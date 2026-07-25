@@ -46,6 +46,7 @@ struct CatalogCookResult final {
 //   asset Material <32hexId> <payloadPath> <dep32hex:Kind> ...
 //   texture2d <32hexId> <width> <height> <hexRRGGBBAA> ...   // inline Rgba8Unorm pixels
 //   sprite <32hexId> <texture32hexId> [u0 v0 u1 v1 pivotX pivotY ppu]
+//   spriteanim <32hexId> <Once|Loop|PingPong> <sprite32hexId:durationSeconds>...
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> <f0...>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
 //   audioclip <32hexId> file <relativeOrAbsolute.wav>  // PCM16 WAV only (M11-A20)

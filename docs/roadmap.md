@@ -16,12 +16,15 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
+| 2D-TILEMAP-LAYERS | TileMap 多层与对象层 | 让当前 TileMap/Catalog 路径承载真实关卡数据，而不破坏有序渲染、碰撞与资源契约 |
+| 2D-PHYSICS-EXPAND | shapes、sensors 与 joints | 在现有 backend-neutral Physics2D 边界上补齐可验证的交互能力 |
+| 2D-INPUT-ADV | analog action 与运行时 rebind | 使 ActionMapper 覆盖手柄/重绑定，同时保持 UI consume 不穿透 |
 
 
 
 
-Now 的退出条件：没有未解释的 Accepted ADR/实现冲突；Windows product-2d 与 3D 产品门禁可复现；
-Linux 当前 tip 有新证据；Legacy 残留有明确删除或保留决定。
+Now 的退出条件：当前 P1 条目均满足各自验收条件；受影响的 Windows product-2d/3d 门禁可复现；
+没有未解释的 Accepted ADR/实现冲突。
 
 ## Next：可用性与资源寿命
 
@@ -67,8 +70,8 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002） | UI-003 多 DPI 矩阵 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
 | UI product | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有结构化与 Windows 产品视觉证据 | UI-002、UI-003 |
-| 3D product | 双 mesh + baseColorTexture GPU 绑定 smoke 已有证据（3D-001/ASSET-001） | RENDER-001 |
+| 3D product | 双 mesh + baseColor/MR/normal 贴图采样、material factors、key/fill light 已有证据（3D-001/ASSET-001） | RENDER-001 的完整 PBR/IBL/shadow/pass scheduling |
 | Runtime stack/packet | stack/commands/policy 与 FramePin Null completion 首切片已落地 | 产品 sample 暂停演示；GPU fence 异步 completion |
-| Asset/Cooker | multi-mesh 产品 E2E、baseColorTexture cook、外部 URI 安全与产品纹理绑定已完成 | PBR 与更完整资源炸弹矩阵 |
+| Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全与产品纹理采样已完成 | 更完整资源炸弹矩阵、热重载与增量 Cooker |
 | Audio | backend-neutral 与 miniaudio null-device 路径已有 Windows 证据 | Linux/product gate 复验 |
 | Legacy retirement | 产品源码/target 删除完成；vcpkg legacy feature 与 EASTL/compatibility 扫尾完成 | 仅保留 `TINA_BUILD_LEGACY=ON` FATAL 拒绝开关 |

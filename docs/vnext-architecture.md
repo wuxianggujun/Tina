@@ -148,7 +148,7 @@ hard failure policy，但必须保持“join/completion 之前不释放被访问
 | `TASK-001` | **Done**：Desktop 交互 CPU worker 默认 |
 | `RUNTIME-001` | stack/四相位 policy **Done**；gameplay input policy / 交互暂停 / stale-owner 矩阵仍后置 |
 | `RUNTIME-002` | FramePin + Null completion **Done**；真 GPU fence 后置 |
-| `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + texture bind API **Done**；Opaque3D 采样后置 |
+| `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling **Done**；完整 PBR/IBL/shadow 后置 |
 | `UI-002`～`UI-005` / `TEXT-001` | accessibility、视觉矩阵、focus/modal/capture、虚拟化、复杂 text |
 | `PERF-001` | schema v1 **Done**；固定机 hard gate / 多进程 MAD 后置 |
 | `CLEAN-001`～`CLEAN-003` | **Done**（扫尾记录） |

@@ -6,6 +6,7 @@ add_executable(tina_sample_3d
 target_compile_features(tina_sample_3d PRIVATE cxx_std_23)
 target_include_directories(tina_sample_3d PRIVATE
     "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/samples/common"
 )
 target_link_libraries(tina_sample_3d PRIVATE
     Tina::ProjectOptions

@@ -1,6 +1,7 @@
 set(TINA_SCENE_TEST_SOURCES
     SceneWorldTests.cpp
     SceneComponentExtractTests.cpp
+    SpriteAnimator2DTests.cpp
     header_isolation/Camera2DHeader.cpp
     header_isolation/EntityHeader.cpp
     header_isolation/ExtractRenderSceneHeader.cpp
@@ -9,6 +10,7 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/PrefabInstantiateHeader.cpp
     header_isolation/SceneErrorsHeader.cpp
     header_isolation/SceneHeader.cpp
+    header_isolation/SpriteAnimator2DHeader.cpp
     header_isolation/SpriteRenderer2DHeader.cpp
     header_isolation/TransformHeader.cpp
     header_isolation/WorldHeader.cpp

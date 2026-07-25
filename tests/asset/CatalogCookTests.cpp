@@ -8,6 +8,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory_resource>
@@ -139,6 +141,154 @@ TEST(CatalogCookTests, InlineTexture2dAndSpriteRecipe)
     EXPECT_EQ(catalog->entryCount(), 2U);
     EXPECT_EQ(catalog->dependencyCount(), 1U);
     std::filesystem::remove_all(root, ec);
+}
+
+TEST(CatalogCookTests, InlineSpriteAnimationRecipesCookAndLoadThreeClips)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto spriteA = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto spriteB = *Core::AssetId::fromBytes(idBytes(3U));
+    const auto spriteC = *Core::AssetId::fromBytes(idBytes(4U));
+    const auto onceClipId = *Core::AssetId::fromBytes(idBytes(5U));
+    const auto loopClipId = *Core::AssetId::fromBytes(idBytes(6U));
+    const auto pingPongClipId = *Core::AssetId::fromBytes(idBytes(7U));
+
+    std::string recipe = "platform WindowsX64\n";
+    const auto appendId = [&recipe](Core::AssetId id) {
+        const auto text = id.canonicalText();
+        recipe.append(text.data(), text.size());
+    };
+    recipe += "texture2d ";
+    appendId(textureId);
+    recipe += " 1 1 FFFFFFFF\n";
+    for (const auto spriteId : std::array{spriteA, spriteB, spriteC})
+    {
+        recipe += "sprite ";
+        appendId(spriteId);
+        recipe += " ";
+        appendId(textureId);
+        recipe += "\n";
+    }
+    recipe += "spriteanim ";
+    appendId(onceClipId);
+    recipe += " Once ";
+    appendId(spriteC);
+    recipe += ":0.12\n";
+    recipe += "spriteanim ";
+    appendId(loopClipId);
+    recipe += " Loop ";
+    appendId(spriteA);
+    recipe += ":0.20 ";
+    appendId(spriteA);
+    recipe += ":0.15\n";
+    recipe += "spriteanim ";
+    appendId(pingPongClipId);
+    recipe += " PingPong ";
+    appendId(spriteB);
+    recipe += ":0.08 ";
+    appendId(spriteA);
+    recipe += ":0.09 ";
+    appendId(spriteB);
+    recipe += ":0.10\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 7U);
+    const auto pingSpec = std::find_if(
+        request->assets.begin(), request->assets.end(),
+        [pingPongClipId](const CatalogCookAssetSpec& asset) { return asset.assetId == pingPongClipId; });
+    ASSERT_NE(pingSpec, request->assets.end());
+    EXPECT_EQ(pingSpec->assetKind, AssetFormat::AssetKind::SpriteAnimationClip);
+    ASSERT_EQ(pingSpec->dependencies.size(), 2U);
+    EXPECT_EQ(pingSpec->dependencies[0].assetId, spriteA);
+    EXPECT_EQ(pingSpec->dependencies[1].assetId, spriteB);
+    auto pingPayload = AssetFormat::parseSpriteAnimationClipPayload(pingSpec->payload);
+    ASSERT_TRUE(pingPayload.has_value()) << pingPayload.error().message;
+    EXPECT_EQ(pingPayload->playbackMode, AssetFormat::SpriteAnimationPlaybackMode::PingPong);
+    ASSERT_TRUE(pingPayload->frame(0U).has_value());
+    ASSERT_TRUE(pingPayload->frame(1U).has_value());
+    EXPECT_EQ(pingPayload->frame(0U)->spriteDependencyIndex, 1U);
+    EXPECT_EQ(pingPayload->frame(1U)->spriteDependencyIndex, 0U);
+
+    const auto root = std::filesystem::temp_directory_path() / "tina_inline_sprite_animation";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(root), *request).has_value());
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 16,
+                        .maxDependencies = 32,
+                        .maxDependenciesPerAsset = 8,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(root), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    EXPECT_EQ(catalog->entryCount(), 7U);
+    EXPECT_EQ(catalog->dependencyCount(), 7U);
+
+    auto loaded = loadCookedAssetsFromPackage(
+        toUtf8(root), std::array{onceClipId, loopClipId, pingPongClipId}, openConfig,
+        CookedAssetBatchLoadConfig{
+            .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+            .memoryResource = &memory,
+        });
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+    ASSERT_EQ(loaded->assets.size(), 7U);
+    const CookedAssetFile* pingFile = nullptr;
+    for (const auto& asset : loaded->assets)
+    {
+        if (asset.header().assetId == pingPongClipId)
+        {
+            pingFile = &asset;
+            break;
+        }
+    }
+    ASSERT_NE(pingFile, nullptr);
+    auto pingClip = parseSpriteAnimationClipFromCooked(*pingFile);
+    ASSERT_TRUE(pingClip.has_value()) << pingClip.error().message;
+    const auto firstFrame = pingClip->frame(0U);
+    ASSERT_TRUE(firstFrame.has_value());
+    const auto firstSprite = pingFile->dependency(firstFrame->spriteDependencyIndex);
+    ASSERT_TRUE(firstSprite.has_value());
+    EXPECT_EQ(firstSprite->assetId, spriteB);
+
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST(CatalogCookTests, SpriteAnimationRecipeRejectsBadModeAndDuration)
+{
+    const auto spriteId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto clipId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto spriteText = spriteId.canonicalText();
+    const auto clipText = clipId.canonicalText();
+
+    std::string badMode = "spriteanim ";
+    badMode.append(clipText.data(), clipText.size());
+    badMode += " Bounce ";
+    badMode.append(spriteText.data(), spriteText.size());
+    badMode += ":0.1\n";
+    EXPECT_FALSE(parseCatalogCookRecipe(badMode, ".").has_value());
+
+    std::string badDuration = "spriteanim ";
+    badDuration.append(clipText.data(), clipText.size());
+    badDuration += " Once ";
+    badDuration.append(spriteText.data(), spriteText.size());
+    badDuration += ":0\n";
+    EXPECT_FALSE(parseCatalogCookRecipe(badDuration, ".").has_value());
 }
 
 TEST(CatalogCookTests, InlineTilesetAndTileMapRecipe)

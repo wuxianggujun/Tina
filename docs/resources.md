@@ -40,7 +40,7 @@ Catalog package
 | Registry | generation `AssetHandle`、move-only `AssetLease`、显式容量与注入 PMR |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 逻辑状态 | Null `UploadTicket`、ReadyCpu→UploadQueued→ReadyGpu、取消与 retirement ledger |
-| 产品路径 | Texture2D/Sprite/TileMap 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
+| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
@@ -92,9 +92,14 @@ mesh 产品上传使用 `RenderDevice` typed upload 和 key binding，尚未与�
 
 | 领域 | 已有 schema/parser/writer |
 | --- | --- |
-| 2D | `Texture2D`、`Sprite`、`Tileset`、`TileMap` |
+| 2D | `Texture2D`、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` |
 | 3D | `StaticMesh`、`Material`、`Prefab` |
 | Audio | `AudioClip` float32 PCM |
+
+SpriteAnimationClip v1 保存 Once/Loop/PingPong、逐帧正有限 duration 与 required Sprite dependency
+索引；recipe 使用 `spriteanim <id> <mode> <sprite-id:duration>...`。typed view 会同时校验 payload 与
+Cooked dependency contract，产品 sample 再在 Asset/Scene 边界把 Sprite 解析成 Animator 所需的
+`SpriteRenderer2D` 帧。
 
 `AssetKind` 还包含 Shader 与 Font 枚举值，但当前没有对应的公开 typed payload header、完整 Cooker 与
 产品消费闭环，不能把它们列为已完成资源类型。FreeType 字体仍通过显式 `TINA_UI_FONT_PATH`/fixture

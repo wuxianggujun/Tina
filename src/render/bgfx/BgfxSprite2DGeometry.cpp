@@ -78,11 +78,6 @@ static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
     return Core::failure(RenderErrorCode::InvalidRenderSceneInput, message);
 }
 
-[[nodiscard]] Core::Result<BgfxSprite2DFrameRequirements> unsupportedFixtureKey()
-{
-    return Core::failure(Core::CoreErrorCode::Unsupported, "Sprite2D received an unsupported procedural fixture key");
-}
-
 [[nodiscard]] Core::Result<BgfxSprite2DFrameRequirements> countRequirements(std::span<const RenderSprite2DItem> sprites)
 {
     if (sprites.size() > static_cast<usize>((std::numeric_limits<u32>::max)()))
@@ -190,10 +185,6 @@ Core::Result<BgfxSprite2DFrameRequirements> checkedSprite2DFrame(RenderSceneView
     for (usize index = 0; index < sprites.size(); ++index)
     {
         const RenderSprite2DItem& sprite = sprites[index];
-        if (sprite.spriteKey != Sprite2DspriteKey)
-        {
-            return unsupportedFixtureKey();
-        }
         if (!finiteSprite(sprite))
         {
             return invalidFrame("Sprite2D contains invalid geometry or resource values");

@@ -85,10 +85,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap、Gameplay、UI、Audio；feature 图含 Physics/FreeType/miniaudio | Linux、跨 GPU golden、完整编辑器/UI 工具包 |
+| `tina_sample_2d` | Catalog TileMap、SpriteAnimationClip/Animator、Gameplay、UI、Audio；feature 图含 Physics/FreeType/miniaudio | Linux、跨 GPU golden、完整编辑器/UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；material texture **bind API** | Opaque3D 贴图采样画面、PBR、Handle/Lease→fence pin |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、key/fill light | 完整 PBR/IBL/shadow、Handle/Lease→真 GPU fence pin |
 
 `tina_sample_2d_tilemap_bgfx` 是 `tina_sample_2d` 的兼容 ALIAS；新脚本使用正式 target 名。
 
@@ -96,17 +96,23 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 
 ```powershell
 cmake --build --preset windows-vnext-debug `
-  --target tina_asset_format_tests tina_asset_tests tina_assetc tina_catalog_validate tina_sample_asset -- /m:2 /v:m
+  --target tina_asset_format_tests tina_asset_tests tina_scene_tests tina_assetc tina_catalog_validate tina_sample_asset -- /m:2 /v:m
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --recipe <recipe>
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
 ```
 
 multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct
-mesh/material AssetId、Prefab dependency 与 product meshKey 1/2 binding 可验证。Opaque3D baseColor
-贴图 **采样** 与 PBR 仍后置，不得把 material texture bind API 写成“画面已贴图”。
+mesh/material AssetId、Prefab dependency 与 product meshKey 1/2 binding 可验证。Opaque3D 已做
+baseColor/MR/normal 贴图 **采样**、material factors 与 key/fill directional light；完整 PBR/IBL/shadow
+仍后置。
+
+`SpriteAnimationClip` 覆盖 payload/schema、Catalog typed view、dependency contract 与
+`SpriteAnimator2D` 的 Once/Loop/PingPong、暂停、倍速和大 delta；`tina_sample_2d` 再提供
+`Idle -> Walk -> HitWall` 的产品状态证据。
 
 ## UI 与视觉
 

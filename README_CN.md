@@ -59,15 +59,18 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 
 ## 当前状态
 
-- Legacy 产品删除：完成；剩余的是依赖、兼容文件、文档和 Linux 复验扫尾；
-- 2D 产品竖切：已形成 Windows 产品门禁；
-- 3D Cooker：multi-mesh glTF cooking、AssetId resolver 与 baseColorTexture PNG/JPEG→Texture2D cook
-  已完成；当前产品样例仍只映射单个 product mesh，纹理 GPU 绑定、安全 URI/size policy、PBR 和完整
-  multi-mesh 产品 E2E 未关闭；
+- Legacy 产品删除及依赖/兼容扫尾：完成；仅保留 `TINA_BUILD_LEGACY=ON` 的 FATAL 拒绝开关；
+- 2D 产品竖切：已形成 Windows 产品门禁；当前工作树已接入 Catalog `SpriteAnimationClip`、
+  `SpriteAnimator2D` 和角色 `Idle -> Walk -> HitWall` 状态证据；
+- 3D 产品：multi-mesh glTF cooking、AssetId resolver、外部 URI/size policy、baseColor/MR/normal
+  Texture2D cook 与 product GPU upload/bind 已完成；样例按多个 mesh/material key 提交，experimental
+  metallic-roughness 路径采样三类贴图并使用 material factors 与 key/fill directional light；
+  完整 PBR、IBL、shadow、通用 light/pass system 与真 GPU fence pin 仍后置；
 - UI：当前工作树的 Windows Debug 门禁为 `tina_ui_tests` 190/190、`tina_runtime_ui_tests` 77/77、
   `tina_ui_render_integration_tests` 12/12；ProgressBar/RadioButton 已有 product-2d 结构化与视觉证据；
-- Task：ADR 0017 已接受，但 Desktop 尚未落实交互模式 CPU worker 默认值，此项列入 Backlog；
-- Linux、跨 GPU/DPI 视觉 golden、UIA/AT-SPI 和完整 benchmark protocol 仍是后续工作。
+- Task：ADR 0017 的 Desktop 交互默认值已落实为 `max(1, hw-1)` 个 CPU worker，显式配置保持不变；
+- Linux tip 已有 GCC/Clang（含 sanitizer）证据；Wayland、跨 GPU/DPI 视觉 golden、Narrator/AT-SPI
+  和完整 benchmark protocol 仍是后续工作。
 
 任务状态统一维护在 [Roadmap](docs/roadmap.md) 与 [Backlog](docs/backlog.md)。架构、构建、测试和
 决策分别见 [文档索引](docs/README.md)、[架构总览](docs/architecture.md)、

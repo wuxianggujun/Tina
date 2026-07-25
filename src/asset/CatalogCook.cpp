@@ -6,6 +6,7 @@
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
+#include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -85,6 +86,11 @@ struct CookedPackage final {
     if (name == "AudioClip")
     {
         out = AssetFormat::AssetKind::AudioClip;
+        return true;
+    }
+    if (name == "SpriteAnimationClip")
+    {
+        out = AssetFormat::AssetKind::SpriteAnimationClip;
         return true;
     }
     return false;
@@ -555,6 +561,91 @@ parseAudioClipInline(const std::vector<std::string>& tokens, std::string_view ba
     return asset;
 }
 
+[[nodiscard]] Core::Result<CatalogCookAssetSpec>
+parseSpriteAnimationInline(const std::vector<std::string>& tokens)
+{
+    // spriteanim <id> <Once|Loop|PingPong> <spriteId:durationSeconds>...
+    if (tokens.size() < 4U)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "spriteanim needs id mode and at least one spriteId:duration frame");
+    }
+    const auto animationId = Core::AssetId::parseCanonical(tokens[1]);
+    if (!animationId)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "invalid sprite animation clip asset id");
+    }
+
+    AssetFormat::SpriteAnimationPlaybackMode playbackMode{};
+    if (tokens[2] == "Once")
+    {
+        playbackMode = AssetFormat::SpriteAnimationPlaybackMode::Once;
+    } else if (tokens[2] == "Loop")
+    {
+        playbackMode = AssetFormat::SpriteAnimationPlaybackMode::Loop;
+    } else if (tokens[2] == "PingPong")
+    {
+        playbackMode = AssetFormat::SpriteAnimationPlaybackMode::PingPong;
+    } else
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "spriteanim mode must be Once, Loop, or PingPong");
+    }
+
+    std::vector<AssetFormat::SpriteAnimationFrameDesc> frames;
+    frames.reserve(tokens.size() - 3U);
+    for (std::size_t tokenIndex = 3U; tokenIndex < tokens.size(); ++tokenIndex)
+    {
+        const std::string_view token = tokens[tokenIndex];
+        const auto separator = token.rfind(':');
+        if (separator == std::string_view::npos || separator == 0U || separator + 1U == token.size())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim frame must be spriteId:durationSeconds");
+        }
+        const auto spriteId = Core::AssetId::parseCanonical(token.substr(0U, separator));
+        float durationSeconds = 0.0F;
+        if (!spriteId || !parseFloatToken(token.substr(separator + 1U), durationSeconds) ||
+            !(durationSeconds > 0.0F) || !std::isfinite(durationSeconds))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim frame requires a valid Sprite AssetId and positive duration");
+        }
+        if (*spriteId == *animationId)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "sprite animation clip cannot depend on itself");
+        }
+        frames.push_back(AssetFormat::SpriteAnimationFrameDesc{
+            .spriteId = *spriteId,
+            .durationSeconds = durationSeconds,
+        });
+    }
+
+    const AssetFormat::SpriteAnimationClipPayloadDesc desc{
+        .playbackMode = playbackMode,
+        .frames = frames,
+    };
+    auto payload = AssetFormat::writeSpriteAnimationClipPayloadBytes(desc);
+    if (!payload)
+    {
+        return Core::failure(std::move(payload.error()));
+    }
+    auto dependencies = AssetFormat::makeSpriteAnimationClipDependencies(desc);
+    if (!dependencies)
+    {
+        return Core::failure(std::move(dependencies.error()));
+    }
+    return CatalogCookAssetSpec{
+        .assetKind = AssetFormat::AssetKind::SpriteAnimationClip,
+        .assetId = *animationId,
+        .assetTypeVersion = AssetFormat::SpriteAnimationClipWire::SchemaVersion,
+        .payload = std::move(*payload),
+        .dependencies = std::move(*dependencies),
+    };
+}
+
 [[nodiscard]] Core::Result<CookedPackage> cookPackageInternal(const CatalogCookRequest& request)
 {
     if (request.assets.empty())
@@ -885,6 +976,16 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         if (tokens[0] == "sprite")
         {
             auto asset = parseSpriteInline(tokens);
+            if (!asset)
+            {
+                return Core::failure(std::move(asset.error()));
+            }
+            request.assets.push_back(std::move(*asset));
+            continue;
+        }
+        if (tokens[0] == "spriteanim")
+        {
+            auto asset = parseSpriteAnimationInline(tokens);
             if (!asset)
             {
                 return Core::failure(std::move(asset.error()));

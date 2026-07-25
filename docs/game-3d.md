@@ -13,10 +13,10 @@ Cooker 与产品 sample 支持一个 glTF 中多个 mesh（sample 槽位上限 8
 AssetId、独立 meshKey binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与
 产品侧 `setMesh3DMaterialTextureBinding` 已完成（ASSET-001）。Cooked Material v2 携带 metallic/
 roughness factor 与可选 MR/normal Texture2D dependency。bgfx Opaque3D 在 submit 时采样 baseColor，
-并以 **experimental metallic-roughness hybrid** 着色（`setMesh3DDirectionalLight` 可调 1 盏方向光 +
-ambient；`setMesh3DMaterialFactors` 接 Cooked metallic/roughness；可选 MR/normal 贴图 bind）。
-`tina_sample_3d` 在 prefab instantiate 后按 mesh AABB **自动框定相机**（球体网格等外置模型可用）。
-完整 multi-light / IBL / shadow 仍属 `RENDER-001` 后续。
+并以 **experimental metallic-roughness hybrid** 着色（key `setMesh3DDirectionalLight` + 可选 fill
+`setMesh3DFillDirectionalLight` + ambient；`setMesh3DMaterialFactors` 接 Cooked metallic/roughness；
+可选 MR/normal 贴图 bind）。`tina_sample_3d` 在 prefab instantiate 后按 mesh AABB **自动框定相机**。
+完整 N-light / IBL / shadow 仍属 `RENDER-001` 后续。
 
 ## CLI（`tina_sample_3d`）
 
@@ -91,7 +91,7 @@ EngineHost 仍是唯一组合根。
 | Cooked 数据 | StaticMesh v1 使用 P3N3UV2、UInt16 index、bounds/submesh；Material v2 为 Opaque `UnlitBaseColor` + cooked PBR factors（metallic/roughness）与可选 baseColor/MR/normal Texture2D deps；Prefab v1 保存稳定 node id、父索引、local transform 与 Mesh/Material AssetId |
 | Scene | `PerspectiveCamera3D`、`MeshRenderer3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
 | Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling、稳定排序与相邻实例 batch |
-| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、experimental MR hybrid **采样** baseColor（`s_texColor`）与可选 MR 贴图（`s_texMR`）；固定方向光 |
+| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、experimental MR hybrid **采样** baseColor（`s_texColor`）、可选 MR 贴图（`s_texMR`）与 normal 贴图（`s_texNormal`）；key + optional fill directional light |
 
 世界坐标为右手、Y-up、局部 `-Z` forward、单位米。Camera 公共字段使用 degree，并要求
 `0 < near < far`、有限数值和有效 normalized viewport；aspect 每帧从 primary surface 解析，不写回
@@ -120,9 +120,9 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
 7. 实例化、extract、提交，退出时解除 binding 并销毁 GPU mesh/texture。
 
 当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding、material texture 绑定，以及 Opaque3D
-experimental MR submit 时按 materialKey **采样** baseColor 并做固定光照（未 bind 用 1×1 白；
-默认 metallic=0/roughness=1）。尚未证明 `AssetSystem` Handle/Lease 到 submission 的完整 fence pin
-（真 fence 见 RUNTIME-002 尾巴）。
+experimental MR submit 时按 materialKey **采样** baseColor/MR/normal 并做 key/fill directional light
+着色（未 bind baseColor 用 1×1 白；未 bind MR 时默认 metallic=0/roughness=1；未 bind normal 时用几何法线）。
+尚未证明 `AssetSystem` Handle/Lease 到 submission 的完整 fence pin（真 fence 见 RUNTIME-002 尾巴）。
 
 ## 三类 3D 门禁
 
@@ -134,7 +134,7 @@ experimental MR submit 时按 materialKey **采样** baseColor 并做固定光�
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
-`sceneExtract`、退出计数与资源归零信息。测试数量不是永久契约；实际命令和门禁矩阵统一见
+`sceneExtract`、`keyLightConfigured`、`fillLightConfigured`、退出计数与资源归零信息。测试数量不是永久契约；实际命令和门禁矩阵统一见
 [测试说明](testing.md)。
 
 ## 当前限制
@@ -143,8 +143,8 @@ experimental MR submit 时按 materialKey **采样** baseColor 并做固定光�
   1 mesh/1 material 节点契约不变；不支持多 submesh 合并进单一 StaticMesh、无 bufferView 的 data-URI
   image、Draco、morph、skin、animation、sparse accessor 或非三角 primitive；不支持项返回结构化错误；
 - Cooked Material v2 写入 metallic/roughness factor 与可选 MR/normal Texture2D deps；Runtime/bgfx
-  产品着色为 **experimental MR hybrid**（固定方向光 + ambient + baseColor/可选 MR 贴图），不是完整
-  PBR；无 multi-light system、Shadow、transparent、IBL 或 post；
+  产品着色为 **experimental MR hybrid**（key/fill directional light + ambient + baseColor/可选 MR/normal
+  贴图），不是完整 PBR；无通用 multi-light system、Shadow、transparent、IBL 或 post；
 - glTF Cooker 读取完整 `pbrMetallicRoughness` 与可选 `normalTexture`；外部相对 URI 强制 root
   containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；
 - Scene/Render 仍使用 mesh/material **key**（bind-table 语义，非 AssetHandle 组件字段），不是 Scene 上直接存
@@ -154,5 +154,5 @@ experimental MR submit 时按 materialKey **采样** baseColor 并做固定光�
   （PERF-001 首切片），但不替代 3D 视觉门禁；
 - Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
 
-下一步只在可执行 Backlog 中维护：`RENDER-001` 剩余（light system / IBL / cooked MR factors /
-pass scheduling），真 GPU fence completion 见 RUNTIME-002 尾巴。详见 [Backlog](backlog.md)。
+下一步只在可执行 Backlog 中维护：`RENDER-001` 剩余（light system / IBL / shadow / pass scheduling），
+真 GPU fence completion 见 RUNTIME-002 尾巴。详见 [Backlog](backlog.md)。

@@ -198,6 +198,14 @@ Core::Status validateCatalogPackageOnDisk(std::string_view catalogRootUtf8, cons
                     {
                         return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedSprite"));
                     }
+                } else if (entry->assetKind == AssetFormat::AssetKind::SpriteAnimationClip)
+                {
+                    auto typed = parseSpriteAnimationClipFromCooked(*asset);
+                    if (!typed)
+                    {
+                        return Core::failure(
+                            withEntryContext(std::move(typed.error()), *entry, "typedSpriteAnimationClip"));
+                    }
                 } else if (entry->assetKind == AssetFormat::AssetKind::Tileset)
                 {
                     auto typed = parseTilesetFromCooked(*asset);

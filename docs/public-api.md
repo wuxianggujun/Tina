@@ -164,7 +164,9 @@ dispatch/shutdown 不暴露给游戏。
 
 - RGBA8 Texture2D create/destroy、Sprite2D key binding；
 - P3N3UV2/U16 StaticMesh create/destroy、Mesh3D key binding；
-- material key → base-color texture binding；
+- material key → base-color / metallic-roughness / normal texture binding；
+- material key → metallic/roughness factors；
+- experimental Opaque3D key/fill directional lights（非负 RGB + 非负 ambient）；
 - primary framebuffer RGBA8 capture。
 
 `GpuTextureId`/`GpuMeshId` 是 RenderDevice generation handle，不是 AssetHandle。当前 `RenderFrame` 的
@@ -210,7 +212,8 @@ multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
 metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtime Opaque3D 为 experimental
 MR hybrid（`setMesh3DMaterialTextureBinding` + 可选 `setMesh3DMaterialMetallicRoughnessTextureBinding`；
-固定方向光）。完整 light system/IBL/shadow 尚未完成。
+`setMesh3DMaterialFactors` + 可选 normal 贴图 + key/fill directional lights）。完整 light system/IBL/shadow
+尚未完成。
 
 ## Audio 与 Physics
 

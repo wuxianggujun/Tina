@@ -3,8 +3,8 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos
 #include <bgfx_shader.sh>
 
 // Experimental Opaque3D metallic-roughness hybrid (RENDER-001).
-// Honesty: single fixed directional light + constant ambient; no IBL, shadows,
-// multi-light. Cooked factors via u_mrParams; optional MR + normal maps.
+// Honesty: key + optional fill directional lights + constant ambient; no IBL/shadows.
+// Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
 // s_texNormal: tangent-space RGB normal (no mesh tangents; TBN from derivatives).
 
@@ -12,14 +12,35 @@ SAMPLER2D(s_texColor, 0);
 SAMPLER2D(s_texMR, 1);
 SAMPLER2D(s_texNormal, 2);
 
-// xyz = world-space direction toward the light (normalized preferred), w unused.
+// xyz = world-space direction toward the key light (normalized preferred), w unused.
 uniform vec4 u_lightDir;
-// rgb = light color * intensity, w unused.
+// rgb = key light color * intensity, w unused.
 uniform vec4 u_lightColor;
+// xyz = direction toward fill light; w = 1 if fill enabled (color length > 0).
+uniform vec4 u_fillLightDir;
+// rgb = fill light color * intensity, w unused.
+uniform vec4 u_fillLightColor;
 // x = metallic factor, y = roughness factor, z = ambient scale, w = 1 if MR map bound.
 uniform vec4 u_mrParams;
 // x = 1 if normal map bound, yzw unused.
 uniform vec4 u_normalParams;
+
+vec3 safeNormalize(vec3 value)
+{
+	return value * inversesqrt(max(dot(value, value), 0.00000001));
+}
+
+vec3 shadeDirectional(vec3 N, vec3 V, vec3 L, vec3 lightRgb, vec3 albedo, vec3 F0, float metallic,
+	float roughness)
+{
+	float NdotL = max(dot(N, L), 0.0);
+	vec3 H = safeNormalize(L + V);
+	float NdotH = max(dot(N, H), 0.0);
+	vec3 diffuse = albedo * (1.0 - metallic) * NdotL;
+	float shininess = exp2(10.0 * (1.0 - roughness) + 1.0);
+	float specular = pow(NdotH, shininess) * NdotL;
+	return lightRgb * (diffuse + F0 * specular);
+}
 
 void main()
 {
@@ -36,7 +57,7 @@ void main()
 		metallic = clamp(mrSample.b * u_mrParams.x, 0.0, 1.0);
 	}
 
-	vec3 N = normalize(v_normal);
+	vec3 N = safeNormalize(v_normal);
 	if (u_normalParams.x > 0.5)
 	{
 		// Cotangent frame from screen-space derivatives (no vertex tangents).
@@ -48,35 +69,33 @@ void main()
 		vec3 dp1perp = cross(N, dp1);
 		vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
 		vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
-		float invMax = inversesqrt(max(dot(T, T), dot(B, B)));
+		float invMax = inversesqrt(max(max(dot(T, T), dot(B, B)), 0.00000001));
 		T *= invMax;
 		B *= invMax;
 		vec3 mapN = texture2D(s_texNormal, v_texcoord0).xyz * 2.0 - 1.0;
 		// glTF: green channel often OpenGL-style; keep as authored.
-		N = normalize(T * mapN.x + B * mapN.y + N * mapN.z);
+		vec3 mappedN = T * mapN.x + B * mapN.y + N * mapN.z;
+		N = safeNormalize(mappedN);
 	}
 
-	vec3 L = normalize(u_lightDir.xyz);
 	// Camera world position from inverse view (bgfx built-in).
 	vec3 eyePos = mul(u_invView, vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-	vec3 V = normalize(eyePos - v_worldPos);
-	vec3 H = normalize(L + V);
-
-	float NdotL = max(dot(N, L), 0.0);
-	float NdotH = max(dot(N, H), 0.0);
+	vec3 V = safeNormalize(eyePos - v_worldPos);
 
 	vec3 albedo = baseColor.rgb;
 	vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
-	vec3 diffuse = albedo * (1.0 - metallic) * NdotL;
 
-	// Shininess falls with roughness; metallic boosts specular lobe.
-	float shininess = exp2(10.0 * (1.0 - roughness) + 1.0);
-	float specular = pow(NdotH, shininess) * NdotL;
-	vec3 specularColor = F0 * specular;
+	vec3 lit = shadeDirectional(N, V, safeNormalize(u_lightDir.xyz), u_lightColor.rgb, albedo, F0, metallic,
+		roughness);
+	if (u_fillLightDir.w > 0.5)
+	{
+		lit += shadeDirectional(N, V, safeNormalize(u_fillLightDir.xyz), u_fillLightColor.rgb, albedo, F0,
+			metallic, roughness);
+	}
 
 	float ambientScale = max(u_mrParams.z, 0.0);
 	vec3 ambient = albedo * ambientScale * (1.0 - metallic * 0.6) + F0 * (ambientScale * 0.25);
+	lit += ambient;
 
-	vec3 lit = ambient + u_lightColor.rgb * (diffuse + specularColor);
 	gl_FragColor = vec4(lit, baseColor.a);
 }

@@ -44,11 +44,13 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 Run GoogleTest executables directly; the project intentionally does not use CTest. Routine gates
 must not use `--clean-first` or wipe `out/build`.
 
-The multi-mesh glTF cooker, AssetId resolver coverage, and PNG/JPEG base-color texture cooking are
-implemented. The current 3D product sample still binds one product mesh, so cooked-texture GPU
-binding, URI/size hardening, PBR, and a full multi-mesh product E2E remain open. The accepted
-task-system policy also still needs its interactive Desktop CPU-worker default implemented or
-superseded by a new ADR.
+The multi-mesh glTF cooker, per-AssetId resolver coverage, URI/size hardening, and PNG/JPEG
+base-color texture cooking are implemented. `tina_sample_3d` maps multiple product meshes and
+materials to backend keys; cooked base-color, metallic-roughness, and normal textures are
+uploaded, bound, and sampled by the experimental metallic-roughness path with material factors
+and key/fill directional lights. Full PBR, IBL, shadows, a general light/pass system, and true
+GPU-fence pinning remain open. The accepted task-system policy is implemented: interactive Desktop
+defaults CPU workers to `max(1, hw-1)` while explicit settings remain preserved.
 
 See the [Chinese project guide](README_CN.md), [documentation index](docs/README.md),
 [roadmap](docs/roadmap.md), and [actionable backlog](docs/backlog.md).

@@ -21,10 +21,9 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
-
-
-
-
+| 2D-TILEMAP-LAYERS | Planned | P1 | TileMap 多层与对象层 | 当前 TileMap typed payload / chunk cache | versioned payload、Cooker 与 runtime 保留有序 tile/object layer、稳定 ID、visibility 和 properties；渲染/碰撞显式选择 layer；非法引用不发布半包 | Unit + Integration + Smoke |
+| 2D-PHYSICS-EXPAND | Planned | P1 | Physics2D shapes、sensors 与 joints | 当前 Box2D adapter / Tile solid sync | backend-neutral shape/sensor/joint 描述覆盖创建、查询、enter/exit、销毁顺序和 stale handle；Box2D 类型保持 PRIVATE；sample 至少验证一个 sensor 与一个 joint | Unit + Integration + Smoke |
+| 2D-INPUT-ADV | Planned | P1 | analog action 与运行时 rebind | ActionMapper / UI consumption | axis deadzone、缩放与合成行为确定；rebind 支持冲突、取消和设备变化；UI consume/claim 后 analog/digital action 均不得穿透 | Unit + Integration + Smoke |
 
 ## Next
 
@@ -32,6 +31,9 @@
 | --- | --- | --- | --- | --- | --- | --- |
 
 
+| 2D-TILEMAP-STREAM | Planned | P2 | TileMap chunk streaming | 2D-TILEMAP-LAYERS / Task / Asset Lease | 相机窗口外 chunk 可有界加载、取消和卸载；重入结果确定；不得要求完整地图常驻；dirty cache 与资源 lease 生命周期有回归覆盖 | Unit + Integration + Smoke |
+| 2D-AUDIO-ADV | Planned | P2 | Audio streaming、pitch/pan/fade | 当前 AudioEngine / miniaudio adapter | 有界 streaming buffer 覆盖 EOF、underrun、cancel；voice 支持有范围校验的 pitch/pan 与可取消 fade；completion 和 shutdown 不泄漏 voice | Unit + Integration + Smoke |
+| 2D-FX | Planned | P2 | 2D particles 与 trails | Scene/Render 2D batch | emission、lifetime、capacity failure 与固定 seed 可复现；trail 断点/宽度生命周期明确；产品 sample 有结构化与非空像素证据 | Unit + Integration + Visual |
 | UI-002 | Partial | P1 | Windows UIA 真机 adapter | UI-002-SPI | **已完成** 属性映射 + HostBridge + **EngineHost 产品 HWND 自动 attach/publish**（lease 解码 Win32）；**待** Narrator/Inspect 人工金标、Linux AT-SPI | Unit + Integration |
 | UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性 + **字体 identity fingerprint**（`fontFingerprint`：path/sha256/env `TINA_UI_FONT_PATH`/FreeType-on；baseline schema 3；mismatch 默认 fail）；**待** OS 级 100/150/200% DPI 真机矩阵、跨 GPU 像素金标 | Unit + Visual |
 
@@ -46,13 +48,17 @@
 | --- | --- | --- | --- | --- |
 | RENDER-FENCE | Partial | P1 | 真 GPU fence 驱动 complete | **已完成** Host 可注入 ledger；Desktop `BgfxSubmissionCompletionLedger` = **FrameDeferred**（present 后 pin 延迟到下一 present 释放；`bgfx::frame()` token 经 `lastPresentFrameToken`）；Null 仍 PresentSync；`handOffDeferred`/`completeDeferred` 单测。**待** 真 fence object poll（非仅双缓冲 lag） |
 | ASSET-HANDLE-SCENE | Deferred | P1 | Scene 组件存 AssetHandle；extract 解析 bind key / 未来 FrameResourceRef | 去掉游戏侧手写 key 表为唯一产品路径 |
-| RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal + **`setMesh3DDirectionalLight`**；sample_3d 自动相机框定 + Khronos 球体/盒。**待** multi-light/IBL/shadow、pass scheduling、vertex tangents |
+| RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal + **key `setMesh3DDirectionalLight` + fill `setMesh3DFillDirectionalLight`**；sample_3d 自动相机 + Khronos 球体/盒。**待** N-light/IBL/shadow、pass scheduling、vertex tangents |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | UI-004 | Deferred | P2 | 通用 Focus Scope、Modal、持久 Pointer Capture | 多 root/state transition 与输入恢复测试通过 |
 | UI-005 | Deferred | P2 | ScrollView、虚拟 ListView、Dropdown、TreeView | 100k item 虚拟化与零稳态分配门禁通过 |
 | TEXT-001 | Deferred | P2 | 多行 TextEdit、grapheme/shaping、候选窗定位 | 中英混排、组合输入、selection 与平台 IME 矩阵通过 |
 | ASSET-002 | Deferred | P2 | 热重载与增量 Cooker | 不破坏 AssetId/Lease/retirement 契约，失败不发布半包 |
 | UI-THEME-C | Deferred | P2 | 圆角/Image/stylesheet 级 Theme | 不破坏 create 默认 chrome 与局部覆盖契约 |
+| 2D-LIGHT | Deferred | P2 | 2D lighting 与 shadow | backend-neutral light/occluder 数据、遮挡合成与透明 Sprite 排序契约明确；多光源容量和视觉门禁通过 |
+| 2D-NAV | Deferred | P3 | 2D navigation | Tile/object layer 可生成可版本化导航数据；动态阻挡、不可达与异步取消有确定结果 |
+| 2D-SERIALIZATION | Deferred | P3 | 2D world/gameplay serialization | schema/version/migration、稳定资源引用与失败原子性明确；round-trip 和旧版本 fixture 通过 |
+| 2D-EDITOR | Deferred | P3 | TileMap/Scene/动画 editor tooling | 工具只写受验证的 authoring 数据；undo/redo、非法输入诊断、cook preview 与 runtime 产物一致性通过 |
 
 ## Done
 
@@ -64,6 +70,8 @@
 | DONE-004 | 2D product sample 与 glTF/Prefab 3D product sample | [2D](game-2d.md) · [3D](game-3d.md) |
 | DONE-005 | Retained UI 文本/Glyph、Checkbox/Slider/TextEdit、ProgressBar/RadioButton 库级实现 | [UI](ui.md) |
 | DONE-006 | glTF multi-mesh Cooker 与 distinct AssetId/Prefab dependency 测试 | [3D](game-3d.md) |
+| 2D-SPRITE-BATCH | 任意非0 `spriteKey`；bgfx 按最终渲染顺序建立连续 key batch 并逐 batch 绑定纹理；双纹理 sample 保持透明排序 | [2D](game-2d.md) · BgfxSprite2DGeometryTests |
+| 2D-SPRITE-ANIM | SpriteAnimationClip cooked payload/typed validation/recipe；SpriteAnimator2D Once/Loop/PingPong、暂停、倍速与大 delta；sample 双纹理 `Idle -> Walk -> HitWall` | [2D](game-2d.md) · [资源](resources.md) · SpriteAnimationClipPayloadTests · SpriteAnimator2DTests |
 | 3D-001 | multi-mesh 产品 E2E：双 mesh glTF fixture → cook → 两 StaticMesh upload/bind（meshKey 1/2）→ Prefab 每节点 resolve → extract/draw → ledger 归零；`tina_sample_3d` 300 帧 `multiMesh=true` | [3D](game-3d.md) |
 | TASK-001 | Desktop `resolveDesktopTaskSystemParams`：交互默认 `max(1, hw-1)` CPU worker；`createBoundedTaskSystem(cpu=0)` IO-only 仍 NotSupported；BoundedTaskSystem 单测覆盖 | [Task](task-system.md) · ADR 0017 |
 | CLEAN-001 | 删除 vcpkg `legacy` feature 及 EnTT/GLM/spdlog/utfcpp 死依赖声明；preset 无引用 | [dependencies](dependencies.md) |

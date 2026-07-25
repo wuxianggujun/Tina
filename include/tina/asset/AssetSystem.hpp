@@ -40,7 +40,7 @@ struct AssetSystemConfig final {
     AssetGpuUploadConfig gpuUpload{};
     // When true and uploadLedger is set, newly ReadyCpu handles are auto-tracked for upload.
     bool autoGpuUpload = true;
-    // When true, openAndBindCatalog defaults verifyTypedPayload for Texture2D/Sprite.
+    // When true, openAndBindCatalog verifies all known typed 2D payloads and dependencies.
     bool requireTyped2dPayloads = false;
 };
 

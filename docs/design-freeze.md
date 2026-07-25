@@ -26,7 +26,7 @@
 | 测试 | 直接运行 GoogleTest，不用 CTest 调度 | [0006](adr/0006-direct-googletest.md) | Implemented |
 | 容器/Hash | 标准库/PMR，不使用 EASTL；xxHash 私有 | [0007](adr/0007-standard-containers-and-hash.md) | Implemented |
 | Render | bgfx 是首个真实 backend，保持私有 | [0008](adr/0008-bgfx-render-backend.md) | Implemented |
-| Asset | Runtime 只读 Cooked；cgltf 只在 Cooker | [0009](adr/0009-cooked-assets-and-cgltf.md) | Implemented；baseColorTexture cook + 外部 URI 安全 + 产品 `setMesh3DMaterialTextureBinding`；bgfx Opaque3D **采样**仍后置；PBR 后置 |
+| Asset | Runtime 只读 Cooked；cgltf 只在 Cooker | [0009](adr/0009-cooked-assets-and-cgltf.md) | Implemented；baseColor/MR/normal Texture2D cook + 外部 URI 安全 + 产品 material binding；bgfx Opaque3D experimental MR 采样已落地；完整 PBR 后置 |
 | Physics | Box2D 与 Jolt API 分离 | [0010](adr/0010-separate-physics-backends.md) | Box2D implemented；Jolt deferred |
 | UI | Tina Retained UI 输出后端无关 DisplayList | [0011](adr/0011-retained-ui.md) | Implemented foundation/product slice |
 | Audio | miniaudio 是唯一真实 audio backend | [0012](adr/0012-miniaudio-backend.md) | Implemented optional adapter |
@@ -48,7 +48,7 @@
 
 | 领域 | 后置范围 | 重新开启条件 |
 | --- | --- | --- |
-| Render | PBR、通用 pass scheduler、自研 RHI | 完成 3D multi-mesh/texture 产品路径且有 profile 需求 |
+| Render | 完整 PBR/IBL/shadow、通用 pass scheduler、自研 RHI | experimental MR 产品路径稳定且有 profile/视觉需求 |
 | Physics | Jolt 3D adapter | 有明确 3D gameplay 场景与性能预算 |
 | UI | 通用 Modal/Focus Scope/Capture、虚拟列表、复杂 shaping、多行编辑 | 当前 Widget/产品/accessibility 门禁稳定 |
 | Asset | 热重载、增量 Cooker、在线编辑 | Cooked schema、Lease/retirement 与产品打包稳定 |

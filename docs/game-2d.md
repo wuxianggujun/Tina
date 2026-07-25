@@ -50,7 +50,34 @@ consume/claim 的 primary pointer transition 才生成 `WorldPointerSample`；0 
 extraction 只写 key、transform、UV 与颜色。
 
 Sprite 顺序为 sorting layer → order in layer → stable source ordinal。透明语义不能为了全局纹理合批
-被重排；UI 使用独立 pass，始终不混入 World Sprite batch。
+被重排；bgfx 按最终顺序扫描相邻且 `spriteKey` 相同的 Sprite，按连续区间分别绑定纹理并 submit。
+例如 key 序列 A/A/B/A 会形成3个 batch，而不会重排成 A/A/A/B。除0以外的 key 都可参与该路径；
+0仍作为非法资源 key 拒绝。UI 使用独立 pass，始终不混入 World Sprite batch。
+
+产品 sample 当前上传并绑定两张 Cooked Texture2D：Tile atlas 使用 key 1，角色三帧 atlas 使用 key 2。
+Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用不同纹理，不再受历史 fixture key 1 限制。
+
+## Sprite 动画
+
+`SpriteAnimationClip` 是 Cooked asset kind 与 typed payload v1。payload 保存 `Once`、`Loop`、`PingPong`
+模式、按 authoring 顺序排列的帧、每帧正有限时长，以及指向去重后 required Sprite dependency stream
+的索引。writer/parser 限制最多4096帧并严格检查 schema、flags、大小、依赖索引和 duration；Asset typed
+view 继续校验 Cooked kind/version、依赖数量、required Sprite kind，以及每个 dependency 都实际被帧引用。
+
+Catalog recipe 支持：
+
+```text
+spriteanim <clip-id> <Once|Loop|PingPong> <sprite-id:duration-seconds>...
+```
+
+`SpriteAnimator2D` 接收已在 Asset/Scene 边界解析为 `SpriteRenderer2D` 的帧，不自行持有 AssetHandle 或
+backend texture。它支持 Once 停在末帧、Loop、PingPong 反向经过内部帧、pause/play/stop/restart、
+正倍速和跨多帧的大 delta；无效 clip、非正倍速及负数/非有限 delta 会显式失败。clip 帧在设置时复制，
+`update()` 不分配。
+
+产品 sample 从 Catalog 解析 Idle、Walk、HitWall 三个 clip（共5个 resolved frame），由角色 fixed-step
+状态驱动 `Idle -> Walk -> HitWall`。HitWall 使用 Once clip，并把完成状态写入结构化门禁；角色当前帧
+直接更新 Scene 的 `SpriteRenderer2D`，使用独立角色 atlas/key。
 
 ## TileMap 与角色控制
 
@@ -100,17 +127,19 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
 ```
 
-已记录的产品报告满足：
+当前 sample 的结构化产品门禁要求：
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
-- `catalogFromRecipeFile=true`、`catalogRecipeAssets=4`；
+- `catalogFromRecipeFile=true`、`catalogRecipeAssets=11`、`texturesUploaded=2`；
 - 300次 extraction/physics step，角色 grounded/walk/hit-right；
-- Texture upload、Tile sprites、Camera follow/interpolation、chunk cache；
+- Tile/角色双纹理 upload/binding、连续 sprite batch、Camera follow/interpolation、chunk cache；
+- 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；
 - UI/TextEdit/ProgressBar/RadioButton、Audio Catalog lease、Physics contact；
 - `stateExits=1`、`applicationShutdowns=1`、`uiRootsReleased=1`；
 - `pixelCaptureOk=true`。
 
-Windows 视觉与同轮完整模块测试证据见 [M12 Windows 证据](m12-evidence-windows.md)。可复现脚本：
+既有 Windows 视觉与完整模块测试证据见 [M12 Windows 证据](m12-evidence-windows.md)；当前代码门禁还会
+校验上述双纹理与动画字段。可复现脚本：
 `tools/windows/RunProduct2dGate.ps1`（TEST-002）。测试数量不是永久基线。
 
 `--frames>=60` 时产品 State 会在收尾前 `requestPush` 一层暂停 overlay（block fixed/frame/UI below，

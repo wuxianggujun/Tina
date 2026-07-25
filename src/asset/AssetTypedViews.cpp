@@ -2,6 +2,9 @@
 
 #include <tina/asset/AssetErrors.hpp>
 
+#include <new>
+#include <vector>
+
 namespace Tina::Asset {
 
 Core::Result<AssetFormat::Texture2DPayloadView> parseTexture2DFromCooked(const CookedAssetFile& file)
@@ -28,6 +31,76 @@ Core::Result<AssetFormat::SpritePayloadView> parseSpriteFromCooked(const CookedA
         return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not Sprite");
     }
     return AssetFormat::parseSpritePayload(file.payload());
+}
+
+Core::Result<AssetFormat::SpriteAnimationClipPayloadView>
+parseSpriteAnimationClipFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::SpriteAnimationClip)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "cooked asset is not SpriteAnimationClip");
+    }
+    if (file.header().assetTypeVersion != AssetFormat::SpriteAnimationClipWire::SchemaVersion)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "sprite animation asset type version is unsupported");
+    }
+
+    auto view = AssetFormat::parseSpriteAnimationClipPayload(file.payload());
+    if (!view)
+    {
+        return Core::failure(std::move(view.error()));
+    }
+    if (file.header().dependencyCount != view->spriteDependencyCount)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "sprite animation dependency count does not match payload");
+    }
+
+    try
+    {
+        std::vector<bool> referencedDependencies(view->spriteDependencyCount, false);
+        for (Core::u32 dependencyIndex = 0; dependencyIndex < view->spriteDependencyCount;
+             ++dependencyIndex)
+        {
+            const auto dependency = file.dependency(dependencyIndex);
+            if (!dependency || !dependency->assetId ||
+                dependency->expectedKind != AssetFormat::AssetKind::Sprite ||
+                dependency->flags != AssetFormat::DependencyFlags::Required)
+            {
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "sprite animation dependencies must be required Sprite assets");
+            }
+        }
+        for (Core::u32 frameIndex = 0; frameIndex < view->frameCount; ++frameIndex)
+        {
+            const auto frame = view->frame(frameIndex);
+            if (!frame || static_cast<Core::usize>(frame->spriteDependencyIndex) >= referencedDependencies.size())
+            {
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "sprite animation frame dependency index is invalid");
+            }
+            referencedDependencies[frame->spriteDependencyIndex] = true;
+        }
+        for (const bool referenced : referencedDependencies)
+        {
+            if (!referenced)
+            {
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "sprite animation contains an unused dependency");
+            }
+        }
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "sprite animation validation allocation failed");
+    }
+    return *view;
 }
 
 Core::Result<AssetFormat::TilesetPayloadView> parseTilesetFromCooked(const CookedAssetFile& file)

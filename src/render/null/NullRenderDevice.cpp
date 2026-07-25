@@ -12,6 +12,12 @@
 namespace Tina::Render {
 namespace {
 
+[[nodiscard]] bool isFiniteNonNegativeRgb(float red, float green, float blue) noexcept
+{
+    return std::isfinite(red) && std::isfinite(green) && std::isfinite(blue) &&
+           red >= 0.0F && green >= 0.0F && blue >= 0.0F;
+}
+
 class NullRenderDevice final : public IRenderDevice {
   public:
     explicit NullRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker) noexcept
@@ -342,12 +348,12 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
         }
-        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) || !std::isfinite(colorR) ||
-            !std::isfinite(colorG) || !std::isfinite(colorB) || !std::isfinite(ambientScale) ||
+        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) ||
+            !isFiniteNonNegativeRgb(colorR, colorG, colorB) || !std::isfinite(ambientScale) ||
             ambientScale < 0.0F)
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload,
-                                 "Mesh3D directional light parameters must be finite (ambient >= 0)");
+                                 "Mesh3D directional light parameters must be finite (color and ambient >= 0)");
         }
         const float lenSq = dirX * dirX + dirY * dirY + dirZ * dirZ;
         if (lenSq <= 1.0e-12F)
@@ -362,6 +368,47 @@ class NullRenderDevice final : public IRenderDevice {
         lightColorG_ = colorG;
         lightColorB_ = colorB;
         lightAmbient_ = ambientScale;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMesh3DFillDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
+                                                             float colorG, float colorB) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) ||
+            !isFiniteNonNegativeRgb(colorR, colorG, colorB))
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Mesh3D fill light parameters must be finite and color must be non-negative");
+        }
+        const float colorMag = std::abs(colorR) + std::abs(colorG) + std::abs(colorB);
+        if (colorMag <= 1.0e-6F)
+        {
+            fillEnabled_ = false;
+            fillDirX_ = 0.0F;
+            fillDirY_ = 1.0F;
+            fillDirZ_ = 0.0F;
+            fillColorR_ = 0.0F;
+            fillColorG_ = 0.0F;
+            fillColorB_ = 0.0F;
+            return Core::success();
+        }
+        const float lenSq = dirX * dirX + dirY * dirY + dirZ * dirZ;
+        if (lenSq <= 1.0e-12F)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Mesh3D fill light direction must be non-zero when color is non-zero");
+        }
+        fillEnabled_ = true;
+        fillDirX_ = dirX;
+        fillDirY_ = dirY;
+        fillDirZ_ = dirZ;
+        fillColorR_ = colorR;
+        fillColorG_ = colorG;
+        fillColorB_ = colorB;
         return Core::success();
     }
 
@@ -440,6 +487,13 @@ class NullRenderDevice final : public IRenderDevice {
     float lightColorG_ = 0.98F;
     float lightColorB_ = 0.92F;
     float lightAmbient_ = 0.18F;
+    bool fillEnabled_ = false;
+    float fillDirX_ = 0.0F;
+    float fillDirY_ = 1.0F;
+    float fillDirZ_ = 0.0F;
+    float fillColorR_ = 0.0F;
+    float fillColorG_ = 0.0F;
+    float fillColorB_ = 0.0F;
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;
     bool frameOpen_ = false;

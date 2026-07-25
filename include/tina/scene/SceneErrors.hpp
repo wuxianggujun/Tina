@@ -21,6 +21,7 @@ inline constexpr Core::ErrorCode InvalidComponent{Core::ErrorDomain::Scene, 12};
 inline constexpr Core::ErrorCode MultipleActiveCameras{Core::ErrorDomain::Scene, 13};
 inline constexpr Core::ErrorCode UnresolvedSprite{Core::ErrorDomain::Scene, 14};
 inline constexpr Core::ErrorCode UnresolvedMesh{Core::ErrorDomain::Scene, 15};
+inline constexpr Core::ErrorCode InvalidAnimation{Core::ErrorDomain::Scene, 16};
 
 } // namespace SceneErrorCode
 

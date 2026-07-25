@@ -52,6 +52,7 @@ enum class AssetKind : Core::u16 {
     Material = 8,
     Prefab = 9,
     AudioClip = 10,
+    SpriteAnimationClip = 11,
 };
 
 enum class TargetPlatform : Core::u16 {

@@ -214,10 +214,10 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Mesh3D normal texture binding");
     }
-    // RENDER-001: single directional light for experimental Opaque3D MR (product path).
+    // RENDER-001: key directional light for experimental Opaque3D MR (product path).
     // directionTowardLight = world-space vector toward the light (normalized by backend).
-    // colorRgb = RGB intensity (linear). ambientScale multiplies albedo ambient term.
-    // Not a multi-light / IBL system.
+    // colorRgb = non-negative RGB intensity (linear). ambientScale multiplies albedo ambient term.
+    // Pair with setMesh3DFillDirectionalLight for a second (fill) dir light. Not IBL/shadows.
     [[nodiscard]] virtual Core::Status setMesh3DDirectionalLight(float dirX, float dirY, float dirZ,
                                                                  float colorR, float colorG, float colorB,
                                                                  float ambientScale = 0.18F) noexcept
@@ -231,6 +231,22 @@ class IRenderDevice {
         static_cast<void>(ambientScale);
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Mesh3D directional light");
+    }
+    // RENDER-001: optional fill directional light (second dir light). Zero color disables fill.
+    // colorRgb must be non-negative linear RGB.
+    // directionTowardLight must be non-zero when color is non-zero.
+    [[nodiscard]] virtual Core::Status setMesh3DFillDirectionalLight(float dirX, float dirY, float dirZ,
+                                                                     float colorR, float colorG,
+                                                                     float colorB) noexcept
+    {
+        static_cast<void>(dirX);
+        static_cast<void>(dirY);
+        static_cast<void>(dirZ);
+        static_cast<void>(colorR);
+        static_cast<void>(colorG);
+        static_cast<void>(colorB);
+        return Core::failure(RenderErrorCode::TextureUploadUnsupported,
+                             "This render device does not support Mesh3D fill directional light");
     }
 };
 

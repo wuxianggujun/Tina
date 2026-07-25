@@ -9,6 +9,7 @@ add_executable(tina_sample_2d_tilemap_bgfx ALIAS tina_sample_2d)
 target_compile_features(tina_sample_2d PRIVATE cxx_std_23)
 target_include_directories(tina_sample_2d PRIVATE
     "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/samples/common"
 )
 target_link_libraries(tina_sample_2d PRIVATE
     Tina::ProjectOptions

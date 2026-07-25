@@ -13,8 +13,10 @@
 #include <tina/physics2d/PhysicsWorld2D.hpp>
 #endif
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/hash/ContentHash.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
@@ -36,6 +38,7 @@
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/SpriteAnimator2D.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/World.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
@@ -53,6 +56,7 @@
 
 #include "AudioControlState.hpp"
 #include "DeviceCapture.hpp"
+#include "SampleTempDirectory.hpp"
 #include "TileSelection.hpp"
 #include "WindowVisibilityPacing.hpp"
 
@@ -68,6 +72,7 @@
 #include <iostream>
 #include <memory>
 #include <memory_resource>
+#include <new>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -85,9 +90,14 @@ using Tina::Core::u8;
 
 inline constexpr u64 DefaultFrameCount = 300;
 inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
-// bgfx product path currently binds atlas textures per spriteKey; fixture samples
-// historically only accepted key 1. Tile + character share the cooked atlas key.
-inline constexpr u32 ProductSpriteKey = 1;
+inline constexpr u32 ProductTileSpriteKey = 1;
+inline constexpr u32 ProductCharacterSpriteKey = 2;
+inline constexpr u32 ExpectedCharacterAnimationClips = 3;
+inline constexpr u32 ExpectedCharacterAnimationSprites = 3;
+inline constexpr u32 ExpectedCharacterAnimationResolvedFrames = 5;
+inline constexpr u32 ExpectedCatalogRecipeAssets =
+    5 + ExpectedCharacterAnimationClips + ExpectedCharacterAnimationSprites;
+inline constexpr u32 ExpectedUploadedTextures = 2;
 inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
 inline constexpr Tina::InputActionId MoveLeftAction{1};
 inline constexpr Tina::InputActionId MoveRightAction{2};
@@ -179,6 +189,15 @@ struct LifecycleCounters final {
     u64 controllerGroundedFrames = 0;
     u64 controllerWalkFrames = 0;
     u64 controllerHitRightFrames = 0;
+    u64 characterAnimationUpdates = 0;
+    u64 characterAnimationFrameChanges = 0;
+    u64 characterAnimationIdleEntries = 0;
+    u64 characterAnimationWalkEntries = 0;
+    u64 characterAnimationHitWallEntries = 0;
+    u64 characterAnimationResolvedFrames = 0;
+    u64 characterAnimationLastFrame = 0;
+    bool characterAnimationFromCatalog = false;
+    bool characterAnimationHitCompleted = false;
     float maxControllerX = 0.0f;
     u64 uiRootsCreated = 0;
     u64 uiPanelsCreated = 0;
@@ -528,16 +547,42 @@ void writeError(const Tina::Core::Error& error)
     return options;
 }
 
+enum class CharacterAnimationState : u8 {
+    Idle,
+    Walk,
+    HitWall,
+};
+
+struct ResolvedCharacterAnimationClip final {
+    explicit ResolvedCharacterAnimationClip(std::pmr::memory_resource& resource)
+        : frames(&resource)
+    {
+    }
+
+    [[nodiscard]] Tina::Scene::SpriteAnimationClip2D view() const noexcept
+    {
+        return {
+            .frames = frames,
+            .playbackMode = playbackMode,
+        };
+    }
+
+    std::pmr::vector<Tina::Scene::SpriteAnimationFrame2D> frames;
+    Tina::Scene::SpriteAnimationPlaybackMode playbackMode = Tina::Scene::SpriteAnimationPlaybackMode::Loop;
+};
+
 struct TileMapResources final {
     std::pmr::unsynchronized_pool_resource memory{};
     std::unique_ptr<Tina::Asset::AssetSystem> system{};
-    Tina::Asset::AssetHandle textureHandle{};
+    Tina::Asset::AssetHandle tileTextureHandle{};
+    Tina::Asset::AssetHandle characterTextureHandle{};
     Tina::Asset::AssetHandle tilesetHandle{};
     Tina::Asset::AssetHandle tileMapHandle{};
     Tina::Asset::AssetHandle audioClipHandle{};
     // Keeps cooked AudioClip CPU payload alive across playOneShot/mix (M11-A19).
     Tina::Asset::AssetLease audioClipLease{};
-    Tina::Render::GpuTextureId gpuTexture{};
+    Tina::Render::GpuTextureId tileGpuTexture{};
+    Tina::Render::GpuTextureId characterGpuTexture{};
     std::optional<Tina::Asset::TileMapInstance> map{};
     std::optional<Tina::Asset::TileMapGridCollision> grid{};
     std::optional<Tina::Asset::CharacterController2D> controller{};
@@ -554,6 +599,11 @@ struct TileMapResources final {
     std::optional<Tina::Scene::World> sceneWorld{};
     Tina::Scene::EntityId cameraEntity{};
     Tina::Scene::EntityId characterEntity{};
+    ResolvedCharacterAnimationClip idleAnimation{memory};
+    ResolvedCharacterAnimationClip walkAnimation{memory};
+    ResolvedCharacterAnimationClip hitWallAnimation{memory};
+    std::optional<Tina::Scene::SpriteAnimator2D> characterAnimator{};
+    CharacterAnimationState characterAnimationState = CharacterAnimationState::Idle;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     Tina::Scene::EntityId crateEntity{};
 #endif
@@ -579,13 +629,267 @@ struct TileMapResources final {
     return local;
 }
 
+[[nodiscard]] Tina::Core::Result<Tina::Scene::SpriteAnimationPlaybackMode>
+toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept
+{
+    switch (mode)
+    {
+    case Tina::AssetFormat::SpriteAnimationPlaybackMode::Once:
+        return Tina::Scene::SpriteAnimationPlaybackMode::Once;
+    case Tina::AssetFormat::SpriteAnimationPlaybackMode::Loop:
+        return Tina::Scene::SpriteAnimationPlaybackMode::Loop;
+    case Tina::AssetFormat::SpriteAnimationPlaybackMode::PingPong:
+        return Tina::Scene::SpriteAnimationPlaybackMode::PingPong;
+    }
+    return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                               "unsupported character animation playback mode");
+}
+
+[[nodiscard]] Tina::Core::Status resolveCharacterAnimationClip(
+    Tina::Asset::AssetSystem& system,
+    Tina::Core::AssetId clipId,
+    Tina::Core::AssetId expectedTextureId,
+    Tina::Scene::Vec2 characterSize,
+    ResolvedCharacterAnimationClip& output)
+{
+    auto clipHandle = system.find(clipId);
+    if (!clipHandle)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle,
+                                   "character animation clip is not loaded");
+    }
+    const auto* clipFile = system.tryGet(*clipHandle);
+    if (clipFile == nullptr)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                   "character animation clip CPU payload is missing");
+    }
+    auto clip = Tina::Asset::parseSpriteAnimationClipFromCooked(*clipFile);
+    if (!clip)
+    {
+        return Tina::Core::failure(std::move(clip.error()));
+    }
+    auto playbackMode = toScenePlaybackMode(clip->playbackMode);
+    if (!playbackMode)
+    {
+        return Tina::Core::failure(std::move(playbackMode.error()));
+    }
+
+    std::pmr::vector<Tina::Scene::SpriteAnimationFrame2D> resolvedFrames{
+        output.frames.get_allocator().resource()};
+    try
+    {
+        resolvedFrames.reserve(clip->frameCount);
+        for (u32 frameIndex = 0; frameIndex < clip->frameCount; ++frameIndex)
+        {
+            const auto frame = clip->frame(frameIndex);
+            if (!frame)
+            {
+                return Tina::Core::failure(Tina::Asset::AssetErrorCode::CatalogEntryMismatch,
+                                           "character animation frame could not be decoded");
+            }
+            const auto spriteDependency = clipFile->dependency(frame->spriteDependencyIndex);
+            if (!spriteDependency)
+            {
+                return Tina::Core::failure(Tina::Asset::AssetErrorCode::CatalogEntryMismatch,
+                                           "character animation Sprite dependency is missing");
+            }
+            auto spriteHandle = system.find(spriteDependency->assetId);
+            if (!spriteHandle)
+            {
+                return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle,
+                                           "character animation Sprite dependency is not loaded");
+            }
+            const auto* spriteFile = system.tryGet(*spriteHandle);
+            if (spriteFile == nullptr)
+            {
+                return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                           "character animation Sprite CPU payload is missing");
+            }
+            const auto textureDependency = spriteFile->dependency(0);
+            if (spriteFile->header().dependencyCount != 1U || !textureDependency ||
+                textureDependency->expectedKind != Tina::AssetFormat::AssetKind::Texture2D ||
+                textureDependency->assetId != expectedTextureId)
+            {
+                return Tina::Core::failure(Tina::Asset::AssetErrorCode::CatalogEntryMismatch,
+                                           "character animation Sprite must use the character texture atlas");
+            }
+            auto sprite = Tina::Asset::parseSpriteFromCooked(*spriteFile);
+            if (!sprite)
+            {
+                return Tina::Core::failure(std::move(sprite.error()));
+            }
+
+            resolvedFrames.push_back(Tina::Scene::SpriteAnimationFrame2D{
+                .sprite = Tina::Scene::SpriteRenderer2D{
+                    .spriteKey = ProductCharacterSpriteKey,
+                    .overrides = Tina::Scene::SpriteOverrideFlags::Size |
+                                 Tina::Scene::SpriteOverrideFlags::Pivot |
+                                 Tina::Scene::SpriteOverrideFlags::UvRect,
+                    .sizeOverrideMeters = characterSize,
+                    .pivotOverride = {.x = sprite->pivotX, .y = sprite->pivotY},
+                    .uvRectOverride = {
+                        .u0 = sprite->u0,
+                        .v0 = sprite->v0,
+                        .u1 = sprite->u1,
+                        .v1 = sprite->v1,
+                    },
+                    .sortingLayer = 1,
+                    .orderInLayer = 0,
+                    .visible = true,
+                },
+                .duration = Tina::Core::Duration{frame->durationSeconds},
+            });
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "character animation frame resolution ran out of memory");
+    }
+
+    output.frames.swap(resolvedFrames);
+    output.playbackMode = *playbackMode;
+    return Tina::Core::success();
+}
+
+[[nodiscard]] Tina::Core::Status prepareCharacterAnimations(
+    TileMapResources& resources,
+    LifecycleCounters& counters,
+    Tina::Asset::AssetSystem& system,
+    Tina::Core::AssetId characterTextureId,
+    Tina::Core::AssetId idleClipId,
+    Tina::Core::AssetId walkClipId,
+    Tina::Core::AssetId hitWallClipId)
+{
+    if (!resources.controller)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "controller required for character animation");
+    }
+    const auto& config = resources.controller->config();
+    const Tina::Scene::Vec2 characterSize{config.halfWidth * 2.0F, config.halfHeight * 2.0F};
+    if (auto status = resolveCharacterAnimationClip(
+            system, idleClipId, characterTextureId, characterSize, resources.idleAnimation);
+        !status)
+    {
+        return status;
+    }
+    if (auto status = resolveCharacterAnimationClip(
+            system, walkClipId, characterTextureId, characterSize, resources.walkAnimation);
+        !status)
+    {
+        return status;
+    }
+    if (auto status = resolveCharacterAnimationClip(
+            system, hitWallClipId, characterTextureId, characterSize, resources.hitWallAnimation);
+        !status)
+    {
+        return status;
+    }
+
+    auto animator = Tina::Scene::SpriteAnimator2D::Create(resources.idleAnimation.view(), resources.memory);
+    if (!animator)
+    {
+        return Tina::Core::failure(std::move(animator.error()));
+    }
+    resources.characterAnimator.emplace(std::move(*animator));
+    resources.characterAnimationState = CharacterAnimationState::Idle;
+    counters.characterAnimationIdleEntries = 1;
+    counters.characterAnimationResolvedFrames = resources.idleAnimation.frames.size() +
+                                                resources.walkAnimation.frames.size() +
+                                                resources.hitWallAnimation.frames.size();
+    counters.characterAnimationFromCatalog = true;
+    return Tina::Core::success();
+}
+
+[[nodiscard]] Tina::Core::Status setCharacterAnimationState(
+    TileMapResources& resources,
+    LifecycleCounters& counters,
+    CharacterAnimationState nextState)
+{
+    if (!resources.characterAnimator)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "character animator is not initialized");
+    }
+    if (resources.characterAnimationState == nextState)
+    {
+        return Tina::Core::success();
+    }
+
+    const ResolvedCharacterAnimationClip* clip = nullptr;
+    switch (nextState)
+    {
+    case CharacterAnimationState::Idle:
+        clip = &resources.idleAnimation;
+        ++counters.characterAnimationIdleEntries;
+        break;
+    case CharacterAnimationState::Walk:
+        clip = &resources.walkAnimation;
+        ++counters.characterAnimationWalkEntries;
+        break;
+    case CharacterAnimationState::HitWall:
+        clip = &resources.hitWallAnimation;
+        ++counters.characterAnimationHitWallEntries;
+        break;
+    }
+    if (clip == nullptr)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "character animation state has no clip");
+    }
+    if (auto status = resources.characterAnimator->setClip(clip->view()); !status)
+    {
+        return status;
+    }
+    resources.characterAnimationState = nextState;
+    return Tina::Core::success();
+}
+
+[[nodiscard]] Tina::Core::Status updateCharacterAnimation(
+    TileMapResources& resources,
+    LifecycleCounters& counters,
+    Tina::Core::Duration delta)
+{
+    if (!resources.characterAnimator || !resources.sceneWorld)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "character animation Scene state is not initialized");
+    }
+    auto update = resources.characterAnimator->update(delta);
+    if (!update)
+    {
+        return Tina::Core::failure(std::move(update.error()));
+    }
+    ++counters.characterAnimationUpdates;
+    if (update->currentFrameChanged)
+    {
+        ++counters.characterAnimationFrameChanges;
+    }
+    counters.characterAnimationLastFrame = update->currentFrameIndex;
+    if (resources.characterAnimationState == CharacterAnimationState::HitWall &&
+        resources.characterAnimator->isCompleted())
+    {
+        counters.characterAnimationHitCompleted = true;
+    }
+    const auto* sprite = resources.characterAnimator->currentSprite();
+    if (sprite == nullptr)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "character animator has no current Sprite frame");
+    }
+    return resources.sceneWorld->setSpriteRenderer2D(resources.characterEntity, *sprite);
+}
+
 // Bootstrap Scene World for product extract (camera + character [+ crate]).
 // Called once after controller (and optional physics) are ready in prepareCatalog.
 [[nodiscard]] Tina::Core::Status prepareSceneWorld(TileMapResources& resources)
 {
-    if (!resources.controller)
+    if (!resources.controller || !resources.characterAnimator)
     {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "controller required for Scene World");
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "controller and character animator required for Scene World");
     }
 
     auto world = Tina::Scene::World::Create(Tina::Scene::WorldConfig{.entityCapacity = 16});
@@ -609,25 +913,19 @@ struct TileMapResources final {
         return status;
     }
 
-    const auto& controllerConfig = resources.controller->config();
     auto characterEntity =
         world->createEntity(sceneTranslation(resources.controller->state().positionX, resources.controller->state().positionY));
     if (!characterEntity)
     {
         return Tina::Core::failure(std::move(characterEntity.error()));
     }
-    const Tina::Scene::SpriteRenderer2D characterSprite{
-        .spriteKey = ProductSpriteKey,
-        .overrides = Tina::Scene::SpriteOverrideFlags::Size | Tina::Scene::SpriteOverrideFlags::UvRect,
-        .sizeOverrideMeters = {controllerConfig.halfWidth * 2.0f, controllerConfig.halfHeight * 2.0f},
-        // Left half of the product atlas (pre-M8-C1 direct emit fidelity).
-        .uvRectOverride = {.u0 = 0.0f, .v0 = 0.0f, .u1 = 0.5f, .v1 = 1.0f},
-        .color = {.red = 255, .green = 220, .blue = 80, .alpha = 255},
-        .sortingLayer = 1,
-        .orderInLayer = 0,
-        .visible = true,
-    };
-    if (const auto status = world->setSpriteRenderer2D(*characterEntity, characterSprite); !status)
+    const auto* characterSprite = resources.characterAnimator->currentSprite();
+    if (characterSprite == nullptr)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "character animator has no initial Sprite frame");
+    }
+    if (const auto status = world->setSpriteRenderer2D(*characterEntity, *characterSprite); !status)
     {
         return status;
     }
@@ -640,7 +938,7 @@ struct TileMapResources final {
     }
     const float crateSize = resources.dynamicHalfExtent * 2.0f;
     const Tina::Scene::SpriteRenderer2D crateSprite{
-        .spriteKey = ProductSpriteKey,
+        .spriteKey = ProductTileSpriteKey,
         .overrides = Tina::Scene::SpriteOverrideFlags::Size | Tina::Scene::SpriteOverrideFlags::UvRect,
         .sizeOverrideMeters = {crateSize, crateSize},
         // Right half of the product atlas (pre-M8-C1 direct emit fidelity).
@@ -666,10 +964,14 @@ struct TileMapResources final {
 [[nodiscard]] Tina::Core::Status prepareCatalog(TileMapResources& resources, LifecycleCounters& counters)
 {
     // Stable product ids must match samples/2d_tilemap_bgfx/catalog/sample_2d.recipe.
-    const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
+    const auto tileTextureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
     const auto tilesetId = *Tina::Core::AssetId::fromBytes(idBytes(2U));
     const auto tileMapId = *Tina::Core::AssetId::fromBytes(idBytes(3U));
     const auto audioClipId = *Tina::Core::AssetId::fromBytes(idBytes(4U));
+    const auto characterTextureId = *Tina::Core::AssetId::fromBytes(idBytes(5U));
+    const auto idleClipId = *Tina::Core::AssetId::fromBytes(idBytes(9U));
+    const auto walkClipId = *Tina::Core::AssetId::fromBytes(idBytes(10U));
+    const auto hitWallClipId = *Tina::Core::AssetId::fromBytes(idBytes(11U));
 
 #if !defined(TINA_SAMPLE_2D_RECIPE_PATH)
 #error "TINA_SAMPLE_2D_RECIPE_PATH must be defined for tina_sample_2d catalog recipe load"
@@ -682,17 +984,24 @@ struct TileMapResources final {
     {
         return Tina::Core::failure(std::move(request.error()));
     }
-    if (request->assets.size() != 4U)
+    if (request->assets.size() != ExpectedCatalogRecipeAssets)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                   "sample_2d.recipe must declare Texture2D+Tileset+TileMap+AudioClip");
+                                   "sample_2d.recipe must declare the 2D map, audio, and character animation assets");
     }
     counters.catalogRecipeAssets = request->assets.size();
     counters.catalogFromRecipeFile = true;
 
-    resources.catalogRoot = std::filesystem::temp_directory_path() / "tina_sample_2d_pkg";
-    std::error_code ec;
-    std::filesystem::remove_all(resources.catalogRoot, ec);
+    auto catalogRoot = Tina::Sample::createUniqueTempDirectory("tina_sample_2d_pkg");
+    if (!catalogRoot)
+    {
+        return Tina::Core::failure(std::move(catalogRoot.error()));
+    }
+    resources.catalogRoot = std::move(*catalogRoot);
+    auto catalogCleanup = Tina::Core::makeScopeExit([&resources]() noexcept {
+        std::error_code cleanupError;
+        std::filesystem::remove_all(resources.catalogRoot, cleanupError);
+    });
     const auto rootUtf8 = [&] {
         const auto u8 = resources.catalogRoot.u8string();
         return std::string(u8.begin(), u8.end());
@@ -720,26 +1029,25 @@ struct TileMapResources final {
     {
         return bindStatus;
     }
-    auto loaded = system->load(std::array{tileMapId, audioClipId});
+    auto loaded = system->load(std::array{tileMapId, audioClipId, idleClipId, walkClipId, hitWallClipId});
     if (!loaded)
     {
         return Tina::Core::failure(std::move(loaded.error()));
     }
-    if (loaded->size() < 2U)
-    {
-        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle, "tilemap/audioclip load incomplete");
-    }
-    resources.tileMapHandle = (*loaded)[0];
-    resources.audioClipHandle = (*loaded)[1];
-
+    static_cast<void>(loaded);
+    auto tileMapHandle = system->find(tileMapId);
     auto tilesetHandle = system->find(tilesetId);
-    auto textureHandle = system->find(textureId);
-    if (!tilesetHandle || !textureHandle)
+    auto tileTextureHandle = system->find(tileTextureId);
+    auto characterTextureHandle = system->find(characterTextureId);
+    if (!tileMapHandle || !tilesetHandle || !tileTextureHandle || !characterTextureHandle)
     {
-        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle, "tileset/texture not loaded");
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle,
+                                   "tilemap/tileset/texture dependencies are not loaded");
     }
+    resources.tileMapHandle = *tileMapHandle;
     resources.tilesetHandle = *tilesetHandle;
-    resources.textureHandle = *textureHandle;
+    resources.tileTextureHandle = *tileTextureHandle;
+    resources.characterTextureHandle = *characterTextureHandle;
 
     // Resolve AudioClip by id (load() return order is plan order, not request order).
     auto audioHandle = system->find(audioClipId);
@@ -788,6 +1096,13 @@ struct TileMapResources final {
         .skin = 0.01f,
     });
     resources.controller->teleport(1.0f, 3.0f, true);
+
+    if (const auto status = prepareCharacterAnimations(resources, counters, *system, characterTextureId,
+                                                       idleClipId, walkClipId, hitWallClipId);
+        !status)
+    {
+        return status;
+    }
 
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     Tina::Physics2D::PhysicsWorld2DConfig worldConfig;
@@ -864,6 +1179,7 @@ struct TileMapResources final {
     {
         return status;
     }
+    catalogCleanup.release();
     return Tina::Core::success();
 }
 
@@ -931,23 +1247,42 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "render device or catalog missing");
         }
-        const auto* textureFile = resources_->system->tryGet(resources_->textureHandle);
-        if (textureFile == nullptr)
+        const auto* tileTextureFile = resources_->system->tryGet(resources_->tileTextureHandle);
+        const auto* characterTextureFile = resources_->system->tryGet(resources_->characterTextureHandle);
+        if (tileTextureFile == nullptr || characterTextureFile == nullptr)
         {
-            return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady, "texture CPU payload missing");
+            return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                       "tile or character texture CPU payload is missing");
         }
-        auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, *textureFile);
-        if (!texture)
+        auto tileTexture = Tina::Asset::uploadTexture2DFromCooked(*device, *tileTextureFile);
+        if (!tileTexture)
         {
-            return Tina::Core::failure(std::move(texture.error()));
+            return Tina::Core::failure(std::move(tileTexture.error()));
         }
-        if (const auto status = device->setSprite2DTextureBinding(ProductSpriteKey, *texture); !status)
+        auto characterTexture = Tina::Asset::uploadTexture2DFromCooked(*device, *characterTextureFile);
+        if (!characterTexture)
         {
-            (void)device->destroyTexture2D(*texture);
+            (void)device->destroyTexture2D(*tileTexture);
+            return Tina::Core::failure(std::move(characterTexture.error()));
+        }
+        if (const auto status = device->setSprite2DTextureBinding(ProductTileSpriteKey, *tileTexture); !status)
+        {
+            (void)device->destroyTexture2D(*characterTexture);
+            (void)device->destroyTexture2D(*tileTexture);
             return status;
         }
-        resources_->gpuTexture = *texture;
-        ++counters_->texturesUploaded;
+        if (const auto status =
+                device->setSprite2DTextureBinding(ProductCharacterSpriteKey, *characterTexture);
+            !status)
+        {
+            (void)device->setSprite2DTextureBinding(ProductTileSpriteKey, {});
+            (void)device->destroyTexture2D(*characterTexture);
+            (void)device->destroyTexture2D(*tileTexture);
+            return status;
+        }
+        resources_->tileGpuTexture = *tileTexture;
+        resources_->characterGpuTexture = *characterTexture;
+        counters_->texturesUploaded += 2U;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
         if (resources_->physicsWorld)
         {
@@ -1599,11 +1934,20 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
         accessibilityProbe_.clear();
         accessibilityTree_ = Tina::UI::UIAccessibilityTree{};
-        if (auto* device = capture_->get(); device != nullptr && resources_->gpuTexture)
+        if (auto* device = capture_->get(); device != nullptr)
         {
-            (void)device->setSprite2DTextureBinding(ProductSpriteKey, {});
-            (void)device->destroyTexture2D(resources_->gpuTexture);
-            resources_->gpuTexture = {};
+            (void)device->setSprite2DTextureBinding(ProductCharacterSpriteKey, {});
+            (void)device->setSprite2DTextureBinding(ProductTileSpriteKey, {});
+            if (resources_->characterGpuTexture)
+            {
+                (void)device->destroyTexture2D(resources_->characterGpuTexture);
+                resources_->characterGpuTexture = {};
+            }
+            if (resources_->tileGpuTexture)
+            {
+                (void)device->destroyTexture2D(resources_->tileGpuTexture);
+                resources_->tileGpuTexture = {};
+            }
         }
         ++counters_->stateExits;
     }
@@ -1858,6 +2202,28 @@ class TileMapBgfxState final : public Tina::IGameState {
                 counters_->maxControllerX = st.positionX;
             }
 
+            CharacterAnimationState animationState = CharacterAnimationState::Idle;
+            if (st.hitRight)
+            {
+                animationState = CharacterAnimationState::HitWall;
+            }
+            else if (st.grounded && std::abs(wishX) > 0.0F)
+            {
+                animationState = CharacterAnimationState::Walk;
+            }
+            if (auto status = setCharacterAnimationState(*resources_, *counters_, animationState); !status)
+            {
+                return status;
+            }
+            // Product evidence is deterministic even when --frame-delay-ms=0;
+            // the runtime Animator itself accepts arbitrary caller-owned deltas.
+            if (auto status = updateCharacterAnimation(
+                    *resources_, *counters_, context.frameTiming().fixedDelta);
+                !status)
+            {
+                return status;
+            }
+
             // M11-B2: direct follow target after character step. previous = last
             // current; extract lerps with FrameTiming.interpolation (snap later).
             resources_->cameraPreviousX = resources_->cameraCurrentX;
@@ -2062,7 +2428,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         // Still emit all visible sprites for the visual product path. Dirty cache
         // runs in parallel as the CPU revision gate (M11-B1 evidence).
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
-            *resources_->map, query, Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductSpriteKey},
+            *resources_->map, query, Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductTileSpriteKey},
             tileSprites);
         if (!emitted)
         {
@@ -2116,7 +2482,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                     .heightCells = resources_->map->heightCells(),
                     .cellSizeMeters = resources_->map->cellSizeMeters(),
                 },
-                ProductSpriteKey);
+                ProductTileSpriteKey);
             if (!highlight)
             {
                 return Tina::Core::failure(std::move(highlight.error()));
@@ -2328,6 +2694,10 @@ int main(int argc, char** argv)
         writeError(status.error());
         return 1;
     }
+    auto catalogCleanup = Tina::Core::makeScopeExit([&resources]() noexcept {
+        std::error_code cleanupError;
+        std::filesystem::remove_all(resources.catalogRoot, cleanupError);
+    });
 
     Tina::Sample2D::DeviceCapture capture{};
     Tina::Desktop::CreateEngineOptions desktopOptions{};
@@ -2393,9 +2763,6 @@ int main(int argc, char** argv)
 
     (*host).reset();
 
-    std::error_code ec;
-    std::filesystem::remove_all(resources.catalogRoot, ec);
-
     const Tina::Sample2D::SelectedTile* lastSelection =
         counters.tileSelection.lastSelection.has_value() ? &*counters.tileSelection.lastSelection : nullptr;
     const u64 classifiedPointerPresses = counters.tileSelection.missingWorldPointerSamples +
@@ -2445,6 +2812,15 @@ int main(int argc, char** argv)
         counters.audioEnginePresent && counters.audioOneShotQueued && counters.audioStartedObserved &&
         counters.audioStartedCount >= 1 && counters.audioFromCatalogLease && counters.audioClipFrameCount > 0 &&
         counters.audioClipSampleRate == 48000;
+    const bool characterAnimationValid =
+        counters.characterAnimationFromCatalog &&
+        counters.characterAnimationResolvedFrames == ExpectedCharacterAnimationResolvedFrames &&
+        counters.characterAnimationUpdates == counters.frameUpdates &&
+        counters.characterAnimationFrameChanges > 0 &&
+        counters.characterAnimationIdleEntries >= 1 &&
+        counters.characterAnimationWalkEntries >= 1 &&
+        counters.characterAnimationHitWallEntries >= 1 &&
+        counters.characterAnimationHitCompleted;
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
     // M11-A16: null-backend device must start, run callbacks, and advance mixRealtime.
     const bool audioDeviceValid =
@@ -2455,9 +2831,10 @@ int main(int argc, char** argv)
 #endif
 
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
-              cameraFollowValid && chunkDirtyValid && audioValid && audioDeviceValid &&
+              cameraFollowValid && chunkDirtyValid && audioValid && audioDeviceValid && characterAnimationValid &&
               counters.catalogFromRecipeFile &&
-              counters.catalogRecipeAssets == 4 && counters.texturesUploaded == 1 &&
+              counters.catalogRecipeAssets == ExpectedCatalogRecipeAssets &&
+              counters.texturesUploaded == ExpectedUploadedTextures &&
               counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
               counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
               counters.controllerHitRightFrames > 0 && counters.maxControllerX > 1.5f &&
@@ -2508,11 +2885,15 @@ int main(int argc, char** argv)
 
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
-    evidenceBytes.reserve(188);
-    appendLeU32(evidenceBytes, 4U); // schema
+    evidenceBytes.reserve(220);
+    appendLeU32(evidenceBytes, 5U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
+    appendLeU32(evidenceBytes, ExpectedCharacterAnimationClips);
+    appendLeU32(evidenceBytes, ExpectedCharacterAnimationSprites);
+    appendLeU64(evidenceBytes, counters.characterAnimationResolvedFrames);
+    appendLeU32(evidenceBytes, counters.characterAnimationFromCatalog ? 1U : 0U);
     appendLeU64(evidenceBytes, ExpectedNonEmptyTiles);
     appendLeU64(evidenceBytes, expectedTotalSprites);
     appendLeU64(evidenceBytes, ExpectedUIPanelCount);
@@ -2572,6 +2953,16 @@ int main(int argc, char** argv)
                   << ",\"grounded\":" << counters.controllerGroundedFrames
                   << ",\"walkFrames\":" << counters.controllerWalkFrames
                   << ",\"hitRight\":" << counters.controllerHitRightFrames
+                  << ",\"animationFromCatalog\":"
+                  << (counters.characterAnimationFromCatalog ? "true" : "false")
+                  << ",\"animationResolvedFrames\":" << counters.characterAnimationResolvedFrames
+                  << ",\"animationUpdates\":" << counters.characterAnimationUpdates
+                  << ",\"animationFrameChanges\":" << counters.characterAnimationFrameChanges
+                  << ",\"animationIdleEntries\":" << counters.characterAnimationIdleEntries
+                  << ",\"animationWalkEntries\":" << counters.characterAnimationWalkEntries
+                  << ",\"animationHitWallEntries\":" << counters.characterAnimationHitWallEntries
+                  << ",\"animationHitCompleted\":"
+                  << (counters.characterAnimationHitCompleted ? "true" : "false")
                   << ",\"maxX\":" << counters.maxControllerX << ",\"uiRoots\":" << counters.uiRootsCreated
                   << ",\"uiPanels\":" << counters.uiPanelsCreated << ",\"uiLabels\":" << counters.uiTextLabelsCreated
                   << ",\"uiTextEdits\":" << counters.uiTextEditsCreated
@@ -2665,6 +3056,17 @@ int main(int argc, char** argv)
               << ",\"controllerGroundedFrames\":" << counters.controllerGroundedFrames
               << ",\"controllerWalkFrames\":" << counters.controllerWalkFrames
               << ",\"controllerHitRightFrames\":" << counters.controllerHitRightFrames
+              << ",\"characterAnimationFromCatalog\":"
+              << (counters.characterAnimationFromCatalog ? "true" : "false")
+              << ",\"characterAnimationResolvedFrames\":" << counters.characterAnimationResolvedFrames
+              << ",\"characterAnimationUpdates\":" << counters.characterAnimationUpdates
+              << ",\"characterAnimationFrameChanges\":" << counters.characterAnimationFrameChanges
+              << ",\"characterAnimationIdleEntries\":" << counters.characterAnimationIdleEntries
+              << ",\"characterAnimationWalkEntries\":" << counters.characterAnimationWalkEntries
+              << ",\"characterAnimationHitWallEntries\":" << counters.characterAnimationHitWallEntries
+              << ",\"characterAnimationLastFrame\":" << counters.characterAnimationLastFrame
+              << ",\"characterAnimationHitCompleted\":"
+              << (counters.characterAnimationHitCompleted ? "true" : "false")
               << ",\"maxControllerX\":" << counters.maxControllerX
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiPanelsCreated\":" << counters.uiPanelsCreated
@@ -2816,7 +3218,7 @@ int main(int argc, char** argv)
               << ",\"accessibilityHasRadio\":" << (counters.accessibilityHasRadio ? "true" : "false")
               << ",\"accessibilityHasTextEdit\":" << (counters.accessibilityHasTextEdit ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":4"
+              << ",\"evidenceSchema\":5"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")

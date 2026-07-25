@@ -42,10 +42,10 @@ namespace {
 }
 
 [[nodiscard]] RenderSprite2DInput sprite(u64 stableEntityKey, float centerX, i16 sortingLayer = 0,
-                                         i32 orderInLayer = 0) noexcept
+                                         i32 orderInLayer = 0, u32 spriteKey = Sprite2DspriteKey) noexcept
 {
     return RenderSprite2DInput{
-        .spriteKey = Sprite2DspriteKey,
+        .spriteKey = spriteKey,
         .stableEntityKey = stableEntityKey,
         .centerX = centerX,
         .centerY = 0.0F,
@@ -210,18 +210,66 @@ TEST(BgfxSprite2DGeometryTest, FlipChangesUvWithoutChangingGeometry)
     EXPECT_FLOAT_EQ(flippedVertices[2].textureV, 1.0F);
 }
 
-TEST(BgfxSprite2DGeometryTest, RejectsUnsupportedFixtureKeyExplicitly)
+TEST(BgfxSprite2DGeometryTest, MultipleSpriteKeysPreserveRenderOrderAndCountContiguousBatches)
 {
     RenderSceneBuilder builder = makeBuilder();
-    auto unsupported = sprite(1, 0.0F);
-    unsupported.spriteKey = Sprite2DspriteKey + 1U;
-    const std::array inputs{unsupported};
+    constexpr u32 AtlasA = Sprite2DspriteKey + 10U;
+    constexpr u32 AtlasB = Sprite2DspriteKey + 20U;
+    const std::array inputs{
+        sprite(40, 4.0F, 2, 0, AtlasA),
+        sprite(20, -1.0F, 0, 1, AtlasA),
+        sprite(30, 2.0F, 1, 0, AtlasB),
+        sprite(10, -3.0F, 0, 0, AtlasA),
+    };
+    auto scene = commitScene(builder, inputs);
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+    ASSERT_EQ(scene->sprites2D().size(), 4U);
+    EXPECT_EQ(scene->sprites2D()[0].stableEntityKey, 10U);
+    EXPECT_EQ(scene->sprites2D()[1].stableEntityKey, 20U);
+    EXPECT_EQ(scene->sprites2D()[2].stableEntityKey, 30U);
+    EXPECT_EQ(scene->sprites2D()[3].stableEntityKey, 40U);
+    EXPECT_EQ(scene->sprites2D()[0].spriteKey, AtlasA);
+    EXPECT_EQ(scene->sprites2D()[1].spriteKey, AtlasA);
+    EXPECT_EQ(scene->sprites2D()[2].spriteKey, AtlasB);
+    EXPECT_EQ(scene->sprites2D()[3].spriteKey, AtlasA);
+
+    auto requirements = checkedSprite2DFrame(*scene);
+    ASSERT_TRUE(requirements.has_value()) << requirements.error().message;
+    EXPECT_EQ(requirements->spriteCount, 4U);
+    EXPECT_EQ(requirements->vertexCount, 16U);
+    EXPECT_EQ(requirements->indexCount, 24U);
+    EXPECT_EQ(requirements->batchCount, 3U);
+
+    std::array<BgfxSprite2DVertex, 16> vertices{};
+    std::array<u32, 24> indices{};
+    auto written = writeSprite2DGeometry(*scene, vertices, indices);
+    ASSERT_TRUE(written.has_value()) << written.error().message;
+    EXPECT_EQ(written->batchCount, 3U);
+
+    constexpr u32 ExpectedAbgr = 0xC0014080U;
+    expectVertex(vertices[0], -4.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
+    expectVertex(vertices[4], -2.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
+    expectVertex(vertices[8], 1.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
+    expectVertex(vertices[12], 3.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
+
+    constexpr std::array<u32, 24> ExpectedIndices{
+        0,  1,  2,  0,  2,  3,  4,  5,  6,  4,  6,  7,
+        8,  9,  10, 8,  10, 11, 12, 13, 14, 12, 14, 15,
+    };
+    EXPECT_TRUE(std::ranges::equal(indices, ExpectedIndices));
+}
+
+TEST(BgfxSprite2DGeometryTest, RejectsZeroSpriteKeyInCorruptView)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    const std::array inputs{sprite(1, 0.0F)};
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value());
 
+    const_cast<RenderSprite2DItem&>(scene->sprites2D()[0]).spriteKey = 0;
     auto requirements = checkedSprite2DFrame(*scene);
     ASSERT_FALSE(requirements.has_value());
-    EXPECT_EQ(requirements.error().code, Core::CoreErrorCode::Unsupported);
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidRenderSceneInput);
 }
 
 TEST(BgfxSprite2DGeometryTest, RejectsMissingCameraInCorruptView)

@@ -64,6 +64,11 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
     ASSERT_TRUE((*device)->setMesh3DDirectionalLight(0.2F, 0.8F, 0.3F, 1.0F, 1.0F, 1.0F, 0.2F).has_value());
     ASSERT_FALSE((*device)->setMesh3DDirectionalLight(0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.2F).has_value());
     ASSERT_FALSE((*device)->setMesh3DDirectionalLight(0.0F, 1.0F, 0.0F, 1.0F, 1.0F, 1.0F, -0.1F).has_value());
+    ASSERT_FALSE((*device)->setMesh3DDirectionalLight(0.0F, 1.0F, 0.0F, -0.1F, 1.0F, 1.0F, 0.2F).has_value());
+    ASSERT_TRUE((*device)->setMesh3DFillDirectionalLight(-0.4F, 0.2F, -0.3F, 0.3F, 0.3F, 0.4F).has_value());
+    ASSERT_TRUE((*device)->setMesh3DFillDirectionalLight(0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F).has_value());
+    ASSERT_FALSE((*device)->setMesh3DFillDirectionalLight(0.0F, 1.0F, 0.0F, 0.2F, -0.2F, 0.2F).has_value());
+    ASSERT_FALSE((*device)->setMesh3DFillDirectionalLight(0.0F, 0.0F, 0.0F, 0.2F, 0.2F, 0.2F).has_value());
     // Destroy while still bound: stale normal/MR/baseColor bindings must be scrubbed.
     ASSERT_TRUE((*device)->destroyTexture2D(*baseColor).has_value());
     ASSERT_TRUE((*device)->setMesh3DMaterialNormalTextureBinding(7U, {}).has_value());

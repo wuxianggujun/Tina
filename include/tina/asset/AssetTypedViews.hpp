@@ -4,6 +4,7 @@
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
+#include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -23,6 +24,11 @@ parseTexture2DFromCooked(const CookedAssetFile& file);
 
 [[nodiscard]] Core::Result<AssetFormat::SpritePayloadView>
 parseSpriteFromCooked(const CookedAssetFile& file);
+
+// Validates the complete Sprite dependency stream. Frame dependency indices
+// resolve through the same CookedAssetFile while this borrowed view is alive.
+[[nodiscard]] Core::Result<AssetFormat::SpriteAnimationClipPayloadView>
+parseSpriteAnimationClipFromCooked(const CookedAssetFile& file);
 
 [[nodiscard]] Core::Result<AssetFormat::TilesetPayloadView>
 parseTilesetFromCooked(const CookedAssetFile& file);

@@ -12,6 +12,7 @@ set(TINA_ASSET_TEST_SOURCES
     Typed2dCatalogPipelineTests.cpp
     AssetSystemCatalogApiTests.cpp
     AssetSpriteRenderTests.cpp
+    SpriteAnimationClipTypedViewTests.cpp
     AssetGpuTextureTests.cpp
     AssetGpuMeshTests.cpp
     AudioClipCookedPlaybackTests.cpp

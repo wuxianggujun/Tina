@@ -4,6 +4,7 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AudioClipPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/MaterialPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/PrefabPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SpriteAnimationClipPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SpritePayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/StaticMeshPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/Texture2DPayload.hpp
@@ -17,6 +18,7 @@ add_library(tina_asset_format STATIC
     AudioClipPayload.cpp
     MaterialPayload.cpp
     PrefabPayload.cpp
+    SpriteAnimationClipPayload.cpp
     SpritePayload.cpp
     StaticMeshPayload.cpp
     Texture2DPayload.cpp

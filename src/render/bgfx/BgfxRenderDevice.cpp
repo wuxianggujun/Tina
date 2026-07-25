@@ -200,6 +200,12 @@ constexpr u64 kSprite2DPremultipliedAlphaState =
 constexpr u64 kUIPremultipliedAlphaState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
                                            BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 
+[[nodiscard]] bool isFiniteNonNegativeRgb(float red, float green, float blue) noexcept
+{
+    return std::isfinite(red) && std::isfinite(green) && std::isfinite(blue) &&
+           red >= 0.0F && green >= 0.0F && blue >= 0.0F;
+}
+
 static_assert(std::is_standard_layout_v<BgfxUIDisplayVertex>);
 static_assert(sizeof(BgfxUIDisplayVertex) == sizeof(float) * 4U + sizeof(u32));
 static_assert(offsetof(BgfxUIDisplayVertex, x) == 0U);
@@ -762,6 +768,22 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        opaque3DFillLightDirUniform_ = bgfx::createUniform("u_fillLightDir", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DFillLightDirUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D fill light direction uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DFillLightColorUniform_ = bgfx::createUniform("u_fillLightColor", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DFillLightColorUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D fill light color uniform");
+        }
+        ++statistics_.liveResources;
+
         opaque3DMrParamsUniform_ = bgfx::createUniform("u_mrParams", bgfx::UniformType::Vec4);
         if (!bgfx::isValid(opaque3DMrParamsUniform_))
         {
@@ -1066,6 +1088,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DLightColorUniform_);
                 opaque3DLightColorUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DFillLightDirUniform_))
+            {
+                bgfx::destroy(opaque3DFillLightDirUniform_);
+                opaque3DFillLightDirUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DFillLightColorUniform_))
+            {
+                bgfx::destroy(opaque3DFillLightColorUniform_);
+                opaque3DFillLightColorUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(opaque3DMrParamsUniform_))
@@ -1451,6 +1485,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setTexture(2, opaque3DNormalSampler_, normalTexture);
             bgfx::setUniform(opaque3DLightDirUniform_, mesh3DLightDir_.data());
             bgfx::setUniform(opaque3DLightColorUniform_, mesh3DLightColor_.data());
+            bgfx::setUniform(opaque3DFillLightDirUniform_, mesh3DFillLightDir_.data());
+            bgfx::setUniform(opaque3DFillLightColorUniform_, mesh3DFillLightColor_.data());
             bgfx::setUniform(opaque3DMrParamsUniform_, mrParams.data());
             bgfx::setUniform(opaque3DNormalParamsUniform_, normalParams.data());
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
@@ -1482,11 +1518,9 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
 
-        bgfx::setScissor();
-        bgfx::setState(kSprite2DPremultipliedAlphaState);
-        bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.requirements.vertexCount);
-
         // One submit per contiguous spriteKey batch so product textures can bind per key.
+        // bgfx::submit() discards draw state by default, so every batch must
+        // publish the complete state required by the following submit.
         const auto sprites = scene.sprites2D();
         u32 batchBegin = 0;
         while (batchBegin < prepared.requirements.spriteCount)
@@ -1511,6 +1545,9 @@ class BgfxRenderDevice final : public IRenderDevice {
                     }
                 }
             }
+            bgfx::setScissor();
+            bgfx::setState(kSprite2DPremultipliedAlphaState);
+            bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.requirements.vertexCount);
             bgfx::setTexture(0, sprite2DSampler_, texture);
             const u32 firstIndex = batchBegin * 6U;
             const u32 indexCount = (batchEnd - batchBegin) * 6U;
@@ -1955,12 +1992,12 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
         }
-        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) || !std::isfinite(colorR) ||
-            !std::isfinite(colorG) || !std::isfinite(colorB) || !std::isfinite(ambientScale) ||
+        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) ||
+            !isFiniteNonNegativeRgb(colorR, colorG, colorB) || !std::isfinite(ambientScale) ||
             ambientScale < 0.0F)
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload,
-                                 "Mesh3D directional light parameters must be finite (ambient >= 0)");
+                                 "Mesh3D directional light parameters must be finite (color and ambient >= 0)");
         }
         const float lenSq = dirX * dirX + dirY * dirY + dirZ * dirZ;
         if (lenSq <= 1.0e-12F)
@@ -1972,6 +2009,43 @@ class BgfxRenderDevice final : public IRenderDevice {
         mesh3DLightDir_ = {dirX * invLen, dirY * invLen, dirZ * invLen, 0.0F};
         mesh3DLightColor_ = {colorR, colorG, colorB, 1.0F};
         mesh3DAmbientScale_ = ambientScale;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMesh3DFillDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
+                                                             float colorG, float colorB) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) ||
+            !isFiniteNonNegativeRgb(colorR, colorG, colorB))
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Mesh3D fill light parameters must be finite and color must be non-negative");
+        }
+        const float colorMag = std::abs(colorR) + std::abs(colorG) + std::abs(colorB);
+        if (colorMag <= 1.0e-6F)
+        {
+            // Disable fill light.
+            mesh3DFillLightDir_ = {0.0F, 1.0F, 0.0F, 0.0F};
+            mesh3DFillLightColor_ = {0.0F, 0.0F, 0.0F, 0.0F};
+            return Core::success();
+        }
+        const float lenSq = dirX * dirX + dirY * dirY + dirZ * dirZ;
+        if (lenSq <= 1.0e-12F)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Mesh3D fill light direction must be non-zero when color is non-zero");
+        }
+        const float invLen = 1.0F / std::sqrt(lenSq);
+        mesh3DFillLightDir_ = {dirX * invLen, dirY * invLen, dirZ * invLen, 1.0F};
+        mesh3DFillLightColor_ = {colorR, colorG, colorB, 1.0F};
         return Core::success();
     }
 
@@ -2170,6 +2244,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle opaque3DNormalSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DLightDirUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DLightColorUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DFillLightDirUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DFillLightColorUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
@@ -2216,6 +2292,9 @@ class BgfxRenderDevice final : public IRenderDevice {
     std::unordered_map<u32, MaterialFactors> mesh3DMaterialFactors_{};
     std::array<float, 4> mesh3DLightDir_{0.4F, 0.85F, 0.35F, 0.0F};
     std::array<float, 4> mesh3DLightColor_{1.0F, 0.98F, 0.92F, 1.0F};
+    // w=0 disables fill in the shader.
+    std::array<float, 4> mesh3DFillLightDir_{0.0F, 1.0F, 0.0F, 0.0F};
+    std::array<float, 4> mesh3DFillLightColor_{0.0F, 0.0F, 0.0F, 0.0F};
     float mesh3DAmbientScale_ = 0.18F;
 
     bool frameOpen_ = false;

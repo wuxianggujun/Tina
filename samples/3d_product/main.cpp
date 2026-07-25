@@ -8,6 +8,7 @@
 #include <tina/asset/GltfCook.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -29,6 +30,7 @@
 #include <tina/ui/UIPaint.hpp>
 
 #include "DeviceCapture.hpp"
+#include "SampleTempDirectory.hpp"
 
 #include <algorithm>
 #include <array>
@@ -93,6 +95,8 @@ struct LifecycleCounters final {
     bool materialFactorsBound = false;
     bool materialMrTextureBound = false;
     bool materialNormalTextureBound = false;
+    bool keyLightConfigured = false;
+    bool fillLightConfigured = false;
     bool gltfCooked = false;
     bool prefabInstantiated = false;
     bool completePbrFixture = false;
@@ -462,16 +466,23 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
                                                             LifecycleCounters& counters,
                                                             const SampleOptions& options)
 {
-    resources.workRoot = std::filesystem::temp_directory_path() / "tina_sample_3d_gltf";
+    auto workRoot = Tina::Sample::createUniqueTempDirectory("tina_sample_3d_gltf");
+    if (!workRoot)
+    {
+        return Tina::Core::failure(std::move(workRoot.error()));
+    }
+    resources.workRoot = std::move(*workRoot);
     resources.catalogRoot = resources.workRoot / "catalog";
     resources.externalGltf = !options.gltfPath.empty();
     resources.completePbrFixture = false;
     resources.gltfSourcePath = options.gltfPath;
-    std::error_code ec;
-    std::filesystem::remove_all(resources.workRoot, ec);
-    std::filesystem::create_directories(resources.workRoot, ec);
+    auto workRootCleanup = Tina::Core::makeScopeExit([&resources]() noexcept {
+        std::error_code cleanupError;
+        std::filesystem::remove_all(resources.workRoot, cleanupError);
+    });
 
     std::filesystem::path gltfPath;
+    std::error_code ec;
     if (resources.externalGltf)
     {
         gltfPath = std::filesystem::path{options.gltfPath};
@@ -794,6 +805,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "cooked Prefab must contain at least two meshed nodes");
     }
+    workRootCleanup.release();
     return Tina::Core::success();
 }
 
@@ -813,6 +825,9 @@ class Product3DState final : public Tina::IGameState {
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "render device or product mesh slots missing");
         }
+        // EngineHost discards a failed onEnter candidate without calling onExit.
+        // Keep GPU resource ownership transactional until the state is fully entered.
+        auto gpuRollback = Tina::Core::makeScopeExit([this]() noexcept { releaseProductGpuResources(); });
 
         for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
         {
@@ -925,14 +940,22 @@ class Product3DState final : public Tina::IGameState {
         }
         world_.emplace(std::move(*worldResult));
 
-        // Directional light for experimental MR (override defaults for product framing).
+        // Key + fill directional lights for experimental MR (sphere grid readability).
         if (auto* device = capture_->get(); device != nullptr)
         {
-            if (auto status = device->setMesh3DDirectionalLight(0.35F, 0.9F, 0.4F, 1.0F, 0.98F, 0.92F, 0.22F);
+            if (auto status = device->setMesh3DDirectionalLight(0.35F, 0.9F, 0.4F, 1.0F, 0.98F, 0.92F, 0.16F);
                 !status)
             {
                 return status;
             }
+            counters_->keyLightConfigured = true;
+            // Cool fill from opposite side so metallic spheres show rim response without IBL.
+            if (auto status = device->setMesh3DFillDirectionalLight(-0.55F, 0.25F, -0.35F, 0.28F, 0.34F, 0.45F);
+                !status)
+            {
+                return status;
+            }
+            counters_->fillLightConfigured = true;
         }
 
         auto prefab = Tina::Asset::parsePrefabFromCooked(resources_->prefabFile);
@@ -1157,6 +1180,7 @@ class Product3DState final : public Tina::IGameState {
         uiRoot_ = std::move(*root);
         ++counters_->uiRootsCreated;
         counters_->uiPanelsCreated += panels.size();
+        gpuRollback.release();
         return Tina::Core::success();
     }
 
@@ -1164,41 +1188,7 @@ class Product3DState final : public Tina::IGameState {
     {
         world_.reset();
         prefabEntities_.clear();
-        if (auto* device = capture_->get(); device != nullptr)
-        {
-            for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
-            {
-                ProductMeshSlot& productMesh = resources_->meshes[slot];
-                if (productMesh.normalTextureUploaded)
-                {
-                    (void)device->setMesh3DMaterialNormalTextureBinding(productMesh.materialKey, {});
-                    (void)device->destroyTexture2D(productMesh.gpuNormalTexture);
-                    productMesh.normalTextureUploaded = false;
-                    productMesh.gpuNormalTexture = {};
-                }
-                if (productMesh.metallicRoughnessTextureUploaded)
-                {
-                    (void)device->setMesh3DMaterialMetallicRoughnessTextureBinding(productMesh.materialKey, {});
-                    (void)device->destroyTexture2D(productMesh.gpuMetallicRoughnessTexture);
-                    productMesh.metallicRoughnessTextureUploaded = false;
-                    productMesh.gpuMetallicRoughnessTexture = {};
-                }
-                if (productMesh.textureUploaded)
-                {
-                    (void)device->setMesh3DMaterialTextureBinding(productMesh.materialKey, {});
-                    (void)device->destroyTexture2D(productMesh.gpuTexture);
-                    productMesh.textureUploaded = false;
-                    productMesh.gpuTexture = {};
-                }
-                if (productMesh.meshUploaded)
-                {
-                    (void)device->setMesh3DBinding(productMesh.meshKey, {});
-                    (void)device->destroyStaticMesh(productMesh.gpuMesh);
-                    productMesh.meshUploaded = false;
-                    productMesh.gpuMesh = {};
-                }
-            }
-        }
+        releaseProductGpuResources();
         if (uiRoot_)
         {
             uiRoot_.reset();
@@ -1269,6 +1259,45 @@ class Product3DState final : public Tina::IGameState {
     }
 
   private:
+    void releaseProductGpuResources() noexcept
+    {
+        if (auto* device = capture_->get(); device != nullptr)
+        {
+            for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
+            {
+                ProductMeshSlot& productMesh = resources_->meshes[slot];
+                if (productMesh.normalTextureUploaded)
+                {
+                    (void)device->setMesh3DMaterialNormalTextureBinding(productMesh.materialKey, {});
+                    (void)device->destroyTexture2D(productMesh.gpuNormalTexture);
+                    productMesh.normalTextureUploaded = false;
+                    productMesh.gpuNormalTexture = {};
+                }
+                if (productMesh.metallicRoughnessTextureUploaded)
+                {
+                    (void)device->setMesh3DMaterialMetallicRoughnessTextureBinding(productMesh.materialKey, {});
+                    (void)device->destroyTexture2D(productMesh.gpuMetallicRoughnessTexture);
+                    productMesh.metallicRoughnessTextureUploaded = false;
+                    productMesh.gpuMetallicRoughnessTexture = {};
+                }
+                if (productMesh.textureUploaded)
+                {
+                    (void)device->setMesh3DMaterialTextureBinding(productMesh.materialKey, {});
+                    (void)device->destroyTexture2D(productMesh.gpuTexture);
+                    productMesh.textureUploaded = false;
+                    productMesh.gpuTexture = {};
+                }
+                if (productMesh.meshUploaded)
+                {
+                    (void)device->setMesh3DBinding(productMesh.meshKey, {});
+                    (void)device->destroyStaticMesh(productMesh.gpuMesh);
+                    productMesh.meshUploaded = false;
+                    productMesh.gpuMesh = {};
+                }
+            }
+        }
+    }
+
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     Product3DResources* resources_ = nullptr;
@@ -1337,6 +1366,10 @@ class Product3DApplication final : public Tina::IGameApplication {
         writeError(status.error());
         return 1;
     }
+    auto workRootCleanup = Tina::Core::makeScopeExit([&resources]() noexcept {
+        std::error_code cleanupError;
+        std::filesystem::remove_all(resources.workRoot, cleanupError);
+    });
 
     DeviceCapture capture;
     Tina::Desktop::CreateEngineOptions desktopOptions{};
@@ -1359,9 +1392,6 @@ class Product3DApplication final : public Tina::IGameApplication {
         capture.get() == nullptr || capture.get()->statistics().liveResources == 0;
     hostResult->reset();
 
-    std::error_code ec;
-    std::filesystem::remove_all(resources.workRoot, ec);
-
     if (!runResult)
     {
         writeError(runResult.error());
@@ -1383,7 +1413,8 @@ class Product3DApplication final : public Tina::IGameApplication {
         counters.uiPanelsCreated != 2 || counters.uiRootsReleased != 1 ||
         counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMeshes || !texturesOk ||
         !counters.meshBound || !counters.materialTextureBound || counters.catalogCooked != 1 || !counters.gltfCooked ||
-        !counters.prefabInstantiated || counters.prefabNodes == 0 || counters.prefabInstances == 0 || !ledgerBalanced)
+        !counters.prefabInstantiated || counters.prefabNodes == 0 || counters.prefabInstances == 0 ||
+        !counters.keyLightConfigured || !counters.fillLightConfigured || !ledgerBalanced)
     {
         std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\","
                      "\"message\":\"lifecycle counters did not match\","
@@ -1393,6 +1424,8 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"texturesUploaded\":" << counters.texturesUploaded
                   << ",\"meshBound\":" << (counters.meshBound ? "true" : "false")
                   << ",\"materialTextureBound\":" << (counters.materialTextureBound ? "true" : "false")
+                  << ",\"keyLightConfigured\":" << (counters.keyLightConfigured ? "true" : "false")
+                  << ",\"fillLightConfigured\":" << (counters.fillLightConfigured ? "true" : "false")
                   << ",\"gltfCooked\":" << (counters.gltfCooked ? "true" : "false")
                   << ",\"prefabInstantiated\":" << (counters.prefabInstantiated ? "true" : "false")
                   << ",\"prefabNodes\":" << counters.prefabNodes
@@ -1416,7 +1449,9 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"completePbrFixture\":" << (resources.completePbrFixture ? "true" : "false")
               << ",\"materialFactorsBound\":" << (counters.materialFactorsBound ? "true" : "false")
               << ",\"materialMrTextureBound\":" << (counters.materialMrTextureBound ? "true" : "false")
-              << ",\"materialNormalTextureBound\":" << (counters.materialNormalTextureBound ? "true" : "false");
+              << ",\"materialNormalTextureBound\":" << (counters.materialNormalTextureBound ? "true" : "false")
+              << ",\"keyLightConfigured\":" << (counters.keyLightConfigured ? "true" : "false")
+              << ",\"fillLightConfigured\":" << (counters.fillLightConfigured ? "true" : "false");
     if (resources.externalGltf || resources.completePbrFixture)
     {
         std::cout << ",\"gltfPath\":";

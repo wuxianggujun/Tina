@@ -13,8 +13,8 @@
 | G0 | 非 clean 构建可复现 | Verified | Windows 现有 build tree 可增量 configure/build；日常门禁禁止 wipe |
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
 | G2 | UI 产品 | Partial | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有产品/结构化/视觉证据；平台 accessibility adapter、跨 DPI/GPU golden 与完整控件矩阵后置 |
-| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）与 texture bind API 已通过；Opaque3D 贴图采样 / PBR / fence pin 后置 |
-| G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColorTexture PNG/JPEG cook 与 Material dependency 已完成；PBR 后置 |
+| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、base/MR/normal 贴图采样与 key/fill light 已通过；完整 PBR/IBL/shadow/fence pin 后置 |
+| G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency 已完成；完整 PBR 后置 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
 | G6 | 平台矩阵 | Strong | tip Docker：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 sanitizer 均 exit 0（见 [Linux 证据](m12-evidence-linux.md)） |
 | G7 | Legacy smoke | N/A | 产品已删除，不再运行 Legacy smoke |
@@ -51,20 +51,19 @@ accessibility adapter、跨 DPI/GPU golden 和完整控件/输入矩阵保持 Pa
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| 最小 glTF/GLB parse + Prefab | Done | `tina_sample_3d` 单 mesh 产品路径 |
+| 最小 glTF/GLB parse + Prefab | Done | Cooked Prefab 基础路径；当前 `tina_sample_3d` 已覆盖 multi-mesh product 映射 |
 | 多 glTF mesh cook | Done | 每个 mesh 生成 distinct StaticMesh/Material AssetId，Prefab 依赖可解析 |
 | baseColorTexture cook | Done | 相对文件或 bufferView 的 PNG/JPEG 解码为 RGBA8 Texture2D，Material 发布 required dependency，相同 image 去重 |
 | multi-primitive mesh (SPLIT) | Done | 每 TRIANGLES prim → StaticMesh+Material；Prefab 展开父+子节点；非三角 prim 结构化失败 |
-| multi-mesh product bind/draw | Open | sample 当前仍映射单个 product mesh key；见 3D-001 |
-| PBR/其他纹理通道 | Deferred | metallic-roughness/normal/emissive 与 Material/Render 产品门禁仍后置 |
+| multi-mesh product bind/draw | Done | sample 映射多个 product mesh/material key；见 3D-001 |
+| PBR/其他纹理通道 | Partial | metallic-roughness/normal 首切片已进 Material/Render 产品门禁；emissive、IBL、shadow 与完整 PBR 后置 |
 
-## 当前剩余工作
+## 后续工作边界
 
-1. TEST-001：当前 tip Linux 全门禁；
-2. TEST-002：product-2d 完整模块测试与 sample 门禁；
-3. 3D-001：multi-mesh 产品 upload/bind/extract/draw E2E；
-4. CLEAN-001～003：vcpkg/EASTL/compatibility/错误文案残留；
-5. UI-002～003：accessibility adapter、跨 DPI/GPU golden 与完整控件/输入矩阵。
+M12 只跟踪 Legacy 产品图删除及其替代产品证据；不再把已关闭的 `TEST-001`、`TEST-002`、`3D-001` 和
+`CLEAN-001`～`CLEAN-003` 重新列为待办。当前未关闭的功能和验证风险以 [Backlog](backlog.md) 为唯一
+明细：Now 的 TileMap/Physics2D/Input 工作、Partial 的 UI-002/UI-003，以及 Later 的
+`RENDER-FENCE`/`RENDER-001`。
 
 ## Windows 快速复验
 

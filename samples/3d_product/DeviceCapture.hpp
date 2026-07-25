@@ -107,6 +107,11 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->setMesh3DDirectionalLight(dirX, dirY, dirZ, colorR, colorG, colorB, ambientScale);
     }
+    [[nodiscard]] Core::Status setMesh3DFillDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
+                                                             float colorG, float colorB) noexcept override
+    {
+        return inner_->setMesh3DFillDirectionalLight(dirX, dirY, dirZ, colorR, colorG, colorB);
+    }
 
   private:
     std::unique_ptr<Render::IRenderDevice> inner_;

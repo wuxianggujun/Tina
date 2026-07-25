@@ -100,7 +100,7 @@ Core::Status extractRenderSceneFromWorld(
         if (params.surfaceViewport.pixelWidth == 0
             || params.surfaceViewport.pixelHeight == 0) {
             // Continue to sprites only when a camera was authored but surface is
-            // suspended â€?still skip setCamera2D so pure-UI / suspended frames
+            // suspended - still skip setCamera2D so pure-UI / suspended frames
             // remain valid.
         } else {
             const Render::Camera2DProjectionQuery query{
@@ -245,7 +245,7 @@ Core::Status extractRenderSceneFromWorld(
         }
 
         // Suspended surface: skip 3D camera without failing (aspect is injected by
-        // RenderScene frame parameters; 0Ã—0 is still a no-op set for this slice).
+        // RenderScene frame parameters; 0x0 is still a no-op set for this slice).
         if (params.surfaceViewport.pixelWidth != 0 && params.surfaceViewport.pixelHeight != 0) {
             const Render::RenderPerspectiveCameraInput input{
                 .stableCameraKey = stableEntityKey(activePerspectiveEntity),

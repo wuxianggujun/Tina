@@ -7,6 +7,7 @@ set(TINA_SCENE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/scene/PrefabInstantiate.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Scene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SceneErrors.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/SpriteAnimator2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SpriteRenderer2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Transform.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/World.hpp
@@ -16,6 +17,7 @@ add_library(tina_scene STATIC
     ${TINA_SCENE_PUBLIC_HEADERS}
     ExtractRenderScene.cpp
     PrefabInstantiate.cpp
+    SpriteAnimator2D.cpp
     World.cpp
 )
 add_library(Tina::Scene ALIAS tina_scene)
