@@ -33,7 +33,7 @@
 | ECS | 若使用 EnTT，只能是 Scene 私有存储 | [0013](adr/0013-entt-internal-storage.md) | Not used：当前 Scene 不链接 EnTT |
 | Runtime | `IGameApplication` lifecycle + `IGameState` frame behavior | [0014](adr/0014-runtime-phase-and-state.md) | stack/commands + 四相位阻断 + `blocksGameplayInputBelow` 空 snapshot 已落地；`blocksUIUpdateBelow` 仅拦 `updateUI`（不回改当帧 UI route） |
 | Input | ordered PlatformFrame、Action domain、逐 substep 提交 | [0015](adr/0015-input-and-fixed-step.md) | Implemented foundation |
-| Asset 生命周期 | 弱 Handle、强 Lease、物理 retirement | [0016](adr/0016-asset-ownership-and-retirement.md) | CPU/Null upload ledger + FramePin present-return CPU completion；固定帧延迟假 fence 已删除；真 bgfx fence/Asset retirement 合并后置 |
+| Asset 生命周期 | 弱 Handle、强 Lease、物理 retirement | [0016](adr/0016-asset-ownership-and-retirement.md) | CPU/Null upload ledger + 独立 present-return CPU completion；bgfx readTexture completion marker、AssetLease→Texture/Mesh retirement 与 suspend/shutdown drain 已落地 |
 | Task | 有界 CPU/IO/Main、TaskGroup、禁止 detach/强杀 | [0017](adr/0017-bounded-task-system.md) | Implemented；Desktop 交互默认 `max(1, hw-1)`（TASK-001 Done），工厂 0=IO-only |
 | Benchmark | 版本化 JSON、fingerprint、provisional vs hard gate | [0018](adr/0018-benchmark-protocol.md) | Accepted 首切片：`tina_bench` schema v1；固定机 hard gate / 多进程 MAD 后置 |
 | Handle | 强类型 generation + owner 边界 | [0019](adr/0019-generation-handles.md) | Implemented across current modules |

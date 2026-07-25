@@ -8,6 +8,14 @@
 #include <vector>
 
 namespace Tina::Tests {
+namespace {
+
+void countPinRelease(void* userData) noexcept
+{
+    ++*static_cast<Core::u32*>(userData);
+}
+
+} // namespace
 
 TEST(NullRenderDeviceTextureTest, CreateBindDestroyLifecycle)
 {
@@ -142,6 +150,35 @@ TEST(NullRenderDeviceTextureTest, RejectsBadUploadSize)
     });
     ASSERT_FALSE(texture.has_value());
     EXPECT_EQ(texture.error().code, Render::RenderErrorCode::InvalidTextureUpload);
+}
+
+TEST(NullRenderDeviceTextureTest, RetirementPinCompletesImmediatelyAndIsNotConsumedOnFailure)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    std::array<std::byte, 4> pixel{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+    auto texture = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
+        .width = 1,
+        .height = 1,
+        .rgba8Pixels = pixel,
+    });
+    ASSERT_TRUE(texture.has_value());
+
+    Core::u32 releases = 0;
+    Render::FramePin completionPin{Render::FramePinKind::AssetLease, 7, &releases, &countPinRelease};
+    ASSERT_TRUE((*device)->retireTexture2D(*texture, completionPin).has_value());
+    EXPECT_FALSE(completionPin.hasValue());
+    EXPECT_EQ(releases, 1U);
+    EXPECT_EQ((*device)->statistics().pendingGpuRetirements, 0U);
+    EXPECT_EQ((*device)->statistics().completedGpuRetirements, 1U);
+
+    Render::FramePin failurePin{Render::FramePinKind::AssetLease, 8, &releases, &countPinRelease};
+    auto stale = (*device)->retireTexture2D(*texture, failurePin);
+    ASSERT_FALSE(stale.has_value());
+    EXPECT_TRUE(failurePin.hasValue());
+    EXPECT_EQ(releases, 1U);
+    failurePin.release();
+    EXPECT_EQ(releases, 2U);
 }
 
 } // namespace Tina::Tests

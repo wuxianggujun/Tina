@@ -155,6 +155,7 @@ class NullRenderDevice final : public IRenderDevice {
                 ++it;
             }
         }
+        ++statistics_.completedGpuRetirements;
         return Core::success();
     }
 
@@ -238,6 +239,7 @@ class NullRenderDevice final : public IRenderDevice {
                 ++it;
             }
         }
+        ++statistics_.completedGpuRetirements;
         return Core::success();
     }
 

@@ -185,6 +185,15 @@ class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
     {
         return inner_->destroyTexture2D(texture);
     }
+    [[nodiscard]] Tina::Core::Status retireTexture2D(
+        Tina::Render::GpuTextureId texture, Tina::Render::FramePin& completionPin) noexcept override
+    {
+        return inner_->retireTexture2D(texture, completionPin);
+    }
+    [[nodiscard]] Tina::Core::Status drainGpuRetirements() noexcept override
+    {
+        return inner_->drainGpuRetirements();
+    }
     [[nodiscard]] Tina::Core::Status setSprite2DTextureBinding(u32 spriteKey,
                                                                Tina::Render::GpuTextureId texture) noexcept override
     {
@@ -360,8 +369,17 @@ class Catalog2DState final : public Tina::IGameState {
         if (auto* device = capture_->get(); device != nullptr && resources_->gpuTexture)
         {
             (void)device->setSprite2DTextureBinding(ProductSpriteKey, {});
-            (void)device->destroyTexture2D(resources_->gpuTexture);
+            const auto retirement = resources_->system->retireTexture2D(
+                *device, resources_->textureHandle, resources_->gpuTexture);
+            if (!retirement)
+            {
+                // Capability fallback keeps the old logical-destroy behavior;
+                // the bgfx device still owns the native shutdown drain.
+                (void)device->destroyTexture2D(resources_->gpuTexture);
+                (void)resources_->system->unload(resources_->textureHandle);
+            }
             resources_->gpuTexture = {};
+            resources_->textureHandle = {};
         }
         ++counters_->stateExits;
     }
@@ -537,18 +555,20 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    CatalogResources resources{};
-    if (const auto status = prepareCatalog(resources); !status)
-    {
-        writeError(status.error());
-        return 1;
-    }
-
     DeviceCapture capture{};
     auto host = Tina::EngineHost::Create(createEngineConfig(), createFactories(capture));
     if (!host)
     {
         writeError(host.error());
+        return 1;
+    }
+
+    // Declared after host so AssetSystem (and any retirement pins) drains while
+    // the captured RenderDevice is still alive during reverse-order teardown.
+    CatalogResources resources{};
+    if (const auto status = prepareCatalog(resources); !status)
+    {
+        writeError(status.error());
         return 1;
     }
 

@@ -86,10 +86,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap schema v2；visual=10、hidden collision=20、gameplay objects=30；消费 point 101/rectangle 102；SpriteAnimationClip/Animator、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；feature 图含 Physics/FreeType/miniaudio | TileMap streaming/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
+| `tina_sample_2d` | Catalog TileMap schema v2；visual=10、hidden collision=20、gameplay objects=30；消费 point 101/rectangle 102；SpriteAnimationClip/Animator、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | TileMap streaming/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯） | 完整 PBR/IBL/shadow/light component、Handle/Lease→真 GPU fence pin |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | 完整 PBR/IBL/shadow/light component、Scene AssetHandle 产品化、跨 GPU golden |
 
 `tina_sample_2d_tilemap_bgfx` 是 `tina_sample_2d` 的兼容 ALIAS；新脚本使用正式 target 名。
 
@@ -141,6 +141,24 @@ UI 逻辑门禁至少包括：
 
 Visual 证据必须同时记录 sample 返回码、client-area 尺寸、是否强制终止、blank/black 比例、字体来源和
 截图。初始化白帧不得作为稳定画面；截图通过也不能替代 UIA/AT-SPI。
+
+2D/3D 产品 sample 还提供 backend primary-frame 的单机像素门禁。第一次运行采集
+`pixelFingerprint`，第二次把同机、同 backend、同尺寸、同资源版本的值传回 exact golden 参数：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 `
+  --expect-pixel-fingerprint=<first-run-pixelFingerprint>
+
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 `
+  --expect-pixel-fingerprint=<first-run-pixelFingerprint>
+```
+
+通过必须同时看到 `pixelCaptureOk=true`、非零 width/height/bytes、
+`pixelGoldenChecked=true` 与 `pixelGoldenMatched=true`。该 exact hash 是 machine-local gate，不得跨 GPU、
+driver 或 backend 复制为通用金标。需要可人工查看的 PNG 与 blank/black 分析时，再使用
+`tools/windows/CaptureSampleWindow.ps1 -RequireNonBlank`；内置 hash 不替代该窗口证据。
 
 ## Physics2D 与 Audio
 

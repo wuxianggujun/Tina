@@ -28,6 +28,11 @@ namespace {
     };
 }
 
+void countPinRelease(void* userData) noexcept
+{
+    ++*static_cast<Core::u32*>(userData);
+}
+
 } // namespace
 
 TEST(NullRenderDeviceMeshTest, CreateBindDestroyLifecycle)
@@ -86,6 +91,33 @@ TEST(NullRenderDeviceMeshTest, RejectsZeroMeshKeyBinding)
     EXPECT_EQ(bad.error().code, Render::RenderErrorCode::InvalidMeshUpload);
 
     ASSERT_TRUE((*device)->destroyStaticMesh(*mesh).has_value());
+}
+
+TEST(NullRenderDeviceMeshTest, RetirementPinCompletesImmediatelyAndIsNotConsumedOnFailure)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+
+    std::array<float, 24> vertices{};
+    std::array<std::uint16_t, 3> indices{};
+    auto mesh = (*device)->createStaticMeshP3N3UV2(makeUnitTriangleDesc(vertices, indices));
+    ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
+
+    Core::u32 releases = 0;
+    Render::FramePin completionPin{Render::FramePinKind::AssetLease, 9, &releases, &countPinRelease};
+    ASSERT_TRUE((*device)->retireStaticMesh(*mesh, completionPin).has_value());
+    EXPECT_FALSE(completionPin.hasValue());
+    EXPECT_EQ(releases, 1U);
+    EXPECT_EQ((*device)->statistics().pendingGpuRetirements, 0U);
+    EXPECT_EQ((*device)->statistics().completedGpuRetirements, 1U);
+
+    Render::FramePin failurePin{Render::FramePinKind::AssetLease, 10, &releases, &countPinRelease};
+    auto stale = (*device)->retireStaticMesh(*mesh, failurePin);
+    ASSERT_FALSE(stale.has_value());
+    EXPECT_TRUE(failurePin.hasValue());
+    EXPECT_EQ(releases, 1U);
+    failurePin.release();
+    EXPECT_EQ(releases, 2U);
 }
 
 } // namespace Tina::Tests

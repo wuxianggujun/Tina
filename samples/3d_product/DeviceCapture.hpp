@@ -14,9 +14,29 @@ class DeviceCapture final {
   public:
     void set(Render::IRenderDevice* device) noexcept { device_ = device; }
     [[nodiscard]] Render::IRenderDevice* get() const noexcept { return device_; }
+    void requestCaptureNextPresent() noexcept { captureNextPresent_ = true; }
+    [[nodiscard]] bool consumeCaptureNextPresent() noexcept
+    {
+        const bool requested = captureNextPresent_;
+        captureNextPresent_ = false;
+        return requested;
+    }
+    void setLastCapture(Render::Rgba8FrameCapture capture) noexcept
+    {
+        lastCapture_ = std::move(capture);
+        hasLastCapture_ = true;
+    }
+    [[nodiscard]] bool hasLastCapture() const noexcept { return hasLastCapture_; }
+    [[nodiscard]] const Render::Rgba8FrameCapture* lastCapture() const noexcept
+    {
+        return hasLastCapture_ ? &lastCapture_ : nullptr;
+    }
 
   private:
     Render::IRenderDevice* device_ = nullptr;
+    bool captureNextPresent_ = false;
+    bool hasLastCapture_ = false;
+    Render::Rgba8FrameCapture lastCapture_{};
 };
 
 class CapturingRenderDevice final : public Render::IRenderDevice {
@@ -39,7 +59,19 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->submitFrame(frame);
     }
-    [[nodiscard]] Core::Status present() override { return inner_->present(); }
+    [[nodiscard]] Core::Status present() override
+    {
+        auto status = inner_->present();
+        if (status && capture_ != nullptr && capture_->consumeCaptureNextPresent())
+        {
+            auto captured = inner_->capturePrimaryFrameRgba8();
+            if (captured.has_value() && !captured->empty())
+            {
+                capture_->setLastCapture(std::move(*captured));
+            }
+        }
+        return status;
+    }
     [[nodiscard]] Render::RenderStatistics statistics() const noexcept override
     {
         return inner_->statistics();
@@ -53,6 +85,11 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Core::Status destroyTexture2D(Render::GpuTextureId texture) noexcept override
     {
         return inner_->destroyTexture2D(texture);
+    }
+    [[nodiscard]] Core::Status retireTexture2D(Render::GpuTextureId texture,
+                                               Render::FramePin& completionPin) noexcept override
+    {
+        return inner_->retireTexture2D(texture, completionPin);
     }
     [[nodiscard]] Core::Status setSprite2DTextureBinding(Core::u32 spriteKey,
                                                          Render::GpuTextureId texture) noexcept override
@@ -71,6 +108,15 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Core::Status destroyStaticMesh(Render::GpuMeshId mesh) noexcept override
     {
         return inner_->destroyStaticMesh(mesh);
+    }
+    [[nodiscard]] Core::Status retireStaticMesh(Render::GpuMeshId mesh,
+                                                Render::FramePin& completionPin) noexcept override
+    {
+        return inner_->retireStaticMesh(mesh, completionPin);
+    }
+    [[nodiscard]] Core::Status drainGpuRetirements() noexcept override
+    {
+        return inner_->drainGpuRetirements();
     }
     [[nodiscard]] Core::Status setMesh3DBinding(Core::u32 meshKey, Render::GpuMeshId mesh) noexcept override
     {

@@ -43,7 +43,6 @@
 
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
-| RENDER-FENCE | Partial | P1 | 真 GPU fence 驱动 Asset retirement | **已完成** Host/FramePin 收敛为唯一 present-return CPU completion，并删除 `PresentSync`/`FrameDeferred`、bgfx wrapper、固定下一帧 handoff 与 `bgfx::frame()` 假 token。**待** backend 真 fence/equivalent poll、AssetLease→GPU resource retirement 合并与 shutdown drain；当前 CPU ticket 不得描述为 GPU 退役 |
 | ASSET-HANDLE-SCENE | Deferred | P1 | Scene 组件存 AssetHandle；extract 解析 bind key / 未来 FrameResourceRef | 去掉游戏侧手写 key 表为唯一产品路径 |
 | RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal；唯一 `setMesh3DLighting` 有界 0..4 directional lights；sample_3d 一次提交3灯 + 自动相机 + Khronos 球体/盒。**待** IBL/shadow、light component/culling、pass scheduling、vertex tangents |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
@@ -71,6 +70,7 @@
 | 2D-TILEMAP-LAYERS | TileMap 唯一 payload schema v2：有序 tile/object layer、map-wide 非零唯一稳定 layer/object ID、visibility、UTF-8 name/properties、point/rectangle；runtime chunk/render/collision 显式选择 layer；sample 使用 visual=10、collision=20、gameplay objects=30 并消费 object 101/102；Cooker 在发布前校验 v2、required Tileset dependency 与 tile localId | [2D](game-2d.md) · [资源](resources.md) · [物理](physics.md) · TileMap/CatalogCook/TileChunk/TileMapPhysics tests |
 | 2D-PHYSICS-EXPAND | Body/Shape/Joint 独立 generation handle；Box/Circle/Capsule、多 shape/body、sensor enter/exit、Distance joint 与级联 retirement；TileMap bridge/sample 全部迁移，Box2D 保持 PRIVATE；29/29 模块测试与产品 300 帧 sensor/joint 证据通过 | [物理](physics.md) · [2D](game-2d.md) · PhysicsWorld2D/TileMapPhysics/CharacterControllerPhysics tests |
 | RENDER-001-NLIGHT | 删除 Opaque3D key/fill 双 setter；`Mesh3DLightingDesc` 单次提交0..4 directional lights + ambient；Null/bgfx/shader 同一上限与验证；sample_3d 提交3灯并输出 count | [Rendering](rendering.md) · [3D](game-3d.md) · GpuTextureUploadTests |
+| RENDER-FENCE | present-return CPU ticket 与 GPU resource retirement 分离；bgfx 用末尾 view 的 blit + `readTexture()` ready frame 作为可证明 completion marker，Texture/Mesh generation 立即失效、native handle 延迟销毁；AssetLease pin、suspend flush、显式 drain 与 shutdown hard drain 已贯通 | [Rendering](rendering.md) · [Resources](resources.md) · [ADR 0016](adr/0016-asset-ownership-and-retirement.md) · BgfxRetirementTimeline/AssetGpuRetirement tests |
 | 2D-SPRITE-BATCH | 任意非0 `spriteKey`；bgfx 按最终渲染顺序建立连续 key batch 并逐 batch 绑定纹理；双纹理 sample 保持透明排序 | [2D](game-2d.md) · BgfxSprite2DGeometryTests |
 | 2D-SPRITE-ANIM | SpriteAnimationClip cooked payload/typed validation/recipe；SpriteAnimator2D Once/Loop/PingPong、暂停、倍速与大 delta；sample 双纹理 `Idle -> Walk -> HitWall` | [2D](game-2d.md) · [资源](resources.md) · SpriteAnimationClipPayloadTests · SpriteAnimator2DTests |
 | 3D-001 | multi-mesh 产品 E2E：双 mesh glTF fixture → cook → 两 StaticMesh upload/bind（meshKey 1/2）→ Prefab 每节点 resolve → extract/draw → ledger 归零；`tina_sample_3d` 300 帧 `multiMesh=true` | [3D](game-3d.md) |

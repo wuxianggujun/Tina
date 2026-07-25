@@ -8,6 +8,7 @@
 #include <tina/task/TaskErrors.hpp>
 
 #include <filesystem>
+#include <exception>
 #include <new>
 #include <string>
 #include <utility>
@@ -20,6 +21,40 @@ namespace {
     for (const auto& part : relative)
     {
         if (part == "..")
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+struct AssetLeaseRetirementPinPayload final {
+    AssetLease lease{};
+    AssetRetirementLedger* ledger = nullptr;
+    AssetHandle handle{};
+};
+
+void releaseAssetLeaseRetirementPin(void* userData) noexcept
+{
+    auto* payload = static_cast<AssetLeaseRetirementPinPayload*>(userData);
+    if (payload == nullptr)
+    {
+        return;
+    }
+    if (payload->ledger != nullptr)
+    {
+        payload->ledger->markReleased(payload->handle);
+    }
+    delete payload;
+}
+
+[[nodiscard]] bool hasLiveGpuRetirements(const AssetRetirementLedger& ledger) noexcept
+{
+    for (const auto& record : ledger.records())
+    {
+        const bool gpuResource = record.kind == AssetRetirementKind::GpuTexture2D ||
+                                 record.kind == AssetRetirementKind::GpuStaticMesh;
+        if (gpuResource && record.state != AssetRetirementState::Released)
         {
             return true;
         }
@@ -46,17 +81,40 @@ AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std
     }
 }
 
-AssetSystem::~AssetSystem() noexcept = default;
+AssetSystem::~AssetSystem() noexcept
+{
+    if (m_gpuRetirementDevice != nullptr && hasLiveGpuRetirements(m_retirement))
+    {
+        const auto status = drainGpuRetirements();
+        if (!status)
+        {
+            // Retirement pins reference this AssetSystem's store/ledger. The
+            // RenderDevice-outlives-AssetSystem contract therefore requires a
+            // proven drain before member destruction; continuing would be UAF.
+            std::terminate();
+        }
+    }
+    m_gpuRetirementDevice = nullptr;
+}
 
 AssetSystem::AssetSystem(AssetSystem&& other) noexcept
     : m_store(std::move(other.m_store)), m_batch(other.m_batch), m_memoryResource(other.m_memoryResource),
       m_queueCapacity(other.m_queueCapacity), m_defaultPumpBudget(other.m_defaultPumpBudget),
       m_taskSystem(other.m_taskSystem), m_uploadLedger(other.m_uploadLedger), m_gpuUploadConfig(other.m_gpuUploadConfig),
+      m_retirement(std::move(other.m_retirement)),
+      m_gpuRetirementDevice(std::exchange(other.m_gpuRetirementDevice, nullptr)),
       m_autoGpuUpload(other.m_autoGpuUpload), m_requireTyped2dPayloads(other.m_requireTyped2dPayloads),
       m_catalog(std::move(other.m_catalog)), m_catalogRoot(std::move(other.m_catalogRoot)),
       m_index(std::move(other.m_index)), m_queue(std::move(other.m_queue)),
       m_inFlight(other.m_inFlight.load(std::memory_order_relaxed))
 {
+    if (m_gpuRetirementDevice != nullptr && hasLiveGpuRetirements(m_retirement))
+    {
+        // An in-flight pin stores addresses into the source AssetSystem. Moving
+        // that owner would invalidate the completion callback.
+        std::terminate();
+    }
+    m_gpuRetirementDevice = nullptr;
     // Rebuild coordinator against this->m_store and this->m_retirement.
     other.m_gpuUpload.reset();
     if (m_uploadLedger != nullptr)
@@ -908,7 +966,7 @@ Core::Status AssetSystem::unload(AssetHandle handle) noexcept
         (void)m_gpuUpload->cancelUpload(handle);
     } else
     {
-        m_retirement.enqueueDestroy(handle, m_store.assetId(handle), {});
+        (void)m_retirement.enqueueDestroy(handle, m_store.assetId(handle), {});
         m_retirement.markReleased(handle);
     }
 
@@ -916,6 +974,162 @@ Core::Status AssetSystem::unload(AssetHandle handle) noexcept
     if (status && m_store.state(handle) == AssetLogicalState::Unloaded)
     {
         forgetHandle(handle);
+    }
+    return status;
+}
+
+Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetHandle handle,
+                                          Render::GpuTextureId texture)
+{
+    if (!handle || !texture)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "GPU texture retirement requires valid asset and texture handles");
+    }
+    if (m_gpuRetirementDevice != nullptr && m_gpuRetirementDevice != &device)
+    {
+        if (auto status = drainGpuRetirements(); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext("AssetSystem::retireTexture2D",
+                                                                       "previousDeviceDrain"));
+        }
+    }
+
+    auto lease = m_store.acquire(handle);
+    if (!lease)
+    {
+        return Core::failure(std::move(lease.error()).withContext("AssetSystem::retireTexture2D", "acquire"));
+    }
+    auto* payload = new (std::nothrow) AssetLeaseRetirementPinPayload{
+        .lease = std::move(*lease),
+        .ledger = &m_retirement,
+        .handle = handle,
+    };
+    if (payload == nullptr)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "GPU texture retirement pin allocation failed");
+    }
+    Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
+                                   &releaseAssetLeaseRetirementPin};
+
+    if (auto status = m_retirement.enqueueTexture2D(handle, payload->lease.assetId(), texture); !status)
+    {
+        completionPin.release();
+        return status;
+    }
+    m_retirement.markRetiring(handle);
+
+    if (auto status = device.retireTexture2D(texture, completionPin); !status)
+    {
+        m_retirement.cancel(handle);
+        completionPin.release();
+        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireTexture2D", "render"));
+    }
+
+    m_gpuRetirementDevice = &device;
+    if (m_gpuUpload != nullptr)
+    {
+        // The render backend has accepted ownership of the AssetLease pin.
+        // Retire any Null staging now without overwriting the GPU record.
+        (void)m_gpuUpload->cancelUpload(handle);
+    }
+    if (auto status = m_store.unload(handle); !status)
+    {
+        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireTexture2D", "unload"));
+    }
+    // Logical lookup becomes stale immediately even while the strong lease
+    // keeps the cooked payload in UnloadPending until GPU completion.
+    forgetHandle(handle);
+    return Core::success();
+}
+
+Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetHandle handle,
+                                           Render::GpuMeshId mesh)
+{
+    if (!handle || !mesh)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "GPU mesh retirement requires valid asset and mesh handles");
+    }
+    if (m_gpuRetirementDevice != nullptr && m_gpuRetirementDevice != &device)
+    {
+        if (auto status = drainGpuRetirements(); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext("AssetSystem::retireStaticMesh",
+                                                                       "previousDeviceDrain"));
+        }
+    }
+
+    auto lease = m_store.acquire(handle);
+    if (!lease)
+    {
+        return Core::failure(std::move(lease.error()).withContext("AssetSystem::retireStaticMesh", "acquire"));
+    }
+    auto* payload = new (std::nothrow) AssetLeaseRetirementPinPayload{
+        .lease = std::move(*lease),
+        .ledger = &m_retirement,
+        .handle = handle,
+    };
+    if (payload == nullptr)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "GPU mesh retirement pin allocation failed");
+    }
+    Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
+                                   &releaseAssetLeaseRetirementPin};
+
+    if (auto status = m_retirement.enqueueStaticMesh(handle, payload->lease.assetId(), mesh); !status)
+    {
+        completionPin.release();
+        return status;
+    }
+    m_retirement.markRetiring(handle);
+
+    if (auto status = device.retireStaticMesh(mesh, completionPin); !status)
+    {
+        m_retirement.cancel(handle);
+        completionPin.release();
+        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireStaticMesh", "render"));
+    }
+
+    m_gpuRetirementDevice = &device;
+    if (m_gpuUpload != nullptr)
+    {
+        (void)m_gpuUpload->cancelUpload(handle);
+    }
+    if (auto status = m_store.unload(handle); !status)
+    {
+        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireStaticMesh", "unload"));
+    }
+    forgetHandle(handle);
+    return Core::success();
+}
+
+Core::Status AssetSystem::drainGpuRetirements() noexcept
+{
+    if (m_gpuRetirementDevice == nullptr)
+    {
+        return Core::success();
+    }
+    // The backend may have completed pins during ordinary present or its own
+    // shutdown before AssetSystem observes the device again. The callback has
+    // already released every AssetLease, so do not call a potentially stopped
+    // or already-destroyed device merely to clear this non-owning pointer.
+    if (!hasLiveGpuRetirements(m_retirement))
+    {
+        m_gpuRetirementDevice = nullptr;
+        return Core::success();
+    }
+    auto status = m_gpuRetirementDevice->drainGpuRetirements();
+    if (status)
+    {
+        if (hasLiveGpuRetirements(m_retirement))
+        {
+            return Core::failure(Render::RenderErrorCode::GpuRetirementDrainFailed,
+                                 "render device reported a completed drain while AssetLease pins remain live");
+        }
+        m_gpuRetirementDevice = nullptr;
     }
     return status;
 }

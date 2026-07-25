@@ -12,8 +12,9 @@
 
 namespace Tina::Render {
 
-// Backend-neutral GPU upload ticket (ADR 0016). First slice is a Null ledger: staging is owned
-// until explicit retire. No bgfx/GPU fence yet; poll() may advance Pending → Ready immediately.
+// Backend-neutral GPU upload ticket (ADR 0016). This Null ledger owns staging until explicit
+// retire and may advance Pending → Ready immediately. It is separate from IRenderDevice's
+// backend-proven Texture2D/StaticMesh resource retirement path.
 enum class UploadTicketState : Core::u8 {
     Invalid = 0,
     Pending = 1,

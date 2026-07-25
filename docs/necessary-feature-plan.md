@@ -20,7 +20,7 @@
 | N2 | 2D-PHYSICS-EXPAND | 已完成 | backend-neutral 多 shape、sensor enter/exit、distance joint、独立 generation handle 与级联 retirement 已覆盖；Box2D 保持 PRIVATE |
 | N3 | 2D-INPUT-ADV | 已完成 | Runtime 单一 unified binding 已覆盖 analog deadzone/缩放/合成、运行时 rebind、UI consume/claim 后输入不穿透 |
 | N4 | 3D RENDER-001 | 已完成 | Opaque3D 使用唯一有界 0..4 directional-light 提交；Null/bgfx/shader/sample/test 同步，完整 PBR 边界保持明确 |
-| N5 | RENDER-FENCE | 部分完成 | FramePin/SubmissionTicket 已统一为 present-return CPU completion；真实 GPU fence 与 Asset retirement 仍由 backlog 跟踪 |
+| N5 | RENDER-FENCE | 已完成 | CPU submission completion 与 GPU resource retirement 已分离；bgfx readback marker、AssetLease pin、suspend/shutdown drain 与测试已贯通 |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -212,14 +212,25 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 - 删除 `SubmissionCompletionMode`、`BgfxSubmissionCompletionLedger`、deferred handoff、dynamic_cast 与
   `lastPresentFrameToken()`；`bgfx::frame()` 只推进 backend 帧，不再冒充 fence token。
 - `submitFrame()` 的 borrowed view 继续要求同步消费；GPU Texture/Mesh 资源所有权由 bgfx backend 管理。
-- 未伪装完成的边界：通用 AssetLease/retirement 尚未接入真实 GPU fence/equivalent completion，继续保留
-  为 `RENDER-FENCE` 后续项。
+- `IRenderDevice::retireTexture2D/retireStaticMesh` 成功才消费 `FramePin`；generation 与 binding 立即失效，
+  native handle 等 backend-proven completion 后销毁。Null 同步完成，统计统一暴露 pending/completed。
+- bgfx 在所有资源引用 view 之后提交 1×1 blit + readback marker，只以 `readTexture()` 返回的 ready frame
+  完成 retirement；frame wrap 使用半区间比较，suspend/drain 使用 `BGFX_FRAME_FLUSH` 推进。
+- `AssetSystem` retirement helper 把 `AssetLease` 移入 pin：逻辑 lookup 立即移除，Store 保持
+  `UnloadPending`，callback exactly-once 转 `Released/Unloaded`。析构会 drain，或识别 backend 已完成的回调。
+- 无 blit/readback capability 时，带外部 pin 的异步 retirement 在资源状态变化前原子拒绝且不消费 pin；
+  无 pin destroy 立即使逻辑 handle/binding 失效并交给 `bgfx::destroy` 的 backend-owned deferred
+  destruction，不进入 marker timeline。有界 marker drain 未完成时，shutdown 才是仍存活外部 pin 的
+  hard completion fallback。通用 GPU submission fence 仍不是本项能力，也未被伪装实现。
 
 ### 验收
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_sample_2d tina_sample_3d -- /m:2 /v:m
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_filter="*FramePin*:*Retire*:*Fence*:*Asset*"
+cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_asset_tests tina_render_bgfx_tests tina_sample_2d_catalog tina_sample_2d tina_sample_3d -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_filter="*FramePin*:*Retire*:*Fence*"
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_filter="*Retirement*"
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_filter="*Retirement*"
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d_catalog.exe --frames=30 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```

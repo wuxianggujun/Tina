@@ -1,7 +1,7 @@
 # Public API
 
 本文描述当前 `include/tina` 公共面和 CMake target。它不是未来 SDK 愿望清单；尚未存在的能力（通用
-event queue、真 GPU fence、PBR 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
+event queue、通用 GPU submission fence、完整 PBR 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
 首切片**已经存在**。
 
 ## 分层
@@ -188,7 +188,8 @@ generation 断连或 raw reset 失去该 generation 时 transaction 取消，不
 Surface/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。Runtime 使用
 `RenderFramePacket`、`FramePin` 与 submission completion ledger（成功 present 返回后关闭 CPU 借用，见
 `include/tina/render/FramePin.hpp`）。`SubmissionTicket` 不可复制且绑定签发 ledger，packet 取得唯一所有权
-后负责 complete/abandon。它不代表 GPU execution/retirement；真实 GPU fence completion 尚未实现。
+后负责 complete/abandon。它不代表 GPU execution/retirement；Texture2D/StaticMesh 使用独立的
+`retire*` + backend marker，不能把两类 completion 混用。
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
 commit 后返回 borrowed view。`UIDisplayList` 支持 SolidQuad/Glyph 与 axis-aligned clip。
@@ -235,7 +236,9 @@ layer 与不存在 layer 分别返回 `TileMapLayerTypeMismatch`/`TileMapLayerNo
 
 `AssetSystem` 提供 request/load/pump、generation slot 与 typed state。`AssetHandle` 是弱 lookup；
 `AssetLease` 强保活 CPU payload。逻辑 invalidation 不等于物理释放。产品 helper 可把 Cooked Texture2D/
-StaticMesh 上传到 RenderDevice，并建立 backend key binding。
+StaticMesh 上传到 RenderDevice，并建立 backend key binding；`AssetSystem::retireTexture2D` /
+`retireStaticMesh` 把 lease 移入 `FramePin`，成功后弱 lookup 立即失效，backend completion 后才释放 payload。
+失败不消费 pin，Asset 仍保持可用。`drainGpuRetirements()` 用于 owner-thread teardown。
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
@@ -264,7 +267,7 @@ Jolt/Physics3D 尚未接入。
 | `EntityId/UINodeId/PhysicsBodyId/PhysicsShapeId/PhysicsJointId/...` | registry owner | erase/owner destroy/generation reuse |
 | `AssetHandle` | 弱 | slot invalidation/reuse |
 | `AssetLease` | 强 CPU payload owner | lease reset/destroy |
-| `GpuTextureId/GpuMeshId` | RenderDevice | destroy/device shutdown |
+| `GpuTextureId/GpuMeshId` | RenderDevice | retire/destroy 时逻辑失效；有外部 pin 时由 completion marker（或 shutdown hard drain）证明完成，无 pin fallback 交给 backend deferred destroy |
 | PlatformFrame view | Platform | 下一次 poll/build |
 | Phase context/writer | Runtime callback | callback 返回 |
 | committed UI view | UIContext | 下一次对应 commit/context destroy |
@@ -285,7 +288,7 @@ submission ledger；Windows UIA provider + HWND HostBridge 首切片。
 
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
-- 真实 GPU fence 驱动的 submission completion；
+- 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh retirement）；
 - 完整 PBR/IBL/shadow、light component/culling 与通用 pass scheduler；
 - TileMap chunk streaming、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 完整 Focus Scope / Modal / 持久 Capture、复杂 text / 虚拟列表；

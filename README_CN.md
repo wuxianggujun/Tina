@@ -65,7 +65,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 - 3D 产品：multi-mesh glTF cooking、AssetId resolver、外部 URI/size policy、baseColor/MR/normal
   Texture2D cook 与 product GPU upload/bind 已完成；样例按多个 mesh/material key 提交，experimental
   metallic-roughness 路径采样三类贴图并使用 material factors 与 key/fill directional light；
-  完整 PBR、IBL、shadow、通用 light/pass system 与真 GPU fence pin 仍后置；
+  完整 PBR、IBL、shadow、通用 light/pass system 与通用 GPU submission fence 仍后置；Texture/Mesh
+  已使用 readback marker 完成 AssetLease-backed GPU retirement；
 - UI：当前工作树的 Windows Debug 门禁为 `tina_ui_tests` 190/190、`tina_runtime_ui_tests` 77/77、
   `tina_ui_render_integration_tests` 12/12；ProgressBar/RadioButton 已有 product-2d 结构化与视觉证据；
 - Task：ADR 0017 的 Desktop 交互默认值已落实为 `max(1, hw-1)` 个 CPU worker，显式配置保持不变；

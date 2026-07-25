@@ -48,9 +48,11 @@ The multi-mesh glTF cooker, per-AssetId resolver coverage, URI/size hardening, a
 base-color texture cooking are implemented. `tina_sample_3d` maps multiple product meshes and
 materials to backend keys; cooked base-color, metallic-roughness, and normal textures are
 uploaded, bound, and sampled by the experimental metallic-roughness path with material factors
-and key/fill directional lights. Full PBR, IBL, shadows, a general light/pass system, and true
-GPU-fence pinning remain open. The accepted task-system policy is implemented: interactive Desktop
-defaults CPU workers to `max(1, hw-1)` while explicit settings remain preserved.
+and key/fill directional lights. Texture/Mesh resources use backend-proven readback markers for
+AssetLease-backed retirement; a general GPU submission fence remains outside the current contract.
+Full PBR, IBL, shadows, and a general light/pass system remain open. The accepted task-system
+policy is implemented: interactive Desktop defaults CPU workers to `max(1, hw-1)` while explicit
+settings remain preserved.
 
 See the [Chinese project guide](README_CN.md), [documentation index](docs/README.md),
 [roadmap](docs/roadmap.md), and [actionable backlog](docs/backlog.md).

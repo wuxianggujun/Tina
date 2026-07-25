@@ -110,14 +110,13 @@ default action 与 Windows IMM32。目标差距是 UIA/AT-SPI、通用 Focus Sco
 - Scene：generation World、Transform、2D/3D component 与 extraction 已完成；command buffer/多 World
   orchestration 后置。
 - Asset：Catalog/Cooked、AssetId、Handle/Lease、IO Task/Main completion、typed payload、Texture/Mesh
-  upload 与 retirement ledger 已有；glTF texture 安全策略/产品绑定、PBR、hot reload 和完整
-  completion pin 后置。
-- Render：Null/bgfx、Sprite2D/Opaque3D/UI Glyph、Texture2D/StaticMesh binding 已有；通用 pass scheduler、
-  PBR 与 owning packet 后置。
+  upload、retirement ledger 与 AssetLease completion pin 已有；hot reload/增量 Cooker 后置。
+- Render：Null/bgfx、Sprite2D/Opaque3D/UI Glyph、Texture2D/StaticMesh binding、owning packet 与 readback
+  retirement marker 已有；通用 pass scheduler 与完整 PBR 后置。
 - Physics：Box2D 2D 产品路径已有；Jolt 3D 未接入。
 
-multi-mesh glTF Cooker 已生成 distinct AssetId/Prefab dependency；产品 sample 仍只绑定一个 mesh，
-`3D-001` 关闭两个 mesh 的 upload/bind/extract/draw E2E。
+multi-mesh glTF Cooker 已生成 distinct AssetId/Prefab dependency；`3D-001` 产品 sample 已关闭两个 mesh 的
+upload/bind/extract/draw E2E。
 
 ## 所有权与借用
 
@@ -130,7 +129,7 @@ multi-mesh glTF Cooker 已生成 distinct AssetId/Prefab dependency；产品 sam
 | AssetHandle | Asset registry | 弱 lookup，可失效 |
 | AssetLease | Asset payload | 强保活 CPU payload |
 | GPU handle | RenderDevice | generation backend owner |
-| FramePin/packet | present-return CPU complete 已落地；无 backend 分支 | 真 bgfx fence 驱动 Asset retirement 后置 |
+| FramePin/packet | present-return CPU complete 已落地；Texture/Mesh 用独立 readback marker retirement | 通用 GPU submission fence 后置 |
 
 任何 borrowed view 都必须注明精确失效点。不能用“一律不能跨帧”代替 committed UI view、Platform
 view、phase writer 和 Lease 各自不同的规则。
@@ -147,7 +146,7 @@ hard failure policy，但必须保持“join/completion 之前不释放被访问
 | --- | --- |
 | `TASK-001` | **Done**：Desktop 交互 CPU worker 默认 |
 | `RUNTIME-001` | stack/四相位 policy **Done**；gameplay input policy / 交互暂停 / stale-owner 矩阵仍后置 |
-| `RUNTIME-002` | FramePin + present-return CPU completion **Done**；真 GPU fence/Asset retirement 后置 |
+| `RUNTIME-002` | FramePin + present-return CPU completion **Done**；RENDER-FENCE 的 Asset/Texture/Mesh readback retirement 亦已完成，通用 submission fence 非当前契约 |
 | `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling **Done**；完整 PBR/IBL/shadow 后置 |
 | `UI-002`～`UI-005` / `TEXT-001` | accessibility、视觉矩阵、focus/modal/capture、虚拟化、复杂 text |
 | `PERF-001` | schema v1 **Done**；固定机 hard gate / 多进程 MAD 后置 |

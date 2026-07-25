@@ -13,7 +13,7 @@
 | G0 | 非 clean 构建可复现 | Verified | Windows 现有 build tree 可增量 configure/build；日常门禁禁止 wipe |
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
 | G2 | UI 产品 | Partial | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有产品/结构化/视觉证据；平台 accessibility adapter、跨 DPI/GPU golden 与完整控件矩阵后置 |
-| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、base/MR/normal 贴图采样与单次有界3-light 产品提交已通过；完整 PBR/IBL/shadow/fence pin 后置 |
+| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、base/MR/normal 贴图采样、单次有界3-light 与 GPU resource retirement 已落地；完整 PBR/IBL/shadow、Scene AssetHandle 产品化后置 |
 | G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency 已完成；完整 PBR 后置 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
 | G6 | 平台矩阵 | Strong | tip Docker：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 sanitizer 均 exit 0（见 [Linux 证据](m12-evidence-linux.md)） |
@@ -58,12 +58,22 @@ accessibility adapter、跨 DPI/GPU golden 和完整控件/输入矩阵保持 Pa
 | multi-mesh product bind/draw | Done | sample 映射多个 product mesh/material key；见 3D-001 |
 | PBR/其他纹理通道 | Partial | metallic-roughness/normal 首切片已进 Material/Render 产品门禁；emissive、IBL、shadow 与完整 PBR 后置 |
 
+3D 视觉证据分为两层：`tina_sample_3d` 在最后一次 present 后读取 primary framebuffer，stdout JSON 必须
+包含 `pixelCaptureOk=true`、非零尺寸/字节数和非空 `pixelFingerprint`；同机、同 backend、同窗口尺寸与
+同资源版本的第二次运行可把首次值传给 `--expect-pixel-fingerprint`，并要求
+`pixelGoldenChecked/pixelGoldenMatched` 均为 true。fingerprint 不跨 GPU/driver/backend 复用。
+
+外部窗口 PNG 证据由 `tools/windows/CaptureSampleWindow.ps1` 生成；每次运行写入
+`artifacts/screenshots/sample-3d-product/<timestamp>/`，其中 `report.json`、`stdout.txt` 与 `frame-*.png`
+共同记录进程结果、sample 结构化输出和连续非空画面。该目录是运行产物位置，不在文档中预填未实测的
+fingerprint 或 PNG hash。
+
 ## 后续工作边界
 
 M12 只跟踪 Legacy 产品图删除及其替代产品证据；不再把已关闭的 `TEST-001`、`TEST-002`、`3D-001` 和
 `CLEAN-001`～`CLEAN-003` 重新列为待办。当前未关闭的功能和验证风险以 [Backlog](backlog.md) 为唯一
-明细：Now 的 TileMap/Physics2D/Input 工作、Partial 的 UI-002/UI-003，以及 Later 的
-`RENDER-FENCE`/`RENDER-001`。
+明细：Now 的 TileMap/Physics2D/Input 工作、Partial 的 UI-002/UI-003，以及 Later 的 `RENDER-001`；
+`RENDER-FENCE` 已完成。
 
 ## Windows 快速复验
 
@@ -76,6 +86,14 @@ cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sam
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 `
+  --expect-pixel-fingerprint=<first-run-pixelFingerprint>
+
+# External client-area PNG evidence
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\windows\CaptureSampleWindow.ps1 `
+  -Exe out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe `
+  -ArgString '--frames=180 --frame-delay-ms=16' `
+  -OutDir artifacts\screenshots\sample-3d-product -RequireNonBlank
 
 # Full 2D feature graph
 cmake --preset windows-msvc-vnext-bgfx-product-2d

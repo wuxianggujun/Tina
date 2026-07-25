@@ -1,6 +1,7 @@
 #include "BgfxRenderDevice.hpp"
 #include "BgfxOpaque3DGeometry.hpp"
 #include "BgfxOpaque3DShader.hpp"
+#include "BgfxRetirementTimeline.hpp"
 #include "BgfxSprite2DGeometry.hpp"
 #include "BgfxSprite2DShader.hpp"
 #include "BgfxSurfaceFramePlanner.hpp"
@@ -189,6 +190,8 @@ constexpr bgfx::ViewId kSurfaceClearView = 0;
 constexpr bgfx::ViewId kOpaque3DView = 1;
 constexpr bgfx::ViewId kSprite2DView = 2;
 constexpr bgfx::ViewId kUIView = 3;
+// Must remain after every view that can reference a retireable resource.
+constexpr bgfx::ViewId kRetirementMarkerView = 4;
 constexpr u32 kDefaultResetFlags = BGFX_RESET_VSYNC;
 constexpr u32 kClearRgba = 0x102a43ff;
 constexpr usize kIndicesPerSolidQuad = 6;
@@ -199,6 +202,11 @@ constexpr u64 kSprite2DPremultipliedAlphaState =
     BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 constexpr u64 kUIPremultipliedAlphaState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
                                            BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+
+[[nodiscard]] constexpr u32 nextResourceGeneration(u32 generation) noexcept
+{
+    return generation == (std::numeric_limits<u32>::max)() ? 1U : generation + 1U;
+}
 
 static_assert(std::is_standard_layout_v<BgfxUIDisplayVertex>);
 static_assert(sizeof(BgfxUIDisplayVertex) == sizeof(float) * 4U + sizeof(u32));
@@ -647,6 +655,35 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfxInitialized_ = true;
         appliedBackbuffer_ = initialBackbuffer;
 
+        const bgfx::Caps* const caps = bgfx::getCaps();
+        constexpr u64 RequiredRetirementCaps =
+            BGFX_CAPS_TEXTURE_BLIT | BGFX_CAPS_TEXTURE_READ_BACK;
+        retirementMarkerSupported_ =
+            caps != nullptr && (caps->supported & RequiredRetirementCaps) == RequiredRetirementCaps;
+        if (retirementMarkerSupported_)
+        {
+            constexpr std::array<u8, 4> MarkerPixel{0x54, 0x49, 0x4e, 0x41};
+            retirementMarkerSource_ = bgfx::createTexture2D(
+                1, 1, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_NONE,
+                bgfx::copy(MarkerPixel.data(), static_cast<u32>(MarkerPixel.size())));
+            if (!bgfx::isValid(retirementMarkerSource_))
+            {
+                return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                     "bgfx rejected the GPU retirement marker source texture");
+            }
+            ++statistics_.liveResources;
+
+            retirementMarkerReadback_ = bgfx::createTexture2D(
+                1, 1, false, 1, bgfx::TextureFormat::RGBA8,
+                BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK);
+            if (!bgfx::isValid(retirementMarkerReadback_))
+            {
+                return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                     "bgfx rejected the GPU retirement marker readback texture");
+            }
+            ++statistics_.liveResources;
+        }
+
         uiVertexLayout_.begin()
             .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
@@ -935,6 +972,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (!framePlan->shouldSubmit())
         {
             ++statistics_.skippedSuspendedSurfaceFrames;
+            pumpRetirementOnlyFrameIfNeeded();
             return RenderFrameSubmission::SkippedSuspendedSurface();
         }
 
@@ -966,7 +1004,9 @@ class BgfxRenderDevice final : public IRenderDevice {
                                  "A bgfx frame must be submitted before it can be presented");
         }
 
-        bgfx::frame();
+        submitRetirementMarkerIfNeeded();
+        const u32 currentFrame = bgfx::frame();
+        completeRetirementsThrough(currentFrame);
         frameOpen_ = false;
         ++statistics_.presented;
         return Core::success();
@@ -981,6 +1021,40 @@ class BgfxRenderDevice final : public IRenderDevice {
         return statistics_;
     }
 
+    [[nodiscard]] Core::Status drainGpuRetirements() noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::drainGpuRetirements"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (frameOpen_)
+        {
+            return Core::failure(RenderErrorCode::FrameAlreadyOpen,
+                                 "Present the open frame before draining GPU retirements");
+        }
+        if (retirementTimeline_.pendingCount() == 0U)
+        {
+            return Core::success();
+        }
+        if (!retirementMarkerSupported_)
+        {
+            return Core::failure(RenderErrorCode::GpuRetirementUnsupported,
+                                 "This bgfx backend can drain GPU retirements only during shutdown");
+        }
+
+        drainRetirementsWithMarkers();
+        if (retirementTimeline_.pendingCount() != 0U)
+        {
+            return Core::failure(RenderErrorCode::GpuRetirementDrainFailed,
+                                 "bgfx retirement marker did not complete within the drain budget");
+        }
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         if (std::this_thread::get_id() != ownerThread_)
@@ -993,6 +1067,13 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         if (bgfxInitialized_)
         {
+            if (retirementMarkerSupported_ && retirementTimeline_.pendingCount() != 0U)
+            {
+                // Flushes an open frame without presenting and waits only for
+                // readTexture-provided completion frames. A bounded failure
+                // falls back to bgfx::shutdown as the final hard drain.
+                drainRetirementsWithMarkers();
+            }
             mesh3DBindings_.clear();
             mesh3DMaterialTextureBindings_.clear();
             mesh3DMaterialMetallicRoughnessTextureBindings_.clear();
@@ -1000,7 +1081,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             mesh3DMaterialFactors_.clear();
             for (MeshSlot& slot : meshes_)
             {
-                if (slot.live)
+                if (slot.live || slot.retirementPhase != RetirementPhase::None)
                 {
                     if (bgfx::isValid(slot.vertexBuffer))
                     {
@@ -1014,11 +1095,13 @@ class BgfxRenderDevice final : public IRenderDevice {
                         slot.indexBuffer = BGFX_INVALID_HANDLE;
                         --statistics_.liveResources;
                     }
-                    slot.live = false;
-                    ++slot.generation;
+                    if (slot.live)
+                    {
+                        slot.live = false;
+                        slot.generation = nextResourceGeneration(slot.generation);
+                    }
                 }
             }
-            meshes_.clear();
             if (bgfx::isValid(opaque3DIndexBuffer_))
             {
                 bgfx::destroy(opaque3DIndexBuffer_);
@@ -1121,15 +1204,19 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             for (TextureSlot& slot : textures_)
             {
-                if (slot.live && bgfx::isValid(slot.handle))
+                if ((slot.live || slot.retirementPhase != RetirementPhase::None) &&
+                    bgfx::isValid(slot.handle))
                 {
                     bgfx::destroy(slot.handle);
                     slot.handle = BGFX_INVALID_HANDLE;
-                    slot.live = false;
                     --statistics_.liveResources;
                 }
+                if (slot.live)
+                {
+                    slot.live = false;
+                    slot.generation = nextResourceGeneration(slot.generation);
+                }
             }
-            textures_.clear();
             spriteTextureBindings_.clear();
             if (bgfx::isValid(uiSolidQuadProgram_))
             {
@@ -1156,13 +1243,25 @@ class BgfxRenderDevice final : public IRenderDevice {
                 uiTexColorUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(retirementMarkerReadback_))
+            {
+                bgfx::destroy(retirementMarkerReadback_);
+                retirementMarkerReadback_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(retirementMarkerSource_))
+            {
+                bgfx::destroy(retirementMarkerSource_);
+                retirementMarkerSource_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             // Device-owned init resources (must match ++ in initialize):
             // uiSolidQuadProgram, uiSolidWhiteTexture, uiTexColorUniform,
             // sprite2DProgram, sprite2DSampler, sprite2DDefaultTexture,
             // opaque3DProgram, opaque3DSampler, opaque3DMrSampler,
             // opaque3D light direction/color arrays + MrParams uniforms, opaque3DDefaultTexture,
             // opaque3DDefaultMrTexture, opaque3DVertexBuffer, opaque3DIndexBuffer
-            // (+ dynamic mesh/texture slots).
+            // retirement marker source/readback (+ dynamic mesh/texture slots).
             if (statistics_.liveResources != 0)
             {
                 char path[512]{};
@@ -1190,6 +1289,39 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             bgfx::shutdown();
             bgfxInitialized_ = false;
+
+            // When marker support is unavailable (or its bounded drain failed),
+            // bgfx::shutdown is the final hard completion point. External pins
+            // are therefore released only after shutdown returns.
+            u64 shutdownCompleted = 0;
+            for (TextureSlot& slot : textures_)
+            {
+                if (slot.retirementPhase != RetirementPhase::None)
+                {
+                    slot.completionPin.release();
+                    slot.retirementPhase = RetirementPhase::None;
+                    ++shutdownCompleted;
+                }
+            }
+            for (MeshSlot& slot : meshes_)
+            {
+                if (slot.retirementPhase != RetirementPhase::None)
+                {
+                    slot.completionPin.release();
+                    slot.retirementPhase = RetirementPhase::None;
+                    ++shutdownCompleted;
+                }
+            }
+            if (shutdownCompleted > statistics_.pendingGpuRetirements)
+            {
+                std::terminate();
+            }
+            statistics_.pendingGpuRetirements -= shutdownCompleted;
+            statistics_.completedGpuRetirements += shutdownCompleted;
+            retirementTimeline_.reset();
+            retirementMarkerSupported_ = false;
+            textures_.clear();
+            meshes_.clear();
         }
 
         lease_ = Integration::NativeWindowSurfaceLease{};
@@ -1227,6 +1359,129 @@ class BgfxRenderDevice final : public IRenderDevice {
     {
         bgfx::reset(extent.width, extent.height, kDefaultResetFlags);
         appliedBackbuffer_ = extent;
+    }
+
+    void submitRetirementMarkerIfNeeded() noexcept
+    {
+        if (!retirementMarkerSupported_ || !retirementTimeline_.needsMarker())
+        {
+            return;
+        }
+
+        bgfx::setViewMode(kRetirementMarkerView, bgfx::ViewMode::Sequential);
+        bgfx::blit(kRetirementMarkerView, retirementMarkerReadback_, 0, 0,
+                   retirementMarkerSource_, 0, 0, 1, 1);
+        const u32 readyFrame = bgfx::readTexture(retirementMarkerReadback_,
+                                                 retirementMarkerBytes_.data());
+        if (!retirementTimeline_.beginMarker(readyFrame))
+        {
+            std::terminate();
+        }
+
+        u32 waitingCount = 0;
+        for (TextureSlot& slot : textures_)
+        {
+            if (slot.retirementPhase == RetirementPhase::Queued)
+            {
+                slot.retirementPhase = RetirementPhase::Waiting;
+                ++waitingCount;
+            }
+        }
+        for (MeshSlot& slot : meshes_)
+        {
+            if (slot.retirementPhase == RetirementPhase::Queued)
+            {
+                slot.retirementPhase = RetirementPhase::Waiting;
+                ++waitingCount;
+            }
+        }
+        if (waitingCount != retirementTimeline_.waitingCount())
+        {
+            std::terminate();
+        }
+    }
+
+    void completeRetirementsThrough(u32 currentFrame) noexcept
+    {
+        const u32 expected = retirementTimeline_.completeThrough(currentFrame);
+        if (expected == 0U)
+        {
+            return;
+        }
+
+        u32 completed = 0;
+        for (TextureSlot& slot : textures_)
+        {
+            if (slot.retirementPhase != RetirementPhase::Waiting)
+            {
+                continue;
+            }
+            if (bgfx::isValid(slot.handle))
+            {
+                bgfx::destroy(slot.handle);
+                slot.handle = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            slot.width = 0;
+            slot.height = 0;
+            slot.retirementPhase = RetirementPhase::None;
+            slot.completionPin.release();
+            ++completed;
+        }
+        for (MeshSlot& slot : meshes_)
+        {
+            if (slot.retirementPhase != RetirementPhase::Waiting)
+            {
+                continue;
+            }
+            if (bgfx::isValid(slot.vertexBuffer))
+            {
+                bgfx::destroy(slot.vertexBuffer);
+                slot.vertexBuffer = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(slot.indexBuffer))
+            {
+                bgfx::destroy(slot.indexBuffer);
+                slot.indexBuffer = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            slot.vertexCount = 0;
+            slot.indexCount = 0;
+            slot.retirementPhase = RetirementPhase::None;
+            slot.completionPin.release();
+            ++completed;
+        }
+        if (completed != expected || statistics_.pendingGpuRetirements < completed)
+        {
+            std::terminate();
+        }
+        statistics_.pendingGpuRetirements -= completed;
+        statistics_.completedGpuRetirements += completed;
+    }
+
+    void pumpRetirementOnlyFrameIfNeeded() noexcept
+    {
+        if (!retirementMarkerSupported_ || retirementTimeline_.pendingCount() == 0U)
+        {
+            return;
+        }
+        submitRetirementMarkerIfNeeded();
+        const u32 currentFrame = bgfx::frame(BGFX_FRAME_FLUSH);
+        completeRetirementsThrough(currentFrame);
+    }
+
+    void drainRetirementsWithMarkers() noexcept
+    {
+        constexpr u32 MaximumDrainFrames = 16;
+        for (u32 drainFrame = 0;
+             drainFrame < MaximumDrainFrames && retirementTimeline_.pendingCount() != 0U;
+             ++drainFrame)
+        {
+            submitRetirementMarkerIfNeeded();
+            const u32 currentFrame = bgfx::frame(BGFX_FRAME_FLUSH);
+            completeRetirementsThrough(currentFrame);
+        }
     }
 
     void configureSurfaceClearView(const RenderSurfaceState& surface) noexcept
@@ -1546,7 +1801,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         u32 index = (std::numeric_limits<u32>::max)();
         for (u32 slotIndex = 0; slotIndex < static_cast<u32>(textures_.size()); ++slotIndex)
         {
-            if (!textures_[slotIndex].live)
+            if (!textures_[slotIndex].live &&
+                textures_[slotIndex].retirementPhase == RetirementPhase::None)
             {
                 index = slotIndex;
                 break;
@@ -1566,19 +1822,34 @@ class BgfxRenderDevice final : public IRenderDevice {
         slot.width = desc.width;
         slot.height = desc.height;
         slot.live = true;
+        slot.retirementPhase = RetirementPhase::None;
         ++statistics_.liveResources;
         return GpuTextureId{.index = index, .generation = slot.generation};
     }
 
     [[nodiscard]] Core::Status destroyTexture2D(GpuTextureId texture) noexcept override
     {
-        if (std::this_thread::get_id() != ownerThread_)
+        FramePin completionPin;
+        return retireTexture2D(texture, completionPin);
+    }
+
+    [[nodiscard]] Core::Status retireTexture2D(GpuTextureId texture,
+                                               FramePin& completionPin) noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::retireTexture2D"); !status)
         {
-            std::terminate();
+            return Core::failure(std::move(status.error()));
         }
         if (stopped_ || !bgfxInitialized_)
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        const auto disposition = RetirementDetail::selectRetirementDisposition(
+            retirementMarkerSupported_, completionPin.hasValue());
+        if (disposition == RetirementDetail::RetirementDisposition::RejectExternalPin)
+        {
+            return Core::failure(RenderErrorCode::GpuRetirementUnsupported,
+                                 "This bgfx backend cannot retain an external retirement pin");
         }
         if (!texture || texture.index >= textures_.size())
         {
@@ -1589,14 +1860,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is stale or destroyed");
         }
-        if (bgfx::isValid(slot.handle))
-        {
-            bgfx::destroy(slot.handle);
-            slot.handle = BGFX_INVALID_HANDLE;
-            --statistics_.liveResources;
-        }
         slot.live = false;
-        ++slot.generation;
+        slot.generation = nextResourceGeneration(slot.generation);
         for (auto it = spriteTextureBindings_.begin(); it != spriteTextureBindings_.end();)
         {
             if (it->second == texture)
@@ -1642,6 +1907,25 @@ class BgfxRenderDevice final : public IRenderDevice {
                 ++it;
             }
         }
+        if (disposition == RetirementDetail::RetirementDisposition::DestroyImmediately)
+        {
+            if (bgfx::isValid(slot.handle))
+            {
+                bgfx::destroy(slot.handle);
+                slot.handle = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            slot.width = 0;
+            slot.height = 0;
+            slot.retirementPhase = RetirementPhase::None;
+            ++statistics_.completedGpuRetirements;
+            return Core::success();
+        }
+
+        slot.retirementPhase = RetirementPhase::Queued;
+        slot.completionPin = std::move(completionPin);
+        retirementTimeline_.queue();
+        ++statistics_.pendingGpuRetirements;
         return Core::success();
     }
 
@@ -1725,7 +2009,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         u32 slotIndex = (std::numeric_limits<u32>::max)();
         for (u32 i = 0; i < static_cast<u32>(meshes_.size()); ++i)
         {
-            if (!meshes_[i].live)
+            if (!meshes_[i].live && meshes_[i].retirementPhase == RetirementPhase::None)
             {
                 slotIndex = i;
                 break;
@@ -1742,6 +2026,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         slot.vertexCount = desc.vertexCount;
         slot.indexCount = desc.indexCount;
         slot.live = true;
+        slot.retirementPhase = RetirementPhase::None;
         if (slot.generation == 0)
         {
             slot.generation = 1;
@@ -1753,13 +2038,27 @@ class BgfxRenderDevice final : public IRenderDevice {
 
     [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
     {
-        if (std::this_thread::get_id() != ownerThread_)
+        FramePin completionPin;
+        return retireStaticMesh(mesh, completionPin);
+    }
+
+    [[nodiscard]] Core::Status retireStaticMesh(GpuMeshId mesh,
+                                                FramePin& completionPin) noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::retireStaticMesh"); !status)
         {
-            std::terminate();
+            return Core::failure(std::move(status.error()));
         }
         if (stopped_ || !bgfxInitialized_)
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        const auto disposition = RetirementDetail::selectRetirementDisposition(
+            retirementMarkerSupported_, completionPin.hasValue());
+        if (disposition == RetirementDetail::RetirementDisposition::RejectExternalPin)
+        {
+            return Core::failure(RenderErrorCode::GpuRetirementUnsupported,
+                                 "This bgfx backend cannot retain an external retirement pin");
         }
         if (!mesh || mesh.index >= meshes_.size())
         {
@@ -1770,20 +2069,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is stale or destroyed");
         }
-        if (bgfx::isValid(slot.vertexBuffer))
-        {
-            bgfx::destroy(slot.vertexBuffer);
-            slot.vertexBuffer = BGFX_INVALID_HANDLE;
-            --statistics_.liveResources;
-        }
-        if (bgfx::isValid(slot.indexBuffer))
-        {
-            bgfx::destroy(slot.indexBuffer);
-            slot.indexBuffer = BGFX_INVALID_HANDLE;
-            --statistics_.liveResources;
-        }
         slot.live = false;
-        ++slot.generation;
+        slot.generation = nextResourceGeneration(slot.generation);
         for (auto it = mesh3DBindings_.begin(); it != mesh3DBindings_.end();)
         {
             if (it->second == mesh)
@@ -1795,6 +2082,31 @@ class BgfxRenderDevice final : public IRenderDevice {
                 ++it;
             }
         }
+        if (disposition == RetirementDetail::RetirementDisposition::DestroyImmediately)
+        {
+            if (bgfx::isValid(slot.vertexBuffer))
+            {
+                bgfx::destroy(slot.vertexBuffer);
+                slot.vertexBuffer = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(slot.indexBuffer))
+            {
+                bgfx::destroy(slot.indexBuffer);
+                slot.indexBuffer = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            slot.vertexCount = 0;
+            slot.indexCount = 0;
+            slot.retirementPhase = RetirementPhase::None;
+            ++statistics_.completedGpuRetirements;
+            return Core::success();
+        }
+
+        slot.retirementPhase = RetirementPhase::Queued;
+        slot.completionPin = std::move(completionPin);
+        retirementTimeline_.queue();
+        ++statistics_.pendingGpuRetirements;
         return Core::success();
     }
 
@@ -2005,7 +2317,9 @@ class BgfxRenderDevice final : public IRenderDevice {
         constexpr int kMaxFrames = 8;
         for (int i = 0; i < kMaxFrames && !captureCallback_.isReady(); ++i)
         {
-            bgfx::frame();
+            submitRetirementMarkerIfNeeded();
+            const u32 currentFrame = bgfx::frame();
+            completeRetirementsThrough(currentFrame);
         }
         captureInFlight_ = false;
         if (!captureCallback_.isReady())
@@ -2188,12 +2502,20 @@ class BgfxRenderDevice final : public IRenderDevice {
     UIAtlasPageSize uiGlyphAtlasPageSize_{};
     bgfx::UniformHandle uiTexColorUniform_ = BGFX_INVALID_HANDLE;
 
+    enum class RetirementPhase : u8 {
+        None,
+        Queued,
+        Waiting,
+    };
+
     struct TextureSlot final {
         bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
         u32 generation = 1;
         u16 width = 0;
         u16 height = 0;
         bool live = false;
+        RetirementPhase retirementPhase = RetirementPhase::None;
+        FramePin completionPin{};
     };
     std::vector<TextureSlot> textures_{};
     std::unordered_map<u32, GpuTextureId> spriteTextureBindings_{};
@@ -2205,6 +2527,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         u32 vertexCount = 0;
         u32 indexCount = 0;
         bool live = false;
+        RetirementPhase retirementPhase = RetirementPhase::None;
+        FramePin completionPin{};
     };
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> mesh3DBindings_{};
@@ -2226,6 +2550,11 @@ class BgfxRenderDevice final : public IRenderDevice {
     bool stopped_ = false;
     bool bgfxInitialized_ = false;
     bool captureInFlight_ = false;
+    bool retirementMarkerSupported_ = false;
+    bgfx::TextureHandle retirementMarkerSource_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle retirementMarkerReadback_ = BGFX_INVALID_HANDLE;
+    std::array<u8, 4> retirementMarkerBytes_{};
+    RetirementDetail::BgfxRetirementTimeline retirementTimeline_{};
     BgfxCaptureCallback captureCallback_{};
 };
 

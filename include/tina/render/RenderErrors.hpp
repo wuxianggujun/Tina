@@ -49,5 +49,7 @@ inline constexpr Core::ErrorCode InvalidFramePin{Core::ErrorDomain::Render, 40};
 inline constexpr Core::ErrorCode SubmissionCompletionLedgerFull{Core::ErrorDomain::Render, 41};
 inline constexpr Core::ErrorCode InvalidSubmissionTicket{Core::ErrorDomain::Render, 42};
 inline constexpr Core::ErrorCode InvalidMesh3DLighting{Core::ErrorDomain::Render, 43};
+inline constexpr Core::ErrorCode GpuRetirementUnsupported{Core::ErrorDomain::Render, 44};
+inline constexpr Core::ErrorCode GpuRetirementDrainFailed{Core::ErrorDomain::Render, 45};
 
 } // namespace Tina::Render::RenderErrorCode

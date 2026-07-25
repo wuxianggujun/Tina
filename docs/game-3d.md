@@ -122,7 +122,9 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
 当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding、material texture 绑定，以及 Opaque3D
 experimental MR submit 时按 materialKey **采样** baseColor/MR/normal，并一次提交3个 directional lights
 着色（未 bind baseColor 用 1×1 白；未 bind MR 时默认 metallic=0/roughness=1；未 bind normal 时用几何法线）。
-尚未证明 `AssetSystem` Handle/Lease 到 submission 的完整 fence pin（真 fence 见 RUNTIME-002 尾巴）。
+`tina_sample_3d` 仍直接持有 owning `CookedAssetFile`，不把它伪装成 AssetSystem 产品集成；库级
+AssetSystem→Texture/Mesh retirement 已由 delayed backend tests 覆盖。把 3D Scene 引用改为 AssetHandle
+仍由 `ASSET-HANDLE-SCENE` 跟踪。
 
 ## 三类 3D 门禁
 
@@ -130,12 +132,15 @@ experimental MR submit 时按 materialKey **采样** baseColor/MR/normal，并�
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；texture upload + material key bind + Opaque3D experimental MR | 完整 light system/IBL/shadow、Handle/Lease→fence pin |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；texture upload + material key bind + Opaque3D experimental MR | 完整 light system/IBL/shadow、Scene AssetHandle 产品化 |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
-`sceneExtract`、`lightingConfigured=true`、`directionalLightCount=3`、退出计数与资源归零信息。测试数量不是永久契约；实际命令和门禁矩阵统一见
-[测试说明](testing.md)。
+`sceneExtract`、`lightingConfigured=true`、`directionalLightCount=3`、退出计数、资源归零信息、
+`pixelCaptureOk`、非零 capture 尺寸/字节数与 `pixelFingerprint`。同机 exact 视觉回归把首次 fingerprint
+传给 `--expect-pixel-fingerprint=<32 lowercase hex>`，并要求
+`pixelGoldenChecked/pixelGoldenMatched` 均为 true；该值不得跨 GPU/driver/backend 作为通用金标。
+测试数量不是永久契约；实际命令和门禁矩阵统一见[测试说明](testing.md)。
 
 ## 当前限制
 
@@ -149,11 +154,12 @@ experimental MR submit 时按 materialKey **采样** baseColor/MR/normal，并�
   containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；
 - Scene/Render 仍使用 mesh/material **key**（bind-table 语义，非 AssetHandle 组件字段），不是 Scene 上直接存
   `AssetHandle`，也不是 extract 输出 owning `FrameResourceRef`；
-- EngineHost 已有 `RenderFramePacket` + FramePin + present-return CPU completion；它不代表 GPU 退役，
-  真 bgfx fence 后置；
+- EngineHost 已有 `RenderFramePacket` + FramePin + present-return CPU completion；它不代表 GPU 退役；
+  Texture/Mesh 使用独立 readback marker；
 - 无通用 pass scheduler、pipeline cache 产品契约或 worker extraction；`tina_bench` schema v1 已落地
   （PERF-001 首切片），但不替代 3D 视觉门禁；
 - Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
 
 下一步只在可执行 Backlog 中维护：`RENDER-001` 剩余（light system / IBL / shadow / pass scheduling），
-真 GPU fence completion 见 RUNTIME-002 尾巴。详见 [Backlog](backlog.md)。
+Texture/Mesh backend retirement 已使用 readback completion marker；通用 GPU submission fence 不在当前
+Runtime 契约内。详见 [Rendering](rendering.md) 与 [Backlog](backlog.md)。

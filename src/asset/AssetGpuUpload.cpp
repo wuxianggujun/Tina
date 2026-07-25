@@ -6,6 +6,24 @@
 #include <utility>
 
 namespace Tina::Asset {
+namespace {
+
+[[nodiscard]] bool hasGpuRetirementRecord(const AssetRetirementLedger& retirement,
+                                          AssetHandle handle) noexcept
+{
+    for (const auto& record : retirement.records())
+    {
+        if (record.handle == handle &&
+            (record.kind == AssetRetirementKind::GpuTexture2D ||
+             record.kind == AssetRetirementKind::GpuStaticMesh))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
 
 AssetGpuUploadCoordinator::AssetGpuUploadCoordinator(AssetStore& store, Render::NullUploadLedger& ledger,
                                                      AssetGpuUploadConfig config,
@@ -180,9 +198,11 @@ Core::Status AssetGpuUploadCoordinator::cancelUpload(AssetHandle handle) noexcep
             continue;
         }
         const auto assetId = m_store->assetId(handle);
-        if (m_retirement != nullptr)
+        const bool gpuRetirementOwnsRecord =
+            m_retirement != nullptr && hasGpuRetirementRecord(*m_retirement, handle);
+        if (m_retirement != nullptr && !gpuRetirementOwnsRecord)
         {
-            m_retirement->enqueueDestroy(handle, assetId, it->ticket);
+            (void)m_retirement->enqueueDestroy(handle, assetId, it->ticket);
             m_retirement->markRetiring(handle);
         }
         // Free staging for Pending/Ready/Failed tickets.
@@ -196,7 +216,7 @@ Core::Status AssetGpuUploadCoordinator::cancelUpload(AssetHandle handle) noexcep
         {
             (void)m_ledger->retire(it->ticket);
         }
-        if (m_retirement != nullptr)
+        if (m_retirement != nullptr && !gpuRetirementOwnsRecord)
         {
             m_retirement->markReleased(handle);
         }
@@ -204,10 +224,10 @@ Core::Status AssetGpuUploadCoordinator::cancelUpload(AssetHandle handle) noexcep
         return Core::success();
     }
 
-    if (m_retirement != nullptr)
+    if (m_retirement != nullptr && !hasGpuRetirementRecord(*m_retirement, handle))
     {
         // No outstanding ticket: logical unload only.
-        m_retirement->enqueueDestroy(handle, m_store->assetId(handle), {});
+        (void)m_retirement->enqueueDestroy(handle, m_store->assetId(handle), {});
         m_retirement->markReleased(handle);
     }
     return Core::success();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/error/Result.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/RenderFrame.hpp>
 #include <tina/render/RenderFrameCapture.hpp>
@@ -23,6 +24,10 @@ struct RenderStatistics final {
     u64 presented = 0;
     u64 skippedSuspendedSurfaceFrames = 0;
     u64 liveResources = 0;
+    // Resources that are logically stale but whose native handles are still
+    // waiting for backend-proven GPU completion.
+    u64 pendingGpuRetirements = 0;
+    u64 completedGpuRetirements = 0;
 };
 
 // Backend-owned GPU texture handle (generation-aware). Not a weak AssetHandle.
@@ -143,6 +148,20 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Texture2D destroy");
     }
+    // Logically invalidates texture immediately and releases completionPin only
+    // after the backend can safely hand the native resource to its destroy path.
+    // On failure completionPin is not consumed. Null/default paths complete
+    // synchronously; real backends may retain it until a GPU completion marker.
+    [[nodiscard]] virtual Core::Status retireTexture2D(GpuTextureId texture,
+                                                       FramePin& completionPin) noexcept
+    {
+        auto status = destroyTexture2D(texture);
+        if (status)
+        {
+            completionPin.release();
+        }
+        return status;
+    }
     // Bind a GPU texture for Sprite2D batches with matching spriteKey (0 clears binding).
     [[nodiscard]] virtual Core::Status setSprite2DTextureBinding(u32 spriteKey, GpuTextureId texture) noexcept
     {
@@ -174,6 +193,25 @@ class IRenderDevice {
         static_cast<void>(mesh);
         return Core::failure(RenderErrorCode::MeshUploadUnsupported,
                              "This render device does not support StaticMesh destroy");
+    }
+    // Same ownership contract as retireTexture2D().
+    [[nodiscard]] virtual Core::Status retireStaticMesh(GpuMeshId mesh,
+                                                        FramePin& completionPin) noexcept
+    {
+        auto status = destroyStaticMesh(mesh);
+        if (status)
+        {
+            completionPin.release();
+        }
+        return status;
+    }
+
+    // Advances already-submitted retirement completion without fabricating a
+    // GPU fence. The default/Null path is already complete. A backend may
+    // return GpuRetirementUnsupported when only shutdown can provide a drain.
+    [[nodiscard]] virtual Core::Status drainGpuRetirements() noexcept
+    {
+        return Core::success();
     }
     // Bind a GPU mesh for Mesh3D batches with matching meshKey (0 clears binding).
     // meshKey=1 remains the built-in procedural cube fixture when unbound.

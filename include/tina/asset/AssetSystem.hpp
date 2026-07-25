@@ -119,6 +119,16 @@ class AssetSystem final {
     [[nodiscard]] Core::Result<AssetLease> acquire(AssetHandle handle);
     [[nodiscard]] Core::Status unload(AssetHandle handle) noexcept;
 
+    // Acquires an AssetLease, transfers it to the Render retirement pin, then
+    // logically unloads the weak handle. The RenderDevice and AssetSystem must
+    // both remain alive while the pin is live; backend completion or an explicit
+    // drain releases the lease exactly once.
+    [[nodiscard]] Core::Status retireTexture2D(Render::IRenderDevice& device, AssetHandle handle,
+                                               Render::GpuTextureId texture);
+    [[nodiscard]] Core::Status retireStaticMesh(Render::IRenderDevice& device, AssetHandle handle,
+                                                Render::GpuMeshId mesh);
+    [[nodiscard]] Core::Status drainGpuRetirements() noexcept;
+
   private:
     struct IndexEntry final {
         Core::AssetId assetId{};
@@ -161,6 +171,7 @@ class AssetSystem final {
     AssetGpuUploadConfig m_gpuUploadConfig{};
     std::unique_ptr<AssetGpuUploadCoordinator> m_gpuUpload;
     AssetRetirementLedger m_retirement{};
+    Render::IRenderDevice* m_gpuRetirementDevice = nullptr;
     bool m_autoGpuUpload = true;
     bool m_requireTyped2dPayloads = false;
     CatalogSnapshot m_catalog{};

@@ -175,8 +175,9 @@ backend key，覆盖 multi-mesh cook -> upload/bind -> Prefab resolve -> extract
 bufferView 的 baseColor/MR/normal 贴图可 cook 为 RGBA8 Texture2D 并成为 Material dependency；产品路径
 完成外部 URI/size policy、GPU binding 与 experimental metallic-roughness 采样（material factors、
 `Mesh3DLightingDesc` 单次提交0..4 directional lights）。完整 PBR、IBL/shadow、light component/culling、
-通用 pass system，以及 Asset Handle/Lease 到真 GPU fence retirement 的合并仍未完成。FramePin 当前只覆盖
-同步 submit/present 的 CPU 借用期，不能作为 GPU 退役证据。
+通用 pass system 与通用 GPU submission fence 仍未完成。Frame packet 的 FramePin 只覆盖同步
+submit/present 的 CPU 借用期；Texture/Mesh 则使用独立 readback completion marker，并已把 AssetLease
+合并到 backend retirement，二者不能互相作为完成证据。
 
 ## 当前 UI 边界
 

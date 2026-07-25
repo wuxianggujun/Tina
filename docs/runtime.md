@@ -1,6 +1,6 @@
 # Runtime 与 Frame Pipeline
 
-本文描述当前 `tina_runtime` 与 `Tina::Desktop::CreateEngine`。未完成扩展（如真实 GPU fence、产品
+本文描述当前 `tina_runtime` 与 `Tina::Desktop::CreateEngine`。未完成扩展（如通用 GPU submission fence、产品
 暂停 sample）见 [Backlog](backlog.md)；已落地 stack/packet 能力见下文「当前结论」。
 
 ## 当前结论
@@ -196,7 +196,7 @@ AudioEngine
 | `blocksGameplayInputBelow` → 下层空 Action snapshot | Done（Host dispatch，非 ActionMapper 内） |
 | `blocksUIUpdateBelow` 仅挡 `updateUI` | Done；不回改当帧 UI route |
 | `2D-INPUT-ADV` unified digital/analog Action + transactional rebind | Done；本轮测试结果以最终验证记录为准 |
-| `RenderFramePacket` + `FramePin` + present-return CPU ledger | Done；固定帧延迟假 fence 已删除，真实 GPU fence 后置 |
+| `RenderFramePacket` + `FramePin` + present-return CPU ledger | Done；固定帧延迟假 fence 已删除；Texture/Mesh retirement 使用 Render/Asset 独立 readback marker，不混入 Runtime ticket |
 | Runtime 拥有 AssetSystem/World | 否；仍由产品 State/样例持有 |
 | 通用 Event Queue、多 World/editor orchestration、pass scheduler | 未做；需 ADR/Backlog 后开 |
 

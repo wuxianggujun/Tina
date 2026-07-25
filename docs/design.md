@@ -96,9 +96,9 @@ UI 不调用 bgfx。Render 不读取 UI 节点对象，只同步消费当前 sub
 | 产品面 | 已有 | 仍缺 |
 | --- | --- | --- |
 | 2D | Catalog TileMap schema v2（有序 tile/object layers、稳定 ID、visibility/properties、显式 render/collision layer）、对象 101/102 消费、角色/碰撞、Physics2D Box/Circle/Capsule + sensor + Distance joint、SpriteAnimationClip/Animator、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | TileMap streaming/editor/自动 gameplay 生成、advanced input、更多 shape/joint、2D lighting/navigation |
-| 3D | multi-mesh/multi-prim SPLIT cook、upload/bind、Prefab、Scene extract、baseColor/MR/normal 采样、material factors、单一有界0..4 directional-light 提交、URI 安全 | 完整 PBR/IBL/shadow、light component/culling、通用 pass system、AssetHandle 终态与真 GPU fence |
+| 3D | multi-mesh/multi-prim SPLIT cook、upload/bind、Prefab、Scene extract、baseColor/MR/normal 采样、material factors、单一有界0..4 directional-light 提交、URI 安全、Texture/Mesh retirement marker | 完整 PBR/IBL/shadow、light component/culling、通用 pass system、Scene AssetHandle 产品化 |
 | UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、控件集；Windows UIA + HWND 桥接首切片 | Focus Scope、Modal/Capture、多行/复杂 shaping、虚拟化、Narrator 金标/AT-SPI |
-| Runtime | State 栈/commands、四相位阻断、`blocksGameplayInputBelow` 空 snapshot、FramePin/ledger、固定步长 | 真 GPU fence、多 World、Runtime 内置 Asset/World |
+| Runtime | State 栈/commands、四相位阻断、`blocksGameplayInputBelow` 空 snapshot、FramePin/CPU ledger、固定步长 | 通用 GPU submission fence、多 World、Runtime 内置 Asset/World |
 | 性能 | `tina_bench` schema v1 + provisional 结论 | 固定门禁机 hard gate、多进程 MAD、更多 workload |
 
 ## 游戏侧正确姿势（摘要）
@@ -118,7 +118,7 @@ UI 不调用 bgfx。Render 不读取 UI 节点对象，只同步消费当前 sub
 
 1. 保持文档/契约与 tip 源码一致（本索引与 runtime/public-api 为优先同步面）；
 2. 在已完成 TileMap N1、Physics2D N2 的基础上推进 `2D-INPUT-ADV`；
-3. TileMap streaming/editor、UI-002/UI-003、完整 PBR、真 fence completion 与 bench hard gate 均保持
+3. TileMap streaming/editor、UI-002/UI-003、完整 PBR、通用 submission fence 与 bench hard gate 均保持
    独立任务，不把任一首切片扩写成完整产品能力。
 
 任何“完成”声明都必须指出证据类型：单元测试、集成测试、sample 生命周期、结构化 JSON 或人工视觉。

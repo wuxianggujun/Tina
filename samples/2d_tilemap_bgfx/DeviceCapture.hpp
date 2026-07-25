@@ -87,6 +87,11 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->destroyTexture2D(texture);
     }
+    [[nodiscard]] Core::Status retireTexture2D(Render::GpuTextureId texture,
+                                               Render::FramePin& completionPin) noexcept override
+    {
+        return inner_->retireTexture2D(texture, completionPin);
+    }
     [[nodiscard]] Core::Status setSprite2DTextureBinding(Core::u32 spriteKey,
                                                          Render::GpuTextureId texture) noexcept override
     {
@@ -104,6 +109,15 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Core::Status destroyStaticMesh(Render::GpuMeshId mesh) noexcept override
     {
         return inner_->destroyStaticMesh(mesh);
+    }
+    [[nodiscard]] Core::Status retireStaticMesh(Render::GpuMeshId mesh,
+                                                Render::FramePin& completionPin) noexcept override
+    {
+        return inner_->retireStaticMesh(mesh, completionPin);
+    }
+    [[nodiscard]] Core::Status drainGpuRetirements() noexcept override
+    {
+        return inner_->drainGpuRetirements();
     }
     [[nodiscard]] Core::Status setMesh3DBinding(Core::u32 meshKey, Render::GpuMeshId mesh) noexcept override
     {

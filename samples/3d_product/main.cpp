@@ -11,6 +11,8 @@
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Error.hpp>
+#include <tina/core/hash/ContentHash.hpp>
+#include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/render/RenderDevice.hpp>
@@ -67,11 +69,27 @@ inline constexpr u32 MaxProductMeshSlots = 128;
 inline constexpr u32 FirstProductMeshKey = 1;
 inline constexpr u32 FirstProductMaterialKey = 1;
 
+[[nodiscard]] std::string contentHashToHex(const Tina::Core::ContentHash& hash)
+{
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out(32, '0');
+    const auto& bytes = hash.bytes();
+    for (std::size_t index = 0; index < bytes.size(); ++index)
+    {
+        const auto value = static_cast<unsigned>(std::to_integer<unsigned char>(bytes[index]));
+        out[index * 2] = kHex[(value >> 4U) & 0x0FU];
+        out[index * 2 + 1] = kHex[value & 0x0FU];
+    }
+    return out;
+}
+
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
     // Empty → in-memory two-mesh fixture. Non-empty → cook external .gltf/.glb path.
     std::string gltfPath{};
+    // Empty = capture-only; non-empty = require an exact machine-local pixel match.
+    std::string expectPixelFingerprint{};
     bool help = false;
 };
 
@@ -100,9 +118,33 @@ struct LifecycleCounters final {
     bool gltfCooked = false;
     bool prefabInstantiated = false;
     bool completePbrFixture = false;
+    bool pixelCaptureAttempted = false;
+    bool pixelCaptureOk = false;
+    u32 pixelCaptureWidth = 0;
+    u32 pixelCaptureHeight = 0;
+    u64 pixelCaptureBytes = 0;
+    std::string pixelFingerprint{};
 };
 
 using DeviceCapture = Tina::Sample3D::DeviceCapture;
+
+void recordPixelCapture(LifecycleCounters& counters, const Tina::Render::Rgba8FrameCapture& capture)
+{
+    if (capture.empty())
+    {
+        return;
+    }
+    auto pixelHash = Tina::Core::digestContentHashV1(capture.rgba8Pixels);
+    if (!pixelHash.has_value() || !pixelHash->hasValue())
+    {
+        return;
+    }
+    counters.pixelCaptureOk = true;
+    counters.pixelCaptureWidth = capture.width;
+    counters.pixelCaptureHeight = capture.height;
+    counters.pixelCaptureBytes = static_cast<u64>(capture.byteCount());
+    counters.pixelFingerprint = contentHashToHex(*pixelHash);
+}
 
 struct ProductMeshSlot final {
     Tina::Asset::CookedAssetFile meshFile{};
@@ -322,6 +364,8 @@ void printUsage()
         << "  --frame-delay-ms=N      sleep N ms per frame (default 0)\n"
         << "  --gltf=<path>           cook external .gltf/.glb from disk (omit = built-in two-mesh fixture)\n"
         << "  --gltf <path>           same as --gltf=<path>\n"
+        << "  --expect-pixel-fingerprint=<32 lowercase hex chars>\n"
+        << "                           require an exact machine-local RGBA8 frame match\n"
         << "  --help, -h              print this help\n"
         << "\n"
         << "External path is opt-in. Runtime never parses glTF; only the cooker (cgltf) does.\n"
@@ -340,10 +384,12 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     constexpr std::string_view FramesPrefix = "--frames=";
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
     constexpr std::string_view GltfPrefix = "--gltf=";
+    constexpr std::string_view PixelFingerprintPrefix = "--expect-pixel-fingerprint=";
     SampleOptions options;
     bool hasFrames = false;
     bool hasDelay = false;
     bool hasGltf = false;
+    bool hasPixelFingerprint = false;
 
     for (int index = 1; index < argumentCount; ++index)
     {
@@ -382,6 +428,23 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             }
             options.gltfPath.assign(path);
             hasGltf = true;
+        }
+        else if (argument.starts_with(PixelFingerprintPrefix))
+        {
+            const std::string_view fingerprint = argument.substr(PixelFingerprintPrefix.size());
+            const bool validHex = fingerprint.size() == 32 &&
+                                  std::ranges::all_of(fingerprint, [](char character) noexcept {
+                                      return (character >= '0' && character <= '9') ||
+                                             (character >= 'a' && character <= 'f');
+                                  });
+            if (hasPixelFingerprint || !validHex)
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "--expect-pixel-fingerprint must appear once with 32 lowercase hex chars");
+            }
+            options.expectPixelFingerprint.assign(fingerprint);
+            hasPixelFingerprint = true;
         }
         else if (argument == "--gltf")
         {
@@ -1231,6 +1294,10 @@ class Product3DState final : public Tina::IGameState {
         }
         if (counters_->frameUpdates >= options_.targetFrameCount)
         {
+            if (capture_ != nullptr)
+            {
+                capture_->requestCaptureNextPresent();
+            }
             context.requestExitAfterFrame();
         }
         return Tina::Core::success();
@@ -1411,6 +1478,20 @@ class Product3DApplication final : public Tina::IGameApplication {
     Product3DApplication application{options, counters, resources, capture};
     auto runResult = (*hostResult)->run(application);
 
+    counters.pixelCaptureAttempted = true;
+    if (capture.hasLastCapture() && capture.lastCapture() != nullptr)
+    {
+        recordPixelCapture(counters, *capture.lastCapture());
+    }
+    else if (Tina::Render::IRenderDevice* device = capture.get(); device != nullptr)
+    {
+        auto captured = device->capturePrimaryFrameRgba8();
+        if (captured.has_value())
+        {
+            recordPixelCapture(counters, *captured);
+        }
+    }
+
     const bool ledgerBalanced =
         capture.get() == nullptr || capture.get()->statistics().liveResources == 0;
     hostResult->reset();
@@ -1429,6 +1510,9 @@ class Product3DApplication final : public Tina::IGameApplication {
                                           counters.materialMrTextureBound && counters.materialNormalTextureBound &&
                                           counters.materialFactorsBound)
                                        : (counters.texturesUploaded >= expectedMeshes));
+    const bool pixelGoldenChecked = !options.expectPixelFingerprint.empty();
+    const bool pixelGoldenMatched =
+        !pixelGoldenChecked || counters.pixelFingerprint == options.expectPixelFingerprint;
     if (*runResult != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame ||
         counters.frameUpdates != options.targetFrameCount ||
         counters.renderExtractions != options.targetFrameCount || counters.stateEnters != 1 ||
@@ -1437,7 +1521,10 @@ class Product3DApplication final : public Tina::IGameApplication {
         counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMeshes || !texturesOk ||
         !counters.meshBound || !counters.materialTextureBound || counters.catalogCooked != 1 || !counters.gltfCooked ||
         !counters.prefabInstantiated || counters.prefabNodes == 0 || counters.prefabInstances == 0 ||
-        !counters.lightingConfigured || counters.directionalLightCount != 3U || !ledgerBalanced)
+        !counters.lightingConfigured || counters.directionalLightCount != 3U || !ledgerBalanced ||
+        !counters.pixelCaptureAttempted || !counters.pixelCaptureOk || counters.pixelCaptureWidth == 0 ||
+        counters.pixelCaptureHeight == 0 || counters.pixelCaptureBytes == 0 || counters.pixelFingerprint.empty() ||
+        !pixelGoldenMatched)
     {
         std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\","
                      "\"message\":\"lifecycle counters did not match\","
@@ -1456,7 +1543,16 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"catalogCooked\":" << counters.catalogCooked
                   << ",\"meshSlotCount\":" << expectedMeshes
                   << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false")
-                  << ",\"ledgerBalanced\":" << (ledgerBalanced ? "true" : "false") << "}\n";
+                  << ",\"ledgerBalanced\":" << (ledgerBalanced ? "true" : "false")
+                  << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
+                  << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
+                  << ",\"pixelCaptureWidth\":" << counters.pixelCaptureWidth
+                  << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
+                  << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
+                  << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
+                  << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
+                  << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
+                  << ",\"expectPixelFingerprint\":\"" << options.expectPixelFingerprint << "\"}\n";
         return 1;
     }
 
@@ -1501,7 +1597,16 @@ class Product3DApplication final : public Tina::IGameApplication {
     std::cout << "],\"instanceBatchesPerFrame\":" << expectedMeshes << ",\"catalogCooked\":" << counters.catalogCooked
               << ",\"stateExits\":" << counters.stateExits << ",\"uiPanelsPerFrame\":2,\"uiRootsReleased\":"
               << counters.uiRootsReleased << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"engineHostDestroyed\":true,\"renderResourceLedgerBalanced\":true}\n";
+              << ",\"engineHostDestroyed\":true,\"renderResourceLedgerBalanced\":true"
+              << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
+              << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
+              << ",\"pixelCaptureWidth\":" << counters.pixelCaptureWidth
+              << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
+              << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
+              << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
+              << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
+              << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
+              << ",\"expectPixelFingerprint\":\"" << options.expectPixelFingerprint << "\"}\n";
     return 0;
 }
 

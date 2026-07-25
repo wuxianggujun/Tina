@@ -28,7 +28,8 @@ Scene、UI、RenderScene、Asset、Task、Audio、Physics2D 等模块也使用�
 - `RenderFrame` 的 Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；
 - AssetLease、UploadTicket、GpuTextureId/GpuMeshId、Audio voice 是不同账本，不能互相替代；
 - backend 必须在 `submitFrame()` 内同步消费 frame borrow；RenderFramePacket/FramePin 在 present-return
-  关闭 CPU 所有权。真实 GPU retirement 未接入前，不得用该完成点释放仍被 GPU 资源路径引用的 Asset。
+  关闭 CPU 所有权。Texture/Mesh 必须通过 `retire*` 的独立 readback marker pin；其他 GPU 类型在没有
+  对应 backend retirement 契约前仍不得借用 CPU ticket 提前释放 Asset。
 
 容量不足必须返回 `CapacityExceeded`/模块错误，不越界、不覆盖 in-flight 数据、不静默切换系统 heap。
 

@@ -74,7 +74,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
 | UI product | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有结构化与 Windows 产品视觉证据 | UI-002、UI-003 |
 | 3D product | 双 mesh + baseColor/MR/normal 贴图采样、material factors、有界0..4 directional lights 已有证据（产品提交3灯） | RENDER-001 的完整 PBR/IBL/shadow/light component/pass scheduling |
-| Runtime stack/packet | stack/commands/policy 与 FramePin present-return CPU completion 已落地 | 产品 sample 暂停演示；Asset→GPU fence 异步 retirement |
+| Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion 与独立 Texture/Mesh AssetLease readback retirement 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |
 | Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v2 + required Tileset dependency/localId 发布前验证已完成 | 更完整资源炸弹矩阵、TileMap streaming/editor、热重载与增量 Cooker |
 | Audio | backend-neutral 与 miniaudio null-device 路径已有 Windows 证据 | Linux/product gate 复验 |
 | Legacy retirement | 产品源码/target 删除完成；vcpkg legacy feature 与 EASTL/compatibility 扫尾完成 | 仅保留 `TINA_BUILD_LEGACY=ON` FATAL 拒绝开关 |

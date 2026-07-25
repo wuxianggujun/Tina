@@ -39,7 +39,7 @@ Catalog package
 | Cooker | recipe、writer、发布前 typed/package validation、staging 后原子发布；TileMap v2 会校验 required Tileset dependency 与 tile localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
 | Registry | generation `AssetHandle`、move-only `AssetLease`、显式容量与注入 PMR |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
-| GPU 逻辑状态 | Null `UploadTicket`、ReadyCpu→UploadQueued→ReadyGpu、取消与 retirement ledger |
+| GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
@@ -61,7 +61,8 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `AssetHandle` 是弱 generation lookup，不延长 CPU payload 生命周期；
 - `AssetLease` 是 move-only 强引用，Lease 存在时逻辑 unload 进入 `UnloadPending`；
 - `UploadTicket` 当前只由 Null ledger 完整实现，用于验证 staging 与逻辑状态；
-- `AssetRetirementLedger` 记录 `DestroyQueued`、`Retiring`、`Released`，自身不释放真实 GPU 资源。
+- `AssetRetirementLedger` 按 Logical/UploadStaging/GpuTexture2D/GpuStaticMesh 记录
+  `DestroyQueued`、`Retiring`、`Released`；真实 GPU 销毁仍由 RenderDevice 执行。
 
 Handle 不能持久化、不能手工构造，也不能跨 Store 混用。需要跨 Task、Audio callback 或未来 Render
 submission 保留 CPU payload 时必须持有 Lease，而不是缓存 `tryGet()` 返回的裸指针。
@@ -84,9 +85,16 @@ UnloadPending -- last lease released --> generation erased / stale Handle
 同步 `load()`、异步 `request()/pump()`、状态转换、Store publish/unload 都是 owner-thread API。协作取消会
 丢弃迟到结果，但不能强制终止已经进入系统调用的文件线程。
 
-可选 `AssetGpuUploadCoordinator` 目前把 Cooked payload bytes 复制到 `NullUploadLedger`，用于验证预算、
-ticket、ReadyGpu 与 unload/retirement 状态机；`retireOnGpuReady=true` 是 Null 路径行为。真实 bgfx texture/
-mesh 产品上传使用 `RenderDevice` typed upload 和 key binding，尚未与通用 AssetSystem completion 合并。
+可选 `AssetGpuUploadCoordinator` 把 Cooked payload bytes 复制到 `NullUploadLedger`，用于验证预算、ticket、
+ReadyGpu 与 unload/retirement 状态机；`retireOnGpuReady=true` 是 Null staging 路径行为。真实 bgfx texture/
+mesh 产品上传使用 `RenderDevice` typed upload 和 key binding；`AssetSystem::retireTexture2D` /
+`retireStaticMesh` 会先 acquire `AssetLease`，把 lease 转入 render completion pin，再立即 logical unload 与
+移除 AssetId lookup。marker 前 Store 保持 `UnloadPending`，callback 后进入 `Released/Unloaded`。
+
+RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetSystem::drainGpuRetirements()` 与析构
+执行有界 drain；若 backend 已在普通 present/shutdown 中 exactly-once 释放 pin，AssetSystem 只根据 ledger
+清除非 owning device 指针，不再调用 stopped device。失败的 render retirement 不消费 pin、取消 ledger
+记录，AssetHandle 仍可用。
 
 ## 当前 Typed Cooked Payload
 
@@ -137,9 +145,8 @@ component/culling 与通用 pass scheduler 仍属 `RENDER-001`。glTF importer �
 
 ## 当前限制与下一步
 
-- owning `RenderFramePacket`、FramePin 与 present-return CPU submission completion 已落地；它不承担
-  GPU retirement，真实 backend fence 驱动的 Asset asynchronous completion 仍后置；
-  由 `RUNTIME-002` 跟踪；
+- owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh
+  已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - glTF 外部 buffer/texture 的 root containment、URI/type/size 上限与产品接入由 `ASSET-001` 跟踪；
 - hot reload、增量 Cooker、自动 LRU、Bundle/Patch 与 network Asset 尚未实现，见 `ASSET-002`；
 - TileMap schema v2 不包含 chunk streaming、editor authoring/undo/redo、自动 gameplay 生成、navigation

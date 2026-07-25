@@ -4,8 +4,8 @@ Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在�
 实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，以及 EngineHost 侧
 `RenderFramePacket` + FramePin + present-return CPU completion。Opaque3D 产品着色为 **experimental
 metallic-roughness hybrid**：`setMesh3DLighting()` 一次提交0..4个 directional lights + 常量 ambient；
-无 IBL/阴影/light component/culling。当前也没有通用 pass scheduler 或真 GPU fence 驱动的异步
-completion。
+无 IBL/阴影/light component/culling。当前没有通用 pass scheduler 或通用 GPU submission fence；
+Texture2D/StaticMesh 已有独立、backend-proven 的 GPU resource retirement completion。
 
 ## Target 边界
 
@@ -41,8 +41,8 @@ complete/abandon、复用或析构时关闭，不能用副本或其他 ledger �
 所有 composition 采用唯一语义：`submitFrame()` 同步消费借用 view，成功 `present()` 返回后关闭 CPU
 submission ticket 并释放 frame pin。该完成点只表示 Host/backend 已不再借用本帧 CPU 数据，**不表示 GPU
 执行完成或 Asset 物理退役**。旧 `PresentSync`/`FrameDeferred` 分支、bgfx ledger wrapper、下一帧固定延迟
-handoff 与 `bgfx::frame()` 假 fence token 已删除；真 GPU fence 与 Asset→GPU retirement 合并仍见 backlog
-`RENDER-FENCE`。
+handoff 与 `bgfx::frame()` 假 fence token 已删除。GPU resource retirement 走下文独立 marker，不复用该
+CPU ticket，也不把普通 frame number 描述为 fence。
 
 Opaque3D（experimental MR hybrid）：`setMesh3DMaterialTextureBinding(materialKey)` 在 `submit` 时
 `setTexture(0, s_texColor)`；可选 `setMesh3DMaterialMetallicRoughnessTextureBinding` →
@@ -99,9 +99,12 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 
 | API | Null | bgfx |
 | --- | --- | --- |
-| `create/destroyTexture2DRgba8` | 逻辑 generation storage | 私有 RGBA8 texture |
+| `create/destroyTexture2DRgba8` | 逻辑 generation storage；同步 retire | 私有 RGBA8 texture；逻辑失效后 marker 延迟销毁 |
+| `retireTexture2D(texture, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
 | `setSprite2DTextureBinding` | 校验/记录 binding | sprite key → texture |
-| `create/destroyStaticMeshP3N3UV2` | 逻辑 mesh storage | 私有 VB/IB |
+| `create/destroyStaticMeshP3N3UV2` | 逻辑 mesh storage；同步 retire | 私有 VB/IB；逻辑失效后 marker 延迟销毁 |
+| `retireStaticMesh(mesh, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
+| `drainGpuRetirements` | 已完成，无操作 | owner-thread completion-only flush；有界失败返回结构化错误 |
 | `setMesh3DBinding` | 校验/记录 binding | mesh key → GPU mesh |
 | `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D MR submit **采样** `s_texColor`（默认 1×1 白） |
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
@@ -111,9 +114,17 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 `GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
 失败；Asset Catalog 使用 `AssetId`，产品 resolver 显式映射 AssetId → key → GPU handle。
 
-`UploadTicketLedger` 与 `CpuSubmissionCompletionLedger` 均为 backend-neutral 逻辑/CPU completion
-首切片。真实 bgfx resource API 可上传 Cooked Texture2D/StaticMesh；其资源所有权由 bgfx backend 管理，
-但 GPU fence 驱动的 Asset 异步 retirement 尚未与通用账本合并。
+`UploadTicketLedger` 与 `CpuSubmissionCompletionLedger` 仍分别表达 staging 与 CPU completion。GPU 资源
+retirement 不复用它们：`destroy*` 是无外部 pin 的便利入口，`retire*` 成功才转移 pin；
+`RenderStatistics` 分别报告 `pendingGpuRetirements/completedGpuRetirements`。
+
+bgfx retirement marker 使用 1×1 source texture 与 `BLIT_DST | READ_BACK` destination texture；在最后一个
+view 提交 blit/readback，仅以 `readTexture()` 的 ready frame 判断完成。active/suspended/capture/drain 都会
+推进同一 timeline；uint32 frame wrap 使用半区间比较。缺少 blit/readback capability 时，带外部 pin 的
+请求在任何 generation/binding/native slot 变化前返回 `GpuRetirementUnsupported`，且不消费 pin；无外部
+pin 的 destroy 则立即使逻辑 handle/binding 失效并把 native handle 交给 `bgfx::destroy` 的 backend-owned
+deferred destruction，不进入 marker timeline。只有已经进入 marker timeline、但有界 drain 未完成的外部
+pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 
 ## bgfx backend
 
@@ -125,6 +136,7 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 - Opaque3D experimental metallic-roughness hybrid mesh/depth pass（单次有界0..4 directional lights）；
 - UI solid/glyph pass；
 - Texture2D/StaticMesh generation storage 与 key binding；
+- Texture2D/StaticMesh backend-proven retirement marker、suspend flush 与 shutdown hard drain；
 - present 后 primary framebuffer capture；
 - D3D11/OpenGL/Vulkan 对应 embedded shader 选择（按构建与平台可用性）。
 
@@ -156,5 +168,5 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 
 测试映射与 Visual 证据规则见 [测试说明](testing.md)。`RENDER-001` 已落地 experimental MR +
 MR/normal/factors，以及唯一 `Mesh3DLightingDesc` 有界4 directional-light 提交；产品 sample 一次提交3灯。
-完整 PBR / IBL / shadow / light component / pass scheduling 仍后置。真 GPU fence completion
-（RUNTIME-002 尾巴）与跨 DPI/GPU visual gate（`UI-003`）亦后置。
+完整 PBR / IBL / shadow / light component / pass scheduling、通用 GPU submission fence 与跨 DPI/GPU
+visual gate（`UI-003`）仍后置；Texture/Mesh resource retirement 已不属于这些后置项。
