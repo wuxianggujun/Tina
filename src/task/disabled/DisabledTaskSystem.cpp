@@ -2,6 +2,7 @@
 
 #include <tina/task/TaskErrors.hpp>
 
+#include <cmath>
 #include <memory>
 
 namespace Tina::Task {
@@ -46,6 +47,17 @@ class DisabledTaskSystem final : public ITaskSystem {
     void requestStop() noexcept override
     {
         m_stopped = true;
+    }
+
+    [[nodiscard]] Core::Status shutdownAndJoinFor(Core::Duration deadline) noexcept override
+    {
+        if (!std::isfinite(deadline.count()) || deadline <= Core::Duration::zero())
+        {
+            return Core::failure(TaskErrorCode::InvalidArgument,
+                                 "shutdownAndJoinFor requires a finite positive deadline");
+        }
+        m_stopped = true;
+        return Core::success();
     }
 
     void shutdownAndJoin() noexcept override

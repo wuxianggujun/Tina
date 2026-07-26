@@ -12,6 +12,7 @@
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/runtime/spi/PlatformEventDispatcher.hpp>
+#include <tina/task/TaskErrors.hpp>
 #include <tina/task/TaskSystem.hpp>
 
 #include <tina/core/base/ScopeExit.hpp>
@@ -435,6 +436,7 @@ renderSceneFrameParameters(const Platform::PlatformFrameView& frame) noexcept
 
 struct EngineModules final {
     // Created first, destroyed last (docs/runtime.md module order).
+    Core::Duration shutdownDeadline;
     std::unique_ptr<Core::Diagnostics::Diagnostics> diagnostics;
     std::unique_ptr<Core::IMonotonicClock> monotonicClock;
     std::unique_ptr<Platform::IPlatformBackend> platform;
@@ -444,7 +446,10 @@ struct EngineModules final {
     std::optional<Audio::AudioEngine> audioEngine;
     Integration::IPrimaryWindowSurfaceProvider* windowSurfaceProvider = nullptr;
 
-    EngineModules() = default;
+    explicit EngineModules(Core::Duration configuredShutdownDeadline) noexcept
+        : shutdownDeadline(configuredShutdownDeadline)
+    {
+    }
     EngineModules(const EngineModules&) = delete;
     EngineModules& operator=(const EngineModules&) = delete;
     EngineModules(EngineModules&&) noexcept = default;
@@ -469,8 +474,7 @@ struct EngineModules final {
         }
         if (taskSystem != nullptr)
         {
-            taskSystem->shutdownAndJoin();
-            taskSystem.reset();
+            shutdownTaskSystem();
         }
         if (platform != nullptr)
         {
@@ -489,6 +493,33 @@ struct EngineModules final {
     [[nodiscard]] Audio::AudioEngine* audioEnginePtr() noexcept
     {
         return audioEngine.has_value() ? &(*audioEngine) : nullptr;
+    }
+
+  private:
+    void shutdownTaskSystem() noexcept
+    {
+        Core::Status shutdownStatus = taskSystem->shutdownAndJoinFor(shutdownDeadline);
+        if (!shutdownStatus)
+        {
+            const Core::ErrorCode runtimeErrorCode =
+                shutdownStatus.error().code == Task::TaskErrorCode::WaitTimeout
+                    ? RuntimeErrorCode::ShutdownDeadlineExceeded
+                    : RuntimeErrorCode::LifecycleInvariantViolation;
+            const std::string_view diagnosticMessage =
+                runtimeErrorCode == RuntimeErrorCode::ShutdownDeadlineExceeded
+                    ? "ShutdownDeadlineExceeded: TaskSystem shutdown exceeded EngineConfig::shutdownDeadline"
+                    : "LifecycleInvariantViolation: TaskSystem shutdown failed unexpectedly";
+            if (diagnostics != nullptr)
+            {
+                diagnostics->channel().write({
+                    .level = Core::Diagnostics::LogLevel::Error,
+                    .category = "runtime.lifecycle",
+                    .message = diagnosticMessage,
+                });
+            }
+            std::terminate();
+        }
+        taskSystem.reset();
     }
 };
 
@@ -1645,7 +1676,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             return Core::failure(std::move(error));
         }
 
-        EngineModules modules;
+        EngineModules modules{ownedConfig.shutdownDeadline};
         {
             auto diagnosticsResult = Core::Diagnostics::Diagnostics::Create({});
             if (!diagnosticsResult)

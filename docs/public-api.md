@@ -91,6 +91,12 @@ backend，也不取得 `IRenderDevice*`。
 `EngineHost` 在创建线程拥有全部 Runtime module，`run()` 只允许一次。跨线程 run 返回错误；错误线程
 析构带 native owner 的 Host 会终止，避免在错误线程调用平台 API。
 
+`EngineConfig::shutdownDeadline` 默认5秒，必须是 finite positive `Core::Duration`。它只预算
+`EngineHost` 关闭过程中 `ITaskSystem::shutdownAndJoinFor()` 的 Worker-exit/join 阶段，不覆盖此前的
+`AudioEngine::shutdown()`、`IRenderDevice::shutdown()`，也不是整个 Host shutdown 的总耗时上限。若该
+TaskSystem 阶段返回 `TaskErrorCode::WaitTimeout`，Host 先写入 `runtime.lifecycle` Diagnostics，再
+`std::terminate()`；不会 reset TaskSystem 或继续析构 Platform、Clock、Diagnostics 等剩余 owner。
+
 ## `IGameApplication` 与 `IGameState`
 
 当前 Application 接口：
@@ -170,7 +176,9 @@ generation 断连或 raw reset 失去该 generation 时 transaction 取消，不
 ## Task
 
 `ITaskSystem` 提供 `scheduleIo`、`scheduleCpu`、`postMain`、`pumpMain`、`requestStop`、
-`shutdownAndJoin`。`TaskSystemCreateParams::cpuWorkerCount=0` 在直接工厂中表示 CPU domain disabled；
+`shutdownAndJoinFor`、`shutdownAndJoin`。有界关闭只接受 finite positive `Core::Duration`；非法值不触发
+stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Worker ownership 供后续重试。
+`TaskSystemCreateParams::cpuWorkerCount=0` 在直接工厂中表示 CPU domain disabled；
 `Desktop::CreateEngine` 经 `resolveDesktopTaskSystemParams` 将 0 解析为 `max(1, hardware_concurrency-1)`。
 `TaskGroup` 提供结构化 pending/wait，不允许 detach/强杀。
 

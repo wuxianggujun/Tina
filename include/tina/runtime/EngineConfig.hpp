@@ -37,6 +37,7 @@ struct EngineConfig final {
     PlatformEventSubscriptionConfig platformEventSubscriptions{};
     Core::FixedStepConfig fixedSimulation;
     double gameplayTimeScale = 1.0;
+    // Maximum TaskSystem worker-exit/join wait during EngineHost shutdown.
     Core::Duration shutdownDeadline{5.0};
 
     [[nodiscard]] static EngineConfig Defaults();

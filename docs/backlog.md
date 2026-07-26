@@ -57,6 +57,7 @@
 
 | ID | 完成项 | 证据入口 |
 | --- | --- | --- |
+| RUNTIME-SHUTDOWN-DEADLINE | `shutdownAndJoinFor` 有界 stop/join；invalid 不触发 stop，timeout 保留 stopping TaskSystem/Worker/owner 并可 retry；Host 仅为 TaskSystem worker-exit/join 使用配置 deadline，超时先写 Diagnostics 再 terminate，绝不继续析构 owner；不 detach/强杀 | [Task](task-system.md) · [Runtime](runtime.md) · Disabled/Bounded Task shutdown tests · EngineHost Task-shutdown deadline/death tests |
 | DONE-001 | Legacy `Tina.exe`、旧横版 2D 与旧 UI 产品图删除 | [M12 退役说明](m12-legacy-ui-retirement.md) |
 | DONE-002 | `EngineHost`、Platform/Input、WindowSurface、Desktop/bgfx 垂直切片 | [架构](architecture.md) · [测试](testing.md) |
 | DONE-003 | Scene 2D/3D extraction 与 Catalog/Cooked/Handle/Lease/Task/Upload 首轮 | [Scene](scene-ecs.md) · [资源](resources.md) |

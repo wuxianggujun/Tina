@@ -10,6 +10,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <memory_resource>
 #include <new>
@@ -85,6 +86,17 @@ class ControlledTaskSystem final : public Task::ITaskSystem {
     {
         m_stopping = true;
         m_io.clear();
+    }
+
+    [[nodiscard]] Core::Status shutdownAndJoinFor(Core::Duration deadline) noexcept override
+    {
+        if (!std::isfinite(deadline.count()) || deadline <= Core::Duration::zero())
+        {
+            return Core::failure(Task::TaskErrorCode::InvalidArgument,
+                                 "shutdown deadline must be finite and greater than zero");
+        }
+        shutdownAndJoin();
+        return Core::success();
     }
 
     void rejectNextIo(Core::u32 count = 1U) noexcept

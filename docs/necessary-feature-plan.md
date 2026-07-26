@@ -24,6 +24,7 @@
 | N6 | 2D-TILEMAP-STREAM | 已完成 | TileMap v3 root/TileMapChunk v1、deferred dependency、固定容量 Camera/layer demand/cancel/unload、resident generation dirty cache 与产品 sample 已贯通 |
 | N7 | 2D-AUDIO-ADV | 已完成 | voice gain/pitch/pan、可取消 fade、线性重采样、one-shot retirement，以及 bounded PCM streaming 的原子 submit、EOF/underrun/cancel、terminal backpressure 与 shutdown 已贯通测试和产品 sample |
 | N8 | 2D-FX | 已完成 | standalone ParticleSystem2D/Trail2D 的固定容量 PMR、确定性/事务失败/lifetime/width 契约已贯通 `tina_scene_tests` 与 product-2d schema 9 |
+| N9 | RUNTIME-SHUTDOWN-DEADLINE | 已完成 | `ITaskSystem` 有界 stop/join、timeout ownership retention/retry 与 `EngineHost` Diagnostics + terminate hard boundary 已贯通 `tina_tests` |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -378,6 +379,46 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 `
 
 N8 不包含 Cooked FX asset schema、effect graph/editor、GPU particle simulation、mesh-ribbon trail、collision
 或网络 rollback；当前 trail 按独立 Sprite2D segment extraction，不宣称通用 ribbon renderer。
+
+## N9 - RUNTIME-SHUTDOWN-DEADLINE
+
+### 已完成契约
+
+- `ITaskSystem` 新增
+  `[[nodiscard]] Core::Status shutdownAndJoinFor(Core::Duration deadline) noexcept`。deadline 必须 finite 且
+  大于0；非法值返回 `TaskErrorCode::InvalidArgument`，不得触发 stop 或改变队列/Worker 状态。
+- 有效调用先进入 stopping 并协作停止，等待所有 Worker 退出。deadline 内完成后 join 并清理线程/队列；
+  已完成后重复调用仍成功。
+- deadline 到期返回 `TaskErrorCode::WaitTimeout`；TaskSystem 保持 stopping，线程、队列和 owner storage 均
+  不 join、不 clear、不 reset。阻塞任务放行后，同一对象可再次调用并成功收口。
+- `EngineHost` 将已校验为 finite positive 的 `EngineConfig::shutdownDeadline` 原样传给 TaskSystem。该值只
+  预算 `shutdownAndJoinFor()` 的 Worker-exit/join 阶段，不覆盖此前的 AudioEngine/RenderDevice shutdown，
+  也不是整个 Host shutdown 的总耗时上限。TaskSystem 超时后，Host 先向仍存活的 Diagnostics 写入
+  `runtime.lifecycle` 错误，再调用 `std::terminate()`；不得继续 reset TaskSystem 或析构 Platform、Clock、
+  Diagnostics 等剩余 owner。
+- 关闭路径不 detach、不强杀 Worker；deadline 是进程级 hard failure boundary，不是忽略活跃线程后继续
+  析构的许可。
+
+### 完成结果
+
+| 阶段 | 完成结果 |
+| --- | --- |
+| N9.1 | Task 公共 API 与 Disabled/Bounded 实现覆盖 invalid、idle、queued drain、timeout 保留状态、release 后 retry、重复成功 |
+| N9.2 | `EngineHost` 仅为 TaskSystem worker-exit/join 使用配置 deadline；成功路径继续逆序析构，timeout death path 证明先写 Diagnostics 且不继续析构剩余 owner |
+| N9.3 | shutdown deadline 聚焦门禁与完整 `tina_tests` 已直接执行通过；公开头隔离由同一 target 编译覆盖，文档一致性扫描通过 |
+
+### 验收
+
+```powershell
+cmake --build --preset windows-vnext-debug --target tina_tests -- /m:1 /v:m
+out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes `
+  --gtest_filter="DisabledTaskSystemTest.ShutdownDeadline*:BoundedTaskSystemTest.ShutdownDeadline*:EngineHostCreationTest.PassesConfiguredShutdownDeadlineToTaskSystem:EngineHostShutdownDeadlineDeathTest.*"
+out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+```
+
+N9 不包含通用 State TaskGroup soft deadline、Worker 抢占/强制取消、detach、跨进程 watchdog 或 crash
+dump 协议；这些能力需要独立契约和门禁。
 
 ## 每项收口清单
 

@@ -6,6 +6,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <limits>
+#include <mutex>
+#include <semaphore>
 #include <thread>
 
 namespace Tina::Tests {
@@ -187,6 +191,214 @@ TEST(BoundedTaskSystemTest, DesktopResolvedParamsEnableScheduleCpu)
     }
     EXPECT_EQ(value.load(std::memory_order_acquire), 1);
     (*system)->shutdownAndJoin();
+}
+
+TEST(BoundedTaskSystemTest, ShutdownDeadlineRejectsInvalidValuesWithoutStopping)
+{
+    auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .ioQueueCapacity = 4,
+        .mainQueueCapacity = 4,
+    });
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    const Core::Duration invalidDeadlines[] = {
+        Core::Duration::zero(),
+        Core::Duration{-1.0},
+        Core::Duration{std::numeric_limits<double>::infinity()},
+        Core::Duration{std::numeric_limits<double>::quiet_NaN()},
+    };
+    for (const Core::Duration deadline : invalidDeadlines)
+    {
+        const auto status = (*system)->shutdownAndJoinFor(deadline);
+        ASSERT_FALSE(status.has_value());
+        EXPECT_EQ(status.error().code, Task::TaskErrorCode::InvalidArgument);
+        EXPECT_FALSE((*system)->isStopping());
+    }
+
+    (*system)->shutdownAndJoin();
+}
+
+TEST(BoundedTaskSystemTest, ShutdownDeadlineSucceedsWhenIdleAndCanRepeat)
+{
+    auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .cpuWorkerCount = 1,
+        .ioQueueCapacity = 4,
+        .cpuQueueCapacity = 4,
+        .mainQueueCapacity = 4,
+    });
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    EXPECT_TRUE((*system)
+                    ->shutdownAndJoinFor(Core::Duration{std::numeric_limits<double>::max()})
+                    .has_value());
+    EXPECT_TRUE((*system)->isStopping());
+    EXPECT_TRUE((*system)->isIdle());
+    EXPECT_TRUE((*system)->shutdownAndJoinFor(Core::Duration{0.5}).has_value());
+}
+
+TEST(BoundedTaskSystemTest, ShutdownDeadlineTimeoutPreservesStoppingStateForRetry)
+{
+    auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .ioQueueCapacity = 4,
+        .mainQueueCapacity = 4,
+    });
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    std::binary_semaphore workerStarted{0};
+    std::binary_semaphore releaseWorker{0};
+    std::atomic<bool> workerCompleted{false};
+    ASSERT_TRUE((*system)
+                    ->scheduleIo([&] {
+                        workerStarted.release();
+                        releaseWorker.acquire();
+                        workerCompleted.store(true, std::memory_order_release);
+                    })
+                    .has_value());
+    workerStarted.acquire();
+
+    const auto timeout = (*system)->shutdownAndJoinFor(Core::Duration{0.02});
+    EXPECT_FALSE(timeout.has_value());
+    if (!timeout.has_value())
+    {
+        EXPECT_EQ(timeout.error().code, Task::TaskErrorCode::WaitTimeout);
+    }
+    EXPECT_TRUE((*system)->isStopping());
+    EXPECT_FALSE((*system)->isIdle());
+    const auto rejected = (*system)->scheduleIo([] {});
+    EXPECT_FALSE(rejected.has_value());
+    if (!rejected.has_value())
+    {
+        EXPECT_EQ(rejected.error().code, Task::TaskErrorCode::TaskSystemStopped);
+    }
+
+    releaseWorker.release();
+    const auto retry = (*system)->shutdownAndJoinFor(Core::Duration{1.0});
+    ASSERT_TRUE(retry.has_value()) << retry.error().message;
+    EXPECT_TRUE(workerCompleted.load(std::memory_order_acquire));
+    EXPECT_TRUE((*system)->isIdle());
+}
+
+TEST(BoundedTaskSystemTest, ShutdownDeadlineDrainsQueuedWorkerTasks)
+{
+    auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .ioQueueCapacity = 4,
+        .mainQueueCapacity = 4,
+    });
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    std::binary_semaphore workerStarted{0};
+    std::binary_semaphore releaseWorker{0};
+    std::atomic<int> completed{0};
+    ASSERT_TRUE((*system)
+                    ->scheduleIo([&] {
+                        workerStarted.release();
+                        releaseWorker.acquire();
+                        completed.fetch_add(1, std::memory_order_relaxed);
+                    })
+                    .has_value());
+    workerStarted.acquire();
+    for (int index = 0; index < 3; ++index)
+    {
+        const auto queued = (*system)->scheduleIo([&] { completed.fetch_add(1, std::memory_order_relaxed); });
+        if (!queued.has_value())
+        {
+            releaseWorker.release();
+            (*system)->shutdownAndJoin();
+            FAIL() << queued.error().message;
+            return;
+        }
+    }
+
+    std::jthread unblockWorker([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        releaseWorker.release();
+    });
+    const auto status = (*system)->shutdownAndJoinFor(Core::Duration{1.0});
+    ASSERT_TRUE(status.has_value()) << status.error().message;
+    EXPECT_EQ(completed.load(std::memory_order_relaxed), 4);
+    EXPECT_TRUE((*system)->isIdle());
+}
+
+TEST(BoundedTaskSystemTest, ShutdownDeadlineIncludesShutdownSerializationWait)
+{
+    auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .ioQueueCapacity = 4,
+        .mainQueueCapacity = 4,
+    });
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    std::binary_semaphore workerStarted{0};
+    std::binary_semaphore releaseWorker{0};
+    ASSERT_TRUE((*system)
+                    ->scheduleIo([&] {
+                        workerStarted.release();
+                        releaseWorker.acquire();
+                    })
+                    .has_value());
+    workerStarted.acquire();
+
+    std::atomic<bool> releaseIssued{false};
+    const auto releaseOnce = [&] {
+        if (!releaseIssued.exchange(true, std::memory_order_acq_rel))
+        {
+            releaseWorker.release();
+        }
+    };
+    std::mutex safetyMutex;
+    std::condition_variable safetyCv;
+    bool cancelSafetyRelease = false;
+    std::jthread safetyRelease([&] {
+        std::unique_lock lock(safetyMutex);
+        if (!safetyCv.wait_for(lock, std::chrono::seconds(1), [&] { return cancelSafetyRelease; }))
+        {
+            releaseOnce();
+        }
+    });
+
+    std::atomic<bool> indefiniteShutdownCompleted{false};
+    std::jthread indefiniteShutdown([&] {
+        (*system)->shutdownAndJoin();
+        indefiniteShutdownCompleted.store(true, std::memory_order_release);
+    });
+    for (int attempt = 0; attempt < 200 && !(*system)->isStopping(); ++attempt)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!(*system)->isStopping())
+    {
+        releaseOnce();
+        indefiniteShutdown.join();
+        {
+            std::scoped_lock lock(safetyMutex);
+            cancelSafetyRelease = true;
+        }
+        safetyCv.notify_one();
+        FAIL() << "indefinite shutdown did not enter stopping state";
+        return;
+    }
+
+    const auto timeout = (*system)->shutdownAndJoinFor(Core::Duration{0.02});
+    EXPECT_FALSE(timeout.has_value());
+    if (!timeout.has_value())
+    {
+        EXPECT_EQ(timeout.error().code, Task::TaskErrorCode::WaitTimeout);
+    }
+    EXPECT_FALSE(indefiniteShutdownCompleted.load(std::memory_order_acquire));
+
+    {
+        std::scoped_lock lock(safetyMutex);
+        cancelSafetyRelease = true;
+    }
+    safetyCv.notify_one();
+    releaseOnce();
+    indefiniteShutdown.join();
+    EXPECT_TRUE(indefiniteShutdownCompleted.load(std::memory_order_acquire));
+    EXPECT_TRUE((*system)->shutdownAndJoinFor(Core::Duration{0.5}).has_value());
 }
 
 } // namespace Tina::Tests

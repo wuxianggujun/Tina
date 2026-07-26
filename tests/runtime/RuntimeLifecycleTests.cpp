@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -235,6 +237,17 @@ class LoggingTaskSystem final : public Task::ITaskSystem {
             events_->emplace_back("task.shutdown");
             stopped_ = true;
         }
+    }
+
+    [[nodiscard]] Core::Status shutdownAndJoinFor(Core::Duration deadline) noexcept override
+    {
+        if (!std::isfinite(deadline.count()) || deadline <= Core::Duration::zero())
+        {
+            return Core::failure(Task::TaskErrorCode::InvalidArgument,
+                                 "shutdown deadline must be finite and greater than zero");
+        }
+        shutdownAndJoin();
+        return Core::success();
     }
 
   private:
@@ -512,6 +525,10 @@ struct RuntimeProbe final {
     CommittedFailurePoint failurePoint = CommittedFailurePoint::None;
     InjectedOutcome failureOutcome = InjectedOutcome::ReturnError;
     std::optional<InjectedOutcome> initialMetricsFailure;
+    std::optional<Core::Duration> taskShutdownDeadline;
+    bool taskShutdownTimesOut = false;
+    bool failIfOwnerDestroyedAfterTaskTimeout = false;
+    bool taskShutdownTimedOut = false;
     bool platformExitRequested = false;
     bool omitInitialPrimaryWindowMetrics = false;
     bool emitPlatformEvent = false;
@@ -551,6 +568,10 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
 
     ~AdvancingPlatform() override
     {
+        if (probe_->failIfOwnerDestroyedAfterTaskTimeout && probe_->taskShutdownTimedOut)
+        {
+            std::_Exit(89);
+        }
         probe_->events.emplace_back("platform.destroy");
     }
 
@@ -733,6 +754,10 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
 
     void shutdown() noexcept override
     {
+        if (probe_->failIfOwnerDestroyedAfterTaskTimeout && probe_->taskShutdownTimedOut)
+        {
+            std::_Exit(89);
+        }
         if (!stopped_)
         {
             probe_->events.emplace_back("platform.shutdown");
@@ -917,6 +942,10 @@ class ProbeTaskSystem final : public Task::ITaskSystem {
 
     ~ProbeTaskSystem() override
     {
+        if (probe_->failIfOwnerDestroyedAfterTaskTimeout && probe_->taskShutdownTimedOut)
+        {
+            std::_Exit(88);
+        }
         probe_->events.emplace_back("task.destroy");
     }
 
@@ -966,6 +995,25 @@ class ProbeTaskSystem final : public Task::ITaskSystem {
             probe_->events.emplace_back("task.shutdown");
             stopped_ = true;
         }
+    }
+
+    [[nodiscard]] Core::Status shutdownAndJoinFor(Core::Duration deadline) noexcept override
+    {
+        probe_->taskShutdownDeadline = deadline;
+        if (!std::isfinite(deadline.count()) || deadline <= Core::Duration::zero())
+        {
+            return Core::failure(Task::TaskErrorCode::InvalidArgument,
+                                 "shutdown deadline must be finite and greater than zero");
+        }
+        if (probe_->taskShutdownTimesOut)
+        {
+            probe_->taskShutdownTimedOut = true;
+            stopped_ = true;
+            return Core::failure(Task::TaskErrorCode::WaitTimeout,
+                                 "controlled TaskSystem shutdown deadline exceeded");
+        }
+        shutdownAndJoin();
+        return Core::success();
     }
 
   private:
@@ -1907,6 +1955,52 @@ Core::Result<std::unique_ptr<EngineHost>> createRuntimeHost(RuntimeProbe& probe,
     return EngineHost::Create(std::move(config), makeRuntimeFactories(probe));
 }
 
+constexpr int ShutdownDeadlineTerminateExitCode = 86;
+
+void installShutdownDeadlineTerminateHandler() noexcept
+{
+    std::set_terminate([]() noexcept { std::_Exit(ShutdownDeadlineTerminateExitCode); });
+}
+
+void destroyReadyHostWithTimedOutTaskSystem()
+{
+    installShutdownDeadlineTerminateHandler();
+    RuntimeProbe runtime;
+    runtime.taskShutdownTimesOut = true;
+    runtime.failIfOwnerDestroyedAfterTaskTimeout = true;
+
+    auto config = EngineConfig::Defaults();
+    config.shutdownDeadline = Core::Duration{0.001};
+    auto host = createRuntimeHost(runtime, config);
+    if (!host)
+    {
+        std::_Exit(80);
+    }
+    (*host).reset();
+    std::_Exit(81);
+}
+
+void rollBackCreateWithTimedOutTaskSystem()
+{
+    installShutdownDeadlineTerminateHandler();
+    RuntimeProbe runtime;
+    runtime.taskShutdownTimesOut = true;
+    runtime.failIfOwnerDestroyedAfterTaskTimeout = true;
+
+    EngineCompositionFactories factories = makeRuntimeFactories(runtime);
+    auto& platformRender = std::get<IndependentPlatformRenderFactories>(factories.platformRender);
+    platformRender.createRenderDevice =
+        [](const Render::RenderDeviceCreateParams&) -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
+        return Core::failure(Core::CoreErrorCode::Internal, "injected render creation failure");
+    };
+
+    auto config = EngineConfig::Defaults();
+    config.shutdownDeadline = Core::Duration{0.001};
+    auto host = EngineHost::Create(config, std::move(factories));
+    static_cast<void>(host);
+    std::_Exit(82);
+}
+
 } // namespace
 
 TEST(EngineConfigTest, DefaultsAreValidAndUseSixtyHertzWithFourCatchUpSteps)
@@ -2262,6 +2356,33 @@ TEST(EngineHostCreationTest, DestroyingReadyHostWithoutRunShutsModulesDownInReve
                           "platform.destroy",
                           "clock.destroy",
                       }));
+}
+
+TEST(EngineHostCreationTest, PassesConfiguredShutdownDeadlineToTaskSystem)
+{
+    RuntimeProbe runtime;
+    auto config = EngineConfig::Defaults();
+    config.shutdownDeadline = Core::Duration{0.125};
+
+    auto host = createRuntimeHost(runtime, config);
+    ASSERT_TRUE(host.has_value()) << host.error().message;
+    host->reset();
+
+    ASSERT_TRUE(runtime.taskShutdownDeadline.has_value());
+    EXPECT_DOUBLE_EQ(runtime.taskShutdownDeadline->count(), config.shutdownDeadline.count());
+    EXPECT_FALSE(runtime.taskShutdownTimedOut);
+}
+
+TEST(EngineHostShutdownDeadlineDeathTest, ReadyHostTimeoutTerminatesBeforeTaskOwnerDestruction)
+{
+    EXPECT_EXIT(destroyReadyHostWithTimedOutTaskSystem(),
+                testing::ExitedWithCode(ShutdownDeadlineTerminateExitCode), "ShutdownDeadlineExceeded");
+}
+
+TEST(EngineHostShutdownDeadlineDeathTest, CreateRollbackTimeoutTerminatesBeforeTaskOwnerDestruction)
+{
+    EXPECT_EXIT(rollBackCreateWithTimedOutTaskSystem(),
+                testing::ExitedWithCode(ShutdownDeadlineTerminateExitCode), "ShutdownDeadlineExceeded");
 }
 
 TEST(EngineHostThreadAffinityTest, RejectsRunOnAnotherThreadWithoutConsumingTheHost)

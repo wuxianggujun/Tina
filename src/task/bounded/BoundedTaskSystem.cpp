@@ -3,6 +3,8 @@
 #include <tina/task/TaskErrors.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -15,6 +17,24 @@
 namespace Tina::Task {
 namespace {
 
+[[nodiscard]] Core::MonotonicTimePoint shutdownDeadlineFromNow(Core::Duration deadline) noexcept
+{
+    const Core::MonotonicTimePoint now = Core::MonotonicNativeClock::now();
+    const Core::MonotonicDuration maximumRemaining = Core::MonotonicTimePoint::max() - now;
+    constexpr long double ticksPerSecond =
+        static_cast<long double>(Core::MonotonicDuration::period::den) /
+        static_cast<long double>(Core::MonotonicDuration::period::num);
+    const long double safeMaximumTicks =
+        std::nextafter(static_cast<long double>(maximumRemaining.count()), 0.0L);
+    const long double requestedSeconds = static_cast<long double>(deadline.count());
+    if (!std::isfinite(requestedSeconds) || requestedSeconds >= safeMaximumTicks / ticksPerSecond)
+    {
+        return Core::MonotonicTimePoint::max();
+    }
+    const long double requestedTicks = requestedSeconds * ticksPerSecond;
+    return now + Core::MonotonicDuration{static_cast<Core::MonotonicDuration::rep>(requestedTicks)};
+}
+
 class BoundedTaskSystem final : public ITaskSystem {
   public:
     BoundedTaskSystem(Core::u32 ioWorkerCount, Core::u32 cpuWorkerCount, Core::usize ioQueueCapacity,
@@ -22,15 +42,24 @@ class BoundedTaskSystem final : public ITaskSystem {
         : m_ioQueueCapacity(ioQueueCapacity), m_cpuQueueCapacity(cpuQueueCapacity),
           m_mainQueueCapacity(mainQueueCapacity)
     {
-        m_ioWorkers.reserve(ioWorkerCount);
-        for (Core::u32 index = 0; index < ioWorkerCount; ++index)
+        try
         {
-            m_ioWorkers.emplace_back([this] { ioWorkerLoop(); });
-        }
-        m_cpuWorkers.reserve(cpuWorkerCount);
-        for (Core::u32 index = 0; index < cpuWorkerCount; ++index)
+            m_ioWorkers.reserve(ioWorkerCount);
+            for (Core::u32 index = 0; index < ioWorkerCount; ++index)
+            {
+                m_ioWorkers.emplace_back([this] { ioWorkerLoop(); });
+            }
+            m_cpuWorkers.reserve(cpuWorkerCount);
+            for (Core::u32 index = 0; index < cpuWorkerCount; ++index)
+            {
+                m_cpuWorkers.emplace_back([this] { cpuWorkerLoop(); });
+            }
+        } catch (...)
         {
-            m_cpuWorkers.emplace_back([this] { cpuWorkerLoop(); });
+            // A failed std::thread construction leaves earlier workers joinable. Roll them
+            // back before vector destruction so the original construction failure can escape.
+            shutdownAndJoin();
+            throw;
         }
     }
 
@@ -159,9 +188,54 @@ class BoundedTaskSystem final : public ITaskSystem {
         m_cpuCv.notify_all();
     }
 
+    [[nodiscard]] Core::Status shutdownAndJoinFor(Core::Duration deadline) noexcept override
+    {
+        if (!std::isfinite(deadline.count()) || deadline <= Core::Duration::zero())
+        {
+            return Core::failure(TaskErrorCode::InvalidArgument,
+                                 "shutdownAndJoinFor requires a finite positive deadline");
+        }
+
+        const Core::MonotonicTimePoint shutdownDeadline = shutdownDeadlineFromNow(deadline);
+        std::unique_lock<std::timed_mutex> shutdownLock(m_shutdownMutex, std::defer_lock);
+        if (!shutdownLock.try_lock_until(shutdownDeadline))
+        {
+            return Core::failure(TaskErrorCode::WaitTimeout, "task system shutdown deadline exceeded");
+        }
+        requestStop();
+        std::unique_lock lock(m_mutex);
+        if (!m_workerExitCv.wait_until(lock, shutdownDeadline, [this] { return allWorkersExitedLocked(); }))
+        {
+            return Core::failure(TaskErrorCode::WaitTimeout, "task system shutdown deadline exceeded");
+        }
+        lock.unlock();
+        finishShutdown();
+        return Core::success();
+    }
+
     void shutdownAndJoin() noexcept override
     {
+        std::scoped_lock shutdownLock(m_shutdownMutex);
         requestStop();
+        std::unique_lock lock(m_mutex);
+        m_workerExitCv.wait(lock, [this] { return allWorkersExitedLocked(); });
+        lock.unlock();
+        finishShutdown();
+    }
+
+  private:
+    [[nodiscard]] bool allWorkersExitedLocked() const noexcept
+    {
+        return m_shutdownJoined ||
+               m_exitedWorkerCount == static_cast<Core::u32>(m_ioWorkers.size() + m_cpuWorkers.size());
+    }
+
+    void finishShutdown() noexcept
+    {
+        if (m_shutdownJoined)
+        {
+            return;
+        }
         for (auto& worker : m_ioWorkers)
         {
             if (worker.joinable())
@@ -184,9 +258,9 @@ class BoundedTaskSystem final : public ITaskSystem {
         m_mainQueue.clear();
         m_activeIo = 0;
         m_activeCpu = 0;
+        m_shutdownJoined = true;
     }
 
-  private:
     void ioWorkerLoop()
     {
         workerLoop(m_ioQueue, m_ioCv, m_activeIo);
@@ -207,7 +281,7 @@ class BoundedTaskSystem final : public ITaskSystem {
                 cv.wait(lock, [&] { return m_stopping.load(std::memory_order_relaxed) || !queue.empty(); });
                 if (m_stopping.load(std::memory_order_relaxed) && queue.empty())
                 {
-                    return;
+                    break;
                 }
                 work = std::move(queue.front());
                 queue.pop_front();
@@ -231,6 +305,11 @@ class BoundedTaskSystem final : public ITaskSystem {
                 }
             }
         }
+        {
+            std::scoped_lock lock(m_mutex);
+            ++m_exitedWorkerCount;
+        }
+        m_workerExitCv.notify_all();
     }
 
     const Core::usize m_ioQueueCapacity;
@@ -239,6 +318,7 @@ class BoundedTaskSystem final : public ITaskSystem {
     mutable std::mutex m_mutex;
     std::condition_variable m_ioCv;
     std::condition_variable m_cpuCv;
+    std::condition_variable m_workerExitCv;
     std::deque<TaskCallable> m_ioQueue;
     std::deque<TaskCallable> m_cpuQueue;
     std::deque<TaskCallable> m_mainQueue;
@@ -246,6 +326,9 @@ class BoundedTaskSystem final : public ITaskSystem {
     std::vector<std::thread> m_cpuWorkers;
     Core::u32 m_activeIo = 0;
     Core::u32 m_activeCpu = 0;
+    Core::u32 m_exitedWorkerCount = 0;
+    bool m_shutdownJoined = false;
+    std::timed_mutex m_shutdownMutex;
     std::atomic<bool> m_stopping{false};
 };
 

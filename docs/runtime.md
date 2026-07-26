@@ -178,7 +178,7 @@ Platform dispatcher 关闭后，模块按以下顺序退出：
 ```text
 AudioEngine
   -> RenderDevice
-  -> TaskSystem::shutdownAndJoin
+  -> TaskSystem::shutdownAndJoinFor(EngineConfig::shutdownDeadline)
   -> Platform
   -> MonotonicClock
   -> Diagnostics
@@ -186,6 +186,13 @@ AudioEngine
 
 主窗口 UIContext 在 Render、Task、Platform 与 Clock 之前于 owner thread 销毁。Task 未 join 前不得
 释放其可能访问的 owner；错误线程销毁带 native 资源的 Host 会终止进程，而不是冒险制造 UAF。
+
+`shutdownDeadline` 在配置校验时必须 finite 且大于0，只预算 Host 调用
+`TaskSystem::shutdownAndJoinFor()` 后的 Worker-exit/join 阶段。此前的 AudioEngine/RenderDevice shutdown
+不计入该值，因此它不是整个 Host shutdown 的总耗时上限。TaskSystem 在 deadline 内 join 成功后才 reset
+并继续逆序析构。若返回 timeout，Host 先通过仍存活的 Diagnostics 写入 `runtime.lifecycle` 错误，再调用
+`std::terminate()`；TaskSystem、Worker、Platform、Clock 与 Diagnostics ownership 均不会沿超时分支继续
+析构。该路径不 detach、不强杀 Worker，也不把 timeout 当成可恢复的 Host shutdown 结果。
 
 ## 已落地 vs 后置
 
@@ -197,6 +204,7 @@ AudioEngine
 | `blocksUIUpdateBelow` 仅挡 `updateUI` | Done；不回改当帧 UI route |
 | `2D-INPUT-ADV` unified digital/analog Action + transactional rebind | Done；本轮测试结果以最终验证记录为准 |
 | `RenderFramePacket` + `FramePin` + present-return CPU ledger | Done；固定帧延迟假 fence 已删除；Texture/Mesh retirement 使用 Render/Asset 独立 readback marker，不混入 Runtime ticket |
+| `RUNTIME-SHUTDOWN-DEADLINE` bounded Task shutdown + Host-enforced TaskSystem deadline | Done；Task invalid/timeout/retry 与 Host Task-shutdown deadline/death tests 已通过 |
 | Runtime 拥有 AssetSystem/World | 否；仍由产品 State/样例持有 |
 | 通用 Event Queue、多 World/editor orchestration、pass scheduler | 未做；需 ADR/Backlog 后开 |
 

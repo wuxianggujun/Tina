@@ -76,6 +76,29 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 
 公共 API 变化还必须编译 header-isolation/consumer 测试，并扫描公开头是否出现第三方 token。
 
+## Shutdown deadline
+
+`RUNTIME-SHUTDOWN-DEADLINE` 的自动门禁归属 `tina_tests`，必须覆盖：
+
+- Disabled/Bounded TaskSystem 拒绝非 finite 或非正 deadline，且非法调用不触发 stop；
+- idle、queued drain 和已完成后的重复调用在 deadline 内成功；
+- blocked Worker 触发 `TaskErrorCode::WaitTimeout` 后，TaskSystem 仍为 stopping，线程、队列和 owner storage
+  未被 join/clear/reset；放行任务后对同一对象重试成功；
+- `EngineHost` 将 `EngineConfig::shutdownDeadline` 原样传入 TaskSystem，且该值只预算
+  Worker-exit/join 阶段，不被描述为 Audio/Render/整个 Host shutdown 的总耗时上限；
+- Host 的 TaskSystem timeout death path 在 `std::terminate()` 前写入 `runtime.lifecycle` Diagnostics，
+  并且不继续析构 TaskSystem、Platform、Clock、Diagnostics 等剩余 owner。
+
+```powershell
+cmake --build --preset windows-vnext-debug --target tina_tests -- /m:1 /v:m
+out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes `
+  --gtest_filter="DisabledTaskSystemTest.ShutdownDeadline*:BoundedTaskSystemTest.ShutdownDeadline*:EngineHostCreationTest.PassesConfiguredShutdownDeadlineToTaskSystem:EngineHostShutdownDeadlineDeathTest.*"
+out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
+```
+
+仅观察进程终止不够：death test 同时匹配 `ShutdownDeadlineExceeded` Diagnostics 输出，并以析构哨兵证明
+超时后没有 Task owner teardown。本轮 shutdown deadline 聚焦门禁和完整 `tina_tests` 均已直接执行通过。
+
 ## 产品样例的证据边界
 
 | Sample | 证明 | 不证明 |

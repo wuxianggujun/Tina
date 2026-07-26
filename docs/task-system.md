@@ -20,9 +20,15 @@ class ITaskSystem {
     Status postMain(TaskCallable work);
     Result<u32> pumpMain(u32 budget = 0);
     void requestStop() noexcept;
+    [[nodiscard]] Core::Status shutdownAndJoinFor(Core::Duration deadline) noexcept;
     void shutdownAndJoin() noexcept;
 };
 ```
+
+`shutdownAndJoinFor()` 的 deadline 必须 finite 且大于0。非法值返回 `TaskErrorCode::InvalidArgument`，
+不触发 stop；有效值进入 stopping 并等待 Worker 退出。deadline 到期返回 `TaskErrorCode::WaitTimeout`，
+对象仍保持 stopping，线程与队列 ownership 不变，调用方可在任务放行后重试。成功后 join/clear，重复调用
+仍成功。`shutdownAndJoin()` 保留给明确允许无界等待的调用方；`EngineHost` 使用有界接口。
 
 `cpuWorkerCount=0` 在 `createBoundedTaskSystem` / 直接工厂参数中仍表示 CPU pool disabled，
 `scheduleCpu()` 返回 `NotSupported`（IO-only 图与单测继续可用）。产品 `Desktop::CreateEngine` 通过
@@ -53,7 +59,8 @@ IO 与 CPU 队列分离，避免慢磁盘占满 CPU worker。普通 preset 的 I
 - Main completion 不等待产生它的 Worker，避免环形等待；
 - 队列满返回结构化错误，不复制到无界 side list；
 - Worker 入口捕获异常并转为失败状态，不让异常逃出线程；
-- 关闭时先停止新任务，再取消/排空上层 owner，最后 `shutdownAndJoin()`。
+- 关闭时先停止新任务，再取消/排空上层 owner，最后由组合根调用 `shutdownAndJoinFor()`；timeout 不释放
+  TaskSystem、Worker 或仍可能被访问的 owner。
 
 ## 队列与背压
 
@@ -88,8 +95,13 @@ Platform poll/dispatch
 ## 生命周期与关闭
 
 ```text
-Accepting -> Draining -> StopRequested -> Joined
+Accepting -> StopRequested/Draining -> Joined
+                    | deadline
+                    +-> StopRequested (WaitTimeout, ownership retained, retryable)
 ```
+
+非法 deadline 保持 `Accepting`；成功进入 `Joined` 后重复关闭仍返回成功。timeout 不是可继续析构状态，
+也不会隐式 detach 或强杀 Worker。
 
 当前 `EngineHost` 关闭顺序：
 
@@ -98,16 +110,21 @@ Accepting -> Draining -> StopRequested -> Joined
 3. Runtime 关闭私有 UI owner 与 Platform dispatcher；
 4. `AudioEngine::shutdown()`；
 5. `RenderDevice::shutdown()`；
-6. `TaskSystem::shutdownAndJoin()`；
+6. `TaskSystem::shutdownAndJoinFor(EngineConfig::shutdownDeadline)`；
 7. Platform → Clock → Diagnostics。
 
-当前尚无通用 State TaskGroup barrier、soft/hard deadline 或 CrashContext fast-fail protocol。未来实现时
-必须保证 Worker join 前不 reset Arena/释放 owner；该工作属于 RUNTIME-001/PERF-001，而不是现有接口。
+`EngineConfig::shutdownDeadline` 只从第6步的 Worker-exit/join 等待开始计时，不覆盖 AudioEngine、
+RenderDevice 或整个 Host shutdown 的总耗时。
+
+TaskSystem timeout 后 `EngineHost` 先通过仍存活的 Diagnostics 写入 `runtime.lifecycle` 错误，再
+`std::terminate()`；不会 reset TaskSystem，也不会继续析构 Platform、Clock、Diagnostics 等剩余 owner。
+当前仍无通用 State TaskGroup soft deadline 或 CrashContext/dump protocol。
 
 ## 测试
 
-`tina_tests` 当前覆盖 BoundedTaskSystem、DisabledTaskSystem、队列满、stop/join、异常和 TaskGroup；
-Runtime/Asset tests 覆盖 IO completion、generation 迟到结果和 retirement。新增 Task 行为至少直接运行：
+`tina_tests` 当前覆盖 Disabled/Bounded 的 invalid、idle、queued drain、blocked timeout 状态保留与 retry、
+重复成功，以及 `EngineHost` 配置 deadline 透传和 timeout death path。
+Runtime/Asset tests 继续覆盖 IO completion、generation 迟到结果和 retirement。至少直接运行：
 
 ```powershell
 cmake --build --preset windows-vnext-debug --target tina_tests tina_asset_tests -- /m:1 /v:m
@@ -123,6 +140,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 跟踪：`tina_bench` schema v1 + `null_runtime_frames` 已落地，共享机仅 provisional；固定机 hard gate
 与多进程 MAD 后置。模块级 `tina_physics2d_bench` 或局部耗时仍不可当作跨机器基线。
 
-已落实：Desktop 交互 CPU worker 默认 `max(1, hw-1)`（TASK-001）。仍待冻结：各队列容量、Task capture
-size、phase barrier soft deadline、shutdown hard deadline、Background 饥饿策略。work stealing/fiber
+已落实：Desktop 交互 CPU worker 默认 `max(1, hw-1)`（TASK-001），以及
+RUNTIME-SHUTDOWN-DEADLINE hard deadline。仍待冻结：各队列容量、Task capture size、phase barrier soft
+deadline、Background 饥饿策略。work stealing/fiber
 只有 profile 证明共享队列是瓶颈后才另建 ADR。

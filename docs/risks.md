@@ -9,7 +9,6 @@
 | --- | --- | --- | --- | --- | --- |
 | R-TASK-01 | closed | Desktop 交互默认已落实 `max(1, hw-1)` CPU worker；直接工厂 `cpuWorkerCount=0` 仍为 IO-only | BoundedTaskSystem 单测 + Desktop resolve | — | TASK-001 Done |
 | R-LIFE-01 | P0 | RenderFrame 在途引用因 Asset unload、Atlas eviction 或 Surface close 失效 | Handle/Lease、UploadTicket、retirement ledger | owning packet/FramePin/completion 失败注入后全部归零 | RUNTIME-002 |
-| R-SHUT-01 | P0 | barrier/deadline 后继续析构，Worker 或 callback UAF | 协作取消、join、逆序 shutdown | timeout 注入证明活跃 owner 不被释放，硬 deadline 明确 fast-fail | RUNTIME-002 |
 | R-3D-01 | P0 | Cooker 单测被误当成 multi-mesh 产品 E2E | 文档区分 G4 Cooker 与 G3 product | 两个 mesh AssetId 分别 upload/bind/extract/draw，视觉与账本门禁通过 | 3D-001 |
 | R-GLTF-01 | P0 | 外部 URI 路径穿越、symlink escape、size/count 资源炸弹 | Runtime 不直接打开 URI；Cooker 有结构/size 校验，relative-file 仍只按可信输入处理 | root containment、URI policy、overflow/oversize corpus 全通过 | ASSET-001 |
 | R-LINUX-01 | closed | tip Docker GCC13 + Clang22（含 sanitizer）已复验 | [m12-evidence-linux.md](m12-evidence-linux.md) | 可选 Wayland/真显示器 | TEST-001 Done |
@@ -35,6 +34,7 @@
 
 | ID | 风险 | 关闭证据 |
 | --- | --- | --- |
+| R-SHUT-01 | barrier/deadline 后继续析构，Worker 或 callback UAF | `shutdownAndJoinFor` timeout 保留 stopping TaskSystem/Worker/owner 并可 retry；Host 配置 deadline + Diagnostics/terminate death tests 证明不继续析构 owner；不 detach/强杀 |
 | R-PRODUCT-01 | Legacy `Tina.exe`/旧 UI 产品图继续被构建或运行 | 产品源码/target 已删除，`TINA_BUILD_LEGACY=ON` FATAL |
 | R-EASTL-01 | EASTL 继续作为产品 target 公共依赖 | vNext 产品 target 已使用标准库/PMR；仅余 CLEAN-002 扫尾，不再构成产品依赖 |
 | R-ROOT-01 | `Application` 与 `EngineHost` 双组合根 | Legacy Application 已删除，产品只从 Desktop/EngineHost 进入 |

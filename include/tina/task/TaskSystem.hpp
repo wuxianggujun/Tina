@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/core/time/MonotonicClock.hpp>
 
 #include <functional>
 #include <memory>
@@ -81,6 +82,14 @@ class ITaskSystem {
     [[nodiscard]] virtual Core::Result<Core::u32> pumpMain(Core::u32 budget = 0) = 0;
 
     virtual void requestStop() noexcept = 0;
+
+    // deadline must be finite and greater than zero. Success means every worker exited,
+    // was joined, and all queues were cleared. WaitTimeout leaves the system stopping
+    // with its workers and queues alive so the owner can retry; implementations never
+    // detach or forcibly terminate workers.
+    [[nodiscard]] virtual Core::Status shutdownAndJoinFor(Core::Duration deadline) noexcept = 0;
+
+    // Indefinite shutdown using the same worker-exit observation and finalization path.
     virtual void shutdownAndJoin() noexcept = 0;
 };
 
