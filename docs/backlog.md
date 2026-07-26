@@ -28,7 +28,6 @@
 | --- | --- | --- | --- | --- | --- | --- |
 
 
-| 2D-FX | Planned | P2 | 2D particles 与 trails | Scene/Render 2D batch | emission、lifetime、capacity failure 与固定 seed 可复现；trail 断点/宽度生命周期明确；产品 sample 有结构化与非空像素证据 | Unit + Integration + Visual |
 | UI-002 | Partial | P1 | Windows UIA 真机 adapter | UI-002-SPI | **已完成** 属性映射 + HostBridge + **EngineHost 产品 HWND 自动 attach/publish**（lease 解码 Win32）；**待** Narrator/Inspect 人工金标、Linux AT-SPI | Unit + Integration |
 | UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性 + **字体 identity fingerprint**（`fontFingerprint`：path/sha256/env `TINA_UI_FONT_PATH`/FreeType-on；baseline schema 3；mismatch 默认 fail）；**待** OS 级 100/150/200% DPI 真机矩阵、跨 GPU 像素金标 | Unit + Visual |
 
@@ -70,6 +69,7 @@
 | 2D-TILEMAP-LRU | retain window 仅作 optional cache；按最近一次成功 demand update 时位于 load window 的 recency 自动淘汰，读取 API 不 touch；desired 强需求单独超 resident capacity 仍 transactional failure | [2D](game-2d.md) · [资源](resources.md) · TileMapStream retain-overflow/LRU tests |
 | 2D-PHYSICS-EXPAND | Body/Shape/Joint 独立 generation handle；Box/Circle/Capsule、多 shape/body、sensor enter/exit、Distance joint 与级联 retirement；TileMap bridge/sample 全部迁移，Box2D 保持 PRIVATE；29/29 模块测试与产品 300 帧 sensor/joint 证据通过 | [物理](physics.md) · [2D](game-2d.md) · PhysicsWorld2D/TileMapPhysics/CharacterControllerPhysics tests |
 | 2D-AUDIO-ADV | voice gain/pitch/pan/fade 与 transient one-shot retirement；PCM stream 在 Create 固定预分配，owner thread 整块原子 submit，Task worker 必须 marshal；非 EOF underrun 仅静音计数，EOF 排空后单次 Stopped，cancel 单次 Cancelled；terminal completion 在 ring 满/active realtime reader 时延迟而不丢，单 realtime consumer、absorbing terminal 与有界 shutdown 已覆盖；产品 sample 贯通 Catalog PCM stream | [Audio](audio.md) · [公开 API](public-api.md) · AudioEngine PCM stream tests · MiniaudioDevice null-backend stream test · product-2d 300帧 smoke |
+| 2D-FX | `ParticleSystem2D` / `Trail2D` 作为独立 Scene systems：Create 唯一持久 PMR 分配、固定容量与稳定 key 单调不复用；粒子固定 seed（含0）确定性、burst/update 失败事务性；trail anchor/segment/break、独立 segment lifetime 与按 age 宽度插值；产品门禁 schema 9 提供结构化与非空像素证据 | [2D](game-2d.md) · [Scene](scene-ecs.md) · [测试](testing.md) · `tina_scene_tests` · `RunProduct2dGate.ps1` |
 | RENDER-001-NLIGHT | 删除 Opaque3D key/fill 双 setter；`Mesh3DLightingDesc` 单次提交0..4 directional lights + ambient；Null/bgfx/shader 同一上限与验证；sample_3d 提交3灯并输出 count | [Rendering](rendering.md) · [3D](game-3d.md) · GpuTextureUploadTests |
 | RENDER-FENCE | present-return CPU ticket 与 GPU resource retirement 分离；bgfx 用末尾 view 的 blit + `readTexture()` ready frame 作为可证明 completion marker，Texture/Mesh generation 立即失效、native handle 延迟销毁；AssetLease pin、suspend flush、显式 drain 与 shutdown hard drain 已贯通 | [Rendering](rendering.md) · [Resources](resources.md) · [ADR 0016](adr/0016-asset-ownership-and-retirement.md) · BgfxRetirementTimeline/AssetGpuRetirement tests |
 | 2D-SPRITE-BATCH | 任意非0 `spriteKey`；bgfx 按最终渲染顺序建立连续 key batch 并逐 batch 绑定纹理；双纹理 sample 保持透明排序 | [2D](game-2d.md) · BgfxSprite2DGeometryTests |

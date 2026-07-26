@@ -1,17 +1,21 @@
 set(TINA_SCENE_TEST_SOURCES
     SceneWorldTests.cpp
     SceneComponentExtractTests.cpp
+    ParticleSystem2DTests.cpp
     SpriteAnimator2DTests.cpp
+    Trail2DTests.cpp
     header_isolation/Camera2DHeader.cpp
     header_isolation/EntityHeader.cpp
     header_isolation/ExtractRenderSceneHeader.cpp
     header_isolation/MeshRenderer3DHeader.cpp
+    header_isolation/ParticleSystem2DHeader.cpp
     header_isolation/PerspectiveCamera3DHeader.cpp
     header_isolation/PrefabInstantiateHeader.cpp
     header_isolation/SceneErrorsHeader.cpp
     header_isolation/SceneHeader.cpp
     header_isolation/SpriteAnimator2DHeader.cpp
     header_isolation/SpriteRenderer2DHeader.cpp
+    header_isolation/Trail2DHeader.cpp
     header_isolation/TransformHeader.cpp
     header_isolation/WorldHeader.cpp
 )

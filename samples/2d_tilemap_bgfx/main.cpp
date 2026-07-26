@@ -39,8 +39,10 @@
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/ParticleSystem2D.hpp>
 #include <tina/scene/SpriteAnimator2D.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
+#include <tina/scene/Trail2D.hpp>
 #include <tina/scene/World.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
 #include <tina/audio/miniaudio/MiniaudioDevice.hpp>
@@ -68,6 +70,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -107,6 +110,15 @@ inline constexpr u32 ExpectedCatalogRecipeAssets =
     5 + ExpectedCharacterAnimationClips + ExpectedCharacterAnimationSprites + ExpectedTileMapStreamChunks;
 inline constexpr u32 ExpectedUploadedTextures = 2;
 inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
+inline constexpr u32 ProductParticleCapacity = 12;
+inline constexpr u32 ProductParticleEmitted = 10;
+inline constexpr u32 ProductParticleExpiredAt300Frames = 4;
+inline constexpr u32 ProductParticleActiveAt300Frames = 6;
+inline constexpr u64 ProductParticleRandomSeed = 0x54494E41ULL;
+inline constexpr u64 ProductParticleStableKeyBase = 0x100000000ULL;
+inline constexpr u32 ProductTrailCapacity = 8;
+inline constexpr u32 ProductTrailSegments = 3;
+inline constexpr u64 ProductTrailStableKeyBase = 0x200000000ULL;
 inline constexpr Tina::InputActionId MoveLeftAction{1};
 inline constexpr Tina::InputActionId MoveRightAction{2};
 inline constexpr Tina::InputActionId SelectTileAction{3};
@@ -153,6 +165,14 @@ void appendF32Bits(std::vector<std::byte>& out, float value)
     u32 bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
     appendLeU32(out, bits);
+}
+
+void appendF64Bits(std::vector<std::byte>& out, double value)
+{
+    static_assert(sizeof(double) == 8);
+    u64 bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    appendLeU64(out, bits);
 }
 
 struct SampleOptions final {
@@ -264,6 +284,16 @@ struct LifecycleCounters final {
     u64 tileMapStreamCommitted = 0;
     u64 tileMapStreamResident = 0;
     u64 tileMapStreamPeakResident = 0;
+    // 2D-FX: deterministic fixed-capacity particle/trail product evidence.
+    u64 particleEmitted = 0;
+    u64 particleExpired = 0;
+    u64 particleActive = 0;
+    u64 particleExtracted = 0;
+    u64 trailSegmentsCreated = 0;
+    u64 trailActive = 0;
+    u64 trailExtracted = 0;
+    u64 trailBreaks = 0;
+    std::string fxInitialFingerprint{};
     // M11-B0: surface-driven Camera2D projection (FixedWorldHeight).
     u32 surfacePixelWidth = 960;
     u32 surfacePixelHeight = 540;
@@ -646,6 +676,8 @@ struct TileMapResources final {
     ResolvedCharacterAnimationClip walkAnimation{memory};
     ResolvedCharacterAnimationClip hitWallAnimation{memory};
     std::optional<Tina::Scene::SpriteAnimator2D> characterAnimator{};
+    std::optional<Tina::Scene::ParticleSystem2D> particles{};
+    std::optional<Tina::Scene::Trail2D> trail{};
     CharacterAnimationState characterAnimationState = CharacterAnimationState::Idle;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     Tina::Scene::EntityId crateEntity{};
@@ -671,6 +703,194 @@ struct TileMapResources final {
     std::optional<Tina::Audio::MiniaudioDevice> audioDevice{};
 #endif
 };
+
+[[nodiscard]] Tina::Core::Result<std::string> makeInitialFxFingerprint(
+    const Tina::Scene::ParticleSystem2D& particles,
+    const Tina::Scene::Trail2D& trail)
+{
+    std::vector<std::byte> bytes;
+    bytes.reserve(640);
+    appendLeU32(bytes, 1U); // FX fingerprint schema
+    appendLeU64(bytes, particles.randomSeed());
+    appendLeU64(bytes, particles.capacity());
+    appendLeU64(bytes, particles.liveCount());
+    for (const Tina::Scene::Particle2D& particle : particles.particles())
+    {
+        appendLeU64(bytes, particle.stableParticleKey);
+        appendLeU32(bytes, particle.spriteKey);
+        appendF32Bits(bytes, particle.position.x);
+        appendF32Bits(bytes, particle.position.y);
+        appendF32Bits(bytes, particle.velocity.x);
+        appendF32Bits(bytes, particle.velocity.y);
+        appendF64Bits(bytes, particle.age.count());
+        appendF64Bits(bytes, particle.lifetime.count());
+        appendF32Bits(bytes, particle.startSizeMeters.x);
+        appendF32Bits(bytes, particle.startSizeMeters.y);
+        appendF32Bits(bytes, particle.endSizeMeters.x);
+        appendF32Bits(bytes, particle.endSizeMeters.y);
+        appendLeU32(bytes, static_cast<u32>(particle.startColor.red) |
+                               (static_cast<u32>(particle.startColor.green) << 8U) |
+                               (static_cast<u32>(particle.startColor.blue) << 16U) |
+                               (static_cast<u32>(particle.startColor.alpha) << 24U));
+        appendLeU32(bytes, static_cast<u32>(particle.endColor.red) |
+                               (static_cast<u32>(particle.endColor.green) << 8U) |
+                               (static_cast<u32>(particle.endColor.blue) << 16U) |
+                               (static_cast<u32>(particle.endColor.alpha) << 24U));
+        appendF32Bits(bytes, particle.rotationRadians);
+        appendLeU32(bytes, static_cast<u32>(static_cast<std::uint16_t>(particle.sortingLayer)));
+        appendLeU32(bytes, static_cast<u32>(particle.orderInLayer));
+    }
+
+    const Tina::Scene::Trail2DConfig trailConfig = trail.config();
+    appendLeU64(bytes, trailConfig.segmentCapacity);
+    appendF64Bits(bytes, trailConfig.segmentLifetime.count());
+    appendF32Bits(bytes, trailConfig.startWidthMeters);
+    appendF32Bits(bytes, trailConfig.endWidthMeters);
+    appendLeU32(bytes, trailConfig.spriteKey);
+    appendLeU64(bytes, trailConfig.stableEntityKeyBase);
+    appendF32Bits(bytes, trailConfig.uvRect.u0);
+    appendF32Bits(bytes, trailConfig.uvRect.v0);
+    appendF32Bits(bytes, trailConfig.uvRect.u1);
+    appendF32Bits(bytes, trailConfig.uvRect.v1);
+    appendLeU32(bytes, static_cast<u32>(trailConfig.color.red) |
+                           (static_cast<u32>(trailConfig.color.green) << 8U) |
+                           (static_cast<u32>(trailConfig.color.blue) << 16U) |
+                           (static_cast<u32>(trailConfig.color.alpha) << 24U));
+    appendLeU32(bytes, static_cast<u32>(static_cast<std::uint16_t>(trailConfig.sortingLayer)));
+    appendLeU32(bytes, static_cast<u32>(trailConfig.orderInLayer));
+    appendLeU64(bytes, trail.segmentCount());
+    for (const Tina::Scene::Trail2DSegment& segment : trail.segments())
+    {
+        appendF32Bits(bytes, segment.start.x);
+        appendF32Bits(bytes, segment.start.y);
+        appendF32Bits(bytes, segment.end.x);
+        appendF32Bits(bytes, segment.end.y);
+        appendF64Bits(bytes, segment.age.count());
+        appendF64Bits(bytes, segment.lifetime.count());
+        appendLeU64(bytes, segment.stableEntityKey);
+    }
+
+    auto fingerprint = Tina::Core::digestContentHashV1(bytes);
+    if (!fingerprint)
+    {
+        return Tina::Core::failure(std::move(fingerprint.error()));
+    }
+    return contentHashToHex(*fingerprint);
+}
+
+[[nodiscard]] Tina::Core::Status prepare2dEffects(TileMapResources& resources, LifecycleCounters& counters)
+{
+    auto particles = Tina::Scene::ParticleSystem2D::Create(
+        Tina::Scene::ParticleSystem2DConfig{
+            .capacity = ProductParticleCapacity,
+            .randomSeed = ProductParticleRandomSeed,
+            .firstStableParticleKey = ProductParticleStableKeyBase,
+        },
+        resources.memory);
+    if (!particles)
+    {
+        return Tina::Core::failure(std::move(particles.error()));
+    }
+
+    const Tina::Scene::ParticleBurst2D shortBurst{
+        .count = 4,
+        .spriteKey = ProductCharacterSpriteKey,
+        .origin = {4.0F, 2.1F},
+        .positionOffset = {.minimum = {-0.45F, -0.2F}, .maximum = {0.45F, 0.2F}},
+        .velocity = {.minimum = {-0.25F, 0.25F}, .maximum = {0.25F, 0.55F}},
+        .lifetime = {.minimum = Tina::Core::Duration{0.5}, .maximum = Tina::Core::Duration{0.5}},
+        .startSizeMeters = {0.28F, 0.28F},
+        .endSizeMeters = {0.1F, 0.1F},
+        .startColor = {.red = 255, .green = 215, .blue = 96, .alpha = 255},
+        .endColor = {.red = 255, .green = 105, .blue = 64, .alpha = 32},
+        .rotationRadians = 0.0F,
+        .sortingLayer = 2,
+        .orderInLayer = 10,
+    };
+    if (const auto status = particles->emitBurst(shortBurst); !status)
+    {
+        return status;
+    }
+
+    const Tina::Scene::ParticleBurst2D persistentBurst{
+        .count = 6,
+        .spriteKey = ProductCharacterSpriteKey,
+        .origin = {4.0F, 2.0F},
+        .positionOffset = {.minimum = {-0.55F, -0.35F}, .maximum = {0.55F, 0.35F}},
+        .velocity = {.minimum = {-0.02F, -0.01F}, .maximum = {0.02F, 0.02F}},
+        .lifetime = {.minimum = Tina::Core::Duration{10.0}, .maximum = Tina::Core::Duration{10.0}},
+        .startSizeMeters = {0.2F, 0.2F},
+        .endSizeMeters = {0.12F, 0.12F},
+        .startColor = {.red = 90, .green = 220, .blue = 255, .alpha = 230},
+        .endColor = {.red = 80, .green = 140, .blue = 255, .alpha = 120},
+        .rotationRadians = 0.0F,
+        .sortingLayer = 2,
+        .orderInLayer = 11,
+    };
+    if (const auto status = particles->emitBurst(persistentBurst); !status)
+    {
+        return status;
+    }
+
+    auto trail = Tina::Scene::Trail2D::Create(
+        Tina::Scene::Trail2DConfig{
+            .segmentCapacity = ProductTrailCapacity,
+            .segmentLifetime = Tina::Core::Duration{10.0},
+            .startWidthMeters = 0.18F,
+            .endWidthMeters = 0.04F,
+            .spriteKey = ProductCharacterSpriteKey,
+            .stableEntityKeyBase = ProductTrailStableKeyBase,
+            .color = {.red = 70, .green = 230, .blue = 180, .alpha = 210},
+            .sortingLayer = 1,
+            .orderInLayer = 8,
+        },
+        resources.memory);
+    if (!trail)
+    {
+        return Tina::Core::failure(std::move(trail.error()));
+    }
+
+    constexpr std::array firstTrailPoints{
+        Tina::Scene::Vec2{3.2F, 1.4F},
+        Tina::Scene::Vec2{3.7F, 1.8F},
+        Tina::Scene::Vec2{4.2F, 1.5F},
+    };
+    for (const Tina::Scene::Vec2 point : firstTrailPoints)
+    {
+        if (const auto status = trail->appendPoint(point); !status)
+        {
+            return status;
+        }
+    }
+    trail->breakTrail();
+    ++counters.trailBreaks;
+    constexpr std::array secondTrailPoints{
+        Tina::Scene::Vec2{4.35F, 2.25F},
+        Tina::Scene::Vec2{4.85F, 2.65F},
+    };
+    for (const Tina::Scene::Vec2 point : secondTrailPoints)
+    {
+        if (const auto status = trail->appendPoint(point); !status)
+        {
+            return status;
+        }
+    }
+
+    auto fxFingerprint = makeInitialFxFingerprint(*particles, *trail);
+    if (!fxFingerprint)
+    {
+        return Tina::Core::failure(std::move(fxFingerprint.error()));
+    }
+
+    counters.particleEmitted = particles->liveCount();
+    counters.particleActive = particles->liveCount();
+    counters.trailSegmentsCreated = trail->segmentCount();
+    counters.trailActive = trail->segmentCount();
+    counters.fxInitialFingerprint = std::move(*fxFingerprint);
+    resources.particles.emplace(std::move(*particles));
+    resources.trail.emplace(std::move(*trail));
+    return Tina::Core::success();
+}
 
 [[nodiscard]] Tina::Core::Status consumeGameplayObjectLayer(TileMapResources& resources, LifecycleCounters& counters)
 {
@@ -1434,6 +1654,10 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
 
     // M8-C1: Scene World for camera/character/(crate) extract path.
     if (const auto status = prepareSceneWorld(resources); !status)
+    {
+        return status;
+    }
+    if (const auto status = prepare2dEffects(resources, counters); !status)
     {
         return status;
     }
@@ -2643,6 +2867,24 @@ class TileMapBgfxState final : public Tina::IGameState {
 #endif
         }
 
+        if (!resources_->particles || !resources_->trail)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "2D particle and trail systems are not initialized");
+        }
+        auto particleUpdate = resources_->particles->update(context.frameTiming().fixedDelta);
+        if (!particleUpdate)
+        {
+            return Tina::Core::failure(std::move(particleUpdate.error()));
+        }
+        counters_->particleExpired += particleUpdate->expired;
+        counters_->particleActive = particleUpdate->alive;
+        if (const auto status = resources_->trail->update(context.frameTiming().fixedDelta); !status)
+        {
+            return status;
+        }
+        counters_->trailActive = resources_->trail->segmentCount();
+
         // Stream both render and collision layers from the current simulation
         // camera before CharacterController2D queries the borrowed collision grid.
         const float streamAspect =
@@ -2830,7 +3072,8 @@ class TileMapBgfxState final : public Tina::IGameState {
 
     Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
     {
-        if (!resources_->tileMapStream || !resources_->controller || !resources_->sceneWorld)
+        if (!resources_->tileMapStream || !resources_->controller || !resources_->sceneWorld ||
+            !resources_->particles || !resources_->trail)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap state not ready");
         }
@@ -3006,6 +3249,19 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             ++counters_->selectionHighlightSprites;
         }
+
+        auto particleExtract = resources_->particles->extract(writer);
+        if (!particleExtract)
+        {
+            return Tina::Core::failure(std::move(particleExtract.error()));
+        }
+        if (const auto status = resources_->trail->extract(writer); !status)
+        {
+            return status;
+        }
+        counters_->particleExtracted = particleExtract->submitted;
+        counters_->trailExtracted = resources_->trail->segmentCount();
+        totalSprites += counters_->particleExtracted + counters_->trailExtracted;
         counters_->lastTotalSprites = totalSprites;
         ++counters_->renderExtractions;
         return Tina::Core::success();
@@ -3305,7 +3561,8 @@ int main(int argc, char** argv)
          lastSelection->cellY < resources.tileMapStream->map().heightCells());
     const bool selectionStateValid = selectionCountersValid && selectionLatchValid;
     const u64 expectedHighlightSprites = lastSelection != nullptr ? 1U : 0U;
-    const u64 expectedTotalSprites = ExpectedSpritesWithPhysics + expectedHighlightSprites;
+    const u64 expectedTotalSprites = ExpectedSpritesWithPhysics + expectedHighlightSprites +
+                                     counters.particleActive + counters.trailActive;
     // Seed path: selection from frame 0 →highlight every extract. Accidental OS
     // clicks during interactive/smoke only require last-frame highlight match.
     const bool highlightValid =
@@ -3344,6 +3601,21 @@ int main(int argc, char** argv)
         counters.tileMapStreamCommitted == ExpectedTileMapStreamChunks &&
         counters.tileMapStreamResident == ExpectedTileMapStreamChunks &&
         counters.tileMapStreamPeakResident >= ExpectedTileMapStreamChunks;
+    const bool product300EffectsValid =
+        options->targetFrameCount != 300U ||
+        (counters.particleExpired == ProductParticleExpiredAt300Frames &&
+         counters.particleActive == ProductParticleActiveAt300Frames &&
+         counters.trailActive == ProductTrailSegments);
+    const bool effectsValid =
+        resources.particles.has_value() && resources.trail.has_value() &&
+        counters.particleEmitted == ProductParticleEmitted &&
+        counters.particleExpired + counters.particleActive == counters.particleEmitted &&
+        counters.particleActive == resources.particles->liveCount() &&
+        counters.particleExtracted == counters.particleActive &&
+        counters.trailSegmentsCreated == ProductTrailSegments && counters.trailBreaks == 1U &&
+        counters.trailActive == resources.trail->segmentCount() &&
+        counters.trailExtracted == counters.trailActive && counters.fxInitialFingerprint.size() == 32U &&
+        product300EffectsValid;
 
     const bool audioValid =
         counters.audioEnginePresent && counters.audioOneShotQueued && counters.audioStartedObserved &&
@@ -3376,7 +3648,7 @@ int main(int argc, char** argv)
 #endif
 
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
-              cameraFollowValid && chunkDirtyValid && tileMapStreamValid && audioValid && audioDeviceValid &&
+              cameraFollowValid && chunkDirtyValid && tileMapStreamValid && effectsValid && audioValid && audioDeviceValid &&
               characterAnimationValid &&
               counters.catalogFromRecipeFile &&
               counters.catalogRecipeAssets == ExpectedCatalogRecipeAssets &&
@@ -3434,8 +3706,8 @@ int main(int argc, char** argv)
 
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
-    evidenceBytes.reserve(384);
-    appendLeU32(evidenceBytes, 8U); // schema
+    evidenceBytes.reserve(512);
+    appendLeU32(evidenceBytes, 9U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
@@ -3449,7 +3721,19 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.characterAnimationResolvedFrames);
     appendLeU32(evidenceBytes, counters.characterAnimationFromCatalog ? 1U : 0U);
     appendLeU64(evidenceBytes, ExpectedNonEmptyTiles);
-    appendLeU64(evidenceBytes, expectedTotalSprites);
+    appendLeU64(evidenceBytes, ExpectedSpritesWithPhysics);
+    appendLeU32(evidenceBytes, options->seedTileSelection ? 1U : 0U);
+    appendLeU64(evidenceBytes, ProductParticleCapacity);
+    appendLeU64(evidenceBytes, ProductParticleEmitted);
+    appendLeU64(evidenceBytes, ProductParticleRandomSeed);
+    appendLeU64(evidenceBytes, ProductParticleStableKeyBase);
+    appendLeU64(evidenceBytes, ProductTrailCapacity);
+    appendLeU64(evidenceBytes, ProductTrailSegments);
+    appendLeU64(evidenceBytes, ProductTrailStableKeyBase);
+    for (const char byte : counters.fxInitialFingerprint)
+    {
+        evidenceBytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(byte)));
+    }
     appendLeU64(evidenceBytes, ExpectedUIPanelCount);
     appendLeU64(evidenceBytes, ExpectedUITextLabelCount);
     appendLeU64(evidenceBytes, ExpectedUITextEditCount);
@@ -3529,6 +3813,18 @@ int main(int argc, char** argv)
                   << ",\"requestedFrameDelayMs\":" << options->frameDelayMilliseconds
                   << ",\"minimumWindowVisibilityMs\":" << minimumWindowVisibilityMilliseconds(*options)
                   << ",\"totalSprites\":" << counters.lastTotalSprites
+                  << ",\"particleCapacity\":" << ProductParticleCapacity
+                  << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
+                  << ",\"particleEmitted\":" << counters.particleEmitted
+                  << ",\"particleExpired\":" << counters.particleExpired
+                  << ",\"particleActive\":" << counters.particleActive
+                  << ",\"particleExtracted\":" << counters.particleExtracted
+                  << ",\"trailCapacity\":" << ProductTrailCapacity
+                  << ",\"trailSegmentsCreated\":" << counters.trailSegmentsCreated
+                  << ",\"trailActive\":" << counters.trailActive
+                  << ",\"trailExtracted\":" << counters.trailExtracted
+                  << ",\"trailBreaks\":" << counters.trailBreaks
+                  << ",\"fxInitialFingerprint\":\"" << counters.fxInitialFingerprint << "\""
                   << ",\"grounded\":" << counters.controllerGroundedFrames
                   << ",\"walkFrames\":" << counters.controllerWalkFrames
                   << ",\"hitRight\":" << counters.controllerHitRightFrames
@@ -3665,6 +3961,18 @@ int main(int argc, char** argv)
               << ",\"texturesUploaded\":" << counters.texturesUploaded
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
               << ",\"spritesPerFrame\":" << expectedTotalSprites
+              << ",\"particleCapacity\":" << ProductParticleCapacity
+              << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
+              << ",\"particleEmitted\":" << counters.particleEmitted
+              << ",\"particleExpired\":" << counters.particleExpired
+              << ",\"particleActive\":" << counters.particleActive
+              << ",\"particleExtracted\":" << counters.particleExtracted
+              << ",\"trailCapacity\":" << ProductTrailCapacity
+              << ",\"trailSegmentsCreated\":" << counters.trailSegmentsCreated
+              << ",\"trailActive\":" << counters.trailActive
+              << ",\"trailExtracted\":" << counters.trailExtracted
+              << ",\"trailBreaks\":" << counters.trailBreaks
+              << ",\"fxInitialFingerprint\":\"" << counters.fxInitialFingerprint << "\""
               << ",\"controllerGroundedFrames\":" << counters.controllerGroundedFrames
               << ",\"controllerWalkFrames\":" << counters.controllerWalkFrames
               << ",\"controllerHitRightFrames\":" << counters.controllerHitRightFrames
@@ -3855,7 +4163,7 @@ int main(int argc, char** argv)
               << ",\"accessibilityHasRadio\":" << (counters.accessibilityHasRadio ? "true" : "false")
               << ",\"accessibilityHasTextEdit\":" << (counters.accessibilityHasTextEdit ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":8"
+              << ",\"evidenceSchema\":9"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")

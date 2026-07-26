@@ -21,7 +21,7 @@ CTest 测试。测试进程任一返回非0即失败。
 | `tina_ui_tests` | UI tree/layout/hit/route/paint/semantics、Widget、文本/Glyph | 基础图 |
 | `tina_runtime_ui_tests` | Runtime UI owner/capability/route/layout/display handoff | 基础图 |
 | `tina_ui_render_integration_tests` | committed UI paint → Render DisplayList | 基础图 |
-| `tina_scene_tests` | Entity/Transform/2D/3D component 与 extraction | 基础图 |
+| `tina_scene_tests` | Entity/Transform/2D/3D component/extraction、ParticleSystem2D、Trail2D | 基础图 |
 | `tina_render_scene_tests` | Camera2D/3D、culling、sort/batch、world picking | 基础图 |
 | `tina_asset_format_tests` | Cooked/Manifest 与 typed payload schema | 基础图 |
 | `tina_asset_tests` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement | 基础图 |
@@ -66,7 +66,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 | Task/关闭顺序 | `tina_tests` | Null/Desktop 300帧，失败注入 |
 | Runtime phase/state | `tina_tests`、`tina_runtime_ui_tests` | Null、2D、3D products |
 | UI/Widget/Text | `tina_ui_tests`、`tina_runtime_ui_tests`、bridge | FreeType、product-2d、截图 |
-| RenderScene/Scene | `tina_render_scene_tests`、`tina_scene_tests` | extraction samples、2D/3D products |
+| RenderScene/Scene/2D-FX | `tina_render_scene_tests`、`tina_scene_tests` | extraction samples、2D/3D products |
 | bgfx backend | `tina_render_bgfx_tests` | Desktop/2D/3D GPU samples + Visual |
 | Asset format/Cooker | `tina_asset_format_tests`、`tina_asset_tests` | `assetc`→validate→sample、3D product |
 | TileMap payload/runtime | `tina_asset_format_tests`、`tina_asset_tests`、`tina_physics2d_tests` | `tina_sample_2d`；验证显式 visual/collision/object layer |
@@ -86,7 +86,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；schema 9 结构化证据、final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | 完整 PBR/IBL/shadow/light component、Scene AssetHandle 产品化、跨 GPU golden |
@@ -135,6 +135,25 @@ out\build\windows-msvc-vnext-bgfx-physics2d\bin\Debug\tina_physics2d_tests.exe -
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 ```
 
+## 2D-FX
+
+`tina_scene_tests` 是 `ParticleSystem2D` / `Trail2D` 的模块门禁：覆盖 Create 固定 PMR allocation 与失败
+回收、300帧无 storage growth、固定 seed 可复现、burst validation/capacity/stable-key failure 原子性、
+stable key 过期后不复用、update preflight 零发布，以及向 `RenderSceneWriter` 的 lifetime/size/color/width
+extraction 和 writer capacity failure。
+
+```powershell
+cmake --build --preset windows-vnext-debug --target tina_scene_tests -- /m:2 /v:m
+out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+```
+
+product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=9`。通用结构化
+字段包括 `particleCapacity=12`、`particleRandomSeed=1414090305`、`particleEmitted=10`、
+`trailCapacity=8`、`trailSegmentsCreated=3`、`trailBreaks=1`，以及32字符小写 hex
+`fxInitialFingerprint`。300帧 gate 进一步要求 `particleExpired=4`、`particleActive=6`、
+`particleExtracted=6`、`trailActive=3`、`trailExtracted=3`。这些字段证明固定配置下的 simulation/extract
+数量与初始状态指纹；`pixelCaptureOk` 和单机 golden/非空窗口证据仍单独证明可见输出。
+
 ## UI 与视觉
 
 UI 逻辑门禁至少包括：
@@ -173,8 +192,9 @@ driver 或 backend 复制为通用金标。需要可人工查看的 PNG 与 blan
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_physics2d_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
+  --target tina_scene_tests tina_physics2d_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
            tina_ui_freetype_tests tina_audio_tests tina_audio_miniaudio_tests tina_sample_2d -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=yes
@@ -204,7 +224,7 @@ wrong-owner/bounded shutdown、active callback reader quiescence、terminal abso
 
 `MiniaudioDeviceTest.NullBackendConsumesBoundedStreamEofAndCancel` 验证 adapter 作为 realtime consumer 的
 EOF/Cancel 路径。产品 300帧还要求 `audioStreamQueued/submitted/eof/mixed/drained/stopped/retired=true`、
-submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；evidence schema 为8。
+submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为9。
 
 Physics2D N2 的模块门禁覆盖：`createBody/createShape` 独立 generation、多 Box/Circle/Capsule shape/body、
 shape 单独销毁、sensor enter/exit、Distance joint create/query/destroy、body 级联退休 shape/joint、
@@ -212,8 +232,9 @@ wrong-world/stale/capacity/PMR rollback，以及 TileMap bridge/CharacterControl
 `tina_physics2d_tests` 为 29/29；产品 300 帧还要求 `physicsSensorEnters>0`、
 `physicsSensorExits>0`、`physicsJointReady=true`。
 
-Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化（TEST-002）：上表测试 executable
-全部 exit 0 后，再跑 sample 300 帧并校验 `productGate=bgfx-physics-freetype-audio`。
+Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化（TEST-002）：包含
+`tina_scene_tests` 的上述测试 executable 全部 exit 0 后，再跑 sample 300 帧并校验
+`productGate=bgfx-physics-freetype-audio` 与 schema 9 Particle/Trail 字段。
 
 文档扫描（DOC-002）：
 

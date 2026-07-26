@@ -47,6 +47,7 @@ $BinDir = [System.IO.Path]::GetFullPath($BinDir)
 $expectedGate = 'bgfx-physics-freetype-audio'
 $targets = @(
     'tina_sample_2d',
+    'tina_scene_tests',
     'tina_ui_tests',
     'tina_runtime_ui_tests',
     'tina_ui_render_integration_tests',
@@ -57,6 +58,7 @@ $targets = @(
     'tina_asset_tests'
 )
 $testExes = @(
+    'tina_scene_tests.exe',
     'tina_ui_tests.exe',
     'tina_runtime_ui_tests.exe',
     'tina_ui_render_integration_tests.exe',
@@ -130,8 +132,15 @@ $gatePattern = 'productGate":"' + [regex]::Escape($expectedGate) + '"'
 if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
-$requiredAudioEvidence = @(
-    'evidenceSchema\":8',
+$requiredProductEvidence = @(
+    'evidenceSchema\":9',
+    'particleCapacity\":12',
+    'particleRandomSeed\":1414090305',
+    'particleEmitted\":10',
+    'trailCapacity\":8',
+    'trailSegmentsCreated\":3',
+    'trailBreaks\":1',
+    'fxInitialFingerprint\":\"[0-9a-f]{32}\"',
     'audioVoiceParamsConfigured\":true',
     'audioFadeStarted\":true',
     'audioFadeCancelled\":true',
@@ -149,9 +158,18 @@ $requiredAudioEvidence = @(
     'audioStreamConsumedFrames\":[1-9][0-9]*',
     'audioStreamUnderrunFrames\":0'
 )
-foreach ($pattern in $requiredAudioEvidence) {
+if ($SampleFrames -eq 300) {
+    $requiredProductEvidence += @(
+        'particleExpired\":4',
+        'particleActive\":6',
+        'particleExtracted\":6',
+        'trailActive\":3',
+        'trailExtracted\":3'
+    )
+}
+foreach ($pattern in $requiredProductEvidence) {
     if ($sampleOut -notmatch $pattern) {
-        Add-Step -Name 'audioEvidence' -ExitCode 1 -Detail "missing $pattern; output=$($sampleOut.Trim())"
+        Add-Step -Name 'productEvidence' -ExitCode 1 -Detail "missing $pattern; output=$($sampleOut.Trim())"
     }
 }
 Add-Step -Name 'tina_sample_2d' -ExitCode 0 -Detail "productGate=$expectedGate frames=$SampleFrames"

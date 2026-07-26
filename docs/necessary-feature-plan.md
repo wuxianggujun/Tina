@@ -23,6 +23,7 @@
 | N5 | RENDER-FENCE | 已完成 | CPU submission completion 与 GPU resource retirement 已分离；bgfx readback marker、AssetLease pin、suspend/shutdown drain 与测试已贯通 |
 | N6 | 2D-TILEMAP-STREAM | 已完成 | TileMap v3 root/TileMapChunk v1、deferred dependency、固定容量 Camera/layer demand/cancel/unload、resident generation dirty cache 与产品 sample 已贯通 |
 | N7 | 2D-AUDIO-ADV | 已完成 | voice gain/pitch/pan、可取消 fade、线性重采样、one-shot retirement，以及 bounded PCM streaming 的原子 submit、EOF/underrun/cancel、terminal backpressure 与 shutdown 已贯通测试和产品 sample |
+| N8 | 2D-FX | 已完成 | standalone ParticleSystem2D/Trail2D 的固定容量 PMR、确定性/事务失败/lifetime/width 契约已贯通 `tina_scene_tests` 与 product-2d schema 9 |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -333,6 +334,50 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 `
 
 N7 不包含 OS 真实扬声器质量/延迟/设备切换门禁、高质量 band-limited resampler、空间音频/HRTF、
 DSP graph、正式 codec 产品策略或 callback benchmark；这些保持为后续独立切片。
+
+## N8 - 2D-FX
+
+### 已完成契约
+
+- `ParticleSystem2D` / `Trail2D` 是 Scene standalone owner-thread systems，不属于 World component，也不
+  依赖 Asset 或 bgfx；两者直接写调用方 phase-local `RenderSceneWriter`。
+- `Create()` 通过调用方 PMR resource 建立固定容量 storage，是唯一持久分配点；成功 emit/append、update、
+  extract 不增长 storage。
+- Particle 的每个固定 seed（包括0）都对应确定 RNG 序列；burst 在提交前验证全部输入、remaining
+  capacity 与 stable-key range。validation/capacity/key failure 不推进 RNG、next key 或 live set；成功 key
+  单调分配，过期或 clear 后不复用。
+- Particle update 先 preflight 全部 next age 与仍存活粒子的积分后位置，任何 overflow 保持整个 system
+  不变；成功后再推进、删除过期粒子。extract 按 normalized age 线性插值 size/color。
+- Trail 首点建立 anchor，后续有效非退化点建立 segment 并移动 anchor；`breakTrail()` 使下一点开始新链。
+  每段从创建时拥有独立 age/lifetime，width 按 normalized age 线性插值。geometry/capacity/key failure
+  保持 anchor、segments 与 next key；update 先 preflight 全部 age，再推进并删除过期段；segment key
+  单调且不复用。
+- product-2d 使用固定容量12/seed `1414090305` 的 Particle（发射10）和容量8的 Trail（3段、1次 break）；
+  schema 9 输出初始 FX 指纹与 active/expired/extracted 计数，300帧 gate 再结合 non-empty pixel evidence。
+
+### 完成结果
+
+| 阶段 | 完成结果 |
+| --- | --- |
+| N8.1 | Scene 公共头与实现加入 `ParticleSystem2D` / `Trail2D`；两个 system 不引入 Asset/bgfx dependency |
+| N8.2 | `tina_scene_tests` 覆盖 PMR、seed、validation/capacity/key/update 事务性、lifetime/width 与 RenderScene writer failure |
+| N8.3 | `tina_sample_2d` 在 `updateFrame()` 使用 fixed delta 推进 Particle/Trail 并接入 extraction，evidence fingerprint 升级 schema 9 |
+| N8.4 | `RunProduct2dGate.ps1` 同轮构建/直接运行 `tina_scene_tests`，并校验通用与300帧 FX 结构化字段 |
+
+### 验收
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_scene_tests tina_sample_2d -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
+  --frames=300 --frame-delay-ms=0
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 `
+  -SkipConfigure -SkipBuild
+```
+
+N8 不包含 Cooked FX asset schema、effect graph/editor、GPU particle simulation、mesh-ribbon trail、collision
+或网络 rollback；当前 trail 按独立 Sprite2D segment extraction，不宣称通用 ribbon renderer。
 
 ## 每项收口清单
 

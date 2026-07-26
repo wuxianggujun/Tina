@@ -25,7 +25,7 @@ consumer 门禁。调用方按需链接现有模块 target；正式 SDK packagin
 | `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
 | `Tina::DesktopBootstrap` | 普通 Windows/Linux Desktop 组合入口 |
-| `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab |
+| `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、standalone Particle/Trail |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload |
 | `Tina::UI` | retained UI、Widget、text、semantics |
@@ -61,7 +61,8 @@ return host.value()->run(application);
 - 帧逻辑只写在 `IGameState` 相位里；Application 不做逐帧工作。
 - 优先 `Desktop::CreateEngine`；手写 `EngineCompositionFactories` 是测试/Headless/特殊集成的接线税。
 - 不取得 `IRenderDevice*`、不缓存 phase Context/writer/span 跨回调。
-- AssetSystem / Scene::World / Physics2D 由游戏 State（或样例）显式持有，不是 Host 内置模块。
+- AssetSystem / Scene::World / ParticleSystem2D / Trail2D / Physics2D 由游戏 State（或样例）显式持有，
+  不是 Host 内置模块。
 
 普通桌面游戏调用：
 
@@ -211,6 +212,20 @@ Linux AT-SPI 仍未完成（UI-002）。
 SpriteRenderer2D/PerspectiveCamera3D/MeshRenderer3D。`extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material key。
+
+`ParticleSystem2D` 与 `Trail2D` 是独立 Scene owners，不属于 World/ECS，也不依赖 Asset 或 bgfx。二者
+在 `Create()` 中通过调用方 PMR resource 建立固定容量 storage；成功的 emit/append、update、extract
+不增长 storage。它们直接复用调用方 phase-local `RenderSceneWriter` 提交 backend-neutral Sprite2D。
+
+`ParticleSystem2DConfig::randomSeed` 对所有值（包括0）都是固定确定 seed。`emitBurst()` 的 validation、
+容量与稳定 key preflight 失败不改变 RNG、next key 或 live set；成功 key 单调分配且过期/clear 后不
+复用。`update()` 先检查全部 next age 和 survivor position，失败时所有粒子不变；extract 按 normalized
+age 插值 size/color。
+
+`Trail2D::appendPoint()` 的第一点建立 anchor，之后每点生成一段；`breakTrail()` 使下一点建立新 anchor。
+segment 各自从创建时计算 lifetime/age，width 按 normalized age 在 start/end width 间线性插值。
+非法 geometry、容量或 key exhaustion 不修改 anchor/segments/next key；update 对所有 age 先 preflight，
+成功后才推进和移除过期段。稳定 segment key 单调且不复用。
 
 当前没有公开 SceneManager、ECS registry 或 Runtime-owned World capability。EnTT 不在公开面，也未被当前
 Scene target 使用。

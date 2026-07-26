@@ -1,7 +1,7 @@
 # 2D 产品架构
 
 `tina_sample_2d` 是当前正式 2D 产品门禁，不再只是 fixture Sprite 样例。完整 feature 图通过
-Catalog/TileMap/Scene/UI/Audio/Physics2D/FreeType/miniaudio 的300帧结构化与 Windows 视觉证据。
+Catalog/TileMap/Scene/Particle/Trail/UI/Audio/Physics2D/FreeType/miniaudio 的300帧结构化与 Windows 视觉证据。
 
 ## 模块边界
 
@@ -11,12 +11,13 @@ Game2DState
   -> TileMapStream -> resident TileMapInstance + CharacterController2D
   -> optional PhysicsWorld2D
   -> Scene::World (Camera2D + SpriteRenderer2D)
+  -> Scene::ParticleSystem2D + Trail2D
   -> RenderScene extraction
   -> RenderDevice Texture2D binding + bgfx Sprite2D pass
   -> retained UI + AudioEngine
 ```
 
-- `tina_scene` 只认识 Entity、Transform、Camera2D、SpriteRenderer2D 与 backend-neutral key；
+- `tina_scene` 提供 World 以及独立的 `ParticleSystem2D` / `Trail2D`，只写 backend-neutral sprite key；
 - TileMap、角色控制、选择高亮、Physics sync 和产品规则留在 Asset/产品 State；
 - Render backend 不理解 tile/cell/gameplay，也不接收 AssetHandle；
 - Box2D、bgfx、FreeType、miniaudio 均位于可选私有 adapter。
@@ -85,6 +86,23 @@ backend texture。它支持 Once 停在末帧、Loop、PingPong 反向经过内�
 产品 sample 从 Catalog 解析 Idle、Walk、HitWall 三个 clip（共5个 resolved frame），由角色 fixed-step
 状态驱动 `Idle -> Walk -> HitWall`。HitWall 使用 Once clip，并把完成状态写入结构化门禁；角色当前帧
 直接更新 Scene 的 `SpriteRenderer2D`，使用独立角色 atlas/key。
+
+## Particles 与 Trail
+
+`ParticleSystem2D` 和 `Trail2D` 是 `Tina::Scene` 的两个 standalone owner-thread system，不是 World
+component，也不依赖 Asset 或 bgfx。二者在 `Create()` 时通过调用方 `memory_resource` 建立固定容量
+PMR storage；后续成功的 emit/append、update 和 extract 不扩容。它们复用调用方当前 phase 的
+`RenderSceneWriter` 提交 Sprite2D，真实纹理仍由既有 `spriteKey` binding 解析。
+
+粒子系统对每个 `randomSeed`（包括0）使用固定确定序列。`emitBurst()` 在写入前完成 burst validation、
+剩余容量和稳定 key 空间检查；任一失败都不推进 RNG、next key 或 live set。成功粒子按单调 key 分配，
+过期或 `clear()` 后也不复用。`update()` 先 preflight 所有 age，以及仍存活粒子的积分后位置；任何溢出
+使整批状态不变，成功后才推进并压缩过期粒子。extract 按 `age/lifetime` 线性插值 size 与 color。
+
+Trail 第一个 `appendPoint()` 只建立 anchor，后续有效非退化点各追加一个从旧 anchor 到新点的 segment；
+`breakTrail()` 使下一点建立新 anchor，不跨断点连线。每段从创建时独立计 age/lifetime，宽度按各自
+normalized age 在 start/end width 间线性插值。几何、容量或稳定 key 失败不修改 anchor、segments 或
+next key；update 同样先 preflight 全部 age 后再推进与删除过期段。segment key 单调分配且不因过期复用。
 
 ## TileMap 与角色控制
 
@@ -180,9 +198,10 @@ retire 与零 underrun；miniaudio callback 调用 mixer 和 device lifecycle �
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx-product-2d
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_sample_2d tina_physics2d_tests tina_ui_tests tina_runtime_ui_tests `
+  --target tina_sample_2d tina_scene_tests tina_physics2d_tests tina_ui_tests tina_runtime_ui_tests `
            tina_ui_render_integration_tests tina_ui_freetype_tests tina_audio_tests `
            tina_audio_miniaudio_tests -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
 ```
@@ -197,6 +216,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - 300次 extraction/physics step，角色 grounded/walk/hit-right；
 - Tile/角色双纹理 upload/binding、连续 sprite batch、Camera follow/interpolation、chunk cache；
 - 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；
+- `evidenceSchema=9`；固定粒子容量12、seed `1414090305`、初始发射10，300帧时 expired=4、
+  active/extracted=6；Trail 容量8、创建/active/extracted segment=3、break=1；
+  `fxInitialFingerprint` 是32字符小写 hex，覆盖确定性的初始粒子/Trail 状态；
 - UI/TextEdit/ProgressBar/RadioButton、Audio Catalog lease、Advanced Audio owner-thread deterministic mix、
   Physics contact；
 - `physicsSensorEnters>0`、`physicsSensorExits>0`、`physicsJointReady=true`；
@@ -229,6 +251,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   migration、2D lighting、navigation 或网络 rollback；
 - Cooked SpriteAsset 的完整 atlas/PPU metadata resolve 仍可扩展，当前产品使用 Texture2D + 显式 UV/key；
 - GPU chunk mesh cache、复杂透明材质与多 camera/letterbox policy 尚未产品化；
+- 当前 2D-FX 是 CPU fixed-capacity Sprite2D extraction，不包含 Cooked FX asset schema、effect graph/editor、
+  GPU particle simulation 或 mesh-ribbon trail；
 - Physics2D 当前 shape 为 Box/Circle/Capsule、joint 为 Distance；polygon/chain 与更多 joint 类型未产品化；
 - Linux 当前 tip、跨 GPU/DPI golden 与真实扬声器不由 Windows 报告证明。
 
