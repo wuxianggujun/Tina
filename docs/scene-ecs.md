@@ -114,8 +114,9 @@ borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/gene
 material color fixture/product key。Scene 不保存 resolver、AssetLease、Cooked payload 或 GPU handle。
 
 A2 提供的产品 resolver 把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，由 Asset 层沿
-Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。A3 让 Particle/Trail 保存 Handle，
-但 TileMap 仍提交 registry 注册返回的动态 key。产品 State
+Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。A3 让 Particle/Trail 保存 Handle；
+A4 将底层通用 seam 下沉为 AssetTypes 的 `AssetBindingResolver`，Scene 名称保留为 alias，并让 TileMap
+保存 weak Tileset Handle、调用 `resolveTileset()`，不再跨帧保存 registry key。产品 State
 拥有 registry 与 GPU texture cleanup 账簿，但只借用 `TileMapResources` 中的 Store 和 `DeviceCapture` 中的
 RenderDevice；外部 owner 必须覆盖 State/registry 生命周期。key 由 RenderDevice 实例 allocator 分配，
 同一 device 的多个 registry 共享唯一/单调 namespace；allocator-managed registry 管理期间不得混用 direct
@@ -161,7 +162,7 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
   extraction、Prefab rollback/resolver，以及 Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle
   保留、resolver fail-closed/解析次数与 writer capacity；当前直接运行 83/83；
 - `tina_asset_tests`：Sprite binding registry 的容量/owner thread、register/unbind transaction、key
-  non-reuse、Texture/Sprite Handle 与 cooked dependency fail-closed；
+  non-reuse、Texture/Sprite/Tileset Handle 与 cooked dependency fail-closed，以及 TileMap 解析次数/失败清空；
 - `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking；
 - `tina_sample_2d` / `tina_sample_3d`：产品 Asset → Scene → Render 路径；
 - header-isolation：公开头不得泄漏 EnTT、GLM、bgfx 或 cgltf。

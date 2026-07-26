@@ -1,3 +1,4 @@
+#include <tina/asset/AssetStore.hpp>
 #include <tina/asset/TileChunkDirtyCache.hpp>
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapInstance.hpp>
@@ -78,6 +79,14 @@ inline constexpr AssetFormat::TileMapLayerId AlternateLayerId = 20;
 {
     return TileChunkCameraQuery{.centerX = 4.0f, .centerY = 4.0f, .halfWidth = 5.0f, .halfHeight = 5.0f};
 }
+
+struct TestTilesetBinding final {
+    [[nodiscard]] static Core::u32 resolve(void* userData, AssetHandle tileset) noexcept
+    {
+        const auto* expected = static_cast<const AssetHandle*>(userData);
+        return expected != nullptr && tileset == *expected ? 1U : 0U;
+    }
+};
 
 TEST(TileChunkDirtyCacheTests, FirstSyncRebuildsThenHitsWithoutEdits)
 {
@@ -186,6 +195,14 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
 {
     std::pmr::unsynchronized_pool_resource memory;
     auto map = makeLargeMap(memory);
+    auto store = AssetStore::Create({.capacity = 1, .memoryResource = &memory});
+    ASSERT_TRUE(store.has_value()) << store.error().message;
+    auto tileset = store->beginQueued(map.tilesetAssetId(), AssetFormat::AssetKind::Tileset);
+    ASSERT_TRUE(tileset.has_value()) << tileset.error().message;
+    const TileChunkSpriteEmitParams emitParams{
+        .tileset = *tileset,
+        .bindingResolver = AssetBindingResolver{.userData = &*tileset, .resolve = &TestTilesetBinding::resolve},
+    };
     auto cache = TileChunkDirtyCache::Create({.capacity = 128, .memoryResource = &memory});
     ASSERT_TRUE(cache.has_value());
 
@@ -226,8 +243,7 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
         for (const TileChunkView& view : rebuilt)
         {
             sprites.clear();
-            auto emitted = emitTileChunkSprites(
-                map, view, TileChunkSpriteEmitParams{.spriteKey = 1}, sprites);
+            auto emitted = emitTileChunkSprites(map, view, emitParams, sprites);
             ASSERT_TRUE(emitted.has_value()) << emitted.error().message;
             totalSpritesFromRebuilds += *emitted;
         }

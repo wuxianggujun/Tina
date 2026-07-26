@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/AssetHandle.hpp>
+#include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -58,6 +59,8 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] Core::u32 bindingKey(AssetHandle textureAsset) const noexcept;
     // Fail-closed Sprite -> unique Texture2D dependency -> live binding lookup.
     [[nodiscard]] Core::u32 resolveSprite(AssetHandle spriteAsset) const noexcept;
+    // Fail-closed Tileset -> unique Texture2D dependency -> live binding lookup.
+    [[nodiscard]] Core::u32 resolveTileset(AssetHandle tilesetAsset) const noexcept;
 
   private:
     struct Entry final {
@@ -77,6 +80,8 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] const Entry* findByAssetId(Core::AssetId textureAssetId) const noexcept;
     [[nodiscard]] Entry* findFree() noexcept;
     [[nodiscard]] bool isLiveTextureEntry(const Entry& entry) const noexcept;
+    [[nodiscard]] Core::u32 resolveSingleTextureDependency(AssetHandle asset,
+                                                           AssetFormat::AssetKind expectedKind) const noexcept;
 
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;

@@ -25,7 +25,7 @@ Catalog package
 ```
 
 - `Tina::AssetFormat` 定义 wire schema、parser/writer 与 typed payload schema，只 PUBLIC 依赖 Core；
-- `Tina::AssetTypes` 只承载 header-only weak `AssetHandle`；`Tina::Asset` 负责 Catalog、磁盘文件、Cooker、
+- `Tina::AssetTypes` 承载 header-only weak `AssetHandle` 与 borrowed `AssetBindingResolver`；`Tina::Asset` 负责 Catalog、磁盘文件、Cooker、
   Lease、Task IO 与 upload 账本；
 - xxHash 与 cgltf 都是私有实现依赖，公开头不泄漏第三方 token；
 - Render backend 只接收解析后的 payload或资源 key，不读取 Catalog/source tree；
@@ -48,10 +48,11 @@ Catalog package
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D` 与 standalone
 `ParticleSystem2D`/`Trail2D` 复制该 weak handle，并在 extraction 时显式借用共享产品 resolver；A2
 产品 resolver 薄调用 Asset-owned API surface 的
-`Sprite2DBindingRegistry`，后者按当前 Store owner/generation、Sprite kind、唯一 required Texture2D cooked dependency
+`Sprite2DBindingRegistry`，后者按当前 Store owner/generation、Sprite/Tileset kind、唯一 required Texture2D cooked dependency
 与 live binding 解析 key。Scene 不因此依赖完整 AssetSystem，也不取得 Lease/payload/GPU owner。
 Particle/Trail 不缓存解析结果或 resolver：空 FX 不解析，Trail 每次非空 extract 解析一次，Particle 按 live
-item 解析。TileMap 仍存 registry key；3D 与统一 FrameResourceRef 后置。
+item 解析。TileMap emit 保存 weak Tileset Handle，不缓存 key/resolver；hidden/off-camera/empty 跳过解析，
+非空可见集合每次调用只解析一次，失败清空输出。3D 与统一 FrameResourceRef 后置。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
@@ -98,9 +99,10 @@ direct `setSprite2DTextureBinding()` 的 caller-chosen key 与 allocator-managed
 allocator 不追踪 direct key。registry 管理期间不得混用两种写入方式，否则 direct binding 可能被后续
 allocator candidate 覆盖。
 
-Sprite resolve 不缓存 Cooked payload 指针：每次验证 live Sprite handle，读取恰好一个 expected kind 为
-Texture2D 的 required cooked dependency，再验证 registry 中对应 Texture handle/payload/binding 后返回 key，否则
-返回0。只有 unbind 使用原 exact handle，即使 Store handle 已 stale 仍可清理 device；device 清除失败时 entry
+Sprite/Tileset resolve 不缓存 Cooked payload 指针：每次验证 live handle 与 expected kind，读取恰好一个
+expected kind 为 Texture2D、flags 为 `Required` 的 cooked dependency，再验证 registry 中对应 Texture
+handle/payload/binding 后返回 key，否则返回0。只有 unbind 使用原 exact handle，即使 Store handle 已 stale
+仍可清理 device；device 清除失败时 entry
 保持不变，调用方可重试。registry 析构不替代资源 teardown，产品 State 必须按
 `unbind -> destroy/retire Texture2D` 顺序关闭，之后外部 Asset/Render owner 才能停止；State/registry 只借用
 这些外部 owner，并不负责销毁它们。

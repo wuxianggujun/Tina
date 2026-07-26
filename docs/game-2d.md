@@ -60,8 +60,9 @@ consume/claim 后 digital/analog source 均不会穿透。运行时改键只通�
 `GpuTextureId`，再由固定容量 owner-thread `Sprite2DBindingRegistry` 校验 Texture2D Handle，并调用
 RenderDevice 实例 allocator 事务绑定 GPU texture。返回 key 在该 device namespace 内唯一、单调且不复用；
 backend bind 失败不消费 key，同一 device 上的多个 registry 不会碰撞。allocator-managed registry 管理期间
-不得混用 caller-chosen `setSprite2DTextureBinding()` key。Scene extraction 每帧继续借用 A1 的
-`Sprite2DBindingResolver`，产品实现薄调用 registry，沿 Sprite 唯一 required Texture2D cooked dependency 校验
+不得混用 caller-chosen `setSprite2DTextureBinding()` key。通用 resolver 现为 `Tina::AssetTypes` 中的
+`AssetBindingResolver`；Scene 保留 A1 名称 `Sprite2DBindingResolver` 作为语义 alias。Scene extraction
+每帧借用该 seam，产品实现薄调用 registry，沿 Sprite 唯一 required Texture2D cooked dependency 校验
 Store owner/generation、kind、payload 与 live binding，然后只写 key、transform、UV 与颜色。缺 resolver
 或无法解析的 visible sprite 返回 `UnresolvedSprite`；hidden sprite 不触发解析。
 
@@ -74,9 +75,11 @@ Sprite 顺序为 sorting layer → order in layer → stable source ordinal。�
 registry 借用 `TileMapResources` 中的 Store 与 `DeviceCapture` 中的 RenderDevice，两个外部 owner 都必须
 覆盖 State/registry 生命周期。World 里的 crate/角色帧保存 Catalog Sprite handle，再由 borrowed resolver
 调用 registry 解析。Particle/Trail 保存 Catalog Sprite handle，并分别通过显式借用的 resolver 调用 registry；
-TileMap emit 仍保存并消费 registry 生成的 `u32` key，不再依赖手写 `1/2` binding 表。registry 借用
+TileMap emit 保存 Catalog Tileset handle，每次非空可见集合通过 resolver 薄调用 `resolveTileset()`，沿
+Tileset 唯一 required Texture2D dependency 取得当前 key。hidden/off-camera/empty 不调用 resolver；解析失败
+清空输出并返回 `SpriteBindingNotFound`。selection highlight 同样即时解析，不跨帧保存 key。registry 借用
 AssetStore 与 RenderDevice，不拥有 GPU texture、AssetLease 或 retirement；State RAII teardown 必须先成功
-unbind 两项 binding，再 destroy texture。A3 已完成 FX Handle 化，但尚未覆盖 TileMap、3D 或
+unbind 两项 binding，再 destroy texture。A4 已完成2D持久 binding key 清除，但尚未覆盖3D或
 `FrameResourceRef`，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
 Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用不同纹理，不再受历史 fixture key 1 限制。
 

@@ -15,19 +15,11 @@ namespace {
     return base + linear + 1U;
 }
 
-} // namespace
-
-Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk,
-                                             const TileChunkSpriteEmitParams& params,
-                                             std::pmr::vector<Render::RenderSprite2DInput>& out)
+[[nodiscard]] Core::Result<bool> hasRenderableTiles(const TileMapInstance& map, const TileChunkView& chunk)
 {
     if (!map)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile map instance is empty");
-    }
-    if (params.spriteKey == 0)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "spriteKey must be non-zero");
     }
     if (chunk.layerId == 0)
     {
@@ -42,7 +34,38 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
     {
         return Core::failure(AssetErrorCode::TileMapLayerTypeMismatch, "tile chunk render requires tile layer");
     }
-    if (!layer->visible || chunk.empty || chunk.widthCells == 0 || chunk.heightCells == 0)
+    return layer->visible && !chunk.empty && chunk.widthCells != 0 && chunk.heightCells != 0;
+}
+
+[[nodiscard]] Core::Result<Core::u32> resolveTilesetBinding(const TileChunkSpriteEmitParams& params) noexcept
+{
+    if (!params.tileset)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "tile chunk render requires a weak Tileset handle");
+    }
+    const Core::u32 spriteKey = params.bindingResolver(params.tileset);
+    if (spriteKey == 0)
+    {
+        return Core::failure(AssetErrorCode::SpriteBindingNotFound,
+                             "Tileset asset has no live Sprite2D texture binding");
+    }
+    return spriteKey;
+}
+
+[[nodiscard]] Core::Result<Core::u32> emitTileChunkSpritesWithBinding(
+    const TileMapInstance& map,
+    const TileChunkView& chunk,
+    const TileChunkSpriteEmitParams& params,
+    Core::u32 spriteKey,
+    std::pmr::vector<Render::RenderSprite2DInput>& out)
+{
+    auto renderable = hasRenderableTiles(map, chunk);
+    if (!renderable)
+    {
+        out.clear();
+        return Core::failure(std::move(renderable.error()));
+    }
+    if (!*renderable)
     {
         out.clear();
         return Core::u32{0};
@@ -63,6 +86,7 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
                 auto info = map.tileInfoAt(chunk.layerId, cellX, cellY);
                 if (!info)
                 {
+                    out.clear();
                     return Core::failure(std::move(info.error()));
                 }
                 if (!*info || (*info)->empty)
@@ -72,7 +96,7 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
                 const float centerX = params.originX + (static_cast<float>(cellX) + 0.5f) * cell;
                 const float centerY = params.originY + (static_cast<float>(cellY) + 0.5f) * cell;
                 out.push_back(Render::RenderSprite2DInput{
-                    .spriteKey = params.spriteKey,
+                    .spriteKey = spriteKey,
                     .stableEntityKey = makeStableEntityKey(params.stableEntityKeyBase, cellX, cellY, map.widthCells()),
                     .centerX = centerX,
                     .centerY = centerY,
@@ -99,9 +123,34 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
         }
     } catch (const std::bad_alloc&)
     {
+        out.clear();
         return Core::failure(AssetErrorCode::AllocationFailed, "tile chunk sprite emit allocation failed");
     }
     return static_cast<Core::u32>(out.size());
+}
+
+} // namespace
+
+Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk,
+                                             const TileChunkSpriteEmitParams& params,
+                                             std::pmr::vector<Render::RenderSprite2DInput>& out)
+{
+    out.clear();
+    auto renderable = hasRenderableTiles(map, chunk);
+    if (!renderable)
+    {
+        return Core::failure(std::move(renderable.error()));
+    }
+    if (!*renderable)
+    {
+        return Core::u32{0};
+    }
+    auto spriteKey = resolveTilesetBinding(params);
+    if (!spriteKey)
+    {
+        return Core::failure(std::move(spriteKey.error()));
+    }
+    return emitTileChunkSpritesWithBinding(map, chunk, params, *spriteKey, out);
 }
 
 Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId,
@@ -115,6 +164,15 @@ Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, As
     {
         return Core::failure(std::move(extracted.error()));
     }
+    if (chunks.empty())
+    {
+        return Core::u32{0};
+    }
+    auto spriteKey = resolveTilesetBinding(params);
+    if (!spriteKey)
+    {
+        return Core::failure(std::move(spriteKey.error()));
+    }
 
     std::pmr::vector<Render::RenderSprite2DInput> chunkSprites{out.get_allocator()};
     Core::u32 total = 0;
@@ -122,9 +180,10 @@ Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, As
     {
         for (const auto& chunk : chunks)
         {
-            auto n = emitTileChunkSprites(map, chunk, params, chunkSprites);
+            auto n = emitTileChunkSpritesWithBinding(map, chunk, params, *spriteKey, chunkSprites);
             if (!n)
             {
+                out.clear();
                 return Core::failure(std::move(n.error()));
             }
             out.insert(out.end(), chunkSprites.begin(), chunkSprites.end());
@@ -132,6 +191,7 @@ Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, As
         }
     } catch (const std::bad_alloc&)
     {
+        out.clear();
         return Core::failure(AssetErrorCode::AllocationFailed, "visible tile map sprite emit allocation failed");
     }
     return total;

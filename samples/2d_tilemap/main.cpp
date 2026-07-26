@@ -1,3 +1,4 @@
+#include <tina/asset/AssetStore.hpp>
 #include <tina/asset/CharacterController2D.hpp>
 #include <tina/asset/GridCollision.hpp>
 #include <tina/asset/TileChunkRender.hpp>
@@ -388,6 +389,21 @@ class TileMap2DState final : public Tina::IGameState {
             return Tina::Core::failure(std::move(map.error()));
         }
         map_.emplace(std::move(*map));
+        auto fixtureStore = Tina::Asset::AssetStore::Create(
+            Tina::Asset::AssetStoreConfig{.capacity = 1U, .memoryResource = &memory_});
+        if (!fixtureStore)
+        {
+            return Tina::Core::failure(std::move(fixtureStore.error()));
+        }
+        fixtureStore_.emplace(std::move(*fixtureStore));
+        auto tileset = fixtureStore_->beginQueued(
+            map_->tilesetAssetId(), Tina::AssetFormat::AssetKind::Tileset);
+        if (!tileset)
+        {
+            return Tina::Core::failure(std::move(tileset.error()));
+        }
+        tilesetHandle_ = *tileset;
+        tilesetBinding_ = FixtureTilesetBinding{.tileset = tilesetHandle_};
         grid_.emplace(*map_, CollisionLayerId);
         controller_.emplace(Tina::Asset::CharacterController2DConfig{
             .halfWidth = 0.3f,
@@ -408,6 +424,9 @@ class TileMap2DState final : public Tina::IGameState {
         controller_.reset();
         grid_.reset();
         map_.reset();
+        tilesetBinding_ = {};
+        tilesetHandle_ = {};
+        fixtureStore_.reset();
     }
 
     [[nodiscard]] Tina::GameStatePolicy initialPolicy() const noexcept override
@@ -472,7 +491,14 @@ class TileMap2DState final : public Tina::IGameState {
             .halfHeight = camera.worldHeight * 0.5f,
         };
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
-            *map_, VisualLayerId, query, Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductSpriteKey},
+            *map_, VisualLayerId, query,
+            Tina::Asset::TileChunkSpriteEmitParams{
+                .tileset = tilesetHandle_,
+                .bindingResolver = Tina::Asset::AssetBindingResolver{
+                    .userData = &tilesetBinding_,
+                    .resolve = &FixtureTilesetBinding::resolve,
+                },
+            },
             tileSprites);
         if (!emitted)
         {
@@ -512,9 +538,24 @@ class TileMap2DState final : public Tina::IGameState {
     }
 
   private:
+    struct FixtureTilesetBinding final {
+        [[nodiscard]] static u32 resolve(
+            void* userData,
+            Tina::Asset::AssetHandle tileset) noexcept
+        {
+            const auto* binding = static_cast<const FixtureTilesetBinding*>(userData);
+            return binding != nullptr && binding->tileset == tileset ? ProductSpriteKey : 0U;
+        }
+
+        Tina::Asset::AssetHandle tileset{};
+    };
+
     u64 targetFrames_ = 0;
     SampleCapture* capture_ = nullptr;
     mutable std::pmr::unsynchronized_pool_resource memory_{};
+    std::optional<Tina::Asset::AssetStore> fixtureStore_{};
+    Tina::Asset::AssetHandle tilesetHandle_{};
+    mutable FixtureTilesetBinding tilesetBinding_{};
     std::optional<Tina::Asset::TileMapInstance> map_;
     std::optional<Tina::Asset::TileMapGridCollision> grid_;
     std::optional<Tina::Asset::CharacterController2D> controller_;

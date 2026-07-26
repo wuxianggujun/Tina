@@ -1,3 +1,5 @@
+#include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/AssetStore.hpp>
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapInstance.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
@@ -10,6 +12,7 @@
 
 #include <array>
 #include <memory_resource>
+#include <optional>
 #include <vector>
 
 namespace Tina::Asset {
@@ -26,9 +29,14 @@ inline constexpr AssetFormat::TileMapLayerId HiddenLayerId = 20;
     return bytes;
 }
 
+[[nodiscard]] Core::AssetId tilesetAssetId()
+{
+    return *Core::AssetId::fromBytes(idBytes(5U));
+}
+
 [[nodiscard]] TileMapInstance makeMap(std::pmr::memory_resource& memory)
 {
-    const auto tilesetId = *Core::AssetId::fromBytes(idBytes(5U));
+    const auto tilesetId = tilesetAssetId();
     const auto mapId = *Core::AssetId::fromBytes(idBytes(6U));
     const std::array tiles{
         AssetFormat::TilesetTileDesc{.localId = 1,
@@ -47,8 +55,8 @@ inline constexpr AssetFormat::TileMapLayerId HiddenLayerId = 20;
     auto tilesetBytes = AssetFormat::writeTilesetPayloadBytes(
         AssetFormat::TilesetPayloadDesc{.tilePixelWidth = 16, .tilePixelHeight = 16, .tiles = tiles});
     auto tileset = AssetFormat::parseTilesetPayload(*tilesetBytes);
-    // 2x2 all filled
-    const std::array<Core::u16, 4> cells{1, 2, 2, 1};
+    // 4x2 all filled across two 2x2 chunks.
+    const std::array<Core::u16, 8> cells{1, 2, 2, 1, 2, 1, 1, 2};
     const std::array layers{
         TestSupport::TestTileMapLayerDesc{
             .stableLayerId = VisualLayerId,
@@ -65,27 +73,82 @@ inline constexpr AssetFormat::TileMapLayerId HiddenLayerId = 20;
             .cells = cells,
         },
     };
-    auto instance = TestSupport::makeResidentTileMapInstance(2, 2, 2, mapId, tilesetId, *tileset, layers, memory);
+    auto instance = TestSupport::makeResidentTileMapInstance(4, 2, 2, mapId, tilesetId, *tileset, layers, memory);
     EXPECT_TRUE(instance.has_value()) << instance.error().message;
     return std::move(*instance);
 }
 
-TEST(TileChunkRenderTests, EmitSpritesWithUvAndCenter)
-{
-    std::pmr::unsynchronized_pool_resource memory;
-    auto map = makeMap(memory);
-    std::pmr::vector<TileChunkView> chunks{&memory};
-    ASSERT_TRUE(extractVisibleTileChunks(
-                    map, VisualLayerId,
-                    TileChunkCameraQuery{.centerX = 1.0f, .centerY = 1.0f, .halfWidth = 2.0f, .halfHeight = 2.0f}, chunks)
-                    .has_value());
-    ASSERT_EQ(chunks.size(), 1U);
+struct TestTilesetBinding final {
+    [[nodiscard]] AssetBindingResolver resolver() noexcept
+    {
+        return AssetBindingResolver{.userData = this, .resolve = &resolve};
+    }
 
-    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory};
-    auto n = emitTileChunkSprites(map, chunks[0], TileChunkSpriteEmitParams{.spriteKey = 1}, sprites);
+    [[nodiscard]] static Core::u32 resolve(void* userData, AssetHandle tileset) noexcept
+    {
+        auto& self = *static_cast<TestTilesetBinding*>(userData);
+        ++self.resolveCalls;
+        self.lastResolved = tileset;
+        if (self.store == nullptr || tileset != self.boundTileset ||
+            self.store->assetKind(tileset) != AssetFormat::AssetKind::Tileset ||
+            self.store->state(tileset) == AssetLogicalState::Unloaded)
+        {
+            return 0;
+        }
+        return self.bindingKey;
+    }
+
+    AssetStore* store = nullptr;
+    AssetHandle boundTileset{};
+    Core::u32 bindingKey = 41U;
+    Core::usize resolveCalls = 0;
+    AssetHandle lastResolved{};
+};
+
+class TileChunkRenderTests : public testing::Test {
+  protected:
+    void SetUp() override
+    {
+        auto store = AssetStore::Create({.capacity = 2, .memoryResource = &memory_});
+        ASSERT_TRUE(store.has_value()) << store.error().message;
+        store_.emplace(std::move(*store));
+        auto tileset = store_->beginQueued(tilesetAssetId(), AssetFormat::AssetKind::Tileset);
+        ASSERT_TRUE(tileset.has_value()) << tileset.error().message;
+        tileset_ = *tileset;
+        binding_ = TestTilesetBinding{.store = &*store_, .boundTileset = tileset_};
+    }
+
+    [[nodiscard]] TileChunkSpriteEmitParams emitParams() noexcept
+    {
+        return TileChunkSpriteEmitParams{
+            .tileset = tileset_,
+            .bindingResolver = binding_.resolver(),
+        };
+    }
+
+    std::pmr::unsynchronized_pool_resource memory_{};
+    std::optional<AssetStore> store_{};
+    AssetHandle tileset_{};
+    TestTilesetBinding binding_{};
+};
+
+TEST_F(TileChunkRenderTests, EmitSpritesWithUvAndCenter)
+{
+    auto map = makeMap(memory_);
+    std::pmr::vector<TileChunkView> chunks{&memory_};
+    ASSERT_TRUE(extractVisibleTileChunks(
+                    map, VisualLayerId, TileChunkCameraQuery{.centerX = 2.0f, .centerY = 1.0f,
+                                                            .halfWidth = 3.0f, .halfHeight = 2.0f}, chunks)
+                    .has_value());
+    ASSERT_EQ(chunks.size(), 2U);
+
+    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
+    auto n = emitTileChunkSprites(map, chunks[0], emitParams(), sprites);
     ASSERT_TRUE(n.has_value()) << n.error().message;
     EXPECT_EQ(*n, 4U);
     EXPECT_EQ(sprites.size(), 4U);
+    EXPECT_EQ(binding_.resolveCalls, 1U);
+    EXPECT_EQ(binding_.lastResolved, tileset_);
 
     // Cell (0,0) tile 1 UV 0..0.5, center (0.5, 0.5)
     EXPECT_FLOAT_EQ(sprites[0].centerX, 0.5f);
@@ -93,10 +156,10 @@ TEST(TileChunkRenderTests, EmitSpritesWithUvAndCenter)
     EXPECT_FLOAT_EQ(sprites[0].widthMeters, 1.0f);
     EXPECT_FLOAT_EQ(sprites[0].u0, 0.0f);
     EXPECT_FLOAT_EQ(sprites[0].u1, 0.5f);
-    EXPECT_EQ(sprites[0].spriteKey, 1U);
+    EXPECT_EQ(sprites[0].spriteKey, 41U);
 
     // Commit into RenderScene
-    auto builder = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{.spriteCapacity = 16}, memory);
+    auto builder = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{.spriteCapacity = 16}, memory_);
     ASSERT_TRUE(builder.has_value());
     ASSERT_TRUE(builder->beginFrame({}).has_value());
     auto writer = builder->writer();
@@ -119,33 +182,98 @@ TEST(TileChunkRenderTests, EmitSpritesWithUvAndCenter)
     EXPECT_FLOAT_EQ(view->sprites2D()[0].u1, 0.5f);
 }
 
-TEST(TileChunkRenderTests, EmitVisibleSkipsOffCamera)
+TEST_F(TileChunkRenderTests, EmitVisibleResolvesTilesetOnceAcrossChunks)
 {
-    std::pmr::unsynchronized_pool_resource memory;
-    auto map = makeMap(memory);
-    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory};
+    auto map = makeMap(memory_);
+    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
+    auto n = emitVisibleTileMapSprites(
+        map, VisualLayerId,
+        TileChunkCameraQuery{.centerX = 2.0f, .centerY = 1.0f, .halfWidth = 3.0f, .halfHeight = 2.0f},
+        emitParams(), sprites);
+    ASSERT_TRUE(n.has_value()) << n.error().message;
+    EXPECT_EQ(*n, 8U);
+    EXPECT_EQ(sprites.size(), 8U);
+    EXPECT_EQ(binding_.resolveCalls, 1U);
+    for (const auto& sprite : sprites)
+    {
+        EXPECT_EQ(sprite.spriteKey, 41U);
+    }
+}
+
+TEST_F(TileChunkRenderTests, EmitVisibleSkipsOffCameraWithoutResolving)
+{
+    auto map = makeMap(memory_);
+    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
     // Camera far away → 0 sprites
     auto n = emitVisibleTileMapSprites(
         map, VisualLayerId,
         TileChunkCameraQuery{.centerX = 100.0f, .centerY = 100.0f, .halfWidth = 0.5f, .halfHeight = 0.5f},
-        TileChunkSpriteEmitParams{.spriteKey = 7}, sprites);
+        emitParams(), sprites);
     ASSERT_TRUE(n.has_value());
     EXPECT_EQ(*n, 0U);
     EXPECT_TRUE(sprites.empty());
+    EXPECT_EQ(binding_.resolveCalls, 0U);
+
+    sprites.push_back({.spriteKey = 99U, .stableEntityKey = 99U});
+    const auto emptyChunk = emitTileChunkSprites(
+        map, TileChunkView{.layerId = VisualLayerId, .empty = true}, emitParams(), sprites);
+    ASSERT_TRUE(emptyChunk.has_value()) << emptyChunk.error().message;
+    EXPECT_EQ(*emptyChunk, 0U);
+    EXPECT_TRUE(sprites.empty());
+    EXPECT_EQ(binding_.resolveCalls, 0U);
 }
 
-TEST(TileChunkRenderTests, HiddenLayerIsNotEmitted)
+TEST_F(TileChunkRenderTests, HiddenLayerIsNotEmittedOrResolved)
 {
-    std::pmr::unsynchronized_pool_resource memory;
-    auto map = makeMap(memory);
-    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory};
+    auto map = makeMap(memory_);
+    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
     auto n = emitVisibleTileMapSprites(
         map, HiddenLayerId,
-        TileChunkCameraQuery{.centerX = 1.0f, .centerY = 1.0f, .halfWidth = 2.0f, .halfHeight = 2.0f},
-        TileChunkSpriteEmitParams{.spriteKey = 7}, sprites);
+        TileChunkCameraQuery{.centerX = 2.0f, .centerY = 1.0f, .halfWidth = 3.0f, .halfHeight = 2.0f},
+        emitParams(), sprites);
     ASSERT_TRUE(n.has_value());
     EXPECT_EQ(*n, 0U);
     EXPECT_TRUE(sprites.empty());
+    EXPECT_EQ(binding_.resolveCalls, 0U);
+}
+
+TEST_F(TileChunkRenderTests, MissingAndZeroBindingsFailClosedWithoutPublishing)
+{
+    auto map = makeMap(memory_);
+    std::pmr::vector<TileChunkView> chunks{&memory_};
+    ASSERT_TRUE(extractVisibleTileChunks(
+                    map, VisualLayerId, TileChunkCameraQuery{.centerX = 2.0f, .centerY = 1.0f,
+                                                            .halfWidth = 3.0f, .halfHeight = 2.0f}, chunks)
+                    .has_value());
+    ASSERT_FALSE(chunks.empty());
+    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
+    sprites.push_back({.spriteKey = 99U, .stableEntityKey = 99U});
+
+    auto emptyHandleParams = emitParams();
+    emptyHandleParams.tileset = {};
+    const auto emptyHandle = emitTileChunkSprites(map, chunks.front(), emptyHandleParams, sprites);
+    ASSERT_FALSE(emptyHandle.has_value());
+    EXPECT_EQ(emptyHandle.error().code, AssetErrorCode::InvalidHandle);
+    EXPECT_TRUE(sprites.empty());
+    EXPECT_EQ(binding_.resolveCalls, 0U);
+
+    auto missingResolverParams = emitParams();
+    missingResolverParams.bindingResolver = {};
+    const auto missingResolver = emitTileChunkSprites(map, chunks.front(), missingResolverParams, sprites);
+    ASSERT_FALSE(missingResolver.has_value());
+    EXPECT_EQ(missingResolver.error().code, AssetErrorCode::SpriteBindingNotFound);
+    EXPECT_TRUE(sprites.empty());
+    EXPECT_EQ(binding_.resolveCalls, 0U);
+
+    binding_.bindingKey = 0U;
+    const auto zeroBinding = emitVisibleTileMapSprites(
+        map, VisualLayerId,
+        TileChunkCameraQuery{.centerX = 2.0f, .centerY = 1.0f, .halfWidth = 3.0f, .halfHeight = 2.0f},
+        emitParams(), sprites);
+    ASSERT_FALSE(zeroBinding.has_value());
+    EXPECT_EQ(zeroBinding.error().code, AssetErrorCode::SpriteBindingNotFound);
+    EXPECT_TRUE(sprites.empty());
+    EXPECT_EQ(binding_.resolveCalls, 1U);
 }
 
 } // namespace

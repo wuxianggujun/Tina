@@ -28,6 +28,7 @@
 | N10 | ASSET-HANDLE-SCENE-2D-A1 | 已完成 | World Sprite 组件改存 weak AssetHandle，extract 借用零分配 resolver；资源失败 fail closed，完整 ASSET-HANDLE-SCENE 仍为 Partial |
 | N11 | ASSET-HANDLE-SCENE-2D-A2 | 已完成 | 固定容量 owner-thread Sprite binding registry + device-instance key allocator 取代产品手写 key 表；事务注册/解绑、同 device 多 registry、cooked dependency resolve 与 State teardown 已贯通，完整总项仍为 Partial |
 | N12 | ASSET-HANDLE-SCENE-2D-A3 | 已完成 | Particle/Trail 改存 weak Sprite AssetHandle，并在 extraction 时借用 resolver fail closed；产品 evidence schema 11 与稳定 FX fingerprint 已贯通，完整总项仍为 Partial |
+| N13 | ASSET-HANDLE-SCENE-2D-A4 | 已完成 | TileMap emit 改存 weak Tileset AssetHandle，并在调用期借用 Asset resolver；registry Tileset dependency resolve、单次解析/失败清空与产品 evidence schema 12 已贯通，完整总项仍为 Partial |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -457,8 +458,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
 N10 单独不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时产品 resolver 仍映射 game-owned binding key。
-N11 已补 engine-provided、State-owned binding registry；N12 已完成 Particle/Trail Handle 化。TileMap、
-统一 retirement/FrameResourceRef 与 3D component Handle 化仍需后续切片。
+N11 已补 engine-provided、State-owned binding registry；N12 已完成 Particle/Trail Handle 化，N13 已完成
+TileMap Tileset Handle 化。统一 retirement/FrameResourceRef 与 3D component Handle 化仍需后续切片。
 
 ## N11 - ASSET-HANDLE-SCENE-2D-A2
 
@@ -488,7 +489,7 @@ N11 已补 engine-provided、State-owned binding registry；N12 已完成 Partic
 | --- | --- |
 | N11.1 | Asset 公共 registry、独立错误码与 RenderDevice instance-scoped transactional key allocator；direct setter 与 allocator 的共享 namespace/禁混契约 |
 | N11.2 | fixed-capacity/owner-thread、duplicate/conflict/capacity/device key nonreuse、same-device multi-registry、register/unbind transaction、Sprite dependency fail-closed 单测与 header isolation |
-| N11.3 | product-2d State 注册2纹理、resolver/TileMap/FX 消费动态 key、先解绑后销毁；完成时 schema 10 输出 `spriteBindingTextures=2`、`spriteBindingsReleased=2`、`spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`；N12 后当前 schema 为11 |
+| N11.3 | product-2d State 注册2纹理、resolver/TileMap/FX 消费动态 key、先解绑后销毁；完成时 schema 10 输出 `spriteBindingTextures=2`、`spriteBindingsReleased=2`、`spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`；N12 后为11，N13 后当前为12 |
 
 ### 验收
 
@@ -503,7 +504,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
 N11 单独不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时 FX/TileMap 虽已消费 registry key，组件仍没有保存
-AssetHandle。N12 已迁移 FX；TileMap、3D Mesh/Material registry、统一 retirement ownership 与
+AssetHandle。N12 已迁移 FX，N13 已迁移 TileMap；3D Mesh/Material registry、统一 retirement ownership 与
 `FrameResourceRef` 仍未完成。
 
 ## N12 - ASSET-HANDLE-SCENE-2D-A3
@@ -546,8 +547,49 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2d
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
-N12 不宣称完成 `ASSET-HANDLE-SCENE` 总项：TileMap 仍保存 Sprite binding key，3D Mesh/Material registry、
-统一 retirement ownership 与 `FrameResourceRef` 仍需后续切片。
+N12 不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时 TileMap 仍保存 Sprite binding key。N13 已迁移 TileMap；
+3D Mesh/Material registry、统一 retirement ownership 与 `FrameResourceRef` 仍需后续切片。
+
+## N13 - ASSET-HANDLE-SCENE-2D-A4
+
+### 已完成契约
+
+- 通用 `AssetBindingResolver` 位于窄 `Tina::AssetTypes` target，保持 borrowed function pointer + user data；
+  Scene 的 `Sprite2DBindingResolver` 是语义 alias，不形成 Asset→Scene 依赖。
+- `TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与 resolver，不再保存 `spriteKey`，也不
+  持有 `AssetLease`、Cooked payload、GPU owner 或 resolver context。
+- `Sprite2DBindingRegistry::resolveTileset()` 与 Sprite 路径共用单 Texture2D dependency 校验：live handle、
+  Tileset kind、CPU payload、恰好一个 `Required` Texture2D dependency 与 live binding 任一不满足都返回0。
+- hidden/off-camera/empty 不解析；单 chunk 有 tile 时解析一次，完整非空 visible set 跨 chunk 仍只解析一次。
+  空 handle 返回 `InvalidHandle`，missing/zero binding 返回 `SpriteBindingNotFound`，失败清空输出。
+- product-2d 的 TileMap 传 Catalog Tileset handle 与 State-owned resolver context；selection highlight 即时解析，
+  不保存 key。schema 12 新增 `tileMapSpriteBindingResolverHits>0` 并纳入 evidence fingerprint。
+- 无 Catalog 的 headless TileMap sample 使用 State-owned 最小 AssetStore fixture 生成合法 weak Tileset handle，
+  固定 resolver 只映射到既有 Null product key，不伪造 generation handle。
+
+### 完成结果
+
+| 阶段 | 完成结果 |
+| --- | --- |
+| N13.1 | 通用 Asset resolver 头 + Scene alias；TileChunk emit 公共契约一次性迁移到 weak Tileset Handle，无 key 双轨 |
+| N13.2 | `tina_asset_tests` 170/170；registry 覆盖 Tileset wrong-kind/queued/stale/unbound/缺 dependency，TileChunk 覆盖成功、跨 chunk 单次解析、hidden/off-camera skip 与 missing/zero fail-closed |
+| N13.3 | product-2d TileMap/selection 使用 registry Tileset resolve；schema 12 与独立 TileMap resolver hit 进入 300 帧 gate；headless TileMap 300 帧通过 |
+
+### 验收
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_asset_tests tina_scene_tests tina_sample_2d tina_sample_2d_tilemap -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_tilemap.exe --frames=300
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 `
+  -SkipConfigure -SkipBuild
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+```
+
+N13 不宣称完成 `ASSET-HANDLE-SCENE` 总项：3D Mesh/Material registry、统一 retirement ownership 与
+`FrameResourceRef` 仍需后续切片。
 
 ## 每项收口清单
 

@@ -183,17 +183,29 @@ Core::u32 Sprite2DBindingRegistry::bindingKey(AssetHandle textureAsset) const no
 
 Core::u32 Sprite2DBindingRegistry::resolveSprite(AssetHandle spriteAsset) const noexcept
 {
-    if (!isOwnerThread() || !spriteAsset || m_store->assetKind(spriteAsset) != AssetFormat::AssetKind::Sprite ||
-        !hasRenderableCpuPayload(*m_store, spriteAsset))
+    return resolveSingleTextureDependency(spriteAsset, AssetFormat::AssetKind::Sprite);
+}
+
+Core::u32 Sprite2DBindingRegistry::resolveTileset(AssetHandle tilesetAsset) const noexcept
+{
+    return resolveSingleTextureDependency(tilesetAsset, AssetFormat::AssetKind::Tileset);
+}
+
+Core::u32 Sprite2DBindingRegistry::resolveSingleTextureDependency(
+    AssetHandle asset,
+    AssetFormat::AssetKind expectedKind) const noexcept
+{
+    if (!isOwnerThread() || !asset || m_store->assetKind(asset) != expectedKind ||
+        !hasRenderableCpuPayload(*m_store, asset))
     {
         return 0;
     }
-    const CookedAssetFile* spriteFile = m_store->tryGet(spriteAsset);
-    if (spriteFile == nullptr || spriteFile->header().dependencyCount != 1U)
+    const CookedAssetFile* file = m_store->tryGet(asset);
+    if (file == nullptr || file->header().dependencyCount != 1U)
     {
         return 0;
     }
-    const auto textureDependency = spriteFile->dependency(0);
+    const auto textureDependency = file->dependency(0);
     if (!textureDependency || textureDependency->expectedKind != AssetFormat::AssetKind::Texture2D ||
         textureDependency->flags != AssetFormat::DependencyFlags::Required)
     {

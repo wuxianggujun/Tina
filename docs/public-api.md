@@ -272,6 +272,12 @@ dirty cache/sprite emit 与 `TileMapGridCollision` 都要求显式 `TileMapLayer
 `TileMapLayerTypeMismatch`/`TileMapLayerNotFound`。grid SPI 的 `materialFlagsAt()` 仍按约定把无效、空或
 未驻留 cell 表现为0。visibility=false 会跳过可见 chunk/sprite emit，但不禁止显式用作 collision。
 
+`TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与 borrowed `AssetBindingResolver`，不保存
+render key，也不取得 Lease/payload/GPU owner。resolver 与 user data 只在当前 emit 调用内有效。单 chunk
+有实际 tile 时解析一次；`emitVisibleTileMapSprites()` 对完整非空可见集合只解析一次。hidden、off-camera、
+empty 不调用 resolver；空 handle 返回 `InvalidHandle`，missing/zero binding 返回 `SpriteBindingNotFound`，
+任一失败都清空调用方输出。
+
 `TileMapStream::Create()` 消费 root/tileset `AssetLease` 并拥有 resident `TileMapInstance`。调用顺序必须是
 `updateDemand() -> AssetSystem::pump() -> commitReady()`。load window 中的 desired chunk 单独超过
 resident capacity 时 failure 是 transactional，旧 active set 保持不变；retain window 只是 optional
@@ -295,9 +301,11 @@ thread 调用；该线程成为固定容量 registry 的 owner，所有后续操
 GPU texture 或同 AssetId 的另一 live handle 是冲突。`bindingKey()` 只为当前 live Texture2D/payload 返回
 key；stale lookup 返回0。
 `unbindTextureBinding()` 以原 exact handle 清除 device binding，device 失败保留记录供重试。
-`resolveSprite()` 沿 Cooked Sprite 的唯一 required Texture2D dependency fail closed 返回当前 key。registry 不拥有
+`resolveSprite()` 与 `resolveTileset()` 分别沿 Cooked Sprite/Tileset 的唯一 required Texture2D dependency
+fail closed 返回当前 key。registry 不拥有
 GPU texture、Lease 或 retirement；调用方必须让 Store/device 覆盖它，并在 destroy/retire texture 前成功
-unbind。它不是 Scene owner；A1 的 `Sprite2DBindingResolver` 继续作为 extraction borrowed seam。
+unbind。它不是 Scene owner；通用 `AssetBindingResolver` 位于窄 `AssetTypes` target，A1 的
+`Sprite2DBindingResolver` 是 Scene extraction 的语义 alias。
 
 `setSprite2DTextureBinding(callerKey, texture)` 仍保留 direct binding/clear SPI，但 caller-chosen key 与上述
 allocator 使用同一个 device namespace。allocator-managed registry 管理期间不得混用 direct caller key；

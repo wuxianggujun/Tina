@@ -3,6 +3,7 @@
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/render/RenderErrors.hpp>
 
 #include "support/CatalogPackageTestSupport.hpp"
@@ -216,6 +217,56 @@ class FixedBindingRenderDevice final : public Render::IRenderDevice {
     return makeSprite(memory, seed, textureId, dependencies);
 }
 
+[[nodiscard]] CookedAssetFile makeTileset(
+    std::pmr::memory_resource& memory,
+    Core::u8 seed,
+    Core::AssetId textureId,
+    std::span<const AssetFormat::CookedAssetWriteDependency> dependencies)
+{
+    constexpr std::array tiles{
+        AssetFormat::TilesetTileDesc{
+            .localId = 1,
+            .u0 = 0.0F,
+            .v0 = 0.0F,
+            .u1 = 1.0F,
+            .v1 = 1.0F,
+        },
+    };
+    auto payload = AssetFormat::writeTilesetPayloadBytes(AssetFormat::TilesetPayloadDesc{
+        .tilePixelWidth = 16,
+        .tilePixelHeight = 16,
+        .tiles = tiles,
+        .textureId = textureId,
+    });
+    EXPECT_TRUE(payload.has_value()) << (payload ? "" : payload.error().message);
+    if (!payload)
+    {
+        return {};
+    }
+    return makeCookedFile(
+        memory,
+        AssetFormat::AssetKind::Tileset,
+        AssetFormat::TilesetWire::SchemaVersion,
+        assetId(seed),
+        dependencies,
+        *payload);
+}
+
+[[nodiscard]] CookedAssetFile makeTileset(
+    std::pmr::memory_resource& memory,
+    Core::u8 seed,
+    Core::AssetId textureId)
+{
+    const std::array dependencies{
+        AssetFormat::CookedAssetWriteDependency{
+            .assetId = textureId,
+            .expectedKind = AssetFormat::AssetKind::Texture2D,
+            .flags = AssetFormat::DependencyFlags::Required,
+        },
+    };
+    return makeTileset(memory, seed, textureId, dependencies);
+}
+
 [[nodiscard]] Core::Result<AssetStore> makeStore(std::pmr::memory_resource& memory, Core::usize capacity = 16U)
 {
     return AssetStore::Create(AssetStoreConfig{.capacity = capacity, .memoryResource = &memory});
@@ -293,6 +344,42 @@ TEST(Sprite2DBindingRegistryTests, SharedAtlasResolvesToOneIdempotentTextureBind
     EXPECT_EQ(*duplicate, *registered);
     EXPECT_EQ(device.callCount(), 1U);
     EXPECT_EQ(registry->bindingCount(), 1U);
+}
+
+TEST(Sprite2DBindingRegistryTests, TilesetResolvesItsRequiredTextureBindingFailClosed)
+{
+    TrackingMemoryResource memory;
+    auto store = makeStore(memory);
+    ASSERT_TRUE(store.has_value()) << store.error().message;
+    const Core::AssetId textureId = assetId(1U);
+    auto texture = store->publish(makeTexture(memory, 1U));
+    auto tileset = store->publish(makeTileset(memory, 2U, textureId));
+    auto unboundTileset = store->publish(makeTileset(memory, 3U, assetId(9U)));
+    auto queuedTileset = store->beginQueued(assetId(4U), AssetFormat::AssetKind::Tileset);
+    auto staleTileset = store->publish(makeTileset(memory, 5U, textureId));
+    auto noDependencyTileset = store->publish(makeTileset(memory, 6U, textureId, {}));
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(tileset.has_value());
+    ASSERT_TRUE(unboundTileset.has_value());
+    ASSERT_TRUE(queuedTileset.has_value());
+    ASSERT_TRUE(staleTileset.has_value());
+    ASSERT_TRUE(noDependencyTileset.has_value());
+    ASSERT_TRUE(store->unload(*staleTileset).has_value());
+
+    FixedBindingRenderDevice device;
+    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    ASSERT_TRUE(registry.has_value()) << registry.error().message;
+    auto binding = registry->registerTextureBinding(*texture, Render::GpuTextureId{7U, 1U});
+    ASSERT_TRUE(binding.has_value()) << binding.error().message;
+
+    EXPECT_EQ(registry->resolveTileset(*tileset), *binding);
+    EXPECT_EQ(registry->resolveTileset({}), 0U);
+    EXPECT_EQ(registry->resolveTileset(*texture), 0U);
+    EXPECT_EQ(registry->resolveTileset(*unboundTileset), 0U);
+    EXPECT_EQ(registry->resolveTileset(*queuedTileset), 0U);
+    EXPECT_EQ(registry->resolveTileset(*staleTileset), 0U);
+    EXPECT_EQ(registry->resolveTileset(*noDependencyTileset), 0U);
+    EXPECT_EQ(device.callCount(), 1U);
 }
 
 TEST(Sprite2DBindingRegistryTests, RegistrationRejectsInvalidStaleWrongKindAndNotReadyHandles)

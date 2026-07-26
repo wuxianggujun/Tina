@@ -109,8 +109,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 - hidden unresolved sprite 不调用 resolver；成功解析保持 UV/pivot/transform/color/sort，writer failure 原样传播；
 - `SpriteAnimator2D` 的空 handle frame 仍为 `InvalidAnimation`；
 - `tina_sample_2d` 的 World crate/character 组件来自 Catalog Sprite handle，resolver 每次验证 Store/kind/
-  binding 后映射 key。A1 本身未证明 registry；A2 已补该证据，A3 已完成 FX Handle 化；TileMap/3D
-  Handle 迁移仍未完成。
+  binding 后映射 key。A1 本身未证明 registry；A2 已补该证据，A3 已完成 FX Handle 化，A4 已完成
+  TileMap Tileset Handle 化；3D Handle 迁移仍未完成。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -135,7 +135,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - registry 不拥有 GPU/Lease/retirement；产品 State RAII 证明先 unbind 两项 binding，再 destroy 两张 texture；
 - A2 完成时 product evidence schema 10：`spriteBindingTextures=2`、`spriteBindingsReleased=2`、
   `spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`，且 TileMap/selection/Particle/Trail
-  使用 registry 动态 key；A3 后当前 product evidence schema 为11。
+  使用 registry 动态 key；A3 升为 schema 11，A4 后当前 product evidence schema 为12。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -146,8 +146,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
 ```
 
-A2 保留 A1 resolver ABI；A3 随后完成 Particle/Trail Handle 化。TileMap、3D 与 `FrameResourceRef` 仍未
-迁移，不能据此把 `ASSET-HANDLE-SCENE` 总项标为 Done。
+A2 保留 A1 resolver ABI；A3 随后完成 Particle/Trail Handle 化，A4 再完成 TileMap Tileset Handle 化。
+3D 与 `FrameResourceRef` 仍未迁移，不能据此把 `ASSET-HANDLE-SCENE` 总项标为 Done。
 
 ## Particle/Trail Sprite AssetHandle A3
 
@@ -178,6 +178,33 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 A3 不迁移 TileMap、3D Mesh/Material registry、统一 retirement ownership 或 `FrameResourceRef`。
 
+## TileMap Tileset AssetHandle A4
+
+`ASSET-HANDLE-SCENE-2D-A4` 的模块门禁归属 `tina_asset_tests`，产品闭环归属 2D product gate：
+
+- `AssetBindingResolver.hpp` 与更新后的 `TileChunkRender.hpp` header isolation 编译；Scene resolver 保留语义
+  alias，AssetTypes 不反向依赖 Scene；
+- `TileChunkSpriteEmitParams` 保存 weak Tileset Handle 与 borrowed resolver，无旧 `spriteKey` 字段/双轨；
+- registry `resolveTileset()` 要求 live Tileset、唯一 required Texture2D dependency 与 live binding；wrong-kind、
+  queued、stale、missing/unbound dependency 均返回0；
+- hidden/off-camera/empty TileMap 不调用 resolver，单 chunk 与跨 chunk 非空 visible set 均只解析一次；
+  missing/zero binding fail closed 为 `SpriteBindingNotFound` 并清空输出；
+- `tina_asset_tests` 170/170、`tina_scene_tests` 83/83、headless TileMap sample 300 帧通过；
+- product evidence schema 12 新增 `tileMapSpriteBindingResolverHits>0`，selection highlight 即时解析 Tileset，
+  产品 State 不再保存 `tileSpriteKey_`。
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_asset_tests tina_scene_tests tina_sample_2d tina_sample_2d_tilemap -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_tilemap.exe --frames=300
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 `
+  -SkipConfigure -SkipBuild
+```
+
+A4 不迁移 3D Mesh/Material registry、统一 retirement ownership 或 `FrameResourceRef`。
+
 ## 产品样例的证据边界
 
 | Sample | 证明 | 不证明 |
@@ -188,7 +215,7 @@ A3 不迁移 TileMap、3D Mesh/Material registry、统一 retirement ownership �
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；schema 11 含 Sprite registry 注册/释放/纹理销毁、World/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；schema 12 含 Sprite registry 注册/释放/纹理销毁、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | 完整 PBR/IBL/shadow/light component、Scene AssetHandle 产品化、跨 GPU golden |
@@ -332,7 +359,7 @@ wrong-owner/bounded shutdown、active callback reader quiescence、terminal abso
 
 `MiniaudioDeviceTest.NullBackendConsumesBoundedStreamEofAndCancel` 验证 adapter 作为 realtime consumer 的
 EOF/Cancel 路径。产品 300帧还要求 `audioStreamQueued/submitted/eof/mixed/drained/stopped/retired=true`、
-submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为11。
+submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为12。
 
 Physics2D N2 的模块门禁覆盖：`createBody/createShape` 独立 generation、多 Box/Circle/Capsule shape/body、
 shape 单独销毁、sensor enter/exit、Distance joint create/query/destroy、body 级联退休 shape/joint、
@@ -342,7 +369,7 @@ wrong-world/stale/capacity/PMR rollback，以及 TileMap bridge/CharacterControl
 
 Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化（TEST-002）：包含
 `tina_scene_tests` 的上述测试 executable 全部 exit 0 后，再跑 sample 300 帧并校验
-`productGate=bgfx-physics-freetype-audio` 与 schema 11 Sprite binding、Particle/Trail Handle resolver 字段。
+`productGate=bgfx-physics-freetype-audio` 与 schema 12 Sprite binding、TileMap/Particle/Trail Handle resolver 字段。
 
 文档扫描（DOC-002）：
 
