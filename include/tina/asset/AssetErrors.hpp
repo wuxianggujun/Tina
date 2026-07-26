@@ -22,5 +22,6 @@ inline constexpr Core::ErrorCode AssetQueueFull{Core::ErrorDomain::Asset, 25};
 inline constexpr Core::ErrorCode AssetUploadFailed{Core::ErrorDomain::Asset, 26};
 inline constexpr Core::ErrorCode TileMapLayerNotFound{Core::ErrorDomain::Asset, 27};
 inline constexpr Core::ErrorCode TileMapLayerTypeMismatch{Core::ErrorDomain::Asset, 28};
+inline constexpr Core::ErrorCode TileMapChunkNotResident{Core::ErrorDomain::Asset, 29};
 
 } // namespace Tina::Asset::AssetErrorCode

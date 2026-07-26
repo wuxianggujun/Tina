@@ -52,23 +52,47 @@ Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, Ass
     const float camMaxY = camera.centerY + camera.halfHeight;
     const Core::u16 chunkSize = map.chunkSizeCells();
     const float cell = map.cellSizeMeters();
+    const float mapMaxX = static_cast<float>(map.widthCells()) * cell;
+    const float mapMaxY = static_cast<float>(map.heightCells()) * cell;
+    if (!aabbOverlap(0.0f, 0.0f, mapMaxX, mapMaxY, camMinX, camMinY, camMaxX, camMaxY))
+    {
+        return Core::u32{0};
+    }
+    const auto chunkForWorld = [&](float world, Core::u32 chunkCount) -> Core::u32 {
+        if (world <= 0.0f)
+        {
+            return 0U;
+        }
+        const auto cellIndex = static_cast<Core::u32>(world / cell);
+        return (std::min)(cellIndex / chunkSize, chunkCount - 1U);
+    };
+    const Core::u32 minChunkX = chunkForWorld((std::max)(camMinX, 0.0f), map.chunkCountX());
+    const Core::u32 minChunkY = chunkForWorld((std::max)(camMinY, 0.0f), map.chunkCountY());
+    const Core::u32 maxChunkX =
+        chunkForWorld(std::nextafter((std::min)(camMaxX, mapMaxX), 0.0f), map.chunkCountX());
+    const Core::u32 maxChunkY =
+        chunkForWorld(std::nextafter((std::min)(camMaxY, mapMaxY), 0.0f), map.chunkCountY());
 
     try
     {
-        for (Core::u32 cy = 0; cy < map.chunkCountY(); ++cy)
+        for (Core::u32 cy = minChunkY; cy <= maxChunkY; ++cy)
         {
-            for (Core::u32 cx = 0; cx < map.chunkCountX(); ++cx)
+            for (Core::u32 cx = minChunkX; cx <= maxChunkX; ++cx)
             {
-                const Core::u32 originX = cx * chunkSize;
-                const Core::u32 originY = cy * chunkSize;
-                const Core::u32 width =
-                    std::min<Core::u32>(chunkSize, map.widthCells() > originX ? map.widthCells() - originX : 0);
-                const Core::u32 height =
-                    std::min<Core::u32>(chunkSize, map.heightCells() > originY ? map.heightCells() - originY : 0);
-                if (width == 0 || height == 0)
+                const auto rootRef = layer->findChunkRef(cx, cy);
+                if (!rootRef)
                 {
                     continue;
                 }
+                const TileMapChunkCoord coord{.chunkX = cx, .chunkY = cy};
+                if (!map.isChunkResident(layerId, coord))
+                {
+                    continue;
+                }
+                const Core::u32 originX = cx * chunkSize;
+                const Core::u32 originY = cy * chunkSize;
+                const Core::u32 width = rootRef->widthCells;
+                const Core::u32 height = rootRef->heightCells;
                 const float worldMinX = static_cast<float>(originX) * cell;
                 const float worldMinY = static_cast<float>(originY) * cell;
                 const float worldMaxX = static_cast<float>(originX + width) * cell;
@@ -86,6 +110,7 @@ Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, Ass
                         auto tileId = map.tileIdAt(layerId, originX + x, originY + y);
                         if (!tileId)
                         {
+                            out.clear();
                             return Core::failure(std::move(tileId.error()));
                         }
                         if (*tileId != AssetFormat::TileMapWire::EmptyTileId)
@@ -99,15 +124,17 @@ Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, Ass
                     continue;
                 }
 
-                auto revision = map.chunkRevision(layerId, cx, cy);
-                if (!revision)
+                auto state = map.chunkState(layerId, cx, cy);
+                if (!state)
                 {
-                    return Core::failure(std::move(revision.error()));
+                    out.clear();
+                    return Core::failure(std::move(state.error()));
                 }
                 out.push_back(TileChunkView{
                     .layerId = layerId,
-                    .coord = TileMapChunkCoord{.chunkX = cx, .chunkY = cy},
-                    .revision = *revision,
+                    .coord = coord,
+                    .revision = state->contentRevision,
+                    .residencyGeneration = state->residencyGeneration,
                     .originCellX = originX,
                     .originCellY = originY,
                     .widthCells = width,
@@ -125,6 +152,7 @@ Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, Ass
         }
     } catch (const std::bad_alloc&)
     {
+        out.clear();
         return Core::failure(AssetErrorCode::AllocationFailed, "visible tile chunk extraction allocation failed");
     }
     return static_cast<Core::u32>(out.size());
@@ -151,13 +179,21 @@ Core::Result<Core::u32> collectChunkNonEmptyCells(const TileMapInstance& map, As
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "chunk coord out of range");
     }
     out.clear();
+    const auto rootRef = layer->findChunkRef(coord.chunkX, coord.chunkY);
+    if (!rootRef)
+    {
+        return Core::u32{0};
+    }
+    if (!map.isChunkResident(layerId, coord))
+    {
+        return Core::failure(AssetErrorCode::TileMapChunkNotResident,
+                             "cannot collect cells from a non-resident tilemap chunk");
+    }
     const Core::u16 chunkSize = map.chunkSizeCells();
     const Core::u32 originX = coord.chunkX * chunkSize;
     const Core::u32 originY = coord.chunkY * chunkSize;
-    const Core::u32 width =
-        std::min<Core::u32>(chunkSize, map.widthCells() > originX ? map.widthCells() - originX : 0);
-    const Core::u32 height =
-        std::min<Core::u32>(chunkSize, map.heightCells() > originY ? map.heightCells() - originY : 0);
+    const Core::u32 width = rootRef->widthCells;
+    const Core::u32 height = rootRef->heightCells;
     try
     {
         for (Core::u32 y = 0; y < height; ++y)
@@ -169,6 +205,7 @@ Core::Result<Core::u32> collectChunkNonEmptyCells(const TileMapInstance& map, As
                 auto info = map.tileInfoAt(layerId, cellX, cellY);
                 if (!info)
                 {
+                    out.clear();
                     return Core::failure(std::move(info.error()));
                 }
                 if (!*info || (*info)->empty)
@@ -180,6 +217,7 @@ Core::Result<Core::u32> collectChunkNonEmptyCells(const TileMapInstance& map, As
         }
     } catch (const std::bad_alloc&)
     {
+        out.clear();
         return Core::failure(AssetErrorCode::AllocationFailed, "chunk cell collection allocation failed");
     }
     return static_cast<Core::u32>(out.size());

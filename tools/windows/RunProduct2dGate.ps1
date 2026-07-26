@@ -1,4 +1,3 @@
-#Requires -Version 5.1
 <#
 .SYNOPSIS
   Build and run the full Windows product-2d gate (TEST-002 topology).
@@ -8,6 +7,11 @@
   tina_sample_2d 300-frame smoke. Expects productGate=bgfx-physics-freetype-audio.
 
   Does not use CTest. Does not clean-first wipe. Exit non-zero on first failure.
+
+.PARAMETER BinDir
+  Directory containing the selected build preset's executables. Relative paths are
+  resolved from SourceRoot. Defaults to the standard product-2d Debug output directory;
+  pass this explicitly when a custom ConfigurePreset or BuildPreset uses another output.
 #>
 [CmdletBinding()]
 param(
@@ -17,8 +21,10 @@ param(
     [int]$SampleFrames = 300,
     [switch]$SkipConfigure,
     [switch]$SkipBuild,
-    [string]$OutJson = ''
+    [string]$OutJson = '',
+    [string]$BinDir = ''
 )
+#Requires -Version 5.1
 
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
@@ -28,9 +34,16 @@ if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
         $SourceRoot = (Get-Location).Path
     }
 }
+$SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
 Set-Location -LiteralPath $SourceRoot
 
-$binDir = Join-Path $SourceRoot "out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug"
+if ([string]::IsNullOrWhiteSpace($BinDir)) {
+    $BinDir = Join-Path $SourceRoot "out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug"
+} elseif (-not [System.IO.Path]::IsPathRooted($BinDir)) {
+    $BinDir = Join-Path $SourceRoot $BinDir
+}
+$BinDir = [System.IO.Path]::GetFullPath($BinDir)
+
 $expectedGate = 'bgfx-physics-freetype-audio'
 $targets = @(
     'tina_sample_2d',
@@ -60,6 +73,7 @@ $report = [ordered]@{
     sourceRoot       = $SourceRoot
     configurePreset  = $ConfigurePreset
     buildPreset      = $BuildPreset
+    binDir           = $BinDir
     expectedProductGate = $expectedGate
     head             = (git rev-parse HEAD 2>$null)
     steps            = @()
@@ -90,18 +104,22 @@ if (-not $SkipBuild) {
     Add-Step -Name 'build' -ExitCode $LASTEXITCODE
 }
 
+if (-not (Test-Path -LiteralPath $BinDir -PathType Container)) {
+    Add-Step -Name 'binDir' -ExitCode 1 -Detail "missing directory: $BinDir; pass -BinDir for custom preset output"
+}
+
 foreach ($exe in $testExes) {
-    $path = Join-Path $binDir $exe
+    $path = Join-Path $BinDir $exe
     if (-not (Test-Path -LiteralPath $path)) {
-        Add-Step -Name $exe -ExitCode 1 -Detail 'missing executable'
+        Add-Step -Name $exe -ExitCode 1 -Detail "missing executable: $path"
     }
     & $path --gtest_color=yes
     Add-Step -Name $exe -ExitCode $LASTEXITCODE
 }
 
-$samplePath = Join-Path $binDir 'tina_sample_2d.exe'
+$samplePath = Join-Path $BinDir 'tina_sample_2d.exe'
 if (-not (Test-Path -LiteralPath $samplePath)) {
-    Add-Step -Name 'tina_sample_2d' -ExitCode 1 -Detail 'missing executable'
+    Add-Step -Name 'tina_sample_2d' -ExitCode 1 -Detail "missing executable: $samplePath"
 }
 $sampleOut = & $samplePath "--frames=$SampleFrames" '--frame-delay-ms=0' 2>&1 | Out-String
 $sampleExit = $LASTEXITCODE
@@ -111,6 +129,30 @@ if ($sampleExit -ne 0) {
 $gatePattern = 'productGate":"' + [regex]::Escape($expectedGate) + '"'
 if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
+}
+$requiredAudioEvidence = @(
+    'evidenceSchema\":8',
+    'audioVoiceParamsConfigured\":true',
+    'audioFadeStarted\":true',
+    'audioFadeCancelled\":true',
+    'audioFadeStopped\":true',
+    'audioOneShotRetired\":true',
+    'audioStreamQueued\":true',
+    'audioStreamSubmitted\":true',
+    'audioStreamEofSignaled\":true',
+    'audioStreamStartedObserved\":true',
+    'audioStreamMixed\":true',
+    'audioStreamDrained\":true',
+    'audioStreamStopped\":true',
+    'audioStreamRetired\":true',
+    'audioStreamSubmittedFrames\":[1-9][0-9]*',
+    'audioStreamConsumedFrames\":[1-9][0-9]*',
+    'audioStreamUnderrunFrames\":0'
+)
+foreach ($pattern in $requiredAudioEvidence) {
+    if ($sampleOut -notmatch $pattern) {
+        Add-Step -Name 'audioEvidence' -ExitCode 1 -Detail "missing $pattern; output=$($sampleOut.Trim())"
+    }
 }
 Add-Step -Name 'tina_sample_2d' -ExitCode 0 -Detail "productGate=$expectedGate frames=$SampleFrames"
 

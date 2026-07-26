@@ -187,5 +187,71 @@ TEST(AssetSystemPumpTests, QueueCapacityIsBounded)
     removePackage(package);
 }
 
+TEST(AssetSystemPumpTests, UnloadImmediatelyHidesLookupWhileLeaseKeepsOldPayloadAlive)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTextureMaterialPackage("tina_asset_system_unload_lease_lookup");
+
+    auto system = AssetSystem::Create(AssetSystemConfig{
+        .storeCapacity = 8,
+        .memoryResource = &resource,
+        .batch =
+            CookedAssetBatchLoadConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+                .memoryResource = &resource,
+            },
+        .queueCapacity = 8,
+        .defaultPumpBudget = 4,
+    });
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &resource,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+                .verifyContent = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(package.root), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    ASSERT_TRUE(system->bindCatalog(toUtf8(package.root), std::move(*catalog)).has_value());
+
+    auto oldHandle = system->loadOne(package.textureId);
+    ASSERT_TRUE(oldHandle.has_value()) << oldHandle.error().message;
+    auto leaseResult = system->acquire(*oldHandle);
+    ASSERT_TRUE(leaseResult.has_value()) << leaseResult.error().message;
+    AssetLease lease = std::move(*leaseResult);
+    ASSERT_NE(lease.get(), nullptr);
+
+    ASSERT_TRUE(system->unload(*oldHandle).has_value());
+    EXPECT_EQ(system->find(package.textureId), std::nullopt);
+    EXPECT_EQ(system->state(*oldHandle), AssetLogicalState::UnloadPending);
+    EXPECT_NE(lease.get(), nullptr);
+
+    // Reentry allocates a new generation instead of returning the UnloadPending one.
+    auto newHandle = system->requestOne(package.textureId);
+    ASSERT_TRUE(newHandle.has_value()) << newHandle.error().message;
+    EXPECT_NE(*newHandle, *oldHandle);
+    EXPECT_EQ(system->find(package.textureId), newHandle);
+    EXPECT_EQ(system->state(*newHandle), AssetLogicalState::Queued);
+
+    lease = AssetLease{};
+    EXPECT_EQ(system->state(*oldHandle), AssetLogicalState::Unloaded);
+    EXPECT_EQ(system->find(package.textureId), newHandle);
+
+    removePackage(package);
+}
+
 } // namespace
 } // namespace Tina::Asset

@@ -53,6 +53,7 @@ enum class AssetKind : Core::u16 {
     Prefab = 9,
     AudioClip = 10,
     SpriteAnimationClip = 11,
+    TileMapChunk = 12,
 };
 
 enum class TargetPlatform : Core::u16 {
@@ -75,7 +76,20 @@ enum class HashAlgorithm : Core::u8 {
 enum class DependencyFlags : Core::u16 {
     None = 0,
     Required = 1U << 0U,
+    // The target remains a validated Catalog dependency, but requesting the
+    // parent does not enqueue it. The owning feature requests it on demand.
+    Deferred = 1U << 1U,
 };
+
+[[nodiscard]] constexpr DependencyFlags operator|(DependencyFlags left, DependencyFlags right) noexcept
+{
+    return static_cast<DependencyFlags>(static_cast<Core::u16>(left) | static_cast<Core::u16>(right));
+}
+
+[[nodiscard]] constexpr bool hasDependencyFlag(DependencyFlags value, DependencyFlags flag) noexcept
+{
+    return (static_cast<Core::u16>(value) & static_cast<Core::u16>(flag)) == static_cast<Core::u16>(flag);
+}
 
 struct CookedAssetLimits final {
     Core::u64 maxFileBytes = Wire::MaxCookedFileBytes;

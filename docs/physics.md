@@ -34,8 +34,9 @@ Box2D solver 目前按配置的单线程 `step()` 执行，没有隐式创建未
 ## 产品 2D 数据流
 
 ```text
-TileMap recipe v2 / explicit collision layer ID
-  -> TileMapGridCollision(map, layerId) / IGridCollisionProvider
+TileMap recipe -> v3 root + deferred TileMapChunk
+  -> TileMapStream demand/pump/commit collision layer
+  -> TileMapGridCollision(stream.map(), layerId) / IGridCollisionProvider
   -> collect solid cells
   -> syncTileMapSolidsToStaticBodies
   -> PhysicsWorld2D (static terrain + dynamic crate)
@@ -44,8 +45,9 @@ TileMap recipe v2 / explicit collision layer ID
   -> Scene/Render extraction
 ```
 
-`tina_sample_2d` 已在 product-2d 图实例化 PhysicsWorld2D：`TileMapGridCollision(map, 20)` 显式选择
-hidden collision tile layer 生成 static bodies，gameplay object layer `30` 的 rectangle object `102` 提供
+`tina_sample_2d` 已在 product-2d 图实例化 PhysicsWorld2D：先确认 collision chunk resident，再用
+`TileMapGridCollision(stream.map(), 20)` 显式选择 hidden collision tile layer 生成 static bodies，gameplay
+object layer `30` 的 rectangle object `102` 提供
 dynamic crate 初始位置；每个 fixed tick 推进并读取 contact。角色仍使用确定性的
 `CharacterController2D` + grid AABB，并由 point object `101` 初始化位置。这两种运动模型共享 layer `20`
 的 Tile solid 数据，但不强行放入同一 controller。
@@ -74,7 +76,8 @@ Physics 不在 solver callback 中直接修改 Scene；contact 应在 step 返�
 
 Asset 层提供 `syncTileMapSolidsToStaticBodies()`，Physics2D 不 include TileMap：
 
-1. Asset/gameplay 先用 `TileMapGridCollision(map, layerId)` 显式选择 tile layer；
+1. Asset/gameplay 先推进 `TileMapStream` 并确认目标 chunk resident，再用
+   `TileMapGridCollision(stream.map(), layerId)` 显式选择 tile layer；
 2. 通过 `IGridCollisionProvider` 批量收集 `MaterialSolid` cell；
 3. 使用 caller scratch 和 output buffer；
 4. 逐 cell 调用 `createBody()` + `createShape(Box)`，任一步失败都销毁本批已创建 body；
@@ -83,7 +86,8 @@ Asset 层提供 `syncTileMapSolidsToStaticBodies()`，Physics2D 不 include Tile
 layer visibility 只控制 TileMap 可见提取/渲染，不是碰撞开关；hidden tile layer 仍可被显式选为 collision
 provider。result-returning 的 tile/chunk/solid query 在不存在 layer 或误选 object layer 时返回明确的
 Asset error，而不是退回第0层；`IGridCollisionProvider::materialFlagsAt()` 仍按 SPI 约定把无效/空 cell
-表现为0，因此创建 adapter 前应先用 `TileMapInstance::layer()` 校验产品配置。
+表现为0，因此创建 adapter 前应先用 `TileMapInstance::layer()` 校验产品配置，并在批量 Physics sync 前
+确认所需 chunk 已 resident。grid 借用 `stream.map()`，必须先销毁 grid 再移动/shutdown/destroy stream。
 
 当前 bridge 不做共线 cell 合并，也不提供 GPU chunk cache；Tile chunk revision/dirty 策略由 Asset/产品层
 维护。

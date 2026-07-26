@@ -9,6 +9,8 @@
 
 #include <gtest/gtest.h>
 
+#include "../asset/support/TileMapInstanceTestSupport.hpp"
+
 #include <array>
 #include <memory_resource>
 #include <utility>
@@ -27,7 +29,7 @@ inline constexpr AssetFormat::TileMapLayerId CollisionLayerId = 20;
 }
 
 // 8x4: solid floor y=0; solid wall x=6 for y=1..3 (matches CharacterController unit fixture).
-[[nodiscard]] Asset::TileMapInstance makePlatformMap(std::pmr::memory_resource& memory)
+[[nodiscard]] Core::Result<Asset::TileMapInstance> makePlatformMap(std::pmr::memory_resource& memory)
 {
     const auto tilesetId = *Core::AssetId::fromBytes(idBytes(41U));
     const auto mapId = *Core::AssetId::fromBytes(idBytes(42U));
@@ -41,8 +43,15 @@ inline constexpr AssetFormat::TileMapLayerId CollisionLayerId = 20;
     }};
     auto tilesetBytes = AssetFormat::writeTilesetPayloadBytes(
         AssetFormat::TilesetPayloadDesc{.tilePixelWidth = 16, .tilePixelHeight = 16, .tiles = tiles});
+    if (!tilesetBytes)
+    {
+        return Core::failure(std::move(tilesetBytes.error()));
+    }
     auto tileset = AssetFormat::parseTilesetPayload(*tilesetBytes);
-    EXPECT_TRUE(tileset.has_value());
+    if (!tileset)
+    {
+        return Core::failure(std::move(tileset.error()));
+    }
 
     std::array<Core::u16, 32> cells{};
     for (Core::u32 x = 0; x < 8; ++x)
@@ -55,35 +64,24 @@ inline constexpr AssetFormat::TileMapLayerId CollisionLayerId = 20;
     }
 
     const std::array layers{
-        AssetFormat::TileMapLayerDesc{
+        Asset::TestSupport::TestTileMapLayerDesc{
             .stableLayerId = CollisionLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = false,
             .name = "collision",
-            .tiles = cells,
+            .cells = cells,
         },
     };
-
-    auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
-        .widthCells = 8,
-        .heightCells = 4,
-        .cellSizeMeters = 1.0f,
-        .layers = layers,
-        .tilesetId = tilesetId,
-    });
-    auto map = AssetFormat::parseTileMapPayload(*mapBytes);
-    EXPECT_TRUE(map.has_value());
-    auto instance = Asset::TileMapInstance::Create(
-        *map, *tileset, mapId, tilesetId,
-        Asset::TileMapInstanceConfig{.chunkSizeCells = 4, .memoryResource = &memory});
-    EXPECT_TRUE(instance.has_value()) << instance.error().message;
-    return std::move(*instance);
+    return Asset::TestSupport::makeResidentTileMapInstance(
+        8U, 4U, 4U, mapId, tilesetId, *tileset, layers, memory);
 }
 
 TEST(CharacterControllerPhysicsCoexistenceTest, GridControllerAndDynamicBodyShareTileSolids)
 {
     std::pmr::unsynchronized_pool_resource memory;
-    auto map = makePlatformMap(memory);
+    auto mapResult = makePlatformMap(memory);
+    ASSERT_TRUE(mapResult) << mapResult.error().message;
+    auto map = std::move(*mapResult);
     Asset::TileMapGridCollision grid{map, CollisionLayerId};
 
     Physics2D::PhysicsWorld2DConfig worldConfig;

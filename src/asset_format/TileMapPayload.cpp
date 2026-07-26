@@ -3,6 +3,7 @@
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/core/text/Utf8.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -60,6 +61,17 @@ struct ParsedLayer final {
     return value;
 }
 
+[[nodiscard]] std::optional<Core::AssetId> readAssetId(std::span<const std::byte> bytes, usize offset) noexcept
+{
+    if (!hasBytes(bytes, offset, Core::AssetId::Bytes{}.size()))
+    {
+        return std::nullopt;
+    }
+    Core::AssetId::Bytes idBytes{};
+    std::memcpy(idBytes.data(), bytes.data() + offset, idBytes.size());
+    return Core::AssetId::fromBytes(idBytes);
+}
+
 void appendU8(std::vector<std::byte>& bytes, u8 value)
 {
     bytes.push_back(static_cast<std::byte>(value));
@@ -96,9 +108,21 @@ void appendText(std::vector<std::byte>& bytes, std::string_view text)
     }
 }
 
+void appendAssetId(std::vector<std::byte>& bytes, Core::AssetId assetId)
+{
+    const usize offset = bytes.size();
+    bytes.resize(offset + assetId.bytes().size());
+    std::memcpy(bytes.data() + offset, assetId.bytes().data(), assetId.bytes().size());
+}
+
 [[nodiscard]] bool isFinite(float value) noexcept
 {
     return std::isfinite(value);
+}
+
+[[nodiscard]] bool isPowerOfTwo(u16 value) noexcept
+{
+    return value != 0U && (value & static_cast<u16>(value - 1U)) == 0U;
 }
 
 [[nodiscard]] bool isKnownLayerKind(TileMapLayerKind kind) noexcept
@@ -177,6 +201,27 @@ void appendText(std::vector<std::byte>& bytes, std::string_view text)
     return Core::success();
 }
 
+[[nodiscard]] Core::Status validateChunkRef(const TileMapChunkRefDesc& chunk, u32 mapWidth, u32 mapHeight,
+                                            u16 chunkSize)
+{
+    const u32 chunkCountX = (mapWidth + chunkSize - 1U) / chunkSize;
+    const u32 chunkCountY = (mapHeight + chunkSize - 1U) / chunkSize;
+    if (!chunk.chunkAssetId || chunk.chunkX >= chunkCountX || chunk.chunkY >= chunkCountY)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidIdentity, "tilemap chunk reference identity invalid");
+    }
+    const u32 originX = chunk.chunkX * chunkSize;
+    const u32 originY = chunk.chunkY * chunkSize;
+    const u16 expectedWidth = static_cast<u16>((std::min)(static_cast<u32>(chunkSize), mapWidth - originX));
+    const u16 expectedHeight = static_cast<u16>((std::min)(static_cast<u32>(chunkSize), mapHeight - originY));
+    if (chunk.widthCells != expectedWidth || chunk.heightCells != expectedHeight || chunk.nonEmptyCount == 0U ||
+        chunk.nonEmptyCount > static_cast<u32>(chunk.widthCells) * chunk.heightCells)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "tilemap chunk reference extent invalid");
+    }
+    return Core::success();
+}
+
 [[nodiscard]] Core::Status validateDesc(const TileMapPayloadDesc& desc)
 {
     if (desc.widthCells == 0 || desc.heightCells == 0 || desc.widthCells > TileMapWire::MaxDimension ||
@@ -188,14 +233,20 @@ void appendText(std::vector<std::byte>& bytes, std::string_view text)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "cellSizeMeters must be positive finite");
     }
+    if (!isPowerOfTwo(desc.chunkSizeCells) || desc.chunkSizeCells < TileMapWire::MinChunkSizeCells ||
+        desc.chunkSizeCells > TileMapWire::MaxChunkSizeCells)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "tilemap chunk size out of range");
+    }
     if (desc.layers.empty() || desc.layers.size() > TileMapWire::MaxLayers)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLimits, "tilemap layer count out of range");
     }
 
-    const u32 expectedTileCount = desc.widthCells * desc.heightCells;
     std::array<TileMapObjectId, TileMapWire::MaxObjectsPerMap> objectIds{};
     usize objectIdCount = 0;
+    std::array<Core::AssetId, TileMapWire::MaxChunkRefsPerMap> chunkAssetIds{};
+    usize chunkAssetIdCount = 0;
     for (usize index = 0; index < desc.layers.size(); ++index)
     {
         const TileMapLayerDesc& layer = desc.layers[index];
@@ -221,14 +272,44 @@ void appendText(std::vector<std::byte>& bytes, std::string_view text)
 
         if (layer.kind == TileMapLayerKind::Tile)
         {
-            if (layer.tiles.size() != expectedTileCount || !layer.objects.empty())
+            if (layer.chunkRefs.size() > TileMapWire::MaxChunkRefsPerLayer || !layer.objects.empty() ||
+                layer.chunkRefs.size() > TileMapWire::MaxChunkRefsPerMap - chunkAssetIdCount)
             {
-                return Core::failure(AssetFormatErrorCode::InvalidLayout, "tilemap tile layer content mismatch");
+                return Core::failure(AssetFormatErrorCode::InvalidLimits, "tilemap chunk reference count out of range");
+            }
+            for (usize chunkIndex = 0; chunkIndex < layer.chunkRefs.size(); ++chunkIndex)
+            {
+                const TileMapChunkRefDesc& chunk = layer.chunkRefs[chunkIndex];
+                if (const auto status =
+                        validateChunkRef(chunk, desc.widthCells, desc.heightCells, desc.chunkSizeCells);
+                    !status)
+                {
+                    return status;
+                }
+                if (chunkIndex > 0U)
+                {
+                    const TileMapChunkRefDesc& previous = layer.chunkRefs[chunkIndex - 1U];
+                    if (chunk.chunkY < previous.chunkY ||
+                        (chunk.chunkY == previous.chunkY && chunk.chunkX <= previous.chunkX))
+                    {
+                        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                             "tilemap chunk references must be coordinate sorted");
+                    }
+                }
+                for (usize prior = 0; prior < chunkAssetIdCount; ++prior)
+                {
+                    if (chunkAssetIds[prior] == chunk.chunkAssetId)
+                    {
+                        return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                                             "duplicate tilemap chunk asset id");
+                    }
+                }
+                chunkAssetIds[chunkAssetIdCount++] = chunk.chunkAssetId;
             }
             continue;
         }
 
-        if (!layer.tiles.empty() || layer.objects.size() > TileMapWire::MaxObjectsPerLayer ||
+        if (!layer.chunkRefs.empty() || layer.objects.size() > TileMapWire::MaxObjectsPerLayer ||
             layer.objects.size() > TileMapWire::MaxObjectsPerMap - objectIdCount)
         {
             return Core::failure(AssetFormatErrorCode::InvalidLimits, "tilemap object layer count out of range");
@@ -287,14 +368,20 @@ void appendLayer(std::vector<std::byte>& bytes, const TileMapLayerDesc& layer)
     appendU16(bytes, static_cast<u16>(layer.name.size()));
     appendU16(bytes, static_cast<u16>(layer.properties.size()));
     appendU16(bytes, 0U);
-    appendU32(bytes, static_cast<u32>(layer.kind == TileMapLayerKind::Tile ? layer.tiles.size() : layer.objects.size()));
+    appendU32(bytes,
+              static_cast<u32>(layer.kind == TileMapLayerKind::Tile ? layer.chunkRefs.size() : layer.objects.size()));
     appendText(bytes, layer.name);
     appendProperties(bytes, layer.properties);
     if (layer.kind == TileMapLayerKind::Tile)
     {
-        for (const u16 tile : layer.tiles)
+        for (const TileMapChunkRefDesc& chunk : layer.chunkRefs)
         {
-            appendU16(bytes, tile);
+            appendU32(bytes, chunk.chunkX);
+            appendU32(bytes, chunk.chunkY);
+            appendU16(bytes, chunk.widthCells);
+            appendU16(bytes, chunk.heightCells);
+            appendU32(bytes, chunk.nonEmptyCount);
+            appendAssetId(bytes, chunk.chunkAssetId);
         }
         return;
     }
@@ -436,8 +523,30 @@ struct ParsedProperties final {
     };
 }
 
+[[nodiscard]] std::optional<TileMapChunkRefView> decodeChunkRef(std::span<const std::byte> bytes,
+                                                                usize offset) noexcept
+{
+    if (!hasBytes(bytes, offset, TileMapWire::ChunkRefBytes))
+    {
+        return std::nullopt;
+    }
+    const auto assetId = readAssetId(bytes, offset + 16U);
+    if (!assetId)
+    {
+        return std::nullopt;
+    }
+    return TileMapChunkRefView{
+        .chunkX = readU32(bytes, offset),
+        .chunkY = readU32(bytes, offset + 4U),
+        .widthCells = readU16(bytes, offset + 8U),
+        .heightCells = readU16(bytes, offset + 10U),
+        .nonEmptyCount = readU32(bytes, offset + 12U),
+        .chunkAssetId = *assetId,
+    };
+}
+
 [[nodiscard]] Core::Result<ParsedLayer> parseLayerAt(std::span<const std::byte> bytes, usize offset, u32 widthCells,
-                                                      u32 heightCells)
+                                                      u32 heightCells, u16 chunkSizeCells)
 {
     if (!hasBytes(bytes, offset, TileMapWire::LayerHeaderBytes))
     {
@@ -482,22 +591,50 @@ struct ParsedProperties final {
         .propertyBytes = properties->bytes,
         .widthCells = widthCells,
         .heightCells = heightCells,
+        .chunkSizeCells = chunkSizeCells,
     };
     if (kind == TileMapLayerKind::Tile)
     {
-        const u32 expectedTileCount = widthCells * heightCells;
-        if (contentCount != expectedTileCount)
+        if (contentCount > TileMapWire::MaxChunkRefsPerLayer)
         {
-            return Core::failure(AssetFormatErrorCode::InvalidLayout, "tilemap tile layer count mismatch");
+            return Core::failure(AssetFormatErrorCode::InvalidLimits, "tilemap chunk reference count exceeds limit");
         }
-        const usize tileBytes = static_cast<usize>(contentCount) * sizeof(u16);
-        if (!hasBytes(bytes, offset, tileBytes))
+        const usize chunkBytes = static_cast<usize>(contentCount) * TileMapWire::ChunkRefBytes;
+        if (!hasBytes(bytes, offset, chunkBytes))
         {
-            return Core::failure(AssetFormatErrorCode::InvalidLayout, "tilemap tile layer truncated");
+            return Core::failure(AssetFormatErrorCode::InvalidLayout, "tilemap chunk references truncated");
         }
-        view.tileCount = contentCount;
-        view.tileBytes = bytes.subspan(offset, tileBytes);
-        offset += tileBytes;
+        std::optional<TileMapChunkRefView> previous;
+        for (u32 index = 0; index < contentCount; ++index)
+        {
+            const auto chunk = decodeChunkRef(bytes, offset + static_cast<usize>(index) * TileMapWire::ChunkRefBytes);
+            if (!chunk)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidIdentity, "tilemap chunk reference id is zero");
+            }
+            if (const auto status = validateChunkRef(
+                    TileMapChunkRefDesc{.chunkX = chunk->chunkX,
+                                        .chunkY = chunk->chunkY,
+                                        .widthCells = chunk->widthCells,
+                                        .heightCells = chunk->heightCells,
+                                        .nonEmptyCount = chunk->nonEmptyCount,
+                                        .chunkAssetId = chunk->chunkAssetId},
+                    widthCells, heightCells, chunkSizeCells);
+                !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
+            if (previous && (chunk->chunkY < previous->chunkY ||
+                             (chunk->chunkY == previous->chunkY && chunk->chunkX <= previous->chunkX)))
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "tilemap chunk references are not coordinate sorted");
+            }
+            previous = chunk;
+        }
+        view.chunkRefCount = contentCount;
+        view.chunkRefBytes = bytes.subspan(offset, chunkBytes);
+        offset += chunkBytes;
     }
     else
     {
@@ -603,19 +740,47 @@ std::optional<TileMapPropertyView> TileMapLayerPayloadView::findProperty(std::st
     return ::Tina::AssetFormat::findProperty(propertyBytes, propertyCount, key);
 }
 
-std::optional<Core::u16> TileMapLayerPayloadView::tileAt(Core::u32 x, Core::u32 y) const noexcept
+std::optional<TileMapChunkRefView> TileMapLayerPayloadView::chunkRefAt(Core::u32 index) const noexcept
 {
-    if (kind != TileMapLayerKind::Tile || x >= widthCells || y >= heightCells)
+    if (kind != TileMapLayerKind::Tile || index >= chunkRefCount)
     {
         return std::nullopt;
     }
-    const usize index = static_cast<usize>(y) * widthCells + x;
-    const usize offset = index * sizeof(u16);
-    if (!hasBytes(tileBytes, offset, sizeof(u16)))
+    return decodeChunkRef(chunkRefBytes, static_cast<usize>(index) * TileMapWire::ChunkRefBytes);
+}
+
+std::optional<TileMapChunkRefView> TileMapLayerPayloadView::findChunkRef(Core::u32 chunkX,
+                                                                        Core::u32 chunkY) const noexcept
+{
+    if (kind != TileMapLayerKind::Tile)
     {
         return std::nullopt;
     }
-    return readU16(tileBytes, offset);
+    Core::u32 low = 0;
+    Core::u32 high = chunkRefCount;
+    while (low < high)
+    {
+        const Core::u32 middle = low + (high - low) / 2U;
+        const auto candidate = chunkRefAt(middle);
+        if (!candidate)
+        {
+            return std::nullopt;
+        }
+        if (candidate->chunkY < chunkY || (candidate->chunkY == chunkY && candidate->chunkX < chunkX))
+        {
+            low = middle + 1U;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    const auto candidate = chunkRefAt(low);
+    if (!candidate || candidate->chunkX != chunkX || candidate->chunkY != chunkY)
+    {
+        return std::nullopt;
+    }
+    return candidate;
 }
 
 std::optional<TileMapObjectPayloadView> TileMapLayerPayloadView::objectAt(Core::u32 index) const noexcept
@@ -674,7 +839,7 @@ std::optional<TileMapLayerPayloadView> TileMapPayloadView::layerAt(Core::u16 ind
     usize offset = 0;
     for (u16 current = 0; current <= index; ++current)
     {
-        auto layer = parseLayerAt(layerBytes, offset, widthCells, heightCells);
+        auto layer = parseLayerAt(layerBytes, offset, widthCells, heightCells, chunkSizeCells);
         if (!layer)
         {
             return std::nullopt;
@@ -697,7 +862,7 @@ std::optional<TileMapLayerPayloadView> TileMapPayloadView::findLayer(TileMapLaye
     usize offset = 0;
     for (u16 index = 0; index < layerCount; ++index)
     {
-        auto layer = parseLayerAt(layerBytes, offset, widthCells, heightCells);
+        auto layer = parseLayerAt(layerBytes, offset, widthCells, heightCells, chunkSizeCells);
         if (!layer)
         {
             return std::nullopt;
@@ -725,8 +890,9 @@ Core::Result<std::vector<std::byte>> writeTileMapPayloadBytes(const TileMapPaylo
         appendU32(bytes, desc.widthCells);
         appendU32(bytes, desc.heightCells);
         appendF32(bytes, desc.cellSizeMeters);
+        appendU16(bytes, desc.chunkSizeCells);
         appendU16(bytes, static_cast<u16>(desc.layers.size()));
-        appendU16(bytes, 0U);
+        appendU32(bytes, 0U);
         for (const TileMapLayerDesc& layer : desc.layers)
         {
             appendLayer(bytes, layer);
@@ -756,10 +922,11 @@ Core::Result<TileMapPayloadView> parseTileMapPayload(std::span<const std::byte> 
         .widthCells = readU32(payload, 4U),
         .heightCells = readU32(payload, 8U),
         .cellSizeMeters = readF32(payload, 12U),
-        .layerCount = readU16(payload, 16U),
+        .chunkSizeCells = readU16(payload, 16U),
+        .layerCount = readU16(payload, 18U),
         .payloadBytes = payload,
     };
-    const u16 reserved = readU16(payload, 18U);
+    const u32 reserved = readU32(payload, 20U);
     if (view.schemaVersion != TileMapWire::SchemaVersion)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedSchema, "unsupported tilemap payload schema");
@@ -773,6 +940,11 @@ Core::Result<TileMapPayloadView> parseTileMapPayload(std::span<const std::byte> 
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "tilemap header fields invalid");
     }
+    if (!isPowerOfTwo(view.chunkSizeCells) || view.chunkSizeCells < TileMapWire::MinChunkSizeCells ||
+        view.chunkSizeCells > TileMapWire::MaxChunkSizeCells)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "tilemap chunk size out of range");
+    }
     if (view.layerCount == 0 || view.layerCount > TileMapWire::MaxLayers)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLimits, "tilemap layer count out of range");
@@ -782,10 +954,12 @@ Core::Result<TileMapPayloadView> parseTileMapPayload(std::span<const std::byte> 
     std::array<TileMapLayerId, TileMapWire::MaxLayers> layerIds{};
     std::array<TileMapObjectId, TileMapWire::MaxObjectsPerMap> objectIds{};
     usize objectIdCount = 0;
+    std::array<Core::AssetId, TileMapWire::MaxChunkRefsPerMap> chunkAssetIds{};
+    usize chunkAssetIdCount = 0;
     usize offset = 0;
     for (u16 index = 0; index < view.layerCount; ++index)
     {
-        auto layer = parseLayerAt(view.layerBytes, offset, view.widthCells, view.heightCells);
+        auto layer = parseLayerAt(view.layerBytes, offset, view.widthCells, view.heightCells, view.chunkSizeCells);
         if (!layer)
         {
             return Core::failure(std::move(layer.error()));
@@ -798,7 +972,33 @@ Core::Result<TileMapPayloadView> parseTileMapPayload(std::span<const std::byte> 
             }
         }
         layerIds[index] = layer->view.stableLayerId;
-        if (layer->view.kind == TileMapLayerKind::Object)
+        if (layer->view.kind == TileMapLayerKind::Tile)
+        {
+            if (layer->view.chunkRefCount > TileMapWire::MaxChunkRefsPerMap - chunkAssetIdCount)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLimits,
+                                     "tilemap total chunk reference count exceeds limit");
+            }
+            for (u32 chunkIndex = 0; chunkIndex < layer->view.chunkRefCount; ++chunkIndex)
+            {
+                const auto chunk = layer->view.chunkRefAt(chunkIndex);
+                if (!chunk)
+                {
+                    return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                         "tilemap chunk reference disappeared after validation");
+                }
+                for (usize prior = 0; prior < chunkAssetIdCount; ++prior)
+                {
+                    if (chunkAssetIds[prior] == chunk->chunkAssetId)
+                    {
+                        return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                                             "duplicate tilemap chunk asset id");
+                    }
+                }
+                chunkAssetIds[chunkAssetIdCount++] = chunk->chunkAssetId;
+            }
+        }
+        else
         {
             usize objectOffset = 0;
             for (u32 objectIndex = 0; objectIndex < layer->view.objectCount; ++objectIndex)
@@ -835,7 +1035,7 @@ Core::Result<TileMapPayloadView> parseTileMapPayload(std::span<const std::byte> 
 Core::Result<std::vector<std::byte>> writeCookedTileMapAsset(Core::AssetId tileMapId, const TileMapPayloadDesc& desc,
                                                              TargetPlatform platform)
 {
-    if (!tileMapId || !desc.tilesetId)
+    if (!tileMapId || !desc.tilesetId || tileMapId == desc.tilesetId)
     {
         return Core::failure(AssetFormatErrorCode::InvalidIdentity, "tilemap requires map id and tileset id");
     }
@@ -844,21 +1044,58 @@ Core::Result<std::vector<std::byte>> writeCookedTileMapAsset(Core::AssetId tileM
     {
         return Core::failure(std::move(payload.error()));
     }
-    const std::array deps{CookedAssetWriteDependency{
-        .assetId = desc.tilesetId,
-        .expectedKind = AssetKind::Tileset,
-        .flags = DependencyFlags::Required,
-    }};
-    return writeCookedAssetBytes(CookedAssetWriteDesc{
-        .assetKind = AssetKind::TileMap,
-        .assetTypeVersion = TileMapWire::SchemaVersion,
-        .targetPlatform = platform,
-        .assetId = tileMapId,
-        .dependencies = deps,
-        .payload = *payload,
-        .payloadAlignment = 16,
-        .computeContentHash = true,
-    });
+    try
+    {
+        std::vector<CookedAssetWriteDependency> dependencies;
+        dependencies.reserve(1U + TileMapWire::MaxChunkRefsPerMap);
+        dependencies.push_back(CookedAssetWriteDependency{
+            .assetId = desc.tilesetId,
+            .expectedKind = AssetKind::Tileset,
+            .flags = DependencyFlags::Required,
+        });
+        for (const TileMapLayerDesc& layer : desc.layers)
+        {
+            if (layer.kind != TileMapLayerKind::Tile)
+            {
+                continue;
+            }
+            for (const TileMapChunkRefDesc& chunk : layer.chunkRefs)
+            {
+                if (chunk.chunkAssetId == tileMapId || chunk.chunkAssetId == desc.tilesetId)
+                {
+                    return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                                         "tilemap chunk dependency collides with map or tileset id");
+                }
+                dependencies.push_back(CookedAssetWriteDependency{
+                    .assetId = chunk.chunkAssetId,
+                    .expectedKind = AssetKind::TileMapChunk,
+                    .flags = DependencyFlags::Required | DependencyFlags::Deferred,
+                });
+            }
+        }
+        std::sort(dependencies.begin(), dependencies.end(),
+                  [](const CookedAssetWriteDependency& left, const CookedAssetWriteDependency& right) {
+                      return left.assetId < right.assetId;
+                  });
+        return writeCookedAssetBytes(CookedAssetWriteDesc{
+            .assetKind = AssetKind::TileMap,
+            .assetTypeVersion = TileMapWire::SchemaVersion,
+            .targetPlatform = platform,
+            .assetId = tileMapId,
+            .dependencies = dependencies,
+            .payload = *payload,
+            .payloadAlignment = 16,
+            .computeContentHash = true,
+        });
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "tilemap dependency allocation failed");
+    }
+    catch (const std::length_error&)
+    {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "tilemap dependency count exceeds vector limit");
+    }
 }
 
 } // namespace Tina::AssetFormat

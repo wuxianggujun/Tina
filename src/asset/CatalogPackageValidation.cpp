@@ -3,6 +3,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/asset_format/TileMapChunkPayload.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/core/text/Utf8.hpp>
 
@@ -219,6 +220,14 @@ Core::Status validateCatalogPackageOnDisk(std::string_view catalogRootUtf8, cons
                     if (!typed)
                     {
                         return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedTileMap"));
+                    }
+                } else if (entry->assetKind == AssetFormat::AssetKind::TileMapChunk)
+                {
+                    auto typed = AssetFormat::parseTileMapChunkPayload(asset->payload());
+                    if (!typed)
+                    {
+                        return Core::failure(
+                            withEntryContext(std::move(typed.error()), *entry, "typedTileMapChunk"));
                     }
                 } else if (entry->assetKind == AssetFormat::AssetKind::AudioClip)
                 {

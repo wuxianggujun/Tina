@@ -101,6 +101,11 @@ computeCatalogLoadOrder(const CatalogSnapshot& catalog, std::span<const Core::As
                         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                              "catalog dependency missing during load order");
                     }
+                    if (AssetFormat::hasDependencyFlag(dependency->flags,
+                                                       AssetFormat::DependencyFlags::Deferred))
+                    {
+                        continue;
+                    }
                     if (const auto status = pushIfNeeded(dependency->targetEntryIndex); !status)
                     {
                         return Core::failure(std::move(status.error()));

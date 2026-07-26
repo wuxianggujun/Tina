@@ -29,7 +29,7 @@ consumer 门禁。调用方按需链接现有模块 target；正式 SDK packagin
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload |
 | `Tina::UI` | retained UI、Widget、text、semantics |
-| `Tina::Audio` | backend-neutral AudioEngine/PCM |
+| `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
 | `Tina::Physics2D` | optional Box2D-backed Tina API |
 
 Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
@@ -218,21 +218,29 @@ Scene target 使用。
 ## Asset 与 Cooked
 
 `AssetFormat` 定义 versioned manifest/cooked wire format 和 Texture2D/StaticMesh/Material/Prefab/TileMap/
-AudioClip 等 typed payload。Runtime 不解析源 glTF/WAV/image；cgltf/stb_image 与源文件解析只在
+TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源 glTF/WAV/image；cgltf/stb_image 与源文件解析只在
 Cooker/tool。
 
-TileMap 的唯一当前 wire contract 是 schema v2。`TileMapPayloadView` 按 authoring 顺序通过
+TileMap 的唯一当前 root wire contract 是 schema v3。`TileMapPayloadView` 按 authoring 顺序通过
 `layerAt()/findLayer(TileMapLayerId)` 暴露 tile/object layer；稳定 layer/object ID 都是 map-wide 非零唯一
-`u32`。layer 与 object 都有独立 visibility；name 与 properties 是 strict UTF-8 borrowed views；object kind
-当前只有 Point 和 axis-aligned Rectangle。旧 schema v1 不兼容，也没有“默认单层”公共 API。
+`u32`。layer 与 object 都有独立 visibility；name/properties 是 strict UTF-8 borrowed views；object kind
+当前只有 Point 和 axis-aligned Rectangle。tile layer 保存按坐标排序的非空 chunk ref，缺失坐标是已知
+空块；cell 位于独立 `TileMapChunk` v1 payload。旧 schema v1/v2 均不兼容，也没有默认单层 API。
 
-`TileMapInstance` 拷贝验证后的 payload，并为每个 tile layer 持有独立可变 cell/chunk revision。
-`layer(id)` 返回借用到 instance-owned payload 的 metadata/object view；`tileIdAt()`、`tileInfoAt()`、
-`setTile()`、`chunkRevision()`、`querySolidAabb()`、chunk extraction/dirty cache/sprite emit 与
-`TileMapGridCollision` 都要求显式 `TileMapLayerId`。result-returning 的 tile/chunk/query API 对误选 object
-layer 与不存在 layer 分别返回 `TileMapLayerTypeMismatch`/`TileMapLayerNotFound`；grid SPI 的
-`materialFlagsAt()` 仍按约定把无效/空 cell 表现为0。visibility=false 会跳过可见 chunk/sprite emit，但
-不禁止调用方显式把该 tile layer 用作 collision。
+`TileMapInstance` 拷贝验证后的 root metadata/tileset 定义，只为当前 resident chunk 持有可变 cells、
+content revision 与 residency generation。`layer(id)` 返回借用到 instance-owned payload 的 metadata/object
+view；`tileIdAt()`、`tileInfoAt()`、`setTile()`、`chunkRevision()`、`querySolidAabb()`、chunk extraction/
+dirty cache/sprite emit 与 `TileMapGridCollision` 都要求显式 `TileMapLayerId`。引用存在但尚未驻留时返回
+`TileMapChunkNotResident`；误选 object layer 与不存在 layer 分别返回
+`TileMapLayerTypeMismatch`/`TileMapLayerNotFound`。grid SPI 的 `materialFlagsAt()` 仍按约定把无效、空或
+未驻留 cell 表现为0。visibility=false 会跳过可见 chunk/sprite emit，但不禁止显式用作 collision。
+
+`TileMapStream::Create()` 消费 root/tileset `AssetLease` 并拥有 resident `TileMapInstance`。调用顺序必须是
+`updateDemand() -> AssetSystem::pump() -> commitReady()`。load window 中的 desired chunk 单独超过
+resident capacity 时 failure 是 transactional，旧 active set 保持不变；retain window 只是 optional
+cache，overflow 时按最近一次成功 demand update 的 recency 自动淘汰，读取 API 不 touch recency。
+`map()` 是借用视图：先把 stream 放到最终地址再创建 `TileMapGridCollision`，stream 不得在
+borrower 存活时移动，并必须早于它所引用的 `AssetSystem` 析构。
 
 `AssetSystem` 提供 request/load/pump、generation slot 与 typed state。`AssetHandle` 是弱 lookup；
 `AssetLease` 强保活 CPU payload。逻辑 invalidation 不等于物理释放。产品 helper 可把 Cooked Texture2D/
@@ -249,9 +257,30 @@ MR hybrid（`setMesh3DMaterialTextureBinding` + 可选 `setMesh3DMaterialMetalli
 
 ## Audio 与 Physics
 
-`AudioEngine` 提供 generation voice、bus、bounded command/completion、non-owning PCM 与 realtime mix。
-PCM 调用方必须保活到底层 voice stop/completion；产品 2D 用 AssetLease持有 Cooked AudioClip。miniaudio
-device/decode 留在 adapter。
+`AudioEngine` 提供 generation voice、bus、bounded command/completion、non-owning clip PCM、Tina-owned
+bounded stream ring 与 realtime mix。
+voice 控制入口为 `setVoiceGain()`、`setVoicePitch()`、`setVoicePan()`、
+`startVoiceFade(AudioVoiceFadeDesc)`、`cancelVoiceFade()` 与 `voicePlaybackState()`；gain、pitch、pan 的公开
+范围分别为 `[0,1]`、`[0.25,4]`、`[-1,1]`。所有 setter 只接受 live owner voice 和有限值，失败不发布
+半份 realtime 状态。
+
+pitch 使用 `sourceSampleRate / outputSampleRate * pitch` 的 source step 与线性插值。stereo pan 使用兼容
+既有 center 响度的 linear balance，hard-left/right 只衰减对侧；mono 输出忽略 pan。fade 由 target gain、
+正的 `Core::Duration` 与 `KeepPlaying/StopVoice` end action 构成，并在 realtime callback block 边界
+start/cancel；cancel 保留 callback 已推进到的 current gain。
+
+clip PCM 调用方必须保活到底层 voice stop/completion；产品 2D 用 `AssetLease` 持有 Cooked AudioClip。普通
+`createVoice()` 由调用方显式销毁；`playOneShotPcm()` 的 transient voice 在 Stop、fade-to-stop 或 natural
+end 被 pump 后自动 retire，completion 携带的 one-shot ID 随后允许 stale。miniaudio device/decode 留在
+adapter。
+
+bounded stream 公开入口为 `playPcmStream()`、`submitPcmStreamFrames()`、`signalPcmStreamEof()`、
+`cancelPcmStream()` 与 `pcmStreamState()`。Create 一次性预分配每 voice 的双声道最大 ring；descriptor 的
+逻辑容量至少为2且不得超过配置。`AudioPcmStreamChunkView` 只是调用期 borrow，successful submit 返回前已
+整块复制，容量不足不发布半块。owner thread 是唯一 producer；Task worker 必须 marshal，`Tina::Audio`
+不依赖 `Tina::Task`，miniaudio 也没有 producer API。`mixRealtime()` 只允许一个 non-overlapping realtime
+consumer。EOF 排空后单次 Stopped、cancel 单次 Cancelled，terminal completion 受 ring/reader backpressure
+时延迟但不丢，成功 pump 后 transient stream voice 自动 retire。
 
 `PhysicsWorld2D` 提供 Box2D-backed fixed-step world，以及相互独立的 body/shape/joint generation ID。
 唯一创建模型是 `createBody()` + `createShape()`；backend-neutral `PhysicsShape2DDesc` 支持
@@ -267,12 +296,15 @@ Jolt/Physics3D 尚未接入。
 | `EntityId/UINodeId/PhysicsBodyId/PhysicsShapeId/PhysicsJointId/...` | registry owner | erase/owner destroy/generation reuse |
 | `AssetHandle` | 弱 | slot invalidation/reuse |
 | `AssetLease` | 强 CPU payload owner | lease reset/destroy |
+| `AudioVoiceId` | `AudioEngine` generation owner | 显式 destroy、engine shutdown/generation reuse；one-shot/stream terminal completion pump 后自动 retire |
+| `TileMapStream::map()` | `TileMapStream` 借用 | stream move/shutdown/destroy；borrower 必须先销毁 |
 | `GpuTextureId/GpuMeshId` | RenderDevice | retire/destroy 时逻辑失效；有外部 pin 时由 completion marker（或 shutdown hard drain）证明完成，无 pin fallback 交给 backend deferred destroy |
 | PlatformFrame view | Platform | 下一次 poll/build |
 | Phase context/writer | Runtime callback | callback 返回 |
 | committed UI view | UIContext | 下一次对应 commit/context destroy |
 | RenderFrame view | Runtime builder | `submitFrame()` 返回 |
 | `AudioPcmClipView` | non-owning | 调用方 payload 释放；必须晚于 voice completion |
+| `AudioPcmStreamChunkView` | 调用期 non-owning | `submitPcmStreamFrames()` 返回；成功数据已复制到 Tina-owned ring，失败零发布 |
 | `TileMapLayerPayloadView` / object/property view | `TileMapPayloadView` 或 `TileMapInstance` 借用 | backing payload 释放；instance view 还会在 instance move/destroy 时失效 |
 
 不要手工构造 generation ID、跨 owner 混用、持久化 Runtime handle，或把 non-owning view包装成“看似
@@ -290,7 +322,7 @@ submission ledger；Windows UIA provider + HWND HostBridge 首切片。
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh retirement）；
 - 完整 PBR/IBL/shadow、light component/culling 与通用 pass scheduler；
-- TileMap chunk streaming、editor orchestration、旧 schema migration 与自动 gameplay 生成；
+- TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 完整 Focus Scope / Modal / 持久 Capture、复杂 text / 虚拟列表；
 - Narrator 合规金标、Linux AT-SPI；
 - Jolt Physics3D；

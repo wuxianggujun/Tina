@@ -17,6 +17,7 @@ struct TileChunkView final {
     AssetFormat::TileMapLayerId layerId = 0;
     TileMapChunkCoord coord{};
     Core::u32 revision = 0;
+    Core::u64 residencyGeneration = 0;
     Core::u32 originCellX = 0;
     Core::u32 originCellY = 0;
     Core::u32 widthCells = 0;

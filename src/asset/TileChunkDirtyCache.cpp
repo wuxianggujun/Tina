@@ -32,12 +32,14 @@ Core::Result<TileChunkDirtyCache> TileChunkDirtyCache::Create(TileChunkDirtyCach
     }
 }
 
-TileChunkDirtyCache::Entry* TileChunkDirtyCache::findEntry(AssetFormat::TileMapLayerId layerId, Core::u32 chunkX,
-                                                           Core::u32 chunkY) noexcept
+TileChunkDirtyCache::Entry* TileChunkDirtyCache::findEntry(Core::AssetId tileMapAssetId,
+                                                           AssetFormat::TileMapLayerId layerId,
+                                                           Core::u32 chunkX, Core::u32 chunkY) noexcept
 {
     for (Entry& entry : m_entries)
     {
-        if (entry.occupied && entry.layerId == layerId && entry.chunkX == chunkX && entry.chunkY == chunkY)
+        if (entry.occupied && entry.tileMapAssetId == tileMapAssetId && entry.layerId == layerId &&
+            entry.chunkX == chunkX && entry.chunkY == chunkY)
         {
             return &entry;
         }
@@ -88,17 +90,27 @@ Core::Result<Core::u32> TileChunkDirtyCache::classifyVisible(std::span<const Til
     try
     {
         rebuiltOut.clear();
+        rebuiltOut.reserve(visible.size());
+
+        // Validate the complete borrowed set before mutating cache state. This keeps a
+        // malformed later view from partially committing earlier observations.
+        for (const TileChunkView& view : visible)
+        {
+            if (!view.tileMapAssetId || view.layerId == 0 || view.residencyGeneration == 0U)
+            {
+                return Core::failure(AssetErrorCode::TileMapLayerNotFound,
+                                     "tile chunk view has no map, layer, or residency identity");
+            }
+        }
+
         ++m_framesSynced;
         Core::u32 rebuildCount = 0;
         for (const TileChunkView& view : visible)
         {
-            if (view.layerId == 0)
-            {
-                return Core::failure(AssetErrorCode::TileMapLayerNotFound, "tile chunk view has no selected layer");
-            }
             ++m_visibleChunkObservations;
-            Entry* entry = findEntry(view.layerId, view.coord.chunkX, view.coord.chunkY);
-            if (entry != nullptr && entry->revision == view.revision)
+            Entry* entry = findEntry(view.tileMapAssetId, view.layerId, view.coord.chunkX, view.coord.chunkY);
+            if (entry != nullptr && entry->revision == view.revision &&
+                entry->residencyGeneration == view.residencyGeneration)
             {
                 ++m_cacheHits;
                 entry->lastFrame = m_framesSynced;
@@ -109,13 +121,16 @@ Core::Result<Core::u32> TileChunkDirtyCache::classifyVisible(std::span<const Til
                 entry = allocateEntry();
                 if (entry == nullptr)
                 {
+                    rebuiltOut.clear();
                     return Core::failure(AssetErrorCode::CatalogCapacityExceeded,
                                          "TileChunkDirtyCache has no free slot");
                 }
+                entry->tileMapAssetId = view.tileMapAssetId;
                 entry->chunkX = view.coord.chunkX;
                 entry->chunkY = view.coord.chunkY;
             }
             entry->revision = view.revision;
+            entry->residencyGeneration = view.residencyGeneration;
             entry->layerId = view.layerId;
             entry->lastFrame = m_framesSynced;
             ++m_rebuilds;
@@ -125,6 +140,7 @@ Core::Result<Core::u32> TileChunkDirtyCache::classifyVisible(std::span<const Til
         return rebuildCount;
     } catch (const std::bad_alloc&)
     {
+        rebuiltOut.clear();
         return Core::failure(AssetErrorCode::AllocationFailed, "TileChunkDirtyCache classify allocation failed");
     }
 }
@@ -168,6 +184,18 @@ TileChunkDirtyCacheStats TileChunkDirtyCache::stats() const noexcept
         .trackedChunks = m_tracked,
         .capacity = m_capacity,
     };
+}
+
+void TileChunkDirtyCache::invalidate(Core::AssetId tileMapAssetId, AssetFormat::TileMapLayerId layerId,
+                                     TileMapChunkCoord coord) noexcept
+{
+    Entry* entry = findEntry(tileMapAssetId, layerId, coord.chunkX, coord.chunkY);
+    if (entry == nullptr)
+    {
+        return;
+    }
+    *entry = Entry{};
+    --m_tracked;
 }
 
 void TileChunkDirtyCache::clear() noexcept

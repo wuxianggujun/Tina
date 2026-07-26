@@ -8,7 +8,7 @@ Catalog/TileMap/Scene/UI/Audio/Physics2D/FreeType/miniaudio 的300帧结构化�
 ```text
 Game2DState
   -> Catalog / AssetSystem / typed Cooked payload
-  -> TileMapInstance + CharacterController2D
+  -> TileMapStream -> resident TileMapInstance + CharacterController2D
   -> optional PhysicsWorld2D
   -> Scene::World (Camera2D + SpriteRenderer2D)
   -> RenderScene extraction
@@ -88,10 +88,11 @@ backend texture。它支持 Once 停在末帧、Loop、PingPong 反向经过内�
 
 ## TileMap 与角色控制
 
-当前 TileMap 只有一个受支持的 Cooked payload：schema v2。地图按 authoring 顺序保存 tile/object
-layers；layer ID 和 object ID 都是 map-wide 非零唯一稳定 ID。两类 layer 都保存 visibility、strict UTF-8
-name/properties；tile layer 保存独立 row-major grid，object layer 保存 point 或 axis-aligned rectangle，
-对象自身也保存 visibility 与 UTF-8 name/properties。schema v1 与旧的顶层单层字段不再双读。
+当前 TileMap 唯一 root payload 是 schema v3。root 按 authoring 顺序保存 tile/object layers；layer ID 和
+object ID 都是 map-wide 非零唯一稳定 ID。两类 layer 都保存 visibility、strict UTF-8 name/properties；
+tile layer 不再内嵌完整 grid，只保存按 `{chunkY, chunkX}` 严格排序的非空 chunk ref（坐标、实际边缘尺寸、
+非空计数、`AssetId`），缺失坐标是已知空块；object layer 仍在 root 保存 point/axis-aligned rectangle 及其
+metadata。旧 schema v1/v2 均不双读。
 
 Catalog recipe 的 TileMap 唯一语法为：
 
@@ -113,17 +114,28 @@ endtilemap
 
 `row` 只能出现在打开的 `tilelayer` 中；每层必须 `endlayer`，地图必须 `endtilemap`。历史
 `tilemap` 后直接写裸 `row` 的单层 recipe 会被拒绝，不存在 fallback。recipe 的 name/key/value 当前是
-不含空白的单个 UTF-8 token；wire schema 本身仍执行 strict UTF-8/NUL/长度校验。
+不含空白的单个 UTF-8 token；wire schema 本身仍执行 strict UTF-8/NUL/长度校验。Cooker 当前以固定
+16×16 切分 tile rows，只为非空块生成独立 `TileMapChunk` v1 Cooked asset，并把它们登记为 root 的
+`Required|Deferred` dependencies；root 的 eager load 因此不会把整张地图带入 Store。
 
-`TileMapInstance` 拷贝已验证 payload，并按显式 `TileMapLayerId` 保存每个 tile layer 的可变 cell 与独立
-chunk revision。`layer(id)` 暴露保留顺序、metadata 和 object 的 borrowed view；`tileIdAt()`、
-`setTile()`、`chunkRevision()`、chunk extraction、dirty cache、sprite emit 和 solid query 都要求调用方传入
-layer ID，不再默认“第0层”。`TileChunkDirtyCache` 只重建所选 layer 中 revision 变化的可见 chunk，
-结构化输出继续记录 dirty rebuild/cache hit。
+`TileMapStream` 持有 root/tileset `AssetLease`、resident `TileMapInstance` 和固定容量 chunk slot。每帧唯一
+调用顺序是 `updateDemand(camera/layer) -> AssetSystem::pump() -> commitReady()`；load/retain margin、每次
+request budget 与 resident capacity 都显式有界。需求移出 retain window 时，Queued/Loading 请求会取消，
+Resident chunk 会从 instance detach、释放 lease 并 logical unload。load window 中的 desired chunk 是强需求，
+单独超过 capacity 时旧 active set 原样保留；retain window 只作 optional cache，空间不足时按最近一次成功
+`updateDemand` 时位于 load window 的 recency 自动淘汰，Tile/collision 读取不会 touch recency。
+
+`TileMapInstance` 只复制 root metadata/tileset 定义并保存当前 resident chunk cell；`layer(id)` 继续暴露
+metadata/object borrowed view。`tileIdAt()`、`setTile()`、`chunkRevision()`、chunk extraction、dirty cache、
+sprite emit 和 solid query 都要求显式 layer ID；访问 root 引用但尚未 resident 的块返回
+`TileMapChunkNotResident`。每次重新 attach 取得新的 residency generation，`TileChunkDirtyCache` 同时比较
+generation 与 content revision，避免 unload/reload 后误命中旧缓存。
 
 产品 recipe 使用三个稳定 layer：visible visual tile layer `10`、hidden collision tile layer `20`、visible
 gameplay object layer `30`。渲染只显式提交 layer `10`；visibility=false 使 layer `20` 不进入 sprite emit，
-但 `TileMapGridCollision(map, 20)` 仍可把它作为碰撞数据。object `101` 是 `player_spawn` point，object
+但 `TileMapGridCollision(stream.map(), 20)` 仍可把 resident cells 作为碰撞数据。该 grid 借用 instance，
+因此产品先把 stream 放到最终地址再构造 grid，并在 controller 查询前推进 streaming。object `101` 是
+`player_spawn` point，object
 `102` 是 `crate_spawn` rectangle；sample 按稳定 ID 和 properties 校验并消费它们，分别初始化角色位置和
 dynamic crate 位置。
 
@@ -137,13 +149,14 @@ ground 后向右行走并撞墙；它与 Box2D dynamic body 共用同一 Tile so
 
 在 `TINA_BUILD_PHYSICS2D=ON` 图中：
 
-1. `TileMapGridCollision(map, 20)` 显式选择 hidden collision tile layer；
-2. `collectAllSolidCellsForPhysics()` 从该 layer 收集 solid cell；
-3. `syncTileMapSolidsToStaticBodies()` 通过公开 `createBody()` + `createShape(Box)` 原子创建 static terrain；
-4. 产品 State 从 object `102` 创建一个 dynamic crate，并显式挂接 Box shape；
-5. 同一 World 创建 circle sensor 和一个远离主场景的 spring Distance joint；
-6. 每个 fixed tick 调用 `PhysicsWorld2D::step()`，读取 contact/sensor event、body state 与 joint state；
-7. Scene sprite 使用 crate state 输出可见结果。
+1. 启动 demand/pump/commit visual `10` 与 collision `20`，确认两块 resident；
+2. `TileMapGridCollision(stream.map(), 20)` 显式选择 hidden collision tile layer；
+3. `collectAllSolidCellsForPhysics()` 从该 layer 收集 solid cell；
+4. `syncTileMapSolidsToStaticBodies()` 通过公开 `createBody()` + `createShape(Box)` 原子创建 static terrain；
+5. 产品 State 从 object `102` 创建一个 dynamic crate，并显式挂接 Box shape；
+6. 同一 World 创建 circle sensor 和一个远离主场景的 spring Distance joint；
+7. 每个 fixed tick 调用 `PhysicsWorld2D::step()`，读取 contact/sensor event、body state 与 joint state；
+8. Scene sprite 使用 crate state 输出可见结果。
 
 当前 product-2d 证据为11个 static body、dynamic contact 非0、300次 physics step、sensor enter/exit 各1次
 与 `physicsJointReady=true`。完整细节见 [物理](physics.md)。
@@ -154,8 +167,11 @@ ground 后向右行走并撞墙；它与 Box2D dynamic body 共用同一 Tile so
 Windowed/Fullscreen RadioButton。结构化 evidence 验证控件数量、TextEdit UTF-8 初值、ProgressBar 值
 与 Radio 互斥选择；Windows client-area 捕获验证可见、无明显裁剪/重叠和中文无乱码。
 
-AudioClip 来自 Catalog lease。`AudioEngine` 接收 one-shot，完整 feature 图附加 miniaudio null-device，
-报告 callback/mix 与 started completion；这不等同于真实扬声器质量门禁。
+AudioClip 来自 Catalog lease。`2D-AUDIO-ADV / N7` 已完成 voice gain/pitch/pan、fade、transient one-shot
+retirement，以及固定容量 PCM stream 的 submit/EOF/underrun/cancel/terminal backpressure/shutdown 收口。
+产品 sample 通过 owner thread 显式调用固定帧数 `mixRealtime()`，确定性验证 stream drain、Stopped、自动
+retire 与零 underrun；miniaudio callback 调用 mixer 和 device lifecycle 由
+`tina_audio_miniaudio_tests` 的 adapter 测试证明，不把异步 callback 调度当作产品 stream 门禁。
 
 ## 当前产品证据
 
@@ -174,12 +190,15 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 当前 sample 的结构化产品门禁要求：
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
-- `catalogFromRecipeFile=true`、`catalogRecipeAssets=11`、`texturesUploaded=2`；
+- `catalogFromRecipeFile=true`、`catalogRecipeAssets=13`（含2个 cooked chunk）、`texturesUploaded=2`；
+- `tileMapStreamRequests=2`、`tileMapStreamCommitted=2`、`tileMapStreamResident=2`，且每个 frame 都推进
+  demand/pump/commit；
 - `objectLayerConsumed=true`、`objectLayerObjects=2`，稳定 object `101/102` 已被产品逻辑消费；
 - 300次 extraction/physics step，角色 grounded/walk/hit-right；
 - Tile/角色双纹理 upload/binding、连续 sprite batch、Camera follow/interpolation、chunk cache；
 - 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；
-- UI/TextEdit/ProgressBar/RadioButton、Audio Catalog lease、Physics contact；
+- UI/TextEdit/ProgressBar/RadioButton、Audio Catalog lease、Advanced Audio owner-thread deterministic mix、
+  Physics contact；
 - `physicsSensorEnters>0`、`physicsSensorExits>0`、`physicsJointReady=true`；
 - `stateExits=1`、`applicationShutdowns=1`、`uiRootsReleased=1`；
 - `pixelCaptureOk=true`。
@@ -205,8 +224,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 ## 当前限制
 
-- TileMap v2 仍要求完整地图常驻；无 chunk streaming、通用 Tile/Scene 编辑器、自动把任意 object layer
-  转成完整 gameplay、2D lighting、navigation 或网络 rollback；
+- 当前 streaming 是固定容量 Camera/layer demand owner，已有 retain-window demand-recency LRU，但不包含
+  优先级 IO 调度、通用 Tile/Scene 编辑器、自动把任意 object layer 转成完整 gameplay、旧 schema
+  migration、2D lighting、navigation 或网络 rollback；
 - Cooked SpriteAsset 的完整 atlas/PPU metadata resolve 仍可扩展，当前产品使用 Texture2D + 显式 UV/key；
 - GPU chunk mesh cache、复杂透明材质与多 camera/letterbox policy 尚未产品化；
 - Physics2D 当前 shape 为 Box/Circle/Capsule、joint 为 Distance；polygon/chain 与更多 joint 类型未产品化；

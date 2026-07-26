@@ -19,6 +19,7 @@ using Bytes = std::vector<std::byte>;
 struct DependencySpec final {
     Core::u8 idSeed = 0;
     AssetFormat::AssetKind expectedKind = AssetFormat::AssetKind::Invalid;
+    AssetFormat::DependencyFlags flags = AssetFormat::DependencyFlags::Required;
 };
 
 struct ManifestEntrySpec final {
@@ -148,7 +149,7 @@ Bytes makeManifest(const std::vector<ManifestEntrySpec>& entries)
             putU16(bytes, dependencyEntryOffset + 16U,
                    static_cast<Core::u16>(entry.dependencies[localIndex].expectedKind));
             putU16(bytes, dependencyEntryOffset + 18U,
-                   static_cast<Core::u16>(AssetFormat::DependencyFlags::Required));
+                   static_cast<Core::u16>(entry.dependencies[localIndex].flags));
         }
         dependencyFirst += static_cast<Core::u32>(entry.dependencies.size());
     }
@@ -230,6 +231,44 @@ TEST(CatalogLoadOrderTests, DiamondSharesCommonDependencyOnce)
     std::sort(middle.begin(), middle.end());
     EXPECT_EQ(middle[0], 1U);
     EXPECT_EQ(middle[1], 2U);
+}
+
+TEST(CatalogLoadOrderTests, DeferredDependencyLoadsOnlyWhenExplicitlyRequested)
+{
+    TrackingMemoryResource resource;
+    // TileMap(3) references Tileset(2) lazily; Tileset still requires Texture(1).
+    auto catalog = makeCatalog(
+        resource,
+        {
+            ManifestEntrySpec{.idSeed = 1U, .kind = AssetFormat::AssetKind::Texture2D},
+            ManifestEntrySpec{.idSeed = 2U,
+                              .kind = AssetFormat::AssetKind::Tileset,
+                              .dependencies = {{.idSeed = 1U,
+                                                .expectedKind = AssetFormat::AssetKind::Texture2D}}},
+            ManifestEntrySpec{
+                .idSeed = 3U,
+                .kind = AssetFormat::AssetKind::TileMap,
+                .dependencies = {{.idSeed = 2U,
+                                  .expectedKind = AssetFormat::AssetKind::Tileset,
+                                  .flags = AssetFormat::DependencyFlags::Required |
+                                           AssetFormat::DependencyFlags::Deferred}},
+            },
+        });
+
+    const auto tileMapId = *Core::AssetId::fromBytes(idBytes(3U));
+    auto rootOrder = computeCatalogLoadOrder(
+        catalog, std::array{tileMapId}, CatalogLoadOrderConfig{.memoryResource = &resource});
+    ASSERT_TRUE(rootOrder.has_value()) << rootOrder.error().message;
+    ASSERT_EQ(rootOrder->size(), 1U);
+    EXPECT_EQ((*rootOrder)[0], 2U);
+
+    const auto tilesetId = *Core::AssetId::fromBytes(idBytes(2U));
+    auto deferredOrder = computeCatalogLoadOrder(
+        catalog, std::array{tilesetId}, CatalogLoadOrderConfig{.memoryResource = &resource});
+    ASSERT_TRUE(deferredOrder.has_value()) << deferredOrder.error().message;
+    ASSERT_EQ(deferredOrder->size(), 2U);
+    EXPECT_EQ((*deferredOrder)[0], 0U);
+    EXPECT_EQ((*deferredOrder)[1], 1U);
 }
 
 TEST(CatalogLoadOrderTests, RejectsMissingRequestedAsset)

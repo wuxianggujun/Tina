@@ -18,6 +18,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetGpuMeshTests.cpp
     AudioClipCookedPlaybackTests.cpp
     TileMapInstanceTests.cpp
+    TileMapStreamTests.cpp
     TileChunkExtractionTests.cpp
     TileChunkRenderTests.cpp
     TileChunkDirtyCacheTests.cpp
@@ -44,6 +45,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/AssetGpuTextureHeader.cpp
     header_isolation/AssetGpuMeshHeader.cpp
     header_isolation/TileMapInstanceHeader.cpp
+    header_isolation/TileMapStreamHeader.cpp
     header_isolation/GridCollisionHeader.cpp
     header_isolation/TileChunkViewHeader.cpp
     header_isolation/TileChunkRenderHeader.cpp

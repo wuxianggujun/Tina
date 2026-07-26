@@ -1,9 +1,10 @@
 #include <tina/asset/GridCollision.hpp>
 #include <tina/asset/TileChunkView.hpp>
 #include <tina/asset/TileMapInstance.hpp>
-#include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+
+#include "support/TileMapInstanceTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -44,31 +45,22 @@ inline constexpr AssetFormat::TileMapLayerId CollisionLayerId = 20;
     // 4x4 with only bottom-left 2x2 solid filled -> chunk(0,0) non-empty, others empty
     const std::array<Core::u16, 16> cells{1, 1, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     const std::array layers{
-        AssetFormat::TileMapLayerDesc{
+        TestSupport::TestTileMapLayerDesc{
             .stableLayerId = VisualLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = true,
             .name = "visual",
-            .tiles = cells,
+            .cells = cells,
         },
-        AssetFormat::TileMapLayerDesc{
+        TestSupport::TestTileMapLayerDesc{
             .stableLayerId = CollisionLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = false,
             .name = "collision",
-            .tiles = cells,
+            .cells = cells,
         },
     };
-    auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
-        .widthCells = 4,
-        .heightCells = 4,
-        .cellSizeMeters = 1.0f,
-        .layers = layers,
-        .tilesetId = tilesetId,
-    });
-    auto map = AssetFormat::parseTileMapPayload(*mapBytes);
-    auto instance = TileMapInstance::Create(*map, *tileset, mapId, tilesetId,
-                                            TileMapInstanceConfig{.chunkSizeCells = 2, .memoryResource = &memory});
+    auto instance = TestSupport::makeResidentTileMapInstance(4, 4, 2, mapId, tilesetId, *tileset, layers, memory);
     EXPECT_TRUE(instance.has_value());
     return std::move(*instance);
 }

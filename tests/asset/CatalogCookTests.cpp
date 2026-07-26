@@ -332,7 +332,7 @@ TEST(CatalogCookTests, InlineTilesetAndTileMapRecipe)
 
     auto request = parseCatalogCookRecipe(recipe, ".");
     ASSERT_TRUE(request.has_value()) << request.error().message;
-    EXPECT_EQ(request->assets.size(), 3U);
+    EXPECT_EQ(request->assets.size(), 4U);
 
     const auto root = std::filesystem::temp_directory_path() / "tina_inline_tilemap_recipe";
     std::error_code ec;
@@ -360,9 +360,9 @@ TEST(CatalogCookTests, InlineTilesetAndTileMapRecipe)
     };
     auto catalog = openCatalogPackage(toUtf8(root), openConfig);
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
-    EXPECT_EQ(catalog->entryCount(), 3U);
-    // Texture has 0 deps, tileset 1, tilemap 1
-    EXPECT_EQ(catalog->dependencyCount(), 2U);
+    EXPECT_EQ(catalog->entryCount(), 4U);
+    // Texture has 0 deps, tileset 1, tilemap 2 (Tileset + deferred chunk).
+    EXPECT_EQ(catalog->dependencyCount(), 3U);
 
     // Load expands dependencies (Texture → Tileset → TileMap).
     auto loaded = loadCookedAssetsFromPackage(
@@ -394,8 +394,14 @@ TEST(CatalogCookTests, InlineTilesetAndTileMapRecipe)
     EXPECT_TRUE(visual->visible);
     ASSERT_TRUE(visual->findProperty("role").has_value());
     EXPECT_EQ(visual->findProperty("role")->value, "render");
-    EXPECT_EQ(*visual->tileAt(0, 0), 1U);
-    EXPECT_EQ(*visual->tileAt(1, 1), 0U);
+    EXPECT_EQ(visual->chunkRefCount, 1U);
+    const auto visualChunk = visual->chunkRefAt(0);
+    ASSERT_TRUE(visualChunk.has_value());
+    EXPECT_EQ(visualChunk->chunkX, 0U);
+    EXPECT_EQ(visualChunk->chunkY, 0U);
+    EXPECT_EQ(visualChunk->widthCells, 2U);
+    EXPECT_EQ(visualChunk->heightCells, 2U);
+    EXPECT_EQ(visualChunk->nonEmptyCount, 3U);
     const auto gameplay = mapView->findLayer(20);
     ASSERT_TRUE(gameplay.has_value());
     EXPECT_EQ(gameplay->objectCount, 1U);
@@ -406,6 +412,189 @@ TEST(CatalogCookTests, InlineTilesetAndTileMapRecipe)
     EXPECT_EQ(spawn->findProperty("role")->value, "player");
 
     std::filesystem::remove_all(root, ec);
+}
+
+TEST(CatalogCookTests, TileMapChunkIdsIncludeFullParentMapIdentity)
+{
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto tilesetId = *Core::AssetId::fromBytes(idBytes(5U));
+    auto firstMapBytes = idBytes(6U);
+    firstMapBytes[1] = std::byte{0x11};
+    auto secondMapBytes = firstMapBytes;
+    secondMapBytes[1] = std::byte{0x22};
+    const auto firstMapId = *Core::AssetId::fromBytes(firstMapBytes);
+    const auto secondMapId = *Core::AssetId::fromBytes(secondMapBytes);
+
+    std::string recipe = "platform WindowsX64\ntexture2d ";
+    const auto appendId = [&recipe](Core::AssetId id) {
+        const auto text = id.canonicalText();
+        recipe.append(text.data(), text.size());
+    };
+    appendId(textureId);
+    recipe += " 1 1 FFFFFFFF\ntileset ";
+    appendId(tilesetId);
+    recipe += " ";
+    appendId(textureId);
+    recipe += " 16 16\ntile 1 1 0 0 1 1\n";
+    for (const Core::AssetId mapId : std::array{firstMapId, secondMapId})
+    {
+        recipe += "tilemap ";
+        appendId(mapId);
+        recipe += " ";
+        appendId(tilesetId);
+        recipe += " 1 1 1.0\ntilelayer 10 1 visual\nrow 1\nendlayer\nendtilemap\n";
+    }
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 6U);
+
+    const auto findChunkId = [&request](Core::AssetId mapId) {
+        const auto map = std::find_if(request->assets.begin(), request->assets.end(),
+                                      [mapId](const CatalogCookAssetSpec& asset) { return asset.assetId == mapId; });
+        EXPECT_NE(map, request->assets.end());
+        if (map == request->assets.end())
+        {
+            return Core::AssetId{};
+        }
+        const auto chunk = std::find_if(
+            map->dependencies.begin(), map->dependencies.end(),
+            [](const AssetFormat::CookedAssetWriteDependency& dependency) {
+                return dependency.expectedKind == AssetFormat::AssetKind::TileMapChunk;
+            });
+        EXPECT_NE(chunk, map->dependencies.end());
+        return chunk == map->dependencies.end() ? Core::AssetId{} : chunk->assetId;
+    };
+    const Core::AssetId firstChunkId = findChunkId(firstMapId);
+    const Core::AssetId secondChunkId = findChunkId(secondMapId);
+    ASSERT_TRUE(firstChunkId);
+    ASSERT_TRUE(secondChunkId);
+    EXPECT_NE(firstChunkId, secondChunkId);
+
+    auto cooked = cookCatalogPackage(*request);
+    ASSERT_TRUE(cooked.has_value()) << cooked.error().message;
+    EXPECT_EQ(cooked->entryCount, 6U);
+    EXPECT_EQ(cooked->dependencyCount, 5U);
+}
+
+TEST(CatalogCookTests, TileMapChunkDependenciesAreCanonicalizedByAssetId)
+{
+    constexpr Core::u32 MapExtent = 64U;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto tilesetId = *Core::AssetId::fromBytes(idBytes(5U));
+    const auto mapId = *Core::AssetId::fromBytes(idBytes(6U));
+
+    std::string recipe = "platform WindowsX64\ntexture2d ";
+    const auto appendId = [&recipe](Core::AssetId id) {
+        const auto text = id.canonicalText();
+        recipe.append(text.data(), text.size());
+    };
+    appendId(textureId);
+    recipe += " 1 1 FFFFFFFF\ntileset ";
+    appendId(tilesetId);
+    recipe += " ";
+    appendId(textureId);
+    recipe += " 16 16\ntile 1 1 0 0 1 1\ntilemap ";
+    appendId(mapId);
+    recipe += " ";
+    appendId(tilesetId);
+    recipe += " 64 64 1.0\ntilelayer 10 1 visual\n";
+    for (Core::u32 y = 0; y < MapExtent; ++y)
+    {
+        recipe += "row";
+        for (Core::u32 x = 0; x < MapExtent; ++x)
+        {
+            recipe += " 1";
+        }
+        recipe += "\n";
+    }
+    recipe += "endlayer\nendtilemap\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 19U);
+    const auto map = std::find_if(request->assets.begin(), request->assets.end(),
+                                  [mapId](const CatalogCookAssetSpec& asset) { return asset.assetId == mapId; });
+    ASSERT_NE(map, request->assets.end());
+    ASSERT_EQ(map->dependencies.size(), 17U);
+    EXPECT_TRUE(std::is_sorted(map->dependencies.begin(), map->dependencies.end(),
+                               [](const AssetFormat::CookedAssetWriteDependency& left,
+                                  const AssetFormat::CookedAssetWriteDependency& right) {
+                                   return left.assetId < right.assetId;
+                               }));
+
+    auto cooked = cookCatalogPackage(*request);
+    ASSERT_TRUE(cooked.has_value()) << cooked.error().message;
+    EXPECT_EQ(cooked->entryCount, 19U);
+    EXPECT_EQ(cooked->dependencyCount, 18U);
+}
+
+TEST(CatalogCookTests, TileMapChunkIdIsStableWhenEarlierChunkBecomesNonEmpty)
+{
+    constexpr Core::u32 MapWidth = 32U;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto tilesetId = *Core::AssetId::fromBytes(idBytes(5U));
+    const auto mapId = *Core::AssetId::fromBytes(idBytes(6U));
+    const auto makeRecipe = [=](bool includeLeadingChunk) {
+        std::string recipe = "platform WindowsX64\ntexture2d ";
+        const auto appendId = [&recipe](Core::AssetId id) {
+            const auto text = id.canonicalText();
+            recipe.append(text.data(), text.size());
+        };
+        appendId(textureId);
+        recipe += " 1 1 FFFFFFFF\ntileset ";
+        appendId(tilesetId);
+        recipe += " ";
+        appendId(textureId);
+        recipe += " 16 16\ntile 1 1 0 0 1 1\ntilemap ";
+        appendId(mapId);
+        recipe += " ";
+        appendId(tilesetId);
+        recipe += " 32 1 1.0\ntilelayer 10 1 visual\nrow";
+        for (Core::u32 x = 0; x < MapWidth; ++x)
+        {
+            recipe += (x == 16U || (includeLeadingChunk && x == 0U)) ? " 1" : " 0";
+        }
+        recipe += "\nendlayer\nendtilemap\n";
+        return recipe;
+    };
+
+    auto sparseRequest = parseCatalogCookRecipe(makeRecipe(false), ".");
+    auto expandedRequest = parseCatalogCookRecipe(makeRecipe(true), ".");
+    ASSERT_TRUE(sparseRequest.has_value()) << sparseRequest.error().message;
+    ASSERT_TRUE(expandedRequest.has_value()) << expandedRequest.error().message;
+
+    const auto chunkIdAt = [mapId](const CatalogCookRequest& request, Core::u32 chunkX) {
+        const auto mapAsset = std::find_if(request.assets.begin(), request.assets.end(),
+                                           [mapId](const CatalogCookAssetSpec& asset) {
+                                               return asset.assetId == mapId;
+                                           });
+        EXPECT_NE(mapAsset, request.assets.end());
+        if (mapAsset == request.assets.end())
+        {
+            return Core::AssetId{};
+        }
+        auto root = AssetFormat::parseTileMapPayload(mapAsset->payload);
+        EXPECT_TRUE(root.has_value());
+        if (!root)
+        {
+            return Core::AssetId{};
+        }
+        const auto layer = root->findLayer(10U);
+        EXPECT_TRUE(layer.has_value());
+        if (!layer)
+        {
+            return Core::AssetId{};
+        }
+        const auto chunk = layer->findChunkRef(chunkX, 0U);
+        EXPECT_TRUE(chunk.has_value());
+        return chunk ? chunk->chunkAssetId : Core::AssetId{};
+    };
+    const Core::AssetId sparseChunkId = chunkIdAt(*sparseRequest, 1U);
+    const Core::AssetId expandedChunkId = chunkIdAt(*expandedRequest, 1U);
+    ASSERT_TRUE(sparseChunkId);
+    ASSERT_TRUE(expandedChunkId);
+    EXPECT_EQ(sparseChunkId, expandedChunkId);
 }
 
 TEST(CatalogCookTests, TileMapRecipeRejectsLegacyRowsInvalidReferencesAndUnclosedBlocks)

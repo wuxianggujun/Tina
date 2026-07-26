@@ -29,7 +29,6 @@ Now 的退出条件：当前 P1 条目均满足各自验收条件；受影响的
 | --- | --- |
 | UI-002 | 产品 HWND 自动接线 / Narrator 金标 / AT-SPI（映射 + HostBridge 已落地） |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
-| 2D-TILEMAP-STREAM | 基于已完成 schema v2/layer ID 契约做有界 chunk 加载、取消和卸载 |
 
 
 
@@ -62,6 +61,9 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | 2D-PHYSICS-EXPAND / N2 | Body/Shape/Joint 独立 generation；Box/Circle/Capsule 与多 shape/body；sensor enter/exit；Distance joint；body 级联 retirement；TileMap bridge 与产品 sample 迁移；29/29 模块测试及 300 帧 sensor/joint 证据 |
 | RENDER-001-NLIGHT / N4 | Opaque3D lighting 收敛为唯一 `Mesh3DLightingDesc`，有界0..4 directional lights；Null/bgfx/shader/sample/test 同步；产品一次提交3灯 |
 | 2D-INPUT-ADV / N3 | Runtime 单一 unified binding 覆盖 digital/analog value、deadzone/scale、两种合成、多手柄、UI suppression 与 next-frame transactional rebind；本轮测试执行结果以最终验证记录为准 |
+| 2D-TILEMAP-STREAM | TileMap v3 stream root + 独立 deferred TileMapChunk；固定容量 Camera/layer demand、request budget、cancel/unload、lease 与 transactional capacity；resident generation 贯通 dirty cache；产品 sample 每帧推进 visual/collision residency |
+| 2D-TILEMAP-LRU | retain window 作为 optional cache；按成功 demand update 时位于 load window 的 recency 自动淘汰，读取不 touch；desired 强需求超 capacity 仍 transactional |
+| 2D-AUDIO-ADV / N7 | voice gain/pitch/pan/fade、transient one-shot retirement；Create 固定预分配的 bounded PCM stream、owner-thread atomic submit、EOF/underrun/cancel、terminal backpressure/debt、generation 与 shutdown realtime gate；产品 sample 以 owner-thread deterministic mix 验证 stream，miniaudio callback 由 adapter tests 验证 |
 
 “M12 Done”只表示产品删除完成，不表示 Linux、PBR、accessibility、benchmark 或整库 Legacy 字符串全部
 完成。剩余工作已经拆入 Backlog，不再继续扩写 M12 历史清单。
@@ -70,11 +72,11 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 门禁 | 当前结论 | 下一关闭点 |
 | --- | --- | --- |
-| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v2 sample 使用 visual=10、hidden collision=20、gameplay objects=30；Physics 输出 sensor enter/exit 与 Distance joint ready；Advanced input 实现已完成，当前轮测试结果单独记录 | TileMap streaming/editor 与 UI-003 多 DPI 矩阵均为独立后续项 |
+| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint 与 Advanced input 已完成 | TileMap priority IO/editor/自动 gameplay 生成与 UI-003 多 DPI 矩阵均为独立后续项 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
 | UI product | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有结构化与 Windows 产品视觉证据 | UI-002、UI-003 |
 | 3D product | 双 mesh + baseColor/MR/normal 贴图采样、material factors、有界0..4 directional lights 已有证据（产品提交3灯） | RENDER-001 的完整 PBR/IBL/shadow/light component/pass scheduling |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion 与独立 Texture/Mesh AssetLease readback retirement 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |
-| Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v2 + required Tileset dependency/localId 发布前验证已完成 | 更完整资源炸弹矩阵、TileMap streaming/editor、热重载与增量 Cooker |
-| Audio | backend-neutral 与 miniaudio null-device 路径已有 Windows 证据 | Linux/product gate 复验 |
+| Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v3 root/TileMapChunk v1 + eager Tileset/deferred chunk dependency/localId 发布前验证及 retain-window LRU 已完成 | 更完整资源炸弹矩阵、TileMap priority IO/editor、热重载与增量 Cooker |
+| Audio | `2D-AUDIO-ADV / N7` 已完成；Windows product-2d 以 owner-thread deterministic mix 验证 bounded stream，miniaudio callback/mixer 与 lifecycle 由 adapter tests 验证 | Linux、真实设备质量/延迟/切换与 callback benchmark |
 | Legacy retirement | 产品源码/target 删除完成；vcpkg legacy feature 与 EASTL/compatibility 扫尾完成 | 仅保留 `TINA_BUILD_LEGACY=ON` FATAL 拒绝开关 |

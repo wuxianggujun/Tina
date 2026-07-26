@@ -7,6 +7,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     StaticMeshPayloadTests.cpp
     TextureSpritePayloadTests.cpp
     TileMapTilesetPayloadTests.cpp
+    TileMapChunkPayloadTests.cpp
     header_isolation/AssetFormatErrorsHeader.cpp
     header_isolation/AssetFormatHeader.cpp
     header_isolation/AudioClipPayloadHeader.cpp
@@ -18,6 +19,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     header_isolation/Texture2DPayloadHeader.cpp
     header_isolation/TilesetPayloadHeader.cpp
     header_isolation/TileMapPayloadHeader.cpp
+    header_isolation/TileMapChunkPayloadHeader.cpp
 )
 
 add_executable(tina_asset_format_tests ${TINA_ASSET_FORMAT_TEST_SOURCES})

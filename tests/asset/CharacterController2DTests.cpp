@@ -1,9 +1,10 @@
 #include <tina/asset/CharacterController2D.hpp>
 #include <tina/asset/GridCollision.hpp>
 #include <tina/asset/TileMapInstance.hpp>
-#include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+
+#include "support/TileMapInstanceTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -54,25 +55,16 @@ inline constexpr AssetFormat::TileMapLayerId CollisionLayerId = 20;
     }
 
     const std::array layers{
-        AssetFormat::TileMapLayerDesc{
+        TestSupport::TestTileMapLayerDesc{
             .stableLayerId = CollisionLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = false,
             .name = "collision",
-            .tiles = cells,
+            .cells = cells,
         },
     };
 
-    auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
-        .widthCells = 8,
-        .heightCells = 4,
-        .cellSizeMeters = 1.0f,
-        .layers = layers,
-        .tilesetId = tilesetId,
-    });
-    auto map = AssetFormat::parseTileMapPayload(*mapBytes);
-    auto instance = TileMapInstance::Create(*map, *tileset, mapId, tilesetId,
-                                            TileMapInstanceConfig{.chunkSizeCells = 4, .memoryResource = &memory});
+    auto instance = TestSupport::makeResidentTileMapInstance(8, 4, 4, mapId, tilesetId, *tileset, layers, memory);
     EXPECT_TRUE(instance.has_value()) << instance.error().message;
     return std::move(*instance);
 }

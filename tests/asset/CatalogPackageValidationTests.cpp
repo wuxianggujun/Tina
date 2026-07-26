@@ -1,8 +1,11 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/AssetSystem.hpp>
+#include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageValidation.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
+#include <tina/asset_format/TileMapChunkPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 
 #include <gtest/gtest.h>
@@ -318,6 +321,120 @@ TEST(CatalogPackageValidationTests, MetadataOnlyAcceptsButFullValidationRejectsS
     const auto full = validateCatalogPackageOnDisk(toUtf8(catalogRoot), *catalog, fullValidation);
     ASSERT_FALSE(full.has_value());
     EXPECT_EQ(full.error().code, AssetFormat::AssetFormatErrorCode::ContentHashMismatch);
+
+    catalog = CatalogSnapshot{};
+    std::error_code errorCode;
+    std::filesystem::remove_all(catalogRoot, errorCode);
+    EXPECT_EQ(resource.outstandingAllocations(), 0U);
+}
+
+TEST(CatalogPackageValidationTests, TypedValidationRejectsSelfConsistentMalformedTileMapChunk)
+{
+    TrackingMemoryResource resource;
+    constexpr Core::u8 ChunkSeed = 0x26U;
+    constexpr Core::u8 ParentSeed = 0x27U;
+    const auto chunkAssetId = Core::AssetId::fromBytes(idBytes(ChunkSeed));
+    const auto parentAssetId = Core::AssetId::fromBytes(idBytes(ParentSeed));
+    ASSERT_TRUE(chunkAssetId.has_value());
+    ASSERT_TRUE(parentAssetId.has_value());
+
+    constexpr std::array<Core::u16, 1> Cells{1U};
+    auto payload = AssetFormat::writeTileMapChunkPayloadBytes(AssetFormat::TileMapChunkPayloadDesc{
+        .parentTileMapId = *parentAssetId,
+        .layerId = 10U,
+        .chunkX = 0U,
+        .chunkY = 0U,
+        .widthCells = 1U,
+        .heightCells = 1U,
+        .cells = Cells,
+    });
+    ASSERT_TRUE(payload.has_value()) << (payload ? "" : payload.error().message);
+    ASSERT_EQ(payload->size(), AssetFormat::TileMapChunkWire::HeaderBytes + sizeof(Core::u16));
+
+    // Keep the generic cooked file valid while violating the typed chunk schema.
+    // Offset 44 is the reserved u32 in TileMapChunk payload v1.
+    putU32(*payload, 44U, 1U);
+    const auto digest = Core::digestContentHashV1(*payload);
+    ASSERT_TRUE(digest.has_value());
+
+    auto cooked = AssetFormat::writeCookedAssetBytes(AssetFormat::CookedAssetWriteDesc{
+        .assetKind = AssetFormat::AssetKind::TileMapChunk,
+        .assetTypeVersion = AssetFormat::TileMapChunkWire::SchemaVersion,
+        .targetPlatform = AssetFormat::TargetPlatform::WindowsX64,
+        .assetId = *chunkAssetId,
+        .payload = *payload,
+    });
+    ASSERT_TRUE(cooked.has_value()) << (cooked ? "" : cooked.error().message);
+
+    const std::array<AssetFormat::CookedManifestWriteEntry, 1> entries{{
+        AssetFormat::CookedManifestWriteEntry{
+            .assetId = *chunkAssetId,
+            .contentHash = *digest,
+            .assetKind = AssetFormat::AssetKind::TileMapChunk,
+            .assetTypeVersion = AssetFormat::TileMapChunkWire::SchemaVersion,
+            .cookedFileBytes = cooked->size(),
+        },
+    }};
+    auto manifestBytes = AssetFormat::writeCookedManifestBytes(
+        AssetFormat::CookedManifestWriteDesc{.entries = entries});
+    ASSERT_TRUE(manifestBytes.has_value()) << (manifestBytes ? "" : manifestBytes.error().message);
+    auto manifest = AssetFormat::parseCookedManifestView(*manifestBytes);
+    ASSERT_TRUE(manifest.has_value()) << (manifest ? "" : manifest.error().message);
+    auto catalog = CatalogSnapshot::Create(*manifest, CatalogConfig{
+                                                          .maxEntries = 4,
+                                                          .maxDependencies = 4,
+                                                          .maxDependenciesPerAsset = 2,
+                                                          .memoryResource = &resource,
+                                                      });
+    ASSERT_TRUE(catalog.has_value()) << (catalog ? "" : catalog.error().message);
+
+    const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_typed_tilemap_chunk";
+    resetDirectory(catalogRoot);
+    writeBytes(catalogRoot / std::filesystem::u8path(DefaultCatalogManifestRelativePath),
+               *manifestBytes);
+    writeBytes(catalogRoot / std::filesystem::u8path(
+                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::TileMapChunk,
+                                                       *chunkAssetId)
+                       ->view()),
+               *cooked);
+
+    CatalogPackageValidationConfig config{
+        .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+        .verifyContent = true,
+        .verifyTypedPayload = false,
+    };
+    const auto raw = validateCatalogPackageOnDisk(toUtf8(catalogRoot), *catalog, config);
+    ASSERT_TRUE(raw.has_value()) << (raw ? "" : raw.error().message);
+
+    config.verifyTypedPayload = true;
+    const auto typed = validateCatalogPackageOnDisk(toUtf8(catalogRoot), *catalog, config);
+    ASSERT_FALSE(typed.has_value());
+    EXPECT_EQ(typed.error().code, AssetFormat::AssetFormatErrorCode::UnsupportedValue);
+    const auto phaseContext = std::find_if(typed.error().context.begin(), typed.error().context.end(),
+                                           [](const Core::ErrorContext& context) {
+                                               return context.operation == "validateCatalogPackageOnDisk";
+                                           });
+    ASSERT_NE(phaseContext, typed.error().context.end());
+    EXPECT_EQ(phaseContext->detail, "typedTileMapChunk");
+
+    {
+        auto system = AssetSystem::Create(AssetSystemConfig{
+            .storeCapacity = 4,
+            .memoryResource = &resource,
+            .requireTyped2dPayloads = true,
+        });
+        ASSERT_TRUE(system.has_value()) << (system ? "" : system.error().message);
+        const auto bound = system->openAndBindCatalog(toUtf8(catalogRoot));
+        ASSERT_FALSE(bound.has_value());
+        EXPECT_EQ(bound.error().code, AssetFormat::AssetFormatErrorCode::UnsupportedValue);
+        const auto requiredTypedContext =
+            std::find_if(bound.error().context.begin(), bound.error().context.end(),
+                         [](const Core::ErrorContext& context) {
+                             return context.operation == "validateCatalogPackageOnDisk";
+                         });
+        ASSERT_NE(requiredTypedContext, bound.error().context.end());
+        EXPECT_EQ(requiredTypedContext->detail, "typedTileMapChunk");
+    }
 
     catalog = CatalogSnapshot{};
     std::error_code errorCode;

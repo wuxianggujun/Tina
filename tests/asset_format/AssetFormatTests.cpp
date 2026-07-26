@@ -24,6 +24,7 @@ using Bytes = std::vector<std::byte>;
 struct DependencySpec final {
     Core::u8 idSeed = 0;
     AssetKind expectedKind = AssetKind::Invalid;
+    DependencyFlags flags = DependencyFlags::Required;
 };
 
 struct ManifestEntrySpec final {
@@ -117,7 +118,7 @@ Bytes makeCookedAsset(std::span<const DependencySpec> dependencies = {}, Core::u
         const auto offset = Wire::CookedAssetHeaderBytes + index * Wire::DependencyEntryBytes;
         putFixed(bytes, offset, idBytes(dependencies[index].idSeed));
         putU16(bytes, offset + 16U, static_cast<Core::u16>(dependencies[index].expectedKind));
-        putU16(bytes, offset + 18U, static_cast<Core::u16>(DependencyFlags::Required));
+        putU16(bytes, offset + 18U, static_cast<Core::u16>(dependencies[index].flags));
     }
     putFixed(bytes, static_cast<Core::usize>(payloadOffset), Payload);
     return bytes;
@@ -169,7 +170,8 @@ Bytes makeManifest(std::span<const ManifestEntrySpec> entries)
             putFixed(bytes, dependencyEntryOffset, idBytes(entry.dependencies[localIndex].idSeed));
             putU16(bytes, dependencyEntryOffset + 16U,
                    static_cast<Core::u16>(entry.dependencies[localIndex].expectedKind));
-            putU16(bytes, dependencyEntryOffset + 18U, static_cast<Core::u16>(DependencyFlags::Required));
+            putU16(bytes, dependencyEntryOffset + 18U,
+                   static_cast<Core::u16>(entry.dependencies[localIndex].flags));
         }
         dependencyFirst += static_cast<Core::u32>(entry.dependencies.size());
     }
@@ -230,7 +232,9 @@ TEST(AssetIdentityTests, ContentHashRejectsZeroWithoutBecomingAssetIdentity)
 TEST(CookedAssetFormatTests, ParsesCanonicalAssetAndBorrowsPayload)
 {
     const std::array dependencies{DependencySpec{.idSeed = 1U, .expectedKind = AssetKind::Texture2D},
-                                  DependencySpec{.idSeed = 2U, .expectedKind = AssetKind::Material}};
+                                  DependencySpec{.idSeed = 2U,
+                                                 .expectedKind = AssetKind::Material,
+                                                 .flags = DependencyFlags::Required | DependencyFlags::Deferred}};
     auto bytes = makeCookedAsset(dependencies, 64U);
     const auto result = parseCookedAssetView(bytes);
     ASSERT_TRUE(result.has_value());
@@ -238,6 +242,8 @@ TEST(CookedAssetFormatTests, ParsesCanonicalAssetAndBorrowsPayload)
     EXPECT_EQ(result->header().dependencyCount, 2U);
     ASSERT_TRUE(result->dependency(1U));
     EXPECT_EQ(result->dependency(1U)->expectedKind, AssetKind::Material);
+    EXPECT_TRUE(hasDependencyFlag(result->dependency(1U)->flags, DependencyFlags::Required));
+    EXPECT_TRUE(hasDependencyFlag(result->dependency(1U)->flags, DependencyFlags::Deferred));
     EXPECT_FALSE(result->dependency(2U));
     ASSERT_EQ(result->payload().size(), 4U);
     EXPECT_EQ(result->payload()[0], std::byte{0x10});
@@ -347,6 +353,14 @@ TEST(CookedAssetFormatTests, RejectsInvalidDependenciesAndLimits)
         AssetFormatErrorCode::InvalidDependency);
     expectCookedFailure(
         valid, [](Bytes& value) { putU16(value, Wire::CookedAssetHeaderBytes + 18U, 0U); },
+        AssetFormatErrorCode::InvalidDependency);
+    expectCookedFailure(
+        valid,
+        [](Bytes& value) {
+            constexpr auto UnknownFlag = static_cast<Core::u16>(1U << 2U);
+            putU16(value, Wire::CookedAssetHeaderBytes + 18U,
+                   static_cast<Core::u16>(DependencyFlags::Required) | UnknownFlag);
+        },
         AssetFormatErrorCode::InvalidDependency);
     expectCookedFailure(
         valid, [](Bytes& value) { putU32(value, Wire::CookedAssetHeaderBytes + 20U, 1U); },
@@ -462,6 +476,14 @@ TEST(CookedManifestFormatTests, RejectsMissingSelfMismatchedAndUnsortedDependenc
         valid, [dependencyOffset](Bytes& value) { putU16(value, dependencyOffset + 18U, 0U); },
         AssetFormatErrorCode::InvalidDependency);
     expectManifestFailure(
+        valid,
+        [dependencyOffset](Bytes& value) {
+            constexpr auto UnknownFlag = static_cast<Core::u16>(1U << 2U);
+            putU16(value, dependencyOffset + 18U,
+                   static_cast<Core::u16>(DependencyFlags::Required) | UnknownFlag);
+        },
+        AssetFormatErrorCode::InvalidDependency);
+    expectManifestFailure(
         valid, [dependencyOffset](Bytes& value) { putU32(value, dependencyOffset + 20U, 1U); },
         AssetFormatErrorCode::InvalidDependency);
 
@@ -527,7 +549,7 @@ TEST(CookedAssetWriterTests, WriteThenParseRoundTripWithComputedHash)
     const std::array deps{CookedAssetWriteDependency{
         .assetId = depId,
         .expectedKind = AssetKind::Texture2D,
-        .flags = DependencyFlags::Required,
+        .flags = DependencyFlags::Required | DependencyFlags::Deferred,
     }};
 
     auto written = writeCookedAssetBytes(CookedAssetWriteDesc{
@@ -555,6 +577,30 @@ TEST(CookedAssetWriterTests, WriteThenParseRoundTripWithComputedHash)
     ASSERT_TRUE(dependency.has_value());
     EXPECT_EQ(dependency->assetId, depId);
     EXPECT_EQ(dependency->expectedKind, AssetKind::Texture2D);
+    EXPECT_TRUE(hasDependencyFlag(dependency->flags, DependencyFlags::Required));
+    EXPECT_TRUE(hasDependencyFlag(dependency->flags, DependencyFlags::Deferred));
+}
+
+TEST(CookedAssetWriterTests, RejectsUnknownDependencyFlagBits)
+{
+    constexpr std::array<std::byte, 1> Payload{std::byte{0xAA}};
+    const auto assetId = *Core::AssetId::fromBytes(idBytes(0x11U));
+    const auto dependencyId = *Core::AssetId::fromBytes(idBytes(0x22U));
+    constexpr auto UnknownFlag = static_cast<DependencyFlags>(1U << 2U);
+    const std::array dependencies{CookedAssetWriteDependency{
+        .assetId = dependencyId,
+        .expectedKind = AssetKind::Texture2D,
+        .flags = DependencyFlags::Required | UnknownFlag,
+    }};
+
+    const auto result = writeCookedAssetBytes(CookedAssetWriteDesc{
+        .assetKind = AssetKind::Material,
+        .assetId = assetId,
+        .dependencies = dependencies,
+        .payload = Payload,
+    });
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, AssetFormatErrorCode::InvalidIdentity);
 }
 
 TEST(CookedManifestWriterTests, WriteThenParseRoundTripSortedEntries)
@@ -573,7 +619,7 @@ TEST(CookedManifestWriterTests, WriteThenParseRoundTripSortedEntries)
     const std::array materialDeps{CookedAssetWriteDependency{
         .assetId = textureId,
         .expectedKind = AssetKind::Texture2D,
-        .flags = DependencyFlags::Required,
+        .flags = DependencyFlags::Required | DependencyFlags::Deferred,
     }};
     auto materialBytes = writeCookedAssetBytes(CookedAssetWriteDesc{
         .assetKind = AssetKind::Material,
@@ -617,6 +663,42 @@ TEST(CookedManifestWriterTests, WriteThenParseRoundTripSortedEntries)
     EXPECT_EQ(entry0->assetId, textureId);
     EXPECT_EQ(entry1->assetId, materialId);
     EXPECT_EQ(entry1->dependencyCount, 1U);
+    const auto dependency = view->dependencyForEntry(1U, 0U);
+    ASSERT_TRUE(dependency.has_value());
+    EXPECT_TRUE(hasDependencyFlag(dependency->flags, DependencyFlags::Required));
+    EXPECT_TRUE(hasDependencyFlag(dependency->flags, DependencyFlags::Deferred));
+}
+
+TEST(CookedManifestWriterTests, RejectsUnknownDependencyFlagBits)
+{
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto contentHash = *Core::ContentHash::fromBytes(hashBytes(1U));
+    constexpr auto UnknownFlag = static_cast<DependencyFlags>(1U << 2U);
+    const std::array dependencies{CookedAssetWriteDependency{
+        .assetId = textureId,
+        .expectedKind = AssetKind::Texture2D,
+        .flags = DependencyFlags::Required | UnknownFlag,
+    }};
+    const std::array entries{
+        CookedManifestWriteEntry{
+            .assetId = textureId,
+            .contentHash = contentHash,
+            .assetKind = AssetKind::Texture2D,
+            .cookedFileBytes = 128U,
+        },
+        CookedManifestWriteEntry{
+            .assetId = materialId,
+            .contentHash = contentHash,
+            .assetKind = AssetKind::Material,
+            .cookedFileBytes = 128U,
+            .dependencies = dependencies,
+        },
+    };
+
+    const auto result = writeCookedManifestBytes(CookedManifestWriteDesc{.entries = entries});
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, AssetFormatErrorCode::InvalidIdentity);
 }
 
 TEST(CookedManifestWriterTests, RejectsUnsortedEntries)

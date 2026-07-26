@@ -1,8 +1,9 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/TileMapInstance.hpp>
-#include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+
+#include "support/TileMapInstanceTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -65,14 +66,14 @@ TEST(TileMapInstanceTests, CreateEditChunkRevisionAndSolidQuery)
         },
     };
     const std::array layers{
-        AssetFormat::TileMapLayerDesc{
+        TestSupport::TestTileMapLayerDesc{
             .stableLayerId = TileLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = true,
             .name = "visual",
-            .tiles = cells,
+            .cells = cells,
         },
-        AssetFormat::TileMapLayerDesc{
+        TestSupport::TestTileMapLayerDesc{
             .stableLayerId = ObjectLayerId,
             .kind = AssetFormat::TileMapLayerKind::Object,
             .visible = true,
@@ -80,19 +81,7 @@ TEST(TileMapInstanceTests, CreateEditChunkRevisionAndSolidQuery)
             .objects = objects,
         },
     };
-    auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
-        .widthCells = 4,
-        .heightCells = 2,
-        .cellSizeMeters = 1.0f,
-        .layers = layers,
-        .tilesetId = tilesetId,
-    });
-    ASSERT_TRUE(mapBytes.has_value());
-    auto map = AssetFormat::parseTileMapPayload(*mapBytes);
-    ASSERT_TRUE(map.has_value());
-
-    auto instance = TileMapInstance::Create(*map, *tileset, mapId, tilesetId,
-                                            TileMapInstanceConfig{.chunkSizeCells = 2, .memoryResource = &memory});
+    auto instance = TestSupport::makeResidentTileMapInstance(4, 2, 2, mapId, tilesetId, *tileset, layers, memory);
     ASSERT_TRUE(instance.has_value()) << instance.error().message;
     EXPECT_EQ(instance->widthCells(), 4U);
     EXPECT_EQ(instance->heightCells(), 2U);
@@ -120,10 +109,9 @@ TEST(TileMapInstanceTests, CreateEditChunkRevisionAndSolidQuery)
     ASSERT_TRUE(editedRevision.has_value());
     EXPECT_EQ(*editedTile, 2U);
     EXPECT_GT(*editedRevision, *revBefore);
-    const auto editedLayerView = instance->layer(TileLayerId);
-    ASSERT_TRUE(editedLayerView.has_value());
-    ASSERT_TRUE(editedLayerView->tileAt(0, 0).has_value());
-    EXPECT_EQ(*editedLayerView->tileAt(0, 0), 2U);
+    const auto editedLayerTile = instance->tileIdAt(TileLayerId, 0, 0);
+    ASSERT_TRUE(editedLayerTile.has_value());
+    EXPECT_EQ(*editedLayerTile, 2U);
     // Other chunk unchanged.
     auto otherRevision = instance->chunkRevision(TileLayerId, 1, 0);
     ASSERT_TRUE(otherRevision.has_value());
@@ -136,6 +124,13 @@ TEST(TileMapInstanceTests, CreateEditChunkRevisionAndSolidQuery)
     ASSERT_TRUE(count.has_value());
     EXPECT_EQ(*count, 3U);
     EXPECT_EQ(hits.size(), 3U);
+
+    auto farOutside = instance->querySolidAabb(
+        TileLayerId,
+        TileMapSolidQuery{.minX = 1.0e30f, .minY = 1.0e30f, .maxX = 2.0e30f, .maxY = 2.0e30f}, hits);
+    ASSERT_TRUE(farOutside.has_value());
+    EXPECT_EQ(*farOutside, 0U);
+    EXPECT_TRUE(hits.empty());
 
     // Unknown tile id rejected.
     auto bad = instance->setTile(TileLayerId, 0, 0, 99);
@@ -161,22 +156,17 @@ TEST(TileMapInstanceTests, RejectsUnknownCellInSourceMap)
 
     const std::array<Core::u16, 1> cells{9};
     const std::array layers{
-        AssetFormat::TileMapLayerDesc{
+        TestSupport::TestTileMapLayerDesc{
             .stableLayerId = TileLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = true,
             .name = "visual",
-            .tiles = cells,
+            .cells = cells,
         },
     };
-    auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
-        .widthCells = 1, .heightCells = 1, .cellSizeMeters = 1.0f, .layers = layers});
-    auto map = AssetFormat::parseTileMapPayload(*mapBytes);
-    ASSERT_TRUE(map.has_value());
-
-    auto instance = TileMapInstance::Create(
-        *map, *tileset, *Core::AssetId::fromBytes(idBytes(1U)), *Core::AssetId::fromBytes(idBytes(2U)),
-        TileMapInstanceConfig{.chunkSizeCells = 1, .memoryResource = &memory});
+    auto instance = TestSupport::makeResidentTileMapInstance(1, 1, 1, *Core::AssetId::fromBytes(idBytes(1U)),
+                                                              *Core::AssetId::fromBytes(idBytes(2U)), *tileset,
+                                                              layers, memory);
     ASSERT_FALSE(instance.has_value());
 }
 

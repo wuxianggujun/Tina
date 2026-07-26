@@ -2,6 +2,7 @@
 #include <tina/asset/GridCollision.hpp>
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapInstance.hpp>
+#include <tina/asset_format/TileMapChunkPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/error/Error.hpp>
@@ -26,6 +27,7 @@
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -174,6 +176,7 @@ class RecordingNullRenderDevice final : public Tina::Render::IRenderDevice {
 [[nodiscard]] Tina::Core::Result<Tina::Asset::TileMapInstance>
 makePlatformMap(std::pmr::memory_resource& memory)
 {
+    constexpr u16 ChunkSizeCells = 4U;
     const auto tilesetId = *Tina::Core::AssetId::fromBytes(idBytes(31U));
     const auto mapId = *Tina::Core::AssetId::fromBytes(idBytes(32U));
     const std::array tiles{
@@ -216,26 +219,111 @@ makePlatformMap(std::pmr::memory_resource& memory)
         cells[y * 8 + 6] = 2;
     }
 
+    std::array<u16, ChunkSizeCells * ChunkSizeCells> leftChunkCells{};
+    std::array<u16, ChunkSizeCells * ChunkSizeCells> rightChunkCells{};
+    for (u32 y = 0; y < ChunkSizeCells; ++y)
+    {
+        for (u32 x = 0; x < ChunkSizeCells; ++x)
+        {
+            leftChunkCells[y * ChunkSizeCells + x] = cells[y * 8U + x];
+            rightChunkCells[y * ChunkSizeCells + x] = cells[y * 8U + ChunkSizeCells + x];
+        }
+    }
+
+    const auto visualLeftChunkId = *Tina::Core::AssetId::fromBytes(idBytes(33U));
+    const auto visualRightChunkId = *Tina::Core::AssetId::fromBytes(idBytes(34U));
+    const auto collisionLeftChunkId = *Tina::Core::AssetId::fromBytes(idBytes(35U));
+    const auto collisionRightChunkId = *Tina::Core::AssetId::fromBytes(idBytes(36U));
+    const auto writeChunk = [&](Tina::AssetFormat::TileMapLayerId layerId, u32 chunkX,
+                                std::span<const u16> chunkCells) {
+        return Tina::AssetFormat::writeTileMapChunkPayloadBytes(Tina::AssetFormat::TileMapChunkPayloadDesc{
+            .parentTileMapId = mapId,
+            .layerId = layerId,
+            .chunkX = chunkX,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .cells = chunkCells,
+        });
+    };
+    auto visualLeftChunk = writeChunk(VisualLayerId, 0U, leftChunkCells);
+    auto visualRightChunk = writeChunk(VisualLayerId, 1U, rightChunkCells);
+    auto collisionLeftChunk = writeChunk(CollisionLayerId, 0U, leftChunkCells);
+    auto collisionRightChunk = writeChunk(CollisionLayerId, 1U, rightChunkCells);
+    if (!visualLeftChunk || !visualRightChunk || !collisionLeftChunk || !collisionRightChunk)
+    {
+        if (!visualLeftChunk)
+        {
+            return Tina::Core::failure(std::move(visualLeftChunk.error()));
+        }
+        if (!visualRightChunk)
+        {
+            return Tina::Core::failure(std::move(visualRightChunk.error()));
+        }
+        if (!collisionLeftChunk)
+        {
+            return Tina::Core::failure(std::move(collisionLeftChunk.error()));
+        }
+        return Tina::Core::failure(std::move(collisionRightChunk.error()));
+    }
+
+    const std::array visualChunkRefs{
+        Tina::AssetFormat::TileMapChunkRefDesc{
+            .chunkX = 0U,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .nonEmptyCount = 4U,
+            .chunkAssetId = visualLeftChunkId,
+        },
+        Tina::AssetFormat::TileMapChunkRefDesc{
+            .chunkX = 1U,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .nonEmptyCount = 7U,
+            .chunkAssetId = visualRightChunkId,
+        },
+    };
+    const std::array collisionChunkRefs{
+        Tina::AssetFormat::TileMapChunkRefDesc{
+            .chunkX = 0U,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .nonEmptyCount = 4U,
+            .chunkAssetId = collisionLeftChunkId,
+        },
+        Tina::AssetFormat::TileMapChunkRefDesc{
+            .chunkX = 1U,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .nonEmptyCount = 7U,
+            .chunkAssetId = collisionRightChunkId,
+        },
+    };
     const std::array layers{
         Tina::AssetFormat::TileMapLayerDesc{
             .stableLayerId = VisualLayerId,
             .kind = Tina::AssetFormat::TileMapLayerKind::Tile,
             .visible = true,
             .name = "visual",
-            .tiles = cells,
+            .chunkRefs = visualChunkRefs,
         },
         Tina::AssetFormat::TileMapLayerDesc{
             .stableLayerId = CollisionLayerId,
             .kind = Tina::AssetFormat::TileMapLayerKind::Tile,
             .visible = false,
             .name = "collision",
-            .tiles = cells,
+            .chunkRefs = collisionChunkRefs,
         },
     };
     auto mapBytes = Tina::AssetFormat::writeTileMapPayloadBytes(Tina::AssetFormat::TileMapPayloadDesc{
         .widthCells = 8,
         .heightCells = 4,
         .cellSizeMeters = 1.0f,
+        .chunkSizeCells = ChunkSizeCells,
         .layers = layers,
         .tilesetId = tilesetId,
     });
@@ -249,9 +337,40 @@ makePlatformMap(std::pmr::memory_resource& memory)
         return Tina::Core::failure(std::move(map.error()));
     }
 
-    return Tina::Asset::TileMapInstance::Create(
+    auto instance = Tina::Asset::TileMapInstance::Create(
         *map, *tileset, mapId, tilesetId,
-        Tina::Asset::TileMapInstanceConfig{.chunkSizeCells = 4, .memoryResource = &memory});
+        Tina::Asset::TileMapInstanceConfig{.residentChunkCapacity = 4U, .memoryResource = &memory});
+    if (!instance)
+    {
+        return Tina::Core::failure(std::move(instance.error()));
+    }
+
+    const auto attachChunk = [&](Tina::Core::AssetId chunkId, const std::vector<std::byte>& payload,
+                                 u64 generation) -> Tina::Core::Status {
+        auto chunk = Tina::AssetFormat::parseTileMapChunkPayload(payload);
+        if (!chunk)
+        {
+            return Tina::Core::failure(std::move(chunk.error()));
+        }
+        return instance->attachChunk(chunkId, *chunk, generation);
+    };
+    if (auto status = attachChunk(visualLeftChunkId, *visualLeftChunk, 1U); !status)
+    {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    if (auto status = attachChunk(visualRightChunkId, *visualRightChunk, 2U); !status)
+    {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    if (auto status = attachChunk(collisionLeftChunkId, *collisionLeftChunk, 3U); !status)
+    {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    if (auto status = attachChunk(collisionRightChunkId, *collisionRightChunk, 4U); !status)
+    {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    return std::move(*instance);
 }
 
 class TileMap2DState final : public Tina::IGameState {

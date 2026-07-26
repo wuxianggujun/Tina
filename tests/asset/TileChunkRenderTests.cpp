@@ -1,8 +1,9 @@
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapInstance.hpp>
-#include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+
+#include "support/TileMapInstanceTestSupport.hpp"
 #include <tina/render/RenderScene.hpp>
 
 #include <gtest/gtest.h>
@@ -49,31 +50,22 @@ inline constexpr AssetFormat::TileMapLayerId HiddenLayerId = 20;
     // 2x2 all filled
     const std::array<Core::u16, 4> cells{1, 2, 2, 1};
     const std::array layers{
-        AssetFormat::TileMapLayerDesc{
+        TestSupport::TestTileMapLayerDesc{
             .stableLayerId = VisualLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = true,
             .name = "visual",
-            .tiles = cells,
+            .cells = cells,
         },
-        AssetFormat::TileMapLayerDesc{
+        TestSupport::TestTileMapLayerDesc{
             .stableLayerId = HiddenLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = false,
             .name = "collision",
-            .tiles = cells,
+            .cells = cells,
         },
     };
-    auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
-        .widthCells = 2,
-        .heightCells = 2,
-        .cellSizeMeters = 1.0f,
-        .layers = layers,
-        .tilesetId = tilesetId,
-    });
-    auto map = AssetFormat::parseTileMapPayload(*mapBytes);
-    auto instance = TileMapInstance::Create(*map, *tileset, mapId, tilesetId,
-                                            TileMapInstanceConfig{.chunkSizeCells = 2, .memoryResource = &memory});
+    auto instance = TestSupport::makeResidentTileMapInstance(2, 2, 2, mapId, tilesetId, *tileset, layers, memory);
     EXPECT_TRUE(instance.has_value()) << instance.error().message;
     return std::move(*instance);
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/asset_format/TileMapChunkPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/base/Types.hpp>
@@ -13,13 +14,11 @@
 
 namespace Tina::Asset {
 
-// Runtime mutable TileMap instance (gameplay feature; not Scene).
-// Tile data is owned per explicit TileMapLayerId. Object layers and metadata are
-// retained in the instance-owned validated payload and exposed through layer().
+// Runtime mutable TileMap stream instance (gameplay feature; not Scene).
+// The v3 root metadata is owned, while only explicitly attached chunks hold cells.
 
 struct TileMapInstanceConfig final {
-    // Chunk size in cells along each axis. Must be power-of-two in [1, 64]. Default 16.
-    Core::u16 chunkSizeCells = 16;
+    Core::usize residentChunkCapacity = 64;
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
@@ -46,6 +45,11 @@ struct TileMapChunkCoord final {
     [[nodiscard]] friend constexpr bool operator==(const TileMapChunkCoord&, const TileMapChunkCoord&) = default;
 };
 
+struct TileMapChunkState final {
+    Core::u32 contentRevision = 0;
+    Core::u64 residencyGeneration = 0;
+};
+
 struct TileMapTileInfo final {
     Core::u16 localTileId = 0;
     Core::u16 materialFlags = 0;
@@ -66,8 +70,7 @@ class TileMapInstance final {
     TileMapInstance(TileMapInstance&&) noexcept = default;
     TileMapInstance& operator=(TileMapInstance&&) noexcept = default;
 
-    // Copies tile cells, metadata, and object layers from tileMap. Tile values
-    // are validated against the tileset's local-id table before the instance is published.
+    // Copies only root metadata/object layers and the Tileset lookup table.
     [[nodiscard]] static Core::Result<TileMapInstance>
     Create(const AssetFormat::TileMapPayloadView& tileMap, const AssetFormat::TilesetPayloadView& tileset,
            Core::AssetId tileMapAssetId, Core::AssetId tilesetAssetId, TileMapInstanceConfig config = {});
@@ -110,9 +113,9 @@ class TileMapInstance final {
         return m_tilesetAssetId;
     }
 
-    // Returns a borrowed layer view. It remains valid until this instance is moved
-    // or destroyed. Tile bytes stay synchronized with setTile(), while names,
-    // properties, ordering, visibility, and object data remain immutable.
+    // Returns a borrowed v3 root layer view. It remains valid until this instance
+    // is moved or destroyed. Root metadata/chunk refs stay immutable; resident
+    // mutable cells are observed through tileIdAt()/tileInfoAt().
     [[nodiscard]] Core::Result<AssetFormat::TileMapLayerPayloadView>
     layer(AssetFormat::TileMapLayerId layerId) const;
 
@@ -125,6 +128,16 @@ class TileMapInstance final {
     // localTileId 0 = empty. Unknown non-zero local ids fail.
     [[nodiscard]] Core::Status setTile(AssetFormat::TileMapLayerId layerId, Core::u32 x, Core::u32 y,
                                        Core::u16 localTileId);
+
+    // Attaches one validated chunk transactionally. The payload is copied into bounded
+    // instance-owned mutable storage; duplicate coordinates or mismatched root refs fail.
+    [[nodiscard]] Core::Status attachChunk(Core::AssetId chunkAssetId,
+                                           const AssetFormat::TileMapChunkPayloadView& chunk,
+                                           Core::u64 residencyGeneration);
+    [[nodiscard]] Core::Status detachChunk(AssetFormat::TileMapLayerId layerId, TileMapChunkCoord coord) noexcept;
+    [[nodiscard]] bool isChunkResident(AssetFormat::TileMapLayerId layerId, TileMapChunkCoord coord) const noexcept;
+    [[nodiscard]] Core::Result<TileMapChunkState> chunkState(AssetFormat::TileMapLayerId layerId,
+                                                            Core::u32 chunkX, Core::u32 chunkY) const;
 
     [[nodiscard]] Core::Result<Core::u32> chunkRevision(AssetFormat::TileMapLayerId layerId, Core::u32 chunkX,
                                                          Core::u32 chunkY) const;
@@ -146,24 +159,29 @@ class TileMapInstance final {
         bool valid = false;
     };
 
-    struct TileLayerState final {
+    struct ResidentChunk final {
         AssetFormat::TileMapLayerId layerId = 0;
-        Core::usize payloadTileByteOffset = 0;
+        TileMapChunkCoord coord{};
+        Core::u16 widthCells = 0;
+        Core::u16 heightCells = 0;
+        Core::u32 nonEmptyCount = 0;
+        Core::u64 residencyGeneration = 0;
+        Core::u32 contentRevision = 1;
         std::pmr::vector<Core::u16> cells{};
-        std::pmr::vector<Core::u32> chunkRevisions{};
     };
 
-    TileMapInstance(Core::u32 width, Core::u32 height, float cellSize, Core::u16 chunkSize, Core::u32 chunkCountX,
-                    Core::u32 chunkCountY, Core::AssetId tileMapAssetId, Core::AssetId tilesetAssetId,
-                    std::pmr::vector<std::byte> payloadBytes, std::pmr::vector<TileLayerState> tileLayers,
-                    std::pmr::vector<TileDef> tileDefs) noexcept;
+    TileMapInstance(Core::u32 width, Core::u32 height, float cellSize, Core::u16 chunkSize,
+                    Core::AssetId tileMapAssetId, Core::AssetId tilesetAssetId,
+                    std::pmr::vector<std::byte> payloadBytes, std::pmr::vector<TileDef> tileDefs,
+                    std::pmr::vector<ResidentChunk> residentChunks, Core::usize residentCapacity) noexcept;
 
     [[nodiscard]] bool inBounds(Core::u32 x, Core::u32 y) const noexcept;
-    [[nodiscard]] Core::u32 cellIndex(Core::u32 x, Core::u32 y) const noexcept;
-    [[nodiscard]] Core::u32 chunkIndex(Core::u32 chunkX, Core::u32 chunkY) const noexcept;
-    [[nodiscard]] Core::Result<TileLayerState*> tileLayer(AssetFormat::TileMapLayerId layerId);
-    [[nodiscard]] Core::Result<const TileLayerState*> tileLayer(AssetFormat::TileMapLayerId layerId) const;
-    void bumpChunkForCell(TileLayerState& layer, Core::u32 x, Core::u32 y) noexcept;
+    [[nodiscard]] Core::Result<AssetFormat::TileMapLayerPayloadView>
+    tileLayerMetadata(AssetFormat::TileMapLayerId layerId) const;
+    [[nodiscard]] ResidentChunk* residentChunk(AssetFormat::TileMapLayerId layerId,
+                                               TileMapChunkCoord coord) noexcept;
+    [[nodiscard]] const ResidentChunk* residentChunk(AssetFormat::TileMapLayerId layerId,
+                                                     TileMapChunkCoord coord) const noexcept;
 
     Core::u32 m_width = 0;
     Core::u32 m_height = 0;
@@ -174,9 +192,10 @@ class TileMapInstance final {
     Core::AssetId m_tileMapAssetId{};
     Core::AssetId m_tilesetAssetId{};
     std::pmr::vector<std::byte> m_payloadBytes{};
-    std::pmr::vector<TileLayerState> m_tileLayers{};
     // Indexed by localTileId; entry.valid when present in tileset.
     std::pmr::vector<TileDef> m_tileDefs{};
+    std::pmr::vector<ResidentChunk> m_residentChunks{};
+    Core::usize m_residentCapacity = 0;
 };
 
 } // namespace Tina::Asset

@@ -14,6 +14,20 @@
 #include <utility>
 
 namespace Tina::Asset {
+
+struct AssetSystem::AsyncRequestState final {
+    enum class Outcome : Core::u8 {
+        Reading = 0,
+        Succeeded = 1,
+        Failed = 2,
+    };
+
+    AssetHandle handle{};
+    Core::AssetId assetId{};
+    std::pmr::vector<std::byte> bytes{std::pmr::new_delete_resource()};
+    std::atomic<Outcome> outcome{Outcome::Reading};
+};
+
 namespace {
 
 [[nodiscard]] bool hasPathEscapeComponent(const std::filesystem::path& relative) noexcept
@@ -72,8 +86,10 @@ AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std
       m_defaultPumpBudget(defaultPumpBudget), m_taskSystem(taskSystem), m_uploadLedger(uploadLedger),
       m_gpuUploadConfig(gpuUploadConfig), m_autoGpuUpload(autoGpuUpload),
       m_requireTyped2dPayloads(requireTyped2dPayloads), m_catalogRoot(memoryResource), m_index(memoryResource),
-      m_queue(memoryResource)
+      m_queue(memoryResource), m_asyncRequests(memoryResource)
 {
+    m_queue.reserve(m_queueCapacity);
+    m_asyncRequests.reserve(m_queueCapacity);
     if (m_uploadLedger != nullptr)
     {
         m_gpuUpload =
@@ -106,6 +122,7 @@ AssetSystem::AssetSystem(AssetSystem&& other) noexcept
       m_autoGpuUpload(other.m_autoGpuUpload), m_requireTyped2dPayloads(other.m_requireTyped2dPayloads),
       m_catalog(std::move(other.m_catalog)), m_catalogRoot(std::move(other.m_catalogRoot)),
       m_index(std::move(other.m_index)), m_queue(std::move(other.m_queue)),
+      m_asyncRequests(std::move(other.m_asyncRequests)),
       m_inFlight(other.m_inFlight.load(std::memory_order_relaxed))
 {
     if (m_gpuRetirementDevice != nullptr && hasLiveGpuRetirements(m_retirement))
@@ -291,7 +308,8 @@ std::optional<AssetHandle> AssetSystem::find(Core::AssetId assetId) const noexce
         return std::nullopt;
     }
     const auto handle = m_index[*index].handle;
-    if (!handle || m_store.state(handle) == AssetLogicalState::Unloaded)
+    const auto state = m_store.state(handle);
+    if (!handle || state == AssetLogicalState::UnloadPending || state == AssetLogicalState::Unloaded)
     {
         return std::nullopt;
     }
@@ -708,39 +726,33 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
 {
     AssetPumpStats stats{};
 
-    // 1) Drain completed Main work first so Ready is visible this frame.
-    auto mainResult = m_taskSystem->pumpMain(limit);
-    if (!mainResult)
-    {
-        return Core::failure(std::move(mainResult.error()).withContext("AssetSystem::pump", "pumpMain"));
-    }
-    stats.mainCompletions = *mainResult;
+    // Commit only a completed dispatch-order prefix. Worker completion timing must not
+    // determine the order in which asset generations become visible on the owner thread.
+    stats.mainCompletions = commitAsyncCompletions(limit, stats);
+    Core::u32 consumedWork = stats.mainCompletions;
 
-    // 2) Dispatch up to remaining budget items to IO workers.
-    Core::u32 dispatchBudget = limit;
-    if (dispatchBudget == 0U)
-    {
-        dispatchBudget = static_cast<Core::u32>(m_queue.size());
-    }
-    while (stats.dispatchedIo < dispatchBudget && !m_queue.empty())
+    // Completion commits and queued-request advancement share one pump budget. Retain
+    // the queue head on transient Task QueueFull. Active request state is independently
+    // bounded by queueCapacity.
+    while ((limit == 0U || consumedWork < limit) && !m_queue.empty() &&
+           m_asyncRequests.size() < m_queueCapacity)
     {
         const auto item = m_queue.front();
-        m_queue.erase(m_queue.begin());
-        ++stats.processed;
 
         if (m_store.state(item.handle) != AssetLogicalState::Queued)
         {
+            m_queue.erase(m_queue.begin());
+            ++stats.processed;
+            ++consumedWork;
             continue;
-        }
-        auto markStatus = m_store.markLoading(item.handle);
-        if (!markStatus)
-        {
-            return Core::failure(std::move(markStatus.error()).withContext("AssetSystem::pump", "markLoading"));
         }
 
         auto pathResult = resolveObjectPath(item.assetId, item.assetKind);
         if (!pathResult)
         {
+            m_queue.erase(m_queue.begin());
+            ++stats.processed;
+            ++consumedWork;
             auto failStatus = m_store.fail(item.handle);
             if (!failStatus)
             {
@@ -750,63 +762,109 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
             continue;
         }
 
-        // Capture values for worker. Use heap-backed path string for thread safety.
-        const auto handle = item.handle;
-        const auto assetId = item.assetId;
-        const auto path = *pathResult;
-        const auto maxBytes = m_batch.file.maxFileBytes;
-        auto* memoryResource = m_memoryResource;
-        auto* self = this;
+        std::shared_ptr<AsyncRequestState> request;
+        Task::TaskCallable ioWork;
+        try
+        {
+            request = std::make_shared<AsyncRequestState>();
+            request->handle = item.handle;
+            request->assetId = item.assetId;
 
-        m_inFlight.fetch_add(1U, std::memory_order_acq_rel);
-        auto scheduleStatus = m_taskSystem->scheduleIo([self, handle, assetId, path, maxBytes, memoryResource]() {
-            Core::ReadFileConfig readConfig{.maxBytes = maxBytes, .memoryResource = memoryResource};
-            auto bytes = Core::readFile(path, readConfig);
-            std::pmr::vector<std::byte> payload{memoryResource};
-            bool ok = false;
-            if (bytes)
-            {
+            const auto maxBytes = m_batch.file.maxFileBytes;
+            ioWork = [request, path = std::move(*pathResult), maxBytes]() noexcept {
+                bool ok = false;
                 try
                 {
-                    payload = std::move(*bytes);
-                    ok = true;
+                    auto bytes = Core::readFile(
+                        path, Core::ReadFileConfig{
+                                  .maxBytes = maxBytes,
+                                  .memoryResource = std::pmr::new_delete_resource(),
+                              });
+                    if (bytes)
+                    {
+                        request->bytes = std::move(*bytes);
+                        ok = true;
+                    }
                 } catch (...)
                 {
                     ok = false;
                 }
-            }
-            // Main completion posts owning bytes; parse happens on main.
-            (void)self->m_taskSystem->postMain([self, handle, assetId, payload = std::move(payload), ok]() mutable {
-                self->completeOnMain(handle, assetId, std::move(payload), ok, nullptr);
-                self->m_inFlight.fetch_sub(1U, std::memory_order_acq_rel);
-            });
-        });
+                request->outcome.store(ok ? AsyncRequestState::Outcome::Succeeded
+                                          : AsyncRequestState::Outcome::Failed,
+                                       std::memory_order_release);
+            };
+            m_asyncRequests.push_back(request);
+        } catch (const std::bad_alloc&)
+        {
+            return Core::failure(AssetErrorCode::AllocationFailed,
+                                 "asset async request state allocation failed");
+        }
+
+        Core::Status scheduleStatus = Core::success();
+        try
+        {
+            scheduleStatus = m_taskSystem->scheduleIo(std::move(ioWork));
+        } catch (const std::bad_alloc&)
+        {
+            m_asyncRequests.pop_back();
+            return Core::failure(AssetErrorCode::AllocationFailed,
+                                 "asset IO scheduling allocation failed");
+        } catch (const std::exception&)
+        {
+            m_asyncRequests.pop_back();
+            return Core::failure(Core::CoreErrorCode::Internal,
+                                 "task system threw while scheduling asset IO");
+        } catch (...)
+        {
+            m_asyncRequests.pop_back();
+            return Core::failure(Core::CoreErrorCode::Internal,
+                                 "task system threw an unknown exception while scheduling asset IO");
+        }
         if (!scheduleStatus)
         {
-            m_inFlight.fetch_sub(1U, std::memory_order_acq_rel);
+            m_asyncRequests.pop_back();
+            // QueueFull is transient backpressure. Preserve both the queue head and
+            // Queued generation so the next pump retries in exactly the same order.
+            if (scheduleStatus.error().code == Task::TaskErrorCode::QueueFull)
+            {
+                break;
+            }
+
+            m_queue.erase(m_queue.begin());
+            ++stats.processed;
+            ++consumedWork;
             auto failStatus = m_store.fail(item.handle);
             if (!failStatus)
             {
                 return Core::failure(std::move(failStatus.error()).withContext("AssetSystem::pump", "failAfterQueue"));
             }
             ++stats.becameFailed;
-            // If IO queue is full, stop dispatching more this frame.
-            if (scheduleStatus.error().code == Task::TaskErrorCode::QueueFull)
-            {
-                break;
-            }
             continue;
         }
+
+        // The worker only publishes into request state, so it is safe for it to finish
+        // before this owner-thread transition; commit cannot run concurrently with pump().
+        auto markStatus = m_store.markLoading(item.handle);
+        m_queue.erase(m_queue.begin());
+        m_inFlight.fetch_add(1U, std::memory_order_acq_rel);
+        ++stats.processed;
         ++stats.dispatchedIo;
+        ++consumedWork;
+        if (!markStatus)
+        {
+            return Core::failure(std::move(markStatus.error()).withContext("AssetSystem::pump", "markLoading"));
+        }
     }
 
-    // 3) Drain any completions that arrived during dispatch.
-    auto mainResult2 = m_taskSystem->pumpMain(0);
-    if (!mainResult2)
+    // Fast IO may have finished during dispatch. Preserve the same prefix ordering while
+    // consuming only budget left after the initial commits and queued-request advancement.
+    if (limit == 0U)
     {
-        return Core::failure(std::move(mainResult2.error()).withContext("AssetSystem::pump", "pumpMain2"));
+        stats.mainCompletions += commitAsyncCompletions(0U, stats);
+    } else if (consumedWork < limit)
+    {
+        stats.mainCompletions += commitAsyncCompletions(limit - consumedWork, stats);
     }
-    stats.mainCompletions += *mainResult2;
 
     if (const auto status = mergeGpuStats(stats); !status)
     {
@@ -817,10 +875,65 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
     return stats;
 }
 
-void AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId assetId, std::pmr::vector<std::byte> bytes, bool ok,
-                                 AssetPumpStats* stats) noexcept
+Core::u32 AssetSystem::commitAsyncCompletions(Core::u32 limit, AssetPumpStats& stats) noexcept
 {
-    static_cast<void>(stats);
+    Core::u32 committed = 0;
+    Core::usize completedPrefix = 0;
+    while (completedPrefix < m_asyncRequests.size() && (limit == 0U || committed < limit))
+    {
+        const auto& request = m_asyncRequests[completedPrefix];
+        const auto outcome = request->outcome.load(std::memory_order_acquire);
+        if (outcome == AsyncRequestState::Outcome::Reading)
+        {
+            break;
+        }
+
+        const auto stateBefore = m_store.state(request->handle);
+        bool ok = outcome == AsyncRequestState::Outcome::Succeeded;
+        std::pmr::vector<std::byte> ownerBytes{m_memoryResource};
+        if (ok)
+        {
+            try
+            {
+                ownerBytes.assign(request->bytes.begin(), request->bytes.end());
+            } catch (...)
+            {
+                ok = false;
+            }
+        }
+        completeOnMain(request->handle, request->assetId, std::move(ownerBytes), ok);
+
+        if (stateBefore == AssetLogicalState::Loading)
+        {
+            if (m_store.hasCpuPayload(request->handle))
+            {
+                ++stats.becameReady;
+            } else if (m_store.state(request->handle) == AssetLogicalState::Failed)
+            {
+                ++stats.becameFailed;
+            }
+        }
+
+        const auto previous = m_inFlight.fetch_sub(1U, std::memory_order_acq_rel);
+        if (previous == 0U)
+        {
+            m_inFlight.store(0U, std::memory_order_release);
+        }
+        ++completedPrefix;
+        ++committed;
+    }
+
+    if (completedPrefix != 0U)
+    {
+        m_asyncRequests.erase(m_asyncRequests.begin(),
+                              m_asyncRequests.begin() + static_cast<std::ptrdiff_t>(completedPrefix));
+    }
+    return committed;
+}
+
+void AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId assetId, std::pmr::vector<std::byte> bytes,
+                                 bool ok) noexcept
+{
     if (m_store.state(handle) != AssetLogicalState::Loading)
     {
         return;
@@ -971,8 +1084,10 @@ Core::Status AssetSystem::unload(AssetHandle handle) noexcept
     }
 
     const auto status = m_store.unload(handle);
-    if (status && m_store.state(handle) == AssetLogicalState::Unloaded)
+    if (status)
     {
+        // AssetId lookup is a logical-residency index. Hide it immediately even when
+        // a live AssetLease keeps the old generation payload in UnloadPending.
         forgetHandle(handle);
     }
     return status;

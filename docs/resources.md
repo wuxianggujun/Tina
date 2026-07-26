@@ -19,6 +19,7 @@ Catalog package
   -> Asset owning CatalogSnapshot / CookedAssetFile
   -> load plan + AssetSystem
   -> AssetStore Handle/Lease state
+  -> optional TileMapStream chunk residency owner
   -> optional Null UploadTicket coordinator
 ```
 
@@ -36,11 +37,11 @@ Catalog package
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验 |
 | Package | 确定性 object path、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
-| Cooker | recipe、writer、发布前 typed/package validation、staging 后原子发布；TileMap v2 会校验 required Tileset dependency 与 tile localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
+| Cooker | recipe、writer、发布前 typed/package validation、staging 后原子发布；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
 | Registry | generation `AssetHandle`、move-only `AssetLease`、显式容量与注入 PMR |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh backend retirement marker；AssetLease pin 与 retirement ledger |
-| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
+| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
@@ -60,6 +61,8 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `CatalogSnapshot` 与 `CookedAssetFile` 是 owning、move-only 对象；
 - `AssetHandle` 是弱 generation lookup，不延长 CPU payload 生命周期；
 - `AssetLease` 是 move-only 强引用，Lease 存在时逻辑 unload 进入 `UnloadPending`；
+- `TileMapStream` 持有 root/tileset lease 与 demanded chunk handle/lease；必须先把 `AssetSystem` 和 stream
+  放到最终地址，再创建借用 `stream.map()` 的 collision adapter，且 stream 必须先于 AssetSystem 析构；
 - `UploadTicket` 当前只由 Null ledger 完整实现，用于验证 staging 与逻辑状态；
 - `AssetRetirementLedger` 按 Logical/UploadStaging/GpuTexture2D/GpuStaticMesh 记录
   `DestroyQueued`、`Retiring`、`Released`；真实 GPU 销毁仍由 RenderDevice 执行。
@@ -100,7 +103,7 @@ RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetS
 
 | 领域 | 已有 schema/parser/writer |
 | --- | --- |
-| 2D | `Texture2D`、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` |
+| 2D | `Texture2D`、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` v3 root、`TileMapChunk` v1 |
 | 3D | `StaticMesh`、`Material`、`Prefab` |
 | Audio | `AudioClip` float32 PCM |
 
@@ -109,16 +112,33 @@ SpriteAnimationClip v1 保存 Once/Loop/PingPong、逐帧正有限 duration 与 
 Cooked dependency contract，产品 sample 再在 Asset/Scene 边界把 Sprite 解析成 Animator 所需的
 `SpriteRenderer2D` 帧。
 
-TileMap 当前唯一 typed payload 为 schema v2：按 authoring 顺序保存 tile/object layers；layer/object ID
-必须 map-wide 非零唯一；layer 与 object 都有 visibility，name/properties 使用 strict UTF-8；tile layer 保存
-与地图尺寸完全匹配的 row-major localId grid；object layer 保存 point/rectangle。`layerAt()/findLayer()`、
-`objectAt()/findObject()` 和 property lookup 返回 borrowed view。旧 schema v1 不兼容，也不存在单层双读。
+TileMap 当前唯一 root typed payload 为 schema v3：按 authoring 顺序保存 tile/object layers；layer/object ID
+必须 map-wide 非零唯一；layer 与 object 都有 visibility，name/properties 使用 strict UTF-8。tile layer 只保存
+按 `{chunkY, chunkX}` 严格排序的非空 chunk ref，缺失坐标表示已知空块；object layer 仍保存
+point/rectangle。`layerAt()/findLayer()`、`chunkRefAt()/findChunkRef()`、`objectAt()/findObject()` 和 property
+lookup 返回 borrowed view。旧 schema v1/v2 均不兼容。
+
+每个非空块是独立 `AssetKind::TileMapChunk` schema v1，保存 parent TileMap `AssetId`、layer ID、chunk
+坐标、边缘实际尺寸、非空计数和 row-major cells。parent ID 内嵌在 payload，而不建立 chunk→parent
+dependency，避免 parent→deferred chunk 图形成环。TileMap root 对每个 chunk 使用
+`Required|Deferred` dependency；普通 root load 只 eager 加载 Tileset 链，chunk 只在被明确 request 时进入
+Store。
 
 recipe 必须使用 `tilelayer/objectlayer/property/row/point/rectangle/objectproperty/endlayer/endtilemap`
-组成显式 block；历史 `tilemap` 后直接跟裸 `row` 的格式会失败。Cooker 在构造并发布 Manifest 前重新解析
-TileMap v2；recipe name/key/value 当前是不含空白的单 UTF-8 token。package validation 要求恰好一个
-`Required` Tileset dependency、依赖存在且 kind/version 正确，并检查每个非零 tile localId 都存在于该
-Tileset；任一步失败都不会发布 `manifest.tmnft`。
+组成显式 block；历史 `tilemap` 后直接跟裸 `row` 的格式会失败。Cooker 当前用固定16×16切分，只为
+非空块生成确定性 chunk asset/ref；recipe name/key/value 当前是不含空白的单 UTF-8 token。package
+validation 要求恰好一个 eager `Required` Tileset dependency，所有 root chunk ref 与
+`Required|Deferred TileMapChunk` dependency 一一对应，并检查 chunk parent/layer/coord/extent、非空计数
+及每个非零 tile localId；任一步失败都不会发布 `manifest.tmnft`。
+
+`TileMapStream` 是固定容量 owner。调用方每帧按
+`updateDemand -> AssetSystem::pump -> commitReady` 推进；load/retain margin、request budget 和 resident
+capacity 都在 config 中有界。需求移出 retain window 时可取消 Queued/Loading 请求或 detach/unload
+Resident chunk。desired load window 单独超过 capacity 时 failure 不改变旧 active set；retain window 只是
+optional cache，overflow 时按最近一次成功 demand update 的 recency 自动淘汰，读取 API 不 touch。
+`TileMapInstance` 对引用但未驻留的访问返回
+`TileMapChunkNotResident`，重新 attach 会分配新的 residency generation，dirty cache 因而不会把旧
+resident 数据误当成 cache hit。
 
 `AssetKind` 还包含 Shader 与 Font 枚举值，但当前没有对应的公开 typed payload header、完整 Cooker 与
 产品消费闭环，不能把它们列为已完成资源类型。FreeType 字体仍通过显式 `TINA_UI_FONT_PATH`/fixture
@@ -148,9 +168,11 @@ component/culling 与通用 pass scheduler 仍属 `RENDER-001`。glTF importer �
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - glTF 外部 buffer/texture 的 root containment、URI/type/size 上限与产品接入由 `ASSET-001` 跟踪；
-- hot reload、增量 Cooker、自动 LRU、Bundle/Patch 与 network Asset 尚未实现，见 `ASSET-002`；
-- TileMap schema v2 不包含 chunk streaming、editor authoring/undo/redo、自动 gameplay 生成、navigation
-  或旧 schema migration；这些必须作为独立切片验收；
+- hot reload、增量 Cooker、通用 Asset cache/LRU、Bundle/Patch 与 network Asset 尚未实现，见
+  `ASSET-002`；
+- TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；
+  优先级 IO 调度、editor authoring/undo/redo、自动 gameplay 生成、navigation 与旧 schema migration
+  仍须独立验收；
 - shader/font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收；
 - Linux 当前 tip 复验属于 `TEST-001`，现有 Windows 证据不能代替它。
 

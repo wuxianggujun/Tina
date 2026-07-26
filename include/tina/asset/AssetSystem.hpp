@@ -30,9 +30,12 @@ struct AssetSystemConfig final {
     CookedAssetBatchLoadConfig batch{};
     // Bounded pending-request queue capacity. 0 defaults to storeCapacity.
     Core::usize queueCapacity = 0;
-    // Default max work items advanced per pump() call. 0 means process all pending.
+    // Default max work items advanced per pump() call. An async completion commit and a
+    // queued request advance each consume one item from the same budget. 0 means process
+    // all pending work.
     Core::u32 defaultPumpBudget = 8;
-    // Optional non-owning task system for IO+Main completion. When null, pump() runs sync IO.
+    // Optional non-owning task system for IO dispatch. Completed reads are retained in bounded
+    // request state and committed by pump() on the owner thread. When null, pump() runs sync IO.
     Task::ITaskSystem* taskSystem = nullptr;
     // Optional non-owning Null upload ledger. When non-null, ReadyCpu assets are tracked and
     // advanced toward ReadyGpu during pump()/load() via AssetGpuUploadCoordinator.
@@ -49,7 +52,7 @@ struct AssetPumpStats final {
     Core::u32 becameReady = 0; // ReadyCpu transitions this pump
     Core::u32 becameFailed = 0;
     Core::u32 dispatchedIo = 0;
-    Core::u32 mainCompletions = 0;
+    Core::u32 mainCompletions = 0; // async read results committed on the owner thread
     Core::u32 remaining = 0;
     Core::u32 inFlight = 0;
     Core::u32 gpuSubmitted = 0;
@@ -105,6 +108,8 @@ class AssetSystem final {
     [[nodiscard]] Core::Result<AssetHandle> requestOne(Core::AssetId assetId);
 
     // Advances IO deferred work and, when configured, Null GPU upload toward ReadyGpu.
+    // A non-zero budget bounds the combined owner completion commits and queued requests
+    // advanced by this call. Passing 0 uses defaultPumpBudget.
     [[nodiscard]] Core::Result<AssetPumpStats> pump(Core::u32 budget = 0);
 
     // Explicitly track a ReadyCpu handle for GPU upload (no-op without upload ledger).
@@ -141,6 +146,8 @@ class AssetSystem final {
         AssetFormat::AssetKind assetKind = AssetFormat::AssetKind::Invalid;
     };
 
+    struct AsyncRequestState;
+
     AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
                 Core::usize queueCapacity, Core::u32 defaultPumpBudget, Task::ITaskSystem* taskSystem,
                 Render::NullUploadLedger* uploadLedger, AssetGpuUploadConfig gpuUploadConfig, bool autoGpuUpload,
@@ -156,8 +163,9 @@ class AssetSystem final {
     [[nodiscard]] Core::Result<std::string> resolveObjectPath(Core::AssetId assetId, AssetFormat::AssetKind kind) const;
     [[nodiscard]] Core::Result<AssetPumpStats> pumpSync(Core::u32 limit);
     [[nodiscard]] Core::Result<AssetPumpStats> pumpAsync(Core::u32 limit);
-    void completeOnMain(AssetHandle handle, Core::AssetId assetId, std::pmr::vector<std::byte> bytes, bool ok,
-                        AssetPumpStats* stats) noexcept;
+    [[nodiscard]] Core::u32 commitAsyncCompletions(Core::u32 limit, AssetPumpStats& stats) noexcept;
+    void completeOnMain(AssetHandle handle, Core::AssetId assetId, std::pmr::vector<std::byte> bytes,
+                        bool ok) noexcept;
     void noteReadyCpu(AssetHandle handle) noexcept;
     [[nodiscard]] Core::Status mergeGpuStats(AssetPumpStats& stats) noexcept;
 
@@ -178,6 +186,9 @@ class AssetSystem final {
     std::pmr::string m_catalogRoot;
     std::pmr::vector<IndexEntry> m_index;
     std::pmr::vector<WorkItem> m_queue;
+    // Dispatch order is commit order. Each state is also owned by its worker callable, so
+    // AssetSystem move/destruction cannot invalidate an active blocking read.
+    std::pmr::vector<std::shared_ptr<AsyncRequestState>> m_asyncRequests;
     std::atomic<Core::u32> m_inFlight{0};
 };
 

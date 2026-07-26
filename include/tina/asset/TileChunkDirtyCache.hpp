@@ -12,7 +12,7 @@
 namespace Tina::Asset {
 
 // CPU-side visible-chunk revision cache (game-2d dirty rebuild gate).
-// Tracks last-seen TileChunkView.revision per chunk coord. Unchanged revisions
+// Tracks map identity + residency generation + content revision per chunk coord. Unchanged state
 // are cache hits (no re-emit); setTile-bumped revisions force a rebuild entry.
 // Does not own tile storage or GPU buffers; extraction still uses emit* helpers.
 
@@ -64,22 +64,28 @@ class TileChunkDirtyCache final {
 
     [[nodiscard]] TileChunkDirtyCacheStats stats() const noexcept;
 
+    void invalidate(Core::AssetId tileMapAssetId, AssetFormat::TileMapLayerId layerId,
+                    TileMapChunkCoord coord) noexcept;
+
     // Drop all tracked revisions (e.g. map replace). Stats counters are kept.
     void clear() noexcept;
 
   private:
     struct Entry final {
+        Core::AssetId tileMapAssetId{};
         AssetFormat::TileMapLayerId layerId = 0;
         Core::u32 chunkX = 0;
         Core::u32 chunkY = 0;
         Core::u32 revision = 0;
+        Core::u64 residencyGeneration = 0;
         Core::u64 lastFrame = 0;
         bool occupied = false;
     };
 
     explicit TileChunkDirtyCache(std::pmr::vector<Entry> entries, Core::usize capacity) noexcept;
 
-    [[nodiscard]] Entry* findEntry(AssetFormat::TileMapLayerId layerId, Core::u32 chunkX, Core::u32 chunkY) noexcept;
+    [[nodiscard]] Entry* findEntry(Core::AssetId tileMapAssetId, AssetFormat::TileMapLayerId layerId,
+                                   Core::u32 chunkX, Core::u32 chunkY) noexcept;
     [[nodiscard]] Entry* allocateEntry() noexcept;
 
     std::pmr::vector<Entry> m_entries{};

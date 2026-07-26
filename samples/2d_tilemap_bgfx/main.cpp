@@ -8,6 +8,7 @@
 #include <tina/asset/TileChunkDirtyCache.hpp>
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapInstance.hpp>
+#include <tina/asset/TileMapStream.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
 #include <tina/asset/TileMapPhysicsSync.hpp>
 #include <tina/physics2d/PhysicsWorld2D.hpp>
@@ -100,8 +101,10 @@ inline constexpr Tina::AssetFormat::TileMapObjectId CrateSpawnObjectId = 102;
 inline constexpr u32 ExpectedCharacterAnimationClips = 3;
 inline constexpr u32 ExpectedCharacterAnimationSprites = 3;
 inline constexpr u32 ExpectedCharacterAnimationResolvedFrames = 5;
+inline constexpr u32 ExpectedTileMapStreamChunks = 2;
+inline constexpr u32 ExpectedAudioClipFrames = 480;
 inline constexpr u32 ExpectedCatalogRecipeAssets =
-    5 + ExpectedCharacterAnimationClips + ExpectedCharacterAnimationSprites;
+    5 + ExpectedCharacterAnimationClips + ExpectedCharacterAnimationSprites + ExpectedTileMapStreamChunks;
 inline constexpr u32 ExpectedUploadedTextures = 2;
 inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
 inline constexpr Tina::InputActionId MoveLeftAction{1};
@@ -255,6 +258,12 @@ struct LifecycleCounters final {
     u64 objectLayerObjectCount = 0;
     bool objectLayerConsumed = false;
     bool seedTileSelectionApplied = false;
+    // 2D-TILEMAP-STREAM: product-path lazy chunk residency evidence.
+    u64 tileMapStreamDemandUpdates = 0;
+    u64 tileMapStreamRequests = 0;
+    u64 tileMapStreamCommitted = 0;
+    u64 tileMapStreamResident = 0;
+    u64 tileMapStreamPeakResident = 0;
     // M11-B0: surface-driven Camera2D projection (FixedWorldHeight).
     u32 surfacePixelWidth = 960;
     u32 surfacePixelHeight = 540;
@@ -291,10 +300,31 @@ struct LifecycleCounters final {
     bool audioEnginePresent = false;
     bool audioOneShotQueued = false;
     bool audioStartedObserved = false;
+    bool audioVoiceParamsConfigured = false;
+    bool audioFadeStarted = false;
+    bool audioFadeCancelled = false;
+    bool audioFadeStopped = false;
+    bool audioOneShotRetired = false;
+    // N7-B: bounded owner-thread PCM stream from the same catalog-held clip.
+    bool audioStreamQueued = false;
+    bool audioStreamSubmitted = false;
+    bool audioStreamEofSignaled = false;
+    bool audioStreamStartedObserved = false;
+    bool audioStreamMixed = false;
+    bool audioStreamDrained = false;
+    bool audioStreamStopped = false;
+    bool audioStreamRetired = false;
     bool audioFromCatalogLease = false;
     u64 audioStartedCount = 0;
+    u64 audioStoppedCount = 0;
+    u64 audioStreamSubmittedFrames = 0;
+    u64 audioStreamConsumedFrames = 0;
+    u64 audioStreamUnderrunFrames = 0;
     u64 audioClipFrameCount = 0;
     u32 audioClipSampleRate = 0;
+    float audioVoiceGain = 0.0F;
+    float audioPitch = 0.0F;
+    float audioPan = 0.0F;
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
     // M11-A16: optional null-backend device + attachMixer SFX evidence.
     bool audioDeviceCreated = false;
@@ -593,7 +623,8 @@ struct TileMapResources final {
     Tina::Asset::AssetLease audioClipLease{};
     Tina::Render::GpuTextureId tileGpuTexture{};
     Tina::Render::GpuTextureId characterGpuTexture{};
-    std::optional<Tina::Asset::TileMapInstance> map{};
+    // Must remain at its final address: TileMapGridCollision borrows stream.map().
+    std::optional<Tina::Asset::TileMapStream> tileMapStream{};
     std::optional<Tina::Asset::TileMapGridCollision> grid{};
     std::optional<Tina::Asset::CharacterController2D> controller{};
     std::optional<Tina::Asset::TileChunkDirtyCache> chunkDirtyCache{};
@@ -643,11 +674,11 @@ struct TileMapResources final {
 
 [[nodiscard]] Tina::Core::Status consumeGameplayObjectLayer(TileMapResources& resources, LifecycleCounters& counters)
 {
-    if (!resources.map)
+    if (!resources.tileMapStream)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap is required for object layer setup");
     }
-    auto layer = resources.map->layer(GameplayObjectLayerId);
+    auto layer = resources.tileMapStream->map().layer(GameplayObjectLayerId);
     if (!layer)
     {
         return Tina::Core::failure(std::move(layer.error()));
@@ -701,6 +732,46 @@ struct TileMapResources final {
 #endif
     counters.objectLayerObjectCount = layer->objectCount;
     counters.objectLayerConsumed = true;
+    return Tina::Core::success();
+}
+
+[[nodiscard]] Tina::Core::Status advanceTileMapStream(TileMapResources& resources, LifecycleCounters& counters,
+                                                      const Tina::Asset::TileChunkCameraQuery& camera)
+{
+    if (resources.system == nullptr || !resources.tileMapStream)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap stream or asset system is missing");
+    }
+
+    const std::array demands{
+        Tina::Asset::TileMapChunkDemand{.layerId = VisualTileLayerId, .camera = camera},
+        Tina::Asset::TileMapChunkDemand{.layerId = CollisionTileLayerId, .camera = camera},
+    };
+    if (auto status = resources.tileMapStream->updateDemand(demands); !status)
+    {
+        return status;
+    }
+    ++counters.tileMapStreamDemandUpdates;
+
+    auto pumped = resources.system->pump(ExpectedTileMapStreamChunks);
+    if (!pumped)
+    {
+        return Tina::Core::failure(std::move(pumped.error()));
+    }
+    auto committed = resources.tileMapStream->commitReady();
+    if (!committed)
+    {
+        return Tina::Core::failure(std::move(committed.error()));
+    }
+    counters.tileMapStreamRequests = committed->totalRequests;
+    counters.tileMapStreamCommitted = committed->totalCommitted;
+    counters.tileMapStreamResident = committed->residentSlots;
+    counters.tileMapStreamPeakResident = committed->peakResidentSlots;
+    if (committed->failedSlots != 0)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetFailed,
+                                   "one or more demanded tilemap chunks failed to load");
+    }
     return Tina::Core::success();
 }
 
@@ -1139,31 +1210,66 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     }
     resources.audioClipHandle = *audioHandle;
 
-    const auto* tileMapFile = system->tryGet(resources.tileMapHandle);
-    const auto* tilesetFile = system->tryGet(resources.tilesetHandle);
-    if (tileMapFile == nullptr || tilesetFile == nullptr)
+    // AssetLease stores an AssetStore pointer. Move the system into its final
+    // owner before acquiring the stream root/tileset and audio leases.
+    resources.system = std::make_unique<Tina::Asset::AssetSystem>(std::move(*system));
+    auto rootLease = resources.system->acquire(resources.tileMapHandle);
+    auto tilesetLease = resources.system->acquire(resources.tilesetHandle);
+    auto audioLease = resources.system->acquire(resources.audioClipHandle);
+    if (!rootLease || !tilesetLease || !audioLease)
     {
-        return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady, "tilemap/tileset CPU missing");
+        if (!rootLease)
+        {
+            return Tina::Core::failure(std::move(rootLease.error()));
+        }
+        if (!tilesetLease)
+        {
+            return Tina::Core::failure(std::move(tilesetLease.error()));
+        }
+        return Tina::Core::failure(std::move(audioLease.error()));
     }
-    auto tileMapView = Tina::Asset::parseTileMapFromCooked(*tileMapFile);
-    auto tilesetView = Tina::Asset::parseTilesetFromCooked(*tilesetFile);
-    if (!tileMapView || !tilesetView)
+    resources.audioClipLease = std::move(*audioLease);
+
+    auto tileMapStream = Tina::Asset::TileMapStream::Create(
+        *resources.system, std::move(*rootLease), std::move(*tilesetLease),
+        Tina::Asset::TileMapStreamConfig{.residentCapacity = ExpectedTileMapStreamChunks,
+                                         .requestBudgetPerUpdate = ExpectedTileMapStreamChunks,
+                                         .retainMarginChunks = 0,
+                                         .memoryResource = &resources.memory});
+    if (!tileMapStream)
     {
-        return Tina::Core::failure(tileMapView ? tilesetView.error() : tileMapView.error());
+        return Tina::Core::failure(std::move(tileMapStream.error()));
     }
-    auto map = Tina::Asset::TileMapInstance::Create(
-        *tileMapView, *tilesetView, tileMapId, tilesetId,
-        Tina::Asset::TileMapInstanceConfig{.chunkSizeCells = 4, .memoryResource = &resources.memory});
-    if (!map)
+    // TileMapGridCollision borrows TileMapInstance; emplace the stream at its
+    // final address before constructing any borrower.
+    resources.tileMapStream.emplace(std::move(*tileMapStream));
+
+    // Product recipe is 8x4 with cooker chunk size 16: one visual and one
+    // collision chunk. Make both resident before collision/Physics bootstrap.
+    const Tina::Asset::TileChunkCameraQuery initialDemand{
+        .centerX = 4.0F,
+        .centerY = 2.0F,
+        .halfWidth = 4.0F,
+        .halfHeight = 2.0F,
+    };
+    if (const auto status = advanceTileMapStream(resources, counters, initialDemand); !status)
     {
-        return Tina::Core::failure(std::move(map.error()));
+        return status;
     }
-    resources.map.emplace(std::move(*map));
+    const Tina::Asset::TileMapChunkCoord rootChunk{};
+    const Tina::Asset::TileMapInstance& residentMap = resources.tileMapStream->map();
+    if (counters.tileMapStreamResident != ExpectedTileMapStreamChunks ||
+        !residentMap.isChunkResident(VisualTileLayerId, rootChunk) ||
+        !residentMap.isChunkResident(CollisionTileLayerId, rootChunk))
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                   "initial visual/collision tilemap chunks are not resident");
+    }
     if (const auto status = consumeGameplayObjectLayer(resources, counters); !status)
     {
         return status;
     }
-    resources.grid.emplace(*resources.map, CollisionTileLayerId);
+    resources.grid.emplace(resources.tileMapStream->map(), CollisionTileLayerId);
     {
         // M11-B1 product path: fixed-capacity revision cache for visible chunks.
         auto dirty = Tina::Asset::TileChunkDirtyCache::Create(
@@ -1183,7 +1289,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     });
     resources.controller->teleport(resources.characterSpawnX, resources.characterSpawnY, true);
 
-    if (const auto status = prepareCharacterAnimations(resources, counters, *system, characterTextureId,
+    if (const auto status = prepareCharacterAnimations(resources, counters, *resources.system, characterTextureId,
                                                        idleClipId, walkClipId, hitWallClipId);
         !status)
     {
@@ -1312,14 +1418,6 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     counters.physicsJointReady = resources.physicsWorld->jointState(*joint).has_value();
 #endif
 
-    // AssetLease holds AssetStore*; acquire only after the system owns its final address.
-    resources.system = std::make_unique<Tina::Asset::AssetSystem>(std::move(*system));
-    auto audioLease = resources.system->acquire(resources.audioClipHandle);
-    if (!audioLease)
-    {
-        return Tina::Core::failure(std::move(audioLease.error()));
-    }
-    resources.audioClipLease = std::move(*audioLease);
     const auto* audioFile = resources.audioClipLease.get();
     if (audioFile == nullptr)
     {
@@ -2116,12 +2214,12 @@ class TileMapBgfxState final : public Tina::IGameState {
 
     Tina::Core::Status fixedUpdate(Tina::FixedUpdateContext& context) override
     {
-        if (!resources_->map)
+        if (!resources_->tileMapStream)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap selection map missing");
         }
 
-        const Tina::Asset::TileMapInstance& map = *resources_->map;
+        const Tina::Asset::TileMapInstance& map = resources_->tileMapStream->map();
         const Tina::Sample2D::TileSelectionGrid grid{
             .widthCells = map.widthCells(),
             .heightCells = map.heightCells(),
@@ -2252,38 +2350,10 @@ class TileMapBgfxState final : public Tina::IGameState {
                 counters_->lastSfxMuted = bus->muted;
                 sfxMuteState_.committed = bus->muted;
             }
-#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
-            // First frame with Audio: create null device, attach mixer, start.
-            if (!resources_->audioDevice.has_value())
-            {
-                auto device = Tina::Audio::MiniaudioDevice::Create(Tina::Audio::MiniaudioDeviceConfig{
-                    .useNullBackend = true,
-                    .sampleRate = 48000,
-                    .channels = 2,
-                    .periodFrames = 256,
-                });
-                if (!device)
-                {
-                    return Tina::Core::failure(std::move(device.error()));
-                }
-                device->attachMixer(audio);
-                if (auto status = device->start(); !status)
-                {
-                    return Tina::Core::failure(std::move(status.error()));
-                }
-                counters_->audioDeviceCreated = true;
-                counters_->audioDeviceStarted = device->isRunning();
-                counters_->audioDeviceNullBackend = device->isNullBackend();
-                resources_->audioDevice = std::move(*device);
-            }
-            else if (resources_->audioDevice->isRunning())
-            {
-                counters_->audioDeviceCallbacks = resources_->audioDevice->callbackInvocations();
-            }
-#endif
             if (!counters_->audioOneShotQueued)
             {
-                // M11-A19: play cooked AudioClip held by AssetLease (recipe audioclip line).
+                // N7-A: play cooked AudioClip held by AssetLease and configure
+                // gain/pitch/pan before the queued Play is applied by the Host pump.
                 if (!resources_->audioClipLease)
                 {
                     return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
@@ -2310,15 +2380,42 @@ class TileMapBgfxState final : public Tina::IGameState {
                 {
                     return Tina::Core::failure(std::move(voice.error()));
                 }
+                if (auto status = audio->setVoiceGain(*voice, 0.8F); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                if (auto status = audio->setVoicePitch(*voice, 0.75F); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                if (auto status = audio->setVoicePan(*voice, -0.25F); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                auto playbackState = audio->voicePlaybackState(*voice);
+                if (!playbackState)
+                {
+                    return Tina::Core::failure(std::move(playbackState.error()));
+                }
+                counters_->audioVoiceGain = playbackState->gain;
+                counters_->audioPitch = playbackState->pitch;
+                counters_->audioPan = playbackState->pan;
+                counters_->audioVoiceParamsConfigured =
+                    playbackState->gain == 0.8F && playbackState->pitch == 0.75F &&
+                    playbackState->pan == -0.25F;
+                audioOneShotVoice_ = *voice;
                 counters_->audioOneShotQueued = true;
                 counters_->audioFromCatalogLease = true;
                 counters_->audioClipFrameCount = clip->frameCount;
                 counters_->audioClipSampleRate = clip->sampleRate;
             }
-            // Host pumps completions after updateFrame; Started is visible next frame.
+
+            // Host pumps completions after updateFrame; Started/Stopped counters
+            // become visible on a following frame.
             if (auto stats = audio->stats(); stats.has_value())
             {
                 counters_->audioStartedCount = stats->completedStarted;
+                counters_->audioStoppedCount = stats->completedStopped;
                 if (stats->completedStarted > 0)
                 {
                     counters_->audioStartedObserved = true;
@@ -2327,6 +2424,241 @@ class TileMapBgfxState final : public Tina::IGameState {
                 counters_->audioMixFramesRendered = stats->mixFramesRendered;
 #endif
             }
+
+            // Exercise fade start/cancel/fade-to-stop deterministically before
+            // starting the asynchronous miniaudio device. Each explicit mix call
+            // is one callback block and keeps the product gate independent of OS
+            // thread scheduling.
+            if (counters_->audioStartedObserved && audioOneShotVoice_.hasValue() && !audioFadeStopMixed_)
+            {
+                if (auto status = audio->startVoiceFade(
+                        audioOneShotVoice_,
+                        Tina::Audio::AudioVoiceFadeDesc{
+                            .targetGain = 0.2F,
+                            .duration = Tina::Core::Duration{128.0 / 48000.0},
+                            .endAction = Tina::Audio::AudioFadeEndAction::KeepPlaying,
+                        });
+                    !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                std::array<float, 128> fadeStartOutput{};
+                audio->mixRealtime(fadeStartOutput.data(), 64, 2, 48000);
+                auto fadingState = audio->voicePlaybackState(audioOneShotVoice_);
+                if (!fadingState)
+                {
+                    return Tina::Core::failure(std::move(fadingState.error()));
+                }
+                counters_->audioFadeStarted =
+                    fadingState->fadeActive && fadingState->gain < 0.8F && fadingState->gain > 0.2F;
+
+                if (auto status = audio->cancelVoiceFade(audioOneShotVoice_); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                std::array<float, 128> fadeCancelOutput{};
+                audio->mixRealtime(fadeCancelOutput.data(), 64, 2, 48000);
+                auto cancelledState = audio->voicePlaybackState(audioOneShotVoice_);
+                if (!cancelledState)
+                {
+                    return Tina::Core::failure(std::move(cancelledState.error()));
+                }
+                counters_->audioFadeCancelled =
+                    !cancelledState->fadeActive && cancelledState->gain > 0.2F && cancelledState->gain < 0.8F;
+
+                if (auto status = audio->startVoiceFade(
+                        audioOneShotVoice_,
+                        Tina::Audio::AudioVoiceFadeDesc{
+                            .targetGain = 0.0F,
+                            .duration = Tina::Core::Duration{64.0 / 48000.0},
+                            .endAction = Tina::Audio::AudioFadeEndAction::StopVoice,
+                        });
+                    !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                std::array<float, 128> fadeStopOutput{};
+                audio->mixRealtime(fadeStopOutput.data(), 64, 2, 48000);
+                audioFadeStopMixed_ = true;
+            }
+
+            if (audioFadeStopMixed_ && audioOneShotVoice_.hasValue())
+            {
+                auto live = audio->isVoiceLive(audioOneShotVoice_);
+                if (!live)
+                {
+                    return Tina::Core::failure(std::move(live.error()));
+                }
+                if (!*live)
+                {
+                    counters_->audioOneShotRetired = true;
+                    counters_->audioFadeStopped = counters_->audioStoppedCount > 0;
+                    audioOneShotVoice_ = {};
+                }
+            }
+
+            // N7-B: after N7-A retires, feed the same catalog-held PCM through
+            // the fixed-capacity stream ring, signal EOF, and let the Host apply
+            // the queued Play at the frame boundary.
+            if (counters_->audioOneShotRetired && !counters_->audioStreamQueued)
+            {
+                const auto* audioFile = resources_->audioClipLease.get();
+                if (audioFile == nullptr)
+                {
+                    return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                               "audioclip payload missing for bounded PCM stream");
+                }
+                auto clip = Tina::Asset::parseAudioClipFromCooked(*audioFile);
+                if (!clip)
+                {
+                    return Tina::Core::failure(std::move(clip.error()));
+                }
+                auto pcmView = Tina::Audio::pcmClipViewFromAudioClipPayload(*clip);
+                if (!pcmView)
+                {
+                    return Tina::Core::failure(std::move(pcmView.error()));
+                }
+                if (pcmView->frameCount != ExpectedAudioClipFrames)
+                {
+                    return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                               "product audioclip frame count changed");
+                }
+                if (pcmView->frameCount >
+                    static_cast<Tina::Core::u64>(Tina::Audio::AudioEngineConfig{}.streamBufferFrameCapacity))
+                {
+                    return Tina::Core::failure(Tina::Core::CoreErrorCode::CapacityExceeded,
+                                               "product audioclip exceeds default PCM stream capacity");
+                }
+
+                auto voice = audio->playPcmStream(Tina::Audio::AudioPcmStreamDesc{
+                    .channels = pcmView->channels,
+                    .sampleRate = pcmView->sampleRate,
+                    .bufferCapacityFrames = static_cast<Tina::Core::usize>(pcmView->frameCount),
+                });
+                if (!voice)
+                {
+                    return Tina::Core::failure(std::move(voice.error()));
+                }
+                if (auto status = audio->submitPcmStreamFrames(
+                        *voice,
+                        Tina::Audio::AudioPcmStreamChunkView{
+                            .frames = pcmView->frames,
+                            .frameCount = pcmView->frameCount,
+                        });
+                    !status)
+                {
+                    static_cast<void>(audio->cancelPcmStream(*voice));
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                counters_->audioStreamSubmitted = true;
+                counters_->audioStreamSubmittedFrames = pcmView->frameCount;
+                if (auto status = audio->signalPcmStreamEof(*voice); !status)
+                {
+                    static_cast<void>(audio->cancelPcmStream(*voice));
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                counters_->audioStreamEofSignaled = true;
+                counters_->audioStreamQueued = true;
+                audioStreamVoice_ = *voice;
+            }
+
+            if (audioStreamVoice_.hasValue() && !counters_->audioStreamStartedObserved)
+            {
+                auto playing = audio->isVoicePlaying(audioStreamVoice_);
+                if (!playing)
+                {
+                    return Tina::Core::failure(std::move(playing.error()));
+                }
+                counters_->audioStreamStartedObserved = *playing;
+            }
+
+            // A fixed 480-frame block makes EOF drain deterministic and proves
+            // submitted == consumed with no callback-thread scheduling dependency.
+            if (counters_->audioStreamStartedObserved && audioStreamVoice_.hasValue() && !audioStreamMixed_)
+            {
+                std::array<float, static_cast<std::size_t>(ExpectedAudioClipFrames) * 2U> streamOutput{};
+                audio->mixRealtime(streamOutput.data(), ExpectedAudioClipFrames, 2, 48000);
+                auto streamState = audio->pcmStreamState(audioStreamVoice_);
+                if (!streamState)
+                {
+                    return Tina::Core::failure(std::move(streamState.error()));
+                }
+                counters_->audioStreamConsumedFrames = streamState->consumedFrames;
+                counters_->audioStreamUnderrunFrames = streamState->underrunFrames;
+                counters_->audioStreamMixed = streamState->consumedFrames == ExpectedAudioClipFrames;
+                counters_->audioStreamDrained =
+                    streamState->eofSignaled && streamState->bufferedFrames == 0 &&
+                    streamState->submittedFrames == ExpectedAudioClipFrames &&
+                    streamState->consumedFrames == ExpectedAudioClipFrames &&
+                    streamState->underrunFrames == 0;
+                audioStreamMixed_ = true;
+            }
+
+            if (audioStreamMixed_ && audioStreamVoice_.hasValue())
+            {
+                auto live = audio->isVoiceLive(audioStreamVoice_);
+                if (!live)
+                {
+                    return Tina::Core::failure(std::move(live.error()));
+                }
+                if (!*live)
+                {
+                    counters_->audioStreamRetired = true;
+                    // The generation-qualified stream id was observed playing and
+                    // became stale only after its terminal completion was pumped.
+                    counters_->audioStreamStopped = counters_->audioStreamStartedObserved;
+                    audioStreamVoice_ = {};
+                }
+            }
+
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+            // Start the null device only after deterministic N7-A/N7-B evidence
+            // has retired both transient voices, avoiding callback/test contention.
+            if (counters_->audioStreamRetired && !resources_->audioDevice.has_value())
+            {
+                auto device = Tina::Audio::MiniaudioDevice::Create(Tina::Audio::MiniaudioDeviceConfig{
+                    .useNullBackend = true,
+                    .sampleRate = 48000,
+                    .channels = 2,
+                    .periodFrames = 256,
+                });
+                if (!device)
+                {
+                    return Tina::Core::failure(std::move(device.error()));
+                }
+                device->attachMixer(audio);
+                if (auto status = device->start(); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                counters_->audioDeviceCreated = true;
+                counters_->audioDeviceStarted = device->isRunning();
+                counters_->audioDeviceNullBackend = device->isNullBackend();
+                resources_->audioDevice = std::move(*device);
+            }
+            else if (resources_->audioDevice.has_value() && resources_->audioDevice->isRunning())
+            {
+                counters_->audioDeviceCallbacks = resources_->audioDevice->callbackInvocations();
+            }
+#endif
+        }
+
+        // Stream both render and collision layers from the current simulation
+        // camera before CharacterController2D queries the borrowed collision grid.
+        const float streamAspect =
+            (counters_->surfacePixelHeight != 0)
+                ? static_cast<float>(static_cast<double>(counters_->surfacePixelWidth) /
+                                     static_cast<double>(counters_->surfacePixelHeight))
+                : (10.0F / 6.0F);
+        const Tina::Asset::TileChunkCameraQuery streamCamera{
+            .centerX = resources_->cameraCurrentX,
+            .centerY = resources_->cameraCurrentY,
+            .halfWidth = ProductCameraHeightMeters * 0.5F * streamAspect,
+            .halfHeight = ProductCameraHeightMeters * 0.5F,
+        };
+        if (const auto status = advanceTileMapStream(*resources_, *counters_, streamCamera); !status)
+        {
+            return status;
         }
         if (resources_->controller && resources_->grid)
         {
@@ -2398,9 +2730,10 @@ class TileMapBgfxState final : public Tina::IGameState {
                     ? static_cast<float>(static_cast<double>(counters_->surfacePixelWidth) /
                                          static_cast<double>(counters_->surfacePixelHeight))
                     : (10.0f / 6.0f);
-            if (resources_->map)
+            if (resources_->tileMapStream)
             {
-                clampCameraCenterToMap(*resources_->map, ProductCameraHeightMeters, aspect, followX, followY);
+                clampCameraCenterToMap(resources_->tileMapStream->map(), ProductCameraHeightMeters, aspect, followX,
+                                       followY);
             }
             resources_->cameraCurrentX = followX;
             resources_->cameraCurrentY = followY;
@@ -2497,7 +2830,7 @@ class TileMapBgfxState final : public Tina::IGameState {
 
     Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
     {
-        if (!resources_->map || !resources_->controller || !resources_->sceneWorld)
+        if (!resources_->tileMapStream || !resources_->controller || !resources_->sceneWorld)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap state not ready");
         }
@@ -2602,7 +2935,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         // Still emit all visible sprites for the visual product path. Dirty cache
         // runs in parallel as the CPU revision gate (M11-B1 evidence).
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
-            *resources_->map, VisualTileLayerId, query,
+            resources_->tileMapStream->map(), VisualTileLayerId, query,
             Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductTileSpriteKey}, tileSprites);
         if (!emitted)
         {
@@ -2621,7 +2954,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             const auto statsBefore = resources_->chunkDirtyCache->stats();
             resources_->chunkDirtyRebuilt.clear();
             auto rebuilds = resources_->chunkDirtyCache->syncVisible(
-                *resources_->map, VisualTileLayerId, query, resources_->chunkDirtyRebuilt);
+                resources_->tileMapStream->map(), VisualTileLayerId, query, resources_->chunkDirtyRebuilt);
             if (!rebuilds)
             {
                 return Tina::Core::failure(std::move(rebuilds.error()));
@@ -2652,9 +2985,9 @@ class TileMapBgfxState final : public Tina::IGameState {
             auto highlight = Tina::Sample2D::makeSelectionHighlightSprite(
                 selection,
                 Tina::Sample2D::TileSelectionGrid{
-                    .widthCells = resources_->map->widthCells(),
-                    .heightCells = resources_->map->heightCells(),
-                    .cellSizeMeters = resources_->map->cellSizeMeters(),
+                    .widthCells = resources_->tileMapStream->map().widthCells(),
+                    .heightCells = resources_->tileMapStream->map().heightCells(),
+                    .cellSizeMeters = resources_->tileMapStream->map().cellSizeMeters(),
                 },
                 ProductTileSpriteKey);
             if (!highlight)
@@ -2733,6 +3066,10 @@ class TileMapBgfxState final : public Tina::IGameState {
     Tina::Sample2D::AudioMuteControlState masterMuteState_{};
     Tina::Sample2D::AudioMuteControlState musicMuteState_{};
     Tina::Sample2D::AudioMuteControlState sfxMuteState_{};
+    Tina::Audio::AudioVoiceId audioOneShotVoice_{};
+    Tina::Audio::AudioVoiceId audioStreamVoice_{};
+    bool audioFadeStopMixed_ = false;
+    bool audioStreamMixed_ = false;
     bool hasPendingMasterVolume_ = false;
     bool hasPendingMusicVolume_ = false;
     bool hasPendingSfxVolume_ = false;
@@ -2963,8 +3300,9 @@ int main(int argc, char** argv)
     const bool selectionCountersValid = counters.tileSelection.pointerPresses == classifiedPointerPresses;
     const bool selectionLatchValid =
         (counters.tileSelection.selectionHits == 0 && lastSelection == nullptr) ||
-        (counters.tileSelection.selectionHits > 0 && lastSelection != nullptr && resources.map.has_value() &&
-         lastSelection->cellX < resources.map->widthCells() && lastSelection->cellY < resources.map->heightCells());
+        (counters.tileSelection.selectionHits > 0 && lastSelection != nullptr && resources.tileMapStream.has_value() &&
+         lastSelection->cellX < resources.tileMapStream->map().widthCells() &&
+         lastSelection->cellY < resources.tileMapStream->map().heightCells());
     const bool selectionStateValid = selectionCountersValid && selectionLatchValid;
     const u64 expectedHighlightSprites = lastSelection != nullptr ? 1U : 0U;
     const u64 expectedTotalSprites = ExpectedSpritesWithPhysics + expectedHighlightSprites;
@@ -2999,11 +3337,26 @@ int main(int argc, char** argv)
         counters.chunkDirtyRebuilds > 0 && counters.chunkDirtyCacheHits > 0 &&
         counters.chunkDirtyRebuilds < counters.chunkDirtyVisibleObservations &&
         counters.lastChunkDirtyRebuilds == 0 && counters.lastChunkDirtyCacheHits > 0;
+    const bool tileMapStreamValid =
+        resources.tileMapStream.has_value() &&
+        counters.tileMapStreamDemandUpdates == counters.frameUpdates + 1U &&
+        counters.tileMapStreamRequests == ExpectedTileMapStreamChunks &&
+        counters.tileMapStreamCommitted == ExpectedTileMapStreamChunks &&
+        counters.tileMapStreamResident == ExpectedTileMapStreamChunks &&
+        counters.tileMapStreamPeakResident >= ExpectedTileMapStreamChunks;
 
     const bool audioValid =
         counters.audioEnginePresent && counters.audioOneShotQueued && counters.audioStartedObserved &&
         counters.audioStartedCount >= 1 && counters.audioFromCatalogLease && counters.audioClipFrameCount > 0 &&
-        counters.audioClipSampleRate == 48000;
+        counters.audioClipSampleRate == 48000 && counters.audioVoiceParamsConfigured &&
+        counters.audioVoiceGain == 0.8F && counters.audioPitch == 0.75F && counters.audioPan == -0.25F &&
+        counters.audioFadeStarted && counters.audioFadeCancelled && counters.audioFadeStopped &&
+        counters.audioStoppedCount >= 2 && counters.audioOneShotRetired && counters.audioStreamQueued &&
+        counters.audioStreamSubmitted && counters.audioStreamEofSignaled &&
+        counters.audioStreamStartedObserved && counters.audioStreamMixed && counters.audioStreamDrained &&
+        counters.audioStreamUnderrunFrames == 0 && counters.audioStreamStopped &&
+        counters.audioStreamRetired && counters.audioStreamSubmittedFrames == ExpectedAudioClipFrames &&
+        counters.audioStreamConsumedFrames == ExpectedAudioClipFrames;
     const bool characterAnimationValid =
         counters.characterAnimationFromCatalog &&
         counters.characterAnimationResolvedFrames == ExpectedCharacterAnimationResolvedFrames &&
@@ -3023,7 +3376,8 @@ int main(int argc, char** argv)
 #endif
 
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
-              cameraFollowValid && chunkDirtyValid && audioValid && audioDeviceValid && characterAnimationValid &&
+              cameraFollowValid && chunkDirtyValid && tileMapStreamValid && audioValid && audioDeviceValid &&
+              characterAnimationValid &&
               counters.catalogFromRecipeFile &&
               counters.catalogRecipeAssets == ExpectedCatalogRecipeAssets &&
               counters.objectLayerConsumed && counters.objectLayerObjectCount == 2U &&
@@ -3080,11 +3434,16 @@ int main(int argc, char** argv)
 
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
-    evidenceBytes.reserve(220);
-    appendLeU32(evidenceBytes, 5U); // schema
+    evidenceBytes.reserve(384);
+    appendLeU32(evidenceBytes, 8U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
+    appendLeU64(evidenceBytes, counters.tileMapStreamDemandUpdates);
+    appendLeU64(evidenceBytes, counters.tileMapStreamRequests);
+    appendLeU64(evidenceBytes, counters.tileMapStreamCommitted);
+    appendLeU64(evidenceBytes, counters.tileMapStreamResident);
+    appendLeU64(evidenceBytes, counters.tileMapStreamPeakResident);
     appendLeU32(evidenceBytes, ExpectedCharacterAnimationClips);
     appendLeU32(evidenceBytes, ExpectedCharacterAnimationSprites);
     appendLeU64(evidenceBytes, counters.characterAnimationResolvedFrames);
@@ -3109,6 +3468,25 @@ int main(int argc, char** argv)
     appendLeU32(evidenceBytes, counters.audioClipSampleRate);
     appendLeU32(evidenceBytes, counters.audioEnginePresent ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.audioFromCatalogLease ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioVoiceParamsConfigured ? 1U : 0U);
+    appendF32Bits(evidenceBytes, counters.audioVoiceGain);
+    appendF32Bits(evidenceBytes, counters.audioPitch);
+    appendF32Bits(evidenceBytes, counters.audioPan);
+    appendLeU32(evidenceBytes, counters.audioFadeStarted ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioFadeCancelled ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioFadeStopped ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioOneShotRetired ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioStreamQueued ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioStreamSubmitted ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioStreamEofSignaled ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioStreamStartedObserved ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioStreamMixed ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioStreamDrained ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioStreamStopped ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioStreamRetired ? 1U : 0U);
+    appendLeU64(evidenceBytes, counters.audioStreamSubmittedFrames);
+    appendLeU64(evidenceBytes, counters.audioStreamConsumedFrames);
+    appendLeU64(evidenceBytes, counters.audioStreamUnderrunFrames);
     appendLeU32(evidenceBytes, counters.surfacePixelWidth);
     appendLeU32(evidenceBytes, counters.surfacePixelHeight);
     appendF32Bits(evidenceBytes, counters.lastCameraWorldWidth);
@@ -3202,6 +3580,11 @@ int main(int argc, char** argv)
                   << ",\"chunkDirtyHits\":" << counters.chunkDirtyCacheHits
                   << ",\"lastChunkDirtyRebuilds\":" << counters.lastChunkDirtyRebuilds
                   << ",\"lastChunkDirtyHits\":" << counters.lastChunkDirtyCacheHits
+                  << ",\"tileMapStreamDemandUpdates\":" << counters.tileMapStreamDemandUpdates
+                  << ",\"tileMapStreamRequests\":" << counters.tileMapStreamRequests
+                  << ",\"tileMapStreamCommitted\":" << counters.tileMapStreamCommitted
+                  << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
+                  << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
                   << ",\"cameraProjectionResolves\":" << counters.cameraProjectionResolves
                    << ",\"renderExtractions\":" << counters.renderExtractions
                    << ",\"pauseOverlayPushes\":" << counters.pauseOverlayPushes
@@ -3216,6 +3599,24 @@ int main(int argc, char** argv)
                   << ",\"audioFromCatalogLease\":" << (counters.audioFromCatalogLease ? "true" : "false")
                   << ",\"audioClipFrameCount\":" << counters.audioClipFrameCount
                   << ",\"audioClipSampleRate\":" << counters.audioClipSampleRate
+                  << ",\"audioVoiceParamsConfigured\":"
+                  << (counters.audioVoiceParamsConfigured ? "true" : "false")
+                  << ",\"audioFadeStarted\":" << (counters.audioFadeStarted ? "true" : "false")
+                  << ",\"audioFadeCancelled\":" << (counters.audioFadeCancelled ? "true" : "false")
+                  << ",\"audioFadeStopped\":" << (counters.audioFadeStopped ? "true" : "false")
+                  << ",\"audioOneShotRetired\":" << (counters.audioOneShotRetired ? "true" : "false")
+                  << ",\"audioStreamQueued\":" << (counters.audioStreamQueued ? "true" : "false")
+                  << ",\"audioStreamSubmitted\":" << (counters.audioStreamSubmitted ? "true" : "false")
+                  << ",\"audioStreamEofSignaled\":" << (counters.audioStreamEofSignaled ? "true" : "false")
+                  << ",\"audioStreamStartedObserved\":"
+                  << (counters.audioStreamStartedObserved ? "true" : "false")
+                  << ",\"audioStreamMixed\":" << (counters.audioStreamMixed ? "true" : "false")
+                  << ",\"audioStreamDrained\":" << (counters.audioStreamDrained ? "true" : "false")
+                  << ",\"audioStreamStopped\":" << (counters.audioStreamStopped ? "true" : "false")
+                  << ",\"audioStreamRetired\":" << (counters.audioStreamRetired ? "true" : "false")
+                  << ",\"audioStreamSubmittedFrames\":" << counters.audioStreamSubmittedFrames
+                  << ",\"audioStreamConsumedFrames\":" << counters.audioStreamConsumedFrames
+                  << ",\"audioStreamUnderrunFrames\":" << counters.audioStreamUnderrunFrames
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
                   << ",\"audioDeviceCreated\":" << (counters.audioDeviceCreated ? "true" : "false")
                   << ",\"audioDeviceNullBackend\":" << (counters.audioDeviceNullBackend ? "true" : "false")
@@ -3256,6 +3657,11 @@ int main(int argc, char** argv)
               << ",\"catalogRecipeAssets\":" << counters.catalogRecipeAssets
               << ",\"objectLayerConsumed\":" << (counters.objectLayerConsumed ? "true" : "false")
               << ",\"objectLayerObjects\":" << counters.objectLayerObjectCount
+              << ",\"tileMapStreamDemandUpdates\":" << counters.tileMapStreamDemandUpdates
+              << ",\"tileMapStreamRequests\":" << counters.tileMapStreamRequests
+              << ",\"tileMapStreamCommitted\":" << counters.tileMapStreamCommitted
+              << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
+              << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
               << ",\"texturesUploaded\":" << counters.texturesUploaded
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
               << ",\"spritesPerFrame\":" << expectedTotalSprites
@@ -3371,9 +3777,31 @@ int main(int argc, char** argv)
               << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
               << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
               << ",\"audioStartedCount\":" << counters.audioStartedCount
+              << ",\"audioStoppedCount\":" << counters.audioStoppedCount
               << ",\"audioFromCatalogLease\":" << (counters.audioFromCatalogLease ? "true" : "false")
               << ",\"audioClipFrameCount\":" << counters.audioClipFrameCount
               << ",\"audioClipSampleRate\":" << counters.audioClipSampleRate
+              << ",\"audioVoiceParamsConfigured\":"
+              << (counters.audioVoiceParamsConfigured ? "true" : "false")
+              << ",\"audioVoiceGain\":" << counters.audioVoiceGain
+              << ",\"audioPitch\":" << counters.audioPitch
+              << ",\"audioPan\":" << counters.audioPan
+              << ",\"audioFadeStarted\":" << (counters.audioFadeStarted ? "true" : "false")
+              << ",\"audioFadeCancelled\":" << (counters.audioFadeCancelled ? "true" : "false")
+              << ",\"audioFadeStopped\":" << (counters.audioFadeStopped ? "true" : "false")
+              << ",\"audioOneShotRetired\":" << (counters.audioOneShotRetired ? "true" : "false")
+              << ",\"audioStreamQueued\":" << (counters.audioStreamQueued ? "true" : "false")
+              << ",\"audioStreamSubmitted\":" << (counters.audioStreamSubmitted ? "true" : "false")
+              << ",\"audioStreamEofSignaled\":" << (counters.audioStreamEofSignaled ? "true" : "false")
+              << ",\"audioStreamStartedObserved\":"
+              << (counters.audioStreamStartedObserved ? "true" : "false")
+              << ",\"audioStreamMixed\":" << (counters.audioStreamMixed ? "true" : "false")
+              << ",\"audioStreamDrained\":" << (counters.audioStreamDrained ? "true" : "false")
+              << ",\"audioStreamStopped\":" << (counters.audioStreamStopped ? "true" : "false")
+              << ",\"audioStreamRetired\":" << (counters.audioStreamRetired ? "true" : "false")
+              << ",\"audioStreamSubmittedFrames\":" << counters.audioStreamSubmittedFrames
+              << ",\"audioStreamConsumedFrames\":" << counters.audioStreamConsumedFrames
+              << ",\"audioStreamUnderrunFrames\":" << counters.audioStreamUnderrunFrames
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
               << ",\"audioMiniaudioEnabled\":true"
               << ",\"audioDeviceCreated\":" << (counters.audioDeviceCreated ? "true" : "false")
@@ -3427,7 +3855,7 @@ int main(int argc, char** argv)
               << ",\"accessibilityHasRadio\":" << (counters.accessibilityHasRadio ? "true" : "false")
               << ",\"accessibilityHasTextEdit\":" << (counters.accessibilityHasTextEdit ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":5"
+              << ",\"evidenceSchema\":8"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")

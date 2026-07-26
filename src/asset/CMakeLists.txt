@@ -9,6 +9,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuTexture.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuMesh.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapInstance.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapStream.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/GridCollision.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkRender.hpp
@@ -39,6 +40,7 @@ set(TINA_ASSET_SOURCES
     AssetGpuTexture.cpp
     AssetGpuMesh.cpp
     TileMapInstance.cpp
+    TileMapStream.cpp
     GridCollision.cpp
     TileChunkView.cpp
     TileChunkRender.cpp

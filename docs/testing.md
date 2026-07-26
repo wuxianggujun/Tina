@@ -86,7 +86,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap schema v2；visual=10、hidden collision=20、gameplay objects=30；消费 point 101/rectangle 102；SpriteAnimationClip/Animator、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | TileMap streaming/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | 完整 PBR/IBL/shadow/light component、Scene AssetHandle 产品化、跨 GPU golden |
@@ -115,16 +115,23 @@ baseColor/MR/normal 贴图 **采样**、material factors 与有界0..4 direction
 `SpriteAnimator2D` 的 Once/Loop/PingPong、暂停、倍速和大 delta；`tina_sample_2d` 再提供
 `Idle -> Walk -> HitWall` 的产品状态证据。
 
-TileMap N1 的最小回归覆盖：payload schema v2 round-trip（含 layer/object visibility）、旧 schema/重复或零稳定 ID/非法几何与 UTF-8
-拒绝；recipe 显式 layer block 与旧裸 `row` 拒绝；Cooker 在 Manifest 发布前验证 required Tileset
-dependency 和所有非零 tile localId；runtime/chunk/dirty/render/collision 全部显式传 layer ID；hidden tile
-layer 不渲染但可作为 collision。对应产品 smoke 还必须看到 `objectLayerConsumed=true` 与
-`objectLayerObjects=2`。
+TileMap 当前最小回归覆盖：root schema v3 与 `TileMapChunk` v1 round-trip（含 layer/object visibility、
+chunk ref、parent/layer/coord/extent/non-empty）；旧 schema、重复/零稳定 ID、非法几何/UTF-8 拒绝；recipe
+显式 layer block与旧裸 `row` 拒绝；Cooker 在 Manifest 发布前验证 eager Tileset、deferred chunk dependency
+和所有非零 tile localId。Runtime 还覆盖仅加载 visible chunk、demand shift 的 cancel/unload、capacity
+transaction、retain overflow 自动淘汰与 demand-recency LRU、Asset async active-read move/destroy 生命周期，
+以及 residency generation 驱动 dirty cache 重建；render/collision 全部显式传 layer ID。desired load window
+单独超 capacity 仍必须验证旧 active set 不变。产品 smoke 必须看到 `objectLayerConsumed=true`、
+`objectLayerObjects=2`、`tileMapStreamRequests/Committed/Resident=2`。
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_sample_2d -- /m:2 /v:m
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe `
-  --gtest_filter="TileMap*:CatalogCook*:TileChunk*:CharacterController*:TileMapPhysics*"
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_asset_format_tests tina_asset_tests tina_sample_2d -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-physics2d-debug `
+  --target tina_physics2d_tests -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-physics2d\bin\Debug\tina_physics2d_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 ```
 
@@ -180,6 +187,24 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 
 miniaudio null-device 证明 adapter callback/mix/lifecycle，不证明真实扬声器质量。Physics2D Release bench
 是模块基线。统一 schema 使用 `tina_bench`（ADR 0018 schema v1；共享机仅 provisional）。
+
+Audio N7 模块门禁除 one-shot/pitch/pan/fade 外，还覆盖 fixed ring 的 submit/mix/EOF/retire、非 EOF
+underrun 静音恢复、整块原子 submit 与 wrap、completion ring 满时 terminal debt、mix-slot reuse ABA、
+wrong-owner/bounded shutdown、active callback reader quiescence、terminal absorbing、fractional stream 最小
+容量和 terminal priority。关键测试入口包括：
+
+- `PcmStreamSubmitsMixesSignalsEofAndRetires`；
+- `PcmStreamUnderrunOutputsSilenceWithoutFakingEof`；
+- `PcmStreamSubmitIsWholeChunkAtomicAndWraps`；
+- `PcmStreamCancelCompletionSurvivesFullCompletionRing`；
+- `DeferredStreamTerminalDoesNotClearReusedMixSlot`；
+- `PcmStreamValidationWrongThreadAndShutdownAreBounded`；
+- `PcmStreamCancelConcurrentWithRealtimeMixRetiresExactlyOnceBeforeReuse`；
+- terminal absorbing/priority、cancel-vs-EOF exactly-once 与 concurrent shutdown 回归。
+
+`MiniaudioDeviceTest.NullBackendConsumesBoundedStreamEofAndCancel` 验证 adapter 作为 realtime consumer 的
+EOF/Cancel 路径。产品 300帧还要求 `audioStreamQueued/submitted/eof/mixed/drained/stopped/retired=true`、
+submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；evidence schema 为8。
 
 Physics2D N2 的模块门禁覆盖：`createBody/createShape` 独立 generation、多 Box/Circle/Capsule shape/body、
 shape 单独销毁、sensor enter/exit、Distance joint create/query/destroy、body 级联退休 shape/joint、

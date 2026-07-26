@@ -65,7 +65,26 @@ TEST(TileMapPayloadTests, WriteParseAndCookedRoundTrip)
 {
     const auto tilesetId = *Core::AssetId::fromBytes(idBytes(5U));
     const auto mapId = *Core::AssetId::fromBytes(idBytes(6U));
-    const std::array<Core::u16, 6> tiles{0, 1, 2, 1, 0, 2};
+    const auto chunkAId = *Core::AssetId::fromBytes(idBytes(7U));
+    const auto chunkBId = *Core::AssetId::fromBytes(idBytes(8U));
+    const std::array chunks{
+        TileMapChunkRefDesc{
+            .chunkX = 0,
+            .chunkY = 0,
+            .widthCells = 4,
+            .heightCells = 4,
+            .nonEmptyCount = 6,
+            .chunkAssetId = chunkAId,
+        },
+        TileMapChunkRefDesc{
+            .chunkX = 1,
+            .chunkY = 0,
+            .widthCells = 2,
+            .heightCells = 4,
+            .nonEmptyCount = 2,
+            .chunkAssetId = chunkBId,
+        },
+    };
     const std::array tileProperties{
         TileMapPropertyDesc{.key = "role", .value = "visual"},
     };
@@ -100,7 +119,7 @@ TEST(TileMapPayloadTests, WriteParseAndCookedRoundTrip)
             .visible = true,
             .name = "visual",
             .properties = tileProperties,
-            .tiles = tiles,
+            .chunkRefs = chunks,
         },
         TileMapLayerDesc{
             .stableLayerId = 8,
@@ -111,17 +130,19 @@ TEST(TileMapPayloadTests, WriteParseAndCookedRoundTrip)
         },
     };
     auto payload = writeTileMapPayloadBytes(TileMapPayloadDesc{
-        .widthCells = 3,
-        .heightCells = 2,
+        .widthCells = 6,
+        .heightCells = 4,
         .cellSizeMeters = 0.5f,
+        .chunkSizeCells = 4,
         .layers = layers,
         .tilesetId = tilesetId,
     });
     ASSERT_TRUE(payload.has_value()) << payload.error().message;
     auto view = parseTileMapPayload(*payload);
     ASSERT_TRUE(view.has_value()) << view.error().message;
-    EXPECT_EQ(view->widthCells, 3U);
-    EXPECT_EQ(view->heightCells, 2U);
+    EXPECT_EQ(view->widthCells, 6U);
+    EXPECT_EQ(view->heightCells, 4U);
+    EXPECT_EQ(view->chunkSizeCells, 4U);
     EXPECT_EQ(view->layerCount, 2U);
     const auto tileLayer = view->findLayer(7);
     ASSERT_TRUE(tileLayer.has_value());
@@ -129,9 +150,15 @@ TEST(TileMapPayloadTests, WriteParseAndCookedRoundTrip)
     EXPECT_EQ(view->layerAt(0)->stableLayerId, 7U);
     EXPECT_EQ(view->layerAt(1)->stableLayerId, 8U);
     EXPECT_TRUE(tileLayer->visible);
-    EXPECT_EQ(tileLayer->tileCount, 6U);
-    EXPECT_EQ(*tileLayer->tileAt(1, 0), 1U);
-    EXPECT_EQ(*tileLayer->tileAt(2, 1), 2U);
+    EXPECT_EQ(tileLayer->chunkRefCount, 2U);
+    ASSERT_TRUE(tileLayer->chunkRefAt(0).has_value());
+    EXPECT_EQ(tileLayer->chunkRefAt(0)->chunkAssetId, chunkAId);
+    const auto edgeChunk = tileLayer->findChunkRef(1, 0);
+    ASSERT_TRUE(edgeChunk.has_value());
+    EXPECT_EQ(edgeChunk->widthCells, 2U);
+    EXPECT_EQ(edgeChunk->heightCells, 4U);
+    EXPECT_EQ(edgeChunk->nonEmptyCount, 2U);
+    EXPECT_FALSE(tileLayer->findChunkRef(0, 1).has_value());
     const auto tileProperty = tileLayer->findProperty("role");
     ASSERT_TRUE(tileProperty.has_value());
     EXPECT_EQ(tileProperty->key, "role");
@@ -155,9 +182,10 @@ TEST(TileMapPayloadTests, WriteParseAndCookedRoundTrip)
     EXPECT_FLOAT_EQ(rectangle->width, 1.0f);
 
     auto cooked = writeCookedTileMapAsset(mapId, TileMapPayloadDesc{
-                                                     .widthCells = 3,
-                                                     .heightCells = 2,
+                                                     .widthCells = 6,
+                                                     .heightCells = 4,
                                                      .cellSizeMeters = 0.5f,
+                                                     .chunkSizeCells = 4,
                                                      .layers = layers,
                                                      .tilesetId = tilesetId,
                                                  });
@@ -165,27 +193,53 @@ TEST(TileMapPayloadTests, WriteParseAndCookedRoundTrip)
     auto asset = parseCookedAssetView(*cooked);
     ASSERT_TRUE(asset.has_value());
     EXPECT_EQ(asset->header().assetKind, AssetKind::TileMap);
-    auto dep = asset->dependency(0);
-    ASSERT_TRUE(dep.has_value());
-    EXPECT_EQ(dep->expectedKind, AssetKind::Tileset);
+    EXPECT_EQ(asset->header().dependencyCount, 3U);
+    Core::u32 tilesetDependencies = 0;
+    Core::u32 chunkDependencies = 0;
+    for (Core::u32 index = 0; index < asset->header().dependencyCount; ++index)
+    {
+        const auto dependency = asset->dependency(index);
+        ASSERT_TRUE(dependency.has_value());
+        if (dependency->expectedKind == AssetKind::Tileset)
+        {
+            ++tilesetDependencies;
+            EXPECT_EQ(dependency->flags, DependencyFlags::Required);
+        }
+        else if (dependency->expectedKind == AssetKind::TileMapChunk)
+        {
+            ++chunkDependencies;
+            EXPECT_TRUE(hasDependencyFlag(dependency->flags, DependencyFlags::Deferred));
+        }
+    }
+    EXPECT_EQ(tilesetDependencies, 1U);
+    EXPECT_EQ(chunkDependencies, 2U);
     ASSERT_TRUE(verifyCookedAssetContentHash(*asset).has_value());
 }
 
 TEST(TileMapPayloadTests, RejectsDimensionMismatch)
 {
-    const std::array<Core::u16, 2> tiles{1, 2};
+    const auto chunkId = *Core::AssetId::fromBytes(idBytes(3U));
+    const std::array chunks{TileMapChunkRefDesc{
+        .chunkX = 0,
+        .chunkY = 0,
+        .widthCells = 3,
+        .heightCells = 4,
+        .nonEmptyCount = 1,
+        .chunkAssetId = chunkId,
+    }};
     const std::array layers{
         TileMapLayerDesc{
             .stableLayerId = 1,
             .kind = TileMapLayerKind::Tile,
             .visible = true,
             .name = "visual",
-            .tiles = tiles,
+            .chunkRefs = chunks,
         },
     };
     auto payload = writeTileMapPayloadBytes(TileMapPayloadDesc{
-        .widthCells = 2,
-        .heightCells = 2,
+        .widthCells = 4,
+        .heightCells = 4,
+        .chunkSizeCells = 4,
         .layers = layers,
     });
     ASSERT_FALSE(payload.has_value());
@@ -194,10 +248,18 @@ TEST(TileMapPayloadTests, RejectsDimensionMismatch)
 
 TEST(TileMapPayloadTests, RejectsInvalidAndDuplicateStableIds)
 {
-    const std::array<Core::u16, 1> tiles{1};
+    const auto chunkId = *Core::AssetId::fromBytes(idBytes(4U));
+    const std::array chunks{TileMapChunkRefDesc{
+        .chunkX = 0,
+        .chunkY = 0,
+        .widthCells = 1,
+        .heightCells = 1,
+        .nonEmptyCount = 1,
+        .chunkAssetId = chunkId,
+    }};
     const std::array duplicateLayers{
-        TileMapLayerDesc{.stableLayerId = 7, .kind = TileMapLayerKind::Tile, .tiles = tiles},
-        TileMapLayerDesc{.stableLayerId = 7, .kind = TileMapLayerKind::Tile, .tiles = tiles},
+        TileMapLayerDesc{.stableLayerId = 7, .kind = TileMapLayerKind::Tile, .chunkRefs = chunks},
+        TileMapLayerDesc{.stableLayerId = 7, .kind = TileMapLayerKind::Tile, .chunkRefs = chunks},
     };
     auto duplicateLayerPayload = writeTileMapPayloadBytes(
         TileMapPayloadDesc{.widthCells = 1, .heightCells = 1, .layers = duplicateLayers});
@@ -220,7 +282,7 @@ TEST(TileMapPayloadTests, RejectsInvalidAndDuplicateStableIds)
     EXPECT_EQ(duplicateObjectPayload.error().code, AssetFormatErrorCode::InvalidIdentity);
 
     const std::array zeroLayer{
-        TileMapLayerDesc{.stableLayerId = 0, .kind = TileMapLayerKind::Tile, .tiles = tiles},
+        TileMapLayerDesc{.stableLayerId = 0, .kind = TileMapLayerKind::Tile, .chunkRefs = chunks},
     };
     auto zeroLayerPayload =
         writeTileMapPayloadBytes(TileMapPayloadDesc{.widthCells = 1, .heightCells = 1, .layers = zeroLayer});
@@ -230,10 +292,27 @@ TEST(TileMapPayloadTests, RejectsInvalidAndDuplicateStableIds)
 
 TEST(TileMapPayloadTests, ParserRejectsLegacySchemaAndDuplicateWireIds)
 {
-    const std::array<Core::u16, 1> tiles{1};
+    const auto chunkAId = *Core::AssetId::fromBytes(idBytes(7U));
+    const auto chunkBId = *Core::AssetId::fromBytes(idBytes(8U));
+    const std::array firstChunks{TileMapChunkRefDesc{
+        .chunkX = 0,
+        .chunkY = 0,
+        .widthCells = 1,
+        .heightCells = 1,
+        .nonEmptyCount = 1,
+        .chunkAssetId = chunkAId,
+    }};
+    const std::array secondChunks{TileMapChunkRefDesc{
+        .chunkX = 0,
+        .chunkY = 0,
+        .widthCells = 1,
+        .heightCells = 1,
+        .nonEmptyCount = 1,
+        .chunkAssetId = chunkBId,
+    }};
     const std::array layers{
-        TileMapLayerDesc{.stableLayerId = 7, .kind = TileMapLayerKind::Tile, .tiles = tiles},
-        TileMapLayerDesc{.stableLayerId = 8, .kind = TileMapLayerKind::Tile, .tiles = tiles},
+        TileMapLayerDesc{.stableLayerId = 7, .kind = TileMapLayerKind::Tile, .chunkRefs = firstChunks},
+        TileMapLayerDesc{.stableLayerId = 8, .kind = TileMapLayerKind::Tile, .chunkRefs = secondChunks},
     };
     auto payload = writeTileMapPayloadBytes(
         TileMapPayloadDesc{.widthCells = 1, .heightCells = 1, .layers = layers});
@@ -246,15 +325,25 @@ TEST(TileMapPayloadTests, ParserRejectsLegacySchemaAndDuplicateWireIds)
     ASSERT_FALSE(legacyView.has_value());
     EXPECT_EQ(legacyView.error().code, AssetFormatErrorCode::UnsupportedSchema);
 
-    // Header(20) + first tile layer header(16) + one u16 tile = second layer offset 38.
+    // Header(24) + first tile layer header(16) + one chunk ref(32) = second layer offset 72.
     auto duplicateLayer = *payload;
-    duplicateLayer[38] = duplicateLayer[20];
-    duplicateLayer[39] = duplicateLayer[21];
-    duplicateLayer[40] = duplicateLayer[22];
-    duplicateLayer[41] = duplicateLayer[23];
+    duplicateLayer[72] = duplicateLayer[24];
+    duplicateLayer[73] = duplicateLayer[25];
+    duplicateLayer[74] = duplicateLayer[26];
+    duplicateLayer[75] = duplicateLayer[27];
     auto duplicateLayerView = parseTileMapPayload(duplicateLayer);
     ASSERT_FALSE(duplicateLayerView.has_value());
     EXPECT_EQ(duplicateLayerView.error().code, AssetFormatErrorCode::InvalidIdentity);
+
+    auto duplicateChunkId = *payload;
+    for (Core::usize index = 0; index < Core::AssetId::Bytes{}.size(); ++index)
+    {
+        // First ref id at 24+16+16; second ref id at 72+16+16.
+        duplicateChunkId[104U + index] = duplicateChunkId[56U + index];
+    }
+    auto duplicateChunkView = parseTileMapPayload(duplicateChunkId);
+    ASSERT_FALSE(duplicateChunkView.has_value());
+    EXPECT_EQ(duplicateChunkView.error().code, AssetFormatErrorCode::InvalidIdentity);
 
     const std::array firstObjects{
         TileMapObjectDesc{.stableObjectId = 101, .kind = TileMapObjectKind::Point},
@@ -269,11 +358,11 @@ TEST(TileMapPayloadTests, ParserRejectsLegacySchemaAndDuplicateWireIds)
     auto objectPayload = writeTileMapPayloadBytes(
         TileMapPayloadDesc{.widthCells = 1, .heightCells = 1, .layers = objectLayers});
     ASSERT_TRUE(objectPayload.has_value());
-    // Header(20) + first object layer(16 + 28) = second layer offset 64; object header begins at 80.
-    (*objectPayload)[80] = (*objectPayload)[36];
-    (*objectPayload)[81] = (*objectPayload)[37];
-    (*objectPayload)[82] = (*objectPayload)[38];
-    (*objectPayload)[83] = (*objectPayload)[39];
+    // Header(24) + first object layer(16 + 28) = second layer offset 68; object header begins at 84.
+    (*objectPayload)[84] = (*objectPayload)[40];
+    (*objectPayload)[85] = (*objectPayload)[41];
+    (*objectPayload)[86] = (*objectPayload)[42];
+    (*objectPayload)[87] = (*objectPayload)[43];
     auto duplicateObjectView = parseTileMapPayload(*objectPayload);
     ASSERT_FALSE(duplicateObjectView.has_value());
     EXPECT_EQ(duplicateObjectView.error().code, AssetFormatErrorCode::InvalidIdentity);

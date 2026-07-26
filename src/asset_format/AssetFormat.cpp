@@ -96,7 +96,7 @@ template <typename Bytes> [[nodiscard]] Bytes readFixedBytes(std::span<const std
 
 [[nodiscard]] constexpr bool isKnownAssetKind(AssetKind kind) noexcept
 {
-    return kind >= AssetKind::Texture2D && kind <= AssetKind::SpriteAnimationClip;
+    return kind >= AssetKind::Texture2D && kind <= AssetKind::TileMapChunk;
 }
 
 [[nodiscard]] constexpr bool isKnownTargetPlatform(TargetPlatform platform) noexcept
@@ -109,9 +109,12 @@ template <typename Bytes> [[nodiscard]] Bytes readFixedBytes(std::span<const std
     return algorithm == HashAlgorithm::Xxh3_128V1;
 }
 
-[[nodiscard]] constexpr bool isRequiredDependencyFlags(DependencyFlags flags) noexcept
+[[nodiscard]] constexpr bool isKnownDependencyFlags(DependencyFlags flags) noexcept
 {
-    return flags == DependencyFlags::Required;
+    constexpr auto Required = static_cast<u16>(DependencyFlags::Required);
+    constexpr auto Deferred = static_cast<u16>(DependencyFlags::Deferred);
+    const auto value = static_cast<u16>(flags);
+    return (value & Required) != 0U && (value & ~(Required | Deferred)) == 0U;
 }
 
 [[nodiscard]] bool isZeroPadding(std::span<const std::byte> bytes, u64 begin, u64 end) noexcept
@@ -396,7 +399,7 @@ Core::Result<CookedAssetView> parseCookedAssetView(std::span<const std::byte> by
             return Core::failure(AssetFormatErrorCode::InvalidIdentity, "cooked dependency id is zero");
         }
         if (readU32(bytes, offset + 20U) != 0 || !isKnownAssetKind(dependency->expectedKind) ||
-            !isRequiredDependencyFlags(dependency->flags) || dependency->assetId == header.assetId ||
+            !isKnownDependencyFlags(dependency->flags) || dependency->assetId == header.assetId ||
             (previousDependency && dependency->assetId <= *previousDependency))
         {
             return Core::failure(AssetFormatErrorCode::InvalidDependency, "invalid cooked dependency");
@@ -534,7 +537,7 @@ Core::Result<CookedManifestView> parseCookedManifestView(std::span<const std::by
                 return Core::failure(AssetFormatErrorCode::InvalidIdentity, "manifest dependency id is zero");
             }
             if (readU32(bytes, offset + 20U) != 0 || !isKnownAssetKind(dependency->expectedKind) ||
-                !isRequiredDependencyFlags(dependency->flags) || dependency->assetId == manifestEntry.assetId ||
+                !isKnownDependencyFlags(dependency->flags) || dependency->assetId == manifestEntry.assetId ||
                 (previousDependency && dependency->assetId <= *previousDependency))
             {
                 return Core::failure(AssetFormatErrorCode::InvalidDependency, "invalid manifest dependency");
@@ -725,9 +728,11 @@ Core::Result<std::vector<std::byte>> writeCookedAssetBytes(const CookedAssetWrit
         for (usize index = 0; index < desc.dependencies.size(); ++index)
         {
             const auto& dependency = desc.dependencies[index];
-            if (!dependency.assetId || !isKnownAssetKind(dependency.expectedKind))
+            if (!dependency.assetId || !isKnownAssetKind(dependency.expectedKind) ||
+                !isKnownDependencyFlags(dependency.flags))
             {
-                return Core::failure(AssetFormatErrorCode::InvalidIdentity, "dependency requires valid id and kind");
+                return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                                     "dependency requires valid id, kind, and flags");
             }
             const auto offset = Wire::CookedAssetHeaderBytes + index * Wire::DependencyEntryBytes;
             writeFixed(bytes, offset, dependency.assetId.bytes());
@@ -828,9 +833,11 @@ Core::Result<std::vector<std::byte>> writeCookedManifestBytes(const CookedManife
             for (usize localIndex = 0; localIndex < entry.dependencies.size(); ++localIndex)
             {
                 const auto& dependency = entry.dependencies[localIndex];
-                if (!dependency.assetId || !isKnownAssetKind(dependency.expectedKind))
+                if (!dependency.assetId || !isKnownAssetKind(dependency.expectedKind) ||
+                    !isKnownDependencyFlags(dependency.flags))
                 {
-                    return Core::failure(AssetFormatErrorCode::InvalidIdentity, "manifest dependency identity invalid");
+                    return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                                         "manifest dependency identity or flags invalid");
                 }
                 const auto dependencyIndex = dependencyFirst + static_cast<u32>(localIndex);
                 const auto dependencyEntryOffset =

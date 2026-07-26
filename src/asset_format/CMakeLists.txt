@@ -10,6 +10,7 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/Texture2DPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TilesetPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TileMapPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TileMapChunkPayload.hpp
 )
 
 add_library(tina_asset_format STATIC
@@ -24,6 +25,7 @@ add_library(tina_asset_format STATIC
     Texture2DPayload.cpp
     TilesetPayload.cpp
     TileMapPayload.cpp
+    TileMapChunkPayload.cpp
 )
 add_library(Tina::AssetFormat ALIAS tina_asset_format)
 

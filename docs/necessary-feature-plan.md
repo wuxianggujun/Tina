@@ -21,17 +21,19 @@
 | N3 | 2D-INPUT-ADV | 已完成 | Runtime 单一 unified binding 已覆盖 analog deadzone/缩放/合成、运行时 rebind、UI consume/claim 后输入不穿透 |
 | N4 | 3D RENDER-001 | 已完成 | Opaque3D 使用唯一有界 0..4 directional-light 提交；Null/bgfx/shader/sample/test 同步，完整 PBR 边界保持明确 |
 | N5 | RENDER-FENCE | 已完成 | CPU submission completion 与 GPU resource retirement 已分离；bgfx readback marker、AssetLease pin、suspend/shutdown drain 与测试已贯通 |
+| N6 | 2D-TILEMAP-STREAM | 已完成 | TileMap v3 root/TileMapChunk v1、deferred dependency、固定容量 Camera/layer demand/cancel/unload、resident generation dirty cache 与产品 sample 已贯通 |
+| N7 | 2D-AUDIO-ADV | 已完成 | voice gain/pitch/pan、可取消 fade、线性重采样、one-shot retirement，以及 bounded PCM streaming 的原子 submit、EOF/underrun/cancel、terminal backpressure 与 shutdown 已贯通测试和产品 sample |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
 ### 已完成契约
 
-1. `TileMapPayload` 的唯一当前格式是 schema v2：地图保存 authoring-order layer 容器，schema v1 不双读。
-2. Tile/object layer 都有 map-wide 非零唯一稳定 ID、visibility、strict UTF-8 name/properties；tile layer 有独立 row-major grid。
+1. N1 交付时 `TileMapPayload` 是 schema v2；N6 已将唯一当前格式替换为 v3 stream root，v1/v2 均不双读。
+2. Tile/object layer 的 map-wide 非零唯一稳定 ID、visibility、strict UTF-8 name/properties 契约延续到 v3；tile cells 已迁入独立 chunk asset。
 3. Object ID 也 map-wide 非零唯一；对象支持 point 与 axis-aligned rectangle，并拥有独立 visibility 与 UTF-8 name/properties。
 4. `TileMapInstance`、chunk view/dirty cache/render 和 solid query 全部围绕显式 `TileMapLayerId` 工作；不存在默认第0层。
 5. `TileMapGridCollision(map, layerId)` 显式选择碰撞层。hidden tile layer 不渲染，但仍可参与 collision。
-6. Cooker 在发布 Manifest 前校验 TileMap v2、恰好一个 required Tileset dependency、依赖 kind/version，以及每个非零 tile localId；失败不发布半包。
+6. N1 建立的 Tileset/localId 发布前验证仍保留；N6 进一步验证 v3 root 与 deferred chunk 一一对应。
 
 ### 唯一 recipe 语法
 
@@ -58,8 +60,8 @@ token；payload writer/parser 继续执行 strict UTF-8/NUL/长度校验。
 
 | 阶段 | 完成结果 |
 | --- | --- |
-| N1.1 | payload schema v2 writer/parser/view 已替换 v1 单层字段，并验证 ID、UTF-8、properties、几何、容量与尾随字节 |
-| N1.2 | recipe 仅接受显式 layer block；package validation 在发布前验证 v2、required Tileset dependency 与 tile localId |
+| N1.1 | 当时以 payload schema v2 writer/parser/view 替换 v1 单层字段，并验证 ID、UTF-8、properties、几何、容量与尾随字节；当前格式见 N6 |
+| N1.2 | recipe 仅接受显式 layer block；package validation 建立 required Tileset dependency 与 tile localId 验证，当前 v3/chunk 扩展见 N6 |
 | N1.3 | runtime tile storage、chunk revision/dirty/cache/render/collision 全部携带显式 layer ID；错误区分 layer not found/type mismatch |
 | N1.4 | sample 使用 visual=10、collision=20、gameplay objects=30；消费 point 101 与 rectangle 102；JSON 输出 `objectLayerConsumed`/`objectLayerObjects` |
 | N1.5 | payload/Cooker/runtime/chunk/Physics tests 覆盖 round-trip、拒绝路径、hidden render 与 explicit collision layer |
@@ -73,8 +75,8 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_filter="TileM
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 ```
 
-N1 明确不包含 chunk streaming、关卡/Scene/动画编辑器、undo/redo、旧 schema migration、自动从任意
-object layer 生成完整 gameplay、2D 光照或导航。sample 对 object 101/102 的消费是产品垂直切片，不是
+N1 当时不包含 chunk streaming；该项已由 N6 关闭。仍不包含关卡/Scene/动画编辑器、undo/redo、旧 schema
+migration、自动从任意 object layer 生成完整 gameplay、2D 光照或导航。sample 对 object 101/102 的消费是产品垂直切片，不是
 通用 editor/gameplay pipeline。
 
 ## N2 - 2D-PHYSICS-EXPAND
@@ -234,6 +236,103 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d_catalog.exe --frames=
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```
+
+## N6 - 2D-TILEMAP-STREAM
+
+### 已完成契约
+
+- `TileMapPayload` 唯一当前格式为 schema v3 stream root；tile layer 只保存排序后的非空 chunk ref，
+  object layer metadata 仍在 root；v1/v2 不双读。
+- 独立 `TileMapChunk` schema v1 保存 parent/layer/coord/extent/non-empty/cells；root 以
+  `Required|Deferred` dependency 引用，root eager load 不再要求完整地图常驻。
+- `TileMapStream` 持有 root/tileset/chunk leases 与 resident `TileMapInstance`；唯一帧序为
+  `updateDemand -> AssetSystem::pump -> commitReady`，配置显式 resident capacity、request budget、
+  load/retain margin。
+- demand shift 可取消 Queued/Loading、detach/unload Resident；capacity failure 保持旧 active set；重入
+  attach 分配新的 residency generation，dirty cache 同时比较 generation/content revision。
+- load window 中的 desired chunk 是强需求，单独超过 resident capacity 时继续 transactional failure；
+  retain window 只作缓存提示，空间不足时按最近一次成功 `updateDemand` 时位于 load window 的 recency 自动
+  淘汰 optional retained slot。读取 Tile/collision API 不更新 recency。
+- `tina_sample_2d` 在 AssetSystem 最终地址上 acquire leases，把 stream emplace 到最终地址后再构造
+  `TileMapGridCollision`；启动确认 visual/collision 两块 resident，每 frame 在 controller 查询前推进 stream。
+
+### 完成结果
+
+| 阶段 | 完成结果 |
+| --- | --- |
+| N6.1 | AssetKind/typed validation 加入 TileMapChunk v1；TileMap root 升级 v3，删除 v2 cells 双轨 |
+| N6.2 | Cooker 固定16×16生成非空 chunk asset，Manifest 使用 eager Tileset + deferred chunk dependency，并做跨资产一致性验证 |
+| N6.3 | resident `TileMapInstance` attach/detach/non-resident 错误与 residency generation 建立；chunk extraction/render/collision/dirty cache 迁移 |
+| N6.4 | `TileMapStream` 覆盖 visible demand、shift cancel/unload、transactional capacity；AssetSystem active-read move/destroy 生命周期加固 |
+| N6.5 | 产品 sample 改走 stream，并输出 demand/request/commit/resident/peak 结构化证据；Catalog 资产数由11变为13 |
+| N6.6 | retain window 自动 demand-recency LRU；desired 强需求超容仍 transactional，retain overflow 不再阻止新 load-window chunk |
+
+### 验收
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_asset_format_tests tina_asset_tests tina_sample_2d_catalog tina_sample_2d tina_tests -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+```
+
+N6 不包含优先级 IO 调度、GPU chunk mesh cache、editor、旧 schema migration、navigation 或自动
+gameplay 生成；当前 LRU 只管理 `TileMapStream` optional retained slot，不是通用 Asset cache。
+
+## N7 - 2D-AUDIO-ADV
+
+### N7-A 已完成契约
+
+- `AudioVoiceMin/MaxGain` 固定为 `[0,1]`，pitch 固定为 `[0.25,4]`，pan 固定为 `[-1,1]`；NaN、Inf、
+  越界、stale/wrong-owner voice 均原子拒绝。
+- `AudioEngine` 公开 `setVoiceGain()`、`setVoicePitch()`、`setVoicePan()`、
+  `startVoiceFade(AudioVoiceFadeDesc)`、`cancelVoiceFade()` 与 `voicePlaybackState()`；不暴露 miniaudio 类型。
+- pitch 按 `sourceSampleRate / outputSampleRate * pitch` 推进 source cursor，并使用线性插值；不同采样率
+  不再静音卡住 cursor。
+- stereo pan 使用兼容既有 center 响度的 linear balance：center 保持左右各1，hard-left/right 只衰减
+  对侧；mono 输出忽略 pan。
+- `AudioVoiceFadeDesc` 以 target gain、正的 `Core::Duration` 与
+  `AudioFadeEndAction::KeepPlaying/StopVoice` 表达；start/cancel 在下一 realtime callback block 边界生效，
+  cancel 保留 callback 已推进到的 current gain。
+- `playOneShotPcm()` 创建 transient voice；显式 Stop、fade-to-stop 或 natural end 经 completion pump 后
+  自动 retire。普通 `createVoice()` 仍由调用方显式销毁；shutdown 清除 voice/fade，不遗留 active slot。
+
+### N7-B 已完成契约
+
+- `AudioEngine::Create` 为每个 voice 固定预留
+  `streamBufferFrameCapacity * AudioPcmStreamMaxChannels` float；descriptor 只可缩小逻辑容量且至少为2，
+  callback/submit 后不扩容或分配。
+- AudioEngine owner thread 是唯一 producer；`AudioPcmStreamChunkView` 只在 submit 调用内借用，成功时整块
+  复制进 Tina-owned ring，容量不足零发布。Task worker 必须 marshal 到 owner thread；Audio 不新增 Task
+  producer API/依赖。
+- 非 EOF underrun 只输出静音并计数，保持 playing 且允许后续 submit；EOF 幂等并拒绝后续 submit，ring
+  排空后发布唯一 Stopped 并自动 retire。
+- cancel/Stop 是 absorbing terminal intent，拒绝后续 submit/Play；分别发布唯一 Cancelled/Stopped。
+  completion ring 满或旧 realtime reader 活跃时 terminal debt 保留，发布成功后才允许 voice/slot reuse。
+- `mixRealtime()` 只允许一个 non-overlapping realtime consumer；publication epoch 与 reader quiescence 防止
+  cancel/EOF/slot reuse ABA。shutdown 先关闭 realtime 进入并等待已进入 block，再同步归零；shutdown 本身
+  不承诺补发未 pump terminal。miniaudio 仍只是 consumer，不引入第二套 device/backend 或 producer API。
+
+### N7 验收
+
+```powershell
+cmake --build --preset windows-vnext-audio-miniaudio-debug `
+  --target tina_audio_tests tina_audio_miniaudio_tests -- /m:2 /v:m
+out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_tests tina_audio_tests tina_audio_miniaudio_tests tina_sample_2d -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
+  --frames=300 --frame-delay-ms=0
+
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 `
+  -SkipConfigure -SkipBuild
+```
+
+N7 不包含 OS 真实扬声器质量/延迟/设备切换门禁、高质量 band-limited resampler、空间音频/HRTF、
+DSP graph、正式 codec 产品策略或 callback benchmark；这些保持为后续独立切片。
 
 ## 每项收口清单
 

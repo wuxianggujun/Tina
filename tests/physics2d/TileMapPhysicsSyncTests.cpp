@@ -8,6 +8,8 @@
 
 #include <gtest/gtest.h>
 
+#include "../asset/support/TileMapInstanceTestSupport.hpp"
+
 #include <array>
 #include <memory_resource>
 #include <utility>
@@ -59,32 +61,17 @@ TEST(TileMapPhysicsSyncTest, SyncsSolidFloorToStaticBodiesAndContactsDynamic)
     // 4x2: solid floor on y=0, non-solid/empty above
     const std::array<Core::u16, 8> cells{1, 1, 1, 1, 0, 2, 0, 0};
     const std::array layers{
-        AssetFormat::TileMapLayerDesc{
+        Asset::TestSupport::TestTileMapLayerDesc{
             .stableLayerId = CollisionLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = false,
             .name = "collision",
-            .tiles = cells,
+            .cells = cells,
         },
     };
-    auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
-        .widthCells = 4,
-        .heightCells = 2,
-        .cellSizeMeters = 1.0f,
-        .layers = layers,
-        .tilesetId = tilesetId,
-    });
-    ASSERT_TRUE(mapBytes.has_value());
-    auto map = AssetFormat::parseTileMapPayload(*mapBytes);
-    ASSERT_TRUE(map.has_value());
-
-    auto instance = Asset::TileMapInstance::Create(
-        *map,
-        *tileset,
-        mapId,
-        tilesetId,
-        Asset::TileMapInstanceConfig{.chunkSizeCells = 2, .memoryResource = &memory});
-    ASSERT_TRUE(instance.has_value()) << instance.error().message;
+    auto instance = Asset::TestSupport::makeResidentTileMapInstance(
+        4U, 2U, 2U, mapId, tilesetId, *tileset, layers, memory);
+    ASSERT_TRUE(instance) << instance.error().message;
 
     Asset::TileMapGridCollision grid{*instance, CollisionLayerId};
     Physics2D::PhysicsGridSolidCell2D solidScratch[16]{};
@@ -161,6 +148,8 @@ TEST(TileMapPhysicsSyncTest, SyncsSolidFloorToStaticBodiesAndContactsDynamic)
 TEST(TileMapPhysicsSyncTest, ScratchOverflowIsReportedAndSyncFails)
 {
     std::pmr::unsynchronized_pool_resource memory;
+    const auto tilesetId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto mapId = *Core::AssetId::fromBytes(idBytes(2U));
     const std::array tiles{AssetFormat::TilesetTileDesc{
         .localId = 1,
         .materialFlags = AssetFormat::TilesetWire::MaterialSolid,
@@ -175,29 +164,17 @@ TEST(TileMapPhysicsSyncTest, ScratchOverflowIsReportedAndSyncFails)
 
     const std::array<Core::u16, 4> cells{1, 1, 1, 1};
     const std::array layers{
-        AssetFormat::TileMapLayerDesc{
+        Asset::TestSupport::TestTileMapLayerDesc{
             .stableLayerId = CollisionLayerId,
             .kind = AssetFormat::TileMapLayerKind::Tile,
             .visible = false,
             .name = "collision",
-            .tiles = cells,
+            .cells = cells,
         },
     };
-    auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
-        .widthCells = 2,
-        .heightCells = 2,
-        .cellSizeMeters = 1.0f,
-        .layers = layers});
-    auto map = AssetFormat::parseTileMapPayload(*mapBytes);
-    ASSERT_TRUE(map.has_value());
-
-    auto instance = Asset::TileMapInstance::Create(
-        *map,
-        *tileset,
-        *Core::AssetId::fromBytes(idBytes(1U)),
-        *Core::AssetId::fromBytes(idBytes(2U)),
-        Asset::TileMapInstanceConfig{.chunkSizeCells = 2, .memoryResource = &memory});
-    ASSERT_TRUE(instance.has_value());
+    auto instance = Asset::TestSupport::makeResidentTileMapInstance(
+        2U, 2U, 2U, mapId, tilesetId, *tileset, layers, memory);
+    ASSERT_TRUE(instance) << instance.error().message;
 
     Asset::TileMapGridCollision grid{*instance, CollisionLayerId};
     Physics2D::PhysicsGridSolidCell2D tiny[1]{};

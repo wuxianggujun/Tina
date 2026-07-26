@@ -10,6 +10,7 @@
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/asset_format/TileMapChunkPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
@@ -35,6 +36,52 @@ struct CookedPackage final {
     std::vector<CatalogPackageObjectBlob> objectViews{};
     std::vector<std::vector<std::byte>> objectStorage{};
 };
+
+[[nodiscard]] Core::Result<Core::AssetId> deriveTileMapChunkAssetId(Core::AssetId parentTileMapId,
+                                                                   Core::u32 stableLayerId,
+                                                                   Core::u32 chunkX,
+                                                                   Core::u32 chunkY)
+{
+    // Chunk IDs are persistent recipe output. Hash a fixed, domain-separated little-endian preimage and
+    // key it by the stable layer ID so layer reordering or unrelated chunk occupancy does not churn IDs.
+    constexpr std::string_view Domain = "tina.asset.tilemap-chunk-id";
+    constexpr Core::u8 DerivationVersion = 1U;
+    constexpr std::size_t ScalarBytes = sizeof(Core::u32);
+    std::array<std::byte, Domain.size() + 1U + Core::AssetId::Bytes{}.size() + ScalarBytes * 3U> input{};
+
+    std::size_t offset = 0;
+    for (const char value : Domain)
+    {
+        input[offset++] = static_cast<std::byte>(static_cast<unsigned char>(value));
+    }
+    input[offset++] = static_cast<std::byte>(DerivationVersion);
+    for (const std::byte value : parentTileMapId.bytes())
+    {
+        input[offset++] = value;
+    }
+    const auto appendU32LittleEndian = [&input, &offset](Core::u32 value) {
+        for (std::size_t byteIndex = 0; byteIndex < sizeof(value); ++byteIndex)
+        {
+            input[offset++] = static_cast<std::byte>((value >> (byteIndex * 8U)) & 0xFFU);
+        }
+    };
+    appendU32LittleEndian(stableLayerId);
+    appendU32LittleEndian(chunkX);
+    appendU32LittleEndian(chunkY);
+
+    auto digest = Core::digestContentHashV1(input);
+    if (!digest)
+    {
+        return Core::failure(std::move(digest.error()).withContext("deriveTileMapChunkAssetId", "digest"));
+    }
+    auto chunkId = Core::AssetId::fromBytes(digest->bytes());
+    if (!chunkId)
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "tilemap chunk AssetId derivation produced an invalid zero value");
+    }
+    return *chunkId;
+}
 
 [[nodiscard]] bool isKnownKindName(std::string_view name, AssetFormat::AssetKind& out) noexcept
 {
@@ -66,6 +113,11 @@ struct CookedPackage final {
     if (name == "TileMap")
     {
         out = AssetFormat::AssetKind::TileMap;
+        return true;
+    }
+    if (name == "TileMapChunk")
+    {
+        out = AssetFormat::AssetKind::TileMapChunk;
         return true;
     }
     if (name == "StaticMesh")
@@ -110,6 +162,8 @@ struct CookedPackage final {
         return AssetFormat::TilesetWire::SchemaVersion;
     case AssetFormat::AssetKind::TileMap:
         return AssetFormat::TileMapWire::SchemaVersion;
+    case AssetFormat::AssetKind::TileMapChunk:
+        return AssetFormat::TileMapChunkWire::SchemaVersion;
     case AssetFormat::AssetKind::StaticMesh:
         return AssetFormat::StaticMeshWire::SchemaVersion;
     case AssetFormat::AssetKind::Material:
@@ -695,15 +749,39 @@ findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetI
     {
         return Core::failure(std::move(tileMap.error()));
     }
-    if (tileMapAsset.dependencies.size() != 1U ||
-        tileMapAsset.dependencies[0].expectedKind != AssetFormat::AssetKind::Tileset ||
-        tileMapAsset.dependencies[0].flags != AssetFormat::DependencyFlags::Required)
+    const AssetFormat::CookedAssetWriteDependency* tilesetDependency = nullptr;
+    Core::u32 deferredChunkDependencyCount = 0;
+    for (const auto& dependency : tileMapAsset.dependencies)
+    {
+        if (dependency.expectedKind == AssetFormat::AssetKind::Tileset &&
+            dependency.flags == AssetFormat::DependencyFlags::Required)
+        {
+            if (tilesetDependency != nullptr)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "tilemap cook asset requires exactly one required Tileset dependency");
+            }
+            tilesetDependency = &dependency;
+        }
+        else if (dependency.expectedKind == AssetFormat::AssetKind::TileMapChunk &&
+                 dependency.flags == (AssetFormat::DependencyFlags::Required |
+                                      AssetFormat::DependencyFlags::Deferred))
+        {
+            ++deferredChunkDependencyCount;
+        }
+        else
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "tilemap cook asset dependency must be required Tileset or deferred TileMapChunk");
+        }
+    }
+    if (tilesetDependency == nullptr)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "tilemap cook asset requires exactly one required Tileset dependency");
     }
 
-    const CatalogCookAssetSpec* tilesetAsset = findCookAsset(assets, tileMapAsset.dependencies[0].assetId);
+    const CatalogCookAssetSpec* tilesetAsset = findCookAsset(assets, tilesetDependency->assetId);
     if (tilesetAsset == nullptr || tilesetAsset->assetKind != AssetFormat::AssetKind::Tileset ||
         tilesetAsset->assetTypeVersion != AssetFormat::TilesetWire::SchemaVersion)
     {
@@ -728,6 +806,7 @@ findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetI
         knownLocalIds[tile->localId] = true;
     }
 
+    Core::u32 chunkRefCount = 0;
     for (Core::u16 layerIndex = 0; layerIndex < tileMap->layerCount; ++layerIndex)
     {
         const auto layer = tileMap->layerAt(layerIndex);
@@ -740,18 +819,66 @@ findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetI
         {
             continue;
         }
-        for (Core::u32 y = 0; y < tileMap->heightCells; ++y)
+        chunkRefCount += layer->chunkRefCount;
+        for (Core::u32 chunkIndex = 0; chunkIndex < layer->chunkRefCount; ++chunkIndex)
         {
-            for (Core::u32 x = 0; x < tileMap->widthCells; ++x)
+            const auto ref = layer->chunkRefAt(chunkIndex);
+            if (!ref)
             {
-                const auto localId = layer->tileAt(x, y);
-                if (!localId || (*localId != AssetFormat::TileMapWire::EmptyTileId && !knownLocalIds[*localId]))
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "tilemap chunk ref disappeared after payload validation");
+            }
+            const auto dependency = std::find_if(
+                tileMapAsset.dependencies.begin(), tileMapAsset.dependencies.end(),
+                [assetId = ref->chunkAssetId](const AssetFormat::CookedAssetWriteDependency& candidate) {
+                    return candidate.assetId == assetId &&
+                           candidate.expectedKind == AssetFormat::AssetKind::TileMapChunk &&
+                           candidate.flags == (AssetFormat::DependencyFlags::Required |
+                                               AssetFormat::DependencyFlags::Deferred);
+                });
+            if (dependency == tileMapAsset.dependencies.end())
+            {
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "tilemap chunk ref is missing a deferred chunk dependency");
+            }
+            const CatalogCookAssetSpec* chunkAsset = findCookAsset(assets, ref->chunkAssetId);
+            if (chunkAsset == nullptr || chunkAsset->assetKind != AssetFormat::AssetKind::TileMapChunk ||
+                chunkAsset->assetTypeVersion != AssetFormat::TileMapChunkWire::SchemaVersion)
+            {
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "tilemap chunk dependency is missing or has the wrong kind/version");
+            }
+            auto chunk = AssetFormat::parseTileMapChunkPayload(chunkAsset->payload);
+            if (!chunk)
+            {
+                return Core::failure(std::move(chunk.error()));
+            }
+            if (chunk->parentTileMapId != tileMapAsset.assetId || chunk->layerId != layer->stableLayerId ||
+                chunk->chunkX != ref->chunkX || chunk->chunkY != ref->chunkY ||
+                chunk->widthCells != ref->widthCells || chunk->heightCells != ref->heightCells ||
+                chunk->nonEmptyCount != ref->nonEmptyCount)
+            {
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "tilemap chunk payload does not match its root chunk ref");
+            }
+            for (Core::u16 y = 0; y < chunk->heightCells; ++y)
+            {
+                for (Core::u16 x = 0; x < chunk->widthCells; ++x)
                 {
-                    return Core::failure(AssetErrorCode::CatalogEntryMismatch,
-                                         "tilemap tile layer references an unknown Tileset local id");
+                    const auto localId = chunk->cellAt(x, y);
+                    if (!localId || (*localId != AssetFormat::TileMapWire::EmptyTileId && !knownLocalIds[*localId]))
+                    {
+                        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                             "tilemap tile chunk references an unknown Tileset local id");
+                    }
                 }
             }
         }
+    }
+    if (chunkRefCount != deferredChunkDependencyCount)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "tilemap deferred chunk dependency count does not match chunk refs");
     }
     return Core::success();
 }
@@ -994,13 +1121,19 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         std::vector<std::vector<AssetFormat::TileMapPropertyDesc>> layerProperties;
         std::vector<std::vector<std::vector<AssetFormat::TileMapPropertyDesc>>> objectProperties;
         std::vector<std::vector<AssetFormat::TileMapObjectDesc>> layerObjects;
+        std::vector<std::vector<AssetFormat::TileMapChunkRefDesc>> layerChunkRefs;
         std::vector<AssetFormat::TileMapLayerDesc> layers;
+        std::vector<CatalogCookAssetSpec> chunkAssets;
         layerProperties.reserve(pendingMapLayers.size());
         objectProperties.reserve(pendingMapLayers.size());
         layerObjects.reserve(pendingMapLayers.size());
         layers.reserve(pendingMapLayers.size());
-        for (const PendingTileMapLayer& pendingLayer : pendingMapLayers)
+        layerChunkRefs.reserve(pendingMapLayers.size());
+        chunkAssets.reserve(pendingMapLayers.size() * 4U);
+        constexpr Core::u16 RecipeChunkSize = 16U;
+        for (std::size_t pendingLayerIndex = 0; pendingLayerIndex < pendingMapLayers.size(); ++pendingLayerIndex)
         {
+            const PendingTileMapLayer& pendingLayer = pendingMapLayers[pendingLayerIndex];
             if (pendingLayer.kind == AssetFormat::TileMapLayerKind::Tile && pendingLayer.rowCount != pendingMapH)
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -1018,6 +1151,72 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
                 });
             }
 
+            layerChunkRefs.emplace_back();
+            auto& chunkRefs = layerChunkRefs.back();
+
+            if (pendingLayer.kind == AssetFormat::TileMapLayerKind::Tile)
+            {
+                const Core::u32 chunkCountX = (pendingMapW + RecipeChunkSize - 1U) / RecipeChunkSize;
+                const Core::u32 chunkCountY = (pendingMapH + RecipeChunkSize - 1U) / RecipeChunkSize;
+                for (Core::u32 chunkY = 0; chunkY < chunkCountY; ++chunkY)
+                {
+                    for (Core::u32 chunkX = 0; chunkX < chunkCountX; ++chunkX)
+                    {
+                        const Core::u32 originX = chunkX * RecipeChunkSize;
+                        const Core::u32 originY = chunkY * RecipeChunkSize;
+                        const Core::u16 widthCells = static_cast<Core::u16>((std::min)(static_cast<Core::u32>(RecipeChunkSize), pendingMapW - originX));
+                        const Core::u16 heightCells = static_cast<Core::u16>((std::min)(static_cast<Core::u32>(RecipeChunkSize), pendingMapH - originY));
+                        std::vector<Core::u16> chunkCells;
+                        chunkCells.reserve(static_cast<std::size_t>(widthCells) * heightCells);
+                        Core::u32 nonEmptyCount = 0;
+                        for (Core::u16 localY = 0; localY < heightCells; ++localY)
+                        {
+                            for (Core::u16 localX = 0; localX < widthCells; ++localX)
+                            {
+                                const Core::u16 cell = pendingLayer.tiles[(originY + localY) * pendingMapW + originX + localX];
+                                chunkCells.push_back(cell);
+                                nonEmptyCount += cell != AssetFormat::TileMapWire::EmptyTileId ? 1U : 0U;
+                            }
+                        }
+                        if (nonEmptyCount == 0U)
+                        {
+                            continue;
+                        }
+                        auto chunkId = deriveTileMapChunkAssetId(pendingMapId, pendingLayer.stableLayerId, chunkX, chunkY);
+                        if (!chunkId)
+                        {
+                            return Core::failure(std::move(chunkId.error()));
+                        }
+                        auto chunkPayload = AssetFormat::writeTileMapChunkPayloadBytes(AssetFormat::TileMapChunkPayloadDesc{
+                            .parentTileMapId = pendingMapId,
+                            .layerId = pendingLayer.stableLayerId,
+                            .chunkX = chunkX,
+                            .chunkY = chunkY,
+                            .widthCells = widthCells,
+                            .heightCells = heightCells,
+                            .cells = chunkCells,
+                        });
+                        if (!chunkPayload)
+                        {
+                            return Core::failure(std::move(chunkPayload.error()));
+                        }
+                        chunkRefs.push_back(AssetFormat::TileMapChunkRefDesc{
+                            .chunkX = chunkX,
+                            .chunkY = chunkY,
+                            .widthCells = widthCells,
+                            .heightCells = heightCells,
+                            .nonEmptyCount = nonEmptyCount,
+                            .chunkAssetId = *chunkId,
+                        });
+                        chunkAssets.push_back(CatalogCookAssetSpec{
+                            .assetKind = AssetFormat::AssetKind::TileMapChunk,
+                            .assetId = *chunkId,
+                            .assetTypeVersion = AssetFormat::TileMapChunkWire::SchemaVersion,
+                            .payload = std::move(*chunkPayload),
+                        });
+                    }
+                }
+            }
             objectProperties.emplace_back();
             layerObjects.emplace_back();
             auto& ownedObjectProperties = objectProperties.back();
@@ -1054,7 +1253,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
                 .visible = pendingLayer.visible,
                 .name = pendingLayer.name,
                 .properties = properties,
-                .tiles = pendingLayer.tiles,
+                .chunkRefs = chunkRefs,
                 .objects = objects,
             });
         }
@@ -1063,6 +1262,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
             .widthCells = pendingMapW,
             .heightCells = pendingMapH,
             .cellSizeMeters = pendingCellSize,
+            .chunkSizeCells = RecipeChunkSize,
             .layers = layers,
             .tilesetId = pendingMapTilesetId,
         });
@@ -1081,7 +1281,22 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
             .expectedKind = AssetFormat::AssetKind::Tileset,
             .flags = AssetFormat::DependencyFlags::Required,
         });
+        for (const CatalogCookAssetSpec& chunkAsset : chunkAssets)
+        {
+            asset.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                .assetId = chunkAsset.assetId,
+                .expectedKind = AssetFormat::AssetKind::TileMapChunk,
+                .flags = AssetFormat::DependencyFlags::Required | AssetFormat::DependencyFlags::Deferred,
+            });
+        }
+        std::sort(asset.dependencies.begin(), asset.dependencies.end(),
+                  [](const AssetFormat::CookedAssetWriteDependency& left,
+                     const AssetFormat::CookedAssetWriteDependency& right) { return left.assetId < right.assetId; });
         request.assets.push_back(std::move(asset));
+        for (CatalogCookAssetSpec& chunkAsset : chunkAssets)
+        {
+            request.assets.push_back(std::move(chunkAsset));
+        }
         multi = MultiState::None;
         tileMapBlock = TileMapBlockState::None;
         pendingMapLayers.clear();
