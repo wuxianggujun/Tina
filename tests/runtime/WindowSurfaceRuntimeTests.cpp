@@ -31,12 +31,68 @@ struct WindowSurfaceRuntimeProbe final {
     u64 submittedFrames = 0;
     u64 presentedFrames = 0;
     u64 skippedFrames = 0;
+    u64 completionLedgerBeginCalls = 0;
+    u64 completionLedgerCompleteCalls = 0;
+    u64 completionLedgerAbandonCalls = 0;
+    u32 completionLedgerInflight = 0;
     usize leaseCountAtRenderShutdown = 99;
     usize leaseCountAtPlatformShutdown = 99;
     bool lifecycleOrderingViolation = false;
     bool renderFactorySawInitialSurface = false;
     bool switchedWindowWasValid = false;
     bool gameShutdown = false;
+};
+
+class SurfaceProbeSubmissionCompletionLedger final : public Render::ISubmissionCompletionLedger {
+  public:
+    explicit SurfaceProbeSubmissionCompletionLedger(WindowSurfaceRuntimeProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    [[nodiscard]] Core::Result<Render::SubmissionTicket> beginSubmitted(u64 submissionIndex) override
+    {
+        ++probe_->completionLedgerBeginCalls;
+        ++probe_->completionLedgerInflight;
+        return makeSubmissionTicket(submissionIndex);
+    }
+
+    [[nodiscard]] u32 inflightCount() const noexcept override
+    {
+        return probe_->completionLedgerInflight;
+    }
+
+    [[nodiscard]] bool allClear() const noexcept override
+    {
+        return probe_->completionLedgerInflight == 0;
+    }
+
+  protected:
+    [[nodiscard]] Core::Status completeOwned(u64) noexcept override
+    {
+        ++probe_->completionLedgerCompleteCalls;
+        if (probe_->completionLedgerInflight == 0)
+        {
+            return Core::failure(Render::RenderErrorCode::InvalidSubmissionTicket,
+                                 "The surface probe completion ledger has no in-flight ticket");
+        }
+        --probe_->completionLedgerInflight;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status abandonOwned(u64) noexcept override
+    {
+        ++probe_->completionLedgerAbandonCalls;
+        if (probe_->completionLedgerInflight == 0)
+        {
+            return Core::failure(Render::RenderErrorCode::InvalidSubmissionTicket,
+                                 "The surface probe completion ledger has no in-flight ticket");
+        }
+        --probe_->completionLedgerInflight;
+        return Core::success();
+    }
+
+  private:
+    WindowSurfaceRuntimeProbe* probe_;
 };
 
 struct RuntimeWindowRecord final {};
@@ -450,8 +506,14 @@ enum class WindowSurfaceFactoryFailure : u8 {
 TEST(WindowSurfaceRuntimeTest, PublishesAfterRenderCreationAndSeparatesEngineFramesFromSubmissions)
 {
     WindowSurfaceRuntimeProbe probe;
-    auto host = EngineHost::Create(EngineConfig::Defaults(),
-                                   makeWindowSurfaceFactories(probe, WindowSurfaceFactoryFailure::None));
+    auto factories = makeWindowSurfaceFactories(probe, WindowSurfaceFactoryFailure::None);
+    factories.createSubmissionCompletionLedger =
+        [&probe]() -> Core::Result<std::unique_ptr<Render::ISubmissionCompletionLedger>> {
+        std::unique_ptr<Render::ISubmissionCompletionLedger> ledger =
+            std::make_unique<SurfaceProbeSubmissionCompletionLedger>(probe);
+        return ledger;
+    };
+    auto host = EngineHost::Create(EngineConfig::Defaults(), std::move(factories));
     ASSERT_TRUE(host.has_value());
     ASSERT_NE(*host, nullptr);
     EXPECT_TRUE(probe.renderFactorySawInitialSurface);
@@ -468,6 +530,10 @@ TEST(WindowSurfaceRuntimeTest, PublishesAfterRenderCreationAndSeparatesEngineFra
     EXPECT_EQ(probe.submittedFrames, 2U);
     EXPECT_EQ(probe.presentedFrames, 2U);
     EXPECT_EQ(probe.skippedFrames, 1U);
+    EXPECT_EQ(probe.completionLedgerBeginCalls, 2U);
+    EXPECT_EQ(probe.completionLedgerCompleteCalls, 2U);
+    EXPECT_EQ(probe.completionLedgerAbandonCalls, 0U);
+    EXPECT_EQ(probe.completionLedgerInflight, 0U);
     EXPECT_EQ(probe.leaseCountAtRenderShutdown, 0U);
     EXPECT_EQ(probe.leaseCountAtPlatformShutdown, 0U);
     EXPECT_FALSE(probe.lifecycleOrderingViolation);

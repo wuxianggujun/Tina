@@ -2,7 +2,7 @@
 
 Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在于 `tina_render_bgfx` 私有
 实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，以及 EngineHost 侧
-`RenderFramePacket` + FramePin + present-return CPU completion。Opaque3D 产品着色为 **experimental
+`RenderFramePacket` + FramePin + packet-local `FrameResourceRef` table + present-return CPU completion。Opaque3D 产品着色为 **experimental
 metallic-roughness hybrid**：`setMesh3DLighting()` 一次提交0..4个 directional lights + 常量 ambient；
 无 IBL/阴影/light component/culling。当前没有通用 pass scheduler 或通用 GPU submission fence；
 Texture2D/StaticMesh 已有独立、backend-proven 的 GPU resource retirement completion。
@@ -24,6 +24,7 @@ Texture2D/StaticMesh 已有独立、backend-proven 的 GPU resource retirement c
 
 - frame index 与 interpolation；
 - optional primary `RenderSurfaceState`；
+- submit-call-local `FrameResourceTableView`；
 - submit-call-local primary World `RenderSceneView`；
 - submit-call-local primary UI `UIDisplayListView`；
 - optional R8 `UIGlyphAtlasPageView`。
@@ -37,6 +38,15 @@ Surface/GlyphAtlas pin；失败路径 abandon；suspended skip 与成功 present
 `unique_ptr<ISubmissionCompletionLedger>`，可选 factory 只允许替换记账实现，**不能改变完成时点**。
 `SubmissionTicket` 是不可复制、绑定签发 ledger 的唯一所有权 token；移动进 packet 后由 packet 在
 complete/abandon、复用或析构时关闭，不能用副本或其他 ledger 重复消费 in-flight 计数。
+EngineHost 只有在 packet abandon 成功后才可继续 State teardown；persistent failure 必须记录
+`runtime.lifecycle` 并 fail-stop，不能带着 live frame owner 销毁 State。
+
+`FrameResourceRef` 是 packet-local `{owner, generation, index}` token，不拥有资源。packet 的固定容量资源表
+按 `{FrameResourceKind, deviceBindingKey}` intern：首次登记消费 owning `FramePin`，同帧重复登记立即释放
+重复 pin 并返回同一 ref；invalid/capacity 失败不消费调用方 pin。`FrameResourceTableView::resolve()` 对
+cross-packet、stale、越界与 wrong-kind ref fail closed。view/ref 在 complete、completeSkipped、abandon 或
+packet 复用后立即失效，backend 只能在 `submitFrame()` 内同步解析。当前 N16.1 只落地公共基础设施，
+Scene Sprite/Mesh item 的迁移由后续切片完成。
 
 所有 composition 采用唯一语义：`submitFrame()` 同步消费借用 view，成功 `present()` 返回后关闭 CPU
 submission ticket 并释放 frame pin。该完成点只表示 Host/backend 已不再借用本帧 CPU 数据，**不表示 GPU

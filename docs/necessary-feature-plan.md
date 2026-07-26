@@ -31,6 +31,7 @@
 | N13 | ASSET-HANDLE-SCENE-2D-A4 | 已完成 | TileMap emit 改存 weak Tileset AssetHandle，并在调用期借用 Asset resolver；registry Tileset dependency resolve、单次解析/失败清空与产品 evidence schema 12 已贯通，完整总项仍为 Partial |
 | N14 | ASSET-HANDLE-SCENE-3D-A5 | 已完成 | MeshRenderer3D/Prefab 改存 weak StaticMesh/Material Handle，extraction 借用 kind-specific resolver；3D product evidence schema 1 与 Resources-owned AssetStore 已贯通，完整总项仍为 Partial |
 | N15 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS | 已完成 | fixed-capacity owner-thread Mesh3D registry、独立 device key allocator、原子 material bundle、stale-safe unbind 与 3D product evidence schema 2 已贯通；完整总项仅剩统一 retirement ownership/FrameResourceRef |
+| N16 | ASSET-HANDLE-SCENE-FRAME-RESOURCE | 进行中 | N16.1 已建立 packet-local FrameResourceRef/资源表与 lease-consuming Texture2D retirement 事务；N16.2/N16.3 继续迁移 2D extraction、统一 registry 与 retirement owner |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -680,6 +681,50 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 
 N15 不宣称完成 `ASSET-HANDLE-SCENE` 总项：registry 仍不拥有 GPU/Lease/retirement；统一 retirement
 ownership 与 packet-local `FrameResourceRef` 必须作为独立后续切片完成。
+
+## N16 - ASSET-HANDLE-SCENE-FRAME-RESOURCE
+
+### N16.1 已完成契约
+
+- `FrameResourceRef` 是不可由调用方构造有效值的 copyable packet-local token，身份由 packet owner、frame
+  generation 与 table index 组成；它不拥有 GPU resource 或 `AssetLease`。
+- `RenderFramePacket` 在固定容量资源表中按 `{kind, deviceBindingKey}` intern。首次登记取得 owning
+  `FramePin`，重复登记立即释放重复 pin 并返回同一 ref；invalid/capacity 失败不消费调用方 pin。
+- `FrameResourceTableView` 只在 owning packet 当前 generation 存活且 `submitFrame()` 同步调用期间有效；
+  cross-packet、stale、越界或 wrong-kind ref 均 fail closed。complete、completeSkipped、abandon、packet 复用
+  与析构都 exactly-once 释放资源 pin 并使旧 view/ref 失效。
+- `EngineHost` 在 Audio completion pump 后、RenderScene extraction 前 begin packet。空 State 栈正常退出不
+  begin；extraction/UI/submit/present 失败由同一 rollback 覆盖，State teardown 前 packet 已 abandon；若
+  persistent failure 使 abandon 失败则 fail-stop，禁止继续销毁仍被 live frame owner 引用的 State。
+- `AssetSystem::retireTexture2D(device, lease, texture)` 仅在 backend 接受 retirement 后消费调用方
+  `AssetLease` 与 `GpuTextureId`。owner-thread、kind/store/state、ledger、PMR payload allocation 或 backend
+  失败都保持两个 owner 可重试；成功后 weak lookup 立即失效，completion/drain 后释放 lease；同步 backend
+  可在调用返回前完成最后一个 `UnloadPending` Lease，此时不得再次使用已失效 handle 执行 unload。
+
+### 后续切片
+
+| 切片 | 状态 | 完成定义 |
+| --- | --- | --- |
+| N16.1 | 已完成 | Render packet 资源表/引用、Runtime begin/rollback 时序、lease-consuming Texture2D retirement 事务与单元/集成测试 |
+| N16.2 | 待推进 | World/TileMap/Particle/Trail Sprite2D extraction 只写 `FrameResourceRef`，同帧相同资源只 intern 一次，backend 提交前完整验证 table/ref |
+| N16.3 | 待推进 | 统一 Sprite registry、`AssetLease` 与 GPU retirement owner，升级 product-2d evidence 并收口 `ASSET-HANDLE-SCENE` 总项 |
+
+### N16.1 验收
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_tests tina_asset_tests tina_render_bgfx_tests -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+```
+
+最终验证：`tina_tests` 329/329、`tina_asset_tests` 188/188、`tina_render_bgfx_tests` 52/52；
+`tina_sample_2d` 与 `tina_sample_3d` 均完成 300 帧 smoke；DOC-002 为0 error / 0 warning。
+
+N16.1 只建立统一引用/所有权基础设施；Scene item 尚未迁移到 `FrameResourceRef`，registry 也尚未成为
+Lease/GPU retirement owner，因此 `ASSET-HANDLE-SCENE` 总项仍为 InProgress。
 
 ## 每项收口清单
 

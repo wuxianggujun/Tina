@@ -207,8 +207,9 @@ Scene/TileMap emit 都不保存 resolver、AssetSystem、AssetLease、Cooked pay
 空/stale/cross-store/wrong-kind/unbound handle 映射为0时分别 fail closed 为 Scene `UnresolvedSprite` 或 Asset
 `SpriteBindingNotFound`，TileMap 失败清空输出。产品 State 的 RAII teardown 必须先 unbind，成功后才
 destroy GPU owner；3D 使用显式 registered 位确保 stale handle 仍走 exact unbind。2D 与 3D Scene component
-的持久 binding key、产品手写 key table 都已删除；统一 retirement ownership 与 `FrameResourceRef` 仍由
-`ASSET-HANDLE-SCENE` 后续切片完成，因此总项保持 Partial。
+的持久 binding key、产品手写 key table 都已删除。N16.1 已建立 packet-local `FrameResourceRef`/固定容量
+resource table、extraction 前 begin/失败释放时序与 lease-consuming Texture2D retirement 事务；Scene item
+迁移和统一 registry/retirement owner 仍由 N16.2/N16.3 完成，因此总项保持 InProgress。
 
 ## 当前 UI 边界
 

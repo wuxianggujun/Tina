@@ -546,6 +546,12 @@ struct RuntimeProbe final {
     u64 presentCalls = 0;
     u64 submittedFrames = 0;
     u64 presentedFrames = 0;
+    u64 completionLedgerBeginCalls = 0;
+    u64 completionLedgerCompleteCalls = 0;
+    u64 completionLedgerAbandonCalls = 0;
+    u32 completionLedgerInflight = 0;
+    std::optional<u32> completionLedgerInflightAtStateExit;
+    bool completionLedgerRejectAbandon = false;
     bool lastSubmittedHadPrimaryWindowSurface = false;
     std::optional<Render::RenderCamera2D> copiedLastSubmittedWorldCamera2D;
     std::vector<Render::RenderSprite2DItem> copiedLastSubmittedWorldSprites2D;
@@ -555,6 +561,66 @@ struct RuntimeProbe final {
     Render::RenderSceneStatistics copiedLastSubmittedWorldSceneStatistics{};
     std::vector<usize> submittedUICommandCounts;
     std::optional<Render::UIDrawCommand> copiedLastSubmittedUICommand;
+};
+
+class ProbeSubmissionCompletionLedger final : public Render::ISubmissionCompletionLedger {
+  public:
+    explicit ProbeSubmissionCompletionLedger(RuntimeProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    [[nodiscard]] Core::Result<Render::SubmissionTicket> beginSubmitted(u64 submissionIndex) override
+    {
+        probe_->events.emplace_back("ledger.begin");
+        ++probe_->completionLedgerBeginCalls;
+        ++probe_->completionLedgerInflight;
+        return makeSubmissionTicket(submissionIndex);
+    }
+
+    [[nodiscard]] u32 inflightCount() const noexcept override
+    {
+        return probe_->completionLedgerInflight;
+    }
+
+    [[nodiscard]] bool allClear() const noexcept override
+    {
+        return probe_->completionLedgerInflight == 0;
+    }
+
+  protected:
+    [[nodiscard]] Core::Status completeOwned(u64) noexcept override
+    {
+        probe_->events.emplace_back("ledger.complete");
+        ++probe_->completionLedgerCompleteCalls;
+        if (probe_->completionLedgerInflight == 0)
+        {
+            return Core::failure(Render::RenderErrorCode::InvalidSubmissionTicket,
+                                 "The probe completion ledger has no in-flight ticket");
+        }
+        --probe_->completionLedgerInflight;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status abandonOwned(u64) noexcept override
+    {
+        probe_->events.emplace_back("ledger.abandon");
+        ++probe_->completionLedgerAbandonCalls;
+        if (probe_->completionLedgerRejectAbandon)
+        {
+            return Core::failure(Render::RenderErrorCode::InvalidSubmissionTicket,
+                                 "The probe completion ledger rejected abandon");
+        }
+        if (probe_->completionLedgerInflight == 0)
+        {
+            return Core::failure(Render::RenderErrorCode::InvalidSubmissionTicket,
+                                 "The probe completion ledger has no in-flight ticket");
+        }
+        --probe_->completionLedgerInflight;
+        return Core::success();
+    }
+
+  private:
+    RuntimeProbe* probe_;
 };
 
 class AdvancingPlatform final : public Platform::IPlatformBackend {
@@ -1268,6 +1334,7 @@ struct GameProbe final {
     EnterMode enterMode = EnterMode::Normal;
     Core::Duration advanceClockDuringEnter{};
     u64 exitOnFrame = 0;
+    bool popOnFrameUpdate = false;
     bool subscribeToPlatformEvents = false;
     bool throwFromPlatformEvent = false;
     u32 platformEventCount = 0;
@@ -1489,6 +1556,7 @@ class ScriptedGameState final : public IGameState {
 
     void onExit(GameStateExitContext& context) noexcept override
     {
+        probe_->runtime->completionLedgerInflightAtStateExit = probe_->runtime->completionLedgerInflight;
         if (probe_->registerPrimaryWindowUIPointerListener)
         {
             pointerListener_.reset();
@@ -1628,6 +1696,13 @@ class ScriptedGameState final : public IGameState {
         if (frameIndex == probe_->exitOnFrame)
         {
             context.requestExitAfterFrame();
+        }
+        if (probe_->popOnFrameUpdate)
+        {
+            if (auto popStatus = context.requestPop(); !popStatus)
+            {
+                return popStatus;
+            }
         }
         return maybeInjectCommittedGameFailure(*probe_->runtime, CommittedFailurePoint::UpdateFrame, "updateFrame");
     }
@@ -1955,7 +2030,21 @@ Core::Result<std::unique_ptr<EngineHost>> createRuntimeHost(RuntimeProbe& probe,
     return EngineHost::Create(std::move(config), makeRuntimeFactories(probe));
 }
 
+Core::Result<std::unique_ptr<EngineHost>> createRuntimeHostWithProbeLedger(
+    RuntimeProbe& probe, EngineConfig config = EngineConfig::Defaults())
+{
+    EngineCompositionFactories factories = makeRuntimeFactories(probe);
+    factories.createSubmissionCompletionLedger =
+        [&probe]() -> Core::Result<std::unique_ptr<Render::ISubmissionCompletionLedger>> {
+        std::unique_ptr<Render::ISubmissionCompletionLedger> ledger =
+            std::make_unique<ProbeSubmissionCompletionLedger>(probe);
+        return ledger;
+    };
+    return EngineHost::Create(std::move(config), std::move(factories));
+}
+
 constexpr int ShutdownDeadlineTerminateExitCode = 86;
+constexpr int FramePacketAbandonTerminateExitCode = 87;
 
 void installShutdownDeadlineTerminateHandler() noexcept
 {
@@ -1999,6 +2088,26 @@ void rollBackCreateWithTimedOutTaskSystem()
     auto host = EngineHost::Create(config, std::move(factories));
     static_cast<void>(host);
     std::_Exit(82);
+}
+
+void runPresentFailureWithRejectedFramePacketAbandon()
+{
+    std::set_terminate([]() noexcept { std::_Exit(FramePacketAbandonTerminateExitCode); });
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    runtime.failurePoint = CommittedFailurePoint::RenderPresent;
+    runtime.completionLedgerRejectAbandon = true;
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = (std::numeric_limits<u64>::max)();
+    ScriptedGameApplication application(game);
+    auto host = createRuntimeHostWithProbeLedger(runtime);
+    if (!host)
+    {
+        std::_Exit(82);
+    }
+    (void)(*host)->run(application);
+    std::_Exit(83);
 }
 
 } // namespace
@@ -2383,6 +2492,13 @@ TEST(EngineHostShutdownDeadlineDeathTest, CreateRollbackTimeoutTerminatesBeforeT
 {
     EXPECT_EXIT(rollBackCreateWithTimedOutTaskSystem(),
                 testing::ExitedWithCode(ShutdownDeadlineTerminateExitCode), "ShutdownDeadlineExceeded");
+}
+
+TEST(EngineHostFramePacketDeathTest, PersistentAbandonFailureTerminatesBeforeStateTeardown)
+{
+    EXPECT_EXIT(runPresentFailureWithRejectedFramePacketAbandon(),
+                testing::ExitedWithCode(FramePacketAbandonTerminateExitCode),
+                "FramePacketAbandonFailed");
 }
 
 TEST(EngineHostThreadAffinityTest, RejectsRunOnAnotherThreadWithoutConsumingTheHost)
@@ -2909,6 +3025,125 @@ TEST(EngineHostRunTest, ExitRequestStillCompletesExtractionUiRenderAndPresent)
                                   "platform.shutdown",
                                   "platform.destroy",
                               }));
+}
+
+TEST(EngineHostRunTest, FramePacketFailurePathsLeaveNoSubmissionTicketAtStateExit)
+{
+    const std::vector failurePoints{
+        CommittedFailurePoint::ExtractRenderScene,
+        CommittedFailurePoint::UpdateUI,
+        CommittedFailurePoint::RenderSubmit,
+    };
+
+    for (const CommittedFailurePoint failurePoint : failurePoints)
+    {
+        SCOPED_TRACE(static_cast<int>(failurePoint));
+        RuntimeProbe runtime;
+        runtime.frameDeltas = {Core::Duration::zero()};
+        runtime.failurePoint = failurePoint;
+        GameProbe game;
+        game.runtime = &runtime;
+        game.exitOnFrame = (std::numeric_limits<u64>::max)();
+        ScriptedGameApplication application(game);
+        auto hostResult = createRuntimeHostWithProbeLedger(runtime);
+        ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+        auto runResult = (*hostResult)->run(application);
+
+        ASSERT_FALSE(runResult.has_value());
+        EXPECT_EQ(runtime.completionLedgerBeginCalls, 0U);
+        EXPECT_EQ(runtime.completionLedgerCompleteCalls, 0U);
+        EXPECT_EQ(runtime.completionLedgerAbandonCalls, 0U);
+        EXPECT_EQ(runtime.completionLedgerInflight, 0U);
+        ASSERT_TRUE(runtime.completionLedgerInflightAtStateExit.has_value());
+        EXPECT_EQ(*runtime.completionLedgerInflightAtStateExit, 0U);
+        EXPECT_EQ(runtime.submitCalls, failurePoint == CommittedFailurePoint::RenderSubmit ? 1U : 0U);
+        EXPECT_EQ(runtime.presentCalls, 0U);
+    }
+}
+
+TEST(EngineHostRunTest, PresentFailureAbandonsSubmissionBeforeStateExit)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    runtime.failurePoint = CommittedFailurePoint::RenderPresent;
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = (std::numeric_limits<u64>::max)();
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHostWithProbeLedger(runtime);
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_FALSE(runResult.has_value());
+    EXPECT_EQ(runtime.completionLedgerBeginCalls, 1U);
+    EXPECT_EQ(runtime.completionLedgerCompleteCalls, 0U);
+    EXPECT_EQ(runtime.completionLedgerAbandonCalls, 1U);
+    EXPECT_EQ(runtime.completionLedgerInflight, 0U);
+    ASSERT_TRUE(runtime.completionLedgerInflightAtStateExit.has_value());
+    EXPECT_EQ(*runtime.completionLedgerInflightAtStateExit, 0U);
+    const auto abandonPosition = std::ranges::find(runtime.events, "ledger.abandon");
+    const auto stateExitPosition = std::ranges::find(runtime.events, "state.exit");
+    ASSERT_NE(abandonPosition, runtime.events.end());
+    ASSERT_NE(stateExitPosition, runtime.events.end());
+    EXPECT_LT(abandonPosition, stateExitPosition);
+}
+
+TEST(EngineHostRunTest, PresentSuccessCompletesSubmissionBeforeStateExit)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 0;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHostWithProbeLedger(runtime);
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    EXPECT_EQ(runtime.completionLedgerBeginCalls, 1U);
+    EXPECT_EQ(runtime.completionLedgerCompleteCalls, 1U);
+    EXPECT_EQ(runtime.completionLedgerAbandonCalls, 0U);
+    EXPECT_EQ(runtime.completionLedgerInflight, 0U);
+    ASSERT_TRUE(runtime.completionLedgerInflightAtStateExit.has_value());
+    EXPECT_EQ(*runtime.completionLedgerInflightAtStateExit, 0U);
+    const auto completePosition = std::ranges::find(runtime.events, "ledger.complete");
+    const auto stateExitPosition = std::ranges::find(runtime.events, "state.exit");
+    ASSERT_NE(completePosition, runtime.events.end());
+    ASSERT_NE(stateExitPosition, runtime.events.end());
+    EXPECT_LT(completePosition, stateExitPosition);
+}
+
+TEST(EngineHostRunTest, EmptyStateStackExitSkipsExtractionAndSubmissionAccounting)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = (std::numeric_limits<u64>::max)();
+    game.popOnFrameUpdate = true;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHostWithProbeLedger(runtime);
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameStateStackBecameEmpty);
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "state.extract."));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "state.ui."));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "render.submit."));
+    EXPECT_EQ(runtime.presentCalls, 0U);
+    EXPECT_EQ(runtime.completionLedgerBeginCalls, 0U);
+    EXPECT_EQ(runtime.completionLedgerCompleteCalls, 0U);
+    EXPECT_EQ(runtime.completionLedgerAbandonCalls, 0U);
+    EXPECT_EQ(runtime.completionLedgerInflight, 0U);
+    ASSERT_TRUE(runtime.completionLedgerInflightAtStateExit.has_value());
+    EXPECT_EQ(*runtime.completionLedgerInflightAtStateExit, 0U);
 }
 
 TEST(EngineHostRunTest, LaterUiFailureWinsOverExitRequestFromSameFrame)

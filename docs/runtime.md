@@ -75,11 +75,12 @@ Platform poll
   -> updateFrame (stack top-down; only top may queue stack commands)
   -> commitPendingGameStateCommands  // after frame, before extract
   -> Audio completion pump
+  -> RenderFramePacket begin
   -> RenderScene begin/extract/commit (stack top-down)
   -> updateUI through root-scoped capability (stack top-down)
   -> UI layout/hit/paint/semantics commit (+ optional UIA publish)
   -> UI DisplayList + optional R8 Glyph atlas view
-  -> RenderFramePacket pins + RenderDevice::submitFrame
+  -> attach packet resource table/pins + RenderDevice::submitFrame
   -> present when the surface is active, then complete CPU frame pins (else completeSkipped)
   -> latch presented Camera2D for next-frame world picking
 ```
@@ -163,8 +164,11 @@ Platform subscription token、UI listener token、`UIRootOwner`、AssetLease 等
 - Platform frame、RenderScene 和 UI snapshot 都先校验/构建，再单点提交；失败不发布半份 view。
 - UI routing 读取上一份 committed hit snapshot；当前帧 `updateUI()` 的结果在 Render 前提交，并从
   下一帧开始参与输入命中。
-- `RenderFrame` 当前携带 submit-call-local 的 World Scene、UI DisplayList 与 Glyph atlas borrow；
+- `RenderFrame` 当前携带 submit-call-local 的 packet resource table、World Scene、UI DisplayList 与 Glyph atlas borrow；
   backend 必须在 `submitFrame()` 返回前同步消费，不能保存指针。
+- packet 在 extraction 前开启；extraction/UI/submit/present 的所有失败都 abandon，suspended skip 使用
+  `completeSkipped()`。cross-packet/stale/wrong-kind `FrameResourceRef` 在 table resolve 时 fail closed。若
+  persistent failure 使 abandon 失败，Runtime 记录 `runtime.lifecycle` 后 fail-stop，不能继续 State teardown。
 - suspended surface 返回 `SkippedSuspendedSurface`，Runtime 不调用 `present()`。
 - active surface 在 `present()` 成功返回后关闭 submission ticket 并释放 FramePin；该时点只结束 CPU
   借用，不声明 GPU 已执行完成或 Asset 已物理退役。
@@ -172,7 +176,8 @@ Platform subscription token、UI listener token、`UIRootOwner`、AssetLease 等
 
 ## 关闭顺序
 
-已提交游戏先执行 State `onExit()`，再执行 Application `onShutdown()`。Runtime 私有 UI owner 与
+已提交游戏先 abandon 当前 RenderFramePacket；只有成功关闭所有 frame owner 后才执行 State `onExit()`，随后执行 Application
+`onShutdown()`。Runtime 私有 UI owner 与
 Platform dispatcher 关闭后，模块按以下顺序退出：
 
 ```text
@@ -203,7 +208,7 @@ AudioEngine
 | `blocksGameplayInputBelow` → 下层空 Action snapshot | Done（Host dispatch，非 ActionMapper 内） |
 | `blocksUIUpdateBelow` 仅挡 `updateUI` | Done；不回改当帧 UI route |
 | `2D-INPUT-ADV` unified digital/analog Action + transactional rebind | Done；本轮测试结果以最终验证记录为准 |
-| `RenderFramePacket` + `FramePin` + present-return CPU ledger | Done；固定帧延迟假 fence 已删除；Texture/Mesh retirement 使用 Render/Asset 独立 readback marker，不混入 Runtime ticket |
+| `RenderFramePacket` + `FramePin` + packet-local `FrameResourceRef` table + present-return CPU ledger | Done；资源表固定容量/同帧去重，旧 ref 在 complete/skip/abandon 后 fail closed；Texture/Mesh retirement 使用 Render/Asset 独立 marker |
 | `RUNTIME-SHUTDOWN-DEADLINE` bounded Task shutdown + Host-enforced TaskSystem deadline | Done；Task invalid/timeout/retry 与 Host Task-shutdown deadline/death tests 已通过 |
 | Runtime 拥有 AssetSystem/World | 否；仍由产品 State/样例持有 |
 | 通用 Event Queue、多 World/editor orchestration、pass scheduler | 未做；需 ADR/Backlog 后开 |

@@ -999,6 +999,17 @@ class EngineHostImplementation final {
                 }
             }
 
+            // Open the owning packet before any frame extraction. Every later phase may
+            // register frame-local resources and is covered by the same rollback guard.
+            if (auto packetBegin = m_renderFramePacket.beginFrame(frameIndex); !packetBegin)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(packetBegin.error()), frameIndex,
+                                              simulationTick);
+            }
+            auto packetRollback = Core::makeScopeExit([this]() noexcept {
+                abandonRenderFramePacketOrTerminate();
+            });
+
             auto renderSceneBeginStatus =
                 m_renderSceneBuilder.beginFrame(renderSceneFrameParameters(*platformFrame));
             if (!renderSceneBeginStatus)
@@ -1095,17 +1106,6 @@ class EngineHostImplementation final {
                 }
             }
 
-            // RUNTIME-002: owning packet + injectable accounting ledger around submit/present.
-            // Pins cover CPU submission ownership only and release after present returns.
-            if (auto packetBegin = m_renderFramePacket.beginFrame(frameIndex); !packetBegin)
-            {
-                return failAfterStartupCommit(gameApplication, std::move(packetBegin.error()), frameIndex,
-                                              simulationTick);
-            }
-            auto packetRollback = Core::makeScopeExit([this]() noexcept {
-                (void)m_renderFramePacket.abandon();
-            });
-
             // Surface pin: keep surface snapshot facts alive for this submission epoch.
             if (primaryWindowSurface.has_value())
             {
@@ -1183,6 +1183,7 @@ class EngineHostImplementation final {
                 .frameIndex = frameIndex,
                 .interpolation = frameTiming.interpolation,
                 .primaryWindowSurface = primaryWindowSurface,
+                .resources = m_renderFramePacket.resourceTableView(),
                 .primaryWindowUIDisplayList = uiDisplayResult->displayList,
                 .primaryWindowUIGlyphAtlas = glyphAtlasPage,
                 .primaryWorldScene = *renderSceneResult,
@@ -1317,12 +1318,28 @@ class EngineHostImplementation final {
         return exitReason;
     }
 
+    void abandonRenderFramePacketOrTerminate() noexcept
+    {
+        if (auto status = m_renderFramePacket.abandon(); !status)
+        {
+            if (m_modules.diagnostics != nullptr)
+            {
+                m_modules.diagnostics->channel().write({
+                    .level = Core::Diagnostics::LogLevel::Error,
+                    .category = "runtime.lifecycle",
+                    .message = "FramePacketAbandonFailed: refusing State teardown with live frame ownership",
+                });
+            }
+            std::terminate();
+        }
+    }
+
     void stopCommittedGame(IGameApplication& gameApplication, RunStopCause stopCause,
                            const Core::Error* runtimeFailure) noexcept
     {
         m_lifecycleState = LifecycleState::Stopping;
         m_pendingCommands.clearAll();
-        (void)m_renderFramePacket.abandon();
+        abandonRenderFramePacketOrTerminate();
         while (!m_gameStateStack.empty())
         {
             std::unique_ptr<IGameState> state = m_gameStateStack.popCommitted();

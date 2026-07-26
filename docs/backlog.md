@@ -21,6 +21,7 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
+| ASSET-HANDLE-SCENE | InProgress | P1 | A1-A6 已清除 2D/3D Scene 持久 key 并建立两类 binding registry；N16.1 已加入 packet-local `FrameResourceRef`/资源表与 lease-consuming texture retirement 事务 | N16.1 | N16.2 迁移所有 Sprite2D extraction，N16.3 统一 registry/Lease/GPU retirement owner 并升级产品证据 | Unit + Integration；产品证据待 N16.3 |
 
 ## Next
 
@@ -40,7 +41,6 @@
 
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
-| ASSET-HANDLE-SCENE | Partial | P1 | A1-A4 已清除2D Scene/FX/TileMap 持久 key；A5 已让 `MeshRenderer3D`/Prefab 使用 weak mesh/material Handle 与 extract-time resolver；A6 已补 fixed-capacity owner-thread Mesh3D registry、原子 material bundle 与 stale-safe teardown。Scene 2D/3D 持久 key 和产品手写 key 表均已清除 | 2D/3D 资源引用与 frame retirement owner 收敛为统一 `FrameResourceRef` 路径 |
 | RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal；唯一 `setMesh3DLighting` 有界 0..4 directional lights；sample_3d 一次提交3灯 + 自动相机 + Khronos 球体/盒。**待** IBL/shadow、light component/culling、pass scheduling、vertex tangents |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | UI-004 | Deferred | P2 | 通用 Focus Scope、Modal、持久 Pointer Capture | 多 root/state transition 与输入恢复测试通过 |
@@ -57,6 +57,7 @@
 
 | ID | 完成项 | 证据入口 |
 | --- | --- | --- |
+| ASSET-HANDLE-SCENE-N16.1-CORE | packet-local `FrameResourceRef`/固定容量资源表按 kind+binding 去重并持有 owning pin；cross-packet/stale/wrong-kind fail closed；Runtime extraction 前 begin 且失败/skip/complete 在 State teardown 前释放；Texture2D 既有 Lease+GPU owner 仅在 backend 接受后消费，PMR/ledger/backend 失败完整恢复 | [Rendering](rendering.md) · [Runtime](runtime.md) · [资源](resources.md) · FramePinPacket/RuntimeLifecycle/AssetGpuRetirement tests |
 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS | fixed-capacity owner-thread `Mesh3DBindingRegistry` 借用 Store/device/PMR；mesh/material 使用独立 device-instance allocator，成功后才消费且解绑不复用；Material 三张纹理与 factors 原子发布，dependency stale fail closed；exact stale handle 可解绑，失败保留记录重试；3D product schema 2 记录2组注册/释放、2 mesh/6 texture 销毁与 registry 释放 | [资源](resources.md) · [Rendering](rendering.md) · [3D](game-3d.md) · Mesh3DBindingRegistry/Render tests · 3D product smoke |
 | ASSET-HANDLE-SCENE-3D-A5 | `MeshRenderer3D` 保存 copyable weak StaticMesh/Material Handle；visible extraction 分别借用 kind-specific resolver，invalid/stale/wrong-kind/unbound/zero fail closed，hidden 不解析；Prefab 只做 AssetId→Handle 并事务 rollback；3D product evidence schema 1 记录 handle 发布、两类 resolver hits 与 AssetStore active | [Scene](scene-ecs.md) · [3D](game-3d.md) · Scene tests · 3D product smoke |
 | ASSET-HANDLE-SCENE-2D-A4 | `TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与调用期 borrowed `AssetBindingResolver`，不再保存 `spriteKey`；registry 沿 Tileset 唯一 required Texture2D dependency fail closed；hidden/off-camera/empty 不解析，非空可见集合只解析一次，失败清空输出；product-2d schema 12 提供 TileMap resolver hits | [资源](resources.md) · [2D](game-2d.md) · TileChunk/Registry tests · 2D product gate |

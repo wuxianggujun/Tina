@@ -272,6 +272,35 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --fr
 A6 不拥有 GPU resource、`AssetLease` 或 retirement record。统一 retirement ownership 与
 `FrameResourceRef` 仍是后续切片，因此 `ASSET-HANDLE-SCENE` 总项保持 Partial。
 
+## Frame Resource Core N16.1
+
+`ASSET-HANDLE-SCENE-N16.1-CORE` 的门禁归属 `tina_tests`、`tina_asset_tests` 与 Render header isolation：
+
+- `FrameResourceRef` 不能由调用方构造有效 identity；packet table 按 kind+binding key 去重；重复 pin 立即
+  释放，invalid/capacity 失败不消费 pin；
+- cross-packet、stale generation、wrong-kind 与越界 ref fail closed；complete、skip、abandon、复用和析构
+  exactly-once 释放，普通 FramePin 与 resource pin 容量相互独立；
+- Runtime 在 extraction 前 begin packet，空 State 栈正常退出不 begin；extract/UI/submit/present 失败和成功
+  present 都在 State `onExit` 前清零 submission accounting；若 persistent failure 使 packet abandon 失败，
+  Runtime 必须 fail-stop，不能继续销毁仍被 live frame owner 引用的 State；
+- Texture2D 既有 Lease+GPU owner retirement 覆盖成功转移、PMR payload allocation rollback、backend reject
+  后重试、wrong-kind/cross-store/invalid/wrong-thread 不变性、同步 completion 完成最后一个
+  `UnloadPending` Lease，以及 drain exactly-once。
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_tests tina_asset_tests tina_render_bgfx_tests -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+```
+
+本轮结果：`tina_tests` 329/329、`tina_asset_tests` 188/188、`tina_render_bgfx_tests` 52/52；2D/3D
+产品 sample 均通过 300 帧 smoke，DOC-002 为0 error / 0 warning。
+
+N16.1 不迁移 Scene item，也不让 registry 拥有 Lease/GPU retirement；产品 2D 证据由 N16.2/N16.3 升级，
+`ASSET-HANDLE-SCENE` 总项保持 InProgress。
+
 ## 产品样例的证据边界
 
 | Sample | 证明 | 不证明 |

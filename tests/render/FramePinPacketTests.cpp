@@ -1,10 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <tina/render/FramePin.hpp>
+#include <tina/render/FrameResource.hpp>
 #include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderErrors.hpp>
 
 #include <atomic>
+#include <cstddef>
+#include <memory>
 #include <type_traits>
 #include <utility>
 
@@ -15,6 +18,10 @@ static_assert(!std::is_copy_constructible_v<Render::SubmissionTicket>);
 static_assert(!std::is_copy_assignable_v<Render::SubmissionTicket>);
 static_assert(std::is_move_constructible_v<Render::SubmissionTicket>);
 static_assert(!std::is_move_assignable_v<Render::SubmissionTicket>);
+static_assert(std::is_copy_constructible_v<Render::FrameResourceRef>);
+static_assert(std::is_copy_assignable_v<Render::FrameResourceRef>);
+static_assert(std::is_default_constructible_v<Render::FrameResourceRef>);
+static_assert(!std::is_constructible_v<Render::FrameResourceRef, Core::u64, Core::u64, Core::u32>);
 
 std::atomic<int> g_releaseCount{0};
 
@@ -22,6 +29,16 @@ void countingRelease(void* userData) noexcept
 {
     ++g_releaseCount;
     delete static_cast<int*>(userData);
+}
+
+[[nodiscard]] Render::FramePin makeCountingPin(Core::u64 tag)
+{
+    return Render::FramePin{Render::FramePinKind::AssetLease, tag, new int{1}, &countingRelease};
+}
+
+[[nodiscard]] constexpr Render::FrameResourceDescriptor spriteTexture(Core::u64 bindingKey) noexcept
+{
+    return {Render::FrameResourceKind::Sprite2DTexture, bindingKey};
 }
 
 TEST(FramePinTest, ReleaseRunsExactlyOnce)
@@ -58,6 +75,271 @@ TEST(FramePinTest, MoveTransfersOwnershipWithoutDoubleRelease)
     EXPECT_TRUE(b.hasValue());
     b.release();
     EXPECT_EQ(g_releaseCount.load(), 1);
+}
+
+TEST(FramePinTest, AddRejectsMismatchedKindWithoutConsumingCallerPin)
+{
+    g_releaseCount.store(0);
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    Render::FramePin pin = makeCountingPin(1);
+
+    auto status = packet.add(Render::FramePinKind::Surface, std::move(pin));
+
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, Render::RenderErrorCode::InvalidFramePin);
+    EXPECT_TRUE(pin.hasValue());
+    EXPECT_EQ(packet.pinCount(), 0U);
+    pin.release();
+    EXPECT_EQ(g_releaseCount.load(), 1);
+    ASSERT_TRUE(packet.completeSkipped().has_value());
+}
+
+TEST(FrameResourceTest, DefaultRefAndViewAreInvalid)
+{
+    constexpr Render::FrameResourceRef ref{};
+    Render::FrameResourceTableView view{};
+
+    static_assert(!ref.hasValue());
+    EXPECT_TRUE(view.empty());
+    EXPECT_EQ(view.resolve(ref, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+}
+
+TEST(FrameResourceTest, InternDeduplicatesAndResolvesDescriptor)
+{
+    g_releaseCount.store(0);
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(7).has_value());
+    Render::FramePin firstPin = makeCountingPin(1);
+    Render::FramePin duplicatePin = makeCountingPin(2);
+
+    auto first = packet.resourceSink().intern(spriteTexture(91), std::move(firstPin));
+    auto duplicate = packet.resourceSink().intern(spriteTexture(91), std::move(duplicatePin));
+
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(duplicate.has_value());
+    EXPECT_EQ(*first, *duplicate);
+    EXPECT_FALSE(firstPin.hasValue());
+    EXPECT_FALSE(duplicatePin.hasValue());
+    EXPECT_EQ(packet.resourceCount(), 1U);
+    EXPECT_EQ(g_releaseCount.load(), 1);
+
+    const Render::FrameResourceTableView view = packet.resourceTableView();
+    ASSERT_EQ(view.size(), 1U);
+    const auto* descriptor =
+        view.resolve(*first, Render::FrameResourceKind::Sprite2DTexture);
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_EQ(descriptor->deviceBindingKey, 91U);
+    EXPECT_EQ(view.resolve(*first, Render::FrameResourceKind::Invalid), nullptr);
+
+    Render::RenderFrame frame{};
+    frame.resources = view;
+    EXPECT_EQ(frame.resources.resolve(*first, Render::FrameResourceKind::Sprite2DTexture),
+              descriptor);
+
+    ASSERT_TRUE(packet.completeSkipped().has_value());
+    EXPECT_EQ(g_releaseCount.load(), 2);
+    EXPECT_TRUE(view.empty());
+    EXPECT_EQ(view.resolve(*first, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+}
+
+TEST(FrameResourceTest, InvalidInputAndCapacityFailureDoNotConsumeCallerPin)
+{
+    g_releaseCount.store(0);
+    Render::RenderFramePacket packet;
+    Render::FramePin beforeBegin = makeCountingPin(1);
+    auto wrongState = packet.intern(spriteTexture(1), std::move(beforeBegin));
+    ASSERT_FALSE(wrongState.has_value());
+    EXPECT_TRUE(beforeBegin.hasValue());
+
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    Render::FramePin invalidDescriptorPin = makeCountingPin(2);
+    auto invalidDescriptor = packet.intern(spriteTexture(0), std::move(invalidDescriptorPin));
+    ASSERT_FALSE(invalidDescriptor.has_value());
+    EXPECT_EQ(invalidDescriptor.error().code, Render::RenderErrorCode::InvalidFrameResource);
+    EXPECT_TRUE(invalidDescriptorPin.hasValue());
+
+    for (Core::u32 index = 0; index < Render::RenderFramePacket::MaxResources; ++index)
+    {
+        ASSERT_TRUE(packet.intern(spriteTexture(index + 1), makeCountingPin(index + 10)).has_value())
+            << index;
+    }
+    Render::FramePin overflowPin = makeCountingPin(1000);
+    auto overflow = packet.intern(spriteTexture(1000), std::move(overflowPin));
+    ASSERT_FALSE(overflow.has_value());
+    EXPECT_EQ(overflow.error().code, Render::RenderErrorCode::FrameResourceCapacityExceeded);
+    EXPECT_TRUE(overflowPin.hasValue());
+
+    Render::FramePin duplicatePin = makeCountingPin(1001);
+    auto duplicate = packet.intern(spriteTexture(1), std::move(duplicatePin));
+    ASSERT_TRUE(duplicate.has_value());
+    EXPECT_FALSE(duplicatePin.hasValue());
+    EXPECT_EQ(packet.resourceCount(), Render::RenderFramePacket::MaxResources);
+
+    beforeBegin.release();
+    invalidDescriptorPin.release();
+    overflowPin.release();
+    ASSERT_TRUE(packet.completeSkipped().has_value());
+    EXPECT_EQ(g_releaseCount.load(), static_cast<int>(Render::RenderFramePacket::MaxResources + 4));
+}
+
+TEST(FrameResourceTest, OwnerGenerationAndKindValidationFailClosed)
+{
+    Render::RenderFramePacket firstPacket;
+    Render::RenderFramePacket secondPacket;
+    ASSERT_TRUE(firstPacket.beginFrame(5).has_value());
+    ASSERT_TRUE(secondPacket.beginFrame(5).has_value());
+    auto firstRef = firstPacket.intern(spriteTexture(11), makeCountingPin(1));
+    auto secondRef = secondPacket.intern(spriteTexture(22), makeCountingPin(2));
+    ASSERT_TRUE(firstRef.has_value());
+    ASSERT_TRUE(secondRef.has_value());
+
+    const auto firstView = firstPacket.resourceTableView();
+    EXPECT_NE(firstView.resolve(*firstRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    EXPECT_EQ(firstView.resolve(*secondRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    EXPECT_EQ(firstView.resolve(*firstRef, Render::FrameResourceKind::Invalid), nullptr);
+
+    ASSERT_TRUE(firstPacket.beginFrame(5).has_value());
+    auto replacementRef = firstPacket.intern(spriteTexture(33), makeCountingPin(3));
+    ASSERT_TRUE(replacementRef.has_value());
+    const auto replacementView = firstPacket.resourceTableView();
+    EXPECT_TRUE(firstView.empty());
+    EXPECT_EQ(firstView.resolve(*replacementRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    EXPECT_EQ(replacementView.resolve(*firstRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    const auto* replacement =
+        replacementView.resolve(*replacementRef, Render::FrameResourceKind::Sprite2DTexture);
+    ASSERT_NE(replacement, nullptr);
+    EXPECT_EQ(replacement->deviceBindingKey, 33U);
+
+    ASSERT_TRUE(firstPacket.completeSkipped().has_value());
+    ASSERT_TRUE(secondPacket.completeSkipped().has_value());
+}
+
+TEST(FrameResourceTest, ResourcePinsReleaseExactlyOnceForEveryPacketClosure)
+{
+    g_releaseCount.store(0);
+    Render::RenderFramePacket packet;
+    Render::CpuSubmissionCompletionLedger ledger;
+
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    ASSERT_TRUE(packet.intern(spriteTexture(1), makeCountingPin(1)).has_value());
+    auto ticket = ledger.beginSubmitted(1);
+    ASSERT_TRUE(ticket.has_value());
+    ASSERT_TRUE(packet.attachSubmission(ledger, std::move(*ticket)).has_value());
+    ASSERT_TRUE(packet.complete().has_value());
+    ASSERT_TRUE(packet.complete().has_value());
+    EXPECT_EQ(g_releaseCount.load(), 1);
+
+    ASSERT_TRUE(packet.beginFrame(2).has_value());
+    ASSERT_TRUE(packet.intern(spriteTexture(2), makeCountingPin(2)).has_value());
+    ASSERT_TRUE(packet.completeSkipped().has_value());
+    ASSERT_TRUE(packet.completeSkipped().has_value());
+    EXPECT_EQ(g_releaseCount.load(), 2);
+
+    ASSERT_TRUE(packet.beginFrame(3).has_value());
+    ASSERT_TRUE(packet.intern(spriteTexture(3), makeCountingPin(3)).has_value());
+    ASSERT_TRUE(packet.abandon().has_value());
+    ASSERT_TRUE(packet.abandon().has_value());
+    EXPECT_EQ(g_releaseCount.load(), 3);
+
+    ASSERT_TRUE(packet.beginFrame(4).has_value());
+    ASSERT_TRUE(packet.intern(spriteTexture(4), makeCountingPin(4)).has_value());
+    ASSERT_TRUE(packet.beginFrame(5).has_value());
+    EXPECT_EQ(g_releaseCount.load(), 4);
+    ASSERT_TRUE(packet.completeSkipped().has_value());
+}
+
+TEST(FrameResourceTest, CompleteAbandonAndDestructorInvalidateViewsAndReleaseExactlyOnce)
+{
+    g_releaseCount.store(0);
+    Render::CpuSubmissionCompletionLedger ledger;
+
+    Render::FrameResourceTableView completedView;
+    {
+        Render::RenderFramePacket packet;
+        ASSERT_TRUE(packet.beginFrame(1).has_value());
+        auto ref = packet.intern(spriteTexture(1), makeCountingPin(1));
+        ASSERT_TRUE(ref.has_value());
+        completedView = packet.resourceTableView();
+        auto ticket = ledger.beginSubmitted(1);
+        ASSERT_TRUE(ticket.has_value());
+        ASSERT_TRUE(packet.attachSubmission(ledger, std::move(*ticket)).has_value());
+        ASSERT_TRUE(packet.complete().has_value());
+        EXPECT_TRUE(completedView.empty());
+        EXPECT_EQ(completedView.resolve(*ref, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    }
+    EXPECT_EQ(g_releaseCount.load(), 1);
+
+    Render::FrameResourceTableView abandonedView;
+    {
+        Render::RenderFramePacket packet;
+        ASSERT_TRUE(packet.beginFrame(2).has_value());
+        auto ref = packet.intern(spriteTexture(2), makeCountingPin(2));
+        ASSERT_TRUE(ref.has_value());
+        abandonedView = packet.resourceTableView();
+        ASSERT_TRUE(packet.abandon().has_value());
+        EXPECT_TRUE(abandonedView.empty());
+        EXPECT_EQ(abandonedView.resolve(*ref, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    }
+    EXPECT_EQ(g_releaseCount.load(), 2);
+
+    {
+        Render::RenderFramePacket packet;
+        ASSERT_TRUE(packet.beginFrame(3).has_value());
+        ASSERT_TRUE(packet.intern(spriteTexture(3), makeCountingPin(3)).has_value());
+    }
+    EXPECT_EQ(g_releaseCount.load(), 3);
+}
+
+TEST(FrameResourceTest, ReconstructedPacketAtSameAddressCannotResolveOldRef)
+{
+    alignas(Render::RenderFramePacket)
+        std::byte storage[sizeof(Render::RenderFramePacket)];
+
+    auto* firstPacket = std::construct_at(reinterpret_cast<Render::RenderFramePacket*>(storage));
+    ASSERT_TRUE(firstPacket->beginFrame(1).has_value());
+    auto oldRef = firstPacket->intern(spriteTexture(7), makeCountingPin(1));
+    ASSERT_TRUE(oldRef.has_value());
+    std::destroy_at(firstPacket);
+
+    auto* secondPacket = std::construct_at(reinterpret_cast<Render::RenderFramePacket*>(storage));
+    ASSERT_TRUE(secondPacket->beginFrame(1).has_value());
+    auto newRef = secondPacket->intern(spriteTexture(7), makeCountingPin(2));
+    ASSERT_TRUE(newRef.has_value());
+    const auto newView = secondPacket->resourceTableView();
+    EXPECT_EQ(newView.resolve(*oldRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    EXPECT_NE(newView.resolve(*newRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    std::destroy_at(secondPacket);
+}
+
+TEST(FrameResourceTest, OrdinaryAndResourcePinCapacitiesAreIndependent)
+{
+    g_releaseCount.store(0);
+    Render::RenderFramePacket ordinaryFull;
+    ASSERT_TRUE(ordinaryFull.beginFrame(1).has_value());
+    for (Core::u32 index = 0; index < Render::RenderFramePacket::MaxPins; ++index)
+    {
+        ASSERT_TRUE(ordinaryFull.add(Render::FramePinKind::AssetLease, makeCountingPin(index)).has_value());
+    }
+    ASSERT_TRUE(ordinaryFull.intern(spriteTexture(1), makeCountingPin(100)).has_value());
+    EXPECT_EQ(ordinaryFull.pinCount(), Render::RenderFramePacket::MaxPins);
+    EXPECT_EQ(ordinaryFull.resourceCount(), 1U);
+    ASSERT_TRUE(ordinaryFull.completeSkipped().has_value());
+
+    Render::RenderFramePacket resourcesFull;
+    ASSERT_TRUE(resourcesFull.beginFrame(2).has_value());
+    for (Core::u32 index = 0; index < Render::RenderFramePacket::MaxResources; ++index)
+    {
+        ASSERT_TRUE(resourcesFull.intern(spriteTexture(index + 1), makeCountingPin(index)).has_value());
+    }
+    ASSERT_TRUE(resourcesFull.add(Render::FramePinKind::AssetLease, makeCountingPin(200)).has_value());
+    EXPECT_EQ(resourcesFull.resourceCount(), Render::RenderFramePacket::MaxResources);
+    EXPECT_EQ(resourcesFull.pinCount(), 1U);
+    ASSERT_TRUE(resourcesFull.completeSkipped().has_value());
+
+    EXPECT_EQ(g_releaseCount.load(),
+              static_cast<int>(Render::RenderFramePacket::MaxPins
+                               + Render::RenderFramePacket::MaxResources + 2));
 }
 
 TEST(CpuSubmissionCompletionLedgerTest, BeginCompleteBalancesInflight)

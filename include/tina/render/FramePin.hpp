@@ -90,7 +90,7 @@ private:
 class FramePinSink {
 public:
     virtual ~FramePinSink() noexcept = default;
-    [[nodiscard]] virtual Core::Status add(FramePinKind kind, FramePin pin) = 0;
+    [[nodiscard]] virtual Core::Status add(FramePinKind kind, FramePin&& pin) = 0;
     [[nodiscard]] virtual Core::u32 pinCount() const noexcept = 0;
 };
 

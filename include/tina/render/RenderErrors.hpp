@@ -54,5 +54,8 @@ inline constexpr Core::ErrorCode GpuRetirementDrainFailed{Core::ErrorDomain::Ren
 inline constexpr Core::ErrorCode SpriteBindingKeyExhausted{Core::ErrorDomain::Render, 46};
 inline constexpr Core::ErrorCode Mesh3DBindingKeyExhausted{Core::ErrorDomain::Render, 47};
 inline constexpr Core::ErrorCode Mesh3DMaterialBindingKeyExhausted{Core::ErrorDomain::Render, 48};
+inline constexpr Core::ErrorCode InvalidFrameResource{Core::ErrorDomain::Render, 49};
+inline constexpr Core::ErrorCode FrameResourceCapacityExceeded{Core::ErrorDomain::Render, 50};
+inline constexpr Core::ErrorCode FrameResourceIdentityExhausted{Core::ErrorDomain::Render, 51};
 
 } // namespace Tina::Render::RenderErrorCode

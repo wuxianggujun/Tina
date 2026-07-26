@@ -20,6 +20,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace Tina::Asset {
@@ -130,6 +131,11 @@ class AssetSystem final {
     // drain releases the lease exactly once.
     [[nodiscard]] Core::Status retireTexture2D(Render::IRenderDevice& device, AssetHandle handle,
                                                Render::GpuTextureId texture);
+    // Transfers an existing Texture2D lease and GPU owner only after the backend
+    // accepts retirement. Every failure before that commit preserves both caller
+    // values and leaves the asset and retirement ledger retryable. Owner-thread only.
+    [[nodiscard]] Core::Status retireTexture2D(Render::IRenderDevice& device, AssetLease& lease,
+                                               Render::GpuTextureId& texture);
     [[nodiscard]] Core::Status retireStaticMesh(Render::IRenderDevice& device, AssetHandle handle,
                                                 Render::GpuMeshId mesh);
     [[nodiscard]] Core::Status drainGpuRetirements() noexcept;
@@ -180,6 +186,7 @@ class AssetSystem final {
     std::unique_ptr<AssetGpuUploadCoordinator> m_gpuUpload;
     AssetRetirementLedger m_retirement{};
     Render::IRenderDevice* m_gpuRetirementDevice = nullptr;
+    std::thread::id m_ownerThread{};
     bool m_autoGpuUpload = true;
     bool m_requireTyped2dPayloads = false;
     CatalogSnapshot m_catalog{};

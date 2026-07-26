@@ -164,9 +164,10 @@ GPU resource 与注册提交位。统一 `FrameResourceRef` 和库级 AssetSyste
 - glTF Cooker 读取完整 `pbrMetallicRoughness` 与可选 `normalTexture`；外部相对 URI 强制 root
   containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；
 - Scene component 已保存 mesh/material weak `AssetHandle`；RenderScene/RenderDevice 仍消费 extraction 期由
-  `Mesh3DBindingRegistry` 解析的 backend-neutral key。registry 不输出 owning `FrameResourceRef`；
-- Material v2 只保存 texture role flags 与 required Texture2D dependency 集，不保存 role-tagged AssetId；registry
-  能验证每个声明 role 有 live Handle/GPU texture 且 dependency 集完整，但不能独立证明排序/去重后的 ID role；
+  `Mesh3DBindingRegistry` 解析的 backend-neutral key。packet-local `FrameResourceRef` table 基础设施已落地，
+  但 registry 尚未输出对应 ref；
+- Material v2 由 baseColor/MR/normal flags 和同顺序的 required Texture2D dependency stream 表达 role；writer
+  要求 AssetId 严格递增且唯一，拒绝乱序或多个 role 共享同一 ID，registry 因而可精确拒绝 role swap；
 - EngineHost 已有 `RenderFramePacket` + FramePin + present-return CPU completion；它不代表 GPU 退役；
   Texture/Mesh 使用独立 readback marker；
 - 无通用 pass scheduler、pipeline cache 产品契约或 worker extraction；`tina_bench` schema v1 已落地

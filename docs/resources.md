@@ -55,7 +55,8 @@ item 解析。TileMap emit 保存 weak Tileset Handle，不缓存 key/resolver�
 非空可见集合每次调用只解析一次，失败清空输出。3D Prefab 先把 AssetId 解析为 weak StaticMesh/Material
 handle；Scene extraction 再通过两个 kind-specific resolver 取得 backend key。产品 `AssetStore` 覆盖
 World/extraction 生命周期；A6 的 `Mesh3DBindingRegistry` 原子注册 mesh/material GPU bundle，并由 resolver
-fail closed 解析。统一 retirement ownership 与 `FrameResourceRef` 后置。
+fail closed 解析。N16.1 已落地 packet-local `FrameResourceRef`/资源表基础设施；Scene item 迁移与统一
+retirement owner 仍后置。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
@@ -133,9 +134,13 @@ UnloadPending -- last lease released --> generation erased / stale Handle
 
 可选 `AssetGpuUploadCoordinator` 把 Cooked payload bytes 复制到 `NullUploadLedger`，用于验证预算、ticket、
 ReadyGpu 与 unload/retirement 状态机；`retireOnGpuReady=true` 是 Null staging 路径行为。真实 bgfx texture/
-mesh 产品上传使用 `RenderDevice` typed upload 和 key binding；`AssetSystem::retireTexture2D` /
+mesh 产品上传使用 `RenderDevice` typed upload 和 key binding；handle-based `AssetSystem::retireTexture2D` /
 `retireStaticMesh` 会先 acquire `AssetLease`，把 lease 转入 render completion pin，再立即 logical unload 与
-移除 AssetId lookup。marker 前 Store 保持 `UnloadPending`，callback 后进入 `Released/Unloaded`。
+移除 AssetId lookup。Texture2D 另提供既有 `AssetLease&` + `GpuTextureId&` overload：只有 backend 接受
+retirement 后才消费两个 owner；owner-thread、kind/store/state、PMR payload allocation、ledger 或 backend
+失败都保留输入供重试。marker 前 Store 保持 `UnloadPending`，callback 后进入 `Released/Unloaded`。
+同步 backend 可在 retirement 调用返回前执行 completion；若它释放最后一个 `UnloadPending` Lease，Store
+会当场完成 generation erase，调用方不得再以旧 handle 重复 unload。
 
 RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetSystem::drainGpuRetirements()` 与析构
 执行有界 drain；若 backend 已在普通 present/shutdown 中 exactly-once 释放 pin，AssetSystem 只根据 ledger

@@ -196,8 +196,9 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 - primary framebuffer RGBA8 capture。
 
 `GpuTextureId`/`GpuMeshId` 是 RenderDevice generation handle，不是 AssetHandle。当前 `RenderFrame` 的
-Surface/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。Runtime 使用
-`RenderFramePacket`、`FramePin` 与 submission completion ledger（成功 present 返回后关闭 CPU 借用，见
+Surface/resource table/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。
+`FrameResourceRef` 是 packet-local owner/generation/index token；table resolve 对 cross-packet、stale、越界与
+wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与 submission completion ledger（成功 present 返回后关闭 CPU 借用，见
 `include/tina/render/FramePin.hpp`）。`SubmissionTicket` 不可复制且绑定签发 ledger，packet 取得唯一所有权
 后负责 complete/abandon。它不代表 GPU execution/retirement；Texture2D/StaticMesh 使用独立的
 `retire*` + backend marker，不能把两类 completion 混用。
@@ -296,7 +297,8 @@ borrower 存活时移动，并必须早于它所引用的 `AssetSystem` 析构�
 `AssetLease` 强保活 CPU payload。逻辑 invalidation 不等于物理释放。产品 helper 可把 Cooked Texture2D/
 StaticMesh 上传到 RenderDevice，并建立 backend key binding；`AssetSystem::retireTexture2D` /
 `retireStaticMesh` 把 lease 移入 `FramePin`，成功后弱 lookup 立即失效，backend completion 后才释放 payload。
-失败不消费 pin，Asset 仍保持可用。`drainGpuRetirements()` 用于 owner-thread teardown。
+Texture2D 的既有 `AssetLease&` + `GpuTextureId&` overload 仅在 backend 接受后消费两者；失败完整恢复供
+重试。`drainGpuRetirements()` 用于 owner-thread teardown。
 
 `Sprite2DBindingRegistry::Create(store, device, config)` 必须在借用 Store 与 RenderDevice 的共享 owner
 thread 调用；该线程成为固定容量 registry 的 owner，所有后续操作也必须在同一线程执行。Store、device
@@ -330,7 +332,8 @@ dependency stream 表达 role identity，因此 writer 拒绝乱序或多 role �
 `resolveMesh()` / `resolveMaterial()` 每次按当前 Store state fail closed；Material 任一已注册 texture
 dependency stale 时解析为0。exact handle 即使随后 stale，仍可用于 unbind；backend unbind 失败保留
 registry entry 供重试，成功才删除。registry 不拥有 GPU resource、`AssetLease` 或 retirement record；调用方
-必须先成功 unbind，再 destroy/retire GPU owner。统一 `FrameResourceRef` 与 retirement owner 尚未落地。
+必须先成功 unbind，再 destroy/retire GPU owner。packet-local `FrameResourceRef` 基础设施已落地，但 Scene
+item 与 registry/retirement owner 尚未统一。
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
