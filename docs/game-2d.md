@@ -19,8 +19,8 @@ Game2DState
 
 - `tina_scene` 的 World Sprite 与独立 `ParticleSystem2D`/`Trail2D` 只存 weak Sprite `AssetHandle`，
   extraction 显式借用共享 resolver 后写 backend-neutral key；
-- TileMap 当前仍直接写 backend-neutral sprite key，但产品 key 由 `Sprite2DBindingRegistry` 生成，
-  不再由游戏手写；
+- TileMap emit 保存 weak Tileset `AssetHandle`，每次非空可见 emit 借用 resolver，通过
+  `Sprite2DBindingRegistry` 解析 backend-neutral key，不保存产品 key；
 - TileMap、角色控制、选择高亮、Physics sync 和产品规则留在 Asset/产品 State；
 - Render backend 不理解 tile/cell/gameplay，也不接收 AssetHandle；
 - Box2D、bgfx、FreeType、miniaudio 均位于可选私有 adapter。
@@ -80,8 +80,8 @@ Tileset 唯一 required Texture2D dependency 取得当前 key。hidden/off-camer
 清空输出并返回 `SpriteBindingNotFound`。selection highlight 同样即时解析，不跨帧保存 key。registry 借用
 AssetStore 与 RenderDevice，不拥有 GPU texture、AssetLease 或 retirement；State RAII teardown 必须先成功
 unbind 两项 binding，再 destroy texture。A4 已完成2D持久 binding key 清除，A5 已完成 3D
-component/Prefab Handle 化；engine-owned 3D registry 与 `FrameResourceRef` 尚未覆盖，因此
-`ASSET-HANDLE-SCENE` 总项仍为 Partial。
+component/Prefab Handle 化，A6 已补 engine-provided、State-owned 3D registry；统一 retirement ownership 与
+`FrameResourceRef` 尚未覆盖，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
 Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用不同纹理，不再受历史 fixture key 1 限制。
 
 ## Sprite 动画
@@ -238,9 +238,10 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=14`（含2个 cooked chunk）、`texturesUploaded=2`；
-- `evidenceSchema=11`，`spriteBindingTextures=2`、`spriteBindingsReleased=2`、
+- `evidenceSchema=12`，`spriteBindingTextures=2`、`spriteBindingsReleased=2`、
   `spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`，并且
-  `particleSpriteBindingResolverHits>0`、`trailSpriteBindingResolverHits>0`；这些字段都进入 evidence hash；
+  `tileMapSpriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
+  `trailSpriteBindingResolverHits>0`；这些字段都进入 evidence hash；
 - `tileMapStreamRequests=2`、`tileMapStreamCommitted=2`、`tileMapStreamResident=2`，且每个 frame 都推进
   demand/pump/commit；
 - `objectLayerConsumed=true`、`objectLayerObjects=2`，稳定 object `101/102` 已被产品逻辑消费；

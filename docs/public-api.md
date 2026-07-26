@@ -27,7 +27,7 @@ consumer 门禁。调用方按需链接现有模块 target；正式 SDK packagin
 | `Tina::DesktopBootstrap` | 普通 Windows/Linux Desktop 组合入口 |
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、standalone Particle/Trail |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
-| `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload |
+| `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained UI、Widget、text、semantics |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
 | `Tina::Physics2D` | optional Box2D-backed Tina API |
@@ -188,9 +188,10 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 
 - RGBA8 Texture2D create/destroy、Sprite2D 非0 key binding（invalid `GpuTextureId` 清除 binding），以及
   device-instance `createSprite2DTextureBinding()` allocator；
-- P3N3UV2/U16 StaticMesh create/destroy、Mesh3D key binding；
-- material key → base-color / metallic-roughness / normal texture binding；
-- material key → metallic/roughness factors；
+- P3N3UV2/U16 StaticMesh create/destroy、Mesh3D key binding 与独立 device-instance
+  `createMesh3DBinding()` allocator；
+- 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
+  `set/clearMesh3DMaterialBinding()` texture/factor bundle；细粒度 material setter 是低层 direct SPI；
 - experimental Opaque3D `Mesh3DLightingDesc`（同步提交0..4 directional lights + 非负 ambient）；
 - primary framebuffer RGBA8 capture。
 
@@ -317,12 +318,26 @@ unbind。它不是 Scene owner；通用 `AssetBindingResolver` 位于窄 `AssetT
 allocator 使用同一个 device namespace。allocator-managed registry 管理期间不得混用 direct caller key；
 device 不会为 direct setter 自动保留或跳过该 key。
 
+`Mesh3DBindingRegistry::Create(store, device, config)` 同样是 fixed-capacity、owner-thread owner，借用
+`AssetStore`、`IRenderDevice` 与可选 PMR。mesh/material 使用独立 device-instance key namespace，两类 key
+都从2开始并分别保留内置 key 1；成功绑定后才消费，解绑后不复用，共享同一 device
+的多个 registry 仍获得 distinct key。`registerMeshBinding()` 只接受 live StaticMesh Handle 与 GPU mesh；
+`registerMaterialBinding()` 只接受 live Material Handle，并验证调用方提供的 live texture handle/GPU texture
+按 baseColor/MR/normal 顺序与 required Texture2D dependency 精确对应。Material v2 依靠 strictly increasing
+dependency stream 表达 role identity，因此 writer 拒绝乱序或多 role 共享同一 Texture2D AssetId。Material 通过单次
+`Mesh3DMaterialBindingDesc` 原子发布三张纹理与 factors，失败不留下半份 backend 状态。
+
+`resolveMesh()` / `resolveMaterial()` 每次按当前 Store state fail closed；Material 任一已注册 texture
+dependency stale 时解析为0。exact handle 即使随后 stale，仍可用于 unbind；backend unbind 失败保留
+registry entry 供重试，成功才删除。registry 不拥有 GPU resource、`AssetLease` 或 retirement record；调用方
+必须先成功 unbind，再 destroy/retire GPU owner。统一 `FrameResourceRef` 与 retirement owner 尚未落地。
+
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
 metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtime Opaque3D 为 experimental
-MR hybrid（`setMesh3DMaterialTextureBinding` + 可选 `setMesh3DMaterialMetallicRoughnessTextureBinding`；
-`setMesh3DMaterialFactors` + 可选 normal 贴图 + 有界0..4 directional lights）。完整 light component/IBL/shadow
-尚未完成。
+MR hybrid；engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors，
+direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional lights。完整 light component/IBL/
+shadow 尚未完成。
 
 ## Audio 与 Physics
 

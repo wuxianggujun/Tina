@@ -52,5 +52,7 @@ inline constexpr Core::ErrorCode InvalidMesh3DLighting{Core::ErrorDomain::Render
 inline constexpr Core::ErrorCode GpuRetirementUnsupported{Core::ErrorDomain::Render, 44};
 inline constexpr Core::ErrorCode GpuRetirementDrainFailed{Core::ErrorDomain::Render, 45};
 inline constexpr Core::ErrorCode SpriteBindingKeyExhausted{Core::ErrorDomain::Render, 46};
+inline constexpr Core::ErrorCode Mesh3DBindingKeyExhausted{Core::ErrorDomain::Render, 47};
+inline constexpr Core::ErrorCode Mesh3DMaterialBindingKeyExhausted{Core::ErrorDomain::Render, 48};
 
 } // namespace Tina::Render::RenderErrorCode

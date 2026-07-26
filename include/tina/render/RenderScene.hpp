@@ -131,8 +131,8 @@ struct RenderPerspectiveCameraInput final {
     RenderNormalizedViewport normalizedViewport{};
 };
 
-// meshKey/materialKey are backend-neutral bind table ids (setMesh3DBinding /
-// setMesh3DMaterialTextureBinding). AssetHandle-on-component resolve remains Deferred.
+// meshKey/materialKey are phase-local backend-neutral bind table ids produced by
+// Scene extraction from weak AssetHandles; RenderScene never owns those handles.
 struct RenderMesh3DInput final {
     u32 meshKey = 0;
     u32 materialKey = 0;

@@ -111,8 +111,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 - `SpriteAnimator2D` 的空 handle frame 仍为 `InvalidAnimation`；
 - `tina_sample_2d` 的 World crate/character 组件来自 Catalog Sprite handle，resolver 每次验证 Store/kind/
   binding 后映射 key。A1 本身未证明 registry；A2 已补该证据，A3 已完成 FX Handle 化，A4 已完成
-  TileMap Tileset Handle 化；A5 已完成 3D component/Prefab Handle 化，engine-owned 3D registry 与
-  `FrameResourceRef` 仍未迁移。
+  TileMap Tileset Handle 化；A5 已完成 3D component/Prefab Handle 化，A6 已补 engine-provided、State-owned 3D registry；
+  统一 retirement ownership 与 `FrameResourceRef` 仍未迁移。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -149,8 +149,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 ```
 
 A2 保留 A1 resolver ABI；A3 随后完成 Particle/Trail Handle 化，A4 完成 TileMap Tileset Handle 化，A5
-再完成 3D Mesh/Material component Handle 化。engine-owned 3D registry 与 `FrameResourceRef` 仍未迁移，
-不能据此把 `ASSET-HANDLE-SCENE` 总项标为 Done。
+完成 3D Mesh/Material component Handle 化，A6 再补 engine-provided、State-owned 3D registry。统一 retirement ownership 与
+`FrameResourceRef` 仍未迁移，不能据此把 `ASSET-HANDLE-SCENE` 总项标为 Done。
 
 ## Particle/Trail Sprite AssetHandle A3
 
@@ -206,7 +206,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2d
   -SkipConfigure -SkipBuild
 ```
 
-A4 本身不迁移 3D；A5 随后完成 component/Prefab Handle 化，但不实现 engine-owned Mesh/Material
+A4 本身不迁移 3D；A5 随后完成 component/Prefab Handle 化，但不实现 engine-provided、State-owned Mesh/Material
 registry、统一 retirement ownership 或 `FrameResourceRef`。
 
 ## Mesh/Material AssetHandle A5
@@ -231,8 +231,46 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
 ```
 
-A5 不实现 engine-owned 3D Mesh/Material binding registry、统一 retirement ownership 或
+A5 不实现 engine-provided、State-owned 3D Mesh/Material binding registry、统一 retirement ownership 或
 `FrameResourceRef`，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
+
+## Mesh3D Binding Registry A6
+
+`ASSET-HANDLE-SCENE-3D-A6-BINDINGS` 的模块门禁归属 `tina_asset_tests` 与 Render 测试，产品闭环归属
+3D product smoke：
+
+- `Mesh3DBindingRegistry.hpp` header isolation；Create 分别校验 mesh/material 容量、PMR failure 与
+  owner-thread 约束，稳态 register/resolve/unbind 不再分配 PMR；
+- mesh/material 使用独立 device-instance key namespace；两类 key 都从2开始，分别保留内置 key 1；
+  同 device 多 registry key distinct，bind 成功后才消费，解绑后不复用；
+- mesh 与 material Handle 的 invalid/stale/cross-store/wrong-kind/not-ready、exact duplicate、同 AssetId
+  conflict、容量和 backend rollback 都有失败原子性覆盖；
+- Material 从 Cooked payload 取得 factors，并要求每个启用 role 有 live Texture2D/GPU pair，按
+  baseColor/MR/normal 顺序与 Cooked required Texture2D dependency 精确匹配；三张纹理与
+  factors 单次原子发布，任一 dependency stale 后 resolve fail closed；
+- Material v2 writer 要求最多三个 Texture2D dependency 在 baseColor/MR/normal role 顺序下 AssetId 严格
+  递增且唯一；乱序与多 role 共享同一 AssetId 都返回结构化错误；
+- exact handle stale 后仍可 unbind；backend unbind 失败保留 entry 供重试，仅当资源仍 live 时 resolve 继续
+  有效，stale 资源始终解析为0；成功 unbind 才删除 entry；
+- 产品先 reset World，再逆序 exact unbind；只有 unbind 成功才 destroy 对应 GPU owner，失败保留 owner 供
+  teardown 重试。schema 2 要求 `meshBindingsRegistered=2`、`materialBindingsRegistered=2`、
+  `meshBindingsReleased=2`、`materialBindingsReleased=2`、`meshesDestroyed=2`、`texturesDestroyed=6`、
+  `meshAssetBindingResolverHits=600`、`materialAssetBindingResolverHits=600`、
+  `bindingRegistryReleased=true`、GPU ledger 归零与像素捕获成功。
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_tests tina_render_bgfx_tests tina_asset_format_tests tina_asset_tests tina_sample_3d -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes `
+  --gtest_filter="Mesh3DBindingRegistryTests.*"
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
+```
+
+A6 不拥有 GPU resource、`AssetLease` 或 retirement record。统一 retirement ownership 与
+`FrameResourceRef` 仍是后续切片，因此 `ASSET-HANDLE-SCENE` 总项保持 Partial。
 
 ## 产品样例的证据边界
 
@@ -247,7 +285,7 @@ A5 不实现 engine-owned 3D Mesh/Material binding registry、统一 retirement 
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；schema 12 含 Sprite registry 注册/释放/纹理销毁、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→Prefab/Scene weak Handle→extract-time key resolve→bgfx；evidence schema 1、baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | engine-owned 3D binding registry、统一 FrameResourceRef、完整 PBR/IBL/shadow/light component、跨 GPU golden |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→extract-time key resolve→bgfx；evidence schema 2、原子 baseColor/MR/normal/factors binding、两类 registry 注册/释放、mesh/texture 销毁、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、统一 `FrameResourceRef`/retirement owner、完整 PBR/IBL/shadow/light component、跨 GPU golden |
 
 `tina_sample_2d_tilemap_bgfx` 是 `tina_sample_2d` 的兼容 ALIAS；新脚本使用正式 target 名。
 
@@ -265,7 +303,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 ```
 
 multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct
-mesh/material AssetId、Prefab dependency、AssetId→Handle→extract-time key 与 product meshKey 1/2 binding
+mesh/material AssetId、Prefab dependency、AssetId→Handle→registry-assigned extract-time key 与双 mesh binding
 可验证。Opaque3D 已做
 baseColor/MR/normal 贴图 **采样**、material factors 与有界0..4 directional lights；完整 PBR/IBL/shadow
 仍后置。
@@ -308,9 +346,9 @@ cmake --build --preset windows-vnext-debug --target tina_scene_tests -- /m:2 /v:
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 ```
 
-product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=11`。通用结构化
+product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=12`。通用结构化
 字段包括 `spriteBindingTextures=2`、`spriteBindingsReleased=2`、`spriteBindingTexturesDestroyed=2`、
-`spriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
+`spriteBindingResolverHits>0`、`tileMapSpriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
 `trailSpriteBindingResolverHits>0`、
 `particleCapacity=12`、`particleRandomSeed=1414090305`、`particleEmitted=10`、
 `trailCapacity=8`、`trailSegmentsCreated=3`、`trailBreaks=1`，以及32字符小写 hex

@@ -19,7 +19,7 @@ Catalog package
   -> Asset owning CatalogSnapshot / CookedAssetFile
   -> load plan + AssetSystem
   -> AssetStore Handle/Lease state
-  -> optional Sprite2DBindingRegistry (borrow Store + RenderDevice)
+  -> optional Sprite2DBindingRegistry / Mesh3DBindingRegistry (borrow Store + RenderDevice)
   -> optional TileMapStream chunk residency owner
   -> optional Null UploadTicket coordinator
 ```
@@ -40,7 +40,7 @@ Catalog package
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验 |
 | Package | 确定性 object path、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
 | Cooker | recipe、writer、发布前 typed/package validation、staging 后原子发布；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
-| Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread `Sprite2DBindingRegistry` 校验 Texture Handle，RenderDevice 实例 allocator 事务分配唯一、单调不复用 key |
+| Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，RenderDevice 实例 allocator 事务分配唯一、单调不复用 key |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
@@ -54,7 +54,8 @@ Particle/Trail 不缓存解析结果或 resolver：空 FX 不解析，Trail 每�
 item 解析。TileMap emit 保存 weak Tileset Handle，不缓存 key/resolver；hidden/off-camera/empty 跳过解析，
 非空可见集合每次调用只解析一次，失败清空输出。3D Prefab 先把 AssetId 解析为 weak StaticMesh/Material
 handle；Scene extraction 再通过两个 kind-specific resolver 取得 backend key。产品 `AssetStore` 覆盖
-World/extraction 生命周期；3D engine-owned binding registry 与统一 `FrameResourceRef` 后置。
+World/extraction 生命周期；A6 的 `Mesh3DBindingRegistry` 原子注册 mesh/material GPU bundle，并由 resolver
+fail closed 解析。统一 retirement ownership 与 `FrameResourceRef` 后置。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
@@ -76,6 +77,9 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `AssetLease` 是 move-only 强引用，Lease 存在时逻辑 unload 进入 `UnloadPending`；
 - `Sprite2DBindingRegistry` 是 fixed-capacity owner-thread mapping；只借用 Store/device，不拥有 GPU texture、
   Lease 或 retirement，Texture2D 释放前必须先成功 unbind；
+- `Mesh3DBindingRegistry` 分别维护 StaticMesh/Material 固定容量 mapping；Material v2 writer 要求 required
+  Texture2D dependency 按 baseColor/MR/normal role 顺序保持 AssetId 严格递增且唯一，registry 从 Cooked
+  payload 派生 factors 并逐 role 校验；它只借用 GPU owner，释放前必须 exact unbind；
 - `TileMapStream` 持有 root/tileset lease 与 demanded chunk handle/lease；必须先把 `AssetSystem` 和 stream
   放到最终地址，再创建借用 `stream.map()` 的 collision adapter，且 stream 必须先于 AssetSystem 析构；
 - `UploadTicket` 当前只由 Null ledger 完整实现，用于验证 staging 与逻辑状态；

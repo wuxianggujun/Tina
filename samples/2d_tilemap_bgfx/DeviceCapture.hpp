@@ -123,6 +123,15 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->setMesh3DBinding(meshKey, mesh);
     }
+    [[nodiscard]] Core::Status setMesh3DMaterialBinding(
+        Core::u32 materialKey, const Render::Mesh3DMaterialBindingDesc& desc) noexcept override
+    {
+        return inner_->setMesh3DMaterialBinding(materialKey, desc);
+    }
+    [[nodiscard]] Core::Status clearMesh3DMaterialBinding(Core::u32 materialKey) noexcept override
+    {
+        return inner_->clearMesh3DMaterialBinding(materialKey);
+    }
     [[nodiscard]] Core::Status setMesh3DMaterialTextureBinding(Core::u32 materialKey,
                                                                Render::GpuTextureId texture) noexcept override
     {

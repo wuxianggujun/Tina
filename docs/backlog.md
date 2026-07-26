@@ -40,7 +40,7 @@
 
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
-| ASSET-HANDLE-SCENE | Partial | P1 | A1-A4 已清除2D Scene/FX/TileMap 持久 key；A5 已让 `MeshRenderer3D` 存 weak mesh/material Handle、Prefab 只做 AssetId→Handle，并在 extraction 分别借用 kind-specific resolver。Scene 2D/3D 持久 key 已清除；3D engine-owned binding registry 与 FrameResourceRef 未迁移 | 2D/3D 资源引用与 frame retirement owner 收敛为统一 Handle/FrameResourceRef 路径 |
+| ASSET-HANDLE-SCENE | Partial | P1 | A1-A4 已清除2D Scene/FX/TileMap 持久 key；A5 已让 `MeshRenderer3D`/Prefab 使用 weak mesh/material Handle 与 extract-time resolver；A6 已补 fixed-capacity owner-thread Mesh3D registry、原子 material bundle 与 stale-safe teardown。Scene 2D/3D 持久 key 和产品手写 key 表均已清除 | 2D/3D 资源引用与 frame retirement owner 收敛为统一 `FrameResourceRef` 路径 |
 | RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal；唯一 `setMesh3DLighting` 有界 0..4 directional lights；sample_3d 一次提交3灯 + 自动相机 + Khronos 球体/盒。**待** IBL/shadow、light component/culling、pass scheduling、vertex tangents |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | UI-004 | Deferred | P2 | 通用 Focus Scope、Modal、持久 Pointer Capture | 多 root/state transition 与输入恢复测试通过 |
@@ -57,6 +57,7 @@
 
 | ID | 完成项 | 证据入口 |
 | --- | --- | --- |
+| ASSET-HANDLE-SCENE-3D-A6-BINDINGS | fixed-capacity owner-thread `Mesh3DBindingRegistry` 借用 Store/device/PMR；mesh/material 使用独立 device-instance allocator，成功后才消费且解绑不复用；Material 三张纹理与 factors 原子发布，dependency stale fail closed；exact stale handle 可解绑，失败保留记录重试；3D product schema 2 记录2组注册/释放、2 mesh/6 texture 销毁与 registry 释放 | [资源](resources.md) · [Rendering](rendering.md) · [3D](game-3d.md) · Mesh3DBindingRegistry/Render tests · 3D product smoke |
 | ASSET-HANDLE-SCENE-3D-A5 | `MeshRenderer3D` 保存 copyable weak StaticMesh/Material Handle；visible extraction 分别借用 kind-specific resolver，invalid/stale/wrong-kind/unbound/zero fail closed，hidden 不解析；Prefab 只做 AssetId→Handle 并事务 rollback；3D product evidence schema 1 记录 handle 发布、两类 resolver hits 与 AssetStore active | [Scene](scene-ecs.md) · [3D](game-3d.md) · Scene tests · 3D product smoke |
 | ASSET-HANDLE-SCENE-2D-A4 | `TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与调用期 borrowed `AssetBindingResolver`，不再保存 `spriteKey`；registry 沿 Tileset 唯一 required Texture2D dependency fail closed；hidden/off-camera/empty 不解析，非空可见集合只解析一次，失败清空输出；product-2d schema 12 提供 TileMap resolver hits | [资源](resources.md) · [2D](game-2d.md) · TileChunk/Registry tests · 2D product gate |
 | ASSET-HANDLE-SCENE-2D-A3 | `ParticleSystem2D`/`Trail2D` 保存 copyable weak Sprite `AssetHandle`，显式 extract 借用共享 resolver；空 handle 在 emit/Create 拒绝，资源失效映射为 `UnresolvedSprite`；空 FX 不解析，Trail 每次非空 extract 解析一次、Particle 按 live item 解析；不持 Lease/payload/GPU owner；product-2d schema 11 提供独立 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | [Scene](scene-ecs.md) · [2D](game-2d.md) · Particle/Trail tests · 2D product gate |
@@ -80,7 +81,7 @@
 | RENDER-FENCE | present-return CPU ticket 与 GPU resource retirement 分离；bgfx 用末尾 view 的 blit + `readTexture()` ready frame 作为可证明 completion marker，Texture/Mesh generation 立即失效、native handle 延迟销毁；AssetLease pin、suspend flush、显式 drain 与 shutdown hard drain 已贯通 | [Rendering](rendering.md) · [Resources](resources.md) · [ADR 0016](adr/0016-asset-ownership-and-retirement.md) · BgfxRetirementTimeline/AssetGpuRetirement tests |
 | 2D-SPRITE-BATCH | 任意非0 `spriteKey`；bgfx 按最终渲染顺序建立连续 key batch 并逐 batch 绑定纹理；双纹理 sample 保持透明排序 | [2D](game-2d.md) · BgfxSprite2DGeometryTests |
 | 2D-SPRITE-ANIM | SpriteAnimationClip cooked payload/typed validation/recipe；SpriteAnimator2D Once/Loop/PingPong、暂停、倍速与大 delta；sample 双纹理 `Idle -> Walk -> HitWall` | [2D](game-2d.md) · [资源](resources.md) · SpriteAnimationClipPayloadTests · SpriteAnimator2DTests |
-| 3D-001 | multi-mesh 产品 E2E：双 mesh glTF fixture → cook → 两 StaticMesh upload/bind（meshKey 1/2）→ Prefab 每节点 resolve → extract/draw → ledger 归零；`tina_sample_3d` 300 帧 `multiMesh=true` | [3D](game-3d.md) |
+| 3D-001 | multi-mesh 产品 E2E：双 mesh glTF fixture → cook → 两 StaticMesh upload/bind（当时 meshKey 1/2，N15 已替换为 registry allocator）→ Prefab 每节点 resolve → extract/draw → ledger 归零；`tina_sample_3d` 300 帧 `multiMesh=true` | [3D](game-3d.md) |
 | TASK-001 | Desktop `resolveDesktopTaskSystemParams`：交互默认 `max(1, hw-1)` CPU worker；`createBoundedTaskSystem(cpu=0)` IO-only 仍 NotSupported；BoundedTaskSystem 单测覆盖 | [Task](task-system.md) · ADR 0017 |
 | CLEAN-001 | 删除 vcpkg `legacy` feature 及 EnTT/GLM/spdlog/utfcpp 死依赖声明；preset 无引用 | [dependencies](dependencies.md) |
 | CLEAN-002 | 删除无消费者 `StringUtils.hpp`（EASTL/utfcpp）与 Clock/FrameTimer/FixedStepTicker compatibility；`SteadyMonotonicClock` 实现迁到 `MonotonicClock.cpp` | [core](core.md) |

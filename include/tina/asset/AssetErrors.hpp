@@ -27,5 +27,8 @@ inline constexpr Core::ErrorCode SpriteBindingCapacityExceeded{Core::ErrorDomain
 inline constexpr Core::ErrorCode SpriteBindingKeyExhausted{Core::ErrorDomain::Asset, 31};
 inline constexpr Core::ErrorCode SpriteBindingConflict{Core::ErrorDomain::Asset, 32};
 inline constexpr Core::ErrorCode SpriteBindingNotFound{Core::ErrorDomain::Asset, 33};
+inline constexpr Core::ErrorCode Mesh3DBindingCapacityExceeded{Core::ErrorDomain::Asset, 34};
+inline constexpr Core::ErrorCode Mesh3DBindingConflict{Core::ErrorDomain::Asset, 35};
+inline constexpr Core::ErrorCode Mesh3DBindingNotFound{Core::ErrorDomain::Asset, 36};
 
 } // namespace Tina::Asset::AssetErrorCode

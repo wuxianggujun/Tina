@@ -76,15 +76,16 @@ OS/GLFW events
 ```text
 source -> Cooker -> Cooked Catalog -> request/load -> Handle/Lease
        -> typed decode -> upload -> ReadyGpu
-       -> Sprite2DBindingRegistry -> RenderDevice key allocator -> frame key use
+       -> Sprite2D/Mesh3D BindingRegistry -> RenderDevice key allocator -> frame key use
        -> unbind -> GPU retirement
 ```
 
 `AssetId` 表示稳定逻辑身份，`ContentHash` 表示内容；二者不可混用。Handle 是弱查询，Lease 负责跨
-Task/Render/Audio 生命周期保活。Sprite2D registry 固定容量并由 owner thread 串行访问，只借用 Store 与
-RenderDevice；它不拥有 GPU/Lease/retirement，State 必须先成功 unbind 再 destroy/retire texture。
-binding key 在单个 RenderDevice 实例的 allocator namespace 内唯一且单调不复用；多个 registry 可安全共享
-device。caller-chosen direct binding 与 allocator 共用 namespace，registry 管理期间不得混用。
+Task/Render/Audio 生命周期保活。Sprite2D/Mesh3D registry 固定容量并由 owner thread 串行访问，只借用
+Store 与 RenderDevice；它们不拥有 GPU/Lease/retirement，State 必须先成功 unbind 再 destroy/retire GPU
+resource。binding key 在单个 RenderDevice 实例的同类 allocator namespace 内唯一且单调不复用；多个
+registry 可安全共享 device。Mesh/Material namespace 相互独立，Material 三张纹理与 factors 原子发布；
+caller-chosen direct binding 与同类 allocator 共用 namespace，registry 管理期间不得混用。
 
 ### UI 与渲染
 
@@ -101,7 +102,7 @@ UI 不调用 bgfx。Render 不读取 UI 节点对象，只同步消费当前 sub
 | 产品面 | 已有 | 仍缺 |
 | --- | --- | --- |
 | 2D | Catalog TileMap v3 stream root + deferred TileMapChunk、固定容量 Camera/layer demand/cancel/unload、retain-window demand-recency LRU、resident generation dirty cache；稳定 layer/object ID、对象 101/102 消费、角色/碰撞、Physics2D Box/Circle/Capsule + sensor + Distance joint、SpriteAnimationClip/Animator；World Sprite、standalone Particle/Trail 与 TileMap emit 保存 weak AssetHandle 并借用共享 resolver；owner-thread fixed-capacity Sprite binding registry；advanced input、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | 统一 FrameResourceRef、TileMap 优先级 IO/editor/自动 gameplay 生成/旧 schema migration、完整 FX asset/editor/GPU simulation、更多 shape/joint、2D lighting/navigation |
-| 3D | multi-mesh/multi-prim SPLIT cook、Resources-owned AssetStore、Prefab/Scene weak Mesh/Material Handle、extract-time key resolve、upload/bind、baseColor/MR/normal 采样、material factors、单一有界0..4 directional-light 提交、URI 安全、Texture/Mesh retirement marker | engine-owned 3D binding registry、统一 FrameResourceRef、完整 PBR/IBL/shadow、light component/culling、通用 pass system |
+| 3D | multi-mesh/multi-prim SPLIT cook、Resources-owned AssetStore、Prefab/Scene weak Mesh/Material Handle、engine-provided/State-owned fixed-capacity Mesh3D registry、extract-time key resolve、原子 material bundle、baseColor/MR/normal 采样、material factors、单一有界0..4 directional-light 提交、URI 安全、Texture/Mesh retirement marker | 统一 FrameResourceRef/retirement owner、完整 PBR/IBL/shadow、light component/culling、通用 pass system |
 | UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、控件集；Windows UIA + HWND 桥接首切片 | Focus Scope、Modal/Capture、多行/复杂 shaping、虚拟化、Narrator 金标/AT-SPI |
 | Runtime | State 栈/commands、四相位阻断、`blocksGameplayInputBelow` 空 snapshot、FramePin/CPU ledger、固定步长、bounded Task shutdown + Host-enforced TaskSystem deadline | 通用 GPU submission fence、多 World、Runtime 内置 Asset/World |
 | 性能 | `tina_bench` schema v1 + provisional 结论 | 固定门禁机 hard gate、多进程 MAD、更多 workload |

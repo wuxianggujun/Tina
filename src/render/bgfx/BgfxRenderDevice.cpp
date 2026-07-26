@@ -35,6 +35,7 @@
 #include <mutex>
 #include <new>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 #include <type_traits>
@@ -1075,10 +1076,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 drainRetirementsWithMarkers();
             }
             mesh3DBindings_.clear();
-            mesh3DMaterialTextureBindings_.clear();
-            mesh3DMaterialMetallicRoughnessTextureBindings_.clear();
-            mesh3DMaterialNormalTextureBindings_.clear();
-            mesh3DMaterialFactors_.clear();
+            mesh3DMaterialBindings_.clear();
             for (MeshSlot& slot : meshes_)
             {
                 if (slot.live || slot.retirementPhase != RetirementPhase::None)
@@ -1180,10 +1178,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
-            mesh3DMaterialTextureBindings_.clear();
-            mesh3DMaterialMetallicRoughnessTextureBindings_.clear();
-            mesh3DMaterialNormalTextureBindings_.clear();
-            mesh3DMaterialFactors_.clear();
+            mesh3DMaterialBindings_.clear();
             if (bgfx::isValid(sprite2DProgram_))
             {
                 bgfx::destroy(sprite2DProgram_);
@@ -1628,11 +1623,15 @@ class BgfxRenderDevice final : public IRenderDevice {
                 continue;
             }
 
+            const auto materialBinding = mesh3DMaterialBindings_.find(batch.materialKey);
+            const Mesh3DMaterialBindingDesc binding = materialBinding == mesh3DMaterialBindings_.end()
+                                                          ? Mesh3DMaterialBindingDesc{}
+                                                          : materialBinding->second;
+
             bgfx::TextureHandle materialTexture = opaque3DDefaultTexture_;
-            if (const auto matBinding = mesh3DMaterialTextureBindings_.find(batch.materialKey);
-                matBinding != mesh3DMaterialTextureBindings_.end())
+            if (binding.baseColorTexture)
             {
-                const GpuTextureId id = matBinding->second;
+                const GpuTextureId id = binding.baseColorTexture;
                 if (id.index < textures_.size())
                 {
                     const TextureSlot& slot = textures_[id.index];
@@ -1645,11 +1644,9 @@ class BgfxRenderDevice final : public IRenderDevice {
 
             bgfx::TextureHandle mrTexture = opaque3DDefaultMrTexture_;
             float mrMapBound = 0.0F;
-            if (const auto mrBinding =
-                    mesh3DMaterialMetallicRoughnessTextureBindings_.find(batch.materialKey);
-                mrBinding != mesh3DMaterialMetallicRoughnessTextureBindings_.end())
+            if (binding.metallicRoughnessTexture)
             {
-                const GpuTextureId id = mrBinding->second;
+                const GpuTextureId id = binding.metallicRoughnessTexture;
                 if (id.index < textures_.size())
                 {
                     const TextureSlot& slot = textures_[id.index];
@@ -1663,10 +1660,9 @@ class BgfxRenderDevice final : public IRenderDevice {
 
             bgfx::TextureHandle normalTexture = opaque3DDefaultNormalTexture_;
             float normalMapBound = 0.0F;
-            if (const auto normalBinding = mesh3DMaterialNormalTextureBindings_.find(batch.materialKey);
-                normalBinding != mesh3DMaterialNormalTextureBindings_.end())
+            if (binding.normalTexture)
             {
-                const GpuTextureId id = normalBinding->second;
+                const GpuTextureId id = binding.normalTexture;
                 if (id.index < textures_.size())
                 {
                     const TextureSlot& slot = textures_[id.index];
@@ -1678,17 +1674,9 @@ class BgfxRenderDevice final : public IRenderDevice {
                 }
             }
 
-            // Factors from setMesh3DMaterialFactors (Cooked Material v2); defaults metallic=0, roughness=1.
-            float metallic = 0.0F;
-            float roughness = 1.0F;
-            if (const auto factors = mesh3DMaterialFactors_.find(batch.materialKey);
-                factors != mesh3DMaterialFactors_.end())
-            {
-                metallic = factors->second.metallic;
-                roughness = factors->second.roughness;
-            }
             // ambient from setMesh3DLighting; w = MR map bound flag.
-            const std::array<float, 4> mrParams{metallic, roughness, mesh3DAmbientScale_, mrMapBound};
+            const std::array<float, 4> mrParams{
+                binding.metallicFactor, binding.roughnessFactor, mesh3DAmbientScale_, mrMapBound};
             const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
 
             bgfx::setVertexBuffer(0, vb);
@@ -1872,39 +1860,20 @@ class BgfxRenderDevice final : public IRenderDevice {
                 ++it;
             }
         }
-        for (auto it = mesh3DMaterialTextureBindings_.begin(); it != mesh3DMaterialTextureBindings_.end();)
+        for (auto& entry : mesh3DMaterialBindings_)
         {
-            if (it->second == texture)
+            Mesh3DMaterialBindingDesc& binding = entry.second;
+            if (binding.baseColorTexture == texture)
             {
-                it = mesh3DMaterialTextureBindings_.erase(it);
+                binding.baseColorTexture = {};
             }
-            else
+            if (binding.metallicRoughnessTexture == texture)
             {
-                ++it;
+                binding.metallicRoughnessTexture = {};
             }
-        }
-        for (auto it = mesh3DMaterialMetallicRoughnessTextureBindings_.begin();
-             it != mesh3DMaterialMetallicRoughnessTextureBindings_.end();)
-        {
-            if (it->second == texture)
+            if (binding.normalTexture == texture)
             {
-                it = mesh3DMaterialMetallicRoughnessTextureBindings_.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
-        }
-        for (auto it = mesh3DMaterialNormalTextureBindings_.begin();
-             it != mesh3DMaterialNormalTextureBindings_.end();)
-        {
-            if (it->second == texture)
-            {
-                it = mesh3DMaterialNormalTextureBindings_.erase(it);
-            }
-            else
-            {
-                ++it;
+                binding.normalTexture = {};
             }
         }
         if (disposition == RetirementDetail::RetirementDisposition::DestroyImmediately)
@@ -2138,6 +2107,88 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] bool isLiveTexture(GpuTextureId texture) const noexcept
+    {
+        return !texture || (texture.index < textures_.size() && textures_[texture.index].live &&
+                            textures_[texture.index].generation == texture.generation);
+    }
+
+    [[nodiscard]] Mesh3DMaterialBindingDesc materialBindingOrDefault(u32 materialKey) const noexcept
+    {
+        const auto existing = mesh3DMaterialBindings_.find(materialKey);
+        return existing == mesh3DMaterialBindings_.end() ? Mesh3DMaterialBindingDesc{} : existing->second;
+    }
+
+    [[nodiscard]] Core::Status commitMaterialBinding(
+        u32 materialKey, const Mesh3DMaterialBindingDesc& binding) noexcept
+    {
+        try
+        {
+            mesh3DMaterialBindings_.insert_or_assign(materialKey, binding);
+            return Core::success();
+        }
+        catch (const std::bad_alloc&)
+        {
+            return Core::failure(Core::CoreErrorCode::OutOfMemory);
+        }
+        catch (const std::length_error&)
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded);
+        }
+    }
+
+    [[nodiscard]] Core::Status setMesh3DMaterialBinding(
+        u32 materialKey, const Mesh3DMaterialBindingDesc& desc) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (materialKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
+        }
+        if (!(desc.metallicFactor >= 0.0F && desc.metallicFactor <= 1.0F) ||
+            !(desc.roughnessFactor >= 0.0F && desc.roughnessFactor <= 1.0F) ||
+            !std::isfinite(desc.metallicFactor) || !std::isfinite(desc.roughnessFactor))
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "metallic and roughness must be finite values in [0,1]");
+        }
+
+        if (!isLiveTexture(desc.baseColorTexture) || !isLiveTexture(desc.metallicRoughnessTexture) ||
+            !isLiveTexture(desc.normalTexture))
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound,
+                                 "Mesh3D material binding contains an invalid Texture2D handle");
+        }
+
+        return commitMaterialBinding(materialKey, desc);
+    }
+
+    [[nodiscard]] Core::Status clearMesh3DMaterialBinding(u32 materialKey) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (materialKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
+        }
+
+        mesh3DMaterialBindings_.erase(materialKey);
+        return Core::success();
+    }
+
     // M11-E5: bind baseColor texture for Mesh3D materialKey (0 clears).
     [[nodiscard]] Core::Status setMesh3DMaterialTextureBinding(u32 materialKey, GpuTextureId texture) noexcept override
     {
@@ -2155,16 +2206,22 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         if (!texture)
         {
-            mesh3DMaterialTextureBindings_.erase(materialKey);
-            return Core::success();
+            const auto existing = mesh3DMaterialBindings_.find(materialKey);
+            if (existing == mesh3DMaterialBindings_.end())
+            {
+                return Core::success();
+            }
+            Mesh3DMaterialBindingDesc binding = existing->second;
+            binding.baseColorTexture = {};
+            return commitMaterialBinding(materialKey, binding);
         }
-        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
-            textures_[texture.index].generation != texture.generation)
+        if (!isLiveTexture(texture))
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
-        mesh3DMaterialTextureBindings_[materialKey] = texture;
-        return Core::success();
+        Mesh3DMaterialBindingDesc binding = materialBindingOrDefault(materialKey);
+        binding.baseColorTexture = texture;
+        return commitMaterialBinding(materialKey, binding);
     }
 
     // RENDER-001: bind optional metallic-roughness texture (G=roughness, B=metallic).
@@ -2185,16 +2242,22 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         if (!texture)
         {
-            mesh3DMaterialMetallicRoughnessTextureBindings_.erase(materialKey);
-            return Core::success();
+            const auto existing = mesh3DMaterialBindings_.find(materialKey);
+            if (existing == mesh3DMaterialBindings_.end())
+            {
+                return Core::success();
+            }
+            Mesh3DMaterialBindingDesc binding = existing->second;
+            binding.metallicRoughnessTexture = {};
+            return commitMaterialBinding(materialKey, binding);
         }
-        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
-            textures_[texture.index].generation != texture.generation)
+        if (!isLiveTexture(texture))
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
-        mesh3DMaterialMetallicRoughnessTextureBindings_[materialKey] = texture;
-        return Core::success();
+        Mesh3DMaterialBindingDesc binding = materialBindingOrDefault(materialKey);
+        binding.metallicRoughnessTexture = texture;
+        return commitMaterialBinding(materialKey, binding);
     }
 
     [[nodiscard]] Core::Status setMesh3DMaterialFactors(u32 materialKey, float metallic,
@@ -2218,8 +2281,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::InvalidTextureUpload,
                                  "metallic and roughness must be finite values in [0,1]");
         }
-        mesh3DMaterialFactors_[materialKey] = MaterialFactors{.metallic = metallic, .roughness = roughness};
-        return Core::success();
+        Mesh3DMaterialBindingDesc binding = materialBindingOrDefault(materialKey);
+        binding.metallicFactor = metallic;
+        binding.roughnessFactor = roughness;
+        return commitMaterialBinding(materialKey, binding);
     }
 
     [[nodiscard]] Core::Status setMesh3DMaterialNormalTextureBinding(u32 materialKey,
@@ -2239,16 +2304,22 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         if (!texture)
         {
-            mesh3DMaterialNormalTextureBindings_.erase(materialKey);
-            return Core::success();
+            const auto existing = mesh3DMaterialBindings_.find(materialKey);
+            if (existing == mesh3DMaterialBindings_.end())
+            {
+                return Core::success();
+            }
+            Mesh3DMaterialBindingDesc binding = existing->second;
+            binding.normalTexture = {};
+            return commitMaterialBinding(materialKey, binding);
         }
-        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
-            textures_[texture.index].generation != texture.generation)
+        if (!isLiveTexture(texture))
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
-        mesh3DMaterialNormalTextureBindings_[materialKey] = texture;
-        return Core::success();
+        Mesh3DMaterialBindingDesc binding = materialBindingOrDefault(materialKey);
+        binding.normalTexture = texture;
+        return commitMaterialBinding(materialKey, binding);
     }
 
     [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting) noexcept override
@@ -2532,14 +2603,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     };
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> mesh3DBindings_{};
-    std::unordered_map<u32, GpuTextureId> mesh3DMaterialTextureBindings_{};
-    std::unordered_map<u32, GpuTextureId> mesh3DMaterialMetallicRoughnessTextureBindings_{};
-    std::unordered_map<u32, GpuTextureId> mesh3DMaterialNormalTextureBindings_{};
-    struct MaterialFactors final {
-        float metallic = 0.0F;
-        float roughness = 1.0F;
-    };
-    std::unordered_map<u32, MaterialFactors> mesh3DMaterialFactors_{};
+    std::unordered_map<u32, Mesh3DMaterialBindingDesc> mesh3DMaterialBindings_{};
     std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U> mesh3DLightDirections_{
         0.4F, 0.85F, 0.35F, 1.0F};
     std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U> mesh3DLightColors_{

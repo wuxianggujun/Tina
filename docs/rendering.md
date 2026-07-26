@@ -44,11 +44,10 @@ submission ticket 并释放 frame pin。该完成点只表示 Host/backend 已�
 handoff 与 `bgfx::frame()` 假 fence token 已删除。GPU resource retirement 走下文独立 marker，不复用该
 CPU ticket，也不把普通 frame number 描述为 fence。
 
-Opaque3D（experimental MR hybrid）：`setMesh3DMaterialTextureBinding(materialKey)` 在 `submit` 时
-`setTexture(0, s_texColor)`；可选 `setMesh3DMaterialMetallicRoughnessTextureBinding` →
-`setTexture(1, s_texMR)`（glTF 打包：G=roughness、B=metallic）；可选
-`setMesh3DMaterialNormalTextureBinding` → `setTexture(2, s_texNormal)`。`setMesh3DMaterialFactors`
-接 Cooked Material v2 metallic/roughness factor。`Mesh3DLightingDesc` 是唯一 lighting 提交模型：同步消费
+Opaque3D（experimental MR hybrid）：产品 registry 通过单次 `setMesh3DMaterialBinding()` 原子提交
+baseColor/MR/normal 与 Cooked Material v2 metallic/roughness factor；细粒度 setter 仅保留为低层 direct
+SPI。submit 时分别绑定 `s_texColor`、`s_texMR`（glTF 打包：G=roughness、B=metallic）与
+`s_texNormal`。`Mesh3DLightingDesc` 是唯一 lighting 提交模型：同步消费
 0..4个 backend-neutral directional light 与 ambient；超容量、零方向、负 RGB/ambient 或非有限值失败。
 着色 = baseColor × 贴图 ×（bounded directional Lambert + Blinn-Phong 近似 specular + ambient）；未绑定 baseColor 用
 1×1 白；未绑定 MR 图时 metallic=0、roughness=1；未绑定 normal 图时只用几何法线。诚实限制：无通用
@@ -106,7 +105,10 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 | `create/destroyStaticMeshP3N3UV2` | 逻辑 mesh storage；同步 retire | 私有 VB/IB；逻辑失效后 marker 延迟销毁 |
 | `retireStaticMesh(mesh, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
 | `drainGpuRetirements` | 已完成，无操作 | owner-thread completion-only flush；有界失败返回结构化错误 |
+| `createMesh3DBinding` | device-instance mesh allocator；成功才消费 key | device-instance mesh allocator；成功才消费 key |
 | `setMesh3DBinding` | 校验/记录 binding | mesh key → GPU mesh |
+| `createMesh3DMaterialBinding` | device-instance material allocator；成功才消费 key | device-instance material allocator；成功才消费 key |
+| `set/clearMesh3DMaterialBinding` | 原子替换/整组清除三张纹理与 factors | 原子替换/整组清除三张纹理与 factors |
 | `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D MR submit **采样** `s_texColor`（默认 1×1 白） |
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
 | `setMesh3DLighting` | 同步校验/复制有界描述 | 0..4 directional lights + ambient；shader 使用两个4×vec4 uniform array |
@@ -115,6 +117,11 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 `createSprite2DTextureBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
 caller-chosen `setSprite2DTextureBinding()` key 与 allocator-managed key 共用 device namespace，registry
 管理期间不得混用。
+
+Mesh3D mesh/material 分别使用独立的 device-instance allocator namespace。两类 key 都从2开始并分别保留
+内置 mesh/material key 1。两类 key 都只在完整 backend bind 成功后消费，解绑后不复用；
+caller-chosen setter 与同类 allocator-managed key 不得混用。`setMesh3DMaterialBinding()` 先完整校验三张
+可选纹理与 factors，再原子替换整组状态；`clearMesh3DMaterialBinding()` 幂等清除整组状态。
 
 `GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
 失败；Asset Catalog 使用 `AssetId`，Prefab 先映射为 weak AssetHandle，extraction resolver 再把 live handle
@@ -147,9 +154,9 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - D3D11/OpenGL/Vulkan 对应 embedded shader 选择（按构建与平台可用性）。
 
 `tina_sample_2d` 已使用 Cooked Texture2D 与产品 sprite binding；`tina_sample_3d` 已使用 Cooked
-StaticMesh/Material/Prefab 的 **双 mesh** product key binding（3D-001 Done），并调用
-`setMesh3DMaterialTextureBinding`/MR/normal/factors/light API；bgfx Opaque3D 以 experimental MR hybrid
-着色。
+StaticMesh/Material/Prefab 的 **双 mesh** engine-provided、State-owned registry binding（3D-001 / N15 Done），并通过原子
+material bundle 提交 baseColor/MR/normal/factors，再调用 lighting API；bgfx Opaque3D 以 experimental MR
+hybrid 着色。
 
 ## Surface 与线程
 

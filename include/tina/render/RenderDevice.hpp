@@ -79,6 +79,17 @@ struct StaticMeshUploadDesc final {
     std::span<const u16> indices{};    // size == indexCount, multiple of 3
 };
 
+struct Mesh3DMaterialBindingDesc final {
+    GpuTextureId baseColorTexture{};
+    GpuTextureId metallicRoughnessTexture{};
+    GpuTextureId normalTexture{};
+    float metallicFactor = 0.0F;
+    float roughnessFactor = 1.0F;
+
+    [[nodiscard]] friend constexpr bool operator==(const Mesh3DMaterialBindingDesc&,
+                                                   const Mesh3DMaterialBindingDesc&) = default;
+};
+
 struct Mesh3DDirectionalLight final {
     float directionTowardLightX = 0.0F;
     float directionTowardLightY = 1.0F;
@@ -250,6 +261,74 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::MeshUploadUnsupported,
                              "This render device does not support Mesh3D mesh binding");
     }
+    // Transactionally allocates a key from this device's Mesh3D mesh namespace.
+    // Key 1 remains reserved for the built-in procedural cube fixture. Failed
+    // bindings do not consume a key; successful keys are never reused.
+    // Caller-selected keys passed to setMesh3DBinding share this namespace and
+    // must not be mixed with allocator-managed bindings.
+    [[nodiscard]] Core::Result<u32> createMesh3DBinding(GpuMeshId mesh) noexcept
+    {
+        if (!mesh)
+        {
+            return Core::failure(RenderErrorCode::InvalidMeshUpload,
+                                 "Mesh3D binding requires a live GPU mesh");
+        }
+        if (m_nextMesh3DBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::Mesh3DBindingKeyExhausted,
+                                 "Render device exhausted Mesh3D mesh binding keys");
+        }
+
+        const u32 candidateKey = m_nextMesh3DBindingKey;
+        if (auto status = setMesh3DBinding(candidateKey, mesh); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        m_nextMesh3DBindingKey =
+            candidateKey == (std::numeric_limits<u32>::max)() ? 0U : candidateKey + 1U;
+        return candidateKey;
+    }
+    // Atomically replaces all texture and scalar state for one material key.
+    // Invalid texture handles clear their corresponding optional binding.
+    [[nodiscard]] virtual Core::Status setMesh3DMaterialBinding(
+        u32 materialKey, const Mesh3DMaterialBindingDesc& desc) noexcept
+    {
+        static_cast<void>(materialKey);
+        static_cast<void>(desc);
+        return Core::failure(RenderErrorCode::TextureUploadUnsupported,
+                             "This render device does not support Mesh3D material binding");
+    }
+    // Erases every texture and scalar state for materialKey. Supporting backends
+    // treat an already-clear non-zero key as success.
+    [[nodiscard]] virtual Core::Status clearMesh3DMaterialBinding(u32 materialKey) noexcept
+    {
+        static_cast<void>(materialKey);
+        return Core::failure(RenderErrorCode::TextureUploadUnsupported,
+                             "This render device does not support clearing Mesh3D material bindings");
+    }
+    // Transactionally allocates a key from this device's independent Mesh3D
+    // material namespace. Failed bindings do not consume a key; successful keys
+    // are never reused.
+    // Caller-selected keys passed to the material setters share this namespace
+    // and must not be mixed with allocator-managed bindings.
+    [[nodiscard]] Core::Result<u32> createMesh3DMaterialBinding(
+        const Mesh3DMaterialBindingDesc& desc) noexcept
+    {
+        if (m_nextMesh3DMaterialBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::Mesh3DMaterialBindingKeyExhausted,
+                                 "Render device exhausted Mesh3D material binding keys");
+        }
+
+        const u32 candidateKey = m_nextMesh3DMaterialBindingKey;
+        if (auto status = setMesh3DMaterialBinding(candidateKey, desc); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        m_nextMesh3DMaterialBindingKey =
+            candidateKey == (std::numeric_limits<u32>::max)() ? 0U : candidateKey + 1U;
+        return candidateKey;
+    }
     // M11-E5: bind baseColor texture for Mesh3D batches with matching materialKey
     // (0 clears). Unbound materialKey samples the default 1x1 white texture.
     [[nodiscard]] virtual Core::Status setMesh3DMaterialTextureBinding(u32 materialKey,
@@ -308,6 +387,9 @@ class IRenderDevice {
 
   private:
     u32 m_nextSprite2DBindingKey = 1;
+    u32 m_nextMesh3DBindingKey = 2;
+    // Key 1 is reserved for the built-in opaque 3D fixture material.
+    u32 m_nextMesh3DMaterialBindingKey = 2;
 };
 
 using RenderDeviceFactory =

@@ -30,6 +30,7 @@
 | N12 | ASSET-HANDLE-SCENE-2D-A3 | 已完成 | Particle/Trail 改存 weak Sprite AssetHandle，并在 extraction 时借用 resolver fail closed；产品 evidence schema 11 与稳定 FX fingerprint 已贯通，完整总项仍为 Partial |
 | N13 | ASSET-HANDLE-SCENE-2D-A4 | 已完成 | TileMap emit 改存 weak Tileset AssetHandle，并在调用期借用 Asset resolver；registry Tileset dependency resolve、单次解析/失败清空与产品 evidence schema 12 已贯通，完整总项仍为 Partial |
 | N14 | ASSET-HANDLE-SCENE-3D-A5 | 已完成 | MeshRenderer3D/Prefab 改存 weak StaticMesh/Material Handle，extraction 借用 kind-specific resolver；3D product evidence schema 1 与 Resources-owned AssetStore 已贯通，完整总项仍为 Partial |
+| N15 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS | 已完成 | fixed-capacity owner-thread Mesh3D registry、独立 device key allocator、原子 material bundle、stale-safe unbind 与 3D product evidence schema 2 已贯通；完整总项仅剩统一 retirement ownership/FrameResourceRef |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -460,8 +461,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 
 N10 单独不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时产品 resolver 仍映射 game-owned binding key。
 N11 已补 engine-provided、State-owned binding registry；N12 已完成 Particle/Trail Handle 化，N13 已完成
-TileMap Tileset Handle 化，N14 已完成 3D component/Prefab Handle 化。engine-owned 3D registry 与统一
-retirement/FrameResourceRef 仍需后续切片。
+TileMap Tileset Handle 化，N14 已完成 3D component/Prefab Handle 化，N15 已补 engine-provided、State-owned 3D registry。
+统一 retirement ownership/`FrameResourceRef` 仍需后续切片。
 
 ## N11 - ASSET-HANDLE-SCENE-2D-A2
 
@@ -506,8 +507,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
 N11 单独不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时 FX/TileMap 虽已消费 registry key，组件仍没有保存
-AssetHandle。N12 已迁移 FX，N13 已迁移 TileMap，N14 已迁移 3D component/Prefab；engine-owned 3D
-Mesh/Material registry、统一 retirement ownership 与 `FrameResourceRef` 仍未完成。
+AssetHandle。N12 已迁移 FX，N13 已迁移 TileMap，N14 已迁移 3D component/Prefab，N15 已补 engine-provided、State-owned
+3D Mesh/Material registry；统一 retirement ownership 与 `FrameResourceRef` 仍未完成。
 
 ## N12 - ASSET-HANDLE-SCENE-2D-A3
 
@@ -550,8 +551,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
 N12 不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时 TileMap 仍保存 Sprite binding key。N13 已迁移 TileMap，
-N14 已迁移 3D component/Prefab；engine-owned 3D Mesh/Material registry、统一 retirement ownership 与
-`FrameResourceRef` 仍需后续切片。
+N14 已迁移 3D component/Prefab，N15 已补 engine-provided、State-owned 3D Mesh/Material registry；统一 retirement
+ownership 与 `FrameResourceRef` 仍需后续切片。
 
 ## N13 - ASSET-HANDLE-SCENE-2D-A4
 
@@ -591,8 +592,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2d
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
-N13 本身不迁移 3D；N14 随后完成 component/Prefab Handle 化。engine-owned 3D Mesh/Material registry、
-统一 retirement ownership 与 `FrameResourceRef` 仍需后续切片。
+N13 本身不迁移 3D；N14 随后完成 component/Prefab Handle 化，N15 再补 engine-provided、State-owned 3D Mesh/Material
+registry。统一 retirement ownership 与 `FrameResourceRef` 仍需后续切片。
 
 ## N14 - ASSET-HANDLE-SCENE-3D-A5
 
@@ -630,8 +631,55 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --fr
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
-N14 不宣称完成 `ASSET-HANDLE-SCENE` 总项：engine-owned 3D Mesh/Material binding registry、统一
+N14 不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时尚无 engine-provided、State-owned 3D Mesh/Material binding registry，统一
 retirement ownership 与 `FrameResourceRef` 仍需后续切片。
+
+## N15 - ASSET-HANDLE-SCENE-3D-A6-BINDINGS
+
+### 已完成契约
+
+- `Mesh3DBindingRegistry` 是 fixed-capacity owner-thread owner；创建时通过调用方 PMR 一次建立 mesh/material
+  storage，只借用 `AssetStore`、`IRenderDevice` 与 memory resource。registry 不持有 GPU owner、
+  `AssetLease` 或 retirement record。
+- RenderDevice 提供独立的 mesh/material device-instance allocator。两类 key 都从2开始，key 1 分别保留给
+  内置 cube mesh/material。只有完整 backend bind 成功才消费候选 key，成功 key 解绑后不复用；同
+  device 多 registry key distinct。caller-chosen setter 与同类 allocator-managed namespace 不得混用。
+- `registerMeshBinding()` 校验 live StaticMesh Handle/GPU mesh；`registerMaterialBinding()` 解析 Cooked
+  Material factors，并要求每个启用 texture role 提供 live Texture2D Handle/GPU texture，按 Material v2
+  的 baseColor/MR/normal dependency 顺序逐角色精确匹配。
+- Material v2 通过 strictly increasing dependency stream 本身承载 role identity；writer 明确拒绝乱序或
+  多 role 共享同一 Texture2D AssetId。共享依赖需由后续 schema 显式保存 role-to-dependency mapping。
+- `Mesh3DMaterialBindingDesc` 将 baseColor/MR/normal texture 与 metallic/roughness factors 作为一个原子
+  backend bundle；完整校验成功前不修改旧状态。`clearMesh3DMaterialBinding()` 幂等清除整组状态。
+- resolve 每次校验当前 Store generation/kind/payload；Material 任一已注册 texture dependency stale 时
+  fail closed。exact handle stale 后仍可 unbind；backend 失败保留 entry/GPU owner 供重试，成功才释放记录。
+- 3D product 不再保存私有 mesh/material key 表。World reset 后按逆序 exact unbind，解绑成功后才
+  destroy GPU resource；registry 最后释放。evidence schema 2 输出两类注册/释放、mesh/texture 销毁、
+  resolver hits、`bindingRegistryReleased`、GPU ledger 与像素证据。
+
+### 完成结果
+
+| 阶段 | 完成结果 |
+| --- | --- |
+| N15.1 | RenderDevice mesh/material 独立事务 allocator + 原子 Material set/clear；Null/bgfx/proxy 与 header isolation 同步 |
+| N15.2 | Asset Mesh3D registry 公共头/实现/错误码/CMake；Material v2 role-order validation；12项 registry 测试覆盖容量/PMR、validation、role swap、duplicate/conflict、rollback、stale unbind、多 registry、owner thread 与稳态零分配，asset-format 回归覆盖乱序/共享纹理拒绝 |
+| N15.3 | product-3d 从私有 slot key 迁移 registry resolver；schema 2 证明2 mesh/2 material 注册与释放、2 mesh/6 texture 销毁、600/600 resolver hits、registry 释放、ledger 归零与 pixel capture |
+
+### 验收
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_tests tina_render_bgfx_tests tina_asset_format_tests tina_asset_tests tina_sample_2d tina_sample_3d -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+```
+
+N15 不宣称完成 `ASSET-HANDLE-SCENE` 总项：registry 仍不拥有 GPU/Lease/retirement；统一 retirement
+ownership 与 packet-local `FrameResourceRef` 必须作为独立后续切片完成。
 
 ## 每项收口清单
 

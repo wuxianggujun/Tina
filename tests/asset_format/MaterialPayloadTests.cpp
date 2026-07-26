@@ -128,6 +128,34 @@ TEST(MaterialPayloadTests, CookedMaterialWithTextureDependencies)
     EXPECT_FLOAT_EQ(view->roughnessFactor, 0.4F);
 }
 
+TEST(MaterialPayloadTests, RejectsTextureRoleAssetIdsThatAreNotStrictlyIncreasing)
+{
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(0x50));
+    const auto baseColorId = *Core::AssetId::fromBytes(idBytes(0x53));
+    const auto mrId = *Core::AssetId::fromBytes(idBytes(0x51));
+    const auto normalId = *Core::AssetId::fromBytes(idBytes(0x52));
+    auto cooked = writeCookedMaterialAsset(materialId, MaterialPayloadDesc{
+                                                           .baseColorTextureId = baseColorId,
+                                                           .metallicRoughnessTextureId = mrId,
+                                                           .normalTextureId = normalId,
+                                                       });
+    ASSERT_FALSE(cooked.has_value());
+    EXPECT_EQ(cooked.error().code, AssetFormatErrorCode::InvalidLayout);
+}
+
+TEST(MaterialPayloadTests, RejectsOneTextureSharedByMultipleRolesInV2)
+{
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(0x60));
+    const auto sharedTextureId = *Core::AssetId::fromBytes(idBytes(0x61));
+    auto cooked = writeCookedMaterialAsset(materialId, MaterialPayloadDesc{
+                                                           .baseColorTextureId = sharedTextureId,
+                                                           .metallicRoughnessTextureId = sharedTextureId,
+                                                           .normalTextureId = sharedTextureId,
+                                                       });
+    ASSERT_FALSE(cooked.has_value());
+    EXPECT_EQ(cooked.error().code, AssetFormatErrorCode::InvalidLayout);
+}
+
 TEST(MaterialPayloadTests, DefaultsMetallicRoughnessToOne)
 {
     auto written = writeMaterialPayloadBytes(MaterialPayloadDesc{});

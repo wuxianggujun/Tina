@@ -86,6 +86,23 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "material alphaMode must be Opaque in v2");
     }
+    Core::AssetId previousTextureId{};
+    const std::array textureIds{desc.baseColorTextureId, desc.metallicRoughnessTextureId,
+                                desc.normalTextureId};
+    for (const Core::AssetId textureId : textureIds)
+    {
+        if (!textureId)
+        {
+            continue;
+        }
+        if (previousTextureId && !(previousTextureId < textureId))
+        {
+            return Core::failure(
+                AssetFormatErrorCode::InvalidLayout,
+                "material texture role AssetIds must be unique and strictly increasing in role order");
+        }
+        previousTextureId = textureId;
+    }
     return Core::success();
 }
 

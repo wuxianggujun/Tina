@@ -102,7 +102,7 @@ updateWorldTransforms
   -> resolve active Camera2D and/or PerspectiveCamera3D
   -> borrowed resolver asks Asset registry for current Sprite dependency binding key
   -> emit visible SpriteRenderer2D items
-  -> borrowed kind-specific resolvers map mesh/material AssetHandles to current keys
+  -> borrowed kind-specific resolvers ask Mesh3D registry for current mesh/material keys
   -> emit visible MeshRenderer3D items
   -> caller commits RenderSceneBuilder
 ```
@@ -125,6 +125,11 @@ A4 将底层通用 seam 下沉为 AssetTypes 的 `AssetBindingResolver`，Scene 
 RenderDevice；外部 owner 必须覆盖 State/registry 生命周期。key 由 RenderDevice 实例 allocator 分配，
 同一 device 的多个 registry 共享唯一/单调 namespace；allocator-managed registry 管理期间不得混用 direct
 caller-chosen binding key。Scene 不参与 key 分配、unbind 或 retirement。
+
+A6 的产品 resolver 把 mesh/material Handle 转交 `Mesh3DBindingRegistry`。registry 固定容量、owner-thread，
+借用 Store/device/PMR；StaticMesh 与 Material 使用独立 device key namespace，Material 通过一次原子 bundle
+提交 baseColor/MR/normal texture 与 factors。任一依赖 texture stale 时 Material resolve 返回0。registry
+不拥有 GPU/Lease/retirement；产品按 exact registered 状态 unbind 后再销毁 GPU owner。
 
 writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用内有效，不能保存到下一帧。
 
@@ -167,8 +172,9 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
   extraction、Prefab rollback/AssetId→Handle resolver、3D kind-specific resolver fail-closed，以及
   Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle 保留、resolver fail-closed/解析次数与
   writer capacity；
-- `tina_asset_tests`：Sprite binding registry 的容量/owner thread、register/unbind transaction、key
-  non-reuse、Texture/Sprite/Tileset Handle 与 cooked dependency fail-closed，以及 TileMap 解析次数/失败清空；
+- `tina_asset_tests`：Sprite/Mesh3D binding registry 的容量/owner thread、register/unbind transaction、key
+  non-reuse、Texture/Sprite/Tileset/StaticMesh/Material Handle 与 cooked dependency fail-closed，以及 TileMap
+  解析次数/失败清空；
 - `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking；
 - `tina_sample_2d` / `tina_sample_3d`：产品 Asset → Scene → Render 路径；
 - header-isolation：公开头不得泄漏 EnTT、GLM、bgfx 或 cgltf。

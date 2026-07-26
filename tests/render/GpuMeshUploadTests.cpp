@@ -93,6 +93,44 @@ TEST(NullRenderDeviceMeshTest, RejectsZeroMeshKeyBinding)
     ASSERT_TRUE((*device)->destroyStaticMesh(*mesh).has_value());
 }
 
+TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysStartAtTwoAndAreNeverConsumedOrReusedOnFailure)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+
+    auto invalid = (*device)->createMesh3DBinding({});
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+
+    std::array<float, 24> vertices{};
+    std::array<std::uint16_t, 3> indices{};
+    auto staleMesh = (*device)->createStaticMeshP3N3UV2(makeUnitTriangleDesc(vertices, indices));
+    ASSERT_TRUE(staleMesh.has_value()) << staleMesh.error().message;
+    ASSERT_TRUE((*device)->destroyStaticMesh(*staleMesh).has_value());
+    auto staleBinding = (*device)->createMesh3DBinding(*staleMesh);
+    ASSERT_FALSE(staleBinding.has_value());
+    EXPECT_EQ(staleBinding.error().code, Render::RenderErrorCode::MeshNotFound);
+
+    auto mesh = (*device)->createStaticMeshP3N3UV2(makeUnitTriangleDesc(vertices, indices));
+    ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
+
+    auto first = (*device)->createMesh3DBinding(*mesh);
+    auto second = (*device)->createMesh3DBinding(*mesh);
+    ASSERT_TRUE(first.has_value()) << first.error().message;
+    ASSERT_TRUE(second.has_value()) << second.error().message;
+    EXPECT_EQ(*first, 2U);
+    EXPECT_EQ(*second, 3U);
+
+    ASSERT_TRUE((*device)->setMesh3DBinding(*first, {}).has_value());
+    auto third = (*device)->createMesh3DBinding(*mesh);
+    ASSERT_TRUE(third.has_value()) << third.error().message;
+    EXPECT_EQ(*third, 4U);
+
+    ASSERT_TRUE((*device)->setMesh3DBinding(*second, {}).has_value());
+    ASSERT_TRUE((*device)->setMesh3DBinding(*third, {}).has_value());
+    ASSERT_TRUE((*device)->destroyStaticMesh(*mesh).has_value());
+}
+
 TEST(NullRenderDeviceMeshTest, RetirementPinCompletesImmediatelyAndIsNotConsumedOnFailure)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});

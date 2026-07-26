@@ -138,6 +138,105 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
 }
 
+TEST(NullRenderDeviceTextureTest, MaterialBundleUpdatesComposeAndClearIsIdempotent)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+
+    std::array<std::byte, 4> pixel{std::byte{10}, std::byte{20}, std::byte{30}, std::byte{255}};
+    const auto uploadTexture = [&]() {
+        return (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
+            .width = 1,
+            .height = 1,
+            .rgba8Pixels = pixel,
+        });
+    };
+    auto baseColor = uploadTexture();
+    auto metallicRoughness = uploadTexture();
+    auto normal = uploadTexture();
+    auto replacement = uploadTexture();
+    auto stale = uploadTexture();
+    ASSERT_TRUE(baseColor.has_value());
+    ASSERT_TRUE(metallicRoughness.has_value());
+    ASSERT_TRUE(normal.has_value());
+    ASSERT_TRUE(replacement.has_value());
+    ASSERT_TRUE(stale.has_value());
+    ASSERT_TRUE((*device)->destroyTexture2D(*stale).has_value());
+
+    auto invalid = (*device)->createMesh3DMaterialBinding(Render::Mesh3DMaterialBindingDesc{
+        .baseColorTexture = *baseColor,
+        .metallicRoughnessTexture = *stale,
+        .normalTexture = *normal,
+        .metallicFactor = 0.25F,
+        .roughnessFactor = 0.75F,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::TextureNotFound);
+
+    const Render::Mesh3DMaterialBindingDesc desc{
+        .baseColorTexture = *baseColor,
+        .metallicRoughnessTexture = *metallicRoughness,
+        .normalTexture = *normal,
+        .metallicFactor = 0.25F,
+        .roughnessFactor = 0.75F,
+    };
+    auto first = (*device)->createMesh3DMaterialBinding(desc);
+    auto second = (*device)->createMesh3DMaterialBinding(desc);
+    ASSERT_TRUE(first.has_value()) << first.error().message;
+    ASSERT_TRUE(second.has_value()) << second.error().message;
+    EXPECT_EQ(*first, 2U);
+    EXPECT_EQ(*second, 3U);
+
+    ASSERT_TRUE((*device)->clearMesh3DMaterialBinding(*first).has_value());
+    ASSERT_TRUE((*device)->clearMesh3DMaterialBinding(*first).has_value());
+    auto third = (*device)->createMesh3DMaterialBinding(desc);
+    ASSERT_TRUE(third.has_value()) << third.error().message;
+    EXPECT_EQ(*third, 4U);
+
+    auto invalidReplacement = (*device)->setMesh3DMaterialBinding(
+        *second, Render::Mesh3DMaterialBindingDesc{
+                     .baseColorTexture = *normal,
+                     .metallicRoughnessTexture = *metallicRoughness,
+                     .normalTexture = *baseColor,
+                     .metallicFactor = 1.25F,
+                     .roughnessFactor = 0.5F,
+                 });
+    ASSERT_FALSE(invalidReplacement.has_value());
+    EXPECT_EQ(invalidReplacement.error().code, Render::RenderErrorCode::InvalidTextureUpload);
+
+    ASSERT_TRUE((*device)
+                    ->setMesh3DMaterialBinding(
+                        *second, Render::Mesh3DMaterialBindingDesc{
+                                     .baseColorTexture = *normal,
+                                     .metallicRoughnessTexture = *baseColor,
+                                     .normalTexture = *metallicRoughness,
+                                     .metallicFactor = 0.4F,
+                                     .roughnessFactor = 0.6F,
+                                 })
+                    .has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(*second, *replacement).has_value());
+    ASSERT_TRUE(
+        (*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(*second, *normal).has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialNormalTextureBinding(*second, *metallicRoughness).has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialFactors(*second, 0.2F, 0.8F).has_value());
+
+    ASSERT_TRUE((*device)->destroyTexture2D(*normal).has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialFactors(*second, 0.3F, 0.7F).has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(*second, {}).has_value());
+    ASSERT_TRUE(
+        (*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(*second, *replacement).has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialNormalTextureBinding(*second, {}).has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(*second, *metallicRoughness).has_value());
+
+    ASSERT_TRUE((*device)->clearMesh3DMaterialBinding(*second).has_value());
+    ASSERT_TRUE((*device)->clearMesh3DMaterialBinding(*third).has_value());
+
+    ASSERT_TRUE((*device)->destroyTexture2D(*baseColor).has_value());
+    ASSERT_TRUE((*device)->destroyTexture2D(*metallicRoughness).has_value());
+    ASSERT_TRUE((*device)->destroyTexture2D(*replacement).has_value());
+    EXPECT_EQ((*device)->statistics().liveResources, 0U);
+}
+
 TEST(NullRenderDeviceTextureTest, RejectsBadUploadSize)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});

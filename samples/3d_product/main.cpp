@@ -7,6 +7,7 @@
 #include <tina/asset/CatalogPackageValidation.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset/GltfCook.hpp>
+#include <tina/asset/Mesh3DBindingRegistry.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/core/base/ScopeExit.hpp>
@@ -63,12 +64,8 @@ using Tina::Core::u64;
 
 inline constexpr u64 DefaultFrameCount = 300;
 inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
-// Product meshKeys start at 1; key 1 is no longer "only cube fixture".
-// Cap matches sample renderSceneCapacities.mesh3DBatchCapacity.
 // Khronos MetalRoughSpheres* is a mesh-per-sphere MR grid (often 50–100+ meshes).
 inline constexpr u32 MaxProductMeshSlots = 128;
-inline constexpr u32 FirstProductMeshKey = 1;
-inline constexpr u32 FirstProductMaterialKey = 1;
 
 [[nodiscard]] std::string contentHashToHex(const Tina::Core::ContentHash& hash)
 {
@@ -113,6 +110,12 @@ struct LifecycleCounters final {
     u64 materialAssetHandlesPublished = 0;
     u64 meshAssetBindingResolverHits = 0;
     u64 materialAssetBindingResolverHits = 0;
+    u64 meshBindingsRegistered = 0;
+    u64 materialBindingsRegistered = 0;
+    u64 meshBindingsReleased = 0;
+    u64 materialBindingsReleased = 0;
+    u64 meshesDestroyed = 0;
+    u64 texturesDestroyed = 0;
     bool meshBound = false;
     bool materialTextureBound = false;
     bool materialFactorsBound = false;
@@ -125,6 +128,7 @@ struct LifecycleCounters final {
     bool completePbrFixture = false;
     bool pixelCaptureAttempted = false;
     bool pixelCaptureOk = false;
+    bool bindingRegistryReleased = false;
     u32 pixelCaptureWidth = 0;
     u32 pixelCaptureHeight = 0;
     u64 pixelCaptureBytes = 0;
@@ -169,13 +173,13 @@ struct ProductMeshSlot final {
     bool textureUploaded = false;
     bool metallicRoughnessTextureUploaded = false;
     bool normalTextureUploaded = false;
+    bool meshBindingRegistered = false;
+    bool materialBindingRegistered = false;
     Tina::Core::AssetId meshId{};
     Tina::Core::AssetId materialId{};
     Tina::Core::AssetId textureId{};
     Tina::Core::AssetId metallicRoughnessTextureId{};
     Tina::Core::AssetId normalTextureId{};
-    u32 meshKey = 0;
-    u32 materialKey = 0;
 };
 
 struct Product3DResources final {
@@ -758,8 +762,6 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         ProductMeshSlot& productMesh = resources.meshes[slot];
         productMesh.meshId = productMeshIds[slot];
         productMesh.materialId = productMaterialIds[slot];
-        productMesh.meshKey = FirstProductMeshKey + slot;
-        productMesh.materialKey = FirstProductMaterialKey + slot;
 
         auto meshAsset = Tina::Asset::loadCookedAssetFromCatalog(
             toUtf8(resources.catalogRoot), *catalog, productMesh.meshId,
@@ -917,6 +919,13 @@ class Product3DState final : public Tina::IGameState {
     {
     }
 
+    ~Product3DState() override
+    {
+        world_.reset();
+        prefabEntities_.clear();
+        releaseProductGpuResources();
+    }
+
     Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_->stateEnters;
@@ -927,9 +936,26 @@ class Product3DState final : public Tina::IGameState {
                 Tina::Core::CoreErrorCode::Internal,
                 "render device, AssetStore, or product mesh slots missing");
         }
+        auto registry = Tina::Asset::Mesh3DBindingRegistry::Create(
+            *resources_->assetStore,
+            *device,
+            Tina::Asset::Mesh3DBindingRegistryConfig{
+                .meshCapacity = resources_->meshSlotCount,
+                .materialCapacity = resources_->meshSlotCount,
+                .memoryResource = &resources_->memory,
+            });
+        if (!registry)
+        {
+            return Tina::Core::failure(std::move(registry.error()));
+        }
+        mesh3DBindings_.emplace(std::move(*registry));
         // EngineHost discards a failed onEnter candidate without calling onExit.
         // Keep GPU resource ownership transactional until the state is fully entered.
-        auto gpuRollback = Tina::Core::makeScopeExit([this]() noexcept { releaseProductGpuResources(); });
+        auto gpuRollback = Tina::Core::makeScopeExit([this]() noexcept {
+            world_.reset();
+            prefabEntities_.clear();
+            releaseProductGpuResources();
+        });
 
         for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
         {
@@ -945,22 +971,17 @@ class Product3DState final : public Tina::IGameState {
             {
                 return Tina::Core::failure(std::move(mesh.error()));
             }
-            if (auto status = device->setMesh3DBinding(productMesh.meshKey, *mesh); !status)
-            {
-                (void)device->destroyStaticMesh(*mesh);
-                return status;
-            }
             productMesh.gpuMesh = *mesh;
             productMesh.meshUploaded = true;
+            auto meshBinding = mesh3DBindings_->registerMeshBinding(productMesh.meshAsset, productMesh.gpuMesh);
+            if (!meshBinding)
+            {
+                return Tina::Core::failure(std::move(meshBinding.error()));
+            }
+            productMesh.meshBindingRegistered = true;
+            ++counters_->meshBindingsRegistered;
             ++counters_->meshesUploaded;
 
-            if (auto status = device->setMesh3DMaterialFactors(productMesh.materialKey, productMesh.metallicFactor,
-                                                               productMesh.roughnessFactor);
-                !status)
-            {
-                return status;
-            }
-            counters_->materialFactorsBound = true;
             if (productMesh.textureAsset)
             {
                 const Tina::Asset::CookedAssetFile* textureFile =
@@ -975,11 +996,6 @@ class Product3DState final : public Tina::IGameState {
                 if (!texture)
                 {
                     return Tina::Core::failure(std::move(texture.error()));
-                }
-                if (auto status = device->setMesh3DMaterialTextureBinding(productMesh.materialKey, *texture); !status)
-                {
-                    (void)device->destroyTexture2D(*texture);
-                    return status;
                 }
                 productMesh.gpuTexture = *texture;
                 productMesh.textureUploaded = true;
@@ -1001,13 +1017,6 @@ class Product3DState final : public Tina::IGameState {
                 {
                     return Tina::Core::failure(std::move(texture.error()));
                 }
-                if (auto status = device->setMesh3DMaterialMetallicRoughnessTextureBinding(productMesh.materialKey,
-                                                                                           *texture);
-                    !status)
-                {
-                    (void)device->destroyTexture2D(*texture);
-                    return status;
-                }
                 productMesh.gpuMetallicRoughnessTexture = *texture;
                 productMesh.metallicRoughnessTextureUploaded = true;
                 counters_->materialMrTextureBound = true;
@@ -1028,17 +1037,38 @@ class Product3DState final : public Tina::IGameState {
                 {
                     return Tina::Core::failure(std::move(texture.error()));
                 }
-                if (auto status = device->setMesh3DMaterialNormalTextureBinding(productMesh.materialKey, *texture);
-                    !status)
-                {
-                    (void)device->destroyTexture2D(*texture);
-                    return status;
-                }
                 productMesh.gpuNormalTexture = *texture;
                 productMesh.normalTextureUploaded = true;
                 counters_->materialNormalTextureBound = true;
                 ++counters_->texturesUploaded;
             }
+
+            auto materialBinding = mesh3DBindings_->registerMaterialBinding(
+                productMesh.materialAsset,
+                Tina::Asset::Mesh3DMaterialGpuBindingDesc{
+                    .baseColor =
+                        {
+                            .textureAsset = productMesh.textureAsset,
+                            .gpuTexture = productMesh.gpuTexture,
+                        },
+                    .metallicRoughness =
+                        {
+                            .textureAsset = productMesh.metallicRoughnessTextureAsset,
+                            .gpuTexture = productMesh.gpuMetallicRoughnessTexture,
+                        },
+                    .normal =
+                        {
+                            .textureAsset = productMesh.normalTextureAsset,
+                            .gpuTexture = productMesh.gpuNormalTexture,
+                        },
+                });
+            if (!materialBinding)
+            {
+                return Tina::Core::failure(std::move(materialBinding.error()));
+            }
+            productMesh.materialBindingRegistered = true;
+            ++counters_->materialBindingsRegistered;
+            counters_->materialFactorsBound = true;
         }
         counters_->meshBound = true;
         // Complete PBR fixture: base+MR+normal per mesh (texturesUploaded >= 3*slots).
@@ -1436,7 +1466,16 @@ class Product3DState final : public Tina::IGameState {
         Tina::Asset::AssetHandle asset) noexcept
     {
         auto& self = *static_cast<Product3DState*>(userData);
-        return self.resolveProductBinding(asset, Tina::AssetFormat::AssetKind::StaticMesh);
+        if (!self.mesh3DBindings_.has_value())
+        {
+            return 0;
+        }
+        const u32 bindingKey = self.mesh3DBindings_->resolveMesh(asset);
+        if (bindingKey != 0)
+        {
+            ++self.counters_->meshAssetBindingResolverHits;
+        }
+        return bindingKey;
     }
 
     [[nodiscard]] static u32 resolveProductMaterialBinding(
@@ -1444,75 +1483,107 @@ class Product3DState final : public Tina::IGameState {
         Tina::Asset::AssetHandle asset) noexcept
     {
         auto& self = *static_cast<Product3DState*>(userData);
-        return self.resolveProductBinding(asset, Tina::AssetFormat::AssetKind::Material);
-    }
-
-    [[nodiscard]] u32 resolveProductBinding(
-        Tina::Asset::AssetHandle asset,
-        Tina::AssetFormat::AssetKind expectedKind) noexcept
-    {
-        if (!resources_->assetStore.has_value()
-            || resources_->assetStore->tryGet(asset) == nullptr
-            || resources_->assetStore->assetKind(asset) != expectedKind)
+        if (!self.mesh3DBindings_.has_value())
         {
             return 0;
         }
-
-        for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
+        const u32 bindingKey = self.mesh3DBindings_->resolveMaterial(asset);
+        if (bindingKey != 0)
         {
-            const ProductMeshSlot& productMesh = resources_->meshes[slot];
-            if (expectedKind == Tina::AssetFormat::AssetKind::StaticMesh
-                && productMesh.meshAsset == asset)
-            {
-                ++counters_->meshAssetBindingResolverHits;
-                return productMesh.meshKey;
-            }
-            if (expectedKind == Tina::AssetFormat::AssetKind::Material
-                && productMesh.materialAsset == asset)
-            {
-                ++counters_->materialAssetBindingResolverHits;
-                return productMesh.materialKey;
-            }
+            ++self.counters_->materialAssetBindingResolverHits;
         }
-        return 0;
+        return bindingKey;
     }
 
     void releaseProductGpuResources() noexcept
     {
-        if (auto* device = capture_->get(); device != nullptr)
+        auto* device = capture_ != nullptr ? capture_->get() : nullptr;
+        if (device == nullptr || resources_ == nullptr)
         {
-            for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
+            return;
+        }
+
+        for (u32 remaining = resources_->meshSlotCount; remaining > 0; --remaining)
+        {
+            ProductMeshSlot& productMesh = resources_->meshes[remaining - 1U];
+
+            bool materialUnbound = true;
+            if (productMesh.materialBindingRegistered)
             {
-                ProductMeshSlot& productMesh = resources_->meshes[slot];
-                if (productMesh.normalTextureUploaded)
+                if (mesh3DBindings_.has_value())
                 {
-                    (void)device->setMesh3DMaterialNormalTextureBinding(productMesh.materialKey, {});
-                    (void)device->destroyTexture2D(productMesh.gpuNormalTexture);
-                    productMesh.normalTextureUploaded = false;
-                    productMesh.gpuNormalTexture = {};
+                    if (auto status = mesh3DBindings_->unbindMaterialBinding(productMesh.materialAsset); status)
+                    {
+                        productMesh.materialBindingRegistered = false;
+                        ++counters_->materialBindingsReleased;
+                    }
+                    else
+                    {
+                        materialUnbound = false;
+                    }
                 }
-                if (productMesh.metallicRoughnessTextureUploaded)
+                else
                 {
-                    (void)device->setMesh3DMaterialMetallicRoughnessTextureBinding(productMesh.materialKey, {});
-                    (void)device->destroyTexture2D(productMesh.gpuMetallicRoughnessTexture);
-                    productMesh.metallicRoughnessTextureUploaded = false;
-                    productMesh.gpuMetallicRoughnessTexture = {};
-                }
-                if (productMesh.textureUploaded)
-                {
-                    (void)device->setMesh3DMaterialTextureBinding(productMesh.materialKey, {});
-                    (void)device->destroyTexture2D(productMesh.gpuTexture);
-                    productMesh.textureUploaded = false;
-                    productMesh.gpuTexture = {};
-                }
-                if (productMesh.meshUploaded)
-                {
-                    (void)device->setMesh3DBinding(productMesh.meshKey, {});
-                    (void)device->destroyStaticMesh(productMesh.gpuMesh);
-                    productMesh.meshUploaded = false;
-                    productMesh.gpuMesh = {};
+                    materialUnbound = false;
                 }
             }
+            if (materialUnbound)
+            {
+                auto destroyTexture = [this, device](Tina::Render::GpuTextureId& gpuTexture,
+                                                     bool& uploaded) noexcept {
+                    if (uploaded)
+                    {
+                        if (auto status = device->destroyTexture2D(gpuTexture); status)
+                        {
+                            gpuTexture = {};
+                            uploaded = false;
+                            ++counters_->texturesDestroyed;
+                        }
+                    }
+                };
+                destroyTexture(productMesh.gpuNormalTexture, productMesh.normalTextureUploaded);
+                destroyTexture(productMesh.gpuMetallicRoughnessTexture,
+                               productMesh.metallicRoughnessTextureUploaded);
+                destroyTexture(productMesh.gpuTexture, productMesh.textureUploaded);
+            }
+
+            bool meshUnbound = true;
+            if (productMesh.meshBindingRegistered)
+            {
+                if (mesh3DBindings_.has_value())
+                {
+                    if (auto status = mesh3DBindings_->unbindMeshBinding(productMesh.meshAsset); status)
+                    {
+                        productMesh.meshBindingRegistered = false;
+                        ++counters_->meshBindingsReleased;
+                    }
+                    else
+                    {
+                        meshUnbound = false;
+                    }
+                }
+                else
+                {
+                    meshUnbound = false;
+                }
+            }
+            if (meshUnbound && productMesh.meshUploaded)
+            {
+                if (auto status = device->destroyStaticMesh(productMesh.gpuMesh); status)
+                {
+                    productMesh.gpuMesh = {};
+                    productMesh.meshUploaded = false;
+                    ++counters_->meshesDestroyed;
+                }
+            }
+        }
+
+        if (mesh3DBindings_.has_value()
+            && mesh3DBindings_->meshBindingCount() == 0
+            && mesh3DBindings_->materialBindingCount() == 0)
+        {
+            mesh3DBindings_.reset();
+            counters_->bindingRegistryReleased = true;
         }
     }
 
@@ -1521,6 +1592,7 @@ class Product3DState final : public Tina::IGameState {
     Product3DResources* resources_ = nullptr;
     DeviceCapture* capture_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
+    std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};
     mutable std::optional<Tina::Scene::World> world_{};
     Tina::Scene::EntityId cameraEntity_{};
     std::vector<Tina::Scene::EntityId> prefabEntities_{};
@@ -1651,12 +1723,19 @@ class Product3DApplication final : public Tina::IGameApplication {
         counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMeshes || !texturesOk ||
         counters.meshAssetHandlesPublished != expectedMeshes
         || counters.materialAssetHandlesPublished != expectedMeshes
+        || counters.meshBindingsRegistered != expectedMeshes
+        || counters.materialBindingsRegistered != expectedMeshes
+        || counters.meshBindingsReleased != expectedMeshes
+        || counters.materialBindingsReleased != expectedMeshes
+        || counters.meshesDestroyed != counters.meshesUploaded
+        || counters.texturesDestroyed != counters.texturesUploaded
         || counters.meshAssetBindingResolverHits == 0
         || counters.materialAssetBindingResolverHits == 0
         || assetStoreActiveCount < static_cast<Tina::usize>(expectedMeshes) * 2U + 1U ||
         !counters.meshBound || !counters.materialTextureBound || counters.catalogCooked != 1 || !counters.gltfCooked ||
         !counters.prefabInstantiated || counters.prefabNodes == 0 || counters.prefabInstances == 0 ||
-        !counters.lightingConfigured || counters.directionalLightCount != 3U || !ledgerBalanced ||
+        !counters.lightingConfigured || counters.directionalLightCount != 3U || !counters.bindingRegistryReleased ||
+        !ledgerBalanced ||
         !counters.pixelCaptureAttempted || !counters.pixelCaptureOk || counters.pixelCaptureWidth == 0 ||
         counters.pixelCaptureHeight == 0 || counters.pixelCaptureBytes == 0 || counters.pixelFingerprint.empty() ||
         !pixelGoldenMatched)
@@ -1668,6 +1747,12 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"materialsLoaded\":" << counters.materialsLoaded
                   << ",\"meshAssetHandlesPublished\":" << counters.meshAssetHandlesPublished
                   << ",\"materialAssetHandlesPublished\":" << counters.materialAssetHandlesPublished
+                  << ",\"meshBindingsRegistered\":" << counters.meshBindingsRegistered
+                  << ",\"materialBindingsRegistered\":" << counters.materialBindingsRegistered
+                  << ",\"meshBindingsReleased\":" << counters.meshBindingsReleased
+                  << ",\"materialBindingsReleased\":" << counters.materialBindingsReleased
+                  << ",\"meshesDestroyed\":" << counters.meshesDestroyed
+                  << ",\"texturesDestroyed\":" << counters.texturesDestroyed
                   << ",\"meshAssetBindingResolverHits\":" << counters.meshAssetBindingResolverHits
                   << ",\"materialAssetBindingResolverHits\":" << counters.materialAssetBindingResolverHits
                   << ",\"assetStoreActiveCount\":" << assetStoreActiveCount
@@ -1683,6 +1768,8 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"catalogCooked\":" << counters.catalogCooked
                   << ",\"meshSlotCount\":" << expectedMeshes
                   << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false")
+                  << ",\"bindingRegistryReleased\":"
+                  << (counters.bindingRegistryReleased ? "true" : "false")
                   << ",\"ledgerBalanced\":" << (ledgerBalanced ? "true" : "false")
                   << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
                   << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
@@ -1696,7 +1783,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":1,\"frames\":" << counters.frameUpdates
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":2,\"frames\":" << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
               << (multiMesh ? "true" : "false") << ",\"materialTextureBound\":"
@@ -1705,6 +1792,12 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"materialsLoaded\":" << counters.materialsLoaded << ",\"prefabNodes\":" << counters.prefabNodes
               << ",\"meshAssetHandlesPublished\":" << counters.meshAssetHandlesPublished
               << ",\"materialAssetHandlesPublished\":" << counters.materialAssetHandlesPublished
+              << ",\"meshBindingsRegistered\":" << counters.meshBindingsRegistered
+              << ",\"materialBindingsRegistered\":" << counters.materialBindingsRegistered
+              << ",\"meshBindingsReleased\":" << counters.meshBindingsReleased
+              << ",\"materialBindingsReleased\":" << counters.materialBindingsReleased
+              << ",\"meshesDestroyed\":" << counters.meshesDestroyed
+              << ",\"texturesDestroyed\":" << counters.texturesDestroyed
               << ",\"meshAssetBindingResolverHits\":" << counters.meshAssetBindingResolverHits
               << ",\"materialAssetBindingResolverHits\":" << counters.materialAssetBindingResolverHits
               << ",\"assetStoreActiveCount\":" << assetStoreActiveCount
@@ -1715,31 +1808,15 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"materialMrTextureBound\":" << (counters.materialMrTextureBound ? "true" : "false")
               << ",\"materialNormalTextureBound\":" << (counters.materialNormalTextureBound ? "true" : "false")
               << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
-              << ",\"directionalLightCount\":" << counters.directionalLightCount;
+              << ",\"directionalLightCount\":" << counters.directionalLightCount
+              << ",\"bindingRegistryReleased\":"
+              << (counters.bindingRegistryReleased ? "true" : "false");
     if (resources.externalGltf || resources.completePbrFixture)
     {
         std::cout << ",\"gltfPath\":";
         writeJsonString(std::cout, resources.gltfSourcePath);
     }
-    std::cout << ",\"meshKeys\":[";
-    for (u32 slot = 0; slot < expectedMeshes; ++slot)
-    {
-        if (slot != 0)
-        {
-            std::cout << ',';
-        }
-        std::cout << (FirstProductMeshKey + slot);
-    }
-    std::cout << "],\"materialKeys\":[";
-    for (u32 slot = 0; slot < expectedMeshes; ++slot)
-    {
-        if (slot != 0)
-        {
-            std::cout << ',';
-        }
-        std::cout << (FirstProductMaterialKey + slot);
-    }
-    std::cout << "],\"instanceBatchesPerFrame\":" << expectedMeshes << ",\"catalogCooked\":" << counters.catalogCooked
+    std::cout << ",\"instanceBatchesPerFrame\":" << expectedMeshes << ",\"catalogCooked\":" << counters.catalogCooked
               << ",\"stateExits\":" << counters.stateExits << ",\"uiPanelsPerFrame\":2,\"uiRootsReleased\":"
               << counters.uiRootsReleased << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"engineHostDestroyed\":true,\"renderResourceLedgerBalanced\":true"

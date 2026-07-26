@@ -15,6 +15,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetSpriteRenderTests.cpp
     SpriteAnimationClipTypedViewTests.cpp
     AssetGpuTextureTests.cpp
+    Mesh3DBindingRegistryTests.cpp
     Sprite2DBindingRegistryTests.cpp
     AssetGpuMeshTests.cpp
     AudioClipCookedPlaybackTests.cpp
@@ -46,6 +47,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/AssetTypedViewsHeader.cpp
     header_isolation/AssetSpriteRenderHeader.cpp
     header_isolation/AssetGpuTextureHeader.cpp
+    header_isolation/Mesh3DBindingRegistryHeader.cpp
     header_isolation/Sprite2DBindingRegistryHeader.cpp
     header_isolation/AssetGpuMeshHeader.cpp
     header_isolation/TileMapInstanceHeader.cpp
