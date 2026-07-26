@@ -62,7 +62,7 @@
 | UI 平台证据 | Semantics + probe + `tina_ui_uia` 映射/HostBridge + EngineHost 自动 HWND 接线已有；Narrator 人工金标与 AT-SPI 后置 | 见 UI-002；勿把单测写成合规读屏门禁 |
 | Linux 状态 | tip Docker：GCC13 Null/Platform + Clang22 Null/sanitizer 已有证据 | 见 [m12-evidence-linux.md](m12-evidence-linux.md)；TEST-001 Done |
 | UI route vs policy | `blocksUIUpdateBelow` 不回改当帧 UI route（route 在 stack 前） | 文档已标明；若需真挡 UI 输入另开切片 |
-| AssetHandle 终态 | 2D World Sprite 已存 weak Handle + borrowed resolver；Asset 已提供固定容量 Sprite registry，RenderDevice 实例分配唯一/单调 key，产品手写 binding key 表已删除；FX/TileMap 组件仍存 registry 生成的 key，3D 与 FrameResourceRef 未迁移 | A1/A2 已完成；总项仍 Partial，2D/3D Handle/FrameResourceRef 终态后置 |
+| AssetHandle 终态 | 2D World Sprite 与 standalone Particle/Trail 已存 weak Handle，并在 extract 借用共享 resolver；Asset 已提供固定容量 Sprite registry，RenderDevice 实例分配唯一/单调 key，产品手写 binding key 表已删除；TileMap 仍存 registry key，3D 与 FrameResourceRef 未迁移 | A1/A2/A3 已完成；总项仍 Partial，TileMap/3D Handle 与 FrameResourceRef 终态后置 |
 
 ## 不变量
 

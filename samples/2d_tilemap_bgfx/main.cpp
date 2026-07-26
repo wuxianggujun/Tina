@@ -176,6 +176,12 @@ void appendF64Bits(std::vector<std::byte>& out, double value)
     appendLeU64(out, bits);
 }
 
+void appendAssetIdBytes(std::vector<std::byte>& out, Tina::Core::AssetId assetId)
+{
+    const auto& bytes = assetId.bytes();
+    out.insert(out.end(), bytes.begin(), bytes.end());
+}
+
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
@@ -217,6 +223,8 @@ struct LifecycleCounters final {
     u64 spriteBindingsReleased = 0;
     u64 spriteBindingTexturesDestroyed = 0;
     u64 spriteBindingResolverHits = 0;
+    u64 particleSpriteBindingResolverHits = 0;
+    u64 trailSpriteBindingResolverHits = 0;
     u64 lastTileSprites = 0;
     u64 lastTotalSprites = 0;
     u64 controllerGroundedFrames = 0;
@@ -709,19 +717,27 @@ struct TileMapResources final {
 };
 
 [[nodiscard]] Tina::Core::Result<std::string> makeInitialFxFingerprint(
+    const Tina::Asset::AssetStore& assetStore,
     const Tina::Scene::ParticleSystem2D& particles,
     const Tina::Scene::Trail2D& trail)
 {
     std::vector<std::byte> bytes;
     bytes.reserve(640);
-    appendLeU32(bytes, 1U); // FX fingerprint schema
+    appendLeU32(bytes, 2U); // FX fingerprint schema
     appendLeU64(bytes, particles.randomSeed());
     appendLeU64(bytes, particles.capacity());
     appendLeU64(bytes, particles.liveCount());
     for (const Tina::Scene::Particle2D& particle : particles.particles())
     {
         appendLeU64(bytes, particle.stableParticleKey);
-        appendLeU32(bytes, particle.spriteKey);
+        const Tina::Core::AssetId spriteAssetId = assetStore.assetId(particle.sprite);
+        if (!spriteAssetId)
+        {
+            return Tina::Core::failure(
+                Tina::Asset::AssetErrorCode::InvalidHandle,
+                "particle sprite handle is not live while building the FX fingerprint");
+        }
+        appendAssetIdBytes(bytes, spriteAssetId);
         appendF32Bits(bytes, particle.position.x);
         appendF32Bits(bytes, particle.position.y);
         appendF32Bits(bytes, particle.velocity.x);
@@ -750,7 +766,14 @@ struct TileMapResources final {
     appendF64Bits(bytes, trailConfig.segmentLifetime.count());
     appendF32Bits(bytes, trailConfig.startWidthMeters);
     appendF32Bits(bytes, trailConfig.endWidthMeters);
-    appendLeU32(bytes, trailConfig.spriteKey);
+    const Tina::Core::AssetId trailSpriteAssetId = assetStore.assetId(trailConfig.sprite);
+    if (!trailSpriteAssetId)
+    {
+        return Tina::Core::failure(
+            Tina::Asset::AssetErrorCode::InvalidHandle,
+            "trail sprite handle is not live while building the FX fingerprint");
+    }
+    appendAssetIdBytes(bytes, trailSpriteAssetId);
     appendLeU64(bytes, trailConfig.stableEntityKeyBase);
     appendF32Bits(bytes, trailConfig.uvRect.u0);
     appendF32Bits(bytes, trailConfig.uvRect.v0);
@@ -785,7 +808,7 @@ struct TileMapResources final {
 [[nodiscard]] Tina::Core::Status prepare2dEffects(
     TileMapResources& resources,
     LifecycleCounters& counters,
-    u32 characterSpriteKey)
+    Tina::Asset::AssetHandle characterSprite)
 {
     auto particles = Tina::Scene::ParticleSystem2D::Create(
         Tina::Scene::ParticleSystem2DConfig{
@@ -801,7 +824,7 @@ struct TileMapResources final {
 
     const Tina::Scene::ParticleBurst2D shortBurst{
         .count = 4,
-        .spriteKey = characterSpriteKey,
+        .sprite = characterSprite,
         .origin = {4.0F, 2.1F},
         .positionOffset = {.minimum = {-0.45F, -0.2F}, .maximum = {0.45F, 0.2F}},
         .velocity = {.minimum = {-0.25F, 0.25F}, .maximum = {0.25F, 0.55F}},
@@ -821,7 +844,7 @@ struct TileMapResources final {
 
     const Tina::Scene::ParticleBurst2D persistentBurst{
         .count = 6,
-        .spriteKey = characterSpriteKey,
+        .sprite = characterSprite,
         .origin = {4.0F, 2.0F},
         .positionOffset = {.minimum = {-0.55F, -0.35F}, .maximum = {0.55F, 0.35F}},
         .velocity = {.minimum = {-0.02F, -0.01F}, .maximum = {0.02F, 0.02F}},
@@ -845,7 +868,7 @@ struct TileMapResources final {
             .segmentLifetime = Tina::Core::Duration{10.0},
             .startWidthMeters = 0.18F,
             .endWidthMeters = 0.04F,
-            .spriteKey = characterSpriteKey,
+            .sprite = characterSprite,
             .stableEntityKeyBase = ProductTrailStableKeyBase,
             .color = {.red = 70, .green = 230, .blue = 180, .alpha = 210},
             .sortingLayer = 1,
@@ -883,7 +906,13 @@ struct TileMapResources final {
         }
     }
 
-    auto fxFingerprint = makeInitialFxFingerprint(*particles, *trail);
+    if (resources.system == nullptr)
+    {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "asset system is required while preparing 2D effects");
+    }
+    auto fxFingerprint = makeInitialFxFingerprint(resources.system->store(), *particles, *trail);
     if (!fxFingerprint)
     {
         return Tina::Core::failure(std::move(fxFingerprint.error()));
@@ -1772,8 +1801,20 @@ class TileMapBgfxState final : public Tina::IGameState {
             return Tina::Core::failure(std::move(spriteBindings.error()));
         }
         spriteBindings_.emplace(std::move(*spriteBindings));
-        spriteBindingResolverContext_.registry = &*spriteBindings_;
-        spriteBindingResolverContext_.counters = counters_;
+        worldSpriteBindingResolverContext_ = SpriteBindingResolverContext{
+            .registry = &*spriteBindings_,
+            .counters = counters_,
+        };
+        particleSpriteBindingResolverContext_ = SpriteBindingResolverContext{
+            .registry = &*spriteBindings_,
+            .counters = counters_,
+            .consumerHits = &counters_->particleSpriteBindingResolverHits,
+        };
+        trailSpriteBindingResolverContext_ = SpriteBindingResolverContext{
+            .registry = &*spriteBindings_,
+            .counters = counters_,
+            .consumerHits = &counters_->trailSpriteBindingResolverHits,
+        };
 
         auto tileSpriteKey =
             spriteBindings_->registerTextureBinding(resources_->tileTextureHandle, tileGpuTexture_);
@@ -1791,12 +1832,19 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(characterSpriteKey.error()));
         }
-        characterSpriteKey_ = *characterSpriteKey;
         characterBindingRegistered_ = true;
         ++counters_->spriteBindingTextures;
         counters_->texturesUploaded += 2U;
 
-        if (const auto status = prepare2dEffects(*resources_, *counters_, characterSpriteKey_); !status)
+        const Tina::Scene::SpriteRenderer2D* effectSprite =
+            resources_->characterAnimator ? resources_->characterAnimator->currentSprite() : nullptr;
+        if (effectSprite == nullptr || !effectSprite->sprite)
+        {
+            return Tina::Core::failure(
+                Tina::Asset::AssetErrorCode::InvalidHandle,
+                "character animation has no live Sprite handle for 2D effects");
+        }
+        if (const auto status = prepare2dEffects(*resources_, *counters_, effectSprite->sprite); !status)
         {
             return status;
         }
@@ -3154,8 +3202,8 @@ class TileMapBgfxState final : public Tina::IGameState {
                             .pixelHeight = counters_->surfacePixelHeight,
                         },
                     .spriteBindingResolver = Tina::Scene::Sprite2DBindingResolver{
-                        .userData = &spriteBindingResolverContext_,
-                        .resolve = &TileMapBgfxState::resolveSceneSpriteBinding,
+                        .userData = &worldSpriteBindingResolverContext_,
+                        .resolve = &TileMapBgfxState::resolveSpriteBinding,
                     },
                 });
             !status)
@@ -3275,12 +3323,23 @@ class TileMapBgfxState final : public Tina::IGameState {
             ++counters_->selectionHighlightSprites;
         }
 
-        auto particleExtract = resources_->particles->extract(writer);
+        auto particleExtract = resources_->particles->extract(
+            writer,
+            Tina::Scene::Sprite2DBindingResolver{
+                .userData = &particleSpriteBindingResolverContext_,
+                .resolve = &TileMapBgfxState::resolveSpriteBinding,
+            });
         if (!particleExtract)
         {
             return Tina::Core::failure(std::move(particleExtract.error()));
         }
-        if (const auto status = resources_->trail->extract(writer); !status)
+        if (const auto status = resources_->trail->extract(
+                writer,
+                Tina::Scene::Sprite2DBindingResolver{
+                    .userData = &trailSpriteBindingResolverContext_,
+                    .resolve = &TileMapBgfxState::resolveSpriteBinding,
+                });
+            !status)
         {
             return status;
         }
@@ -3336,9 +3395,10 @@ class TileMapBgfxState final : public Tina::IGameState {
     struct SpriteBindingResolverContext final {
         const Tina::Asset::Sprite2DBindingRegistry* registry = nullptr;
         LifecycleCounters* counters = nullptr;
+        u64* consumerHits = nullptr;
     };
 
-    [[nodiscard]] static u32 resolveSceneSpriteBinding(
+    [[nodiscard]] static u32 resolveSpriteBinding(
         void* userData,
         Tina::Asset::AssetHandle spriteHandle) noexcept
     {
@@ -3352,6 +3412,10 @@ class TileMapBgfxState final : public Tina::IGameState {
         if (bindingKey != 0)
         {
             ++resolverContext->counters->spriteBindingResolverHits;
+            if (resolverContext->consumerHits != nullptr)
+            {
+                ++*resolverContext->consumerHits;
+            }
         }
         return bindingKey;
     }
@@ -3395,14 +3459,12 @@ class TileMapBgfxState final : public Tina::IGameState {
         releaseTextureBinding(resources_->characterTextureHandle, characterGpuTexture_,
                               characterBindingRegistered_);
         releaseTextureBinding(resources_->tileTextureHandle, tileGpuTexture_, tileBindingRegistered_);
+        worldSpriteBindingResolverContext_.registry = nullptr;
+        particleSpriteBindingResolverContext_.registry = nullptr;
+        trailSpriteBindingResolverContext_.registry = nullptr;
         if (spriteBindings_ && spriteBindings_->bindingCount() == 0)
         {
-            spriteBindingResolverContext_.registry = nullptr;
             spriteBindings_.reset();
-        }
-        if (!characterGpuTexture_)
-        {
-            characterSpriteKey_ = 0;
         }
         if (!tileGpuTexture_)
         {
@@ -3417,12 +3479,13 @@ class TileMapBgfxState final : public Tina::IGameState {
     Tina::UI::UIRootOwner uiRoot_{};
     Tina::UI::UIAccessibilityTree accessibilityTree_{};
     Tina::UI::UIAccessibilityProbeProvider accessibilityProbe_{};
-    mutable SpriteBindingResolverContext spriteBindingResolverContext_{};
+    mutable SpriteBindingResolverContext worldSpriteBindingResolverContext_{};
+    mutable SpriteBindingResolverContext particleSpriteBindingResolverContext_{};
+    mutable SpriteBindingResolverContext trailSpriteBindingResolverContext_{};
     std::optional<Tina::Asset::Sprite2DBindingRegistry> spriteBindings_{};
     Tina::Render::GpuTextureId tileGpuTexture_{};
     Tina::Render::GpuTextureId characterGpuTexture_{};
     u32 tileSpriteKey_ = 0;
-    u32 characterSpriteKey_ = 0;
     bool tileBindingRegistered_ = false;
     bool characterBindingRegistered_ = false;
     // Applied on next updateFrame when audioEngine is available (phase-local).
@@ -3752,7 +3815,9 @@ int main(int argc, char** argv)
         counters.spriteBindingTextures == ExpectedUploadedTextures &&
         counters.spriteBindingsReleased == ExpectedUploadedTextures &&
         counters.spriteBindingTexturesDestroyed == ExpectedUploadedTextures &&
-        counters.spriteBindingResolverHits > 0;
+        counters.spriteBindingResolverHits > 0 &&
+        counters.particleSpriteBindingResolverHits > 0 &&
+        counters.trailSpriteBindingResolverHits > 0;
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
     // M11-A16: null-backend device must start, run callbacks, and advance mixRealtime.
     const bool audioDeviceValid =
@@ -3822,7 +3887,7 @@ int main(int argc, char** argv)
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
     evidenceBytes.reserve(512);
-    appendLeU32(evidenceBytes, 10U); // schema
+    appendLeU32(evidenceBytes, 11U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
@@ -3830,6 +3895,8 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.spriteBindingsReleased);
     appendLeU64(evidenceBytes, counters.spriteBindingTexturesDestroyed);
     appendLeU64(evidenceBytes, counters.spriteBindingResolverHits);
+    appendLeU64(evidenceBytes, counters.particleSpriteBindingResolverHits);
+    appendLeU64(evidenceBytes, counters.trailSpriteBindingResolverHits);
     appendLeU64(evidenceBytes, counters.tileMapStreamDemandUpdates);
     appendLeU64(evidenceBytes, counters.tileMapStreamRequests);
     appendLeU64(evidenceBytes, counters.tileMapStreamCommitted);
@@ -3933,6 +4000,9 @@ int main(int argc, char** argv)
                   << ",\"spriteBindingsReleased\":" << counters.spriteBindingsReleased
                   << ",\"spriteBindingTexturesDestroyed\":" << counters.spriteBindingTexturesDestroyed
                   << ",\"spriteBindingResolverHits\":" << counters.spriteBindingResolverHits
+                  << ",\"particleSpriteBindingResolverHits\":"
+                  << counters.particleSpriteBindingResolverHits
+                  << ",\"trailSpriteBindingResolverHits\":" << counters.trailSpriteBindingResolverHits
                   << ",\"requestedFrameDelayMs\":" << options->frameDelayMilliseconds
                   << ",\"minimumWindowVisibilityMs\":" << minimumWindowVisibilityMilliseconds(*options)
                   << ",\"totalSprites\":" << counters.lastTotalSprites
@@ -4086,6 +4156,8 @@ int main(int argc, char** argv)
               << ",\"spriteBindingsReleased\":" << counters.spriteBindingsReleased
               << ",\"spriteBindingTexturesDestroyed\":" << counters.spriteBindingTexturesDestroyed
               << ",\"spriteBindingResolverHits\":" << counters.spriteBindingResolverHits
+              << ",\"particleSpriteBindingResolverHits\":" << counters.particleSpriteBindingResolverHits
+              << ",\"trailSpriteBindingResolverHits\":" << counters.trailSpriteBindingResolverHits
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
               << ",\"spritesPerFrame\":" << expectedTotalSprites
               << ",\"particleCapacity\":" << ProductParticleCapacity
@@ -4290,7 +4362,7 @@ int main(int argc, char** argv)
               << ",\"accessibilityHasRadio\":" << (counters.accessibilityHasRadio ? "true" : "false")
               << ",\"accessibilityHasTextEdit\":" << (counters.accessibilityHasTextEdit ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":10"
+              << ",\"evidenceSchema\":11"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")

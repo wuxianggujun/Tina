@@ -43,7 +43,7 @@ namespace {
 {
     const double minimumLifetime = burst.lifetime.minimum.count();
     const double maximumLifetime = burst.lifetime.maximum.count();
-    if (burst.spriteKey == 0 || !finite(burst.origin) || !validRange(burst.positionOffset) ||
+    if (!burst.sprite || !finite(burst.origin) || !validRange(burst.positionOffset) ||
         !validRange(burst.velocity) || !finite(burst.startSizeMeters) || !finite(burst.endSizeMeters) ||
         !finite(burst.rotationRadians)) {
         return Core::failure(
@@ -186,7 +186,7 @@ Core::Status ParticleSystem2D::emitBurst(const ParticleBurst2D& burst) noexcept
 
         Particle2D particle{
             .stableParticleKey = firstStableKey + static_cast<u64>(index),
-            .spriteKey = burst.spriteKey,
+            .sprite = burst.sprite,
             .position = {
                 burst.origin.x + interpolate(
                     burst.positionOffset.minimum.x,
@@ -286,16 +286,29 @@ Core::Result<ParticleSystem2DUpdateStats> ParticleSystem2D::update(Core::Duratio
 }
 
 Core::Result<ParticleSystem2DExtractStats>
-ParticleSystem2D::extract(Render::RenderSceneWriter& writer) const
+ParticleSystem2D::extract(
+    Render::RenderSceneWriter& writer,
+    Sprite2DBindingResolver spriteBindingResolver) const
 {
     ParticleSystem2DExtractStats stats{};
     for (const Particle2D& particle : particles()) {
+        if (!particle.sprite || !spriteBindingResolver) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedSprite,
+                "ParticleSystem2D particle has no resolvable sprite asset");
+        }
+        const u32 spriteKey = spriteBindingResolver(particle.sprite);
+        if (spriteKey == 0U) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedSprite,
+                "ParticleSystem2D particle sprite asset has no render binding");
+        }
         const double normalizedAge = std::clamp(
             particle.age.count() / particle.lifetime.count(),
             0.0,
             1.0);
         const Render::RenderSprite2DInput input{
-            .spriteKey = particle.spriteKey,
+            .spriteKey = spriteKey,
             .stableEntityKey = particle.stableParticleKey,
             .centerX = particle.position.x,
             .centerY = particle.position.y,

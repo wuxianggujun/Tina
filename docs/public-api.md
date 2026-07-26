@@ -228,9 +228,16 @@ view，仅在一次 extraction 调用内有效；visible sprite 必须由它按�
 和 binding 状态解析为非0 `u32` key。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或0结果
 统一返回 `SceneErrorCode::UnresolvedSprite`；hidden sprite 不解析。Scene 不保存 resolver 或任何 Asset owner。
 
-`ParticleSystem2D` 与 `Trail2D` 是独立 Scene owners，不属于 World/ECS，也不依赖 Asset 或 bgfx。二者
-在 `Create()` 中通过调用方 PMR resource 建立固定容量 storage；成功的 emit/append、update、extract
-不增长 storage。它们直接复用调用方 phase-local `RenderSceneWriter` 提交 backend-neutral Sprite2D。
+`ParticleSystem2D` 与 `Trail2D` 是独立 Scene owners，不属于 World/ECS，也不依赖完整 AssetSystem 或
+bgfx。二者复制 copyable weak Sprite `AssetHandle`，不持有 `AssetLease`、Cooked payload、GPU owner 或
+resolver；在 `Create()` 中通过调用方 PMR resource 建立固定容量 storage，成功的 emit/append、update、
+extract 不增长 storage。它们直接复用调用方 phase-local `RenderSceneWriter` 提交 backend-neutral Sprite2D。
+
+`ParticleBurst2D::sprite` 在 `emitBurst()` 时复制到每个粒子，空 handle 属于 `InvalidComponent`；
+`Trail2DConfig::sprite` 在 `Create()` 时校验，空 handle 同样失败。两种显式 `extract(writer, resolver)` 只在
+本次调用借用共享 `Sprite2DBindingResolver`；缺 resolver 或 handle 被解析为0统一返回
+`SceneErrorCode::UnresolvedSprite`。stale/cross-store/wrong-kind/unbound 的识别由 resolver/registry 负责。
+空 system 不解析；Trail 每次非空 extract 解析一次并供所有 segment 复用，Particle 按 live item 解析。
 
 `ParticleSystem2DConfig::randomSeed` 对所有值（包括0）都是固定确定 seed。`emitBurst()` 的 validation、
 容量与稳定 key preflight 失败不改变 RNG、next key 或 live set；成功 key 单调分配且过期/clear 后不

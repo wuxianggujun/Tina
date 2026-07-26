@@ -1,35 +1,12 @@
 #pragma once
 
-#include <tina/asset/AssetHandle.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/render/Camera2DProjection.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/scene/Sprite2DBindingResolver.hpp>
 #include <tina/scene/World.hpp>
 
 namespace Tina::Scene {
-
-// Borrowed, allocation-free seam from a weak Sprite AssetHandle to the current
-// backend-neutral render binding key. The caller keeps the callback and userData
-// valid for one extractRenderSceneFromWorld() call; Scene retains neither. The
-// callback is a phase-borrowed lookup: it validates handle identity, asset kind,
-// and binding readiness without retaining pointers or references. Returning 0
-// means unresolved.
-struct Sprite2DBindingResolver final {
-    using ResolveFn = Core::u32 (*)(void* userData, Asset::AssetHandle sprite) noexcept;
-
-    void* userData = nullptr;
-    ResolveFn resolve = nullptr;
-
-    [[nodiscard]] constexpr explicit operator bool() const noexcept
-    {
-        return resolve != nullptr;
-    }
-
-    [[nodiscard]] Core::u32 operator()(Asset::AssetHandle sprite) const noexcept
-    {
-        return resolve == nullptr ? 0U : resolve(userData, sprite);
-    }
-};
 
 // Surface framebuffer size for Camera2D projection resolve. Zero extent means
 // Suspended surface: extract skips the World camera without treating it as a

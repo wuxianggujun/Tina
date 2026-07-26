@@ -45,11 +45,13 @@ Catalog package
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
 
-`AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D` 复制该 weak handle，
-并在 extraction 时借用产品 resolver；A2 产品 resolver 薄调用 Asset-owned API surface 的
+`AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D` 与 standalone
+`ParticleSystem2D`/`Trail2D` 复制该 weak handle，并在 extraction 时显式借用共享产品 resolver；A2
+产品 resolver 薄调用 Asset-owned API surface 的
 `Sprite2DBindingRegistry`，后者按当前 Store owner/generation、Sprite kind、唯一 required Texture2D cooked dependency
-与 live binding 解析 key。Scene 不因此依赖完整 AssetSystem，也不取得 Lease/payload/GPU owner。FX/TileMap
-仍存 key但消费 registry 生成值；3D 与统一 FrameResourceRef 后置。
+与 live binding 解析 key。Scene 不因此依赖完整 AssetSystem，也不取得 Lease/payload/GPU owner。
+Particle/Trail 不缓存解析结果或 resolver：空 FX 不解析，Trail 每次非空 extract 解析一次，Particle 按 live
+item 解析。TileMap 仍存 registry key；3D 与统一 FrameResourceRef 后置。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。

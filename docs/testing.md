@@ -109,7 +109,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 - hidden unresolved sprite 不调用 resolver；成功解析保持 UV/pivot/transform/color/sort，writer failure 原样传播；
 - `SpriteAnimator2D` 的空 handle frame 仍为 `InvalidAnimation`；
 - `tina_sample_2d` 的 World crate/character 组件来自 Catalog Sprite handle，resolver 每次验证 Store/kind/
-  binding 后映射 key。A1 本身未证明 registry；A2 已补该证据，但 FX/TileMap/3D Handle 迁移仍未完成。
+  binding 后映射 key。A1 本身未证明 registry；A2 已补该证据，A3 已完成 FX Handle 化；TileMap/3D
+  Handle 迁移仍未完成。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -132,9 +133,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - Sprite 必须是 live Handle 且 Cooked 文件恰有一个 required `Texture2D` dependency；stale/wrong-kind/
   missing/multiple dependency、unbound/stale texture 都返回0；
 - registry 不拥有 GPU/Lease/retirement；产品 State RAII 证明先 unbind 两项 binding，再 destroy 两张 texture；
-- product evidence schema 10：`spriteBindingTextures=2`、`spriteBindingsReleased=2`、
+- A2 完成时 product evidence schema 10：`spriteBindingTextures=2`、`spriteBindingsReleased=2`、
   `spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`，且 TileMap/selection/Particle/Trail
-  使用 registry 动态 key。
+  使用 registry 动态 key；A3 后当前 product evidence schema 为11。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -145,8 +146,37 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
 ```
 
-A2 保留 A1 resolver ABI；FX/TileMap 仍存 key，3D 与 `FrameResourceRef` 未迁移，不能据此把
-`ASSET-HANDLE-SCENE` 总项标为 Done。
+A2 保留 A1 resolver ABI；A3 随后完成 Particle/Trail Handle 化。TileMap、3D 与 `FrameResourceRef` 仍未
+迁移，不能据此把 `ASSET-HANDLE-SCENE` 总项标为 Done。
+
+## Particle/Trail Sprite AssetHandle A3
+
+`ASSET-HANDLE-SCENE-2D-A3` 的模块门禁归属 `tina_scene_tests`，产品闭环归属 2D product gate：
+
+- `Sprite2DBindingResolver.hpp`、`ParticleSystem2D.hpp`、`Trail2D.hpp` header isolation 编译；
+- Particle burst 与 live particle、Trail config 保存 weak Sprite `AssetHandle`，无旧 key overload/双轨，
+  且不持有 resolver、Lease、Cooked payload 或 GPU owner；
+- 空 Particle burst/Trail config 在发布前返回 `InvalidComponent`；Particle 失败保持 live set、stable key 与
+  RNG 状态不变；
+- live Particle 按 item 解析；非空 Trail 只解析一次并复用。missing/zero/stale/wrong-kind binding 均
+  `UnresolvedSprite` fail closed，空 Particle/Trail 不调用 resolver；
+- Particle 18/18、Trail 13/13，完整 `tina_scene_tests` 83/83；覆盖 handle 保留、PMR 300帧稳态与 writer
+  capacity failure；
+- product evidence schema 11 分别要求 `particleSpriteBindingResolverHits>0`、
+  `trailSpriteBindingResolverHits>0`；FX fingerprint schema 2 序列化稳定 `AssetId` bytes，不序列化 runtime
+  generation bits 或 render key。
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_scene_tests tina_sample_2d -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe `
+  --gtest_filter="ParticleSystem2DTests.*:Trail2DAssetTest.*" --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
+  --frames=300 --frame-delay-ms=0
+```
+
+A3 不迁移 TileMap、3D Mesh/Material registry、统一 retirement ownership 或 `FrameResourceRef`。
 
 ## 产品样例的证据边界
 
@@ -158,7 +188,7 @@ A2 保留 A1 resolver ABI；FX/TileMap 仍存 key，3D 与 `FrameResourceRef` �
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；schema 10 含 Sprite registry 注册/释放/纹理销毁/resolver hits，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；schema 11 含 Sprite registry 注册/释放/纹理销毁、World/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | 完整 PBR/IBL/shadow/light component、Scene AssetHandle 产品化、跨 GPU golden |
@@ -212,19 +242,23 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 `tina_scene_tests` 是 `ParticleSystem2D` / `Trail2D` 的模块门禁：覆盖 Create 固定 PMR allocation 与失败
 回收、300帧无 storage growth、固定 seed 可复现、burst validation/capacity/stable-key failure 原子性、
 stable key 过期后不复用、update preflight 零发布，以及向 `RenderSceneWriter` 的 lifetime/size/color/width
-extraction 和 writer capacity failure。
+extraction 和 writer capacity failure。A3 进一步覆盖 weak Sprite Handle 保留、空 handle 发布前拒绝、
+stale/wrong-kind/missing/zero resolver fail closed、空集合不解析与 Trail 每次非空 extraction 只解析一次。
+专项为 Particle 18/18、Trail 13/13，完整 `tina_scene_tests` 为83/83。
 
 ```powershell
 cmake --build --preset windows-vnext-debug --target tina_scene_tests -- /m:2 /v:m
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 ```
 
-product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=10`。通用结构化
+product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=11`。通用结构化
 字段包括 `spriteBindingTextures=2`、`spriteBindingsReleased=2`、`spriteBindingTexturesDestroyed=2`、
-`spriteBindingResolverHits>0`、
+`spriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
+`trailSpriteBindingResolverHits>0`、
 `particleCapacity=12`、`particleRandomSeed=1414090305`、`particleEmitted=10`、
 `trailCapacity=8`、`trailSegmentsCreated=3`、`trailBreaks=1`，以及32字符小写 hex
-`fxInitialFingerprint`。300帧 gate 进一步要求 `particleExpired=4`、`particleActive=6`、
+`fxInitialFingerprint`；该 fingerprint 的哈希输入内部 schema 为2。300帧 gate 进一步要求
+`particleExpired=4`、`particleActive=6`、
 `particleExtracted=6`、`trailActive=3`、`trailExtracted=3`。这些字段证明固定配置下的 simulation/extract
 数量与初始状态指纹；`pixelCaptureOk` 和单机 golden/非空窗口证据仍单独证明可见输出。
 
@@ -298,7 +332,7 @@ wrong-owner/bounded shutdown、active callback reader quiescence、terminal abso
 
 `MiniaudioDeviceTest.NullBackendConsumesBoundedStreamEofAndCancel` 验证 adapter 作为 realtime consumer 的
 EOF/Cancel 路径。产品 300帧还要求 `audioStreamQueued/submitted/eof/mixed/drained/stopped/retired=true`、
-submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为10。
+submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为11。
 
 Physics2D N2 的模块门禁覆盖：`createBody/createShape` 独立 generation、多 Box/Circle/Capsule shape/body、
 shape 单独销毁、sensor enter/exit、Distance joint create/query/destroy、body 级联退休 shape/joint、
@@ -308,7 +342,7 @@ wrong-world/stale/capacity/PMR rollback，以及 TileMap bridge/CharacterControl
 
 Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化（TEST-002）：包含
 `tina_scene_tests` 的上述测试 executable 全部 exit 0 后，再跑 sample 300 帧并校验
-`productGate=bgfx-physics-freetype-audio` 与 schema 10 Sprite binding、Particle/Trail 字段。
+`productGate=bgfx-physics-freetype-audio` 与 schema 11 Sprite binding、Particle/Trail Handle resolver 字段。
 
 文档扫描（DOC-002）：
 

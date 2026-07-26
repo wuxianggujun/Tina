@@ -31,10 +31,15 @@ namespace {
             SceneErrorCode::InvalidComponent,
             "Trail2D widths must be finite and greater than zero");
     }
-    if (config.spriteKey == 0 || config.stableEntityKeyBase == 0) {
+    if (!config.sprite) {
         return Core::failure(
             SceneErrorCode::InvalidComponent,
-            "Trail2D render keys must be non-zero");
+            "Trail2D Sprite AssetHandle must be non-empty");
+    }
+    if (config.stableEntityKeyBase == 0) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Trail2D stable entity key base must be non-zero");
     }
     if (!isValidUvRect(config.uvRect)) {
         return Core::failure(
@@ -228,8 +233,20 @@ Core::Status Trail2D::update(Core::Duration delta) noexcept
     return Core::success();
 }
 
-Core::Status Trail2D::extract(Render::RenderSceneWriter& writer) const noexcept
+Core::Status Trail2D::extract(
+    Render::RenderSceneWriter& writer,
+    Sprite2DBindingResolver spriteBindingResolver) const noexcept
 {
+    if (m_segments.empty()) {
+        return Core::success();
+    }
+    const u32 spriteKey = spriteBindingResolver(m_config.sprite);
+    if (spriteKey == 0) {
+        return Core::failure(
+            SceneErrorCode::UnresolvedSprite,
+            "Trail2D Sprite AssetHandle has no live render binding");
+    }
+
     for (const Trail2DSegment& segment : m_segments) {
         auto geometry = resolveGeometry(segment.start, segment.end);
         if (!geometry) {
@@ -237,7 +254,7 @@ Core::Status Trail2D::extract(Render::RenderSceneWriter& writer) const noexcept
         }
         const float width = widthAtAge(m_config, segment);
         Core::Status status = writer.addSprite2D(Render::RenderSprite2DInput{
-            .spriteKey = m_config.spriteKey,
+            .spriteKey = spriteKey,
             .stableEntityKey = segment.stableEntityKey,
             .centerX = geometry->centerX,
             .centerY = geometry->centerY,

@@ -1,8 +1,10 @@
 #pragma once
 
+#include <tina/asset/AssetHandle.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/scene/Sprite2DBindingResolver.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 
 #include <memory_resource>
@@ -16,7 +18,9 @@ struct Trail2DConfig final {
     Core::Duration segmentLifetime{};
     float startWidthMeters = 1.0F;
     float endWidthMeters = 1.0F;
-    u32 spriteKey = 0;
+    // Copyable weak handle. Trail2D owns no AssetLease and does not extend the
+    // Sprite payload lifetime.
+    Asset::AssetHandle sprite{};
     // First render-facing stable key. Successful segments consume monotonically
     // increasing keys starting here; expired segment keys are never reused.
     u64 stableEntityKeyBase = 1;
@@ -56,7 +60,12 @@ public:
     // The next append establishes a new anchor without connecting to the old one.
     void breakTrail() noexcept;
     [[nodiscard]] Core::Status update(Core::Duration delta) noexcept;
-    [[nodiscard]] Core::Status extract(Render::RenderSceneWriter& writer) const noexcept;
+    // Resolves the weak Sprite handle once per non-empty extraction and retains
+    // neither the resolver nor its userData. A missing resolver or key 0 returns
+    // UnresolvedSprite. Empty trails do not invoke the resolver.
+    [[nodiscard]] Core::Status extract(
+        Render::RenderSceneWriter& writer,
+        Sprite2DBindingResolver spriteBindingResolver) const noexcept;
 
     [[nodiscard]] std::span<const Trail2DSegment> segments() const noexcept { return m_segments; }
     [[nodiscard]] usize segmentCount() const noexcept { return m_segments.size(); }

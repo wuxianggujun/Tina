@@ -17,9 +17,10 @@ Game2DState
   -> retained UI + AudioEngine
 ```
 
-- `tina_scene` 的 World Sprite 只存 weak `AssetHandle`，extraction 借用 resolver 后写 backend-neutral key；
-- 独立 `ParticleSystem2D` / `Trail2D` 与 TileMap 当前仍直接写 backend-neutral sprite key，但产品 key 由
-  `Sprite2DBindingRegistry` 生成，不再由游戏手写；
+- `tina_scene` 的 World Sprite 与独立 `ParticleSystem2D`/`Trail2D` 只存 weak Sprite `AssetHandle`，
+  extraction 显式借用共享 resolver 后写 backend-neutral key；
+- TileMap 当前仍直接写 backend-neutral sprite key，但产品 key 由 `Sprite2DBindingRegistry` 生成，
+  不再由游戏手写；
 - TileMap、角色控制、选择高亮、Physics sync 和产品规则留在 Asset/产品 State；
 - Render backend 不理解 tile/cell/gameplay，也不接收 AssetHandle；
 - Box2D、bgfx、FreeType、miniaudio 均位于可选私有 adapter。
@@ -72,11 +73,11 @@ Sprite 顺序为 sorting layer → order in layer → stable source ordinal。�
 产品 sample 当前上传两张 Cooked Texture2D，并通过 State-owned `Sprite2DBindingRegistry` 注册动态 key；
 registry 借用 `TileMapResources` 中的 Store 与 `DeviceCapture` 中的 RenderDevice，两个外部 owner 都必须
 覆盖 State/registry 生命周期。World 里的 crate/角色帧保存 Catalog Sprite handle，再由 borrowed resolver
-调用 registry 解析。TileMap emit、selection highlight、Particle/Trail 组件仍保存 `u32` key，但都消费
-registry 生成的 key，不再依赖手写
-`1/2` binding 表。registry 借用 AssetStore 与 RenderDevice，不拥有 GPU texture、AssetLease 或 retirement；
-State RAII teardown 必须先成功 unbind 两项 binding，再 destroy texture。A2 仍未把 FX/TileMap 组件改为
-Handle，也未覆盖3D/FrameResourceRef，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
+调用 registry 解析。Particle/Trail 保存 Catalog Sprite handle，并分别通过显式借用的 resolver 调用 registry；
+TileMap emit 仍保存并消费 registry 生成的 `u32` key，不再依赖手写 `1/2` binding 表。registry 借用
+AssetStore 与 RenderDevice，不拥有 GPU texture、AssetLease 或 retirement；State RAII teardown 必须先成功
+unbind 两项 binding，再 destroy texture。A3 已完成 FX Handle 化，但尚未覆盖 TileMap、3D 或
+`FrameResourceRef`，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
 Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用不同纹理，不再受历史 fixture key 1 限制。
 
 ## Sprite 动画
@@ -104,19 +105,28 @@ spriteanim <clip-id> <Once|Loop|PingPong> <sprite-id:duration-seconds>...
 ## Particles 与 Trail
 
 `ParticleSystem2D` 和 `Trail2D` 是 `Tina::Scene` 的两个 standalone owner-thread system，不是 World
-component，也不依赖 Asset 或 bgfx。二者在 `Create()` 时通过调用方 `memory_resource` 建立固定容量
-PMR storage；后续成功的 emit/append、update 和 extract 不扩容。它们复用调用方当前 phase 的
-`RenderSceneWriter` 提交 Sprite2D，真实纹理由 registry 生成的 `spriteKey` binding 解析。
+component，也不依赖完整 AssetSystem 或 bgfx；它们只复制轻量、copyable weak Sprite `AssetHandle`，不持有
+`AssetLease`、Cooked payload、GPU texture owner 或 resolver。二者在 `Create()` 时通过调用方
+`memory_resource` 建立固定容量 PMR storage；后续成功的 emit/append、update 和 extract 不扩容。它们复用
+调用方当前 phase 的 `RenderSceneWriter` 提交 Sprite2D，真实纹理由显式借用的共享
+`Sprite2DBindingResolver` 映射为 registry `spriteKey`。
 
-粒子系统对每个 `randomSeed`（包括0）使用固定确定序列。`emitBurst()` 在写入前完成 burst validation、
+粒子系统对每个 `randomSeed`（包括0）使用固定确定序列。`emitBurst()` 在写入前拒绝空 Sprite handle，并
+完成其余 burst validation、
 剩余容量和稳定 key 空间检查；任一失败都不推进 RNG、next key 或 live set。成功粒子按单调 key 分配，
 过期或 `clear()` 后也不复用。`update()` 先 preflight 所有 age，以及仍存活粒子的积分后位置；任何溢出
-使整批状态不变，成功后才推进并压缩过期粒子。extract 按 `age/lifetime` 线性插值 size 与 color。
+使整批状态不变，成功后才推进并压缩过期粒子。extract 按 `age/lifetime` 线性插值 size 与 color，并为
+每个 live particle 即时解析其保存的 handle；没有 live particle 时不调用 resolver。
 
 Trail 第一个 `appendPoint()` 只建立 anchor，后续有效非退化点各追加一个从旧 anchor 到新点的 segment；
 `breakTrail()` 使下一点建立新 anchor，不跨断点连线。每段从创建时独立计 age/lifetime，宽度按各自
 normalized age 在 start/end width 间线性插值。几何、容量或稳定 key 失败不修改 anchor、segments 或
 next key；update 同样先 preflight 全部 age 后再推进与删除过期段。segment key 单调分配且不因过期复用。
+`Trail2D::Create()` 拒绝空 Sprite handle；每次有 segment 的 extract 只解析一次 config 中的 handle 并复用
+结果，空 Trail 不调用 resolver。
+
+两者缺 resolver，或 stale/cross-store/wrong-kind/unbound handle 使 resolver 返回0时，都 fail closed 为
+`SceneErrorCode::UnresolvedSprite`。resolver 与 `userData` 仅借用到当前 extract 返回，system 不保留它们。
 
 ## TileMap 与角色控制
 
@@ -224,8 +234,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=14`（含2个 cooked chunk）、`texturesUploaded=2`；
-- `evidenceSchema=10`，`spriteBindingTextures=2`、`spriteBindingsReleased=2`、
-  `spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`，四项都进入 evidence hash；
+- `evidenceSchema=11`，`spriteBindingTextures=2`、`spriteBindingsReleased=2`、
+  `spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`，并且
+  `particleSpriteBindingResolverHits>0`、`trailSpriteBindingResolverHits>0`；这些字段都进入 evidence hash；
 - `tileMapStreamRequests=2`、`tileMapStreamCommitted=2`、`tileMapStreamResident=2`，且每个 frame 都推进
   demand/pump/commit；
 - `objectLayerConsumed=true`、`objectLayerObjects=2`，稳定 object `101/102` 已被产品逻辑消费；
@@ -234,7 +245,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；
 - 固定粒子容量12、seed `1414090305`、初始发射10，300帧时 expired=4、
   active/extracted=6；Trail 容量8、创建/active/extracted segment=3、break=1；
-  `fxInitialFingerprint` 是32字符小写 hex，覆盖确定性的初始粒子/Trail 状态；
+  `fxInitialFingerprint` 是32字符小写 hex；其内部 schema 2 用 Store 解析出的稳定 Sprite `AssetId`，不把
+  瞬时 generation handle bits 或 render key 写入指纹，并覆盖确定性的初始粒子/Trail 状态；
 - UI/TextEdit/ProgressBar/RadioButton、Audio Catalog lease、Advanced Audio owner-thread deterministic mix、
   Physics contact；
 - `physicsSensorEnters>0`、`physicsSensorExits>0`、`physicsJointReady=true`；

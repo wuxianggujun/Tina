@@ -67,13 +67,16 @@ camera 时 extraction 失败。
 ## Standalone 2D-FX systems
 
 `ParticleSystem2D` 和 `Trail2D` 属于 `Tina::Scene`，但不是 World component，也不持有 Entity。二者由
-产品 State 显式拥有，owner thread 串行调用；它们只依赖 Core/Render 的 Tina-owned 类型，不依赖
-AssetSystem、AssetHandle 或 bgfx。`Create()` 使用调用方 `std::pmr::memory_resource` 完成唯一持久分配并
-固定容量，成功的 emit/append、update、extract 均不增长 storage。
+产品 State 显式拥有，owner thread 串行调用；它们只依赖轻量 AssetTypes 与 Core/Render 的 Tina-owned
+类型，不依赖完整 AssetSystem 或 bgfx。二者保存 copyable weak Sprite `AssetHandle`，不持有
+`AssetLease`、Cooked payload、GPU texture owner 或 resolver。`Create()` 使用调用方
+`std::pmr::memory_resource` 完成唯一持久分配并固定容量，成功的 emit/append、update、extract 均不增长
+storage。
 
-`ParticleSystem2D` 的每个 seed（包括0）都选择固定 RNG 序列。burst 先完整校验有限值、正 lifetime/size、
-非0 sprite key、剩余容量和稳定 key 空间；validation、capacity 或 key exhaustion 失败都保持 RNG、next
-key 与 live particles 不变。稳定 particle key 从配置基值单调分配，粒子过期或 `clear()` 后不复用。
+`ParticleSystem2D` 的每个 seed（包括0）都选择固定 RNG 序列。burst 先完整校验非空 Sprite handle、有限值、
+正 lifetime/size、剩余容量和稳定 key 空间；validation、capacity 或 key exhaustion 失败都保持 RNG、
+next key 与 live particles 不变。emit 把 burst 的 weak handle 值复制到每个粒子；稳定 particle key 从配置
+基值单调分配，粒子过期或 `clear()` 后不复用。
 `update()` 先 preflight 全部 next age 与 survivor position，再统一推进并 stable-compact live set；任何
 溢出使更新零发布。
 
@@ -81,10 +84,14 @@ key 与 live particles 不变。稳定 particle key 从配置基值单调分配�
 只断开 anchor，使下一点开始新链。每段保存创建时的独立 age/lifetime，update 先 preflight 全部 age，
 再推进并移除过期段；extract 按每段 normalized age 在线性 start/end width 间取值。非法 geometry、固定
 capacity 或稳定 key exhaustion 失败均不修改 anchor、segment set 或 next key；过期 key 不复用。
+`Trail2D::Create()` 对 config 的空 Sprite handle 做结构校验并拒绝。
 
-两个 system 的 `extract()` 都复用调用方 phase-local `RenderSceneWriter`，把粒子或 segment 转为
-backend-neutral Sprite2D item。writer failure 原样传播，simulation owner state 不因此变化；真实 texture
-binding 和 bgfx submission 仍由 RenderDevice/backend 负责。
+两个 system 的 `extract()` 都显式借用共享 `Sprite2DBindingResolver` 与调用方 phase-local
+`RenderSceneWriter`，把粒子或 segment 转为 backend-neutral Sprite2D item。resolver/userData 只在当前
+调用内有效，system 不保留。缺 resolver，或 stale/cross-store/wrong-kind/unbound handle 使 resolver 返回0，
+统一 fail closed 为 `UnresolvedSprite`。空 FX 不调用 resolver；Trail 每次非空 extract 只解析一次并复用
+到所有 segment，Particle 按每个 live item 即时解析。writer failure 原样传播，simulation owner state 不
+因此变化；真实 texture binding 和 bgfx submission 仍由 RenderDevice/backend 负责。
 
 ## Render extraction
 
@@ -106,9 +113,9 @@ borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/gene
 产生 `UnresolvedSprite`；hidden sprite 不调用 resolver。3D mesh 仍使用 world pose/scale、local bounds 和
 material color fixture/product key。Scene 不保存 resolver、AssetLease、Cooked payload 或 GPU handle。
 
-A2 不改变上述 Scene API：产品 resolver 只把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，
-由 Asset 层沿 Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。TileMap/Particle/Trail 仍提交
-key，但产品使用 registry 注册返回的动态 key；这不等于把这些系统改为 Handle component。产品 State
+A2 提供的产品 resolver 把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，由 Asset 层沿
+Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。A3 让 Particle/Trail 保存 Handle，
+但 TileMap 仍提交 registry 注册返回的动态 key。产品 State
 拥有 registry 与 GPU texture cleanup 账簿，但只借用 `TileMapResources` 中的 Store 和 `DeviceCapture` 中的
 RenderDevice；外部 owner 必须覆盖 State/registry 生命周期。key 由 RenderDevice 实例 allocator 分配，
 同一 device 的多个 registry 共享唯一/单调 namespace；allocator-managed registry 管理期间不得混用 direct
@@ -151,8 +158,8 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
 ## 验证
 
 - `tina_scene_tests`：entity generation、owner、destroy/reparent、Transform propagation、2D/3D component、
-  extraction、Prefab rollback/resolver，以及 Particle/Trail 的 PMR、确定性、事务失败、lifetime 与 writer
-  capacity；
+  extraction、Prefab rollback/resolver，以及 Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle
+  保留、resolver fail-closed/解析次数与 writer capacity；当前直接运行 83/83；
 - `tina_asset_tests`：Sprite binding registry 的容量/owner thread、register/unbind transaction、key
   non-reuse、Texture/Sprite Handle 与 cooked dependency fail-closed；
 - `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking；

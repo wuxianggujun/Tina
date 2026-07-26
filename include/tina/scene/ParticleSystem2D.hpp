@@ -1,8 +1,10 @@
 #pragma once
 
+#include <tina/asset/AssetHandle.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/scene/Sprite2DBindingResolver.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 
 #include <memory_resource>
@@ -33,7 +35,8 @@ struct ParticleLifetimeRange final {
 
 struct ParticleBurst2D final {
     usize count = 1;
-    u32 spriteKey = 0;
+    // Copyable weak handle; emitting copies it into each particle and acquires no AssetLease.
+    Asset::AssetHandle sprite{};
     Vec2 origin{};
     ParticleVec2Range positionOffset{};
     ParticleVec2Range velocity{};
@@ -51,7 +54,8 @@ struct ParticleBurst2D final {
 // lifetime during extract(), so update() only advances simulation fields.
 struct Particle2D final {
     u64 stableParticleKey = 0;
-    u32 spriteKey = 0;
+    // Retained weak handle only; the particle system does not own the asset lifetime.
+    Asset::AssetHandle sprite{};
     Vec2 position{};
     Vec2 velocity{};
     Core::Duration age{};
@@ -94,8 +98,10 @@ public:
     // stable-key allocation, and deterministic random state unchanged.
     [[nodiscard]] Core::Status emitBurst(const ParticleBurst2D& burst) noexcept;
     [[nodiscard]] Core::Result<ParticleSystem2DUpdateStats> update(Core::Duration delta) noexcept;
+    // Borrows the resolver for this call only. Live particles require a resolver
+    // and non-zero binding; either failure returns UnresolvedSprite.
     [[nodiscard]] Core::Result<ParticleSystem2DExtractStats>
-    extract(Render::RenderSceneWriter& writer) const;
+    extract(Render::RenderSceneWriter& writer, Sprite2DBindingResolver spriteBindingResolver) const;
 
     void clear() noexcept { m_liveCount = 0; }
 

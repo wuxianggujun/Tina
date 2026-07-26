@@ -1,3 +1,4 @@
+#include <tina/asset/AssetStore.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/scene/ParticleSystem2D.hpp>
@@ -9,6 +10,7 @@
 #include <limits>
 #include <memory_resource>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -48,6 +50,81 @@ private:
     usize m_rejectedAllocationMinimumBytes = (std::numeric_limits<usize>::max)();
 };
 
+[[nodiscard]] Core::AssetId fixtureAssetId(u8 seed)
+{
+    Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(seed);
+    return *Core::AssetId::fromBytes(bytes);
+}
+
+struct TestSpriteBindings final {
+    [[nodiscard]] Sprite2DBindingResolver resolver() noexcept
+    {
+        return Sprite2DBindingResolver{.userData = this, .resolve = &resolve};
+    }
+
+    [[nodiscard]] static u32 resolve(void* userData, Asset::AssetHandle sprite) noexcept
+    {
+        auto& self = *static_cast<TestSpriteBindings*>(userData);
+        ++self.resolveCalls;
+        self.lastResolved = sprite;
+        if (self.store == nullptr || self.store->assetKind(sprite) != AssetFormat::AssetKind::Sprite ||
+            self.store->state(sprite) == Asset::AssetLogicalState::Unloaded || sprite != self.boundSprite)
+        {
+            return 0;
+        }
+        return self.bindingKey;
+    }
+
+    Asset::AssetStore* store = nullptr;
+    Asset::AssetHandle boundSprite{};
+    u32 bindingKey = 0;
+    usize resolveCalls = 0;
+    Asset::AssetHandle lastResolved{};
+};
+
+class ParticleSystem2DTests : public testing::Test {
+  protected:
+    void SetUp() override
+    {
+        auto store = Asset::AssetStore::Create({.capacity = 4, .memoryResource = &assetMemory_});
+        ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
+        assetStore_.emplace(std::move(*store));
+
+        auto firstSprite = assetStore_->beginQueued(fixtureAssetId(1), AssetFormat::AssetKind::Sprite);
+        auto secondSprite = assetStore_->beginQueued(fixtureAssetId(2), AssetFormat::AssetKind::Sprite);
+        auto wrongKind = assetStore_->beginQueued(fixtureAssetId(3), AssetFormat::AssetKind::Texture2D);
+        ASSERT_TRUE(firstSprite.has_value());
+        ASSERT_TRUE(secondSprite.has_value());
+        ASSERT_TRUE(wrongKind.has_value());
+        firstSprite_ = *firstSprite;
+        secondSprite_ = *secondSprite;
+        wrongKind_ = *wrongKind;
+    }
+
+    [[nodiscard]] Asset::AssetStore& assetStore() noexcept
+    {
+        return *assetStore_;
+    }
+
+    [[nodiscard]] TestSpriteBindings bindingsFor(
+        Asset::AssetHandle sprite,
+        u32 bindingKey = 17U) noexcept
+    {
+        return TestSpriteBindings{
+            .store = &assetStore(),
+            .boundSprite = sprite,
+            .bindingKey = bindingKey,
+        };
+    }
+
+    std::pmr::unsynchronized_pool_resource assetMemory_{};
+    std::optional<Asset::AssetStore> assetStore_{};
+    Asset::AssetHandle firstSprite_{};
+    Asset::AssetHandle secondSprite_{};
+    Asset::AssetHandle wrongKind_{};
+};
+
 [[nodiscard]] ParticleSystem2D makeSystem(
     usize capacity,
     u64 seed = 7,
@@ -67,11 +144,11 @@ private:
     return std::move(*system);
 }
 
-[[nodiscard]] ParticleBurst2D randomizedBurst(usize count = 1)
+[[nodiscard]] ParticleBurst2D randomizedBurst(Asset::AssetHandle sprite, usize count = 1)
 {
     return ParticleBurst2D{
         .count = count,
-        .spriteKey = 17,
+        .sprite = sprite,
         .origin = {4.0F, -3.0F},
         .positionOffset = {
             .minimum = {-2.0F, -1.0F},
@@ -98,7 +175,7 @@ private:
 void expectSameParticle(const Particle2D& left, const Particle2D& right)
 {
     EXPECT_EQ(left.stableParticleKey, right.stableParticleKey);
-    EXPECT_EQ(left.spriteKey, right.spriteKey);
+    EXPECT_EQ(left.sprite, right.sprite);
     EXPECT_FLOAT_EQ(left.position.x, right.position.x);
     EXPECT_FLOAT_EQ(left.position.y, right.position.y);
     EXPECT_FLOAT_EQ(left.velocity.x, right.velocity.x);
@@ -137,7 +214,7 @@ void expectSameParticle(const Particle2D& left, const Particle2D& right)
     });
 }
 
-TEST(ParticleSystem2DTests, CreateRejectsInvalidCapacityAndStableKeyBase)
+TEST_F(ParticleSystem2DTests, CreateRejectsInvalidCapacityAndStableKeyBase)
 {
     auto zeroCapacity = ParticleSystem2D::Create({.capacity = 0});
     ASSERT_FALSE(zeroCapacity.has_value());
@@ -151,7 +228,7 @@ TEST(ParticleSystem2DTests, CreateRejectsInvalidCapacityAndStableKeyBase)
     EXPECT_EQ(zeroStableKey.error().code, SceneErrorCode::InvalidComponent);
 }
 
-TEST(ParticleSystem2DTests, CreateMapsPmrAllocationFailureWithoutLeakingStorage)
+TEST_F(ParticleSystem2DTests, CreateMapsPmrAllocationFailureWithoutLeakingStorage)
 {
     TrackingMemoryResource resource;
     resource.rejectAllocationAtLeast(sizeof(Particle2D) * 8U);
@@ -161,12 +238,12 @@ TEST(ParticleSystem2DTests, CreateMapsPmrAllocationFailureWithoutLeakingStorage)
     EXPECT_EQ(resource.allocationCount(), resource.deallocationCount());
 }
 
-TEST(ParticleSystem2DTests, EqualSeedProducesIdenticalParticlesAndDifferentSeedChangesSequence)
+TEST_F(ParticleSystem2DTests, EqualSeedProducesIdenticalParticlesAndDifferentSeedChangesSequence)
 {
     auto first = makeSystem(8, 0);
     auto second = makeSystem(8, 0);
     auto different = makeSystem(8, 0x87654321ULL);
-    const ParticleBurst2D burst = randomizedBurst(8);
+    const ParticleBurst2D burst = randomizedBurst(firstSprite_, 8);
 
     ASSERT_TRUE(first.emitBurst(burst).has_value());
     ASSERT_TRUE(second.emitBurst(burst).has_value());
@@ -183,17 +260,17 @@ TEST(ParticleSystem2DTests, EqualSeedProducesIdenticalParticlesAndDifferentSeedC
         first.particles()[0].lifetime != different.particles()[0].lifetime);
 }
 
-TEST(ParticleSystem2DTests, CapacityFailureIsAtomicAndDoesNotAdvanceRandomOrStableKeyState)
+TEST_F(ParticleSystem2DTests, CapacityFailureIsAtomicAndDoesNotAdvanceRandomOrStableKeyState)
 {
     auto system = makeSystem(2, 99, 500);
     auto reference = makeSystem(2, 99, 500);
 
-    auto tooLarge = system.emitBurst(randomizedBurst(3));
+    auto tooLarge = system.emitBurst(randomizedBurst(firstSprite_, 3));
     ASSERT_FALSE(tooLarge.has_value());
     EXPECT_EQ(tooLarge.error().code, SceneErrorCode::CapacityExceeded);
     EXPECT_EQ(system.liveCount(), 0U);
 
-    const ParticleBurst2D exact = randomizedBurst(2);
+    const ParticleBurst2D exact = randomizedBurst(firstSprite_, 2);
     ASSERT_TRUE(system.emitBurst(exact).has_value());
     ASSERT_TRUE(reference.emitBurst(exact).has_value());
     ASSERT_EQ(system.liveCount(), 2U);
@@ -202,7 +279,7 @@ TEST(ParticleSystem2DTests, CapacityFailureIsAtomicAndDoesNotAdvanceRandomOrStab
     }
 
     const auto before = system.particles();
-    auto noRoom = system.emitBurst(randomizedBurst(1));
+    auto noRoom = system.emitBurst(randomizedBurst(firstSprite_));
     ASSERT_FALSE(noRoom.has_value());
     EXPECT_EQ(noRoom.error().code, SceneErrorCode::CapacityExceeded);
     ASSERT_EQ(system.liveCount(), 2U);
@@ -210,18 +287,18 @@ TEST(ParticleSystem2DTests, CapacityFailureIsAtomicAndDoesNotAdvanceRandomOrStab
     expectSameParticle(system.particles()[1], before[1]);
 }
 
-TEST(ParticleSystem2DTests, StableKeyExhaustionRejectsWholeBurstBeforeRandomStateAdvances)
+TEST_F(ParticleSystem2DTests, StableKeyExhaustionRejectsWholeBurstBeforeRandomStateAdvances)
 {
     constexpr u64 MaximumKey = (std::numeric_limits<u64>::max)();
     auto system = makeSystem(2, 123, MaximumKey);
     auto reference = makeSystem(1, 123, MaximumKey);
 
-    auto overflow = system.emitBurst(randomizedBurst(2));
+    auto overflow = system.emitBurst(randomizedBurst(firstSprite_, 2));
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, SceneErrorCode::CapacityExceeded);
     EXPECT_EQ(system.liveCount(), 0U);
 
-    const ParticleBurst2D one = randomizedBurst(1);
+    const ParticleBurst2D one = randomizedBurst(firstSprite_);
     ASSERT_TRUE(system.emitBurst(one).has_value());
     ASSERT_TRUE(reference.emitBurst(one).has_value());
     expectSameParticle(system.particles().front(), reference.particles().front());
@@ -233,22 +310,22 @@ TEST(ParticleSystem2DTests, StableKeyExhaustionRejectsWholeBurstBeforeRandomStat
     EXPECT_EQ(system.liveCount(), 0U);
 }
 
-TEST(ParticleSystem2DTests, RejectsNonFiniteValuesInvalidLifetimeAndUpdateDelta)
+TEST_F(ParticleSystem2DTests, RejectsNonFiniteValuesInvalidLifetimeAndUpdateDelta)
 {
     auto system = makeSystem(4);
-    ParticleBurst2D burst = randomizedBurst();
+    ParticleBurst2D burst = randomizedBurst(firstSprite_);
     burst.lifetime.minimum = Core::Duration::zero();
     auto zeroLifetime = system.emitBurst(burst);
     ASSERT_FALSE(zeroLifetime.has_value());
     EXPECT_EQ(zeroLifetime.error().code, SceneErrorCode::InvalidComponent);
 
-    burst = randomizedBurst();
+    burst = randomizedBurst(firstSprite_);
     burst.velocity.maximum.x = (std::numeric_limits<float>::quiet_NaN)();
     auto nanVelocity = system.emitBurst(burst);
     ASSERT_FALSE(nanVelocity.has_value());
     EXPECT_EQ(nanVelocity.error().code, SceneErrorCode::InvalidComponent);
 
-    burst = randomizedBurst();
+    burst = randomizedBurst(firstSprite_);
     burst.endSizeMeters.y = 0.0F;
     auto zeroSize = system.emitBurst(burst);
     ASSERT_FALSE(zeroSize.has_value());
@@ -260,10 +337,35 @@ TEST(ParticleSystem2DTests, RejectsNonFiniteValuesInvalidLifetimeAndUpdateDelta)
     EXPECT_EQ(invalidDelta.error().code, SceneErrorCode::InvalidComponent);
 }
 
-TEST(ParticleSystem2DTests, UpdateExpiresAndReclaimsCapacityWithoutReusingStableKeys)
+TEST_F(ParticleSystem2DTests, EmptySpriteHandleFailureIsAtomic)
+{
+    auto system = makeSystem(2, 19, 600);
+    auto reference = makeSystem(2, 19, 600);
+    const ParticleBurst2D first = randomizedBurst(firstSprite_);
+    ASSERT_TRUE(system.emitBurst(first).has_value());
+    ASSERT_TRUE(reference.emitBurst(first).has_value());
+    const Particle2D firstBefore = system.particles().front();
+
+    ParticleBurst2D invalid = randomizedBurst(Asset::AssetHandle{});
+    auto rejected = system.emitBurst(invalid);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, SceneErrorCode::InvalidComponent);
+    ASSERT_EQ(system.liveCount(), 1U);
+    expectSameParticle(system.particles().front(), firstBefore);
+
+    const ParticleBurst2D second = randomizedBurst(secondSprite_);
+    ASSERT_TRUE(system.emitBurst(second).has_value());
+    ASSERT_TRUE(reference.emitBurst(second).has_value());
+    ASSERT_EQ(system.liveCount(), reference.liveCount());
+    for (usize index = 0; index < system.liveCount(); ++index) {
+        expectSameParticle(system.particles()[index], reference.particles()[index]);
+    }
+}
+
+TEST_F(ParticleSystem2DTests, UpdateExpiresAndReclaimsCapacityWithoutReusingStableKeys)
 {
     auto system = makeSystem(2, 4, 700);
-    ParticleBurst2D burst = randomizedBurst(2);
+    ParticleBurst2D burst = randomizedBurst(firstSprite_, 2);
     burst.lifetime = {
         .minimum = Core::Duration{0.25},
         .maximum = Core::Duration{0.25},
@@ -285,10 +387,10 @@ TEST(ParticleSystem2DTests, UpdateExpiresAndReclaimsCapacityWithoutReusingStable
     EXPECT_EQ(system.particles().front().stableParticleKey, 702U);
 }
 
-TEST(ParticleSystem2DTests, UpdatePositionOverflowLeavesEveryParticleUnchanged)
+TEST_F(ParticleSystem2DTests, UpdatePositionOverflowLeavesEveryParticleUnchanged)
 {
     auto system = makeSystem(2);
-    ParticleBurst2D safe = randomizedBurst(1);
+    ParticleBurst2D safe = randomizedBurst(firstSprite_);
     safe.origin = {};
     safe.positionOffset = {};
     safe.velocity = {
@@ -317,12 +419,12 @@ TEST(ParticleSystem2DTests, UpdatePositionOverflowLeavesEveryParticleUnchanged)
     expectSameParticle(system.particles()[1], secondBefore);
 }
 
-TEST(ParticleSystem2DTests, ExtractInterpolatesPositionSizeAndColorAtNormalizedLifetime)
+TEST_F(ParticleSystem2DTests, ExtractInterpolatesPositionSizeAndColorAtNormalizedLifetime)
 {
     auto system = makeSystem(1, 5, 900);
     const ParticleBurst2D burst{
         .count = 1,
-        .spriteKey = 44,
+        .sprite = firstSprite_,
         .origin = {1.0F, 2.0F},
         .velocity = {
             .minimum = {2.0F, -1.0F},
@@ -347,9 +449,12 @@ TEST(ParticleSystem2DTests, ExtractInterpolatesPositionSizeAndColorAtNormalizedL
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
     ASSERT_TRUE(addTestCamera(writer).has_value());
-    auto extracted = system.extract(writer);
+    auto bindings = bindingsFor(firstSprite_, 44U);
+    auto extracted = system.extract(writer, bindings.resolver());
     ASSERT_TRUE(extracted.has_value()) << (extracted.has_value() ? "" : extracted.error().message);
     EXPECT_EQ(extracted->submitted, 1U);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
+    EXPECT_EQ(bindings.lastResolved, firstSprite_);
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value()) << (committed.has_value() ? "" : committed.error().message);
     ASSERT_EQ(committed->sprites2D().size(), 1U);
@@ -370,14 +475,120 @@ TEST(ParticleSystem2DTests, ExtractInterpolatesPositionSizeAndColorAtNormalizedL
     EXPECT_EQ(sprite.orderInLayer, 8);
 }
 
-TEST(ParticleSystem2DTests, UpdateAndExtractDoNotGrowParticlePmrStorageAcrossThreeHundredFrames)
+TEST_F(ParticleSystem2DTests, EmittedParticleRetainsHandleValueFromBurst)
+{
+    auto system = makeSystem(1);
+    ParticleBurst2D burst = randomizedBurst(firstSprite_);
+    ASSERT_TRUE(system.emitBurst(burst).has_value());
+
+    burst.sprite = secondSprite_;
+    ASSERT_EQ(system.liveCount(), 1U);
+    EXPECT_EQ(system.particles().front().sprite, firstSprite_);
+
+    auto builder = makeRenderBuilder(1);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    auto writer = builder.writer();
+    auto bindings = bindingsFor(firstSprite_, 73U);
+    auto extracted = system.extract(writer, bindings.resolver());
+    ASSERT_TRUE(extracted.has_value()) << (extracted ? "" : extracted.error().message);
+    EXPECT_EQ(extracted->submitted, 1U);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
+    EXPECT_EQ(bindings.lastResolved, firstSprite_);
+}
+
+TEST_F(ParticleSystem2DTests, ExtractWithLiveParticleRequiresResolver)
+{
+    auto system = makeSystem(1);
+    ASSERT_TRUE(system.emitBurst(randomizedBurst(firstSprite_)).has_value());
+
+    auto builder = makeRenderBuilder(1);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    auto writer = builder.writer();
+    auto extracted = system.extract(writer, Sprite2DBindingResolver{});
+    ASSERT_FALSE(extracted.has_value());
+    EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
+}
+
+TEST_F(ParticleSystem2DTests, ExtractFailsClosedWhenResolverReturnsZero)
+{
+    auto system = makeSystem(1);
+    ASSERT_TRUE(system.emitBurst(randomizedBurst(firstSprite_)).has_value());
+
+    auto builder = makeRenderBuilder(1);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    auto writer = builder.writer();
+    auto bindings = bindingsFor(secondSprite_, 79U);
+    auto extracted = system.extract(writer, bindings.resolver());
+    ASSERT_FALSE(extracted.has_value());
+    EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
+    EXPECT_EQ(bindings.lastResolved, firstSprite_);
+}
+
+TEST_F(ParticleSystem2DTests, ExtractRejectsWrongKindSpriteHandle)
+{
+    auto system = makeSystem(1);
+    ASSERT_TRUE(system.emitBurst(randomizedBurst(wrongKind_)).has_value());
+
+    auto builder = makeRenderBuilder(1);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    auto writer = builder.writer();
+    auto bindings = bindingsFor(wrongKind_, 83U);
+    auto extracted = system.extract(writer, bindings.resolver());
+    ASSERT_FALSE(extracted.has_value());
+    EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
+    EXPECT_EQ(bindings.lastResolved, wrongKind_);
+}
+
+TEST_F(ParticleSystem2DTests, ExtractRejectsStaleSpriteHandle)
+{
+    ASSERT_TRUE(assetStore().unload(firstSprite_).has_value());
+    auto replacement = assetStore().beginQueued(fixtureAssetId(4), AssetFormat::AssetKind::Sprite);
+    ASSERT_TRUE(replacement.has_value());
+    ASSERT_NE(*replacement, firstSprite_);
+
+    auto system = makeSystem(1);
+    ASSERT_TRUE(system.emitBurst(randomizedBurst(firstSprite_)).has_value());
+
+    auto builder = makeRenderBuilder(1);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    auto writer = builder.writer();
+    auto bindings = bindingsFor(firstSprite_, 89U);
+    auto extracted = system.extract(writer, bindings.resolver());
+    ASSERT_FALSE(extracted.has_value());
+    EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
+    EXPECT_EQ(bindings.lastResolved, firstSprite_);
+}
+
+TEST_F(ParticleSystem2DTests, ExtractWithNoLiveParticlesDoesNotRequireOrInvokeResolver)
+{
+    auto system = makeSystem(1);
+    auto builder = makeRenderBuilder(1);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    auto writer = builder.writer();
+
+    auto withoutResolver = system.extract(writer, Sprite2DBindingResolver{});
+    ASSERT_TRUE(withoutResolver.has_value())
+        << (withoutResolver ? "" : withoutResolver.error().message);
+    EXPECT_EQ(withoutResolver->submitted, 0U);
+
+    auto bindings = bindingsFor(firstSprite_, 97U);
+    auto withResolver = system.extract(writer, bindings.resolver());
+    ASSERT_TRUE(withResolver.has_value()) << (withResolver ? "" : withResolver.error().message);
+    EXPECT_EQ(withResolver->submitted, 0U);
+    EXPECT_EQ(bindings.resolveCalls, 0U);
+}
+
+TEST_F(ParticleSystem2DTests, UpdateAndExtractDoNotGrowParticlePmrStorageAcrossThreeHundredFrames)
 {
     TrackingMemoryResource particleStorage;
     {
         auto system = makeSystem(16, 77, 1'000, particleStorage);
         const usize allocationCount = particleStorage.allocationCount();
         ASSERT_GT(allocationCount, 0U);
-        ParticleBurst2D burst = randomizedBurst(8);
+        ParticleBurst2D burst = randomizedBurst(firstSprite_, 8);
         burst.lifetime = {
             .minimum = Core::Duration{10.0},
             .maximum = Core::Duration{10.0},
@@ -386,33 +597,36 @@ TEST(ParticleSystem2DTests, UpdateAndExtractDoNotGrowParticlePmrStorageAcrossThr
         ASSERT_EQ(particleStorage.allocationCount(), allocationCount);
 
         auto builder = makeRenderBuilder(16);
+        auto bindings = bindingsFor(firstSprite_, 51U);
         for (usize frame = 0; frame < 300; ++frame) {
             auto updated = system.update(Core::Duration{0.001});
             ASSERT_TRUE(updated.has_value()) << (updated.has_value() ? "" : updated.error().message);
             ASSERT_TRUE(builder.beginFrame().has_value());
             auto writer = builder.writer();
             ASSERT_TRUE(addTestCamera(writer).has_value());
-            auto extracted = system.extract(writer);
+            auto extracted = system.extract(writer, bindings.resolver());
             ASSERT_TRUE(extracted.has_value()) << (extracted.has_value() ? "" : extracted.error().message);
             ASSERT_EQ(extracted->submitted, 8U);
             ASSERT_TRUE(builder.commit().has_value());
         }
         EXPECT_EQ(particleStorage.allocationCount(), allocationCount);
+        EXPECT_EQ(bindings.resolveCalls, 8U * 300U);
     }
     EXPECT_EQ(particleStorage.allocationCount(), particleStorage.deallocationCount());
 }
 
-TEST(ParticleSystem2DTests, ExtractPropagatesWriterCapacityFailureWithoutMutatingParticles)
+TEST_F(ParticleSystem2DTests, ExtractPropagatesWriterCapacityFailureWithoutMutatingParticles)
 {
     auto system = makeSystem(2);
-    ASSERT_TRUE(system.emitBurst(randomizedBurst(2)).has_value());
+    ASSERT_TRUE(system.emitBurst(randomizedBurst(firstSprite_, 2)).has_value());
     const Particle2D firstBefore = system.particles()[0];
     const Particle2D secondBefore = system.particles()[1];
 
     auto builder = makeRenderBuilder(1);
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
-    auto extracted = system.extract(writer);
+    auto bindings = bindingsFor(firstSprite_, 63U);
+    auto extracted = system.extract(writer, bindings.resolver());
     ASSERT_FALSE(extracted.has_value());
     EXPECT_EQ(extracted.error().code, Render::RenderErrorCode::RenderSceneCapacityExceeded);
     ASSERT_EQ(system.liveCount(), 2U);
