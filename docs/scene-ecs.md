@@ -93,7 +93,7 @@ binding 和 bgfx submission 仍由 RenderDevice/backend 负责。
 ```text
 updateWorldTransforms
   -> resolve active Camera2D and/or PerspectiveCamera3D
-  -> resolve visible SpriteRenderer2D AssetHandle to current binding key
+  -> borrowed resolver asks Asset registry for current Sprite dependency binding key
   -> emit visible SpriteRenderer2D items
   -> emit visible MeshRenderer3D items
   -> caller commits RenderSceneBuilder
@@ -105,6 +105,14 @@ borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/gene
 并返回非0 backend-neutral key。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或返回0统一
 产生 `UnresolvedSprite`；hidden sprite 不调用 resolver。3D mesh 仍使用 world pose/scale、local bounds 和
 material color fixture/product key。Scene 不保存 resolver、AssetLease、Cooked payload 或 GPU handle。
+
+A2 不改变上述 Scene API：产品 resolver 只把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，
+由 Asset 层沿 Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。TileMap/Particle/Trail 仍提交
+key，但产品使用 registry 注册返回的动态 key；这不等于把这些系统改为 Handle component。产品 State
+拥有 registry 与 GPU texture cleanup 账簿，但只借用 `TileMapResources` 中的 Store 和 `DeviceCapture` 中的
+RenderDevice；外部 owner 必须覆盖 State/registry 生命周期。key 由 RenderDevice 实例 allocator 分配，
+同一 device 的多个 registry 共享唯一/单调 namespace；allocator-managed registry 管理期间不得混用 direct
+caller-chosen binding key。Scene 不参与 key 分配、unbind 或 retirement。
 
 writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用内有效，不能保存到下一帧。
 
@@ -137,7 +145,7 @@ Game State fixed/frame update
   -> Render backend consumes the submitted view
 ```
 
-TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、binding mapping 与 AssetLease 由
+TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、binding registry 与 AssetLease 由
 产品层持有；它们必须覆盖 extraction 的借用期。Scene core 只依赖 AssetTypes，不反向取得这些 owner。
 
 ## 验证
@@ -145,6 +153,8 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
 - `tina_scene_tests`：entity generation、owner、destroy/reparent、Transform propagation、2D/3D component、
   extraction、Prefab rollback/resolver，以及 Particle/Trail 的 PMR、确定性、事务失败、lifetime 与 writer
   capacity；
+- `tina_asset_tests`：Sprite binding registry 的容量/owner thread、register/unbind transaction、key
+  non-reuse、Texture/Sprite Handle 与 cooked dependency fail-closed；
 - `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking；
 - `tina_sample_2d` / `tina_sample_3d`：产品 Asset → Scene → Render 路径；
 - header-isolation：公开头不得泄漏 EnTT、GLM、bgfx 或 cgltf。

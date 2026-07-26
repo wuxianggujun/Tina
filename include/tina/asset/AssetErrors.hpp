@@ -23,5 +23,9 @@ inline constexpr Core::ErrorCode AssetUploadFailed{Core::ErrorDomain::Asset, 26}
 inline constexpr Core::ErrorCode TileMapLayerNotFound{Core::ErrorDomain::Asset, 27};
 inline constexpr Core::ErrorCode TileMapLayerTypeMismatch{Core::ErrorDomain::Asset, 28};
 inline constexpr Core::ErrorCode TileMapChunkNotResident{Core::ErrorDomain::Asset, 29};
+inline constexpr Core::ErrorCode SpriteBindingCapacityExceeded{Core::ErrorDomain::Asset, 30};
+inline constexpr Core::ErrorCode SpriteBindingKeyExhausted{Core::ErrorDomain::Asset, 31};
+inline constexpr Core::ErrorCode SpriteBindingConflict{Core::ErrorDomain::Asset, 32};
+inline constexpr Core::ErrorCode SpriteBindingNotFound{Core::ErrorDomain::Asset, 33};
 
 } // namespace Tina::Asset::AssetErrorCode

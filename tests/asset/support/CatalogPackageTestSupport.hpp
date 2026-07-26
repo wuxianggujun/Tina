@@ -27,10 +27,16 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
         return m_outstandingAllocations;
     }
 
+    [[nodiscard]] std::size_t allocationCalls() const noexcept
+    {
+        return m_allocationCalls;
+    }
+
   private:
     void* do_allocate(std::size_t bytes, std::size_t alignment) override
     {
         void* pointer = std::pmr::new_delete_resource()->allocate(bytes, alignment);
+        ++m_allocationCalls;
         ++m_outstandingAllocations;
         return pointer;
     }
@@ -47,6 +53,7 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
     }
 
     std::size_t m_outstandingAllocations = 0;
+    std::size_t m_allocationCalls = 0;
 };
 
 inline void putU8(Bytes& bytes, Core::usize offset, Core::u8 value)

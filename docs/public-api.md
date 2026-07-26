@@ -186,7 +186,8 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 
 `IRenderDevice` 核心方法是 `submitFrame`、`present`、`statistics`、`shutdown`。可选资源 API包括：
 
-- RGBA8 Texture2D create/destroy、Sprite2D key binding；
+- RGBA8 Texture2D create/destroy、Sprite2D 非0 key binding（invalid `GpuTextureId` 清除 binding），以及
+  device-instance `createSprite2DTextureBinding()` allocator；
 - P3N3UV2/U16 StaticMesh create/destroy、Mesh3D key binding；
 - material key → base-color / metallic-roughness / normal texture binding；
 - material key → metallic/roughness factors；
@@ -276,6 +277,24 @@ borrower 存活时移动，并必须早于它所引用的 `AssetSystem` 析构�
 StaticMesh 上传到 RenderDevice，并建立 backend key binding；`AssetSystem::retireTexture2D` /
 `retireStaticMesh` 把 lease 移入 `FramePin`，成功后弱 lookup 立即失效，backend completion 后才释放 payload。
 失败不消费 pin，Asset 仍保持可用。`drainGpuRetirements()` 用于 owner-thread teardown。
+
+`Sprite2DBindingRegistry::Create(store, device, config)` 必须在借用 Store 与 RenderDevice 的共享 owner
+thread 调用；该线程成为固定容量 registry 的 owner，所有后续操作也必须在同一线程执行。Store、device
+与非空自定义 `memoryResource` 均为借用且必须覆盖 registry 生命周期。
+`registerTextureBinding(textureHandle, gpuTexture)` 校验 live Texture2D Handle，再通过借用 device 的
+`createSprite2DTextureBinding()` 事务映射为非0 `u32` key。key 在该 RenderDevice 实例 namespace 内唯一、
+单调且解绑后不复用；只有 backend bind 成功才消费候选 key，失败不推进 allocator 或发布 registry 记录。
+共享同一 device 的多个 registry 因此获得 distinct key。live exact duplicate 可幂等返回同一 key，另一
+GPU texture 或同 AssetId 的另一 live handle 是冲突。`bindingKey()` 只为当前 live Texture2D/payload 返回
+key；stale lookup 返回0。
+`unbindTextureBinding()` 以原 exact handle 清除 device binding，device 失败保留记录供重试。
+`resolveSprite()` 沿 Cooked Sprite 的唯一 required Texture2D dependency fail closed 返回当前 key。registry 不拥有
+GPU texture、Lease 或 retirement；调用方必须让 Store/device 覆盖它，并在 destroy/retire texture 前成功
+unbind。它不是 Scene owner；A1 的 `Sprite2DBindingResolver` 继续作为 extraction borrowed seam。
+
+`setSprite2DTextureBinding(callerKey, texture)` 仍保留 direct binding/clear SPI，但 caller-chosen key 与上述
+allocator 使用同一个 device namespace。allocator-managed registry 管理期间不得混用 direct caller key；
+device 不会为 direct setter 自动保留或跳过该 key。
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含

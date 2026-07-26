@@ -101,6 +101,7 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 | --- | --- | --- |
 | `create/destroyTexture2DRgba8` | 逻辑 generation storage；同步 retire | 私有 RGBA8 texture；逻辑失效后 marker 延迟销毁 |
 | `retireTexture2D(texture, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
+| `createSprite2DTextureBinding` | device-instance allocator；bind 成功才消费非0 key | device-instance allocator；bind 成功才消费非0 key |
 | `setSprite2DTextureBinding` | 校验/记录 binding | sprite key → texture |
 | `create/destroyStaticMeshP3N3UV2` | 逻辑 mesh storage；同步 retire | 私有 VB/IB；逻辑失效后 marker 延迟销毁 |
 | `retireStaticMesh(mesh, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
@@ -110,6 +111,10 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
 | `setMesh3DLighting` | 同步校验/复制有界描述 | 0..4 directional lights + ambient；shader 使用两个4×vec4 uniform array |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径 |
+
+`createSprite2DTextureBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
+caller-chosen `setSprite2DTextureBinding()` key 与 allocator-managed key 共用 device namespace，registry
+管理期间不得混用。
 
 `GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
 失败；Asset Catalog 使用 `AssetId`，产品 resolver 显式映射 AssetId → key → GPU handle。

@@ -51,5 +51,6 @@ inline constexpr Core::ErrorCode InvalidSubmissionTicket{Core::ErrorDomain::Rend
 inline constexpr Core::ErrorCode InvalidMesh3DLighting{Core::ErrorDomain::Render, 43};
 inline constexpr Core::ErrorCode GpuRetirementUnsupported{Core::ErrorDomain::Render, 44};
 inline constexpr Core::ErrorCode GpuRetirementDrainFailed{Core::ErrorDomain::Render, 45};
+inline constexpr Core::ErrorCode SpriteBindingKeyExhausted{Core::ErrorDomain::Render, 46};
 
 } // namespace Tina::Render::RenderErrorCode

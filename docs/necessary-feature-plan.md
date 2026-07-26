@@ -26,6 +26,7 @@
 | N8 | 2D-FX | 已完成 | standalone ParticleSystem2D/Trail2D 的固定容量 PMR、确定性/事务失败/lifetime/width 契约已贯通 `tina_scene_tests` 与 product-2d schema 9 |
 | N9 | RUNTIME-SHUTDOWN-DEADLINE | 已完成 | `ITaskSystem` 有界 stop/join、timeout ownership retention/retry 与 `EngineHost` Diagnostics + terminate hard boundary 已贯通 `tina_tests` |
 | N10 | ASSET-HANDLE-SCENE-2D-A1 | 已完成 | World Sprite 组件改存 weak AssetHandle，extract 借用零分配 resolver；资源失败 fail closed，完整 ASSET-HANDLE-SCENE 仍为 Partial |
+| N11 | ASSET-HANDLE-SCENE-2D-A2 | 已完成 | 固定容量 owner-thread Sprite binding registry + device-instance key allocator 取代产品手写 key 表；事务注册/解绑、同 device 多 registry、cooked dependency resolve 与 State teardown 已贯通，完整总项仍为 Partial |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -454,9 +455,54 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
-N10 不宣称完成 `ASSET-HANDLE-SCENE` 总项：产品 resolver 仍把 Handle 映射到 game-owned binding key；
-TileMap emit、Particle/Trail、3D Mesh/Material 仍保留各自 key 路径。engine-owned upload/binding registry、
-统一 retirement/FrameResourceRef 与 3D component Handle 化必须在后续切片完成。
+N10 单独不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时产品 resolver 仍映射 game-owned binding key。
+N11 已补 engine-provided、State-owned binding registry 并让 TileMap/Particle/Trail 消费其 key；这些组件的
+Handle 化、统一 retirement/FrameResourceRef 与 3D component Handle 化仍需后续切片。
+
+## N11 - ASSET-HANDLE-SCENE-2D-A2
+
+### 已完成契约
+
+- `Sprite2DBindingRegistry` 是固定容量 owner-thread owner，创建时通过调用方 PMR 建立唯一持久 storage；
+  `AssetStore`、`IRenderDevice` 与非空自定义 `memory_resource` 都只被借用，必须覆盖 registry 生命周期。
+- `registerTextureBinding(Texture2D AssetHandle, GpuTextureId)` 先完整校验 Store/kind/state/payload、GPU
+  handle、重复/AssetId 冲突与 registry 容量，再调用 `IRenderDevice::createSprite2DTextureBinding()`；key 在
+  device 实例 namespace 内唯一、单调且解绑后不复用，backend bind 失败不消费候选 key，也不发布 registry
+  记录。共享同一 device 的多个 registry 安全获得 distinct key。
+- caller-chosen `setSprite2DTextureBinding()` 与 allocator-managed binding 共享 device namespace；registry
+  管理期间不得混用，否则 direct key 可与 allocator 候选 key 冲突。
+- `unbindTextureBinding()` 的 device 失败保留记录供重试，成功后才删除记录。
+- `resolveSprite()` fail closed：只接受当前 Store 中可读取的 Sprite，要求 cooked 文件恰有一个
+  required `Texture2D` dependency，并且对应 Texture handle/payload/binding 仍有效；否则返回0。A1 的 borrowed
+  resolver ABI 保留，产品 resolver 只转调 registry。
+- registry 不持有 `AssetLease`、GPU texture owner 或 retirement record，也不在析构中隐式销毁资源。
+  产品 State RAII shutdown 必须先成功 unbind，再 destroy Texture2D；失败不能继续释放仍被 binding 引用的
+  GPU owner。
+- TileMap、selection highlight、Particle/Trail 当前仍保存 `u32` key，但统一消费 registry 注册返回的动态
+  key；产品不再维护手写 key 1/2 binding 表。
+
+### 完成结果
+
+| 阶段 | 完成结果 |
+| --- | --- |
+| N11.1 | Asset 公共 registry、独立错误码与 RenderDevice instance-scoped transactional key allocator；direct setter 与 allocator 的共享 namespace/禁混契约 |
+| N11.2 | fixed-capacity/owner-thread、duplicate/conflict/capacity/device key nonreuse、same-device multi-registry、register/unbind transaction、Sprite dependency fail-closed 单测与 header isolation |
+| N11.3 | product-2d State 注册2纹理、resolver/TileMap/FX 消费动态 key、先解绑后销毁；schema 10 输出 `spriteBindingTextures=2`、`spriteBindingsReleased=2`、`spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0` |
+
+### 验收
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_asset_tests tina_scene_tests tina_sample_2d -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
+  --frames=300 --frame-delay-ms=0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+```
+
+N11 不宣称完成 `ASSET-HANDLE-SCENE` 总项：FX/TileMap 虽已消费 registry key，组件仍没有保存
+AssetHandle；3D Mesh/Material registry、统一 retirement ownership 与 `FrameResourceRef` 仍未完成。
 
 ## 每项收口清单
 

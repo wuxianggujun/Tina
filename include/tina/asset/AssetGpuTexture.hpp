@@ -11,7 +11,9 @@ namespace Tina::Asset {
 [[nodiscard]] Core::Result<Render::GpuTextureId> uploadTexture2DFromCooked(Render::IRenderDevice& device,
                                                                            const CookedAssetFile& textureAsset);
 
-// Convenience: upload + bind for Sprite2D batches using spriteKey.
+// Convenience: upload + direct bind for Sprite2D batches using a caller-selected
+// spriteKey. It shares the device namespace with allocator-managed bindings and
+// must not be used while a Sprite2DBindingRegistry manages that device.
 [[nodiscard]] Core::Status uploadAndBindTexture2DForSpriteKey(Render::IRenderDevice& device,
                                                               const CookedAssetFile& textureAsset, Core::u32 spriteKey);
 

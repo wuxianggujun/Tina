@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 
 namespace Tina::Render {
 
@@ -162,13 +163,40 @@ class IRenderDevice {
         }
         return status;
     }
-    // Bind a GPU texture for Sprite2D batches with matching spriteKey (0 clears binding).
+    // Bind a GPU texture for Sprite2D batches with matching non-zero spriteKey.
+    // An invalid GpuTextureId clears the binding.
     [[nodiscard]] virtual Core::Status setSprite2DTextureBinding(u32 spriteKey, GpuTextureId texture) noexcept
     {
         static_cast<void>(spriteKey);
         static_cast<void>(texture);
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Sprite2D texture binding");
+    }
+    // Transactionally allocates a non-zero key from this device's Sprite2D key
+    // namespace and binds texture. Backend failure does not consume the key.
+    // Caller-selected keys passed directly to setSprite2DTextureBinding share the
+    // namespace and must not be mixed with allocator-managed bindings.
+    [[nodiscard]] Core::Result<u32> createSprite2DTextureBinding(GpuTextureId texture) noexcept
+    {
+        if (!texture)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Sprite2D binding requires a live GPU texture");
+        }
+        if (m_nextSprite2DBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::SpriteBindingKeyExhausted,
+                                 "Render device exhausted non-zero Sprite2D binding keys");
+        }
+
+        const u32 candidateKey = m_nextSprite2DBindingKey;
+        if (auto status = setSprite2DTextureBinding(candidateKey, texture); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        m_nextSprite2DBindingKey =
+            candidateKey == (std::numeric_limits<u32>::max)() ? 0U : candidateKey + 1U;
+        return candidateKey;
     }
 
     // M11-D1: capture primary backbuffer as RGBA8 (top-left origin) after present.
@@ -277,6 +305,9 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Mesh3D lighting");
     }
+
+  private:
+    u32 m_nextSprite2DBindingKey = 1;
 };
 
 using RenderDeviceFactory =
