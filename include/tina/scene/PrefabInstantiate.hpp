@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/asset/AssetHandle.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -13,17 +14,16 @@
 
 namespace Tina::Scene {
 
-// Maps cooked Prefab node AssetIds to backend meshKey/materialKey tables.
-// When resolve* is empty, meshKey/materialKey apply to every meshed node.
-// Games typically bind GPU meshes once then resolve AssetId -> key.
+// Maps cooked Prefab node AssetIds to weak mesh/material AssetHandles.
+// When resolve* is empty, mesh/material apply to every meshed node.
 struct PrefabMeshBinding final {
-    u32 meshKey = 1;
-    u32 materialKey = 1;
+    Asset::AssetHandle mesh{};
+    Asset::AssetHandle material{};
     Render::RenderBoundingSphereInput localBounds{.radius = 0.5F};
     Render::RenderLinearColor baseColorFactor{};
-    // Optional: return 0 to fail instantiate for that node.
-    std::function<u32(Core::AssetId meshId)> resolveMeshKey{};
-    std::function<u32(Core::AssetId materialId)> resolveMaterialKey{};
+    // Optional: return an empty handle to fail instantiate for that node.
+    std::function<Asset::AssetHandle(Core::AssetId meshId)> resolveMesh{};
+    std::function<Asset::AssetHandle(Core::AssetId materialId)> resolveMaterial{};
     // Optional: override bounds/color per mesh AssetId (empty = use defaults above).
     std::function<Render::RenderBoundingSphereInput(Core::AssetId meshId)> resolveLocalBounds{};
     std::function<Render::RenderLinearColor(Core::AssetId materialId)> resolveBaseColor{};

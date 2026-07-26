@@ -29,6 +29,7 @@
 | N11 | ASSET-HANDLE-SCENE-2D-A2 | 已完成 | 固定容量 owner-thread Sprite binding registry + device-instance key allocator 取代产品手写 key 表；事务注册/解绑、同 device 多 registry、cooked dependency resolve 与 State teardown 已贯通，完整总项仍为 Partial |
 | N12 | ASSET-HANDLE-SCENE-2D-A3 | 已完成 | Particle/Trail 改存 weak Sprite AssetHandle，并在 extraction 时借用 resolver fail closed；产品 evidence schema 11 与稳定 FX fingerprint 已贯通，完整总项仍为 Partial |
 | N13 | ASSET-HANDLE-SCENE-2D-A4 | 已完成 | TileMap emit 改存 weak Tileset AssetHandle，并在调用期借用 Asset resolver；registry Tileset dependency resolve、单次解析/失败清空与产品 evidence schema 12 已贯通，完整总项仍为 Partial |
+| N14 | ASSET-HANDLE-SCENE-3D-A5 | 已完成 | MeshRenderer3D/Prefab 改存 weak StaticMesh/Material Handle，extraction 借用 kind-specific resolver；3D product evidence schema 1 与 Resources-owned AssetStore 已贯通，完整总项仍为 Partial |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -459,7 +460,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 
 N10 单独不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时产品 resolver 仍映射 game-owned binding key。
 N11 已补 engine-provided、State-owned binding registry；N12 已完成 Particle/Trail Handle 化，N13 已完成
-TileMap Tileset Handle 化。统一 retirement/FrameResourceRef 与 3D component Handle 化仍需后续切片。
+TileMap Tileset Handle 化，N14 已完成 3D component/Prefab Handle 化。engine-owned 3D registry 与统一
+retirement/FrameResourceRef 仍需后续切片。
 
 ## N11 - ASSET-HANDLE-SCENE-2D-A2
 
@@ -504,8 +506,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
 N11 单独不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时 FX/TileMap 虽已消费 registry key，组件仍没有保存
-AssetHandle。N12 已迁移 FX，N13 已迁移 TileMap；3D Mesh/Material registry、统一 retirement ownership 与
-`FrameResourceRef` 仍未完成。
+AssetHandle。N12 已迁移 FX，N13 已迁移 TileMap，N14 已迁移 3D component/Prefab；engine-owned 3D
+Mesh/Material registry、统一 retirement ownership 与 `FrameResourceRef` 仍未完成。
 
 ## N12 - ASSET-HANDLE-SCENE-2D-A3
 
@@ -547,8 +549,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2d
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
-N12 不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时 TileMap 仍保存 Sprite binding key。N13 已迁移 TileMap；
-3D Mesh/Material registry、统一 retirement ownership 与 `FrameResourceRef` 仍需后续切片。
+N12 不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时 TileMap 仍保存 Sprite binding key。N13 已迁移 TileMap，
+N14 已迁移 3D component/Prefab；engine-owned 3D Mesh/Material registry、统一 retirement ownership 与
+`FrameResourceRef` 仍需后续切片。
 
 ## N13 - ASSET-HANDLE-SCENE-2D-A4
 
@@ -588,8 +591,47 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2d
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
-N13 不宣称完成 `ASSET-HANDLE-SCENE` 总项：3D Mesh/Material registry、统一 retirement ownership 与
-`FrameResourceRef` 仍需后续切片。
+N13 本身不迁移 3D；N14 随后完成 component/Prefab Handle 化。engine-owned 3D Mesh/Material registry、
+统一 retirement ownership 与 `FrameResourceRef` 仍需后续切片。
+
+## N14 - ASSET-HANDLE-SCENE-3D-A5
+
+### 已完成契约
+
+- `MeshRenderer3D` 保存 copyable weak StaticMesh/Material `AssetHandle` 与语义字段，不保存 Render key、
+  `AssetLease`、Cooked payload、GPU owner 或 resolver context；`isValid()` 只检查 bounds/color 等结构属性。
+- `ExtractRenderSceneParams` 分别借用 mesh/material `AssetBindingResolver`。visible mesh 先验证两个 handle 与
+  resolver，再按顺序解析；mesh 失败不调用 material resolver。empty/stale/cross-store/wrong-kind/unbound/0
+  统一 `UnresolvedMesh`，hidden mesh 不解析。
+- `PrefabMeshBinding` 只做 mesh/material AssetId→Handle，empty AssetId/Handle 失败会销毁本次全部 entity；
+  bounds/baseColor 回调保留，不存在 key/handle 双轨。
+- infrastructure 3D sample 使用 State-owned 最小 `AssetStore` fixture；产品 `Product3DResources` 拥有覆盖
+  State/World/extraction 的 `AssetStore`，Cooked mesh/material/texture/prefab 全部发布后只保存 weak handle。
+- product 私有 slot 继续拥有 GPU resource 与 backend key；每帧 resolver 按 AssetKind 和 exact live handle
+  映射 key。3D evidence schema 1 要求发布数匹配 slot、两类 resolver hits>0、Store active、像素捕获成功
+  与 GPU ledger 归零，不输出 runtime generation bits。
+
+### 完成结果
+
+| 阶段 | 完成结果 |
+| --- | --- |
+| N14.1 | MeshRenderer3D/Prefab 公共契约一次性迁移到 weak Handle；Scene extraction 使用两个 kind-specific borrowed resolver，无旧 key 双轨 |
+| N14.2 | Scene tests 覆盖 storage、success、missing/empty/wrong-kind/unbound、mesh short-circuit、material kind mismatch、hidden skip 与 Prefab AssetId→Handle |
+| N14.3 | infrastructure fixture 与完整 3D product 都走合法 AssetStore Handle；schema 1 输出 handle 发布、resolver hits 与 Store active evidence |
+
+### 验收
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_scene_tests tina_sample_3d_infrastructure tina_sample_3d -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+```
+
+N14 不宣称完成 `ASSET-HANDLE-SCENE` 总项：engine-owned 3D Mesh/Material binding registry、统一
+retirement ownership 与 `FrameResourceRef` 仍需后续切片。
 
 ## 每项收口清单
 

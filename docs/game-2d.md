@@ -79,8 +79,9 @@ TileMap emit 保存 Catalog Tileset handle，每次非空可见集合通过 reso
 Tileset 唯一 required Texture2D dependency 取得当前 key。hidden/off-camera/empty 不调用 resolver；解析失败
 清空输出并返回 `SpriteBindingNotFound`。selection highlight 同样即时解析，不跨帧保存 key。registry 借用
 AssetStore 与 RenderDevice，不拥有 GPU texture、AssetLease 或 retirement；State RAII teardown 必须先成功
-unbind 两项 binding，再 destroy texture。A4 已完成2D持久 binding key 清除，但尚未覆盖3D或
-`FrameResourceRef`，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
+unbind 两项 binding，再 destroy texture。A4 已完成2D持久 binding key 清除，A5 已完成 3D
+component/Prefab Handle 化；engine-owned 3D registry 与 `FrameResourceRef` 尚未覆盖，因此
+`ASSET-HANDLE-SCENE` 总项仍为 Partial。
 Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用不同纹理，不再受历史 fixture key 1 限制。
 
 ## Sprite 动画

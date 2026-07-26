@@ -61,17 +61,18 @@ source glTF/GLB
   -> CatalogCookRequest
   -> manifest.tmnft + Cooked StaticMesh/Material/Prefab
   -> typed Cooked views
-  -> RenderDevice mesh upload + key binding
-  -> Prefab AssetId-to-key resolver
+  -> AssetStore weak AssetHandle + RenderDevice mesh upload/key binding
+  -> Prefab AssetId-to-AssetHandle resolver
   -> Scene::World
        PerspectiveCamera3D
        MeshRenderer3D
+  -> extraction AssetHandle-to-key resolver
   -> RenderScene cull/sort/batch
   -> bgfx Opaque3D + UI
 ```
 
 - cgltf 只在 `tina_asset` 的私有 Cooker 实现中出现；Runtime 不解析源 glTF；
-- `Scene::World` 保存 Transform、Camera 和 backend-neutral key，不保存 bgfx/GPU handle；
+- `Scene::World` 保存 Transform、Camera 和 weak AssetHandle，不保存 backend key、bgfx/GPU handle；
 - RenderScene 不回查 World，提交时只消费已 commit 的 Camera、mesh item 与 batch；
 - `tina_render_bgfx` 私有拥有 shader、vertex/index buffer、view id、uniform 与 texture binding；
 - 普通 Game API 不暴露 cgltf、bgfx 或 native surface 类型。
@@ -97,15 +98,17 @@ EngineHost 仍是唯一组合根。
 `0 < near < far`、有限数值和有效 normalized viewport；aspect 每帧从 primary surface 解析，不写回
 Camera component。
 
-当前 `MeshRenderer3D` 的真实字段仍是 `meshKey`、`materialKey`、`submeshIndex`、bounds、
-base color 与可见性。名称保留了基础设施阶段痕迹，但非零 key 也可绑定产品 GPU mesh。它尚未直接保存
-`AssetHandle<StaticMesh>` 或 `AssetHandle<Material>`，不要把未来资源解析边界写成现有 API。
+当前 `MeshRenderer3D` 保存 copyable weak mesh/material `AssetHandle`、`submeshIndex`、bounds、base color
+与可见性，不保存 backend key、Lease、Cooked payload 或 GPU owner。每次 extraction 分别借用 mesh/material
+resolver，把 live handle 解析为非零 backend-neutral key；hidden mesh 不解析，空/stale/cross-store/
+wrong-kind/unbound handle 或0结果统一 fail closed 为 `UnresolvedMesh`。
 
 ## Prefab 与资源解析
 
 Cooker 为每个 glTF mesh 建立 StaticMesh 和 Material，并让 Prefab node 通过 AssetId 引用它们。
 `instantiatePrefab()` 按稳定 node 顺序创建 Entity、设置父子关系，再通过调用方 resolver 把每个 node 的
-Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销毁本次已创建 Entity。
+Mesh/Material AssetId 转成 weak `AssetHandle`。任一步失败都会逆序销毁本次已创建 Entity；Render key
+只在后续 extraction 中解析。
 
 `tina_sample_3d` 当前使用同步 Catalog package API：
 
@@ -113,18 +116,21 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
    用 `--gltf` 指向磁盘上的 `.gltf`/`.glb`；
 2. `cookGltfFileToCatalogRequest` + `cookAndPublishCatalogPackage` 原子发布 Catalog package；
 3. 完整校验 Manifest、ContentHash 与 typed payload；
-4. 加载 N 个 StaticMesh、N 个 Material 和一个 Prefab（N≤8）；
+4. 加载 N 个 StaticMesh、N 个 Material、相关 Texture2D 和一个 Prefab（N≤128），发布到
+   Resources-owned `AssetStore`；slot/Prefab/Scene 只保存 weak handle；
 5. 上传 mesh，绑定 product meshKey `1..N`；有 baseColorTexture 时 upload Texture2D 并
    `setMesh3DMaterialTextureBinding`（外部无贴图模型可跳过，Opaque3D 用 1×1 白）；
-6. resolver 按 node AssetId 映射到对应 meshKey/materialKey 与 per-mesh bounds/color；
+6. Prefab resolver 按 node AssetId 映射到对应 mesh/material handle 与 per-mesh bounds/color；每帧 Scene
+   resolver 再按 live handle 和严格 AssetKind 映射到 meshKey/materialKey；
 7. 实例化、extract、提交，退出时解除 binding 并销毁 GPU mesh/texture。
 
 当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding、material texture 绑定，以及 Opaque3D
 experimental MR submit 时按 materialKey **采样** baseColor/MR/normal，并一次提交3个 directional lights
 着色（未 bind baseColor 用 1×1 白；未 bind MR 时默认 metallic=0/roughness=1；未 bind normal 时用几何法线）。
-`tina_sample_3d` 仍直接持有 owning `CookedAssetFile`，不把它伪装成 AssetSystem 产品集成；库级
-AssetSystem→Texture/Mesh retirement 已由 delayed backend tests 覆盖。把 3D Scene 引用改为 AssetHandle
-仍由 `ASSET-HANDLE-SCENE` 跟踪。
+`tina_sample_3d` 的 `Product3DResources` 拥有固定容量 `AssetStore`，Store 覆盖 State/World/extraction
+生命周期；sample 不在组件中保存 Lease 或 runtime generation bits。GPU mesh/texture 与 backend binding key
+仍由 sample 私有 slot 管理；engine-owned 3D binding registry、统一 `FrameResourceRef` 和库级
+AssetSystem retirement 仍是 `ASSET-HANDLE-SCENE` 后续边界。
 
 ## 三类 3D 门禁
 
@@ -132,11 +138,12 @@ AssetSystem→Texture/Mesh retirement 已由 delayed backend tests 覆盖。把 
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；texture upload + material key bind + Opaque3D experimental MR | 完整 light system/IBL/shadow、Scene AssetHandle 产品化 |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→weak Handle Prefab/Scene→extract-time key resolve→bgfx；texture upload + material key bind + Opaque3D experimental MR | engine-owned 3D binding registry、统一 FrameResourceRef、完整 light system/IBL/shadow |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
-`sceneExtract`、`lightingConfigured=true`、`directionalLightCount=3`、退出计数、资源归零信息、
+`sceneExtract`、`evidenceSchema=1`、mesh/material handle 发布数、两类 binding resolver hits、
+`lightingConfigured=true`、`directionalLightCount=3`、退出计数、资源归零信息、
 `pixelCaptureOk`、非零 capture 尺寸/字节数与 `pixelFingerprint`。同机 exact 视觉回归把首次 fingerprint
 传给 `--expect-pixel-fingerprint=<32 lowercase hex>`，并要求
 `pixelGoldenChecked/pixelGoldenMatched` 均为 true；该值不得跨 GPU/driver/backend 作为通用金标。
@@ -152,8 +159,8 @@ AssetSystem→Texture/Mesh retirement 已由 delayed backend tests 覆盖。把 
   贴图），不是完整 PBR；无 light component/culling、Shadow、transparent、IBL 或 post；
 - glTF Cooker 读取完整 `pbrMetallicRoughness` 与可选 `normalTexture`；外部相对 URI 强制 root
   containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；
-- Scene/Render 仍使用 mesh/material **key**（bind-table 语义，非 AssetHandle 组件字段），不是 Scene 上直接存
-  `AssetHandle`，也不是 extract 输出 owning `FrameResourceRef`；
+- Scene component 已保存 mesh/material weak `AssetHandle`；RenderScene/RenderDevice 仍消费 extraction 期解析的
+  backend-neutral key。当前没有 engine-owned 3D binding registry，也不输出 owning `FrameResourceRef`；
 - EngineHost 已有 `RenderFramePacket` + FramePin + present-return CPU completion；它不代表 GPU 退役；
   Texture/Mesh 使用独立 readback marker；
 - 无通用 pass scheduler、pipeline cache 产品契约或 worker extraction；`tina_bench` schema v1 已落地

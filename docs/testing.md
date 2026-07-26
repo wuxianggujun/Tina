@@ -54,8 +54,9 @@ out\build\windows-msvc-vnext\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 ```
 
-当前工作树已增量构建并直接验证 `tina_ui_tests` 190/190、`tina_runtime_ui_tests` 77/77 与
-`tina_ui_render_integration_tests` 12/12。其他 target 必须按最终验证命令重新运行后才能记录本轮数字。
+当前 tip 最近直接验证 `tina_ui_tests` 263/263、`tina_runtime_ui_tests` 83/83、
+`tina_ui_render_integration_tests` 15/15 与 product-2d 图的 `tina_ui_freetype_tests` 3/3。其他 target
+必须按最终验证命令重新运行后才能记录本轮数字。
 
 ## 改动到门禁映射
 
@@ -110,7 +111,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 - `SpriteAnimator2D` 的空 handle frame 仍为 `InvalidAnimation`；
 - `tina_sample_2d` 的 World crate/character 组件来自 Catalog Sprite handle，resolver 每次验证 Store/kind/
   binding 后映射 key。A1 本身未证明 registry；A2 已补该证据，A3 已完成 FX Handle 化，A4 已完成
-  TileMap Tileset Handle 化；3D Handle 迁移仍未完成。
+  TileMap Tileset Handle 化；A5 已完成 3D component/Prefab Handle 化，engine-owned 3D registry 与
+  `FrameResourceRef` 仍未迁移。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -146,8 +148,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
 ```
 
-A2 保留 A1 resolver ABI；A3 随后完成 Particle/Trail Handle 化，A4 再完成 TileMap Tileset Handle 化。
-3D 与 `FrameResourceRef` 仍未迁移，不能据此把 `ASSET-HANDLE-SCENE` 总项标为 Done。
+A2 保留 A1 resolver ABI；A3 随后完成 Particle/Trail Handle 化，A4 完成 TileMap Tileset Handle 化，A5
+再完成 3D Mesh/Material component Handle 化。engine-owned 3D registry 与 `FrameResourceRef` 仍未迁移，
+不能据此把 `ASSET-HANDLE-SCENE` 总项标为 Done。
 
 ## Particle/Trail Sprite AssetHandle A3
 
@@ -203,7 +206,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2d
   -SkipConfigure -SkipBuild
 ```
 
-A4 不迁移 3D Mesh/Material registry、统一 retirement ownership 或 `FrameResourceRef`。
+A4 本身不迁移 3D；A5 随后完成 component/Prefab Handle 化，但不实现 engine-owned Mesh/Material
+registry、统一 retirement ownership 或 `FrameResourceRef`。
+
+## Mesh/Material AssetHandle A5
+
+`ASSET-HANDLE-SCENE-3D-A5` 的模块门禁归属 `tina_scene_tests`，产品闭环归属 3D product smoke：
+
+- `MeshRenderer3D` 保存 weak StaticMesh/Material Handle，不保存 mesh/material key；结构属性校验与资源
+  存活校验分开，World 可保存 empty weak handle；
+- visible extraction 分别借用 mesh/material resolver，严格按预期 AssetKind 解析；empty/stale/cross-store/
+  wrong-kind/unbound/zero 统一 `UnresolvedMesh`，mesh 失败不调用 material resolver，hidden mesh 不解析；
+- `PrefabMeshBinding` 只做 AssetId→Handle 并保持失败全量 rollback，不生成 Render key；
+- infrastructure sample 使用 State-owned 最小 `AssetStore` fixture；产品 sample 的 Resources-owned
+  `AssetStore` 覆盖 World/extraction，backend key 只保留在私有 GPU binding slot；
+- 3D product evidence schema 1 要求 mesh/material handle 发布数匹配 slot 数、两类 resolver hits>0、
+  AssetStore active、像素捕获成功与 GPU ledger 归零。
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_scene_tests tina_sample_3d_infrastructure tina_sample_3d -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
+```
+
+A5 不实现 engine-owned 3D Mesh/Material binding registry、统一 retirement ownership 或
+`FrameResourceRef`，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
 
 ## 产品样例的证据边界
 
@@ -218,7 +247,7 @@ A4 不迁移 3D Mesh/Material registry、统一 retirement ownership 或 `FrameR
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；schema 12 含 Sprite registry 注册/释放/纹理销毁、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | 完整 PBR/IBL/shadow/light component、Scene AssetHandle 产品化、跨 GPU golden |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→Prefab/Scene weak Handle→extract-time key resolve→bgfx；evidence schema 1、baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | engine-owned 3D binding registry、统一 FrameResourceRef、完整 PBR/IBL/shadow/light component、跨 GPU golden |
 
 `tina_sample_2d_tilemap_bgfx` 是 `tina_sample_2d` 的兼容 ALIAS；新脚本使用正式 target 名。
 
@@ -236,7 +265,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 ```
 
 multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct
-mesh/material AssetId、Prefab dependency 与 product meshKey 1/2 binding 可验证。Opaque3D 已做
+mesh/material AssetId、Prefab dependency、AssetId→Handle→extract-time key 与 product meshKey 1/2 binding
+可验证。Opaque3D 已做
 baseColor/MR/normal 贴图 **采样**、material factors 与有界0..4 directional lights；完整 PBR/IBL/shadow
 仍后置。
 
@@ -271,7 +301,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 stable key 过期后不复用、update preflight 零发布，以及向 `RenderSceneWriter` 的 lifetime/size/color/width
 extraction 和 writer capacity failure。A3 进一步覆盖 weak Sprite Handle 保留、空 handle 发布前拒绝、
 stale/wrong-kind/missing/zero resolver fail closed、空集合不解析与 Trail 每次非空 extraction 只解析一次。
-专项为 Particle 18/18、Trail 13/13，完整 `tina_scene_tests` 为83/83。
+专项为 Particle 18/18、Trail 13/13；A5 新增 3D Handle 边界后，完整 `tina_scene_tests` 为91/91。
 
 ```powershell
 cmake --build --preset windows-vnext-debug --target tina_scene_tests -- /m:2 /v:m

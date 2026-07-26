@@ -615,17 +615,114 @@ TEST(SceneExtractTest, InactiveCameraIsIgnored)
     };
 }
 
-[[nodiscard]] MeshRenderer3D fixtureMesh(u32 meshKey = 1, u32 materialKey = 1)
+[[nodiscard]] MeshRenderer3D fixtureMesh(
+    Asset::AssetHandle mesh,
+    Asset::AssetHandle material)
 {
     return MeshRenderer3D{
-        .meshKey = meshKey,
-        .materialKey = materialKey,
+        .mesh = mesh,
+        .material = material,
         .localBounds = Render::RenderBoundingSphereInput{.radius = 0.5F},
         .visible = true,
     };
 }
 
-TEST(SceneComponentStorageTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
+struct TestMeshBindings final {
+    struct Binding final {
+        Asset::AssetHandle asset{};
+        u32 key = 0;
+    };
+
+    [[nodiscard]] Asset::AssetBindingResolver meshResolver() noexcept
+    {
+        return Asset::AssetBindingResolver{.userData = this, .resolve = &resolveMesh};
+    }
+
+    [[nodiscard]] Asset::AssetBindingResolver materialResolver() noexcept
+    {
+        return Asset::AssetBindingResolver{.userData = this, .resolve = &resolveMaterial};
+    }
+
+    void bind(Asset::AssetHandle asset, u32 key) noexcept
+    {
+        bindings[bindingCount++] = Binding{.asset = asset, .key = key};
+    }
+
+    [[nodiscard]] static u32 resolveMesh(void* userData, Asset::AssetHandle asset) noexcept
+    {
+        auto& self = *static_cast<TestMeshBindings*>(userData);
+        ++self.meshResolveCalls;
+        return self.resolveExpected(asset, AssetFormat::AssetKind::StaticMesh);
+    }
+
+    [[nodiscard]] static u32 resolveMaterial(void* userData, Asset::AssetHandle asset) noexcept
+    {
+        auto& self = *static_cast<TestMeshBindings*>(userData);
+        ++self.materialResolveCalls;
+        return self.resolveExpected(asset, AssetFormat::AssetKind::Material);
+    }
+
+    [[nodiscard]] u32 resolveExpected(
+        Asset::AssetHandle asset,
+        AssetFormat::AssetKind expectedKind) const noexcept
+    {
+        if (store == nullptr || !asset
+            || store->state(asset) == Asset::AssetLogicalState::Unloaded
+            || store->assetKind(asset) != expectedKind) {
+            return 0;
+        }
+        for (usize index = 0; index < bindingCount; ++index) {
+            if (bindings[index].asset == asset) {
+                return bindings[index].key;
+            }
+        }
+        return 0;
+    }
+
+    Asset::AssetStore* store = nullptr;
+    std::array<Binding, 8> bindings{};
+    usize bindingCount = 0;
+    u32 meshResolveCalls = 0;
+    u32 materialResolveCalls = 0;
+};
+
+class SceneMeshAssetTest : public testing::Test {
+  protected:
+    void SetUp() override
+    {
+        auto store = Asset::AssetStore::Create({.capacity = 6, .memoryResource = &memory_});
+        ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
+        store_.emplace(std::move(*store));
+
+        auto meshA = store_->beginQueued(fixtureAssetId(1), AssetFormat::AssetKind::StaticMesh);
+        auto meshB = store_->beginQueued(fixtureAssetId(2), AssetFormat::AssetKind::StaticMesh);
+        auto materialA = store_->beginQueued(fixtureAssetId(3), AssetFormat::AssetKind::Material);
+        auto materialB = store_->beginQueued(fixtureAssetId(4), AssetFormat::AssetKind::Material);
+        auto wrongKind = store_->beginQueued(fixtureAssetId(5), AssetFormat::AssetKind::Texture2D);
+        ASSERT_TRUE(meshA.has_value());
+        ASSERT_TRUE(meshB.has_value());
+        ASSERT_TRUE(materialA.has_value());
+        ASSERT_TRUE(materialB.has_value());
+        ASSERT_TRUE(wrongKind.has_value());
+        meshA_ = *meshA;
+        meshB_ = *meshB;
+        materialA_ = *materialA;
+        materialB_ = *materialB;
+        wrongKind_ = *wrongKind;
+    }
+
+    [[nodiscard]] Asset::AssetStore& store() noexcept { return *store_; }
+
+    std::pmr::unsynchronized_pool_resource memory_{};
+    std::optional<Asset::AssetStore> store_{};
+    Asset::AssetHandle meshA_{};
+    Asset::AssetHandle meshB_{};
+    Asset::AssetHandle materialA_{};
+    Asset::AssetHandle materialB_{};
+    Asset::AssetHandle wrongKind_{};
+};
+
+TEST_F(SceneMeshAssetTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
 {
     World world = makeWorld();
     const EntityId entity = world.createEntity().value();
@@ -634,10 +731,10 @@ TEST(SceneComponentStorageTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
     ASSERT_NE(world.perspectiveCamera3D(entity), nullptr);
     EXPECT_FLOAT_EQ(world.perspectiveCamera3D(entity)->verticalFovDegrees, 60.0F);
 
-    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(2, 3)));
+    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(meshA_, materialA_)));
     ASSERT_NE(world.meshRenderer3D(entity), nullptr);
-    EXPECT_EQ(world.meshRenderer3D(entity)->meshKey, 2U);
-    EXPECT_EQ(world.meshRenderer3D(entity)->materialKey, 3U);
+    EXPECT_EQ(world.meshRenderer3D(entity)->mesh, meshA_);
+    EXPECT_EQ(world.meshRenderer3D(entity)->material, materialA_);
 
     ASSERT_TRUE(world.clearPerspectiveCamera3D(entity));
     EXPECT_EQ(world.perspectiveCamera3D(entity), nullptr);
@@ -645,7 +742,7 @@ TEST(SceneComponentStorageTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
     EXPECT_EQ(world.meshRenderer3D(entity), nullptr);
 }
 
-TEST(SceneComponentStorageTest, RejectsInvalidPerspectiveAndMesh)
+TEST_F(SceneMeshAssetTest, RejectsInvalidPropertiesButStoresWeakMeshHandles)
 {
     World world = makeWorld();
     const EntityId entity = world.createEntity().value();
@@ -657,23 +754,28 @@ TEST(SceneComponentStorageTest, RejectsInvalidPerspectiveAndMesh)
         world.setPerspectiveCamera3D(entity, badCamera).error().code,
         SceneErrorCode::InvalidComponent);
 
-    MeshRenderer3D missingKeys = fixtureMesh(0, 1);
+    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh({}, {})));
+    EXPECT_FALSE(world.meshRenderer3D(entity)->mesh);
+    EXPECT_FALSE(world.meshRenderer3D(entity)->material);
+
+    MeshRenderer3D invalidBounds = fixtureMesh(meshA_, materialA_);
+    invalidBounds.localBounds.radius = 0.0F;
     EXPECT_EQ(
-        world.setMeshRenderer3D(entity, missingKeys).error().code,
+        world.setMeshRenderer3D(entity, invalidBounds).error().code,
         SceneErrorCode::InvalidComponent);
 }
 
-TEST(SceneExtractTest, ExtractsPerspectiveCameraAndMeshIntoRenderScene)
+TEST_F(SceneMeshAssetTest, ExtractsPerspectiveCameraAndResolvedMeshIntoRenderScene)
 {
     World world = makeWorld();
     const EntityId cameraEntity = world.createEntity(translated(0.0F, 0.35F, 8.0F)).value();
     ASSERT_TRUE(world.setPerspectiveCamera3D(cameraEntity, fixturePerspectiveCamera()));
 
     const EntityId meshEntity = world.createEntity(translated(0.0F, 0.0F, 0.0F)).value();
-    ASSERT_TRUE(world.setMeshRenderer3D(meshEntity, fixtureMesh(1, 1)));
+    ASSERT_TRUE(world.setMeshRenderer3D(meshEntity, fixtureMesh(meshA_, materialA_)));
 
     const EntityId hidden = world.createEntity(translated(1.0F, 0.0F, 0.0F)).value();
-    MeshRenderer3D invisible = fixtureMesh(1, 1);
+    MeshRenderer3D invisible = fixtureMesh({}, {});
     invisible.visible = false;
     ASSERT_TRUE(world.setMeshRenderer3D(hidden, invisible));
 
@@ -683,11 +785,16 @@ TEST(SceneExtractTest, ExtractsPerspectiveCameraAndMeshIntoRenderScene)
         .primarySurfaceAspectRatio = 16.0F / 9.0F,
     }));
     Render::RenderSceneWriter writer = builder->writer();
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 7);
+    bindings.bind(materialA_, 11);
     ASSERT_TRUE(extractRenderSceneFromWorld(
         world,
         writer,
         ExtractRenderSceneParams{
             .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
         }));
 
     auto view = builder->commit();
@@ -699,8 +806,163 @@ TEST(SceneExtractTest, ExtractsPerspectiveCameraAndMeshIntoRenderScene)
     EXPECT_FLOAT_EQ(view->perspectiveCamera()->verticalFovDegrees, 60.0F);
 
     ASSERT_EQ(view->meshes3D().size(), 1U);
-    EXPECT_EQ(view->meshes3D()[0].meshKey, 1U);
-    EXPECT_EQ(view->meshes3D()[0].materialKey, 1U);
+    EXPECT_EQ(view->meshes3D()[0].meshKey, 7U);
+    EXPECT_EQ(view->meshes3D()[0].materialKey, 11U);
+    EXPECT_EQ(bindings.meshResolveCalls, 1U);
+    EXPECT_EQ(bindings.materialResolveCalls, 1U);
+}
+
+TEST_F(SceneMeshAssetTest, MissingResolverRejectsVisibleMesh)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(meshA_, materialA_)));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    const Core::Status status = extractRenderSceneFromWorld(world, writer);
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedMesh);
+}
+
+TEST_F(SceneMeshAssetTest, EmptyHandleRejectsBeforeCallingResolver)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(meshA_, {})));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 7);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedMesh);
+    EXPECT_EQ(bindings.meshResolveCalls, 0U);
+    EXPECT_EQ(bindings.materialResolveCalls, 0U);
+}
+
+TEST_F(SceneMeshAssetTest, WrongKindOrUnboundMeshAssetIsUnresolved)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(wrongKind_, materialA_)));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(wrongKind_, 7);
+    bindings.bind(materialA_, 11);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedMesh);
+    EXPECT_EQ(bindings.meshResolveCalls, 1U);
+    EXPECT_EQ(bindings.materialResolveCalls, 0U);
+}
+
+TEST_F(SceneMeshAssetTest, MaterialResolverRejectsStaticMeshHandleInMaterialField)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(meshA_, meshB_)));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 7);
+    bindings.bind(meshB_, 11);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedMesh);
+    EXPECT_EQ(bindings.meshResolveCalls, 1U);
+    EXPECT_EQ(bindings.materialResolveCalls, 1U);
+}
+
+TEST_F(SceneMeshAssetTest, StaleMeshHandleIsUnresolved)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(meshA_, materialA_)));
+    ASSERT_TRUE(store().unload(meshA_));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 7);
+    bindings.bind(materialA_, 11);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedMesh);
+    EXPECT_EQ(bindings.meshResolveCalls, 1U);
+    EXPECT_EQ(bindings.materialResolveCalls, 0U);
+}
+
+TEST_F(SceneMeshAssetTest, CrossStoreMeshHandleIsUnresolved)
+{
+    std::pmr::unsynchronized_pool_resource foreignMemory;
+    auto foreignStore = Asset::AssetStore::Create({.capacity = 1, .memoryResource = &foreignMemory});
+    ASSERT_TRUE(foreignStore.has_value());
+    auto foreignMesh = foreignStore->beginQueued(
+        fixtureAssetId(6),
+        AssetFormat::AssetKind::StaticMesh);
+    ASSERT_TRUE(foreignMesh.has_value());
+
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(*foreignMesh, materialA_)));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(*foreignMesh, 7);
+    bindings.bind(materialA_, 11);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedMesh);
+    EXPECT_EQ(bindings.meshResolveCalls, 1U);
+    EXPECT_EQ(bindings.materialResolveCalls, 0U);
 }
 
 TEST(SceneExtractTest, RejectsMultipleActivePerspectiveCameras)
@@ -753,7 +1015,7 @@ TEST(SceneExtractTest, ZeroActivePerspectiveCamerasIsValid)
     EXPECT_TRUE(view->meshes3D().empty());
 }
 
-TEST(ScenePrefabInstantiateTest, InstantiatesHierarchyAndMeshes)
+TEST_F(SceneMeshAssetTest, InstantiatesHierarchyAndMeshes)
 {
     World world = makeWorld();
     const std::array nodes{
@@ -775,7 +1037,10 @@ TEST(ScenePrefabInstantiateTest, InstantiatesHierarchyAndMeshes)
         },
     };
     AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
-    auto created = instantiatePrefab(world, prefab, PrefabMeshBinding{.meshKey = 1, .materialKey = 1});
+    auto created = instantiatePrefab(
+        world,
+        prefab,
+        PrefabMeshBinding{.mesh = meshA_, .material = materialA_});
     ASSERT_TRUE(created.has_value()) << (created ? "" : created.error().message);
     ASSERT_EQ(created->size(), 2U);
     EXPECT_EQ(world.entityCount(), 2U);
@@ -792,11 +1057,16 @@ TEST(ScenePrefabInstantiateTest, InstantiatesHierarchyAndMeshes)
         .primarySurfaceAspectRatio = 16.0F / 9.0F,
     }));
     Render::RenderSceneWriter writer = builder->writer();
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 1);
+    bindings.bind(materialA_, 1);
     ASSERT_TRUE(extractRenderSceneFromWorld(
         world,
         writer,
         ExtractRenderSceneParams{
             .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
         }));
     auto view = builder->commit();
     ASSERT_TRUE(view);
@@ -827,7 +1097,7 @@ TEST(ScenePrefabInstantiateTest, RollsBackOnInvalidParentIndex)
     EXPECT_EQ(world.entityCount(), 0U);
 }
 
-TEST(ScenePrefabInstantiateTest, ResolvesPerNodeMeshKeysFromAssetIds)
+TEST_F(SceneMeshAssetTest, ResolvesPerNodeMeshHandlesFromAssetIds)
 {
     World world = makeWorld();
     const auto meshA = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{1}});
@@ -857,31 +1127,31 @@ TEST(ScenePrefabInstantiateTest, ResolvesPerNodeMeshKeysFromAssetIds)
     };
     AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
     PrefabMeshBinding binding{
-        .meshKey = 1,
-        .materialKey = 1,
-        .resolveMeshKey =
-            [meshA, meshB](Core::AssetId id) -> u32 {
+        .mesh = meshA_,
+        .material = materialA_,
+        .resolveMesh =
+            [meshA, meshB, first = meshA_, second = meshB_](Core::AssetId id) -> Asset::AssetHandle {
                 if (id == meshA)
                 {
-                    return 10;
+                    return first;
                 }
                 if (id == meshB)
                 {
-                    return 20;
+                    return second;
                 }
-                return 0;
+                return {};
             },
-        .resolveMaterialKey =
-            [matA, matB](Core::AssetId id) -> u32 {
+        .resolveMaterial =
+            [matA, matB, first = materialA_, second = materialB_](Core::AssetId id) -> Asset::AssetHandle {
                 if (id == matA)
                 {
-                    return 11;
+                    return first;
                 }
                 if (id == matB)
                 {
-                    return 21;
+                    return second;
                 }
-                return 0;
+                return {};
             },
     };
     auto created = instantiatePrefab(world, prefab, binding);
@@ -891,10 +1161,75 @@ TEST(ScenePrefabInstantiateTest, ResolvesPerNodeMeshKeysFromAssetIds)
     const MeshRenderer3D* b = world.meshRenderer3D((*created)[1]);
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
-    EXPECT_EQ(a->meshKey, 10U);
-    EXPECT_EQ(a->materialKey, 11U);
-    EXPECT_EQ(b->meshKey, 20U);
-    EXPECT_EQ(b->materialKey, 21U);
+    EXPECT_EQ(a->mesh, meshA_);
+    EXPECT_EQ(a->material, materialA_);
+    EXPECT_EQ(b->mesh, meshB_);
+    EXPECT_EQ(b->material, materialB_);
+}
+
+TEST_F(SceneMeshAssetTest, RollsBackWhenAssetIdResolverReturnsEmptyHandle)
+{
+    World world = makeWorld();
+    const std::array nodes{
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 1,
+            .parentIndex = -1,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+            .meshId = fixtureAssetId(1),
+            .materialId = fixtureAssetId(3),
+        },
+    };
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    auto created = instantiatePrefab(
+        world,
+        prefab,
+        PrefabMeshBinding{
+            .resolveMesh = [](Core::AssetId) -> Asset::AssetHandle { return {}; },
+            .resolveMaterial = [material = materialA_](Core::AssetId) { return material; },
+        });
+    ASSERT_FALSE(created.has_value());
+    EXPECT_EQ(created.error().code, SceneErrorCode::UnresolvedMesh);
+    EXPECT_EQ(world.entityCount(), 0U);
+}
+
+TEST_F(SceneMeshAssetTest, RollsBackEarlierNodesWhenLaterAssetResolverReturnsEmptyHandle)
+{
+    World world = makeWorld();
+    const std::array nodes{
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 1,
+            .parentIndex = -1,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+            .meshId = fixtureAssetId(1),
+            .materialId = fixtureAssetId(3),
+        },
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 2,
+            .parentIndex = 0,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+            .meshId = fixtureAssetId(2),
+            .materialId = fixtureAssetId(3),
+        },
+    };
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    auto created = instantiatePrefab(
+        world,
+        prefab,
+        PrefabMeshBinding{
+            .resolveMesh = [firstId = fixtureAssetId(1), mesh = meshA_](Core::AssetId id) {
+                return id == firstId ? mesh : Asset::AssetHandle{};
+            },
+            .resolveMaterial = [material = materialA_](Core::AssetId) { return material; },
+        });
+    ASSERT_FALSE(created.has_value());
+    EXPECT_EQ(created.error().code, SceneErrorCode::UnresolvedMesh);
+    EXPECT_EQ(world.entityCount(), 0U);
 }
 
 } // namespace

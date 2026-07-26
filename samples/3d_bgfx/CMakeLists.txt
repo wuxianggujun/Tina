@@ -7,6 +7,7 @@ target_link_libraries(tina_sample_3d_infrastructure PRIVATE
     Tina::ProjectOptions
     Tina::DesktopBootstrap
     Tina::Runtime
+    Tina::Asset
     Tina::Scene
 )
 set_target_properties(tina_sample_3d_infrastructure PROPERTIES CXX_EXTENSIONS OFF)

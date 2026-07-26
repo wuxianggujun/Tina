@@ -58,7 +58,7 @@
 | `Camera2D` | FixedWorldHeight/PixelPerfect 投影、viewport、pixel snap | 每帧最多一个 active 2D camera；surface 0x0 时跳过 |
 | `SpriteRenderer2D` | weak Sprite `AssetHandle`、尺寸/pivot/UV override、颜色与排序 | World 只校验结构；visible extract 必须解析为非0 key；UV finite 且严格递增 |
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
-| `MeshRenderer3D` | mesh/material key、bounds、base color、可见性 | key 由产品 AssetId resolver 或 fixture 提供 |
+| `MeshRenderer3D` | weak mesh/material `AssetHandle`、bounds、base color、可见性 | World 只校验结构；visible extract 通过两个 kind-specific resolver 解析非0 key |
 
 组件 storage 与 entity slot 共用固定容量。`set*` 替换当前值，`clear*` 移除组件；访问 stale 或 cross-world
 ID 失败。Camera2D 与 PerspectiveCamera3D 是独立轨道，可以在同一帧同时存在；各自出现多个 active
@@ -102,6 +102,7 @@ updateWorldTransforms
   -> resolve active Camera2D and/or PerspectiveCamera3D
   -> borrowed resolver asks Asset registry for current Sprite dependency binding key
   -> emit visible SpriteRenderer2D items
+  -> borrowed kind-specific resolvers map mesh/material AssetHandles to current keys
   -> emit visible MeshRenderer3D items
   -> caller commits RenderSceneBuilder
 ```
@@ -110,8 +111,11 @@ updateWorldTransforms
 culling、batch 规划与 pixel snap。`ExtractRenderSceneParams::spriteBindingResolver` 是只在本次调用有效的
 borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/generation、Sprite kind 与 binding，
 并返回非0 backend-neutral key。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或返回0统一
-产生 `UnresolvedSprite`；hidden sprite 不调用 resolver。3D mesh 仍使用 world pose/scale、local bounds 和
-material color fixture/product key。Scene 不保存 resolver、AssetLease、Cooked payload 或 GPU handle。
+产生 `UnresolvedSprite`；hidden sprite 不调用 resolver。`MeshRenderer3D` 同样只保存 weak mesh/material
+`AssetHandle` 与 world pose/scale、local bounds、material color 等语义字段。extraction 分别借用
+`mesh3DBindingResolver`/`material3DBindingResolver`，按预期 AssetKind 解析非零 key；任一 handle/resolver/
+binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden mesh 不解析。Scene
+不保存 resolver、AssetLease、Cooked payload 或 GPU handle。
 
 A2 提供的产品 resolver 把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，由 Asset 层沿
 Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。A3 让 Particle/Trail 保存 Handle；
@@ -134,11 +138,12 @@ createEntity(local transform)
   -> optional setMeshRenderer3D
 ```
 
-`PrefabMeshBinding` 可以通过回调把每个 mesh/material `AssetId` 解析为 backend-neutral key，并补充 bounds/
-baseColor。任一步失败都会销毁本次已创建的全部 entity，不留下半份 hierarchy。
+`PrefabMeshBinding` 可以通过回调把每个 mesh/material `AssetId` 解析为 weak `AssetHandle`，并补充 bounds/
+baseColor。它不分配 Render key；任一步失败都会销毁本次已创建的全部 entity，不留下半份 hierarchy。
 
-multi-mesh Cooker 已能让不同 Prefab node 引用 distinct StaticMesh/Material AssetId；当前产品 sample 仍只
-绑定一个 product mesh。两个 mesh 的 upload/bind/extract/draw 闭环由 `3D-001` 跟踪。
+multi-mesh Cooker 已能让不同 Prefab node 引用 distinct StaticMesh/Material AssetId；产品 sample 把全部
+Cooked owner 发布到 Resources-owned `AssetStore`，Prefab 保存 handle，extraction 再解析到 distinct backend
+key。双 mesh upload/bind/extract/draw 与 handle resolver evidence 已进入产品门禁。
 
 ## 与 Runtime/Game 的关系
 
@@ -159,8 +164,9 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
 ## 验证
 
 - `tina_scene_tests`：entity generation、owner、destroy/reparent、Transform propagation、2D/3D component、
-  extraction、Prefab rollback/resolver，以及 Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle
-  保留、resolver fail-closed/解析次数与 writer capacity；当前直接运行 83/83；
+  extraction、Prefab rollback/AssetId→Handle resolver、3D kind-specific resolver fail-closed，以及
+  Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle 保留、resolver fail-closed/解析次数与
+  writer capacity；
 - `tina_asset_tests`：Sprite binding registry 的容量/owner thread、register/unbind transaction、key
   non-reuse、Texture/Sprite/Tileset Handle 与 cooked dependency fail-closed，以及 TileMap 解析次数/失败清空；
 - `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking；

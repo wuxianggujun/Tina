@@ -64,9 +64,9 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
             continue;
         }
 
-        u32 meshKey = meshBinding.meshKey;
-        u32 materialKey = meshBinding.materialKey;
-        if (meshBinding.resolveMeshKey)
+        Asset::AssetHandle meshAsset = meshBinding.mesh;
+        Asset::AssetHandle materialAsset = meshBinding.material;
+        if (meshBinding.resolveMesh)
         {
             if (!static_cast<bool>(node.meshId))
             {
@@ -74,9 +74,9 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
                 return Core::failure(SceneErrorCode::UnresolvedMesh,
                                      "prefab meshed node missing mesh AssetId for resolve");
             }
-            meshKey = meshBinding.resolveMeshKey(node.meshId);
+            meshAsset = meshBinding.resolveMesh(node.meshId);
         }
-        if (meshBinding.resolveMaterialKey)
+        if (meshBinding.resolveMaterial)
         {
             if (!static_cast<bool>(node.materialId))
             {
@@ -84,13 +84,13 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
                 return Core::failure(SceneErrorCode::UnresolvedMesh,
                                      "prefab meshed node missing material AssetId for resolve");
             }
-            materialKey = meshBinding.resolveMaterialKey(node.materialId);
+            materialAsset = meshBinding.resolveMaterial(node.materialId);
         }
-        if (meshKey == 0 || materialKey == 0)
+        if (!meshAsset || !materialAsset)
         {
             rollback();
             return Core::failure(SceneErrorCode::UnresolvedMesh,
-                                 "prefab mesh/material key resolve returned zero");
+                                 "prefab mesh/material AssetHandle resolve returned empty");
         }
 
         Render::RenderBoundingSphereInput bounds = meshBinding.localBounds;
@@ -105,8 +105,8 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
         }
 
         MeshRenderer3D mesh{
-            .meshKey = meshKey,
-            .materialKey = materialKey,
+            .mesh = meshAsset,
+            .material = materialAsset,
             .localBounds = bounds,
             .baseColorFactor = color,
             .visible = node.visible,

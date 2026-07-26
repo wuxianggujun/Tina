@@ -220,13 +220,19 @@ Linux AT-SPI 仍未完成（UI-002）。
 `Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Camera2D/
 SpriteRenderer2D/PerspectiveCamera3D/MeshRenderer3D。`extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
-material key。
+material weak `AssetHandle`。
 
 `SpriteRenderer2D` 只复制 weak `AssetHandle` 和渲染语义字段，不持有 `AssetLease`/Cooked payload/GPU
 handle。`ExtractRenderSceneParams::spriteBindingResolver` 是 allocation-free 的 borrowed function-pointer
 view，仅在一次 extraction 调用内有效；visible sprite 必须由它按当前 Store owner/generation、Sprite kind
 和 binding 状态解析为非0 `u32` key。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或0结果
 统一返回 `SceneErrorCode::UnresolvedSprite`；hidden sprite 不解析。Scene 不保存 resolver 或任何 Asset owner。
+
+`MeshRenderer3D` 只复制 weak mesh/material `AssetHandle` 与渲染语义字段。extract params 分别提供
+`mesh3DBindingResolver` 和 `material3DBindingResolver`，只在本次 extraction 调用有效；visible mesh 必须
+由两者按当前 Store owner/generation、预期 StaticMesh/Material kind 与 binding 状态解析为非0 key。任一
+resolver/handle/binding 无效返回 `UnresolvedMesh`；mesh 解析失败时不调用 material resolver，hidden mesh
+不解析。`PrefabMeshBinding` 只完成 AssetId→Handle，不保存或分配 Render key。
 
 `ParticleSystem2D` 与 `Trail2D` 是独立 Scene owners，不属于 World/ECS，也不依赖完整 AssetSystem 或
 bgfx。二者复制 copyable weak Sprite `AssetHandle`，不持有 `AssetLease`、Cooked payload、GPU owner 或

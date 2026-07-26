@@ -1129,7 +1129,7 @@ Core::Status World::setMeshRenderer3D(EntityId entity, MeshRenderer3D mesh) noex
     if (!isValid(mesh)) {
         return Core::failure(
             SceneErrorCode::InvalidComponent,
-            "Scene MeshRenderer3D is missing fixture keys or has invalid bounds");
+            "Scene MeshRenderer3D has invalid bounds or material color");
     }
     EntityRecord* entityRecord = record(entity);
     if (entityRecord == nullptr) {

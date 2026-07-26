@@ -209,8 +209,8 @@ rounded rectangle、Image widget、毛玻璃与 CSS 式 stylesheet 仍未实现�
 人工复核 `frame-02.png` / `frame-03.png` 中上述控件可见、中文正常且无裁剪或重叠；两帧 65% fill
 均为 x=700..842（143 px），选中色只出现在 Windowed RadioButton，client capture 未混入标题栏。
 
-当前 tip 增量验证为：`tina_ui_tests` 255/255（含 Accessibility）、`tina_runtime_ui_tests` 83/83、
-`tina_ui_render_integration_tests` 12/12、product-2d 图的 `tina_ui_freetype_tests` 2/2。UI 容量回归
+当前 tip 最近直接验证为：`tina_ui_tests` 263/263（含 Accessibility）、`tina_runtime_ui_tests` 83/83、
+`tina_ui_render_integration_tests` 15/15、product-2d 图的 `tina_ui_freetype_tests` 3/3。UI 容量回归
 覆盖 Checkbox/Slider mutation、TextEdit pointer selection 和需要同时重绘旧/新节点的 focus step；
 dirty queue 容量不足时状态与 callback 原子不变，同文本替换 selection 仍发布新 paint。数字是当前
 工作树证据，不是架构永久基线。

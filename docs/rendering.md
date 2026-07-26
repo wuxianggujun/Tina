@@ -117,7 +117,8 @@ caller-chosen `setSprite2DTextureBinding()` key 与 allocator-managed key 共用
 管理期间不得混用。
 
 `GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
-失败；Asset Catalog 使用 `AssetId`，产品 resolver 显式映射 AssetId → key → GPU handle。
+失败；Asset Catalog 使用 `AssetId`，Prefab 先映射为 weak AssetHandle，extraction resolver 再把 live handle
+映射为 backend-neutral key，最后由 RenderDevice binding 映射到 GPU handle。
 
 `UploadTicketLedger` 与 `CpuSubmissionCompletionLedger` 仍分别表达 staging 与 CPU completion。GPU 资源
 retirement 不复用它们：`destroy*` 是无外部 pin 的便利入口，`retire*` 成功才转移 pin；

@@ -40,7 +40,7 @@
 
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
-| ASSET-HANDLE-SCENE | Partial | P1 | A1 已让 2D World Sprite 存 weak AssetHandle；A2 已用 State-owned fixed-capacity registry 取代产品手写 binding key 表；A3 已让 Particle/Trail 存 weak Sprite AssetHandle；A4 已让 TileMap emit 存 weak Tileset Handle 并借用 Asset resolver。2D 持久 key 已清除，3D 与 FrameResourceRef 未迁移 | 2D/3D 资源引用与 frame retirement owner 收敛为统一 Handle/FrameResourceRef 路径 |
+| ASSET-HANDLE-SCENE | Partial | P1 | A1-A4 已清除2D Scene/FX/TileMap 持久 key；A5 已让 `MeshRenderer3D` 存 weak mesh/material Handle、Prefab 只做 AssetId→Handle，并在 extraction 分别借用 kind-specific resolver。Scene 2D/3D 持久 key 已清除；3D engine-owned binding registry 与 FrameResourceRef 未迁移 | 2D/3D 资源引用与 frame retirement owner 收敛为统一 Handle/FrameResourceRef 路径 |
 | RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal；唯一 `setMesh3DLighting` 有界 0..4 directional lights；sample_3d 一次提交3灯 + 自动相机 + Khronos 球体/盒。**待** IBL/shadow、light component/culling、pass scheduling、vertex tangents |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | UI-004 | Deferred | P2 | 通用 Focus Scope、Modal、持久 Pointer Capture | 多 root/state transition 与输入恢复测试通过 |
@@ -57,6 +57,7 @@
 
 | ID | 完成项 | 证据入口 |
 | --- | --- | --- |
+| ASSET-HANDLE-SCENE-3D-A5 | `MeshRenderer3D` 保存 copyable weak StaticMesh/Material Handle；visible extraction 分别借用 kind-specific resolver，invalid/stale/wrong-kind/unbound/zero fail closed，hidden 不解析；Prefab 只做 AssetId→Handle 并事务 rollback；3D product evidence schema 1 记录 handle 发布、两类 resolver hits 与 AssetStore active | [Scene](scene-ecs.md) · [3D](game-3d.md) · Scene tests · 3D product smoke |
 | ASSET-HANDLE-SCENE-2D-A4 | `TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与调用期 borrowed `AssetBindingResolver`，不再保存 `spriteKey`；registry 沿 Tileset 唯一 required Texture2D dependency fail closed；hidden/off-camera/empty 不解析，非空可见集合只解析一次，失败清空输出；product-2d schema 12 提供 TileMap resolver hits | [资源](resources.md) · [2D](game-2d.md) · TileChunk/Registry tests · 2D product gate |
 | ASSET-HANDLE-SCENE-2D-A3 | `ParticleSystem2D`/`Trail2D` 保存 copyable weak Sprite `AssetHandle`，显式 extract 借用共享 resolver；空 handle 在 emit/Create 拒绝，资源失效映射为 `UnresolvedSprite`；空 FX 不解析，Trail 每次非空 extract 解析一次、Particle 按 live item 解析；不持 Lease/payload/GPU owner；product-2d schema 11 提供独立 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | [Scene](scene-ecs.md) · [2D](game-2d.md) · Particle/Trail tests · 2D product gate |
 | ASSET-HANDLE-SCENE-2D-A2 | owner-thread `Sprite2DBindingRegistry` 借用 Store/device；device-instance allocator 将 Texture Handle + GPU texture 事务注册为唯一、单调不复用 key，同 device 多 registry 不冲突；Sprite/Tileset 通过唯一 required Texture2D cooked dependency fail-closed resolve；State 严格 unbind 后 destroy；当前 product-2d schema 12 保留2纹理注册、释放、销毁与 resolver hits | [资源](resources.md) · [2D](game-2d.md) · Registry tests · 2D product gate |

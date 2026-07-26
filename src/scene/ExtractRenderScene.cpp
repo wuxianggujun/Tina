@@ -292,7 +292,25 @@ Core::Status extractRenderSceneFromWorld(
         if (!isValid(*mesh)) {
             return Core::failure(
                 SceneErrorCode::UnresolvedMesh,
-                "Scene MeshRenderer3D is missing fixture keys or has invalid bounds");
+                "Scene MeshRenderer3D has invalid render properties");
+        }
+        if (!mesh->mesh || !mesh->material || !params.mesh3DBindingResolver
+            || !params.material3DBindingResolver) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedMesh,
+                "Scene MeshRenderer3D has no resolvable mesh and material assets");
+        }
+        const u32 meshKey = params.mesh3DBindingResolver(mesh->mesh);
+        if (meshKey == 0U) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedMesh,
+                "Scene MeshRenderer3D mesh asset has no render binding");
+        }
+        const u32 materialKey = params.material3DBindingResolver(mesh->material);
+        if (materialKey == 0U) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedMesh,
+                "Scene MeshRenderer3D material asset has no render binding");
         }
         const WorldTransform* transform = world.worldTransform(entity);
         if (transform == nullptr || !isValid(*transform)) {
@@ -302,8 +320,8 @@ Core::Status extractRenderSceneFromWorld(
         }
 
         const Render::RenderMesh3DInput input{
-            .meshKey = mesh->meshKey,
-            .materialKey = mesh->materialKey,
+            .meshKey = meshKey,
+            .materialKey = materialKey,
             .submeshIndex = mesh->submeshIndex,
             .stableEntityKey = stableEntityKey(entity),
             .worldTransform =

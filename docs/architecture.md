@@ -180,8 +180,9 @@ source asset
 ```
 
 multi-mesh / multi-primitive glTF cooking 为每个 TRIANGLES prim 生成独立 StaticMesh/Material，并由
-Prefab 依赖 AssetId（多 prim 展开父+子节点）。`tina_sample_3d` 已按每个 product mesh/material 映射
-backend key，覆盖 multi-mesh cook -> upload/bind -> Prefab resolve -> extract/draw 的产品 E2E。相对文件或
+Prefab 依赖 AssetId（多 prim 展开父+子节点）。`tina_sample_3d` 把 Cooked owner 发布到 Resources-owned
+`AssetStore`；Prefab 按 AssetId 写入 weak mesh/material handle，Scene extraction 再分别解析 backend key，
+覆盖 multi-mesh cook -> upload/bind -> Prefab resolve -> extract/draw 的产品 E2E。相对文件或
 bufferView 的 baseColor/MR/normal 贴图可 cook 为 RGBA8 Texture2D 并成为 Material dependency；产品路径
 完成外部 URI/size policy、GPU binding 与 experimental metallic-roughness 采样（material factors、
 `Mesh3DLightingDesc` 单次提交0..4 directional lights）。完整 PBR、IBL/shadow、light component/culling、
@@ -190,8 +191,9 @@ submit/present 的 CPU 借用期；Texture/Mesh 则使用独立 readback complet
 合并到 backend retirement，二者不能互相作为完成证据。
 
 2D World 的 `SpriteRenderer2D` 与 standalone `ParticleSystem2D`/`Trail2D` 已只保存 copyable weak Sprite
-`AssetHandle`；TileMap emit 保存 weak Tileset `AssetHandle`。通用 allocation-free `AssetBindingResolver` 位于
-窄 `AssetTypes` 边界，Scene 保留语义 alias `Sprite2DBindingResolver`；四条路径都只在当前调用借用 resolver。
+`AssetHandle`；TileMap emit 保存 weak Tileset `AssetHandle`；3D `MeshRenderer3D` 保存 weak StaticMesh/
+Material handle。通用 allocation-free `AssetBindingResolver` 位于窄 `AssetTypes` 边界，Scene 保留语义
+alias `Sprite2DBindingResolver`；所有路径都只在当前调用借用 resolver。
 产品 resolver 薄调用 `Sprite2DBindingRegistry::resolveSprite()` 或 `resolveTileset()`。registry 在 Asset owner
 thread 上验证资源唯一 required Texture2D cooked dependency、当前 Texture2D Handle 与 live binding，再返回 RenderDevice
 实例 namespace 内唯一、单调且不复用的非零 key。device 只有在 backend bind 成功后才消费候选 key，
@@ -203,8 +205,9 @@ Scene/TileMap emit 都不保存 resolver、AssetSystem、AssetLease、Cooked pay
 解析；TileMap hidden/off-camera/empty 不解析，非空可见集合每次 emit 只解析一次。缺 resolver 或
 空/stale/cross-store/wrong-kind/unbound handle 映射为0时分别 fail closed 为 Scene `UnresolvedSprite` 或 Asset
 `SpriteBindingNotFound`，TileMap 失败清空输出。产品 State 的 RAII teardown 必须先 unbind 两个 texture
-binding，成功后才 destroy texture。2D 持久 binding key 迁移已完成；3D component Handle 化与统一
-`FrameResourceRef` 仍由 `ASSET-HANDLE-SCENE` 后续切片完成，因此总项保持 Partial。
+binding，成功后才 destroy texture。2D 与 3D Scene component 的持久 binding key 迁移已完成；3D 当前
+由产品私有 slot 解析 backend key，engine-owned Mesh/Material binding registry 与统一 `FrameResourceRef`
+仍由 `ASSET-HANDLE-SCENE` 后续切片完成，因此总项保持 Partial。
 
 ## 当前 UI 边界
 

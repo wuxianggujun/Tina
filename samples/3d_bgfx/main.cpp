@@ -1,3 +1,4 @@
+#include <tina/asset/AssetStore.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/GameApplication.hpp>
@@ -19,6 +20,7 @@
 #include <exception>
 #include <iostream>
 #include <memory>
+#include <memory_resource>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -176,6 +178,30 @@ class Visible3DState final : public Tina::IGameState {
     {
         ++counters_->stateEnters;
 
+        auto storeResult = Tina::Asset::AssetStore::Create({.capacity = 2, .memoryResource = &assetMemory_});
+        if (!storeResult)
+        {
+            return Tina::Core::failure(std::move(storeResult.error()));
+        }
+        assetStore_.emplace(std::move(*storeResult));
+        Tina::Core::AssetId::Bytes meshIdBytes{};
+        meshIdBytes[0] = std::byte{1};
+        Tina::Core::AssetId::Bytes materialIdBytes{};
+        materialIdBytes[0] = std::byte{2};
+        auto mesh = assetStore_->beginQueued(
+            *Tina::Core::AssetId::fromBytes(meshIdBytes),
+            Tina::AssetFormat::AssetKind::StaticMesh);
+        auto material = assetStore_->beginQueued(
+            *Tina::Core::AssetId::fromBytes(materialIdBytes),
+            Tina::AssetFormat::AssetKind::Material);
+        if (!mesh || !material)
+        {
+            return Tina::Core::failure(
+                mesh ? std::move(material.error()) : std::move(mesh.error()));
+        }
+        meshAsset_ = *mesh;
+        materialAsset_ = *material;
+
         auto worldResult = Tina::Scene::World::Create(Tina::Scene::WorldConfig{16});
         if (!worldResult)
         {
@@ -226,8 +252,8 @@ class Visible3DState final : public Tina::IGameState {
             if (auto status = world_->setMeshRenderer3D(
                     cubeEntities_[index],
                     Tina::Scene::MeshRenderer3D{
-                        .meshKey = 1,
-                        .materialKey = 1,
+                        .mesh = meshAsset_,
+                        .material = materialAsset_,
                         .submeshIndex = 0,
                         .localBounds = {.radius = 1.75F},
                         .baseColorFactor = Colors[index],
@@ -320,6 +346,9 @@ class Visible3DState final : public Tina::IGameState {
             ++counters_->uiRootsReleased;
         }
         world_.reset();
+        meshAsset_ = {};
+        materialAsset_ = {};
+        assetStore_.reset();
         ++counters_->stateExits;
     }
 
@@ -379,6 +408,14 @@ class Visible3DState final : public Tina::IGameState {
                             .pixelWidth = 1280,
                             .pixelHeight = 720,
                         },
+                    .mesh3DBindingResolver = Tina::Asset::AssetBindingResolver{
+                        .userData = const_cast<Visible3DState*>(this),
+                        .resolve = &resolveFixtureMeshBinding,
+                    },
+                    .material3DBindingResolver = Tina::Asset::AssetBindingResolver{
+                        .userData = const_cast<Visible3DState*>(this),
+                        .resolve = &resolveFixtureMaterialBinding,
+                    },
                 });
             !status)
         {
@@ -389,12 +426,44 @@ class Visible3DState final : public Tina::IGameState {
     }
 
   private:
+    [[nodiscard]] static u32 resolveFixtureMeshBinding(
+        void* userData,
+        Tina::Asset::AssetHandle asset) noexcept
+    {
+        auto& self = *static_cast<Visible3DState*>(userData);
+        if (!self.assetStore_.has_value()
+            || asset != self.meshAsset_
+            || self.assetStore_->assetKind(asset) != Tina::AssetFormat::AssetKind::StaticMesh)
+        {
+            return 0;
+        }
+        return 1;
+    }
+
+    [[nodiscard]] static u32 resolveFixtureMaterialBinding(
+        void* userData,
+        Tina::Asset::AssetHandle asset) noexcept
+    {
+        auto& self = *static_cast<Visible3DState*>(userData);
+        if (!self.assetStore_.has_value()
+            || asset != self.materialAsset_
+            || self.assetStore_->assetKind(asset) != Tina::AssetFormat::AssetKind::Material)
+        {
+            return 0;
+        }
+        return 1;
+    }
+
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
     mutable std::optional<Tina::Scene::World> world_{};
     Tina::Scene::EntityId cameraEntity_{};
     std::array<Tina::Scene::EntityId, ProceduralCubeCount> cubeEntities_{};
+    std::pmr::unsynchronized_pool_resource assetMemory_{};
+    std::optional<Tina::Asset::AssetStore> assetStore_{};
+    Tina::Asset::AssetHandle meshAsset_{};
+    Tina::Asset::AssetHandle materialAsset_{};
 };
 
 class Visible3DApplication final : public Tina::IGameApplication {

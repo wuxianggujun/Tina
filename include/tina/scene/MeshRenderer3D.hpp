@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/asset/AssetHandle.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/render/RenderScene.hpp>
 
@@ -7,13 +8,11 @@
 
 namespace Tina::Scene {
 
-// Scene-owned opaque mesh draw component. Stores semantic fields only (no GPU
-// handles). meshKey/materialKey are backend-neutral bind table ids (set via
-// setMesh3DBinding / setMesh3DMaterialTextureBinding). Full AssetHandle on the
-// component + extract-time resolve remains Deferred.
+// Scene-owned opaque mesh draw component. Stores copyable weak AssetHandles and
+// semantic fields only; it never owns an AssetLease or backend/GPU handle.
 struct MeshRenderer3D final {
-    u32 meshKey = 0;
-    u32 materialKey = 0;
+    Asset::AssetHandle mesh{};
+    Asset::AssetHandle material{};
     u32 submeshIndex = 0;
     Render::RenderBoundingSphereInput localBounds{.radius = 0.5F};
     Render::RenderLinearColor baseColorFactor{};
@@ -25,10 +24,6 @@ struct MeshRenderer3D final {
 
 [[nodiscard]] inline bool isValid(const MeshRenderer3D& mesh) noexcept
 {
-    if (mesh.meshKey == 0 || mesh.materialKey == 0)
-    {
-        return false;
-    }
     if (!std::isfinite(mesh.localBounds.centerX) || !std::isfinite(mesh.localBounds.centerY)
         || !std::isfinite(mesh.localBounds.centerZ) || !std::isfinite(mesh.localBounds.radius)
         || mesh.localBounds.radius <= 0.0F)
