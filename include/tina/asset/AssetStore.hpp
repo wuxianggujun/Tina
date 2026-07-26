@@ -1,36 +1,18 @@
 #pragma once
 
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/AssetHandle.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
-#include <tina/core/id/GenerationId.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 
 #include <memory_resource>
 #include <utility>
 
 namespace Tina::Asset {
-
-struct AssetHandleTag final {};
-using AssetHandleId = Core::GenerationId<AssetHandleTag>;
-
-// Copyable weak handle. Does not keep payload alive.
-struct AssetHandle final {
-    AssetHandleId id{};
-
-    [[nodiscard]] constexpr bool hasValue() const noexcept
-    {
-        return static_cast<bool>(id);
-    }
-    [[nodiscard]] constexpr explicit operator bool() const noexcept
-    {
-        return hasValue();
-    }
-    [[nodiscard]] friend constexpr bool operator==(const AssetHandle&, const AssetHandle&) = default;
-};
 
 // Logical asset residency. ReadyCpu = cooked CPU payload; ReadyGpu = GPU-resident.
 // Do not introduce a bare "Ready" alias — it collides with upload ticket Ready and hides CPU/GPU.

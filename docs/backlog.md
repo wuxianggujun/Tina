@@ -40,7 +40,7 @@
 
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
-| ASSET-HANDLE-SCENE | Deferred | P1 | Scene 组件存 AssetHandle；extract 解析 bind key / 未来 FrameResourceRef | 去掉游戏侧手写 key 表为唯一产品路径 |
+| ASSET-HANDLE-SCENE | Partial | P1 | A1 已让 2D World Sprite 组件存 AssetHandle 并在 extract 借用 resolver；仍缺 engine-owned binding registry、FX/TileMap/3D 统一路径与未来 FrameResourceRef | 去掉游戏侧手写 key 表为唯一产品路径 |
 | RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal；唯一 `setMesh3DLighting` 有界 0..4 directional lights；sample_3d 一次提交3灯 + 自动相机 + Khronos 球体/盒。**待** IBL/shadow、light component/culling、pass scheduling、vertex tangents |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | UI-004 | Deferred | P2 | 通用 Focus Scope、Modal、持久 Pointer Capture | 多 root/state transition 与输入恢复测试通过 |
@@ -57,6 +57,7 @@
 
 | ID | 完成项 | 证据入口 |
 | --- | --- | --- |
+| ASSET-HANDLE-SCENE-2D-A1 | `SpriteRenderer2D` weak `AssetHandle` + borrowed resolver；空/stale/cross-store/wrong-kind/unbound fail closed，hidden 不解析；Scene 不持有 Lease/GPU owner | [Scene](scene-ecs.md) · Scene component/extract tests · 2D product sample |
 | RUNTIME-SHUTDOWN-DEADLINE | `shutdownAndJoinFor` 有界 stop/join；invalid 不触发 stop，timeout 保留 stopping TaskSystem/Worker/owner 并可 retry；Host 仅为 TaskSystem worker-exit/join 使用配置 deadline，超时先写 Diagnostics 再 terminate，绝不继续析构 owner；不 detach/强杀 | [Task](task-system.md) · [Runtime](runtime.md) · Disabled/Bounded Task shutdown tests · EngineHost Task-shutdown deadline/death tests |
 | DONE-001 | Legacy `Tina.exe`、旧横版 2D 与旧 UI 产品图删除 | [M12 退役说明](m12-legacy-ui-retirement.md) |
 | DONE-002 | `EngineHost`、Platform/Input、WindowSurface、Desktop/bgfx 垂直切片 | [架构](architecture.md) · [测试](testing.md) |

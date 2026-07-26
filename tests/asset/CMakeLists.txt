@@ -36,6 +36,7 @@ set(TINA_ASSET_TEST_SOURCES
     CookedAssetBatchTests.cpp
     CookedAssetFileTests.cpp
     header_isolation/AssetErrorsHeader.cpp
+    header_isolation/AssetHandleHeader.cpp
     header_isolation/AssetStoreHeader.cpp
     header_isolation/AssetSystemHeader.cpp
     header_isolation/AssetGpuUploadHeader.cpp

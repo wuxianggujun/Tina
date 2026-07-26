@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/asset/AssetHandle.hpp>
 #include <tina/core/base/Types.hpp>
 
 #include <cmath>
@@ -26,7 +27,7 @@ enum class SpriteOverrideFlags : u8 {
     None = 0,
     Size = 1 << 0,
     Pivot = 1 << 1,
-    // Optional normalized UV rect on the bound texture/atlas (fixture path).
+    // Optional normalized UV rect on the bound texture/atlas.
     // Without UvRect, extract writes full texture [0,1] like RenderSprite2DInput defaults.
     UvRect = 1 << 2,
 };
@@ -65,12 +66,10 @@ struct SpriteUvRect final {
     friend constexpr bool operator==(const SpriteUvRect&, const SpriteUvRect&) noexcept = default;
 };
 
-// Scene-owned 2D sprite draw component. Stores semantic fields only (no GPU
-// handles). spriteKey is a backend-neutral bind table id (set via
-// setSprite2DTextureBinding). Full AssetHandle on the component remains Deferred.
+// Scene-owned 2D sprite draw component. Stores a copyable weak AssetHandle and
+// semantic fields only; it never owns an AssetLease or backend/GPU handle.
 struct SpriteRenderer2D final {
-    // Non-zero resolved render resource key written to RenderSprite2DInput.
-    u32 spriteKey = 0;
+    Asset::AssetHandle sprite{};
     SpriteOverrideFlags overrides = SpriteOverrideFlags::None;
     Vec2 sizeOverrideMeters{1.0F, 1.0F};
     // Pivot in [0,1] relative to sprite extents; geometric center is adjusted
@@ -101,9 +100,6 @@ struct SpriteRenderer2D final {
 
 [[nodiscard]] inline bool isValid(const SpriteRenderer2D& sprite) noexcept
 {
-    if (sprite.spriteKey == 0) {
-        return false;
-    }
     if (!std::isfinite(sprite.sizeOverrideMeters.x)
         || !std::isfinite(sprite.sizeOverrideMeters.y)
         || !std::isfinite(sprite.pivotOverride.x)

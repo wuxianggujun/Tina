@@ -103,11 +103,13 @@ inline constexpr Tina::AssetFormat::TileMapObjectId PlayerSpawnObjectId = 101;
 inline constexpr Tina::AssetFormat::TileMapObjectId CrateSpawnObjectId = 102;
 inline constexpr u32 ExpectedCharacterAnimationClips = 3;
 inline constexpr u32 ExpectedCharacterAnimationSprites = 3;
+inline constexpr u32 ExpectedSceneCrateSprites = 1;
 inline constexpr u32 ExpectedCharacterAnimationResolvedFrames = 5;
 inline constexpr u32 ExpectedTileMapStreamChunks = 2;
 inline constexpr u32 ExpectedAudioClipFrames = 480;
 inline constexpr u32 ExpectedCatalogRecipeAssets =
-    5 + ExpectedCharacterAnimationClips + ExpectedCharacterAnimationSprites + ExpectedTileMapStreamChunks;
+    5 + ExpectedCharacterAnimationClips + ExpectedCharacterAnimationSprites + ExpectedSceneCrateSprites +
+    ExpectedTileMapStreamChunks;
 inline constexpr u32 ExpectedUploadedTextures = 2;
 inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
 inline constexpr u32 ProductParticleCapacity = 12;
@@ -646,6 +648,7 @@ struct TileMapResources final {
     std::unique_ptr<Tina::Asset::AssetSystem> system{};
     Tina::Asset::AssetHandle tileTextureHandle{};
     Tina::Asset::AssetHandle characterTextureHandle{};
+    Tina::Asset::AssetHandle crateSpriteHandle{};
     Tina::Asset::AssetHandle tilesetHandle{};
     Tina::Asset::AssetHandle tileMapHandle{};
     Tina::Asset::AssetHandle audioClipHandle{};
@@ -703,6 +706,50 @@ struct TileMapResources final {
     std::optional<Tina::Audio::MiniaudioDevice> audioDevice{};
 #endif
 };
+
+[[nodiscard]] u32 resolveSceneSpriteBinding(
+    void* userData,
+    Tina::Asset::AssetHandle spriteHandle) noexcept
+{
+    const auto* resources = static_cast<const TileMapResources*>(userData);
+    if (resources == nullptr || resources->system == nullptr || !spriteHandle)
+    {
+        return 0;
+    }
+
+    const Tina::Asset::AssetStore& store = resources->system->store();
+    if (store.assetKind(spriteHandle) != Tina::AssetFormat::AssetKind::Sprite)
+    {
+        return 0;
+    }
+    const Tina::Asset::CookedAssetFile* spriteFile = resources->system->tryGet(spriteHandle);
+    if (spriteFile == nullptr || spriteFile->header().dependencyCount != 1U)
+    {
+        return 0;
+    }
+    const auto textureDependency = spriteFile->dependency(0);
+    if (!textureDependency || textureDependency->expectedKind != Tina::AssetFormat::AssetKind::Texture2D)
+    {
+        return 0;
+    }
+    const auto textureHandle = resources->system->find(textureDependency->assetId);
+    if (!textureHandle || store.assetKind(*textureHandle) != Tina::AssetFormat::AssetKind::Texture2D ||
+        resources->system->tryGet(*textureHandle) == nullptr)
+    {
+        return 0;
+    }
+
+    if (spriteHandle == resources->crateSpriteHandle && *textureHandle == resources->tileTextureHandle &&
+        resources->tileGpuTexture)
+    {
+        return ProductTileSpriteKey;
+    }
+    if (*textureHandle == resources->characterTextureHandle && resources->characterGpuTexture)
+    {
+        return ProductCharacterSpriteKey;
+    }
+    return 0;
+}
 
 [[nodiscard]] Tina::Core::Result<std::string> makeInitialFxFingerprint(
     const Tina::Scene::ParticleSystem2D& particles,
@@ -1095,7 +1142,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
 
             resolvedFrames.push_back(Tina::Scene::SpriteAnimationFrame2D{
                 .sprite = Tina::Scene::SpriteRenderer2D{
-                    .spriteKey = ProductCharacterSpriteKey,
+                    .sprite = *spriteHandle,
                     .overrides = Tina::Scene::SpriteOverrideFlags::Size |
                                  Tina::Scene::SpriteOverrideFlags::Pivot |
                                  Tina::Scene::SpriteOverrideFlags::UvRect,
@@ -1311,7 +1358,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     }
     const float crateSize = resources.dynamicHalfExtent * 2.0f;
     const Tina::Scene::SpriteRenderer2D crateSprite{
-        .spriteKey = ProductTileSpriteKey,
+        .sprite = resources.crateSpriteHandle,
         .overrides = Tina::Scene::SpriteOverrideFlags::Size | Tina::Scene::SpriteOverrideFlags::UvRect,
         .sizeOverrideMeters = {crateSize, crateSize},
         // Right half of the product atlas (pre-M8-C1 direct emit fidelity).
@@ -1345,6 +1392,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     const auto idleClipId = *Tina::Core::AssetId::fromBytes(idBytes(9U));
     const auto walkClipId = *Tina::Core::AssetId::fromBytes(idBytes(10U));
     const auto hitWallClipId = *Tina::Core::AssetId::fromBytes(idBytes(11U));
+    const auto crateSpriteId = *Tina::Core::AssetId::fromBytes(idBytes(12U));
 
 #if !defined(TINA_SAMPLE_2D_RECIPE_PATH)
 #error "TINA_SAMPLE_2D_RECIPE_PATH must be defined for tina_sample_2d catalog recipe load"
@@ -1402,7 +1450,8 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     {
         return bindStatus;
     }
-    auto loaded = system->load(std::array{tileMapId, audioClipId, idleClipId, walkClipId, hitWallClipId});
+    auto loaded = system->load(
+        std::array{tileMapId, audioClipId, idleClipId, walkClipId, hitWallClipId, crateSpriteId});
     if (!loaded)
     {
         return Tina::Core::failure(std::move(loaded.error()));
@@ -1412,15 +1461,17 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     auto tilesetHandle = system->find(tilesetId);
     auto tileTextureHandle = system->find(tileTextureId);
     auto characterTextureHandle = system->find(characterTextureId);
-    if (!tileMapHandle || !tilesetHandle || !tileTextureHandle || !characterTextureHandle)
+    auto crateSpriteHandle = system->find(crateSpriteId);
+    if (!tileMapHandle || !tilesetHandle || !tileTextureHandle || !characterTextureHandle || !crateSpriteHandle)
     {
         return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle,
-                                   "tilemap/tileset/texture dependencies are not loaded");
+                                   "tilemap/tileset/texture/sprite dependencies are not loaded");
     }
     resources.tileMapHandle = *tileMapHandle;
     resources.tilesetHandle = *tilesetHandle;
     resources.tileTextureHandle = *tileTextureHandle;
     resources.characterTextureHandle = *characterTextureHandle;
+    resources.crateSpriteHandle = *crateSpriteHandle;
 
     // Resolve AudioClip by id (load() return order is plan order, not request order).
     auto audioHandle = system->find(audioClipId);
@@ -3132,6 +3183,10 @@ class TileMapBgfxState final : public Tina::IGameState {
                             .pixelWidth = counters_->surfacePixelWidth,
                             .pixelHeight = counters_->surfacePixelHeight,
                         },
+                    .spriteBindingResolver = Tina::Scene::Sprite2DBindingResolver{
+                        .userData = resources_,
+                        .resolve = &resolveSceneSpriteBinding,
+                    },
                 });
             !status)
         {

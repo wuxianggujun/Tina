@@ -39,7 +39,7 @@ struct ResolvedTimelinePosition final {
     }
     double timelineSeconds = 0.0;
     for (const SpriteAnimationFrame2D& frame : clip.frames) {
-        if (!isValid(frame.sprite)) {
+        if (!frame.sprite.sprite || !isValid(frame.sprite)) {
             return Core::failure(
                 SceneErrorCode::InvalidAnimation,
                 "SpriteAnimationClip2D contains an invalid SpriteRenderer2D frame");

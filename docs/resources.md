@@ -24,7 +24,8 @@ Catalog package
 ```
 
 - `Tina::AssetFormat` 定义 wire schema、parser/writer 与 typed payload schema，只 PUBLIC 依赖 Core；
-- `Tina::Asset` 负责 Catalog、磁盘文件、Cooker、Handle/Lease、Task IO 与 upload 账本；
+- `Tina::AssetTypes` 只承载 header-only weak `AssetHandle`；`Tina::Asset` 负责 Catalog、磁盘文件、Cooker、
+  Lease、Task IO 与 upload 账本；
 - xxHash 与 cgltf 都是私有实现依赖，公开头不泄漏第三方 token；
 - Render backend 只接收解析后的 payload或资源 key，不读取 Catalog/source tree；
 - Scene、UI 与 gameplay 不直接拥有 bgfx Buffer/Texture/Pipeline handle。
@@ -42,6 +43,11 @@ Catalog package
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
+
+`AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D` 复制该 weak handle，
+并在 extraction 时借用产品 resolver 校验当前 Store owner/generation、Sprite kind 与 render binding；Scene
+不因此依赖完整 AssetSystem，也不取得 Lease/payload/GPU owner。当前 resolver mapping 仍由产品 State
+维护，engine-owned binding registry 与 3D/FX/TileMap 的统一 Handle 路径后置。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。

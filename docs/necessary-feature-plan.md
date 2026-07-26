@@ -25,6 +25,7 @@
 | N7 | 2D-AUDIO-ADV | 已完成 | voice gain/pitch/pan、可取消 fade、线性重采样、one-shot retirement，以及 bounded PCM streaming 的原子 submit、EOF/underrun/cancel、terminal backpressure 与 shutdown 已贯通测试和产品 sample |
 | N8 | 2D-FX | 已完成 | standalone ParticleSystem2D/Trail2D 的固定容量 PMR、确定性/事务失败/lifetime/width 契约已贯通 `tina_scene_tests` 与 product-2d schema 9 |
 | N9 | RUNTIME-SHUTDOWN-DEADLINE | 已完成 | `ITaskSystem` 有界 stop/join、timeout ownership retention/retry 与 `EngineHost` Diagnostics + terminate hard boundary 已贯通 `tina_tests` |
+| N10 | ASSET-HANDLE-SCENE-2D-A1 | 已完成 | World Sprite 组件改存 weak AssetHandle，extract 借用零分配 resolver；资源失败 fail closed，完整 ASSET-HANDLE-SCENE 仍为 Partial |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -419,6 +420,43 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 
 N9 不包含通用 State TaskGroup soft deadline、Worker 抢占/强制取消、detach、跨进程 watchdog 或 crash
 dump 协议；这些能力需要独立契约和门禁。
+
+## N10 - ASSET-HANDLE-SCENE-2D-A1
+
+### 已完成契约
+
+- `AssetHandle` 拆入 header-only `Tina::AssetTypes`；Scene PUBLIC 只依赖该窄 target，不传递完整
+  AssetSystem、Task、Render upload 或可选 Physics2D。
+- `SpriteRenderer2D` 保存 copyable weak `AssetHandle`，不再保存 render key，也不持有 `AssetLease`、
+  Cooked payload、`GpuTextureId` 或 backend 类型。World 只校验组件数值结构，允许异步期间的空 handle。
+- `ExtractRenderSceneParams::spriteBindingResolver` 是借用的 function pointer + user data，仅在本次调用内
+  有效，调用零分配且 `noexcept`。visible sprite 的空/stale/cross-store/wrong-kind/unbound handle、缺 resolver
+  或 resolver 返回0统一产生 `SceneErrorCode::UnresolvedSprite`；hidden sprite 不调用 resolver。
+- 产品 resolver 每次按当前 AssetSystem Store 验证 owner/generation、Sprite kind 与显式 binding mapping；
+  Animator frame 复制 Sprite handle，但空 handle clip 仍返回 `InvalidAnimation`。
+
+### 完成结果
+
+| 阶段 | 完成结果 |
+| --- | --- |
+| N10.1 | 轻量 Handle 公共头与 AssetTypes target；AssetStore 保持原 generation/owner/stale 语义 |
+| N10.2 | SpriteRenderer2D/World/extract/Animator 契约迁移，无 `spriteKey` 双轨字段 |
+| N10.3 | Scene 测试覆盖 default/stale/cross-store/wrong-kind/unbound、返回0、hidden skip、成功 UV/pivot/transform 与 writer failure；2D product World 路径使用 Catalog Sprite handle |
+
+### 验收
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_scene_tests tina_sample_2d -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
+  --frames=300 --frame-delay-ms=0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+```
+
+N10 不宣称完成 `ASSET-HANDLE-SCENE` 总项：产品 resolver 仍把 Handle 映射到 game-owned binding key；
+TileMap emit、Particle/Trail、3D Mesh/Material 仍保留各自 key 路径。engine-owned upload/binding registry、
+统一 retirement/FrameResourceRef 与 3D component Handle 化必须在后续切片完成。
 
 ## 每项收口清单
 

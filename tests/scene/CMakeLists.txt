@@ -25,6 +25,7 @@ target_compile_features(tina_scene_tests PRIVATE cxx_std_23)
 target_include_directories(tina_scene_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(tina_scene_tests PRIVATE
     Tina::ProjectOptions
+    Tina::Asset
     Tina::Scene
     Tina::Render
     GTest::gtest_main

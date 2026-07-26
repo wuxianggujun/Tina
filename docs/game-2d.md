@@ -17,7 +17,8 @@ Game2DState
   -> retained UI + AudioEngine
 ```
 
-- `tina_scene` 提供 World 以及独立的 `ParticleSystem2D` / `Trail2D`，只写 backend-neutral sprite key；
+- `tina_scene` 的 World Sprite 只存 weak `AssetHandle`，extraction 借用 resolver 后写 backend-neutral key；
+- 独立 `ParticleSystem2D` / `Trail2D` 当前仍直接写 backend-neutral sprite key；
 - TileMap、角色控制、选择高亮、Physics sync 和产品规则留在 Asset/产品 State；
 - Render backend 不理解 tile/cell/gameplay，也不接收 AssetHandle；
 - Box2D、bgfx、FreeType、miniaudio 均位于可选私有 adapter。
@@ -49,20 +50,24 @@ consume/claim 后 digital/analog source 均不会穿透。运行时改键只通�
 
 `SpriteRenderer2D` 保存：
 
-- 非0 `spriteKey`/产品 resource key；
+- copyable weak Sprite `AssetHandle`；
 - size、pivot、UV override；
 - color、sorting layer、order、flip 与 visible。
 
-它不保存 `GpuTextureId` 或 bgfx handle。产品路径先把 Cooked Texture2D 解析并上传为
-`GpuTextureId`，再通过 `setSprite2DTextureBinding(spriteKey, texture)` 建立 backend binding。Scene
-extraction 只写 key、transform、UV 与颜色。
+它不保存 `AssetLease`、`GpuTextureId` 或 bgfx handle。产品路径先把 Cooked Texture2D 解析并上传为
+`GpuTextureId`，再建立 backend binding；Scene extraction 每帧借用 `Sprite2DBindingResolver`，验证 handle
+仍属于当前 AssetStore、kind/binding 正确并解析为非0 key，然后只写 key、transform、UV 与颜色。缺 resolver
+或无法解析的 visible sprite 返回 `UnresolvedSprite`；hidden sprite 不触发解析。
 
 Sprite 顺序为 sorting layer → order in layer → stable source ordinal。透明语义不能为了全局纹理合批
 被重排；bgfx 按最终顺序扫描相邻且 `spriteKey` 相同的 Sprite，按连续区间分别绑定纹理并 submit。
 例如 key 序列 A/A/B/A 会形成3个 batch，而不会重排成 A/A/A/B。除0以外的 key 都可参与该路径；
 0仍作为非法资源 key 拒绝。UI 使用独立 pass，始终不混入 World Sprite batch。
 
-产品 sample 当前上传并绑定两张 Cooked Texture2D：Tile atlas 使用 key 1，角色三帧 atlas 使用 key 2。
+产品 sample 当前上传并绑定两张 Cooked Texture2D：Tile atlas 使用 key 1，角色三帧 atlas 使用 key 2；
+World 里的 crate/角色帧保存 Catalog Sprite handle，再由 State-owned resolver 映射到这两个既有 binding。
+该 A1 切片消除了 `SpriteRenderer2D` 直接保存 key，但还没有 engine-owned binding registry；TileMap emit、
+Particle/Trail 和最终 GPU binding 仍使用显式 key，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
 Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用不同纹理，不再受历史 fixture key 1 限制。
 
 ## Sprite 动画
@@ -78,14 +83,14 @@ Catalog recipe 支持：
 spriteanim <clip-id> <Once|Loop|PingPong> <sprite-id:duration-seconds>...
 ```
 
-`SpriteAnimator2D` 接收已在 Asset/Scene 边界解析为 `SpriteRenderer2D` 的帧，不自行持有 AssetHandle 或
-backend texture。它支持 Once 停在末帧、Loop、PingPong 反向经过内部帧、pause/play/stop/restart、
+`SpriteAnimator2D` 接收已在 Asset/Scene 边界解析为 `SpriteRenderer2D` 的帧；每帧复制 weak AssetHandle，
+但不持有 AssetLease 或 backend texture。它支持 Once 停在末帧、Loop、PingPong 反向经过内部帧、pause/play/stop/restart、
 正倍速和跨多帧的大 delta；无效 clip、非正倍速及负数/非有限 delta 会显式失败。clip 帧在设置时复制，
 `update()` 不分配。
 
 产品 sample 从 Catalog 解析 Idle、Walk、HitWall 三个 clip（共5个 resolved frame），由角色 fixed-step
 状态驱动 `Idle -> Walk -> HitWall`。HitWall 使用 Once clip，并把完成状态写入结构化门禁；角色当前帧
-直接更新 Scene 的 `SpriteRenderer2D`，使用独立角色 atlas/key。
+直接更新 Scene 的 `SpriteRenderer2D`，使用独立角色 Sprite handle/atlas binding。
 
 ## Particles 与 Trail
 

@@ -221,6 +221,12 @@ SpriteRenderer2D/PerspectiveCamera3D/MeshRenderer3D。`extractRenderSceneFromWor
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material key。
 
+`SpriteRenderer2D` 只复制 weak `AssetHandle` 和渲染语义字段，不持有 `AssetLease`/Cooked payload/GPU
+handle。`ExtractRenderSceneParams::spriteBindingResolver` 是 allocation-free 的 borrowed function-pointer
+view，仅在一次 extraction 调用内有效；visible sprite 必须由它按当前 Store owner/generation、Sprite kind
+和 binding 状态解析为非0 `u32` key。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或0结果
+统一返回 `SceneErrorCode::UnresolvedSprite`；hidden sprite 不解析。Scene 不保存 resolver 或任何 Asset owner。
+
 `ParticleSystem2D` 与 `Trail2D` 是独立 Scene owners，不属于 World/ECS，也不依赖 Asset 或 bgfx。二者
 在 `Create()` 中通过调用方 PMR resource 建立固定容量 storage；成功的 emit/append、update、extract
 不增长 storage。它们直接复用调用方 phase-local `RenderSceneWriter` 提交 backend-neutral Sprite2D。

@@ -1,12 +1,17 @@
+#include <tina/asset/AssetStore.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
+#include <tina/render/RenderErrors.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
 #include <tina/scene/World.hpp>
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
+#include <memory_resource>
 #include <numbers>
+#include <optional>
 
 namespace Tina::Scene {
 namespace {
@@ -40,20 +45,142 @@ namespace {
     };
 }
 
+[[nodiscard]] Core::AssetId fixtureAssetId(u8 seed)
+{
+    Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(seed);
+    return *Core::AssetId::fromBytes(bytes);
+}
+
 [[nodiscard]] SpriteRenderer2D fixtureSprite(
-    u32 key,
+    Asset::AssetHandle sprite,
     float width = 1.0F,
     float height = 1.0F)
 {
     return SpriteRenderer2D{
-        .spriteKey = key,
+        .sprite = sprite,
         .overrides = SpriteOverrideFlags::Size,
         .sizeOverrideMeters = {width, height},
         .visible = true,
     };
 }
 
-TEST(SceneComponentStorageTest, SetsClearsAndQueriesCameraAndSprite)
+struct TestSpriteBindings final {
+    struct Binding final {
+        Asset::AssetHandle sprite{};
+        u32 key = 0;
+    };
+
+    [[nodiscard]] Sprite2DBindingResolver resolver() noexcept
+    {
+        return Sprite2DBindingResolver{.userData = this, .resolve = &resolve};
+    }
+
+    void bind(Asset::AssetHandle sprite, u32 key) noexcept
+    {
+        bindings[bindingCount++] = Binding{.sprite = sprite, .key = key};
+    }
+
+    [[nodiscard]] static u32 resolve(void* userData, Asset::AssetHandle sprite) noexcept
+    {
+        auto& self = *static_cast<TestSpriteBindings*>(userData);
+        ++self.resolveCalls;
+        if (self.store == nullptr || !sprite || self.store->assetKind(sprite) != AssetFormat::AssetKind::Sprite ||
+            self.store->state(sprite) == Asset::AssetLogicalState::Unloaded)
+        {
+            return 0;
+        }
+        for (usize index = 0; index < self.bindingCount; ++index)
+        {
+            if (self.bindings[index].sprite == sprite)
+            {
+                return self.bindings[index].key;
+            }
+        }
+        return 0;
+    }
+
+    Asset::AssetStore* store = nullptr;
+    std::array<Binding, 4> bindings{};
+    usize bindingCount = 0;
+    u32 resolveCalls = 0;
+};
+
+class SceneSpriteAssetTest : public testing::Test {
+  protected:
+    void SetUp() override
+    {
+        auto store = Asset::AssetStore::Create({.capacity = 8, .memoryResource = &memory_});
+        ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
+        store_.emplace(std::move(*store));
+
+        auto first = store_->beginQueued(fixtureAssetId(1), AssetFormat::AssetKind::Sprite);
+        auto second = store_->beginQueued(fixtureAssetId(2), AssetFormat::AssetKind::Sprite);
+        auto third = store_->beginQueued(fixtureAssetId(3), AssetFormat::AssetKind::Sprite);
+        auto wrongKind = store_->beginQueued(fixtureAssetId(4), AssetFormat::AssetKind::Texture2D);
+        ASSERT_TRUE(first.has_value());
+        ASSERT_TRUE(second.has_value());
+        ASSERT_TRUE(third.has_value());
+        ASSERT_TRUE(wrongKind.has_value());
+        firstSprite_ = *first;
+        secondSprite_ = *second;
+        thirdSprite_ = *third;
+        wrongKind_ = *wrongKind;
+    }
+
+    [[nodiscard]] Asset::AssetStore& store() noexcept
+    {
+        return *store_;
+    }
+
+    std::pmr::unsynchronized_pool_resource memory_{};
+    std::optional<Asset::AssetStore> store_{};
+    Asset::AssetHandle firstSprite_{};
+    Asset::AssetHandle secondSprite_{};
+    Asset::AssetHandle thirdSprite_{};
+    Asset::AssetHandle wrongKind_{};
+};
+
+[[nodiscard]] Core::Status extractSingleSprite(
+    Asset::AssetHandle sprite,
+    Sprite2DBindingResolver resolver = {},
+    bool visible = true)
+{
+    World world = makeWorld();
+    auto entity = world.createEntity();
+    if (!entity)
+    {
+        return Core::failure(std::move(entity.error()));
+    }
+    SpriteRenderer2D component = fixtureSprite(sprite);
+    component.visible = visible;
+    if (auto status = world.setSpriteRenderer2D(*entity, component); !status)
+    {
+        return status;
+    }
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    if (!builder)
+    {
+        return Core::failure(std::move(builder.error()));
+    }
+    if (auto status = builder->beginFrame(); !status)
+    {
+        return status;
+    }
+    Render::RenderSceneWriter writer = builder->writer();
+    return extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{.spriteBindingResolver = resolver});
+}
+
+[[nodiscard]] u32 resolveToZero(void*, Asset::AssetHandle) noexcept
+{
+    return 0;
+}
+
+TEST_F(SceneSpriteAssetTest, SetsClearsAndQueriesCameraAndSprite)
 {
     World world = makeWorld();
     const EntityId entity = world.createEntity().value();
@@ -63,9 +190,9 @@ TEST(SceneComponentStorageTest, SetsClearsAndQueriesCameraAndSprite)
     EXPECT_TRUE(std::holds_alternative<Render::FixedWorldHeight2D>(
         world.camera2D(entity)->projection));
 
-    ASSERT_TRUE(world.setSpriteRenderer2D(entity, fixtureSprite(1)));
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, fixtureSprite(firstSprite_)));
     ASSERT_NE(world.spriteRenderer2D(entity), nullptr);
-    EXPECT_EQ(world.spriteRenderer2D(entity)->spriteKey, 1U);
+    EXPECT_EQ(world.spriteRenderer2D(entity)->sprite, firstSprite_);
 
     ASSERT_TRUE(world.clearCamera2D(entity));
     EXPECT_EQ(world.camera2D(entity), nullptr);
@@ -73,7 +200,7 @@ TEST(SceneComponentStorageTest, SetsClearsAndQueriesCameraAndSprite)
     EXPECT_EQ(world.spriteRenderer2D(entity), nullptr);
 }
 
-TEST(SceneComponentStorageTest, RejectsInvalidComponents)
+TEST_F(SceneSpriteAssetTest, RejectsInvalidRenderPropertiesButStoresWeakHandleState)
 {
     World world = makeWorld();
     const EntityId entity = world.createEntity().value();
@@ -84,17 +211,16 @@ TEST(SceneComponentStorageTest, RejectsInvalidComponents)
         world.setCamera2D(entity, badCamera).error().code,
         SceneErrorCode::InvalidComponent);
 
-    SpriteRenderer2D missingKey = fixtureSprite(0);
-    EXPECT_EQ(
-        world.setSpriteRenderer2D(entity, missingKey).error().code,
-        SceneErrorCode::InvalidComponent);
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, fixtureSprite({})));
+    ASSERT_NE(world.spriteRenderer2D(entity), nullptr);
+    EXPECT_FALSE(world.spriteRenderer2D(entity)->sprite);
 
-    SpriteRenderer2D badSize = fixtureSprite(1, -1.0F, 1.0F);
+    SpriteRenderer2D badSize = fixtureSprite(firstSprite_, -1.0F, 1.0F);
     EXPECT_EQ(
         world.setSpriteRenderer2D(entity, badSize).error().code,
         SceneErrorCode::InvalidComponent);
 
-    SpriteRenderer2D badUv = fixtureSprite(1);
+    SpriteRenderer2D badUv = fixtureSprite(firstSprite_);
     badUv.overrides = SpriteOverrideFlags::Size | SpriteOverrideFlags::UvRect;
     badUv.uvRectOverride = {.u0 = 0.8F, .v0 = 0.0F, .u1 = 0.2F, .v1 = 1.0F};
     EXPECT_EQ(
@@ -102,35 +228,39 @@ TEST(SceneComponentStorageTest, RejectsInvalidComponents)
         SceneErrorCode::InvalidComponent);
 }
 
-TEST(SceneComponentStorageTest, DestroyedEntityDropsComponents)
+TEST_F(SceneSpriteAssetTest, DestroyedEntityDropsComponents)
 {
     World world = makeWorld();
     const EntityId entity = world.createEntity().value();
     ASSERT_TRUE(world.setCamera2D(entity, fixedCamera()));
-    ASSERT_TRUE(world.setSpriteRenderer2D(entity, fixtureSprite(7)));
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, fixtureSprite(firstSprite_)));
     ASSERT_TRUE(world.destroyEntity(entity));
 
     EXPECT_EQ(world.camera2D(entity), nullptr);
     EXPECT_EQ(world.spriteRenderer2D(entity), nullptr);
 }
 
-TEST(SceneExtractTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
+TEST_F(SceneSpriteAssetTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
 {
     World world = makeWorld();
     const EntityId cameraEntity = world.createEntity(translated(3.0F, -1.5F)).value();
     ASSERT_TRUE(world.setCamera2D(cameraEntity, fixedCamera(9.0F)));
 
     const EntityId nearSprite = world.createEntity(translated(0.0F, 0.0F)).value();
-    ASSERT_TRUE(world.setSpriteRenderer2D(nearSprite, fixtureSprite(1, 1.5F, 1.5F)));
+    SpriteRenderer2D near = fixtureSprite(firstSprite_, 1.5F, 1.5F);
+    near.color = {.red = 17, .green = 34, .blue = 51, .alpha = 68};
+    near.sortingLayer = -2;
+    near.orderInLayer = 9;
+    ASSERT_TRUE(world.setSpriteRenderer2D(nearSprite, near));
 
     LocalTransform farLocal = translated(100.0F, 100.0F);
     const EntityId farSprite = world.createEntity(farLocal).value();
-    SpriteRenderer2D far = fixtureSprite(2, 1.0F, 1.0F);
+    SpriteRenderer2D far = fixtureSprite(secondSprite_, 1.0F, 1.0F);
     far.orderInLayer = 5;
     ASSERT_TRUE(world.setSpriteRenderer2D(farSprite, far));
 
     const EntityId hidden = world.createEntity(translated(1.0F, 1.0F)).value();
-    SpriteRenderer2D invisible = fixtureSprite(3);
+    SpriteRenderer2D invisible = fixtureSprite(thirdSprite_);
     invisible.visible = false;
     ASSERT_TRUE(world.setSpriteRenderer2D(hidden, invisible));
 
@@ -139,8 +269,12 @@ TEST(SceneExtractTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
     ASSERT_TRUE(builder->beginFrame());
     Render::RenderSceneWriter writer = builder->writer();
 
+    TestSpriteBindings bindings{.store = &store()};
+    bindings.bind(firstSprite_, 1);
+    bindings.bind(secondSprite_, 2);
     const ExtractRenderSceneParams params{
         .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+        .spriteBindingResolver = bindings.resolver(),
     };
     ASSERT_TRUE(extractRenderSceneFromWorld(world, writer, params));
 
@@ -162,10 +296,126 @@ TEST(SceneExtractTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
             EXPECT_FLOAT_EQ(item.centerY, 0.0F);
             EXPECT_FLOAT_EQ(item.widthMeters, 1.5F);
             EXPECT_FLOAT_EQ(item.heightMeters, 1.5F);
+            EXPECT_EQ(item.red, 17U);
+            EXPECT_EQ(item.green, 34U);
+            EXPECT_EQ(item.blue, 51U);
+            EXPECT_EQ(item.alpha, 68U);
+            EXPECT_EQ(item.sortingLayer, -2);
+            EXPECT_EQ(item.orderInLayer, 9);
         }
         EXPECT_NE(item.spriteKey, 3U);
     }
     EXPECT_TRUE(foundNear);
+    EXPECT_EQ(bindings.resolveCalls, 2U);
+}
+
+TEST_F(SceneSpriteAssetTest, MissingResolverRejectsVisibleSprite)
+{
+    const Core::Status status = extractSingleSprite(firstSprite_);
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+}
+
+TEST_F(SceneSpriteAssetTest, InvalidHandleRejectsBeforeCallingResolver)
+{
+    TestSpriteBindings bindings{.store = &store()};
+    const Core::Status status = extractSingleSprite({}, bindings.resolver());
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(bindings.resolveCalls, 0U);
+}
+
+TEST_F(SceneSpriteAssetTest, StaleHandleIsUnresolved)
+{
+    TestSpriteBindings bindings{.store = &store()};
+    bindings.bind(firstSprite_, 7);
+    ASSERT_TRUE(store().unload(firstSprite_));
+
+    const Core::Status status = extractSingleSprite(firstSprite_, bindings.resolver());
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, CrossStoreHandleIsUnresolved)
+{
+    std::pmr::unsynchronized_pool_resource otherMemory;
+    auto otherStore = Asset::AssetStore::Create({.capacity = 1, .memoryResource = &otherMemory});
+    ASSERT_TRUE(otherStore.has_value());
+    auto otherSprite = otherStore->beginQueued(fixtureAssetId(20), AssetFormat::AssetKind::Sprite);
+    ASSERT_TRUE(otherSprite.has_value());
+
+    TestSpriteBindings bindings{.store = &store()};
+    bindings.bind(*otherSprite, 7);
+    const Core::Status status = extractSingleSprite(*otherSprite, bindings.resolver());
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, WrongAssetKindIsUnresolved)
+{
+    TestSpriteBindings bindings{.store = &store()};
+    bindings.bind(wrongKind_, 7);
+    const Core::Status status = extractSingleSprite(wrongKind_, bindings.resolver());
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, UnboundSpriteAssetIsUnresolved)
+{
+    TestSpriteBindings bindings{.store = &store()};
+    bindings.bind(firstSprite_, 7);
+    const Core::Status status = extractSingleSprite(secondSprite_, bindings.resolver());
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, ResolverReturningZeroIsUnresolved)
+{
+    const Core::Status status = extractSingleSprite(
+        firstSprite_,
+        Sprite2DBindingResolver{.resolve = &resolveToZero});
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+}
+
+TEST_F(SceneSpriteAssetTest, HiddenSpriteSkipsBindingResolution)
+{
+    TestSpriteBindings bindings{.store = &store()};
+    const Core::Status status = extractSingleSprite({}, bindings.resolver(), false);
+    ASSERT_TRUE(status) << (status ? "" : status.error().message);
+    EXPECT_EQ(bindings.resolveCalls, 0U);
+}
+
+TEST_F(SceneSpriteAssetTest, WriterFailureIsReturnedAfterSuccessfulResolution)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, fixtureSprite(firstSprite_)));
+
+    auto builder = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{1});
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(writer.addSprite2D(Render::RenderSprite2DInput{
+        .spriteKey = 99,
+        .stableEntityKey = 99,
+        .widthMeters = 1.0F,
+        .heightMeters = 1.0F,
+    }));
+
+    TestSpriteBindings bindings{.store = &store()};
+    bindings.bind(firstSprite_, 7);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{.spriteBindingResolver = bindings.resolver()});
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, Render::RenderErrorCode::RenderSceneCapacityExceeded);
+    EXPECT_EQ(bindings.resolveCalls, 1U);
 }
 
 TEST(SceneExtractTest, RejectsMultipleActiveCameras)
@@ -242,7 +492,7 @@ TEST(SceneExtractTest, SuspendedSurfaceSkipsCameraWithoutFailing)
     EXPECT_FALSE(view->camera2D().has_value());
 }
 
-TEST(SceneExtractTest, AppliesPivotAndZRotationToSpriteCenter)
+TEST_F(SceneSpriteAssetTest, AppliesPivotAndZRotationToSpriteCenter)
 {
     World world = makeWorld();
     const EntityId cameraEntity = world.createEntity().value();
@@ -251,7 +501,7 @@ TEST(SceneExtractTest, AppliesPivotAndZRotationToSpriteCenter)
     LocalTransform local = translated(0.0F, 0.0F);
     local.rotation = rotationAroundZ(std::numbers::pi_v<float> * 0.5F);
     const EntityId spriteEntity = world.createEntity(local).value();
-    SpriteRenderer2D sprite = fixtureSprite(1, 2.0F, 4.0F);
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_, 2.0F, 4.0F);
     sprite.overrides = SpriteOverrideFlags::Size | SpriteOverrideFlags::Pivot;
     sprite.pivotOverride = {0.0F, 0.0F};
     ASSERT_TRUE(world.setSpriteRenderer2D(spriteEntity, sprite));
@@ -260,16 +510,20 @@ TEST(SceneExtractTest, AppliesPivotAndZRotationToSpriteCenter)
     ASSERT_TRUE(builder);
     ASSERT_TRUE(builder->beginFrame());
     Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings bindings{.store = &store()};
+    bindings.bind(firstSprite_, 17);
     ASSERT_TRUE(extractRenderSceneFromWorld(
         world,
         writer,
         ExtractRenderSceneParams{
             .surfaceViewport = {.pixelWidth = 800, .pixelHeight = 600},
+            .spriteBindingResolver = bindings.resolver(),
         }));
 
     auto view = builder->commit();
     ASSERT_TRUE(view);
     ASSERT_EQ(view->sprites2D().size(), 1U);
+    EXPECT_EQ(view->sprites2D()[0].spriteKey, 17U);
     // Pivot bottom-left: local offset to geometric center is (+1, +2). After
     // +90° Z rotation: (x,y) -> (-y, x) => (-2, 1).
     EXPECT_NEAR(view->sprites2D()[0].centerX, -2.0F, 1.0e-4F);
@@ -285,14 +539,14 @@ TEST(SceneExtractTest, AppliesPivotAndZRotationToSpriteCenter)
     EXPECT_FLOAT_EQ(view->sprites2D()[0].v1, 1.0F);
 }
 
-TEST(SceneExtractTest, ForwardsOptionalUvRectOverride)
+TEST_F(SceneSpriteAssetTest, ForwardsOptionalUvRectOverride)
 {
     World world = makeWorld();
     const EntityId cameraEntity = world.createEntity().value();
     ASSERT_TRUE(world.setCamera2D(cameraEntity, fixedCamera(20.0F)));
 
     const EntityId spriteEntity = world.createEntity(translated(0.0F, 0.0F)).value();
-    SpriteRenderer2D sprite = fixtureSprite(1, 1.0F, 1.0F);
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_, 1.0F, 1.0F);
     sprite.overrides = SpriteOverrideFlags::Size | SpriteOverrideFlags::UvRect;
     sprite.uvRectOverride = {.u0 = 0.5F, .v0 = 0.0F, .u1 = 1.0F, .v1 = 1.0F};
     ASSERT_TRUE(world.setSpriteRenderer2D(spriteEntity, sprite));
@@ -301,16 +555,20 @@ TEST(SceneExtractTest, ForwardsOptionalUvRectOverride)
     ASSERT_TRUE(builder);
     ASSERT_TRUE(builder->beginFrame());
     Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings bindings{.store = &store()};
+    bindings.bind(firstSprite_, 23);
     ASSERT_TRUE(extractRenderSceneFromWorld(
         world,
         writer,
         ExtractRenderSceneParams{
             .surfaceViewport = {.pixelWidth = 800, .pixelHeight = 600},
+            .spriteBindingResolver = bindings.resolver(),
         }));
 
     auto view = builder->commit();
     ASSERT_TRUE(view);
     ASSERT_EQ(view->sprites2D().size(), 1U);
+    EXPECT_EQ(view->sprites2D()[0].spriteKey, 23U);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].u0, 0.5F);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].v0, 0.0F);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].u1, 1.0F);

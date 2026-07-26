@@ -19,10 +19,11 @@
 
 - State push/pop、菜单或暂停流程；
 - Platform/Input、TileMap gameplay、Physics stepping 或 Audio；
-- AssetSystem IO/Lease 生命周期；
+- AssetSystem IO/Lease 生命周期或 binding registry ownership；
 - bgfx handle、shader、native window 或 backend command。
 
-依赖方向保持为 Scene → Core/Render/AssetFormat。第三方 ECS 或 renderer 类型不得进入公开头。
+依赖方向保持为 Scene → Core/Render/AssetFormat/AssetTypes；`AssetTypes` 只公开轻量 `AssetHandle`，不会
+把完整 AssetSystem、Task 或可选 Physics2D 传递给 Scene。第三方 ECS 或 renderer 类型不得进入公开头。
 
 ## World 所有权
 
@@ -55,7 +56,7 @@
 | 组件 | 用途 | 关键约束 |
 | --- | --- | --- |
 | `Camera2D` | FixedWorldHeight/PixelPerfect 投影、viewport、pixel snap | 每帧最多一个 active 2D camera；surface 0x0 时跳过 |
-| `SpriteRenderer2D` | sprite key、尺寸/pivot/UV override、颜色与排序 | key 非0；UV finite 且严格递增 |
+| `SpriteRenderer2D` | weak Sprite `AssetHandle`、尺寸/pivot/UV override、颜色与排序 | World 只校验结构；visible extract 必须解析为非0 key；UV finite 且严格递增 |
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
 | `MeshRenderer3D` | mesh/material key、bounds、base color、可见性 | key 由产品 AssetId resolver 或 fixture 提供 |
 
@@ -92,14 +93,18 @@ binding 和 bgfx submission 仍由 RenderDevice/backend 负责。
 ```text
 updateWorldTransforms
   -> resolve active Camera2D and/or PerspectiveCamera3D
+  -> resolve visible SpriteRenderer2D AssetHandle to current binding key
   -> emit visible SpriteRenderer2D items
   -> emit visible MeshRenderer3D items
   -> caller commits RenderSceneBuilder
 ```
 
 2D sprite 使用 world position/scale、Z rotation、pivot/size/UV override，并由 RenderScene 执行排序、
-culling、batch 规划与 pixel snap。3D mesh 使用 world pose/scale、local bounds 和 material color。
-Scene 只写 backend-neutral key 和 POD；真实 Texture2D/StaticMesh 由产品层上传到 RenderDevice 后绑定。
+culling、batch 规划与 pixel snap。`ExtractRenderSceneParams::spriteBindingResolver` 是只在本次调用有效的
+borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/generation、Sprite kind 与 binding，
+并返回非0 backend-neutral key。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或返回0统一
+产生 `UnresolvedSprite`；hidden sprite 不调用 resolver。3D mesh 仍使用 world pose/scale、local bounds 和
+material color fixture/product key。Scene 不保存 resolver、AssetLease、Cooked payload 或 GPU handle。
 
 writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用内有效，不能保存到下一帧。
 
@@ -132,8 +137,8 @@ Game State fixed/frame update
   -> Render backend consumes the submitted view
 ```
 
-TileMap instance、CharacterController2D、PhysicsWorld2D 与 AssetLease 由产品层持有；Scene core 不反向依赖
-这些系统。
+TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、binding mapping 与 AssetLease 由
+产品层持有；它们必须覆盖 extraction 的借用期。Scene core 只依赖 AssetTypes，不反向取得这些 owner。
 
 ## 验证
 

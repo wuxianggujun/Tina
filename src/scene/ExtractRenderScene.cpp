@@ -135,7 +135,18 @@ Core::Status extractRenderSceneFromWorld(
         if (!isValid(*sprite)) {
             return Core::failure(
                 SceneErrorCode::UnresolvedSprite,
-                "Scene SpriteRenderer2D is missing spriteKey or has invalid size");
+                "Scene SpriteRenderer2D has invalid render properties");
+        }
+        if (!sprite->sprite || !params.spriteBindingResolver) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedSprite,
+                "Scene SpriteRenderer2D has no resolvable sprite asset");
+        }
+        const u32 spriteKey = params.spriteBindingResolver(sprite->sprite);
+        if (spriteKey == 0U) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedSprite,
+                "Scene SpriteRenderer2D asset has no render binding");
         }
         const WorldTransform* transform = world.worldTransform(entity);
         if (transform == nullptr || !isValid(*transform)) {
@@ -183,7 +194,7 @@ Core::Status extractRenderSceneFromWorld(
         }
 
         const Render::RenderSprite2DInput input{
-            .spriteKey = sprite->spriteKey,
+            .spriteKey = spriteKey,
             .stableEntityKey = stableEntityKey(entity),
             .centerX = centerX,
             .centerY = centerY,

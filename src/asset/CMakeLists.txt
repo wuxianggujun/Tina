@@ -1,5 +1,6 @@
 set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetErrors.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetHandle.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetStore.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetSystem.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuUpload.hpp
@@ -61,6 +62,15 @@ set(TINA_ASSET_SOURCES
     CookedAssetFile.cpp
 )
 
+add_library(tina_asset_types INTERFACE)
+add_library(Tina::AssetTypes ALIAS tina_asset_types)
+target_sources(tina_asset_types INTERFACE
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetHandle.hpp
+)
+target_compile_features(tina_asset_types INTERFACE cxx_std_23)
+target_include_directories(tina_asset_types INTERFACE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(tina_asset_types INTERFACE Tina::Core)
+
 if (TINA_BUILD_PHYSICS2D)
     list(APPEND TINA_ASSET_PUBLIC_HEADERS
         ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapPhysicsSync.hpp)
@@ -80,7 +90,7 @@ target_include_directories(tina_asset PRIVATE
     ${PROJECT_SOURCE_DIR}/thirdparty/stb
 )
 target_link_libraries(tina_asset
-    PUBLIC Tina::Core Tina::AssetFormat Tina::Task Tina::Render
+    PUBLIC Tina::Core Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render
     PRIVATE Tina::ProjectOptions
 )
 if (TINA_BUILD_PHYSICS2D)

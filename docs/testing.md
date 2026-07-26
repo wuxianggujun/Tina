@@ -99,6 +99,26 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 仅观察进程终止不够：death test 同时匹配 `ShutdownDeadlineExceeded` Diagnostics 输出，并以析构哨兵证明
 超时后没有 Task owner teardown。本轮 shutdown deadline 聚焦门禁和完整 `tina_tests` 均已直接执行通过。
 
+## Scene Sprite AssetHandle A1
+
+`ASSET-HANDLE-SCENE-2D-A1` 的自动门禁归属 `tina_scene_tests` 与 2D product gate：
+
+- `AssetHandle.hpp`、`SpriteRenderer2D.hpp`、`ExtractRenderScene.hpp` header isolation 编译；
+- World 可保存 default weak handle，但 visible extract 必须返回 `UnresolvedSprite`；
+- stale、cross-store、wrong-kind、unbound、缺 resolver 和 resolver 返回0都 fail closed；
+- hidden unresolved sprite 不调用 resolver；成功解析保持 UV/pivot/transform/color/sort，writer failure 原样传播；
+- `SpriteAnimator2D` 的空 handle frame 仍为 `InvalidAnimation`；
+- `tina_sample_2d` 的 World crate/character 组件来自 Catalog Sprite handle，resolver 每次验证 Store/kind/
+  binding 后映射既有 key。该证据不代表 engine-owned binding registry 或 FX/TileMap/3D Handle 迁移完成。
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_scene_tests tina_sample_2d -- /m:1 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
+  --frames=300 --frame-delay-ms=0
+```
+
 ## 产品样例的证据边界
 
 | Sample | 证明 | 不证明 |
