@@ -123,6 +123,19 @@ struct RadioButtonState final {
     bool selected = false;
 };
 
+struct ScrollViewState final {
+    UIScrollViewStyle style{};
+    UIScrollViewPaint paint{};
+    UIScrollOffset requestedOffset{};
+    UIScrollViewMetrics committedMetrics{};
+    UILogicalRect committedViewportRect{};
+};
+
+struct ScrollViewLayoutScratch final {
+    UIScrollViewMetrics metrics{};
+    UILogicalRect viewportRect{};
+};
+
 inline constexpr u8 ThemeBindingBoxPaint = 1U << 0U;
 inline constexpr u8 ThemeBindingTextStyle = 1U << 1U;
 inline constexpr u8 ThemeBindingButtonPaint = 1U << 2U;
@@ -130,6 +143,7 @@ inline constexpr u8 ThemeBindingCheckboxPaint = 1U << 3U;
 inline constexpr u8 ThemeBindingSliderPaint = 1U << 4U;
 inline constexpr u8 ThemeBindingProgressBarPaint = 1U << 5U;
 inline constexpr u8 ThemeBindingRadioButtonPaint = 1U << 6U;
+inline constexpr u8 ThemeBindingScrollViewPaint = 1U << 7U;
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -256,6 +270,9 @@ struct LayoutScratchState final {
     UILogicalRect localRect{};
     UILogicalRect worldRect{};
     UILogicalRect effectiveClip{};
+    // Clip inherited from the nearest clipping container. Ordinary containers
+    // pass it through; ScrollView replaces it with its content viewport.
+    UILogicalRect descendantClip{};
     UIVisibility effectiveVisibility = UIVisibility::Visible;
     bool parentContentWidthDefinite = false;
     bool parentContentHeightDefinite = false;
@@ -353,6 +370,55 @@ struct ResolvedLength final {
         paint.shadowOffsetY = 0.0F;
     }
     return paint;
+}
+
+[[nodiscard]] bool isValidScrollAxes(UIScrollAxes axes) noexcept
+{
+    return axes == UIScrollAxes::None || axes == UIScrollAxes::Horizontal || axes == UIScrollAxes::Vertical ||
+           axes == UIScrollAxes::Both;
+}
+
+[[nodiscard]] bool isValidScrollBarVisibility(UIScrollBarVisibility visibility) noexcept
+{
+    return visibility == UIScrollBarVisibility::Auto || visibility == UIScrollBarVisibility::Always ||
+           visibility == UIScrollBarVisibility::Hidden;
+}
+
+[[nodiscard]] Core::Result<UIScrollViewStyle> normalizeScrollViewStyle(UIScrollViewStyle style)
+{
+    if (!isValidScrollAxes(style.axes) || !isValidScrollBarVisibility(style.scrollBarVisibility) ||
+        !(std::isfinite(style.wheelStep) && style.wheelStep > 0.0F))
+    {
+        return fail(UIErrorCode::InvalidControlValue,
+                    "UI ScrollView axes/visibility must be valid and wheel step must be finite and positive");
+    }
+    style.wheelStep = normalizeFloat(style.wheelStep);
+    return style;
+}
+
+[[nodiscard]] Core::Result<UIScrollViewPaint> normalizeScrollViewPaint(UIScrollViewPaint paint)
+{
+    if (!(std::isfinite(paint.thickness) && paint.thickness > 0.0F) ||
+        !(std::isfinite(paint.minThumbExtent) && paint.minThumbExtent > 0.0F))
+    {
+        return fail(UIErrorCode::InvalidControlValue,
+                    "UI ScrollView scrollbar thickness and minimum thumb extent must be finite and positive");
+    }
+    paint.thickness = normalizeFloat(paint.thickness);
+    paint.minThumbExtent = normalizeFloat(paint.minThumbExtent);
+    return paint;
+}
+
+[[nodiscard]] Core::Result<UIScrollOffset> normalizeScrollOffset(UIScrollOffset offset)
+{
+    if (!std::isfinite(offset.x) || !std::isfinite(offset.y) || offset.x < 0.0F || offset.y < 0.0F)
+    {
+        return fail(UIErrorCode::InvalidControlValue,
+                    "UI ScrollView offset must contain finite non-negative coordinates");
+    }
+    offset.x = normalizeFloat(offset.x);
+    offset.y = normalizeFloat(offset.y);
+    return offset;
 }
 
 [[nodiscard]] usize countBoxChromePaintEntries(const UIBoxPaint& paint, const UILogicalRect& worldRect,
@@ -861,6 +927,79 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output, UINo
            point.x < rect.right() && point.y < rect.bottom();
 }
 
+struct ScrollBarGeometry final {
+    UILogicalRect track{};
+    UILogicalRect thumb{};
+    bool visible = false;
+};
+
+struct ScrollBarPointerHit final {
+    UINodeId scrollView{};
+    UIScrollAxes axis = UIScrollAxes::None;
+    ScrollBarGeometry geometry{};
+    bool thumb = false;
+
+    [[nodiscard]] bool hasValue() const noexcept
+    {
+        return scrollView.hasValue() && axis != UIScrollAxes::None;
+    }
+};
+
+[[nodiscard]] ScrollBarGeometry makeScrollBarGeometry(const UIScrollViewMetrics& metrics,
+                                                      UILogicalRect viewportRect,
+                                                      const UIScrollViewPaint& paint,
+                                                      UIScrollAxes axis) noexcept
+{
+    const bool horizontal = axis == UIScrollAxes::Horizontal;
+    const bool visible = horizontal ? metrics.horizontalScrollBarVisible : metrics.verticalScrollBarVisible;
+    if (!visible)
+    {
+        return {};
+    }
+
+    const float viewportExtent = horizontal ? metrics.viewportSize.width : metrics.viewportSize.height;
+    const float contentExtent = horizontal ? metrics.contentSize.width : metrics.contentSize.height;
+    const float offset = horizontal ? metrics.offset.x : metrics.offset.y;
+    const UILogicalRect track = horizontal
+                                    ? UILogicalRect{
+                                          .x = viewportRect.x,
+                                          .y = normalizeFloat(viewportRect.bottom()),
+                                          .width = viewportRect.width,
+                                          .height = paint.thickness,
+                                      }
+                                    : UILogicalRect{
+                                          .x = normalizeFloat(viewportRect.right()),
+                                          .y = viewportRect.y,
+                                          .width = paint.thickness,
+                                          .height = viewportRect.height,
+                                      };
+    const float trackExtent = horizontal ? track.width : track.height;
+    if (!(trackExtent > 0.0F))
+    {
+        return ScrollBarGeometry{.track = track, .visible = true};
+    }
+    const float proportionalExtent = contentExtent > 0.0F ? trackExtent * viewportExtent / contentExtent : trackExtent;
+    const float thumbExtent = normalizeFloat((std::clamp)(proportionalExtent, (std::min)(paint.minThumbExtent, trackExtent),
+                                                          trackExtent));
+    const float maxOffset = (std::max)(0.0F, contentExtent - viewportExtent);
+    const float travel = (std::max)(0.0F, trackExtent - thumbExtent);
+    const float thumbStart = maxOffset > 0.0F ? travel * ((std::clamp)(offset, 0.0F, maxOffset) / maxOffset) : 0.0F;
+    const UILogicalRect thumb = horizontal
+                                    ? UILogicalRect{
+                                          .x = normalizeFloat(track.x + thumbStart),
+                                          .y = track.y,
+                                          .width = thumbExtent,
+                                          .height = track.height,
+                                      }
+                                    : UILogicalRect{
+                                          .x = track.x,
+                                          .y = normalizeFloat(track.y + thumbStart),
+                                          .width = track.width,
+                                          .height = thumbExtent,
+                                      };
+    return ScrollBarGeometry{.track = track, .thumb = thumb, .visible = true};
+}
+
 } // namespace
 
 struct UIContext::Impl final {
@@ -897,6 +1036,8 @@ struct UIContext::Impl final {
     std::pmr::vector<TextEditState> textEditStatesByNodeIndex;
     std::pmr::vector<ProgressBarState> progressBarStatesByNodeIndex;
     std::pmr::vector<RadioButtonState> radioButtonStatesByNodeIndex;
+    std::pmr::vector<ScrollViewState> scrollViewStatesByNodeIndex;
+    std::pmr::vector<ScrollViewLayoutScratch> scrollViewLayoutScratchByNodeIndex;
     std::pmr::vector<char> textBytes;
     std::pmr::vector<TextByteAllocation> freeTextAllocations;
     usize textByteUsed = 0;
@@ -1036,6 +1177,10 @@ struct UIContext::Impl final {
         defaultActionGamepadPressed{};
     // M11-C1: exclusive Primary drag capture for Slider (clears Button arm).
     UINodeId armedSlider{};
+    UINodeId armedScrollView{};
+    UIScrollAxes armedScrollAxis = UIScrollAxes::None;
+    float scrollDragGrabOffset = 0.0F;
+    bool scrollThumbDragActive = false;
     UINodeId armedTextEdit{};
     UINodeId capturedPointerNode{};
     UIPointerInputEvent lastPointerInput{};
@@ -1065,7 +1210,8 @@ struct UIContext::Impl final {
           themeBindingsByNodeIndex(&resource), themeDirtyScratchByNodeIndex(&resource),
           themeTextMetricsScratchByNodeIndex(&resource), localSolidFillCacheByIndex(&resource),
           localTextColorCacheByIndex(&resource), textStatesByIndex(&resource), textEditStatesByNodeIndex(&resource),
-          progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource), textBytes(&resource),
+          progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
+          scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource), textBytes(&resource),
           freeTextAllocations(&resource), dirtyByIndex(&resource), dirtyQueuedByIndex(&resource),
           dirtyReservedByIndex(&resource), dirtyQueue(&resource), routeDirtyReservationScratch(&resource),
           routeDirtyReservationCandidateByIndex(&resource), layoutScratchByIndex(&resource),
@@ -1139,6 +1285,8 @@ struct UIContext::Impl final {
         impl->textEditStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->progressBarStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->radioButtonStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->scrollViewStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->scrollViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->textBytes.resize(normalized.textByteCapacity, '\0');
         impl->freeTextAllocations.reserve(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
@@ -1658,14 +1806,15 @@ struct UIContext::Impl final {
         return direction == UIFlexDirection::Row ? style.size.height.isAuto() : style.size.width.isAuto();
     }
 
-    void assignLayoutRect(u32 index, UILogicalRect worldRect, UILogicalRect parentWorldRect, UILogicalRect viewportRect,
-                          u32 ordinal) noexcept
+    void assignLayoutRect(u32 index, UILogicalRect worldRect, UILogicalRect parentWorldRect,
+                          UILogicalRect descendantClip, u32 ordinal) noexcept
     {
         LayoutScratchState& scratch = layoutScratchByIndex[index];
         const UILayoutStyle& style = layoutStylesByIndex[index];
         const UILogicalRect previousWorldRect = scratch.worldRect;
         const UILogicalRect previousLocalRect = scratch.localRect;
         const UILogicalRect previousEffectiveClip = scratch.effectiveClip;
+        const UILogicalRect previousDescendantClip = scratch.descendantClip;
         const UIVisibility previousVisibility = scratch.effectiveVisibility;
         if (scratch.effectiveVisibility == UIVisibility::Collapsed)
         {
@@ -1679,9 +1828,10 @@ struct UIContext::Impl final {
             .width = normalizeFloat(worldRect.width),
             .height = normalizeFloat(worldRect.height),
         };
+        scratch.descendantClip = descendantClip;
         scratch.effectiveClip = scratch.effectiveVisibility == UIVisibility::Collapsed
                                     ? UILogicalRect{}
-                                    : intersectRects(viewportRect, worldRect);
+                                    : intersectRects(descendantClip, worldRect);
         scratch.contentWidthDefinite = true;
         scratch.contentHeightDefinite = true;
         scratch.contentWidth = normalizeFloat((std::max)(0.0F, worldRect.width - horizontalMargin(style.padding)));
@@ -1691,7 +1841,8 @@ struct UIContext::Impl final {
 
         if (layoutReuseInProgress &&
             (previousWorldRect != scratch.worldRect || previousLocalRect != scratch.localRect ||
-             previousEffectiveClip != scratch.effectiveClip || previousVisibility != scratch.effectiveVisibility))
+             previousEffectiveClip != scratch.effectiveClip || previousDescendantClip != scratch.descendantClip ||
+             previousVisibility != scratch.effectiveVisibility))
         {
             ensureLayoutSubtreeWork(index, LayoutWorkArrange);
         }
@@ -1730,7 +1881,7 @@ struct UIContext::Impl final {
     }
 
     void arrangeAbsoluteChild(u32 childIndex, UILogicalRect parentContentRect, UILogicalRect parentWorldRect,
-                              UILogicalRect viewportRect, LayoutPassStatistics& statistics) noexcept
+                              UILogicalRect descendantClip, LayoutPassStatistics& statistics) noexcept
     {
         const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
         LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
@@ -1767,10 +1918,10 @@ struct UIContext::Impl final {
                              .width = normalizeFloat((std::max)(0.0F, width)),
                              .height = normalizeFloat((std::max)(0.0F, height)),
                          },
-                         parentWorldRect, viewportRect, 0);
+                         parentWorldRect, descendantClip, 0);
     }
 
-    void arrangeChildren(u32 parentIndex, UILogicalRect viewportRect, LayoutPassStatistics& statistics) noexcept
+    void arrangeChildren(u32 parentIndex, UILogicalRect, LayoutPassStatistics& statistics) noexcept
     {
         const NodeRecord* parentRecord = recordByIndex(parentIndex);
         if (parentRecord == nullptr)
@@ -1780,15 +1931,22 @@ struct UIContext::Impl final {
         const UILayoutStyle& parentStyle = layoutStylesByIndex[parentIndex];
         const LayoutScratchState& parentScratch = layoutScratchByIndex[parentIndex];
         const UILogicalRect parentWorldRect = parentScratch.worldRect;
-        const UILogicalRect parentContentRect{
+        const UILogicalRect unscrolledContentRect{
             .x = normalizeFloat(parentWorldRect.x + parentStyle.padding.left),
             .y = normalizeFloat(parentWorldRect.y + parentStyle.padding.top),
             .width = normalizeFloat((std::max)(0.0F, parentWorldRect.width - horizontalMargin(parentStyle.padding))),
             .height = normalizeFloat((std::max)(0.0F, parentWorldRect.height - verticalMargin(parentStyle.padding))),
         };
+        UILogicalRect layoutContentRect = unscrolledContentRect;
+        UILogicalRect descendantClip = parentScratch.descendantClip;
 
         if (parentScratch.effectiveVisibility == UIVisibility::Collapsed)
         {
+            if (parentRecord->kind == UIWidgetKind::ScrollView &&
+                parentIndex < scrollViewLayoutScratchByNodeIndex.size())
+            {
+                scrollViewLayoutScratchByNodeIndex[parentIndex] = {};
+            }
             u32 collapsedChild = parentRecord->firstChildIndex;
             while (collapsedChild != InvalidNodeIndex)
             {
@@ -1797,19 +1955,18 @@ struct UIContext::Impl final {
                 {
                     break;
                 }
-                assignLayoutRect(collapsedChild, parentContentRect, parentWorldRect, viewportRect, 0);
+                assignLayoutRect(collapsedChild, unscrolledContentRect, parentWorldRect, descendantClip, 0);
                 collapsedChild = childRecord->nextSiblingIndex;
             }
             return;
         }
 
         const bool row = parentStyle.flex.direction == UIFlexDirection::Row;
-        const float contentMain = row ? parentContentRect.width : parentContentRect.height;
-        const float contentCross = row ? parentContentRect.height : parentContentRect.width;
         const float configuredGap = row ? parentStyle.flex.gap.column : parentStyle.flex.gap.row;
 
         usize flowChildCount = 0;
         float totalMain = 0.0F;
+        float totalCross = 0.0F;
         double totalGrow = 0.0;
         u32 childIndex = parentRecord->firstChildIndex;
         while (childIndex != InvalidNodeIndex)
@@ -1824,18 +1981,98 @@ struct UIContext::Impl final {
             if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
                 childStyle.position == UILayoutPositionMode::InFlow)
             {
-                refreshMeasuredSizeForParentContent(childIndex, parentContentRect, statistics);
+                refreshMeasuredSizeForParentContent(childIndex, unscrolledContentRect, statistics);
                 if (flowChildCount > 0)
                 {
                     totalMain += configuredGap;
                 }
-                totalMain += row ? childScratch.measuredSize.width + horizontalMargin(childStyle.margin)
-                                 : childScratch.measuredSize.height + verticalMargin(childStyle.margin);
+                const float childOuterWidth = childScratch.measuredSize.width + horizontalMargin(childStyle.margin);
+                const float childOuterHeight = childScratch.measuredSize.height + verticalMargin(childStyle.margin);
+                totalMain += row ? childOuterWidth : childOuterHeight;
+                totalCross = (std::max)(totalCross, row ? childOuterHeight : childOuterWidth);
                 totalGrow += static_cast<double>(childStyle.flex.grow);
                 ++flowChildCount;
             }
             childIndex = childRecord->nextSiblingIndex;
         }
+
+        if (parentRecord->kind == UIWidgetKind::ScrollView && parentIndex < scrollViewStatesByNodeIndex.size() &&
+            parentIndex < scrollViewLayoutScratchByNodeIndex.size())
+        {
+            ScrollViewState& state = scrollViewStatesByNodeIndex[parentIndex];
+            const bool horizontalEnabled = hasScrollAxis(state.style.axes, UIScrollAxes::Horizontal);
+            const bool verticalEnabled = hasScrollAxis(state.style.axes, UIScrollAxes::Vertical);
+            const float rawContentWidth = row ? totalMain : totalCross;
+            const float rawContentHeight = row ? totalCross : totalMain;
+            const bool barsHidden = state.style.scrollBarVisibility == UIScrollBarVisibility::Hidden;
+            bool horizontalBar = !barsHidden && horizontalEnabled &&
+                                 state.style.scrollBarVisibility == UIScrollBarVisibility::Always;
+            bool verticalBar = !barsHidden && verticalEnabled &&
+                               state.style.scrollBarVisibility == UIScrollBarVisibility::Always;
+
+            // Auto bars can cause one another by reducing the opposite axis.
+            // Two updates reach the fixed point for a rectangular viewport.
+            for (usize passIndex = 0; passIndex < 2; ++passIndex)
+            {
+                const float viewportWidth =
+                    (std::max)(0.0F, unscrolledContentRect.width - (verticalBar ? state.paint.thickness : 0.0F));
+                const float viewportHeight =
+                    (std::max)(0.0F, unscrolledContentRect.height - (horizontalBar ? state.paint.thickness : 0.0F));
+                if (!barsHidden && state.style.scrollBarVisibility == UIScrollBarVisibility::Auto)
+                {
+                    horizontalBar = horizontalEnabled && rawContentWidth > viewportWidth;
+                    verticalBar = verticalEnabled && rawContentHeight > viewportHeight;
+                }
+            }
+
+            const UILogicalRect scrollViewportRect{
+                .x = unscrolledContentRect.x,
+                .y = unscrolledContentRect.y,
+                .width = normalizeFloat((std::max)(
+                    0.0F, unscrolledContentRect.width - (verticalBar ? state.paint.thickness : 0.0F))),
+                .height = normalizeFloat((std::max)(
+                    0.0F, unscrolledContentRect.height - (horizontalBar ? state.paint.thickness : 0.0F))),
+            };
+            const UILogicalSize contentSize{
+                .width = normalizeFloat(horizontalEnabled
+                                            ? (std::max)(rawContentWidth, scrollViewportRect.width)
+                                            : scrollViewportRect.width),
+                .height = normalizeFloat(verticalEnabled
+                                             ? (std::max)(rawContentHeight, scrollViewportRect.height)
+                                             : scrollViewportRect.height),
+            };
+            const UIScrollOffset clampedOffset{
+                .x = horizontalEnabled
+                         ? normalizeFloat((std::clamp)(state.requestedOffset.x, 0.0F,
+                                                       (std::max)(0.0F, contentSize.width - scrollViewportRect.width)))
+                         : 0.0F,
+                .y = verticalEnabled
+                         ? normalizeFloat((std::clamp)(state.requestedOffset.y, 0.0F,
+                                                       (std::max)(0.0F, contentSize.height - scrollViewportRect.height)))
+                         : 0.0F,
+            };
+            scrollViewLayoutScratchByNodeIndex[parentIndex] = ScrollViewLayoutScratch{
+                .metrics =
+                    UIScrollViewMetrics{
+                        .offset = clampedOffset,
+                        .viewportSize = scrollViewportRect.size(),
+                        .contentSize = contentSize,
+                        .horizontalScrollBarVisible = horizontalBar,
+                        .verticalScrollBarVisible = verticalBar,
+                    },
+                .viewportRect = scrollViewportRect,
+            };
+            layoutContentRect = UILogicalRect{
+                .x = normalizeFloat(scrollViewportRect.x - clampedOffset.x),
+                .y = normalizeFloat(scrollViewportRect.y - clampedOffset.y),
+                .width = contentSize.width,
+                .height = contentSize.height,
+            };
+            descendantClip = intersectRects(parentScratch.descendantClip, scrollViewportRect);
+        }
+
+        const float contentMain = row ? layoutContentRect.width : layoutContentRect.height;
+        const float contentCross = row ? layoutContentRect.height : layoutContentRect.width;
 
         const float freeSpace = contentMain - totalMain;
         const float growSpace = totalGrow > 0.0 ? (std::max)(0.0F, freeSpace) : 0.0F;
@@ -1877,12 +2114,12 @@ struct UIContext::Impl final {
 
             if (childScratch.effectiveVisibility == UIVisibility::Collapsed)
             {
-                assignLayoutRect(currentChild, parentContentRect, parentWorldRect, viewportRect, 0);
+                assignLayoutRect(currentChild, layoutContentRect, parentWorldRect, descendantClip, 0);
                 continue;
             }
             if (childStyle.position == UILayoutPositionMode::AbsoluteOverlay)
             {
-                arrangeAbsoluteChild(currentChild, parentContentRect, parentWorldRect, viewportRect, statistics);
+                arrangeAbsoluteChild(currentChild, layoutContentRect, parentWorldRect, descendantClip, statistics);
                 continue;
             }
 
@@ -1942,8 +2179,10 @@ struct UIContext::Impl final {
                 }
             }
 
-            const float x = row ? parentContentRect.x + mainOffset + mainBefore : parentContentRect.x + crossOffset;
-            const float y = row ? parentContentRect.y + crossOffset : parentContentRect.y + mainOffset + mainBefore;
+            const float x =
+                row ? layoutContentRect.x + mainOffset + mainBefore : layoutContentRect.x + crossOffset;
+            const float y =
+                row ? layoutContentRect.y + crossOffset : layoutContentRect.y + mainOffset + mainBefore;
             assignLayoutRect(currentChild,
                              UILogicalRect{
                                  .x = normalizeFloat(x),
@@ -1951,7 +2190,7 @@ struct UIContext::Impl final {
                                  .width = normalizeFloat((std::max)(0.0F, width)),
                                  .height = normalizeFloat((std::max)(0.0F, height)),
                              },
-                             parentWorldRect, viewportRect, 0);
+                             parentWorldRect, descendantClip, 0);
 
             mainOffset += childMainSize + mainBefore + mainAfter + gap;
         }
@@ -2396,6 +2635,36 @@ struct UIContext::Impl final {
                 {
                     ++paintEntryCount;
                 }
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::ScrollView &&
+                nodeIndex < scrollViewStatesByNodeIndex.size() &&
+                nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
+            {
+                const ScrollViewState& scroll = scrollViewStatesByNodeIndex[nodeIndex];
+                const ScrollViewLayoutScratch& scrollLayout = scrollViewLayoutScratchByNodeIndex[nodeIndex];
+                const auto countBar = [&](UIScrollAxes axis) noexcept {
+                    const ScrollBarGeometry geometry =
+                        makeScrollBarGeometry(scrollLayout.metrics, scrollLayout.viewportRect, scroll.paint, axis);
+                    if (!geometry.visible)
+                    {
+                        return;
+                    }
+                    if (geometry.track.width > 0.0F && geometry.track.height > 0.0F && scroll.paint.trackColor.alpha != 0)
+                    {
+                        ++paintEntryCount;
+                    }
+                    const UIStraightSrgba8Color thumbColor =
+                        scrollThumbDragActive && armedScrollView == layoutEntry.node && armedScrollAxis == axis &&
+                                scroll.paint.draggingThumbColor.alpha != 0
+                            ? scroll.paint.draggingThumbColor
+                            : scroll.paint.thumbColor;
+                    if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && thumbColor.alpha != 0)
+                    {
+                        ++paintEntryCount;
+                    }
+                };
+                countBar(UIScrollAxes::Horizontal);
+                countBar(UIScrollAxes::Vertical);
             }
             if (record != nullptr && record->kind == UIWidgetKind::ProgressBar &&
                 nodeIndex < progressBarStatesByNodeIndex.size())
@@ -2939,6 +3208,52 @@ struct UIContext::Impl final {
                     ++nextPaintOrdinal;
                 }
             }
+            if (record != nullptr && record->kind == UIWidgetKind::ScrollView &&
+                nodeIndex < scrollViewStatesByNodeIndex.size() &&
+                nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
+            {
+                const ScrollViewState& scroll = scrollViewStatesByNodeIndex[nodeIndex];
+                const ScrollViewLayoutScratch& scrollLayout = scrollViewLayoutScratchByNodeIndex[nodeIndex];
+                const auto appendBar = [&](UIScrollAxes axis) noexcept {
+                    const ScrollBarGeometry geometry =
+                        makeScrollBarGeometry(scrollLayout.metrics, scrollLayout.viewportRect, scroll.paint, axis);
+                    if (!geometry.visible)
+                    {
+                        return;
+                    }
+                    const UIPremultipliedRgba8Color track =
+                        widgetPaintColor(layoutEntry.node, premultiply(scroll.paint.trackColor));
+                    if (geometry.track.width > 0.0F && geometry.track.height > 0.0F && !track.isTransparent())
+                    {
+                        output.push_back(UICommittedPaintEntry{
+                            .node = layoutEntry.node,
+                            .worldRect = geometry.track,
+                            .effectiveClip = layoutEntry.effectiveClip,
+                            .paintOrdinal = nextPaintOrdinal++,
+                            .solidFill = track,
+                        });
+                    }
+                    const UIStraightSrgba8Color thumbSource =
+                        scrollThumbDragActive && armedScrollView == layoutEntry.node && armedScrollAxis == axis &&
+                                scroll.paint.draggingThumbColor.alpha != 0
+                            ? scroll.paint.draggingThumbColor
+                            : scroll.paint.thumbColor;
+                    const UIPremultipliedRgba8Color thumbColor =
+                        widgetPaintColor(layoutEntry.node, premultiply(thumbSource));
+                    if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && !thumbColor.isTransparent())
+                    {
+                        output.push_back(UICommittedPaintEntry{
+                            .node = layoutEntry.node,
+                            .worldRect = geometry.thumb,
+                            .effectiveClip = layoutEntry.effectiveClip,
+                            .paintOrdinal = nextPaintOrdinal++,
+                            .solidFill = thumbColor,
+                        });
+                    }
+                };
+                appendBar(UIScrollAxes::Horizontal);
+                appendBar(UIScrollAxes::Vertical);
+            }
             if (record != nullptr && record->kind == UIWidgetKind::ProgressBar &&
                 nodeIndex < progressBarStatesByNodeIndex.size())
             {
@@ -3115,6 +3430,22 @@ struct UIContext::Impl final {
                 entry.checked = radioButtonStatesByNodeIndex[nodeIndex].selected;
                 entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
             }
+            if (record->kind == UIWidgetKind::ScrollView &&
+                nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
+            {
+                const UIScrollViewMetrics& metrics = scrollViewLayoutScratchByNodeIndex[nodeIndex].metrics;
+                entry.hasRange = true;
+                entry.minValue = 0.0F;
+                entry.maxValue = hasScrollAxis(scrollViewStatesByNodeIndex[nodeIndex].style.axes,
+                                               UIScrollAxes::Vertical)
+                                     ? metrics.maxOffsetY()
+                                     : metrics.maxOffsetX();
+                entry.value = hasScrollAxis(scrollViewStatesByNodeIndex[nodeIndex].style.axes,
+                                            UIScrollAxes::Vertical)
+                                  ? metrics.offset.y
+                                  : metrics.offset.x;
+                entry.focused = enabled && scrollThumbDragActive && armedScrollView == layoutEntry.node;
+            }
             output.push_back(entry);
         }
         return Core::success();
@@ -3133,7 +3464,7 @@ struct UIContext::Impl final {
             const LayoutScratchState& scratch = layoutScratchByIndex[index];
             if (!isFiniteNonNegative(scratch.measuredSize.width) || !isFiniteNonNegative(scratch.measuredSize.height) ||
                 !isFiniteLayoutRect(scratch.localRect) || !isFiniteLayoutRect(scratch.worldRect) ||
-                !isFiniteLayoutRect(scratch.effectiveClip))
+                !isFiniteLayoutRect(scratch.effectiveClip) || !isFiniteLayoutRect(scratch.descendantClip))
             {
                 return fail(UIErrorCode::InvalidLayout, "UI layout arithmetic produced non-finite geometry");
             }
@@ -3691,6 +4022,14 @@ struct UIContext::Impl final {
         armedSlider = {};
     }
 
+    void clearArmedScrollView() noexcept
+    {
+        armedScrollView = {};
+        armedScrollAxis = UIScrollAxes::None;
+        scrollDragGrabOffset = 0.0F;
+        scrollThumbDragActive = false;
+    }
+
     void clearArmedTextEdit() noexcept
     {
         armedTextEdit = {};
@@ -3980,6 +4319,10 @@ struct UIContext::Impl final {
         if (armedSlider == node)
         {
             clearArmedSlider();
+        }
+        if (armedScrollView == node)
+        {
+            clearArmedScrollView();
         }
         if (armedTextEdit == node)
         {
@@ -4451,6 +4794,14 @@ struct UIContext::Impl final {
         {
             radioButtonStatesByNodeIndex[index] = {};
         }
+        if (index < scrollViewStatesByNodeIndex.size())
+        {
+            scrollViewStatesByNodeIndex[index] = {};
+        }
+        if (index < scrollViewLayoutScratchByNodeIndex.size())
+        {
+            scrollViewLayoutScratchByNodeIndex[index] = {};
+        }
     }
 
     void markStructureChanged() noexcept
@@ -4888,6 +5239,8 @@ struct UIContext::Impl final {
             return 0;
         case UIWidgetKind::Modal:
             return ThemeBindingBoxPaint;
+        case UIWidgetKind::ScrollView:
+            return ThemeBindingScrollViewPaint;
         case UIWidgetKind::Label:
             return ThemeBindingTextStyle;
         case UIWidgetKind::Button:
@@ -4923,6 +5276,12 @@ struct UIContext::Impl final {
             {
                 boxPaintsByIndex[index] =
                     makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 248), UIElevation::Low);
+            }
+            break;
+        case UIWidgetKind::ScrollView:
+            if ((bindings & ThemeBindingScrollViewPaint) != 0)
+            {
+                scrollViewStatesByNodeIndex[index].paint = makeScrollViewPaint(theme);
             }
             break;
         case UIWidgetKind::Label:
@@ -5039,6 +5398,7 @@ struct UIContext::Impl final {
         case UIWidgetKind::Slider:
         case UIWidgetKind::ProgressBar:
         case UIWidgetKind::Modal:
+        case UIWidgetKind::ScrollView:
             return std::nullopt;
         }
         return std::nullopt;
@@ -5116,6 +5476,20 @@ struct UIContext::Impl final {
             if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome)
             {
                 stageThemePaintChange(index);
+            }
+            break;
+        }
+        case UIWidgetKind::ScrollView: {
+            const UIScrollViewPaint chrome = makeScrollViewPaint(theme);
+            if ((bindings & ThemeBindingScrollViewPaint) != 0 &&
+                scrollViewStatesByNodeIndex[index].paint != chrome)
+            {
+                stageThemePaintChange(index);
+                if (scrollViewStatesByNodeIndex[index].paint.thickness != chrome.thickness ||
+                    scrollViewStatesByNodeIndex[index].paint.minThumbExtent != chrome.minThumbExtent)
+                {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
             }
             break;
         }
@@ -5363,7 +5737,7 @@ struct UIContext::Impl final {
         // decorative unless the caller explicitly changes its hit policy.
         pointerHitPoliciesByIndex[node.index()] =
             (kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox || kind == UIWidgetKind::Slider ||
-             kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::RadioButton)
+             kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::ScrollView)
                 ? UIPointerHitPolicy::Targetable
                 : UIPointerHitPolicy::Ignore;
         if (capacityConfig.applyDefaultProductChrome)
@@ -5843,6 +6217,10 @@ struct UIContext::Impl final {
             if (armedSlider == node)
             {
                 clearArmedSlider();
+            }
+            if (armedScrollView == node)
+            {
+                clearArmedScrollView();
             }
             if (armedTextEdit == node)
             {
@@ -7288,6 +7666,477 @@ struct UIContext::Impl final {
         return armedSlider == slider;
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveScrollView(UINodeId scrollView)
+    {
+        auto nodeResult = resolveNode(scrollView);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::ScrollView)
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ScrollView API requires a ScrollView node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Status markScrollOffsetDirty(UINodeId scrollView)
+    {
+        if (Core::Status dirty = markHitTestDirty(scrollView); !dirty)
+        {
+            return dirty;
+        }
+        const u32 index = scrollView.index();
+        dirtyByIndex[index] |=
+            UIDirty::Arrange | UIDirty::Composite | UIDirty::Paint | UIDirty::Semantics;
+        phaseDirty |= PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
+        return Core::success();
+    }
+
+    [[nodiscard]] bool isLiveScrollView(UINodeId scrollView) const noexcept
+    {
+        if (!scrollView.hasValue() || !contains(scrollView) || scrollView.index() >= scrollViewStatesByNodeIndex.size())
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(scrollView.storageId());
+        return record != nullptr && record->kind == UIWidgetKind::ScrollView;
+    }
+
+    [[nodiscard]] ScrollBarGeometry committedScrollBarGeometry(UINodeId scrollView, UIScrollAxes axis) const noexcept
+    {
+        if (!isLiveScrollView(scrollView))
+        {
+            return {};
+        }
+        const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        return makeScrollBarGeometry(state.committedMetrics, state.committedViewportRect, state.paint, axis);
+    }
+
+    [[nodiscard]] static float scrollAxisOffset(UIScrollOffset offset, UIScrollAxes axis) noexcept
+    {
+        return axis == UIScrollAxes::Horizontal ? offset.x : offset.y;
+    }
+
+    static void setScrollAxisOffset(UIScrollOffset& offset, UIScrollAxes axis, float value) noexcept
+    {
+        if (axis == UIScrollAxes::Horizontal)
+        {
+            offset.x = value;
+        } else
+        {
+            offset.y = value;
+        }
+    }
+
+    [[nodiscard]] static float scrollAxisMaxOffset(const UIScrollViewMetrics& metrics, UIScrollAxes axis) noexcept
+    {
+        return axis == UIScrollAxes::Horizontal ? metrics.maxOffsetX() : metrics.maxOffsetY();
+    }
+
+    [[nodiscard]] Core::Result<bool> applyScrollOffsetFromInput(UINodeId scrollView, UIScrollOffset requested)
+    {
+        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        {
+            return false;
+        }
+        ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        const UIScrollViewMetrics& metrics = state.committedMetrics;
+        requested.x = hasScrollAxis(state.style.axes, UIScrollAxes::Horizontal)
+                          ? normalizeFloat((std::clamp)(requested.x, 0.0F, metrics.maxOffsetX()))
+                          : 0.0F;
+        requested.y = hasScrollAxis(state.style.axes, UIScrollAxes::Vertical)
+                          ? normalizeFloat((std::clamp)(requested.y, 0.0F, metrics.maxOffsetY()))
+                          : 0.0F;
+        if (state.requestedOffset == requested)
+        {
+            return false;
+        }
+        if (Core::Status dirty = markScrollOffsetDirty(scrollView); !dirty)
+        {
+            return Core::failure(dirty.error());
+        }
+        state.requestedOffset = requested;
+        return true;
+    }
+
+    [[nodiscard]] UIScrollOffset resolvedScrollWheelOffset(UINodeId scrollView, UILogicalPoint delta) const noexcept
+    {
+        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        {
+            return {};
+        }
+        const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        const bool horizontal = hasScrollAxis(state.style.axes, UIScrollAxes::Horizontal);
+        const bool vertical = hasScrollAxis(state.style.axes, UIScrollAxes::Vertical);
+        float horizontalDelta = delta.x;
+        float verticalDelta = delta.y;
+        if (horizontal && !vertical && horizontalDelta == 0.0F)
+        {
+            horizontalDelta = verticalDelta;
+        }
+        if (vertical && !horizontal && verticalDelta == 0.0F)
+        {
+            verticalDelta = horizontalDelta;
+        }
+
+        UIScrollOffset next = state.requestedOffset;
+        if (horizontal)
+        {
+            next.x = normalizeFloat(next.x - horizontalDelta * state.style.wheelStep);
+        }
+        if (vertical)
+        {
+            next.y = normalizeFloat(next.y - verticalDelta * state.style.wheelStep);
+        }
+        next.x = horizontal ? normalizeFloat((std::clamp)(next.x, 0.0F, state.committedMetrics.maxOffsetX())) : 0.0F;
+        next.y = vertical ? normalizeFloat((std::clamp)(next.y, 0.0F, state.committedMetrics.maxOffsetY())) : 0.0F;
+        return next;
+    }
+
+    [[nodiscard]] bool scrollWheelWouldChange(UINodeId scrollView, UILogicalPoint delta) const noexcept
+    {
+        return isLiveScrollView(scrollView) && isNodeEnabled(scrollView) &&
+               scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset !=
+                   resolvedScrollWheelOffset(scrollView, delta);
+    }
+
+    [[nodiscard]] Core::Result<bool> applyScrollWheel(UINodeId scrollView, UILogicalPoint delta)
+    {
+        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        {
+            return false;
+        }
+        const UIScrollOffset next = resolvedScrollWheelOffset(scrollView, delta);
+        return applyScrollOffsetFromInput(scrollView, next);
+    }
+
+    [[nodiscard]] Core::Result<bool> applyScrollThumbFromPointer(UINodeId scrollView, UIScrollAxes axis,
+                                                                UILogicalPoint position, float grabOffset)
+    {
+        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        {
+            return false;
+        }
+        const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        const ScrollBarGeometry geometry = committedScrollBarGeometry(scrollView, axis);
+        const float maxOffset = scrollAxisMaxOffset(state.committedMetrics, axis);
+        const float trackStart = axis == UIScrollAxes::Horizontal ? geometry.track.x : geometry.track.y;
+        const float trackExtent = axis == UIScrollAxes::Horizontal ? geometry.track.width : geometry.track.height;
+        const float thumbExtent = axis == UIScrollAxes::Horizontal ? geometry.thumb.width : geometry.thumb.height;
+        const float pointer = axis == UIScrollAxes::Horizontal ? position.x : position.y;
+        const float travel = (std::max)(0.0F, trackExtent - thumbExtent);
+        if (!geometry.visible || !(maxOffset > 0.0F) || !(travel > 0.0F))
+        {
+            return false;
+        }
+
+        const float thumbStart = (std::clamp)(pointer - grabOffset - trackStart, 0.0F, travel);
+        UIScrollOffset next = state.requestedOffset;
+        setScrollAxisOffset(next, axis, normalizeFloat(maxOffset * (thumbStart / travel)));
+        return applyScrollOffsetFromInput(scrollView, next);
+    }
+
+    [[nodiscard]] Core::Result<bool> applyScrollTrackPage(UINodeId scrollView, UIScrollAxes axis,
+                                                         UILogicalPoint position)
+    {
+        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        {
+            return false;
+        }
+        const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        const ScrollBarGeometry geometry = committedScrollBarGeometry(scrollView, axis);
+        if (!geometry.visible)
+        {
+            return false;
+        }
+        const float pointer = axis == UIScrollAxes::Horizontal ? position.x : position.y;
+        const float thumbStart = axis == UIScrollAxes::Horizontal ? geometry.thumb.x : geometry.thumb.y;
+        const float pageExtent = axis == UIScrollAxes::Horizontal ? state.committedMetrics.viewportSize.width
+                                                                  : state.committedMetrics.viewportSize.height;
+        const float direction = pointer < thumbStart ? -1.0F : 1.0F;
+        UIScrollOffset next = state.requestedOffset;
+        setScrollAxisOffset(next, axis,
+                            normalizeFloat(scrollAxisOffset(next, axis) + direction * pageExtent));
+        return applyScrollOffsetFromInput(scrollView, next);
+    }
+
+    [[nodiscard]] ScrollBarPointerHit scrollBarPointerHit(std::span<const u32> routePath,
+                                                         std::span<const UICommittedHitEntry> entries,
+                                                         UILogicalPoint position) const noexcept
+    {
+        for (const u32 routeEntryIndex : routePath)
+        {
+            if (routeEntryIndex >= entries.size())
+            {
+                continue;
+            }
+            const UINodeId node = entries[routeEntryIndex].node;
+            if (!isLiveScrollView(node) || !isNodeEnabled(node))
+            {
+                continue;
+            }
+            const ScrollViewState& state = scrollViewStatesByNodeIndex[node.index()];
+            for (const UIScrollAxes axis : {UIScrollAxes::Horizontal, UIScrollAxes::Vertical})
+            {
+                if (!hasScrollAxis(state.style.axes, axis) ||
+                    !(scrollAxisMaxOffset(state.committedMetrics, axis) > 0.0F))
+                {
+                    continue;
+                }
+                const ScrollBarGeometry geometry = committedScrollBarGeometry(node, axis);
+                if (!geometry.visible || !containsPointHalfOpen(geometry.track, position))
+                {
+                    continue;
+                }
+                return ScrollBarPointerHit{
+                    .scrollView = node,
+                    .axis = axis,
+                    .geometry = geometry,
+                    .thumb = containsPointHalfOpen(geometry.thumb, position),
+                };
+            }
+        }
+        return {};
+    }
+
+    [[nodiscard]] Core::Status setScrollViewStyleFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
+                                                            const UIScrollViewStyle& style)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto scrollResult = resolveScrollView(scrollView);
+        if (!scrollResult)
+        {
+            return Core::failure(scrollResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, scrollView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
+        }
+        auto normalized = normalizeScrollViewStyle(style);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        if (state.style == *normalized)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(scrollView); !dirty)
+        {
+            return dirty;
+        }
+        state.style = *normalized;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIScrollViewStyle> scrollViewStyleFromUpdater(UINodeId updaterRoot,
+                                                                             UINodeId scrollView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto scrollResult = const_cast<Impl*>(this)->resolveScrollView(scrollView);
+        if (!scrollResult)
+        {
+            return Core::failure(scrollResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, scrollView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
+        }
+        return scrollViewStatesByNodeIndex[scrollView.index()].style;
+    }
+
+    [[nodiscard]] Core::Status setScrollViewOffsetFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
+                                                             UIScrollOffset offset)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto scrollResult = resolveScrollView(scrollView);
+        if (!scrollResult)
+        {
+            return Core::failure(scrollResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, scrollView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
+        }
+        auto normalized = normalizeScrollOffset(offset);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        if (state.requestedOffset == *normalized)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markScrollOffsetDirty(scrollView); !dirty)
+        {
+            return dirty;
+        }
+        state.requestedOffset = *normalized;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIScrollOffset> scrollViewOffsetFromUpdater(UINodeId updaterRoot,
+                                                                           UINodeId scrollView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto scrollResult = const_cast<Impl*>(this)->resolveScrollView(scrollView);
+        if (!scrollResult)
+        {
+            return Core::failure(scrollResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, scrollView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
+        }
+        return scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
+    }
+
+    [[nodiscard]] Core::Result<UIScrollViewMetrics> scrollViewMetricsFromUpdater(UINodeId updaterRoot,
+                                                                                 UINodeId scrollView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto scrollResult = const_cast<Impl*>(this)->resolveScrollView(scrollView);
+        if (!scrollResult)
+        {
+            return Core::failure(scrollResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, scrollView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
+        }
+        return scrollViewStatesByNodeIndex[scrollView.index()].committedMetrics;
+    }
+
+    [[nodiscard]] Core::Status setScrollViewPaintFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
+                                                            const UIScrollViewPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto scrollResult = resolveScrollView(scrollView);
+        if (!scrollResult)
+        {
+            return Core::failure(scrollResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, scrollView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
+        }
+        auto normalized = normalizeScrollViewPaint(paint);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        if (state.paint == *normalized)
+        {
+            detachThemeBinding(scrollView.index(), ThemeBindingScrollViewPaint);
+            return Core::success();
+        }
+        const bool layoutChanged = state.paint.thickness != normalized->thickness ||
+                                   state.paint.minThumbExtent != normalized->minThumbExtent;
+        Core::Status dirty = layoutChanged ? markLayoutStyleDirty(scrollView) : markPaintDirty(scrollView);
+        if (!dirty)
+        {
+            return dirty;
+        }
+        state.paint = *normalized;
+        detachThemeBinding(scrollView.index(), ThemeBindingScrollViewPaint);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIScrollViewPaint> scrollViewPaintFromUpdater(UINodeId updaterRoot,
+                                                                             UINodeId scrollView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto scrollResult = const_cast<Impl*>(this)->resolveScrollView(scrollView);
+        if (!scrollResult)
+        {
+            return Core::failure(scrollResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, scrollView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
+        }
+        return scrollViewStatesByNodeIndex[scrollView.index()].paint;
+    }
+
+    [[nodiscard]] Core::Result<bool> isScrollViewDraggingFromUpdater(UINodeId updaterRoot,
+                                                                     UINodeId scrollView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto scrollResult = const_cast<Impl*>(this)->resolveScrollView(scrollView);
+        if (!scrollResult)
+        {
+            return Core::failure(scrollResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, scrollView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
+        }
+        return scrollThumbDragActive && armedScrollView == scrollView;
+    }
+
     [[nodiscard]] Core::Result<NodeRecord*> resolveProgressBar(UINodeId progressBar)
     {
         auto nodeResult = resolveNode(progressBar);
@@ -7893,6 +8742,24 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    void publishScrollViewLayoutState(const std::pmr::vector<u32>& order) noexcept
+    {
+        for (const u32 index : order)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || record->kind != UIWidgetKind::ScrollView ||
+                index >= scrollViewStatesByNodeIndex.size() || index >= scrollViewLayoutScratchByNodeIndex.size())
+            {
+                continue;
+            }
+            ScrollViewState& state = scrollViewStatesByNodeIndex[index];
+            const ScrollViewLayoutScratch& layout = scrollViewLayoutScratchByNodeIndex[index];
+            state.requestedOffset = layout.metrics.offset;
+            state.committedMetrics = layout.metrics;
+            state.committedViewportRect = layout.viewportRect;
+        }
+    }
+
     [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
@@ -8005,6 +8872,10 @@ struct UIContext::Impl final {
         const auto previousDefaultActionKeyPressedTargets = defaultActionKeyPressedTargets;
         const auto previousDefaultActionGamepadPressed = defaultActionGamepadPressed;
         const UINodeId previousArmedSlider = armedSlider;
+        const UINodeId previousArmedScrollView = armedScrollView;
+        const UIScrollAxes previousArmedScrollAxis = armedScrollAxis;
+        const float previousScrollDragGrabOffset = scrollDragGrabOffset;
+        const bool previousScrollThumbDragActive = scrollThumbDragActive;
         const UINodeId previousArmedTextEdit = armedTextEdit;
         const UINodeId previousCapturedPointer = capturedPointerNode;
         const usize previousPublishedHitBufferIndex = publishedHitBufferIndex;
@@ -8046,6 +8917,10 @@ struct UIContext::Impl final {
             defaultActionKeyPressedTargets = previousDefaultActionKeyPressedTargets;
             defaultActionGamepadPressed = previousDefaultActionGamepadPressed;
             armedSlider = previousArmedSlider;
+            armedScrollView = previousArmedScrollView;
+            armedScrollAxis = previousArmedScrollAxis;
+            scrollDragGrabOffset = previousScrollDragGrabOffset;
+            scrollThumbDragActive = previousScrollThumbDragActive;
             armedTextEdit = previousArmedTextEdit;
             capturedPointerNode = previousCapturedPointer;
             imePreeditBytes_ = previousImePreeditBytes;
@@ -8160,6 +9035,9 @@ struct UIContext::Impl final {
         const bool clearSliderArm =
             armedSlider.hasValue() &&
             !isPointerInteractionCandidate(armedSlider, candidateHitEntries, candidateActiveModalEntryIndex);
+        const bool clearScrollViewArm =
+            armedScrollView.hasValue() &&
+            !isPointerInteractionCandidate(armedScrollView, candidateHitEntries, candidateActiveModalEntryIndex);
         const bool clearButtonHover =
             hoveredPrimaryButton.hasValue() &&
             !isPointerInteractionCandidate(hoveredPrimaryButton, candidateHitEntries, candidateActiveModalEntryIndex);
@@ -8171,7 +9049,7 @@ struct UIContext::Impl final {
             armedTextEdit = {};
             paintNeedsCommit = true;
         }
-        if (clearPrimaryButtonArm || clearSliderArm || clearButtonHover)
+        if (clearPrimaryButtonArm || clearSliderArm || clearScrollViewArm || clearButtonHover)
         {
             if (clearPrimaryButtonArm)
             {
@@ -8180,6 +9058,10 @@ struct UIContext::Impl final {
             if (clearSliderArm)
             {
                 clearArmedSlider();
+            }
+            if (clearScrollViewArm)
+            {
+                clearArmedScrollView();
             }
             if (clearButtonHover)
             {
@@ -8262,6 +9144,7 @@ struct UIContext::Impl final {
         lastPaintSnapshotRebuildCount = paintNeedsCommit ? 1 : 0;
         if (layoutNeedsCommit)
         {
+            publishScrollViewLayoutState(layoutOrderScratch);
             layoutReuseCacheValid = true;
         }
         clearDirtyState();
@@ -8955,16 +9838,23 @@ struct UIContext::Impl final {
 
         const UINodeId targetNode = result.routedTarget.node;
         const bool targetNodeEnabledAtRouteStart = isNodeEnabled(targetNode);
-        const UINodeId armedButtonAtRouteStart = armedPrimaryButton;
-        const UINodeId armedSliderAtRouteStart = armedSlider;
-        const UINodeId armedTextEditAtRouteStart = armedTextEdit;
-        const bool hadArmedInteraction = armedButtonAtRouteStart.hasValue();
-        const bool hadArmedSlider = armedSliderAtRouteStart.hasValue();
-        const bool hadArmedTextEdit = armedTextEditAtRouteStart.hasValue();
         const bool primaryButtonDown =
             input.kind == UIRoutedPointerEventKind::ButtonDown && input.button == Platform::PointerButton::Primary;
         const bool primaryButtonUp =
             input.kind == UIRoutedPointerEventKind::ButtonUp && input.button == Platform::PointerButton::Primary;
+        const ScrollBarPointerHit scrollBarHitAtRouteStart =
+            primaryButtonDown ? scrollBarPointerHit(routePathScratch, entries, input.position) : ScrollBarPointerHit{};
+        const UINodeId armedButtonAtRouteStart = armedPrimaryButton;
+        const UINodeId armedSliderAtRouteStart = armedSlider;
+        const UINodeId armedScrollViewAtRouteStart = armedScrollView;
+        const UIScrollAxes armedScrollAxisAtRouteStart = armedScrollAxis;
+        const float scrollDragGrabOffsetAtRouteStart = scrollDragGrabOffset;
+        const bool scrollThumbDragAtRouteStart = scrollThumbDragActive;
+        const UINodeId armedTextEditAtRouteStart = armedTextEdit;
+        const bool hadArmedInteraction = armedButtonAtRouteStart.hasValue();
+        const bool hadArmedSlider = armedSliderAtRouteStart.hasValue();
+        const bool hadArmedScrollView = armedScrollViewAtRouteStart.hasValue();
+        const bool hadArmedTextEdit = armedTextEditAtRouteStart.hasValue();
         releaseRouteDirtyQueueReservations();
         const UINodeId nextHoveredButton = resolvedHoveredPrimaryButton(physicalNearestButton);
         if (nextHoveredButton != hoveredPrimaryButton)
@@ -8980,9 +9870,13 @@ struct UIContext::Impl final {
             addRouteDirtyReservationCandidate(defaultActionFocusButton);
             addRouteDirtyReservationCandidate(textInputFocus);
             addRouteDirtyReservationCandidate(armedSliderAtRouteStart);
+            addRouteDirtyReservationCandidate(armedScrollViewAtRouteStart);
             const NodeRecord* targetRecord =
                 targetNode.hasValue() && contains(targetNode) ? nodes.tryGet(targetNode.storageId()) : nullptr;
-            if (targetRecord != nullptr && targetRecord->kind == UIWidgetKind::TextEdit &&
+            if (scrollBarHitAtRouteStart.hasValue())
+            {
+                addRouteDirtyReservationCandidate(scrollBarHitAtRouteStart.scrollView);
+            } else if (targetRecord != nullptr && targetRecord->kind == UIWidgetKind::TextEdit &&
                 targetNodeEnabledAtRouteStart)
             {
                 addRouteDirtyReservationCandidate(targetNode);
@@ -8999,6 +9893,10 @@ struct UIContext::Impl final {
             {
                 addRouteDirtyReservationCandidate(armedSliderAtRouteStart);
             }
+            if (hadArmedScrollView)
+            {
+                addRouteDirtyReservationCandidate(armedScrollViewAtRouteStart);
+            }
             if (hadArmedTextEdit)
             {
                 addRouteDirtyReservationCandidate(armedTextEditAtRouteStart);
@@ -9012,6 +9910,10 @@ struct UIContext::Impl final {
             if (hadArmedSlider)
             {
                 addRouteDirtyReservationCandidate(armedSliderAtRouteStart);
+            }
+            if (hadArmedScrollView)
+            {
+                addRouteDirtyReservationCandidate(armedScrollViewAtRouteStart);
             }
             if (hadArmedTextEdit)
             {
@@ -9048,6 +9950,19 @@ struct UIContext::Impl final {
                     }
                 }
             }
+        } else if (input.kind == UIRoutedPointerEventKind::Wheel)
+        {
+            for (const u32 routeEntryIndex : routePathScratch)
+            {
+                if (routeEntryIndex < entries.size())
+                {
+                    const UINodeId routeNode = entries[routeEntryIndex].node;
+                    if (scrollWheelWouldChange(routeNode, input.delta))
+                    {
+                        addRouteDirtyReservationCandidate(routeNode);
+                    }
+                }
+            }
         }
         if (Core::Status reservation = reserveRouteDirtyQueueSlots(); !reservation)
         {
@@ -9055,9 +9970,11 @@ struct UIContext::Impl final {
             {
                 const UINodeId releasedButton = armedPrimaryButton;
                 const UINodeId releasedSlider = armedSlider;
+                const UINodeId releasedScrollView = armedScrollView;
                 const UINodeId releasedTextEdit = armedTextEdit;
                 clearArmedPrimaryButton();
                 clearArmedSlider();
+                clearArmedScrollView();
                 clearArmedTextEdit();
                 capturedPointerNode = {};
                 // Primary Up is a release barrier even when queue capacity is
@@ -9066,6 +9983,7 @@ struct UIContext::Impl final {
                 static_cast<void>(markPaintDirtyBatch({
                     releasedButton,
                     releasedSlider,
+                    releasedScrollView,
                     releasedTextEdit,
                 }));
             }
@@ -9154,7 +10072,7 @@ struct UIContext::Impl final {
 
         Core::Status hoverPaintStatus = updateHoveredPrimaryButton(physicalNearestButton);
         const bool deferHoverFailureForRelease =
-            primaryButtonUp && (hadArmedInteraction || hadArmedSlider || hadArmedTextEdit);
+            primaryButtonUp && (hadArmedInteraction || hadArmedSlider || hadArmedScrollView || hadArmedTextEdit);
         if (!hoverPaintStatus && !deferHoverFailureForRelease)
         {
             return Core::failure(hoverPaintStatus.error());
@@ -9164,6 +10082,7 @@ struct UIContext::Impl final {
         {
             clearArmedPrimaryButton();
             clearArmedSlider();
+            clearArmedScrollView();
             clearArmedTextEdit();
             capturedPointerNode = {};
             const NodeRecord* targetRecord =
@@ -9174,12 +10093,20 @@ struct UIContext::Impl final {
             const UINodeId previousTextFocus = textInputFocus;
             const bool preserveFocusForModalBarrier = result.blockedByModal && !targetNode.hasValue();
             const bool allowsDefaultAction = !routedEvent.isDefaultActionPrevented();
-            const bool willFocusTextEdit = allowsDefaultAction && targetsTextEdit;
+            const bool willUseScrollBar = allowsDefaultAction && scrollBarHitAtRouteStart.hasValue() &&
+                                          isLiveScrollView(scrollBarHitAtRouteStart.scrollView) &&
+                                          isNodeEnabled(scrollBarHitAtRouteStart.scrollView);
+            const bool willFocusTextEdit = allowsDefaultAction && !willUseScrollBar && targetsTextEdit;
             const bool willArmSlider =
-                allowsDefaultAction && !willFocusTextEdit && nearestSlider.hasValue() && isNodeEnabled(nearestSlider);
+                allowsDefaultAction && !willUseScrollBar && !willFocusTextEdit && nearestSlider.hasValue() &&
+                isNodeEnabled(nearestSlider);
             UINodeId nextKeyboardFocus = preserveFocusForModalBarrier ? previousKeyboardFocus : UINodeId{};
             UINodeId interactionPaintNode{};
-            if (willFocusTextEdit)
+            if (willUseScrollBar)
+            {
+                interactionPaintNode = scrollBarHitAtRouteStart.thumb ? scrollBarHitAtRouteStart.scrollView
+                                                                     : UINodeId{};
+            } else if (willFocusTextEdit)
             {
                 nextKeyboardFocus = targetNode;
                 interactionPaintNode = targetNode;
@@ -9209,10 +10136,16 @@ struct UIContext::Impl final {
                                                          contains(armedSliderAtRouteStart)
                                                      ? armedSliderAtRouteStart
                                                      : UINodeId{};
+            const UINodeId dirtyPreviousScrollView =
+                scrollThumbDragAtRouteStart && armedScrollViewAtRouteStart.hasValue() &&
+                        armedScrollViewAtRouteStart != interactionPaintNode && contains(armedScrollViewAtRouteStart)
+                    ? armedScrollViewAtRouteStart
+                    : UINodeId{};
             if (Core::Status dirty = markPaintDirtyBatch({
                     dirtyPreviousKeyboard,
                     dirtyPreviousText,
                     dirtyPreviousSlider,
+                    dirtyPreviousScrollView,
                     interactionPaintNode,
                 });
                 !dirty)
@@ -9227,12 +10160,36 @@ struct UIContext::Impl final {
                     clearImeFocus();
                 }
             }
-            // Only one Primary interaction may be armed. An exact TextEdit
-            // target wins over interactive ancestors; otherwise Slider drag
-            // takes priority over Button/Checkbox.
+            // Only one Primary interaction may be armed. Scrollbar chrome wins
+            // at its committed track; otherwise an exact TextEdit target wins,
+            // then Slider drag, then Button/Checkbox.
             if (preserveFocusForModalBarrier)
             {
                 // A Modal backdrop owns the input but is not a focus target.
+            } else if (willUseScrollBar)
+            {
+                armedScrollView = scrollBarHitAtRouteStart.scrollView;
+                armedScrollAxis = scrollBarHitAtRouteStart.axis;
+                scrollThumbDragActive = scrollBarHitAtRouteStart.thumb;
+                if (scrollThumbDragActive)
+                {
+                    const float pointer = armedScrollAxis == UIScrollAxes::Horizontal ? input.position.x
+                                                                                     : input.position.y;
+                    const float thumbStart = armedScrollAxis == UIScrollAxes::Horizontal
+                                                 ? scrollBarHitAtRouteStart.geometry.thumb.x
+                                                 : scrollBarHitAtRouteStart.geometry.thumb.y;
+                    scrollDragGrabOffset = normalizeFloat(pointer - thumbStart);
+                }
+                capturedPointerNode = armedScrollView;
+                routedEvent.consumeInputTransition();
+                static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
+                if (!scrollThumbDragActive)
+                {
+                    if (auto applied = applyScrollTrackPage(armedScrollView, armedScrollAxis, input.position); !applied)
+                    {
+                        return Core::failure(applied.error());
+                    }
+                }
             } else if (willFocusTextEdit)
             {
                 const UINodeId previousFocus = textInputFocus;
@@ -9278,6 +10235,54 @@ struct UIContext::Impl final {
                     clearImeFocus();
                     routedEvent.consumeInputTransition();
                     static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
+                }
+            }
+        } else if (input.kind == UIRoutedPointerEventKind::Wheel && !routedEvent.isDefaultActionPrevented())
+        {
+            for (const u32 routeEntryIndex : routePathScratch)
+            {
+                if (routeEntryIndex >= entries.size())
+                {
+                    continue;
+                }
+                const UINodeId routeNode = entries[routeEntryIndex].node;
+                if (!isLiveScrollView(routeNode) || !isNodeEnabled(routeNode))
+                {
+                    continue;
+                }
+                auto applied = applyScrollWheel(routeNode, input.delta);
+                if (!applied)
+                {
+                    return Core::failure(applied.error());
+                }
+                if (*applied)
+                {
+                    routedEvent.consumeInputTransition();
+                    break;
+                }
+            }
+        } else if (input.kind == UIRoutedPointerEventKind::Move && hadArmedScrollView &&
+                   armedScrollView == armedScrollViewAtRouteStart)
+        {
+            if (!isLiveScrollView(armedScrollViewAtRouteStart) || !isNodeEnabled(armedScrollViewAtRouteStart))
+            {
+                clearArmedScrollView();
+                if (capturedPointerNode == armedScrollViewAtRouteStart)
+                {
+                    capturedPointerNode = {};
+                }
+            } else
+            {
+                static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
+                if (scrollThumbDragAtRouteStart)
+                {
+                    auto applied = applyScrollThumbFromPointer(armedScrollViewAtRouteStart,
+                                                               armedScrollAxisAtRouteStart, input.position,
+                                                               scrollDragGrabOffsetAtRouteStart);
+                    if (!applied)
+                    {
+                        return Core::failure(applied.error());
+                    }
                 }
             }
         } else if (input.kind == UIRoutedPointerEventKind::Move && hadArmedSlider &&
@@ -9329,6 +10334,37 @@ struct UIContext::Impl final {
                     armedPrimaryButtonPressed = pointWithinArmedButton;
                 }
                 static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
+            }
+        } else if (primaryButtonUp && hadArmedScrollView)
+        {
+            const bool scrollViewStillArmed = armedScrollView == armedScrollViewAtRouteStart;
+            Core::Status releasePaint = Core::success();
+            if (scrollViewStillArmed && scrollThumbDragAtRouteStart && contains(armedScrollViewAtRouteStart))
+            {
+                releasePaint = markPaintDirty(armedScrollViewAtRouteStart);
+            }
+            clearArmedScrollView();
+            if (!hoverPaintStatus)
+            {
+                return Core::failure(hoverPaintStatus.error());
+            }
+            if (!releasePaint)
+            {
+                return Core::failure(releasePaint.error());
+            }
+            routedEvent.consumeInputTransition();
+            static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
+            if (scrollViewStillArmed && scrollThumbDragAtRouteStart &&
+                isLiveScrollView(armedScrollViewAtRouteStart) && isNodeEnabled(armedScrollViewAtRouteStart) &&
+                !routedEvent.isDefaultActionPrevented())
+            {
+                auto applied = applyScrollThumbFromPointer(armedScrollViewAtRouteStart,
+                                                           armedScrollAxisAtRouteStart, input.position,
+                                                           scrollDragGrabOffsetAtRouteStart);
+                if (!applied)
+                {
+                    return Core::failure(applied.error());
+                }
             }
         } else if (primaryButtonUp && hadArmedSlider)
         {
@@ -9474,10 +10510,12 @@ struct UIContext::Impl final {
         }
         const UINodeId cancelledButton = armedPrimaryButton;
         const UINodeId cancelledSlider = armedSlider;
+        const UINodeId cancelledScrollView = armedScrollView;
         const UINodeId cancelledFocus = defaultActionFocusButton;
         const UINodeId cancelledHover = hoveredPrimaryButton;
         clearArmedPrimaryButton();
         clearArmedSlider();
+        clearArmedScrollView();
         clearArmedTextEdit();
         capturedPointerNode = {};
         clearDefaultActionPresses();
@@ -9491,6 +10529,7 @@ struct UIContext::Impl final {
         static_cast<void>(markPaintDirtyBatch({
             cancelledButton,
             cancelledSlider,
+            cancelledScrollView,
             cancelledFocus,
             cancelledHover,
         }));
@@ -10692,6 +11731,15 @@ Core::Result<UINodeId> UIRootBuilder::createModal(UINodeId parent)
     return m_context->createChild(parent, UIWidgetKind::Modal);
 }
 
+Core::Result<UINodeId> UIRootBuilder::createScrollView(UINodeId parent)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createChild(parent, UIWidgetKind::ScrollView);
+}
+
 UITreeUpdater::UITreeUpdater(UIContext& context, UINodeId root) noexcept : m_context(&context), m_root(root)
 {
 }
@@ -10792,6 +11840,15 @@ Core::Result<UINodeId> UITreeUpdater::createModal(UINodeId parent)
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Modal);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createScrollView(UINodeId parent)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::ScrollView);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -11112,6 +12169,78 @@ Core::Result<bool> UITreeUpdater::isSliderDragging(UINodeId slider) const
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->isSliderDraggingFromUpdater(m_root, slider);
+}
+
+Core::Status UITreeUpdater::setScrollViewStyle(UINodeId scrollView, const UIScrollViewStyle& style)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setScrollViewStyleFromUpdater(m_root, scrollView, style);
+}
+
+Core::Result<UIScrollViewStyle> UITreeUpdater::scrollViewStyle(UINodeId scrollView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->scrollViewStyleFromUpdater(m_root, scrollView);
+}
+
+Core::Status UITreeUpdater::setScrollViewOffset(UINodeId scrollView, UIScrollOffset offset)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setScrollViewOffsetFromUpdater(m_root, scrollView, offset);
+}
+
+Core::Result<UIScrollOffset> UITreeUpdater::scrollViewOffset(UINodeId scrollView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->scrollViewOffsetFromUpdater(m_root, scrollView);
+}
+
+Core::Result<UIScrollViewMetrics> UITreeUpdater::scrollViewMetrics(UINodeId scrollView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->scrollViewMetricsFromUpdater(m_root, scrollView);
+}
+
+Core::Status UITreeUpdater::setScrollViewPaint(UINodeId scrollView, const UIScrollViewPaint& paint)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setScrollViewPaintFromUpdater(m_root, scrollView, paint);
+}
+
+Core::Result<UIScrollViewPaint> UITreeUpdater::scrollViewPaint(UINodeId scrollView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->scrollViewPaintFromUpdater(m_root, scrollView);
+}
+
+Core::Result<bool> UITreeUpdater::isScrollViewDragging(UINodeId scrollView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isScrollViewDraggingFromUpdater(m_root, scrollView);
 }
 
 Core::Status UITreeUpdater::setProgressBarRange(UINodeId progressBar, float minValue, float maxValue)
@@ -11839,6 +12968,54 @@ Core::Status UIContext::clearSliderChangeCallbackFromUpdater(UINodeId updaterRoo
 Core::Result<bool> UIContext::isSliderDraggingFromUpdater(UINodeId updaterRoot, UINodeId slider) const
 {
     return m_impl->isSliderDraggingFromUpdater(updaterRoot, slider);
+}
+
+Core::Status UIContext::setScrollViewStyleFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
+                                                      const UIScrollViewStyle& style)
+{
+    return m_impl->setScrollViewStyleFromUpdater(updaterRoot, scrollView, style);
+}
+
+Core::Result<UIScrollViewStyle> UIContext::scrollViewStyleFromUpdater(UINodeId updaterRoot,
+                                                                     UINodeId scrollView) const
+{
+    return m_impl->scrollViewStyleFromUpdater(updaterRoot, scrollView);
+}
+
+Core::Status UIContext::setScrollViewOffsetFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
+                                                       UIScrollOffset offset)
+{
+    return m_impl->setScrollViewOffsetFromUpdater(updaterRoot, scrollView, offset);
+}
+
+Core::Result<UIScrollOffset> UIContext::scrollViewOffsetFromUpdater(UINodeId updaterRoot,
+                                                                   UINodeId scrollView) const
+{
+    return m_impl->scrollViewOffsetFromUpdater(updaterRoot, scrollView);
+}
+
+Core::Result<UIScrollViewMetrics> UIContext::scrollViewMetricsFromUpdater(UINodeId updaterRoot,
+                                                                         UINodeId scrollView) const
+{
+    return m_impl->scrollViewMetricsFromUpdater(updaterRoot, scrollView);
+}
+
+Core::Status UIContext::setScrollViewPaintFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
+                                                      const UIScrollViewPaint& paint)
+{
+    return m_impl->setScrollViewPaintFromUpdater(updaterRoot, scrollView, paint);
+}
+
+Core::Result<UIScrollViewPaint> UIContext::scrollViewPaintFromUpdater(UINodeId updaterRoot,
+                                                                     UINodeId scrollView) const
+{
+    return m_impl->scrollViewPaintFromUpdater(updaterRoot, scrollView);
+}
+
+Core::Result<bool> UIContext::isScrollViewDraggingFromUpdater(UINodeId updaterRoot,
+                                                             UINodeId scrollView) const
+{
+    return m_impl->isScrollViewDraggingFromUpdater(updaterRoot, scrollView);
 }
 
 Core::Status UIContext::setProgressBarRangeFromUpdater(UINodeId updaterRoot, UINodeId progressBar, float minValue,

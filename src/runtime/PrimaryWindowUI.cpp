@@ -136,6 +136,15 @@ Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createModal(UI::UINodeId 
     return m_state->createModal(m_epoch, m_phase, m_updater, parent);
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createScrollView(UI::UINodeId parent)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createScrollView");
+    }
+    return m_state->createScrollView(m_epoch, m_phase, m_updater, parent);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style)
 {
     if (m_state == nullptr)
@@ -468,6 +477,80 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isSliderDragging(UI::UINodeId sli
         return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isSliderDragging");
     }
     return m_state->isSliderDragging(m_epoch, m_phase, m_updater, slider);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setScrollViewStyle(UI::UINodeId scrollView,
+                                                           const UI::UIScrollViewStyle& style)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setScrollViewStyle");
+    }
+    return m_state->setScrollViewStyle(m_epoch, m_phase, m_updater, scrollView, style);
+}
+
+Core::Result<UI::UIScrollViewStyle> PrimaryWindowUITreeUpdater::scrollViewStyle(UI::UINodeId scrollView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIScrollViewStyle>("PrimaryWindowUITreeUpdater::scrollViewStyle");
+    }
+    return m_state->scrollViewStyle(m_epoch, m_phase, m_updater, scrollView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setScrollViewOffset(UI::UINodeId scrollView, UI::UIScrollOffset offset)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setScrollViewOffset");
+    }
+    return m_state->setScrollViewOffset(m_epoch, m_phase, m_updater, scrollView, offset);
+}
+
+Core::Result<UI::UIScrollOffset> PrimaryWindowUITreeUpdater::scrollViewOffset(UI::UINodeId scrollView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIScrollOffset>("PrimaryWindowUITreeUpdater::scrollViewOffset");
+    }
+    return m_state->scrollViewOffset(m_epoch, m_phase, m_updater, scrollView);
+}
+
+Core::Result<UI::UIScrollViewMetrics> PrimaryWindowUITreeUpdater::scrollViewMetrics(UI::UINodeId scrollView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIScrollViewMetrics>("PrimaryWindowUITreeUpdater::scrollViewMetrics");
+    }
+    return m_state->scrollViewMetrics(m_epoch, m_phase, m_updater, scrollView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setScrollViewPaint(UI::UINodeId scrollView,
+                                                           const UI::UIScrollViewPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setScrollViewPaint");
+    }
+    return m_state->setScrollViewPaint(m_epoch, m_phase, m_updater, scrollView, paint);
+}
+
+Core::Result<UI::UIScrollViewPaint> PrimaryWindowUITreeUpdater::scrollViewPaint(UI::UINodeId scrollView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIScrollViewPaint>("PrimaryWindowUITreeUpdater::scrollViewPaint");
+    }
+    return m_state->scrollViewPaint(m_epoch, m_phase, m_updater, scrollView);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isScrollViewDragging(UI::UINodeId scrollView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isScrollViewDragging");
+    }
+    return m_state->isScrollViewDragging(m_epoch, m_phase, m_updater, scrollView);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setProgressBarRange(UI::UINodeId progressBar, float minValue, float maxValue)

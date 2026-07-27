@@ -87,7 +87,8 @@ struct UIUiaMappedNode final {
 
 [[nodiscard]] constexpr u32 controlTypeFromRole(UISemanticsRole role) noexcept
 {
-    switch (role) {
+    switch (role)
+    {
     case UISemanticsRole::Button:
         return kControlTypeButton;
     case UISemanticsRole::Checkbox:
@@ -108,6 +109,8 @@ struct UIUiaMappedNode final {
         return kControlTypeList;
     case UISemanticsRole::ListItem:
         return kControlTypeListItem;
+    case UISemanticsRole::ScrollView:
+        return kControlTypePane;
     case UISemanticsRole::Group:
         return kControlTypeGroup;
     }
@@ -116,7 +119,8 @@ struct UIUiaMappedNode final {
 
 [[nodiscard]] constexpr bool roleIsKeyboardFocusable(UISemanticsRole role) noexcept
 {
-    switch (role) {
+    switch (role)
+    {
     case UISemanticsRole::Button:
     case UISemanticsRole::Checkbox:
     case UISemanticsRole::Slider:
@@ -129,6 +133,7 @@ struct UIUiaMappedNode final {
     case UISemanticsRole::Dialog:
     case UISemanticsRole::List:
     case UISemanticsRole::ListItem:
+    case UISemanticsRole::ScrollView:
         return false;
     }
     return false;
@@ -148,35 +153,41 @@ struct UIUiaMappedNode final {
     };
 
     mapped.isKeyboardFocusable = mapped.isEnabled && roleIsKeyboardFocusable(source.role);
-    if (!mapped.isKeyboardFocusable) {
+    if (!mapped.isKeyboardFocusable)
+    {
         mapped.hasKeyboardFocus = false;
     }
 
-    if (hasState(source.states, UIAccessibilityState::HasRange) || source.role == UISemanticsRole::Slider
-        || source.role == UISemanticsRole::ProgressBar) {
+    if (hasState(source.states, UIAccessibilityState::HasRange) || source.role == UISemanticsRole::Slider ||
+        source.role == UISemanticsRole::ProgressBar)
+    {
         mapped.rangeValue = UIUiaRangeValue{
             .value = static_cast<double>(source.value),
             .minimum = static_cast<double>(source.minValue),
             .maximum = static_cast<double>(source.maxValue),
-            .isReadOnly = source.role == UISemanticsRole::ProgressBar
-                || hasState(source.states, UIAccessibilityState::ReadOnly),
+            .isReadOnly =
+                source.role == UISemanticsRole::ProgressBar || hasState(source.states, UIAccessibilityState::ReadOnly),
         };
     }
 
-    if (source.role == UISemanticsRole::Checkbox || source.role == UISemanticsRole::RadioButton) {
-        if (hasState(source.states, UIAccessibilityState::Checked)) {
+    if (source.role == UISemanticsRole::Checkbox || source.role == UISemanticsRole::RadioButton)
+    {
+        if (hasState(source.states, UIAccessibilityState::Checked))
+        {
             mapped.toggleState = kToggleStateOn;
-        } else {
+        } else
+        {
             mapped.toggleState = kToggleStateOff;
         }
     }
 
-    if (source.role == UISemanticsRole::TextEdit || source.role == UISemanticsRole::Label) {
+    if (source.role == UISemanticsRole::TextEdit || source.role == UISemanticsRole::Label)
+    {
         std::string valueText = source.valueText.empty() ? std::string(source.name) : std::string(source.valueText);
         mapped.value = UIUiaValuePattern{
             .value = std::move(valueText),
-            .isReadOnly = source.role == UISemanticsRole::Label
-                || hasState(source.states, UIAccessibilityState::ReadOnly),
+            .isReadOnly =
+                source.role == UISemanticsRole::Label || hasState(source.states, UIAccessibilityState::ReadOnly),
         };
     }
 

@@ -60,6 +60,8 @@ class PrimaryWindowUICapabilityState final {
                                                                UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createModal(u64 epoch, PrimaryWindowUIPhase phase,
                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createScrollView(u64 epoch, PrimaryWindowUIPhase phase,
+                                                              UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -132,6 +134,27 @@ class PrimaryWindowUICapabilityState final {
                                                          UI::UITreeUpdater& updater, UI::UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(u64 epoch, PrimaryWindowUIPhase phase,
                                                       const UI::UITreeUpdater& updater, UI::UINodeId slider);
+    [[nodiscard]] Core::Status setScrollViewStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                  UI::UINodeId scrollView, const UI::UIScrollViewStyle& style);
+    [[nodiscard]] Core::Result<UI::UIScrollViewStyle>
+    scrollViewStyle(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                    UI::UINodeId scrollView);
+    [[nodiscard]] Core::Status setScrollViewOffset(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                   UI::UINodeId scrollView, UI::UIScrollOffset offset);
+    [[nodiscard]] Core::Result<UI::UIScrollOffset>
+    scrollViewOffset(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                     UI::UINodeId scrollView);
+    [[nodiscard]] Core::Result<UI::UIScrollViewMetrics>
+    scrollViewMetrics(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                      UI::UINodeId scrollView);
+    [[nodiscard]] Core::Status setScrollViewPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                  UI::UINodeId scrollView, const UI::UIScrollViewPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIScrollViewPaint>
+    scrollViewPaint(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                    UI::UINodeId scrollView);
+    [[nodiscard]] Core::Result<bool> isScrollViewDragging(u64 epoch, PrimaryWindowUIPhase phase,
+                                                          const UI::UITreeUpdater& updater,
+                                                          UI::UINodeId scrollView);
     [[nodiscard]] Core::Status setProgressBarRange(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                    UI::UINodeId progressBar, float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValue(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,

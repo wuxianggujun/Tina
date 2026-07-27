@@ -19,6 +19,7 @@
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
+#include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
@@ -174,6 +175,7 @@ class UIRootBuilder final {
     [[nodiscard]] Core::Result<UINodeId> createProgressBar(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createModal(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createScrollView(UINodeId parent);
 
   private:
     friend class UIContext;
@@ -204,6 +206,7 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UINodeId> createProgressBar(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createModal(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createScrollView(UINodeId parent);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UINodeId node, UIPointerHitPolicy policy);
@@ -249,6 +252,14 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setSliderChangeCallback(UINodeId slider, UISliderChangeCallback callback);
     [[nodiscard]] Core::Status clearSliderChangeCallback(UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(UINodeId slider) const;
+    [[nodiscard]] Core::Status setScrollViewStyle(UINodeId scrollView, const UIScrollViewStyle& style);
+    [[nodiscard]] Core::Result<UIScrollViewStyle> scrollViewStyle(UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setScrollViewOffset(UINodeId scrollView, UIScrollOffset offset);
+    [[nodiscard]] Core::Result<UIScrollOffset> scrollViewOffset(UINodeId scrollView) const;
+    [[nodiscard]] Core::Result<UIScrollViewMetrics> scrollViewMetrics(UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setScrollViewPaint(UINodeId scrollView, const UIScrollViewPaint& paint);
+    [[nodiscard]] Core::Result<UIScrollViewPaint> scrollViewPaint(UINodeId scrollView) const;
+    [[nodiscard]] Core::Result<bool> isScrollViewDragging(UINodeId scrollView) const;
     [[nodiscard]] Core::Status setProgressBarRange(UINodeId progressBar, float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValue(UINodeId progressBar, float value);
     [[nodiscard]] Core::Result<float> progressBarValue(UINodeId progressBar) const;
@@ -500,6 +511,22 @@ class UIContext final {
                                                                   UISliderChangeCallback&& callback);
     [[nodiscard]] Core::Status clearSliderChangeCallbackFromUpdater(UINodeId updaterRoot, UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDraggingFromUpdater(UINodeId updaterRoot, UINodeId slider) const;
+    [[nodiscard]] Core::Status setScrollViewStyleFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
+                                                            const UIScrollViewStyle& style);
+    [[nodiscard]] Core::Result<UIScrollViewStyle> scrollViewStyleFromUpdater(UINodeId updaterRoot,
+                                                                             UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setScrollViewOffsetFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
+                                                             UIScrollOffset offset);
+    [[nodiscard]] Core::Result<UIScrollOffset> scrollViewOffsetFromUpdater(UINodeId updaterRoot,
+                                                                           UINodeId scrollView) const;
+    [[nodiscard]] Core::Result<UIScrollViewMetrics> scrollViewMetricsFromUpdater(UINodeId updaterRoot,
+                                                                                 UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setScrollViewPaintFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
+                                                            const UIScrollViewPaint& paint);
+    [[nodiscard]] Core::Result<UIScrollViewPaint> scrollViewPaintFromUpdater(UINodeId updaterRoot,
+                                                                             UINodeId scrollView) const;
+    [[nodiscard]] Core::Result<bool> isScrollViewDraggingFromUpdater(UINodeId updaterRoot,
+                                                                     UINodeId scrollView) const;
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListenerFromUpdater(UINodeId updaterRoot, UIRoutedPointerListenerDesc descriptor,
                                         UIRoutedPointerCallback&& callback);

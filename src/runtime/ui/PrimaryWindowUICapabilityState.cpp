@@ -352,6 +352,24 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createModal(u64 epoch
     return *child;
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createScrollView(u64 epoch,
+                                                                            PrimaryWindowUIPhase phase,
+                                                                            UI::UITreeUpdater& updater,
+                                                                            UI::UINodeId parent)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createScrollView";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createScrollView(parent);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase,
                                                             UI::UITreeUpdater& updater, UI::UINodeId node,
                                                             const UI::UILayoutStyle& style)
@@ -953,6 +971,145 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isSliderDragging(u64 epoch, P
         return Core::failure(std::move(status.error()));
     }
     auto dragging = updater.isSliderDragging(slider);
+    if (!dragging)
+    {
+        return Core::failure(rememberFirstError(std::move(dragging.error()), Operation));
+    }
+    return *dragging;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setScrollViewStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                UI::UITreeUpdater& updater,
+                                                                UI::UINodeId scrollView,
+                                                                const UI::UIScrollViewStyle& style)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setScrollViewStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setScrollViewStyle(scrollView, style);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIScrollViewStyle>
+PrimaryWindowUICapabilityState::scrollViewStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                                const UI::UITreeUpdater& updater, UI::UINodeId scrollView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::scrollViewStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto style = updater.scrollViewStyle(scrollView);
+    if (!style)
+    {
+        return Core::failure(rememberFirstError(std::move(style.error()), Operation));
+    }
+    return *style;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setScrollViewOffset(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                 UI::UITreeUpdater& updater,
+                                                                 UI::UINodeId scrollView,
+                                                                 UI::UIScrollOffset offset)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setScrollViewOffset";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setScrollViewOffset(scrollView, offset);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIScrollOffset>
+PrimaryWindowUICapabilityState::scrollViewOffset(u64 epoch, PrimaryWindowUIPhase phase,
+                                                 const UI::UITreeUpdater& updater, UI::UINodeId scrollView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::scrollViewOffset";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto offset = updater.scrollViewOffset(scrollView);
+    if (!offset)
+    {
+        return Core::failure(rememberFirstError(std::move(offset.error()), Operation));
+    }
+    return *offset;
+}
+
+Core::Result<UI::UIScrollViewMetrics>
+PrimaryWindowUICapabilityState::scrollViewMetrics(u64 epoch, PrimaryWindowUIPhase phase,
+                                                  const UI::UITreeUpdater& updater, UI::UINodeId scrollView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::scrollViewMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto metrics = updater.scrollViewMetrics(scrollView);
+    if (!metrics)
+    {
+        return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
+    }
+    return *metrics;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setScrollViewPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                UI::UITreeUpdater& updater,
+                                                                UI::UINodeId scrollView,
+                                                                const UI::UIScrollViewPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setScrollViewPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setScrollViewPaint(scrollView, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIScrollViewPaint>
+PrimaryWindowUICapabilityState::scrollViewPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                const UI::UITreeUpdater& updater, UI::UINodeId scrollView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::scrollViewPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.scrollViewPaint(scrollView);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isScrollViewDragging(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                       const UI::UITreeUpdater& updater,
+                                                                       UI::UINodeId scrollView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isScrollViewDragging";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto dragging = updater.isScrollViewDragging(scrollView);
     if (!dragging)
     {
         return Core::failure(rememberFirstError(std::move(dragging.error()), Operation));

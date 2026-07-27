@@ -24,6 +24,7 @@ enum class UISemanticsRole : u8 {
     ListItem,
     ProgressBar,
     RadioButton,
+    ScrollView,
 };
 
 // Owner-thread snapshot entry. Text fields point into the committed snapshot's
@@ -136,6 +137,8 @@ class UICommittedSemanticsView final {
         return UISemanticsRole::RadioButton;
     case UIWidgetKind::Modal:
         return UISemanticsRole::Dialog;
+    case UIWidgetKind::ScrollView:
+        return UISemanticsRole::ScrollView;
     }
     return UISemanticsRole::Group;
 }
@@ -146,7 +149,7 @@ class UICommittedSemanticsView final {
 {
     return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox ||
            kind == UIWidgetKind::Slider || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ProgressBar ||
-           kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Modal;
+           kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Modal || kind == UIWidgetKind::ScrollView;
 }
 
 } // namespace Tina::UI

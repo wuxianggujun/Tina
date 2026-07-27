@@ -55,6 +55,14 @@ class PrimaryWindowUICapabilityTest : public testing::Test {
     return paint;
 }
 
+[[nodiscard]] UI::UILayoutStyle fixedSize(float width, float height) noexcept
+{
+    UI::UILayoutStyle style{};
+    style.size.width = UI::UILayoutLength::Px(width);
+    style.size.height = UI::UILayoutLength::Px(height);
+    return style;
+}
+
 [[nodiscard]] UI::UIButtonActionCallback buttonAction(usize& activationCount) noexcept
 {
     return UI::UIButtonActionCallback{
@@ -234,6 +242,73 @@ TEST_F(PrimaryWindowUICapabilityTest, ProductThemeFacadeUpdatesExistingControlsA
     auto expiredGet = tree->productTheme();
     ASSERT_FALSE(expiredGet.has_value());
     EXPECT_EQ(expiredGet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ScrollViewFacadeRoundTripsMetricsAndExpiresWithPhase)
+{
+    constexpr UI::UIScrollViewStyle ScrollStyle{
+        .axes = UI::UIScrollAxes::Vertical,
+        .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+        .wheelStep = 32.0F,
+    };
+    constexpr UI::UIScrollViewPaint ScrollPaint{
+        .trackColor = {.red = 20, .green = 30, .blue = 40, .alpha = 255},
+        .thumbColor = {.red = 80, .green = 100, .blue = 120, .alpha = 255},
+        .draggingThumbColor = {.red = 240, .green = 180, .blue = 40, .alpha = 255},
+        .thickness = 10.0F,
+        .minThumbExtent = 24.0F,
+    };
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto scrollView = tree->createScrollView(root->rootNodeId());
+    ASSERT_TRUE(scrollView.has_value()) << scrollView.error().message;
+    auto content = tree->createPanel(*scrollView);
+    ASSERT_TRUE(content.has_value()) << content.error().message;
+
+    ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(100.0F, 100.0F)).has_value());
+    ASSERT_TRUE(tree->setLayoutStyle(*scrollView, fixedSize(100.0F, 100.0F)).has_value());
+    ASSERT_TRUE(tree->setLayoutStyle(*content, fixedSize(100.0F, 200.0F)).has_value());
+    ASSERT_TRUE(tree->setScrollViewStyle(*scrollView, ScrollStyle).has_value());
+    ASSERT_TRUE(tree->setScrollViewPaint(*scrollView, ScrollPaint).has_value());
+    ASSERT_TRUE(tree->setScrollViewOffset(*scrollView, {.x = 0.0F, .y = 40.0F}).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    auto style = treeView.scrollViewStyle(*scrollView);
+    auto paint = treeView.scrollViewPaint(*scrollView);
+    auto offset = treeView.scrollViewOffset(*scrollView);
+    auto metrics = treeView.scrollViewMetrics(*scrollView);
+    auto dragging = treeView.isScrollViewDragging(*scrollView);
+    ASSERT_TRUE(style.has_value()) << style.error().message;
+    ASSERT_TRUE(paint.has_value()) << paint.error().message;
+    ASSERT_TRUE(offset.has_value()) << offset.error().message;
+    ASSERT_TRUE(metrics.has_value()) << metrics.error().message;
+    ASSERT_TRUE(dragging.has_value()) << dragging.error().message;
+    EXPECT_EQ(*style, ScrollStyle);
+    EXPECT_EQ(*paint, ScrollPaint);
+    EXPECT_EQ(*offset, (UI::UIScrollOffset{.x = 0.0F, .y = 40.0F}));
+    EXPECT_EQ(metrics->offset, *offset);
+    EXPECT_FLOAT_EQ(metrics->maxOffsetY(), 100.0F);
+    EXPECT_FALSE(*dragging);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    auto expiredCreate = tree->createScrollView(root->rootNodeId());
+    ASSERT_FALSE(expiredCreate.has_value());
+    EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredMetrics = treeView.scrollViewMetrics(*scrollView);
+    ASSERT_FALSE(expiredMetrics.has_value());
+    EXPECT_EQ(expiredMetrics.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSet = tree->setScrollViewOffset(*scrollView, {});
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAndExpire)

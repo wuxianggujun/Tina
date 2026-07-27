@@ -4,9 +4,9 @@
 #include <tina/ui/UI.hpp>
 #include <tina/ui/WindowsUiaAccessibilityProviderFactory.hpp>
 
+#include "UIUiaMapping.hpp"
 #include "WindowsUiaAccessibilityProvider.hpp"
 #include "WindowsUiaHostBridge.hpp"
-#include "UIUiaMapping.hpp"
 
 #include <UIAutomation.h>
 #include <Windows.h>
@@ -20,17 +20,18 @@ namespace {
 
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
-[[nodiscard]] std::unique_ptr<UI::UIContext> createContext(
-    Platform::WindowId window,
-    UI::UIContextCapacityConfig capacities = {
-        .nodeCapacity = 32,
-        .rootCapacity = 1,
-        .paintSnapshotCapacity = 32,
-        .routePathCapacity = 8,
-        .routedPointerListenerCapacity = 8,
-        .buttonActionCapacity = 8,
-    },
-    std::pmr::memory_resource& resource = *std::pmr::get_default_resource())
+[[nodiscard]] std::unique_ptr<UI::UIContext>
+createContext(Platform::WindowId window,
+              UI::UIContextCapacityConfig capacities =
+                  {
+                      .nodeCapacity = 64,
+                      .rootCapacity = 1,
+                      .paintSnapshotCapacity = 64,
+                      .routePathCapacity = 8,
+                      .routedPointerListenerCapacity = 8,
+                      .buttonActionCapacity = 8,
+                  },
+              std::pmr::memory_resource& resource = *std::pmr::get_default_resource())
 {
     auto result = UI::UIContext::Create(window, capacities, resource);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
@@ -73,6 +74,7 @@ TEST(WindowsUiaMappingTest, RoleMapsToUiaControlTypeConstants)
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::RadioButton), UI::Uia::kControlTypeRadioButton);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::TextEdit), UI::Uia::kControlTypeEdit);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Label), UI::Uia::kControlTypeText);
+    EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::ScrollView), UI::Uia::kControlTypePane);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Group), UI::Uia::kControlTypeGroup);
 }
 
@@ -125,8 +127,8 @@ TEST(WindowsUiaMappingTest, MapsEnabledFocusRangeToggleAndValue)
         .value = 55.0F,
         .minValue = 0.0F,
         .maxValue = 100.0F,
-        .states = UI::UIAccessibilityState::Enabled | UI::UIAccessibilityState::HasRange
-            | UI::UIAccessibilityState::ReadOnly,
+        .states =
+            UI::UIAccessibilityState::Enabled | UI::UIAccessibilityState::HasRange | UI::UIAccessibilityState::ReadOnly,
     };
     const auto mappedProgress = UI::Uia::mapAccessibilityNode(progress);
     ASSERT_TRUE(mappedProgress.rangeValue.has_value());
@@ -334,9 +336,9 @@ TEST(WindowsUiaHostBridgeTest, AttachPublishExposesRootProviderAndChildren)
     ASSERT_TRUE(bridgeResult.has_value());
     auto bridge = std::move(*bridgeResult);
 
-    const HWND hwnd = ::CreateWindowExW(
-        0, L"STATIC", L"TinaUiaBridgeTest", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 320, 200, nullptr,
-        nullptr, ::GetModuleHandleW(nullptr), nullptr);
+    const HWND hwnd =
+        ::CreateWindowExW(0, L"STATIC", L"TinaUiaBridgeTest", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 320,
+                          200, nullptr, nullptr, ::GetModuleHandleW(nullptr), nullptr);
     ASSERT_NE(hwnd, nullptr);
 
     assertOk(bridge->attach(hwnd));
@@ -378,7 +380,8 @@ TEST(WindowsUiaHostBridgeTest, AttachPublishExposesRootProviderAndChildren)
     IRawElementProviderFragment* firstChild = nullptr;
     ASSERT_HRESULT_SUCCEEDED(rootFragment->Navigate(NavigateDirection_FirstChild, &firstChild));
     EXPECT_NE(firstChild, nullptr);
-    if (firstChild != nullptr) {
+    if (firstChild != nullptr)
+    {
         IRawElementProviderSimple* childSimple = nullptr;
         ASSERT_HRESULT_SUCCEEDED(firstChild->QueryInterface(IID_PPV_ARGS(&childSimple)));
         ASSERT_NE(childSimple, nullptr);

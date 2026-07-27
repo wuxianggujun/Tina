@@ -7,6 +7,7 @@
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
+#include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
@@ -44,6 +45,7 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UINodeId> createProgressBar(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createRadioButton(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createModal(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createScrollView(UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);
@@ -83,6 +85,14 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setSliderChangeCallback(UI::UINodeId slider, UI::UISliderChangeCallback callback);
     [[nodiscard]] Core::Status clearSliderChangeCallback(UI::UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(UI::UINodeId slider) const;
+    [[nodiscard]] Core::Status setScrollViewStyle(UI::UINodeId scrollView, const UI::UIScrollViewStyle& style);
+    [[nodiscard]] Core::Result<UI::UIScrollViewStyle> scrollViewStyle(UI::UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setScrollViewOffset(UI::UINodeId scrollView, UI::UIScrollOffset offset);
+    [[nodiscard]] Core::Result<UI::UIScrollOffset> scrollViewOffset(UI::UINodeId scrollView) const;
+    [[nodiscard]] Core::Result<UI::UIScrollViewMetrics> scrollViewMetrics(UI::UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setScrollViewPaint(UI::UINodeId scrollView, const UI::UIScrollViewPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIScrollViewPaint> scrollViewPaint(UI::UINodeId scrollView) const;
+    [[nodiscard]] Core::Result<bool> isScrollViewDragging(UI::UINodeId scrollView) const;
     [[nodiscard]] Core::Status setProgressBarRange(UI::UINodeId progressBar, float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValue(UI::UINodeId progressBar, float value);
     [[nodiscard]] Core::Result<float> progressBarValue(UI::UINodeId progressBar) const;

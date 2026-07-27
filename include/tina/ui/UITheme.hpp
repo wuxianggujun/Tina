@@ -5,6 +5,7 @@
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
+#include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
 
@@ -39,6 +40,9 @@ struct UITheme final {
     UIStraightSrgba8Color shadow = rgb(0x000000, 100);
     UIStraightSrgba8Color buttonNormal = rgb(0x287850);
     UIStraightSrgba8Color buttonDisabled = rgb(0x4C5258, 230);
+    UIStraightSrgba8Color scrollBarTrack = rgb(0x07101A, 210);
+    UIStraightSrgba8Color scrollBarThumb = rgb(0x58738E, 235);
+    UIStraightSrgba8Color scrollBarThumbActive = rgb(0xFFD250, 250);
 
     float panelBorderWidth = 1.0F;
     float panelShadowOffsetX = 3.0F;
@@ -78,6 +82,9 @@ struct UITheme final {
     theme.shadow = rgb(0x000000, 40);
     theme.buttonNormal = rgb(0x2A8A58);
     theme.buttonDisabled = rgb(0xA0A8B0, 230);
+    theme.scrollBarTrack = rgb(0xD2D9E2, 230);
+    theme.scrollBarThumb = rgb(0x687B90, 235);
+    theme.scrollBarThumbActive = rgb(0x9A6500, 250);
     return theme;
 }
 
@@ -310,6 +317,17 @@ struct UITextEditChrome final {
 struct UISettingsPanelChrome final {
     UIBoxPaint panel{};
 };
+
+[[nodiscard]] constexpr UIScrollViewPaint makeScrollViewPaint(const UITheme& theme) noexcept
+{
+    return UIScrollViewPaint{
+        .trackColor = theme.scrollBarTrack,
+        .thumbColor = theme.scrollBarThumb,
+        .draggingThumbColor = theme.scrollBarThumbActive,
+        .thickness = 10.0F,
+        .minThumbExtent = 24.0F,
+    };
+}
 
 [[nodiscard]] constexpr UISettingsPanelChrome makeSettingsPanelChrome(const UITheme& theme) noexcept
 {

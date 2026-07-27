@@ -20,6 +20,7 @@
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
+#include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>

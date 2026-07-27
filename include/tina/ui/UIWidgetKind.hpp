@@ -22,6 +22,9 @@ enum class UIWidgetKind : u8 {
     // Overlay container that establishes a focus scope and blocks pointer
     // routing to lower committed content while effectively visible.
     Modal,
+    // Clipping container with retained two-axis offset, wheel routing, and
+    // interactive scrollbars.
+    ScrollView,
 };
 
 } // namespace Tina::UI
