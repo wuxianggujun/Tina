@@ -47,6 +47,10 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);
     [[nodiscard]] Core::Result<bool> isEnabled(UI::UINodeId node) const;
+    // Context-wide theme mutation remains phase-scoped even though this facade
+    // is rooted. Existing local paint/text overrides are preserved.
+    [[nodiscard]] Core::Result<UI::UITheme> productTheme() const;
+    [[nodiscard]] Core::Status setProductTheme(const UI::UITheme& theme);
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
     [[nodiscard]] Core::Status setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(UI::UINodeId button) const;

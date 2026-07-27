@@ -402,6 +402,36 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isEnabled(
     return *enabled;
 }
 
+Core::Result<UI::UITheme> PrimaryWindowUICapabilityState::productTheme(
+    u64 epoch,
+    PrimaryWindowUIPhase phase)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::productTheme";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return context_->productTheme();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setProductTheme(
+    u64 epoch,
+    PrimaryWindowUIPhase phase,
+    const UI::UITheme& theme)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setProductTheme";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->setProductTheme(theme);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase,
                                                          UI::UITreeUpdater& updater, UI::UINodeId node,
                                                          const UI::UIBoxPaint& paint)

@@ -168,6 +168,33 @@ void publishLayout(
     return nullptr;
 }
 
+[[nodiscard]] usize countSolidEntries(
+    UI::UICommittedPaintView paint,
+    UI::UINodeId node) noexcept
+{
+    usize count = 0;
+    for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
+        if (entry.node == node && !entry.isGlyph) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+[[nodiscard]] bool hasSolidColor(
+    UI::UICommittedPaintView paint,
+    UI::UINodeId node,
+    UI::UIStraightSrgba8Color color) noexcept
+{
+    const UI::UIPremultipliedRgba8Color expected = UI::premultiply(color);
+    for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
+        if (entry.node == node && !entry.isGlyph && entry.solidFill == expected) {
+            return true;
+        }
+    }
+    return false;
+}
+
 [[nodiscard]] const UI::UISemanticsEntry* findSemanticsEntry(
     UI::UICommittedSemanticsView semantics,
     UI::UINodeId node) noexcept
@@ -327,6 +354,68 @@ TEST(UIButtonVisualTest, PaintTracksHoverPressMoveReleaseAndFocus)
     semantics = findSemanticsEntry(context->committedSemantics(), button);
     ASSERT_NE(semantics, nullptr);
     EXPECT_TRUE(semantics->focused);
+}
+
+TEST(UIButtonVisualTest, ProductChromeFocusesWithBorderAndPressCollapsesShadow)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const Platform::WindowId window = *windows->tryEmplace(1);
+    auto contextResult = UI::UIContext::Create(
+        window,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 16,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 16,
+            .routePathCapacity = 8,
+            .buttonActionCapacity = 8,
+        });
+    ASSERT_TRUE(contextResult.has_value());
+    std::unique_ptr<UI::UIContext> context = std::move(*contextResult);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId button = createButton(*context, root.rootNodeId());
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    assertOk(updater.setLayoutStyle(button, fixedSize(60.0F, 36.0F)));
+    assertOk(updater.setButtonAction(
+        button,
+        UI::UIButtonActionCallback{
+            [](const UI::UIButtonActionEvent&) noexcept {}}));
+    publishLayout(*context);
+
+    const UI::UIButtonChrome chrome = UI::makeButtonChrome(context->productTheme());
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 5U);
+    EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
+
+    const UI::UIPointerRouteResult downRoute = route(
+        *context,
+        makePointerInput(
+            window,
+            UI::UIRoutedPointerEventKind::ButtonDown,
+            1,
+            {.x = 10.0F, .y = 10.0F}));
+    EXPECT_TRUE(downRoute.consumed);
+    publishLayout(*context);
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 5U);
+    EXPECT_FALSE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
+    EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.borderDark));
+    EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.borderLight));
+
+    const UI::UIPointerRouteResult upRoute = route(
+        *context,
+        makePointerInput(
+            window,
+            UI::UIRoutedPointerEventKind::ButtonUp,
+            2,
+            {.x = 10.0F, .y = 10.0F}));
+    EXPECT_TRUE(upRoute.consumed);
+    publishLayout(*context);
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 6U);
+    EXPECT_TRUE(hasSolidColor(
+        context->committedPaint(),
+        button,
+        chrome.states.focusedBorderColor));
 }
 
 TEST(UIButtonVisualTest, KeyboardAcceptDownAndUpCommitPressedAndFocusedPaint)

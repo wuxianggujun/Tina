@@ -15,14 +15,17 @@
 
 namespace Tina::UI {
 
-// Interaction-state overrides for a Button background. UIBoxPaint remains the
-// normal-state escape hatch. A zero-alpha override falls back to the next
-// state, with disabled > pressed > hovered > focused > normal precedence.
+// Interaction-state overrides for a Button. UIBoxPaint remains the normal-state
+// escape hatch. A zero-alpha background override falls back to the next state,
+// with disabled > pressed > hovered > focused > normal precedence. Focused
+// borders do not replace the fill; pressed chrome collapses the UIBoxPaint
+// shadow and reverses its dual-tone border to provide deterministic depth.
 struct UIButtonPaint final {
     UIStraightSrgba8Color hoveredBackgroundColor{};
     UIStraightSrgba8Color pressedBackgroundColor{};
     UIStraightSrgba8Color focusedBackgroundColor{};
     UIStraightSrgba8Color disabledBackgroundColor{};
+    UIStraightSrgba8Color focusedBorderColor{};
 
     auto operator<=>(const UIButtonPaint&) const = default;
 };

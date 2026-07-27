@@ -27,5 +27,6 @@ inline constexpr Core::ErrorCode InvalidGlyph{Core::ErrorDomain::UI, 18};
 inline constexpr Core::ErrorCode InvalidControlValue{Core::ErrorDomain::UI, 19};
 inline constexpr Core::ErrorCode AccessibilityTreeMissing{Core::ErrorDomain::UI, 20};
 inline constexpr Core::ErrorCode AccessibilityNodeStale{Core::ErrorDomain::UI, 21};
+inline constexpr Core::ErrorCode InvalidTheme{Core::ErrorDomain::UI, 22};
 
 } // namespace Tina::UI::UIErrorCode

@@ -353,12 +353,13 @@ public:
     [[nodiscard]] Platform::WindowId ownerWindow() const noexcept;
     [[nodiscard]] bool contains(UINodeId node) const noexcept;
 
-    // Active product theme for create* default chrome. Defaults to
-    // makeDefaultProductTheme(). setProductTheme updates the active theme for
-    // subsequent create* only; existing nodes keep their paints until callers
-    // re-apply via setBoxPaint / set*Paint / setTextStyle (local override).
+    // Active product theme for default control chrome. Defaults to
+    // makeDefaultProductTheme(). setProductTheme validates and atomically
+    // re-themes existing properties that still inherit product chrome. A local
+    // setBoxPaint / set*Paint / setTextStyle call detaches only that property;
+    // new nodes inherit the latest theme. Owner-thread only.
     [[nodiscard]] const UITheme& productTheme() const noexcept;
-    void setProductTheme(const UITheme& theme) noexcept;
+    [[nodiscard]] Core::Status setProductTheme(const UITheme& theme);
 
     // Opens (or replaces) the text face used by measure/paint. Closes the previous
     // face, clears the glyph atlas, and dirties layout/paint for nodes with text.

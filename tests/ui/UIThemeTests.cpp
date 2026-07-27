@@ -4,7 +4,9 @@
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UITheme.hpp>
 
+#include <limits>
 #include <memory>
+#include <thread>
 
 namespace Tina::Tests {
 namespace {
@@ -14,7 +16,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 [[nodiscard]] Platform::WindowId makeTestWindow()
 {
     static auto windows = [] {
-        auto pool = WindowPool::Create(8);
+        auto pool = WindowPool::Create(32);
         EXPECT_TRUE(pool.has_value());
         return std::make_unique<WindowPool>(std::move(*pool));
     }();
@@ -87,9 +89,12 @@ TEST(UIThemeTest, ButtonChromeUsesThemeTokens)
     constexpr UI::UIButtonChrome chrome = UI::makeButtonChrome(theme);
     ASSERT_TRUE(chrome.box.solidFill.has_value());
     EXPECT_EQ(chrome.box.solidFill->color.alpha, 230);
-    EXPECT_EQ(chrome.states.focusedBackgroundColor, theme.focusRing);
+    EXPECT_NE(chrome.states.focusedBackgroundColor.alpha, 0);
     EXPECT_EQ(chrome.states.disabledBackgroundColor, theme.buttonDisabled);
+    EXPECT_EQ(chrome.states.focusedBorderColor, theme.focusRing);
     EXPECT_EQ(chrome.label.color, theme.textPrimary);
+    EXPECT_EQ(chrome.box.shadow, theme.shadow);
+    EXPECT_GT(chrome.box.borderWidth, 0.0F);
 }
 
 TEST(UIThemeTest, LightThemeDiffersFromDefault)
@@ -131,7 +136,7 @@ TEST(UIThemeTest, CreateAppliesDefaultButtonChrome)
     EXPECT_EQ(*textStyle, expected.label);
 }
 
-TEST(UIThemeTest, SetProductThemeAffectsSubsequentCreatesOnly)
+TEST(UIThemeTest, SetProductThemeUpdatesExistingAndSubsequentControls)
 {
     const Platform::WindowId window = makeTestWindow();
     ASSERT_TRUE(window.hasValue());
@@ -143,7 +148,7 @@ TEST(UIThemeTest, SetProductThemeAffectsSubsequentCreatesOnly)
     auto darkButton = context->rootBuilder().createButton(root->rootNodeId());
     ASSERT_TRUE(darkButton.has_value());
 
-    context->setProductTheme(UI::makeLightProductTheme());
+    ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
     EXPECT_TRUE(context->productTheme() == UI::makeLightProductTheme());
 
     auto lightButton = context->rootBuilder().createButton(root->rootNodeId());
@@ -155,9 +160,9 @@ TEST(UIThemeTest, SetProductThemeAffectsSubsequentCreatesOnly)
     auto lightPaint = updater->buttonPaint(*lightButton);
     ASSERT_TRUE(darkPaint.has_value());
     ASSERT_TRUE(lightPaint.has_value());
-    EXPECT_EQ(*darkPaint, UI::makeButtonChrome(UI::makeDefaultProductTheme()).states);
+    EXPECT_EQ(*darkPaint, UI::makeButtonChrome(UI::makeLightProductTheme()).states);
     EXPECT_EQ(*lightPaint, UI::makeButtonChrome(UI::makeLightProductTheme()).states);
-    EXPECT_NE(*darkPaint, *lightPaint);
+    EXPECT_EQ(*darkPaint, *lightPaint);
 }
 
 TEST(UIThemeTest, LocalPaintOverrideDoesNotClearButtonStateChrome)
@@ -179,6 +184,150 @@ TEST(UIThemeTest, LocalPaintOverrideDoesNotClearButtonStateChrome)
     auto buttonPaint = updater->buttonPaint(*button);
     ASSERT_TRUE(buttonPaint.has_value());
     EXPECT_EQ(*buttonPaint, UI::makeButtonChrome(UI::makeDefaultProductTheme()).states);
+}
+
+TEST(UIThemeTest, LocalOverridesDetachOnlyTheirCorrespondingThemeProperties)
+{
+    const Platform::WindowId window = makeTestWindow();
+    auto context = createProductContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = context->rootBuilder().createRoot();
+    ASSERT_TRUE(root.has_value());
+    auto button = context->rootBuilder().createButton(root->rootNodeId());
+    ASSERT_TRUE(button.has_value());
+    auto updater = context->treeUpdater(*root);
+    ASSERT_TRUE(updater.has_value());
+
+    const UI::UIButtonPaint localStates{
+        .hoveredBackgroundColor = UI::rgb(0xAA2200),
+        .pressedBackgroundColor = UI::rgb(0x771100),
+        .focusedBackgroundColor = UI::rgb(0xCC4400),
+        .disabledBackgroundColor = UI::rgb(0x555555),
+        .focusedBorderColor = UI::rgb(0xFFFFFF),
+    };
+    ASSERT_TRUE(updater->setButtonPaint(*button, localStates).has_value());
+    ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
+
+    auto states = updater->buttonPaint(*button);
+    auto textStyle = updater->textStyle(*button);
+    ASSERT_TRUE(states.has_value());
+    ASSERT_TRUE(textStyle.has_value());
+    EXPECT_EQ(*states, localStates);
+    EXPECT_EQ(*textStyle, UI::makeButtonChrome(UI::makeLightProductTheme()).label);
+}
+
+TEST(UIThemeTest, ExplicitSameValueSetterStillDetachesThatProperty)
+{
+    const Platform::WindowId window = makeTestWindow();
+    auto context = createProductContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = context->rootBuilder().createRoot();
+    ASSERT_TRUE(root.has_value());
+    auto button = context->rootBuilder().createButton(root->rootNodeId());
+    ASSERT_TRUE(button.has_value());
+    auto updater = context->treeUpdater(*root);
+    ASSERT_TRUE(updater.has_value());
+
+    const UI::UIButtonPaint darkStates = updater->buttonPaint(*button).value();
+    ASSERT_TRUE(updater->setButtonPaint(*button, darkStates).has_value());
+    ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
+    EXPECT_EQ(updater->buttonPaint(*button).value(), darkStates);
+}
+
+TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
+{
+    const Platform::WindowId window = makeTestWindow();
+    auto context = createProductContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = context->rootBuilder().createRoot();
+    ASSERT_TRUE(root.has_value());
+    auto builder = context->rootBuilder();
+    auto label = builder.createLabel(root->rootNodeId());
+    auto checkbox = builder.createCheckbox(root->rootNodeId());
+    auto slider = builder.createSlider(root->rootNodeId());
+    auto textEdit = builder.createTextEdit(root->rootNodeId());
+    auto progress = builder.createProgressBar(root->rootNodeId());
+    auto radio = builder.createRadioButton(root->rootNodeId());
+    ASSERT_TRUE(label && checkbox && slider && textEdit && progress && radio);
+    auto updater = context->treeUpdater(*root);
+    ASSERT_TRUE(updater.has_value());
+    ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
+
+    const UI::UITheme light = UI::makeLightProductTheme();
+    EXPECT_EQ(updater->textStyle(*label).value(), UI::makeBodyTextStyle(light));
+    EXPECT_EQ(updater->checkboxPaint(*checkbox).value(), UI::makeCheckboxChrome(light).indicator);
+    EXPECT_EQ(updater->sliderPaint(*slider).value(), UI::makeSliderChrome(light).slider);
+    EXPECT_EQ(updater->textStyle(*textEdit).value(), UI::makeTextEditChrome(light).text);
+    EXPECT_EQ(updater->progressBarPaint(*progress).value(), UI::makeProgressBarChrome(light).bar);
+    EXPECT_EQ(updater->radioButtonPaint(*radio).value(), UI::makeRadioButtonChrome(light).radio);
+    EXPECT_EQ(updater->textStyle(*radio).value(), UI::makeRadioButtonChrome(light).label);
+}
+
+TEST(UIThemeTest, InvalidThemeAndWrongThreadAreRejectedWithoutMutation)
+{
+    const Platform::WindowId window = makeTestWindow();
+    auto context = createProductContext(window);
+    ASSERT_NE(context, nullptr);
+    const UI::UITheme original = context->productTheme();
+
+    UI::UITheme invalid = UI::makeLightProductTheme();
+    invalid.buttonTextSize = (std::numeric_limits<float>::quiet_NaN)();
+    Core::Status invalidStatus = context->setProductTheme(invalid);
+    ASSERT_FALSE(invalidStatus.has_value());
+    EXPECT_EQ(invalidStatus.error().code, UI::UIErrorCode::InvalidTheme);
+    EXPECT_EQ(context->productTheme(), original);
+
+    Core::Status threadedStatus = Core::success();
+    std::thread worker([&] {
+        threadedStatus = context->setProductTheme(UI::makeLightProductTheme());
+    });
+    worker.join();
+    ASSERT_FALSE(threadedStatus.has_value());
+    EXPECT_EQ(threadedStatus.error().code, UI::UIErrorCode::WrongOwnerThread);
+    EXPECT_EQ(context->productTheme(), original);
+}
+
+TEST(UIThemeTest, DirtyCapacityFailureLeavesThemeAndManagedPropertiesUntouched)
+{
+    const Platform::WindowId window = makeTestWindow();
+    auto contextResult = UI::UIContext::Create(
+        window,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 16,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 1,
+            .paintSnapshotCapacity = 16,
+        });
+    ASSERT_TRUE(contextResult.has_value());
+    auto& context = *contextResult;
+    auto root = context->rootBuilder().createRoot();
+    ASSERT_TRUE(root.has_value());
+    auto first = context->rootBuilder().createButton(root->rootNodeId());
+    auto second = context->rootBuilder().createButton(root->rootNodeId());
+    ASSERT_TRUE(first && second);
+    auto updater = context->treeUpdater(*root);
+    ASSERT_TRUE(updater.has_value());
+    const UI::UIButtonPaint original = updater->buttonPaint(*first).value();
+
+    Core::Status status = context->setProductTheme(UI::makeLightProductTheme());
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(context->productTheme(), UI::makeDefaultProductTheme());
+    EXPECT_EQ(updater->buttonPaint(*first).value(), original);
+    EXPECT_EQ(updater->buttonPaint(*second).value(), original);
+}
+
+TEST(UIThemeTest, ReapplyingCurrentThemeIsANoOp)
+{
+    const Platform::WindowId window = makeTestWindow();
+    auto context = createProductContext(window);
+    ASSERT_NE(context, nullptr);
+    const UI::UIContextStatistics before = context->statistics();
+    ASSERT_TRUE(context->setProductTheme(context->productTheme()).has_value());
+    const UI::UIContextStatistics after = context->statistics();
+    EXPECT_EQ(after.dirtyQueuePendingCount, before.dirtyQueuePendingCount);
+    EXPECT_EQ(after.paintRevision, before.paintRevision);
+    EXPECT_EQ(after.layoutRevision, before.layoutRevision);
 }
 
 TEST(UIThemeTest, CreateAppliesDefaultSliderAndProgressChrome)

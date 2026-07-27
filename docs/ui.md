@@ -185,9 +185,14 @@ dirty 类别。
 - `create*`（Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton）与 Label 文本样式在创建时
   **自动 apply** 对应 `make*Chrome` / text style；Root/Panel 默认无底色（容器），需背景时用
   `makePanelBoxPaint` / `makeSettingsPanelChrome`；
-- `setProductTheme(theme)` 只影响**之后**新建的节点；已有节点保留当前 paint，直到调用方
-  `setBoxPaint` / `set*Paint` / `setTextStyle` 覆盖；
-- 局部覆盖优先级：单节点 setter > 创建时的全局 Theme；
+- `setProductTheme(theme)` 会校验 metric，并事务式重绑所有仍继承产品 Theme 的既有控件属性；容量、
+  文本测量或线程校验失败时，Theme 与控件属性均保持不变；之后新建的节点继承最新 Theme；
+- 局部覆盖按属性分离：`setBoxPaint` / `set*Paint` / `setTextStyle` 只让对应属性脱离后续全局换肤，
+  同一控件上未覆盖的其他属性仍会跟随 Theme；即使 setter 写入当前相同值，也视为显式局部覆盖；
+- Runtime 游戏通过 phase-scoped `PrimaryWindowUITreeUpdater::productTheme()` / `setProductTheme()` 换肤，
+  不取得裸 `UIContext`；
+- 默认 Button chrome 使用 Low elevation 双边框与阴影；pressed 状态收拢阴影并反转双边框，focus 使用
+  独立边框色，因此 hover / pressed / focused / disabled 具有可辨识层次；
 - 另提供 `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome` 等）。
 
 `UIBoxPaint` 仍是 escape hatch，并可携带 borderLight/borderDark/borderWidth 与 shadow（假 elevation）。
@@ -209,7 +214,7 @@ rounded rectangle、Image widget、毛玻璃与 CSS 式 stylesheet 仍未实现�
 人工复核 `frame-02.png` / `frame-03.png` 中上述控件可见、中文正常且无裁剪或重叠；两帧 65% fill
 均为 x=700..842（143 px），选中色只出现在 Windowed RadioButton，client capture 未混入标题栏。
 
-当前 tip 最近直接验证为：`tina_ui_tests` 263/263（含 Accessibility）、`tina_runtime_ui_tests` 83/83、
+当前 tip 最近直接验证为：`tina_ui_tests` 270/270（含 Accessibility）、`tina_runtime_ui_tests` 84/84、
 `tina_ui_render_integration_tests` 15/15、product-2d 图的 `tina_ui_freetype_tests` 3/3。UI 容量回归
 覆盖 Checkbox/Slider mutation、TextEdit pointer selection 和需要同时重绘旧/新节点的 focus step；
 dirty queue 容量不足时状态与 callback 原子不变，同文本替换 selection 仍发布新 paint。数字是当前

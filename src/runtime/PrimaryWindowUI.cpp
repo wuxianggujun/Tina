@@ -163,6 +163,24 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isEnabled(UI::UINodeId node) cons
     return m_state->isEnabled(m_epoch, m_phase, m_updater, node);
 }
 
+Core::Result<UI::UITheme> PrimaryWindowUITreeUpdater::productTheme() const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITheme>("PrimaryWindowUITreeUpdater::productTheme");
+    }
+    return m_state->productTheme(m_epoch, m_phase);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setProductTheme(const UI::UITheme& theme)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setProductTheme");
+    }
+    return m_state->setProductTheme(m_epoch, m_phase, theme);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint)
 {
     if (m_state == nullptr)

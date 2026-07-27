@@ -160,6 +160,38 @@ TEST_F(PrimaryWindowUICapabilityTest, EnabledFacadeRoundTripsAndExpiresWithPhase
     EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, ProductThemeFacadeUpdatesExistingControlsAndExpiresWithPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto button = tree->createButton(root->rootNodeId());
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    auto initialTheme = tree->productTheme();
+    ASSERT_TRUE(initialTheme.has_value()) << initialTheme.error().message;
+    EXPECT_EQ(*initialTheme, UI::makeDefaultProductTheme());
+    ASSERT_TRUE(tree->setProductTheme(UI::makeLightProductTheme()).has_value());
+    EXPECT_EQ(tree->productTheme().value(), UI::makeLightProductTheme());
+    EXPECT_EQ(
+        tree->buttonPaint(*button).value(),
+        UI::makeButtonChrome(UI::makeLightProductTheme()).states);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    Core::Status expiredSet = tree->setProductTheme(UI::makeDefaultProductTheme());
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredGet = tree->productTheme();
+    ASSERT_FALSE(expiredGet.has_value());
+    EXPECT_EQ(expiredGet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAndExpire)
 {
     CapabilityState state;

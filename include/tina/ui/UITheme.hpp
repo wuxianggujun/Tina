@@ -20,8 +20,9 @@ enum class UIElevation : u8 {
 };
 
 // Product Theme tokens + control chrome factories. Not a CSS resolver.
-// UIContext holds the active theme; create* applies chrome automatically.
-// Callers may still setBoxPaint / set*Paint / setTextStyle as local overrides.
+// UIContext owns the active theme and can transactionally re-theme existing
+// default chrome. Local setBoxPaint / set*Paint / setTextStyle calls detach only
+// the corresponding property from later theme updates.
 struct UITheme final {
     UIStraightSrgba8Color surface0 = rgb(0x0A121C);
     UIStraightSrgba8Color surface1 = rgb(0x121C28);
@@ -195,13 +196,14 @@ struct UIButtonChrome final {
     const UIStraightSrgba8Color fill =
         normalFill.alpha != 0 ? normalFill : scaleColorAlpha(theme.buttonNormal, 230);
     return UIButtonChrome{
-        .box = makeSolidBox(fill),
+        .box = makePanelBoxPaint(theme, fill, UIElevation::Low),
         .states =
             UIButtonPaint{
                 .hoveredBackgroundColor = scaleColorAlpha(lightenChannel(fill, 28), 240),
                 .pressedBackgroundColor = darkenChannel(fill, 36),
-                .focusedBackgroundColor = theme.focusRing,
+                .focusedBackgroundColor = lightenChannel(fill, 12),
                 .disabledBackgroundColor = theme.buttonDisabled,
+                .focusedBorderColor = theme.focusRing,
             },
         .label =
             UITextStyle{

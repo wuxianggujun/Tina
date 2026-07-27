@@ -214,6 +214,10 @@ SolidQuad/Glyph 与 axis-aligned clip。
 Label、Button、Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit。
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8；
+`PrimaryWindowUITreeUpdater::setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
+paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
+错误或 dirty queue 容量不足均零发布。
+
 可选 FreeType、R8 Glyph atlas、semantics snapshot 与 `UIAccessibilityTree`/probe provider 均为 Tina API。
 可选 Windows UIA 私有 adapter（`TINA_BUILD_UI_UIA`）映射 UIA 形属性，公开头无 COM；产品路径可经
 EngineHost 自动附着 HWND HostBridge（`IRawElementProviderSimple` 首切片）。Narrator 人工金标与

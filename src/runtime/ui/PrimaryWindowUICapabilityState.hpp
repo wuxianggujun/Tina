@@ -67,6 +67,13 @@ class PrimaryWindowUICapabilityState final {
                                           UI::UINodeId node, bool enabled);
     [[nodiscard]] Core::Result<bool> isEnabled(u64 epoch, PrimaryWindowUIPhase phase,
                                                const UI::UITreeUpdater& updater, UI::UINodeId node);
+    [[nodiscard]] Core::Result<UI::UITheme> productTheme(
+        u64 epoch,
+        PrimaryWindowUIPhase phase);
+    [[nodiscard]] Core::Status setProductTheme(
+        u64 epoch,
+        PrimaryWindowUIPhase phase,
+        const UI::UITheme& theme);
     [[nodiscard]] Core::Status setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                            UI::UINodeId node, const UI::UIBoxPaint& paint);
     [[nodiscard]] Core::Status setButtonPaint(u64 epoch, PrimaryWindowUIPhase phase,

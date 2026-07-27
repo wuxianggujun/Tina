@@ -127,6 +127,18 @@ struct RadioButtonState final {
     bool selected = false;
 };
 
+inline constexpr u8 ThemeBindingBoxPaint = 1U << 0U;
+inline constexpr u8 ThemeBindingTextStyle = 1U << 1U;
+inline constexpr u8 ThemeBindingButtonPaint = 1U << 2U;
+inline constexpr u8 ThemeBindingCheckboxPaint = 1U << 3U;
+inline constexpr u8 ThemeBindingSliderPaint = 1U << 4U;
+inline constexpr u8 ThemeBindingProgressBarPaint = 1U << 5U;
+inline constexpr u8 ThemeBindingRadioButtonPaint = 1U << 6U;
+
+inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
+inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
+inline constexpr u8 ThemeDirtyLayoutAncestor = 1U << 2U;
+
 [[nodiscard]] constexpr bool containsLineBreak(std::string_view text) noexcept
 {
     return text.find('\r') != std::string_view::npos
@@ -496,6 +508,26 @@ void appendBoxChromePaints(
 [[nodiscard]] bool isFiniteNonNegative(float value) noexcept
 {
     return std::isfinite(value) && value >= 0.0F;
+}
+
+[[nodiscard]] Core::Status validateProductTheme(const UITheme& theme)
+{
+    if (!isFiniteNonNegative(theme.panelBorderWidth)
+        || !std::isfinite(theme.panelShadowOffsetX)
+        || !std::isfinite(theme.panelShadowOffsetY)
+        || !isFiniteNonNegative(theme.checkboxIndicatorInset)
+        || !isFiniteNonNegative(theme.radioSelectedInset)
+        || !isFiniteNonNegative(theme.radioLabelGap)
+        || !isFiniteNonNegative(theme.sliderContentInset)
+        || !isFiniteNonNegative(theme.sliderThumbWidth)
+        || !(std::isfinite(theme.buttonTextSize) && theme.buttonTextSize > 0.0F)
+        || !(std::isfinite(theme.bodyTextSize) && theme.bodyTextSize > 0.0F)
+        || !(std::isfinite(theme.titleTextSize) && theme.titleTextSize > 0.0F)) {
+        return fail(
+            UIErrorCode::InvalidTheme,
+            "UI Theme metrics must be finite; sizes must be positive and insets non-negative");
+    }
+    return Core::success();
 }
 
 [[nodiscard]] Core::Status normalizeLayoutLength(
@@ -875,6 +907,11 @@ struct UIContext::Impl final {
     std::pmr::vector<u8> enabledByNodeIndex;
     std::pmr::vector<UIBoxPaint> boxPaintsByIndex;
     std::pmr::vector<UIButtonPaint> buttonPaintsByNodeIndex;
+    // Each bit tracks one property that still inherits product chrome. Theme
+    // staging scratch is index-aligned and allocated once during Create().
+    std::pmr::vector<u8> themeBindingsByNodeIndex;
+    std::pmr::vector<u8> themeDirtyScratchByNodeIndex;
+    std::pmr::vector<UITextMetrics> themeTextMetricsScratchByNodeIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
     std::pmr::vector<WidgetTextState> textStatesByIndex;
@@ -1047,6 +1084,9 @@ struct UIContext::Impl final {
           enabledByNodeIndex(&resource),
           boxPaintsByIndex(&resource),
           buttonPaintsByNodeIndex(&resource),
+          themeBindingsByNodeIndex(&resource),
+          themeDirtyScratchByNodeIndex(&resource),
+          themeTextMetricsScratchByNodeIndex(&resource),
           localSolidFillCacheByIndex(&resource),
           localTextColorCacheByIndex(&resource),
           textStatesByIndex(&resource),
@@ -1147,6 +1187,9 @@ struct UIContext::Impl final {
         impl->enabledByNodeIndex.resize(normalized.nodeCapacity, 1);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
         impl->buttonPaintsByNodeIndex.resize(normalized.nodeCapacity);
+        impl->themeBindingsByNodeIndex.resize(normalized.nodeCapacity, 0);
+        impl->themeDirtyScratchByNodeIndex.resize(normalized.nodeCapacity, 0);
+        impl->themeTextMetricsScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
         impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
         impl->textStatesByIndex.resize(normalized.nodeCapacity);
@@ -2372,6 +2415,37 @@ struct UIContext::Impl final {
         return widgetPaintColor(node, color);
     }
 
+    [[nodiscard]] UIBoxPaint resolvedBoxChrome(
+        UINodeId node,
+        u32 nodeIndex) const noexcept
+    {
+        UIBoxPaint chrome = boxPaintsByIndex[nodeIndex];
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        if (record == nullptr || record->kind != UIWidgetKind::Button
+            || nodeIndex >= buttonPaintsByNodeIndex.size()
+            || !isNodeEnabled(node)) {
+            return chrome;
+        }
+
+        if (isButtonPressed(node)) {
+            std::swap(chrome.borderLight, chrome.borderDark);
+            chrome.shadowOffsetX = 0.0F;
+            chrome.shadowOffsetY = 0.0F;
+            return chrome;
+        }
+
+        const UIButtonPaint& states = buttonPaintsByNodeIndex[nodeIndex];
+        if (defaultActionFocusButton == node
+            && states.focusedBorderColor.alpha != 0) {
+            chrome.borderLight = states.focusedBorderColor;
+            chrome.borderDark = states.focusedBorderColor;
+            if (!(chrome.borderWidth > 0.0F)) {
+                chrome.borderWidth = 1.0F;
+            }
+        }
+        return chrome;
+    }
+
     [[nodiscard]] UIPremultipliedRgba8Color resolvedRadioIndicatorColor(
         UINodeId node,
         u32 nodeIndex) const noexcept
@@ -2411,7 +2485,9 @@ struct UIContext::Impl final {
                     "UI paint snapshot layout references a stale node");
             }
             const u32 nodeIndex = layoutEntry.node.index();
-            const UIBoxPaint& boxPaint = boxPaintsByIndex[nodeIndex];
+            const UIBoxPaint boxPaint = resolvedBoxChrome(
+                layoutEntry.node,
+                nodeIndex);
             const UIPremultipliedRgba8Color normalColor =
                 boxPaint.solidFill.has_value()
                 ? premultiply(boxPaint.solidFill->color)
@@ -2962,7 +3038,9 @@ struct UIContext::Impl final {
                 continue;
             }
             const u32 nodeIndex = layoutEntry.node.index();
-            const UIBoxPaint& boxPaint = boxPaintsByIndex[nodeIndex];
+            const UIBoxPaint boxPaint = resolvedBoxChrome(
+                layoutEntry.node,
+                nodeIndex);
             const UIPremultipliedRgba8Color fill =
                 resolvedBoxFillColor(
                     layoutEntry.node,
@@ -4473,6 +4551,11 @@ struct UIContext::Impl final {
         }
         boxPaintsByIndex[index] = {};
         buttonPaintsByNodeIndex[index] = {};
+        if (index < themeBindingsByNodeIndex.size()) {
+            themeBindingsByNodeIndex[index] = 0;
+            themeDirtyScratchByNodeIndex[index] = 0;
+            themeTextMetricsScratchByNodeIndex[index] = {};
+        }
         localSolidFillCacheByIndex[index] = {};
         localTextColorCacheByIndex[index] = {};
         clearTextState(index);
@@ -4908,78 +4991,424 @@ struct UIContext::Impl final {
         return nodeRecord->rootIndex == root.index();
     }
 
-    void applyDefaultProductChrome(u32 index, UIWidgetKind kind) noexcept
+    [[nodiscard]] static constexpr u8 defaultThemeBindingsFor(
+        UIWidgetKind kind) noexcept
     {
-        if (index >= boxPaintsByIndex.size()) {
-            return;
-        }
-
         switch (kind) {
         case UIWidgetKind::Root:
         case UIWidgetKind::Panel:
-            // Containers stay paint-free unless the caller sets a background.
-            // Use makePanelBoxPaint / makeSettingsPanelChrome for chrome.
+            return 0;
+        case UIWidgetKind::Label:
+            return ThemeBindingTextStyle;
+        case UIWidgetKind::Button:
+            return ThemeBindingBoxPaint
+                | ThemeBindingButtonPaint
+                | ThemeBindingTextStyle;
+        case UIWidgetKind::Checkbox:
+            return ThemeBindingBoxPaint | ThemeBindingCheckboxPaint;
+        case UIWidgetKind::Slider:
+            return ThemeBindingBoxPaint | ThemeBindingSliderPaint;
+        case UIWidgetKind::TextEdit:
+            return ThemeBindingBoxPaint | ThemeBindingTextStyle;
+        case UIWidgetKind::ProgressBar:
+            return ThemeBindingBoxPaint | ThemeBindingProgressBarPaint;
+        case UIWidgetKind::RadioButton:
+            return ThemeBindingRadioButtonPaint | ThemeBindingTextStyle;
+        }
+        return 0;
+    }
+
+    void applyBoundProductChrome(
+        u32 index,
+        UIWidgetKind kind,
+        const UITheme& theme) noexcept
+    {
+        if (index >= themeBindingsByNodeIndex.size()) {
+            return;
+        }
+        const u8 bindings = themeBindingsByNodeIndex[index];
+        switch (kind) {
+        case UIWidgetKind::Root:
+        case UIWidgetKind::Panel:
             break;
-        case UIWidgetKind::Label: {
-            if (index < textStatesByIndex.size()) {
-                textStatesByIndex[index].style = makeBodyTextStyle(productTheme);
+        case UIWidgetKind::Label:
+            if ((bindings & ThemeBindingTextStyle) != 0) {
+                textStatesByIndex[index].style = makeBodyTextStyle(theme);
             }
             break;
-        }
         case UIWidgetKind::Button: {
-            const UIButtonChrome chrome = makeButtonChrome(productTheme);
-            boxPaintsByIndex[index] = chrome.box;
-            if (index < buttonPaintsByNodeIndex.size()) {
+            const UIButtonChrome chrome = makeButtonChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0) {
+                boxPaintsByIndex[index] = chrome.box;
+            }
+            if ((bindings & ThemeBindingButtonPaint) != 0) {
                 buttonPaintsByNodeIndex[index] = chrome.states;
             }
-            if (index < textStatesByIndex.size()) {
+            if ((bindings & ThemeBindingTextStyle) != 0) {
                 textStatesByIndex[index].style = chrome.label;
             }
             break;
         }
         case UIWidgetKind::Checkbox: {
-            const UICheckboxChrome chrome = makeCheckboxChrome(productTheme);
-            boxPaintsByIndex[index] = chrome.box;
-            if (index < checkboxPaintsByNodeIndex.size()) {
+            const UICheckboxChrome chrome = makeCheckboxChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0) {
+                boxPaintsByIndex[index] = chrome.box;
+            }
+            if ((bindings & ThemeBindingCheckboxPaint) != 0) {
                 checkboxPaintsByNodeIndex[index] = chrome.indicator;
             }
             break;
         }
         case UIWidgetKind::Slider: {
-            const UISliderChrome chrome = makeSliderChrome(productTheme);
-            boxPaintsByIndex[index] = chrome.track;
-            if (index < sliderStatesByNodeIndex.size()) {
+            const UISliderChrome chrome = makeSliderChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0) {
+                boxPaintsByIndex[index] = chrome.track;
+            }
+            if ((bindings & ThemeBindingSliderPaint) != 0) {
                 sliderStatesByNodeIndex[index].paint = chrome.slider;
             }
             break;
         }
         case UIWidgetKind::TextEdit: {
-            const UITextEditChrome chrome = makeTextEditChrome(productTheme);
-            boxPaintsByIndex[index] = chrome.box;
-            if (index < textStatesByIndex.size()) {
+            const UITextEditChrome chrome = makeTextEditChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0) {
+                boxPaintsByIndex[index] = chrome.box;
+            }
+            if ((bindings & ThemeBindingTextStyle) != 0) {
                 textStatesByIndex[index].style = chrome.text;
             }
             break;
         }
         case UIWidgetKind::ProgressBar: {
-            const UIProgressBarChrome chrome = makeProgressBarChrome(productTheme);
-            boxPaintsByIndex[index] = chrome.track;
-            if (index < progressBarStatesByNodeIndex.size()) {
+            const UIProgressBarChrome chrome = makeProgressBarChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0) {
+                boxPaintsByIndex[index] = chrome.track;
+            }
+            if ((bindings & ThemeBindingProgressBarPaint) != 0) {
                 progressBarStatesByNodeIndex[index].paint = chrome.bar;
             }
             break;
         }
         case UIWidgetKind::RadioButton: {
-            const UIRadioButtonChrome chrome = makeRadioButtonChrome(productTheme);
-            if (index < radioButtonStatesByNodeIndex.size()) {
+            const UIRadioButtonChrome chrome = makeRadioButtonChrome(theme);
+            if ((bindings & ThemeBindingRadioButtonPaint) != 0) {
                 radioButtonStatesByNodeIndex[index].paint = chrome.radio;
             }
-            if (index < textStatesByIndex.size()) {
+            if ((bindings & ThemeBindingTextStyle) != 0) {
                 textStatesByIndex[index].style = chrome.label;
             }
             break;
         }
         }
+    }
+
+    void applyDefaultProductChrome(u32 index, UIWidgetKind kind) noexcept
+    {
+        if (index >= themeBindingsByNodeIndex.size()) {
+            return;
+        }
+        themeBindingsByNodeIndex[index] = defaultThemeBindingsFor(kind);
+        applyBoundProductChrome(index, kind, productTheme);
+    }
+
+    [[nodiscard]] static std::optional<UITextStyle> productTextStyleFor(
+        UIWidgetKind kind,
+        const UITheme& theme) noexcept
+    {
+        switch (kind) {
+        case UIWidgetKind::Label:
+            return makeBodyTextStyle(theme);
+        case UIWidgetKind::Button:
+            return makeButtonChrome(theme).label;
+        case UIWidgetKind::TextEdit:
+            return makeTextEditChrome(theme).text;
+        case UIWidgetKind::RadioButton:
+            return makeRadioButtonChrome(theme).label;
+        case UIWidgetKind::Root:
+        case UIWidgetKind::Panel:
+        case UIWidgetKind::Checkbox:
+        case UIWidgetKind::Slider:
+        case UIWidgetKind::ProgressBar:
+            return std::nullopt;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] static bool textMeasureInputsDiffer(
+        const UITextStyle& left,
+        const UITextStyle& right) noexcept
+    {
+        return left.logicalSize != right.logicalSize
+            || left.advanceScale != right.advanceScale
+            || left.lineHeightScale != right.lineHeightScale;
+    }
+
+    void stageThemePaintChange(u32 index) noexcept
+    {
+        themeDirtyScratchByNodeIndex[index] |= ThemeDirtyPaint;
+    }
+
+    void detachThemeBinding(u32 index, u8 binding) noexcept
+    {
+        if (index < themeBindingsByNodeIndex.size()) {
+            themeBindingsByNodeIndex[index] &= static_cast<u8>(~binding);
+        }
+    }
+
+    [[nodiscard]] Core::Status stageThemeTextStyle(
+        u32 index,
+        const UITextStyle& nextStyle)
+    {
+        WidgetTextState& state = textStatesByIndex[index];
+        if (state.style == nextStyle) {
+            return Core::success();
+        }
+        stageThemePaintChange(index);
+        if (!state.hasContent || !textMeasureInputsDiffer(state.style, nextStyle)) {
+            themeTextMetricsScratchByNodeIndex[index] = state.metrics;
+            return Core::success();
+        }
+        auto measured = measureWidgetText(textViewFor(index), nextStyle);
+        if (!measured) {
+            return Core::failure(measured.error());
+        }
+        themeTextMetricsScratchByNodeIndex[index] = *measured;
+        if (*measured != state.metrics) {
+            themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status stageBoundProductChrome(
+        u32 index,
+        UIWidgetKind kind,
+        const UITheme& theme)
+    {
+        const u8 bindings = themeBindingsByNodeIndex[index];
+        if ((bindings & ThemeBindingTextStyle) != 0) {
+            const auto nextStyle = productTextStyleFor(kind, theme);
+            if (!nextStyle.has_value()) {
+                return fail(
+                    Core::CoreErrorCode::Internal,
+                    "UI Theme text binding does not match the node kind");
+            }
+            if (Core::Status status = stageThemeTextStyle(index, *nextStyle); !status) {
+                return status;
+            }
+        }
+
+        switch (kind) {
+        case UIWidgetKind::Root:
+        case UIWidgetKind::Panel:
+        case UIWidgetKind::Label:
+            break;
+        case UIWidgetKind::Button: {
+            const UIButtonChrome chrome = makeButtonChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0
+                && boxPaintsByIndex[index] != chrome.box) {
+                stageThemePaintChange(index);
+            }
+            if ((bindings & ThemeBindingButtonPaint) != 0
+                && buttonPaintsByNodeIndex[index] != chrome.states) {
+                stageThemePaintChange(index);
+            }
+            break;
+        }
+        case UIWidgetKind::Checkbox: {
+            const UICheckboxChrome chrome = makeCheckboxChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0
+                && boxPaintsByIndex[index] != chrome.box) {
+                stageThemePaintChange(index);
+            }
+            if ((bindings & ThemeBindingCheckboxPaint) != 0
+                && checkboxPaintsByNodeIndex[index] != chrome.indicator) {
+                stageThemePaintChange(index);
+            }
+            break;
+        }
+        case UIWidgetKind::Slider: {
+            const UISliderChrome chrome = makeSliderChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0
+                && boxPaintsByIndex[index] != chrome.track) {
+                stageThemePaintChange(index);
+            }
+            if ((bindings & ThemeBindingSliderPaint) != 0
+                && sliderStatesByNodeIndex[index].paint != chrome.slider) {
+                stageThemePaintChange(index);
+            }
+            break;
+        }
+        case UIWidgetKind::TextEdit: {
+            const UITextEditChrome chrome = makeTextEditChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0
+                && boxPaintsByIndex[index] != chrome.box) {
+                stageThemePaintChange(index);
+            }
+            break;
+        }
+        case UIWidgetKind::ProgressBar: {
+            const UIProgressBarChrome chrome = makeProgressBarChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0
+                && boxPaintsByIndex[index] != chrome.track) {
+                stageThemePaintChange(index);
+            }
+            if ((bindings & ThemeBindingProgressBarPaint) != 0
+                && progressBarStatesByNodeIndex[index].paint != chrome.bar) {
+                stageThemePaintChange(index);
+            }
+            break;
+        }
+        case UIWidgetKind::RadioButton: {
+            const UIRadioButtonChrome chrome = makeRadioButtonChrome(theme);
+            if ((bindings & ThemeBindingRadioButtonPaint) != 0
+                && radioButtonStatesByNodeIndex[index].paint != chrome.radio) {
+                stageThemePaintChange(index);
+                if (radioButtonStatesByNodeIndex[index].paint.labelGap
+                    != chrome.radio.labelGap) {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
+            }
+            break;
+        }
+        }
+        return Core::success();
+    }
+
+    void propagateThemeLayoutDirtyToAncestors() noexcept
+    {
+        for (u32 index = 0; index < themeDirtyScratchByNodeIndex.size(); ++index) {
+            if ((themeDirtyScratchByNodeIndex[index] & ThemeDirtyLayoutSelf) == 0) {
+                continue;
+            }
+            const NodeRecord* record = recordByIndex(index);
+            u32 parentIndex = record == nullptr ? InvalidNodeIndex : record->parentIndex;
+            while (parentIndex != InvalidNodeIndex) {
+                themeDirtyScratchByNodeIndex[parentIndex] |= ThemeDirtyLayoutAncestor;
+                record = recordByIndex(parentIndex);
+                parentIndex = record == nullptr ? InvalidNodeIndex : record->parentIndex;
+            }
+        }
+    }
+
+    [[nodiscard]] Core::Status preflightThemeDirtyQueue()
+    {
+        compactDirtyQueue();
+        usize requiredQueueEntries = 0;
+        for (u32 index = 0; index < themeDirtyScratchByNodeIndex.size(); ++index) {
+            if (themeDirtyScratchByNodeIndex[index] != 0
+                && dirtyQueuedByIndex[index] == 0
+                && dirtyReservedByIndex[index] == 0) {
+                ++requiredQueueEntries;
+            }
+        }
+        const usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI Theme update exceeds dirty queue capacity");
+        }
+        return Core::success();
+    }
+
+    void publishThemeDirtyState() noexcept
+    {
+        constexpr UIDirty ChangedNodeLayoutDirty =
+            UIDirty::Style
+            | UIDirty::Measure
+            | UIDirty::Arrange
+            | UIDirty::Composite
+            | UIDirty::HitTest
+            | UIDirty::Semantics;
+        constexpr UIDirty AncestorLayoutDirty =
+            UIDirty::Measure
+            | UIDirty::Arrange
+            | UIDirty::Composite
+            | UIDirty::HitTest;
+        bool hasLayoutChange = false;
+        bool hasPaintChange = false;
+        for (u32 index = 0; index < themeDirtyScratchByNodeIndex.size(); ++index) {
+            const u8 staged = themeDirtyScratchByNodeIndex[index];
+            if (staged == 0) {
+                continue;
+            }
+            if (dirtyQueuedByIndex[index] == 0) {
+                consumeDirtyQueueReservation(index);
+                dirtyQueue.push_back(idForIndex(index));
+                dirtyQueuedByIndex[index] = 1;
+            }
+            if ((staged & ThemeDirtyLayoutSelf) != 0) {
+                dirtyByIndex[index] |= ChangedNodeLayoutDirty;
+                hasLayoutChange = true;
+            } else if ((staged & ThemeDirtyLayoutAncestor) != 0) {
+                dirtyByIndex[index] |= AncestorLayoutDirty;
+                hasLayoutChange = true;
+            }
+            if ((staged & ThemeDirtyPaint) != 0) {
+                dirtyByIndex[index] |= UIDirty::Paint | UIDirty::Semantics;
+                hasPaintChange = true;
+            }
+        }
+        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
+        if (hasLayoutChange) {
+            phaseDirty |= PhaseLayout | PhaseHit;
+        }
+        if (hasPaintChange) {
+            phaseDirty |= PhasePaint | PhaseSemantics;
+        }
+    }
+
+    [[nodiscard]] Core::Status setProductTheme(const UITheme& theme)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status validation = validateProductTheme(theme); !validation) {
+            return validation;
+        }
+        if (productTheme == theme) {
+            return Core::success();
+        }
+
+        std::fill(
+            themeDirtyScratchByNodeIndex.begin(),
+            themeDirtyScratchByNodeIndex.end(),
+            u8{0});
+        for (u32 index = 0; index < themeBindingsByNodeIndex.size(); ++index) {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || themeBindingsByNodeIndex[index] == 0) {
+                continue;
+            }
+            if (Core::Status staged = stageBoundProductChrome(index, record->kind, theme);
+                !staged) {
+                return staged;
+            }
+        }
+        propagateThemeLayoutDirtyToAncestors();
+        if (Core::Status capacity = preflightThemeDirtyQueue(); !capacity) {
+            return capacity;
+        }
+
+        for (u32 index = 0; index < themeBindingsByNodeIndex.size(); ++index) {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || themeBindingsByNodeIndex[index] == 0) {
+                continue;
+            }
+            const auto nextTextStyle = productTextStyleFor(record->kind, theme);
+            WidgetTextState& textState = textStatesByIndex[index];
+            if ((themeBindingsByNodeIndex[index] & ThemeBindingTextStyle) != 0
+                && nextTextStyle.has_value()
+                && textState.hasContent
+                && textMeasureInputsDiffer(textState.style, *nextTextStyle)) {
+                textState.metrics = themeTextMetricsScratchByNodeIndex[index];
+            }
+            applyBoundProductChrome(index, record->kind, theme);
+        }
+        productTheme = theme;
+        publishThemeDirtyState();
+        return Core::success();
     }
 
     [[nodiscard]] Core::Result<UINodeId> createNode(UIWidgetKind kind)
@@ -5475,12 +5904,14 @@ struct UIContext::Impl final {
         const UIBoxPaint normalizedPaint = normalizeBoxPaint(paint);
         UIBoxPaint& currentPaint = boxPaintsByIndex[node.index()];
         if (currentPaint == normalizedPaint) {
+            detachThemeBinding(node.index(), ThemeBindingBoxPaint);
             return Core::success();
         }
         if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus) {
             return dirtyStatus;
         }
         currentPaint = normalizedPaint;
+        detachThemeBinding(node.index(), ThemeBindingBoxPaint);
         return Core::success();
     }
 
@@ -5514,12 +5945,14 @@ struct UIContext::Impl final {
         }
         UIButtonPaint& currentPaint = buttonPaintsByNodeIndex[button.index()];
         if (currentPaint == paint) {
+            detachThemeBinding(button.index(), ThemeBindingButtonPaint);
             return Core::success();
         }
         if (Core::Status dirty = markPaintDirty(button); !dirty) {
             return dirty;
         }
         currentPaint = paint;
+        detachThemeBinding(button.index(), ThemeBindingButtonPaint);
         return Core::success();
     }
 
@@ -5707,6 +6140,7 @@ struct UIContext::Impl final {
 
         WidgetTextState& state = textStatesByIndex[node.index()];
         if (state.style == style) {
+            detachThemeBinding(node.index(), ThemeBindingTextStyle);
             return Core::success();
         }
 
@@ -5727,6 +6161,7 @@ struct UIContext::Impl final {
         }
         state.style = style;
         state.metrics = metrics;
+        detachThemeBinding(node.index(), ThemeBindingTextStyle);
         return Core::success();
     }
 
@@ -6121,12 +6556,14 @@ struct UIContext::Impl final {
         }
         UICheckboxPaint& currentPaint = checkboxPaintsByNodeIndex[checkbox.index()];
         if (currentPaint == paint) {
+            detachThemeBinding(checkbox.index(), ThemeBindingCheckboxPaint);
             return Core::success();
         }
         if (Core::Status dirty = markPaintDirty(checkbox); !dirty) {
             return dirty;
         }
         currentPaint = paint;
+        detachThemeBinding(checkbox.index(), ThemeBindingCheckboxPaint);
         return Core::success();
     }
 
@@ -6578,12 +7015,14 @@ struct UIContext::Impl final {
         }
         SliderState& state = sliderStatesByNodeIndex[slider.index()];
         if (state.paint == paint) {
+            detachThemeBinding(slider.index(), ThemeBindingSliderPaint);
             return Core::success();
         }
         if (Core::Status dirty = markPaintDirty(slider); !dirty) {
             return dirty;
         }
         state.paint = paint;
+        detachThemeBinding(slider.index(), ThemeBindingSliderPaint);
         return Core::success();
     }
 
@@ -6909,12 +7348,14 @@ struct UIContext::Impl final {
         }
         ProgressBarState& state = progressBarStatesByNodeIndex[progressBar.index()];
         if (state.paint == paint) {
+            detachThemeBinding(progressBar.index(), ThemeBindingProgressBarPaint);
             return Core::success();
         }
         if (Core::Status dirty = markPaintDirty(progressBar); !dirty) {
             return dirty;
         }
         state.paint = paint;
+        detachThemeBinding(progressBar.index(), ThemeBindingProgressBarPaint);
         return Core::success();
     }
 
@@ -7155,6 +7596,7 @@ struct UIContext::Impl final {
         }
         RadioButtonState& state = radioButtonStatesByNodeIndex[radioButton.index()];
         if (state.paint == paint) {
+            detachThemeBinding(radioButton.index(), ThemeBindingRadioButtonPaint);
             return Core::success();
         }
         const bool layoutChanged = state.paint.labelGap != paint.labelGap;
@@ -7165,6 +7607,7 @@ struct UIContext::Impl final {
             return dirty;
         }
         state.paint = paint;
+        detachThemeBinding(radioButton.index(), ThemeBindingRadioButtonPaint);
         return Core::success();
     }
 
@@ -10366,9 +10809,9 @@ const UITheme& UIContext::productTheme() const noexcept
     return m_impl->productTheme;
 }
 
-void UIContext::setProductTheme(const UITheme& theme) noexcept
+Core::Status UIContext::setProductTheme(const UITheme& theme)
 {
-    m_impl->productTheme = theme;
+    return m_impl->setProductTheme(theme);
 }
 
 Core::Status UIContext::openTextFont(
