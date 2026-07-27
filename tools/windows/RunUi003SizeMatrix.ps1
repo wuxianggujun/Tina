@@ -100,12 +100,13 @@ New-Item -ItemType Directory -Path $matrixRoot -Force | Out-Null
 
 $results = @()
 $fail = 0
+$sampleFrames = 120 # Covers the sample's complete Idle -> Walk -> HitWall verification cycle.
 foreach ($s in $sizes) {
     $label = [string]$s.Label
     $w = [int]$s.W
     $h = [int]$s.H
     $caseRel = Join-Path (Join-Path $OutDir $stamp) $label
-    $args = "--frames=90 --frame-delay-ms=0 --width=$w --height=$h"
+    $args = "--frames=$sampleFrames --frame-delay-ms=0 --width=$w --height=$h"
     Write-Host "=== UI-003 size case $label (${w}x${h}) scaleLike=$($s.ScaleLike) ==="
 
     $baselineRel = [string]$s.BaselineRel

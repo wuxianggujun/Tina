@@ -188,8 +188,10 @@ struct SampleOptions final {
     // Primary window logical size (UI-003 multi-size matrix). Design baseline 960x540.
     u32 windowLogicalWidth = 960;
     u32 windowLogicalHeight = 540;
-    // Optional visual gate: publish the Demo Button in its real disabled state.
+    // Optional visual gate: publish the Theme Button in its real disabled state.
     bool uiDisabledDemoButton = false;
+    // Product gate only: exercise an owner-thread Dark -> Light -> Dark Theme cycle.
+    bool uiThemeDemo = false;
     // Optional controlled product gate: seed one map cell selection after enter
     // without synthesizing OS pointer events (GLFW smoke stays hermetic).
     bool seedTileSelection = false;
@@ -253,6 +255,10 @@ struct LifecycleCounters final {
     bool uiDisabledDemoButtonRequested = false;
     bool uiDemoButtonEnabled = true;
     bool uiDisabledDemoButtonVerified = false;
+    bool uiThemeDemoRequested = false;
+    u64 uiThemeSwitches = 0;
+    u64 uiThemeButtonActivations = 0;
+    bool uiThemeFinalLight = false;
     // M11-C1/C2: Master/Music/SFX volume Sliders wired to AudioEngine buses.
     u64 uiSlidersCreated = 0;
     u64 uiSliderChanges = 0;
@@ -471,20 +477,6 @@ inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 1;
     return style;
 }
 
-[[nodiscard]] Tina::UI::UIBoxPaint solidFill(u8 red, u8 green, u8 blue, u8 alpha = 255) noexcept
-{
-    return Tina::UI::UIBoxPaint{
-        .solidFill = Tina::UI::UISolidFill{.color = Tina::UI::rgba8(red, green, blue, alpha)},
-    };
-}
-
-[[nodiscard]] Tina::UI::UIBoxPaint solidFill(u32 hexRgb, u8 alpha = 255) noexcept
-{
-    return Tina::UI::UIBoxPaint{
-        .solidFill = Tina::UI::UISolidFill{.color = Tina::UI::rgb(hexRgb, alpha)},
-    };
-}
-
 void writeJsonString(std::ostream& output, std::string_view value)
 {
     output.put('"');
@@ -578,6 +570,11 @@ void writeError(const Tina::Core::Error& error)
             options.uiDisabledDemoButton = true;
             continue;
         }
+        if (argument == "--ui-theme-demo")
+        {
+            options.uiThemeDemo = true;
+            continue;
+        }
         if (argument.starts_with("--seed-tile-selection="))
         {
             const auto text = argument.substr(std::string_view{"--seed-tile-selection="}.size());
@@ -627,6 +624,11 @@ void writeError(const Tina::Core::Error& error)
             continue;
         }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "unsupported argument");
+    }
+    if (options.uiThemeDemo && options.targetFrameCount < 3)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "--ui-theme-demo requires --frames=3 or greater");
     }
     return options;
 }
@@ -1883,34 +1885,30 @@ class TileMapBgfxState final : public Tina::IGameState {
             return status;
         }
 
-        // Phase A/B product chrome tokens (not CSS Theme). Escape hatch remains UIBoxPaint.
-        const Tina::UI::UITheme theme = Tina::UI::makeDefaultProductTheme();
+        // Product controls inherit this Theme. Panels and title text keep a small
+        // set of intentional hierarchy overrides which applyUITheme() refreshes.
+        constexpr Tina::UI::UITheme initialTheme = Tina::UI::makeDefaultProductTheme();
         struct PanelSpec final {
             Tina::UI::UILayoutStyle layout{};
-            Tina::UI::UIBoxPaint paint{};
         };
         // Top-left title plate (wide enough for CJK), right settings card with elevation, accent strip.
         const std::array panels{
             PanelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(16.0F), Tina::UI::UILayoutLength::Px(12.0F),
                                              Tina::UI::UILayoutLength::Px(320.0F), Tina::UI::UILayoutLength::Px(56.0F)),
-                .paint = Tina::UI::makePanelBoxPaint(
-                    theme, Tina::UI::scaleColorAlpha(theme.surface1, 230), Tina::UI::UIElevation::None),
             },
             PanelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(668.0F), Tina::UI::UILayoutLength::Px(8.0F),
                                              Tina::UI::UILayoutLength::Px(276.0F), Tina::UI::UILayoutLength::Px(448.0F)),
-                .paint = Tina::UI::makePanelBoxPaint(
-                    theme, Tina::UI::scaleColorAlpha(theme.surface0, 236), Tina::UI::UIElevation::Low),
             },
             PanelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(16.0F), Tina::UI::UILayoutLength::Px(480.0F),
                                              Tina::UI::UILayoutLength::Px(320.0F), Tina::UI::UILayoutLength::Px(10.0F)),
-                .paint = Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.textAccent, 230)),
             },
         };
-        for (const PanelSpec& panelSpec : panels)
+        for (std::size_t index = 0; index < panels.size(); ++index)
         {
+            const PanelSpec& panelSpec = panels[index];
             auto panel = tree->createPanel(root->rootNodeId());
             if (!panel)
             {
@@ -1920,10 +1918,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 return status;
             }
-            if (auto status = tree->setBoxPaint(*panel, panelSpec.paint); !status)
-            {
-                return status;
-            }
+            uiPanelNodes_[index] = *panel;
         }
 
         // HUD and settings labels. Without FreeType these paint as SolidQuad placeholder
@@ -1932,60 +1927,52 @@ class TileMapBgfxState final : public Tina::IGameState {
         struct LabelSpec final {
             Tina::UI::UILayoutStyle layout{};
             std::string_view text{};
-            Tina::UI::UITextStyle style{};
         };
         const std::array labels{
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(20.0F),
                                              Tina::UI::UILayoutLength::Px(300.0F), Tina::UI::UILayoutLength::Px(28.0F)),
                 .text = "TileMap 2D",
-                .style = Tina::UI::makeTitleTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(44.0F),
                                              Tina::UI::UILayoutLength::Px(300.0F), Tina::UI::UILayoutLength::Px(28.0F)),
                 .text = "中文地图",
-                .style = Tina::UI::makeAccentTextStyle(theme, 22.0F),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F), Tina::UI::UILayoutLength::Px(78.0F),
                                              Tina::UI::UILayoutLength::Px(72.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Master",
-                .style = Tina::UI::makeBodyTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F), Tina::UI::UILayoutLength::Px(108.0F),
                                              Tina::UI::UILayoutLength::Px(72.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Music",
-                .style = Tina::UI::makeBodyTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F), Tina::UI::UILayoutLength::Px(138.0F),
                                              Tina::UI::UILayoutLength::Px(72.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "SFX",
-                .style = Tina::UI::makeBodyTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(724.0F), Tina::UI::UILayoutLength::Px(174.0F),
                                              Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Mute Master",
-                .style = Tina::UI::makeSecondaryTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(724.0F), Tina::UI::UILayoutLength::Px(210.0F),
                                              Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Mute Music",
-                .style = Tina::UI::makeSecondaryTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(724.0F), Tina::UI::UILayoutLength::Px(246.0F),
                                              Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Mute SFX",
-                .style = Tina::UI::makeSecondaryTextStyle(theme),
             },
         };
-        for (const LabelSpec& labelSpec : labels)
+        for (std::size_t index = 0; index < labels.size(); ++index)
         {
+            const LabelSpec& labelSpec = labels[index];
             auto label = tree->createLabel(root->rootNodeId());
             if (!label)
             {
@@ -1995,19 +1982,18 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 return status;
             }
-            if (auto status = tree->setTextStyle(*label, labelSpec.style); !status)
-            {
-                return status;
-            }
             if (auto status = tree->setText(*label, labelSpec.text); !status)
             {
                 return status;
             }
+            if (index < uiTitleNodes_.size())
+            {
+                uiTitleNodes_[index] = *label;
+            }
         }
 
-        // HUD Button is product UI surface for pointer/default-action path. Automated
-        // smoke does not synthesize clicks; wiring + create counts are gated. Interactive
-        // runs can click "Demo Button" (no world side-effect required for the JSON gate).
+        // The real Theme command exercises pointer/default-action routing. Its callback
+        // only records intent; updateUI() performs the owner-thread Theme transaction.
         {
             auto button = tree->createButton(root->rootNodeId());
             if (!button)
@@ -2017,54 +2003,31 @@ class TileMapBgfxState final : public Tina::IGameState {
             if (auto status = tree->setLayoutStyle(
                     *button, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
                                                 Tina::UI::UILayoutLength::Px(24.0F),
-                                                Tina::UI::UILayoutLength::Px(136.0F),
+                                                Tina::UI::UILayoutLength::Px(220.0F),
                                                 Tina::UI::UILayoutLength::Px(40.0F)));
                 !status)
             {
                 return status;
             }
-            const Tina::UI::UIStraightSrgba8Color buttonNormal =
-                Tina::UI::scaleColorAlpha(Tina::UI::rgb(0x287850), 230);
-            if (auto status = tree->setBoxPaint(*button, Tina::UI::makeSolidBox(buttonNormal)); !status)
-            {
-                return status;
-            }
-            const Tina::UI::UIButtonPaint buttonPaint{
-                .hoveredBackgroundColor = Tina::UI::scaleColorAlpha(Tina::UI::lightenChannel(buttonNormal, 28), 240),
-                .pressedBackgroundColor = Tina::UI::darkenChannel(buttonNormal, 36),
-                .focusedBackgroundColor = Tina::UI::rgb(0x529AD0, 245),
-                .disabledBackgroundColor = Tina::UI::rgb(0x4C5258, 230),
-            };
-            if (auto status = tree->setButtonPaint(*button, buttonPaint); !status)
-            {
-                return status;
-            }
             auto configuredButtonPaint = tree->buttonPaint(*button);
-            if (!configuredButtonPaint || *configuredButtonPaint != buttonPaint)
+            if (!configuredButtonPaint ||
+                *configuredButtonPaint != Tina::UI::makeButtonChrome(initialTheme).states)
             {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::Internal,
-                    "Button visual paint round-trip failed");
+                    "Theme Button did not inherit product chrome");
             }
             counters_->uiButtonPaintVerified = true;
-            if (auto status = tree->setTextStyle(
-                    *button, Tina::UI::UITextStyle{
-                                 .logicalSize = 18.0F,
-                                 .advanceScale = 0.62F,
-                                 .lineHeightScale = 1.15F,
-                                  .color = theme.textPrimary,
-                             });
-                !status)
+            if (auto status = tree->setText(*button, "Switch to light"); !status)
             {
                 return status;
             }
-            if (auto status = tree->setText(*button, "Demo Button"); !status)
-            {
-                return status;
-            }
+            uiThemeButton_ = *button;
             if (auto status = tree->setButtonAction(
-                    *button, Tina::UI::UIButtonActionCallback{[](const Tina::UI::UIButtonActionEvent&) noexcept {
-                        // Intentionally empty: proves action slot wiring without side effects.
+                    *button, Tina::UI::UIButtonActionCallback{[this](const Tina::UI::UIButtonActionEvent&) noexcept {
+                        ++counters_->uiThemeButtonActivations;
+                        const bool requestedLight = pendingUiThemeLight_.value_or(uiThemeLight_);
+                        pendingUiThemeLight_ = !requestedLight;
                     }});
                 !status)
             {
@@ -2095,7 +2058,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::Internal,
-                    "Demo Button enabled state verification failed");
+                    "Theme Button enabled state verification failed");
             }
         }
 
@@ -2103,8 +2066,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         // Layout stacked in the right-side settings surface. Smoke only requires create counts;
         // interactive drag applies via pending flags on next updateFrame.
         const auto wireVolumeSlider =
-            [&](float y, std::uint8_t r, std::uint8_t g, std::uint8_t b,
-                float initialValue,
+            [&](float y, float initialValue,
                 float& pendingVolume, bool& hasPending, float& lastVolume, bool& fromSlider)
             -> Tina::Core::Status {
                 auto slider = tree->createSlider(root->rootNodeId());
@@ -2117,26 +2079,6 @@ class TileMapBgfxState final : public Tina::IGameState {
                                                     Tina::UI::UILayoutLength::Px(y),
                                                     Tina::UI::UILayoutLength::Px(158.0F),
                                                     Tina::UI::UILayoutLength::Px(20.0F)));
-                    !status)
-                {
-                    return status;
-                }
-                if (auto status = tree->setBoxPaint(
-                        *slider,
-                        Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.surface2, 230)));
-                    !status)
-                {
-                    return status;
-                }
-                if (auto status = tree->setSliderPaint(
-                        *slider,
-                        Tina::UI::UISliderPaint{
-                            .filledTrackColor = Tina::UI::rgba8(r, g, b),
-                            .thumbColor = theme.textPrimary,
-                            .draggingThumbColor = theme.textAccent,
-                            .contentInset = 4.0F,
-                            .thumbWidth = 8.0F,
-                        });
                     !status)
                 {
                     return status;
@@ -2168,21 +2110,21 @@ class TileMapBgfxState final : public Tina::IGameState {
                 return Tina::Core::success();
             };
 
-        if (auto status = wireVolumeSlider(82.0F, 110, 130, 230, 0.75F,
+        if (auto status = wireVolumeSlider(82.0F, 0.75F,
                                            pendingMasterVolume_, hasPendingMasterVolume_,
                                            counters_->lastMasterVolume, counters_->masterVolumeFromSlider);
             !status)
         {
             return status;
         }
-        if (auto status = wireVolumeSlider(112.0F, 70, 185, 125, 0.55F,
+        if (auto status = wireVolumeSlider(112.0F, 0.55F,
                                            pendingMusicVolume_, hasPendingMusicVolume_,
                                            counters_->lastMusicVolume, counters_->musicVolumeFromSlider);
             !status)
         {
             return status;
         }
-        if (auto status = wireVolumeSlider(142.0F, 225, 155, 70, 0.35F,
+        if (auto status = wireVolumeSlider(142.0F, 0.35F,
                                            pendingSfxVolume_, hasPendingSfxVolume_,
                                            counters_->lastSfxVolume, counters_->sfxVolumeFromSlider);
             !status)
@@ -2195,8 +2137,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         // Capture bus id by value so the action callback does not dangle on stack refs.
         enum class MuteBus : u8 { Master = 0, Music = 1, Sfx = 2 };
         const auto wireMuteCheckbox =
-            [&](float y, std::uint8_t r, std::uint8_t g, std::uint8_t b, MuteBus bus,
-                bool initiallyChecked) -> Tina::Core::Status {
+            [&](float y, MuteBus bus, bool initiallyChecked) -> Tina::Core::Status {
                 auto checkbox = tree->createCheckbox(root->rootNodeId());
                 if (!checkbox)
                 {
@@ -2207,20 +2148,6 @@ class TileMapBgfxState final : public Tina::IGameState {
                                                       Tina::UI::UILayoutLength::Px(y),
                                                       Tina::UI::UILayoutLength::Px(28.0F),
                                                       Tina::UI::UILayoutLength::Px(28.0F)));
-                    !status)
-                {
-                    return status;
-                }
-                if (auto status = tree->setBoxPaint(*checkbox, solidFill(r, g, b, 230)); !status)
-                {
-                    return status;
-                }
-                if (auto status = tree->setCheckboxPaint(
-                        *checkbox,
-                        Tina::UI::UICheckboxPaint{
-                            .checkedIndicatorColor = theme.textPrimary,
-                            .checkedIndicatorInset = 6.0F,
-                        });
                     !status)
                 {
                     return status;
@@ -2272,15 +2199,15 @@ class TileMapBgfxState final : public Tina::IGameState {
                 return Tina::Core::success();
             };
 
-        if (auto status = wireMuteCheckbox(172.0F, 120, 50, 50, MuteBus::Master, false); !status)
+        if (auto status = wireMuteCheckbox(172.0F, MuteBus::Master, false); !status)
         {
             return status;
         }
-        if (auto status = wireMuteCheckbox(208.0F, 50, 100, 70, MuteBus::Music, true); !status)
+        if (auto status = wireMuteCheckbox(208.0F, MuteBus::Music, true); !status)
         {
             return status;
         }
-        if (auto status = wireMuteCheckbox(244.0F, 110, 80, 40, MuteBus::Sfx, false); !status)
+        if (auto status = wireMuteCheckbox(244.0F, MuteBus::Sfx, false); !status)
         {
             return status;
         }
@@ -2298,19 +2225,6 @@ class TileMapBgfxState final : public Tina::IGameState {
                                                      Tina::UI::UILayoutLength::Px(292.0F),
                                                      Tina::UI::UILayoutLength::Px(220.0F),
                                                      Tina::UI::UILayoutLength::Px(42.0F)));
-                !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setBoxPaint(
-                    *profileName,
-                    Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.surface2, 245)));
-                !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setTextStyle(
-                    *profileName, Tina::UI::makeBodyTextStyle(theme, 22.0F));
                 !status)
             {
                 return status;
@@ -2342,8 +2256,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             counters_->uiTextEditInitialTextVerified = true;
         }
 
-        // Determinate loading/status indicator. UIBoxPaint is the track and the
-        // ProgressBar-specific paint emits the value-derived foreground fill.
+        // Determinate loading/status indicator inherits its track and fill Theme chrome.
         {
             auto progress = tree->createProgressBar(root->rootNodeId());
             if (!progress)
@@ -2355,22 +2268,6 @@ class TileMapBgfxState final : public Tina::IGameState {
                                                   Tina::UI::UILayoutLength::Px(350.0F),
                                                   Tina::UI::UILayoutLength::Px(220.0F),
                                                   Tina::UI::UILayoutLength::Px(20.0F)));
-                !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setBoxPaint(
-                    *progress,
-                    Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.surface2, 240)));
-                !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setProgressBarPaint(
-                    *progress,
-                    Tina::UI::UIProgressBarPaint{
-                        .fillColor = theme.accent,
-                    });
                 !status)
             {
                 return status;
@@ -2421,27 +2318,6 @@ class TileMapBgfxState final : public Tina::IGameState {
                 {
                     return status;
                 }
-                if (auto status = tree->setRadioButtonPaint(
-                        *radioButton,
-                        Tina::UI::UIRadioButtonPaint{
-                            .indicatorColor = theme.surface2,
-                            .selectedIndicatorColor = theme.textAccent,
-                            .selectedIndicatorInset = 6.0F,
-                            .labelGap = 8.0F,
-                            .focusedIndicatorColor = Tina::UI::rgb(0x529AD0, 245),
-                            .pressedIndicatorColor = Tina::UI::darkenChannel(theme.accent, 40),
-                        });
-                    !status)
-                {
-                    return status;
-                }
-                if (auto status = tree->setTextStyle(
-                        *radioButton,
-                        Tina::UI::makeBodyTextStyle(theme));
-                    !status)
-                {
-                    return status;
-                }
                 if (auto status = tree->setText(*radioButton, radioSpecs[index].text); !status)
                 {
                     return status;
@@ -2474,6 +2350,10 @@ class TileMapBgfxState final : public Tina::IGameState {
             counters_->uiRadioSelectionVerified = *firstSelected && !*secondSelected;
         }
 
+        if (auto status = applyUITheme(*tree, false, false); !status)
+        {
+            return status;
+        }
         uiRoot_ = std::move(*root);
         ++counters_->uiRootsCreated;
         counters_->uiPanelsCreated += panels.size();
@@ -3385,6 +3265,37 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             return Tina::Core::success();
         }
+        const u64 firstThemeFrame = (std::max)(u64{1}, options_.targetFrameCount / u64{3});
+        const u64 secondThemeFrame =
+            (std::max)(firstThemeFrame + u64{1},
+                       options_.targetFrameCount - options_.targetFrameCount / u64{3});
+        if (options_.uiThemeDemo && !uiThemeDemoLightQueued_ &&
+            counters_->frameUpdates >= firstThemeFrame)
+        {
+            pendingUiThemeLight_ = true;
+            uiThemeDemoLightQueued_ = true;
+        } else if (options_.uiThemeDemo && uiThemeDemoLightQueued_ && !uiThemeDemoDarkQueued_ &&
+                   counters_->frameUpdates >= secondThemeFrame)
+        {
+            pendingUiThemeLight_ = false;
+            uiThemeDemoDarkQueued_ = true;
+        }
+
+        auto tree = context.primaryWindowUITreeUpdater(uiRoot_);
+        if (!tree)
+        {
+            return Tina::Core::failure(std::move(tree.error()));
+        }
+        if (pendingUiThemeLight_.has_value())
+        {
+            const bool light = *pendingUiThemeLight_;
+            pendingUiThemeLight_.reset();
+            if (auto status = applyUITheme(*tree, light, true); !status)
+            {
+                return status;
+            }
+        }
+
         // Publish accessibility snapshot from the last committed layout (startup/previous frame).
         // Real UIA/AT-SPI adapters would poll this same SPI; probe is product smoke only.
         auto semantics = context.committedSemantics();
@@ -3420,6 +3331,67 @@ class TileMapBgfxState final : public Tina::IGameState {
     }
 
   private:
+    Tina::Core::Status applyUITheme(Tina::PrimaryWindowUITreeUpdater& tree, bool light, bool countSwitch)
+    {
+        const Tina::UI::UITheme theme =
+            light ? Tina::UI::makeLightProductTheme() : Tina::UI::makeDefaultProductTheme();
+        if (auto status = tree.setProductTheme(theme); !status)
+        {
+            return status;
+        }
+
+        const std::array panelPaints{
+            Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.surface1, 230),
+                                        Tina::UI::UIElevation::None),
+            Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.surface0, 236),
+                                        Tina::UI::UIElevation::Low),
+            Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.textAccent, 230)),
+        };
+        for (std::size_t index = 0; index < uiPanelNodes_.size(); ++index)
+        {
+            if (auto status = tree.setBoxPaint(uiPanelNodes_[index], panelPaints[index]); !status)
+            {
+                return status;
+            }
+        }
+        if (auto status = tree.setTextStyle(uiTitleNodes_[0], Tina::UI::makeTitleTextStyle(theme)); !status)
+        {
+            return status;
+        }
+        if (auto status = tree.setTextStyle(uiTitleNodes_[1], Tina::UI::makeAccentTextStyle(theme, 22.0F)); !status)
+        {
+            return status;
+        }
+        if (auto status = tree.setText(uiThemeButton_, light ? "Switch to dark" : "Switch to light"); !status)
+        {
+            return status;
+        }
+
+        auto activeTheme = tree.productTheme();
+        if (!activeTheme)
+        {
+            return Tina::Core::failure(std::move(activeTheme.error()));
+        }
+        auto buttonPaint = tree.buttonPaint(uiThemeButton_);
+        if (!buttonPaint)
+        {
+            return Tina::Core::failure(std::move(buttonPaint.error()));
+        }
+        if (*activeTheme != theme || *buttonPaint != Tina::UI::makeButtonChrome(theme).states)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "2D product controls did not inherit the requested UI Theme");
+        }
+
+        if (countSwitch && light != uiThemeLight_)
+        {
+            ++counters_->uiThemeSwitches;
+        }
+        uiThemeLight_ = light;
+        counters_->uiThemeFinalLight = light;
+        return Tina::Core::success();
+    }
+
     struct SpriteBindingResolverContext final {
         Tina::Asset::Sprite2DBindingRegistry* registry = nullptr;
         LifecycleCounters* counters = nullptr;
@@ -3535,6 +3507,13 @@ class TileMapBgfxState final : public Tina::IGameState {
     TileMapResources* resources_ = nullptr;
     Tina::Sample2D::DeviceCapture* capture_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
+    std::array<Tina::UI::UINodeId, ExpectedUIPanelCount> uiPanelNodes_{};
+    std::array<Tina::UI::UINodeId, 2> uiTitleNodes_{};
+    Tina::UI::UINodeId uiThemeButton_{};
+    std::optional<bool> pendingUiThemeLight_{};
+    bool uiThemeLight_ = false;
+    bool uiThemeDemoLightQueued_ = false;
+    bool uiThemeDemoDarkQueued_ = false;
     Tina::UI::UIAccessibilityTree accessibilityTree_{};
     Tina::UI::UIAccessibilityProbeProvider accessibilityProbe_{};
     mutable SpriteBindingResolverContext worldSpriteBindingResolverContext_{};
@@ -3704,6 +3683,7 @@ int main(int argc, char** argv)
 
     LifecycleCounters counters{};
     counters.uiDisabledDemoButtonRequested = options->uiDisabledDemoButton;
+    counters.uiThemeDemoRequested = options->uiThemeDemo;
     TileMapResources resources{};
     if (const auto status = prepareCatalog(resources, counters); !status)
     {
@@ -3907,6 +3887,9 @@ int main(int argc, char** argv)
               counters.uiDisabledDemoButtonRequested == options->uiDisabledDemoButton &&
               counters.uiDisabledDemoButtonVerified &&
               counters.uiDemoButtonEnabled == !counters.uiDisabledDemoButtonRequested &&
+              counters.uiThemeDemoRequested == options->uiThemeDemo &&
+              (!options->uiThemeDemo ||
+               (counters.uiThemeSwitches == 2 && !counters.uiThemeFinalLight)) &&
               counters.uiSlidersCreated == 3 && counters.uiCheckboxesCreated == 3 &&
               counters.uiProgressBarsCreated == ExpectedUIProgressBarCount &&
               counters.uiProgressBarValueVerified &&
@@ -3946,7 +3929,7 @@ int main(int argc, char** argv)
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
     evidenceBytes.reserve(512);
-    appendLeU32(evidenceBytes, 11U); // schema
+    appendLeU32(evidenceBytes, 13U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
@@ -3988,6 +3971,10 @@ int main(int argc, char** argv)
     appendLeU32(evidenceBytes, counters.uiDisabledDemoButtonRequested ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.uiDemoButtonEnabled ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.uiDisabledDemoButtonVerified ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.uiThemeDemoRequested ? 1U : 0U);
+    appendLeU64(evidenceBytes, counters.uiThemeSwitches);
+    appendLeU64(evidenceBytes, counters.uiThemeButtonActivations);
+    appendLeU32(evidenceBytes, counters.uiThemeFinalLight ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.uiSlidersCreated);
     appendLeU64(evidenceBytes, counters.uiCheckboxesCreated); // expected 3 after M11-C5
     appendLeU64(evidenceBytes, counters.uiProgressBarsCreated);
@@ -4106,6 +4093,11 @@ int main(int argc, char** argv)
                   << (counters.uiDemoButtonEnabled ? "true" : "false")
                   << ",\"uiDisabledDemoButtonVerified\":"
                   << (counters.uiDisabledDemoButtonVerified ? "true" : "false")
+                  << ",\"uiThemeDemoRequested\":"
+                  << (counters.uiThemeDemoRequested ? "true" : "false")
+                  << ",\"uiThemeSwitches\":" << counters.uiThemeSwitches
+                  << ",\"uiThemeButtonActivations\":" << counters.uiThemeButtonActivations
+                  << ",\"uiThemeFinalLight\":" << (counters.uiThemeFinalLight ? "true" : "false")
                   << ",\"uiSliders\":" << counters.uiSlidersCreated
                   << ",\"uiProgressBars\":" << counters.uiProgressBarsCreated
                   << ",\"uiRadioButtons\":" << counters.uiRadioButtonsCreated
@@ -4265,6 +4257,10 @@ int main(int argc, char** argv)
               << (counters.uiDemoButtonEnabled ? "true" : "false")
               << ",\"uiDisabledDemoButtonVerified\":"
               << (counters.uiDisabledDemoButtonVerified ? "true" : "false")
+              << ",\"uiThemeDemoRequested\":" << (counters.uiThemeDemoRequested ? "true" : "false")
+              << ",\"uiThemeSwitches\":" << counters.uiThemeSwitches
+              << ",\"uiThemeButtonActivations\":" << counters.uiThemeButtonActivations
+              << ",\"uiThemeFinalLight\":" << (counters.uiThemeFinalLight ? "true" : "false")
               << ",\"uiSlidersCreated\":" << counters.uiSlidersCreated
               << ",\"uiSliderChanges\":" << counters.uiSliderChanges
               << ",\"uiCheckboxesCreated\":" << counters.uiCheckboxesCreated
@@ -4424,7 +4420,7 @@ int main(int argc, char** argv)
               << ",\"accessibilityHasRadio\":" << (counters.accessibilityHasRadio ? "true" : "false")
               << ",\"accessibilityHasTextEdit\":" << (counters.accessibilityHasTextEdit ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":12"
+              << ",\"evidenceSchema\":13"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")

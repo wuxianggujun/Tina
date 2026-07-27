@@ -213,7 +213,9 @@ ground 后向右行走并撞墙；它与 Box2D dynamic body 共用同一 Tile so
 
 产品 HUD 当前包括 Label、Button、Checkbox、Slider、单行 TextEdit、65% ProgressBar 和一组
 Windowed/Fullscreen RadioButton。结构化 evidence 验证控件数量、TextEdit UTF-8 初值、ProgressBar 值
-与 Radio 互斥选择；Windows client-area 捕获验证可见、无明显裁剪/重叠和中文无乱码。
+与 Radio 互斥选择；Theme Button 通过 pending intent 在 `updateUI()` 内执行 Dark/Light 全局换肤，所有
+标准控件继承产品 chrome，标题板、设置面板与标题文字的局部层级样式随 Theme 集中重算。Windows
+client-area 捕获验证可见、无明显裁剪/重叠和中文无乱码。
 
 AudioClip 来自 Catalog lease。`2D-AUDIO-ADV / N7` 已完成 voice gain/pitch/pan、fade、transient one-shot
 retirement，以及固定容量 PCM stream 的 submit/EOF/underrun/cancel/terminal backpressure/shutdown 收口。
@@ -233,14 +235,16 @@ cmake --build --preset windows-vnext-bgfx-product-2d-debug `
            tina_audio_miniaudio_tests -- /m:1 /v:m
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
-  --frames=300 --frame-delay-ms=0
+  --frames=300 --frame-delay-ms=0 --ui-theme-demo
 ```
 
 当前 sample 的结构化产品门禁要求：
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=14`（含2个 cooked chunk）、`texturesUploaded=2`；
-- `evidenceSchema=12`，`spriteBindingTextures=2`、`spriteBindingsReleased=2`、
+- `evidenceSchema=13`，`uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
+  `uiThemeButtonActivations=0`、`uiThemeFinalLight=false`，证明自动 Dark→Light→Dark 在 UI phase 完成；
+- `spriteBindingTextures=2`、`spriteBindingsReleased=2`、
   `spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`，并且
   `tileMapSpriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
   `trailSpriteBindingResolverHits>0`；这些字段都进入 evidence hash；
