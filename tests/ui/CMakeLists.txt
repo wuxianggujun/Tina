@@ -10,6 +10,8 @@ add_executable(tina_ui_tests
     UISemanticsTests.cpp
     UIAccessibilityTests.cpp
     UIInputRouteTests.cpp
+    UIFocusModalTests.cpp
+    UIPointerCaptureTests.cpp
 
     UIDirtySubtreeTests.cpp
     UILayoutTests.cpp
@@ -37,6 +39,7 @@ add_executable(tina_ui_tests
     header_isolation/UIContextConfigHeader.cpp
     header_isolation/UIErrorsHeader.cpp
     header_isolation/UIEventRoutingHeader.cpp
+    header_isolation/UIFocusHeader.cpp
     header_isolation/UIHitTestHeader.cpp
     header_isolation/UILayoutHeader.cpp
     header_isolation/UIPaintHeader.cpp

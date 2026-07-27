@@ -43,10 +43,15 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UINodeId> createSlider(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createProgressBar(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createRadioButton(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createModal(UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);
     [[nodiscard]] Core::Result<bool> isEnabled(UI::UINodeId node) const;
+    [[nodiscard]] Core::Status setFocusScopeMode(UI::UINodeId node, UI::UIFocusScopeMode mode);
+    [[nodiscard]] Core::Result<UI::UIFocusScopeMode> focusScopeMode(UI::UINodeId node) const;
+    [[nodiscard]] Core::Status requestFocus(UI::UINodeId node);
+    [[nodiscard]] Core::Status clearFocus();
     // Context-wide theme mutation remains phase-scoped even though this facade
     // is rooted. Existing local paint/text overrides are preserved.
     [[nodiscard]] Core::Result<UI::UITheme> productTheme() const;

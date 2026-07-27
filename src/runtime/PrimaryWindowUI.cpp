@@ -127,6 +127,15 @@ Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createRadioButton(UI::UIN
     return m_state->createRadioButton(m_epoch, m_phase, m_updater, parent);
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createModal(UI::UINodeId parent)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createModal");
+    }
+    return m_state->createModal(m_epoch, m_phase, m_updater, parent);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style)
 {
     if (m_state == nullptr)
@@ -163,6 +172,42 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isEnabled(UI::UINodeId node) cons
     return m_state->isEnabled(m_epoch, m_phase, m_updater, node);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setFocusScopeMode(UI::UINodeId node, UI::UIFocusScopeMode mode)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setFocusScopeMode");
+    }
+    return m_state->setFocusScopeMode(m_epoch, m_phase, m_updater, node, mode);
+}
+
+Core::Result<UI::UIFocusScopeMode> PrimaryWindowUITreeUpdater::focusScopeMode(UI::UINodeId node) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIFocusScopeMode>("PrimaryWindowUITreeUpdater::focusScopeMode");
+    }
+    return m_state->focusScopeMode(m_epoch, m_phase, m_updater, node);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::requestFocus(UI::UINodeId node)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::requestFocus");
+    }
+    return m_state->requestFocus(m_epoch, m_phase, m_updater, node);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearFocus()
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearFocus");
+    }
+    return m_state->clearFocus(m_epoch, m_phase, m_updater);
+}
+
 Core::Result<UI::UITheme> PrimaryWindowUITreeUpdater::productTheme() const
 {
     if (m_state == nullptr)
@@ -190,9 +235,7 @@ Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI
     return m_state->setBoxPaint(m_epoch, m_phase, m_updater, node, paint);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setButtonPaint(
-    UI::UINodeId button,
-    const UI::UIButtonPaint& paint)
+Core::Status PrimaryWindowUITreeUpdater::setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint)
 {
     if (m_state == nullptr)
     {
@@ -201,8 +244,7 @@ Core::Status PrimaryWindowUITreeUpdater::setButtonPaint(
     return m_state->setButtonPaint(m_epoch, m_phase, m_updater, button, paint);
 }
 
-Core::Result<UI::UIButtonPaint> PrimaryWindowUITreeUpdater::buttonPaint(
-    UI::UINodeId button) const
+Core::Result<UI::UIButtonPaint> PrimaryWindowUITreeUpdater::buttonPaint(UI::UINodeId button) const
 {
     if (m_state == nullptr)
     {
@@ -310,8 +352,7 @@ Core::Status PrimaryWindowUITreeUpdater::clearCheckboxAction(UI::UINodeId checkb
     return m_state->clearCheckboxAction(m_epoch, m_phase, m_updater, checkbox);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setCheckboxPaint(UI::UINodeId checkbox,
-                                                           const UI::UICheckboxPaint& paint)
+Core::Status PrimaryWindowUITreeUpdater::setCheckboxPaint(UI::UINodeId checkbox, const UI::UICheckboxPaint& paint)
 {
     if (m_state == nullptr)
     {
@@ -356,8 +397,7 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isCheckboxPressed(UI::UINodeId ch
     return m_state->isCheckboxPressed(m_epoch, m_phase, m_updater, checkbox);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setSliderRange(UI::UINodeId slider, float minValue, float maxValue,
-                                                        float step)
+Core::Status PrimaryWindowUITreeUpdater::setSliderRange(UI::UINodeId slider, float minValue, float maxValue, float step)
 {
     if (m_state == nullptr)
     {
@@ -384,9 +424,7 @@ Core::Result<float> PrimaryWindowUITreeUpdater::sliderValue(UI::UINodeId slider)
     return m_state->sliderValue(m_epoch, m_phase, m_updater, slider);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setSliderPaint(
-    UI::UINodeId slider,
-    const UI::UISliderPaint& paint)
+Core::Status PrimaryWindowUITreeUpdater::setSliderPaint(UI::UINodeId slider, const UI::UISliderPaint& paint)
 {
     if (m_state == nullptr)
     {
@@ -395,8 +433,7 @@ Core::Status PrimaryWindowUITreeUpdater::setSliderPaint(
     return m_state->setSliderPaint(m_epoch, m_phase, m_updater, slider, paint);
 }
 
-Core::Result<UI::UISliderPaint> PrimaryWindowUITreeUpdater::sliderPaint(
-    UI::UINodeId slider) const
+Core::Result<UI::UISliderPaint> PrimaryWindowUITreeUpdater::sliderPaint(UI::UINodeId slider) const
 {
     if (m_state == nullptr)
     {
@@ -433,19 +470,16 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isSliderDragging(UI::UINodeId sli
     return m_state->isSliderDragging(m_epoch, m_phase, m_updater, slider);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setProgressBarRange(
-    UI::UINodeId progressBar, float minValue, float maxValue)
+Core::Status PrimaryWindowUITreeUpdater::setProgressBarRange(UI::UINodeId progressBar, float minValue, float maxValue)
 {
     if (m_state == nullptr)
     {
         return expiredFacade<void>("PrimaryWindowUITreeUpdater::setProgressBarRange");
     }
-    return m_state->setProgressBarRange(
-        m_epoch, m_phase, m_updater, progressBar, minValue, maxValue);
+    return m_state->setProgressBarRange(m_epoch, m_phase, m_updater, progressBar, minValue, maxValue);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setProgressBarValue(
-    UI::UINodeId progressBar, float value)
+Core::Status PrimaryWindowUITreeUpdater::setProgressBarValue(UI::UINodeId progressBar, float value)
 {
     if (m_state == nullptr)
     {
@@ -454,8 +488,7 @@ Core::Status PrimaryWindowUITreeUpdater::setProgressBarValue(
     return m_state->setProgressBarValue(m_epoch, m_phase, m_updater, progressBar, value);
 }
 
-Core::Result<float> PrimaryWindowUITreeUpdater::progressBarValue(
-    UI::UINodeId progressBar) const
+Core::Result<float> PrimaryWindowUITreeUpdater::progressBarValue(UI::UINodeId progressBar) const
 {
     if (m_state == nullptr)
     {
@@ -464,8 +497,8 @@ Core::Result<float> PrimaryWindowUITreeUpdater::progressBarValue(
     return m_state->progressBarValue(m_epoch, m_phase, m_updater, progressBar);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setProgressBarPaint(
-    UI::UINodeId progressBar, const UI::UIProgressBarPaint& paint)
+Core::Status PrimaryWindowUITreeUpdater::setProgressBarPaint(UI::UINodeId progressBar,
+                                                             const UI::UIProgressBarPaint& paint)
 {
     if (m_state == nullptr)
     {
@@ -474,8 +507,7 @@ Core::Status PrimaryWindowUITreeUpdater::setProgressBarPaint(
     return m_state->setProgressBarPaint(m_epoch, m_phase, m_updater, progressBar, paint);
 }
 
-Core::Result<UI::UIProgressBarPaint> PrimaryWindowUITreeUpdater::progressBarPaint(
-    UI::UINodeId progressBar) const
+Core::Result<UI::UIProgressBarPaint> PrimaryWindowUITreeUpdater::progressBarPaint(UI::UINodeId progressBar) const
 {
     if (m_state == nullptr)
     {
@@ -484,8 +516,8 @@ Core::Result<UI::UIProgressBarPaint> PrimaryWindowUITreeUpdater::progressBarPain
     return m_state->progressBarPaint(m_epoch, m_phase, m_updater, progressBar);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setRadioButtonPaint(
-    UI::UINodeId radioButton, const UI::UIRadioButtonPaint& paint)
+Core::Status PrimaryWindowUITreeUpdater::setRadioButtonPaint(UI::UINodeId radioButton,
+                                                             const UI::UIRadioButtonPaint& paint)
 {
     if (m_state == nullptr)
     {
@@ -494,8 +526,7 @@ Core::Status PrimaryWindowUITreeUpdater::setRadioButtonPaint(
     return m_state->setRadioButtonPaint(m_epoch, m_phase, m_updater, radioButton, paint);
 }
 
-Core::Result<UI::UIRadioButtonPaint> PrimaryWindowUITreeUpdater::radioButtonPaint(
-    UI::UINodeId radioButton) const
+Core::Result<UI::UIRadioButtonPaint> PrimaryWindowUITreeUpdater::radioButtonPaint(UI::UINodeId radioButton) const
 {
     if (m_state == nullptr)
     {
@@ -504,15 +535,14 @@ Core::Result<UI::UIRadioButtonPaint> PrimaryWindowUITreeUpdater::radioButtonPain
     return m_state->radioButtonPaint(m_epoch, m_phase, m_updater, radioButton);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setRadioButtonAction(
-    UI::UINodeId radioButton, UI::UIButtonActionCallback callback)
+Core::Status PrimaryWindowUITreeUpdater::setRadioButtonAction(UI::UINodeId radioButton,
+                                                              UI::UIButtonActionCallback callback)
 {
     if (m_state == nullptr)
     {
         return expiredFacade<void>("PrimaryWindowUITreeUpdater::setRadioButtonAction");
     }
-    return m_state->setRadioButtonAction(
-        m_epoch, m_phase, m_updater, radioButton, std::move(callback));
+    return m_state->setRadioButtonAction(m_epoch, m_phase, m_updater, radioButton, std::move(callback));
 }
 
 Core::Status PrimaryWindowUITreeUpdater::clearRadioButtonAction(UI::UINodeId radioButton)
@@ -524,8 +554,7 @@ Core::Status PrimaryWindowUITreeUpdater::clearRadioButtonAction(UI::UINodeId rad
     return m_state->clearRadioButtonAction(m_epoch, m_phase, m_updater, radioButton);
 }
 
-Core::Status PrimaryWindowUITreeUpdater::setRadioButtonSelected(
-    UI::UINodeId radioButton, bool selected)
+Core::Status PrimaryWindowUITreeUpdater::setRadioButtonSelected(UI::UINodeId radioButton, bool selected)
 {
     if (m_state == nullptr)
     {
@@ -534,8 +563,7 @@ Core::Status PrimaryWindowUITreeUpdater::setRadioButtonSelected(
     return m_state->setRadioButtonSelected(m_epoch, m_phase, m_updater, radioButton, selected);
 }
 
-Core::Result<bool> PrimaryWindowUITreeUpdater::isRadioButtonSelected(
-    UI::UINodeId radioButton) const
+Core::Result<bool> PrimaryWindowUITreeUpdater::isRadioButtonSelected(UI::UINodeId radioButton) const
 {
     if (m_state == nullptr)
     {
@@ -544,8 +572,7 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isRadioButtonSelected(
     return m_state->isRadioButtonSelected(m_epoch, m_phase, m_updater, radioButton);
 }
 
-Core::Result<bool> PrimaryWindowUITreeUpdater::isRadioButtonPressed(
-    UI::UINodeId radioButton) const
+Core::Result<bool> PrimaryWindowUITreeUpdater::isRadioButtonPressed(UI::UINodeId radioButton) const
 {
     if (m_state == nullptr)
     {

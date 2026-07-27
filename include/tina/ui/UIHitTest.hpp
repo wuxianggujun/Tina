@@ -30,10 +30,8 @@ struct UIPointerHitTarget final {
 
     [[nodiscard]] constexpr bool hasValue() const noexcept
     {
-        return node.hasValue()
-            && rootNode.hasValue()
-            && hitEntryIndex != InvalidUIHitEntryIndex
-            && rootEntryIndex != InvalidUIHitEntryIndex;
+        return node.hasValue() && rootNode.hasValue() && hitEntryIndex != InvalidUIHitEntryIndex &&
+               rootEntryIndex != InvalidUIHitEntryIndex;
     }
 };
 
@@ -47,6 +45,8 @@ struct UIPointerHitQueryResult final {
     u64 layoutRevision = 0;
     u64 paintOrderRevision = 0;
     u64 hitRevision = 0;
+    // True when a visible committed Modal limits this query to its subtree.
+    bool modalBarrierActive = false;
 
     [[nodiscard]] constexpr bool hasTarget() const noexcept
     {

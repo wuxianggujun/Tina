@@ -55,11 +55,8 @@ class UICommittedSemanticsView final {
 
     constexpr UICommittedSemanticsView(std::span<const UISemanticsEntry> entries, UILogicalSize viewportSize,
                                        u64 structureRevision, u64 layoutRevision, u64 semanticsRevision) noexcept
-        : m_entries(entries),
-          m_viewportSize(viewportSize),
-          m_structureRevision(structureRevision),
-          m_layoutRevision(layoutRevision),
-          m_semanticsRevision(semanticsRevision)
+        : m_entries(entries), m_viewportSize(viewportSize), m_structureRevision(structureRevision),
+          m_layoutRevision(layoutRevision), m_semanticsRevision(semanticsRevision)
     {
     }
 
@@ -137,6 +134,8 @@ class UICommittedSemanticsView final {
         return UISemanticsRole::ProgressBar;
     case UIWidgetKind::RadioButton:
         return UISemanticsRole::RadioButton;
+    case UIWidgetKind::Modal:
+        return UISemanticsRole::Dialog;
     }
     return UISemanticsRole::Group;
 }
@@ -146,8 +145,8 @@ class UICommittedSemanticsView final {
 [[nodiscard]] constexpr bool isSemanticsPublishedKind(UIWidgetKind kind) noexcept
 {
     return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox ||
-           kind == UIWidgetKind::Slider || kind == UIWidgetKind::TextEdit ||
-           kind == UIWidgetKind::ProgressBar || kind == UIWidgetKind::RadioButton;
+           kind == UIWidgetKind::Slider || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ProgressBar ||
+           kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Modal;
 }
 
 } // namespace Tina::UI

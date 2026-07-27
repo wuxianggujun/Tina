@@ -79,8 +79,10 @@ Platform lifecycle dispatch
 UI 读取上一帧 committed hit snapshot。Button、Checkbox、Slider、RadioButton、TextEdit 的 Pointer 默认
 行为已接入；Tab/Shift+Tab 在可见 Targetable 控件间循环，Enter/Space/KeypadEnter 与 Gamepad South
 触发默认 action。TextEdit 消费 navigation/edit key、committed text 与 IME composition，避免穿透玩法。
-当前有最小 focused state/focus ring；通用 Focus Scope、Modal、持久 Pointer Capture、方向/手柄空间导航
-仍后置。
+`UIFocusScopeMode::Contain`、显式 focus、topmost committed Modal barrier、嵌套/跨 root focus 恢复与持久
+Primary Pointer Capture 已接入。capture 路由保留独立物理 hit；Up、输入 cancel、destroy、disable、
+Hidden/Collapsed 与 Modal scope change 会释放 capture，其中 target 失效路径先沿原 committed ancestry
+合成一次 synthetic-only `PointerCancel`。方向/手柄空间导航仍后置。
 
 `preventDefaultAction()`、route stop、transition consume 和 control claim 是不同语义：consume/claim 阻止
 Gameplay Action，不能隐式替代 UI default-action policy。
@@ -136,7 +138,7 @@ UI/Input 修改还需运行 `tina_ui_tests`、`tina_runtime_ui_tests` 与 produc
 
 - Linux 当前 tip 的 GCC/Clang/X11/Wayland 复验：`TEST-001`；
 - Windows UIA / Linux AT-SPI：`UI-002`；
-- 通用 Focus Scope、Modal、持久 Pointer Capture：`UI-004`；
+- 方向/手柄空间导航；
 - 多行编辑、复杂 shaping 与候选窗定位：`TEXT-001`。
 
 这些能力不应从已有 `GamepadId`、composition type 或 focused flag 推断为已完成。

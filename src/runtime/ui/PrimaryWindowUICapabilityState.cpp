@@ -105,8 +105,8 @@ bool PrimaryWindowUICapabilityState::hasPrimaryWindowUI(u64 epoch, PrimaryWindow
            phase != PrimaryWindowUIPhase::None && phase == phase_ && context_ != nullptr;
 }
 
-Core::Result<UI::UICommittedSemanticsView> PrimaryWindowUICapabilityState::committedSemantics(
-    u64 epoch, PrimaryWindowUIPhase phase)
+Core::Result<UI::UICommittedSemanticsView>
+PrimaryWindowUICapabilityState::committedSemantics(u64 epoch, PrimaryWindowUIPhase phase)
 {
     constexpr std::string_view Operation = "PrimaryWindowUICapabilityState::committedSemantics";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -302,8 +302,9 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createSlider(u64 epoc
     return *child;
 }
 
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createProgressBar(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent)
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createProgressBar(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                             UI::UITreeUpdater& updater,
+                                                                             UI::UINodeId parent)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createProgressBar";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -318,8 +319,9 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createProgressBar(
     return *child;
 }
 
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createRadioButton(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent)
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createRadioButton(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                             UI::UITreeUpdater& updater,
+                                                                             UI::UINodeId parent)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createRadioButton";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -327,6 +329,22 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createRadioButton(
         return Core::failure(std::move(status.error()));
     }
     auto child = updater.createRadioButton(parent);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createModal(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                       UI::UITreeUpdater& updater, UI::UINodeId parent)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createModal";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createModal(parent);
     if (!child)
     {
         return Core::failure(rememberFirstError(std::move(child.error()), Operation));
@@ -368,9 +386,8 @@ Core::Status PrimaryWindowUICapabilityState::setPointerHitPolicy(u64 epoch, Prim
     return Core::success();
 }
 
-Core::Status PrimaryWindowUICapabilityState::setEnabled(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId node, bool enabled)
+Core::Status PrimaryWindowUICapabilityState::setEnabled(u64 epoch, PrimaryWindowUIPhase phase,
+                                                        UI::UITreeUpdater& updater, UI::UINodeId node, bool enabled)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setEnabled";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -385,9 +402,8 @@ Core::Status PrimaryWindowUICapabilityState::setEnabled(
     return Core::success();
 }
 
-Core::Result<bool> PrimaryWindowUICapabilityState::isEnabled(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
-    UI::UINodeId node)
+Core::Result<bool> PrimaryWindowUICapabilityState::isEnabled(u64 epoch, PrimaryWindowUIPhase phase,
+                                                             const UI::UITreeUpdater& updater, UI::UINodeId node)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isEnabled";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -402,9 +418,73 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isEnabled(
     return *enabled;
 }
 
-Core::Result<UI::UITheme> PrimaryWindowUICapabilityState::productTheme(
-    u64 epoch,
-    PrimaryWindowUIPhase phase)
+Core::Status PrimaryWindowUICapabilityState::setFocusScopeMode(u64 epoch, PrimaryWindowUIPhase phase,
+                                                               UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                               UI::UIFocusScopeMode mode)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setFocusScopeMode";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setFocusScopeMode(node, mode);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIFocusScopeMode> PrimaryWindowUICapabilityState::focusScopeMode(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                                  const UI::UITreeUpdater& updater,
+                                                                                  UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::focusScopeMode";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto mode = updater.focusScopeMode(node);
+    if (!mode)
+    {
+        return Core::failure(rememberFirstError(std::move(mode.error()), Operation));
+    }
+    return *mode;
+}
+
+Core::Status PrimaryWindowUICapabilityState::requestFocus(u64 epoch, PrimaryWindowUIPhase phase,
+                                                          UI::UITreeUpdater& updater, UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::requestFocus";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.requestFocus(node);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearFocus(u64 epoch, PrimaryWindowUIPhase phase,
+                                                        UI::UITreeUpdater& updater)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearFocus";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearFocus();
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITheme> PrimaryWindowUICapabilityState::productTheme(u64 epoch, PrimaryWindowUIPhase phase)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::productTheme";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -414,10 +494,8 @@ Core::Result<UI::UITheme> PrimaryWindowUICapabilityState::productTheme(
     return context_->productTheme();
 }
 
-Core::Status PrimaryWindowUICapabilityState::setProductTheme(
-    u64 epoch,
-    PrimaryWindowUIPhase phase,
-    const UI::UITheme& theme)
+Core::Status PrimaryWindowUICapabilityState::setProductTheme(u64 epoch, PrimaryWindowUIPhase phase,
+                                                             const UI::UITheme& theme)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setProductTheme";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -449,9 +527,9 @@ Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindo
     return Core::success();
 }
 
-Core::Status PrimaryWindowUICapabilityState::setButtonPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId button, const UI::UIButtonPaint& paint)
+Core::Status PrimaryWindowUICapabilityState::setButtonPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                            UI::UITreeUpdater& updater, UI::UINodeId button,
+                                                            const UI::UIButtonPaint& paint)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setButtonPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -466,9 +544,9 @@ Core::Status PrimaryWindowUICapabilityState::setButtonPaint(
     return Core::success();
 }
 
-Core::Result<UI::UIButtonPaint> PrimaryWindowUICapabilityState::buttonPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
-    UI::UINodeId button)
+Core::Result<UI::UIButtonPaint> PrimaryWindowUICapabilityState::buttonPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                            const UI::UITreeUpdater& updater,
+                                                                            UI::UINodeId button)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::buttonPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -483,9 +561,8 @@ Core::Result<UI::UIButtonPaint> PrimaryWindowUICapabilityState::buttonPaint(
     return *paint;
 }
 
-Core::Status PrimaryWindowUICapabilityState::setText(u64 epoch, PrimaryWindowUIPhase phase,
-                                                     UI::UITreeUpdater& updater, UI::UINodeId node,
-                                                     std::string_view utf8)
+Core::Status PrimaryWindowUICapabilityState::setText(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                     UI::UINodeId node, std::string_view utf8)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setText";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -550,9 +627,8 @@ Core::Result<UI::UITextStyle> PrimaryWindowUICapabilityState::textStyle(u64 epoc
 }
 
 Core::Status PrimaryWindowUICapabilityState::setTextSelection(u64 epoch, PrimaryWindowUIPhase phase,
-                                                               UI::UITreeUpdater& updater,
-                                                               UI::UINodeId textEdit,
-                                                               UI::UITextSelection selection)
+                                                              UI::UITreeUpdater& updater, UI::UINodeId textEdit,
+                                                              UI::UITextSelection selection)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTextSelection";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -567,10 +643,9 @@ Core::Status PrimaryWindowUICapabilityState::setTextSelection(u64 epoch, Primary
     return Core::success();
 }
 
-Core::Result<UI::UITextSelection>
-PrimaryWindowUICapabilityState::textSelection(u64 epoch, PrimaryWindowUIPhase phase,
-                                               const UI::UITreeUpdater& updater,
-                                               UI::UINodeId textEdit)
+Core::Result<UI::UITextSelection> PrimaryWindowUICapabilityState::textSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                                const UI::UITreeUpdater& updater,
+                                                                                UI::UINodeId textEdit)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::textSelection";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -668,9 +743,9 @@ Core::Status PrimaryWindowUICapabilityState::clearCheckboxAction(u64 epoch, Prim
     return Core::success();
 }
 
-Core::Status PrimaryWindowUICapabilityState::setCheckboxPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId checkbox, const UI::UICheckboxPaint& paint)
+Core::Status PrimaryWindowUICapabilityState::setCheckboxPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                              UI::UITreeUpdater& updater, UI::UINodeId checkbox,
+                                                              const UI::UICheckboxPaint& paint)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setCheckboxPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -685,9 +760,9 @@ Core::Status PrimaryWindowUICapabilityState::setCheckboxPaint(
     return Core::success();
 }
 
-Core::Result<UI::UICheckboxPaint> PrimaryWindowUICapabilityState::checkboxPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
-    UI::UINodeId checkbox)
+Core::Result<UI::UICheckboxPaint> PrimaryWindowUICapabilityState::checkboxPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                                const UI::UITreeUpdater& updater,
+                                                                                UI::UINodeId checkbox)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::checkboxPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -801,9 +876,9 @@ Core::Result<float> PrimaryWindowUICapabilityState::sliderValue(u64 epoch, Prima
     return *value;
 }
 
-Core::Status PrimaryWindowUICapabilityState::setSliderPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId slider, const UI::UISliderPaint& paint)
+Core::Status PrimaryWindowUICapabilityState::setSliderPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                            UI::UITreeUpdater& updater, UI::UINodeId slider,
+                                                            const UI::UISliderPaint& paint)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setSliderPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -818,9 +893,9 @@ Core::Status PrimaryWindowUICapabilityState::setSliderPaint(
     return Core::success();
 }
 
-Core::Result<UI::UISliderPaint> PrimaryWindowUICapabilityState::sliderPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
-    UI::UINodeId slider)
+Core::Result<UI::UISliderPaint> PrimaryWindowUICapabilityState::sliderPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                            const UI::UITreeUpdater& updater,
+                                                                            UI::UINodeId slider)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::sliderPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -885,9 +960,9 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isSliderDragging(u64 epoch, P
     return *dragging;
 }
 
-Core::Status PrimaryWindowUICapabilityState::setProgressBarRange(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId progressBar, float minValue, float maxValue)
+Core::Status PrimaryWindowUICapabilityState::setProgressBarRange(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                 UI::UITreeUpdater& updater, UI::UINodeId progressBar,
+                                                                 float minValue, float maxValue)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setProgressBarRange";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -902,9 +977,9 @@ Core::Status PrimaryWindowUICapabilityState::setProgressBarRange(
     return Core::success();
 }
 
-Core::Status PrimaryWindowUICapabilityState::setProgressBarValue(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId progressBar, float value)
+Core::Status PrimaryWindowUICapabilityState::setProgressBarValue(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                 UI::UITreeUpdater& updater, UI::UINodeId progressBar,
+                                                                 float value)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setProgressBarValue";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -919,9 +994,9 @@ Core::Status PrimaryWindowUICapabilityState::setProgressBarValue(
     return Core::success();
 }
 
-Core::Result<float> PrimaryWindowUICapabilityState::progressBarValue(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
-    UI::UINodeId progressBar)
+Core::Result<float> PrimaryWindowUICapabilityState::progressBarValue(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                     const UI::UITreeUpdater& updater,
+                                                                     UI::UINodeId progressBar)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::progressBarValue";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -936,9 +1011,9 @@ Core::Result<float> PrimaryWindowUICapabilityState::progressBarValue(
     return *value;
 }
 
-Core::Status PrimaryWindowUICapabilityState::setProgressBarPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId progressBar, const UI::UIProgressBarPaint& paint)
+Core::Status PrimaryWindowUICapabilityState::setProgressBarPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                 UI::UITreeUpdater& updater, UI::UINodeId progressBar,
+                                                                 const UI::UIProgressBarPaint& paint)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setProgressBarPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -953,9 +1028,10 @@ Core::Status PrimaryWindowUICapabilityState::setProgressBarPaint(
     return Core::success();
 }
 
-Core::Result<UI::UIProgressBarPaint> PrimaryWindowUICapabilityState::progressBarPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
-    UI::UINodeId progressBar)
+Core::Result<UI::UIProgressBarPaint> PrimaryWindowUICapabilityState::progressBarPaint(u64 epoch,
+                                                                                      PrimaryWindowUIPhase phase,
+                                                                                      const UI::UITreeUpdater& updater,
+                                                                                      UI::UINodeId progressBar)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::progressBarPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -970,9 +1046,9 @@ Core::Result<UI::UIProgressBarPaint> PrimaryWindowUICapabilityState::progressBar
     return *paint;
 }
 
-Core::Status PrimaryWindowUICapabilityState::setRadioButtonPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId radioButton, const UI::UIRadioButtonPaint& paint)
+Core::Status PrimaryWindowUICapabilityState::setRadioButtonPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                 UI::UITreeUpdater& updater, UI::UINodeId radioButton,
+                                                                 const UI::UIRadioButtonPaint& paint)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setRadioButtonPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -987,9 +1063,10 @@ Core::Status PrimaryWindowUICapabilityState::setRadioButtonPaint(
     return Core::success();
 }
 
-Core::Result<UI::UIRadioButtonPaint> PrimaryWindowUICapabilityState::radioButtonPaint(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
-    UI::UINodeId radioButton)
+Core::Result<UI::UIRadioButtonPaint> PrimaryWindowUICapabilityState::radioButtonPaint(u64 epoch,
+                                                                                      PrimaryWindowUIPhase phase,
+                                                                                      const UI::UITreeUpdater& updater,
+                                                                                      UI::UINodeId radioButton)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::radioButtonPaint";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -1004,9 +1081,9 @@ Core::Result<UI::UIRadioButtonPaint> PrimaryWindowUICapabilityState::radioButton
     return *paint;
 }
 
-Core::Status PrimaryWindowUICapabilityState::setRadioButtonAction(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId radioButton, UI::UIButtonActionCallback callback)
+Core::Status PrimaryWindowUICapabilityState::setRadioButtonAction(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                  UI::UITreeUpdater& updater, UI::UINodeId radioButton,
+                                                                  UI::UIButtonActionCallback callback)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setRadioButtonAction";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -1021,9 +1098,9 @@ Core::Status PrimaryWindowUICapabilityState::setRadioButtonAction(
     return Core::success();
 }
 
-Core::Status PrimaryWindowUICapabilityState::clearRadioButtonAction(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId radioButton)
+Core::Status PrimaryWindowUICapabilityState::clearRadioButtonAction(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                    UI::UITreeUpdater& updater,
+                                                                    UI::UINodeId radioButton)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearRadioButtonAction";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -1038,9 +1115,9 @@ Core::Status PrimaryWindowUICapabilityState::clearRadioButtonAction(
     return Core::success();
 }
 
-Core::Status PrimaryWindowUICapabilityState::setRadioButtonSelected(
-    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-    UI::UINodeId radioButton, bool selected)
+Core::Status PrimaryWindowUICapabilityState::setRadioButtonSelected(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                    UI::UITreeUpdater& updater,
+                                                                    UI::UINodeId radioButton, bool selected)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setRadioButtonSelected";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -1055,9 +1132,9 @@ Core::Status PrimaryWindowUICapabilityState::setRadioButtonSelected(
     return Core::success();
 }
 
-Core::Result<bool> PrimaryWindowUICapabilityState::isRadioButtonSelected(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
-    UI::UINodeId radioButton)
+Core::Result<bool> PrimaryWindowUICapabilityState::isRadioButtonSelected(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                         const UI::UITreeUpdater& updater,
+                                                                         UI::UINodeId radioButton)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isRadioButtonSelected";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -1072,9 +1149,9 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isRadioButtonSelected(
     return *selected;
 }
 
-Core::Result<bool> PrimaryWindowUICapabilityState::isRadioButtonPressed(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
-    UI::UINodeId radioButton)
+Core::Result<bool> PrimaryWindowUICapabilityState::isRadioButtonPressed(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                        const UI::UITreeUpdater& updater,
+                                                                        UI::UINodeId radioButton)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isRadioButtonPressed";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)

@@ -9,14 +9,14 @@
 | 领域 | 已实现 |
 | --- | --- |
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
-| Tree | Root/Panel/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit，固定容量 mutation |
+| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit，固定容量 mutation |
 | Layout | Flex-lite measure/arrange、logical pixel、事务 commit、clean-subtree reuse |
-| Hit/route | committed hit snapshot、Capture→Target→Bubble、listener token、consume/prevent/claim |
+| Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal barrier、listener token、consume/prevent/claim |
 | Paint | box/text/control paint、clip、PaintCache、committed paint snapshot |
 | Theme（A/B） | `UITheme` token + `makePanelBoxPaint`：surface 色阶、1px 亮/暗边、可选 Low elevation 假影；hex helper `rgb`/`argb`；**无**圆角/毛玻璃/CSS Theme（C） |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Pointer default action、Tab focus、Keyboard/Gamepad activation、TextEdit edit/selection/IME |
-| Semantics | role/name/checked/selected/range/value/valueText/focused snapshot |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab focus、Keyboard/Gamepad activation、TextEdit edit/selection/IME |
+| Semantics | role/name/checked/selected/range/value/valueText/focused snapshot，Modal 映射 Dialog role |
 | Runtime | startup root builder、phase-scoped tree updater、DisplayList/Glyph atlas handoff |
 | Product | 独立 13 控件 showcase（Dark/Light 实时换肤）、product-2d HUD/设置面板、product-3d Scene Controls 与 Windows 视觉证据 |
 
@@ -57,10 +57,15 @@ Pointer route 顺序为 Capture → Target → Bubble。listener 可以分别：
 - stop propagation；
 - prevent default action；
 - consume 当前 transition，阻止 Gameplay Action；
-- claim held continuous control，直到真实 release/reset。
+- claim held continuous control，直到真实 release/reset；
+- `capturePointer()` / `releasePointerCapture()` 改变后续 transition 的 routed target，同时保留物理
+  `pointQuery.target` 供 drag/drop、hover 与边界判断使用。
 
-这些语义互不隐式替代。cancel/reset 清理 pressed/armed/focus/edit state，不伪造普通 Up，也不允许同帧
-失败后重放已经发生的 callback 副作用。
+这些语义互不隐式替代。Primary Up 是 capture release barrier。capture target 被禁用、销毁、Hidden/
+Collapsed，或因新 Modal 离开 committed scope 时，UI 沿原 committed ancestry 合成一次
+`PointerCancel` 再释放；该 kind 只允许 listener 注册，外部 `routePointerInput()` 不能伪造。输入流
+cancel/reset 同样清理 pressed/armed/focus/edit state，不伪造普通 Up，也不允许同帧失败后重放已经发生的
+callback 副作用。
 
 当前默认行为：
 
@@ -72,8 +77,12 @@ Pointer route 顺序为 Capture → Target → Bubble。listener 可以分别：
   Ctrl+A、committed text 与 IME；
 - ProgressBar：非交互 determinate range/value，hit policy 为 Ignore。
 
-当前是窄线性 focus/default-action 模型并有 focused visual。通用 Focus Scope、Modal、持久 Pointer
-Capture、空间/方向导航与多 root transition 恢复仍由 `UI-004` 跟踪。
+`UI-004` 已完成：`UIFocusScopeMode::Contain` 将 Tab/Shift+Tab 限制在 committed scope；显式
+`requestFocus()` 拒绝未提交、隐藏、disabled、非 Targetable、非键盘控件及 active Modal 外节点。
+最后绘制的 committed visible Modal 是 active Modal，屏蔽下层 hit/Tab 并消费 backdrop 输入；嵌套 Modal
+逐层保存/恢复 focus，跨 root Modal 释放后也恢复原 root 的有效焦点。commit 的 Modal/focus/capture
+变化与 paint/semantics 一起事务发布，失败提交不发送 `PointerCancel`、不释放旧 capture。空间/方向导航
+仍未实现。
 
 ## Text、UTF-8 与 IME
 
@@ -98,13 +107,14 @@ committed text。多行、grapheme、BiDi/shaping、候选窗定位见 `TEXT-001
 
 ## Semantics 与 accessibility
 
-`committedSemantics()` 当前发布 Label、Button、Checkbox、Slider、ProgressBar、RadioButton、TextEdit：
+`committedSemantics()` 当前发布 Modal、Label、Button、Checkbox、Slider、ProgressBar、RadioButton、TextEdit：
 
 - role/name；
 - checked/selected；
 - min/max/value；
 - TextEdit valueText；
-- 有限 focused state。
+- 有限 focused state；
+- Modal 的 Dialog role。
 
 这是后端无关 semantics snapshot，不等同于平台辅助技术。
 
@@ -172,6 +182,7 @@ bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx back
 | --- | --- | --- |
 | `Root` | 树和所有权边界 | 默认不绘制；设置 `UIBoxPaint` 后也可作为背景 SolidQuad |
 | `Panel` | 容器和布局 | `UIBoxPaint` 的 SolidQuad；当前 effective clip 是 viewport 与自身矩形的交集 |
+| `Modal` | committed Focus/Input scope、下层输入 barrier、Dialog semantics | Theme surface chrome；布局/内容由 retained 子树组合 |
 | `Label` | 只读 UTF-8 文本 | Glyph quads；没有可用字体时为确定性的 placeholder SolidQuad |
 | `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | `UIBoxPaint` 背景 + 可选 `UIButtonPaint` 状态色 + 文本 |
 | `Checkbox` | checked 切换，复用 Button action/焦点路径 | 背景 SolidQuad + `UICheckboxPaint` 勾选指示块 + 可选文本 |
@@ -247,7 +258,7 @@ callback 只提交 intent，`updateUI()` 统一处理控件状态、ProgressBar 
 `artifacts/screenshots/sample-3d-ui-light/20260727-174414`，均取得连续2帧 1280×720 非空 client capture；
 人工复核文字、控件层级、主题差异及 3D 主视区均成立，无裁剪或重叠。
 
-当前 tip 最近直接验证为：`tina_ui_tests` 271/271（含 Accessibility）、`tina_runtime_ui_tests` 84/84、
+当前 tip 最近直接验证为：`tina_ui_tests` 282/282（含 Focus/Modal/Pointer Capture）、`tina_runtime_ui_tests` 85/85、
 `tina_ui_render_integration_tests` 15/15、product-2d 图的 `tina_ui_freetype_tests` 3/3。UI 容量回归
 覆盖 Checkbox/Slider mutation、TextEdit pointer selection 和需要同时重绘旧/新节点的 focus step；
 dirty queue 容量不足时状态与 callback 原子不变，同文本替换 selection 仍发布新 paint；文本 padding
@@ -291,11 +302,11 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | --- | --- |
 | `UI-002` | 产品 HWND 自动接线 + Narrator/Inspect 金标 + Linux AT-SPI（映射 + HostBridge 已有） |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
-| `UI-004` | 通用 Focus Scope、Modal、持久 Pointer Capture |
 | `UI-005` | ScrollView、虚拟 ListView、Dropdown、TreeView |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | （可选） | Phase C：圆角 clip、backdrop blur、完整 style resolver |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
 Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；UI-002-SPI 与
-可选 `tina_ui_uia` 映射切片已落地，但不要把外部 Narrator 真机门禁或 UI-003 标成 Done。
+可选 `tina_ui_uia` 映射切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture 已完成，但不要把外部
+Narrator 真机门禁或 UI-003 标成 Done。

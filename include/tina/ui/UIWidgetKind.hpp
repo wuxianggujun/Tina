@@ -19,6 +19,9 @@ enum class UIWidgetKind : u8 {
     ProgressBar,
     // Parent-scoped exclusive selection control.
     RadioButton,
+    // Overlay container that establishes a focus scope and blocks pointer
+    // routing to lower committed content while effectively visible.
+    Modal,
 };
 
 } // namespace Tina::UI

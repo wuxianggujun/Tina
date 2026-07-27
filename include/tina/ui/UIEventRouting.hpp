@@ -31,6 +31,9 @@ enum class UIRoutedPointerEventKind : u8 {
     ButtonDown,
     ButtonUp,
     Wheel,
+    // Synthesized by UIContext when persistent capture is cancelled. Platform
+    // input producers must not submit this kind through routePointerInput().
+    PointerCancel,
 };
 
 enum class UIEventPhase : u8 {
@@ -52,33 +55,23 @@ enum class UIEventPhaseMask : u8 {
     return static_cast<std::underlying_type_t<UIEventPhaseMask>>(value);
 }
 
-[[nodiscard]] constexpr UIEventPhaseMask operator|(
-    UIEventPhaseMask left,
-    UIEventPhaseMask right) noexcept
+[[nodiscard]] constexpr UIEventPhaseMask operator|(UIEventPhaseMask left, UIEventPhaseMask right) noexcept
 {
-    return static_cast<UIEventPhaseMask>(
-        eventPhaseMaskValue(left) | eventPhaseMaskValue(right));
+    return static_cast<UIEventPhaseMask>(eventPhaseMaskValue(left) | eventPhaseMaskValue(right));
 }
 
-[[nodiscard]] constexpr UIEventPhaseMask operator&(
-    UIEventPhaseMask left,
-    UIEventPhaseMask right) noexcept
+[[nodiscard]] constexpr UIEventPhaseMask operator&(UIEventPhaseMask left, UIEventPhaseMask right) noexcept
 {
-    return static_cast<UIEventPhaseMask>(
-        eventPhaseMaskValue(left) & eventPhaseMaskValue(right));
+    return static_cast<UIEventPhaseMask>(eventPhaseMaskValue(left) & eventPhaseMaskValue(right));
 }
 
-constexpr UIEventPhaseMask& operator|=(
-    UIEventPhaseMask& left,
-    UIEventPhaseMask right) noexcept
+constexpr UIEventPhaseMask& operator|=(UIEventPhaseMask& left, UIEventPhaseMask right) noexcept
 {
     left = left | right;
     return left;
 }
 
-[[nodiscard]] constexpr bool hasEventPhase(
-    UIEventPhaseMask phases,
-    UIEventPhaseMask phase) noexcept
+[[nodiscard]] constexpr bool hasEventPhase(UIEventPhaseMask phases, UIEventPhaseMask phase) noexcept
 {
     return (phases & phase) != UIEventPhaseMask::None;
 }
@@ -104,7 +97,7 @@ struct UIPointerInputEvent final {
 // dispatch; only propagation, transition-consumption, continuous-control claim,
 // and cancelable default-action decisions may change.
 class UIRoutedPointerEvent final {
-public:
+  public:
     UIRoutedPointerEvent(const UIRoutedPointerEvent&) = delete;
     UIRoutedPointerEvent& operator=(const UIRoutedPointerEvent&) = delete;
     UIRoutedPointerEvent(UIRoutedPointerEvent&&) = delete;
@@ -158,12 +151,35 @@ public:
         m_defaultActionPrevented = true;
     }
 
+    // Requests persistent capture by the listener's current route node. The
+    // last capture/release request in one dispatch wins and is applied after
+    // the route batch. Capture changes where later events route, not their
+    // physical pointQuery result.
+    constexpr void capturePointer() noexcept
+    {
+        if (m_currentNode.hasValue())
+        {
+            m_pointerCaptureRequest = m_currentNode;
+            m_pointerCaptureReleaseRequested = false;
+        }
+    }
+
+    constexpr void releasePointerCapture() noexcept
+    {
+        m_pointerCaptureRequest = {};
+        m_pointerCaptureReleaseRequested = true;
+    }
+
+    [[nodiscard]] constexpr bool isPointerCaptureRoute() const noexcept
+    {
+        return m_pointerCaptureRoute;
+    }
+
     // Requests frame-local ownership of one button on this event's Window and
     // Pointer. This is independent from transition consumption: Runtime only
     // publishes the request when the final Platform snapshot still holds the
     // button. Repeated valid requests are idempotent; invalid enum values fail.
-    [[nodiscard]] constexpr bool claimPointerButton(
-        Platform::PointerButton button) noexcept
+    [[nodiscard]] constexpr bool claimPointerButton(Platform::PointerButton button) noexcept
     {
         const usize index = static_cast<usize>(button);
         if (index >= m_claimedPointerButtons.size())
@@ -195,20 +211,15 @@ public:
         return m_defaultActionPrevented;
     }
 
-private:
+  private:
     friend class UIContext;
     friend class Detail::UIRoutedPointerEventAccess;
 
-    explicit constexpr UIRoutedPointerEvent(UIPointerInputEvent input) noexcept
-        : m_input(std::move(input))
+    explicit constexpr UIRoutedPointerEvent(UIPointerInputEvent input) noexcept : m_input(std::move(input))
     {
     }
 
-    constexpr void setRouteState(
-        UIEventPhase phase,
-        UINodeId current,
-        UINodeId target,
-        UINodeId root) noexcept
+    constexpr void setRouteState(UIEventPhase phase, UINodeId current, UINodeId target, UINodeId root) noexcept
     {
         m_currentPhase = phase;
         m_currentNode = current;
@@ -225,6 +236,9 @@ private:
     bool m_immediatePropagationStopped = false;
     bool m_inputTransitionConsumed = false;
     bool m_defaultActionPrevented = false;
+    UINodeId m_pointerCaptureRequest{};
+    bool m_pointerCaptureReleaseRequested = false;
+    bool m_pointerCaptureRoute = false;
     std::bitset<Platform::PointerButtonCount> m_claimedPointerButtons{};
 };
 
@@ -233,19 +247,14 @@ namespace Detail {
 // Narrow implementation seam used by UIContext::Impl without exposing mutable
 // route identity on the public event surface.
 class UIRoutedPointerEventAccess final {
-public:
-    [[nodiscard]] static constexpr UIRoutedPointerEvent Create(
-        UIPointerInputEvent input) noexcept
+  public:
+    [[nodiscard]] static constexpr UIRoutedPointerEvent Create(UIPointerInputEvent input) noexcept
     {
         return UIRoutedPointerEvent(std::move(input));
     }
 
-    static constexpr void setRouteState(
-        UIRoutedPointerEvent& event,
-        UIEventPhase phase,
-        UINodeId current,
-        UINodeId target,
-        UINodeId root) noexcept
+    static constexpr void setRouteState(UIRoutedPointerEvent& event, UIEventPhase phase, UINodeId current,
+                                        UINodeId target, UINodeId root) noexcept
     {
         event.setRouteState(phase, current, target, root);
     }
@@ -255,6 +264,21 @@ public:
     {
         return event.m_claimedPointerButtons;
     }
+
+    [[nodiscard]] static constexpr UINodeId pointerCaptureRequest(const UIRoutedPointerEvent& event) noexcept
+    {
+        return event.m_pointerCaptureRequest;
+    }
+
+    [[nodiscard]] static constexpr bool pointerCaptureReleaseRequested(const UIRoutedPointerEvent& event) noexcept
+    {
+        return event.m_pointerCaptureReleaseRequested;
+    }
+
+    static constexpr void setPointerCaptureRoute(UIRoutedPointerEvent& event, bool captured) noexcept
+    {
+        event.m_pointerCaptureRoute = captured;
+    }
 };
 
 } // namespace Detail
@@ -263,24 +287,21 @@ public:
 // than InlineStorageBytes are rejected at compile time; there is no allocator
 // and therefore no heap fallback.
 class UIRoutedPointerCallback final {
-public:
+  public:
     static constexpr usize InlineStorageBytes = 48;
 
-private:
+  private:
     // Declare the constructor constraint before its first use. MSVC accepts a
     // later class-scope declaration, while GCC correctly requires the name to
     // be visible at the requires-clause point.
     template <typename Callable, typename Source>
     static constexpr bool CanStoreCallable =
-        !std::is_same_v<Callable, UIRoutedPointerCallback>
-        && sizeof(Callable) <= InlineStorageBytes
-        && alignof(Callable) <= alignof(std::max_align_t)
-        && std::is_nothrow_constructible_v<Callable, Source&&>
-        && std::is_nothrow_move_constructible_v<Callable>
-        && std::is_nothrow_destructible_v<Callable>
-        && std::is_nothrow_invocable_r_v<void, Callable&, UIRoutedPointerEvent&>;
+        !std::is_same_v<Callable, UIRoutedPointerCallback> && sizeof(Callable) <= InlineStorageBytes &&
+        alignof(Callable) <= alignof(std::max_align_t) && std::is_nothrow_constructible_v<Callable, Source&&> &&
+        std::is_nothrow_move_constructible_v<Callable> && std::is_nothrow_destructible_v<Callable> &&
+        std::is_nothrow_invocable_r_v<void, Callable&, UIRoutedPointerEvent&>;
 
-public:
+  public:
     UIRoutedPointerCallback() noexcept = default;
 
     template <typename Source>
@@ -288,9 +309,7 @@ public:
     explicit UIRoutedPointerCallback(Source&& source) noexcept
     {
         using Callable = std::decay_t<Source>;
-        std::construct_at(
-            reinterpret_cast<Callable*>(m_storage.data()),
-            std::forward<Source>(source));
+        std::construct_at(reinterpret_cast<Callable*>(m_storage.data()), std::forward<Source>(source));
         m_invoke = &invokeCallable<Callable>;
         m_move = &moveCallable<Callable>;
         m_destroy = &destroyCallable<Callable>;
@@ -311,7 +330,8 @@ public:
 
     UIRoutedPointerCallback& operator=(UIRoutedPointerCallback&& other) noexcept
     {
-        if (this != &other) {
+        if (this != &other)
+        {
             reset();
             moveFrom(other);
         }
@@ -337,55 +357,50 @@ public:
         const DestroyOperation destroy = std::exchange(m_destroy, nullptr);
         m_invoke = nullptr;
         m_move = nullptr;
-        if (destroy != nullptr) {
+        if (destroy != nullptr)
+        {
             destroy(m_storage.data());
         }
     }
 
     void operator()(UIRoutedPointerEvent& event) noexcept
     {
-        if (m_invoke != nullptr) {
+        if (m_invoke != nullptr)
+        {
             m_invoke(m_storage.data(), event);
         }
     }
 
-private:
+  private:
     using InvokeOperation = void (*)(std::byte*, UIRoutedPointerEvent&) noexcept;
     using MoveOperation = void (*)(std::byte*, std::byte*) noexcept;
     using DestroyOperation = void (*)(std::byte*) noexcept;
 
-    template <typename Callable>
-    [[nodiscard]] static Callable& callableAt(std::byte* storage) noexcept
+    template <typename Callable> [[nodiscard]] static Callable& callableAt(std::byte* storage) noexcept
     {
         return *std::launder(reinterpret_cast<Callable*>(storage));
     }
 
-    template <typename Callable>
-    static void invokeCallable(
-        std::byte* storage,
-        UIRoutedPointerEvent& event) noexcept
+    template <typename Callable> static void invokeCallable(std::byte* storage, UIRoutedPointerEvent& event) noexcept
     {
         callableAt<Callable>(storage)(event);
     }
 
-    template <typename Callable>
-    static void moveCallable(std::byte* source, std::byte* destination) noexcept
+    template <typename Callable> static void moveCallable(std::byte* source, std::byte* destination) noexcept
     {
-        std::construct_at(
-            reinterpret_cast<Callable*>(destination),
-            std::move(callableAt<Callable>(source)));
+        std::construct_at(reinterpret_cast<Callable*>(destination), std::move(callableAt<Callable>(source)));
         std::destroy_at(&callableAt<Callable>(source));
     }
 
-    template <typename Callable>
-    static void destroyCallable(std::byte* storage) noexcept
+    template <typename Callable> static void destroyCallable(std::byte* storage) noexcept
     {
         std::destroy_at(&callableAt<Callable>(storage));
     }
 
     void moveFrom(UIRoutedPointerCallback& other) noexcept
     {
-        if (!other.hasValue()) {
+        if (!other.hasValue())
+        {
             return;
         }
 
@@ -425,6 +440,9 @@ struct UIRoutedPointerListenerDesc final {
 
 struct UIPointerRouteResult final {
     UIPointerHitQueryResult pointQuery{};
+    // Actual target used for Capture -> Target -> Bubble. It differs from the
+    // physical pointQuery target while persistent pointer capture is active.
+    UIPointerHitTarget routedTarget{};
     // Requested buttons are interpreted with the routed input's Window and
     // Pointer identity by the Runtime route-result producer.
     std::bitset<Platform::PointerButtonCount> claimedPointerButtons{};
@@ -433,10 +451,13 @@ struct UIPointerRouteResult final {
     bool consumed = false;
     bool stopped = false;
     bool targetInvalidated = false;
+    bool routedThroughPointerCapture = false;
+    bool pointerCaptureChanged = false;
+    bool blockedByModal = false;
 
     [[nodiscard]] constexpr bool hasRoutedTarget() const noexcept
     {
-        return pointQuery.hasTarget() && routeDepth != 0 && !targetInvalidated;
+        return routedTarget.hasValue() && routeDepth != 0 && !targetInvalidated;
     }
 };
 

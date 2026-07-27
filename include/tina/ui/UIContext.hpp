@@ -3,28 +3,29 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/Window.hpp>
+#include <tina/ui/UIButton.hpp>
+#include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UICommittedHit.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
-#include <tina/ui/UIButton.hpp>
-#include <tina/ui/UICheckbox.hpp>
-#include <tina/ui/UIProgressBar.hpp>
-#include <tina/ui/UIRadioButton.hpp>
-#include <tina/ui/UISlider.hpp>
-#include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
+#include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UIProgressBar.hpp>
+#include <tina/ui/UIRadioButton.hpp>
+#include <tina/ui/UISemantics.hpp>
+#include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
-#include <tina/ui/text/UITextRasterizer.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
+#include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <memory>
 #include <memory_resource>
@@ -102,7 +103,7 @@ class UIContext;
 // queued in bounded storage and takes effect before the next owner-thread UI
 // mutation or route. Reset remains safe after the UIContext is destroyed.
 class UIRoutedPointerListenerToken final {
-public:
+  public:
     UIRoutedPointerListenerToken() noexcept = default;
     ~UIRoutedPointerListenerToken() noexcept;
 
@@ -116,13 +117,11 @@ public:
     [[nodiscard]] bool isActive() const noexcept;
     explicit operator bool() const noexcept;
 
-private:
+  private:
     friend class UIContext;
 
-    UIRoutedPointerListenerToken(
-        std::weak_ptr<Detail::UIContextLifetimeControl> lifetime,
-        u32 slot,
-        u32 generation) noexcept;
+    UIRoutedPointerListenerToken(std::weak_ptr<Detail::UIContextLifetimeControl> lifetime, u32 slot,
+                                 u32 generation) noexcept;
 
     std::weak_ptr<Detail::UIContextLifetimeControl> m_lifetime{};
     u32 m_slot = 0;
@@ -133,7 +132,7 @@ private:
 // immediately; destruction on another thread enters a bounded preallocated
 // release queue drained at the next owner-thread UI mutation/commit.
 class UIRootOwner final {
-public:
+  public:
     UIRootOwner() noexcept = default;
     ~UIRootOwner() noexcept;
 
@@ -149,14 +148,12 @@ public:
     [[nodiscard]] bool hasValue() const noexcept;
     explicit operator bool() const noexcept;
 
-private:
+  private:
     friend class UIContext;
     friend class UIRootBuilder;
     friend class UITreeUpdater;
 
-    UIRootOwner(
-        std::weak_ptr<Detail::UIContextLifetimeControl> lifetime,
-        UINodeId root) noexcept;
+    UIRootOwner(std::weak_ptr<Detail::UIContextLifetimeControl> lifetime, UINodeId root) noexcept;
 
     std::weak_ptr<Detail::UIContextLifetimeControl> m_lifetime{};
     UINodeId m_root{};
@@ -164,7 +161,7 @@ private:
 
 // Non-owning owner-thread view. It must not outlive the UIContext that created it.
 class UIRootBuilder final {
-public:
+  public:
     UIRootBuilder() noexcept = default;
 
     [[nodiscard]] Core::Result<UIRootOwner> createRoot();
@@ -176,6 +173,7 @@ public:
     [[nodiscard]] Core::Result<UINodeId> createTextEdit(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createProgressBar(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createModal(UINodeId parent);
 
   private:
     friend class UIContext;
@@ -188,7 +186,7 @@ public:
 // Non-owning owner-thread view scoped to one live root. It must not outlive its
 // UIContext; generation checks reject a root or child destroyed while it exists.
 class UITreeUpdater final {
-public:
+  public:
     UITreeUpdater() noexcept = default;
 
     UITreeUpdater(const UITreeUpdater&) = delete;
@@ -205,23 +203,23 @@ public:
     [[nodiscard]] Core::Result<UINodeId> createTextEdit(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createProgressBar(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createModal(UINodeId parent);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
-    [[nodiscard]] Core::Status setPointerHitPolicy(
-        UINodeId node,
-        UIPointerHitPolicy policy);
+    [[nodiscard]] Core::Status setPointerHitPolicy(UINodeId node, UIPointerHitPolicy policy);
     // Enables or disables a published widget. Disabled widgets remain in the
     // semantics snapshot, but cannot receive default focus or widget actions.
     // The state change is owner-thread only and is committed atomically with
     // its paint/semantics invalidation.
     [[nodiscard]] Core::Status setEnabled(UINodeId node, bool enabled);
     [[nodiscard]] Core::Result<bool> isEnabled(UINodeId node) const;
+    [[nodiscard]] Core::Status setFocusScopeMode(UINodeId node, UIFocusScopeMode mode);
+    [[nodiscard]] Core::Result<UIFocusScopeMode> focusScopeMode(UINodeId node) const;
+    [[nodiscard]] Core::Status requestFocus(UINodeId node);
+    [[nodiscard]] Core::Status clearFocus();
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
-    [[nodiscard]] Core::Status setButtonPaint(
-        UINodeId button,
-        const UIButtonPaint& paint);
-    [[nodiscard]] Core::Result<UIButtonPaint> buttonPaint(
-        UINodeId button) const;
+    [[nodiscard]] Core::Status setButtonPaint(UINodeId button, const UIButtonPaint& paint);
+    [[nodiscard]] Core::Result<UIButtonPaint> buttonPaint(UINodeId button) const;
     // Label/Button/RadioButton/TextEdit only. Stores strict UTF-8 without NUL into the fixed text
     // byte budget and dirties Measure for Auto-sized intrinsic placeholders.
     // Glyph raster and FreeType remain out of this API.
@@ -229,84 +227,45 @@ public:
     [[nodiscard]] Core::Status setTextStyle(UINodeId node, const UITextStyle& style);
     [[nodiscard]] Core::Result<std::string_view> text(UINodeId node);
     [[nodiscard]] Core::Result<UITextStyle> textStyle(UINodeId node);
-    [[nodiscard]] Core::Status setTextSelection(
-        UINodeId textEdit,
-        UITextSelection selection);
-    [[nodiscard]] Core::Result<UITextSelection> textSelection(
-        UINodeId textEdit) const;
-    [[nodiscard]] Core::Status setButtonAction(
-        UINodeId button,
-        UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status setTextSelection(UINodeId textEdit, UITextSelection selection);
+    [[nodiscard]] Core::Result<UITextSelection> textSelection(UINodeId textEdit) const;
+    [[nodiscard]] Core::Status setButtonAction(UINodeId button, UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UINodeId button) const;
     // Checkbox reuses Button action slots/arm path; callback fires after toggle.
-    [[nodiscard]] Core::Status setCheckboxAction(
-        UINodeId checkbox,
-        UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status setCheckboxAction(UINodeId checkbox, UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearCheckboxAction(UINodeId checkbox);
-    [[nodiscard]] Core::Status setCheckboxPaint(
-        UINodeId checkbox,
-        const UICheckboxPaint& paint);
-    [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaint(
-        UINodeId checkbox) const;
+    [[nodiscard]] Core::Status setCheckboxPaint(UINodeId checkbox, const UICheckboxPaint& paint);
+    [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaint(UINodeId checkbox) const;
     [[nodiscard]] Core::Status setChecked(UINodeId checkbox, bool checked);
     [[nodiscard]] Core::Result<bool> isChecked(UINodeId checkbox) const;
     [[nodiscard]] Core::Result<bool> isCheckboxPressed(UINodeId checkbox) const;
     // M11-C1 Slider: finite min/max/value/step; drag maps pointer X into range.
-    [[nodiscard]] Core::Status setSliderRange(
-        UINodeId slider,
-        float minValue,
-        float maxValue,
-        float step = 0.0F);
+    [[nodiscard]] Core::Status setSliderRange(UINodeId slider, float minValue, float maxValue, float step = 0.0F);
     [[nodiscard]] Core::Status setSliderValue(UINodeId slider, float value);
     [[nodiscard]] Core::Result<float> sliderValue(UINodeId slider) const;
-    [[nodiscard]] Core::Status setSliderPaint(
-        UINodeId slider,
-        const UISliderPaint& paint);
-    [[nodiscard]] Core::Result<UISliderPaint> sliderPaint(
-        UINodeId slider) const;
-    [[nodiscard]] Core::Status setSliderChangeCallback(
-        UINodeId slider,
-        UISliderChangeCallback callback);
+    [[nodiscard]] Core::Status setSliderPaint(UINodeId slider, const UISliderPaint& paint);
+    [[nodiscard]] Core::Result<UISliderPaint> sliderPaint(UINodeId slider) const;
+    [[nodiscard]] Core::Status setSliderChangeCallback(UINodeId slider, UISliderChangeCallback callback);
     [[nodiscard]] Core::Status clearSliderChangeCallback(UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(UINodeId slider) const;
-    [[nodiscard]] Core::Status setProgressBarRange(
-        UINodeId progressBar,
-        float minValue,
-        float maxValue);
-    [[nodiscard]] Core::Status setProgressBarValue(
-        UINodeId progressBar,
-        float value);
-    [[nodiscard]] Core::Result<float> progressBarValue(
-        UINodeId progressBar) const;
-    [[nodiscard]] Core::Status setProgressBarPaint(
-        UINodeId progressBar,
-        const UIProgressBarPaint& paint);
-    [[nodiscard]] Core::Result<UIProgressBarPaint> progressBarPaint(
-        UINodeId progressBar) const;
-    [[nodiscard]] Core::Status setRadioButtonPaint(
-        UINodeId radioButton,
-        const UIRadioButtonPaint& paint);
-    [[nodiscard]] Core::Result<UIRadioButtonPaint> radioButtonPaint(
-        UINodeId radioButton) const;
-    [[nodiscard]] Core::Status setRadioButtonAction(
-        UINodeId radioButton,
-        UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status setProgressBarRange(UINodeId progressBar, float minValue, float maxValue);
+    [[nodiscard]] Core::Status setProgressBarValue(UINodeId progressBar, float value);
+    [[nodiscard]] Core::Result<float> progressBarValue(UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setProgressBarPaint(UINodeId progressBar, const UIProgressBarPaint& paint);
+    [[nodiscard]] Core::Result<UIProgressBarPaint> progressBarPaint(UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setRadioButtonPaint(UINodeId radioButton, const UIRadioButtonPaint& paint);
+    [[nodiscard]] Core::Result<UIRadioButtonPaint> radioButtonPaint(UINodeId radioButton) const;
+    [[nodiscard]] Core::Status setRadioButtonAction(UINodeId radioButton, UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearRadioButtonAction(UINodeId radioButton);
-    [[nodiscard]] Core::Status setRadioButtonSelected(
-        UINodeId radioButton,
-        bool selected);
-    [[nodiscard]] Core::Result<bool> isRadioButtonSelected(
-        UINodeId radioButton) const;
-    [[nodiscard]] Core::Result<bool> isRadioButtonPressed(
-        UINodeId radioButton) const;
+    [[nodiscard]] Core::Status setRadioButtonSelected(UINodeId radioButton, bool selected);
+    [[nodiscard]] Core::Result<bool> isRadioButtonSelected(UINodeId radioButton) const;
+    [[nodiscard]] Core::Result<bool> isRadioButtonPressed(UINodeId radioButton) const;
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
-    addRoutedPointerListener(
-        UIRoutedPointerListenerDesc descriptor,
-        UIRoutedPointerCallback callback);
+    addRoutedPointerListener(UIRoutedPointerListenerDesc descriptor, UIRoutedPointerCallback callback);
     [[nodiscard]] Core::Status destroy(UINodeId node);
 
-private:
+  private:
     friend class UIContext;
 
     UITreeUpdater(UIContext& context, UINodeId root) noexcept;
@@ -321,23 +280,21 @@ private:
 // objects and cross-thread release queues allocate only during Create() from the process
 // default heap.
 class UIContext final {
-public:
+  public:
     // Default Create wires createPlaceholderTextRasterizer, opens its built-in
     // empty face, and owns a fixed-capacity UIGlyphAtlas for paint-time
     // placements. Glyph DisplayList emission depends on successful atlas insert.
-    [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>> Create(
-        Platform::WindowId ownerWindow,
-        UIContextCapacityConfig capacityConfig = {},
-        std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
+    [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>>
+    Create(Platform::WindowId ownerWindow, UIContextCapacityConfig capacityConfig = {},
+           std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 
     // Takes ownership of textRasterizer. For the placeholder rasterizer, empty
     // font bytes open the built-in face. FreeType adapters must open a real face
     // before setText can measure (or measure fails with InvalidFont).
-    [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>> Create(
-        Platform::WindowId ownerWindow,
-        UIContextCapacityConfig capacityConfig,
-        std::unique_ptr<IUITextRasterizer> textRasterizer,
-        std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
+    [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>>
+    Create(Platform::WindowId ownerWindow, UIContextCapacityConfig capacityConfig,
+           std::unique_ptr<IUITextRasterizer> textRasterizer,
+           std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 
     // Destruction is an owner-thread, phase-boundary operation. Destroying a
     // context from one of its routed callbacks/callback destructors, or from a
@@ -364,9 +321,7 @@ public:
     // Opens (or replaces) the text face used by measure/paint. Closes the previous
     // face, clears the glyph atlas, and dirties layout/paint for nodes with text.
     // FreeType requires non-empty font bytes; placeholder rejects non-empty bytes.
-    [[nodiscard]] Core::Status openTextFont(
-        std::span<const std::byte> fontBytes,
-        i32 faceIndex = 0);
+    [[nodiscard]] Core::Status openTextFont(std::span<const std::byte> fontBytes, i32 faceIndex = 0);
 
     [[nodiscard]] UIRootBuilder rootBuilder() noexcept;
     [[nodiscard]] Core::Result<UITreeUpdater> treeUpdater(UIRootOwner& rootOwner);
@@ -389,28 +344,23 @@ public:
     [[nodiscard]] u32 glyphAtlasHeight() const noexcept;
     // Pure query over the last committed hit snapshot. It never commits
     // layout, rebuilds hit data, dispatches an event, or allocates storage.
-    [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
-        UILogicalPoint point) const noexcept;
+    [[nodiscard]] UIPointerHitQueryResult queryPointerHit(UILogicalPoint point) const noexcept;
     // Registers an owning, fixed-inline callback in stable per-node order.
     // Registration is bounded; dispatch never grows or heap-falls back.
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
-    addRoutedPointerListener(
-        UIRoutedPointerListenerDesc descriptor,
-        UIRoutedPointerCallback callback);
+    addRoutedPointerListener(UIRoutedPointerListenerDesc descriptor, UIRoutedPointerCallback callback);
     // Routes one normalized pointer input over the last committed hit snapshot.
     // It performs at most one point query and never commits layout or hit data.
-    [[nodiscard]] Core::Result<UIPointerRouteResult> routePointerInput(
-        const UIPointerInputEvent& input);
+    [[nodiscard]] Core::Result<UIPointerRouteResult> routePointerInput(const UIPointerInputEvent& input);
     // Clears retained Primary Pointer interaction state for the matching
     // Window without synthesizing an Up event or invoking a Button action.
-    [[nodiscard]] Core::Status cancelPointerInteraction(
-        Platform::WindowId routedWindow);
+    [[nodiscard]] Core::Status cancelPointerInteraction(Platform::WindowId routedWindow);
     // Clears a disconnected gamepad's default-action press without releasing
     // another keyboard/gamepad control. A missing gamepad clears all default
     // action controls for the window.
-    [[nodiscard]] Core::Status cancelDefaultActionInteraction(
-        Platform::WindowId routedWindow,
-        std::optional<Platform::GamepadId> gamepad = std::nullopt);
+    [[nodiscard]] Core::Status
+    cancelDefaultActionInteraction(Platform::WindowId routedWindow,
+                                   std::optional<Platform::GamepadId> gamepad = std::nullopt);
     // Activates the default-focused Button (set when Primary Pointer arms a
     // Button). Used for keyboard Enter/Space and Gamepad South Accept.
     // Returns consumed=true when an action was invoked or the key was claimed.
@@ -418,30 +368,34 @@ public:
         bool consumed = false;
         bool activated = false;
     };
-    [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionActivate(
-        Platform::PlatformFrameId platformFrame,
-        u64 sourceSequence,
-        UIButtonActivationSource source,
-        std::optional<Platform::DigitalControlIdentity> control = std::nullopt);
+    [[nodiscard]] Core::Result<UIDefaultActionResult>
+    routeDefaultActionActivate(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                               UIButtonActivationSource source,
+                               std::optional<Platform::DigitalControlIdentity> control = std::nullopt);
     // Releases one keyboard/gamepad default-action control. The control
     // identity is required so overlapping Accept keys or gamepads cannot
     // release one another's pressed state.
-    [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionRelease(
-        Platform::PlatformFrameId platformFrame,
-        u64 sourceSequence,
-        UIButtonActivationSource source,
-        const Platform::DigitalControlIdentity& control);
+    [[nodiscard]] Core::Result<UIDefaultActionResult>
+    routeDefaultActionRelease(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                              UIButtonActivationSource source, const Platform::DigitalControlIdentity& control);
     // Cycles keyboard focus among visible Targetable Button/Checkbox/RadioButton/TextEdit nodes in paint
-    // order. reverse=true moves backward (Shift+Tab). Consumes when any
-    // candidate exists. Not a full Focus Scope / Modal system.
+    // order. reverse=true moves backward (Shift+Tab). A committed Contain
+    // Focus Scope, including Modal, keeps traversal inside its subtree.
     struct UIDefaultFocusStepResult final {
         bool consumed = false;
         bool moved = false;
         UINodeId focus{};
     };
-    [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(
-        bool reverse);
+    [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(bool reverse);
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
+    [[nodiscard]] UINodeId activeFocusScope() const noexcept;
+    [[nodiscard]] UINodeId activeModal() const noexcept;
+    [[nodiscard]] UINodeId pointerCapture() const noexcept;
+    // Explicit focus changes use the last committed hit/focus-scope snapshot.
+    // A target must be visible, enabled, Targetable, keyboard-focusable, and
+    // inside the active Modal. clearFocus is idempotent.
+    [[nodiscard]] Core::Status requestFocus(UINodeId node);
+    [[nodiscard]] Core::Status clearFocus();
 
     // IME/text target. Pointer-down or Tab focus on a TextEdit sets text focus.
     // Composition preedit is retained separately; commit replaces the selection.
@@ -453,30 +407,22 @@ public:
     [[nodiscard]] bool imeCompositionActive() const noexcept;
     [[nodiscard]] std::string_view imePreeditUtf8() const noexcept;
     [[nodiscard]] u32 imePreeditCursorCodepoint() const noexcept;
-    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextComposition(
-        Platform::WindowId window,
-        Platform::PlatformFrameId platformFrame,
-        u64 sourceSequence,
-        std::string_view preeditUtf8,
-        u32 cursorCodepoint,
-        Platform::TextCompositionStage stage);
-    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextInput(
-        Platform::WindowId window,
-        Platform::PlatformFrameId platformFrame,
-        u64 sourceSequence,
-        std::string_view committedUtf8);
-    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextEditCommand(
-        Platform::WindowId window,
-        Platform::PlatformFrameId platformFrame,
-        u64 sourceSequence,
-        UITextEditCommand command,
-        bool extendSelection = false);
+    [[nodiscard]] Core::Result<UITextInputRouteResult>
+    routeTextComposition(Platform::WindowId window, Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                         std::string_view preeditUtf8, u32 cursorCodepoint, Platform::TextCompositionStage stage);
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextInput(Platform::WindowId window,
+                                                                      Platform::PlatformFrameId platformFrame,
+                                                                      u64 sourceSequence,
+                                                                      std::string_view committedUtf8);
+    [[nodiscard]] Core::Result<UITextInputRouteResult>
+    routeTextEditCommand(Platform::WindowId window, Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                         UITextEditCommand command, bool extendSelection = false);
 
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;
 
-private:
+  private:
     friend class UIRootOwner;
     friend class UIRootBuilder;
     friend class UITreeUpdater;
@@ -488,169 +434,75 @@ private:
 
     [[nodiscard]] Core::Result<UIRootOwner> createRoot();
     [[nodiscard]] Core::Result<UINodeId> createChild(UINodeId parent, UIWidgetKind kind);
-    [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId parent,
-        UIWidgetKind kind);
-    [[nodiscard]] Core::Status setProgressBarRangeFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId progressBar,
-        float minValue,
-        float maxValue);
-    [[nodiscard]] Core::Status setProgressBarValueFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId progressBar,
-        float value);
-    [[nodiscard]] Core::Result<float> progressBarValueFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId progressBar) const;
-    [[nodiscard]] Core::Status setProgressBarPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId progressBar,
-        const UIProgressBarPaint& paint);
-    [[nodiscard]] Core::Result<UIProgressBarPaint> progressBarPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId progressBar) const;
-    [[nodiscard]] Core::Status setRadioButtonPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId radioButton,
-        const UIRadioButtonPaint& paint);
-    [[nodiscard]] Core::Result<UIRadioButtonPaint> radioButtonPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId radioButton) const;
-    [[nodiscard]] Core::Status setRadioButtonActionFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId radioButton,
-        UIButtonActionCallback&& callback);
-    [[nodiscard]] Core::Status clearRadioButtonActionFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId radioButton);
-    [[nodiscard]] Core::Status setRadioButtonSelectedFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId radioButton,
-        bool selected);
-    [[nodiscard]] Core::Result<bool> isRadioButtonSelectedFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId radioButton) const;
-    [[nodiscard]] Core::Result<bool> isRadioButtonPressedFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId radioButton) const;
-    [[nodiscard]] Core::Status setLayoutStyleFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId node,
-        const UILayoutStyle& style);
-    [[nodiscard]] Core::Status setPointerHitPolicyFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId node,
-        UIPointerHitPolicy policy);
-    [[nodiscard]] Core::Status setEnabledFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId node,
-        bool enabled);
-    [[nodiscard]] Core::Result<bool> isEnabledFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId node) const;
-    [[nodiscard]] Core::Status setBoxPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId node,
-        const UIBoxPaint& paint);
-    [[nodiscard]] Core::Status setButtonPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId button,
-        const UIButtonPaint& paint);
-    [[nodiscard]] Core::Result<UIButtonPaint> buttonPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId button) const;
-    [[nodiscard]] Core::Status setTextFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId node,
-        std::string_view utf8);
-    [[nodiscard]] Core::Status setTextStyleFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId node,
-        const UITextStyle& style);
-    [[nodiscard]] Core::Result<std::string_view> textFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId node);
-    [[nodiscard]] Core::Result<UITextStyle> textStyleFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId node);
-    [[nodiscard]] Core::Status setTextSelectionFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId textEdit,
-        UITextSelection selection);
-    [[nodiscard]] Core::Result<UITextSelection> textSelectionFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId textEdit) const;
-    [[nodiscard]] Core::Status setButtonActionFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId button,
-        UIButtonActionCallback&& callback);
-    [[nodiscard]] Core::Status clearButtonActionFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId button);
-    [[nodiscard]] Core::Result<bool> isButtonPressedFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId button);
-    [[nodiscard]] Core::Status setCheckboxActionFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId checkbox,
-        UIButtonActionCallback&& callback);
-    [[nodiscard]] Core::Status clearCheckboxActionFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId checkbox);
-    [[nodiscard]] Core::Status setCheckboxPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId checkbox,
-        const UICheckboxPaint& paint);
-    [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId checkbox) const;
-    [[nodiscard]] Core::Status setCheckedFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId checkbox,
-        bool checked);
-    [[nodiscard]] Core::Result<bool> isCheckedFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId checkbox) const;
-    [[nodiscard]] Core::Result<bool> isCheckboxPressedFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId checkbox);
-    [[nodiscard]] Core::Status setSliderRangeFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId slider,
-        float minValue,
-        float maxValue,
-        float step);
-    [[nodiscard]] Core::Status setSliderValueFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId slider,
-        float value);
-    [[nodiscard]] Core::Result<float> sliderValueFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId slider) const;
-    [[nodiscard]] Core::Status setSliderPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId slider,
-        const UISliderPaint& paint);
-    [[nodiscard]] Core::Result<UISliderPaint> sliderPaintFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId slider) const;
-    [[nodiscard]] Core::Status setSliderChangeCallbackFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId slider,
-        UISliderChangeCallback&& callback);
-    [[nodiscard]] Core::Status clearSliderChangeCallbackFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId slider);
-    [[nodiscard]] Core::Result<bool> isSliderDraggingFromUpdater(
-        UINodeId updaterRoot,
-        UINodeId slider) const;
+    [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                                UIWidgetKind kind);
+    [[nodiscard]] Core::Status setProgressBarRangeFromUpdater(UINodeId updaterRoot, UINodeId progressBar,
+                                                              float minValue, float maxValue);
+    [[nodiscard]] Core::Status setProgressBarValueFromUpdater(UINodeId updaterRoot, UINodeId progressBar, float value);
+    [[nodiscard]] Core::Result<float> progressBarValueFromUpdater(UINodeId updaterRoot, UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setProgressBarPaintFromUpdater(UINodeId updaterRoot, UINodeId progressBar,
+                                                              const UIProgressBarPaint& paint);
+    [[nodiscard]] Core::Result<UIProgressBarPaint> progressBarPaintFromUpdater(UINodeId updaterRoot,
+                                                                               UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setRadioButtonPaintFromUpdater(UINodeId updaterRoot, UINodeId radioButton,
+                                                              const UIRadioButtonPaint& paint);
+    [[nodiscard]] Core::Result<UIRadioButtonPaint> radioButtonPaintFromUpdater(UINodeId updaterRoot,
+                                                                               UINodeId radioButton) const;
+    [[nodiscard]] Core::Status setRadioButtonActionFromUpdater(UINodeId updaterRoot, UINodeId radioButton,
+                                                               UIButtonActionCallback&& callback);
+    [[nodiscard]] Core::Status clearRadioButtonActionFromUpdater(UINodeId updaterRoot, UINodeId radioButton);
+    [[nodiscard]] Core::Status setRadioButtonSelectedFromUpdater(UINodeId updaterRoot, UINodeId radioButton,
+                                                                 bool selected);
+    [[nodiscard]] Core::Result<bool> isRadioButtonSelectedFromUpdater(UINodeId updaterRoot, UINodeId radioButton) const;
+    [[nodiscard]] Core::Result<bool> isRadioButtonPressedFromUpdater(UINodeId updaterRoot, UINodeId radioButton) const;
+    [[nodiscard]] Core::Status setLayoutStyleFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                         const UILayoutStyle& style);
+    [[nodiscard]] Core::Status setPointerHitPolicyFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                              UIPointerHitPolicy policy);
+    [[nodiscard]] Core::Status setEnabledFromUpdater(UINodeId updaterRoot, UINodeId node, bool enabled);
+    [[nodiscard]] Core::Status setFocusScopeModeFromUpdater(UINodeId updaterRoot, UINodeId node, UIFocusScopeMode mode);
+    [[nodiscard]] Core::Result<UIFocusScopeMode> focusScopeModeFromUpdater(UINodeId updaterRoot, UINodeId node) const;
+    [[nodiscard]] Core::Status requestFocusFromUpdater(UINodeId updaterRoot, UINodeId node);
+    [[nodiscard]] Core::Status clearFocusFromUpdater(UINodeId updaterRoot);
+    [[nodiscard]] Core::Result<bool> isEnabledFromUpdater(UINodeId updaterRoot, UINodeId node) const;
+    [[nodiscard]] Core::Status setBoxPaintFromUpdater(UINodeId updaterRoot, UINodeId node, const UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setButtonPaintFromUpdater(UINodeId updaterRoot, UINodeId button,
+                                                         const UIButtonPaint& paint);
+    [[nodiscard]] Core::Result<UIButtonPaint> buttonPaintFromUpdater(UINodeId updaterRoot, UINodeId button) const;
+    [[nodiscard]] Core::Status setTextFromUpdater(UINodeId updaterRoot, UINodeId node, std::string_view utf8);
+    [[nodiscard]] Core::Status setTextStyleFromUpdater(UINodeId updaterRoot, UINodeId node, const UITextStyle& style);
+    [[nodiscard]] Core::Result<std::string_view> textFromUpdater(UINodeId updaterRoot, UINodeId node);
+    [[nodiscard]] Core::Result<UITextStyle> textStyleFromUpdater(UINodeId updaterRoot, UINodeId node);
+    [[nodiscard]] Core::Status setTextSelectionFromUpdater(UINodeId updaterRoot, UINodeId textEdit,
+                                                           UITextSelection selection);
+    [[nodiscard]] Core::Result<UITextSelection> textSelectionFromUpdater(UINodeId updaterRoot, UINodeId textEdit) const;
+    [[nodiscard]] Core::Status setButtonActionFromUpdater(UINodeId updaterRoot, UINodeId button,
+                                                          UIButtonActionCallback&& callback);
+    [[nodiscard]] Core::Status clearButtonActionFromUpdater(UINodeId updaterRoot, UINodeId button);
+    [[nodiscard]] Core::Result<bool> isButtonPressedFromUpdater(UINodeId updaterRoot, UINodeId button);
+    [[nodiscard]] Core::Status setCheckboxActionFromUpdater(UINodeId updaterRoot, UINodeId checkbox,
+                                                            UIButtonActionCallback&& callback);
+    [[nodiscard]] Core::Status clearCheckboxActionFromUpdater(UINodeId updaterRoot, UINodeId checkbox);
+    [[nodiscard]] Core::Status setCheckboxPaintFromUpdater(UINodeId updaterRoot, UINodeId checkbox,
+                                                           const UICheckboxPaint& paint);
+    [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaintFromUpdater(UINodeId updaterRoot, UINodeId checkbox) const;
+    [[nodiscard]] Core::Status setCheckedFromUpdater(UINodeId updaterRoot, UINodeId checkbox, bool checked);
+    [[nodiscard]] Core::Result<bool> isCheckedFromUpdater(UINodeId updaterRoot, UINodeId checkbox) const;
+    [[nodiscard]] Core::Result<bool> isCheckboxPressedFromUpdater(UINodeId updaterRoot, UINodeId checkbox);
+    [[nodiscard]] Core::Status setSliderRangeFromUpdater(UINodeId updaterRoot, UINodeId slider, float minValue,
+                                                         float maxValue, float step);
+    [[nodiscard]] Core::Status setSliderValueFromUpdater(UINodeId updaterRoot, UINodeId slider, float value);
+    [[nodiscard]] Core::Result<float> sliderValueFromUpdater(UINodeId updaterRoot, UINodeId slider) const;
+    [[nodiscard]] Core::Status setSliderPaintFromUpdater(UINodeId updaterRoot, UINodeId slider,
+                                                         const UISliderPaint& paint);
+    [[nodiscard]] Core::Result<UISliderPaint> sliderPaintFromUpdater(UINodeId updaterRoot, UINodeId slider) const;
+    [[nodiscard]] Core::Status setSliderChangeCallbackFromUpdater(UINodeId updaterRoot, UINodeId slider,
+                                                                  UISliderChangeCallback&& callback);
+    [[nodiscard]] Core::Status clearSliderChangeCallbackFromUpdater(UINodeId updaterRoot, UINodeId slider);
+    [[nodiscard]] Core::Result<bool> isSliderDraggingFromUpdater(UINodeId updaterRoot, UINodeId slider) const;
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
-    addRoutedPointerListenerFromUpdater(
-        UINodeId updaterRoot,
-        UIRoutedPointerListenerDesc descriptor,
-        UIRoutedPointerCallback&& callback);
+    addRoutedPointerListenerFromUpdater(UINodeId updaterRoot, UIRoutedPointerListenerDesc descriptor,
+                                        UIRoutedPointerCallback&& callback);
     [[nodiscard]] Core::Status destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node);
     void destroyRootFromOwner(UINodeId root) noexcept;
     [[nodiscard]] bool isAliveInRoot(UINodeId updaterRoot, UINodeId node) const noexcept;

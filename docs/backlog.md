@@ -43,7 +43,6 @@
 | --- | --- | --- | --- | --- |
 | RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal；唯一 `setMesh3DLighting` 有界 0..4 directional lights；sample_3d 一次提交3灯 + 自动相机 + Khronos 球体/盒。**待** IBL/shadow、light component/culling、pass scheduling、vertex tangents |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
-| UI-004 | Deferred | P2 | 通用 Focus Scope、Modal、持久 Pointer Capture | 多 root/state transition 与输入恢复测试通过 |
 | UI-005 | Deferred | P2 | ScrollView、虚拟 ListView、Dropdown、TreeView | 100k item 虚拟化与零稳态分配门禁通过 |
 | TEXT-001 | Deferred | P2 | 多行 TextEdit、grapheme/shaping、候选窗定位 | 中英混排、组合输入、selection 与平台 IME 矩阵通过 |
 | ASSET-002 | Deferred | P2 | 热重载与增量 Cooker | 不破坏 AssetId/Lease/retirement 契约，失败不发布半包 |
@@ -57,6 +56,7 @@
 
 | ID | 完成项 | 证据入口 |
 | --- | --- | --- |
+| UI-004 | committed `UIFocusScopeMode::Contain`、显式 focus、topmost Modal barrier、嵌套/跨 root focus 恢复；listener 与 Button/Slider/TextEdit 持久 Primary Pointer Capture；Up、cancel、destroy、disable、Hidden/Collapsed 与 Modal scope change 释放；失效沿原 committed ancestry 合成 synthetic-only `PointerCancel`；paint/semantics 失败提交回滚 focus/Modal/capture；UI 282/282、Runtime UI 85/85 | [UI](ui.md) · [ADR 0011](adr/0011-retained-ui.md) · `UIFocusModalTests` / `UIPointerCaptureTests` / `PrimaryWindowUICapabilityTests` |
 | ASSET-HANDLE-SCENE-N16.2-SPRITE | `AssetFrameResourceResolver` + Runtime sink 将 World/TileMap/selection/Particle/Trail 全部迁移为 packet-local Sprite texture ref；registry 同帧去重并以 entry borrow pin 阻止活跃帧 unbind；Null/bgfx 在任何提交副作用前验证 cross-packet/stale/wrong-kind/range；旧 `RenderSprite2D*::spriteKey` 零引用 | [Rendering](rendering.md) · [Scene](scene-ecs.md) · [资源](resources.md) · Runtime/Scene/Asset/Render tests · 2D product smoke |
 | ASSET-HANDLE-SCENE-N16.1-CORE | packet-local `FrameResourceRef`/固定容量资源表按 kind+binding 去重并持有 owning pin；cross-packet/stale/wrong-kind fail closed；Runtime extraction 前 begin 且失败/skip/complete 在 State teardown 前释放；Texture2D 既有 Lease+GPU owner 仅在 backend 接受后消费，PMR/ledger/backend 失败完整恢复 | [Rendering](rendering.md) · [Runtime](runtime.md) · [资源](resources.md) · FramePinPacket/RuntimeLifecycle/AssetGpuRetirement tests |
 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS | fixed-capacity owner-thread `Mesh3DBindingRegistry` 借用 Store/device/PMR；mesh/material 使用独立 device-instance allocator，成功后才消费且解绑不复用；Material 三张纹理与 factors 原子发布，dependency stale fail closed；exact stale handle 可解绑，失败保留记录重试；3D product schema 2 记录2组注册/释放、2 mesh/6 texture 销毁与 registry 释放 | [资源](resources.md) · [Rendering](rendering.md) · [3D](game-3d.md) · Mesh3DBindingRegistry/Render tests · 3D product smoke |

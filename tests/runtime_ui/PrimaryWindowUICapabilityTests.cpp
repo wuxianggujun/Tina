@@ -44,21 +44,21 @@ class PrimaryWindowUICapabilityTest : public testing::Test {
 {
     UI::UIBoxPaint paint;
     paint.solidFill = UI::UISolidFill{
-        .color = {
-            .red = red,
-            .green = green,
-            .blue = blue,
-            .alpha = alpha,
-        },
+        .color =
+            {
+                .red = red,
+                .green = green,
+                .blue = blue,
+                .alpha = alpha,
+            },
     };
     return paint;
 }
 
 [[nodiscard]] UI::UIButtonActionCallback buttonAction(usize& activationCount) noexcept
 {
-    return UI::UIButtonActionCallback{[&activationCount](const UI::UIButtonActionEvent&) noexcept {
-        ++activationCount;
-    }};
+    return UI::UIButtonActionCallback{
+        [&activationCount](const UI::UIButtonActionEvent&) noexcept { ++activationCount; }};
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAndExpiresUnconditionally)
@@ -160,6 +160,52 @@ TEST_F(PrimaryWindowUICapabilityTest, EnabledFacadeRoundTripsAndExpiresWithPhase
     EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, ModalAndFocusFacadesRoundTripAndExpireWithPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    auto panel = tree->createPanel(root->rootNodeId());
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+    ASSERT_TRUE(tree->setFocusScopeMode(*panel, UI::UIFocusScopeMode::Contain).has_value());
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    auto scopeMode = treeView.focusScopeMode(*panel);
+    ASSERT_TRUE(scopeMode.has_value()) << scopeMode.error().message;
+    EXPECT_EQ(*scopeMode, UI::UIFocusScopeMode::Contain);
+
+    auto modal = tree->createModal(root->rootNodeId());
+    ASSERT_TRUE(modal.has_value()) << modal.error().message;
+    auto modalButton = tree->createButton(*modal);
+    ASSERT_TRUE(modalButton.has_value()) << modalButton.error().message;
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 90.0F}).has_value());
+    EXPECT_EQ(context->activeModal(), *modal);
+    EXPECT_EQ(context->defaultActionFocus(), *modalButton);
+    ASSERT_TRUE(tree->requestFocus(*modalButton).has_value());
+    ASSERT_TRUE(tree->clearFocus().has_value());
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    auto expiredModal = tree->createModal(root->rootNodeId());
+    ASSERT_FALSE(expiredModal.has_value());
+    EXPECT_EQ(expiredModal.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredRequest = tree->requestFocus(*modalButton);
+    ASSERT_FALSE(expiredRequest.has_value());
+    EXPECT_EQ(expiredRequest.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredClear = tree->clearFocus();
+    ASSERT_FALSE(expiredClear.has_value());
+    EXPECT_EQ(expiredClear.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredScope = treeView.focusScopeMode(*panel);
+    ASSERT_FALSE(expiredScope.has_value());
+    EXPECT_EQ(expiredScope.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, ProductThemeFacadeUpdatesExistingControlsAndExpiresWithPhase)
 {
     CapabilityState state;
@@ -179,9 +225,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ProductThemeFacadeUpdatesExistingControlsA
     EXPECT_EQ(*initialTheme, UI::makeDefaultProductTheme());
     ASSERT_TRUE(tree->setProductTheme(UI::makeLightProductTheme()).has_value());
     EXPECT_EQ(tree->productTheme().value(), UI::makeLightProductTheme());
-    EXPECT_EQ(
-        tree->buttonPaint(*button).value(),
-        UI::makeButtonChrome(UI::makeLightProductTheme()).states);
+    EXPECT_EQ(tree->buttonPaint(*button).value(), UI::makeButtonChrome(UI::makeLightProductTheme()).states);
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
     Core::Status expiredSet = tree->setProductTheme(UI::makeDefaultProductTheme());

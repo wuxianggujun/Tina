@@ -362,3 +362,27 @@ Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、完整含�
 - 复用或兼容 Legacy UI API：会把旧生命周期和隐式更新语义固化到 vNext；
 - 每帧全树 layout/paint：无法满足无变化 UI 的零工作与零 Tina heap allocation 门禁；
 - 跨透明 paint order 全局排序：会为了 batch 数量改变可观察的混合结果。
+
+## 2026-07-27 实施补充：UI-004
+
+UI-004 已按本 ADR 的 committed snapshot 与输入所有权语义完成：
+
+- `UIFocusScopeMode::Contain`、显式 `requestFocus()` / `clearFocus()` 与常量额外空间的 Tab/Shift+Tab
+  扫描只接受 committed、visible、enabled、Targetable 且可键盘聚焦的控件；
+- 最后绘制的 committed visible `Modal` 成为 active Modal，限制 hit、Tab 与显式 focus，并消费 backdrop
+  输入；嵌套 Modal 逐层保存/恢复焦点，跨 root Modal root 释放也恢复原有效焦点；
+- listener 的 `capturePointer()` / `releasePointerCapture()` 与 Button、Slider、TextEdit Primary Down
+  建立持久 capture。后续 route 同时返回物理 `pointQuery.target` 与实际 `routedTarget`，Primary Up 是无条件
+  release barrier；
+- 新增 `UIRoutedPointerEventKind::PointerCancel`。它只允许 listener 注册，Runtime/游戏不能通过
+  `routePointerInput()` 伪造。capture target destroy/disable，以及成功 commit 导致的
+  Hidden/Collapsed/Modal scope 失效，会沿 capture target 的原 committed ancestry 派发一次
+  Capture→Target→Bubble `PointerCancel`，随后释放 capture；
+- synthetic cancel 使用创建期预留的独立 route scratch，允许失效由现有 pointer listener 触发而不覆盖
+  外层 route ancestry，也不在稳态路由中增加 supplied UI PMR allocation；generation 校验继续阻止向复用
+  slot 投递；
+- Modal/focus/capture 的候选变化与 layout/hit/paint/semantics 一起事务发布。paint 或 semantics candidate
+  失败时不发送 `PointerCancel`，旧 focus、Modal 与 capture 完整恢复。
+
+Windows MSVC Debug 的直接证据为 `tina_ui_tests` 282/282（含 `UIFocusModalTests` 与
+`UIPointerCaptureTests`）和 `tina_runtime_ui_tests` 85/85。空间/方向导航不属于本切片，仍未实现。
