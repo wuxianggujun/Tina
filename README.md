@@ -15,6 +15,7 @@ The current retained UI still lives in `include/tina/ui` and `src/ui`. Reference
 - Catalog/Cooked assets, AssetId, Handle/Lease, task-backed loading, GPU upload, and retirement exist.
 - The retained UI includes layout, routing, text/glyph rendering, Button, Checkbox, Slider,
   ProgressBar, RadioButton, and single-line TextEdit.
+- `tina_sample_ui_showcase` presents 13 controls, layered button feedback, and live Dark/Light themes.
 - Audio and Physics2D have optional miniaudio and Box2D adapters.
 - `tina_sample_2d` and `tina_sample_3d` are the product smoke entry points.
 
@@ -39,6 +40,14 @@ cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d -- /m:2 /v:m
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
+```
+
+Use the FreeType graph for the complete UI control and theme showcase:
+
+```powershell
+cmake --preset windows-msvc-vnext-bgfx-ui-freetype
+cmake --build --preset windows-vnext-bgfx-ui-freetype-debug --target tina_sample_ui_showcase -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe
 ```
 
 Run GoogleTest executables directly; the project intentionally does not use CTest. Routine gates

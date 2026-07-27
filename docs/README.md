@@ -22,8 +22,8 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 2 | [架构总览](architecture.md) | 模块依赖、所有权、启动事务、每帧顺序 |
 | 3 | [Public API](public-api.md) | `Desktop::CreateEngine`、Application/State、借用寿命 |
 | 4 | [Runtime](runtime.md) | 帧 pipeline、State 栈、policy 两套语义、输入四段式 |
-| 5 | 跑 sample | `tina_sample_2d` / `tina_sample_3d`（命令见 [构建](building.md)） |
-| 6 | 读 sample 源码 | 产品接线：`samples/2d_tilemap_bgfx`（含 PauseOverlay policy）；3D：`samples/3d*` |
+| 5 | 跑 sample | `tina_sample_ui_showcase` / `tina_sample_2d` / `tina_sample_3d`（命令见 [构建](building.md)） |
+| 6 | 读 sample 源码 | UI 工作台：`samples/ui_showcase`；2D 产品接线：`samples/2d_tilemap_bgfx`（含 PauseOverlay policy）；3D：`samples/3d*` |
 
 改契约或公开头前：对照 [design-freeze](design-freeze.md) 与对应 ADR；验证按 [testing](testing.md) 直接跑 GoogleTest executable。
 

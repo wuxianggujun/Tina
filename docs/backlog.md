@@ -94,6 +94,8 @@
 | DOC-001 | 文档职责与任务体系重组完成；本地链接、configure/build preset、CMake target、Markdown fence 与格式扫描通过；UI 绘制链路和控件矩阵已归档 | [文档索引](README.md) · [Roadmap](roadmap.md) · [UI](ui.md) |
 | UI-THEME-AB | 薄 `UITheme` token；`UIBoxPaint` 亮/暗边 + 可选 shadow；sample_2d 设置面板 elevation；hex `rgb`/`argb`；`UIThemeTests` | [UI](ui.md) |
 | UI-THEME-DEFAULT | Context/Runtime phase facade `productTheme`/`setProductTheme`；`create*` 自动 apply `make*Chrome`；既有继承属性事务换肤；属性级局部 override；Button focus border 与 pressed depth；`makeLightProductTheme`；`UIThemeTests` | [UI](ui.md) |
+| UI-SHOWCASE | 独立 `tina_sample_ui_showcase` 同屏展示 13 个成熟控件、Panel/elevation/色板/状态栏、Dark/Light 实时换肤与 Slider→ProgressBar 联动；dark/light 自动 smoke 和 Win32 pointer interaction/capture 通过 | [UI](ui.md) · [测试](testing.md) |
+| UI-LAYOUT-PADDING | `UILayoutStyle::padding` 同时约束 text auto-size/paint content origin；多行回到 padded x，TextEdit pointer selection 扣除 left padding；对应 UI 回归通过 | [UI](ui.md) · `UITextTests` / `UITextEditTests` |
 | DOC-002 | `tools/docs/CheckDocs.ps1`：docs 本地链接、cmake configure/build preset、`--target` 名、Legacy 产品文案软警告；不扫 out/build/thirdparty | [building](building.md) · [testing](testing.md) |
 | RUNTIME-001 | `GameStateStack` + commands + 唯一 commit；**policy 向下阻断**（fixed/frame/render/UI 自顶向下 `forEachDispatch`）；enter 失败丢 candidate；`GameStateStackTests` / policy dispatch 单测 | [gameplay](gameplay.md) · ADR 0014 |
 | RUNTIME-002 | `FramePin`/`FramePinSink`、`RenderFramePacket`、`CpuSubmissionCompletionLedger`；EngineHost submit/present 挂 pin 并在 present/skip 后 complete；shutdown abandon；`FramePinPacketTests` | [rendering](rendering.md) · ADR 0016 |

@@ -18,7 +18,7 @@
 | Input | Pointer default action、Tab focus、Keyboard/Gamepad activation、TextEdit edit/selection/IME |
 | Semantics | role/name/checked/selected/range/value/valueText/focused snapshot |
 | Runtime | startup root builder、phase-scoped tree updater、DisplayList/Glyph atlas handoff |
-| Product | product-2d HUD、设置控件、TextEdit、65% ProgressBar、RadioButton 组与 Windows 视觉证据 |
+| Product | 独立 13 控件 showcase（Dark/Light 实时换肤）以及 product-2d HUD/设置面板与 Windows 视觉证据 |
 
 ## 所有权与句柄
 
@@ -45,6 +45,10 @@ Tree mutation、layout、hit、paint 与 semantics 都有固定容量和明确 c
 Layout 使用窗口 logical extent，不直接读取 framebuffer pixel。content scale/resize 更新 layout size，但同一
 WindowId 不重建 Context。clean-subtree measure/arrange reuse 已实现；完整 dirty-range pruning 与大型虚拟
 列表尚未实现。
+
+`UILayoutStyle::padding` 同时参与 measure/auto-size 与 content origin：Label、Button、TextEdit、
+RadioButton 的文字从 `left/top` padding 后开始绘制，多行文字换行回到同一 padded x；TextEdit 的
+pointer-to-caret 命中也以 padded 文本起点计算。`right/bottom` padding 参与固有尺寸，但不额外移动文字。
 
 ## 输入与默认行为
 
@@ -200,6 +204,19 @@ rounded rectangle、Image widget、毛玻璃与 CSS 式 stylesheet 仍未实现�
 
 ## 产品接入与证据
 
+`tina_sample_ui_showcase` 是控件与换肤的独立工作台，固定 1280×720 logical extent，同屏展示：
+
+- Primary、destructive、disabled 与 reset Button；
+- Checkbox、Slider→ProgressBar 联动、UTF-8 TextEdit；
+- Performance/Balanced/Quality 与 Dark/Light 两组 RadioButton；
+- Panel elevation、双边框/阴影、状态栏与主题色板。
+
+它使用默认 product chrome 呈现 hover/pressed/focused/disabled 层次，并通过
+`setProductTheme()` 在既有 retained tree 上事务切换 Dark/Light。`--auto-demo` 会执行
+Dark→Light→Dark（或相反）及 Slider→ProgressBar 联动，并在退出 JSON 中验证 theme switch、value、
+13 个控件与 root 生命周期。完整文字视觉验收必须使用 bgfx + FreeType preset；普通 bgfx preset 的
+placeholder text 只用于确定性降级和生命周期 smoke。
+
 `tina_sample_2d` 当前 UI 包含：
 
 - HUD Label/Button；
@@ -214,11 +231,12 @@ rounded rectangle、Image widget、毛玻璃与 CSS 式 stylesheet 仍未实现�
 人工复核 `frame-02.png` / `frame-03.png` 中上述控件可见、中文正常且无裁剪或重叠；两帧 65% fill
 均为 x=700..842（143 px），选中色只出现在 Windowed RadioButton，client capture 未混入标题栏。
 
-当前 tip 最近直接验证为：`tina_ui_tests` 270/270（含 Accessibility）、`tina_runtime_ui_tests` 84/84、
+当前 tip 最近直接验证为：`tina_ui_tests` 271/271（含 Accessibility）、`tina_runtime_ui_tests` 84/84、
 `tina_ui_render_integration_tests` 15/15、product-2d 图的 `tina_ui_freetype_tests` 3/3。UI 容量回归
 覆盖 Checkbox/Slider mutation、TextEdit pointer selection 和需要同时重绘旧/新节点的 focus step；
-dirty queue 容量不足时状态与 callback 原子不变，同文本替换 selection 仍发布新 paint。数字是当前
-工作树证据，不是架构永久基线。
+dirty queue 容量不足时状态与 callback 原子不变，同文本替换 selection 仍发布新 paint；文本 padding
+回归覆盖 auto-size、多行回行和可变 glyph advance 的 TextEdit pointer selection。数字是当前工作树
+证据，不是架构永久基线。
 
 ## 验证
 
@@ -230,7 +248,19 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe --gtest_co
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=yes
 ```
 
-FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [测试说明](testing.md)。
+完整 showcase：
+
+```powershell
+cmake --preset windows-msvc-vnext-bgfx-ui-freetype
+cmake --build --preset windows-vnext-bgfx-ui-freetype-debug `
+  --target tina_sample_ui_showcase tina_ui_tests tina_runtime_ui_tests `
+           tina_ui_render_integration_tests tina_ui_freetype_tests -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
+  --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
+```
+
+FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构建说明](building.md)与
+[测试说明](testing.md)。
 
 ## 后续任务
 

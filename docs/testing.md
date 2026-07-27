@@ -54,9 +54,34 @@ out\build\windows-msvc-vnext\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 ```
 
-当前 tip 最近直接验证 `tina_ui_tests` 263/263、`tina_runtime_ui_tests` 83/83、
+当前 tip 最近直接验证 `tina_ui_tests` 271/271、`tina_runtime_ui_tests` 84/84、
 `tina_ui_render_integration_tests` 15/15 与 product-2d 图的 `tina_ui_freetype_tests` 3/3。其他 target
 必须按最终验证命令重新运行后才能记录本轮数字。
+
+## UI showcase 门禁
+
+完整控件、中文与主题视觉验收使用 bgfx + FreeType 图：
+
+```powershell
+cmake --preset windows-msvc-vnext-bgfx-ui-freetype
+cmake --build --preset windows-vnext-bgfx-ui-freetype-debug `
+  --target tina_sample_ui_showcase tina_ui_tests tina_runtime_ui_tests `
+           tina_ui_render_integration_tests tina_ui_freetype_tests -- /m:2 /v:m
+
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
+  --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
+  --frames=150 --frame-delay-ms=0 --theme=light --auto-demo
+```
+
+两个自动 smoke 均须 exit 0，并输出 `controls=13`、`themeSwitches=2`、`sliderChanges>0`、
+`progressValue=84`、`uiRootsCreated=1`、`uiRootsReleased=1`，最终主题回到 `initialTheme`。
+`--auto-demo` 与显式 `--frames` 同用时至少 120 帧。
+
+Visual/interaction 验收另跑不带 `--auto-demo` 的窗口：确认 Dark/Light 切换后既有控件同步换肤，
+Primary/Destructive/Disabled Button 层次清楚，pointer press 会压低阴影并反转双边框，Tab focus 可辨，
+Slider 与 ProgressBar 联动，TextEdit 中文可读且左右 padding 与 pointer caret 一致。普通
+`windows-msvc-vnext-bgfx` 图未启用 FreeType，placeholder text 不能计为字体或 CJK 视觉通过。
 
 ## 改动到门禁映射
 
@@ -66,7 +91,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 | Platform/Input/WindowSurface | `tina_tests`、`tina_platform_glfw_tests` | `tina_sample_platform`，X11/Wayland |
 | Task/关闭顺序 | `tina_tests` | Null/Desktop 300帧，失败注入 |
 | Runtime phase/state | `tina_tests`、`tina_runtime_ui_tests` | Null、2D、3D products |
-| UI/Widget/Text | `tina_ui_tests`、`tina_runtime_ui_tests`、bridge | FreeType、product-2d、截图 |
+| UI/Widget/Text | `tina_ui_tests`、`tina_runtime_ui_tests`、bridge | FreeType、UI showcase、product-2d、截图 |
 | RenderScene/Scene/2D-FX | `tina_render_scene_tests`、`tina_scene_tests` | extraction samples、2D/3D products |
 | bgfx backend | `tina_render_bgfx_tests` | Desktop/2D/3D GPU samples + Visual |
 | Asset format/Cooker | `tina_asset_format_tests`、`tina_asset_tests` | `assetc`→validate→sample、3D product |

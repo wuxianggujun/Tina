@@ -82,7 +82,7 @@ cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug `
   --target tina_tests tina_runtime_ui_tests tina_platform_glfw_tests tina_render_bgfx_tests `
            tina_sample_desktop tina_sample_2d_infrastructure_bgfx tina_sample_3d_infrastructure `
-           tina_sample_3d tina_sample_2d -- /m:2 /v:m
+           tina_sample_ui_showcase tina_sample_3d tina_sample_2d -- /m:2 /v:m
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d_infrastructure_bgfx.exe --frames=300 --frame-delay-ms=0
@@ -91,6 +91,26 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --
 
 GLFW/GLFW sample 在 Linux X11/Wayland 图中应通过 `xvfb-run` 或受控 compositor 运行；X11 的
 `_XimOpenIM` suppression 只能用于初始化 GLFW 的进程，不能扩大为 Tina 全局 suppression。
+
+## UI control showcase
+
+`tina_sample_ui_showcase` 在普通 bgfx 图也可构建，但默认图未启用 FreeType，只能看到文字 placeholder。
+用于完整控件、中文、按钮状态层次和 Dark/Light 换肤验收时，使用专用 FreeType 图：
+
+```powershell
+cmake --preset windows-msvc-vnext-bgfx-ui-freetype
+cmake --build --preset windows-vnext-bgfx-ui-freetype-debug `
+  --target tina_sample_ui_showcase tina_ui_tests tina_runtime_ui_tests `
+           tina_ui_render_integration_tests tina_ui_freetype_tests -- /m:2 /v:m
+
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
+  --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
+```
+
+交互模式关闭窗口退出；自动模式输出 JSON 并校验 13 个控件、两次换肤、Slider→ProgressBar 联动和
+UI root 生命周期。可用 `--theme=light` 改初始主题。字体仍按 CMake cache、环境变量
+`TINA_UI_FONT_PATH`、可选 repo fixture 的顺序解析；没有真实字体不得记录为 CJK 视觉通过。
 
 ## 完整 product-2d 图
 

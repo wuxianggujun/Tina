@@ -16,6 +16,7 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
   upload/retirement；
 - UI 支持 retained tree、布局、路由、文本/Glyph、Button、Checkbox、Slider、ProgressBar、RadioButton
   和单行 TextEdit；
+- `tina_sample_ui_showcase` 提供 13 控件工作台、按钮交互层次与 Dark/Light 实时换肤；
 - Audio 提供 backend-neutral engine 与可选 miniaudio；Physics2D 提供可选 Box2D 3.x adapter；
 - `tina_sample_2d` 是 Catalog/TileMap/UI/Audio/Physics2D 产品门禁，`tina_sample_3d` 是
   glTF/Prefab/Scene/Render 产品门禁。
@@ -45,6 +46,14 @@ cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_tests -- /m:2 /v:m
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
+```
+
+UI 控件与换肤工作台（完整文字使用 FreeType 图）：
+
+```powershell
+cmake --preset windows-msvc-vnext-bgfx-ui-freetype
+cmake --build --preset windows-vnext-bgfx-ui-freetype-debug --target tina_sample_ui_showcase -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe
 ```
 
 完整 2D feature 图（bgfx + Physics2D + FreeType + miniaudio）：

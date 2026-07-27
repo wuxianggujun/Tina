@@ -795,12 +795,14 @@ TEST_F(UITextEditTest, PointerSelectionUsesRasterizedVariableGlyphAdvances)
     ASSERT_TRUE(textEditResult.has_value())
         << (textEditResult ? "" : textEditResult.error().message);
     const UI::UINodeId textEdit = *textEditResult;
-    assertOk(localUpdater.setLayoutStyle(textEdit, fixedSize(120.0F, 32.0F)));
+    UI::UILayoutStyle textEditStyle = fixedSize(120.0F, 32.0F);
+    textEditStyle.padding.left = 12.0F;
+    assertOk(localUpdater.setLayoutStyle(textEdit, textEditStyle));
     assertOk(localUpdater.setText(textEdit, "Wi"));
     assertOk(localContext->commitLayout({.width = 120.0F, .height = 40.0F}));
 
     auto down = localContext->routePointerInput(
-        makePrimaryPointerDown(window, 1, 18.0F, 10.0F));
+        makePrimaryPointerDown(window, 1, 30.0F, 10.0F));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
     auto selection = localUpdater.textSelection(textEdit);

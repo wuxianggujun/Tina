@@ -297,6 +297,63 @@ TEST(UITextTests, TextPaintUsesRasterizerAdvancesForMultiLine)
     EXPECT_TRUE(paint.entries()[2].isGlyph);
 }
 
+TEST(UITextTests, TextPaintAndAutoSizeRespectLayoutPaddingAcrossLines)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+
+    auto context = createContext(
+        *windowResult,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 8,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 8,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+
+    auto labelResult = updater.createLabel(root.rootNodeId());
+    ASSERT_TRUE(labelResult.has_value());
+    const UI::UINodeId label = *labelResult;
+    UI::UILayoutStyle labelStyle{};
+    labelStyle.padding = {
+        .left = 7.0F,
+        .top = 5.0F,
+        .right = 3.0F,
+        .bottom = 2.0F,
+    };
+    assertOk(updater.setLayoutStyle(label, labelStyle));
+    assertOk(updater.setText(label, "A\nB"));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 2U);
+    EXPECT_FLOAT_EQ(paint.entries()[0].worldRect.x, 7.0F);
+    EXPECT_FLOAT_EQ(paint.entries()[0].worldRect.y, 5.0F);
+    EXPECT_FLOAT_EQ(paint.entries()[1].worldRect.x, 7.0F);
+    EXPECT_FLOAT_EQ(
+        paint.entries()[1].worldRect.y,
+        5.0F + 16.0F * 1.2F);
+
+    bool foundLabel = false;
+    for (const UI::UICommittedLayoutEntry& entry : context->committedLayout().entries()) {
+        if (entry.node != label) {
+            continue;
+        }
+        foundLabel = true;
+        EXPECT_FLOAT_EQ(entry.worldRect.width, 16.0F * 0.6F + 10.0F);
+        EXPECT_FLOAT_EQ(entry.worldRect.height, 16.0F * 1.2F * 2.0F + 7.0F);
+    }
+    EXPECT_TRUE(foundLabel);
+}
+
 TEST(UITextTests, SameTextIsNoOpAndClearingTextShrinksAutoSize)
 {
     auto windowsResult = WindowPool::Create(1);

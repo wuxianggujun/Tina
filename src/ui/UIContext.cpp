@@ -2661,12 +2661,13 @@ struct UIContext::Impl final {
         float startY,
         TextPaintCursor* outCursor) noexcept
     {
+        const float lineStartX = outCursor != nullptr ? outCursor->baseX : startX;
         if (outCursor != nullptr) {
             *outCursor = TextPaintCursor{
                 .x = startX,
                 .y = startY,
                 .lineHeight = style.logicalSize * style.lineHeightScale,
-                .baseX = layoutEntry.worldRect.x,
+                .baseX = lineStartX,
             };
         }
         if (utf8.empty() || color.isTransparent()) {
@@ -2708,7 +2709,7 @@ struct UIContext::Impl final {
                         break;
                     }
                     if (unitLength == 1 && first == '\n') {
-                        cursorX = layoutEntry.worldRect.x;
+                        cursorX = lineStartX;
                         cursorY = normalizeFloat(cursorY + lineHeight);
                         index += unitLength;
                         continue;
@@ -2788,7 +2789,7 @@ struct UIContext::Impl final {
                         outCursor->x = cursorX;
                         outCursor->y = cursorY;
                         outCursor->lineHeight = lineHeight;
-                        outCursor->baseX = layoutEntry.worldRect.x;
+                        outCursor->baseX = lineStartX;
                     }
                     return;
                 }
@@ -2818,7 +2819,7 @@ struct UIContext::Impl final {
                 break;
             }
             if (unitLength == 1 && first == '\n') {
-                cursorX = layoutEntry.worldRect.x;
+                cursorX = lineStartX;
                 cursorY = normalizeFloat(cursorY + lineHeight);
                 index += unitLength;
                 continue;
@@ -2845,7 +2846,7 @@ struct UIContext::Impl final {
             outCursor->x = cursorX;
             outCursor->y = cursorY;
             outCursor->lineHeight = lineHeight;
-            outCursor->baseX = layoutEntry.worldRect.x;
+            outCursor->baseX = lineStartX;
         }
     }
 
@@ -2877,7 +2878,11 @@ struct UIContext::Impl final {
                 && textState->hasContent
             ? textViewFor(nodeIndex)
             : std::string_view{};
-        float textStartX = layoutEntry.worldRect.x;
+        const UIEdgeSpacing padding = nodeIndex < layoutStylesByIndex.size()
+            ? layoutStylesByIndex[nodeIndex].padding
+            : UIEdgeSpacing{};
+        float textStartX = normalizeFloat(layoutEntry.worldRect.x + padding.left);
+        const float textStartY = normalizeFloat(layoutEntry.worldRect.y + padding.top);
         if (record != nullptr && record->kind == UIWidgetKind::RadioButton
             && nodeIndex < radioButtonStatesByNodeIndex.size()) {
             const float indicatorExtent = (std::min)(
@@ -2885,11 +2890,12 @@ struct UIContext::Impl final {
                 layoutEntry.worldRect.height);
             textStartX = normalizeFloat(
                 layoutEntry.worldRect.x + indicatorExtent
-                + radioButtonStatesByNodeIndex[nodeIndex].paint.labelGap);
+                + radioButtonStatesByNodeIndex[nodeIndex].paint.labelGap
+                + padding.left);
         }
         TextPaintCursor cursor{
             .x = textStartX,
-            .y = layoutEntry.worldRect.y,
+            .y = textStartY,
             .lineHeight = style.logicalSize * style.lineHeightScale,
             .baseX = textStartX,
         };
@@ -6806,7 +6812,9 @@ struct UIContext::Impl final {
         if (!(std::isfinite(advance) && advance > 0.0F)) {
             advance = 1.0F;
         }
-        const float relativeX = position.x - worldRect.x;
+        const float textStartX = worldRect.x
+            + layoutStylesByIndex[textEdit.index()].padding.left;
+        const float relativeX = position.x - textStartX;
         if (!(relativeX > 0.0F)) {
             return 0;
         }
