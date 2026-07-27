@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <tina/render/RenderFramePacket.hpp>
+
 #include <array>
 #include <limits>
 #include <optional>
@@ -120,10 +122,26 @@ TEST(Sample2DTileSelectionTest, IgnoresNonStartedOtherActionsMissingPayloadAndCa
 
 TEST(Sample2DTileSelectionTest, SelectionHighlightSpriteCentersOnCellAndRejectsInvalid)
 {
+    Tina::Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    Tina::Render::FramePin pin{
+        Tina::Render::FramePinKind::Custom,
+        1,
+        nullptr,
+        [](void*) noexcept {},
+    };
+    auto texture = packet.intern(
+        Tina::Render::FrameResourceDescriptor{
+            .kind = Tina::Render::FrameResourceKind::Sprite2DTexture,
+            .deviceBindingKey = 1,
+        },
+        std::move(pin));
+    ASSERT_TRUE(texture);
+
     const auto sprite =
-        Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 2, .cellY = 1}, SampleGrid, /*spriteKey=*/1);
+        Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 2, .cellY = 1}, SampleGrid, *texture);
     ASSERT_TRUE(sprite.has_value());
-    EXPECT_EQ(sprite->spriteKey, 1U);
+    EXPECT_EQ(sprite->texture, *texture);
     EXPECT_FLOAT_EQ(sprite->centerX, 2.5F);
     EXPECT_FLOAT_EQ(sprite->centerY, 1.5F);
     EXPECT_FLOAT_EQ(sprite->widthMeters, 0.92F);
@@ -131,10 +149,14 @@ TEST(Sample2DTileSelectionTest, SelectionHighlightSpriteCentersOnCellAndRejectsI
     EXPECT_EQ(sprite->sortingLayer, 2);
     EXPECT_EQ(sprite->alpha, 160);
 
-    EXPECT_FALSE(Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 8, .cellY = 0}, SampleGrid, 1).has_value());
-    EXPECT_FALSE(Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 0, .cellY = 0}, SampleGrid, 0).has_value());
     EXPECT_FALSE(
-        Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 0, .cellY = 0}, TileSelectionGrid{8, 4, 0.0F}, 1)
+        Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 8, .cellY = 0}, SampleGrid, *texture).has_value());
+    EXPECT_FALSE(Tina::Sample2D::makeSelectionHighlightSprite(
+                     {.cellX = 0, .cellY = 0}, SampleGrid, Tina::Render::FrameResourceRef{})
+                     .has_value());
+    EXPECT_FALSE(
+        Tina::Sample2D::makeSelectionHighlightSprite(
+            {.cellX = 0, .cellY = 0}, TileSelectionGrid{8, 4, 0.0F}, *texture)
             .has_value());
 }
 

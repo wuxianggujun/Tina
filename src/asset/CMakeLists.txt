@@ -1,5 +1,6 @@
 set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetBindingResolver.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetFrameResourceResolver.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetHandle.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetStore.hpp
@@ -71,11 +72,12 @@ add_library(tina_asset_types INTERFACE)
 add_library(Tina::AssetTypes ALIAS tina_asset_types)
 target_sources(tina_asset_types INTERFACE
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetBindingResolver.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetFrameResourceResolver.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetHandle.hpp
 )
 target_compile_features(tina_asset_types INTERFACE cxx_std_23)
 target_include_directories(tina_asset_types INTERFACE ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(tina_asset_types INTERFACE Tina::Core)
+target_link_libraries(tina_asset_types INTERFACE Tina::Core Tina::Render)
 
 if (TINA_BUILD_PHYSICS2D)
     list(APPEND TINA_ASSET_PUBLIC_HEADERS

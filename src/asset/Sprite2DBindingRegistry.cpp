@@ -3,8 +3,11 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetStore.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
 
+#include <exception>
+#include <limits>
 #include <new>
 #include <utility>
 
@@ -19,6 +22,20 @@ namespace {
 }
 
 } // namespace
+
+Sprite2DBindingRegistry::~Sprite2DBindingRegistry() noexcept
+{
+    for (const Entry& entry : m_entries)
+    {
+        if (entry.frameBorrowCount != 0)
+        {
+            // FramePin callbacks point at fixed registry entries. Destroying that
+            // storage while a packet still owns a borrow would turn completion
+            // into a use-after-free.
+            std::terminate();
+        }
+    }
+}
 
 Sprite2DBindingRegistry::Sprite2DBindingRegistry(AssetStore& store, Render::IRenderDevice& device,
                                                  std::pmr::vector<Entry> entries, Core::usize capacity) noexcept
@@ -161,6 +178,11 @@ Core::Status Sprite2DBindingRegistry::unbindTextureBinding(AssetHandle textureAs
     {
         return Core::failure(AssetErrorCode::SpriteBindingNotFound, "Texture2D handle has no Sprite2D binding");
     }
+    if (entry->frameBorrowCount != 0)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "Sprite2D binding is still borrowed by an active frame resource");
+    }
     if (auto status = m_device->setSprite2DTextureBinding(entry->bindingKey, {}); !status)
     {
         return Core::failure(
@@ -191,32 +213,104 @@ Core::u32 Sprite2DBindingRegistry::resolveTileset(AssetHandle tilesetAsset) cons
     return resolveSingleTextureDependency(tilesetAsset, AssetFormat::AssetKind::Tileset);
 }
 
-Core::u32 Sprite2DBindingRegistry::resolveSingleTextureDependency(
+Core::Result<Render::FrameResourceRef>
+Sprite2DBindingRegistry::internSpriteFrameResource(AssetHandle spriteAsset,
+                                                   Render::FrameResourceSink& sink) noexcept
+{
+    return internSingleTextureDependency(spriteAsset, AssetFormat::AssetKind::Sprite, sink);
+}
+
+Core::Result<Render::FrameResourceRef>
+Sprite2DBindingRegistry::internTilesetFrameResource(AssetHandle tilesetAsset,
+                                                    Render::FrameResourceSink& sink) noexcept
+{
+    return internSingleTextureDependency(tilesetAsset, AssetFormat::AssetKind::Tileset, sink);
+}
+
+const Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::resolveSingleTextureDependencyEntry(
     AssetHandle asset,
     AssetFormat::AssetKind expectedKind) const noexcept
 {
     if (!isOwnerThread() || !asset || m_store->assetKind(asset) != expectedKind ||
         !hasRenderableCpuPayload(*m_store, asset))
     {
-        return 0;
+        return nullptr;
     }
     const CookedAssetFile* file = m_store->tryGet(asset);
     if (file == nullptr || file->header().dependencyCount != 1U)
     {
-        return 0;
+        return nullptr;
     }
     const auto textureDependency = file->dependency(0);
     if (!textureDependency || textureDependency->expectedKind != AssetFormat::AssetKind::Texture2D ||
         textureDependency->flags != AssetFormat::DependencyFlags::Required)
     {
-        return 0;
+        return nullptr;
     }
     const Entry* entry = findByAssetId(textureDependency->assetId);
     if (entry == nullptr || !isLiveTextureEntry(*entry))
     {
-        return 0;
+        return nullptr;
     }
-    return entry->bindingKey;
+    return entry;
+}
+
+Core::u32 Sprite2DBindingRegistry::resolveSingleTextureDependency(
+    AssetHandle asset,
+    AssetFormat::AssetKind expectedKind) const noexcept
+{
+    const Entry* entry = resolveSingleTextureDependencyEntry(asset, expectedKind);
+    return entry == nullptr ? 0U : entry->bindingKey;
+}
+
+Core::Result<Render::FrameResourceRef> Sprite2DBindingRegistry::internSingleTextureDependency(
+    AssetHandle asset,
+    AssetFormat::AssetKind expectedKind,
+    Render::FrameResourceSink& sink) noexcept
+{
+    if (!isOwnerThread())
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Sprite2DBindingRegistry frame resource intern must run on its owner thread");
+    }
+
+    const Entry* resolvedEntry = resolveSingleTextureDependencyEntry(asset, expectedKind);
+    if (resolvedEntry == nullptr)
+    {
+        return Render::FrameResourceRef{};
+    }
+    Entry* entry = findExact(resolvedEntry->textureAsset);
+    if (entry == nullptr || entry->frameBorrowCount == (std::numeric_limits<Core::u32>::max)())
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "Sprite2D binding cannot acquire another frame resource borrow");
+    }
+
+    ++entry->frameBorrowCount;
+    Render::FramePin pin{Render::FramePinKind::Custom, entry->bindingKey, entry,
+                         &Sprite2DBindingRegistry::releaseFrameBorrow};
+    auto resource = sink.intern(
+        Render::FrameResourceDescriptor{
+            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .deviceBindingKey = entry->bindingKey,
+        },
+        std::move(pin));
+    if (!resource)
+    {
+        return Core::failure(
+            std::move(resource.error()).withContext("Sprite2DBindingRegistry::internFrameResource", "sink"));
+    }
+    return *resource;
+}
+
+void Sprite2DBindingRegistry::releaseFrameBorrow(void* userData) noexcept
+{
+    auto* entry = static_cast<Entry*>(userData);
+    if (entry == nullptr || entry->frameBorrowCount == 0)
+    {
+        std::terminate();
+    }
+    --entry->frameBorrowCount;
 }
 
 bool Sprite2DBindingRegistry::isOwnerThread() const noexcept

@@ -32,6 +32,8 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+
+#include "../common/SampleSpriteFrameResource.hpp"
 #include <vector>
 
 namespace {
@@ -41,8 +43,8 @@ using Tina::Core::u32;
 using Tina::Core::u64;
 using Tina::Core::u8;
 
-inline constexpr u32 ProductSpriteKey = 1;
-inline constexpr u32 CharacterSpriteKey = 2;
+inline constexpr u32 ProductSpriteBindingKey = 1;
+inline constexpr u32 CharacterSpriteBindingKey = 2;
 inline constexpr Tina::AssetFormat::TileMapLayerId VisualLayerId = 1;
 inline constexpr Tina::AssetFormat::TileMapLayerId CollisionLayerId = 2;
 inline constexpr u64 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
@@ -403,7 +405,10 @@ class TileMap2DState final : public Tina::IGameState {
             return Tina::Core::failure(std::move(tileset.error()));
         }
         tilesetHandle_ = *tileset;
-        tilesetBinding_ = FixtureTilesetBinding{.tileset = tilesetHandle_};
+        tilesetBinding_ = FixtureTilesetBinding{
+            .tileset = tilesetHandle_,
+            .frameResource = &spriteFrameResource_,
+        };
         grid_.emplace(*map_, CollisionLayerId);
         controller_.emplace(Tina::Asset::CharacterController2DConfig{
             .halfWidth = 0.3f,
@@ -494,11 +499,12 @@ class TileMap2DState final : public Tina::IGameState {
             *map_, VisualLayerId, query,
             Tina::Asset::TileChunkSpriteEmitParams{
                 .tileset = tilesetHandle_,
-                .bindingResolver = Tina::Asset::AssetBindingResolver{
+                .bindingResolver = Tina::Asset::AssetFrameResourceResolver{
                     .userData = &tilesetBinding_,
                     .resolve = &FixtureTilesetBinding::resolve,
                 },
             },
+            context.frameResourceSink(),
             tileSprites);
         if (!emitted)
         {
@@ -513,10 +519,15 @@ class TileMap2DState final : public Tina::IGameState {
             }
         }
 
-        // Character as a second product sprite key (not a tile cell).
+        // Character uses a second texture binding (not a tile cell).
         const auto& st = controller_->state();
+        auto characterTexture = spriteFrameResource_.intern(context.frameResourceSink(), CharacterSpriteBindingKey);
+        if (!characterTexture)
+        {
+            return Tina::Core::failure(std::move(characterTexture.error()));
+        }
         const Tina::Render::RenderSprite2DInput character{
-            .spriteKey = CharacterSpriteKey,
+            .texture = *characterTexture,
             .stableEntityKey = 900001,
             .centerX = st.positionX,
             .centerY = st.positionY,
@@ -539,15 +550,21 @@ class TileMap2DState final : public Tina::IGameState {
 
   private:
     struct FixtureTilesetBinding final {
-        [[nodiscard]] static u32 resolve(
+        [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef> resolve(
             void* userData,
-            Tina::Asset::AssetHandle tileset) noexcept
+            Tina::Asset::AssetHandle tileset,
+            Tina::Render::FrameResourceSink& frameResources) noexcept
         {
             const auto* binding = static_cast<const FixtureTilesetBinding*>(userData);
-            return binding != nullptr && binding->tileset == tileset ? ProductSpriteKey : 0U;
+            if (binding == nullptr || binding->frameResource == nullptr || binding->tileset != tileset)
+            {
+                return Tina::Render::FrameResourceRef{};
+            }
+            return binding->frameResource->intern(frameResources, ProductSpriteBindingKey);
         }
 
         Tina::Asset::AssetHandle tileset{};
+        const Tina::Samples::SampleSpriteFrameResource* frameResource = nullptr;
     };
 
     u64 targetFrames_ = 0;
@@ -555,6 +572,7 @@ class TileMap2DState final : public Tina::IGameState {
     mutable std::pmr::unsynchronized_pool_resource memory_{};
     std::optional<Tina::Asset::AssetStore> fixtureStore_{};
     Tina::Asset::AssetHandle tilesetHandle_{};
+    mutable Tina::Samples::SampleSpriteFrameResource spriteFrameResource_{};
     mutable FixtureTilesetBinding tilesetBinding_{};
     std::optional<Tina::Asset::TileMapInstance> map_;
     std::optional<Tina::Asset::TileMapGridCollision> grid_;

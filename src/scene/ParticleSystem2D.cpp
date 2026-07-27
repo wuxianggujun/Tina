@@ -288,6 +288,7 @@ Core::Result<ParticleSystem2DUpdateStats> ParticleSystem2D::update(Core::Duratio
 Core::Result<ParticleSystem2DExtractStats>
 ParticleSystem2D::extract(
     Render::RenderSceneWriter& writer,
+    Render::FrameResourceSink& frameResources,
     Sprite2DBindingResolver spriteBindingResolver) const
 {
     ParticleSystem2DExtractStats stats{};
@@ -297,8 +298,11 @@ ParticleSystem2D::extract(
                 SceneErrorCode::UnresolvedSprite,
                 "ParticleSystem2D particle has no resolvable sprite asset");
         }
-        const u32 spriteKey = spriteBindingResolver(particle.sprite);
-        if (spriteKey == 0U) {
+        auto texture = spriteBindingResolver(particle.sprite, frameResources);
+        if (!texture) {
+            return Core::failure(std::move(texture.error()));
+        }
+        if (!texture->hasValue()) {
             return Core::failure(
                 SceneErrorCode::UnresolvedSprite,
                 "ParticleSystem2D particle sprite asset has no render binding");
@@ -308,7 +312,7 @@ ParticleSystem2D::extract(
             0.0,
             1.0);
         const Render::RenderSprite2DInput input{
-            .spriteKey = spriteKey,
+            .texture = *texture,
             .stableEntityKey = particle.stableParticleKey,
             .centerX = particle.position.x,
             .centerY = particle.position.y,

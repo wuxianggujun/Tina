@@ -7,6 +7,7 @@
 #include <cmath>
 #include <memory>
 #include <new>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -14,6 +15,23 @@
 
 namespace Tina::Render {
 namespace {
+
+[[nodiscard]] Core::Status validateSprite2DResources(const RenderFrame& frame) noexcept
+{
+    for (const RenderSprite2DItem& sprite : frame.primaryWorldScene.sprites2D())
+    {
+        const FrameResourceDescriptor* descriptor =
+            frame.resources.resolve(sprite.texture, FrameResourceKind::Sprite2DTexture);
+        if (descriptor == nullptr
+            || descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidFrameResource,
+                "NullRender Sprite2D texture ref is stale, cross-packet, wrong-kind, or out of binding range");
+        }
+    }
+    return Core::success();
+}
 
 class NullRenderDevice final : public IRenderDevice {
   public:
@@ -37,6 +55,10 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::UnexpectedFrameIndex,
                                  "Render frame indices must be contiguous and begin at zero");
+        }
+        if (auto status = validateSprite2DResources(frame); !status)
+        {
+            return Core::failure(std::move(status.error()));
         }
 
         if (auto status = surfaceStateTracker_.validateAndCommit(frame.primaryWindowSurface); !status)
@@ -143,19 +165,21 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status setSprite2DTextureBinding(u32 spriteKey, GpuTextureId texture) noexcept override
+    [[nodiscard]] Core::Status setSprite2DTextureBinding(u32 deviceBindingKey,
+                                                         GpuTextureId texture) noexcept override
     {
         if (stopped_)
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
         }
-        if (spriteKey == 0)
+        if (deviceBindingKey == 0)
         {
-            return Core::failure(RenderErrorCode::InvalidTextureUpload, "spriteKey must be non-zero");
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Sprite2D device binding key must be non-zero");
         }
         if (!texture)
         {
-            spriteBindings_.erase(spriteKey);
+            spriteBindings_.erase(deviceBindingKey);
             return Core::success();
         }
         if (texture.index >= textures_.size() || !textures_[texture.index].live ||
@@ -163,7 +187,7 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
-        spriteBindings_[spriteKey] = texture;
+        spriteBindings_[deviceBindingKey] = texture;
         return Core::success();
     }
 

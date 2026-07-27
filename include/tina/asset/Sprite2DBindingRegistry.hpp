@@ -5,6 +5,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/render/FrameResource.hpp>
 #include <tina/render/RenderDevice.hpp>
 
 #include <memory_resource>
@@ -31,6 +32,8 @@ struct Sprite2DBindingRegistryConfig final {
 // destroying or retiring a registered texture.
 class Sprite2DBindingRegistry final {
   public:
+    ~Sprite2DBindingRegistry() noexcept;
+
     Sprite2DBindingRegistry(const Sprite2DBindingRegistry&) = delete;
     Sprite2DBindingRegistry& operator=(const Sprite2DBindingRegistry&) = delete;
     Sprite2DBindingRegistry(Sprite2DBindingRegistry&& other) noexcept;
@@ -62,12 +65,22 @@ class Sprite2DBindingRegistry final {
     // Fail-closed Tileset -> unique Texture2D dependency -> live binding lookup.
     [[nodiscard]] Core::u32 resolveTileset(AssetHandle tilesetAsset) const noexcept;
 
+    // Resolves the asset's unique Texture2D dependency and interns its current
+    // backend binding into a frame-local resource table. The retained FramePin
+    // prevents this binding entry from being unbound until the sink releases it.
+    // An unresolved asset returns a successful empty ref without invoking the sink.
+    [[nodiscard]] Core::Result<Render::FrameResourceRef>
+    internSpriteFrameResource(AssetHandle spriteAsset, Render::FrameResourceSink& sink) noexcept;
+    [[nodiscard]] Core::Result<Render::FrameResourceRef>
+    internTilesetFrameResource(AssetHandle tilesetAsset, Render::FrameResourceSink& sink) noexcept;
+
   private:
     struct Entry final {
         AssetHandle textureAsset{};
         Core::AssetId textureAssetId{};
         Render::GpuTextureId gpuTexture{};
         Core::u32 bindingKey = 0;
+        Core::u32 frameBorrowCount = 0;
     };
 
     Sprite2DBindingRegistry(AssetStore& store, Render::IRenderDevice& device, std::pmr::vector<Entry> entries,
@@ -80,8 +93,16 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] const Entry* findByAssetId(Core::AssetId textureAssetId) const noexcept;
     [[nodiscard]] Entry* findFree() noexcept;
     [[nodiscard]] bool isLiveTextureEntry(const Entry& entry) const noexcept;
+    [[nodiscard]] const Entry* resolveSingleTextureDependencyEntry(
+        AssetHandle asset,
+        AssetFormat::AssetKind expectedKind) const noexcept;
     [[nodiscard]] Core::u32 resolveSingleTextureDependency(AssetHandle asset,
                                                            AssetFormat::AssetKind expectedKind) const noexcept;
+    [[nodiscard]] Core::Result<Render::FrameResourceRef> internSingleTextureDependency(
+        AssetHandle asset,
+        AssetFormat::AssetKind expectedKind,
+        Render::FrameResourceSink& sink) noexcept;
+    static void releaseFrameBorrow(void* userData) noexcept;
 
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;

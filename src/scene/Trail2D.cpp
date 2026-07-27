@@ -235,13 +235,17 @@ Core::Status Trail2D::update(Core::Duration delta) noexcept
 
 Core::Status Trail2D::extract(
     Render::RenderSceneWriter& writer,
+    Render::FrameResourceSink& frameResources,
     Sprite2DBindingResolver spriteBindingResolver) const noexcept
 {
     if (m_segments.empty()) {
         return Core::success();
     }
-    const u32 spriteKey = spriteBindingResolver(m_config.sprite);
-    if (spriteKey == 0) {
+    auto texture = spriteBindingResolver(m_config.sprite, frameResources);
+    if (!texture) {
+        return Core::failure(std::move(texture.error()));
+    }
+    if (!texture->hasValue()) {
         return Core::failure(
             SceneErrorCode::UnresolvedSprite,
             "Trail2D Sprite AssetHandle has no live render binding");
@@ -254,7 +258,7 @@ Core::Status Trail2D::extract(
         }
         const float width = widthAtAge(m_config, segment);
         Core::Status status = writer.addSprite2D(Render::RenderSprite2DInput{
-            .spriteKey = spriteKey,
+            .texture = *texture,
             .stableEntityKey = segment.stableEntityKey,
             .centerX = geometry->centerX,
             .centerY = geometry->centerY,

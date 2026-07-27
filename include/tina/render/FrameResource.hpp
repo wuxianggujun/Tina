@@ -130,7 +130,7 @@ public:
     virtual ~FrameResourceSink() noexcept = default;
     [[nodiscard]] virtual Core::Result<FrameResourceRef> intern(
         FrameResourceDescriptor descriptor,
-        FramePin&& pin) = 0;
+        FramePin&& pin) noexcept = 0;
     [[nodiscard]] virtual Core::u32 resourceCount() const noexcept = 0;
 };
 

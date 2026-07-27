@@ -1,4 +1,6 @@
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
 
 #include <gtest/gtest.h>
@@ -41,6 +43,43 @@ class CountingResource final : public std::pmr::memory_resource {
     }
 };
 
+void countFrameResourceRelease(void* userData) noexcept
+{
+    ++(*static_cast<u32*>(userData));
+}
+
+class FrameResourceScope final {
+  public:
+    FrameResourceScope()
+    {
+        EXPECT_TRUE(packet_.beginFrame(0));
+    }
+
+    [[nodiscard]] FrameResourceRef texture(u64 deviceBindingKey)
+    {
+        FramePin pin{FramePinKind::Custom, deviceBindingKey, &releaseCount_, &countFrameResourceRelease};
+        auto result = packet_.intern(
+            FrameResourceDescriptor{
+                .kind = FrameResourceKind::Sprite2DTexture,
+                .deviceBindingKey = deviceBindingKey,
+            },
+            std::move(pin));
+        EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+        return result ? *result : FrameResourceRef{};
+    }
+
+    [[nodiscard]] u64 bindingKey(FrameResourceRef ref) const noexcept
+    {
+        const FrameResourceDescriptor* descriptor =
+            packet_.resourceTableView().resolve(ref, FrameResourceKind::Sprite2DTexture);
+        return descriptor != nullptr ? descriptor->deviceBindingKey : 0;
+    }
+
+  private:
+    u32 releaseCount_ = 0;
+    RenderFramePacket packet_{};
+};
+
 [[nodiscard]] RenderSceneBuilder makeBuilder(u32 capacity = 16)
 {
     auto result = RenderSceneBuilder::Create(RenderSceneCapacity{capacity});
@@ -61,11 +100,12 @@ class CountingResource final : public std::pmr::memory_resource {
     };
 }
 
-[[nodiscard]] RenderSprite2DInput sprite(u32 key, u64 stableKey, float x, float y,
+[[nodiscard]] RenderSprite2DInput sprite(FrameResourceScope& resources, u64 bindingKey,
+                                         u64 stableKey, float x, float y,
                                          i16 layer = 0, i32 order = 0)
 {
     return RenderSprite2DInput{
-        .spriteKey = key,
+        .texture = resources.texture(bindingKey),
         .stableEntityKey = stableKey,
         .centerX = x,
         .centerY = y,
@@ -166,24 +206,25 @@ TEST(RenderSceneBuilderTest, RejectsInvalidMeshAndBatchCapacitiesBeforeAllocatin
 
 TEST(RenderSceneBuilderTest, SortsCullsAndSnapsWithoutChangingInput)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame());
     RenderCamera2DInput cameraInput = camera(0.13F, -0.07F);
     cameraInput.pixelSnap = RenderPixelSnapPolicy::CameraAndSprites;
     ASSERT_TRUE(builder.writer().setCamera2D(cameraInput));
 
-    RenderSprite2DInput farAway = sprite(99, 99, 100.0F, 100.0F);
+    RenderSprite2DInput farAway = sprite(resources, 99, 99, 100.0F, 100.0F);
     ASSERT_TRUE(builder.writer().addSprite2D(farAway));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(2, 20, 0.14F, 0.04F, 2, 0)));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, 10, 0.12F, 0.02F, 1, 4)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 2, 20, 0.14F, 0.04F, 2, 0)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 1, 10, 0.12F, 0.02F, 1, 4)));
 
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
     ASSERT_TRUE(committed->camera2D().has_value());
     EXPECT_FLOAT_EQ(committed->camera2D()->centerX, 0.1F);
     ASSERT_EQ(committed->sprites2D().size(), 2U);
-    EXPECT_EQ(committed->sprites2D()[0].spriteKey, 1U);
-    EXPECT_EQ(committed->sprites2D()[1].spriteKey, 2U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[0].texture), 1U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[1].texture), 2U);
     EXPECT_EQ(committed->statistics().culledSpriteCount, 1U);
     EXPECT_EQ(committed->statistics().visibleSpriteCount, 2U);
     EXPECT_FLOAT_EQ(committed->sprites2D()[0].centerX, 0.1F);
@@ -191,6 +232,7 @@ TEST(RenderSceneBuilderTest, SortsCullsAndSnapsWithoutChangingInput)
 
 TEST(RenderSceneBuilderTest, ConservativelyCullsRotatedSpritesAtTheCameraBoundary)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame());
     RenderCamera2DInput cameraInput = camera();
@@ -198,14 +240,14 @@ TEST(RenderSceneBuilderTest, ConservativelyCullsRotatedSpritesAtTheCameraBoundar
     cameraInput.worldHeight = 4.0F;
     ASSERT_TRUE(builder.writer().setCamera2D(cameraInput));
 
-    RenderSprite2DInput intersectsAfterRotation = sprite(1, 1, 3.05F, 0.0F);
+    RenderSprite2DInput intersectsAfterRotation = sprite(resources, 1, 1, 3.05F, 0.0F);
     intersectsAfterRotation.widthMeters = 2.0F;
     intersectsAfterRotation.heightMeters = 1.0F;
     intersectsAfterRotation.rotationRadians = std::numbers::pi_v<float> * 0.25F;
     ASSERT_TRUE(builder.writer().addSprite2D(intersectsAfterRotation));
 
     RenderSprite2DInput outsideAfterRotation = intersectsAfterRotation;
-    outsideAfterRotation.spriteKey = 2;
+    outsideAfterRotation.texture = resources.texture(2);
     outsideAfterRotation.stableEntityKey = 2;
     outsideAfterRotation.centerX = 3.2F;
     ASSERT_TRUE(builder.writer().addSprite2D(outsideAfterRotation));
@@ -213,33 +255,35 @@ TEST(RenderSceneBuilderTest, ConservativelyCullsRotatedSpritesAtTheCameraBoundar
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
     ASSERT_EQ(committed->sprites2D().size(), 1U);
-    EXPECT_EQ(committed->sprites2D().front().spriteKey, 1U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D().front().texture), 1U);
     EXPECT_EQ(committed->statistics().culledSpriteCount, 1U);
 }
 
 TEST(RenderSceneBuilderTest, UsesEntityThenInsertionOrderForEqualLayers)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame());
     ASSERT_TRUE(builder.writer().setCamera2D(camera()));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(3, 30, 0.0F, 0.0F, 2, 7)));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(2, 20, 0.0F, 0.0F, 2, 7)));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, 20, 0.0F, 0.0F, 2, 7)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 3, 30, 0.0F, 0.0F, 2, 7)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 2, 20, 0.0F, 0.0F, 2, 7)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 1, 20, 0.0F, 0.0F, 2, 7)));
 
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
     ASSERT_EQ(committed->sprites2D().size(), 3U);
-    EXPECT_EQ(committed->sprites2D()[0].spriteKey, 2U);
-    EXPECT_EQ(committed->sprites2D()[1].spriteKey, 1U);
-    EXPECT_EQ(committed->sprites2D()[2].spriteKey, 3U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[0].texture), 2U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[1].texture), 1U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[2].texture), 3U);
     EXPECT_LT(committed->sprites2D()[0].insertionOrder, committed->sprites2D()[1].insertionOrder);
 }
 
 TEST(RenderSceneBuilderTest, RequiresOneCameraForWorldSpritesAndRejectsDuplicates)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame());
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, 1, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 1, 1, 0.0F, 0.0F)));
     auto missingCamera = builder.commit();
     ASSERT_FALSE(missingCamera);
     EXPECT_EQ(missingCamera.error().code, RenderErrorCode::RenderSceneMissingCamera);
@@ -252,20 +296,38 @@ TEST(RenderSceneBuilderTest, RequiresOneCameraForWorldSpritesAndRejectsDuplicate
     builder.rollback();
 }
 
+TEST(RenderSceneBuilderTest, RejectsInvalidSpriteTextureRefAtomically)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    ASSERT_TRUE(builder.writer().setCamera2D(camera()));
+
+    const auto invalid = builder.writer().addSprite2D(RenderSprite2DInput{
+        .stableEntityKey = 1,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    auto commit = builder.commit();
+    ASSERT_FALSE(commit.has_value());
+    EXPECT_EQ(commit.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    EXPECT_TRUE(builder.publishedView().empty());
+}
+
 TEST(RenderSceneBuilderTest, PrunesInvisibleAndTransparentSpritesAndReportsCapacity)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder(1);
     ASSERT_TRUE(builder.beginFrame());
     ASSERT_TRUE(builder.writer().setCamera2D(camera()));
 
-    auto invisible = sprite(1, 1, 0.0F, 0.0F);
+    auto invisible = sprite(resources, 1, 1, 0.0F, 0.0F);
     invisible.visible = false;
     ASSERT_TRUE(builder.writer().addSprite2D(invisible));
-    auto transparent = sprite(2, 2, 0.0F, 0.0F);
+    auto transparent = sprite(resources, 2, 2, 0.0F, 0.0F);
     transparent.alpha = 0;
     ASSERT_TRUE(builder.writer().addSprite2D(transparent));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(3, 3, 0.0F, 0.0F)));
-    const auto overflow = builder.writer().addSprite2D(sprite(4, 4, 0.0F, 0.0F));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 3, 3, 0.0F, 0.0F)));
+    const auto overflow = builder.writer().addSprite2D(sprite(resources, 4, 4, 0.0F, 0.0F));
     ASSERT_FALSE(overflow);
     EXPECT_EQ(overflow.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
     const auto commit = builder.commit();
@@ -275,6 +337,7 @@ TEST(RenderSceneBuilderTest, PrunesInvisibleAndTransparentSpritesAndReportsCapac
 
 TEST(RenderSceneBuilderTest, RejectsInvalidIdentityAndDerivedGeometryAtomically)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame());
 
@@ -294,7 +357,7 @@ TEST(RenderSceneBuilderTest, RejectsInvalidIdentityAndDerivedGeometryAtomically)
 
     ASSERT_TRUE(builder.beginFrame());
     ASSERT_TRUE(builder.writer().setCamera2D(camera()));
-    RenderSprite2DInput overflow = sprite(1, 1, 0.0F, 0.0F);
+    RenderSprite2DInput overflow = sprite(resources, 1, 1, 0.0F, 0.0F);
     overflow.widthMeters = (std::numeric_limits<float>::max)();
     overflow.scaleX = 2.0F;
     const auto spriteFailure = builder.writer().addSprite2D(overflow);
@@ -311,10 +374,11 @@ TEST(RenderSceneBuilderTest, RejectsInvalidIdentityAndDerivedGeometryAtomically)
 
 TEST(RenderSceneBuilderTest, ReplacementBuildInvalidatesOldPublicationAndFailurePublishesNothing)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder(1);
     ASSERT_TRUE(builder.beginFrame());
     ASSERT_TRUE(builder.writer().setCamera2D(camera()));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, 1, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 1, 1, 0.0F, 0.0F)));
     auto first = builder.commit();
     ASSERT_TRUE(first.has_value());
     ASSERT_EQ(first->sprites2D().size(), 1U);
@@ -322,8 +386,8 @@ TEST(RenderSceneBuilderTest, ReplacementBuildInvalidatesOldPublicationAndFailure
     ASSERT_TRUE(builder.beginFrame());
     EXPECT_TRUE(builder.publishedView().empty());
     ASSERT_TRUE(builder.writer().setCamera2D(camera()));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(2, 2, 0.0F, 0.0F)));
-    ASSERT_FALSE(builder.writer().addSprite2D(sprite(3, 3, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 2, 2, 0.0F, 0.0F)));
+    ASSERT_FALSE(builder.writer().addSprite2D(sprite(resources, 3, 3, 0.0F, 0.0F)));
     ASSERT_FALSE(builder.commit());
     EXPECT_TRUE(builder.publishedView().empty());
 }
@@ -356,10 +420,11 @@ TEST(RenderSceneBuilderTest, PerspectiveCameraRequiresCurrentSurfaceAspectAndVal
 
 TEST(RenderSceneBuilderTest, InvalidFrameAspectPreservesThePreviousPublicationWithoutOpeningABuild)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame());
     ASSERT_TRUE(builder.writer().setCamera2D(camera()));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, 1, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 1, 1, 0.0F, 0.0F)));
     ASSERT_TRUE(builder.commit());
 
     auto invalidFrame = builder.beginFrame(RenderSceneFrameParameters{
@@ -529,11 +594,12 @@ TEST(RenderSceneBuilderTest, MeshItemCapacityFailureIsStickyAndTransactional)
 
 TEST(RenderSceneBuilderTest, TwoDimensionalAndPerspectiveCamerasCanShareOneWorldScene)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
     ASSERT_TRUE(builder.writer().setCamera2D(camera()));
     ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
-    ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, 1, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 1, 1, 0.0F, 0.0F)));
     ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, 2, 0.0F, 0.0F, 0.0F)));
 
     auto committed = builder.commit();
@@ -549,6 +615,7 @@ TEST(RenderSceneBuilderTest, TwoDimensionalAndPerspectiveCamerasCanShareOneWorld
 
 TEST(RenderSceneBuilderTest, ReusesFixedStorageAcrossThreeHundredFrames)
 {
+    FrameResourceScope resources;
     CountingResource resource;
     {
         auto builderResult = RenderSceneBuilder::Create(RenderSceneCapacity{4}, resource);
@@ -561,7 +628,7 @@ TEST(RenderSceneBuilderTest, ReusesFixedStorageAcrossThreeHundredFrames)
             ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
             ASSERT_TRUE(builder.writer().setCamera2D(camera()));
             ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
-            ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, frame + 1U, 0.0F, 0.0F)));
+            ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 1, frame + 1U, 0.0F, 0.0F)));
             ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, frame + 10'000U, 0.0F, 0.0F, 0.0F)));
             auto committed = builder.commit();
             ASSERT_TRUE(committed.has_value());
@@ -577,6 +644,7 @@ TEST(RenderSceneBuilderTest, ReusesFixedStorageAcrossThreeHundredFrames)
 
 TEST(RenderSceneBuilderTest, MoveTransfersFixedStorageExactlyOnce)
 {
+    FrameResourceScope resources;
     CountingResource resource;
     {
         auto builderResult = RenderSceneBuilder::Create(RenderSceneCapacity{4}, resource);
@@ -588,7 +656,7 @@ TEST(RenderSceneBuilderTest, MoveTransfersFixedStorageExactlyOnce)
 
         ASSERT_TRUE(moved.beginFrame());
         ASSERT_TRUE(moved.writer().setCamera2D(camera()));
-        ASSERT_TRUE(moved.writer().addSprite2D(sprite(1, 1, 0.0F, 0.0F)));
+        ASSERT_TRUE(moved.writer().addSprite2D(sprite(resources, 1, 1, 0.0F, 0.0F)));
         ASSERT_TRUE(moved.commit());
         EXPECT_EQ(resource.allocations, allocationsAfterCreate);
     }

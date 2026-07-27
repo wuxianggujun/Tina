@@ -22,8 +22,9 @@
 - AssetSystem IO/Lease 生命周期或 binding registry ownership；
 - bgfx handle、shader、native window 或 backend command。
 
-依赖方向保持为 Scene → Core/Render/AssetFormat/AssetTypes；`AssetTypes` 只公开轻量 `AssetHandle`，不会
-把完整 AssetSystem、Task 或可选 Physics2D 传递给 Scene。第三方 ECS 或 renderer 类型不得进入公开头。
+依赖方向保持为 Scene → Core/Render/AssetFormat/AssetTypes；`AssetTypes` 只公开轻量 `AssetHandle` 与
+borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetSystem、Task 或可选 Physics2D
+传递给 Scene。第三方 ECS 或 renderer 类型不得进入公开头。
 
 ## World 所有权
 
@@ -56,7 +57,7 @@
 | 组件 | 用途 | 关键约束 |
 | --- | --- | --- |
 | `Camera2D` | FixedWorldHeight/PixelPerfect 投影、viewport、pixel snap | 每帧最多一个 active 2D camera；surface 0x0 时跳过 |
-| `SpriteRenderer2D` | weak Sprite `AssetHandle`、尺寸/pivot/UV override、颜色与排序 | World 只校验结构；visible extract 必须解析为非0 key；UV finite 且严格递增 |
+| `SpriteRenderer2D` | weak Sprite `AssetHandle`、尺寸/pivot/UV override、颜色与排序 | World 只校验结构；visible extract 必须解析为当前 packet texture ref；UV finite 且严格递增 |
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
 | `MeshRenderer3D` | weak mesh/material `AssetHandle`、bounds、base color、可见性 | World 只校验结构；visible extract 通过两个 kind-specific resolver 解析非0 key |
 
@@ -86,21 +87,23 @@ next key 与 live particles 不变。emit 把 burst 的 weak handle 值复制到
 capacity 或稳定 key exhaustion 失败均不修改 anchor、segment set 或 next key；过期 key 不复用。
 `Trail2D::Create()` 对 config 的空 Sprite handle 做结构校验并拒绝。
 
-两个 system 的 `extract()` 都显式借用共享 `Sprite2DBindingResolver` 与调用方 phase-local
-`RenderSceneWriter`，把粒子或 segment 转为 backend-neutral Sprite2D item。resolver/userData 只在当前
-调用内有效，system 不保留。缺 resolver，或 stale/cross-store/wrong-kind/unbound handle 使 resolver 返回0，
+两个 system 的 `extract()` 都显式借用共享 `Sprite2DBindingResolver`、当前 packet
+`FrameResourceSink` 与调用方 phase-local `RenderSceneWriter`，把粒子或 segment 转为 backend-neutral
+Sprite2D item。resolver/userData/sink 只在当前调用内有效，system 不保留。缺 resolver，或
+stale/cross-store/wrong-kind/unbound handle 使 resolver 返回空 ref，
 统一 fail closed 为 `UnresolvedSprite`。空 FX 不调用 resolver；Trail 每次非空 extract 只解析一次并复用
 到所有 segment，Particle 按每个 live item 即时解析。writer failure 原样传播，simulation owner state 不
 因此变化；真实 texture binding 和 bgfx submission 仍由 RenderDevice/backend 负责。
 
 ## Render extraction
 
-`extractRenderSceneFromWorld(World&, RenderSceneWriter&, params)` 在调用方提供的 writer 中事务式写入：
+`extractRenderSceneFromWorld(World&, RenderSceneWriter&, FrameResourceSink&, params)` 在调用方提供的
+writer 与当前 packet sink 中事务式写入：
 
 ```text
 updateWorldTransforms
   -> resolve active Camera2D and/or PerspectiveCamera3D
-  -> borrowed resolver asks Asset registry for current Sprite dependency binding key
+  -> borrowed resolver asks Asset registry to intern current Sprite texture binding
   -> emit visible SpriteRenderer2D items
   -> borrowed kind-specific resolvers ask Mesh3D registry for current mesh/material keys
   -> emit visible MeshRenderer3D items
@@ -110,21 +113,23 @@ updateWorldTransforms
 2D sprite 使用 world position/scale、Z rotation、pivot/size/UV override，并由 RenderScene 执行排序、
 culling、batch 规划与 pixel snap。`ExtractRenderSceneParams::spriteBindingResolver` 是只在本次调用有效的
 borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/generation、Sprite kind 与 binding，
-并返回非0 backend-neutral key。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或返回0统一
+并返回有效 packet-local texture ref。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或空 ref统一
 产生 `UnresolvedSprite`；hidden sprite 不调用 resolver。`MeshRenderer3D` 同样只保存 weak mesh/material
 `AssetHandle` 与 world pose/scale、local bounds、material color 等语义字段。extraction 分别借用
 `mesh3DBindingResolver`/`material3DBindingResolver`，按预期 AssetKind 解析非零 key；任一 handle/resolver/
 binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden mesh 不解析。Scene
 不保存 resolver、AssetLease、Cooked payload 或 GPU handle。
 
-A2 提供的产品 resolver 把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，由 Asset 层沿
+A2 提供的产品 resolver 最初把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，由 Asset 层沿
 Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。A3 让 Particle/Trail 保存 Handle；
 A4 将底层通用 seam 下沉为 AssetTypes 的 `AssetBindingResolver`，Scene 名称保留为 alias，并让 TileMap
 保存 weak Tileset Handle、调用 `resolveTileset()`，不再跨帧保存 registry key。产品 State
 拥有 registry 与 GPU texture cleanup 账簿，但只借用 `TileMapResources` 中的 Store 和 `DeviceCapture` 中的
 RenderDevice；外部 owner 必须覆盖 State/registry 生命周期。key 由 RenderDevice 实例 allocator 分配，
 同一 device 的多个 registry 共享唯一/单调 namespace；allocator-managed registry 管理期间不得混用 direct
-caller-chosen binding key。Scene 不参与 key 分配、unbind 或 retirement。
+caller-chosen binding key。N16.2 将 2D seam 升级为 `AssetFrameResourceResolver`：registry 把验证后的
+binding intern 到当前 packet，并以 entry borrow pin 阻止活跃帧 unbind；Scene 不参与 key 分配、unbind
+或 retirement，也不保存 frame ref。
 
 A6 的产品 resolver 把 mesh/material Handle 转交 `Mesh3DBindingRegistry`。registry 固定容量、owner-thread，
 借用 Store/device/PMR；StaticMesh 与 Material 使用独立 device key namespace，Material 通过一次原子 bundle

@@ -492,9 +492,10 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
     return PreparedOpaque3D{.requirements = *requirements};
 }
 
-[[nodiscard]] Core::Result<PreparedSprite2D> preflightSprite2D(RenderSceneView scene)
+[[nodiscard]] Core::Result<PreparedSprite2D>
+preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
 {
-    auto requirements = checkedSprite2DFrame(scene);
+    auto requirements = checkedSprite2DFrame(scene, resources);
     if (!requirements)
     {
         if (requirements.error().code == Core::CoreErrorCode::CapacityExceeded)
@@ -909,6 +910,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::UnexpectedFrameIndex,
                                  "Render frame indices must be contiguous and begin at zero");
         }
+        if (auto status = validateSprite2DFrameResources(frame.primaryWorldScene, frame.resources); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
         if (auto status = validateFrameSurfaceBeforeCommit(frame); !status)
         {
             return Core::failure(std::move(status.error()));
@@ -933,7 +938,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             preparedOpaque3D = *opaque3DPreflight;
 
-            auto sprite2DPreflight = preflightSprite2D(frame.primaryWorldScene);
+            auto sprite2DPreflight = preflightSprite2D(frame.primaryWorldScene, frame.resources);
             if (!sprite2DPreflight)
             {
                 return Core::failure(std::move(sprite2DPreflight.error()));
@@ -982,8 +987,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             resetBackbuffer(framePlan->targetExtent);
         }
 
-        submitPrimaryFrame(committedSurfaceState_, frame.primaryWorldScene, preparedOpaque3D, preparedSprite2D,
-                           frame.primaryWindowUIDisplayList, preparedUI);
+        submitPrimaryFrame(committedSurfaceState_, frame.primaryWorldScene, frame.resources, preparedOpaque3D,
+                           preparedSprite2D, frame.primaryWindowUIDisplayList, preparedUI);
         frameOpen_ = true;
         ++statistics_.submitted;
         return RenderFrameSubmission::Submitted(nextSubmissionIndex_++);
@@ -1695,7 +1700,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
     }
 
-    void submitSprite2D(RenderSceneView scene, PreparedSprite2D prepared) noexcept
+    void submitSprite2D(RenderSceneView scene, FrameResourceTableView resources,
+                        PreparedSprite2D prepared) noexcept
     {
         if (prepared.requirements.spriteCount == 0)
         {
@@ -1711,7 +1717,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                                   static_cast<usize>(prepared.requirements.vertexCount)};
         auto indices = std::span{reinterpret_cast<u32*>(transientIndices.data),
                                  static_cast<usize>(prepared.requirements.indexCount)};
-        auto written = writeSprite2DGeometry(scene, vertices, indices);
+        auto written = writeSprite2DGeometry(scene, resources, vertices, indices);
         if (!written || written->spriteCount != prepared.requirements.spriteCount ||
             written->vertexCount != prepared.requirements.vertexCount ||
             written->indexCount != prepared.requirements.indexCount ||
@@ -1720,16 +1726,23 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
 
-        // One submit per contiguous spriteKey batch so product textures can bind per key.
+        // One submit per contiguous texture-ref batch so product textures can bind per key.
         // bgfx::submit() discards draw state by default, so every batch must
         // publish the complete state required by the following submit.
         const auto sprites = scene.sprites2D();
         u32 batchBegin = 0;
         while (batchBegin < prepared.requirements.spriteCount)
         {
-            const u32 batchKey = sprites[batchBegin].spriteKey;
+            const FrameResourceRef batchTexture = sprites[batchBegin].texture;
+            const FrameResourceDescriptor* descriptor =
+                resources.resolve(batchTexture, FrameResourceKind::Sprite2DTexture);
+            if (descriptor == nullptr)
+            {
+                std::terminate();
+            }
+            const u32 batchKey = static_cast<u32>(descriptor->deviceBindingKey);
             u32 batchEnd = batchBegin + 1U;
-            while (batchEnd < prepared.requirements.spriteCount && sprites[batchEnd].spriteKey == batchKey)
+            while (batchEnd < prepared.requirements.spriteCount && sprites[batchEnd].texture == batchTexture)
             {
                 ++batchEnd;
             }
@@ -1898,7 +1911,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status setSprite2DTextureBinding(u32 spriteKey, GpuTextureId texture) noexcept override
+    [[nodiscard]] Core::Status setSprite2DTextureBinding(u32 deviceBindingKey,
+                                                         GpuTextureId texture) noexcept override
     {
         if (std::this_thread::get_id() != ownerThread_)
         {
@@ -1908,13 +1922,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
         }
-        if (spriteKey == 0)
+        if (deviceBindingKey == 0)
         {
-            return Core::failure(RenderErrorCode::InvalidTextureUpload, "spriteKey must be non-zero");
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Sprite2D device binding key must be non-zero");
         }
         if (!texture)
         {
-            spriteTextureBindings_.erase(spriteKey);
+            spriteTextureBindings_.erase(deviceBindingKey);
             return Core::success();
         }
         if (texture.index >= textures_.size() || !textures_[texture.index].live ||
@@ -1922,7 +1937,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
-        spriteTextureBindings_[spriteKey] = texture;
+        spriteTextureBindings_[deviceBindingKey] = texture;
         return Core::success();
     }
 
@@ -2520,7 +2535,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
     }
 
-    void submitPrimaryFrame(const RenderSurfaceState& surface, RenderSceneView scene, PreparedOpaque3D preparedOpaque3D,
+    void submitPrimaryFrame(const RenderSurfaceState& surface, RenderSceneView scene,
+                            FrameResourceTableView resources, PreparedOpaque3D preparedOpaque3D,
                             PreparedSprite2D preparedSprite2D, UIDisplayListView displayList,
                             PreparedUIDisplayList preparedUI) noexcept
     {
@@ -2533,7 +2549,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (scene.camera2D().has_value())
         {
             configureSprite2DView(surface, *scene.camera2D());
-            submitSprite2D(scene, preparedSprite2D);
+            submitSprite2D(scene, resources, preparedSprite2D);
         }
         configureUIView(surface);
         submitUI(surface, displayList, preparedUI);

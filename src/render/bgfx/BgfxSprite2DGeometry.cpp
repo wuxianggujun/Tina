@@ -43,7 +43,7 @@ static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
 {
     const float scaledWidth = sprite.widthMeters * std::abs(sprite.scaleX);
     const float scaledHeight = sprite.heightMeters * std::abs(sprite.scaleY);
-    return sprite.spriteKey != 0 && sprite.stableEntityKey != 0 && finite(sprite.centerX) && finite(sprite.centerY) &&
+    return sprite.stableEntityKey != 0 && finite(sprite.centerX) && finite(sprite.centerY) &&
            finite(sprite.rotationRadians) && finite(sprite.widthMeters) && finite(sprite.heightMeters) &&
            finite(sprite.scaleX) && finite(sprite.scaleY) && sprite.widthMeters > 0.0F && sprite.heightMeters > 0.0F &&
            sprite.scaleX != 0.0F && sprite.scaleY != 0.0F && finite(scaledWidth) && finite(scaledHeight) &&
@@ -94,13 +94,13 @@ static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
     }
 
     u32 batchCount = 0;
-    u32 previousKey = 0;
+    FrameResourceRef previousTexture{};
     for (const RenderSprite2DItem& sprite : sprites)
     {
-        if (batchCount == 0 || sprite.spriteKey != previousKey)
+        if (batchCount == 0 || sprite.texture != previousTexture)
         {
             ++batchCount;
-            previousKey = sprite.spriteKey;
+            previousTexture = sprite.texture;
         }
     }
 
@@ -170,7 +170,25 @@ void writeSprite(const RenderSprite2DItem& sprite, std::span<BgfxSprite2DVertex>
 
 } // namespace
 
-Core::Result<BgfxSprite2DFrameRequirements> checkedSprite2DFrame(RenderSceneView scene)
+Core::Status validateSprite2DFrameResources(
+    RenderSceneView scene, FrameResourceTableView resources) noexcept
+{
+    for (const RenderSprite2DItem& sprite : scene.sprites2D())
+    {
+        const FrameResourceDescriptor* descriptor =
+            resources.resolve(sprite.texture, FrameResourceKind::Sprite2DTexture);
+        if (descriptor == nullptr
+            || descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+        {
+            return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                 "Sprite2D texture ref is stale, cross-packet, wrong-kind, or out of binding range");
+        }
+    }
+    return Core::success();
+}
+
+Core::Result<BgfxSprite2DFrameRequirements>
+checkedSprite2DFrame(RenderSceneView scene, FrameResourceTableView resources)
 {
     const std::span<const RenderSprite2DItem> sprites = scene.sprites2D();
     if (sprites.empty())
@@ -180,6 +198,10 @@ Core::Result<BgfxSprite2DFrameRequirements> checkedSprite2DFrame(RenderSceneView
     if (!scene.camera2D().has_value() || !finiteCamera(*scene.camera2D()))
     {
         return invalidFrame("Sprite2D sprites require a valid Camera2D");
+    }
+    if (auto status = validateSprite2DFrameResources(scene, resources); !status)
+    {
+        return Core::failure(std::move(status.error()));
     }
 
     for (usize index = 0; index < sprites.size(); ++index)
@@ -199,9 +221,10 @@ Core::Result<BgfxSprite2DFrameRequirements> checkedSprite2DFrame(RenderSceneView
 }
 
 Core::Result<BgfxSprite2DFrameRequirements>
-writeSprite2DGeometry(RenderSceneView scene, std::span<BgfxSprite2DVertex> vertices, std::span<u32> indices)
+writeSprite2DGeometry(RenderSceneView scene, FrameResourceTableView resources,
+                      std::span<BgfxSprite2DVertex> vertices, std::span<u32> indices)
 {
-    auto requirements = checkedSprite2DFrame(scene);
+    auto requirements = checkedSprite2DFrame(scene, resources);
     if (!requirements)
     {
         return Core::failure(std::move(requirements.error()));

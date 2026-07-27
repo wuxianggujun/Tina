@@ -98,10 +98,11 @@ public:
     // stable-key allocation, and deterministic random state unchanged.
     [[nodiscard]] Core::Status emitBurst(const ParticleBurst2D& burst) noexcept;
     [[nodiscard]] Core::Result<ParticleSystem2DUpdateStats> update(Core::Duration delta) noexcept;
-    // Borrows the resolver for this call only. Live particles require a resolver
-    // and non-zero binding; either failure returns UnresolvedSprite.
+    // Borrows the resolver and frame-resource sink for this call only. Live
+    // particles require a resolver and valid packet-local texture ref.
     [[nodiscard]] Core::Result<ParticleSystem2DExtractStats>
-    extract(Render::RenderSceneWriter& writer, Sprite2DBindingResolver spriteBindingResolver) const;
+    extract(Render::RenderSceneWriter& writer, Render::FrameResourceSink& frameResources,
+            Sprite2DBindingResolver spriteBindingResolver) const;
 
     void clear() noexcept { m_liveCount = 0; }
 

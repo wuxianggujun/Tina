@@ -31,10 +31,10 @@ struct ExtractRenderSceneParams final {
 // - Camera2D and PerspectiveCamera3D are independent tracks (2D ortho vs 3D
 //   perspective); both may be active in the same frame when the writer allows.
 // - Each visible SpriteRenderer2D resolves its AssetHandle through
-//   spriteBindingResolver, then becomes addSprite2D using published world
-//   position/scale and Z-axis rotation.
+//   spriteBindingResolver into frameResources, then becomes addSprite2D using
+//   published world position/scale and Z-axis rotation.
 // - A missing resolver, invalid/stale/wrong-kind/unbound handle, or resolver
-//   result 0 returns UnresolvedSprite. Hidden sprites are not resolved.
+//   empty result returns UnresolvedSprite. Hidden sprites are not resolved.
 // - Each visible MeshRenderer3D resolves its mesh/material AssetHandles through
 //   the kind-specific mesh3DBindingResolver/material3DBindingResolver, then
 //   becomes addMesh3D from WorldTransform pose/scale.
@@ -47,6 +47,7 @@ struct ExtractRenderSceneParams final {
 [[nodiscard]] Core::Status extractRenderSceneFromWorld(
     World& world,
     Render::RenderSceneWriter& writer,
+    Render::FrameResourceSink& frameResources,
     ExtractRenderSceneParams params = {}) noexcept;
 
 } // namespace Tina::Scene

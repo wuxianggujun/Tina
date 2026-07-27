@@ -23,6 +23,8 @@
 #include <system_error>
 #include <utility>
 
+#include "../common/SampleSpriteFrameResource.hpp"
+
 namespace {
 
 using Tina::Core::u64;
@@ -231,8 +233,14 @@ class Infrastructure2DState final : public Tina::IGameState {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                            "2D infrastructure sprite transform is unavailable");
             }
+            auto texture = spriteFrameResource_.intern(
+                context.frameResourceSink(), static_cast<Tina::u64>(index + 1U));
+            if (!texture)
+            {
+                return Tina::Core::failure(std::move(texture.error()));
+            }
             Tina::Render::RenderSprite2DInput sprite{
-                .spriteKey = static_cast<Tina::u32>(index + 1U),
+                .texture = *texture,
                 .stableEntityKey = stableKey(spriteEntities_[index]),
                 .centerX = transform->position.x,
                 .centerY = transform->position.y,
@@ -258,6 +266,7 @@ class Infrastructure2DState final : public Tina::IGameState {
     u64 targetFrames_ = 0;
     SampleCapture* capture_ = nullptr;
     std::optional<Tina::Scene::World> world_;
+    mutable Tina::Samples::SampleSpriteFrameResource spriteFrameResource_{};
     Tina::Scene::EntityId cameraEntity_{};
     std::array<Tina::Scene::EntityId, 3> spriteEntities_{};
 };

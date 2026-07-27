@@ -110,15 +110,17 @@ inline void consumeTileSelectionTransitions(std::span<const SimulationActionTran
 }
 
 // Builds one translucent overlay sprite for the latest selected cell. Uses the
-// same ProductSpriteKey atlas binding as tiles; tint + alpha provide visibility
+// same packet-local atlas resource as tiles; tint + alpha provide visibility
 // without a second texture. Returns structured error on invalid grid/cell;
 // callers must not leave a half-emitted selection highlight on failure.
 [[nodiscard]] inline Core::Result<Render::RenderSprite2DInput>
-makeSelectionHighlightSprite(const SelectedTile& selection, TileSelectionGrid grid, Core::u32 spriteKey) noexcept
+makeSelectionHighlightSprite(const SelectedTile& selection, TileSelectionGrid grid,
+                             Render::FrameResourceRef texture) noexcept
 {
-    if (spriteKey == 0U)
+    if (!texture.hasValue())
     {
-        return Core::failure(Core::CoreErrorCode::InvalidArgument, "selection highlight spriteKey must be non-zero");
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "selection highlight texture ref must be valid");
     }
     if (grid.widthCells == 0U || grid.heightCells == 0U || !std::isfinite(grid.cellSizeMeters) ||
         grid.cellSizeMeters <= 0.0F)
@@ -133,7 +135,7 @@ makeSelectionHighlightSprite(const SelectedTile& selection, TileSelectionGrid gr
     const float cell = grid.cellSizeMeters;
     const float size = cell * SelectionHighlightInsetScale;
     return Render::RenderSprite2DInput{
-        .spriteKey = spriteKey,
+        .texture = texture,
         .stableEntityKey = SelectionHighlightStableEntityKey,
         .centerX = (static_cast<float>(selection.cellX) + 0.5F) * cell,
         .centerY = (static_cast<float>(selection.cellY) + 0.5F) * cell,

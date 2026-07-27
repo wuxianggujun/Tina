@@ -57,6 +57,7 @@ namespace {
 Core::Status extractRenderSceneFromWorld(
     World& world,
     Render::RenderSceneWriter& writer,
+    Render::FrameResourceSink& frameResources,
     ExtractRenderSceneParams params) noexcept
 {
     if (const Core::Status status = world.updateWorldTransforms(); !status) {
@@ -142,8 +143,11 @@ Core::Status extractRenderSceneFromWorld(
                 SceneErrorCode::UnresolvedSprite,
                 "Scene SpriteRenderer2D has no resolvable sprite asset");
         }
-        const u32 spriteKey = params.spriteBindingResolver(sprite->sprite);
-        if (spriteKey == 0U) {
+        auto texture = params.spriteBindingResolver(sprite->sprite, frameResources);
+        if (!texture) {
+            return Core::failure(std::move(texture.error()));
+        }
+        if (!texture->hasValue()) {
             return Core::failure(
                 SceneErrorCode::UnresolvedSprite,
                 "Scene SpriteRenderer2D asset has no render binding");
@@ -194,7 +198,7 @@ Core::Status extractRenderSceneFromWorld(
         }
 
         const Render::RenderSprite2DInput input{
-            .spriteKey = spriteKey,
+            .texture = *texture,
             .stableEntityKey = stableEntityKey(entity),
             .centerX = centerX,
             .centerY = centerY,

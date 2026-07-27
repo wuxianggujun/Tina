@@ -5,6 +5,7 @@
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 
 #include "support/CatalogPackageTestSupport.hpp"
 
@@ -142,6 +143,30 @@ class FixedBindingRenderDevice final : public Render::IRenderDevice {
     std::array<Call, 1024> m_calls{};
     Core::usize m_callCount = 0;
     bool m_rejectNext = false;
+};
+
+class RejectingFrameResourceSink final : public Render::FrameResourceSink {
+  public:
+    [[nodiscard]] Core::Result<Render::FrameResourceRef>
+    intern(Render::FrameResourceDescriptor, Render::FramePin&&) noexcept override
+    {
+        ++m_callCount;
+        return Core::failure(Render::RenderErrorCode::InvalidFrameResource,
+                             "test frame resource sink rejected intern");
+    }
+
+    [[nodiscard]] Core::u32 resourceCount() const noexcept override
+    {
+        return 0;
+    }
+
+    [[nodiscard]] Core::usize callCount() const noexcept
+    {
+        return m_callCount;
+    }
+
+  private:
+    Core::usize m_callCount = 0;
 };
 
 [[nodiscard]] CookedAssetFile makeCookedFile(std::pmr::memory_resource& memory, AssetFormat::AssetKind kind,
@@ -380,6 +405,123 @@ TEST(Sprite2DBindingRegistryTests, TilesetResolvesItsRequiredTextureBindingFailC
     EXPECT_EQ(registry->resolveTileset(*staleTileset), 0U);
     EXPECT_EQ(registry->resolveTileset(*noDependencyTileset), 0U);
     EXPECT_EQ(device.callCount(), 1U);
+}
+
+TEST(Sprite2DBindingRegistryTests, FrameResourcesDeduplicateAndBlockUnbindUntilPacketRelease)
+{
+    TrackingMemoryResource memory;
+    auto store = makeStore(memory);
+    ASSERT_TRUE(store.has_value()) << store.error().message;
+    const Core::AssetId textureId = assetId(1U);
+    auto texture = store->publish(makeTexture(memory, 1U));
+    auto sprite = store->publish(makeSprite(memory, 2U, textureId));
+    auto tileset = store->publish(makeTileset(memory, 3U, textureId));
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(sprite.has_value());
+    ASSERT_TRUE(tileset.has_value());
+
+    FixedBindingRenderDevice device;
+    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    ASSERT_TRUE(registry.has_value()) << registry.error().message;
+    auto binding = registry->registerTextureBinding(*texture, Render::GpuTextureId{7U, 1U});
+    ASSERT_TRUE(binding.has_value()) << binding.error().message;
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+
+    auto firstSprite = registry->internSpriteFrameResource(*sprite, packet.resourceSink());
+    auto duplicateSprite = registry->internSpriteFrameResource(*sprite, packet.resourceSink());
+    auto sharedTileset = registry->internTilesetFrameResource(*tileset, packet.resourceSink());
+    ASSERT_TRUE(firstSprite.has_value()) << firstSprite.error().message;
+    ASSERT_TRUE(duplicateSprite.has_value()) << duplicateSprite.error().message;
+    ASSERT_TRUE(sharedTileset.has_value()) << sharedTileset.error().message;
+    EXPECT_TRUE(static_cast<bool>(*firstSprite));
+    EXPECT_EQ(*duplicateSprite, *firstSprite);
+    EXPECT_EQ(*sharedTileset, *firstSprite);
+    EXPECT_EQ(packet.resourceCount(), 1U);
+    const auto* descriptor = packet.resourceTableView().resolve(
+        *firstSprite, Render::FrameResourceKind::Sprite2DTexture);
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_EQ(descriptor->deviceBindingKey, *binding);
+
+    const auto borrowedUnbind = registry->unbindTextureBinding(*texture);
+    ASSERT_FALSE(borrowedUnbind.has_value());
+    EXPECT_EQ(borrowedUnbind.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_EQ(registry->bindingCount(), 1U);
+
+    ASSERT_TRUE(packet.abandon().has_value());
+    ASSERT_TRUE(registry->unbindTextureBinding(*texture).has_value());
+    EXPECT_EQ(registry->bindingCount(), 0U);
+}
+
+TEST(Sprite2DBindingRegistryTests, UnresolvedFrameResourcesReturnEmptyWithoutTouchingSink)
+{
+    TrackingMemoryResource memory;
+    auto store = makeStore(memory);
+    ASSERT_TRUE(store.has_value()) << store.error().message;
+    const Core::AssetId textureId = assetId(1U);
+    auto texture = store->publish(makeTexture(memory, 1U));
+    auto unboundSprite = store->publish(makeSprite(memory, 2U, assetId(9U)));
+    auto queuedSprite = store->beginQueued(assetId(3U), AssetFormat::AssetKind::Sprite);
+    auto staleSprite = store->publish(makeSprite(memory, 4U, textureId));
+    auto noDependencySprite = store->publish(makeSprite(memory, 5U, textureId, {}));
+    auto noDependencyTileset = store->publish(makeTileset(memory, 6U, textureId, {}));
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(unboundSprite.has_value());
+    ASSERT_TRUE(queuedSprite.has_value());
+    ASSERT_TRUE(staleSprite.has_value());
+    ASSERT_TRUE(noDependencySprite.has_value());
+    ASSERT_TRUE(noDependencyTileset.has_value());
+    ASSERT_TRUE(store->unload(*staleSprite).has_value());
+
+    FixedBindingRenderDevice device;
+    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    ASSERT_TRUE(registry.has_value()) << registry.error().message;
+    ASSERT_TRUE(registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U}).has_value());
+    RejectingFrameResourceSink sink;
+
+    const auto expectUnresolved = [&](auto resource) {
+        ASSERT_TRUE(resource.has_value()) << resource.error().message;
+        EXPECT_FALSE(static_cast<bool>(*resource));
+    };
+    expectUnresolved(registry->internSpriteFrameResource({}, sink));
+    expectUnresolved(registry->internSpriteFrameResource(*texture, sink));
+    expectUnresolved(registry->internSpriteFrameResource(*unboundSprite, sink));
+    expectUnresolved(registry->internSpriteFrameResource(*queuedSprite, sink));
+    expectUnresolved(registry->internSpriteFrameResource(*staleSprite, sink));
+    expectUnresolved(registry->internSpriteFrameResource(*noDependencySprite, sink));
+    expectUnresolved(registry->internTilesetFrameResource(*noDependencyTileset, sink));
+    EXPECT_EQ(sink.callCount(), 0U);
+}
+
+TEST(Sprite2DBindingRegistryTests, SinkFailuresReleaseBorrowAndLeaveBindingUnbindable)
+{
+    TrackingMemoryResource memory;
+    auto store = makeStore(memory);
+    ASSERT_TRUE(store.has_value()) << store.error().message;
+    const Core::AssetId textureId = assetId(1U);
+    auto texture = store->publish(makeTexture(memory, 1U));
+    auto sprite = store->publish(makeSprite(memory, 2U, textureId));
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(sprite.has_value());
+
+    FixedBindingRenderDevice device;
+    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    ASSERT_TRUE(registry.has_value()) << registry.error().message;
+    ASSERT_TRUE(registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U}).has_value());
+
+    Render::RenderFramePacket idlePacket;
+    const auto idleFailure = registry->internSpriteFrameResource(*sprite, idlePacket.resourceSink());
+    ASSERT_FALSE(idleFailure.has_value());
+    EXPECT_EQ(idleFailure.error().code, Render::RenderErrorCode::InvalidFrameResource);
+    ASSERT_TRUE(registry->unbindTextureBinding(*texture).has_value());
+
+    ASSERT_TRUE(registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U}).has_value());
+    RejectingFrameResourceSink rejectingSink;
+    const auto rejected = registry->internSpriteFrameResource(*sprite, rejectingSink);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::InvalidFrameResource);
+    EXPECT_EQ(rejectingSink.callCount(), 1U);
+    ASSERT_TRUE(registry->unbindTextureBinding(*texture).has_value());
 }
 
 TEST(Sprite2DBindingRegistryTests, RegistrationRejectsInvalidStaleWrongKindAndNotReadyHandles)
@@ -778,8 +920,11 @@ TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation
 
     std::optional<Core::ErrorCode> registerError;
     std::optional<Core::ErrorCode> unbindError;
+    std::optional<Core::ErrorCode> internError;
     Core::u32 foreignBindingKey = *binding;
     Core::u32 foreignSpriteKey = *binding;
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
     std::thread foreignThread([&] {
         const auto registration = registry->registerTextureBinding(*texture, Render::GpuTextureId{2U, 1U});
         if (!registration)
@@ -791,6 +936,11 @@ TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation
         {
             unbindError = unbind.error().code;
         }
+        const auto intern = registry->internSpriteFrameResource(*sprite, packet.resourceSink());
+        if (!intern)
+        {
+            internError = intern.error().code;
+        }
         foreignBindingKey = registry->bindingKey(*texture);
         foreignSpriteKey = registry->resolveSprite(*sprite);
     });
@@ -800,6 +950,9 @@ TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation
     EXPECT_EQ(*registerError, Render::RenderErrorCode::WrongOwnerThread);
     ASSERT_TRUE(unbindError.has_value());
     EXPECT_EQ(*unbindError, Render::RenderErrorCode::WrongOwnerThread);
+    ASSERT_TRUE(internError.has_value());
+    EXPECT_EQ(*internError, Render::RenderErrorCode::WrongOwnerThread);
+    EXPECT_EQ(packet.resourceCount(), 0U);
     EXPECT_EQ(foreignBindingKey, 0U);
     EXPECT_EQ(foreignSpriteKey, 0U);
     EXPECT_EQ(registry->bindingCount(), 1U);

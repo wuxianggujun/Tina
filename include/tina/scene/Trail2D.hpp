@@ -61,10 +61,11 @@ public:
     void breakTrail() noexcept;
     [[nodiscard]] Core::Status update(Core::Duration delta) noexcept;
     // Resolves the weak Sprite handle once per non-empty extraction and retains
-    // neither the resolver nor its userData. A missing resolver or key 0 returns
-    // UnresolvedSprite. Empty trails do not invoke the resolver.
+    // neither the resolver nor its userData. A missing resolver or empty ref
+    // returns UnresolvedSprite. Empty trails do not invoke the resolver.
     [[nodiscard]] Core::Status extract(
         Render::RenderSceneWriter& writer,
+        Render::FrameResourceSink& frameResources,
         Sprite2DBindingResolver spriteBindingResolver) const noexcept;
 
     [[nodiscard]] std::span<const Trail2DSegment> segments() const noexcept { return m_segments; }

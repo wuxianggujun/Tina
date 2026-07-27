@@ -301,6 +301,37 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_c
 N16.1 不迁移 Scene item，也不让 registry 拥有 Lease/GPU retirement；产品 2D 证据由 N16.2/N16.3 升级，
 `ASSET-HANDLE-SCENE` 总项保持 InProgress。
 
+## Sprite Frame Resource N16.2
+
+`ASSET-HANDLE-SCENE-N16.2-SPRITE` 的门禁覆盖 Runtime、Scene、Asset、RenderScene、Null 与 bgfx：
+
+- `AssetFrameResourceResolver` 只在 extraction 期间借用当前 `FrameResourceSink`，World、TileMap、selection、
+  Particle 与 Trail 的 Sprite2D item 只保存 packet-local texture ref；同帧相同 binding 只 intern 一次；
+- registry 首次 intern 时转移 entry borrow pin，活跃 packet 完成、跳过或 abandon 前 unbind 必须失败且保留
+  entry；packet 释放后可正常 unbind；
+- Null/bgfx 在任何 draw/binding 提交副作用前验证 cross-packet、stale、wrong-kind、越界与 binding key
+  表示范围，失败不产生部分提交；
+- 3D `Mesh3D` item 仍使用 registry key，registry/`AssetLease`/GPU retirement owner 统一属于 N16.3。
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_tests tina_scene_tests tina_asset_tests tina_render_scene_tests tina_render_bgfx_tests `
+           tina_sample_2d tina_sample_3d -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 `
+  -SkipConfigure -SkipBuild
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
+```
+
+本轮基础 bgfx 图直接测试结果：`tina_tests` 330/330、`tina_scene_tests` 91/91、
+`tina_asset_tests` 193/193、`tina_render_scene_tests` 39/39、`tina_render_bgfx_tests` 54/54。
+Product-2D 同轮门禁已返回 `productGate=bgfx-physics-freetype-audio`，3D 300 帧 smoke exit 0 且
+`renderResourceLedgerBalanced=true`、final-present capture 成功。
+
 ## 产品样例的证据边界
 
 | Sample | 证明 | 不证明 |
@@ -311,7 +342,7 @@ N16.1 不迁移 Scene item，也不让 registry 拥有 Lease/GPU retirement；�
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；schema 12 含 Sprite registry 注册/释放/纹理销毁、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；全部 Sprite2D extraction 使用 packet-local `FrameResourceRef`；schema 12 含 Sprite registry 注册/释放/纹理销毁、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、registry/Lease/GPU retirement owner 统一、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→extract-time key resolve→bgfx；evidence schema 2、原子 baseColor/MR/normal/factors binding、两类 registry 注册/释放、mesh/texture 销毁、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、统一 `FrameResourceRef`/retirement owner、完整 PBR/IBL/shadow/light component、跨 GPU golden |

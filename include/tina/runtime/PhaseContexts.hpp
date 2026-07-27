@@ -2,6 +2,7 @@
 
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Error.hpp>
+#include <tina/render/FrameResource.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/FrameTiming.hpp>
@@ -144,13 +145,18 @@ class RenderSceneExtractionContext final {
     // The writer is valid only during this callback. It can add resolved
     // Camera2D/Sprite2D items but cannot publish or resize the frame storage.
     [[nodiscard]] Render::RenderSceneWriter& renderSceneWriter() noexcept;
+    // Packet-local resource sink. Refs issued here are valid only for the
+    // RenderFramePacket currently being extracted and submitted.
+    [[nodiscard]] Render::FrameResourceSink& frameResourceSink() noexcept;
 
   private:
     RenderSceneExtractionContext(const FrameTiming& frameTiming,
-                                 Render::RenderSceneWriter& renderSceneWriter) noexcept;
+                                 Render::RenderSceneWriter& renderSceneWriter,
+                                 Render::FrameResourceSink& frameResourceSink) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     Render::RenderSceneWriter* m_renderSceneWriter = nullptr;
+    Render::FrameResourceSink* m_frameResourceSink = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <tina/asset/AssetBindingResolver.hpp>
+#include <tina/asset/AssetFrameResourceResolver.hpp>
 #include <tina/asset/TileChunkView.hpp>
 #include <tina/asset/TileMapInstance.hpp>
 #include <tina/core/base/Types.hpp>
@@ -16,7 +16,7 @@ struct TileChunkSpriteEmitParams final {
     // Copyable weak Tileset handle. Emission resolves its required Texture2D
     // binding for this call and retains neither the handle owner nor resolver.
     AssetHandle tileset{};
-    AssetBindingResolver bindingResolver{};
+    AssetFrameResourceResolver bindingResolver{};
     // Base for stableEntityKey generation: base + (cellY * mapWidth + cellX) + 1.
     Core::u64 stableEntityKeyBase = 1;
     Core::i16 sortingLayer = 0;
@@ -37,6 +37,7 @@ struct TileChunkSpriteEmitParams final {
 // Clears `out` first. Returns number of sprites written.
 [[nodiscard]] Core::Result<Core::u32>
 emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk, const TileChunkSpriteEmitParams& params,
+                     Render::FrameResourceSink& frameResources,
                      std::pmr::vector<Render::RenderSprite2DInput>& out);
 
 // Convenience: extract visible chunks then emit sprites for each (order: chunk row-major, then cells).
@@ -46,6 +47,7 @@ emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk, con
 [[nodiscard]] Core::Result<Core::u32>
 emitVisibleTileMapSprites(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId,
                           const TileChunkCameraQuery& camera,
-                          const TileChunkSpriteEmitParams& params, std::pmr::vector<Render::RenderSprite2DInput>& out);
+                          const TileChunkSpriteEmitParams& params, Render::FrameResourceSink& frameResources,
+                          std::pmr::vector<Render::RenderSprite2DInput>& out);
 
 } // namespace Tina::Asset

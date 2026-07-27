@@ -174,11 +174,13 @@ class IRenderDevice {
         }
         return status;
     }
-    // Bind a GPU texture for Sprite2D batches with matching non-zero spriteKey.
+    // Bind a GPU texture for Sprite2D resource descriptors with a matching
+    // non-zero deviceBindingKey.
     // An invalid GpuTextureId clears the binding.
-    [[nodiscard]] virtual Core::Status setSprite2DTextureBinding(u32 spriteKey, GpuTextureId texture) noexcept
+    [[nodiscard]] virtual Core::Status setSprite2DTextureBinding(u32 deviceBindingKey,
+                                                                 GpuTextureId texture) noexcept
     {
-        static_cast<void>(spriteKey);
+        static_cast<void>(deviceBindingKey);
         static_cast<void>(texture);
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Sprite2D texture binding");

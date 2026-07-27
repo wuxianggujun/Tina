@@ -60,28 +60,30 @@ consume/claim 后 digital/analog source 均不会穿透。运行时改键只通�
 `GpuTextureId`，再由固定容量 owner-thread `Sprite2DBindingRegistry` 校验 Texture2D Handle，并调用
 RenderDevice 实例 allocator 事务绑定 GPU texture。返回 key 在该 device namespace 内唯一、单调且不复用；
 backend bind 失败不消费 key，同一 device 上的多个 registry 不会碰撞。allocator-managed registry 管理期间
-不得混用 caller-chosen `setSprite2DTextureBinding()` key。通用 resolver 现为 `Tina::AssetTypes` 中的
-`AssetBindingResolver`；Scene 保留 A1 名称 `Sprite2DBindingResolver` 作为语义 alias。Scene extraction
+不得混用 caller-chosen `setSprite2DTextureBinding()` key。2D 通用 resolver 现为 `Tina::AssetTypes` 中的
+`AssetFrameResourceResolver`；Scene 保留 A1 名称 `Sprite2DBindingResolver` 作为语义 alias。Scene extraction
 每帧借用该 seam，产品实现薄调用 registry，沿 Sprite 唯一 required Texture2D cooked dependency 校验
-Store owner/generation、kind、payload 与 live binding，然后只写 key、transform、UV 与颜色。缺 resolver
+Store owner/generation、kind、payload 与 live binding，再把 binding intern 到当前 packet，只写
+`FrameResourceRef`、transform、UV 与颜色。缺 resolver
 或无法解析的 visible sprite 返回 `UnresolvedSprite`；hidden sprite 不触发解析。
 
 Sprite 顺序为 sorting layer → order in layer → stable source ordinal。透明语义不能为了全局纹理合批
-被重排；bgfx 按最终顺序扫描相邻且 `spriteKey` 相同的 Sprite，按连续区间分别绑定纹理并 submit。
-例如 key 序列 A/A/B/A 会形成3个 batch，而不会重排成 A/A/A/B。除0以外的 key 都可参与该路径；
-0仍作为非法资源 key 拒绝。UI 使用独立 pass，始终不混入 World Sprite batch。
+被重排；bgfx 按最终顺序扫描相邻且 texture ref 相同的 Sprite，按连续区间解析 binding、绑定纹理并
+submit。例如 ref 序列 A/A/B/A 会形成3个 batch，而不会重排成 A/A/A/B。空、cross-packet、stale、
+wrong-kind 或 binding 超范围 ref 在提交产生副作用前失败。UI 使用独立 pass，始终不混入 World Sprite batch。
 
 产品 sample 当前上传两张 Cooked Texture2D，并通过 State-owned `Sprite2DBindingRegistry` 注册动态 key；
 registry 借用 `TileMapResources` 中的 Store 与 `DeviceCapture` 中的 RenderDevice，两个外部 owner 都必须
 覆盖 State/registry 生命周期。World 里的 crate/角色帧保存 Catalog Sprite handle，再由 borrowed resolver
 调用 registry 解析。Particle/Trail 保存 Catalog Sprite handle，并分别通过显式借用的 resolver 调用 registry；
 TileMap emit 保存 Catalog Tileset handle，每次非空可见集合通过 resolver 薄调用 `resolveTileset()`，沿
-Tileset 唯一 required Texture2D dependency 取得当前 key。hidden/off-camera/empty 不调用 resolver；解析失败
-清空输出并返回 `SpriteBindingNotFound`。selection highlight 同样即时解析，不跨帧保存 key。registry 借用
+Tileset 唯一 required Texture2D dependency 取得当前 packet texture ref。hidden/off-camera/empty 不调用
+resolver；解析失败清空输出并返回 `SpriteBindingNotFound`。selection highlight 同样即时解析，不跨帧
+保存 ref。World、TileMap、selection、Particle 与 Trail 对同一 texture 的 intern 由 packet 去重；首次
+登记的 registry entry borrow pin 覆盖 submit/present CPU 借用期，active pin 清零前 unbind 失败。registry 借用
 AssetStore 与 RenderDevice，不拥有 GPU texture、AssetLease 或 retirement；State RAII teardown 必须先成功
-unbind 两项 binding，再 destroy texture。A4 已完成2D持久 binding key 清除，A5 已完成 3D
-component/Prefab Handle 化，A6 已补 engine-provided、State-owned 3D registry；统一 retirement ownership 与
-`FrameResourceRef` 尚未覆盖，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
+unbind 两项 binding，再 destroy texture。N16.2 已完成全部 Sprite2D `FrameResourceRef` 迁移；统一 registry/
+AssetLease/GPU retirement ownership 仍由 N16.3 收口，因此 `ASSET-HANDLE-SCENE` 总项保持 InProgress。
 Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用不同纹理，不再受历史 fixture key 1 限制。
 
 ## Sprite 动画
@@ -113,7 +115,7 @@ component，也不依赖完整 AssetSystem 或 bgfx；它们只复制轻量、co
 `AssetLease`、Cooked payload、GPU texture owner 或 resolver。二者在 `Create()` 时通过调用方
 `memory_resource` 建立固定容量 PMR storage；后续成功的 emit/append、update 和 extract 不扩容。它们复用
 调用方当前 phase 的 `RenderSceneWriter` 提交 Sprite2D，真实纹理由显式借用的共享
-`Sprite2DBindingResolver` 映射为 registry `spriteKey`。
+`Sprite2DBindingResolver` 与当前 `FrameResourceSink` 映射为 packet-local texture ref。
 
 粒子系统对每个 `randomSeed`（包括0）使用固定确定序列。`emitBurst()` 在写入前拒绝空 Sprite handle，并
 完成其余 burst validation、
@@ -129,7 +131,7 @@ next key；update 同样先 preflight 全部 age 后再推进与删除过期段�
 `Trail2D::Create()` 拒绝空 Sprite handle；每次有 segment 的 extract 只解析一次 config 中的 handle 并复用
 结果，空 Trail 不调用 resolver。
 
-两者缺 resolver，或 stale/cross-store/wrong-kind/unbound handle 使 resolver 返回0时，都 fail closed 为
+两者缺 resolver，或 stale/cross-store/wrong-kind/unbound handle 使 resolver 返回空 ref时，都 fail closed 为
 `SceneErrorCode::UnresolvedSprite`。resolver 与 `userData` 仅借用到当前 extract 返回，system 不保留它们。
 
 ## TileMap 与角色控制

@@ -1019,7 +1019,8 @@ class EngineHostImplementation final {
             }
             auto renderSceneRollback = Core::makeScopeExit([this]() noexcept { m_renderSceneBuilder.rollback(); });
             Render::RenderSceneWriter renderSceneWriter = m_renderSceneBuilder.writer();
-            RenderSceneExtractionContext extractionContext{frameTiming, renderSceneWriter};
+            RenderSceneExtractionContext extractionContext{
+                frameTiming, renderSceneWriter, m_renderFramePacket.resourceSink()};
             auto extractionResult = m_gameStateStack.forEachDispatch(
                 GameStateDispatchPhase::RenderExtract,
                 [&](IGameState& state, const GameStatePolicy&, usize) -> Core::Status {

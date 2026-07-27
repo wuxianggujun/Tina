@@ -1,5 +1,6 @@
 #include <tina/asset/AssetStore.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/scene/ParticleSystem2D.hpp>
 #include <tina/scene/SceneErrors.hpp>
@@ -16,6 +17,64 @@
 
 namespace Tina::Scene {
 namespace {
+
+struct TestFrameResourceLifetime final {
+    u32 borrows = 0;
+};
+
+[[nodiscard]] TestFrameResourceLifetime& testFrameResourceLifetime() noexcept
+{
+    static TestFrameResourceLifetime lifetime{};
+    return lifetime;
+}
+
+[[nodiscard]] Render::RenderFramePacket& testFramePacket() noexcept
+{
+    (void)testFrameResourceLifetime();
+    static Render::RenderFramePacket packet{};
+    return packet;
+}
+
+[[nodiscard]] Render::FrameResourceSink& beginTestFrameResources()
+{
+    static u64 frameIndex = 0;
+    const Core::Status status = testFramePacket().beginFrame(frameIndex++);
+    EXPECT_TRUE(status) << (status ? "" : status.error().message);
+    return testFramePacket().resourceSink();
+}
+
+[[nodiscard]] Core::Result<Render::FrameResourceRef> internTestTexture(
+    Render::FrameResourceSink& sink,
+    u32 bindingKey) noexcept
+{
+    TestFrameResourceLifetime& lifetime = testFrameResourceLifetime();
+    ++lifetime.borrows;
+    Render::FramePin pin{
+        Render::FramePinKind::Custom,
+        bindingKey,
+        &lifetime,
+        [](void* userData) noexcept {
+            auto& pinned = *static_cast<TestFrameResourceLifetime*>(userData);
+            if (pinned.borrows > 0)
+            {
+                --pinned.borrows;
+            }
+        },
+    };
+    return sink.intern(
+        Render::FrameResourceDescriptor{
+            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .deviceBindingKey = bindingKey,
+        },
+        std::move(pin));
+}
+
+[[nodiscard]] u64 textureBindingKey(Render::FrameResourceRef texture) noexcept
+{
+    const Render::FrameResourceDescriptor* descriptor = testFramePacket().resourceTableView().resolve(
+        texture, Render::FrameResourceKind::Sprite2DTexture);
+    return descriptor == nullptr ? 0 : descriptor->deviceBindingKey;
+}
 
 class TrackingMemoryResource final : public std::pmr::memory_resource {
 public:
@@ -63,7 +122,10 @@ struct TestSpriteBindings final {
         return Sprite2DBindingResolver{.userData = this, .resolve = &resolve};
     }
 
-    [[nodiscard]] static u32 resolve(void* userData, Asset::AssetHandle sprite) noexcept
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolve(
+        void* userData,
+        Asset::AssetHandle sprite,
+        Render::FrameResourceSink& frameResources) noexcept
     {
         auto& self = *static_cast<TestSpriteBindings*>(userData);
         ++self.resolveCalls;
@@ -71,9 +133,9 @@ struct TestSpriteBindings final {
         if (self.store == nullptr || self.store->assetKind(sprite) != AssetFormat::AssetKind::Sprite ||
             self.store->state(sprite) == Asset::AssetLogicalState::Unloaded || sprite != self.boundSprite)
         {
-            return 0;
+            return Render::FrameResourceRef{};
         }
-        return self.bindingKey;
+        return internTestTexture(frameResources, self.bindingKey);
     }
 
     Asset::AssetStore* store = nullptr;
@@ -450,7 +512,7 @@ TEST_F(ParticleSystem2DTests, ExtractInterpolatesPositionSizeAndColorAtNormalize
     auto writer = builder.writer();
     ASSERT_TRUE(addTestCamera(writer).has_value());
     auto bindings = bindingsFor(firstSprite_, 44U);
-    auto extracted = system.extract(writer, bindings.resolver());
+    auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_TRUE(extracted.has_value()) << (extracted.has_value() ? "" : extracted.error().message);
     EXPECT_EQ(extracted->submitted, 1U);
     EXPECT_EQ(bindings.resolveCalls, 1U);
@@ -460,7 +522,7 @@ TEST_F(ParticleSystem2DTests, ExtractInterpolatesPositionSizeAndColorAtNormalize
     ASSERT_EQ(committed->sprites2D().size(), 1U);
 
     const Render::RenderSprite2DItem& sprite = committed->sprites2D().front();
-    EXPECT_EQ(sprite.spriteKey, 44U);
+    EXPECT_EQ(textureBindingKey(sprite.texture), 44U);
     EXPECT_EQ(sprite.stableEntityKey, 900U);
     EXPECT_FLOAT_EQ(sprite.centerX, 3.0F);
     EXPECT_FLOAT_EQ(sprite.centerY, 1.0F);
@@ -489,7 +551,7 @@ TEST_F(ParticleSystem2DTests, EmittedParticleRetainsHandleValueFromBurst)
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
     auto bindings = bindingsFor(firstSprite_, 73U);
-    auto extracted = system.extract(writer, bindings.resolver());
+    auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_TRUE(extracted.has_value()) << (extracted ? "" : extracted.error().message);
     EXPECT_EQ(extracted->submitted, 1U);
     EXPECT_EQ(bindings.resolveCalls, 1U);
@@ -504,12 +566,12 @@ TEST_F(ParticleSystem2DTests, ExtractWithLiveParticleRequiresResolver)
     auto builder = makeRenderBuilder(1);
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
-    auto extracted = system.extract(writer, Sprite2DBindingResolver{});
+    auto extracted = system.extract(writer, beginTestFrameResources(), Sprite2DBindingResolver{});
     ASSERT_FALSE(extracted.has_value());
     EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
 }
 
-TEST_F(ParticleSystem2DTests, ExtractFailsClosedWhenResolverReturnsZero)
+TEST_F(ParticleSystem2DTests, ExtractFailsClosedWhenResolverReturnsEmptyRef)
 {
     auto system = makeSystem(1);
     ASSERT_TRUE(system.emitBurst(randomizedBurst(firstSprite_)).has_value());
@@ -518,7 +580,7 @@ TEST_F(ParticleSystem2DTests, ExtractFailsClosedWhenResolverReturnsZero)
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
     auto bindings = bindingsFor(secondSprite_, 79U);
-    auto extracted = system.extract(writer, bindings.resolver());
+    auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_FALSE(extracted.has_value());
     EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
     EXPECT_EQ(bindings.resolveCalls, 1U);
@@ -534,7 +596,7 @@ TEST_F(ParticleSystem2DTests, ExtractRejectsWrongKindSpriteHandle)
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
     auto bindings = bindingsFor(wrongKind_, 83U);
-    auto extracted = system.extract(writer, bindings.resolver());
+    auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_FALSE(extracted.has_value());
     EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
     EXPECT_EQ(bindings.resolveCalls, 1U);
@@ -555,7 +617,7 @@ TEST_F(ParticleSystem2DTests, ExtractRejectsStaleSpriteHandle)
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
     auto bindings = bindingsFor(firstSprite_, 89U);
-    auto extracted = system.extract(writer, bindings.resolver());
+    auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_FALSE(extracted.has_value());
     EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
     EXPECT_EQ(bindings.resolveCalls, 1U);
@@ -569,13 +631,13 @@ TEST_F(ParticleSystem2DTests, ExtractWithNoLiveParticlesDoesNotRequireOrInvokeRe
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
 
-    auto withoutResolver = system.extract(writer, Sprite2DBindingResolver{});
+    auto withoutResolver = system.extract(writer, beginTestFrameResources(), Sprite2DBindingResolver{});
     ASSERT_TRUE(withoutResolver.has_value())
         << (withoutResolver ? "" : withoutResolver.error().message);
     EXPECT_EQ(withoutResolver->submitted, 0U);
 
     auto bindings = bindingsFor(firstSprite_, 97U);
-    auto withResolver = system.extract(writer, bindings.resolver());
+    auto withResolver = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_TRUE(withResolver.has_value()) << (withResolver ? "" : withResolver.error().message);
     EXPECT_EQ(withResolver->submitted, 0U);
     EXPECT_EQ(bindings.resolveCalls, 0U);
@@ -604,9 +666,10 @@ TEST_F(ParticleSystem2DTests, UpdateAndExtractDoNotGrowParticlePmrStorageAcrossT
             ASSERT_TRUE(builder.beginFrame().has_value());
             auto writer = builder.writer();
             ASSERT_TRUE(addTestCamera(writer).has_value());
-            auto extracted = system.extract(writer, bindings.resolver());
+            auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
             ASSERT_TRUE(extracted.has_value()) << (extracted.has_value() ? "" : extracted.error().message);
             ASSERT_EQ(extracted->submitted, 8U);
+            ASSERT_EQ(testFramePacket().resourceCount(), 1U);
             ASSERT_TRUE(builder.commit().has_value());
         }
         EXPECT_EQ(particleStorage.allocationCount(), allocationCount);
@@ -626,7 +689,7 @@ TEST_F(ParticleSystem2DTests, ExtractPropagatesWriterCapacityFailureWithoutMutat
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
     auto bindings = bindingsFor(firstSprite_, 63U);
-    auto extracted = system.extract(writer, bindings.resolver());
+    auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_FALSE(extracted.has_value());
     EXPECT_EQ(extracted.error().code, Render::RenderErrorCode::RenderSceneCapacityExceeded);
     ASSERT_EQ(system.liveCount(), 2U);

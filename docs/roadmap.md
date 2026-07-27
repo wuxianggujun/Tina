@@ -16,9 +16,7 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
-
-
-
+| ASSET-HANDLE-SCENE / N16.3 | 统一 Sprite registry、`AssetLease` 与 GPU retirement owner | N16.2 已完成全部 Sprite2D packet-local `FrameResourceRef` 迁移；最后仍需让资源拥有者与 frame borrow/retirement 形成单一可验证生命周期，并升级产品证据 |
 
 Now 的退出条件：当前 P1 条目均满足各自验收条件；受影响的 Windows product-2d/3d 门禁可复现；
 没有未解释的 Accepted ADR/实现冲突。
@@ -72,6 +70,8 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | ASSET-HANDLE-SCENE-2D-A4 / N13 | TileMap emit 从持久 `u32` key 迁移为 weak Tileset `AssetHandle` + borrowed Asset resolver；Tileset 唯一 required Texture2D dependency fail closed；hidden/off-camera/empty 不解析，非空可见集合只解析一次，失败清空；schema 12 独立记录 TileMap hits |
 | ASSET-HANDLE-SCENE-3D-A5 / N14 | `MeshRenderer3D` 保存 weak StaticMesh/Material Handle；Prefab 只做 AssetId→Handle；visible extraction 分别借用 kind-specific resolver，资源失效 fail closed，hidden 不解析；3D product evidence schema 1 记录 handle 发布、两类 resolver hits 与 AssetStore active |
 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS / N15 | fixed-capacity owner-thread Mesh3D registry 借用 Store/device/PMR；mesh/material 独立 device allocator 事务分配、不复用；Material texture/factors 原子发布并按 dependency fail closed；exact stale unbind 与产品逆序释放安全；schema 2 记录注册/释放/销毁与 registry 释放 |
+| ASSET-HANDLE-SCENE-N16.1-CORE | packet-local `FrameResourceRef`/固定容量资源表、同帧去重与 owning pin；Runtime 在 extraction 前开启 packet，并在 complete/skip/abandon 时 exactly-once 释放；Texture2D retirement 事务覆盖 backend reject 与重试 |
+| ASSET-HANDLE-SCENE-N16.2-SPRITE | World、TileMap、selection、Particle 与 Trail 的 Sprite2D extraction 全部只写 packet-local texture ref；registry 用 frame borrow pin 阻止活跃帧 unbind；Null/bgfx 在提交副作用前验证 ref owner/generation/kind/range |
 
 “M12 Done”只表示产品删除完成，不表示 Linux、PBR、accessibility、benchmark 或整库 Legacy 字符串全部
 完成。剩余工作已经拆入 Backlog，不再继续扩写 M12 历史清单。
@@ -80,7 +80,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 门禁 | 当前结论 | 下一关闭点 |
 | --- | --- | --- |
-| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle、fixed-capacity binding registry 已完成；schema 12 记录2纹理注册/释放/销毁、World/TileMap/Particle/Trail resolver hits，FX fingerprint schema 2 使用稳定 AssetId | 统一 FrameResourceRef、TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 与 UI-003 多 DPI 矩阵均为独立后续项 |
+| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle、fixed-capacity binding registry 已完成；全部 Sprite2D item 使用 packet-local `FrameResourceRef`；schema 12 记录2纹理注册/释放/销毁、World/TileMap/Particle/Trail resolver hits，FX fingerprint schema 2 使用稳定 AssetId | N16.3 统一 registry/Lease/GPU retirement owner；TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 与 UI-003 多 DPI 矩阵均为独立后续项 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
 | UI product | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有结构化与 Windows 产品视觉证据 | UI-002、UI-003 |
 | 3D product | 双 mesh + Resources-owned AssetStore + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + extract-time resolver、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、有界0..4 directional lights 已有证据（产品提交3灯）；schema 2 证明注册/释放/销毁与 registry 释放 | 统一 `FrameResourceRef`/retirement owner；RENDER-001 的完整 PBR/IBL/shadow/light component/pass scheduling |

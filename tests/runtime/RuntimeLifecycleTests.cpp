@@ -4,6 +4,7 @@
 #include <tina/platform/PlatformBackend.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/runtime/EngineHost.hpp>
@@ -69,29 +70,35 @@ void expectEventSuffix(const EventLog& events, const EventLog& expectedSuffix)
     };
 }
 
-[[nodiscard]] Render::RenderSprite2DInput makeRenderSceneSprite2DInput(u32 spriteKey, u64 stableEntityKey,
-                                                                       float centerX, float centerY, i16 layer = 0,
-                                                                       i32 order = 0)
+struct ScriptedRenderSprite2DInput final {
+    u64 deviceBindingKey = 0;
+    Render::RenderSprite2DInput sprite{};
+};
+
+[[nodiscard]] ScriptedRenderSprite2DInput makeRenderSceneSprite2DInput(
+    u64 deviceBindingKey, u64 stableEntityKey, float centerX, float centerY, i16 layer = 0, i32 order = 0)
 {
-    return Render::RenderSprite2DInput{
-        .spriteKey = spriteKey,
-        .stableEntityKey = stableEntityKey,
-        .centerX = centerX,
-        .centerY = centerY,
-        .rotationRadians = 0.0F,
-        .widthMeters = 1.0F,
-        .heightMeters = 1.0F,
-        .scaleX = 1.0F,
-        .scaleY = 1.0F,
-        .sortingLayer = layer,
-        .orderInLayer = order,
-        .red = 255,
-        .green = 255,
-        .blue = 255,
-        .alpha = 255,
-        .flipX = false,
-        .flipY = false,
-        .visible = true,
+    return ScriptedRenderSprite2DInput{
+        .deviceBindingKey = deviceBindingKey,
+        .sprite = Render::RenderSprite2DInput{
+            .stableEntityKey = stableEntityKey,
+            .centerX = centerX,
+            .centerY = centerY,
+            .rotationRadians = 0.0F,
+            .widthMeters = 1.0F,
+            .heightMeters = 1.0F,
+            .scaleX = 1.0F,
+            .scaleY = 1.0F,
+            .sortingLayer = layer,
+            .orderInLayer = order,
+            .red = 255,
+            .green = 255,
+            .blue = 255,
+            .alpha = 255,
+            .flipX = false,
+            .flipY = false,
+            .visible = true,
+        },
     };
 }
 
@@ -555,6 +562,8 @@ struct RuntimeProbe final {
     bool lastSubmittedHadPrimaryWindowSurface = false;
     std::optional<Render::RenderCamera2D> copiedLastSubmittedWorldCamera2D;
     std::vector<Render::RenderSprite2DItem> copiedLastSubmittedWorldSprites2D;
+    std::vector<u64> copiedLastSubmittedWorldSpriteBindingKeys;
+    u32 copiedLastSubmittedFrameResourceCount = 0;
     std::optional<Render::RenderPerspectiveCamera> copiedLastSubmittedPerspectiveCamera;
     std::vector<Render::RenderMesh3DItem> copiedLastSubmittedWorldMeshes3D;
     std::vector<Render::RenderMesh3DBatch> copiedLastSubmittedWorldMesh3DBatches;
@@ -1105,6 +1114,20 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
         probe_->copiedLastSubmittedWorldCamera2D = frame.primaryWorldScene.camera2D();
         const auto sprites = frame.primaryWorldScene.sprites2D();
         probe_->copiedLastSubmittedWorldSprites2D.assign(sprites.begin(), sprites.end());
+        probe_->copiedLastSubmittedFrameResourceCount = frame.resources.size();
+        probe_->copiedLastSubmittedWorldSpriteBindingKeys.clear();
+        probe_->copiedLastSubmittedWorldSpriteBindingKeys.reserve(sprites.size());
+        for (const Render::RenderSprite2DItem& sprite : sprites)
+        {
+            const Render::FrameResourceDescriptor* descriptor = frame.resources.resolve(
+                sprite.texture, Render::FrameResourceKind::Sprite2DTexture);
+            if (descriptor == nullptr)
+            {
+                return Core::failure(Render::RenderErrorCode::InvalidFrameResource,
+                                     "runtime probe received an invalid Sprite2D frame resource");
+            }
+            probe_->copiedLastSubmittedWorldSpriteBindingKeys.push_back(descriptor->deviceBindingKey);
+        }
         probe_->copiedLastSubmittedPerspectiveCamera = frame.primaryWorldScene.perspectiveCamera();
         const auto meshes3D = frame.primaryWorldScene.meshes3D();
         probe_->copiedLastSubmittedWorldMeshes3D.assign(meshes3D.begin(), meshes3D.end());
@@ -1381,7 +1404,8 @@ struct GameProbe final {
     std::optional<Core::ErrorCode> ignoredPrimaryWindowUIUpdateFailure;
     std::optional<Render::RenderCamera2DInput> scriptedRenderSceneCamera;
     std::vector<Render::RenderCamera2DInput> scriptedRenderSceneCamerasByFrame;
-    std::vector<Render::RenderSprite2DInput> scriptedRenderSceneSprites;
+    std::vector<ScriptedRenderSprite2DInput> scriptedRenderSceneSprites;
+    u32 spriteFrameBorrowCount = 0;
     std::optional<Render::RenderPerspectiveCameraInput> scriptedRenderScenePerspectiveCamera;
     std::vector<Render::RenderMesh3DInput> scriptedRenderSceneMeshes3D;
     bool ignoreRenderSceneWriteFailures = false;
@@ -1741,8 +1765,33 @@ class ScriptedGameState final : public IGameState {
                 return cameraStatus;
             }
         }
-        for (const Render::RenderSprite2DInput& sprite : probe_->scriptedRenderSceneSprites)
+        for (const ScriptedRenderSprite2DInput& scripted : probe_->scriptedRenderSceneSprites)
         {
+            ++probe_->spriteFrameBorrowCount;
+            Render::FramePin pin{
+                Render::FramePinKind::Custom,
+                scripted.deviceBindingKey,
+                probe_,
+                [](void* userData) noexcept {
+                    auto& game = *static_cast<GameProbe*>(userData);
+                    if (game.spriteFrameBorrowCount > 0)
+                    {
+                        --game.spriteFrameBorrowCount;
+                    }
+                },
+            };
+            auto texture = context.frameResourceSink().intern(
+                Render::FrameResourceDescriptor{
+                    .kind = Render::FrameResourceKind::Sprite2DTexture,
+                    .deviceBindingKey = scripted.deviceBindingKey,
+                },
+                std::move(pin));
+            if (!texture)
+            {
+                return Core::failure(std::move(texture.error()));
+            }
+            Render::RenderSprite2DInput sprite = scripted.sprite;
+            sprite.texture = *texture;
             auto spriteStatus = handleWriteStatus(writer.addSprite2D(sprite));
             if (!spriteStatus)
             {
@@ -2680,7 +2729,9 @@ TEST(EngineHostRunTest, ExtractRenderScenePublishesCameraAndSpriteDataToSubmitFr
     EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldCamera2D->centerX, 3.25F);
     EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldCamera2D->centerY, -1.5F);
     ASSERT_EQ(runtime.copiedLastSubmittedWorldSprites2D.size(), 1U);
-    EXPECT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().spriteKey, 11U);
+    ASSERT_EQ(runtime.copiedLastSubmittedWorldSpriteBindingKeys.size(), 1U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSpriteBindingKeys.front(), 11U);
+    EXPECT_EQ(runtime.copiedLastSubmittedFrameResourceCount, 1U);
     EXPECT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().stableEntityKey, 201U);
     EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().centerX, 2.5F);
     EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().centerY, -1.0F);

@@ -4,6 +4,8 @@
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/render/FramePin.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/render/UploadTicket.hpp>
 
@@ -17,6 +19,11 @@
 
 namespace Tina::Asset {
 namespace {
+
+void countFrameResourceRelease(void* userData) noexcept
+{
+    ++*static_cast<Core::u32*>(userData);
+}
 
 [[nodiscard]] Core::AssetId::Bytes idBytes(Core::u8 seed)
 {
@@ -111,12 +118,22 @@ TEST(AssetToRenderScenePipelineTests, CookLoadToRenderSceneCommitWithUv)
     const auto* textureFile = system->tryGet(*texHandle);
     ASSERT_NE(textureFile, nullptr);
 
-    auto renderInput = makeSpriteRenderInput(*spriteFile, textureFile,
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    Core::u32 releaseCount = 0;
+    auto textureResource = packet.intern(
+        Render::FrameResourceDescriptor{
+            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .deviceBindingKey = 1U,
+        },
+        Render::FramePin{Render::FramePinKind::Custom, 1U, &releaseCount, &countFrameResourceRelease});
+    ASSERT_TRUE(textureResource.has_value()) << textureResource.error().message;
+
+    auto renderInput = makeSpriteRenderInput(*spriteFile, textureFile, *textureResource,
                                              SpriteRenderParams{
                                                  .stableEntityKey = 42,
                                                  .centerX = 0.0f,
                                                  .centerY = 0.0f,
-                                                 .spriteKey = 1, // fixture-compatible key for bgfx path
                                              });
     ASSERT_TRUE(renderInput.has_value()) << renderInput.error().message;
     EXPECT_FLOAT_EQ(renderInput->u0, 0.25f);
@@ -145,8 +162,12 @@ TEST(AssetToRenderScenePipelineTests, CookLoadToRenderSceneCommitWithUv)
     EXPECT_FLOAT_EQ(view->sprites2D()[0].u0, 0.25f);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].u1, 0.75f);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].widthMeters, 0.5f);
+    EXPECT_EQ(view->sprites2D()[0].texture, *textureResource);
     EXPECT_EQ(view->sprites2D()[0].stableEntityKey, 42U);
     EXPECT_EQ(view->statistics().visibleSpriteCount, 1U);
+
+    ASSERT_TRUE(packet.abandon().has_value());
+    EXPECT_EQ(releaseCount, 1U);
 
     std::filesystem::remove_all(root, ec);
 }

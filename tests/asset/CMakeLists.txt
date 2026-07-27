@@ -12,6 +12,7 @@ set(TINA_ASSET_TEST_SOURCES
     GltfCookTests.cpp
     Typed2dCatalogPipelineTests.cpp
     AssetSystemCatalogApiTests.cpp
+    AssetFrameResourceResolverTests.cpp
     AssetSpriteRenderTests.cpp
     SpriteAnimationClipTypedViewTests.cpp
     AssetGpuTextureTests.cpp
@@ -38,6 +39,7 @@ set(TINA_ASSET_TEST_SOURCES
     CookedAssetBatchTests.cpp
     CookedAssetFileTests.cpp
     header_isolation/AssetBindingResolverHeader.cpp
+    header_isolation/AssetFrameResourceResolverHeader.cpp
     header_isolation/AssetErrorsHeader.cpp
     header_isolation/AssetHandleHeader.cpp
     header_isolation/AssetStoreHeader.cpp

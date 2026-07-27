@@ -2,29 +2,22 @@
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
+#include <tina/render/RenderErrors.hpp>
 
 #include <cmath>
 
 namespace Tina::Asset {
-namespace {
-
-[[nodiscard]] Core::u32 spriteKeyFromAssetId(Core::AssetId assetId) noexcept
-{
-    const auto& bytes = assetId.bytes();
-    Core::u32 key = 0;
-    for (std::size_t index = 0; index < 4; ++index)
-    {
-        key = (key << 8U) | std::to_integer<Core::u32>(bytes[index]);
-    }
-    return key == 0 ? 1U : key;
-}
-
-} // namespace
 
 Core::Result<Render::RenderSprite2DInput> makeSpriteRenderInput(const CookedAssetFile& spriteAsset,
                                                                 const CookedAssetFile* textureAsset,
+                                                                Render::FrameResourceRef texture,
                                                                 const SpriteRenderParams& params)
 {
+    if (!texture)
+    {
+        return Core::failure(Render::RenderErrorCode::InvalidFrameResource,
+                             "sprite render input requires a valid frame texture resource");
+    }
     auto sprite = parseSpriteFromCooked(spriteAsset);
     if (!sprite)
     {
@@ -74,7 +67,7 @@ Core::Result<Render::RenderSprite2DInput> makeSpriteRenderInput(const CookedAsse
     const float centerY = params.centerY + pivotOffsetX * sine + pivotOffsetY * cosine;
 
     Render::RenderSprite2DInput input{
-        .spriteKey = params.spriteKey != 0 ? params.spriteKey : spriteKeyFromAssetId(spriteAsset.header().assetId),
+        .texture = texture,
         .stableEntityKey = params.stableEntityKey == 0 ? 1ULL : params.stableEntityKey,
         .centerX = centerX,
         .centerY = centerY,

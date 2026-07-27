@@ -402,6 +402,7 @@ class Visible3DState final : public Tina::IGameState {
         if (auto status = Tina::Scene::extractRenderSceneFromWorld(
                 *world_,
                 writer,
+                context.frameResourceSink(),
                 Tina::Scene::ExtractRenderSceneParams{
                     .surfaceViewport =
                         Tina::Render::Camera2DSurfaceViewport{

@@ -20,6 +20,8 @@
 #include <thread>
 #include <utility>
 
+#include "../common/SampleSpriteFrameResource.hpp"
+
 namespace {
 
 using Tina::Core::u32;
@@ -354,11 +356,16 @@ class Visible2DState final : public Tina::IGameState {
         }};
 
         const float rotationBase = static_cast<float>(context.frameTiming().frameIndex) * 0.02F;
+        auto texture = spriteFrameResource_.intern(context.frameResourceSink(), 1);
+        if (!texture)
+        {
+            return Tina::Core::failure(std::move(texture.error()));
+        }
         for (u32 index = 0; index < SpriteCount; ++index)
         {
             const SpriteSpec& spec = Sprites[index];
             const Tina::Render::RenderSprite2DInput sprite{
-                .spriteKey = 1,
+                .texture = *texture,
                 .stableEntityKey = static_cast<u64>(index) + 1U,
                 .centerX = spec.centerX,
                 .centerY = spec.centerY,
@@ -390,6 +397,7 @@ class Visible2DState final : public Tina::IGameState {
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
+    mutable Tina::Samples::SampleSpriteFrameResource spriteFrameResource_{};
 };
 
 class Visible2DApplication final : public Tina::IGameApplication {

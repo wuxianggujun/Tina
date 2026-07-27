@@ -408,7 +408,7 @@ Core::Status RenderSceneBuilder::validateSprite(const RenderSprite2DInput& sprit
 {
     const float scaledWidth = sprite.widthMeters * std::abs(sprite.scaleX);
     const float scaledHeight = sprite.heightMeters * std::abs(sprite.scaleY);
-    if (sprite.spriteKey == 0 || sprite.stableEntityKey == 0 || !finite(sprite.centerX) ||
+    if (!sprite.texture || sprite.stableEntityKey == 0 || !finite(sprite.centerX) ||
         !finite(sprite.centerY) || !finite(sprite.rotationRadians) || !finite(sprite.widthMeters) ||
         !finite(sprite.heightMeters) || !finite(sprite.scaleX) || !finite(sprite.scaleY) ||
         sprite.widthMeters <= 0.0F || sprite.heightMeters <= 0.0F || sprite.scaleX == 0.0F ||
@@ -572,7 +572,7 @@ Core::Status RenderSceneBuilder::addSprite2D(const RenderSprite2DInput& sprite)
     }
 
     std::construct_at(&m_sprites[m_spriteCount], RenderSprite2DItem{
-        .spriteKey = sprite.spriteKey,
+        .texture = sprite.texture,
         .stableEntityKey = sprite.stableEntityKey,
         .insertionOrder = m_spriteCount,
         .centerX = sprite.centerX,

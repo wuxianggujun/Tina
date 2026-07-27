@@ -204,7 +204,9 @@ wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与
 `retire*` + backend marker，不能把两类 completion 混用。
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
-commit 后返回 borrowed view。`UIDisplayList` 支持 SolidQuad/Glyph 与 axis-aligned clip。
+commit 后返回 borrowed view。`RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
+`FrameResourceRef`；backend 在同步 submit 中按 `Sprite2DTexture` kind 解析。`UIDisplayList` 支持
+SolidQuad/Glyph 与 axis-aligned clip。
 
 ## UI
 
@@ -226,9 +228,10 @@ material weak `AssetHandle`。
 
 `SpriteRenderer2D` 只复制 weak `AssetHandle` 和渲染语义字段，不持有 `AssetLease`/Cooked payload/GPU
 handle。`ExtractRenderSceneParams::spriteBindingResolver` 是 allocation-free 的 borrowed function-pointer
-view，仅在一次 extraction 调用内有效；visible sprite 必须由它按当前 Store owner/generation、Sprite kind
-和 binding 状态解析为非0 `u32` key。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或0结果
-统一返回 `SceneErrorCode::UnresolvedSprite`；hidden sprite 不解析。Scene 不保存 resolver 或任何 Asset owner。
+view，仅在一次 extraction 调用内有效；它接收当前 `FrameResourceSink`，visible sprite 必须由它按 Store
+owner/generation、Sprite kind 与 binding 状态解析并 intern 为 packet-local texture ref。缺 resolver、
+空/stale/cross-store/wrong-kind/unbound handle 或空 ref 统一返回 `SceneErrorCode::UnresolvedSprite`；hidden
+sprite 不解析。Scene 不保存 resolver、sink、ref 或任何 Asset owner。
 
 `MeshRenderer3D` 只复制 weak mesh/material `AssetHandle` 与渲染语义字段。extract params 分别提供
 `mesh3DBindingResolver` 和 `material3DBindingResolver`，只在本次 extraction 调用有效；visible mesh 必须
@@ -242,8 +245,9 @@ resolver；在 `Create()` 中通过调用方 PMR resource 建立固定容量 sto
 extract 不增长 storage。它们直接复用调用方 phase-local `RenderSceneWriter` 提交 backend-neutral Sprite2D。
 
 `ParticleBurst2D::sprite` 在 `emitBurst()` 时复制到每个粒子，空 handle 属于 `InvalidComponent`；
-`Trail2DConfig::sprite` 在 `Create()` 时校验，空 handle 同样失败。两种显式 `extract(writer, resolver)` 只在
-本次调用借用共享 `Sprite2DBindingResolver`；缺 resolver 或 handle 被解析为0统一返回
+`Trail2DConfig::sprite` 在 `Create()` 时校验，空 handle 同样失败。两种显式
+`extract(writer, frameResources, resolver)` 只在本次调用借用共享 `Sprite2DBindingResolver` 与 sink；缺
+resolver 或 handle 被解析为空 ref 统一返回
 `SceneErrorCode::UnresolvedSprite`。stale/cross-store/wrong-kind/unbound 的识别由 resolver/registry 负责。
 空 system 不解析；Trail 每次非空 extract 解析一次并供所有 segment 复用，Particle 按 live item 解析。
 
@@ -280,8 +284,9 @@ dirty cache/sprite emit 与 `TileMapGridCollision` 都要求显式 `TileMapLayer
 `TileMapLayerTypeMismatch`/`TileMapLayerNotFound`。grid SPI 的 `materialFlagsAt()` 仍按约定把无效、空或
 未驻留 cell 表现为0。visibility=false 会跳过可见 chunk/sprite emit，但不禁止显式用作 collision。
 
-`TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与 borrowed `AssetBindingResolver`，不保存
-render key，也不取得 Lease/payload/GPU owner。resolver 与 user data 只在当前 emit 调用内有效。单 chunk
+`TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与 borrowed
+`AssetFrameResourceResolver`，不保存 render key/ref，也不取得 Lease/payload/GPU owner。resolver、sink 与
+user data 只在当前 emit 调用内有效。单 chunk
 有实际 tile 时解析一次；`emitVisibleTileMapSprites()` 对完整非空可见集合只解析一次。hidden、off-camera、
 empty 不调用 resolver；空 handle 返回 `InvalidHandle`，missing/zero binding 返回 `SpriteBindingNotFound`，
 任一失败都清空调用方输出。
@@ -311,10 +316,13 @@ GPU texture 或同 AssetId 的另一 live handle 是冲突。`bindingKey()` 只�
 key；stale lookup 返回0。
 `unbindTextureBinding()` 以原 exact handle 清除 device binding，device 失败保留记录供重试。
 `resolveSprite()` 与 `resolveTileset()` 分别沿 Cooked Sprite/Tileset 的唯一 required Texture2D dependency
-fail closed 返回当前 key。registry 不拥有
+fail closed 返回当前低层 key；产品 extraction 使用 `internSpriteFrameResource()` /
+`internTilesetFrameResource()` 将 binding 登记到当前 sink。同帧重复 descriptor 返回同一 ref，首次 pin
+阻止 `unbindTextureBinding()`，直到 packet complete/skip/abandon。registry 不拥有
 GPU texture、Lease 或 retirement；调用方必须让 Store/device 覆盖它，并在 destroy/retire texture 前成功
-unbind。它不是 Scene owner；通用 `AssetBindingResolver` 位于窄 `AssetTypes` target，A1 的
-`Sprite2DBindingResolver` 是 Scene extraction 的语义 alias。
+unbind。它不是 Scene owner；通用 `AssetFrameResourceResolver` 位于窄 `AssetTypes` target，A1 的
+`Sprite2DBindingResolver` 是 Scene extraction 的语义 alias；3D key resolver 仍使用
+`AssetBindingResolver`。
 
 `setSprite2DTextureBinding(callerKey, texture)` 仍保留 direct binding/clear SPI，但 caller-chosen key 与上述
 allocator 使用同一个 device namespace。allocator-managed registry 管理期间不得混用 direct caller key；
@@ -332,8 +340,8 @@ dependency stream 表达 role identity，因此 writer 拒绝乱序或多 role �
 `resolveMesh()` / `resolveMaterial()` 每次按当前 Store state fail closed；Material 任一已注册 texture
 dependency stale 时解析为0。exact handle 即使随后 stale，仍可用于 unbind；backend unbind 失败保留
 registry entry 供重试，成功才删除。registry 不拥有 GPU resource、`AssetLease` 或 retirement record；调用方
-必须先成功 unbind，再 destroy/retire GPU owner。packet-local `FrameResourceRef` 基础设施已落地，但 Scene
-item 与 registry/retirement owner 尚未统一。
+必须先成功 unbind，再 destroy/retire GPU owner。全部 Sprite2D Scene item 已迁移到 packet-local
+`FrameResourceRef`；Mesh3D item 与 registry/Lease/GPU retirement owner 仍待后续统一。
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含

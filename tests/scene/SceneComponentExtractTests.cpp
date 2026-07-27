@@ -1,6 +1,7 @@
 #include <tina/asset/AssetStore.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
 #include <tina/scene/World.hpp>
@@ -12,6 +13,7 @@
 #include <memory_resource>
 #include <numbers>
 #include <optional>
+#include <utility>
 
 namespace Tina::Scene {
 namespace {
@@ -65,6 +67,73 @@ namespace {
     };
 }
 
+struct TestFrameResourceLifetime final {
+    u32 borrows = 0;
+};
+
+[[nodiscard]] TestFrameResourceLifetime& testFrameResourceLifetime() noexcept
+{
+    static TestFrameResourceLifetime lifetime{};
+    return lifetime;
+}
+
+[[nodiscard]] Render::RenderFramePacket& testFramePacket() noexcept
+{
+    (void)testFrameResourceLifetime();
+    static Render::RenderFramePacket packet{};
+    return packet;
+}
+
+[[nodiscard]] Render::FrameResourceSink& beginTestFrameResources()
+{
+    static u64 frameIndex = 0;
+    const Core::Status status = testFramePacket().beginFrame(frameIndex++);
+    EXPECT_TRUE(status) << (status ? "" : status.error().message);
+    return testFramePacket().resourceSink();
+}
+
+[[nodiscard]] Core::Result<Render::FrameResourceRef> internTestTexture(
+    Render::FrameResourceSink& sink,
+    u32 bindingKey) noexcept
+{
+    TestFrameResourceLifetime& lifetime = testFrameResourceLifetime();
+    ++lifetime.borrows;
+    Render::FramePin pin{
+        Render::FramePinKind::Custom,
+        bindingKey,
+        &lifetime,
+        [](void* userData) noexcept {
+            auto& pinned = *static_cast<TestFrameResourceLifetime*>(userData);
+            if (pinned.borrows > 0)
+            {
+                --pinned.borrows;
+            }
+        },
+    };
+    return sink.intern(
+        Render::FrameResourceDescriptor{
+            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .deviceBindingKey = bindingKey,
+        },
+        std::move(pin));
+}
+
+[[nodiscard]] u64 textureBindingKey(Render::FrameResourceRef texture) noexcept
+{
+    const Render::FrameResourceDescriptor* descriptor = testFramePacket().resourceTableView().resolve(
+        texture, Render::FrameResourceKind::Sprite2DTexture);
+    return descriptor == nullptr ? 0 : descriptor->deviceBindingKey;
+}
+
+[[nodiscard]] Core::Status extractRenderSceneFromWorld(
+    World& world,
+    Render::RenderSceneWriter& writer,
+    ExtractRenderSceneParams params = {}) noexcept
+{
+    return ::Tina::Scene::extractRenderSceneFromWorld(
+        world, writer, beginTestFrameResources(), params);
+}
+
 struct TestSpriteBindings final {
     struct Binding final {
         Asset::AssetHandle sprite{};
@@ -81,23 +150,26 @@ struct TestSpriteBindings final {
         bindings[bindingCount++] = Binding{.sprite = sprite, .key = key};
     }
 
-    [[nodiscard]] static u32 resolve(void* userData, Asset::AssetHandle sprite) noexcept
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolve(
+        void* userData,
+        Asset::AssetHandle sprite,
+        Render::FrameResourceSink& frameResources) noexcept
     {
         auto& self = *static_cast<TestSpriteBindings*>(userData);
         ++self.resolveCalls;
         if (self.store == nullptr || !sprite || self.store->assetKind(sprite) != AssetFormat::AssetKind::Sprite ||
             self.store->state(sprite) == Asset::AssetLogicalState::Unloaded)
         {
-            return 0;
+            return Render::FrameResourceRef{};
         }
         for (usize index = 0; index < self.bindingCount; ++index)
         {
             if (self.bindings[index].sprite == sprite)
             {
-                return self.bindings[index].key;
+                return internTestTexture(frameResources, self.bindings[index].key);
             }
         }
-        return 0;
+        return Render::FrameResourceRef{};
     }
 
     Asset::AssetStore* store = nullptr;
@@ -175,9 +247,10 @@ class SceneSpriteAssetTest : public testing::Test {
         ExtractRenderSceneParams{.spriteBindingResolver = resolver});
 }
 
-[[nodiscard]] u32 resolveToZero(void*, Asset::AssetHandle) noexcept
+[[nodiscard]] Core::Result<Render::FrameResourceRef> resolveToEmpty(
+    void*, Asset::AssetHandle, Render::FrameResourceSink&) noexcept
 {
-    return 0;
+    return Render::FrameResourceRef{};
 }
 
 TEST_F(SceneSpriteAssetTest, SetsClearsAndQueriesCameraAndSprite)
@@ -277,6 +350,7 @@ TEST_F(SceneSpriteAssetTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
         .spriteBindingResolver = bindings.resolver(),
     };
     ASSERT_TRUE(extractRenderSceneFromWorld(world, writer, params));
+    EXPECT_EQ(testFramePacket().resourceCount(), 2U);
 
     auto view = builder->commit();
     ASSERT_TRUE(view);
@@ -290,7 +364,7 @@ TEST_F(SceneSpriteAssetTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
     ASSERT_GE(view->sprites2D().size(), 1U);
     bool foundNear = false;
     for (const Render::RenderSprite2DItem& item : view->sprites2D()) {
-        if (item.spriteKey == 1U) {
+        if (textureBindingKey(item.texture) == 1U) {
             foundNear = true;
             EXPECT_FLOAT_EQ(item.centerX, 0.0F);
             EXPECT_FLOAT_EQ(item.centerY, 0.0F);
@@ -303,7 +377,7 @@ TEST_F(SceneSpriteAssetTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
             EXPECT_EQ(item.sortingLayer, -2);
             EXPECT_EQ(item.orderInLayer, 9);
         }
-        EXPECT_NE(item.spriteKey, 3U);
+        EXPECT_NE(textureBindingKey(item.texture), 3U);
     }
     EXPECT_TRUE(foundNear);
     EXPECT_EQ(bindings.resolveCalls, 2U);
@@ -373,11 +447,11 @@ TEST_F(SceneSpriteAssetTest, UnboundSpriteAssetIsUnresolved)
     EXPECT_EQ(bindings.resolveCalls, 1U);
 }
 
-TEST_F(SceneSpriteAssetTest, ResolverReturningZeroIsUnresolved)
+TEST_F(SceneSpriteAssetTest, ResolverReturningEmptyRefIsUnresolved)
 {
     const Core::Status status = extractSingleSprite(
         firstSprite_,
-        Sprite2DBindingResolver{.resolve = &resolveToZero});
+        Sprite2DBindingResolver{.resolve = &resolveToEmpty});
     ASSERT_FALSE(status);
     EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
 }
@@ -401,7 +475,7 @@ TEST_F(SceneSpriteAssetTest, WriterFailureIsReturnedAfterSuccessfulResolution)
     ASSERT_TRUE(builder->beginFrame());
     Render::RenderSceneWriter writer = builder->writer();
     ASSERT_TRUE(writer.addSprite2D(Render::RenderSprite2DInput{
-        .spriteKey = 99,
+        .texture = *internTestTexture(beginTestFrameResources(), 99),
         .stableEntityKey = 99,
         .widthMeters = 1.0F,
         .heightMeters = 1.0F,
@@ -523,7 +597,7 @@ TEST_F(SceneSpriteAssetTest, AppliesPivotAndZRotationToSpriteCenter)
     auto view = builder->commit();
     ASSERT_TRUE(view);
     ASSERT_EQ(view->sprites2D().size(), 1U);
-    EXPECT_EQ(view->sprites2D()[0].spriteKey, 17U);
+    EXPECT_EQ(textureBindingKey(view->sprites2D()[0].texture), 17U);
     // Pivot bottom-left: local offset to geometric center is (+1, +2). After
     // +90° Z rotation: (x,y) -> (-y, x) => (-2, 1).
     EXPECT_NEAR(view->sprites2D()[0].centerX, -2.0F, 1.0e-4F);
@@ -568,7 +642,7 @@ TEST_F(SceneSpriteAssetTest, ForwardsOptionalUvRectOverride)
     auto view = builder->commit();
     ASSERT_TRUE(view);
     ASSERT_EQ(view->sprites2D().size(), 1U);
-    EXPECT_EQ(view->sprites2D()[0].spriteKey, 23U);
+    EXPECT_EQ(textureBindingKey(view->sprites2D()[0].texture), 23U);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].u0, 0.5F);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].v0, 0.0F);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].u1, 1.0F);

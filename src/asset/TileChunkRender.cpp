@@ -37,26 +37,36 @@ namespace {
     return layer->visible && !chunk.empty && chunk.widthCells != 0 && chunk.heightCells != 0;
 }
 
-[[nodiscard]] Core::Result<Core::u32> resolveTilesetBinding(const TileChunkSpriteEmitParams& params) noexcept
+[[nodiscard]] Core::Result<Render::FrameResourceRef>
+resolveTilesetResource(const TileChunkSpriteEmitParams& params, Render::FrameResourceSink& frameResources) noexcept
 {
     if (!params.tileset)
     {
         return Core::failure(AssetErrorCode::InvalidHandle, "tile chunk render requires a weak Tileset handle");
     }
-    const Core::u32 spriteKey = params.bindingResolver(params.tileset);
-    if (spriteKey == 0)
+    if (!params.bindingResolver)
+    {
+        return Core::failure(AssetErrorCode::SpriteBindingNotFound,
+                             "tile chunk render requires a frame resource resolver");
+    }
+    auto resource = params.bindingResolver(params.tileset, frameResources);
+    if (!resource)
+    {
+        return Core::failure(std::move(resource.error()).withContext("TileChunkRender", "resolveTileset"));
+    }
+    if (!*resource)
     {
         return Core::failure(AssetErrorCode::SpriteBindingNotFound,
                              "Tileset asset has no live Sprite2D texture binding");
     }
-    return spriteKey;
+    return *resource;
 }
 
-[[nodiscard]] Core::Result<Core::u32> emitTileChunkSpritesWithBinding(
+[[nodiscard]] Core::Result<Core::u32> emitTileChunkSpritesWithResource(
     const TileMapInstance& map,
     const TileChunkView& chunk,
     const TileChunkSpriteEmitParams& params,
-    Core::u32 spriteKey,
+    Render::FrameResourceRef texture,
     std::pmr::vector<Render::RenderSprite2DInput>& out)
 {
     auto renderable = hasRenderableTiles(map, chunk);
@@ -96,7 +106,7 @@ namespace {
                 const float centerX = params.originX + (static_cast<float>(cellX) + 0.5f) * cell;
                 const float centerY = params.originY + (static_cast<float>(cellY) + 0.5f) * cell;
                 out.push_back(Render::RenderSprite2DInput{
-                    .spriteKey = spriteKey,
+                    .texture = texture,
                     .stableEntityKey = makeStableEntityKey(params.stableEntityKeyBase, cellX, cellY, map.widthCells()),
                     .centerX = centerX,
                     .centerY = centerY,
@@ -133,6 +143,7 @@ namespace {
 
 Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk,
                                              const TileChunkSpriteEmitParams& params,
+                                             Render::FrameResourceSink& frameResources,
                                              std::pmr::vector<Render::RenderSprite2DInput>& out)
 {
     out.clear();
@@ -145,16 +156,17 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
     {
         return Core::u32{0};
     }
-    auto spriteKey = resolveTilesetBinding(params);
-    if (!spriteKey)
+    auto texture = resolveTilesetResource(params, frameResources);
+    if (!texture)
     {
-        return Core::failure(std::move(spriteKey.error()));
+        return Core::failure(std::move(texture.error()));
     }
-    return emitTileChunkSpritesWithBinding(map, chunk, params, *spriteKey, out);
+    return emitTileChunkSpritesWithResource(map, chunk, params, *texture, out);
 }
 
 Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId,
                                                   const TileChunkCameraQuery& camera, const TileChunkSpriteEmitParams& params,
+                                                  Render::FrameResourceSink& frameResources,
                                                   std::pmr::vector<Render::RenderSprite2DInput>& out)
 {
     out.clear();
@@ -168,10 +180,10 @@ Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, As
     {
         return Core::u32{0};
     }
-    auto spriteKey = resolveTilesetBinding(params);
-    if (!spriteKey)
+    auto texture = resolveTilesetResource(params, frameResources);
+    if (!texture)
     {
-        return Core::failure(std::move(spriteKey.error()));
+        return Core::failure(std::move(texture.error()));
     }
 
     std::pmr::vector<Render::RenderSprite2DInput> chunkSprites{out.get_allocator()};
@@ -180,7 +192,7 @@ Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, As
     {
         for (const auto& chunk : chunks)
         {
-            auto n = emitTileChunkSpritesWithBinding(map, chunk, params, *spriteKey, chunkSprites);
+            auto n = emitTileChunkSpritesWithResource(map, chunk, params, *texture, chunkSprites);
             if (!n)
             {
                 out.clear();

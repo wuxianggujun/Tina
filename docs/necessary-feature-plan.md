@@ -31,7 +31,7 @@
 | N13 | ASSET-HANDLE-SCENE-2D-A4 | 已完成 | TileMap emit 改存 weak Tileset AssetHandle，并在调用期借用 Asset resolver；registry Tileset dependency resolve、单次解析/失败清空与产品 evidence schema 12 已贯通，完整总项仍为 Partial |
 | N14 | ASSET-HANDLE-SCENE-3D-A5 | 已完成 | MeshRenderer3D/Prefab 改存 weak StaticMesh/Material Handle，extraction 借用 kind-specific resolver；3D product evidence schema 1 与 Resources-owned AssetStore 已贯通，完整总项仍为 Partial |
 | N15 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS | 已完成 | fixed-capacity owner-thread Mesh3D registry、独立 device key allocator、原子 material bundle、stale-safe unbind 与 3D product evidence schema 2 已贯通；完整总项仅剩统一 retirement ownership/FrameResourceRef |
-| N16 | ASSET-HANDLE-SCENE-FRAME-RESOURCE | 进行中 | N16.1 已建立 packet-local FrameResourceRef/资源表与 lease-consuming Texture2D retirement 事务；N16.2/N16.3 继续迁移 2D extraction、统一 registry 与 retirement owner |
+| N16 | ASSET-HANDLE-SCENE-FRAME-RESOURCE | 进行中 | N16.1 已建立 packet-local FrameResourceRef/资源表与 lease-consuming Texture2D retirement 事务；N16.2 已迁移全部 Sprite2D extraction；N16.3 继续统一 registry 与 retirement owner |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -701,12 +701,30 @@ ownership 与 packet-local `FrameResourceRef` 必须作为独立后续切片完�
   失败都保持两个 owner 可重试；成功后 weak lookup 立即失效，completion/drain 后释放 lease；同步 backend
   可在调用返回前完成最后一个 `UnloadPending` Lease，此时不得再次使用已失效 handle 执行 unload。
 
+### N16.2 已完成契约
+
+- `AssetFrameResourceResolver` 位于窄 `Tina::AssetTypes` 边界，以 borrowed function pointer + user data
+  接收 weak `AssetHandle` 与当前 `FrameResourceSink`，返回 packet-local `FrameResourceRef`；缺 callback 或
+  无法解析的资源返回成功空 ref，wrong-thread/sink rejection 等结构错误原样传播。
+- `RenderSprite2DInput` / `RenderSprite2DItem` 只保存 `FrameResourceRef`，旧 `spriteKey` 字段与兼容双轨已
+  删除。World、TileMap、selection highlight、Particle、Trail 与所有 2D sample 都在 extraction 期间通过
+  当前 packet sink 取得 ref。
+- `Sprite2DBindingRegistry` 沿 Sprite/Tileset 唯一 required Texture2D dependency 校验 live binding，再把
+  `{Sprite2DTexture, deviceBindingKey}` intern 到 packet。首次 intern 持有 entry borrow pin，同帧跨消费者
+  重复 intern 立即释放重复 pin并返回同一 ref；active borrow 期间 unbind 明确失败，packet
+  complete/skip/abandon 后可重试。
+- Null/bgfx backend 在提交产生任何 frame/statistics/surface/geometry 副作用前完整解析所有 Sprite ref；
+  cross-packet、stale、wrong-kind、越界或超出 `u32` binding range 均返回 `InvalidFrameResource`。suspended
+  frame 也执行同一验证。
+- Runtime `RenderSceneExtractionContext` 同时借出 phase-local `RenderSceneWriter` 与
+  `FrameResourceSink`；两者都只在当前 extraction callback 有效，游戏不得缓存。
+
 ### 后续切片
 
 | 切片 | 状态 | 完成定义 |
 | --- | --- | --- |
 | N16.1 | 已完成 | Render packet 资源表/引用、Runtime begin/rollback 时序、lease-consuming Texture2D retirement 事务与单元/集成测试 |
-| N16.2 | 待推进 | World/TileMap/Particle/Trail Sprite2D extraction 只写 `FrameResourceRef`，同帧相同资源只 intern 一次，backend 提交前完整验证 table/ref |
+| N16.2 | 已完成 | World/TileMap/Particle/Trail Sprite2D extraction 只写 `FrameResourceRef`，同帧相同资源只 intern 一次，backend 提交前完整验证 table/ref |
 | N16.3 | 待推进 | 统一 Sprite registry、`AssetLease` 与 GPU retirement owner，升级 product-2d evidence 并收口 `ASSET-HANDLE-SCENE` 总项 |
 
 ### N16.1 验收
@@ -723,8 +741,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 最终验证：`tina_tests` 329/329、`tina_asset_tests` 188/188、`tina_render_bgfx_tests` 52/52；
 `tina_sample_2d` 与 `tina_sample_3d` 均完成 300 帧 smoke；DOC-002 为0 error / 0 warning。
 
-N16.1 只建立统一引用/所有权基础设施；Scene item 尚未迁移到 `FrameResourceRef`，registry 也尚未成为
-Lease/GPU retirement owner，因此 `ASSET-HANDLE-SCENE` 总项仍为 InProgress。
+N16.2 已完成 2D Scene item 与 backend 提交链迁移；registry 仍未成为 Lease/GPU retirement owner，因此
+`ASSET-HANDLE-SCENE` 总项继续为 InProgress，由 N16.3 收口。
 
 ## 每项收口清单
 

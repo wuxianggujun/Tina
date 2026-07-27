@@ -3,6 +3,9 @@
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/render/FramePin.hpp>
+#include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 
 #include <gtest/gtest.h>
 
@@ -11,6 +14,11 @@
 
 namespace Tina::Asset {
 namespace {
+
+void countRelease(void* userData) noexcept
+{
+    ++*static_cast<Core::u32*>(userData);
+}
 
 [[nodiscard]] Core::AssetId::Bytes idBytes(Core::u8 seed)
 {
@@ -55,9 +63,21 @@ TEST(AssetSpriteRenderTests, BuildsUvAndSizeFromTypedPayloads)
     ASSERT_TRUE(texture);
     ASSERT_TRUE(sprite);
 
-    auto input = makeSpriteRenderInput(sprite, &texture, SpriteRenderParams{.stableEntityKey = 7, .centerX = 1.0f,
-                                                                            .centerY = 2.0f});
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    Core::u32 releaseCount = 0;
+    auto textureResource = packet.intern(
+        Render::FrameResourceDescriptor{
+            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .deviceBindingKey = 7,
+        },
+        Render::FramePin{Render::FramePinKind::Custom, 7, &releaseCount, &countRelease});
+    ASSERT_TRUE(textureResource.has_value()) << textureResource.error().message;
+
+    auto input = makeSpriteRenderInput(sprite, &texture, *textureResource,
+                                       SpriteRenderParams{.stableEntityKey = 7, .centerX = 1.0f, .centerY = 2.0f});
     ASSERT_TRUE(input.has_value()) << input.error().message;
+    EXPECT_EQ(input->texture, *textureResource);
     EXPECT_EQ(input->stableEntityKey, 7U);
     EXPECT_FLOAT_EQ(input->u0, 0.0f);
     EXPECT_FLOAT_EQ(input->u1, 0.5f);
@@ -68,6 +88,13 @@ TEST(AssetSpriteRenderTests, BuildsUvAndSizeFromTypedPayloads)
     EXPECT_FLOAT_EQ(input->heightMeters, 1.0f);
     EXPECT_FLOAT_EQ(input->centerX, 1.0f);
     EXPECT_FLOAT_EQ(input->centerY, 2.0f);
+
+    const auto invalidResource = makeSpriteRenderInput(sprite, &texture, {});
+    ASSERT_FALSE(invalidResource.has_value());
+    EXPECT_EQ(invalidResource.error().code, Render::RenderErrorCode::InvalidFrameResource);
+    EXPECT_EQ(releaseCount, 0U);
+    ASSERT_TRUE(packet.abandon().has_value());
+    EXPECT_EQ(releaseCount, 1U);
 }
 
 } // namespace

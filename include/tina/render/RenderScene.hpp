@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/render/FrameResource.hpp>
 
 #include <array>
 #include <compare>
@@ -60,12 +61,13 @@ struct RenderCamera2DInput final {
     RenderPixelSnapPolicy pixelSnap = RenderPixelSnapPolicy::Disabled;
 };
 
-// spriteKey is a backend-neutral bind table id (setSprite2DTextureBinding).
+// texture is a packet-local Sprite2D texture reference. The backend resolves it
+// through RenderFrame::resources during the synchronous submit call.
 // UV rect defaults to full texture [0,1]; typed Sprite payload extraction may
 // override it. The position is the resolved geometric center; Scene/Asset
 // extraction applies any authored pivot before writing this render-facing value.
 struct RenderSprite2DInput final {
-    u32 spriteKey = 0;
+    FrameResourceRef texture{};
     u64 stableEntityKey = 0;
     float centerX = 0.0F;
     float centerY = 0.0F;
@@ -158,7 +160,7 @@ struct RenderCamera2D final {
 };
 
 struct RenderSprite2DItem final {
-    u32 spriteKey = 0;
+    FrameResourceRef texture{};
     u64 stableEntityKey = 0;
     u32 insertionOrder = 0;
     float centerX = 0.0F;

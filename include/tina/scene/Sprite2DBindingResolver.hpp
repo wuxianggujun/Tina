@@ -1,14 +1,11 @@
 #pragma once
 
-#include <tina/asset/AssetBindingResolver.hpp>
+#include <tina/asset/AssetFrameResourceResolver.hpp>
 
 namespace Tina::Scene {
 
-// Borrowed, allocation-free seam from a weak Sprite AssetHandle to the current
-// backend-neutral render binding key. The caller keeps the callback and userData
-// valid for one extraction call; Scene retains neither. The callback is expected
-// to validate handle identity, asset kind, and binding readiness without retaining
-// pointers or references. Returning 0 means unresolved.
-using Sprite2DBindingResolver = Asset::AssetBindingResolver;
+// Scene-facing name for the shared borrowed, allocation-free Asset -> packet
+// resource seam. Scene retains neither the callback nor its userData.
+using Sprite2DBindingResolver = Asset::AssetFrameResourceResolver;
 
 } // namespace Tina::Scene

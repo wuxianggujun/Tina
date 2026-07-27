@@ -4,6 +4,8 @@
 #include <tina/asset/TileMapInstance.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/render/FramePin.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 
 #include "support/TileMapInstanceTestSupport.hpp"
 
@@ -81,10 +83,24 @@ inline constexpr AssetFormat::TileMapLayerId AlternateLayerId = 20;
 }
 
 struct TestTilesetBinding final {
-    [[nodiscard]] static Core::u32 resolve(void* userData, AssetHandle tileset) noexcept
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef>
+    resolve(void* userData, AssetHandle tileset, Render::FrameResourceSink& sink) noexcept
     {
         const auto* expected = static_cast<const AssetHandle*>(userData);
-        return expected != nullptr && tileset == *expected ? 1U : 0U;
+        if (expected == nullptr || tileset != *expected)
+        {
+            return Render::FrameResourceRef{};
+        }
+        return sink.intern(
+            Render::FrameResourceDescriptor{
+                .kind = Render::FrameResourceKind::Sprite2DTexture,
+                .deviceBindingKey = 1U,
+            },
+            Render::FramePin{Render::FramePinKind::Custom, 1U, nullptr, &release});
+    }
+
+    static void release(void*) noexcept
+    {
     }
 };
 
@@ -201,7 +217,7 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
     ASSERT_TRUE(tileset.has_value()) << tileset.error().message;
     const TileChunkSpriteEmitParams emitParams{
         .tileset = *tileset,
-        .bindingResolver = AssetBindingResolver{.userData = &*tileset, .resolve = &TestTilesetBinding::resolve},
+        .bindingResolver = AssetFrameResourceResolver{.userData = &*tileset, .resolve = &TestTilesetBinding::resolve},
     };
     auto cache = TileChunkDirtyCache::Create({.capacity = 128, .memoryResource = &memory});
     ASSERT_TRUE(cache.has_value());
@@ -211,9 +227,11 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
     Core::u64 totalRebuilds = 0;
     Core::u64 totalVisible = 0;
     Core::u64 totalSpritesFromRebuilds = 0;
+    Render::RenderFramePacket packet;
 
     for (Core::u32 frame = 0; frame < 300; ++frame)
     {
+        ASSERT_TRUE(packet.beginFrame(static_cast<Core::u64>(frame) + 1U).has_value());
         // Mild camera pan keeps most chunks visible; still conservative AABB.
         const float pan = static_cast<float>(frame % 40) * 0.05f;
         const TileChunkCameraQuery camera{
@@ -243,7 +261,7 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
         for (const TileChunkView& view : rebuilt)
         {
             sprites.clear();
-            auto emitted = emitTileChunkSprites(map, view, emitParams, sprites);
+            auto emitted = emitTileChunkSprites(map, view, emitParams, packet.resourceSink(), sprites);
             ASSERT_TRUE(emitted.has_value()) << emitted.error().message;
             totalSpritesFromRebuilds += *emitted;
         }
@@ -252,6 +270,7 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
         auto vis = extractVisibleTileChunks(map, VisualLayerId, camera, visible);
         ASSERT_TRUE(vis.has_value());
         totalVisible += *vis;
+        ASSERT_TRUE(packet.completeSkipped().has_value());
     }
 
     const auto st = cache->stats();

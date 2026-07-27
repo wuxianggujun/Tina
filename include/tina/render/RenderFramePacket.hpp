@@ -144,7 +144,7 @@ public:
 
     [[nodiscard]] Core::Result<FrameResourceRef> intern(
         FrameResourceDescriptor descriptor,
-        FramePin&& pin) override
+        FramePin&& pin) noexcept override
     {
         if (m_state != State::Building)
         {

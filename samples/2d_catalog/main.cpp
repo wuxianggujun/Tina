@@ -33,6 +33,8 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+
+#include "../common/SampleSpriteFrameResource.hpp"
 #include <vector>
 
 namespace {
@@ -44,7 +46,7 @@ using Tina::Core::u8;
 
 inline constexpr u64 DefaultFrameCount = 300;
 inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
-inline constexpr u32 ProductSpriteKey = 1;
+inline constexpr u32 ProductSpriteBindingKey = 1;
 
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
@@ -354,7 +356,7 @@ class Catalog2DState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(texture.error()));
         }
-        if (const auto status = device->setSprite2DTextureBinding(ProductSpriteKey, *texture); !status)
+        if (const auto status = device->setSprite2DTextureBinding(ProductSpriteBindingKey, *texture); !status)
         {
             (void)device->destroyTexture2D(*texture);
             return status;
@@ -368,7 +370,7 @@ class Catalog2DState final : public Tina::IGameState {
     {
         if (auto* device = capture_->get(); device != nullptr && resources_->gpuTexture)
         {
-            (void)device->setSprite2DTextureBinding(ProductSpriteKey, {});
+            (void)device->setSprite2DTextureBinding(ProductSpriteBindingKey, {});
             const auto retirement = resources_->system->retireTexture2D(
                 *device, resources_->textureHandle, resources_->gpuTexture);
             if (!retirement)
@@ -431,8 +433,13 @@ class Catalog2DState final : public Tina::IGameState {
         }
 
         const float phase = static_cast<float>(context.frameTiming().frameIndex) * 0.03F;
+        auto texture = spriteFrameResource_.intern(context.frameResourceSink(), ProductSpriteBindingKey);
+        if (!texture)
+        {
+            return Tina::Core::failure(std::move(texture.error()));
+        }
         auto sprite = Tina::Asset::makeSpriteRenderInput(
-            *spriteFile, textureFile,
+            *spriteFile, textureFile, *texture,
             Tina::Asset::SpriteRenderParams{
                 .stableEntityKey = 1,
                 .centerX = 0.0F,
@@ -444,7 +451,6 @@ class Catalog2DState final : public Tina::IGameState {
                 .green = 255,
                 .blue = 255,
                 .alpha = 255,
-                .spriteKey = ProductSpriteKey,
             });
         if (!sprite)
         {
@@ -463,6 +469,7 @@ class Catalog2DState final : public Tina::IGameState {
     LifecycleCounters* counters_ = nullptr;
     CatalogResources* resources_ = nullptr;
     DeviceCapture* capture_ = nullptr;
+    mutable Tina::Samples::SampleSpriteFrameResource spriteFrameResource_{};
 };
 
 class Catalog2DApplication final : public Tina::IGameApplication {

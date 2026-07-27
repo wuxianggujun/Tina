@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
+#include <tina/render/RenderScene.hpp>
 #include <tina/render/UIDisplayList.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
 
@@ -39,6 +42,67 @@ createDevice(const Render::RenderDeviceCreateParams& params = Render::RenderDevi
     surface.framebufferExtent = {0, 0};
     surface.availability = Render::RenderSurfaceAvailability::Suspended;
     return surface;
+}
+
+void releaseTestPin(void* userData) noexcept
+{
+    ++(*static_cast<u32*>(userData));
+}
+
+[[nodiscard]] Render::FrameResourceRef internTexture(
+    Render::RenderFramePacket& packet, u64 bindingKey, u32& releaseCount)
+{
+    Render::FramePin pin{
+        Render::FramePinKind::Custom,
+        bindingKey,
+        &releaseCount,
+        &releaseTestPin,
+    };
+    auto result = packet.intern(
+        Render::FrameResourceDescriptor{
+            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .deviceBindingKey = bindingKey,
+        },
+        std::move(pin));
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? *result : Render::FrameResourceRef{};
+}
+
+[[nodiscard]] Core::Result<Render::RenderSceneView> twoSpriteScene(
+    Render::RenderSceneBuilder& builder,
+    Render::FrameResourceRef firstTexture,
+    Render::FrameResourceRef secondTexture)
+{
+    if (auto status = builder.beginFrame(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    Render::RenderSceneWriter writer = builder.writer();
+    if (auto status = writer.setCamera2D(Render::RenderCamera2DInput{
+            .stableCameraKey = 1,
+            .worldWidth = 10.0F,
+            .worldHeight = 10.0F,
+            .actualPixelsPerMeter = 10.0F,
+        }); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = writer.addSprite2D(Render::RenderSprite2DInput{
+            .texture = firstTexture,
+            .stableEntityKey = 1,
+        }); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = writer.addSprite2D(Render::RenderSprite2DInput{
+            .texture = secondTexture,
+            .stableEntityKey = 2,
+            .centerX = 1.0F,
+        }); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return builder.commit();
 }
 
 } // namespace
@@ -123,6 +187,40 @@ TEST(NullRenderDeviceTest, EnforcesSubmitPresentPairsAndContiguousFrameIndices)
     EXPECT_EQ(statistics.submitted, 2U);
     EXPECT_EQ(statistics.presented, 2U);
     EXPECT_EQ(statistics.liveResources, 0U);
+}
+
+TEST(NullRenderDeviceTest, RejectsAnyCrossPacketSpriteTextureBeforeConsumingFrameOrStatistics)
+{
+    u32 firstReleaseCount = 0;
+    u32 secondReleaseCount = 0;
+    Render::RenderFramePacket firstPacket;
+    Render::RenderFramePacket secondPacket;
+    ASSERT_TRUE(firstPacket.beginFrame(0));
+    ASSERT_TRUE(secondPacket.beginFrame(0));
+    const Render::FrameResourceRef firstTexture = internTexture(firstPacket, 11, firstReleaseCount);
+    const Render::FrameResourceRef secondTexture = internTexture(secondPacket, 22, secondReleaseCount);
+
+    auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{.spriteCapacity = 2});
+    ASSERT_TRUE(builderResult.has_value()) << builderResult.error().message;
+    Render::RenderSceneBuilder builder = std::move(*builderResult);
+    auto scene = twoSpriteScene(builder, firstTexture, secondTexture);
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+    auto invalid = device->submitFrame(Render::RenderFrame{
+        .frameIndex = 0,
+        .resources = firstPacket.resourceTableView(),
+        .primaryWorldScene = *scene,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidFrameResource);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+    EXPECT_EQ(device->statistics().skippedSuspendedSurfaceFrames, 0U);
+
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().submitted, 1U);
 }
 
 TEST(NullRenderDeviceTest, RunsThreeHundredFramesWithoutGpuResources)

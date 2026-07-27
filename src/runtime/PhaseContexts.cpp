@@ -234,8 +234,10 @@ Core::Status FrameUpdateContext::requestPolicyChange(GameStatePolicy policy)
 }
 
 RenderSceneExtractionContext::RenderSceneExtractionContext(
-    const FrameTiming& frameTiming, Render::RenderSceneWriter& renderSceneWriter) noexcept
-    : m_frameTiming(&frameTiming), m_renderSceneWriter(&renderSceneWriter)
+    const FrameTiming& frameTiming, Render::RenderSceneWriter& renderSceneWriter,
+    Render::FrameResourceSink& frameResourceSink) noexcept
+    : m_frameTiming(&frameTiming), m_renderSceneWriter(&renderSceneWriter),
+      m_frameResourceSink(&frameResourceSink)
 {
 }
 
@@ -247,6 +249,11 @@ const FrameTiming& RenderSceneExtractionContext::frameTiming() const noexcept
 Render::RenderSceneWriter& RenderSceneExtractionContext::renderSceneWriter() noexcept
 {
     return *m_renderSceneWriter;
+}
+
+Render::FrameResourceSink& RenderSceneExtractionContext::frameResourceSink() noexcept
+{
+    return *m_frameResourceSink;
 }
 
 UIUpdateContext::UIUpdateContext(const FrameTiming& frameTiming,

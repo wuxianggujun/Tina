@@ -45,8 +45,8 @@ EngineHost 只有在 packet abandon 成功后才可继续 State teardown；persi
 按 `{FrameResourceKind, deviceBindingKey}` intern：首次登记消费 owning `FramePin`，同帧重复登记立即释放
 重复 pin 并返回同一 ref；invalid/capacity 失败不消费调用方 pin。`FrameResourceTableView::resolve()` 对
 cross-packet、stale、越界与 wrong-kind ref fail closed。view/ref 在 complete、completeSkipped、abandon 或
-packet 复用后立即失效，backend 只能在 `submitFrame()` 内同步解析。当前 N16.1 只落地公共基础设施，
-Scene Sprite/Mesh item 的迁移由后续切片完成。
+packet 复用后立即失效，backend 只能在 `submitFrame()` 内同步解析。N16.2 已让全部 Sprite2D item 只保存
+packet-local texture ref；Mesh3D item 仍使用当前 registry key，由 N16.3 之后的独立切片评估迁移。
 
 所有 composition 采用唯一语义：`submitFrame()` 同步消费借用 view，成功 `present()` 返回后关闭 CPU
 submission ticket 并释放 frame pin。该完成点只表示 Host/backend 已不再借用本帧 CPU 数据，**不表示 GPU
@@ -81,10 +81,10 @@ beginFrame(surface facts)
 - Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻兼容 batch；
 - PerspectiveCamera3D、frustum culling、Opaque3D depth/state 与 stable batch；
 - framebuffer 0x0 suspended 路径；
-- 容量/非法数值/非法 key 失败时不发布半份 scene。
+- 容量/非法数值/非法 resource ref/key 失败时不发布半份 scene。
 
-Scene/Runtime writer 不能创建 GPU resource。产品 State 在安全阶段上传并绑定资源，再让 extraction 输出
-对应 backend-neutral key。
+Scene/Runtime writer 不能创建 GPU resource。产品 State 在安全阶段上传并绑定资源；Sprite2D extraction
+通过 phase-local `FrameResourceSink` intern 当前 binding，Mesh3D 继续输出 backend-neutral key。
 
 ## UI DisplayList 与 Glyph
 
@@ -111,7 +111,7 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 | `create/destroyTexture2DRgba8` | 逻辑 generation storage；同步 retire | 私有 RGBA8 texture；逻辑失效后 marker 延迟销毁 |
 | `retireTexture2D(texture, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
 | `createSprite2DTextureBinding` | device-instance allocator；bind 成功才消费非0 key | device-instance allocator；bind 成功才消费非0 key |
-| `setSprite2DTextureBinding` | 校验/记录 binding | sprite key → texture |
+| `setSprite2DTextureBinding` | 校验/记录 binding | device binding key → texture |
 | `create/destroyStaticMeshP3N3UV2` | 逻辑 mesh storage；同步 retire | 私有 VB/IB；逻辑失效后 marker 延迟销毁 |
 | `retireStaticMesh(mesh, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
 | `drainGpuRetirements` | 已完成，无操作 | owner-thread completion-only flush；有界失败返回结构化错误 |
@@ -134,8 +134,9 @@ caller-chosen setter 与同类 allocator-managed key 不得混用。`setMesh3DMa
 可选纹理与 factors，再原子替换整组状态；`clearMesh3DMaterialBinding()` 幂等清除整组状态。
 
 `GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
-失败；Asset Catalog 使用 `AssetId`，Prefab 先映射为 weak AssetHandle，extraction resolver 再把 live handle
-映射为 backend-neutral key，最后由 RenderDevice binding 映射到 GPU handle。
+失败；Asset Catalog 使用 `AssetId`。2D extraction resolver 把 live Sprite/Tileset handle映射并 intern 为
+packet-local ref，backend 同步解析 descriptor 中的 binding key；3D Prefab 先映射 weak AssetHandle，
+extraction resolver 再取得 backend-neutral mesh/material key，最后由 RenderDevice binding 映射到 GPU handle。
 
 `UploadTicketLedger` 与 `CpuSubmissionCompletionLedger` 仍分别表达 staging 与 CPU completion。GPU 资源
 retirement 不复用它们：`destroy*` 是无外部 pin 的便利入口，`retire*` 成功才转移 pin；

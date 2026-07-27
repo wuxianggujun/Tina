@@ -2,6 +2,7 @@
 
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/render/FrameResource.hpp>
 #include <tina/render/RenderScene.hpp>
 
 namespace Tina::Asset {
@@ -25,14 +26,12 @@ struct SpriteRenderParams final {
     bool flipX = false;
     bool flipY = false;
     bool visible = true;
-    // Optional product resource id seed (defaults from assetId first 4 bytes if 0).
-    Core::u32 spriteKey = 0;
 };
 
 // Builds a RenderSprite2DInput from a loaded Sprite cooked asset (+ optional Texture2D for size).
 // UV comes from Sprite payload. Size uses params when >0, else texture size / ppu * UV span.
 [[nodiscard]] Core::Result<Render::RenderSprite2DInput>
 makeSpriteRenderInput(const CookedAssetFile& spriteAsset, const CookedAssetFile* textureAsset,
-                      const SpriteRenderParams& params = {});
+                      Render::FrameResourceRef texture, const SpriteRenderParams& params = {});
 
 } // namespace Tina::Asset

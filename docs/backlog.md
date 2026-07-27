@@ -21,7 +21,7 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
-| ASSET-HANDLE-SCENE | InProgress | P1 | A1-A6 已清除 2D/3D Scene 持久 key 并建立两类 binding registry；N16.1 已加入 packet-local `FrameResourceRef`/资源表与 lease-consuming texture retirement 事务 | N16.1 | N16.2 迁移所有 Sprite2D extraction，N16.3 统一 registry/Lease/GPU retirement owner 并升级产品证据 | Unit + Integration；产品证据待 N16.3 |
+| ASSET-HANDLE-SCENE | InProgress | P1 | A1-A6 已清除 2D/3D Scene 持久 key；N16.1 建立 packet-local resource table，N16.2 已让全部 Sprite2D extraction 只写 `FrameResourceRef` 并由 registry frame pin 保护 binding | N16.2 | N16.3 统一 registry/Lease/GPU retirement owner 并升级产品证据 | Unit + Integration + Smoke；最终产品 ownership 证据待 N16.3 |
 
 ## Next
 
@@ -57,6 +57,7 @@
 
 | ID | 完成项 | 证据入口 |
 | --- | --- | --- |
+| ASSET-HANDLE-SCENE-N16.2-SPRITE | `AssetFrameResourceResolver` + Runtime sink 将 World/TileMap/selection/Particle/Trail 全部迁移为 packet-local Sprite texture ref；registry 同帧去重并以 entry borrow pin 阻止活跃帧 unbind；Null/bgfx 在任何提交副作用前验证 cross-packet/stale/wrong-kind/range；旧 `RenderSprite2D*::spriteKey` 零引用 | [Rendering](rendering.md) · [Scene](scene-ecs.md) · [资源](resources.md) · Runtime/Scene/Asset/Render tests · 2D product smoke |
 | ASSET-HANDLE-SCENE-N16.1-CORE | packet-local `FrameResourceRef`/固定容量资源表按 kind+binding 去重并持有 owning pin；cross-packet/stale/wrong-kind fail closed；Runtime extraction 前 begin 且失败/skip/complete 在 State teardown 前释放；Texture2D 既有 Lease+GPU owner 仅在 backend 接受后消费，PMR/ledger/backend 失败完整恢复 | [Rendering](rendering.md) · [Runtime](runtime.md) · [资源](resources.md) · FramePinPacket/RuntimeLifecycle/AssetGpuRetirement tests |
 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS | fixed-capacity owner-thread `Mesh3DBindingRegistry` 借用 Store/device/PMR；mesh/material 使用独立 device-instance allocator，成功后才消费且解绑不复用；Material 三张纹理与 factors 原子发布，dependency stale fail closed；exact stale handle 可解绑，失败保留记录重试；3D product schema 2 记录2组注册/释放、2 mesh/6 texture 销毁与 registry 释放 | [资源](resources.md) · [Rendering](rendering.md) · [3D](game-3d.md) · Mesh3DBindingRegistry/Render tests · 3D product smoke |
 | ASSET-HANDLE-SCENE-3D-A5 | `MeshRenderer3D` 保存 copyable weak StaticMesh/Material Handle；visible extraction 分别借用 kind-specific resolver，invalid/stale/wrong-kind/unbound/zero fail closed，hidden 不解析；Prefab 只做 AssetId→Handle 并事务 rollback；3D product evidence schema 1 记录 handle 发布、两类 resolver hits 与 AssetStore active | [Scene](scene-ecs.md) · [3D](game-3d.md) · Scene tests · 3D product smoke |
@@ -80,7 +81,7 @@
 | 2D-FX | `ParticleSystem2D` / `Trail2D` 作为独立 Scene systems：Create 唯一持久 PMR 分配、固定容量与稳定 key 单调不复用；粒子固定 seed（含0）确定性、burst/update 失败事务性；trail anchor/segment/break、独立 segment lifetime 与按 age 宽度插值；产品门禁 schema 9 提供结构化与非空像素证据 | [2D](game-2d.md) · [Scene](scene-ecs.md) · [测试](testing.md) · `tina_scene_tests` · `RunProduct2dGate.ps1` |
 | RENDER-001-NLIGHT | 删除 Opaque3D key/fill 双 setter；`Mesh3DLightingDesc` 单次提交0..4 directional lights + ambient；Null/bgfx/shader 同一上限与验证；sample_3d 提交3灯并输出 count | [Rendering](rendering.md) · [3D](game-3d.md) · GpuTextureUploadTests |
 | RENDER-FENCE | present-return CPU ticket 与 GPU resource retirement 分离；bgfx 用末尾 view 的 blit + `readTexture()` ready frame 作为可证明 completion marker，Texture/Mesh generation 立即失效、native handle 延迟销毁；AssetLease pin、suspend flush、显式 drain 与 shutdown hard drain 已贯通 | [Rendering](rendering.md) · [Resources](resources.md) · [ADR 0016](adr/0016-asset-ownership-and-retirement.md) · BgfxRetirementTimeline/AssetGpuRetirement tests |
-| 2D-SPRITE-BATCH | 任意非0 `spriteKey`；bgfx 按最终渲染顺序建立连续 key batch 并逐 batch 绑定纹理；双纹理 sample 保持透明排序 | [2D](game-2d.md) · BgfxSprite2DGeometryTests |
+| 2D-SPRITE-BATCH | 任意有效 packet-local texture ref；bgfx 按最终渲染顺序建立连续 ref batch，解析 device binding 后逐 batch 绑定纹理；双纹理 sample 保持透明排序 | [2D](game-2d.md) · BgfxSprite2DGeometryTests |
 | 2D-SPRITE-ANIM | SpriteAnimationClip cooked payload/typed validation/recipe；SpriteAnimator2D Once/Loop/PingPong、暂停、倍速与大 delta；sample 双纹理 `Idle -> Walk -> HitWall` | [2D](game-2d.md) · [资源](resources.md) · SpriteAnimationClipPayloadTests · SpriteAnimator2DTests |
 | 3D-001 | multi-mesh 产品 E2E：双 mesh glTF fixture → cook → 两 StaticMesh upload/bind（当时 meshKey 1/2，N15 已替换为 registry allocator）→ Prefab 每节点 resolve → extract/draw → ledger 归零；`tina_sample_3d` 300 帧 `multiMesh=true` | [3D](game-3d.md) |
 | TASK-001 | Desktop `resolveDesktopTaskSystemParams`：交互默认 `max(1, hw-1)` CPU worker；`createBoundedTaskSystem(cpu=0)` IO-only 仍 NotSupported；BoundedTaskSystem 单测覆盖 | [Task](task-system.md) · ADR 0017 |

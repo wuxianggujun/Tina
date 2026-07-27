@@ -25,8 +25,9 @@ Catalog package
 ```
 
 - `Tina::AssetFormat` 定义 wire schema、parser/writer 与 typed payload schema，只 PUBLIC 依赖 Core；
-- `Tina::AssetTypes` 承载 header-only weak `AssetHandle` 与 borrowed `AssetBindingResolver`；`Tina::Asset` 负责 Catalog、磁盘文件、Cooker、
-  Lease、Task IO 与 upload 账本；
+- `Tina::AssetTypes` 承载 header-only weak `AssetHandle`、borrowed `AssetBindingResolver` 与
+  `AssetFrameResourceResolver`，只依赖 Core/Render；`Tina::Asset` 负责 Catalog、磁盘文件、Cooker、Lease、
+  Task IO 与 upload 账本；
 - xxHash 与 cgltf 都是私有实现依赖，公开头不泄漏第三方 token；
 - Render backend 只接收解析后的 payload或资源 key，不读取 Catalog/source tree；
 - Scene、UI 与 gameplay 不直接拥有 bgfx Buffer/Texture/Pipeline handle。
@@ -55,8 +56,9 @@ item 解析。TileMap emit 保存 weak Tileset Handle，不缓存 key/resolver�
 非空可见集合每次调用只解析一次，失败清空输出。3D Prefab 先把 AssetId 解析为 weak StaticMesh/Material
 handle；Scene extraction 再通过两个 kind-specific resolver 取得 backend key。产品 `AssetStore` 覆盖
 World/extraction 生命周期；A6 的 `Mesh3DBindingRegistry` 原子注册 mesh/material GPU bundle，并由 resolver
-fail closed 解析。N16.1 已落地 packet-local `FrameResourceRef`/资源表基础设施；Scene item 迁移与统一
-retirement owner 仍后置。
+fail closed 解析。N16.1 已落地 packet-local `FrameResourceRef`/资源表基础设施；N16.2 已把全部 2D
+Sprite item 迁移为 frame ref，registry 在首次 intern 时提供 entry borrow pin并阻止活跃帧期间 unbind；统一
+Lease/GPU retirement owner 仍后置。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
@@ -77,7 +79,8 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `AssetHandle` 是弱 generation lookup，不延长 CPU payload 生命周期；
 - `AssetLease` 是 move-only 强引用，Lease 存在时逻辑 unload 进入 `UnloadPending`；
 - `Sprite2DBindingRegistry` 是 fixed-capacity owner-thread mapping；只借用 Store/device，不拥有 GPU texture、
-  Lease 或 retirement，Texture2D 释放前必须先成功 unbind；
+  Lease 或 retirement。它为 packet-local Sprite ref 维护 entry borrow count，active frame pin 清零前拒绝
+  unbind；Texture2D 释放前必须先成功 unbind；
 - `Mesh3DBindingRegistry` 分别维护 StaticMesh/Material 固定容量 mapping；Material v2 writer 要求 required
   Texture2D dependency 按 baseColor/MR/normal role 顺序保持 AssetId 严格递增且唯一，registry 从 Cooked
   payload 派生 factors 并逐 role 校验；它只借用 GPU owner，释放前必须 exact unbind；
@@ -108,8 +111,9 @@ allocator candidate 覆盖。
 
 Sprite/Tileset resolve 不缓存 Cooked payload 指针：每次验证 live handle 与 expected kind，读取恰好一个
 expected kind 为 Texture2D、flags 为 `Required` 的 cooked dependency，再验证 registry 中对应 Texture
-handle/payload/binding 后返回 key，否则返回0。只有 unbind 使用原 exact handle，即使 Store handle 已 stale
-仍可清理 device；device 清除失败时 entry
+handle/payload/binding。低层 `resolve*()` 返回 key/0；产品 extraction 使用 `intern*FrameResource()` 把同一
+binding intern 到当前 packet，首次登记保留 entry borrow pin，同帧重复登记去重并释放重复 pin。只有
+unbind 使用原 exact handle，即使 Store handle 已 stale 仍可清理 device；active borrow 或 device 清除失败时 entry
 保持不变，调用方可重试。registry 析构不替代资源 teardown，产品 State 必须按
 `unbind -> destroy/retire Texture2D` 顺序关闭，之后外部 Asset/Render owner 才能停止；State/registry 只借用
 这些外部 owner，并不负责销毁它们。

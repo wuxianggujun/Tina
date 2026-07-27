@@ -1,7 +1,9 @@
 #include "BgfxSprite2DGeometry.hpp"
 
 #include <tina/core/error/Error.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
 
 #include <gtest/gtest.h>
@@ -18,6 +20,41 @@
 
 namespace Tina::Render::Bgfx {
 namespace {
+
+void countRelease(void* userData) noexcept
+{
+    ++(*static_cast<u32*>(userData));
+}
+
+class FrameResourceScope final {
+public:
+    FrameResourceScope()
+    {
+        EXPECT_TRUE(packet_.beginFrame(0));
+    }
+
+    [[nodiscard]] FrameResourceRef texture(u64 deviceBindingKey)
+    {
+        FramePin pin{FramePinKind::Custom, deviceBindingKey, &releaseCount_, &countRelease};
+        auto result = packet_.intern(
+            FrameResourceDescriptor{
+                .kind = FrameResourceKind::Sprite2DTexture,
+                .deviceBindingKey = deviceBindingKey,
+            },
+            std::move(pin));
+        EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+        return result ? *result : FrameResourceRef{};
+    }
+
+    [[nodiscard]] FrameResourceTableView view() const noexcept
+    {
+        return packet_.resourceTableView();
+    }
+
+private:
+    u32 releaseCount_ = 0;
+    RenderFramePacket packet_{};
+};
 
 [[nodiscard]] RenderSceneBuilder makeBuilder(u32 spriteCapacity = 8)
 {
@@ -41,11 +78,11 @@ namespace {
     };
 }
 
-[[nodiscard]] RenderSprite2DInput sprite(u64 stableEntityKey, float centerX, i16 sortingLayer = 0,
-                                         i32 orderInLayer = 0, u32 spriteKey = Sprite2DspriteKey) noexcept
+[[nodiscard]] RenderSprite2DInput sprite(FrameResourceRef texture, u64 stableEntityKey, float centerX,
+                                         i16 sortingLayer = 0, i32 orderInLayer = 0) noexcept
 {
     return RenderSprite2DInput{
-        .spriteKey = spriteKey,
+        .texture = texture,
         .stableEntityKey = stableEntityKey,
         .centerX = centerX,
         .centerY = 0.0F,
@@ -109,7 +146,7 @@ TEST(BgfxSprite2DGeometryTest, EmptySceneNeedsNoGeometry)
     auto scene = builder.commit();
     ASSERT_TRUE(scene.has_value());
 
-    auto requirements = checkedSprite2DFrame(*scene);
+    auto requirements = checkedSprite2DFrame(*scene, {});
     ASSERT_TRUE(requirements.has_value());
     EXPECT_EQ(requirements->spriteCount, 0U);
     EXPECT_EQ(requirements->vertexCount, 0U);
@@ -119,10 +156,12 @@ TEST(BgfxSprite2DGeometryTest, EmptySceneNeedsNoGeometry)
 
 TEST(BgfxSprite2DGeometryTest, ValidFixtureExpandsSortedSpritesInRenderOrder)
 {
+    FrameResourceScope resources;
+    const FrameResourceRef texture = resources.texture(1);
     RenderSceneBuilder builder = makeBuilder();
     const std::array inputs{
-        sprite(30, 3.0F, 2, 0),
-        sprite(10, -1.0F, 1, 5),
+        sprite(texture, 30, 3.0F, 2, 0),
+        sprite(texture, 10, -1.0F, 1, 5),
     };
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value()) << scene.error().message;
@@ -130,7 +169,7 @@ TEST(BgfxSprite2DGeometryTest, ValidFixtureExpandsSortedSpritesInRenderOrder)
     EXPECT_EQ(scene->sprites2D()[0].stableEntityKey, 10U);
     EXPECT_EQ(scene->sprites2D()[1].stableEntityKey, 30U);
 
-    auto requirements = checkedSprite2DFrame(*scene);
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
     ASSERT_TRUE(requirements.has_value());
     EXPECT_EQ(requirements->spriteCount, 2U);
     EXPECT_EQ(requirements->vertexCount, 8U);
@@ -139,7 +178,7 @@ TEST(BgfxSprite2DGeometryTest, ValidFixtureExpandsSortedSpritesInRenderOrder)
 
     std::array<BgfxSprite2DVertex, 8> vertices{};
     std::array<u32, 12> indices{};
-    auto written = writeSprite2DGeometry(*scene, vertices, indices);
+    auto written = writeSprite2DGeometry(*scene, resources.view(), vertices, indices);
     ASSERT_TRUE(written.has_value());
 
     constexpr u32 ExpectedAbgr = 0xC0014080U;
@@ -155,8 +194,10 @@ TEST(BgfxSprite2DGeometryTest, ValidFixtureExpandsSortedSpritesInRenderOrder)
 
 TEST(BgfxSprite2DGeometryTest, RotationAndScaleProduceWorldSpaceQuad)
 {
+    FrameResourceScope resources;
+    const FrameResourceRef texture = resources.texture(1);
     RenderSceneBuilder builder = makeBuilder();
-    auto rotated = sprite(1, 0.0F);
+    auto rotated = sprite(texture, 1, 0.0F);
     rotated.widthMeters = 4.0F;
     rotated.heightMeters = 2.0F;
     rotated.scaleX = 0.5F;
@@ -169,7 +210,7 @@ TEST(BgfxSprite2DGeometryTest, RotationAndScaleProduceWorldSpaceQuad)
 
     std::array<BgfxSprite2DVertex, 4> vertices{};
     std::array<u32, 6> indices{};
-    auto written = writeSprite2DGeometry(*scene, vertices, indices);
+    auto written = writeSprite2DGeometry(*scene, resources.view(), vertices, indices);
     ASSERT_TRUE(written.has_value());
 
     EXPECT_NEAR(vertices[0].positionX, 2.0F, 1.0e-5F);
@@ -180,16 +221,18 @@ TEST(BgfxSprite2DGeometryTest, RotationAndScaleProduceWorldSpaceQuad)
 
 TEST(BgfxSprite2DGeometryTest, FlipChangesUvWithoutChangingGeometry)
 {
+    FrameResourceScope resources;
+    const FrameResourceRef texture = resources.texture(1);
     RenderSceneBuilder normalBuilder = makeBuilder();
-    const std::array normalInput{sprite(1, 0.0F)};
+    const std::array normalInput{sprite(texture, 1, 0.0F)};
     auto normalScene = commitScene(normalBuilder, normalInput);
     ASSERT_TRUE(normalScene.has_value());
     std::array<BgfxSprite2DVertex, 4> normalVertices{};
     std::array<u32, 6> normalIndices{};
-    ASSERT_TRUE(writeSprite2DGeometry(*normalScene, normalVertices, normalIndices));
+    ASSERT_TRUE(writeSprite2DGeometry(*normalScene, resources.view(), normalVertices, normalIndices));
 
     RenderSceneBuilder flippedBuilder = makeBuilder();
-    auto flipped = sprite(1, 0.0F);
+    auto flipped = sprite(texture, 1, 0.0F);
     flipped.flipX = true;
     flipped.flipY = true;
     const std::array flippedInput{flipped};
@@ -197,7 +240,7 @@ TEST(BgfxSprite2DGeometryTest, FlipChangesUvWithoutChangingGeometry)
     ASSERT_TRUE(flippedScene.has_value());
     std::array<BgfxSprite2DVertex, 4> flippedVertices{};
     std::array<u32, 6> flippedIndices{};
-    ASSERT_TRUE(writeSprite2DGeometry(*flippedScene, flippedVertices, flippedIndices));
+    ASSERT_TRUE(writeSprite2DGeometry(*flippedScene, resources.view(), flippedVertices, flippedIndices));
 
     for (usize index = 0; index < normalVertices.size(); ++index)
     {
@@ -210,16 +253,17 @@ TEST(BgfxSprite2DGeometryTest, FlipChangesUvWithoutChangingGeometry)
     EXPECT_FLOAT_EQ(flippedVertices[2].textureV, 1.0F);
 }
 
-TEST(BgfxSprite2DGeometryTest, MultipleSpriteKeysPreserveRenderOrderAndCountContiguousBatches)
+TEST(BgfxSprite2DGeometryTest, MultipleTextureRefsPreserveRenderOrderAndCountContiguousBatches)
 {
+    FrameResourceScope resources;
+    const FrameResourceRef atlasA = resources.texture(11);
+    const FrameResourceRef atlasB = resources.texture(21);
     RenderSceneBuilder builder = makeBuilder();
-    constexpr u32 AtlasA = Sprite2DspriteKey + 10U;
-    constexpr u32 AtlasB = Sprite2DspriteKey + 20U;
     const std::array inputs{
-        sprite(40, 4.0F, 2, 0, AtlasA),
-        sprite(20, -1.0F, 0, 1, AtlasA),
-        sprite(30, 2.0F, 1, 0, AtlasB),
-        sprite(10, -3.0F, 0, 0, AtlasA),
+        sprite(atlasA, 40, 4.0F, 2, 0),
+        sprite(atlasA, 20, -1.0F, 0, 1),
+        sprite(atlasB, 30, 2.0F, 1, 0),
+        sprite(atlasA, 10, -3.0F, 0, 0),
     };
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value()) << scene.error().message;
@@ -228,12 +272,12 @@ TEST(BgfxSprite2DGeometryTest, MultipleSpriteKeysPreserveRenderOrderAndCountCont
     EXPECT_EQ(scene->sprites2D()[1].stableEntityKey, 20U);
     EXPECT_EQ(scene->sprites2D()[2].stableEntityKey, 30U);
     EXPECT_EQ(scene->sprites2D()[3].stableEntityKey, 40U);
-    EXPECT_EQ(scene->sprites2D()[0].spriteKey, AtlasA);
-    EXPECT_EQ(scene->sprites2D()[1].spriteKey, AtlasA);
-    EXPECT_EQ(scene->sprites2D()[2].spriteKey, AtlasB);
-    EXPECT_EQ(scene->sprites2D()[3].spriteKey, AtlasA);
+    EXPECT_EQ(scene->sprites2D()[0].texture, atlasA);
+    EXPECT_EQ(scene->sprites2D()[1].texture, atlasA);
+    EXPECT_EQ(scene->sprites2D()[2].texture, atlasB);
+    EXPECT_EQ(scene->sprites2D()[3].texture, atlasA);
 
-    auto requirements = checkedSprite2DFrame(*scene);
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
     ASSERT_TRUE(requirements.has_value()) << requirements.error().message;
     EXPECT_EQ(requirements->spriteCount, 4U);
     EXPECT_EQ(requirements->vertexCount, 16U);
@@ -242,7 +286,7 @@ TEST(BgfxSprite2DGeometryTest, MultipleSpriteKeysPreserveRenderOrderAndCountCont
 
     std::array<BgfxSprite2DVertex, 16> vertices{};
     std::array<u32, 24> indices{};
-    auto written = writeSprite2DGeometry(*scene, vertices, indices);
+    auto written = writeSprite2DGeometry(*scene, resources.view(), vertices, indices);
     ASSERT_TRUE(written.has_value()) << written.error().message;
     EXPECT_EQ(written->batchCount, 3U);
 
@@ -259,36 +303,86 @@ TEST(BgfxSprite2DGeometryTest, MultipleSpriteKeysPreserveRenderOrderAndCountCont
     EXPECT_TRUE(std::ranges::equal(indices, ExpectedIndices));
 }
 
-TEST(BgfxSprite2DGeometryTest, RejectsZeroSpriteKeyInCorruptView)
+TEST(BgfxSprite2DGeometryTest, RejectsInvalidTextureRefInCorruptView)
 {
+    FrameResourceScope resources;
+    const FrameResourceRef texture = resources.texture(1);
     RenderSceneBuilder builder = makeBuilder();
-    const std::array inputs{sprite(1, 0.0F)};
+    const std::array inputs{sprite(texture, 1, 0.0F)};
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value());
 
-    const_cast<RenderSprite2DItem&>(scene->sprites2D()[0]).spriteKey = 0;
-    auto requirements = checkedSprite2DFrame(*scene);
+    const_cast<RenderSprite2DItem&>(scene->sprites2D()[0]).texture = {};
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
     ASSERT_FALSE(requirements.has_value());
-    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
+}
+
+TEST(BgfxSprite2DGeometryTest, CrossPacketTextureRefFailsBeforeAnyGeometryWrite)
+{
+    FrameResourceScope sceneResources;
+    FrameResourceScope submittedResources;
+    const FrameResourceRef texture = sceneResources.texture(1);
+    static_cast<void>(submittedResources.texture(1));
+    RenderSceneBuilder builder = makeBuilder();
+    const std::array inputs{sprite(texture, 1, 0.0F)};
+    auto scene = commitScene(builder, inputs);
+    ASSERT_TRUE(scene.has_value());
+
+    constexpr BgfxSprite2DVertex VertexSentinel{11.0F, 22.0F, 0.25F, 0.75F, 0x12345678U};
+    constexpr u32 IndexSentinel = 0x87654321U;
+    std::array<BgfxSprite2DVertex, 4> vertices;
+    std::array<u32, 6> indices;
+    vertices.fill(VertexSentinel);
+    indices.fill(IndexSentinel);
+
+    auto result = writeSprite2DGeometry(*scene, submittedResources.view(), vertices, indices);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, RenderErrorCode::InvalidFrameResource);
+    EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxSprite2DVertex& vertex) {
+        return vertex.positionX == VertexSentinel.positionX && vertex.positionY == VertexSentinel.positionY &&
+               vertex.textureU == VertexSentinel.textureU && vertex.textureV == VertexSentinel.textureV &&
+               vertex.abgr == VertexSentinel.abgr;
+    }));
+    EXPECT_TRUE(std::ranges::all_of(indices, [](u32 index) { return index == IndexSentinel; }));
+}
+
+TEST(BgfxSprite2DGeometryTest, RejectsTextureBindingKeyOutsideSpriteBindingRange)
+{
+    FrameResourceScope resources;
+    const FrameResourceRef texture =
+        resources.texture(static_cast<u64>((std::numeric_limits<u32>::max)()) + 1U);
+    RenderSceneBuilder builder = makeBuilder();
+    const std::array inputs{sprite(texture, 1, 0.0F)};
+    auto scene = commitScene(builder, inputs);
+    ASSERT_TRUE(scene.has_value());
+
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
+    ASSERT_FALSE(requirements.has_value());
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
 }
 
 TEST(BgfxSprite2DGeometryTest, RejectsMissingCameraInCorruptView)
 {
+    FrameResourceScope resources;
+    const FrameResourceRef texture = resources.texture(1);
     RenderSceneBuilder builder = makeBuilder();
-    const std::array inputs{sprite(1, 0.0F)};
+    const std::array inputs{sprite(texture, 1, 0.0F)};
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value());
 
     const_cast<std::optional<RenderCamera2D>&>(scene->camera2D()).reset();
-    auto requirements = checkedSprite2DFrame(*scene);
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
     ASSERT_FALSE(requirements.has_value());
     EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidRenderSceneInput);
 }
 
 TEST(BgfxSprite2DGeometryTest, InsufficientOutputCapacityLeavesBuffersUntouched)
 {
+    FrameResourceScope resources;
+    const FrameResourceRef texture = resources.texture(1);
     RenderSceneBuilder builder = makeBuilder();
-    const std::array inputs{sprite(1, 0.0F), sprite(2, 2.0F)};
+    const std::array inputs{sprite(texture, 1, 0.0F), sprite(texture, 2, 2.0F)};
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value());
 
@@ -299,7 +393,8 @@ TEST(BgfxSprite2DGeometryTest, InsufficientOutputCapacityLeavesBuffersUntouched)
     vertices.fill(VertexSentinel);
     indices.fill(IndexSentinel);
 
-    auto shortVertices = writeSprite2DGeometry(*scene, std::span{vertices}.first(7), indices);
+    auto shortVertices =
+        writeSprite2DGeometry(*scene, resources.view(), std::span{vertices}.first(7), indices);
     ASSERT_FALSE(shortVertices.has_value());
     EXPECT_EQ(shortVertices.error().code, Core::CoreErrorCode::CapacityExceeded);
     EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxSprite2DVertex& vertex) {
@@ -309,7 +404,8 @@ TEST(BgfxSprite2DGeometryTest, InsufficientOutputCapacityLeavesBuffersUntouched)
     }));
     EXPECT_TRUE(std::ranges::all_of(indices, [](u32 index) { return index == IndexSentinel; }));
 
-    auto shortIndices = writeSprite2DGeometry(*scene, vertices, std::span{indices}.first(11));
+    auto shortIndices =
+        writeSprite2DGeometry(*scene, resources.view(), vertices, std::span{indices}.first(11));
     ASSERT_FALSE(shortIndices.has_value());
     EXPECT_EQ(shortIndices.error().code, Core::CoreErrorCode::CapacityExceeded);
     EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxSprite2DVertex& vertex) {
@@ -322,8 +418,10 @@ TEST(BgfxSprite2DGeometryTest, InsufficientOutputCapacityLeavesBuffersUntouched)
 
 TEST(BgfxSprite2DGeometryTest, ReusesCallerOwnedStorageForThreeHundredWrites)
 {
+    FrameResourceScope resources;
+    const FrameResourceRef texture = resources.texture(1);
     RenderSceneBuilder builder = makeBuilder();
-    const std::array inputs{sprite(1, -1.0F), sprite(2, 1.0F)};
+    const std::array inputs{sprite(texture, 1, -1.0F), sprite(texture, 2, 1.0F)};
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value());
 
@@ -334,7 +432,7 @@ TEST(BgfxSprite2DGeometryTest, ReusesCallerOwnedStorageForThreeHundredWrites)
 
     for (u32 iteration = 0; iteration < 300; ++iteration)
     {
-        auto written = writeSprite2DGeometry(*scene, vertices, indices);
+        auto written = writeSprite2DGeometry(*scene, resources.view(), vertices, indices);
         ASSERT_TRUE(written.has_value());
         EXPECT_EQ(written->vertexCount, vertices.size());
         EXPECT_EQ(written->indexCount, indices.size());

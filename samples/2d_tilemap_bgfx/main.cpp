@@ -1830,11 +1830,11 @@ class TileMapBgfxState final : public Tina::IGameState {
         tileBindingRegistered_ = true;
         ++counters_->spriteBindingTextures;
 
-        auto characterSpriteKey =
+        auto characterBinding =
             spriteBindings_->registerTextureBinding(resources_->characterTextureHandle, characterGpuTexture_);
-        if (!characterSpriteKey)
+        if (!characterBinding)
         {
-            return Tina::Core::failure(std::move(characterSpriteKey.error()));
+            return Tina::Core::failure(std::move(characterBinding.error()));
         }
         characterBindingRegistered_ = true;
         ++counters_->spriteBindingTextures;
@@ -3152,6 +3152,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
 
         auto& writer = context.renderSceneWriter();
+        auto& frameResources = context.frameResourceSink();
         // Suspended surface (0×0): skip world extract; not a Camera config error.
         if (counters_->surfacePixelWidth == 0 || counters_->surfacePixelHeight == 0)
         {
@@ -3199,6 +3200,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         if (const auto status = Tina::Scene::extractRenderSceneFromWorld(
                 sceneWorld,
                 writer,
+                frameResources,
                 Tina::Scene::ExtractRenderSceneParams{
                     .surfaceViewport =
                         Tina::Render::Camera2DSurfaceViewport{
@@ -3258,11 +3260,12 @@ class TileMapBgfxState final : public Tina::IGameState {
             resources_->tileMapStream->map(), VisualTileLayerId, query,
             Tina::Asset::TileChunkSpriteEmitParams{
                 .tileset = resources_->tilesetHandle,
-                .bindingResolver = Tina::Asset::AssetBindingResolver{
+                .bindingResolver = Tina::Asset::AssetFrameResourceResolver{
                     .userData = &tileMapSpriteBindingResolverContext_,
                     .resolve = &TileMapBgfxState::resolveTilesetBinding,
                 },
             },
+            frameResources,
             tileSprites);
         if (!emitted)
         {
@@ -3308,9 +3311,13 @@ class TileMapBgfxState final : public Tina::IGameState {
         u64 highlightSprites = 0;
         if (counters_->tileSelection.lastSelection.has_value())
         {
-            const u32 tileSpriteKey = resolveTilesetBinding(
-                &tileMapSpriteBindingResolverContext_, resources_->tilesetHandle);
-            if (tileSpriteKey == 0)
+            auto tileTexture = resolveTilesetBinding(
+                &tileMapSpriteBindingResolverContext_, resources_->tilesetHandle, frameResources);
+            if (!tileTexture)
+            {
+                return Tina::Core::failure(std::move(tileTexture.error()));
+            }
+            if (!tileTexture->hasValue())
             {
                 return Tina::Core::failure(
                     Tina::Asset::AssetErrorCode::SpriteBindingNotFound,
@@ -3324,7 +3331,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                     .heightCells = resources_->tileMapStream->map().heightCells(),
                     .cellSizeMeters = resources_->tileMapStream->map().cellSizeMeters(),
                 },
-                tileSpriteKey);
+                *tileTexture);
             if (!highlight)
             {
                 return Tina::Core::failure(std::move(highlight.error()));
@@ -3344,6 +3351,7 @@ class TileMapBgfxState final : public Tina::IGameState {
 
         auto particleExtract = resources_->particles->extract(
             writer,
+            frameResources,
             Tina::Scene::Sprite2DBindingResolver{
                 .userData = &particleSpriteBindingResolverContext_,
                 .resolve = &TileMapBgfxState::resolveSpriteBinding,
@@ -3354,6 +3362,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
         if (const auto status = resources_->trail->extract(
                 writer,
+                frameResources,
                 Tina::Scene::Sprite2DBindingResolver{
                     .userData = &trailSpriteBindingResolverContext_,
                     .resolve = &TileMapBgfxState::resolveSpriteBinding,
@@ -3412,28 +3421,33 @@ class TileMapBgfxState final : public Tina::IGameState {
 
   private:
     struct SpriteBindingResolverContext final {
-        const Tina::Asset::Sprite2DBindingRegistry* registry = nullptr;
+        Tina::Asset::Sprite2DBindingRegistry* registry = nullptr;
         LifecycleCounters* counters = nullptr;
         u64* consumerHits = nullptr;
     };
 
     struct TilesetBindingResolverContext final {
-        const Tina::Asset::Sprite2DBindingRegistry* registry = nullptr;
+        Tina::Asset::Sprite2DBindingRegistry* registry = nullptr;
         LifecycleCounters* counters = nullptr;
     };
 
-    [[nodiscard]] static u32 resolveSpriteBinding(
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef> resolveSpriteBinding(
         void* userData,
-        Tina::Asset::AssetHandle spriteHandle) noexcept
+        Tina::Asset::AssetHandle spriteHandle,
+        Tina::Render::FrameResourceSink& frameResources) noexcept
     {
         auto* resolverContext = static_cast<SpriteBindingResolverContext*>(userData);
         if (resolverContext == nullptr || resolverContext->registry == nullptr ||
             resolverContext->counters == nullptr)
         {
-            return 0;
+            return Tina::Render::FrameResourceRef{};
         }
-        const u32 bindingKey = resolverContext->registry->resolveSprite(spriteHandle);
-        if (bindingKey != 0)
+        auto texture = resolverContext->registry->internSpriteFrameResource(spriteHandle, frameResources);
+        if (!texture)
+        {
+            return Tina::Core::failure(std::move(texture.error()));
+        }
+        if (texture->hasValue())
         {
             ++resolverContext->counters->spriteBindingResolverHits;
             if (resolverContext->consumerHits != nullptr)
@@ -3441,25 +3455,30 @@ class TileMapBgfxState final : public Tina::IGameState {
                 ++*resolverContext->consumerHits;
             }
         }
-        return bindingKey;
+        return texture;
     }
 
-    [[nodiscard]] static u32 resolveTilesetBinding(
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef> resolveTilesetBinding(
         void* userData,
-        Tina::Asset::AssetHandle tilesetHandle) noexcept
+        Tina::Asset::AssetHandle tilesetHandle,
+        Tina::Render::FrameResourceSink& frameResources) noexcept
     {
         auto* resolverContext = static_cast<TilesetBindingResolverContext*>(userData);
         if (resolverContext == nullptr || resolverContext->registry == nullptr ||
             resolverContext->counters == nullptr)
         {
-            return 0;
+            return Tina::Render::FrameResourceRef{};
         }
-        const u32 bindingKey = resolverContext->registry->resolveTileset(tilesetHandle);
-        if (bindingKey != 0)
+        auto texture = resolverContext->registry->internTilesetFrameResource(tilesetHandle, frameResources);
+        if (!texture)
+        {
+            return Tina::Core::failure(std::move(texture.error()));
+        }
+        if (texture->hasValue())
         {
             ++resolverContext->counters->tileMapSpriteBindingResolverHits;
         }
-        return bindingKey;
+        return texture;
     }
 
     void releaseTextureBinding(

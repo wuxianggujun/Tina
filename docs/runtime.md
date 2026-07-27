@@ -152,10 +152,10 @@ capture 绑定的 `GamepadId` generation 在 disconnect，或 raw reset 后不�
 | `GameStateEnterContext` | Platform subscription、primary UI root builder | `onEnter()` 返回 |
 | `FixedUpdateContext` | timing、Simulation Action、可选 Audio borrow | `fixedUpdate()` 返回 |
 | `FrameUpdateContext` | timing、Frame Action、可选 Audio、退出请求；仅栈顶可借用 rebind facade | `updateFrame()` 返回 |
-| `RenderSceneExtractionContext` | phase-local `RenderSceneWriter` | `extractRenderScene()` 返回 |
+| `RenderSceneExtractionContext` | phase-local `RenderSceneWriter` + packet-local `FrameResourceSink` | `extractRenderScene()` 返回 |
 | `UIUpdateContext` | root-scoped UI updater | `updateUI()` 返回 |
 
-Context、writer、span、RenderScene view、UIDisplayList view 与 Glyph atlas view都不得跨回调保存。
+Context、writer、resource sink、span、RenderScene view、UIDisplayList view 与 Glyph atlas view都不得跨回调保存。
 Platform subscription token、UI listener token、`UIRootOwner`、AssetLease 等明确 RAII owner 可以按各自
 契约保存；它们不能反向保活 Runtime Context。
 
@@ -169,6 +169,8 @@ Platform subscription token、UI listener token、`UIRootOwner`、AssetLease 等
 - packet 在 extraction 前开启；extraction/UI/submit/present 的所有失败都 abandon，suspended skip 使用
   `completeSkipped()`。cross-packet/stale/wrong-kind `FrameResourceRef` 在 table resolve 时 fail closed。若
   persistent failure 使 abandon 失败，Runtime 记录 `runtime.lifecycle` 后 fail-stop，不能继续 State teardown。
+- 所有 Sprite2D extraction 通过当前 Context 的 resource sink intern texture binding；同帧跨
+  World/TileMap/Particle/Trail 重复资源由 packet 去重，游戏不得缓存 sink 或 ref 到下一帧。
 - suspended surface 返回 `SkippedSuspendedSurface`，Runtime 不调用 `present()`。
 - active surface 在 `present()` 成功返回后关闭 submission ticket 并释放 FramePin；该时点只结束 CPU
   借用，不声明 GPU 已执行完成或 Asset 已物理退役。

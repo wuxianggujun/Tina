@@ -1,5 +1,6 @@
 #include <tina/asset/AssetStore.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/Trail2D.hpp>
 
@@ -16,6 +17,64 @@
 
 namespace Tina::Scene {
 namespace {
+
+struct TestFrameResourceLifetime final {
+    u32 borrows = 0;
+};
+
+[[nodiscard]] TestFrameResourceLifetime& testFrameResourceLifetime() noexcept
+{
+    static TestFrameResourceLifetime lifetime{};
+    return lifetime;
+}
+
+[[nodiscard]] Render::RenderFramePacket& testFramePacket() noexcept
+{
+    (void)testFrameResourceLifetime();
+    static Render::RenderFramePacket packet{};
+    return packet;
+}
+
+[[nodiscard]] Render::FrameResourceSink& beginTestFrameResources()
+{
+    static u64 frameIndex = 0;
+    const Core::Status status = testFramePacket().beginFrame(frameIndex++);
+    EXPECT_TRUE(status) << (status ? "" : status.error().message);
+    return testFramePacket().resourceSink();
+}
+
+[[nodiscard]] Core::Result<Render::FrameResourceRef> internTestTexture(
+    Render::FrameResourceSink& sink,
+    u32 bindingKey) noexcept
+{
+    TestFrameResourceLifetime& lifetime = testFrameResourceLifetime();
+    ++lifetime.borrows;
+    Render::FramePin pin{
+        Render::FramePinKind::Custom,
+        bindingKey,
+        &lifetime,
+        [](void* userData) noexcept {
+            auto& pinned = *static_cast<TestFrameResourceLifetime*>(userData);
+            if (pinned.borrows > 0)
+            {
+                --pinned.borrows;
+            }
+        },
+    };
+    return sink.intern(
+        Render::FrameResourceDescriptor{
+            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .deviceBindingKey = bindingKey,
+        },
+        std::move(pin));
+}
+
+[[nodiscard]] u64 textureBindingKey(Render::FrameResourceRef texture) noexcept
+{
+    const Render::FrameResourceDescriptor* descriptor = testFramePacket().resourceTableView().resolve(
+        texture, Render::FrameResourceKind::Sprite2DTexture);
+    return descriptor == nullptr ? 0 : descriptor->deviceBindingKey;
+}
 
 class CountingMemoryResource final : public std::pmr::memory_resource {
   public:
@@ -82,16 +141,23 @@ struct CountingSpriteResolver final {
         return Sprite2DBindingResolver{.userData = this, .resolve = &resolve};
     }
 
-    [[nodiscard]] static u32 resolve(void* userData, Asset::AssetHandle sprite) noexcept
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolve(
+        void* userData,
+        Asset::AssetHandle sprite,
+        Render::FrameResourceSink& frameResources) noexcept
     {
         auto& self = *static_cast<CountingSpriteResolver*>(userData);
         ++self.calls;
         if (self.store == nullptr || !sprite || sprite != self.boundSprite ||
             self.store->assetKind(sprite) != AssetFormat::AssetKind::Sprite ||
             self.store->state(sprite) == Asset::AssetLogicalState::Unloaded) {
-            return 0;
+            return Render::FrameResourceRef{};
         }
-        return self.key;
+        if (self.key == 0)
+        {
+            return Render::FrameResourceRef{};
+        }
+        return internTestTexture(frameResources, self.key);
     }
 
     Asset::AssetStore* store = nullptr;
@@ -216,14 +282,14 @@ TEST_F(Trail2DAssetTest, EmptyTrailDoesNotResolveSprite)
     ASSERT_TRUE(builder->beginFrame().has_value());
     auto writer = builder->writer();
 
-    ASSERT_TRUE(trail->extract(writer, resolver()).has_value());
+    ASSERT_TRUE(trail->extract(writer, beginTestFrameResources(), resolver()).has_value());
     EXPECT_EQ(spriteResolver_.calls, 0U);
     auto scene = builder->commit();
     ASSERT_TRUE(scene.has_value());
     EXPECT_TRUE(scene->sprites2D().empty());
 }
 
-TEST_F(Trail2DAssetTest, ExtractFailsClosedForMissingZeroStaleAndWrongKindBindings)
+TEST_F(Trail2DAssetTest, ExtractFailsClosedForMissingEmptyStaleAndWrongKindBindings)
 {
     auto trail = Trail2D::Create(trailConfig());
     ASSERT_TRUE(trail.has_value());
@@ -244,31 +310,32 @@ TEST_F(Trail2DAssetTest, ExtractFailsClosedForMissingZeroStaleAndWrongKindBindin
     auto writer = builder->writer();
     ASSERT_TRUE(writer.setCamera2D(camera()).has_value());
 
-    const auto missing = trail->extract(writer, {});
+    const auto missing = trail->extract(writer, beginTestFrameResources(), {});
     ASSERT_FALSE(missing.has_value());
     EXPECT_EQ(missing.error().code, SceneErrorCode::UnresolvedSprite);
 
-    CountingSpriteResolver zeroResolver{
+    CountingSpriteResolver emptyResolver{
         .store = &*store_,
         .boundSprite = sprite_,
         .key = 0,
     };
-    const auto zero = trail->extract(writer, zeroResolver.resolver());
-    ASSERT_FALSE(zero.has_value());
-    EXPECT_EQ(zero.error().code, SceneErrorCode::UnresolvedSprite);
-    EXPECT_EQ(zeroResolver.calls, 1U);
+    const auto empty = trail->extract(writer, beginTestFrameResources(), emptyResolver.resolver());
+    ASSERT_FALSE(empty.has_value());
+    EXPECT_EQ(empty.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(emptyResolver.calls, 1U);
 
     CountingSpriteResolver wrongKindResolver{
         .store = &*store_,
         .boundSprite = wrongKind_,
     };
-    const auto wrongKind = wrongKindTrail->extract(writer, wrongKindResolver.resolver());
+    const auto wrongKind = wrongKindTrail->extract(
+        writer, beginTestFrameResources(), wrongKindResolver.resolver());
     ASSERT_FALSE(wrongKind.has_value());
     EXPECT_EQ(wrongKind.error().code, SceneErrorCode::UnresolvedSprite);
     EXPECT_EQ(wrongKindResolver.calls, 1U);
 
     ASSERT_TRUE(store_->unload(sprite_).has_value());
-    const auto stale = trail->extract(writer, resolver());
+    const auto stale = trail->extract(writer, beginTestFrameResources(), resolver());
     ASSERT_FALSE(stale.has_value());
     EXPECT_EQ(stale.error().code, SceneErrorCode::UnresolvedSprite);
     EXPECT_EQ(spriteResolver_.calls, 1U);
@@ -298,13 +365,15 @@ TEST_F(Trail2DAssetTest, ExtractResolvesSpriteOnceForAllSegments)
     auto writer = builder->writer();
     ASSERT_TRUE(writer.setCamera2D(camera()).has_value());
 
-    ASSERT_TRUE(trail->extract(writer, countingResolver.resolver()).has_value());
+    ASSERT_TRUE(trail->extract(writer, beginTestFrameResources(), countingResolver.resolver()).has_value());
     EXPECT_EQ(countingResolver.calls, 1U);
+    EXPECT_EQ(testFramePacket().resourceCount(), 1U);
     auto scene = builder->commit();
     ASSERT_TRUE(scene.has_value());
     ASSERT_EQ(scene->sprites2D().size(), 2U);
-    EXPECT_EQ(scene->sprites2D()[0].spriteKey, 42U);
-    EXPECT_EQ(scene->sprites2D()[1].spriteKey, 42U);
+    EXPECT_EQ(textureBindingKey(scene->sprites2D()[0].texture), 42U);
+    EXPECT_EQ(textureBindingKey(scene->sprites2D()[1].texture), 42U);
+    EXPECT_EQ(scene->sprites2D()[0].texture, scene->sprites2D()[1].texture);
 }
 
 TEST_F(Trail2DAssetTest, RejectsInvalidGeometryAndExtractsRotatedSprite)
@@ -336,12 +405,12 @@ TEST_F(Trail2DAssetTest, RejectsInvalidGeometryAndExtractsRotatedSprite)
     ASSERT_TRUE(builder->beginFrame().has_value());
     auto writer = builder->writer();
     ASSERT_TRUE(writer.setCamera2D(camera()).has_value());
-    ASSERT_TRUE(trail->extract(writer, resolver()).has_value());
+    ASSERT_TRUE(trail->extract(writer, beginTestFrameResources(), resolver()).has_value());
     auto scene = builder->commit();
     ASSERT_TRUE(scene.has_value());
     ASSERT_EQ(scene->sprites2D().size(), 1U);
     const auto& sprite = scene->sprites2D()[0];
-    EXPECT_EQ(sprite.spriteKey, 7U);
+    EXPECT_EQ(textureBindingKey(sprite.texture), 7U);
     EXPECT_EQ(sprite.stableEntityKey, 100U);
     EXPECT_FLOAT_EQ(sprite.centerX, 1.5F);
     EXPECT_FLOAT_EQ(sprite.centerY, 2.0F);
@@ -380,7 +449,7 @@ TEST_F(Trail2DAssetTest, BreakAndIndependentLifetimeDriveLinearWidths)
     {
         auto writer = builder->writer();
         ASSERT_TRUE(writer.setCamera2D(camera()).has_value());
-        ASSERT_TRUE(trail->extract(writer, resolver()).has_value());
+        ASSERT_TRUE(trail->extract(writer, beginTestFrameResources(), resolver()).has_value());
         auto scene = builder->commit();
         ASSERT_TRUE(scene.has_value());
         ASSERT_EQ(scene->sprites2D().size(), 2U);
@@ -401,7 +470,7 @@ TEST_F(Trail2DAssetTest, BreakAndIndependentLifetimeDriveLinearWidths)
     {
         auto writer = builder->writer();
         ASSERT_TRUE(writer.setCamera2D(camera()).has_value());
-        ASSERT_TRUE(trail->extract(writer, resolver()).has_value());
+        ASSERT_TRUE(trail->extract(writer, beginTestFrameResources(), resolver()).has_value());
         auto scene = builder->commit();
         ASSERT_TRUE(scene.has_value());
         ASSERT_EQ(scene->sprites2D().size(), 1U);
@@ -511,7 +580,7 @@ TEST_F(Trail2DAssetTest, UpdateAndExtractRemainAllocationFreeForThreeHundredFram
             ASSERT_TRUE(builder->beginFrame().has_value());
             auto writer = builder->writer();
             ASSERT_TRUE(writer.setCamera2D(camera(150.0F, 400.0F)).has_value());
-            ASSERT_TRUE(trail->extract(writer, resolver()).has_value());
+            ASSERT_TRUE(trail->extract(writer, beginTestFrameResources(), resolver()).has_value());
             ASSERT_TRUE(builder->commit().has_value());
 
             EXPECT_EQ(memory.allocationCalls(), allocationCalls);
@@ -536,7 +605,7 @@ TEST_F(Trail2DAssetTest, ExtractPropagatesRenderWriterCapacityFailure)
     ASSERT_TRUE(builder->beginFrame().has_value());
     auto writer = builder->writer();
     ASSERT_TRUE(writer.setCamera2D(camera()).has_value());
-    const auto extracted = trail->extract(writer, resolver());
+    const auto extracted = trail->extract(writer, beginTestFrameResources(), resolver());
     ASSERT_FALSE(extracted.has_value());
     EXPECT_EQ(extracted.error().code, Render::RenderErrorCode::RenderSceneCapacityExceeded);
     ASSERT_FALSE(builder->commit().has_value());
