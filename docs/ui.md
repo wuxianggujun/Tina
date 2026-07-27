@@ -18,7 +18,7 @@
 | Input | Pointer default action、Tab focus、Keyboard/Gamepad activation、TextEdit edit/selection/IME |
 | Semantics | role/name/checked/selected/range/value/valueText/focused snapshot |
 | Runtime | startup root builder、phase-scoped tree updater、DisplayList/Glyph atlas handoff |
-| Product | 独立 13 控件 showcase（Dark/Light 实时换肤）以及 product-2d HUD/设置面板与 Windows 视觉证据 |
+| Product | 独立 13 控件 showcase（Dark/Light 实时换肤）、product-2d HUD/设置面板、product-3d Scene Controls 与 Windows 视觉证据 |
 
 ## 所有权与句柄
 
@@ -216,6 +216,10 @@ rounded rectangle、Image widget、毛玻璃与 CSS 式 stylesheet 仍未实现�
 Dark→Light→Dark（或相反）及 Slider→ProgressBar 联动，并在退出 JSON 中验证 theme switch、value、
 13 个控件与 root 生命周期。完整文字视觉验收必须使用 bgfx + FreeType preset；普通 bgfx preset 的
 placeholder text 只用于确定性降级和生命周期 smoke。
+最新 Dark/Light client capture 分别位于
+`artifacts/screenshots/ui-showcase-final-dark-v3/20260727-191013` 和
+`artifacts/screenshots/ui-showcase-final-light-v3/20260727-191058`：两组均取得连续2帧 1280x720
+非空画面，Performance/Balanced/Quality 三项完整显示且互不遮挡，导航状态文字也未占用控件区域。
 
 `tina_sample_2d` 当前 UI 包含：
 
@@ -233,6 +237,15 @@ UTF-8 初值、ProgressBar value 与 Radio 互斥 selection。
 3次 960x540 client capture 中2帧稳定非空；首次 `PrintWindow` 白帧由 `blankLike=true` 排除。
 人工复核 `frame-02.png` / `frame-03.png` 中上述控件可见、中文正常且无裁剪或重叠；两帧 65% fill
 均为 x=700..842（143 px），选中色只出现在 Windowed RadioButton，client capture 未混入标题栏。
+
+`tina_sample_3d` 的 `Product3DUI` 使用同一产品 Theme 契约提供 Theme Button、Auto Rotate Checkbox、
+Rotation Speed Slider、Frame ProgressBar、标题/Inspector/状态层级。Checkbox 与 Slider 控制实际模型旋转；
+callback 只提交 intent，`updateUI()` 统一处理控件状态、ProgressBar 与 `setProductTheme()`。schema 3 的
+自动门禁要求 Dark→Light→Dark、标准控件 chrome 继承验证、5 Panel、9 Label、四类控件各1个、进度
+100% 与 root 释放。FreeType 暗/亮截图分别在
+`artifacts/screenshots/sample-3d-ui-dark/20260727-174319` 和
+`artifacts/screenshots/sample-3d-ui-light/20260727-174414`，均取得连续2帧 1280×720 非空 client capture；
+人工复核文字、控件层级、主题差异及 3D 主视区均成立，无裁剪或重叠。
 
 当前 tip 最近直接验证为：`tina_ui_tests` 271/271（含 Accessibility）、`tina_runtime_ui_tests` 84/84、
 `tina_ui_render_integration_tests` 15/15、product-2d 图的 `tina_ui_freetype_tests` 3/3。UI 容量回归
@@ -260,6 +273,13 @@ cmake --build --preset windows-vnext-bgfx-ui-freetype-debug `
            tina_ui_render_integration_tests tina_ui_freetype_tests -- /m:2 /v:m
 out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
   --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
+```
+
+完整 product-3d UI/资源同轮门禁：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1 `
+  -OutJson artifacts\gates\product-3d.json
 ```
 
 FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构建说明](building.md)与

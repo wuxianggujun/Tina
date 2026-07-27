@@ -30,10 +30,9 @@
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
 #include <tina/scene/World.hpp>
-#include <tina/ui/UILayout.hpp>
-#include <tina/ui/UIPaint.hpp>
 
 #include "DeviceCapture.hpp"
+#include "Product3DUI.hpp"
 #include "SampleTempDirectory.hpp"
 
 #include <algorithm>
@@ -88,6 +87,8 @@ struct SampleOptions final {
     std::string gltfPath{};
     // Empty = capture-only; non-empty = require an exact machine-local pixel match.
     std::string expectPixelFingerprint{};
+    Tina::Sample3D::Product3DUITheme initialUiTheme = Tina::Sample3D::Product3DUITheme::Dark;
+    bool uiThemeDemo = false;
     bool help = false;
 };
 
@@ -97,9 +98,7 @@ struct LifecycleCounters final {
     u64 stateEnters = 0;
     u64 stateExits = 0;
     u64 applicationShutdowns = 0;
-    u64 uiRootsCreated = 0;
-    u64 uiPanelsCreated = 0;
-    u64 uiRootsReleased = 0;
+    Tina::Sample3D::Product3DUIEvidence ui{};
     u64 meshesUploaded = 0;
     u64 materialsLoaded = 0;
     u64 texturesUploaded = 0;
@@ -281,36 +280,6 @@ struct Product3DResources final {
 }
 #endif
 
-[[nodiscard]] Tina::UI::UILayoutStyle absolutePanelStyle(Tina::UI::UILayoutLength left, Tina::UI::UILayoutLength top,
-                                                         Tina::UI::UILayoutLength width,
-                                                         Tina::UI::UILayoutLength height) noexcept
-{
-    Tina::UI::UILayoutStyle style{};
-    style.position = Tina::UI::UILayoutPositionMode::AbsoluteOverlay;
-    style.absoluteInset.left = left;
-    style.absoluteInset.top = top;
-    style.size.width = width;
-    style.size.height = height;
-    return style;
-}
-
-[[nodiscard]] Tina::UI::UIBoxPaint solidFill(Tina::Core::u8 red, Tina::Core::u8 green, Tina::Core::u8 blue,
-                                             Tina::Core::u8 alpha) noexcept
-{
-    return Tina::UI::UIBoxPaint{
-        .solidFill =
-            Tina::UI::UISolidFill{
-                .color =
-                    {
-                        .red = red,
-                        .green = green,
-                        .blue = blue,
-                        .alpha = alpha,
-                    },
-            },
-    };
-}
-
 void writeJsonString(std::ostream& output, std::string_view value)
 {
     output.put('"');
@@ -374,6 +343,8 @@ void printUsage()
         << "  --frame-delay-ms=N      sleep N ms per frame (default 0)\n"
         << "  --gltf=<path>           cook external .gltf/.glb from disk (omit = built-in two-mesh fixture)\n"
         << "  --gltf <path>           same as --gltf=<path>\n"
+        << "  --ui-theme=dark|light   select the initial retained UI theme (default dark)\n"
+        << "  --ui-theme-demo         exercise initial -> alternate -> initial theme in UI phase\n"
         << "  --expect-pixel-fingerprint=<32 lowercase hex chars>\n"
         << "                           require an exact machine-local RGBA8 frame match\n"
         << "  --help, -h              print this help\n"
@@ -394,11 +365,13 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     constexpr std::string_view FramesPrefix = "--frames=";
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
     constexpr std::string_view GltfPrefix = "--gltf=";
+    constexpr std::string_view UiThemePrefix = "--ui-theme=";
     constexpr std::string_view PixelFingerprintPrefix = "--expect-pixel-fingerprint=";
     SampleOptions options;
     bool hasFrames = false;
     bool hasDelay = false;
     bool hasGltf = false;
+    bool hasUiTheme = false;
     bool hasPixelFingerprint = false;
 
     for (int index = 1; index < argumentCount; ++index)
@@ -438,6 +411,22 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             }
             options.gltfPath.assign(path);
             hasGltf = true;
+        }
+        else if (argument.starts_with(UiThemePrefix))
+        {
+            const std::string_view theme = argument.substr(UiThemePrefix.size());
+            if (hasUiTheme || (theme != "dark" && theme != "light"))
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--ui-theme must appear once with dark or light");
+            }
+            options.initialUiTheme = theme == "light" ? Tina::Sample3D::Product3DUITheme::Light
+                                                       : Tina::Sample3D::Product3DUITheme::Dark;
+            hasUiTheme = true;
+        }
+        else if (argument == "--ui-theme-demo")
+        {
+            options.uiThemeDemo = true;
         }
         else if (argument.starts_with(PixelFingerprintPrefix))
         {
@@ -479,6 +468,11 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             error.addContext("parseOptions", argument);
             return Tina::Core::failure(std::move(error));
         }
+    }
+    if (options.uiThemeDemo && options.targetFrameCount < 3)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "--ui-theme-demo requires --frames=3 or greater");
     }
     return options;
 }
@@ -915,7 +909,7 @@ class Product3DState final : public Tina::IGameState {
   public:
     Product3DState(SampleOptions options, LifecycleCounters& counters, Product3DResources& resources,
                    DeviceCapture& capture) noexcept
-        : options_(options), counters_(&counters), resources_(&resources), capture_(&capture)
+        : options_(options), counters_(&counters), resources_(&resources), capture_(&capture), ui_(counters.ui)
     {
     }
 
@@ -1310,66 +1304,17 @@ class Product3DState final : public Tina::IGameState {
             return status;
         }
 
-        auto rootBuilder = context.primaryWindowUIRootBuilder();
-        if (!rootBuilder)
-        {
-            return Tina::Core::failure(std::move(rootBuilder.error()));
-        }
-        auto root = rootBuilder->createRoot();
-        if (!root)
-        {
-            return Tina::Core::failure(std::move(root.error()));
-        }
-        auto tree = rootBuilder->treeUpdater(*root);
-        if (!tree)
-        {
-            return Tina::Core::failure(std::move(tree.error()));
-        }
-
-        Tina::UI::UILayoutStyle rootStyle{};
-        rootStyle.size.width = Tina::UI::UILayoutLength::Percent(100.0F);
-        rootStyle.size.height = Tina::UI::UILayoutLength::Percent(100.0F);
-        if (auto status = tree->setLayoutStyle(root->rootNodeId(), rootStyle); !status)
+        if (auto status = ui_.build(
+                context,
+                Tina::Sample3D::Product3DUIConfig{
+                    .initialTheme = options_.initialUiTheme,
+                    .targetFrameCount = options_.targetFrameCount,
+                    .automatedThemeDemo = options_.uiThemeDemo,
+                });
+            !status)
         {
             return status;
         }
-
-        struct PanelSpec final {
-            Tina::UI::UILayoutStyle layout{};
-            Tina::UI::UIBoxPaint paint{};
-        };
-        const std::array panels{
-            PanelSpec{
-                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(28.0F),
-                                             Tina::UI::UILayoutLength::Px(360.0F), Tina::UI::UILayoutLength::Px(52.0F)),
-                .paint = solidFill(8, 25, 42, 205),
-            },
-            PanelSpec{
-                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(80.0F),
-                                             Tina::UI::UILayoutLength::Px(430.0F), Tina::UI::UILayoutLength::Px(8.0F)),
-                .paint = solidFill(36, 211, 171, 235),
-            },
-        };
-        for (const PanelSpec& panelSpec : panels)
-        {
-            auto panel = tree->createPanel(root->rootNodeId());
-            if (!panel)
-            {
-                return Tina::Core::failure(std::move(panel.error()));
-            }
-            if (auto status = tree->setLayoutStyle(*panel, panelSpec.layout); !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setBoxPaint(*panel, panelSpec.paint); !status)
-            {
-                return status;
-            }
-        }
-
-        uiRoot_ = std::move(*root);
-        ++counters_->uiRootsCreated;
-        counters_->uiPanelsCreated += panels.size();
         gpuRollback.release();
         return Tina::Core::success();
     }
@@ -1379,11 +1324,7 @@ class Product3DState final : public Tina::IGameState {
         world_.reset();
         prefabEntities_.clear();
         releaseProductGpuResources();
-        if (uiRoot_)
-        {
-            uiRoot_.reset();
-            ++counters_->uiRootsReleased;
-        }
+        ui_.release();
         ++counters_->stateExits;
     }
 
@@ -1392,6 +1333,11 @@ class Product3DState final : public Tina::IGameState {
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_->frameUpdates;
+        // Animation advances once per game frame even if the scene is extracted more than once.
+        if (ui_.autoRotate())
+        {
+            rotationHalfAngle_ += 0.0125F * ui_.rotationSpeed();
+        }
         if (options_.frameDelayMilliseconds != 0)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds{options_.frameDelayMilliseconds});
@@ -1407,6 +1353,11 @@ class Product3DState final : public Tina::IGameState {
         return Tina::Core::success();
     }
 
+    Tina::Core::Status updateUI(Tina::UIUpdateContext& context) override
+    {
+        return ui_.update(context, counters_->frameUpdates);
+    }
+
     Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
     {
         if (!world_.has_value())
@@ -1416,7 +1367,7 @@ class Product3DState final : public Tina::IGameState {
         }
 
         // Spin root-ish prefab entities for visible motion without hand-built cubes.
-        const float halfAngle = static_cast<float>(context.frameTiming().frameIndex) * 0.0125F;
+        const float halfAngle = rotationHalfAngle_;
         for (std::size_t index = 0; index < prefabEntities_.size(); ++index)
         {
             const Tina::Scene::LocalTransform* existing = world_->localTransform(prefabEntities_[index]);
@@ -1592,9 +1543,10 @@ class Product3DState final : public Tina::IGameState {
     LifecycleCounters* counters_ = nullptr;
     Product3DResources* resources_ = nullptr;
     DeviceCapture* capture_ = nullptr;
-    Tina::UI::UIRootOwner uiRoot_{};
+    Tina::Sample3D::Product3DUI ui_;
     std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};
     mutable std::optional<Tina::Scene::World> world_{};
+    float rotationHalfAngle_ = 0.0F;
     Tina::Scene::EntityId cameraEntity_{};
     std::vector<Tina::Scene::EntityId> prefabEntities_{};
 };
@@ -1716,11 +1668,24 @@ class Product3DApplication final : public Tina::IGameApplication {
     const bool pixelGoldenChecked = !options.expectPixelFingerprint.empty();
     const bool pixelGoldenMatched =
         !pixelGoldenChecked || counters.pixelFingerprint == options.expectPixelFingerprint;
+    const auto& ui = counters.ui;
+    const bool expectedInitialThemeLight = options.initialUiTheme == Tina::Sample3D::Product3DUITheme::Light;
+    const bool unattendedThemeValid =
+        ui.themeButtonActivations != 0 ||
+        (ui.themeSwitches == (options.uiThemeDemo ? 2U : 0U) &&
+         ui.finalThemeLight == expectedInitialThemeLight);
+    const bool uiValid =
+        ui.rootsCreated == 1 && ui.rootsReleased == 1 && !ui.rootAlive && ui.panelsCreated == 5 &&
+        ui.labelsCreated == 9 && ui.buttonsCreated == 1 && ui.checkboxesCreated == 1 &&
+        ui.slidersCreated == 1 && ui.progressBarsCreated == 1 && ui.themeDemoRequested == options.uiThemeDemo &&
+        ui.initialThemeLight == expectedInitialThemeLight &&
+        ui.automatedThemeSteps == (options.uiThemeDemo ? 2U : 0U) && unattendedThemeValid &&
+        ui.inheritedChromeVerified && ui.controlsInitialStateVerified &&
+        ui.progressUpdates >= options.targetFrameCount && ui.finalProgress >= 99.9F;
     if (*runResult != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame ||
         counters.frameUpdates != options.targetFrameCount ||
         counters.renderExtractions != options.targetFrameCount || counters.stateEnters != 1 ||
-        counters.stateExits != 1 || counters.applicationShutdowns != 1 || counters.uiRootsCreated != 1 ||
-        counters.uiPanelsCreated != 2 || counters.uiRootsReleased != 1 ||
+        counters.stateExits != 1 || counters.applicationShutdowns != 1 || !uiValid ||
         counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMeshes || !texturesOk ||
         counters.meshAssetHandlesPublished != expectedMeshes
         || counters.materialAssetHandlesPublished != expectedMeshes
@@ -1769,6 +1734,22 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"catalogCooked\":" << counters.catalogCooked
                   << ",\"meshSlotCount\":" << expectedMeshes
                   << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false")
+                  << ",\"uiRootsCreated\":" << ui.rootsCreated
+                  << ",\"uiRootsReleased\":" << ui.rootsReleased
+                  << ",\"uiPanelsCreated\":" << ui.panelsCreated
+                  << ",\"uiLabelsCreated\":" << ui.labelsCreated
+                  << ",\"uiThemeDemoRequested\":" << (ui.themeDemoRequested ? "true" : "false")
+                  << ",\"uiThemeSwitches\":" << ui.themeSwitches
+                  << ",\"uiAutomatedThemeSteps\":" << ui.automatedThemeSteps
+                  << ",\"uiThemeButtonActivations\":" << ui.themeButtonActivations
+                  << ",\"uiThemeInitialLight\":" << (ui.initialThemeLight ? "true" : "false")
+                  << ",\"uiThemeFinalLight\":" << (ui.finalThemeLight ? "true" : "false")
+                  << ",\"uiInheritedChromeVerified\":"
+                  << (ui.inheritedChromeVerified ? "true" : "false")
+                  << ",\"uiControlsInitialStateVerified\":"
+                  << (ui.controlsInitialStateVerified ? "true" : "false")
+                  << ",\"uiProgressUpdates\":" << ui.progressUpdates
+                  << ",\"uiProgressFinal\":" << ui.finalProgress
                   << ",\"bindingRegistryReleased\":"
                   << (counters.bindingRegistryReleased ? "true" : "false")
                   << ",\"ledgerBalanced\":" << (ledgerBalanced ? "true" : "false")
@@ -1784,7 +1765,8 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":2,\"frames\":" << counters.frameUpdates
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":3,\"frames\":"
+              << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
               << (multiMesh ? "true" : "false") << ",\"materialTextureBound\":"
@@ -1818,8 +1800,31 @@ class Product3DApplication final : public Tina::IGameApplication {
         writeJsonString(std::cout, resources.gltfSourcePath);
     }
     std::cout << ",\"instanceBatchesPerFrame\":" << expectedMeshes << ",\"catalogCooked\":" << counters.catalogCooked
-              << ",\"stateExits\":" << counters.stateExits << ",\"uiPanelsPerFrame\":2,\"uiRootsReleased\":"
-              << counters.uiRootsReleased << ",\"applicationShutdowns\":" << counters.applicationShutdowns
+              << ",\"stateExits\":" << counters.stateExits
+              << ",\"uiRootsCreated\":" << ui.rootsCreated
+              << ",\"uiRootsReleased\":" << ui.rootsReleased
+              << ",\"uiPanelsCreated\":" << ui.panelsCreated
+              << ",\"uiLabelsCreated\":" << ui.labelsCreated
+              << ",\"uiButtonsCreated\":" << ui.buttonsCreated
+              << ",\"uiCheckboxesCreated\":" << ui.checkboxesCreated
+              << ",\"uiSlidersCreated\":" << ui.slidersCreated
+              << ",\"uiProgressBarsCreated\":" << ui.progressBarsCreated
+              << ",\"uiThemeDemoRequested\":" << (ui.themeDemoRequested ? "true" : "false")
+              << ",\"uiThemeSwitches\":" << ui.themeSwitches
+              << ",\"uiAutomatedThemeSteps\":" << ui.automatedThemeSteps
+              << ",\"uiThemeButtonActivations\":" << ui.themeButtonActivations
+              << ",\"uiCheckboxActivations\":" << ui.checkboxActivations
+              << ",\"uiSliderChanges\":" << ui.sliderChanges
+              << ",\"uiThemeInitialLight\":" << (ui.initialThemeLight ? "true" : "false")
+              << ",\"uiThemeFinalLight\":" << (ui.finalThemeLight ? "true" : "false")
+              << ",\"uiInheritedChromeVerified\":" << (ui.inheritedChromeVerified ? "true" : "false")
+              << ",\"uiControlsInitialStateVerified\":"
+              << (ui.controlsInitialStateVerified ? "true" : "false")
+              << ",\"uiAutoRotateFinal\":" << (ui.autoRotate ? "true" : "false")
+              << ",\"uiRotationSpeedFinal\":" << ui.rotationSpeed
+              << ",\"uiProgressUpdates\":" << ui.progressUpdates
+              << ",\"uiProgressFinal\":" << ui.finalProgress
+              << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"engineHostDestroyed\":true,\"renderResourceLedgerBalanced\":true"
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")

@@ -72,6 +72,8 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS / N15 | fixed-capacity owner-thread Mesh3D registry 借用 Store/device/PMR；mesh/material 独立 device allocator 事务分配、不复用；Material texture/factors 原子发布并按 dependency fail closed；exact stale unbind 与产品逆序释放安全；schema 2 记录注册/释放/销毁与 registry 释放 |
 | ASSET-HANDLE-SCENE-N16.1-CORE | packet-local `FrameResourceRef`/固定容量资源表、同帧去重与 owning pin；Runtime 在 extraction 前开启 packet，并在 complete/skip/abandon 时 exactly-once 释放；Texture2D retirement 事务覆盖 backend reject 与重试 |
 | ASSET-HANDLE-SCENE-N16.2-SPRITE | World、TileMap、selection、Particle 与 Trail 的 Sprite2D extraction 全部只写 packet-local texture ref；registry 用 frame borrow pin 阻止活跃帧 unbind；Null/bgfx 在提交副作用前验证 ref owner/generation/kind/range |
+| UI-SHOWCASE / PRODUCT-2D / PRODUCT-3D | 独立13控件 showcase 与 2D/3D 产品样例统一使用继承式产品 Theme；Button pressed/focus/elevation 层级、Dark/Light 事务换肤、实际 Slider/Checkbox 状态联动、FreeType 暗/亮 client capture 与结构化生命周期证据成立 |
+| TEST-003 | bgfx + FreeType 图同轮运行 Core/Scene/Asset/Render/UI 模块测试和 300 帧 product-3d；schema 3 同时验证 glTF/PBR/3-light/registry 与 Dark→Light→Dark retained UI |
 
 “M12 Done”只表示产品删除完成，不表示 Linux、PBR、accessibility、benchmark 或整库 Legacy 字符串全部
 完成。剩余工作已经拆入 Backlog，不再继续扩写 M12 历史清单。
@@ -82,8 +84,8 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | --- | --- | --- |
 | 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle、fixed-capacity binding registry 已完成；全部 Sprite2D item 使用 packet-local `FrameResourceRef`；schema 13 记录 Dark→Light→Dark、2纹理注册/释放/销毁、World/TileMap/Particle/Trail resolver hits，FX fingerprint schema 2 使用稳定 AssetId | N16.3 统一 registry/Lease/GPU retirement owner；TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 均为独立后续项 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
-| UI product | 13 控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 层次，以及 product-2d 继承式 Theme HUD 均有结构化与 Windows 产品视觉证据 | OS 级 DPI 与跨 GPU 金标 |
-| 3D product | 双 mesh + Resources-owned AssetStore + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + extract-time resolver、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、有界0..4 directional lights 已有证据（产品提交3灯）；schema 2 证明注册/释放/销毁与 registry 释放 | 统一 `FrameResourceRef`/retirement owner；RENDER-001 的完整 PBR/IBL/shadow/light component/pass scheduling |
+| UI product | 13 控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 层次，以及 product-2d HUD 和 product-3d Scene Controls 均有结构化与 Windows FreeType 暗/亮视觉证据 | OS 级 DPI 与跨 GPU 金标 |
+| 3D product | 双 mesh + Resources-owned AssetStore + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + extract-time resolver、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、有界0..4 directional lights 已有证据（产品提交3灯）；schema 3 进一步证明成熟 retained controls、Dark→Light→Dark、注册/释放/销毁与 registry 释放 | 统一 `FrameResourceRef`/retirement owner；RENDER-001 的完整 PBR/IBL/shadow/light component/pass scheduling |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion、独立 Texture/Mesh AssetLease readback retirement，以及 Task timeout/retry + Host-enforced TaskSystem worker-exit/join deadline 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |
 | Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v3 root/TileMapChunk v1 + eager Tileset/deferred chunk dependency/localId 发布前验证及 retain-window LRU 已完成 | 更完整资源炸弹矩阵、TileMap priority IO/editor、热重载与增量 Cooker |
 | Audio | `2D-AUDIO-ADV / N7` 已完成；Windows product-2d 以 owner-thread deterministic mix 验证 bounded stream，miniaudio callback/mixer 与 lifecycle 由 adapter tests 验证 | Linux、真实设备质量/延迟/切换与 callback benchmark |

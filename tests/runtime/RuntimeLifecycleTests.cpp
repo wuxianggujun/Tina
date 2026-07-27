@@ -2698,8 +2698,10 @@ TEST(EngineHostRunTest, GameSdkBuildsAndUpdatesAPrimaryWindowRetainedTree)
     EXPECT_TRUE(game.primaryWindowUIUpdated);
     EXPECT_EQ(runtime.submittedFrames, 1U);
     EXPECT_EQ(runtime.presentedFrames, 1U);
-    ASSERT_EQ(runtime.submittedUICommandCounts, std::vector<usize>{0U});
-    EXPECT_FALSE(runtime.copiedLastSubmittedUICommand.has_value());
+    ASSERT_EQ(runtime.submittedUICommandCounts.size(), 1U);
+    EXPECT_GT(runtime.submittedUICommandCounts.front(), 0U);
+    ASSERT_TRUE(runtime.copiedLastSubmittedUICommand.has_value());
+    EXPECT_EQ(runtime.copiedLastSubmittedUICommand->kind, Render::UIDrawCommandKind::SolidQuad);
     EXPECT_EQ(game.exitCount, 1U);
     EXPECT_EQ(game.shutdownCount, 1U);
 }

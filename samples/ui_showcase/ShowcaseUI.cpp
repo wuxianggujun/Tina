@@ -290,7 +290,7 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         }
     }
     if (Core::Status status = storeNode(
-            createLabel(*tree, rootNode, {48.0F, 642.0F, 170.0F, 38.0F}, "Tab to focus\nEnter / Space to act"),
+            createLabel(*tree, rootNode, {48.0F, 642.0F, 170.0F, 38.0F}, "13 controls online\nTheme synchronized"),
             nodes_.navigationHelp);
         !status) {
         return status;
@@ -464,9 +464,9 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         "Quality",
     };
     constexpr std::array<Rect, 3> QualityRects{
-        Rect{0.0F, 4.0F, 134.0F, 40.0F},
-        Rect{140.0F, 4.0F, 134.0F, 40.0F},
-        Rect{280.0F, 4.0F, 134.0F, 40.0F},
+        Rect{0.0F, 4.0F, 164.0F, 40.0F},
+        Rect{170.0F, 4.0F, 132.0F, 40.0F},
+        Rect{308.0F, 4.0F, 112.0F, 40.0F},
     };
     for (Core::usize index = 0; index < QualityLabels.size(); ++index) {
         if (Core::Status status =

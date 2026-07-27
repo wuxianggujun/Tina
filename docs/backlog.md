@@ -89,6 +89,7 @@
 | CLEAN-002 | 删除无消费者 `StringUtils.hpp`（EASTL/utfcpp）与 Clock/FrameTimer/FixedStepTicker compatibility；`SteadyMonotonicClock` 实现迁到 `MonotonicClock.cpp` | [core](core.md) |
 | CLEAN-003 | miniaudio 实现 TU 与 CMake FATAL 文案不再暗示 Legacy ON 可运行 | [dependencies](dependencies.md) |
 | TEST-002 | product-2d 同轮：UI/RuntimeUI/bridge/FreeType/Physics2D/Audio/miniaudio/Asset 测试 + sample 300 帧；`productGate=bgfx-physics-freetype-audio`；schema 13 自动 Dark→Light→Dark；脚本 `tools/windows/RunProduct2dGate.ps1` | [building](building.md) · [Windows 证据](m12-evidence-windows.md) |
+| TEST-003 | product-3d 同轮：Core/Scene/AssetFormat/Asset/bgfx Render/UI/RuntimeUI/bridge/FreeType 测试 + sample 300 帧；schema 3 同时验证 glTF/PBR/3-light/registry 与自动 Dark→Light→Dark；脚本 `tools/windows/RunProduct3dGate.ps1` | [3D](game-3d.md) · [测试](testing.md) |
 | ASSET-001 | glTF 外部 URI root containment/`..`/scheme 拒绝 + 64MiB 上限；`tina_sample_3d` 上传/绑定 Cooked Texture2D 到 materialKey；路径逃逸单测 | [3D](game-3d.md) · GltfCookTests |
 | UI-001 | ProgressBar/RadioButton 已接入 product-2d；190/190 UI、77/77 Runtime UI、12/12 Render bridge 通过，结构化输出与 Windows client-area 视觉证据成立 | [UI](ui.md) · [Windows 证据](m12-evidence-windows.md) |
 | DOC-001 | 文档职责与任务体系重组完成；本地链接、configure/build preset、CMake target、Markdown fence 与格式扫描通过；UI 绘制链路和控件矩阵已归档 | [文档索引](README.md) · [Roadmap](roadmap.md) · [UI](ui.md) |
@@ -96,6 +97,7 @@
 | UI-THEME-DEFAULT | Context/Runtime phase facade `productTheme`/`setProductTheme`；`create*` 自动 apply `make*Chrome`；既有继承属性事务换肤；属性级局部 override；Button focus border 与 pressed depth；`makeLightProductTheme`；`UIThemeTests` | [UI](ui.md) |
 | UI-SHOWCASE | 独立 `tina_sample_ui_showcase` 同屏展示 13 个成熟控件、Panel/elevation/色板/状态栏、Dark/Light 实时换肤与 Slider→ProgressBar 联动；dark/light 自动 smoke 和 Win32 pointer interaction/capture 通过 | [UI](ui.md) · [测试](testing.md) |
 | UI-PRODUCT-2D-THEME | product-2d Theme Button 提交 pending intent 并在 `updateUI()` 事务换肤；标准控件继承产品 chrome，Panel/标题局部层级随主题重算；schema 13 自动 Dark→Light→Dark 后回到 Dark | [UI](ui.md) · [2D](game-2d.md) · [测试](testing.md) |
+| UI-PRODUCT-3D-THEME | `Product3DUI` 独立 root；Theme Button、Auto Rotate Checkbox、Rotation Speed Slider、Frame ProgressBar 驱动实际 3D 状态；标准 chrome 继承、Panel/标题局部层级集中换肤；schema 3 自动 Dark→Light→Dark 与暗/亮 FreeType client capture | [UI](ui.md) · [3D](game-3d.md) · [测试](testing.md) |
 | UI-LAYOUT-PADDING | `UILayoutStyle::padding` 同时约束 text auto-size/paint content origin；多行回到 padded x，TextEdit pointer selection 扣除 left padding；对应 UI 回归通过 | [UI](ui.md) · `UITextTests` / `UITextEditTests` |
 | DOC-002 | `tools/docs/CheckDocs.ps1`：docs 本地链接、cmake configure/build preset、`--target` 名、Legacy 产品文案软警告；不扫 out/build/thirdparty | [building](building.md) · [testing](testing.md) |
 | RUNTIME-001 | `GameStateStack` + commands + 唯一 commit；**policy 向下阻断**（fixed/frame/render/UI 自顶向下 `forEachDispatch`）；enter 失败丢 candidate；`GameStateStackTests` / policy dispatch 单测 | [gameplay](gameplay.md) · ADR 0014 |

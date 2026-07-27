@@ -370,7 +370,7 @@ Product-2D 同轮门禁已返回 `productGate=bgfx-physics-freetype-audio`，3D 
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；全部 Sprite2D extraction 使用 packet-local `FrameResourceRef`；schema 13 含 Dark→Light→Dark、Sprite registry 注册/释放/纹理销毁、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、registry/Lease/GPU retirement owner 统一、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→extract-time key resolve→bgfx；evidence schema 2、原子 baseColor/MR/normal/factors binding、两类 registry 注册/释放、mesh/texture 销毁、唯一0..4 directional-light 提交（产品3灯）、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、统一 `FrameResourceRef`/retirement owner、完整 PBR/IBL/shadow/light component、跨 GPU golden |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→extract-time key resolve→bgfx；evidence schema 3、原子 baseColor/MR/normal/factors binding、两类 registry 注册/释放、mesh/texture 销毁、唯一0..4 directional-light 提交（产品3灯）、成熟 retained controls、Dark→Light→Dark、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、统一 `FrameResourceRef`/retirement owner、完整 PBR/IBL/shadow/light component、跨 GPU golden |
 
 `tina_sample_2d_tilemap_bgfx` 是 `tina_sample_2d` 的兼容 ALIAS；新脚本使用正式 target 名。
 
@@ -526,6 +526,17 @@ wrong-world/stale/capacity/PMR rollback，以及 TileMap bridge/CharacterControl
 Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化（TEST-002）：包含
 `tina_scene_tests` 的上述测试 executable 全部 exit 0 后，再跑 sample 300 帧并校验
 `productGate=bgfx-physics-freetype-audio` 与 schema 13 Theme、Sprite binding、TileMap/Particle/Trail Handle resolver 字段。
+
+Windows 同轮 product-3d 拓扑由 `tools/windows/RunProduct3dGate.ps1` 固化（TEST-003）：默认使用
+`windows-msvc-vnext-bgfx-ui-freetype`，直接构建并运行 Core、Scene、AssetFormat、Asset、bgfx Render、
+UI、Runtime UI、UI Render bridge 与 FreeType 测试，再执行300帧 `--ui-theme=dark --ui-theme-demo`。
+schema 3 同时断言双 mesh/PBR texture/3-light/registry 生命周期、5 Panel/9 Label、Button/Checkbox/Slider/
+ProgressBar 创建、继承 chrome、Dark→Light→Dark、100% progress、final-present capture 与 ledger 归零：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1 `
+  -OutJson artifacts\gates\product-3d.json
+```
 
 文档扫描（DOC-002）：
 
