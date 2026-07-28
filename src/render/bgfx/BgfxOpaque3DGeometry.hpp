@@ -36,15 +36,20 @@ struct BgfxOpaque3DFrameRequirements final {
 [[nodiscard]] std::span<const BgfxOpaque3DVertex> canonicalCubeVertices() noexcept;
 [[nodiscard]] std::span<const u16> canonicalCubeIndices() noexcept;
 
+// Validates every packet-local Mesh3D geometry/material ref without touching
+// geometry output or backend state. This also applies to suspended frames.
+[[nodiscard]] Core::Status validateOpaque3DFrameResources(
+    RenderSceneView scene, FrameResourceTableView resources) noexcept;
+
 // Validates the private M9-B procedural fixture contract before the backend
 // commits surface state or allocates transient instance data.
 [[nodiscard]] Core::Result<BgfxOpaque3DFrameRequirements>
-checkedOpaque3DFrame(RenderSceneView scene);
+checkedOpaque3DFrame(RenderSceneView scene, FrameResourceTableView resources);
 
 // Allocation-free and transactional: all input and output extents are checked
 // before the first write.
 [[nodiscard]] Core::Result<BgfxOpaque3DFrameRequirements>
-writeOpaque3DInstanceData(RenderSceneView scene,
+writeOpaque3DInstanceData(RenderSceneView scene, FrameResourceTableView resources,
                           std::span<BgfxOpaque3DInstanceData> instances);
 
 } // namespace Tina::Render::Bgfx

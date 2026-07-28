@@ -40,6 +40,7 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxOpaque3DGeometry.hpp
         bgfx/BgfxOpaque3DShader.cpp
         bgfx/BgfxOpaque3DShader.hpp
+        bgfx/BgfxResourceSlotGeneration.hpp
         bgfx/BgfxSprite2DGeometry.cpp
         bgfx/BgfxSprite2DGeometry.hpp
         bgfx/BgfxSprite2DShader.cpp

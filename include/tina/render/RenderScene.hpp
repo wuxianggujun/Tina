@@ -133,11 +133,11 @@ struct RenderPerspectiveCameraInput final {
     RenderNormalizedViewport normalizedViewport{};
 };
 
-// meshKey/materialKey are phase-local backend-neutral bind table ids produced by
-// Scene extraction from weak AssetHandles; RenderScene never owns those handles.
+// mesh/material are packet-local refs produced by Scene extraction from weak
+// AssetHandles. The backend resolves them synchronously through RenderFrame::resources.
 struct RenderMesh3DInput final {
-    u32 meshKey = 0;
-    u32 materialKey = 0;
+    FrameResourceRef mesh{};
+    FrameResourceRef material{};
     u32 submeshIndex = 0;
     u64 stableEntityKey = 0;
     RenderTransform3DInput worldTransform{};
@@ -203,8 +203,8 @@ struct RenderPerspectiveCamera final {
 };
 
 struct RenderMesh3DItem final {
-    u32 meshKey = 0;
-    u32 materialKey = 0;
+    FrameResourceRef mesh{};
+    FrameResourceRef material{};
     u32 submeshIndex = 0;
     u64 stableEntityKey = 0;
     u32 insertionOrder = 0;
@@ -222,8 +222,8 @@ struct RenderMesh3DItem final {
 struct RenderMesh3DBatch final {
     u32 firstItem = 0;
     u32 itemCount = 0;
-    u32 meshKey = 0;
-    u32 materialKey = 0;
+    FrameResourceRef mesh{};
+    FrameResourceRef material{};
     u32 submeshIndex = 0;
     bool doubleSided = false;
 };

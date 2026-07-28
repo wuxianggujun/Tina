@@ -1,20 +1,27 @@
 #include <tina/asset/AssetErrors.hpp>
-#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
+#include <tina/render/null/NullRenderDeviceFactory.hpp>
 
 #include "support/CatalogPackageTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <cstdlib>
+#include <limits>
 #include <memory_resource>
 #include <new>
 #include <optional>
 #include <span>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace Tina::Asset {
@@ -30,12 +37,14 @@ class ThrowingMemoryResource final : public std::pmr::memory_resource {
     {
     }
 
+    [[nodiscard]] Core::usize allocationAttempts() const noexcept { return m_allocationAttempts; }
     [[nodiscard]] Core::usize rejectedAllocations() const noexcept { return m_rejectedAllocations; }
     [[nodiscard]] Core::usize outstandingAllocations() const noexcept { return m_outstandingAllocations; }
 
   private:
     void* do_allocate(std::size_t bytes, std::size_t alignment) override
     {
+        ++m_allocationAttempts;
         if (bytes >= m_rejectedAllocationMinimumBytes)
         {
             ++m_rejectedAllocations;
@@ -58,18 +67,19 @@ class ThrowingMemoryResource final : public std::pmr::memory_resource {
     }
 
     std::size_t m_rejectedAllocationMinimumBytes = 0;
+    Core::usize m_allocationAttempts = 0;
     Core::usize m_rejectedAllocations = 0;
     Core::usize m_outstandingAllocations = 0;
 };
 
 class RecordingRenderDevice final : public Render::IRenderDevice {
   public:
-    struct MeshCall final {
+    struct MeshBindingCall final {
         Core::u32 bindingKey = 0;
         Render::GpuMeshId mesh{};
     };
 
-    struct MaterialCall final {
+    struct MaterialBindingCall final {
         Core::u32 bindingKey = 0;
         Render::Mesh3DMaterialBindingDesc binding{};
     };
@@ -86,83 +96,159 @@ class RecordingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Core::Status setMesh3DBinding(Core::u32 bindingKey,
                                                 Render::GpuMeshId mesh) noexcept override
     {
-        if (m_meshCallCount >= m_meshCalls.size())
+        m_meshBindingCalls[m_meshBindingCallCount++] = {.bindingKey = bindingKey, .mesh = mesh};
+        if (std::exchange(m_rejectNextMeshBinding, false))
         {
             return Core::failure(Render::RenderErrorCode::MeshUploadUnsupported,
-                                 "recording Mesh3D test device mesh call capacity exceeded");
-        }
-        m_meshCalls[m_meshCallCount++] = MeshCall{.bindingKey = bindingKey, .mesh = mesh};
-        if (m_rejectNextMeshUpdate)
-        {
-            m_rejectNextMeshUpdate = false;
-            return Core::failure(Render::RenderErrorCode::MeshUploadUnsupported,
-                                 "recording Mesh3D test device rejected mesh update");
+                                 "recording device rejected Mesh3D binding");
         }
         return Core::success();
     }
 
     [[nodiscard]] Core::Status setMesh3DMaterialBinding(
-        Core::u32 bindingKey, const Render::Mesh3DMaterialBindingDesc& binding) noexcept override
+        Core::u32 bindingKey,
+        const Render::Mesh3DMaterialBindingDesc& binding) noexcept override
     {
-        if (m_materialCallCount >= m_materialCalls.size())
+        m_materialBindingCalls[m_materialBindingCallCount++] = {
+            .bindingKey = bindingKey,
+            .binding = binding,
+        };
+        if (std::exchange(m_rejectNextMaterialBinding, false))
         {
             return Core::failure(Render::RenderErrorCode::TextureUploadUnsupported,
-                                 "recording Mesh3D test device material call capacity exceeded");
-        }
-        m_materialCalls[m_materialCallCount++] = MaterialCall{.bindingKey = bindingKey, .binding = binding};
-        if (m_rejectNextMaterialUpdate)
-        {
-            m_rejectNextMaterialUpdate = false;
-            return Core::failure(Render::RenderErrorCode::TextureUploadUnsupported,
-                                 "recording Mesh3D test device rejected material update");
+                                 "recording device rejected Mesh3D material binding");
         }
         return Core::success();
     }
 
     [[nodiscard]] Core::Status clearMesh3DMaterialBinding(Core::u32 bindingKey) noexcept override
     {
-        if (m_materialClearCount >= m_materialClears.size())
-        {
-            return Core::failure(Render::RenderErrorCode::TextureUploadUnsupported,
-                                 "recording Mesh3D test device clear call capacity exceeded");
-        }
         m_materialClears[m_materialClearCount++] = bindingKey;
-        if (m_rejectNextMaterialClear)
+        if (std::exchange(m_rejectNextMaterialClear, false))
         {
-            m_rejectNextMaterialClear = false;
             return Core::failure(Render::RenderErrorCode::TextureUploadUnsupported,
-                                 "recording Mesh3D test device rejected material clear");
+                                 "recording device rejected Mesh3D material clear");
         }
         return Core::success();
     }
 
-    void rejectNextMeshUpdate() noexcept { m_rejectNextMeshUpdate = true; }
-    void rejectNextMaterialUpdate() noexcept { m_rejectNextMaterialUpdate = true; }
-    void rejectNextMaterialClear() noexcept { m_rejectNextMaterialClear = true; }
-
-    [[nodiscard]] Core::usize meshCallCount() const noexcept { return m_meshCallCount; }
-    [[nodiscard]] Core::usize materialCallCount() const noexcept { return m_materialCallCount; }
-    [[nodiscard]] Core::usize materialClearCount() const noexcept { return m_materialClearCount; }
-    [[nodiscard]] const MeshCall& meshCall(Core::usize index) const noexcept { return m_meshCalls[index]; }
-    [[nodiscard]] const MaterialCall& materialCall(Core::usize index) const noexcept
+    [[nodiscard]] Core::Status validateTexture2D(Render::GpuTextureId texture) const noexcept override
     {
-        return m_materialCalls[index];
+        if (!texture)
+        {
+            return Core::failure(Render::RenderErrorCode::TextureNotFound,
+                                 "recording device rejected invalid Texture2D owner");
+        }
+        return Core::success();
     }
-    [[nodiscard]] Core::u32 materialClear(Core::usize index) const noexcept
+
+    [[nodiscard]] Core::Status retireTexture2D(
+        Render::GpuTextureId texture,
+        Render::FramePin& completionPin) noexcept override
     {
-        return m_materialClears[index];
+        ++m_textureRetirementAttempts;
+        if (m_rejectTextureRetirementAttempt == m_textureRetirementAttempts)
+        {
+            m_rejectTextureRetirementAttempt = 0;
+            return Core::failure(Render::RenderErrorCode::GpuRetirementUnsupported,
+                                 "recording device rejected Texture2D retirement");
+        }
+        m_retiredTextures[m_textureRetirementCount++] = texture;
+        completionPin.release();
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status retireStaticMesh(
+        Render::GpuMeshId mesh,
+        Render::FramePin& completionPin) noexcept override
+    {
+        ++m_meshRetirementAttempts;
+        if (m_rejectMeshRetirementAttempt == m_meshRetirementAttempts)
+        {
+            m_rejectMeshRetirementAttempt = 0;
+            return Core::failure(Render::RenderErrorCode::GpuRetirementUnsupported,
+                                 "recording device rejected StaticMesh retirement");
+        }
+        m_retiredMeshes[m_meshRetirementCount++] = mesh;
+        completionPin.release();
+        return Core::success();
+    }
+
+    void rejectNextMeshBinding() noexcept { m_rejectNextMeshBinding = true; }
+    void rejectNextMaterialBinding() noexcept { m_rejectNextMaterialBinding = true; }
+    void rejectNextMaterialClear() noexcept { m_rejectNextMaterialClear = true; }
+    void rejectNextTextureRetirement() noexcept
+    {
+        m_rejectTextureRetirementAttempt = m_textureRetirementAttempts + 1U;
+    }
+    void rejectNextMeshRetirement() noexcept
+    {
+        m_rejectMeshRetirementAttempt = m_meshRetirementAttempts + 1U;
+    }
+    void rejectTextureRetirementOnAttempt(Core::usize attempt) noexcept
+    {
+        m_rejectTextureRetirementAttempt = attempt;
+    }
+
+    [[nodiscard]] Core::usize meshBindingCallCount() const noexcept { return m_meshBindingCallCount; }
+    [[nodiscard]] Core::usize materialBindingCallCount() const noexcept { return m_materialBindingCallCount; }
+    [[nodiscard]] Core::usize materialClearCount() const noexcept { return m_materialClearCount; }
+    [[nodiscard]] Core::usize textureRetirementAttempts() const noexcept { return m_textureRetirementAttempts; }
+    [[nodiscard]] Core::usize textureRetirementCount() const noexcept { return m_textureRetirementCount; }
+    [[nodiscard]] Core::usize meshRetirementAttempts() const noexcept { return m_meshRetirementAttempts; }
+    [[nodiscard]] Core::usize meshRetirementCount() const noexcept { return m_meshRetirementCount; }
+    [[nodiscard]] const MeshBindingCall& meshBindingCall(Core::usize index) const noexcept
+    {
+        return m_meshBindingCalls[index];
+    }
+    [[nodiscard]] const MaterialBindingCall& materialBindingCall(Core::usize index) const noexcept
+    {
+        return m_materialBindingCalls[index];
+    }
+    [[nodiscard]] Render::GpuTextureId retiredTexture(Core::usize index) const noexcept
+    {
+        return m_retiredTextures[index];
+    }
+    [[nodiscard]] Render::GpuMeshId retiredMesh(Core::usize index) const noexcept
+    {
+        return m_retiredMeshes[index];
     }
 
   private:
-    std::array<MeshCall, 1024> m_meshCalls{};
-    std::array<MaterialCall, 1024> m_materialCalls{};
-    std::array<Core::u32, 1024> m_materialClears{};
-    Core::usize m_meshCallCount = 0;
-    Core::usize m_materialCallCount = 0;
+    std::array<MeshBindingCall, 64> m_meshBindingCalls{};
+    std::array<MaterialBindingCall, 64> m_materialBindingCalls{};
+    std::array<Core::u32, 64> m_materialClears{};
+    std::array<Render::GpuTextureId, 64> m_retiredTextures{};
+    std::array<Render::GpuMeshId, 64> m_retiredMeshes{};
+    Core::usize m_meshBindingCallCount = 0;
+    Core::usize m_materialBindingCallCount = 0;
     Core::usize m_materialClearCount = 0;
-    bool m_rejectNextMeshUpdate = false;
-    bool m_rejectNextMaterialUpdate = false;
+    Core::usize m_textureRetirementAttempts = 0;
+    Core::usize m_textureRetirementCount = 0;
+    Core::usize m_meshRetirementAttempts = 0;
+    Core::usize m_meshRetirementCount = 0;
+    Core::usize m_rejectTextureRetirementAttempt = 0;
+    Core::usize m_rejectMeshRetirementAttempt = 0;
+    bool m_rejectNextMeshBinding = false;
+    bool m_rejectNextMaterialBinding = false;
     bool m_rejectNextMaterialClear = false;
+};
+
+class RejectingFrameResourceSink final : public Render::FrameResourceSink {
+  public:
+    [[nodiscard]] Core::Result<Render::FrameResourceRef>
+    intern(Render::FrameResourceDescriptor, Render::FramePin&&) noexcept override
+    {
+        ++m_callCount;
+        return Core::failure(Render::RenderErrorCode::InvalidFrameResource,
+                             "test sink rejected frame resource");
+    }
+
+    [[nodiscard]] Core::u32 resourceCount() const noexcept override { return 0; }
+    [[nodiscard]] Core::usize callCount() const noexcept { return m_callCount; }
+
+  private:
+    Core::usize m_callCount = 0;
 };
 
 [[nodiscard]] CookedAssetFile loadCooked(std::pmr::memory_resource& memory,
@@ -175,655 +261,1014 @@ class RecordingRenderDevice final : public Render::IRenderDevice {
     }
     std::pmr::vector<std::byte> owned{&memory};
     owned.assign(bytes->begin(), bytes->end());
-    auto file = makeCookedAssetFileFromBytes(std::move(owned), CookedAssetFileLoadConfig{.memoryResource = &memory});
+    auto file = makeCookedAssetFileFromBytes(
+        std::move(owned), CookedAssetFileLoadConfig{.memoryResource = &memory});
     EXPECT_TRUE(file.has_value()) << (file ? "" : file.error().message);
     return file ? std::move(*file) : CookedAssetFile{};
 }
 
 [[nodiscard]] CookedAssetFile makeMesh(std::pmr::memory_resource& memory, Core::u8 seed)
 {
-    constexpr std::array payload{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}};
-    return loadCooked(memory, AssetFormat::writeCookedAssetBytes(AssetFormat::CookedAssetWriteDesc{
-                                  .assetKind = AssetFormat::AssetKind::StaticMesh,
-                                  .assetTypeVersion = 1,
-                                  .assetId = assetId(seed),
-                                  .payload = payload,
-                              }));
+    constexpr std::array payload{
+        std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}};
+    return loadCooked(memory, AssetFormat::writeCookedAssetBytes(
+                                  AssetFormat::CookedAssetWriteDesc{
+                                      .assetKind = AssetFormat::AssetKind::StaticMesh,
+                                      .assetTypeVersion = 1,
+                                      .assetId = assetId(seed),
+                                      .payload = payload,
+                                  }));
 }
 
 [[nodiscard]] CookedAssetFile makeTexture(std::pmr::memory_resource& memory, Core::u8 seed)
 {
-    constexpr std::array pixels{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0xFF}};
-    return loadCooked(memory,
-                      AssetFormat::writeCookedTexture2DAsset(
-                          assetId(seed), AssetFormat::Texture2DPayloadDesc{.width = 1, .height = 1, .pixels = pixels}));
+    constexpr std::array pixels{
+        std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0xFF}};
+    return loadCooked(
+        memory,
+        AssetFormat::writeCookedTexture2DAsset(
+            assetId(seed),
+            AssetFormat::Texture2DPayloadDesc{.width = 1, .height = 1, .pixels = pixels}));
 }
 
-[[nodiscard]] CookedAssetFile makeMaterial(std::pmr::memory_resource& memory, Core::u8 seed,
-                                           AssetFormat::MaterialPayloadDesc desc = {})
+[[nodiscard]] CookedAssetFile makeMaterial(
+    std::pmr::memory_resource& memory,
+    Core::u8 seed,
+    AssetFormat::MaterialPayloadDesc desc = {})
 {
     return loadCooked(memory, AssetFormat::writeCookedMaterialAsset(assetId(seed), desc));
 }
 
-[[nodiscard]] CookedAssetFile makeMaterialWithDependencies(
-    std::pmr::memory_resource& memory, Core::u8 seed, const AssetFormat::MaterialPayloadDesc& desc,
-    std::span<const AssetFormat::CookedAssetWriteDependency> dependencies)
+[[nodiscard]] Core::Result<AssetSystem> makeAssetSystem(
+    std::pmr::memory_resource& memory,
+    Core::usize capacity = 32U)
 {
-    auto payload = AssetFormat::writeMaterialPayloadBytes(desc);
-    EXPECT_TRUE(payload.has_value()) << (payload ? "" : payload.error().message);
-    if (!payload)
+    return AssetSystem::Create(AssetSystemConfig{
+        .storeCapacity = capacity,
+        .memoryResource = &memory,
+        .batch = CookedAssetBatchLoadConfig{
+            .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+            .memoryResource = &memory,
+        },
+    });
+}
+
+class AutoRetiringRegistry final {
+  public:
+    explicit AutoRetiringRegistry(Core::Result<Mesh3DBindingRegistry> registry) noexcept
+        : m_registry(std::move(registry))
     {
-        return {};
     }
-    return loadCooked(memory, AssetFormat::writeCookedAssetBytes(AssetFormat::CookedAssetWriteDesc{
-                                  .assetKind = AssetFormat::AssetKind::Material,
-                                  .assetTypeVersion = AssetFormat::MaterialWire::SchemaVersion,
-                                  .assetId = assetId(seed),
-                                  .dependencies = dependencies,
-                                  .payload = *payload,
-                              }));
-}
 
-[[nodiscard]] Core::Result<AssetStore> makeStore(std::pmr::memory_resource& memory, Core::usize capacity = 32U)
+    ~AutoRetiringRegistry() noexcept
+    {
+        if (m_registry &&
+            (m_registry->meshBindingCount() != 0 || m_registry->materialBindingCount() != 0 ||
+             m_registry->textureOwnerCount() != 0) &&
+            !m_registry->retireAllBindings())
+        {
+            std::terminate();
+        }
+    }
+
+    AutoRetiringRegistry(const AutoRetiringRegistry&) = delete;
+    AutoRetiringRegistry& operator=(const AutoRetiringRegistry&) = delete;
+    AutoRetiringRegistry(AutoRetiringRegistry&&) noexcept = default;
+    AutoRetiringRegistry& operator=(AutoRetiringRegistry&&) = delete;
+
+    [[nodiscard]] bool has_value() const noexcept { return m_registry.has_value(); }
+    [[nodiscard]] explicit operator bool() const noexcept { return m_registry.has_value(); }
+    [[nodiscard]] decltype(auto) error() const { return m_registry.error(); }
+    [[nodiscard]] Mesh3DBindingRegistry& operator*() noexcept { return *m_registry; }
+    [[nodiscard]] const Mesh3DBindingRegistry& operator*() const noexcept { return *m_registry; }
+    [[nodiscard]] Mesh3DBindingRegistry* operator->() noexcept { return &*m_registry; }
+    [[nodiscard]] const Mesh3DBindingRegistry* operator->() const noexcept { return &*m_registry; }
+
+  private:
+    Core::Result<Mesh3DBindingRegistry> m_registry;
+};
+
+[[nodiscard]] AutoRetiringRegistry makeRegistry(
+    AssetSystem& assets,
+    Render::IRenderDevice& device,
+    Mesh3DBindingRegistryConfig config = {})
 {
-    return AssetStore::Create(AssetStoreConfig{.capacity = capacity, .memoryResource = &memory});
+    return AutoRetiringRegistry{Mesh3DBindingRegistry::Create(assets, device, config)};
 }
 
-[[nodiscard]] Mesh3DMaterialGpuBindingDesc oneTextureBinding(AssetHandle texture,
-                                                             Render::GpuTextureId gpuTexture) noexcept
+[[nodiscard]] Core::usize retirementRecordCount(
+    const AssetSystem& assets,
+    AssetRetirementKind kind) noexcept
 {
-    return Mesh3DMaterialGpuBindingDesc{
-        .baseColor = Mesh3DMaterialTextureBinding{.textureAsset = texture, .gpuTexture = gpuTexture},
-    };
+    return static_cast<Core::usize>(std::ranges::count_if(
+        assets.retirement().records(),
+        [kind](const AssetRetirementRecord& record) noexcept { return record.kind == kind; }));
 }
 
-TEST(Mesh3DBindingRegistryTests, CreateValidatesCapacityBoundsAndReportsPmrAllocationFailure)
+void destroyMesh3DRegistryWithOwnedBinding()
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
+    auto assets = makeAssetSystem(memory);
+    if (!assets)
+    {
+        std::abort();
+    }
+    auto mesh = assets->store().publish(makeMesh(memory, 1U));
+    if (!mesh)
+    {
+        std::abort();
+    }
+    RecordingRenderDevice device;
+    auto registry = Mesh3DBindingRegistry::Create(*assets, device);
+    if (!registry)
+    {
+        std::abort();
+    }
+    Render::GpuMeshId gpuMesh{1U, 1U};
+    if (!registry->registerMeshBinding(*mesh, gpuMesh))
+    {
+        std::abort();
+    }
+}
+
+TEST(Mesh3DBindingRegistryTests, CreateValidatesAllCapacitiesAndMapsPmrFailure)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
     RecordingRenderDevice device;
 
-    auto zeroMesh = Mesh3DBindingRegistry::Create(
-        *store, device, Mesh3DBindingRegistryConfig{.meshCapacity = 0, .materialCapacity = 1,
-                                                    .memoryResource = &memory});
-    ASSERT_FALSE(zeroMesh.has_value());
-    EXPECT_EQ(zeroMesh.error().code, AssetErrorCode::InvalidCatalogConfig);
-    auto zeroMaterial = Mesh3DBindingRegistry::Create(
-        *store, device, Mesh3DBindingRegistryConfig{.meshCapacity = 1, .materialCapacity = 0,
-                                                    .memoryResource = &memory});
-    ASSERT_FALSE(zeroMaterial.has_value());
-    EXPECT_EQ(zeroMaterial.error().code, AssetErrorCode::InvalidCatalogConfig);
-    auto excessive = Mesh3DBindingRegistry::Create(
-        *store, device,
-        Mesh3DBindingRegistryConfig{.meshCapacity = MaximumMesh3DBindingCapacity + 1U,
-                                    .materialCapacity = MaximumMesh3DBindingCapacity + 1U,
-                                    .memoryResource = &memory});
-    ASSERT_FALSE(excessive.has_value());
-    EXPECT_EQ(excessive.error().code, AssetErrorCode::InvalidCatalogConfig);
+    for (const Mesh3DBindingRegistryConfig config : std::array{
+             Mesh3DBindingRegistryConfig{.meshCapacity = 0, .materialCapacity = 1, .textureCapacity = 1},
+             Mesh3DBindingRegistryConfig{.meshCapacity = 1, .materialCapacity = 0, .textureCapacity = 1},
+             Mesh3DBindingRegistryConfig{.meshCapacity = 1, .materialCapacity = 1, .textureCapacity = 0},
+         })
+    {
+        auto rejected = Mesh3DBindingRegistry::Create(*assets, device, config);
+        ASSERT_FALSE(rejected.has_value());
+        EXPECT_EQ(rejected.error().code, AssetErrorCode::InvalidCatalogConfig);
+    }
+
+    for (const Mesh3DBindingRegistryConfig config : std::array{
+             Mesh3DBindingRegistryConfig{
+                 .meshCapacity = MaximumMesh3DBindingCapacity + 1U,
+                 .materialCapacity = 1,
+                 .textureCapacity = 1,
+             },
+             Mesh3DBindingRegistryConfig{
+                 .meshCapacity = 1,
+                 .materialCapacity = MaximumMesh3DBindingCapacity + 1U,
+                 .textureCapacity = 1,
+             },
+             Mesh3DBindingRegistryConfig{
+                 .meshCapacity = 1,
+                 .materialCapacity = 1,
+                 .textureCapacity = MaximumMesh3DTextureCapacity + 1U,
+             },
+         })
+    {
+        auto rejected = Mesh3DBindingRegistry::Create(*assets, device, config);
+        ASSERT_FALSE(rejected.has_value());
+        EXPECT_EQ(rejected.error().code, AssetErrorCode::InvalidCatalogConfig);
+    }
 
     ThrowingMemoryResource throwingMemory{64U};
     auto allocationFailure = Mesh3DBindingRegistry::Create(
-        *store, device, Mesh3DBindingRegistryConfig{.memoryResource = &throwingMemory});
+        *assets, device,
+        Mesh3DBindingRegistryConfig{.memoryResource = &throwingMemory});
     ASSERT_FALSE(allocationFailure.has_value());
     EXPECT_EQ(allocationFailure.error().code, AssetErrorCode::AllocationFailed);
+    EXPECT_GE(throwingMemory.allocationAttempts(), 1U);
     EXPECT_EQ(throwingMemory.rejectedAllocations(), 1U);
     EXPECT_EQ(throwingMemory.outstandingAllocations(), 0U);
 }
 
-TEST(Mesh3DBindingRegistryTests, RegistersMeshAndDerivesMaterialFactorsFromCookedPayload)
+TEST(Mesh3DBindingRegistryTests, CapacityFailuresPreserveCandidatesLeasesAndExistingEntries)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto mesh = store->publish(makeMesh(memory, 1U));
-    auto material = store->publish(makeMaterial(memory, 2U, AssetFormat::MaterialPayloadDesc{
-                                                                .metallicFactor = 0.25F,
-                                                                .roughnessFactor = 0.75F,
-                                                            }));
-    ASSERT_TRUE(mesh.has_value());
-    ASSERT_TRUE(material.has_value());
-    RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(
-        *store, device, Mesh3DBindingRegistryConfig{.meshCapacity = 2, .materialCapacity = 2,
-                                                    .memoryResource = &memory});
-    ASSERT_TRUE(registry.has_value()) << registry.error().message;
-
-    auto meshKey = registry->registerMeshBinding(*mesh, Render::GpuMeshId{7U, 3U});
-    auto materialKey = registry->registerMaterialBinding(*material, {});
-    ASSERT_TRUE(meshKey.has_value()) << meshKey.error().message;
-    ASSERT_TRUE(materialKey.has_value()) << materialKey.error().message;
-    EXPECT_EQ(*meshKey, 2U);
-    EXPECT_EQ(*materialKey, 2U);
-    EXPECT_EQ(registry->meshCapacity(), 2U);
-    EXPECT_EQ(registry->materialCapacity(), 2U);
-    EXPECT_EQ(registry->meshBindingCount(), 1U);
-    EXPECT_EQ(registry->materialBindingCount(), 1U);
-    EXPECT_EQ(registry->resolveMesh(*mesh), *meshKey);
-    EXPECT_EQ(registry->resolveMaterial(*material), *materialKey);
-    ASSERT_EQ(device.meshCallCount(), 1U);
-    EXPECT_EQ(device.meshCall(0).bindingKey, *meshKey);
-    EXPECT_EQ(device.meshCall(0).mesh, (Render::GpuMeshId{7U, 3U}));
-    ASSERT_EQ(device.materialCallCount(), 1U);
-    const auto& renderBinding = device.materialCall(0).binding;
-    EXPECT_FALSE(renderBinding.baseColorTexture);
-    EXPECT_FALSE(renderBinding.metallicRoughnessTexture);
-    EXPECT_FALSE(renderBinding.normalTexture);
-    EXPECT_FLOAT_EQ(renderBinding.metallicFactor, 0.25F);
-    EXPECT_FLOAT_EQ(renderBinding.roughnessFactor, 0.75F);
-}
-
-TEST(Mesh3DBindingRegistryTests, MaterialRolesRequireExactCookedTextureDependencies)
-{
-    TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    const Core::AssetId baseColorTextureId = assetId(1U);
-    const Core::AssetId normalTextureId = assetId(2U);
-    auto baseColorTexture = store->publish(makeTexture(memory, 1U));
-    auto normalTexture = store->publish(makeTexture(memory, 2U));
-    const AssetFormat::MaterialPayloadDesc materialDesc{
-        .metallicFactor = 0.4F,
-        .roughnessFactor = 0.6F,
-        .baseColorTextureId = baseColorTextureId,
-        .normalTextureId = normalTextureId,
-    };
-    auto material = store->publish(makeMaterial(memory, 3U, materialDesc));
-    ASSERT_TRUE(baseColorTexture.has_value());
-    ASSERT_TRUE(normalTexture.has_value());
-    ASSERT_TRUE(material.has_value());
-    RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(*store, device);
-    ASSERT_TRUE(registry.has_value());
-    constexpr Render::GpuTextureId BaseColorGpuTexture{8U, 2U};
-    constexpr Render::GpuTextureId NormalGpuTexture{9U, 2U};
-    const Mesh3DMaterialTextureBinding baseColorRole{
-        .textureAsset = *baseColorTexture,
-        .gpuTexture = BaseColorGpuTexture,
-    };
-    const Mesh3DMaterialTextureBinding normalRole{
-        .textureAsset = *normalTexture,
-        .gpuTexture = NormalGpuTexture,
-    };
-
-    const auto swapped = registry->registerMaterialBinding(
-        *material, Mesh3DMaterialGpuBindingDesc{.baseColor = normalRole, .normal = baseColorRole});
-    ASSERT_FALSE(swapped.has_value());
-    EXPECT_EQ(swapped.error().code, AssetErrorCode::InvalidCatalogConfig);
-    EXPECT_EQ(device.materialCallCount(), 0U);
-    auto key = registry->registerMaterialBinding(
-        *material, Mesh3DMaterialGpuBindingDesc{.baseColor = baseColorRole, .normal = normalRole});
-    ASSERT_TRUE(key.has_value()) << key.error().message;
-    ASSERT_EQ(device.materialCallCount(), 1U);
-    const auto& renderBinding = device.materialCall(0).binding;
-    EXPECT_EQ(renderBinding.baseColorTexture, BaseColorGpuTexture);
-    EXPECT_FALSE(renderBinding.metallicRoughnessTexture);
-    EXPECT_EQ(renderBinding.normalTexture, NormalGpuTexture);
-    EXPECT_FLOAT_EQ(renderBinding.metallicFactor, 0.4F);
-    EXPECT_FLOAT_EQ(renderBinding.roughnessFactor, 0.6F);
-
-    auto undeclaredMaterial = store->publish(makeMaterial(memory, 4U));
-    ASSERT_TRUE(undeclaredMaterial.has_value());
-    const auto undeclared = registry->registerMaterialBinding(
-        *undeclaredMaterial, oneTextureBinding(*baseColorTexture, BaseColorGpuTexture));
-    ASSERT_FALSE(undeclared.has_value());
-    EXPECT_EQ(undeclared.error().code, AssetErrorCode::InvalidCatalogConfig);
-
-    const std::array wrongFlags{
-        AssetFormat::CookedAssetWriteDependency{
-            .assetId = baseColorTextureId,
-            .expectedKind = AssetFormat::AssetKind::Texture2D,
-            .flags = AssetFormat::DependencyFlags::Required | AssetFormat::DependencyFlags::Deferred,
-        },
-    };
-    auto malformed = store->publish(makeMaterialWithDependencies(
-        memory, 5U, AssetFormat::MaterialPayloadDesc{.baseColorTextureId = baseColorTextureId}, wrongFlags));
-    ASSERT_TRUE(malformed.has_value());
-    const auto wrongDependency = registry->registerMaterialBinding(
-        *malformed, oneTextureBinding(*baseColorTexture, BaseColorGpuTexture));
-    ASSERT_FALSE(wrongDependency.has_value());
-    EXPECT_EQ(wrongDependency.error().code, AssetErrorCode::InvalidCatalogConfig);
-    EXPECT_EQ(device.materialCallCount(), 1U);
-}
-
-TEST(Mesh3DBindingRegistryTests, RegistrationRejectsInvalidStaleCrossStoreWrongKindAndNotReadyHandles)
-{
-    TrackingMemoryResource memory;
-    TrackingMemoryResource foreignMemory;
-    auto store = makeStore(memory);
-    auto foreignStore = makeStore(foreignMemory);
-    ASSERT_TRUE(store.has_value());
-    ASSERT_TRUE(foreignStore.has_value());
-    auto mesh = store->publish(makeMesh(memory, 1U));
-    auto material = store->publish(makeMaterial(memory, 2U));
-    auto staleMesh = store->publish(makeMesh(memory, 3U));
-    auto staleMaterial = store->publish(makeMaterial(memory, 4U));
-    auto queuedMesh = store->beginQueued(assetId(5U), AssetFormat::AssetKind::StaticMesh);
-    auto queuedMaterial = store->beginQueued(assetId(6U), AssetFormat::AssetKind::Material);
-    auto foreignMesh = foreignStore->publish(makeMesh(foreignMemory, 7U));
-    auto foreignMaterial = foreignStore->publish(makeMaterial(foreignMemory, 8U));
-    ASSERT_TRUE(mesh.has_value());
-    ASSERT_TRUE(material.has_value());
-    ASSERT_TRUE(staleMesh.has_value());
-    ASSERT_TRUE(staleMaterial.has_value());
-    ASSERT_TRUE(queuedMesh.has_value());
-    ASSERT_TRUE(queuedMaterial.has_value());
-    ASSERT_TRUE(foreignMesh.has_value());
-    ASSERT_TRUE(foreignMaterial.has_value());
-    ASSERT_TRUE(store->unload(*staleMesh).has_value());
-    ASSERT_TRUE(store->unload(*staleMaterial).has_value());
-
-    RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(*store, device);
-    ASSERT_TRUE(registry.has_value());
-    constexpr Render::GpuMeshId GpuMesh{1U, 1U};
-
-    const auto emptyMesh = registry->registerMeshBinding({}, GpuMesh);
-    ASSERT_FALSE(emptyMesh.has_value());
-    EXPECT_EQ(emptyMesh.error().code, AssetErrorCode::InvalidHandle);
-    const auto wrongMeshKind = registry->registerMeshBinding(*material, GpuMesh);
-    ASSERT_FALSE(wrongMeshKind.has_value());
-    EXPECT_EQ(wrongMeshKind.error().code, AssetErrorCode::InvalidHandle);
-    const auto staleMeshResult = registry->registerMeshBinding(*staleMesh, GpuMesh);
-    ASSERT_FALSE(staleMeshResult.has_value());
-    EXPECT_EQ(staleMeshResult.error().code, AssetErrorCode::InvalidHandle);
-    const auto foreignMeshResult = registry->registerMeshBinding(*foreignMesh, GpuMesh);
-    ASSERT_FALSE(foreignMeshResult.has_value());
-    EXPECT_EQ(foreignMeshResult.error().code, AssetErrorCode::InvalidHandle);
-    const auto queuedMeshResult = registry->registerMeshBinding(*queuedMesh, GpuMesh);
-    ASSERT_FALSE(queuedMeshResult.has_value());
-    EXPECT_EQ(queuedMeshResult.error().code, AssetErrorCode::AssetNotReady);
-    const auto invalidGpuMesh = registry->registerMeshBinding(*mesh, {});
-    ASSERT_FALSE(invalidGpuMesh.has_value());
-    EXPECT_EQ(invalidGpuMesh.error().code, Render::RenderErrorCode::InvalidMeshUpload);
-
-    const auto emptyMaterial = registry->registerMaterialBinding({}, {});
-    ASSERT_FALSE(emptyMaterial.has_value());
-    EXPECT_EQ(emptyMaterial.error().code, AssetErrorCode::InvalidHandle);
-    const auto wrongMaterialKind = registry->registerMaterialBinding(*mesh, {});
-    ASSERT_FALSE(wrongMaterialKind.has_value());
-    EXPECT_EQ(wrongMaterialKind.error().code, AssetErrorCode::InvalidHandle);
-    const auto staleMaterialResult = registry->registerMaterialBinding(*staleMaterial, {});
-    ASSERT_FALSE(staleMaterialResult.has_value());
-    EXPECT_EQ(staleMaterialResult.error().code, AssetErrorCode::InvalidHandle);
-    const auto foreignMaterialResult = registry->registerMaterialBinding(*foreignMaterial, {});
-    ASSERT_FALSE(foreignMaterialResult.has_value());
-    EXPECT_EQ(foreignMaterialResult.error().code, AssetErrorCode::InvalidHandle);
-    const auto queuedMaterialResult = registry->registerMaterialBinding(*queuedMaterial, {});
-    ASSERT_FALSE(queuedMaterialResult.has_value());
-    EXPECT_EQ(queuedMaterialResult.error().code, AssetErrorCode::AssetNotReady);
-    EXPECT_EQ(device.meshCallCount(), 0U);
-    EXPECT_EQ(device.materialCallCount(), 0U);
-}
-
-TEST(Mesh3DBindingRegistryTests, MaterialRegistrationRejectsInvalidTextureRoleInputs)
-{
-    TrackingMemoryResource memory;
-    TrackingMemoryResource foreignMemory;
-    auto store = makeStore(memory);
-    auto foreignStore = makeStore(foreignMemory);
-    ASSERT_TRUE(store.has_value());
-    ASSERT_TRUE(foreignStore.has_value());
-    const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto material = store->publish(makeMaterial(
-        memory, 2U, AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
-    auto staleTexture = store->publish(makeTexture(memory, 3U));
-    auto queuedTexture = store->beginQueued(assetId(4U), AssetFormat::AssetKind::Texture2D);
-    auto wrongKind = store->publish(makeMesh(memory, 5U));
-    auto foreignTexture = foreignStore->publish(makeTexture(foreignMemory, 6U));
-    ASSERT_TRUE(texture.has_value());
-    ASSERT_TRUE(material.has_value());
-    ASSERT_TRUE(staleTexture.has_value());
-    ASSERT_TRUE(queuedTexture.has_value());
-    ASSERT_TRUE(wrongKind.has_value());
-    ASSERT_TRUE(foreignTexture.has_value());
-    ASSERT_TRUE(store->unload(*staleTexture).has_value());
-    RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(*store, device);
-    ASSERT_TRUE(registry.has_value());
-    constexpr Render::GpuTextureId GpuTexture{1U, 1U};
-
-    const auto missingGpu = registry->registerMaterialBinding(
-        *material, Mesh3DMaterialGpuBindingDesc{.baseColor = {.textureAsset = *texture}});
-    ASSERT_FALSE(missingGpu.has_value());
-    EXPECT_EQ(missingGpu.error().code, AssetErrorCode::InvalidHandle);
-    const auto wrongKindResult = registry->registerMaterialBinding(
-        *material, oneTextureBinding(*wrongKind, GpuTexture));
-    ASSERT_FALSE(wrongKindResult.has_value());
-    EXPECT_EQ(wrongKindResult.error().code, AssetErrorCode::InvalidHandle);
-    const auto stale = registry->registerMaterialBinding(
-        *material, oneTextureBinding(*staleTexture, GpuTexture));
-    ASSERT_FALSE(stale.has_value());
-    EXPECT_EQ(stale.error().code, AssetErrorCode::InvalidHandle);
-    const auto queued = registry->registerMaterialBinding(
-        *material, oneTextureBinding(*queuedTexture, GpuTexture));
-    ASSERT_FALSE(queued.has_value());
-    EXPECT_EQ(queued.error().code, AssetErrorCode::AssetNotReady);
-    const auto foreign = registry->registerMaterialBinding(
-        *material, oneTextureBinding(*foreignTexture, GpuTexture));
-    ASSERT_FALSE(foreign.has_value());
-    EXPECT_EQ(foreign.error().code, AssetErrorCode::InvalidHandle);
-    EXPECT_EQ(device.materialCallCount(), 0U);
-}
-
-TEST(Mesh3DBindingRegistryTests, IdempotencyConflictsAndCapacityPreserveExistingBindings)
-{
-    TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto mesh = store->publish(makeMesh(memory, 1U));
-    auto sameMeshId = store->publish(makeMesh(memory, 1U));
-    auto overflowMesh = store->publish(makeMesh(memory, 2U));
-    const Core::AssetId textureId = assetId(5U);
-    auto texture = store->publish(makeTexture(memory, 5U));
-    const AssetFormat::MaterialPayloadDesc texturedMaterialDesc{.baseColorTextureId = textureId};
-    auto material = store->publish(makeMaterial(memory, 3U, texturedMaterialDesc));
-    auto sameMaterialId = store->publish(makeMaterial(memory, 3U, texturedMaterialDesc));
-    auto overflowMaterial = store->publish(makeMaterial(memory, 4U));
-    ASSERT_TRUE(mesh.has_value());
-    ASSERT_TRUE(sameMeshId.has_value());
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto firstMesh = assets->store().publish(makeMesh(memory, 1U));
+    auto overflowMesh = assets->store().publish(makeMesh(memory, 2U));
+    auto firstTexture = assets->store().publish(makeTexture(memory, 3U));
+    auto overflowTexture = assets->store().publish(makeTexture(memory, 4U));
+    auto firstMaterial = assets->store().publish(makeMaterial(
+        memory, 5U,
+        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(3U)}));
+    auto overflowMaterial = assets->store().publish(makeMaterial(memory, 6U));
+    ASSERT_TRUE(firstMesh.has_value());
     ASSERT_TRUE(overflowMesh.has_value());
-    ASSERT_TRUE(texture.has_value());
-    ASSERT_TRUE(material.has_value());
-    ASSERT_TRUE(sameMaterialId.has_value());
+    ASSERT_TRUE(firstTexture.has_value());
+    ASSERT_TRUE(overflowTexture.has_value());
+    ASSERT_TRUE(firstMaterial.has_value());
     ASSERT_TRUE(overflowMaterial.has_value());
-    RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(
-        *store, device, Mesh3DBindingRegistryConfig{.meshCapacity = 1, .materialCapacity = 1,
-                                                    .memoryResource = &memory});
-    ASSERT_TRUE(registry.has_value());
-    constexpr Render::GpuMeshId GpuMesh{1U, 1U};
-    constexpr Render::GpuTextureId GpuTexture{1U, 1U};
-    const auto gpuBinding = oneTextureBinding(*texture, GpuTexture);
-    auto meshKey = registry->registerMeshBinding(*mesh, GpuMesh);
-    auto materialKey = registry->registerMaterialBinding(*material, gpuBinding);
-    ASSERT_TRUE(meshKey.has_value());
-    ASSERT_TRUE(materialKey.has_value());
 
-    auto duplicateMesh = registry->registerMeshBinding(*mesh, GpuMesh);
-    auto duplicateMaterial = registry->registerMaterialBinding(*material, gpuBinding);
-    ASSERT_TRUE(duplicateMesh.has_value());
-    ASSERT_TRUE(duplicateMaterial.has_value());
-    EXPECT_EQ(*duplicateMesh, *meshKey);
-    EXPECT_EQ(*duplicateMaterial, *materialKey);
-    const auto changedMesh = registry->registerMeshBinding(*mesh, Render::GpuMeshId{2U, 1U});
-    ASSERT_FALSE(changedMesh.has_value());
-    EXPECT_EQ(changedMesh.error().code, AssetErrorCode::Mesh3DBindingConflict);
-    const auto duplicateMeshId = registry->registerMeshBinding(*sameMeshId, Render::GpuMeshId{3U, 1U});
-    ASSERT_FALSE(duplicateMeshId.has_value());
-    EXPECT_EQ(duplicateMeshId.error().code, AssetErrorCode::Mesh3DBindingConflict);
-    const auto meshCapacity = registry->registerMeshBinding(*overflowMesh, Render::GpuMeshId{4U, 1U});
-    ASSERT_FALSE(meshCapacity.has_value());
-    EXPECT_EQ(meshCapacity.error().code, AssetErrorCode::Mesh3DBindingCapacityExceeded);
-    const auto changedMaterial = registry->registerMaterialBinding(
-        *material, oneTextureBinding(*texture, Render::GpuTextureId{2U, 1U}));
-    ASSERT_FALSE(changedMaterial.has_value());
-    EXPECT_EQ(changedMaterial.error().code, AssetErrorCode::Mesh3DBindingConflict);
-    const auto duplicateMaterialId = registry->registerMaterialBinding(*sameMaterialId, gpuBinding);
-    ASSERT_FALSE(duplicateMaterialId.has_value());
-    EXPECT_EQ(duplicateMaterialId.error().code, AssetErrorCode::Mesh3DBindingConflict);
-    const auto materialCapacity = registry->registerMaterialBinding(*overflowMaterial, {});
-    ASSERT_FALSE(materialCapacity.has_value());
-    EXPECT_EQ(materialCapacity.error().code, AssetErrorCode::Mesh3DBindingCapacityExceeded);
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(
+        *assets, device,
+        Mesh3DBindingRegistryConfig{
+            .meshCapacity = 1,
+            .materialCapacity = 1,
+            .textureCapacity = 1,
+            .memoryResource = &memory,
+        });
+    ASSERT_TRUE(registry.has_value());
+    Render::GpuMeshId firstGpuMesh{1U, 1U};
+    Render::GpuTextureId firstGpuTexture{2U, 1U};
+    auto firstMeshKey = registry->registerMeshBinding(*firstMesh, firstGpuMesh);
+    ASSERT_TRUE(firstMeshKey.has_value());
+    ASSERT_TRUE(registry->registerMaterialTexture(*firstTexture, firstGpuTexture).has_value());
+    auto firstMaterialKey = registry->registerMaterialBinding(*firstMaterial);
+    ASSERT_TRUE(firstMaterialKey.has_value());
+
+    constexpr Render::GpuMeshId OverflowGpuMesh{3U, 1U};
+    Render::GpuMeshId overflowGpuMesh = OverflowGpuMesh;
+    const auto rejectedMesh = registry->registerMeshBinding(*overflowMesh, overflowGpuMesh);
+    ASSERT_FALSE(rejectedMesh.has_value());
+    EXPECT_EQ(rejectedMesh.error().code, AssetErrorCode::Mesh3DBindingCapacityExceeded);
+    EXPECT_EQ(overflowGpuMesh, OverflowGpuMesh);
+
+    constexpr Render::GpuTextureId OverflowGpuTexture{4U, 1U};
+    Render::GpuTextureId overflowGpuTexture = OverflowGpuTexture;
+    const auto rejectedTexture =
+        registry->registerMaterialTexture(*overflowTexture, overflowGpuTexture);
+    ASSERT_FALSE(rejectedTexture.has_value());
+    EXPECT_EQ(rejectedTexture.error().code, AssetErrorCode::Mesh3DBindingCapacityExceeded);
+    EXPECT_EQ(overflowGpuTexture, OverflowGpuTexture);
+
+    const auto rejectedMaterial = registry->registerMaterialBinding(*overflowMaterial);
+    ASSERT_FALSE(rejectedMaterial.has_value());
+    EXPECT_EQ(rejectedMaterial.error().code, AssetErrorCode::Mesh3DBindingCapacityExceeded);
+
+    EXPECT_EQ(assets->store().leaseCount(*firstMesh), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*overflowMesh), 0U);
+    EXPECT_EQ(assets->store().leaseCount(*firstTexture), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*overflowTexture), 0U);
+    EXPECT_EQ(assets->store().leaseCount(*firstMaterial), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*overflowMaterial), 0U);
     EXPECT_EQ(registry->meshBindingCount(), 1U);
     EXPECT_EQ(registry->materialBindingCount(), 1U);
-    EXPECT_EQ(device.meshCallCount(), 1U);
-    EXPECT_EQ(device.materialCallCount(), 1U);
+    EXPECT_EQ(registry->textureOwnerCount(), 1U);
+    EXPECT_TRUE(registry->hasMaterialTexture(*firstTexture));
+    EXPECT_FALSE(registry->hasMaterialTexture(*overflowTexture));
+    ASSERT_EQ(device.meshBindingCallCount(), 1U);
+    EXPECT_EQ(device.meshBindingCall(0).bindingKey, *firstMeshKey);
+    ASSERT_EQ(device.materialBindingCallCount(), 1U);
+    EXPECT_EQ(device.materialBindingCall(0).bindingKey, *firstMaterialKey);
+
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1U).has_value());
+    auto meshResource = registry->internMeshFrameResource(*firstMesh, packet.resourceSink());
+    auto materialResource =
+        registry->internMaterialFrameResource(*firstMaterial, packet.resourceSink());
+    ASSERT_TRUE(meshResource.has_value());
+    ASSERT_TRUE(materialResource.has_value());
+    const auto* meshDescriptor = packet.resourceTableView().resolve(
+        *meshResource, Render::FrameResourceKind::Mesh3DGeometry);
+    const auto* materialDescriptor = packet.resourceTableView().resolve(
+        *materialResource, Render::FrameResourceKind::Mesh3DMaterial);
+    ASSERT_NE(meshDescriptor, nullptr);
+    ASSERT_NE(materialDescriptor, nullptr);
+    EXPECT_EQ(meshDescriptor->deviceBindingKey, *firstMeshKey);
+    EXPECT_EQ(materialDescriptor->deviceBindingKey, *firstMaterialKey);
+    ASSERT_TRUE(packet.abandon().has_value());
+    ASSERT_TRUE(registry->retireAllBindings().has_value());
 }
 
-TEST(Mesh3DBindingRegistryTests, BackendRegistrationFailureRollsBackWithoutConsumingKeys)
+TEST(Mesh3DBindingRegistryTests, ExactHandleAndAssetIdConflictsPreserveUniqueOwners)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto firstMesh = store->publish(makeMesh(memory, 1U));
-    auto secondMesh = store->publish(makeMesh(memory, 2U));
-    auto firstMaterial = store->publish(makeMaterial(memory, 3U));
-    auto secondMaterial = store->publish(makeMaterial(memory, 4U));
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto mesh = assets->store().publish(makeMesh(memory, 1U));
+    auto sameIdMesh = assets->store().publish(makeMesh(memory, 1U));
+    auto texture = assets->store().publish(makeTexture(memory, 2U));
+    auto sameIdTexture = assets->store().publish(makeTexture(memory, 2U));
+    auto material = assets->store().publish(makeMaterial(memory, 3U));
+    auto sameIdMaterial = assets->store().publish(makeMaterial(memory, 3U));
+    ASSERT_TRUE(mesh.has_value());
+    ASSERT_TRUE(sameIdMesh.has_value());
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(sameIdTexture.has_value());
+    ASSERT_TRUE(material.has_value());
+    ASSERT_TRUE(sameIdMaterial.has_value());
+
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(*assets, device);
+    ASSERT_TRUE(registry.has_value());
+    Render::GpuMeshId gpuMesh{1U, 1U};
+    Render::GpuTextureId gpuTexture{2U, 1U};
+    ASSERT_TRUE(registry->registerMeshBinding(*mesh, gpuMesh).has_value());
+    ASSERT_TRUE(registry->registerMaterialTexture(*texture, gpuTexture).has_value());
+    ASSERT_TRUE(registry->registerMaterialBinding(*material).has_value());
+
+    constexpr Render::GpuMeshId ExactMeshCandidate{3U, 1U};
+    Render::GpuMeshId exactMeshCandidate = ExactMeshCandidate;
+    const auto exactMesh = registry->registerMeshBinding(*mesh, exactMeshCandidate);
+    ASSERT_FALSE(exactMesh.has_value());
+    EXPECT_EQ(exactMesh.error().code, AssetErrorCode::Mesh3DBindingConflict);
+    EXPECT_EQ(exactMeshCandidate, ExactMeshCandidate);
+
+    constexpr Render::GpuMeshId SameIdMeshCandidate{4U, 1U};
+    Render::GpuMeshId sameIdMeshCandidate = SameIdMeshCandidate;
+    const auto duplicateMesh = registry->registerMeshBinding(*sameIdMesh, sameIdMeshCandidate);
+    ASSERT_FALSE(duplicateMesh.has_value());
+    EXPECT_EQ(duplicateMesh.error().code, AssetErrorCode::Mesh3DBindingConflict);
+    EXPECT_EQ(sameIdMeshCandidate, SameIdMeshCandidate);
+
+    constexpr Render::GpuTextureId ExactTextureCandidate{5U, 1U};
+    Render::GpuTextureId exactTextureCandidate = ExactTextureCandidate;
+    const auto exactTexture =
+        registry->registerMaterialTexture(*texture, exactTextureCandidate);
+    ASSERT_FALSE(exactTexture.has_value());
+    EXPECT_EQ(exactTexture.error().code, AssetErrorCode::Mesh3DBindingConflict);
+    EXPECT_EQ(exactTextureCandidate, ExactTextureCandidate);
+
+    constexpr Render::GpuTextureId SameIdTextureCandidate{6U, 1U};
+    Render::GpuTextureId sameIdTextureCandidate = SameIdTextureCandidate;
+    const auto duplicateTexture =
+        registry->registerMaterialTexture(*sameIdTexture, sameIdTextureCandidate);
+    ASSERT_FALSE(duplicateTexture.has_value());
+    EXPECT_EQ(duplicateTexture.error().code, AssetErrorCode::Mesh3DBindingConflict);
+    EXPECT_EQ(sameIdTextureCandidate, SameIdTextureCandidate);
+
+    const auto exactMaterial = registry->registerMaterialBinding(*material);
+    ASSERT_FALSE(exactMaterial.has_value());
+    EXPECT_EQ(exactMaterial.error().code, AssetErrorCode::Mesh3DBindingConflict);
+    const auto duplicateMaterial = registry->registerMaterialBinding(*sameIdMaterial);
+    ASSERT_FALSE(duplicateMaterial.has_value());
+    EXPECT_EQ(duplicateMaterial.error().code, AssetErrorCode::Mesh3DBindingConflict);
+
+    EXPECT_EQ(assets->store().leaseCount(*mesh), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*sameIdMesh), 0U);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*sameIdTexture), 0U);
+    EXPECT_EQ(assets->store().leaseCount(*material), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*sameIdMaterial), 0U);
+    EXPECT_EQ(registry->meshBindingCount(), 1U);
+    EXPECT_EQ(registry->materialBindingCount(), 1U);
+    EXPECT_EQ(registry->textureOwnerCount(), 1U);
+    EXPECT_EQ(device.meshBindingCallCount(), 1U);
+    EXPECT_EQ(device.materialBindingCallCount(), 1U);
+    ASSERT_TRUE(registry->retireAllBindings().has_value());
+}
+
+TEST(Mesh3DBindingRegistryTests, RegistrationTransfersGpuAndLeaseOwnersAndDerivesMaterial)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    const Core::AssetId textureId = assetId(2U);
+    auto mesh = assets->store().publish(makeMesh(memory, 1U));
+    auto texture = assets->store().publish(makeTexture(memory, 2U));
+    auto material = assets->store().publish(makeMaterial(
+        memory, 3U,
+        AssetFormat::MaterialPayloadDesc{
+            .metallicFactor = 0.25F,
+            .roughnessFactor = 0.75F,
+            .baseColorTextureId = textureId,
+        }));
+    ASSERT_TRUE(mesh.has_value());
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(material.has_value());
+
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(
+        *assets, device,
+        Mesh3DBindingRegistryConfig{
+            .meshCapacity = 2,
+            .materialCapacity = 2,
+            .textureCapacity = 2,
+            .memoryResource = &memory,
+        });
+    ASSERT_TRUE(registry.has_value()) << registry.error().message;
+    constexpr Render::GpuMeshId ExpectedMesh{7U, 3U};
+    constexpr Render::GpuTextureId ExpectedTexture{8U, 4U};
+    Render::GpuMeshId gpuMesh = ExpectedMesh;
+    Render::GpuTextureId gpuTexture = ExpectedTexture;
+
+    auto meshKey = registry->registerMeshBinding(*mesh, gpuMesh);
+    ASSERT_TRUE(meshKey.has_value()) << meshKey.error().message;
+    ASSERT_TRUE(registry->registerMaterialTexture(*texture, gpuTexture).has_value());
+    auto materialKey = registry->registerMaterialBinding(*material);
+    ASSERT_TRUE(materialKey.has_value()) << materialKey.error().message;
+
+    EXPECT_FALSE(gpuMesh);
+    EXPECT_FALSE(gpuTexture);
+    EXPECT_EQ(assets->store().leaseCount(*mesh), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*material), 1U);
+    EXPECT_EQ(registry->meshBindingCount(), 1U);
+    EXPECT_EQ(registry->materialBindingCount(), 1U);
+    EXPECT_EQ(registry->textureOwnerCount(), 1U);
+    ASSERT_EQ(device.meshBindingCallCount(), 1U);
+    EXPECT_EQ(device.meshBindingCall(0).mesh, ExpectedMesh);
+    ASSERT_EQ(device.materialBindingCallCount(), 1U);
+    const auto& binding = device.materialBindingCall(0).binding;
+    EXPECT_EQ(binding.baseColorTexture, ExpectedTexture);
+    EXPECT_FALSE(binding.metallicRoughnessTexture);
+    EXPECT_FALSE(binding.normalTexture);
+    EXPECT_FLOAT_EQ(binding.metallicFactor, 0.25F);
+    EXPECT_FLOAT_EQ(binding.roughnessFactor, 0.75F);
+
+    ASSERT_TRUE(registry->retireAllBindings().has_value());
+    EXPECT_EQ(assets->state(*mesh), AssetLogicalState::Unloaded);
+    EXPECT_EQ(assets->state(*texture), AssetLogicalState::Unloaded);
+    EXPECT_EQ(assets->state(*material), AssetLogicalState::Unloaded);
+    EXPECT_EQ(device.meshRetirementCount(), 1U);
+    EXPECT_EQ(device.textureRetirementCount(), 1U);
+    EXPECT_EQ(device.retiredMesh(0), ExpectedMesh);
+    EXPECT_EQ(device.retiredTexture(0), ExpectedTexture);
+    ASSERT_EQ(assets->retirement().records().size(), 3U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 1U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 1U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 1U);
+    EXPECT_EQ(assets->retirementStats().released, 3U);
+    EXPECT_EQ(assets->retirementStats().live, 0U);
+}
+
+TEST(Mesh3DBindingRegistryTests, RegistrationFailuresPreserveCandidateGpuOwners)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    const Core::AssetId firstTextureId = assetId(3U);
+    auto firstMesh = assets->store().publish(makeMesh(memory, 1U));
+    auto secondMesh = assets->store().publish(makeMesh(memory, 2U));
+    auto firstTexture = assets->store().publish(makeTexture(memory, 3U));
+    auto secondTexture = assets->store().publish(makeTexture(memory, 4U));
+    auto material = assets->store().publish(makeMaterial(
+        memory, 5U,
+        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = firstTextureId}));
     ASSERT_TRUE(firstMesh.has_value());
     ASSERT_TRUE(secondMesh.has_value());
-    ASSERT_TRUE(firstMaterial.has_value());
-    ASSERT_TRUE(secondMaterial.has_value());
+    ASSERT_TRUE(firstTexture.has_value());
+    ASSERT_TRUE(secondTexture.has_value());
+    ASSERT_TRUE(material.has_value());
+
     RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value());
+    constexpr Render::GpuMeshId SharedMesh{11U, 2U};
+    constexpr Render::GpuTextureId SharedTexture{12U, 2U};
 
-    device.rejectNextMeshUpdate();
-    const auto rejectedMesh = registry->registerMeshBinding(*firstMesh, Render::GpuMeshId{1U, 1U});
-    ASSERT_FALSE(rejectedMesh.has_value());
-    EXPECT_EQ(rejectedMesh.error().code, Render::RenderErrorCode::MeshUploadUnsupported);
-    EXPECT_EQ(registry->meshBindingCount(), 0U);
-    auto acceptedMesh = registry->registerMeshBinding(*secondMesh, Render::GpuMeshId{2U, 1U});
-    ASSERT_TRUE(acceptedMesh.has_value());
-    EXPECT_EQ(*acceptedMesh, 2U);
+    Render::GpuMeshId rejectedMesh = SharedMesh;
+    device.rejectNextMeshBinding();
+    const auto backendRejected = registry->registerMeshBinding(*firstMesh, rejectedMesh);
+    ASSERT_FALSE(backendRejected.has_value());
+    EXPECT_EQ(backendRejected.error().code, Render::RenderErrorCode::MeshUploadUnsupported);
+    EXPECT_EQ(rejectedMesh, SharedMesh);
+    EXPECT_EQ(assets->store().leaseCount(*firstMesh), 0U);
 
-    device.rejectNextMaterialUpdate();
-    const auto rejectedMaterial = registry->registerMaterialBinding(*firstMaterial, {});
-    ASSERT_FALSE(rejectedMaterial.has_value());
-    EXPECT_EQ(rejectedMaterial.error().code, Render::RenderErrorCode::TextureUploadUnsupported);
+    Render::GpuMeshId adoptedMesh = SharedMesh;
+    ASSERT_TRUE(registry->registerMeshBinding(*firstMesh, adoptedMesh).has_value());
+    EXPECT_FALSE(adoptedMesh);
+    Render::GpuMeshId duplicateMesh = SharedMesh;
+    const auto meshOwnerConflict = registry->registerMeshBinding(*secondMesh, duplicateMesh);
+    ASSERT_FALSE(meshOwnerConflict.has_value());
+    EXPECT_EQ(meshOwnerConflict.error().code, AssetErrorCode::Mesh3DBindingConflict);
+    EXPECT_EQ(duplicateMesh, SharedMesh);
+    EXPECT_EQ(assets->store().leaseCount(*secondMesh), 0U);
+
+    Render::GpuTextureId adoptedTexture = SharedTexture;
+    ASSERT_TRUE(registry->registerMaterialTexture(*firstTexture, adoptedTexture).has_value());
+    EXPECT_FALSE(adoptedTexture);
+    Render::GpuTextureId duplicateTexture = SharedTexture;
+    const auto textureOwnerConflict =
+        registry->registerMaterialTexture(*secondTexture, duplicateTexture);
+    ASSERT_FALSE(textureOwnerConflict.has_value());
+    EXPECT_EQ(textureOwnerConflict.error().code, AssetErrorCode::Mesh3DBindingConflict);
+    EXPECT_EQ(duplicateTexture, SharedTexture);
+    EXPECT_EQ(assets->store().leaseCount(*secondTexture), 0U);
+
+    device.rejectNextMaterialBinding();
+    const auto materialRejected = registry->registerMaterialBinding(*material);
+    ASSERT_FALSE(materialRejected.has_value());
+    EXPECT_EQ(materialRejected.error().code, Render::RenderErrorCode::TextureUploadUnsupported);
+    EXPECT_EQ(assets->store().leaseCount(*material), 0U);
     EXPECT_EQ(registry->materialBindingCount(), 0U);
-    auto acceptedMaterial = registry->registerMaterialBinding(*secondMaterial, {});
-    ASSERT_TRUE(acceptedMaterial.has_value());
-    EXPECT_EQ(*acceptedMaterial, 2U);
+    ASSERT_TRUE(registry->retireMaterialTexture(*firstTexture).has_value());
+    ASSERT_TRUE(registry->retireMeshBinding(*firstMesh).has_value());
 }
 
-TEST(Mesh3DBindingRegistryTests, UnbindFailuresAreRetryableAndPreserveResolution)
+TEST(Mesh3DBindingRegistryTests, MaterialTextureRegistrationRejectsStaleAndCollidingForeignGpuOwners)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto mesh = store->publish(makeMesh(memory, 1U));
-    auto material = store->publish(makeMaterial(memory, 2U));
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    ASSERT_TRUE(texture.has_value());
+
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    auto foreignDevice = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    ASSERT_TRUE(foreignDevice.has_value());
+    auto registry = makeRegistry(*assets, **device);
+    ASSERT_TRUE(registry.has_value());
+
+    constexpr std::array<std::byte, 4> Pixels{
+        std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0xFF}};
+    auto localTexture = (*device)->createTexture2DRgba8(
+        Render::Texture2DUploadDesc{.width = 1, .height = 1, .rgba8Pixels = Pixels});
+    ASSERT_TRUE(localTexture.has_value());
+    auto foreignTexture = (*foreignDevice)->createTexture2DRgba8(
+        Render::Texture2DUploadDesc{.width = 1, .height = 1, .rgba8Pixels = Pixels});
+    ASSERT_TRUE(foreignTexture.has_value());
+    EXPECT_EQ(localTexture->index, foreignTexture->index);
+    EXPECT_EQ(localTexture->generation, foreignTexture->generation);
+    EXPECT_NE(localTexture->owner, foreignTexture->owner);
+    Render::GpuTextureId foreignCandidate = *foreignTexture;
+    const auto foreign = registry->registerMaterialTexture(*texture, foreignCandidate);
+    ASSERT_FALSE(foreign.has_value());
+    EXPECT_EQ(foreign.error().code, Render::RenderErrorCode::TextureNotFound);
+    EXPECT_EQ(foreignCandidate, *foreignTexture);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 0U);
+    EXPECT_EQ(registry->textureOwnerCount(), 0U);
+
+    ASSERT_TRUE((*device)->destroyTexture2D(*localTexture).has_value());
+    Render::GpuTextureId staleCandidate = *localTexture;
+    const auto stale = registry->registerMaterialTexture(*texture, staleCandidate);
+    ASSERT_FALSE(stale.has_value());
+    EXPECT_EQ(stale.error().code, Render::RenderErrorCode::TextureNotFound);
+    EXPECT_EQ(staleCandidate, *localTexture);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 0U);
+    EXPECT_EQ(registry->textureOwnerCount(), 0U);
+
+    ASSERT_TRUE((*foreignDevice)->destroyTexture2D(*foreignTexture).has_value());
+    (*foreignDevice)->shutdown();
+    (*device)->shutdown();
+}
+
+TEST(Mesh3DBindingRegistryTests, InvalidAndUnreadyAssetsFailBeforeConsumingGpuOwners)
+{
+    TrackingMemoryResource memory;
+    TrackingMemoryResource foreignMemory;
+    auto assets = makeAssetSystem(memory);
+    auto foreignAssets = makeAssetSystem(foreignMemory);
+    ASSERT_TRUE(assets.has_value());
+    ASSERT_TRUE(foreignAssets.has_value());
+    auto wrongKind = assets->store().publish(makeTexture(memory, 1U));
+    auto staleMesh = assets->store().publish(makeMesh(memory, 2U));
+    auto queuedMesh = assets->store().beginQueued(assetId(3U), AssetFormat::AssetKind::StaticMesh);
+    auto foreignMesh = foreignAssets->store().publish(makeMesh(foreignMemory, 4U));
+    auto missingTextureMaterial = assets->store().publish(makeMaterial(
+        memory, 5U,
+        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(9U)}));
+    ASSERT_TRUE(wrongKind.has_value());
+    ASSERT_TRUE(staleMesh.has_value());
+    ASSERT_TRUE(queuedMesh.has_value());
+    ASSERT_TRUE(foreignMesh.has_value());
+    ASSERT_TRUE(missingTextureMaterial.has_value());
+    ASSERT_TRUE(assets->store().unload(*staleMesh).has_value());
+
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(*assets, device);
+    ASSERT_TRUE(registry.has_value());
+    constexpr Render::GpuMeshId Candidate{1U, 1U};
+    for (const AssetHandle handle :
+         std::array{AssetHandle{}, *wrongKind, *staleMesh, *queuedMesh, *foreignMesh})
+    {
+        Render::GpuMeshId gpuMesh = Candidate;
+        const auto rejected = registry->registerMeshBinding(handle, gpuMesh);
+        ASSERT_FALSE(rejected.has_value());
+        EXPECT_EQ(gpuMesh, Candidate);
+    }
+    const auto missingTexture = registry->registerMaterialBinding(*missingTextureMaterial);
+    ASSERT_FALSE(missingTexture.has_value());
+    EXPECT_EQ(missingTexture.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_EQ(device.meshBindingCallCount(), 0U);
+    EXPECT_EQ(device.materialBindingCallCount(), 0U);
+}
+
+TEST(Mesh3DBindingRegistryTests, SharedTextureRemainsOwnedUntilBothMaterialsRetire)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    const Core::AssetId textureId = assetId(1U);
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto firstMaterial = assets->store().publish(makeMaterial(
+        memory, 2U,
+        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
+    auto secondMaterial = assets->store().publish(makeMaterial(
+        memory, 3U,
+        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(firstMaterial.has_value());
+    ASSERT_TRUE(secondMaterial.has_value());
+
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(*assets, device);
+    ASSERT_TRUE(registry.has_value());
+    Render::GpuTextureId gpuTexture{9U, 3U};
+    ASSERT_TRUE(registry->registerMaterialTexture(*texture, gpuTexture).has_value());
+    ASSERT_TRUE(registry->registerMaterialBinding(*firstMaterial).has_value());
+    ASSERT_TRUE(registry->registerMaterialBinding(*secondMaterial).has_value());
+    EXPECT_EQ(registry->textureOwnerCount(), 1U);
+    EXPECT_EQ(device.materialBindingCallCount(), 2U);
+
+    auto referenced = registry->retireMaterialTexture(*texture);
+    ASSERT_FALSE(referenced.has_value());
+    EXPECT_EQ(referenced.error().code, AssetErrorCode::AssetNotReady);
+    ASSERT_TRUE(registry->retireMaterialBinding(*firstMaterial).has_value());
+    referenced = registry->retireMaterialTexture(*texture);
+    ASSERT_FALSE(referenced.has_value());
+    EXPECT_EQ(referenced.error().code, AssetErrorCode::AssetNotReady);
+    ASSERT_TRUE(registry->retireMaterialBinding(*secondMaterial).has_value());
+    ASSERT_TRUE(registry->retireMaterialTexture(*texture).has_value());
+
+    EXPECT_EQ(device.materialClearCount(), 2U);
+    EXPECT_EQ(device.textureRetirementCount(), 1U);
+    EXPECT_EQ(registry->materialBindingCount(), 0U);
+    EXPECT_EQ(registry->textureOwnerCount(), 0U);
+    ASSERT_EQ(assets->retirement().records().size(), 3U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 2U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 1U);
+    EXPECT_EQ(assets->retirementStats().released, 3U);
+    EXPECT_EQ(assets->retirementStats().live, 0U);
+}
+
+TEST(Mesh3DBindingRegistryTests, FrameResourcesDeduplicateAndBlockRetirementUntilRelease)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto mesh = assets->store().publish(makeMesh(memory, 1U));
+    auto material = assets->store().publish(makeMaterial(memory, 2U));
     ASSERT_TRUE(mesh.has_value());
     ASSERT_TRUE(material.has_value());
+
     RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value());
-    auto meshKey = registry->registerMeshBinding(*mesh, Render::GpuMeshId{1U, 1U});
-    auto materialKey = registry->registerMaterialBinding(*material, {});
+    Render::GpuMeshId gpuMesh{7U, 1U};
+    auto meshKey = registry->registerMeshBinding(*mesh, gpuMesh);
+    auto materialKey = registry->registerMaterialBinding(*material);
     ASSERT_TRUE(meshKey.has_value());
     ASSERT_TRUE(materialKey.has_value());
 
-    device.rejectNextMeshUpdate();
-    const auto rejectedMesh = registry->unbindMeshBinding(*mesh);
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1U).has_value());
+    auto firstMesh = registry->internMeshFrameResource(*mesh, packet.resourceSink());
+    auto duplicateMesh = registry->internMeshFrameResource(*mesh, packet.resourceSink());
+    auto firstMaterial = registry->internMaterialFrameResource(*material, packet.resourceSink());
+    auto duplicateMaterial = registry->internMaterialFrameResource(*material, packet.resourceSink());
+    ASSERT_TRUE(firstMesh.has_value());
+    ASSERT_TRUE(duplicateMesh.has_value());
+    ASSERT_TRUE(firstMaterial.has_value());
+    ASSERT_TRUE(duplicateMaterial.has_value());
+    EXPECT_EQ(*duplicateMesh, *firstMesh);
+    EXPECT_EQ(*duplicateMaterial, *firstMaterial);
+    EXPECT_EQ(packet.resourceCount(), 2U);
+    const auto* meshDescriptor = packet.resourceTableView().resolve(
+        *firstMesh, Render::FrameResourceKind::Mesh3DGeometry);
+    const auto* materialDescriptor = packet.resourceTableView().resolve(
+        *firstMaterial, Render::FrameResourceKind::Mesh3DMaterial);
+    ASSERT_NE(meshDescriptor, nullptr);
+    ASSERT_NE(materialDescriptor, nullptr);
+    EXPECT_EQ(meshDescriptor->deviceBindingKey, *meshKey);
+    EXPECT_EQ(materialDescriptor->deviceBindingKey, *materialKey);
+
+    const auto meshBlocked = registry->retireMeshBinding(*mesh);
+    const auto materialBlocked = registry->retireMaterialBinding(*material);
+    const auto allBlocked = registry->retireAllBindings();
+    ASSERT_FALSE(meshBlocked.has_value());
+    ASSERT_FALSE(materialBlocked.has_value());
+    ASSERT_FALSE(allBlocked.has_value());
+    EXPECT_EQ(meshBlocked.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_EQ(materialBlocked.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_EQ(allBlocked.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_EQ(device.materialClearCount(), 0U);
+    EXPECT_EQ(device.meshRetirementAttempts(), 0U);
+
+    ASSERT_TRUE(packet.abandon().has_value());
+    ASSERT_TRUE(registry->retireAllBindings().has_value());
+    EXPECT_EQ(device.materialClearCount(), 1U);
+    EXPECT_EQ(device.meshRetirementCount(), 1U);
+}
+
+TEST(Mesh3DBindingRegistryTests, SinkRejectionRollsBackMeshAndMaterialFrameBorrows)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto mesh = assets->store().publish(makeMesh(memory, 1U));
+    auto material = assets->store().publish(makeMaterial(memory, 2U));
+    ASSERT_TRUE(mesh.has_value());
+    ASSERT_TRUE(material.has_value());
+
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(*assets, device);
+    ASSERT_TRUE(registry.has_value());
+    Render::GpuMeshId gpuMesh{1U, 1U};
+    ASSERT_TRUE(registry->registerMeshBinding(*mesh, gpuMesh).has_value());
+    ASSERT_TRUE(registry->registerMaterialBinding(*material).has_value());
+
+    Render::RenderFramePacket idlePacket;
+    auto idleMesh = registry->internMeshFrameResource(*mesh, idlePacket.resourceSink());
+    auto idleMaterial = registry->internMaterialFrameResource(*material, idlePacket.resourceSink());
+    ASSERT_FALSE(idleMesh.has_value());
+    ASSERT_FALSE(idleMaterial.has_value());
+    RejectingFrameResourceSink sink;
+    auto rejectedMesh = registry->internMeshFrameResource(*mesh, sink);
+    auto rejectedMaterial = registry->internMaterialFrameResource(*material, sink);
     ASSERT_FALSE(rejectedMesh.has_value());
-    EXPECT_EQ(rejectedMesh.error().code, Render::RenderErrorCode::MeshUploadUnsupported);
-    EXPECT_EQ(registry->resolveMesh(*mesh), *meshKey);
-    ASSERT_TRUE(registry->unbindMeshBinding(*mesh).has_value());
-    EXPECT_EQ(registry->resolveMesh(*mesh), 0U);
-    const auto missingMesh = registry->unbindMeshBinding(*mesh);
-    ASSERT_FALSE(missingMesh.has_value());
-    EXPECT_EQ(missingMesh.error().code, AssetErrorCode::Mesh3DBindingNotFound);
+    ASSERT_FALSE(rejectedMaterial.has_value());
+    EXPECT_EQ(sink.callCount(), 2U);
+
+    ASSERT_TRUE(registry->retireAllBindings().has_value());
+    EXPECT_EQ(device.materialClearCount(), 1U);
+    EXPECT_EQ(device.meshRetirementCount(), 1U);
+}
+
+TEST(Mesh3DBindingRegistryTests, MoveWithActiveFrameBorrowsPreservesPinTargetsAndOwnership)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto mesh = assets->store().publish(makeMesh(memory, 1U));
+    auto texture = assets->store().publish(makeTexture(memory, 2U));
+    auto material = assets->store().publish(makeMaterial(
+        memory, 3U,
+        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(2U)}));
+    ASSERT_TRUE(mesh.has_value());
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(material.has_value());
+
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(
+        *assets, device,
+        Mesh3DBindingRegistryConfig{
+            .meshCapacity = 1,
+            .materialCapacity = 1,
+            .textureCapacity = 1,
+            .memoryResource = &memory,
+        });
+    ASSERT_TRUE(registry.has_value());
+    Render::GpuMeshId gpuMesh{1U, 1U};
+    Render::GpuTextureId gpuTexture{2U, 1U};
+    ASSERT_TRUE(registry->registerMeshBinding(*mesh, gpuMesh).has_value());
+    ASSERT_TRUE(registry->registerMaterialTexture(*texture, gpuTexture).has_value());
+    ASSERT_TRUE(registry->registerMaterialBinding(*material).has_value());
+
+    std::optional<AutoRetiringRegistry> movedOwner;
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1U).has_value());
+    ASSERT_TRUE(registry->internMeshFrameResource(*mesh, packet.resourceSink()).has_value());
+    ASSERT_TRUE(registry->internMaterialFrameResource(*material, packet.resourceSink()).has_value());
+    ASSERT_EQ(packet.resourceCount(), 2U);
+
+    movedOwner.emplace(Core::Result<Mesh3DBindingRegistry>{std::move(*registry)});
+    Mesh3DBindingRegistry& moved = **movedOwner;
+
+    EXPECT_FALSE(static_cast<bool>(*registry));
+    EXPECT_EQ(registry->meshCapacity(), 0U);
+    EXPECT_EQ(registry->materialCapacity(), 0U);
+    EXPECT_EQ(registry->textureCapacity(), 0U);
+    EXPECT_EQ(registry->meshBindingCount(), 0U);
+    EXPECT_EQ(registry->materialBindingCount(), 0U);
+    EXPECT_EQ(registry->textureOwnerCount(), 0U);
+    Render::GpuMeshId movedFromCandidate{3U, 1U};
+    const auto movedFromRegister = registry->registerMeshBinding(*mesh, movedFromCandidate);
+    EXPECT_FALSE(movedFromRegister.has_value());
+    if (!movedFromRegister)
+    {
+        EXPECT_EQ(movedFromRegister.error().code, Render::RenderErrorCode::WrongOwnerThread);
+    }
+    EXPECT_EQ(movedFromCandidate, (Render::GpuMeshId{3U, 1U}));
+
+    EXPECT_TRUE(static_cast<bool>(moved));
+    EXPECT_EQ(moved.meshBindingCount(), 1U);
+    EXPECT_EQ(moved.materialBindingCount(), 1U);
+    EXPECT_EQ(moved.textureOwnerCount(), 1U);
+    const auto blocked = moved.retireAllBindings();
+    EXPECT_FALSE(blocked.has_value());
+    if (!blocked)
+    {
+        EXPECT_EQ(blocked.error().code, AssetErrorCode::AssetNotReady);
+    }
+    EXPECT_EQ(device.materialClearCount(), 0U);
+    EXPECT_EQ(device.textureRetirementAttempts(), 0U);
+    EXPECT_EQ(device.meshRetirementAttempts(), 0U);
+
+    ASSERT_TRUE(packet.abandon().has_value());
+    ASSERT_TRUE(moved.retireAllBindings().has_value());
+    EXPECT_EQ(moved.meshBindingCount(), 0U);
+    EXPECT_EQ(moved.materialBindingCount(), 0U);
+    EXPECT_EQ(moved.textureOwnerCount(), 0U);
+    EXPECT_EQ(device.materialClearCount(), 1U);
+    EXPECT_EQ(device.textureRetirementCount(), 1U);
+    EXPECT_EQ(device.meshRetirementCount(), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*mesh), 0U);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 0U);
+    EXPECT_EQ(assets->store().leaseCount(*material), 0U);
+}
+
+TEST(Mesh3DBindingRegistryTests, RetirementRejectionsPreserveOwnersAndCanBeRetried)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    const Core::AssetId textureId = assetId(2U);
+    auto mesh = assets->store().publish(makeMesh(memory, 1U));
+    auto texture = assets->store().publish(makeTexture(memory, 2U));
+    auto material = assets->store().publish(makeMaterial(
+        memory, 3U,
+        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
+    ASSERT_TRUE(mesh.has_value());
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(material.has_value());
+
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(*assets, device);
+    ASSERT_TRUE(registry.has_value());
+    Render::GpuMeshId gpuMesh{4U, 2U};
+    Render::GpuTextureId gpuTexture{5U, 2U};
+    ASSERT_TRUE(registry->registerMeshBinding(*mesh, gpuMesh).has_value());
+    ASSERT_TRUE(registry->registerMaterialTexture(*texture, gpuTexture).has_value());
+    ASSERT_TRUE(registry->registerMaterialBinding(*material).has_value());
 
     device.rejectNextMaterialClear();
-    const auto rejectedMaterial = registry->unbindMaterialBinding(*material);
+    auto rejectedMaterial = registry->retireMaterialBinding(*material);
     ASSERT_FALSE(rejectedMaterial.has_value());
-    EXPECT_EQ(rejectedMaterial.error().code, Render::RenderErrorCode::TextureUploadUnsupported);
-    EXPECT_EQ(registry->resolveMaterial(*material), *materialKey);
-    ASSERT_TRUE(registry->unbindMaterialBinding(*material).has_value());
-    EXPECT_EQ(registry->resolveMaterial(*material), 0U);
-    const auto missingMaterial = registry->unbindMaterialBinding(*material);
-    ASSERT_FALSE(missingMaterial.has_value());
-    EXPECT_EQ(missingMaterial.error().code, AssetErrorCode::Mesh3DBindingNotFound);
-    EXPECT_EQ(registry->meshBindingCount(), 0U);
-    EXPECT_EQ(registry->materialBindingCount(), 0U);
-    ASSERT_EQ(device.materialClearCount(), 2U);
-    EXPECT_EQ(device.materialClear(0), *materialKey);
-    EXPECT_EQ(device.materialClear(1), *materialKey);
+    EXPECT_EQ(rejectedMaterial.error().code,
+              Render::RenderErrorCode::TextureUploadUnsupported);
+    EXPECT_EQ(registry->materialBindingCount(), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*material), 1U);
+    ASSERT_FALSE(registry->retireMaterialTexture(*texture).has_value());
+    ASSERT_TRUE(registry->retireMaterialBinding(*material).has_value());
+
+    device.rejectNextTextureRetirement();
+    auto rejectedTexture = registry->retireMaterialTexture(*texture);
+    ASSERT_FALSE(rejectedTexture.has_value());
+    EXPECT_EQ(rejectedTexture.error().code,
+              Render::RenderErrorCode::GpuRetirementUnsupported);
+    EXPECT_EQ(registry->textureOwnerCount(), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+    ASSERT_EQ(assets->retirement().records().size(), 1U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 1U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 0U);
+    ASSERT_TRUE(registry->retireMaterialTexture(*texture).has_value());
+
+    device.rejectNextMeshRetirement();
+    auto rejectedMesh = registry->retireMeshBinding(*mesh);
+    ASSERT_FALSE(rejectedMesh.has_value());
+    EXPECT_EQ(rejectedMesh.error().code,
+              Render::RenderErrorCode::GpuRetirementUnsupported);
+    EXPECT_EQ(registry->meshBindingCount(), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*mesh), 1U);
+    ASSERT_EQ(assets->retirement().records().size(), 2U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 1U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 0U);
+    ASSERT_TRUE(registry->retireMeshBinding(*mesh).has_value());
+
+    EXPECT_EQ(device.textureRetirementAttempts(), 2U);
+    EXPECT_EQ(device.textureRetirementCount(), 1U);
+    EXPECT_EQ(device.meshRetirementAttempts(), 2U);
+    EXPECT_EQ(device.meshRetirementCount(), 1U);
+    ASSERT_EQ(assets->retirement().records().size(), 3U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 1U);
+    EXPECT_EQ(assets->retirementStats().released, 3U);
+    EXPECT_EQ(assets->retirementStats().live, 0U);
 }
 
-TEST(Mesh3DBindingRegistryTests, StaleExactHandlesCanUnbindAndReleasedKeysAreNotReused)
+TEST(Mesh3DBindingRegistryTests, RetireAllCommitsPrefixAndRetriesRemainingOwnersInOrder)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory, 12U);
-    ASSERT_TRUE(store.has_value());
-    const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto mesh = store->publish(makeMesh(memory, 2U));
-    auto material = store->publish(makeMaterial(
-        memory, 3U, AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
-    ASSERT_TRUE(texture.has_value());
-    ASSERT_TRUE(mesh.has_value());
-    ASSERT_TRUE(material.has_value());
-    RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(
-        *store, device, Mesh3DBindingRegistryConfig{.meshCapacity = 1, .materialCapacity = 1,
-                                                    .memoryResource = &memory});
-    ASSERT_TRUE(registry.has_value());
-    auto firstMeshKey = registry->registerMeshBinding(*mesh, Render::GpuMeshId{1U, 1U});
-    auto firstMaterialKey = registry->registerMaterialBinding(
-        *material, oneTextureBinding(*texture, Render::GpuTextureId{1U, 1U}));
-    ASSERT_TRUE(firstMeshKey.has_value());
-    ASSERT_TRUE(firstMaterialKey.has_value());
-
-    ASSERT_TRUE(store->unload(*texture).has_value());
-    EXPECT_EQ(registry->resolveMaterial(*material), 0U);
-    ASSERT_TRUE(store->unload(*mesh).has_value());
-    ASSERT_TRUE(store->unload(*material).has_value());
-    EXPECT_EQ(registry->resolveMesh(*mesh), 0U);
-    EXPECT_EQ(registry->resolveMaterial(*material), 0U);
-    ASSERT_TRUE(registry->unbindMaterialBinding(*material).has_value());
-    ASSERT_TRUE(registry->unbindMeshBinding(*mesh).has_value());
-
-    auto nextMesh = store->publish(makeMesh(memory, 4U));
-    auto nextMaterial = store->publish(makeMaterial(memory, 5U));
-    ASSERT_TRUE(nextMesh.has_value());
-    ASSERT_TRUE(nextMaterial.has_value());
-    auto nextMeshKey = registry->registerMeshBinding(*nextMesh, Render::GpuMeshId{2U, 1U});
-    auto nextMaterialKey = registry->registerMaterialBinding(*nextMaterial, {});
-    ASSERT_TRUE(nextMeshKey.has_value());
-    ASSERT_TRUE(nextMaterialKey.has_value());
-    EXPECT_GT(*nextMeshKey, *firstMeshKey);
-    EXPECT_GT(*nextMaterialKey, *firstMaterialKey);
-}
-
-TEST(Mesh3DBindingRegistryTests, RegistriesSharingOneDeviceReceiveDistinctKeysAndUnbindIndependently)
-{
-    TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto firstMesh = store->publish(makeMesh(memory, 1U));
-    auto secondMesh = store->publish(makeMesh(memory, 2U));
-    auto firstMaterial = store->publish(makeMaterial(memory, 3U));
-    auto secondMaterial = store->publish(makeMaterial(memory, 4U));
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto firstMesh = assets->store().publish(makeMesh(memory, 1U));
+    auto secondMesh = assets->store().publish(makeMesh(memory, 2U));
+    auto firstTexture = assets->store().publish(makeTexture(memory, 3U));
+    auto secondTexture = assets->store().publish(makeTexture(memory, 4U));
+    auto firstMaterial = assets->store().publish(makeMaterial(
+        memory, 5U,
+        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(3U)}));
+    auto secondMaterial = assets->store().publish(makeMaterial(
+        memory, 6U,
+        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(4U)}));
     ASSERT_TRUE(firstMesh.has_value());
     ASSERT_TRUE(secondMesh.has_value());
+    ASSERT_TRUE(firstTexture.has_value());
+    ASSERT_TRUE(secondTexture.has_value());
     ASSERT_TRUE(firstMaterial.has_value());
     ASSERT_TRUE(secondMaterial.has_value());
+
     RecordingRenderDevice device;
-    auto firstRegistry = Mesh3DBindingRegistry::Create(*store, device);
-    auto secondRegistry = Mesh3DBindingRegistry::Create(*store, device);
-    ASSERT_TRUE(firstRegistry.has_value());
-    ASSERT_TRUE(secondRegistry.has_value());
+    auto registry = makeRegistry(
+        *assets, device,
+        Mesh3DBindingRegistryConfig{
+            .meshCapacity = 2,
+            .materialCapacity = 2,
+            .textureCapacity = 2,
+            .memoryResource = &memory,
+        });
+    ASSERT_TRUE(registry.has_value());
+    Render::GpuMeshId firstGpuMesh{1U, 1U};
+    Render::GpuMeshId secondGpuMesh{2U, 1U};
+    Render::GpuTextureId firstGpuTexture{3U, 1U};
+    Render::GpuTextureId secondGpuTexture{4U, 1U};
+    ASSERT_TRUE(registry->registerMeshBinding(*firstMesh, firstGpuMesh).has_value());
+    ASSERT_TRUE(registry->registerMeshBinding(*secondMesh, secondGpuMesh).has_value());
+    ASSERT_TRUE(registry->registerMaterialTexture(*firstTexture, firstGpuTexture).has_value());
+    ASSERT_TRUE(registry->registerMaterialTexture(*secondTexture, secondGpuTexture).has_value());
+    ASSERT_TRUE(registry->registerMaterialBinding(*firstMaterial).has_value());
+    ASSERT_TRUE(registry->registerMaterialBinding(*secondMaterial).has_value());
+    device.rejectTextureRetirementOnAttempt(2U);
 
-    auto firstMeshKey = firstRegistry->registerMeshBinding(*firstMesh, Render::GpuMeshId{1U, 1U});
-    auto secondMeshKey = secondRegistry->registerMeshBinding(*secondMesh, Render::GpuMeshId{2U, 1U});
-    auto firstMaterialKey = firstRegistry->registerMaterialBinding(*firstMaterial, {});
-    auto secondMaterialKey = secondRegistry->registerMaterialBinding(*secondMaterial, {});
-    ASSERT_TRUE(firstMeshKey.has_value());
-    ASSERT_TRUE(secondMeshKey.has_value());
-    ASSERT_TRUE(firstMaterialKey.has_value());
-    ASSERT_TRUE(secondMaterialKey.has_value());
-    EXPECT_NE(*firstMeshKey, *secondMeshKey);
-    EXPECT_NE(*firstMaterialKey, *secondMaterialKey);
+    auto partial = registry->retireAllBindings();
+    ASSERT_FALSE(partial.has_value());
+    EXPECT_EQ(partial.error().code,
+              Render::RenderErrorCode::GpuRetirementUnsupported);
+    EXPECT_EQ(registry->materialBindingCount(), 0U);
+    EXPECT_EQ(registry->textureOwnerCount(), 1U);
+    EXPECT_EQ(registry->meshBindingCount(), 2U);
+    EXPECT_EQ(device.materialClearCount(), 2U);
+    EXPECT_EQ(device.textureRetirementAttempts(), 2U);
+    EXPECT_EQ(device.textureRetirementCount(), 1U);
+    EXPECT_EQ(device.meshRetirementAttempts(), 0U);
+    ASSERT_EQ(assets->retirement().records().size(), 3U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 2U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 1U);
+    EXPECT_EQ(assets->retirementStats().released, 3U);
 
-    ASSERT_TRUE(firstRegistry->unbindMeshBinding(*firstMesh).has_value());
-    ASSERT_TRUE(firstRegistry->unbindMaterialBinding(*firstMaterial).has_value());
-    EXPECT_EQ(secondRegistry->resolveMesh(*secondMesh), *secondMeshKey);
-    EXPECT_EQ(secondRegistry->resolveMaterial(*secondMaterial), *secondMaterialKey);
+    ASSERT_TRUE(registry->retireAllBindings().has_value());
+    EXPECT_EQ(registry->materialBindingCount(), 0U);
+    EXPECT_EQ(registry->textureOwnerCount(), 0U);
+    EXPECT_EQ(registry->meshBindingCount(), 0U);
+    EXPECT_EQ(device.textureRetirementAttempts(), 3U);
+    EXPECT_EQ(device.textureRetirementCount(), 2U);
+    EXPECT_EQ(device.meshRetirementCount(), 2U);
+    ASSERT_EQ(assets->retirement().records().size(), 6U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 2U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 2U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 2U);
+    EXPECT_EQ(assets->retirementStats().released, 6U);
+    EXPECT_EQ(assets->retirementStats().live, 0U);
+}
+
+TEST(Mesh3DBindingRegistryTests, DestructionWithOwnedBindingFailsFast)
+{
+    EXPECT_DEATH(destroyMesh3DRegistryWithOwnedBinding(), "");
 }
 
 TEST(Mesh3DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto mesh = store->publish(makeMesh(memory, 1U));
-    auto material = store->publish(makeMaterial(memory, 2U));
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto mesh = assets->store().publish(makeMesh(memory, 1U));
+    auto texture = assets->store().publish(makeTexture(memory, 2U));
+    auto material = assets->store().publish(makeMaterial(memory, 3U));
     ASSERT_TRUE(mesh.has_value());
+    ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(material.has_value());
-    RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(*store, device);
-    ASSERT_TRUE(registry.has_value());
-    auto meshKey = registry->registerMeshBinding(*mesh, Render::GpuMeshId{1U, 1U});
-    auto materialKey = registry->registerMaterialBinding(*material, {});
-    ASSERT_TRUE(meshKey.has_value());
-    ASSERT_TRUE(materialKey.has_value());
 
-    std::optional<Core::ErrorCode> meshRegisterError;
-    std::optional<Core::ErrorCode> materialRegisterError;
-    std::optional<Core::ErrorCode> meshUnbindError;
-    std::optional<Core::ErrorCode> materialUnbindError;
-    Core::u32 foreignMeshKey = *meshKey;
-    Core::u32 foreignMaterialKey = *materialKey;
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(*assets, device);
+    ASSERT_TRUE(registry.has_value());
+    Render::GpuMeshId gpuMesh{1U, 1U};
+    Render::GpuTextureId gpuTexture{2U, 1U};
+    ASSERT_TRUE(registry->registerMeshBinding(*mesh, gpuMesh).has_value());
+    ASSERT_TRUE(registry->registerMaterialTexture(*texture, gpuTexture).has_value());
+    ASSERT_TRUE(registry->registerMaterialBinding(*material).has_value());
+
+    std::array<std::optional<Core::ErrorCode>, 7> errors{};
+    Render::GpuMeshId foreignMeshCandidate{3U, 1U};
+    Render::GpuTextureId foreignTextureCandidate{4U, 1U};
+    RejectingFrameResourceSink sink;
+    bool foreignHasTexture = true;
     std::thread foreign([&] {
-        auto meshRegister = registry->registerMeshBinding(*mesh, Render::GpuMeshId{2U, 1U});
-        if (!meshRegister) meshRegisterError = meshRegister.error().code;
-        auto materialRegister = registry->registerMaterialBinding(*material, {});
-        if (!materialRegister) materialRegisterError = materialRegister.error().code;
-        auto meshUnbind = registry->unbindMeshBinding(*mesh);
-        if (!meshUnbind) meshUnbindError = meshUnbind.error().code;
-        auto materialUnbind = registry->unbindMaterialBinding(*material);
-        if (!materialUnbind) materialUnbindError = materialUnbind.error().code;
-        foreignMeshKey = registry->resolveMesh(*mesh);
-        foreignMaterialKey = registry->resolveMaterial(*material);
+        const auto record = [&](Core::usize index, const auto& result) {
+            if (!result)
+            {
+                errors[index] = result.error().code;
+            }
+        };
+        record(0, registry->registerMeshBinding(*mesh, foreignMeshCandidate));
+        record(1, registry->registerMaterialTexture(*texture, foreignTextureCandidate));
+        record(2, registry->registerMaterialBinding(*material));
+        record(3, registry->retireMeshBinding(*mesh));
+        record(4, registry->retireMaterialBinding(*material));
+        record(5, registry->internMeshFrameResource(*mesh, sink));
+        record(6, registry->internMaterialFrameResource(*material, sink));
+        foreignHasTexture = registry->hasMaterialTexture(*texture);
     });
     foreign.join();
 
-    ASSERT_TRUE(meshRegisterError.has_value());
-    EXPECT_EQ(*meshRegisterError, Render::RenderErrorCode::WrongOwnerThread);
-    ASSERT_TRUE(materialRegisterError.has_value());
-    EXPECT_EQ(*materialRegisterError, Render::RenderErrorCode::WrongOwnerThread);
-    ASSERT_TRUE(meshUnbindError.has_value());
-    EXPECT_EQ(*meshUnbindError, Render::RenderErrorCode::WrongOwnerThread);
-    ASSERT_TRUE(materialUnbindError.has_value());
-    EXPECT_EQ(*materialUnbindError, Render::RenderErrorCode::WrongOwnerThread);
-    EXPECT_EQ(foreignMeshKey, 0U);
-    EXPECT_EQ(foreignMaterialKey, 0U);
-    EXPECT_EQ(registry->resolveMesh(*mesh), *meshKey);
-    EXPECT_EQ(registry->resolveMaterial(*material), *materialKey);
+    for (const auto& error : errors)
+    {
+        ASSERT_TRUE(error.has_value());
+        EXPECT_EQ(*error, Render::RenderErrorCode::WrongOwnerThread);
+    }
+    EXPECT_FALSE(foreignHasTexture);
+    EXPECT_EQ(foreignMeshCandidate, (Render::GpuMeshId{3U, 1U}));
+    EXPECT_EQ(foreignTextureCandidate, (Render::GpuTextureId{4U, 1U}));
+    EXPECT_EQ(sink.callCount(), 0U);
     EXPECT_EQ(registry->meshBindingCount(), 1U);
     EXPECT_EQ(registry->materialBindingCount(), 1U);
-}
-
-TEST(Mesh3DBindingRegistryTests, SteadyStateOperationsPerformNoPmrAllocations)
-{
-    TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto mesh = store->publish(makeMesh(memory, 1U));
-    auto material = store->publish(makeMaterial(memory, 2U));
-    ASSERT_TRUE(mesh.has_value());
-    ASSERT_TRUE(material.has_value());
-    RecordingRenderDevice device;
-    auto registry = Mesh3DBindingRegistry::Create(
-        *store, device, Mesh3DBindingRegistryConfig{.meshCapacity = 1, .materialCapacity = 1,
-                                                    .memoryResource = &memory});
-    ASSERT_TRUE(registry.has_value());
-    const Core::usize allocationBaseline = memory.allocationCalls();
-
-    Core::u32 previousMeshKey = 0;
-    Core::u32 previousMaterialKey = 0;
-    for (Core::usize iteration = 0; iteration < 300U; ++iteration)
-    {
-        auto meshKey = registry->registerMeshBinding(*mesh, Render::GpuMeshId{1U, 1U});
-        auto materialKey = registry->registerMaterialBinding(*material, {});
-        ASSERT_TRUE(meshKey.has_value());
-        ASSERT_TRUE(materialKey.has_value());
-        EXPECT_GT(*meshKey, previousMeshKey);
-        EXPECT_GT(*materialKey, previousMaterialKey);
-        EXPECT_EQ(registry->resolveMesh(*mesh), *meshKey);
-        EXPECT_EQ(registry->resolveMaterial(*material), *materialKey);
-        ASSERT_TRUE(registry->unbindMeshBinding(*mesh).has_value());
-        ASSERT_TRUE(registry->unbindMaterialBinding(*material).has_value());
-        previousMeshKey = *meshKey;
-        previousMaterialKey = *materialKey;
-    }
-
-    EXPECT_EQ(memory.allocationCalls(), allocationBaseline);
-    EXPECT_EQ(registry->meshBindingCount(), 0U);
-    EXPECT_EQ(registry->materialBindingCount(), 0U);
+    EXPECT_EQ(registry->textureOwnerCount(), 1U);
+    ASSERT_TRUE(registry->retireAllBindings().has_value());
 }
 
 } // namespace

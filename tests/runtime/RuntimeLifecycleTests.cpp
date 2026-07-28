@@ -114,21 +114,29 @@ struct ScriptedRenderSprite2DInput final {
     };
 }
 
-[[nodiscard]] Render::RenderMesh3DInput makeRenderSceneMesh3DInput(
+struct ScriptedRenderMesh3DInput final {
+    u64 meshDeviceBindingKey = 0;
+    u64 materialDeviceBindingKey = 0;
+    Render::RenderMesh3DInput mesh{};
+};
+
+[[nodiscard]] ScriptedRenderMesh3DInput makeRenderSceneMesh3DInput(
     u32 meshKey, u32 materialKey, u64 stableEntityKey, float centerX, float centerY, float centerZ)
 {
-    return Render::RenderMesh3DInput{
-        .meshKey = meshKey,
-        .materialKey = materialKey,
-        .stableEntityKey = stableEntityKey,
-        .worldTransform = Render::RenderTransform3DInput{
-            .pose = Render::RenderPose3DInput{
-                .positionX = centerX,
-                .positionY = centerY,
-                .positionZ = centerZ,
+    return ScriptedRenderMesh3DInput{
+        .meshDeviceBindingKey = meshKey,
+        .materialDeviceBindingKey = materialKey,
+        .mesh = Render::RenderMesh3DInput{
+            .stableEntityKey = stableEntityKey,
+            .worldTransform = Render::RenderTransform3DInput{
+                .pose = Render::RenderPose3DInput{
+                    .positionX = centerX,
+                    .positionY = centerY,
+                    .positionZ = centerZ,
+                },
             },
+            .localBounds = Render::RenderBoundingSphereInput{.radius = 0.5F},
         },
-        .localBounds = Render::RenderBoundingSphereInput{.radius = 0.5F},
     };
 }
 
@@ -567,6 +575,8 @@ struct RuntimeProbe final {
     std::optional<Render::RenderPerspectiveCamera> copiedLastSubmittedPerspectiveCamera;
     std::vector<Render::RenderMesh3DItem> copiedLastSubmittedWorldMeshes3D;
     std::vector<Render::RenderMesh3DBatch> copiedLastSubmittedWorldMesh3DBatches;
+    std::vector<u64> copiedLastSubmittedWorldMeshBindingKeys;
+    std::vector<u64> copiedLastSubmittedWorldMaterialBindingKeys;
     Render::RenderSceneStatistics copiedLastSubmittedWorldSceneStatistics{};
     std::vector<usize> submittedUICommandCounts;
     std::optional<Render::UIDrawCommand> copiedLastSubmittedUICommand;
@@ -1131,6 +1141,26 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
         probe_->copiedLastSubmittedPerspectiveCamera = frame.primaryWorldScene.perspectiveCamera();
         const auto meshes3D = frame.primaryWorldScene.meshes3D();
         probe_->copiedLastSubmittedWorldMeshes3D.assign(meshes3D.begin(), meshes3D.end());
+        probe_->copiedLastSubmittedWorldMeshBindingKeys.clear();
+        probe_->copiedLastSubmittedWorldMaterialBindingKeys.clear();
+        probe_->copiedLastSubmittedWorldMeshBindingKeys.reserve(meshes3D.size());
+        probe_->copiedLastSubmittedWorldMaterialBindingKeys.reserve(meshes3D.size());
+        for (const Render::RenderMesh3DItem& mesh : meshes3D)
+        {
+            const Render::FrameResourceDescriptor* meshDescriptor = frame.resources.resolve(
+                mesh.mesh, Render::FrameResourceKind::Mesh3DGeometry);
+            const Render::FrameResourceDescriptor* materialDescriptor = frame.resources.resolve(
+                mesh.material, Render::FrameResourceKind::Mesh3DMaterial);
+            if (meshDescriptor == nullptr || materialDescriptor == nullptr)
+            {
+                return Core::failure(Render::RenderErrorCode::InvalidFrameResource,
+                                     "runtime probe received an invalid Mesh3D frame resource");
+            }
+            probe_->copiedLastSubmittedWorldMeshBindingKeys.push_back(
+                meshDescriptor->deviceBindingKey);
+            probe_->copiedLastSubmittedWorldMaterialBindingKeys.push_back(
+                materialDescriptor->deviceBindingKey);
+        }
         const auto mesh3DBatches = frame.primaryWorldScene.mesh3DBatches();
         probe_->copiedLastSubmittedWorldMesh3DBatches.assign(mesh3DBatches.begin(), mesh3DBatches.end());
         probe_->copiedLastSubmittedWorldSceneStatistics = frame.primaryWorldScene.statistics();
@@ -1406,8 +1436,9 @@ struct GameProbe final {
     std::vector<Render::RenderCamera2DInput> scriptedRenderSceneCamerasByFrame;
     std::vector<ScriptedRenderSprite2DInput> scriptedRenderSceneSprites;
     u32 spriteFrameBorrowCount = 0;
+    u32 mesh3DFrameBorrowCount = 0;
     std::optional<Render::RenderPerspectiveCameraInput> scriptedRenderScenePerspectiveCamera;
-    std::vector<Render::RenderMesh3DInput> scriptedRenderSceneMeshes3D;
+    std::vector<ScriptedRenderMesh3DInput> scriptedRenderSceneMeshes3D;
     bool ignoreRenderSceneWriteFailures = false;
     std::optional<Core::ErrorCode> ignoredRenderSceneWriteFailure;
 };
@@ -1807,8 +1838,48 @@ class ScriptedGameState final : public IGameState {
                 return cameraStatus;
             }
         }
-        for (const Render::RenderMesh3DInput& mesh : probe_->scriptedRenderSceneMeshes3D)
+        for (const ScriptedRenderMesh3DInput& scripted : probe_->scriptedRenderSceneMeshes3D)
         {
+            const auto internMesh3DResource = [this, &context](
+                Render::FrameResourceKind kind,
+                u64 deviceBindingKey) -> Core::Result<Render::FrameResourceRef> {
+                ++probe_->mesh3DFrameBorrowCount;
+                Render::FramePin pin{
+                    Render::FramePinKind::Custom,
+                    deviceBindingKey,
+                    probe_,
+                    [](void* userData) noexcept {
+                        auto& game = *static_cast<GameProbe*>(userData);
+                        if (game.mesh3DFrameBorrowCount > 0)
+                        {
+                            --game.mesh3DFrameBorrowCount;
+                        }
+                    },
+                };
+                return context.frameResourceSink().intern(
+                    Render::FrameResourceDescriptor{
+                        .kind = kind,
+                        .deviceBindingKey = deviceBindingKey,
+                    },
+                    std::move(pin));
+            };
+            auto meshResource = internMesh3DResource(
+                Render::FrameResourceKind::Mesh3DGeometry,
+                scripted.meshDeviceBindingKey);
+            if (!meshResource)
+            {
+                return Core::failure(std::move(meshResource.error()));
+            }
+            auto materialResource = internMesh3DResource(
+                Render::FrameResourceKind::Mesh3DMaterial,
+                scripted.materialDeviceBindingKey);
+            if (!materialResource)
+            {
+                return Core::failure(std::move(materialResource.error()));
+            }
+            Render::RenderMesh3DInput mesh = scripted.mesh;
+            mesh.mesh = *meshResource;
+            mesh.material = *materialResource;
             auto meshStatus = handleWriteStatus(writer.addMesh3D(mesh));
             if (!meshStatus)
             {
@@ -2778,8 +2849,10 @@ TEST(EngineHostRunTest, PerspectiveExtractionUsesCurrentPrimaryWindowAspectAndPu
     EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedPerspectiveCamera->aspectRatio, 2.0F);
     EXPECT_EQ(runtime.copiedLastSubmittedPerspectiveCamera->stableCameraKey, 303U);
     ASSERT_EQ(runtime.copiedLastSubmittedWorldMeshes3D.size(), 2U);
-    EXPECT_EQ(runtime.copiedLastSubmittedWorldMeshes3D[0].meshKey, 41U);
-    EXPECT_EQ(runtime.copiedLastSubmittedWorldMeshes3D[0].materialKey, 51U);
+    ASSERT_EQ(runtime.copiedLastSubmittedWorldMeshBindingKeys.size(), 2U);
+    ASSERT_EQ(runtime.copiedLastSubmittedWorldMaterialBindingKeys.size(), 2U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldMeshBindingKeys[0], 41U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldMaterialBindingKeys[0], 51U);
     ASSERT_EQ(runtime.copiedLastSubmittedWorldMesh3DBatches.size(), 1U);
     EXPECT_EQ(runtime.copiedLastSubmittedWorldMesh3DBatches.front().firstItem, 0U);
     EXPECT_EQ(runtime.copiedLastSubmittedWorldMesh3DBatches.front().itemCount, 2U);

@@ -143,6 +143,47 @@ TEST(FrameResourceTest, InternDeduplicatesAndResolvesDescriptor)
     EXPECT_EQ(view.resolve(*first, Render::FrameResourceKind::Sprite2DTexture), nullptr);
 }
 
+TEST(FrameResourceTest, CapacityCoversDefaultSpriteMeshAndMaterialWorkingSets)
+{
+    constexpr Core::u32 SpriteTextureCount = 64;
+    constexpr Core::u32 MeshGeometryCount = 128;
+    constexpr Core::u32 MeshMaterialCount = 128;
+    constexpr Core::u32 ExpectedResourceCount =
+        SpriteTextureCount + MeshGeometryCount + MeshMaterialCount;
+    static_assert(Render::RenderFramePacket::MaxResources >= ExpectedResourceCount);
+
+    g_releaseCount.store(0);
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(8).has_value());
+
+    struct ResourceDomain final {
+        Render::FrameResourceKind kind;
+        Core::u32 count;
+    };
+    constexpr ResourceDomain domains[]{
+        {Render::FrameResourceKind::Sprite2DTexture, SpriteTextureCount},
+        {Render::FrameResourceKind::Mesh3DGeometry, MeshGeometryCount},
+        {Render::FrameResourceKind::Mesh3DMaterial, MeshMaterialCount},
+    };
+    Core::u32 descriptorCount = 0;
+    for (const ResourceDomain domain : domains)
+    {
+        for (Core::u32 index = 0; index < domain.count; ++index)
+        {
+            const auto resource = packet.intern(
+                Render::FrameResourceDescriptor{domain.kind, index + 1U},
+                makeCountingPin(descriptorCount + 1U));
+            ASSERT_TRUE(resource.has_value()) << descriptorCount;
+            ++descriptorCount;
+        }
+    }
+
+    EXPECT_EQ(descriptorCount, ExpectedResourceCount);
+    EXPECT_EQ(packet.resourceCount(), descriptorCount);
+    ASSERT_TRUE(packet.completeSkipped().has_value());
+    EXPECT_EQ(g_releaseCount.load(), static_cast<int>(descriptorCount));
+}
+
 TEST(FrameResourceTest, InvalidInputAndCapacityFailureDoNotConsumeCallerPin)
 {
     g_releaseCount.store(0);

@@ -31,7 +31,7 @@
 | N13 | ASSET-HANDLE-SCENE-2D-A4 | 已完成 | TileMap emit 改存 weak Tileset AssetHandle，并在调用期借用 Asset resolver；registry Tileset dependency resolve、单次解析/失败清空与产品 evidence schema 12 已贯通，完整总项仍为 Partial |
 | N14 | ASSET-HANDLE-SCENE-3D-A5 | 已完成 | MeshRenderer3D/Prefab 改存 weak StaticMesh/Material Handle，extraction 借用 kind-specific resolver；3D product evidence schema 1 与 Resources-owned AssetStore 已贯通，完整总项仍为 Partial |
 | N15 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS | 已完成 | fixed-capacity owner-thread Mesh3D registry、独立 device key allocator、原子 material bundle、stale-safe unbind 与 3D product evidence schema 2 已贯通；完整总项仅剩统一 retirement ownership/FrameResourceRef |
-| N16 | ASSET-HANDLE-SCENE-FRAME-RESOURCE | 进行中 | N16.1 已建立 packet-local FrameResourceRef/资源表与 Texture2D retirement 事务；N16.2 已迁移全部 Sprite2D extraction；N16.3 已统一 Sprite owner；N16.4 待统一 3D owner |
+| N16 | ASSET-HANDLE-SCENE-FRAME-RESOURCE | 已完成 | N16.1 建立 packet-local FrameResourceRef/资源表与 Texture2D retirement 事务；N16.2 迁移全部 Sprite2D extraction；N16.3 统一 Sprite owner；N16.4 统一 Mesh/Material/共享 Texture owner并关闭总项 |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -558,8 +558,9 @@ ownership 与 `FrameResourceRef` 仍需后续切片。
 
 ### 已完成契约
 
-- 通用 `AssetBindingResolver` 位于窄 `Tina::AssetTypes` target，保持 borrowed function pointer + user data；
-  Scene 的 `Sprite2DBindingResolver` 是语义 alias，不形成 Asset→Scene 依赖。
+- N13 当时的通用 `AssetBindingResolver` 位于窄 `Tina::AssetTypes` target，保持 borrowed function pointer +
+  user data；N16.2 已用 `AssetFrameResourceResolver` 替代它，Scene 的 `Sprite2DBindingResolver` 继续作为语义
+  alias，不形成 Asset→Scene 依赖。
 - `TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与 resolver，不再保存 `spriteKey`，也不
   持有 `AssetLease`、Cooked payload、GPU owner 或 resolver context。
 - `Sprite2DBindingRegistry::resolveTileset()` 与 Sprite 路径共用单 Texture2D dependency 校验：live handle、
@@ -601,9 +602,10 @@ registry。统一 retirement ownership 与 `FrameResourceRef` 仍需后续切片
 
 - `MeshRenderer3D` 保存 copyable weak StaticMesh/Material `AssetHandle` 与语义字段，不保存 Render key、
   `AssetLease`、Cooked payload、GPU owner 或 resolver context；`isValid()` 只检查 bounds/color 等结构属性。
-- `ExtractRenderSceneParams` 分别借用 mesh/material `AssetBindingResolver`。visible mesh 先验证两个 handle 与
+- N14 当时的 `ExtractRenderSceneParams` 分别借用 mesh/material `AssetBindingResolver`。visible mesh 先验证两个 handle 与
   resolver，再按顺序解析；mesh 失败不调用 material resolver。empty/stale/cross-store/wrong-kind/unbound/0
-  统一 `UnresolvedMesh`，hidden mesh 不解析。
+  统一 `UnresolvedMesh`，hidden mesh 不解析；N16.4 已以 `AssetFrameResourceResolver` 和 packet-local ref
+  替代 key resolver，不改写 N14 的历史验收事实。
 - `PrefabMeshBinding` 只做 mesh/material AssetId→Handle，empty AssetId/Handle 失败会销毁本次全部 entity；
   bounds/baseColor 回调保留，不存在 key/handle 双轨。
 - infrastructure 3D sample 使用 State-owned 最小 `AssetStore` fixture；产品 `Product3DResources` 拥有覆盖
@@ -733,14 +735,36 @@ ownership 与 packet-local `FrameResourceRef` 必须作为独立后续切片完�
   已取得、2次 retirement 被接受、Registry 已释放、weak handles 已失效，以及2条 `GpuTexture2D` record
   均为 `Released` 且 live=0。
 
-### 后续切片
+### N16.4 已完成契约
+
+- `FrameResourceKind` 新增 `Mesh3DGeometry`/`Mesh3DMaterial`；`RenderMesh3DInput/Item/Batch` 删除持久
+  `meshKey/materialKey`，只保存 packet-local ref。packet 固定预算扩为320，覆盖默认64个 Sprite Texture
+  与 Product 3D 上限各128个 Mesh Geometry/Material 的混合 working set，超限继续显式失败。Scene mesh/material resolver 统一使用
+  `AssetFrameResourceResolver`，旧 `AssetBindingResolver` 及 header-isolation TU 删除。
+- Null/bgfx 在任何 frame/statistics/surface/geometry 提交副作用前解析全部 Mesh3D ref；cross-packet、stale、
+  wrong-kind、越界与超过 `u32` binding range 返回 `InvalidFrameResource`。
+- `Mesh3DBindingRegistry` 借用最终地址稳定的 AssetSystem/device/PMR。Mesh entry 唯一拥有
+  StaticMesh Lease/GPU/binding；Material entry 拥有 Material Lease/binding；Texture entry 按 AssetId 唯一拥有
+  Texture Lease/GPU，并用 material reference count 支持跨 Material 共享。
+- `GpuTextureId`/`GpuMeshId` 使用 RenderDevice owner + index + generation；Null/bgfx 在 bind、validate 与
+  destroy/retire 时拒绝 wrong-owner，即使不同 live device 的 index/generation 碰撞也不能 alias。
+- Mesh/Material 首次 intern 各自取得 entry borrow pin，active frame 阻止对应 retirement。Material 先清除
+  backend bundle并 logical unload，再减少 Texture references；Texture 有 live Material 引用时拒绝退休。
+  Mesh/Texture 使用 lease-consuming AssetSystem transaction，backend/ledger failure 保留完整 Entry供重试。
+- `retireAllBindings()` 在任何提交前检查全部 Mesh/Material borrow，再按 Material→Texture→Mesh 顺序关闭；
+  允许已成功前缀，失败项与后续项保留。Registry 析构要求三类 Entry 全空。
+- product-3d complete-PBR fixture 的两个 Material 共享3个 Texture owner。schema 4 证明2 Mesh、2 Material、
+  3 Texture 上传/retirement、对应 weak handle 失效、retirement records 全部 Released、600/600 frame-resource
+  resolver hits、registry 释放与像素 capture 成功。
+
+### 切片状态
 
 | 切片 | 状态 | 完成定义 |
 | --- | --- | --- |
 | N16.1 | 已完成 | Render packet 资源表/引用、Runtime begin/rollback 时序、lease-consuming Texture2D retirement 事务与单元/集成测试 |
 | N16.2 | 已完成 | World/TileMap/Particle/Trail Sprite2D extraction 只写 `FrameResourceRef`，同帧相同资源只 intern 一次，backend 提交前完整验证 table/ref |
 | N16.3 | 已完成 | 统一 Sprite registry、`AssetLease` 与 GPU retirement owner，升级 product-2d evidence；只收口 2D owner 子项 |
-| N16.4 | 待推进 | Mesh3D/Material 迁移到 packet-local `FrameResourceRef` 并统一 Mesh/共享 Texture owner；完成后再评估 `ASSET-HANDLE-SCENE` 总项 |
+| N16.4 | 已完成 | Mesh3D/Material 使用 packet-local `FrameResourceRef`；统一 Mesh/Material/共享 Texture owner，product-3d schema 4 与模块门禁通过；`ASSET-HANDLE-SCENE` Done |
 
 ### N16.1 验收
 
@@ -756,9 +780,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 最终验证：`tina_tests` 329/329、`tina_asset_tests` 188/188、`tina_render_bgfx_tests` 52/52；
 `tina_sample_2d` 与 `tina_sample_3d` 均完成 300 帧 smoke；DOC-002 为0 error / 0 warning。
 
-N16.2 已完成 2D Scene item 与 backend 提交链迁移；N16.3 关闭 Sprite2D Lease/GPU retirement owner。
-Mesh3D/Material 仍是 key + 分裂 owner 路径，因此 `ASSET-HANDLE-SCENE` 总项继续为 InProgress，由
-N16.4 收口。
+### N16.4 验收
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1 `
+  -SkipConfigure
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1 `
+  -SkipConfigure -SkipBuild -OutJson artifacts\gates\product-3d.json
+```
+
+2026-07-29 基线 `e61b6a00` + N16.4 工作树的正式同轮结果：build exit 0；
+`tina_tests` 335/335、`tina_scene_tests` 91/91、`tina_asset_format_tests` 59/59、
+`tina_asset_tests` 204/204、`tina_render_scene_tests` 39/39、`tina_render_bgfx_tests` 61/61、
+`tina_ui_tests` 282/282、`tina_runtime_ui_tests` 85/85、`tina_ui_render_integration_tests` 15/15、
+`tina_ui_freetype_tests` 3/3。`tina_sample_3d` 完成300帧且 exit 0；schema 4、共享3 Texture、
+600/600 frame-resource resolver hits、retirement Released、ledger 平衡与 pixel capture 全部通过；
+`artifacts/gates/product-3d.json` 报告 `ok=true`。
+
+N16.2 完成 2D Scene item 与 backend 提交链迁移；N16.3 关闭 Sprite2D Lease/GPU retirement owner；N16.4
+完成 Mesh3D/Material frame-resource 与 Mesh/Material/共享 Texture owner 统一。因此
+`ASSET-HANDLE-SCENE` 总项已完成。
 
 ## 每项收口清单
 

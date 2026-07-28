@@ -33,6 +33,26 @@ namespace {
     return Core::success();
 }
 
+[[nodiscard]] Core::Status validateMesh3DResources(const RenderFrame& frame) noexcept
+{
+    for (const RenderMesh3DItem& mesh : frame.primaryWorldScene.meshes3D())
+    {
+        const FrameResourceDescriptor* geometry =
+            frame.resources.resolve(mesh.mesh, FrameResourceKind::Mesh3DGeometry);
+        const FrameResourceDescriptor* material =
+            frame.resources.resolve(mesh.material, FrameResourceKind::Mesh3DMaterial);
+        if (geometry == nullptr || material == nullptr ||
+            geometry->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()) ||
+            material->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidFrameResource,
+                "NullRender Mesh3D refs are stale, cross-packet, wrong-kind, or out of binding range");
+        }
+    }
+    return Core::success();
+}
+
 class NullRenderDevice final : public IRenderDevice {
   public:
     explicit NullRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker) noexcept
@@ -57,6 +77,10 @@ class NullRenderDevice final : public IRenderDevice {
                                  "Render frame indices must be contiguous and begin at zero");
         }
         if (auto status = validateSprite2DResources(frame); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (auto status = validateMesh3DResources(frame); !status)
         {
             return Core::failure(std::move(status.error()));
         }
@@ -115,7 +139,21 @@ class NullRenderDevice final : public IRenderDevice {
         const u32 index = static_cast<u32>(textures_.size());
         textures_.push_back(TextureSlot{.generation = 1, .width = desc.width, .height = desc.height, .live = true});
         ++statistics_.liveResources;
-        return GpuTextureId{.index = index, .generation = 1};
+        return GpuTextureId{resourceOwnerId(), index, 1};
+    }
+
+    [[nodiscard]] Core::Status validateTexture2D(GpuTextureId texture) const noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!texture || !isLiveTexture(texture))
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound,
+                                 "Texture2D handle is invalid, stale, or belongs to another device");
+        }
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status destroyTexture2D(GpuTextureId texture) noexcept override
@@ -124,7 +162,8 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
         }
-        if (!texture || texture.index >= textures_.size() || !textures_[texture.index].live ||
+        if (!texture || texture.owner != resourceOwnerId() || texture.index >= textures_.size() ||
+            !textures_[texture.index].live ||
             textures_[texture.index].generation != texture.generation)
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid or already destroyed");
@@ -182,7 +221,8 @@ class NullRenderDevice final : public IRenderDevice {
             spriteBindings_.erase(deviceBindingKey);
             return Core::success();
         }
-        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
+        if (texture.owner != resourceOwnerId() || texture.index >= textures_.size() ||
+            !textures_[texture.index].live ||
             textures_[texture.index].generation != texture.generation)
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
@@ -216,7 +256,7 @@ class NullRenderDevice final : public IRenderDevice {
                                    .indexCount = desc.indexCount,
                                    .live = true});
         ++statistics_.liveResources;
-        return GpuMeshId{.index = slotIndex, .generation = 1};
+        return GpuMeshId{resourceOwnerId(), slotIndex, 1};
     }
 
     [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
@@ -225,7 +265,8 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
         }
-        if (!mesh || mesh.index >= meshes_.size() || !meshes_[mesh.index].live ||
+        if (!mesh || mesh.owner != resourceOwnerId() || mesh.index >= meshes_.size() ||
+            !meshes_[mesh.index].live ||
             meshes_[mesh.index].generation != mesh.generation)
         {
             return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid or already destroyed");
@@ -266,7 +307,8 @@ class NullRenderDevice final : public IRenderDevice {
             meshBindings_.erase(meshKey);
             return Core::success();
         }
-        if (mesh.index >= meshes_.size() || !meshes_[mesh.index].live ||
+        if (mesh.owner != resourceOwnerId() || mesh.index >= meshes_.size() ||
+            !meshes_[mesh.index].live ||
             meshes_[mesh.index].generation != mesh.generation)
         {
             return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
@@ -487,7 +529,8 @@ class NullRenderDevice final : public IRenderDevice {
   private:
     [[nodiscard]] bool isLiveTexture(GpuTextureId texture) const noexcept
     {
-        return !texture || (texture.index < textures_.size() && textures_[texture.index].live &&
+        return !texture || (texture.owner == resourceOwnerId() && texture.index < textures_.size() &&
+                            textures_[texture.index].live &&
                             textures_[texture.index].generation == texture.generation);
     }
 

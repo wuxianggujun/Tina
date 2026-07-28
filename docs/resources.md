@@ -20,17 +20,17 @@ Catalog package
   -> load plan + AssetSystem
   -> AssetStore Handle/Lease state
   -> optional Sprite2DBindingRegistry (borrow AssetSystem + RenderDevice)
-     / Mesh3DBindingRegistry (borrow Store + RenderDevice)
+     / Mesh3DBindingRegistry (borrow AssetSystem + RenderDevice)
   -> optional TileMapStream chunk residency owner
   -> optional Null UploadTicket coordinator
 ```
 
 - `Tina::AssetFormat` 定义 wire schema、parser/writer 与 typed payload schema，只 PUBLIC 依赖 Core；
-- `Tina::AssetTypes` 承载 header-only weak `AssetHandle`、borrowed `AssetBindingResolver` 与
-  `AssetFrameResourceResolver`，只依赖 Core/Render；`Tina::Asset` 负责 Catalog、磁盘文件、Cooker、Lease、
+- `Tina::AssetTypes` 承载 header-only weak `AssetHandle` 与 borrowed `AssetFrameResourceResolver`，只依赖
+  Core/Render；`Tina::Asset` 负责 Catalog、磁盘文件、Cooker、Lease、
   Task IO 与 upload 账本；
 - xxHash 与 cgltf 都是私有实现依赖，公开头不泄漏第三方 token；
-- Render backend 只接收解析后的 payload或资源 key，不读取 Catalog/source tree；
+- Render backend 只接收解析后的 payload或 packet-local resource descriptor，不读取 Catalog/source tree；
 - Scene、UI 与 gameplay 不直接拥有 bgfx Buffer/Texture/Pipeline handle。
 
 ## 当前实现
@@ -42,7 +42,7 @@ Catalog package
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验 |
 | Package | 确定性 object path、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
 | Cooker | recipe、writer、发布前 typed/package validation、staging 后原子发布；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
-| Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，RenderDevice 实例 allocator 事务分配唯一、单调不复用 key |
+| Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
@@ -51,15 +51,15 @@ Catalog package
 `ParticleSystem2D`/`Trail2D` 与 3D `MeshRenderer3D` 复制 weak handle，并在 extraction 时显式借用产品 resolver；A2
 产品 resolver 薄调用 Asset-owned API surface 的
 `Sprite2DBindingRegistry`，后者按当前 Store owner/generation、Sprite/Tileset kind、唯一 required Texture2D cooked dependency
-与 live binding 解析 key。Scene 不因此依赖完整 AssetSystem，也不取得 Lease/payload/GPU owner。
+与 live binding intern 当前 packet ref。Scene 不因此依赖完整 AssetSystem，也不取得 Lease/payload/GPU owner。
 Particle/Trail 不缓存解析结果或 resolver：空 FX 不解析，Trail 每次非空 extract 解析一次，Particle 按 live
 item 解析。TileMap emit 保存 weak Tileset Handle，不缓存 key/resolver；hidden/off-camera/empty 跳过解析，
 非空可见集合每次调用只解析一次，失败清空输出。3D Prefab 先把 AssetId 解析为 weak StaticMesh/Material
-handle；Scene extraction 再通过两个 kind-specific resolver 取得 backend key。产品 `AssetStore` 覆盖
-World/extraction 生命周期；A6 的 `Mesh3DBindingRegistry` 原子注册 mesh/material GPU bundle，并由 resolver
-fail closed 解析。N16.1 已落地 packet-local `FrameResourceRef`/资源表基础设施；N16.2 已把全部 2D
-Sprite item 迁移为 frame ref；N16.3 让 Sprite registry Entry 唯一拥有 resident Lease/GPU/binding，首次
-intern 的 entry borrow pin 阻止活跃帧期间 retirement。3D Mesh/Material 的对应 owner 统一留给 N16.4。
+handle；Scene extraction 再通过两个 kind-specific `AssetFrameResourceResolver` 取得 packet-local ref。产品
+`AssetStore` 覆盖 World/extraction 生命周期；`Mesh3DBindingRegistry` 原子注册 mesh/material GPU bundle，
+并 fail closed 地 intern 当前 binding。N16.1 建立 `FrameResourceRef`/资源表，N16.2 迁移全部 Sprite item，
+N16.3 统一 Sprite owner，N16.4 已让 Mesh/Material item 同样只携带 frame ref，并让 3D registry 唯一拥有
+Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 Texture Lease/GPU owner。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
@@ -82,9 +82,10 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `Sprite2DBindingRegistry` 是 fixed-capacity owner-thread owner；只借用 AssetSystem/device/可选 PMR，
   每个 Entry 唯一拥有 Texture2D `AssetLease`、`GpuTextureId` 与 binding。它为 packet-local Sprite ref
   维护 entry borrow count，active frame pin 清零前拒绝 retirement；成功 handoff 后 Entry 才清空；
-- `Mesh3DBindingRegistry` 分别维护 StaticMesh/Material 固定容量 mapping；Material v2 writer 要求 required
-  Texture2D dependency 按 baseColor/MR/normal role 顺序保持 AssetId 严格递增且唯一，registry 从 Cooked
-  payload 派生 factors 并逐 role 校验；它只借用 GPU owner，释放前必须 exact unbind；
+- `Mesh3DBindingRegistry` 是 fixed-capacity owner-thread owner；借用 AssetSystem/device/可选 PMR。Mesh entry
+  唯一拥有 StaticMesh `AssetLease`/`GpuMeshId`/binding，Material entry 拥有 Material `AssetLease`/binding，
+  Texture entry 按 AssetId 去重拥有共享 Texture2D `AssetLease`/`GpuTextureId`；Material v2 writer 要求同一
+  Material 内的 required Texture2D dependency 按 baseColor/MR/normal role 顺序严格递增且唯一；
 - `TileMapStream` 持有 root/tileset lease 与 demanded chunk handle/lease；必须先把 `AssetSystem` 和 stream
   放到最终地址，再创建借用 `stream.map()` 的 collision adapter，且 stream 必须先于 AssetSystem 析构；
 - `UploadTicket` 当前只由 Null ledger 完整实现，用于验证 staging 与逻辑状态；
@@ -106,8 +107,8 @@ submission 保留 CPU payload 时必须持有 Lease，而不是缓存 `tryGet()`
 自动回滚且不发布 Entry；完整成功才把 Lease/GPU/binding 发布到 Entry 并清空调用方 handle。成功 key 在
 该 device 实例 namespace 内从1起单调增长，retirement 后不复用；多个 registry 共享 device 时仍获得
 distinct key。exact duplicate、同 AssetId 的另一 handle，以及同一 registry 已持有的 GPU texture 都是
-ownership conflict；由于 `GpuTextureId` 仍是可复制的 index+generation，跨 registry/cross-device alias 由
-调用方唯一 owner 契约禁止。普通 `bindingKey()`
+ownership conflict；`GpuTextureId` 的 RenderDevice owner token 让 backend 确定性拒绝 cross-device handle，
+可复制 handle 的跨 registry alias cleanup 仍由调用方唯一 owner 契约禁止。普通 `bindingKey()`
 对 stale/unloaded Texture2D fail closed 返回0。
 
 direct `setSprite2DTextureBinding()` 的 caller-chosen key 与 allocator-managed key 共用 namespace；device
@@ -124,6 +125,26 @@ backend 接受后会先原子失效 GPU generation 并清除所有引用 binding
 `retireAllTextureBindings()` 先全表 borrow preflight，再允许成功前缀提交。registry 析构要求所有 Entry
 已经显式 retirement，否则 fail-fast。产品 State 只通过 registry retirement 关闭两张纹理，不再保留
 第二份裸 GPU owner 或执行 direct unbind/destroy。
+
+### Mesh3D binding registry
+
+`Mesh3DBindingRegistry::Create(assets, device, config)` 在共享 owner thread 上一次性建立 mesh/material/texture
+三组固定容量 storage。`registerMeshBinding(handle, gpuMesh&)` 只有在 handle、容量、Lease acquisition 与
+ownership conflict 校验通过，并由 `createMesh3DBinding()` 成功校验 GPU owner/live generation、创建 backend
+binding 后才消费调用方 GPU owner。`registerMaterialTexture(handle, gpuTexture&)` 还会通过 backend
+`validateTexture2D()` 做非消费 owner/live/generation 校验。任一路径失败都释放临时 Lease，并保留 GPU owner 与
+backend 状态。Texture 按 `AssetId` 唯一注册，因此多个 Material 可引用同一 Texture owner。
+`registerMaterialBinding(handle)` 从 Cooked Material
+派生 factors 和 texture roles，要求每个 required dependency 都已有 live Texture owner，然后以单个 backend
+bundle 原子发布并增加对应 texture reference count。
+
+`internMeshFrameResource()` / `internMaterialFrameResource()` 分别登记 `Mesh3DGeometry` 与
+`Mesh3DMaterial` descriptor。首次 intern 持有对应 Entry 的 frame borrow pin，同帧去重释放重复 pin；active
+borrow 阻止 Mesh/Material retirement。Material retirement 先清除 backend bundle、logical unload Material
+Lease，再减少共享 Texture 引用；有 live Material 引用的 Texture 不能退休。Mesh/Texture retirement 直接
+调用 AssetSystem 的 lease-consuming transaction，backend/ledger failure 保留完整 Entry 供重试。
+`retireAllBindings()` 先对全部 Mesh/Material borrow 做无突变 preflight，再按 Material→Texture→Mesh 顺序
+提交；已成功前缀不会回滚，失败项及后续 owner 留待重试。Registry 析构要求三组 Entry 全空。
 
 ## AssetSystem 状态流
 
@@ -147,9 +168,10 @@ UnloadPending -- last lease released --> generation erased / stale Handle
 ReadyGpu 与 unload/retirement 状态机；`retireOnGpuReady=true` 是 Null staging 路径行为。真实 bgfx texture/
 mesh 产品上传使用 `RenderDevice` typed upload 和 key binding；handle-based `AssetSystem::retireTexture2D` /
 `retireStaticMesh` 会先 acquire `AssetLease`，把 lease 转入 render completion pin，再立即 logical unload 与
-移除 AssetId lookup。Texture2D 另提供既有 `AssetLease&` + `GpuTextureId&` overload：只有 backend 接受
-retirement 后才消费两个 owner；owner-thread、kind/store/state、PMR payload allocation、ledger 或 backend
-失败都保留输入供重试。marker 前 Store 保持 `UnloadPending`，callback 后进入 `Released/Unloaded`。
+移除 AssetId lookup。Texture2D 与 StaticMesh 均提供 `AssetLease&` + 对应 GPU generation handle ref overload：
+只有 backend 接受 retirement 后才消费两个 owner；owner-thread、kind/store/state、PMR payload allocation、
+ledger 或 backend 失败都保留输入供重试。marker 前 Store 保持 `UnloadPending`，callback 后进入
+`Released/Unloaded`。
 同步 backend 可在 retirement 调用返回前执行 completion；若它释放最后一个 `UnloadPending` Lease，Store
 会当场完成 generation erase，调用方不得再以旧 handle 重复 unload。
 

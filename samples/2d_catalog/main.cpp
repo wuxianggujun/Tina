@@ -183,6 +183,11 @@ class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
     {
         return inner_->createTexture2DRgba8(desc);
     }
+    [[nodiscard]] Tina::Core::Status
+    validateTexture2D(Tina::Render::GpuTextureId texture) const noexcept override
+    {
+        return inner_->validateTexture2D(texture);
+    }
     [[nodiscard]] Tina::Core::Status destroyTexture2D(Tina::Render::GpuTextureId texture) noexcept override
     {
         return inner_->destroyTexture2D(texture);

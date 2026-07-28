@@ -13,6 +13,8 @@ class RenderFramePacket;
 enum class FrameResourceKind : Core::u8 {
     Invalid = 0,
     Sprite2DTexture = 1,
+    Mesh3DGeometry = 2,
+    Mesh3DMaterial = 3,
 };
 
 struct FrameResourceDescriptor final {

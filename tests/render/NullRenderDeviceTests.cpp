@@ -49,8 +49,11 @@ void releaseTestPin(void* userData) noexcept
     ++(*static_cast<u32*>(userData));
 }
 
-[[nodiscard]] Render::FrameResourceRef internTexture(
-    Render::RenderFramePacket& packet, u64 bindingKey, u32& releaseCount)
+[[nodiscard]] Render::FrameResourceRef internResource(
+    Render::RenderFramePacket& packet,
+    Render::FrameResourceKind kind,
+    u64 bindingKey,
+    u32& releaseCount)
 {
     Render::FramePin pin{
         Render::FramePinKind::Custom,
@@ -60,12 +63,19 @@ void releaseTestPin(void* userData) noexcept
     };
     auto result = packet.intern(
         Render::FrameResourceDescriptor{
-            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .kind = kind,
             .deviceBindingKey = bindingKey,
         },
         std::move(pin));
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : Render::FrameResourceRef{};
+}
+
+[[nodiscard]] Render::FrameResourceRef internTexture(
+    Render::RenderFramePacket& packet, u64 bindingKey, u32& releaseCount)
+{
+    return internResource(
+        packet, Render::FrameResourceKind::Sprite2DTexture, bindingKey, releaseCount);
 }
 
 [[nodiscard]] Core::Result<Render::RenderSceneView> twoSpriteScene(
@@ -98,6 +108,37 @@ void releaseTestPin(void* userData) noexcept
             .texture = secondTexture,
             .stableEntityKey = 2,
             .centerX = 1.0F,
+        }); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return builder.commit();
+}
+
+[[nodiscard]] Core::Result<Render::RenderSceneView> oneMeshScene(
+    Render::RenderSceneBuilder& builder,
+    Render::FrameResourceRef mesh,
+    Render::FrameResourceRef material)
+{
+    if (auto status = builder.beginFrame({.primarySurfaceAspectRatio = 1.0F}); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    Render::RenderSceneWriter writer = builder.writer();
+    if (auto status = writer.setPerspectiveCamera(Render::RenderPerspectiveCameraInput{
+            .stableCameraKey = 1,
+            .verticalFovDegrees = 60.0F,
+            .nearPlaneMeters = 0.1F,
+            .farPlaneMeters = 100.0F,
+        }); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = writer.addMesh3D(Render::RenderMesh3DInput{
+            .mesh = mesh,
+            .material = material,
+            .stableEntityKey = 1,
+            .localBounds = {.radius = 1.0F},
         }); !status)
     {
         return Core::failure(std::move(status.error()));
@@ -221,6 +262,159 @@ TEST(NullRenderDeviceTest, RejectsAnyCrossPacketSpriteTextureBeforeConsumingFram
     ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
     ASSERT_TRUE(device->present().has_value());
     EXPECT_EQ(device->statistics().submitted, 1U);
+}
+
+TEST(NullRenderDeviceTest, RejectsCrossPacketMeshResourcesBeforeConsumingFrameOrStatistics)
+{
+    u32 firstReleaseCount = 0;
+    u32 secondReleaseCount = 0;
+    Render::RenderFramePacket firstPacket;
+    Render::RenderFramePacket secondPacket;
+    ASSERT_TRUE(firstPacket.beginFrame(0));
+    ASSERT_TRUE(secondPacket.beginFrame(0));
+    const Render::FrameResourceRef mesh = internResource(
+        firstPacket, Render::FrameResourceKind::Mesh3DGeometry, 11, firstReleaseCount);
+    const Render::FrameResourceRef material = internResource(
+        secondPacket, Render::FrameResourceKind::Mesh3DMaterial, 22, secondReleaseCount);
+
+    auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{
+        .mesh3DItemCapacity = 1,
+        .mesh3DBatchCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value()) << builderResult.error().message;
+    Render::RenderSceneBuilder builder = std::move(*builderResult);
+    auto scene = oneMeshScene(builder, mesh, material);
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+    auto invalid = device->submitFrame(Render::RenderFrame{
+        .frameIndex = 0,
+        .resources = firstPacket.resourceTableView(),
+        .primaryWorldScene = *scene,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidFrameResource);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+}
+
+TEST(NullRenderDeviceTest, RejectsWrongKindMeshResourcesBeforeConsumingFrameOrStatistics)
+{
+    u32 releaseCount = 0;
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    const Render::FrameResourceRef wrongMesh = internResource(
+        packet, Render::FrameResourceKind::Mesh3DMaterial, 11, releaseCount);
+    const Render::FrameResourceRef wrongMaterial = internResource(
+        packet, Render::FrameResourceKind::Mesh3DGeometry, 22, releaseCount);
+
+    auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{
+        .mesh3DItemCapacity = 1,
+        .mesh3DBatchCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value()) << builderResult.error().message;
+    Render::RenderSceneBuilder builder = std::move(*builderResult);
+    auto scene = oneMeshScene(builder, wrongMesh, wrongMaterial);
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+    auto invalid = device->submitFrame(Render::RenderFrame{
+        .frameIndex = 0,
+        .resources = packet.resourceTableView(),
+        .primaryWorldScene = *scene,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidFrameResource);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+}
+
+TEST(NullRenderDeviceTest, RejectsStaleMeshResourcesBeforeConsumingFrameOrStatistics)
+{
+    u32 releaseCount = 0;
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    const Render::FrameResourceRef mesh = internResource(
+        packet, Render::FrameResourceKind::Mesh3DGeometry, 11, releaseCount);
+    const Render::FrameResourceRef material = internResource(
+        packet, Render::FrameResourceKind::Mesh3DMaterial, 22, releaseCount);
+    const Render::FrameResourceTableView staleResources = packet.resourceTableView();
+
+    auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{
+        .mesh3DItemCapacity = 1,
+        .mesh3DBatchCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value()) << builderResult.error().message;
+    Render::RenderSceneBuilder builder = std::move(*builderResult);
+    auto scene = oneMeshScene(builder, mesh, material);
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+    ASSERT_TRUE(packet.abandon().has_value());
+    EXPECT_EQ(releaseCount, 2U);
+
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+    auto invalid = device->submitFrame(Render::RenderFrame{
+        .frameIndex = 0,
+        .resources = staleResources,
+        .primaryWorldScene = *scene,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidFrameResource);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+}
+
+TEST(NullRenderDeviceTest, RejectsOutOfRangeMeshResourcesOnSuspendedFrameBeforeStatistics)
+{
+    u32 releaseCount = 0;
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    constexpr u64 OversizedBindingKey =
+        static_cast<u64>((std::numeric_limits<u32>::max)()) + 1U;
+    const Render::FrameResourceRef mesh = internResource(
+        packet, Render::FrameResourceKind::Mesh3DGeometry, OversizedBindingKey, releaseCount);
+    const Render::FrameResourceRef material = internResource(
+        packet, Render::FrameResourceKind::Mesh3DMaterial, 22, releaseCount);
+
+    auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{
+        .mesh3DItemCapacity = 1,
+        .mesh3DBatchCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value()) << builderResult.error().message;
+    Render::RenderSceneBuilder builder = std::move(*builderResult);
+    auto scene = oneMeshScene(builder, mesh, material);
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+
+    auto suspended = suspendedSurface();
+    auto device = createDevice(Render::RenderDeviceCreateParams{
+        .initialPrimaryWindowSurface = suspended,
+    });
+    ASSERT_NE(device, nullptr);
+    auto invalid = device->submitFrame(Render::RenderFrame{
+        .frameIndex = 0,
+        .primaryWindowSurface = suspended,
+        .resources = packet.resourceTableView(),
+        .primaryWorldScene = *scene,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidFrameResource);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+    EXPECT_EQ(device->statistics().skippedSuspendedSurfaceFrames, 0U);
+
+    auto skipped = device->submitFrame(Render::RenderFrame{
+        .frameIndex = 0,
+        .primaryWindowSurface = suspended,
+    });
+    ASSERT_TRUE(skipped.has_value());
+    EXPECT_EQ(skipped->kind, Render::RenderFrameSubmissionKind::SkippedSuspendedSurface);
 }
 
 TEST(NullRenderDeviceTest, RunsThreeHundredFramesWithoutGpuResources)

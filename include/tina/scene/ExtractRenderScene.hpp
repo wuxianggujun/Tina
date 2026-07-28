@@ -1,6 +1,6 @@
 #pragma once
 
-#include <tina/asset/AssetBindingResolver.hpp>
+#include <tina/asset/AssetFrameResourceResolver.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/render/Camera2DProjection.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -15,8 +15,8 @@ namespace Tina::Scene {
 struct ExtractRenderSceneParams final {
     Render::Camera2DSurfaceViewport surfaceViewport{};
     Sprite2DBindingResolver spriteBindingResolver{};
-    Asset::AssetBindingResolver mesh3DBindingResolver{};
-    Asset::AssetBindingResolver material3DBindingResolver{};
+    Asset::AssetFrameResourceResolver mesh3DBindingResolver{};
+    Asset::AssetFrameResourceResolver material3DBindingResolver{};
 };
 
 // Reads published World components into an existing phase-local
@@ -39,11 +39,11 @@ struct ExtractRenderSceneParams final {
 //   the kind-specific mesh3DBindingResolver/material3DBindingResolver, then
 //   becomes addMesh3D from WorldTransform pose/scale.
 // - A missing resolver, invalid/stale/wrong-kind/unbound handle, or either
-//   resolver result 0 returns UnresolvedMesh. Hidden meshes are not resolved.
+//   resolver empty result returns UnresolvedMesh. Hidden meshes are not resolved.
 // - Optional SpriteOverrideFlags::UvRect copies uvRectOverride into
 //   RenderSprite2DInput; otherwise UV defaults to full texture [0,1].
 // - Does not require Runtime Phase Context World capability.
-// - Does not retain AssetLease, AssetSystem, cooked payload, or GPU types.
+// - Does not retain AssetLease, AssetSystem, cooked payload, GPU types, or device keys.
 [[nodiscard]] Core::Status extractRenderSceneFromWorld(
     World& world,
     Render::RenderSceneWriter& writer,

@@ -251,7 +251,7 @@ UTF-8 初值、ProgressBar value 与 Radio 互斥 selection。
 
 `tina_sample_3d` 的 `Product3DUI` 使用同一产品 Theme 契约提供 Theme Button、Auto Rotate Checkbox、
 Rotation Speed Slider、Frame ProgressBar、标题/Inspector/状态层级。Checkbox 与 Slider 控制实际模型旋转；
-callback 只提交 intent，`updateUI()` 统一处理控件状态、ProgressBar 与 `setProductTheme()`。schema 3 的
+callback 只提交 intent，`updateUI()` 统一处理控件状态、ProgressBar 与 `setProductTheme()`。当前 schema 4 的
 自动门禁要求 Dark→Light→Dark、标准控件 chrome 继承验证、5 Panel、9 Label、四类控件各1个、进度
 100% 与 root 释放。FreeType 暗/亮截图分别在
 `artifacts/screenshots/sample-3d-ui-dark/20260727-174319` 和

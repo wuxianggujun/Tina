@@ -46,7 +46,9 @@ namespace Detail {
 class RenderFramePacket final : public FramePinSink, public FrameResourceSink {
 public:
     static constexpr Core::u32 MaxPins = 32;
-    static constexpr Core::u32 MaxResources = 64;
+    // Covers the default 64 Sprite2D textures plus the Product 3D ceiling of
+    // 128 geometry and 128 material descriptors in one fixed working set.
+    static constexpr Core::u32 MaxResources = 320;
 
     enum class State : Core::u8 {
         Idle = 0,
@@ -152,7 +154,9 @@ public:
                 RenderErrorCode::InvalidFrameResource,
                 "FrameResourceSink only accepts resources while the packet is Building");
         }
-        if (descriptor.kind != FrameResourceKind::Sprite2DTexture
+        if ((descriptor.kind != FrameResourceKind::Sprite2DTexture
+             && descriptor.kind != FrameResourceKind::Mesh3DGeometry
+             && descriptor.kind != FrameResourceKind::Mesh3DMaterial)
             || descriptor.deviceBindingKey == 0)
         {
             return Core::failure(

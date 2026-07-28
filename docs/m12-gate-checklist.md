@@ -13,7 +13,7 @@
 | G0 | 非 clean 构建可复现 | Verified | Windows 现有 build tree 可增量 configure/build；日常门禁禁止 wipe |
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
 | G2 | UI 产品 | Partial | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有产品/结构化/视觉证据；平台 accessibility adapter、跨 DPI/GPU golden 与完整控件矩阵后置 |
-| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + extract-time resolver、原子 material bundle、base/MR/normal 贴图采样、单次有界3-light、Texture/Mesh backend retirement marker 与 stale-safe GPU owner teardown 已落地；统一 FrameResourceRef/retirement owner 与完整 PBR/IBL/shadow 后置 |
+| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、base/MR/normal 贴图采样、单次有界3-light、Texture/Mesh backend retirement marker 与 stale-safe teardown 已落地；仅完整 PBR/IBL/shadow/light system 后置 |
 | G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency 已完成；完整 PBR 后置 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
 | G6 | 平台矩阵 | Strong | tip Docker：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 sanitizer 均 exit 0（见 [Linux 证据](m12-evidence-linux.md)） |
@@ -55,7 +55,7 @@ accessibility adapter、跨 DPI/GPU golden 和完整控件/输入矩阵保持 Pa
 | 多 glTF mesh cook | Done | 每个 mesh 生成 distinct StaticMesh/Material AssetId，Prefab 依赖可解析 |
 | baseColorTexture cook | Done | 相对文件或 bufferView 的 PNG/JPEG 解码为 RGBA8 Texture2D，Material 发布 required dependency，相同 image 去重 |
 | multi-primitive mesh (SPLIT) | Done | 每 TRIANGLES prim → StaticMesh+Material；Prefab 展开父+子节点；非三角 prim 结构化失败 |
-| multi-mesh product bind/draw | Done | sample 通过 engine-provided、State-owned registry 注册/解析/释放多个 mesh/material binding；见 3D-001 / N15 |
+| multi-mesh product bind/draw | Done | sample 通过 engine-provided、State-owned registry 注册多个 mesh/material binding，以 packet-local ref 解析并由 registry retirement；见 3D-001 / N15 / N16.4 |
 | PBR/其他纹理通道 | Partial | metallic-roughness/normal 首切片已进 Material/Render 产品门禁；emissive、IBL、shadow 与完整 PBR 后置 |
 
 3D 视觉证据分为两层：`tina_sample_3d` 在最后一次 present 后读取 primary framebuffer，stdout JSON 必须

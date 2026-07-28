@@ -89,7 +89,7 @@ void releaseAssetLeaseRetirementPin(void* userData) noexcept
     }
 }
 
-[[nodiscard]] bool isTextureRetirementState(AssetLogicalState state) noexcept
+[[nodiscard]] bool isGpuRetirementState(AssetLogicalState state) noexcept
 {
     return state == AssetLogicalState::ReadyCpu || state == AssetLogicalState::UploadQueued ||
            state == AssetLogicalState::ReadyGpu || state == AssetLogicalState::UnloadPending;
@@ -1181,7 +1181,7 @@ Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetLe
         return Core::failure(AssetErrorCode::InvalidHandle,
                              "GPU texture retirement requires a Texture2D lease");
     }
-    if (!isTextureRetirementState(m_store.state(handle)))
+    if (!isGpuRetirementState(m_store.state(handle)))
     {
         return Core::failure(AssetErrorCode::AssetNotReady,
                              "GPU texture retirement requires a resident Texture2D lease");
@@ -1263,10 +1263,71 @@ Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetLe
 Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetHandle handle,
                                            Render::GpuMeshId mesh)
 {
+    if (std::this_thread::get_id() != m_ownerThread)
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "GPU mesh retirement must run on the AssetSystem owner thread");
+    }
     if (!handle || !mesh)
     {
         return Core::failure(AssetErrorCode::InvalidHandle,
                              "GPU mesh retirement requires valid asset and mesh handles");
+    }
+
+    auto lease = m_store.acquire(handle);
+    if (!lease)
+    {
+        return Core::failure(std::move(lease.error()).withContext("AssetSystem::retireStaticMesh", "acquire"));
+    }
+    auto status = retireStaticMesh(device, *lease, mesh);
+    if (!status)
+    {
+        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireStaticMesh", "lease"));
+    }
+    return Core::success();
+}
+
+Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetLease& lease,
+                                           Render::GpuMeshId& mesh)
+{
+    if (std::this_thread::get_id() != m_ownerThread)
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "GPU mesh retirement must run on the AssetSystem owner thread");
+    }
+    if (!lease || !mesh)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "GPU mesh retirement requires a valid lease and mesh handle");
+    }
+
+    const AssetHandle handle = lease.handle();
+    const Core::AssetId storeAssetId = m_store.assetId(handle);
+    if (!storeAssetId || storeAssetId != lease.assetId())
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "GPU mesh retirement lease does not belong to this AssetSystem");
+    }
+    if (m_store.assetKind(handle) != AssetFormat::AssetKind::StaticMesh ||
+        lease.assetKind() != AssetFormat::AssetKind::StaticMesh)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "GPU mesh retirement requires a StaticMesh lease");
+    }
+    if (!isGpuRetirementState(m_store.state(handle)))
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "GPU mesh retirement requires a resident StaticMesh lease");
+    }
+    const bool hasLiveRetirement = std::ranges::any_of(
+        m_retirement.records(),
+        [handle](const AssetRetirementRecord& record) noexcept {
+            return record.handle == handle && record.state != AssetRetirementState::Released;
+        });
+    if (hasLiveRetirement)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "GPU mesh retirement is already tracked for this lease");
     }
     if (m_gpuRetirementDevice != nullptr && m_gpuRetirementDevice != &device)
     {
@@ -1277,45 +1338,45 @@ Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetH
         }
     }
 
-    auto lease = m_store.acquire(handle);
-    if (!lease)
+    if (auto status = m_retirement.enqueueStaticMesh(handle, storeAssetId, mesh); !status)
     {
-        return Core::failure(std::move(lease.error()).withContext("AssetSystem::retireStaticMesh", "acquire"));
+        return status;
     }
     auto* payload = allocateAssetLeaseRetirementPinPayload(*m_memoryResource);
     if (payload == nullptr)
     {
+        m_retirement.cancel(handle);
         return Core::failure(AssetErrorCode::AllocationFailed,
                              "GPU mesh retirement pin allocation failed");
     }
-    payload->lease = std::move(*lease);
+    payload->lease = std::move(lease);
     payload->ledger = &m_retirement;
     payload->handle = handle;
     Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
                                    &releaseAssetLeaseRetirementPin};
-
-    if (auto status = m_retirement.enqueueStaticMesh(handle, payload->lease.assetId(), mesh); !status)
-    {
-        completionPin.release();
-        return status;
-    }
     m_retirement.markRetiring(handle);
 
     if (auto status = device.retireStaticMesh(mesh, completionPin); !status)
     {
+        lease = std::move(payload->lease);
+        payload->ledger = nullptr;
         m_retirement.cancel(handle);
         completionPin.release();
         return Core::failure(std::move(status.error()).withContext("AssetSystem::retireStaticMesh", "render"));
     }
 
+    mesh = {};
     m_gpuRetirementDevice = &device;
     if (m_gpuUpload != nullptr)
     {
         (void)m_gpuUpload->cancelUpload(handle);
     }
-    if (auto status = m_store.unload(handle); !status)
+    if (m_store.tryGet(handle) != nullptr)
     {
-        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireStaticMesh", "unload"));
+        if (auto status = m_store.unload(handle); !status)
+        {
+            std::terminate();
+        }
     }
     forgetHandle(handle);
     return Core::success();

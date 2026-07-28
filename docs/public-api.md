@@ -186,8 +186,9 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 
 `IRenderDevice` 核心方法是 `submitFrame`、`present`、`statistics`、`shutdown`。可选资源 API包括：
 
-- RGBA8 Texture2D create/destroy、Sprite2D 非0 key binding（invalid `GpuTextureId` 清除 binding），以及
-  device-instance `createSprite2DTextureBinding()` allocator；
+- RGBA8 Texture2D create/destroy、非消费式 `validateTexture2D()` live/generation 校验、Sprite2D 非0 key
+  binding（invalid `GpuTextureId` 清除 binding），以及 device-instance
+  `createSprite2DTextureBinding()` allocator；
 - P3N3UV2/U16 StaticMesh create/destroy、Mesh3D key binding 与独立 device-instance
   `createMesh3DBinding()` allocator；
 - 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
@@ -195,7 +196,10 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 - experimental Opaque3D `Mesh3DLightingDesc`（同步提交0..4 directional lights + 非负 ambient）；
 - primary framebuffer RGBA8 capture。
 
-`GpuTextureId`/`GpuMeshId` 是 RenderDevice generation handle，不是 AssetHandle。当前 `RenderFrame` 的
+`validateTexture2D()` 成功只证明该 handle 的 owner/index/generation 当前能在目标 device 的 Texture2D
+storage 中解析；wrong-owner/stale/invalid 失败不消费 handle，也不修改 backend 状态。
+`GpuTextureId`/`GpuMeshId` 是 RenderDevice owner-scoped generation handle，不是 AssetHandle。当前
+`RenderFrame` 的
 Surface/resource table/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。
 `FrameResourceRef` 是 packet-local owner/generation/index token；table resolve 对 cross-packet、stale、越界与
 wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与 submission completion ledger（成功 present 返回后关闭 CPU 借用，见
@@ -205,8 +209,9 @@ wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
 commit 后返回 borrowed view。`RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
-`FrameResourceRef`；backend 在同步 submit 中按 `Sprite2DTexture` kind 解析。`UIDisplayList` 支持
-SolidQuad/Glyph 与 axis-aligned clip。
+`FrameResourceRef`；`RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
+backend 在同步 submit 中分别按 `Sprite2DTexture`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
+`UIDisplayList` 支持 SolidQuad/Glyph 与 axis-aligned clip。
 
 ## UI
 
@@ -239,9 +244,9 @@ sprite 不解析。Scene 不保存 resolver、sink、ref 或任何 Asset owner�
 
 `MeshRenderer3D` 只复制 weak mesh/material `AssetHandle` 与渲染语义字段。extract params 分别提供
 `mesh3DBindingResolver` 和 `material3DBindingResolver`，只在本次 extraction 调用有效；visible mesh 必须
-由两者按当前 Store owner/generation、预期 StaticMesh/Material kind 与 binding 状态解析为非0 key。任一
-resolver/handle/binding 无效返回 `UnresolvedMesh`；mesh 解析失败时不调用 material resolver，hidden mesh
-不解析。`PrefabMeshBinding` 只完成 AssetId→Handle，不保存或分配 Render key。
+由两者按当前 Store owner/generation、预期 StaticMesh/Material kind 与 binding 状态 intern 为非空
+packet-local ref。任一 resolver/handle/binding 无效返回 `UnresolvedMesh`；mesh 解析失败时不调用 material
+resolver，hidden mesh 不解析。`PrefabMeshBinding` 只完成 AssetId→Handle，不保存或分配 Render key。
 
 `ParticleSystem2D` 与 `Trail2D` 是独立 Scene owners，不属于 World/ECS，也不依赖完整 AssetSystem 或
 bgfx。二者复制 copyable weak Sprite `AssetHandle`，不持有 `AssetLease`、Cooked payload、GPU owner 或
@@ -306,8 +311,8 @@ borrower 存活时移动，并必须早于它所引用的 `AssetSystem` 析构�
 `AssetLease` 强保活 CPU payload。逻辑 invalidation 不等于物理释放。产品 helper 可把 Cooked Texture2D/
 StaticMesh 上传到 RenderDevice，并建立 backend key binding；`AssetSystem::retireTexture2D` /
 `retireStaticMesh` 把 lease 移入 `FramePin`，成功后弱 lookup 立即失效，backend completion 后才释放 payload。
-Texture2D 的既有 `AssetLease&` + `GpuTextureId&` overload 仅在 backend 接受后消费两者；失败完整恢复供
-重试。`drainGpuRetirements()` 用于 owner-thread teardown。
+Texture2D 与 StaticMesh 的 `AssetLease&` + 对应 GPU generation handle ref overload 仅在 backend 接受后
+消费两者；失败完整恢复供重试。`drainGpuRetirements()` 用于 owner-thread teardown。
 
 `Sprite2DBindingRegistry::Create(assets, device, config)` 必须在借用 `AssetSystem` 与 RenderDevice 的共享
 owner thread 调用；该线程成为固定容量 registry 的 owner，所有后续操作也必须在同一线程执行。
@@ -328,31 +333,33 @@ fail closed 返回当前低层 key；产品 extraction 使用 `internSpriteFrame
 `internTilesetFrameResource()` 将 binding 登记到当前 sink。同帧重复 descriptor 返回同一 ref，首次 pin
 阻止 retirement，直到 packet complete/skip/abandon。registry 是 Sprite2D resident Lease/GPU/binding
 的唯一 owner，但不是 Scene owner；通用 `AssetFrameResourceResolver` 位于窄 `AssetTypes` target，A1 的
-`Sprite2DBindingResolver` 是 Scene extraction 的语义 alias；3D key resolver 仍使用
-`AssetBindingResolver`。
+`Sprite2DBindingResolver` 是 Scene extraction 的语义 alias；3D mesh/material resolver 也使用同一个通用
+frame-resource seam。
 
-`GpuTextureId` 当前仍是可复制的 index+generation，没有 RenderDevice owner token。同一 Sprite registry
-会拒绝重复 GPU 值；跨 registry alias 与 cross-device 误用仍由调用方唯一 owner 契约禁止，类型系统尚不能
-独立证明。该 handle 强化与 3D Mesh/Material `FrameResourceRef`/owner 统一属于后续切片。
+`GpuTextureId`/`GpuMeshId` 携带非零 RenderDevice owner + index + generation；Null/bgfx 的 bind、validate、
+destroy/retire 都校验 owner，因此即使两个 live device 恰好具有相同 index/generation，cross-device handle
+也会 fail closed。handle 仍可复制，registry 的唯一 GPU owner 与 handoff 契约继续禁止 alias cleanup。
 
 `setSprite2DTextureBinding(callerKey, texture)` 仍保留 direct binding/clear SPI，但 caller-chosen key 与上述
 allocator 使用同一个 device namespace。allocator-managed registry 管理期间不得混用 direct caller key；
 device 不会为 direct setter 自动保留或跳过该 key。
 
-`Mesh3DBindingRegistry::Create(store, device, config)` 同样是 fixed-capacity、owner-thread owner，借用
-`AssetStore`、`IRenderDevice` 与可选 PMR。mesh/material 使用独立 device-instance key namespace，两类 key
-都从2开始并分别保留内置 key 1；成功绑定后才消费，解绑后不复用，共享同一 device
-的多个 registry 仍获得 distinct key。`registerMeshBinding()` 只接受 live StaticMesh Handle 与 GPU mesh；
-`registerMaterialBinding()` 只接受 live Material Handle，并验证调用方提供的 live texture handle/GPU texture
-按 baseColor/MR/normal 顺序与 required Texture2D dependency 精确对应。Material v2 依靠 strictly increasing
-dependency stream 表达 role identity，因此 writer 拒绝乱序或多 role 共享同一 Texture2D AssetId。Material 通过单次
-`Mesh3DMaterialBindingDesc` 原子发布三张纹理与 factors，失败不留下半份 backend 状态。
+`Mesh3DBindingRegistry::Create(assets, device, config)` 是 fixed-capacity、owner-thread owner，借用
+`AssetSystem`、`IRenderDevice` 与可选 PMR。mesh/material 使用独立 device-instance key namespace，两类 key
+都从2开始并分别保留内置 key 1；成功绑定后才消费，retirement 后不复用，共享同一 device 的多个 registry
+仍获得 distinct key。`registerMeshBinding(mesh, gpuMesh&)` 成功后独占 StaticMesh Lease/GPU/binding；
+`registerMaterialTexture(texture, gpuTexture&)` 按 AssetId 唯一取得共享 Texture Lease/GPU owner，并在 owner
+转移前通过 `validateTexture2D()` 拒绝 wrong-owner/invalid/stale 候选；
+`registerMaterialBinding(material)` 从 Cooked payload 解析 roles/factors，只引用已注册 live Texture owner，并
+通过单次 `Mesh3DMaterialBindingDesc` 原子发布 bundle。多个 Material 可共享同一 Texture owner；同一
+Material 内的 role dependency 仍由 Material v2 严格顺序与唯一性约束。
 
-`resolveMesh()` / `resolveMaterial()` 每次按当前 Store state fail closed；Material 任一已注册 texture
-dependency stale 时解析为0。exact handle 即使随后 stale，仍可用于 unbind；backend unbind 失败保留
-registry entry 供重试，成功才删除。registry 不拥有 GPU resource、`AssetLease` 或 retirement record；调用方
-必须先成功 unbind，再 destroy/retire GPU owner。全部 Sprite2D Scene item 已迁移到 packet-local
-`FrameResourceRef`；Mesh3D item 与 registry/Lease/GPU retirement owner 仍待后续统一。
+`internMeshFrameResource()` / `internMaterialFrameResource()` 每次按当前 Store state fail closed，并把
+binding 登记为 packet-local `Mesh3DGeometry` / `Mesh3DMaterial` ref。首次 intern 的 Entry borrow pin 阻止
+active frame retirement。Material retirement 清除 bundle 并减少 Texture 引用；有 live Material 引用时
+Texture retirement 失败。Mesh/Texture retirement 通过 AssetSystem 的 lease-consuming transaction 提交，
+失败保留 Entry；`retireAllBindings()` 按 Material→Texture→Mesh 关闭，Registry 析构要求全空。调用方不再
+持有第二份 GPU owner、registered flag 或持久 device key。
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含

@@ -55,12 +55,12 @@ class FrameResourceScope final {
         EXPECT_TRUE(packet_.beginFrame(0));
     }
 
-    [[nodiscard]] FrameResourceRef texture(u64 deviceBindingKey)
+    [[nodiscard]] FrameResourceRef resource(FrameResourceKind kind, u64 deviceBindingKey)
     {
         FramePin pin{FramePinKind::Custom, deviceBindingKey, &releaseCount_, &countFrameResourceRelease};
         auto result = packet_.intern(
             FrameResourceDescriptor{
-                .kind = FrameResourceKind::Sprite2DTexture,
+                .kind = kind,
                 .deviceBindingKey = deviceBindingKey,
             },
             std::move(pin));
@@ -68,10 +68,27 @@ class FrameResourceScope final {
         return result ? *result : FrameResourceRef{};
     }
 
-    [[nodiscard]] u64 bindingKey(FrameResourceRef ref) const noexcept
+    [[nodiscard]] FrameResourceRef texture(u64 deviceBindingKey)
+    {
+        return resource(FrameResourceKind::Sprite2DTexture, deviceBindingKey);
+    }
+
+    [[nodiscard]] FrameResourceRef mesh(u64 deviceBindingKey)
+    {
+        return resource(FrameResourceKind::Mesh3DGeometry, deviceBindingKey);
+    }
+
+    [[nodiscard]] FrameResourceRef material(u64 deviceBindingKey)
+    {
+        return resource(FrameResourceKind::Mesh3DMaterial, deviceBindingKey);
+    }
+
+    [[nodiscard]] u64 bindingKey(
+        FrameResourceRef ref,
+        FrameResourceKind kind = FrameResourceKind::Sprite2DTexture) const noexcept
     {
         const FrameResourceDescriptor* descriptor =
-            packet_.resourceTableView().resolve(ref, FrameResourceKind::Sprite2DTexture);
+            packet_.resourceTableView().resolve(ref, kind);
         return descriptor != nullptr ? descriptor->deviceBindingKey : 0;
     }
 
@@ -130,12 +147,13 @@ class FrameResourceScope final {
     };
 }
 
-[[nodiscard]] RenderMesh3DInput mesh3D(u32 meshKey, u32 materialKey, u64 stableEntityKey,
+[[nodiscard]] RenderMesh3DInput mesh3D(FrameResourceScope& resources, u32 meshKey, u32 materialKey,
+                                       u64 stableEntityKey,
                                        float x, float y, float z)
 {
     return RenderMesh3DInput{
-        .meshKey = meshKey,
-        .materialKey = materialKey,
+        .mesh = resources.mesh(meshKey),
+        .material = resources.material(materialKey),
         .stableEntityKey = stableEntityKey,
         .worldTransform = RenderTransform3DInput{
             .pose = RenderPose3DInput{
@@ -461,22 +479,24 @@ TEST(RenderSceneBuilderTest, PerspectiveCameraUsesSurfaceAndNormalizedViewportAs
 
 TEST(RenderSceneBuilderTest, CullsSortsAndFinalizesStableMeshInstanceBatches)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
     ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
 
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(2, 1, 30, 0.0F, 0.0F, -2.0F)));
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(2, 1, 20, 0.0F, 0.0F, 0.0F)));
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 2, 10, 1.0F, 0.0F, 0.0F)));
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(9, 9, 40, 100.0F, 0.0F, 0.0F)));
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(9, 9, 50, 0.0F, 0.0F, 10.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 2, 1, 30, 0.0F, 0.0F, -2.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 2, 1, 20, 0.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 1, 2, 10, 1.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 9, 9, 40, 100.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 9, 9, 50, 0.0F, 0.0F, 10.0F)));
 
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
     ASSERT_EQ(committed->meshes3D().size(), 3U);
     ASSERT_EQ(committed->mesh3DBatches().size(), 2U);
 
-    EXPECT_EQ(committed->meshes3D()[0].materialKey, 1U);
+    EXPECT_EQ(resources.bindingKey(committed->meshes3D()[0].material,
+                                   FrameResourceKind::Mesh3DMaterial), 1U);
     EXPECT_EQ(committed->meshes3D()[0].stableEntityKey, 20U);
     EXPECT_EQ(committed->meshes3D()[1].stableEntityKey, 30U);
     EXPECT_LT(committed->meshes3D()[0].depthBucket, committed->meshes3D()[1].depthBucket);
@@ -485,7 +505,8 @@ TEST(RenderSceneBuilderTest, CullsSortsAndFinalizesStableMeshInstanceBatches)
 
     EXPECT_EQ(committed->mesh3DBatches()[0].firstItem, 0U);
     EXPECT_EQ(committed->mesh3DBatches()[0].itemCount, 2U);
-    EXPECT_EQ(committed->mesh3DBatches()[0].meshKey, 2U);
+    EXPECT_EQ(resources.bindingKey(committed->mesh3DBatches()[0].mesh,
+                                   FrameResourceKind::Mesh3DGeometry), 2U);
     EXPECT_EQ(committed->mesh3DBatches()[1].firstItem, 2U);
     EXPECT_EQ(committed->mesh3DBatches()[1].itemCount, 1U);
 
@@ -499,6 +520,7 @@ TEST(RenderSceneBuilderTest, CullsSortsAndFinalizesStableMeshInstanceBatches)
 
 TEST(RenderSceneBuilderTest, PerspectiveSphereCullingKeepsBoundaryIntersections)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame(perspectiveFrame(1.0F)));
     auto cameraInput = perspectiveCamera(0.0F);
@@ -507,15 +529,15 @@ TEST(RenderSceneBuilderTest, PerspectiveSphereCullingKeepsBoundaryIntersections)
     cameraInput.verticalFovDegrees = 90.0F;
     ASSERT_TRUE(builder.writer().setPerspectiveCamera(cameraInput));
 
-    auto nearIntersection = mesh3D(1, 1, 1, 0.0F, 0.0F, -0.6F);
+    auto nearIntersection = mesh3D(resources, 1, 1, 1, 0.0F, 0.0F, -0.6F);
     nearIntersection.localBounds.radius = 0.5F;
     ASSERT_TRUE(builder.writer().addMesh3D(nearIntersection));
 
-    auto sideIntersection = mesh3D(1, 1, 2, 2.4F, 0.0F, -2.0F);
+    auto sideIntersection = mesh3D(resources, 1, 1, 2, 2.4F, 0.0F, -2.0F);
     sideIntersection.localBounds.radius = 0.5F;
     ASSERT_TRUE(builder.writer().addMesh3D(sideIntersection));
 
-    auto sideOutside = mesh3D(1, 1, 3, 3.0F, 0.0F, -2.0F);
+    auto sideOutside = mesh3D(resources, 1, 1, 3, 3.0F, 0.0F, -2.0F);
     sideOutside.localBounds.radius = 0.25F;
     ASSERT_TRUE(builder.writer().addMesh3D(sideOutside));
 
@@ -527,18 +549,19 @@ TEST(RenderSceneBuilderTest, PerspectiveSphereCullingKeepsBoundaryIntersections)
 
 TEST(RenderSceneBuilderTest, MeshInputValidationIsStickyAndRejectsNonOpaqueOrDegenerateTransforms)
 {
+    FrameResourceScope resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
     ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
 
-    auto invalidMesh = mesh3D(1, 1, 1, 0.0F, 0.0F, 0.0F);
+    auto invalidMesh = mesh3D(resources, 1, 1, 1, 0.0F, 0.0F, 0.0F);
     invalidMesh.worldTransform.scaleX = 0.0F;
     invalidMesh.baseColorFactor.alpha = 0.5F;
     auto invalid = builder.writer().addMesh3D(invalidMesh);
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, RenderErrorCode::InvalidRenderSceneInput);
 
-    auto sticky = builder.writer().addMesh3D(mesh3D(1, 1, 2, 0.0F, 0.0F, 0.0F));
+    auto sticky = builder.writer().addMesh3D(mesh3D(resources, 1, 1, 2, 0.0F, 0.0F, 0.0F));
     ASSERT_FALSE(sticky);
     EXPECT_EQ(sticky.error().code, RenderErrorCode::InvalidRenderSceneInput);
     auto commit = builder.commit();
@@ -548,6 +571,7 @@ TEST(RenderSceneBuilderTest, MeshInputValidationIsStickyAndRejectsNonOpaqueOrDeg
 
 TEST(RenderSceneBuilderTest, MeshesRequirePerspectiveCameraAndBatchCapacityIsTransactional)
 {
+    FrameResourceScope resources;
     RenderSceneCapacity capacity{};
     capacity.mesh3DItemCapacity = 4;
     capacity.mesh3DBatchCapacity = 1;
@@ -556,15 +580,15 @@ TEST(RenderSceneBuilderTest, MeshesRequirePerspectiveCameraAndBatchCapacityIsTra
     RenderSceneBuilder builder = std::move(*builderResult);
 
     ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, 1, 0.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 1, 1, 1, 0.0F, 0.0F, 0.0F)));
     auto missingCamera = builder.commit();
     ASSERT_FALSE(missingCamera);
     EXPECT_EQ(missingCamera.error().code, RenderErrorCode::RenderSceneMissingCamera);
 
     ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
     ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, 1, 0.0F, 0.0F, 0.0F)));
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(2, 2, 2, 1.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 1, 1, 1, 0.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 2, 2, 2, 1.0F, 0.0F, 0.0F)));
     auto batchOverflow = builder.commit();
     ASSERT_FALSE(batchOverflow);
     EXPECT_EQ(batchOverflow.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
@@ -573,6 +597,7 @@ TEST(RenderSceneBuilderTest, MeshesRequirePerspectiveCameraAndBatchCapacityIsTra
 
 TEST(RenderSceneBuilderTest, MeshItemCapacityFailureIsStickyAndTransactional)
 {
+    FrameResourceScope resources;
     RenderSceneCapacity capacity{};
     capacity.mesh3DItemCapacity = 1;
     auto builderResult = RenderSceneBuilder::Create(capacity);
@@ -581,8 +606,8 @@ TEST(RenderSceneBuilderTest, MeshItemCapacityFailureIsStickyAndTransactional)
 
     ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
     ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, 1, 0.0F, 0.0F, 0.0F)));
-    auto overflow = builder.writer().addMesh3D(mesh3D(1, 1, 2, 1.0F, 0.0F, 0.0F));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 1, 1, 1, 0.0F, 0.0F, 0.0F)));
+    auto overflow = builder.writer().addMesh3D(mesh3D(resources, 1, 1, 2, 1.0F, 0.0F, 0.0F));
     ASSERT_FALSE(overflow);
     EXPECT_EQ(overflow.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
 
@@ -600,7 +625,7 @@ TEST(RenderSceneBuilderTest, TwoDimensionalAndPerspectiveCamerasCanShareOneWorld
     ASSERT_TRUE(builder.writer().setCamera2D(camera()));
     ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
     ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 1, 1, 0.0F, 0.0F)));
-    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, 2, 0.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(resources, 1, 1, 2, 0.0F, 0.0F, 0.0F)));
 
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
@@ -629,7 +654,8 @@ TEST(RenderSceneBuilderTest, ReusesFixedStorageAcrossThreeHundredFrames)
             ASSERT_TRUE(builder.writer().setCamera2D(camera()));
             ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
             ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 1, frame + 1U, 0.0F, 0.0F)));
-            ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, frame + 10'000U, 0.0F, 0.0F, 0.0F)));
+            ASSERT_TRUE(builder.writer().addMesh3D(
+                mesh3D(resources, 1, 1, frame + 10'000U, 0.0F, 0.0F, 0.0F)));
             auto committed = builder.commit();
             ASSERT_TRUE(committed.has_value());
             ASSERT_EQ(committed->sprites2D().size(), 1U);

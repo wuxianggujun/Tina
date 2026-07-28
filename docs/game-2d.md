@@ -18,9 +18,9 @@ Game2DState
 ```
 
 - `tina_scene` 的 World Sprite 与独立 `ParticleSystem2D`/`Trail2D` 只存 weak Sprite `AssetHandle`，
-  extraction 显式借用共享 resolver 后写 backend-neutral key；
+  extraction 显式借用共享 resolver 后写 packet-local texture ref；
 - TileMap emit 保存 weak Tileset `AssetHandle`，每次非空可见 emit 借用 resolver，通过
-  `Sprite2DBindingRegistry` 解析 backend-neutral key，不保存产品 key；
+  `Sprite2DBindingRegistry` intern packet-local texture ref，不保存产品 key/ref；
 - TileMap、角色控制、选择高亮、Physics sync 和产品规则留在 Asset/产品 State；
 - Render backend 不理解 tile/cell/gameplay，也不接收 AssetHandle；
 - Box2D、bgfx、FreeType、miniaudio 均位于可选私有 adapter。
@@ -84,8 +84,8 @@ resolver；解析失败清空输出并返回 `SpriteBindingNotFound`。selection
 登记的 registry entry borrow pin 覆盖 submit/present CPU 借用期，active pin 清零前 retirement 失败且
 Entry 保持可重试。State RAII teardown 只调用 `retireAllTextureBindings()`；backend 接受后原子失效 GPU
 generation、清除引用它的 binding，并由 AssetSystem retirement ledger 持有 Lease 到 completion。
-N16.3 已关闭 Sprite2D registry/Lease/GPU 的分裂 owner；3D Mesh/Material 仍由 N16.4 收口，因此
-`ASSET-HANDLE-SCENE` 总项保持 InProgress。
+N16.3 已关闭 Sprite2D registry/Lease/GPU 的分裂 owner；N16.4 也已关闭 3D Mesh/Material/共享 Texture
+owner，总体 `ASSET-HANDLE-SCENE` 已完成。
 Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用不同纹理，不再受历史 fixture key 1 限制。
 
 ## Sprite 动画

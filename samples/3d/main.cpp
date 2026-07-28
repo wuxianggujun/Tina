@@ -4,6 +4,7 @@
 #include <tina/platform/PlatformBackend.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/EngineHost.hpp>
@@ -28,6 +29,27 @@ namespace {
 
 using Tina::Core::u64;
 using Tina::usize;
+
+void releaseFixtureFrameResource(void*) noexcept {}
+
+[[nodiscard]] Tina::Core::Result<Tina::Render::FrameResourceRef>
+internFixtureFrameResource(Tina::Render::FrameResourceSink& sink,
+                           Tina::Render::FrameResourceKind kind,
+                           Tina::Core::u32 bindingKey) noexcept
+{
+    Tina::Render::FramePin pin{
+        Tina::Render::FramePinKind::Custom,
+        bindingKey,
+        nullptr,
+        &releaseFixtureFrameResource,
+    };
+    return sink.intern(
+        Tina::Render::FrameResourceDescriptor{
+            .kind = kind,
+            .deviceBindingKey = bindingKey,
+        },
+        std::move(pin));
+}
 
 struct SampleCapture final {
     u64 submittedFrames = 0;
@@ -168,6 +190,15 @@ class RecordingNullRenderDevice final : public Tina::Render::IRenderDevice {
         {
             return Tina::Core::failure(Tina::Render::RenderErrorCode::InvalidRenderSceneInput,
                                        "The 3D extraction scene did not satisfy its camera/culling/batch contract");
+        }
+        for (const Tina::Render::RenderMesh3DItem& mesh : scene.meshes3D())
+        {
+            if (frame.resources.resolve(mesh.mesh, Tina::Render::FrameResourceKind::Mesh3DGeometry) == nullptr ||
+                frame.resources.resolve(mesh.material, Tina::Render::FrameResourceKind::Mesh3DMaterial) == nullptr)
+            {
+                return Tina::Core::failure(Tina::Render::RenderErrorCode::InvalidFrameResource,
+                                           "The 3D extraction scene contains an invalid frame resource ref");
+            }
         }
 
         const float aspectRatio = scene.perspectiveCamera()->aspectRatio;
@@ -358,9 +389,23 @@ class Extraction3DState final : public Tina::IGameState {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                            "3D extraction mesh transform is unavailable");
             }
+            auto meshResource = internFixtureFrameResource(
+                context.frameResourceSink(), Tina::Render::FrameResourceKind::Mesh3DGeometry,
+                meshKeys[index]);
+            if (!meshResource)
+            {
+                return Tina::Core::failure(std::move(meshResource.error()));
+            }
+            auto materialResource = internFixtureFrameResource(
+                context.frameResourceSink(), Tina::Render::FrameResourceKind::Mesh3DMaterial,
+                materialKeys[index]);
+            if (!materialResource)
+            {
+                return Tina::Core::failure(std::move(materialResource.error()));
+            }
             const Tina::Render::RenderMesh3DInput mesh{
-                .meshKey = meshKeys[index],
-                .materialKey = materialKeys[index],
+                .mesh = *meshResource,
+                .material = *materialResource,
                 .stableEntityKey = stableKey(meshEntities_[index]),
                 .worldTransform = makeTransform(*transform),
                 .localBounds = {.radius = 0.9F},
