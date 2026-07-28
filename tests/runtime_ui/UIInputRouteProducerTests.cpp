@@ -52,6 +52,18 @@ struct RouteTree final {
     UI::UINodeId target{};
 };
 
+struct DropdownRouteTree final {
+    std::unique_ptr<UI::UIContext> context;
+    UI::UIRootOwner root;
+    UI::UITreeUpdater updater;
+    UI::UINodeId before{};
+    UI::UINodeId dropdown{};
+    UI::UINodeId popup{};
+    UI::UINodeId firstItem{};
+    UI::UINodeId secondItem{};
+    UI::UINodeId after{};
+};
+
 struct PointerEventTrace final {
     std::array<UI::UIPointerInputEvent, 8> events{};
     usize size = 0;
@@ -295,6 +307,81 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     }
     tree.target = *textEdit;
     expectOk(tree.updater.setLayoutStyle(tree.target, fixedSize(80.0F, 32.0F)));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    return tree;
+}
+
+[[nodiscard]] DropdownRouteTree createDropdownRouteTree(Platform::WindowId window)
+{
+    DropdownRouteTree tree;
+    auto context = UI::UIContext::Create(window, {
+                                                     .nodeCapacity = 64,
+                                                     .rootCapacity = 1,
+                                                     .paintSnapshotCapacity = 64,
+                                                     .routePathCapacity = 16,
+                                                 });
+    EXPECT_TRUE(context.has_value()) << (context ? "" : context.error().message);
+    if (!context)
+    {
+        return tree;
+    }
+    tree.context = std::move(*context);
+    auto root = tree.context->rootBuilder().createRoot();
+    EXPECT_TRUE(root.has_value()) << (root ? "" : root.error().message);
+    if (!root)
+    {
+        return tree;
+    }
+    tree.root = std::move(*root);
+    auto updater = tree.context->treeUpdater(tree.root);
+    EXPECT_TRUE(updater.has_value()) << (updater ? "" : updater.error().message);
+    if (!updater)
+    {
+        return tree;
+    }
+    tree.updater = std::move(*updater);
+
+    auto before = tree.updater.createButton(tree.root.rootNodeId());
+    auto dropdown = tree.updater.createDropdown(tree.root.rootNodeId());
+    EXPECT_TRUE(before.has_value()) << (before ? "" : before.error().message);
+    EXPECT_TRUE(dropdown.has_value()) << (dropdown ? "" : dropdown.error().message);
+    if (!before || !dropdown)
+    {
+        return tree;
+    }
+    auto popup = tree.updater.createPopup(*dropdown);
+    EXPECT_TRUE(popup.has_value()) << (popup ? "" : popup.error().message);
+    if (!popup)
+    {
+        return tree;
+    }
+    auto firstItem = tree.updater.createDropdownItem(*popup);
+    auto secondItem = tree.updater.createDropdownItem(*popup);
+    auto after = tree.updater.createButton(tree.root.rootNodeId());
+    EXPECT_TRUE(firstItem.has_value()) << (firstItem ? "" : firstItem.error().message);
+    EXPECT_TRUE(secondItem.has_value()) << (secondItem ? "" : secondItem.error().message);
+    EXPECT_TRUE(after.has_value()) << (after ? "" : after.error().message);
+    if (!firstItem || !secondItem || !after)
+    {
+        return tree;
+    }
+
+    tree.before = *before;
+    tree.dropdown = *dropdown;
+    tree.popup = *popup;
+    tree.firstItem = *firstItem;
+    tree.secondItem = *secondItem;
+    tree.after = *after;
+    UI::UILayoutStyle popupLayout = fixedSize(80.0F, 40.0F);
+    popupLayout.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    expectOk(tree.updater.setLayoutStyle(tree.root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    expectOk(tree.updater.setLayoutStyle(tree.before, fixedSize(80.0F, 20.0F)));
+    expectOk(tree.updater.setLayoutStyle(tree.dropdown, fixedSize(80.0F, 24.0F)));
+    expectOk(tree.updater.setLayoutStyle(tree.popup, popupLayout));
+    expectOk(tree.updater.setLayoutStyle(tree.firstItem, fixedSize(80.0F, 20.0F)));
+    expectOk(tree.updater.setLayoutStyle(tree.secondItem, fixedSize(80.0F, 20.0F)));
+    expectOk(tree.updater.setLayoutStyle(tree.after, fixedSize(80.0F, 20.0F)));
+    expectOk(tree.updater.setDropdownOpen(tree.dropdown, true));
     expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
     return tree;
 }
@@ -588,6 +675,244 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesTabCommandsTextAndAccept
     text = tree.updater.text(tree.target);
     ASSERT_TRUE(text.has_value());
     EXPECT_TRUE(text->empty());
+}
+
+TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
+{
+    auto producer = createProducer();
+    DropdownRouteTree tree = createDropdownRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+    ASSERT_TRUE(tree.dropdown.hasValue());
+    ASSERT_EQ(tree.context->activePopup(), tree.popup);
+
+    auto down = buildFrame(*builder, window,
+                           {
+                               .frameId = {60},
+                               .transitions = {keyDown(window, Platform::Key::Down)},
+                               .heldKeys = {Platform::Key::Down},
+                           });
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    auto downOutput = producer->produce(tree.context.get(), *down);
+    ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
+    EXPECT_TRUE(downOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+
+    auto downRelease = buildFrame(*builder, window,
+                                  {
+                                      .frameId = {61},
+                                      .transitions = {keyUp(window, Platform::Key::Down)},
+                                  });
+    ASSERT_TRUE(downRelease.has_value()) << (downRelease ? "" : downRelease.error().message);
+    auto downReleaseOutput = producer->produce(tree.context.get(), *downRelease);
+    ASSERT_TRUE(downReleaseOutput.has_value())
+        << (downReleaseOutput ? "" : downReleaseOutput.error().message);
+    EXPECT_TRUE(downReleaseOutput->consumption.isConsumed(0));
+
+    auto up = buildFrame(*builder, window,
+                         {
+                             .frameId = {62},
+                             .transitions = {keyDown(window, Platform::Key::Up)},
+                             .heldKeys = {Platform::Key::Up},
+                         });
+    ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+    auto upOutput = producer->produce(tree.context.get(), *up);
+    ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
+    EXPECT_TRUE(upOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+
+    auto upRelease = buildFrame(*builder, window,
+                                {
+                                    .frameId = {63},
+                                    .transitions = {keyUp(window, Platform::Key::Up)},
+                                });
+    ASSERT_TRUE(upRelease.has_value()) << (upRelease ? "" : upRelease.error().message);
+    auto upReleaseOutput = producer->produce(tree.context.get(), *upRelease);
+    ASSERT_TRUE(upReleaseOutput.has_value()) << (upReleaseOutput ? "" : upReleaseOutput.error().message);
+    EXPECT_TRUE(upReleaseOutput->consumption.isConsumed(0));
+
+    auto tab = buildFrame(*builder, window,
+                          {
+                              .frameId = {64},
+                              .transitions = {keyDown(window, Platform::Key::Tab)},
+                              .heldKeys = {Platform::Key::Tab},
+                          });
+    ASSERT_TRUE(tab.has_value()) << (tab ? "" : tab.error().message);
+    auto tabOutput = producer->produce(tree.context.get(), *tab);
+    ASSERT_TRUE(tabOutput.has_value()) << (tabOutput ? "" : tabOutput.error().message);
+    EXPECT_TRUE(tabOutput->consumption.isConsumed(0));
+    EXPECT_FALSE(tree.context->activePopup().hasValue());
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.after);
+
+    auto tabRelease = buildFrame(*builder, window,
+                                 {
+                                     .frameId = {65},
+                                     .transitions = {keyUp(window, Platform::Key::Tab)},
+                                 });
+    ASSERT_TRUE(tabRelease.has_value()) << (tabRelease ? "" : tabRelease.error().message);
+    auto tabReleaseOutput = producer->produce(tree.context.get(), *tabRelease);
+    ASSERT_TRUE(tabReleaseOutput.has_value()) << (tabReleaseOutput ? "" : tabReleaseOutput.error().message);
+    EXPECT_TRUE(tabReleaseOutput->consumption.isConsumed(0));
+
+    expectOk(tree.updater.setDropdownOpen(tree.dropdown, true));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    auto escape = buildFrame(*builder, window,
+                             {
+                                 .frameId = {66},
+                                 .transitions = {keyDown(window, Platform::Key::Escape)},
+                                 .heldKeys = {Platform::Key::Escape},
+                             });
+    ASSERT_TRUE(escape.has_value()) << (escape ? "" : escape.error().message);
+    auto escapeOutput = producer->produce(tree.context.get(), *escape);
+    ASSERT_TRUE(escapeOutput.has_value()) << (escapeOutput ? "" : escapeOutput.error().message);
+    EXPECT_TRUE(escapeOutput->consumption.isConsumed(0));
+    EXPECT_FALSE(tree.context->activePopup().hasValue());
+
+    auto escapeRelease = buildFrame(*builder, window,
+                                    {
+                                        .frameId = {67},
+                                        .transitions = {keyUp(window, Platform::Key::Escape)},
+                                    });
+    ASSERT_TRUE(escapeRelease.has_value()) << (escapeRelease ? "" : escapeRelease.error().message);
+    auto escapeReleaseOutput = producer->produce(tree.context.get(), *escapeRelease);
+    ASSERT_TRUE(escapeReleaseOutput.has_value())
+        << (escapeReleaseOutput ? "" : escapeReleaseOutput.error().message);
+    EXPECT_TRUE(escapeReleaseOutput->consumption.isConsumed(0));
+}
+
+TEST_F(UIInputRouteProducerTest, DropdownConsumesShiftTabAndGamepadNavigationWithoutStealingClosedKeys)
+{
+    auto producer = createProducer();
+    DropdownRouteTree tree = createDropdownRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    auto shiftTab = buildFrame(*builder, window,
+                               {
+                                   .frameId = {80},
+                                   .transitions = {keyDown(window, Platform::Key::Tab)},
+                                   .heldKeys = {Platform::Key::Tab, Platform::Key::LeftShift},
+                               });
+    ASSERT_TRUE(shiftTab.has_value()) << (shiftTab ? "" : shiftTab.error().message);
+    auto shiftTabOutput = producer->produce(tree.context.get(), *shiftTab);
+    ASSERT_TRUE(shiftTabOutput.has_value()) << (shiftTabOutput ? "" : shiftTabOutput.error().message);
+    EXPECT_TRUE(shiftTabOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.before);
+    EXPECT_FALSE(tree.context->activePopup().hasValue());
+
+    // Shift is already released in this snapshot. Tab Up must still release the
+    // ExitPrevious command selected by the original key-down.
+    auto shiftTabRelease = buildFrame(*builder, window,
+                                      {
+                                          .frameId = {81},
+                                          .transitions = {keyUp(window, Platform::Key::Tab)},
+                                      });
+    ASSERT_TRUE(shiftTabRelease.has_value())
+        << (shiftTabRelease ? "" : shiftTabRelease.error().message);
+    auto shiftTabReleaseOutput = producer->produce(tree.context.get(), *shiftTabRelease);
+    ASSERT_TRUE(shiftTabReleaseOutput.has_value())
+        << (shiftTabReleaseOutput ? "" : shiftTabReleaseOutput.error().message);
+    EXPECT_TRUE(shiftTabReleaseOutput->consumption.isConsumed(0));
+
+    expectOk(tree.updater.setDropdownOpen(tree.dropdown, true));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    Platform::GamepadSnapshot dpadHeld{
+        .gamepad = gamepad,
+        .revision = 82,
+    };
+    dpadHeld.heldButtons.set(static_cast<usize>(Platform::GamepadButton::DpadDown));
+    auto dpadDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {82},
+            .transitions =
+                {Platform::GamepadButtonTransition{
+                    .routedWindow = window,
+                    .gamepad = gamepad,
+                    .button = Platform::GamepadButton::DpadDown,
+                    .state = Platform::DigitalTransition::Down,
+                }},
+            .gamepadSnapshots = {dpadHeld},
+        });
+    ASSERT_TRUE(dpadDown.has_value()) << (dpadDown ? "" : dpadDown.error().message);
+    auto dpadDownOutput = producer->produce(tree.context.get(), *dpadDown);
+    ASSERT_TRUE(dpadDownOutput.has_value()) << (dpadDownOutput ? "" : dpadDownOutput.error().message);
+    EXPECT_TRUE(dpadDownOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+
+    auto dpadRelease = buildFrame(
+        *builder, window,
+        {
+            .frameId = {83},
+            .transitions =
+                {Platform::GamepadButtonTransition{
+                    .routedWindow = window,
+                    .gamepad = gamepad,
+                    .button = Platform::GamepadButton::DpadDown,
+                    .state = Platform::DigitalTransition::Up,
+                }},
+            .gamepadSnapshots = {Platform::GamepadSnapshot{.gamepad = gamepad, .revision = 83}},
+        });
+    ASSERT_TRUE(dpadRelease.has_value()) << (dpadRelease ? "" : dpadRelease.error().message);
+    auto dpadReleaseOutput = producer->produce(tree.context.get(), *dpadRelease);
+    ASSERT_TRUE(dpadReleaseOutput.has_value())
+        << (dpadReleaseOutput ? "" : dpadReleaseOutput.error().message);
+    EXPECT_TRUE(dpadReleaseOutput->consumption.isConsumed(0));
+
+    Platform::GamepadSnapshot eastHeld{
+        .gamepad = gamepad,
+        .revision = 84,
+    };
+    eastHeld.heldButtons.set(static_cast<usize>(Platform::GamepadButton::East));
+    auto cancel = buildFrame(
+        *builder, window,
+        {
+            .frameId = {84},
+            .transitions =
+                {Platform::GamepadButtonTransition{
+                    .routedWindow = window,
+                    .gamepad = gamepad,
+                    .button = Platform::GamepadButton::East,
+                    .state = Platform::DigitalTransition::Down,
+                }},
+            .gamepadSnapshots = {eastHeld},
+        });
+    ASSERT_TRUE(cancel.has_value()) << (cancel ? "" : cancel.error().message);
+    auto cancelOutput = producer->produce(tree.context.get(), *cancel);
+    ASSERT_TRUE(cancelOutput.has_value()) << (cancelOutput ? "" : cancelOutput.error().message);
+    EXPECT_TRUE(cancelOutput->consumption.isConsumed(0));
+    EXPECT_FALSE(tree.context->activePopup().hasValue());
+
+    auto cancelRelease = buildFrame(
+        *builder, window,
+        {
+            .frameId = {85},
+            .transitions =
+                {Platform::GamepadButtonTransition{
+                    .routedWindow = window,
+                    .gamepad = gamepad,
+                    .button = Platform::GamepadButton::East,
+                    .state = Platform::DigitalTransition::Up,
+                }},
+            .gamepadSnapshots = {Platform::GamepadSnapshot{.gamepad = gamepad, .revision = 85}},
+        });
+    ASSERT_TRUE(cancelRelease.has_value()) << (cancelRelease ? "" : cancelRelease.error().message);
+    auto cancelReleaseOutput = producer->produce(tree.context.get(), *cancelRelease);
+    ASSERT_TRUE(cancelReleaseOutput.has_value())
+        << (cancelReleaseOutput ? "" : cancelReleaseOutput.error().message);
+    EXPECT_TRUE(cancelReleaseOutput->consumption.isConsumed(0));
+
+    auto closedArrow = buildFrame(*builder, window,
+                                  {
+                                      .frameId = {86},
+                                      .transitions = {keyDown(window, Platform::Key::Down)},
+                                      .heldKeys = {Platform::Key::Down},
+                                  });
+    ASSERT_TRUE(closedArrow.has_value()) << (closedArrow ? "" : closedArrow.error().message);
+    auto closedArrowOutput = producer->produce(tree.context.get(), *closedArrow);
+    ASSERT_TRUE(closedArrowOutput.has_value())
+        << (closedArrowOutput ? "" : closedArrowOutput.error().message);
+    EXPECT_FALSE(closedArrowOutput->consumption.isConsumed(0));
 }
 
 TEST_F(UIInputRouteProducerTest, FocusedButtonConsumesKeyboardAndGamepadAcceptWithActivationSources)

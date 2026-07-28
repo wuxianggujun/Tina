@@ -311,6 +311,82 @@ TEST_F(PrimaryWindowUICapabilityTest, ScrollViewFacadeRoundTripsMetricsAndExpire
     EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, DropdownPopupFacadeRoundTripsAndExpiresWithPhase)
+{
+    constexpr UI::UIPopupStyle PopupStyle{
+        .placement = UI::UIPopupPlacement::Above,
+        .anchorGap = 6.0F,
+        .matchAnchorWidth = false,
+    };
+    constexpr UI::UIDropdownPaint DropdownPaint{
+        .indicatorColor = {.red = 220, .green = 230, .blue = 240, .alpha = 255},
+        .selectedItemBackgroundColor = {.red = 40, .green = 80, .blue = 120, .alpha = 255},
+        .indicatorWidth = 12.0F,
+        .indicatorHeight = 7.0F,
+        .indicatorInset = 11.0F,
+    };
+
+    auto contextResult = UI::UIContext::Create(window, {.nodeCapacity = 64, .rootCapacity = 4});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    context = std::move(*contextResult);
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    auto dropdown = tree->createDropdown(root->rootNodeId());
+    ASSERT_TRUE(dropdown.has_value()) << dropdown.error().message;
+    auto popup = tree->createPopup(*dropdown);
+    ASSERT_TRUE(popup.has_value()) << popup.error().message;
+    auto firstItem = tree->createDropdownItem(*popup);
+    auto secondItem = tree->createDropdownItem(*popup);
+    ASSERT_TRUE(firstItem.has_value()) << firstItem.error().message;
+    ASSERT_TRUE(secondItem.has_value()) << secondItem.error().message;
+
+    UI::UILayoutStyle popupLayout = fixedSize(140.0F, 48.0F);
+    popupLayout.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(200.0F, 120.0F)).has_value());
+    ASSERT_TRUE(tree->setLayoutStyle(*dropdown, fixedSize(120.0F, 32.0F)).has_value());
+    ASSERT_TRUE(tree->setLayoutStyle(*popup, popupLayout).has_value());
+    ASSERT_TRUE(tree->setLayoutStyle(*firstItem, fixedSize(140.0F, 24.0F)).has_value());
+    ASSERT_TRUE(tree->setLayoutStyle(*secondItem, fixedSize(140.0F, 24.0F)).has_value());
+    ASSERT_TRUE(tree->setPopupStyle(*popup, PopupStyle).has_value());
+    ASSERT_TRUE(tree->setDropdownPaint(*dropdown, DropdownPaint).has_value());
+    ASSERT_TRUE(tree->setDropdownSelectedItem(*dropdown, *secondItem).has_value());
+    ASSERT_TRUE(tree->setDropdownOpen(*dropdown, true).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 200.0F, .height = 120.0F}).has_value());
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    EXPECT_EQ(treeView.popupStyle(*popup).value(), PopupStyle);
+    EXPECT_EQ(treeView.dropdownPaint(*dropdown).value(), DropdownPaint);
+    EXPECT_TRUE(treeView.isPopupOpen(*popup).value());
+    EXPECT_TRUE(treeView.isDropdownOpen(*dropdown).value());
+    EXPECT_EQ(treeView.dropdownSelectedItem(*dropdown).value(), *secondItem);
+    EXPECT_FALSE(treeView.isDropdownItemSelected(*firstItem).value());
+    EXPECT_TRUE(treeView.isDropdownItemSelected(*secondItem).value());
+    const UI::UIPopupMetrics metrics = treeView.popupMetrics(*popup).value();
+    EXPECT_TRUE(metrics.open);
+    EXPECT_EQ(metrics.resolvedPlacement, UI::UIPopupPlacement::Below);
+    EXPECT_FLOAT_EQ(metrics.popupRect.width, 140.0F);
+
+    ASSERT_TRUE(tree->setPopupOpen(*popup, false).has_value());
+    EXPECT_FALSE(treeView.isDropdownOpen(*dropdown).value());
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    auto expiredCreate = tree->createDropdown(root->rootNodeId());
+    ASSERT_FALSE(expiredCreate.has_value());
+    EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredMetrics = treeView.popupMetrics(*popup);
+    ASSERT_FALSE(expiredMetrics.has_value());
+    EXPECT_EQ(expiredMetrics.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAndExpire)
 {
     CapabilityState state;

@@ -62,6 +62,12 @@ class PrimaryWindowUICapabilityState final {
                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createScrollView(u64 epoch, PrimaryWindowUIPhase phase,
                                                               UI::UITreeUpdater& updater, UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createDropdown(u64 epoch, PrimaryWindowUIPhase phase,
+                                                            UI::UITreeUpdater& updater, UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createPopup(u64 epoch, PrimaryWindowUIPhase phase,
+                                                         UI::UITreeUpdater& updater, UI::UINodeId dropdown);
+    [[nodiscard]] Core::Result<UI::UINodeId> createDropdownItem(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                UI::UITreeUpdater& updater, UI::UINodeId popup);
     [[nodiscard]] Core::Status setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -155,6 +161,33 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<bool> isScrollViewDragging(u64 epoch, PrimaryWindowUIPhase phase,
                                                           const UI::UITreeUpdater& updater,
                                                           UI::UINodeId scrollView);
+    [[nodiscard]] Core::Status setPopupStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                            UI::UINodeId popup, const UI::UIPopupStyle& style);
+    [[nodiscard]] Core::Result<UI::UIPopupStyle> popupStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                                            const UI::UITreeUpdater& updater, UI::UINodeId popup);
+    [[nodiscard]] Core::Status setPopupOpen(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                           UI::UINodeId popup, bool open);
+    [[nodiscard]] Core::Result<bool> isPopupOpen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                const UI::UITreeUpdater& updater, UI::UINodeId popup);
+    [[nodiscard]] Core::Result<UI::UIPopupMetrics> popupMetrics(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                const UI::UITreeUpdater& updater, UI::UINodeId popup);
+    [[nodiscard]] Core::Status setDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                              UI::UINodeId dropdown, bool open);
+    [[nodiscard]] Core::Result<bool> isDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                   const UI::UITreeUpdater& updater, UI::UINodeId dropdown);
+    [[nodiscard]] Core::Status setDropdownSelectedItem(u64 epoch, PrimaryWindowUIPhase phase,
+                                                      UI::UITreeUpdater& updater, UI::UINodeId dropdown,
+                                                      UI::UINodeId item);
+    [[nodiscard]] Core::Result<UI::UINodeId> dropdownSelectedItem(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                  const UI::UITreeUpdater& updater,
+                                                                  UI::UINodeId dropdown);
+    [[nodiscard]] Core::Result<bool> isDropdownItemSelected(u64 epoch, PrimaryWindowUIPhase phase,
+                                                           const UI::UITreeUpdater& updater, UI::UINodeId item);
+    [[nodiscard]] Core::Status setDropdownPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                               UI::UINodeId dropdown, const UI::UIDropdownPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIDropdownPaint> dropdownPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                  const UI::UITreeUpdater& updater,
+                                                                  UI::UINodeId dropdown);
     [[nodiscard]] Core::Status setProgressBarRange(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                    UI::UINodeId progressBar, float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValue(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,

@@ -5,7 +5,9 @@
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIProgressBar.hpp>
+#include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
@@ -46,6 +48,9 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UINodeId> createRadioButton(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createModal(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createScrollView(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createDropdown(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createPopup(UI::UINodeId dropdown);
+    [[nodiscard]] Core::Result<UI::UINodeId> createDropdownItem(UI::UINodeId popup);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);
@@ -93,6 +98,18 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setScrollViewPaint(UI::UINodeId scrollView, const UI::UIScrollViewPaint& paint);
     [[nodiscard]] Core::Result<UI::UIScrollViewPaint> scrollViewPaint(UI::UINodeId scrollView) const;
     [[nodiscard]] Core::Result<bool> isScrollViewDragging(UI::UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setPopupStyle(UI::UINodeId popup, const UI::UIPopupStyle& style);
+    [[nodiscard]] Core::Result<UI::UIPopupStyle> popupStyle(UI::UINodeId popup) const;
+    [[nodiscard]] Core::Status setPopupOpen(UI::UINodeId popup, bool open);
+    [[nodiscard]] Core::Result<bool> isPopupOpen(UI::UINodeId popup) const;
+    [[nodiscard]] Core::Result<UI::UIPopupMetrics> popupMetrics(UI::UINodeId popup) const;
+    [[nodiscard]] Core::Status setDropdownOpen(UI::UINodeId dropdown, bool open);
+    [[nodiscard]] Core::Result<bool> isDropdownOpen(UI::UINodeId dropdown) const;
+    [[nodiscard]] Core::Status setDropdownSelectedItem(UI::UINodeId dropdown, UI::UINodeId item);
+    [[nodiscard]] Core::Result<UI::UINodeId> dropdownSelectedItem(UI::UINodeId dropdown) const;
+    [[nodiscard]] Core::Result<bool> isDropdownItemSelected(UI::UINodeId item) const;
+    [[nodiscard]] Core::Status setDropdownPaint(UI::UINodeId dropdown, const UI::UIDropdownPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIDropdownPaint> dropdownPaint(UI::UINodeId dropdown) const;
     [[nodiscard]] Core::Status setProgressBarRange(UI::UINodeId progressBar, float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValue(UI::UINodeId progressBar, float value);
     [[nodiscard]] Core::Result<float> progressBarValue(UI::UINodeId progressBar) const;

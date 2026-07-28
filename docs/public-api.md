@@ -211,10 +211,12 @@ SolidQuad/Glyph 与 axis-aligned clip。
 ## UI
 
 `UIContext`、`UINodeId`、`UIRootOwner` 与 builder/updater 提供 retained tree。当前 Widget：Root、Panel、
-Label、Button、Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit。
+Modal、Label、Button、Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit、ScrollView，以及
+Dropdown/Popup/DropdownItem 组合控件。
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8；
-`PrimaryWindowUITreeUpdater::setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
+`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup phase-scoped mutation/query；
+`setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
 paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
 错误或 dirty queue 容量不足均零发布。
 

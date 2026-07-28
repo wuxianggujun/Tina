@@ -65,6 +65,40 @@ constexpr usize BitsPerConsumptionWord = sizeof(u64) * 8U;
     }
 }
 
+[[nodiscard]] std::optional<UI::UIDropdownCommand> dropdownCommandForKey(Platform::Key key,
+                                                                        bool shiftHeld) noexcept
+{
+    switch (key)
+    {
+    case Platform::Key::Up:
+        return UI::UIDropdownCommand::PreviousItem;
+    case Platform::Key::Down:
+        return UI::UIDropdownCommand::NextItem;
+    case Platform::Key::Escape:
+        return UI::UIDropdownCommand::Dismiss;
+    case Platform::Key::Tab:
+        return shiftHeld ? UI::UIDropdownCommand::ExitPrevious : UI::UIDropdownCommand::ExitNext;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UIDropdownCommand>
+dropdownCommandForGamepadButton(Platform::GamepadButton button) noexcept
+{
+    switch (button)
+    {
+    case Platform::GamepadButton::DpadUp:
+        return UI::UIDropdownCommand::PreviousItem;
+    case Platform::GamepadButton::DpadDown:
+        return UI::UIDropdownCommand::NextItem;
+    case Platform::GamepadButton::East:
+        return UI::UIDropdownCommand::Dismiss;
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] bool isRepresentableLogicalValue(double value) noexcept
 {
     constexpr double MaximumLogicalValue = static_cast<double>((std::numeric_limits<float>::max)());
@@ -414,6 +448,86 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 anyConsumed = true;
             }
             continue;
+        }
+
+        // An open Dropdown owns navigation/cancel/Tab before general text-edit
+        // commands and focus traversal. Matching releases remain consumed after
+        // dismissal so gameplay never observes half of a digital transition.
+        if (const auto* key = std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr && key->window == context->ownerWindow())
+        {
+            bool shiftHeld = false;
+            if (primaryWindow != nullptr)
+            {
+                shiftHeld = primaryWindow->input.isHeld(Platform::Key::LeftShift) ||
+                            primaryWindow->input.isHeld(Platform::Key::RightShift);
+            }
+            if (key->key == Platform::Key::Tab && key->state == Platform::DigitalTransition::Up)
+            {
+                auto previousRelease =
+                    context->routeDropdownCommand(UI::UIDropdownCommand::ExitPrevious, false);
+                if (!previousRelease)
+                {
+                    Core::Error error = std::move(previousRelease.error());
+                    error.addContext("UIInputRouteProducer::produce(dropdown-tab-release)");
+                    return Core::failure(std::move(error));
+                }
+                auto nextRelease = context->routeDropdownCommand(UI::UIDropdownCommand::ExitNext, false);
+                if (!nextRelease)
+                {
+                    Core::Error error = std::move(nextRelease.error());
+                    error.addContext("UIInputRouteProducer::produce(dropdown-tab-release)");
+                    return Core::failure(std::move(error));
+                }
+                if (previousRelease->consumed || nextRelease->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+            if (const auto command = dropdownCommandForKey(key->key, shiftHeld); command.has_value())
+            {
+                auto routed = context->routeDropdownCommand(
+                    *command, key->state == Platform::DigitalTransition::Down);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(dropdown-key-command)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+        }
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
+            gamepad != nullptr && gamepad->routedWindow == context->ownerWindow())
+        {
+            if (const auto command = dropdownCommandForGamepadButton(gamepad->button); command.has_value())
+            {
+                auto routed = context->routeDropdownCommand(
+                    *command, gamepad->state == Platform::DigitalTransition::Down);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(dropdown-gamepad-command)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
         }
 
         // A focused TextEdit owns keyboard transitions so physical gameplay

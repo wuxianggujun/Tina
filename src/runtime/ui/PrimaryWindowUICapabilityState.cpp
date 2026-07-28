@@ -370,6 +370,59 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createScrollView(u64 
     return *child;
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createDropdown(u64 epoch,
+                                                                          PrimaryWindowUIPhase phase,
+                                                                          UI::UITreeUpdater& updater,
+                                                                          UI::UINodeId parent)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createDropdown";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createDropdown(parent);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createPopup(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                       UI::UITreeUpdater& updater,
+                                                                       UI::UINodeId dropdown)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createPopup";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createPopup(dropdown);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createDropdownItem(u64 epoch,
+                                                                              PrimaryWindowUIPhase phase,
+                                                                              UI::UITreeUpdater& updater,
+                                                                              UI::UINodeId popup)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createDropdownItem";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createDropdownItem(popup);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase,
                                                             UI::UITreeUpdater& updater, UI::UINodeId node,
                                                             const UI::UILayoutStyle& style)
@@ -1115,6 +1168,211 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isScrollViewDragging(u64 epoc
         return Core::failure(rememberFirstError(std::move(dragging.error()), Operation));
     }
     return *dragging;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setPopupStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                                           UI::UITreeUpdater& updater, UI::UINodeId popup,
+                                                           const UI::UIPopupStyle& style)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setPopupStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setPopupStyle(popup, style);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIPopupStyle> PrimaryWindowUICapabilityState::popupStyle(u64 epoch,
+                                                                         PrimaryWindowUIPhase phase,
+                                                                         const UI::UITreeUpdater& updater,
+                                                                         UI::UINodeId popup)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::popupStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto style = updater.popupStyle(popup);
+    if (!style)
+    {
+        return Core::failure(rememberFirstError(std::move(style.error()), Operation));
+    }
+    return *style;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setPopupOpen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                          UI::UITreeUpdater& updater, UI::UINodeId popup, bool open)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setPopupOpen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setPopupOpen(popup, open);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isPopupOpen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                              const UI::UITreeUpdater& updater, UI::UINodeId popup)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isPopupOpen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto open = updater.isPopupOpen(popup);
+    if (!open)
+    {
+        return Core::failure(rememberFirstError(std::move(open.error()), Operation));
+    }
+    return *open;
+}
+
+Core::Result<UI::UIPopupMetrics> PrimaryWindowUICapabilityState::popupMetrics(u64 epoch,
+                                                                             PrimaryWindowUIPhase phase,
+                                                                             const UI::UITreeUpdater& updater,
+                                                                             UI::UINodeId popup)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::popupMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto metrics = updater.popupMetrics(popup);
+    if (!metrics)
+    {
+        return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
+    }
+    return *metrics;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                             UI::UITreeUpdater& updater, UI::UINodeId dropdown,
+                                                             bool open)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setDropdownOpen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setDropdownOpen(dropdown, open);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                 const UI::UITreeUpdater& updater,
+                                                                 UI::UINodeId dropdown)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isDropdownOpen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto open = updater.isDropdownOpen(dropdown);
+    if (!open)
+    {
+        return Core::failure(rememberFirstError(std::move(open.error()), Operation));
+    }
+    return *open;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setDropdownSelectedItem(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                     UI::UITreeUpdater& updater,
+                                                                     UI::UINodeId dropdown, UI::UINodeId item)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setDropdownSelectedItem";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setDropdownSelectedItem(dropdown, item);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::dropdownSelectedItem(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId dropdown)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::dropdownSelectedItem";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto selected = updater.dropdownSelectedItem(dropdown);
+    if (!selected)
+    {
+        return Core::failure(rememberFirstError(std::move(selected.error()), Operation));
+    }
+    return *selected;
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isDropdownItemSelected(u64 epoch,
+                                                                          PrimaryWindowUIPhase phase,
+                                                                          const UI::UITreeUpdater& updater,
+                                                                          UI::UINodeId item)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isDropdownItemSelected";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto selected = updater.isDropdownItemSelected(item);
+    if (!selected)
+    {
+        return Core::failure(rememberFirstError(std::move(selected.error()), Operation));
+    }
+    return *selected;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setDropdownPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                              UI::UITreeUpdater& updater, UI::UINodeId dropdown,
+                                                              const UI::UIDropdownPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setDropdownPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setDropdownPaint(dropdown, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIDropdownPaint> PrimaryWindowUICapabilityState::dropdownPaint(u64 epoch,
+                                                                                PrimaryWindowUIPhase phase,
+                                                                                const UI::UITreeUpdater& updater,
+                                                                                UI::UINodeId dropdown)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::dropdownPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.dropdownPaint(dropdown);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
 }
 
 Core::Status PrimaryWindowUICapabilityState::setProgressBarRange(u64 epoch, PrimaryWindowUIPhase phase,

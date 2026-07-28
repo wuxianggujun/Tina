@@ -145,6 +145,33 @@ Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createScrollView(UI::UINo
     return m_state->createScrollView(m_epoch, m_phase, m_updater, parent);
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createDropdown(UI::UINodeId parent)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createDropdown");
+    }
+    return m_state->createDropdown(m_epoch, m_phase, m_updater, parent);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createPopup(UI::UINodeId dropdown)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createPopup");
+    }
+    return m_state->createPopup(m_epoch, m_phase, m_updater, dropdown);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createDropdownItem(UI::UINodeId popup)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createDropdownItem");
+    }
+    return m_state->createDropdownItem(m_epoch, m_phase, m_updater, popup);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style)
 {
     if (m_state == nullptr)
@@ -551,6 +578,115 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isScrollViewDragging(UI::UINodeId
         return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isScrollViewDragging");
     }
     return m_state->isScrollViewDragging(m_epoch, m_phase, m_updater, scrollView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setPopupStyle(UI::UINodeId popup, const UI::UIPopupStyle& style)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setPopupStyle");
+    }
+    return m_state->setPopupStyle(m_epoch, m_phase, m_updater, popup, style);
+}
+
+Core::Result<UI::UIPopupStyle> PrimaryWindowUITreeUpdater::popupStyle(UI::UINodeId popup) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIPopupStyle>("PrimaryWindowUITreeUpdater::popupStyle");
+    }
+    return m_state->popupStyle(m_epoch, m_phase, m_updater, popup);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setPopupOpen(UI::UINodeId popup, bool open)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setPopupOpen");
+    }
+    return m_state->setPopupOpen(m_epoch, m_phase, m_updater, popup, open);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isPopupOpen(UI::UINodeId popup) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isPopupOpen");
+    }
+    return m_state->isPopupOpen(m_epoch, m_phase, m_updater, popup);
+}
+
+Core::Result<UI::UIPopupMetrics> PrimaryWindowUITreeUpdater::popupMetrics(UI::UINodeId popup) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIPopupMetrics>("PrimaryWindowUITreeUpdater::popupMetrics");
+    }
+    return m_state->popupMetrics(m_epoch, m_phase, m_updater, popup);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setDropdownOpen(UI::UINodeId dropdown, bool open)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setDropdownOpen");
+    }
+    return m_state->setDropdownOpen(m_epoch, m_phase, m_updater, dropdown, open);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isDropdownOpen(UI::UINodeId dropdown) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isDropdownOpen");
+    }
+    return m_state->isDropdownOpen(m_epoch, m_phase, m_updater, dropdown);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setDropdownSelectedItem(UI::UINodeId dropdown, UI::UINodeId item)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setDropdownSelectedItem");
+    }
+    return m_state->setDropdownSelectedItem(m_epoch, m_phase, m_updater, dropdown, item);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::dropdownSelectedItem(UI::UINodeId dropdown) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::dropdownSelectedItem");
+    }
+    return m_state->dropdownSelectedItem(m_epoch, m_phase, m_updater, dropdown);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isDropdownItemSelected(UI::UINodeId item) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isDropdownItemSelected");
+    }
+    return m_state->isDropdownItemSelected(m_epoch, m_phase, m_updater, item);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setDropdownPaint(UI::UINodeId dropdown,
+                                                          const UI::UIDropdownPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setDropdownPaint");
+    }
+    return m_state->setDropdownPaint(m_epoch, m_phase, m_updater, dropdown, paint);
+}
+
+Core::Result<UI::UIDropdownPaint> PrimaryWindowUITreeUpdater::dropdownPaint(UI::UINodeId dropdown) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIDropdownPaint>("PrimaryWindowUITreeUpdater::dropdownPaint");
+    }
+    return m_state->dropdownPaint(m_epoch, m_phase, m_updater, dropdown);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setProgressBarRange(UI::UINodeId progressBar, float minValue, float maxValue)

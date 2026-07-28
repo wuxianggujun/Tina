@@ -9,14 +9,14 @@
 | 领域 | 已实现 |
 | --- | --- |
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
-| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit，固定容量 mutation |
+| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/DropdownItem，固定容量 mutation |
 | Layout | Flex-lite measure/arrange、logical pixel、事务 commit、clean-subtree reuse |
-| Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal barrier、listener token、consume/prevent/claim |
+| Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
 | Paint | box/text/control paint、clip、PaintCache、committed paint snapshot |
 | Theme（A/B） | `UITheme` token + `makePanelBoxPaint`：surface 色阶、1px 亮/暗边、可选 Low elevation 假影；hex helper `rgb`/`argb`；**无**圆角/毛玻璃/CSS Theme（C） |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab focus、Keyboard/Gamepad activation、TextEdit edit/selection/IME |
-| Semantics | role/name/checked/selected/range/value/valueText/focused snapshot，Modal 映射 Dialog role |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab focus、Keyboard/Gamepad activation、Dropdown navigation/dismiss、TextEdit edit/selection/IME |
+| Semantics | role/name/checked/selected/range/value/valueText/focused snapshot，Modal/Dropdown/Popup 映射 Dialog/ComboBox/List role |
 | Runtime | startup root builder、phase-scoped tree updater、DisplayList/Glyph atlas handoff |
 | Product | 独立 13 控件 showcase（Dark/Light 实时换肤）、product-2d HUD/设置面板、product-3d Scene Controls 与 Windows 视觉证据 |
 
@@ -73,6 +73,9 @@ callback 副作用。
 - Checkbox：Pointer/Keyboard/Gamepad toggle；
 - Slider：Pointer drag、range/value clamp；
 - RadioButton：同一直接父节点互斥，Pointer/Keyboard/Gamepad selection；
+- ScrollView：wheel、thumb drag、轴向 clamp 与持久 pointer capture；
+- Dropdown/Popup：Pointer/Keyboard/Gamepad 开关与选择，Up/Down/D-pad 导航，Escape/Gamepad East dismiss，
+  Tab/Shift+Tab 关闭并退出 Popup scope，外部点击关闭且阻止 click-through；
 - TextEdit：Pointer focus/selection，Tab traversal，Left/Right/Home/End、Backspace/Delete、Shift selection、
   Ctrl+A、committed text 与 IME；
 - ProgressBar：非交互 determinate range/value，hit policy 为 Ignore。
@@ -107,7 +110,8 @@ committed text。多行、grapheme、BiDi/shaping、候选窗定位见 `TEXT-001
 
 ## Semantics 与 accessibility
 
-`committedSemantics()` 当前发布 Modal、Label、Button、Checkbox、Slider、ProgressBar、RadioButton、TextEdit：
+`committedSemantics()` 当前发布 Modal、Label、Button、Checkbox、Slider、ProgressBar、RadioButton、TextEdit、
+ScrollView、Dropdown、Popup 与 DropdownItem：
 
 - role/name；
 - checked/selected；
@@ -127,7 +131,7 @@ Probe 可验证 stale node 拒绝。
 **Windows UIA 私有 adapter（UI-002，可选）：** `TINA_BUILD_UI_UIA=ON`（Windows-only）时构建
 `tina_ui_uia` 并让 `tina_runtime` 在 WindowSurface 产品路径上自动接线：
 
-1. 属性映射：`UIAccessibilityTree` → UIA 形 ControlType/Name/Enabled/Focus/Range/Toggle/Value；
+1. 属性映射：`UIAccessibilityTree` → UIA 形 ControlType/Name/Enabled/Focus/Selection/Range/Toggle/Value；
 2. **HWND 桥**：`WindowsUiaHostBridge`（`SetWindowSubclass` + `WM_GETOBJECT` +
    `IRawElementProviderSimple` 根/子 fragment）；公开工厂头仍零 COM；
 3. **产品自动 attach**：`EngineHost` 从主窗口 lease 解码 Win32 HWND，startup layout 与每帧
@@ -190,6 +194,10 @@ bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx back
 | `TextEdit` | 单行编辑、选择、光标、IME | 文本 Glyph/placeholder + selection highlight + caret SolidQuad |
 | `ProgressBar` | 非交互 determinate range/value | track SolidQuad + 按比例缩短的 foreground SolidQuad |
 | `RadioButton` | 同直接父节点互斥选择 | indicator SolidQuad + 选中内块 + 文本 Glyph |
+| `ScrollView` | wheel/thumb drag 与 viewport clip | 内容沿 offset 平移并裁剪，追加 track/thumb SolidQuad |
+| `Dropdown` | ComboBox value、Pointer/Keyboard/Gamepad 开关 | Button chrome + 文本 + 下拉指示块 |
+| `Popup` | 独立 List/focus scope、anchor flip/clamp、输入 barrier | 顶层 overlay surface chrome，始终晚于普通树绘制 |
+| `DropdownItem` | ListItem selection 与焦点 | Button chrome + 选中背景 + 文本 |
 
 控件创建入口集中在 `UIRootBuilder`/`UITreeUpdater`；属性 setter 只修改 retained 状态并标记必要的
 dirty 类别。
@@ -197,7 +205,7 @@ dirty 类别。
 **产品 Theme（默认皮肤 + 全局换肤 + 局部覆盖）：**
 
 - `UIContext` 持有 `productTheme()`，默认 `makeDefaultProductTheme()`；
-- `create*`（Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton）与 Label 文本样式在创建时
+- `create*`（Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton/ScrollView/Dropdown/Popup/DropdownItem）与 Label 文本样式在创建时
   **自动 apply** 对应 `make*Chrome` / text style；Root/Panel 默认无底色（容器），需背景时用
   `makePanelBoxPaint` / `makeSettingsPanelChrome`；
 - `setProductTheme(theme)` 会校验 metric，并事务式重绑所有仍继承产品 Theme 的既有控件属性；容量、
@@ -258,8 +266,9 @@ callback 只提交 intent，`updateUI()` 统一处理控件状态、ProgressBar 
 `artifacts/screenshots/sample-3d-ui-light/20260727-174414`，均取得连续2帧 1280×720 非空 client capture；
 人工复核文字、控件层级、主题差异及 3D 主视区均成立，无裁剪或重叠。
 
-当前 tip 最近直接验证为：`tina_ui_tests` 282/282（含 Focus/Modal/Pointer Capture）、`tina_runtime_ui_tests` 85/85、
-`tina_ui_render_integration_tests` 15/15、product-2d 图的 `tina_ui_freetype_tests` 3/3。UI 容量回归
+当前 tip 最近直接验证为：`tina_ui_tests` 快速回归 296/296（另有 4 个 5 万层压力用例留在最终 gate）、
+`tina_runtime_ui_tests` 89/89、`tina_ui_uia_tests` 10/10、`tina_ui_render_integration_tests` 15/15、
+product-2d 图的 `tina_ui_freetype_tests` 3/3。UI 容量回归
 覆盖 Checkbox/Slider mutation、TextEdit pointer selection 和需要同时重绘旧/新节点的 focus step；
 dirty queue 容量不足时状态与 callback 原子不变，同文本替换 selection 仍发布新 paint；文本 padding
 回归覆盖 auto-size、多行回行和可变 glyph advance 的 TextEdit pointer selection。数字是当前工作树
@@ -302,11 +311,12 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | --- | --- |
 | `UI-002` | 产品 HWND 自动接线 + Narrator/Inspect 金标 + Linux AT-SPI（映射 + HostBridge 已有） |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
-| `UI-005` | ScrollView、虚拟 ListView、Dropdown、TreeView |
+| `UI-005` | 虚拟 ListView、TreeView（ScrollView、Dropdown/Popup 已完成） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | （可选） | Phase C：圆角 clip、backdrop blur、完整 style resolver |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
 Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；UI-002-SPI 与
-可选 `tina_ui_uia` 映射切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture 已完成，但不要把外部
+可选 `tina_ui_uia` 映射切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture、UI-005 的
+ScrollView 与 Dropdown/Popup 已完成，但不要把 Virtual ListView/TreeView、外部
 Narrator 真机门禁或 UI-003 标成 Done。
