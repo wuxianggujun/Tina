@@ -14,8 +14,20 @@
 namespace Tina::Sample3D {
 namespace {
 
-inline constexpr Core::u64 PanelCount = 5;
-inline constexpr Core::u64 LabelCount = 9;
+inline constexpr Core::u64 PanelCount = 7;
+inline constexpr Core::u64 LabelCount = 13;
+inline constexpr UI::UIListViewItemKey AssetItemKeyBase = 2'000;
+inline constexpr UI::UITreeViewItemKey SceneTreeItemKey = 1;
+inline constexpr UI::UITreeViewItemKey CameraTreeItemKey = 2;
+inline constexpr UI::UITreeViewItemKey ProductTreeItemKey = 3;
+inline constexpr UI::UITreeViewItemKey ProductMeshTreeItemKey = 4;
+inline constexpr UI::UITreeViewItemKey ProductMaterialTreeItemKey = 5;
+inline constexpr UI::UITreeViewItemKey LightsTreeItemKey = 6;
+inline constexpr UI::UITreeViewItemKey PostFxTreeItemKey = 7;
+
+inline constexpr std::array<std::string_view, 7> AssetItemLabels{
+    "Hero mesh", "MR material", "Base color", "Normal map", "Lighting rig", "Camera", "Environment",
+};
 
 struct Rect final {
     float left = 0.0F;
@@ -120,7 +132,184 @@ struct Rect final {
     return mode == Product3DUITheme::Dark ? Dark : Light;
 }
 
+[[nodiscard]] std::string_view assetLabelForKey(UI::UIListViewItemKey key) noexcept
+{
+    if (key < AssetItemKeyBase || key >= AssetItemKeyBase + AssetItemLabels.size())
+    {
+        return "No asset";
+    }
+    return AssetItemLabels[static_cast<Core::usize>(key - AssetItemKeyBase)];
+}
+
+[[nodiscard]] std::string_view sceneLabelForKey(UI::UITreeViewItemKey key) noexcept
+{
+    switch (key)
+    {
+    case SceneTreeItemKey:
+        return "Scene";
+    case CameraTreeItemKey:
+        return "Camera";
+    case ProductTreeItemKey:
+        return "Product";
+    case ProductMeshTreeItemKey:
+        return "Mesh";
+    case ProductMaterialTreeItemKey:
+        return "Material";
+    case LightsTreeItemKey:
+        return "Lights";
+    case PostFxTreeItemKey:
+        return "Post FX";
+    default:
+        return "No scene node";
+    }
+}
+
 } // namespace
+
+UI::UIListViewDataSource Product3DUI::assetListDataSource() const noexcept
+{
+    return UI::UIListViewDataSource{
+        .state = this,
+        .itemCount = &Product3DUI::assetListItemCount,
+        .resolveItem = &Product3DUI::resolveAssetListItem,
+    };
+}
+
+UI::UITreeViewDataSource Product3DUI::sceneTreeDataSource() noexcept
+{
+    return UI::UITreeViewDataSource{
+        .state = this,
+        .itemCount = &Product3DUI::sceneTreeItemCount,
+        .resolveItem = &Product3DUI::resolveSceneTreeItem,
+        .setItemExpanded = &Product3DUI::setSceneTreeItemExpanded,
+    };
+}
+
+Core::u64 Product3DUI::assetListItemCount(const void* state) noexcept
+{
+    return state != nullptr ? AssetItemLabels.size() : 0;
+}
+
+bool Product3DUI::resolveAssetListItem(const void* state, Core::u64 logicalIndex,
+                                       UI::UIListViewItemDescriptor& output) noexcept
+{
+    if (state == nullptr || logicalIndex >= AssetItemLabels.size())
+    {
+        return false;
+    }
+    output = UI::UIListViewItemDescriptor{
+        .key = AssetItemKeyBase + logicalIndex,
+        .label = AssetItemLabels[static_cast<Core::usize>(logicalIndex)],
+        .enabled = true,
+    };
+    return true;
+}
+
+Core::u64 Product3DUI::sceneTreeItemCount(const void* state) noexcept
+{
+    if (state == nullptr)
+    {
+        return 0;
+    }
+    const auto& ui = *static_cast<const Product3DUI*>(state);
+    Core::u64 count = 2;
+    if (ui.sceneExpanded_)
+    {
+        count += 3;
+        if (ui.productExpanded_)
+        {
+            count += 2;
+        }
+    }
+    return count;
+}
+
+bool Product3DUI::resolveSceneTreeItem(const void* state, Core::u64 logicalIndex,
+                                       UI::UITreeViewItemDescriptor& output) noexcept
+{
+    if (state == nullptr || logicalIndex >= sceneTreeItemCount(state))
+    {
+        return false;
+    }
+    const auto& ui = *static_cast<const Product3DUI*>(state);
+    const auto emit = [&logicalIndex, &output](UI::UITreeViewItemKey key, std::string_view label, Core::u32 level,
+                                               bool expandable = false, bool expanded = false) noexcept {
+        if (logicalIndex == 0)
+        {
+            output = UI::UITreeViewItemDescriptor{
+                .key = key,
+                .label = label,
+                .level = level,
+                .enabled = true,
+                .expandable = expandable,
+                .expanded = expanded,
+            };
+            return true;
+        }
+        --logicalIndex;
+        return false;
+    };
+
+    if (emit(SceneTreeItemKey, "Scene", 0, true, ui.sceneExpanded_))
+    {
+        return true;
+    }
+    if (ui.sceneExpanded_)
+    {
+        if (emit(CameraTreeItemKey, "Camera", 1))
+        {
+            return true;
+        }
+        if (emit(ProductTreeItemKey, "Product", 1, true, ui.productExpanded_))
+        {
+            return true;
+        }
+        if (ui.productExpanded_)
+        {
+            if (emit(ProductMeshTreeItemKey, "Mesh", 2))
+            {
+                return true;
+            }
+            if (emit(ProductMaterialTreeItemKey, "Material", 2))
+            {
+                return true;
+            }
+        }
+        if (emit(LightsTreeItemKey, "Lights", 1))
+        {
+            return true;
+        }
+    }
+    return emit(PostFxTreeItemKey, "Post FX", 0);
+}
+
+bool Product3DUI::setSceneTreeItemExpanded(void* state, UI::UITreeViewItemKey key, bool expanded) noexcept
+{
+    if (state == nullptr)
+    {
+        return false;
+    }
+    auto& ui = *static_cast<Product3DUI*>(state);
+    bool* value = nullptr;
+    switch (key)
+    {
+    case SceneTreeItemKey:
+        value = &ui.sceneExpanded_;
+        break;
+    case ProductTreeItemKey:
+        value = &ui.productExpanded_;
+        break;
+    default:
+        return false;
+    }
+    if (*value != expanded)
+    {
+        *value = expanded;
+        ++ui.evidence_->treeExpansionChanges;
+        ui.statusDirty_ = true;
+    }
+    return true;
+}
 
 Product3DUI::Product3DUI(Product3DUIEvidence& evidence) noexcept : evidence_(&evidence)
 {
@@ -193,7 +382,15 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     {
         return status;
     }
-    if (Core::Status status = addPanel({24.0F, 646.0F, 560.0F, 50.0F}, nodes_.statusPanel); !status)
+    if (Core::Status status = addPanel({932.0F, 412.0F, 324.0F, 284.0F}, nodes_.collectionPanel); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = addPanel({932.0F, 412.0F, 6.0F, 284.0F}, nodes_.collectionAccent); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = addPanel({24.0F, 646.0F, 884.0F, 50.0F}, nodes_.statusPanel); !status)
     {
         return status;
     }
@@ -239,8 +436,28 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     {
         return status;
     }
+    if (Core::Status status = addLabel({956.0F, 428.0F, 276.0F, 28.0F}, "Scene & Assets", nodes_.collectionTitle);
+        !status)
+    {
+        return status;
+    }
     if (Core::Status status =
-            addLabel({44.0F, 659.0F, 520.0F, 26.0F}, "Dark theme | Auto rotate | 1.00x", nodes_.status);
+            addLabel({956.0F, 459.0F, 276.0F, 22.0F}, "Virtualized product data", nodes_.collectionMeta);
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status = addLabel({956.0F, 489.0F, 128.0F, 22.0F}, "Assets", nodes_.assetListLabel); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = addLabel({1096.0F, 489.0F, 136.0F, 22.0F}, "Scene graph", nodes_.sceneTreeLabel);
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status =
+            addLabel({44.0F, 659.0F, 844.0F, 26.0F}, "Dark theme | Auto rotate | 1.00x", nodes_.status);
         !status)
     {
         return status;
@@ -335,6 +552,75 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
         return status;
     }
 
+    auto assetList = tree->createListView(rootNode, {.materializedItemCapacity = 7});
+    if (!assetList)
+    {
+        return Core::failure(std::move(assetList.error()));
+    }
+    nodes_.assetList = *assetList;
+    if (Core::Status status = tree->setLayoutStyle(*assetList, absoluteStyle({956.0F, 516.0F, 128.0F, 156.0F}));
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree->setListViewStyle(
+            *assetList,
+            UI::UIListViewStyle{
+                .rowHeight = 27.0F,
+                .overscanRows = 1,
+                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                .wheelStep = 27.0F,
+            });
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree->setListViewDataSource(*assetList, assetListDataSource()); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree->setListViewSelectedIndex(*assetList, 0); !status)
+    {
+        return status;
+    }
+
+    auto sceneTree = tree->createTreeView(rootNode, {.materializedItemCapacity = 7});
+    if (!sceneTree)
+    {
+        return Core::failure(std::move(sceneTree.error()));
+    }
+    nodes_.sceneTree = *sceneTree;
+    if (Core::Status status = tree->setLayoutStyle(*sceneTree, absoluteStyle({1096.0F, 516.0F, 136.0F, 156.0F}));
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree->setTreeViewStyle(
+            *sceneTree,
+            UI::UITreeViewStyle{
+                .rowHeight = 27.0F,
+                .overscanRows = 1,
+                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                .wheelStep = 27.0F,
+                .indentation = 12.0F,
+                .disclosureExtent = 9.0F,
+                .disclosureGap = 4.0F,
+            });
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree->setTreeViewDataSource(*sceneTree, sceneTreeDataSource()); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree->setTreeViewSelectedIndex(*sceneTree, 0); !status)
+    {
+        return status;
+    }
+    evidence_->listSelectionKey = AssetItemKeyBase;
+    evidence_->treeSelectionKey = SceneTreeItemKey;
+
     if (Core::Status status = applyTheme(*tree, config.initialTheme, false); !status)
     {
         return status;
@@ -351,6 +637,8 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     auto checked = tree->isChecked(nodes_.autoRotateCheckbox);
     auto speed = tree->sliderValue(nodes_.rotationSpeedSlider);
     auto progressValue = tree->progressBarValue(nodes_.frameProgress);
+    auto assetSelection = tree->listViewSelection(nodes_.assetList);
+    auto sceneSelection = tree->treeViewSelection(nodes_.sceneTree);
     if (!checked)
     {
         return Core::failure(std::move(checked.error()));
@@ -363,8 +651,19 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     {
         return Core::failure(std::move(progressValue.error()));
     }
+    if (!assetSelection)
+    {
+        return Core::failure(std::move(assetSelection.error()));
+    }
+    if (!sceneSelection)
+    {
+        return Core::failure(std::move(sceneSelection.error()));
+    }
+    evidence_->listSelectionKey = assetSelection->key;
+    evidence_->treeSelectionKey = sceneSelection->key;
     evidence_->controlsInitialStateVerified =
-        *checked && std::abs(*speed - 1.0F) <= 0.0001F && std::abs(*progressValue) <= 0.0001F;
+        *checked && std::abs(*speed - 1.0F) <= 0.0001F && std::abs(*progressValue) <= 0.0001F &&
+        assetSelection->key == AssetItemKeyBase && sceneSelection->key == SceneTreeItemKey;
     if (!evidence_->controlsInitialStateVerified)
     {
         return Core::failure(Core::CoreErrorCode::Internal, "3D product UI initial control state verification failed");
@@ -377,6 +676,8 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     evidence_->checkboxesCreated = 1;
     evidence_->slidersCreated = 1;
     evidence_->progressBarsCreated = 1;
+    evidence_->listViewsCreated = 1;
+    evidence_->treeViewsCreated = 1;
     evidence_->rootAlive = true;
     root_ = std::move(*root);
     return Core::success();
@@ -412,6 +713,17 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
     {
         return status;
     }
+    if (Core::Status status = tree.setBoxPaint(
+            nodes_.collectionPanel,
+            UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.surface0, 236), UI::UIElevation::Low));
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree.setBoxPaint(nodes_.collectionAccent, UI::makeSolidBox(theme.textAccent)); !status)
+    {
+        return status;
+    }
     if (Core::Status status =
             tree.setBoxPaint(nodes_.statusPanel, UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.surface2, 222),
                                                                        UI::UIElevation::None));
@@ -437,7 +749,17 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
     {
         return status;
     }
-    const std::array bodyLabels{nodes_.autoRotateLabel, nodes_.rotationSpeedLabel, nodes_.progressCaption};
+    if (Core::Status status = tree.setTextStyle(nodes_.collectionTitle, UI::makeTitleTextStyle(theme, 22.0F)); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree.setTextStyle(nodes_.collectionMeta, UI::makeSecondaryTextStyle(theme, 15.0F));
+        !status)
+    {
+        return status;
+    }
+    const std::array bodyLabels{nodes_.autoRotateLabel, nodes_.rotationSpeedLabel, nodes_.progressCaption,
+                                nodes_.assetListLabel, nodes_.sceneTreeLabel};
     for (UI::UINodeId label : bodyLabels)
     {
         if (Core::Status status = tree.setTextStyle(label, UI::makeBodyTextStyle(theme, 17.0F)); !status)
@@ -453,6 +775,23 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
     {
         return status;
     }
+    const UI::UIBoxPaint collectionBox = UI::makePanelBoxPaint(theme, theme.surface0, UI::UIElevation::None);
+    if (Core::Status status = tree.setBoxPaint(nodes_.assetList, collectionBox); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree.setListViewPaint(nodes_.assetList, UI::makeListViewPaint(theme)); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree.setBoxPaint(nodes_.sceneTree, collectionBox); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree.setTreeViewPaint(nodes_.sceneTree, UI::makeTreeViewPaint(theme)); !status)
+    {
+        return status;
+    }
     if (Core::Status status =
             tree.setText(nodes_.themeButton, mode == Product3DUITheme::Dark ? "Switch to light" : "Switch to dark");
         !status)
@@ -465,6 +804,8 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
     auto checkboxPaint = tree.checkboxPaint(nodes_.autoRotateCheckbox);
     auto sliderPaint = tree.sliderPaint(nodes_.rotationSpeedSlider);
     auto progressPaint = tree.progressBarPaint(nodes_.frameProgress);
+    auto listPaint = tree.listViewPaint(nodes_.assetList);
+    auto treePaint = tree.treeViewPaint(nodes_.sceneTree);
     if (!activeTheme)
     {
         return Core::failure(std::move(activeTheme.error()));
@@ -485,9 +826,18 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
     {
         return Core::failure(std::move(progressPaint.error()));
     }
+    if (!listPaint)
+    {
+        return Core::failure(std::move(listPaint.error()));
+    }
+    if (!treePaint)
+    {
+        return Core::failure(std::move(treePaint.error()));
+    }
     if (*activeTheme != theme || *buttonPaint != UI::makeButtonChrome(theme).states ||
         *checkboxPaint != UI::makeCheckboxChrome(theme).indicator ||
-        *sliderPaint != UI::makeSliderChrome(theme).slider || *progressPaint != UI::makeProgressBarChrome(theme).bar)
+        *sliderPaint != UI::makeSliderChrome(theme).slider || *progressPaint != UI::makeProgressBarChrome(theme).bar ||
+        *listPaint != UI::makeListViewPaint(theme) || *treePaint != UI::makeTreeViewPaint(theme))
     {
         return Core::failure(Core::CoreErrorCode::Internal,
                              "3D product controls did not inherit the requested UI Theme");
@@ -548,6 +898,10 @@ Core::Status Product3DUI::publishStatus(PrimaryWindowUITreeUpdater& tree)
     std::string text = currentTheme_ == Product3DUITheme::Dark ? "Dark theme | " : "Light theme | ";
     text += autoRotate_ ? "Auto rotate | " : "Rotation paused | ";
     text += SpeedLabels[static_cast<Core::usize>(speedIndex)];
+    text += " | ";
+    text += assetLabelForKey(evidence_->listSelectionKey);
+    text += " / ";
+    text += sceneLabelForKey(evidence_->treeSelectionKey);
     if (Core::Status status = tree.setText(nodes_.status, text); !status)
     {
         return status;
@@ -569,14 +923,20 @@ Core::Status Product3DUI::update(UIUpdateContext& context, Core::u64 completedFr
     if (config_.automatedThemeDemo && !firstAutomatedThemeStepQueued_ && completedFrames >= firstThemeFrame)
     {
         requestedTheme_ = oppositeTheme(config_.initialTheme);
+        requestedAssetSelection_ = 3;
+        requestedSceneExpansion_ = false;
         firstAutomatedThemeStepQueued_ = true;
         ++evidence_->automatedThemeSteps;
+        ++evidence_->automatedCollectionSteps;
     } else if (config_.automatedThemeDemo && firstAutomatedThemeStepQueued_ && !secondAutomatedThemeStepQueued_ &&
                completedFrames >= secondThemeFrame)
     {
         requestedTheme_ = config_.initialTheme;
+        requestedSceneExpansion_ = true;
+        requestedSceneSelection_ = 3;
         secondAutomatedThemeStepQueued_ = true;
         ++evidence_->automatedThemeSteps;
+        ++evidence_->automatedCollectionSteps;
     }
 
     auto tree = context.primaryWindowUITreeUpdater(root_);
@@ -611,6 +971,53 @@ Core::Status Product3DUI::update(UIUpdateContext& context, Core::u64 completedFr
         }
         autoRotate_ = *checked;
         evidence_->autoRotate = autoRotate_;
+        statusDirty_ = true;
+    }
+    if (requestedAssetSelection_.has_value())
+    {
+        const Core::u64 index = *requestedAssetSelection_;
+        requestedAssetSelection_.reset();
+        if (Core::Status status = tree->setListViewSelectedIndex(nodes_.assetList, index); !status)
+        {
+            return status;
+        }
+    }
+    if (requestedSceneExpansion_.has_value())
+    {
+        const bool expanded = *requestedSceneExpansion_;
+        requestedSceneExpansion_.reset();
+        if (Core::Status status = tree->setTreeViewItemExpanded(nodes_.sceneTree, 0, expanded); !status)
+        {
+            return status;
+        }
+    }
+    if (requestedSceneSelection_.has_value())
+    {
+        const Core::u64 index = *requestedSceneSelection_;
+        requestedSceneSelection_.reset();
+        if (Core::Status status = tree->setTreeViewSelectedIndex(nodes_.sceneTree, index); !status)
+        {
+            return status;
+        }
+    }
+    auto assetSelection = tree->listViewSelection(nodes_.assetList);
+    auto sceneSelection = tree->treeViewSelection(nodes_.sceneTree);
+    if (!assetSelection)
+    {
+        return Core::failure(std::move(assetSelection.error()));
+    }
+    if (!sceneSelection)
+    {
+        return Core::failure(std::move(sceneSelection.error()));
+    }
+    if (assetSelection->key != evidence_->listSelectionKey)
+    {
+        evidence_->listSelectionKey = assetSelection->key;
+        statusDirty_ = true;
+    }
+    if (sceneSelection->key != evidence_->treeSelectionKey)
+    {
+        evidence_->treeSelectionKey = sceneSelection->key;
         statusDirty_ = true;
     }
     if (Core::Status status = applyProgress(*tree, completedFrames); !status)

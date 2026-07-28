@@ -1674,13 +1674,23 @@ class Product3DApplication final : public Tina::IGameApplication {
         ui.themeButtonActivations != 0 ||
         (ui.themeSwitches == (options.uiThemeDemo ? 2U : 0U) &&
          ui.finalThemeLight == expectedInitialThemeLight);
+    constexpr Tina::UI::UIListViewItemKey InitialAssetSelectionKey = 2'000;
+    constexpr Tina::UI::UIListViewItemKey AutomatedAssetSelectionKey = 2'003;
+    constexpr Tina::UI::UITreeViewItemKey InitialSceneSelectionKey = 1;
+    constexpr Tina::UI::UITreeViewItemKey AutomatedSceneSelectionKey = 4;
+    const bool collectionDemoValid =
+        ui.automatedCollectionSteps == (options.uiThemeDemo ? 2U : 0U) &&
+        ui.treeExpansionChanges == (options.uiThemeDemo ? 2U : 0U) &&
+        ui.listSelectionKey == (options.uiThemeDemo ? AutomatedAssetSelectionKey : InitialAssetSelectionKey) &&
+        ui.treeSelectionKey == (options.uiThemeDemo ? AutomatedSceneSelectionKey : InitialSceneSelectionKey);
     const bool uiValid =
-        ui.rootsCreated == 1 && ui.rootsReleased == 1 && !ui.rootAlive && ui.panelsCreated == 5 &&
-        ui.labelsCreated == 9 && ui.buttonsCreated == 1 && ui.checkboxesCreated == 1 &&
-        ui.slidersCreated == 1 && ui.progressBarsCreated == 1 && ui.themeDemoRequested == options.uiThemeDemo &&
+        ui.rootsCreated == 1 && ui.rootsReleased == 1 && !ui.rootAlive && ui.panelsCreated == 7 &&
+        ui.labelsCreated == 13 && ui.buttonsCreated == 1 && ui.checkboxesCreated == 1 &&
+        ui.slidersCreated == 1 && ui.progressBarsCreated == 1 && ui.listViewsCreated == 1 &&
+        ui.treeViewsCreated == 1 && ui.themeDemoRequested == options.uiThemeDemo &&
         ui.initialThemeLight == expectedInitialThemeLight &&
         ui.automatedThemeSteps == (options.uiThemeDemo ? 2U : 0U) && unattendedThemeValid &&
-        ui.inheritedChromeVerified && ui.controlsInitialStateVerified &&
+        collectionDemoValid && ui.inheritedChromeVerified && ui.controlsInitialStateVerified &&
         ui.progressUpdates >= options.targetFrameCount && ui.finalProgress >= 99.9F;
     if (*runResult != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame ||
         counters.frameUpdates != options.targetFrameCount ||
@@ -1738,9 +1748,15 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"uiRootsReleased\":" << ui.rootsReleased
                   << ",\"uiPanelsCreated\":" << ui.panelsCreated
                   << ",\"uiLabelsCreated\":" << ui.labelsCreated
+                  << ",\"uiListViewsCreated\":" << ui.listViewsCreated
+                  << ",\"uiTreeViewsCreated\":" << ui.treeViewsCreated
                   << ",\"uiThemeDemoRequested\":" << (ui.themeDemoRequested ? "true" : "false")
                   << ",\"uiThemeSwitches\":" << ui.themeSwitches
                   << ",\"uiAutomatedThemeSteps\":" << ui.automatedThemeSteps
+                  << ",\"uiAutomatedCollectionSteps\":" << ui.automatedCollectionSteps
+                  << ",\"uiTreeExpansionChanges\":" << ui.treeExpansionChanges
+                  << ",\"uiListSelectionKey\":" << ui.listSelectionKey
+                  << ",\"uiTreeSelectionKey\":" << ui.treeSelectionKey
                   << ",\"uiThemeButtonActivations\":" << ui.themeButtonActivations
                   << ",\"uiThemeInitialLight\":" << (ui.initialThemeLight ? "true" : "false")
                   << ",\"uiThemeFinalLight\":" << (ui.finalThemeLight ? "true" : "false")
@@ -1765,7 +1781,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":3,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":4,\"frames\":"
               << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
@@ -1809,9 +1825,15 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"uiCheckboxesCreated\":" << ui.checkboxesCreated
               << ",\"uiSlidersCreated\":" << ui.slidersCreated
               << ",\"uiProgressBarsCreated\":" << ui.progressBarsCreated
+              << ",\"uiListViewsCreated\":" << ui.listViewsCreated
+              << ",\"uiTreeViewsCreated\":" << ui.treeViewsCreated
               << ",\"uiThemeDemoRequested\":" << (ui.themeDemoRequested ? "true" : "false")
               << ",\"uiThemeSwitches\":" << ui.themeSwitches
               << ",\"uiAutomatedThemeSteps\":" << ui.automatedThemeSteps
+              << ",\"uiAutomatedCollectionSteps\":" << ui.automatedCollectionSteps
+              << ",\"uiTreeExpansionChanges\":" << ui.treeExpansionChanges
+              << ",\"uiListSelectionKey\":" << ui.listSelectionKey
+              << ",\"uiTreeSelectionKey\":" << ui.treeSelectionKey
               << ",\"uiThemeButtonActivations\":" << ui.themeButtonActivations
               << ",\"uiCheckboxActivations\":" << ui.checkboxActivations
               << ",\"uiSliderChanges\":" << ui.sliderChanges

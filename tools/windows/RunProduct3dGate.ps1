@@ -6,7 +6,8 @@
   Configure/build the bgfx + FreeType graph, run the affected Core, Scene,
   Asset, Render, and retained UI GoogleTest executables directly, then run the
   tina_sample_3d 300-frame product smoke with automated Dark -> Light -> Dark
-  switching. The final JSON is validated as evidence schema 3.
+  switching plus ListView/TreeView collection interaction. The final JSON is
+  validated as evidence schema 4.
 
   Does not use CTest. Does not clean-first wipe. Exits non-zero on first failure.
 
@@ -151,7 +152,7 @@ $expectedResolverHits = [long]$SampleFrames * 2
 $expectedFields = [ordered]@{
     status                              = 'ok'
     sample                              = 'tina_sample_3d'
-    evidenceSchema                      = 3
+    evidenceSchema                      = 4
     frames                              = $SampleFrames
     gltfCooked                          = $true
     cookedStaticMesh                    = $true
@@ -191,15 +192,21 @@ $expectedFields = [ordered]@{
     stateExits                          = 1
     uiRootsCreated                      = 1
     uiRootsReleased                     = 1
-    uiPanelsCreated                     = 5
-    uiLabelsCreated                     = 9
+    uiPanelsCreated                     = 7
+    uiLabelsCreated                     = 13
     uiButtonsCreated                    = 1
     uiCheckboxesCreated                 = 1
     uiSlidersCreated                    = 1
     uiProgressBarsCreated               = 1
+    uiListViewsCreated                  = 1
+    uiTreeViewsCreated                  = 1
     uiThemeDemoRequested                = $true
     uiThemeSwitches                     = 2
     uiAutomatedThemeSteps               = 2
+    uiAutomatedCollectionSteps          = 2
+    uiTreeExpansionChanges              = 2
+    uiListSelectionKey                  = 2003
+    uiTreeSelectionKey                  = 4
     uiThemeButtonActivations            = 0
     uiCheckboxActivations               = 0
     uiSliderChanges                     = 0
@@ -246,7 +253,7 @@ if ($evidenceErrors.Count -ne 0) {
     Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$($sampleOut.Trim())")
 }
 
-Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=3 frames=$SampleFrames theme=dark-light-dark"
+Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=4 frames=$SampleFrames theme=dark-light-dark collections=list-tree"
 Add-Step -Name 'tina_sample_3d' -ExitCode 0 -Detail "frames=$SampleFrames pixelFingerprint=$($evidence.pixelFingerprint)"
 
 $report.finishedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
@@ -263,5 +270,5 @@ if ($OutJson) {
     Write-Output "wrote $OutJson"
 }
 
-Write-Output "product-3d gate ok schema=3 frames=$SampleFrames theme=dark-light-dark"
+Write-Output "product-3d gate ok schema=4 frames=$SampleFrames theme=dark-light-dark collections=list-tree"
 exit 0
