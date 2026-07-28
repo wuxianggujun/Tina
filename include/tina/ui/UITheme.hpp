@@ -3,6 +3,7 @@
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UIDropdown.hpp>
+#include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
@@ -327,6 +328,14 @@ struct UISettingsPanelChrome final {
         .draggingThumbColor = theme.scrollBarThumbActive,
         .thickness = 10.0F,
         .minThumbExtent = 24.0F,
+    };
+}
+
+[[nodiscard]] constexpr UIListViewPaint makeListViewPaint(const UITheme& theme) noexcept
+{
+    return UIListViewPaint{
+        .scrollBar = makeScrollViewPaint(theme),
+        .selectedItemBackgroundColor = scaleColorAlpha(theme.accent, 150),
     };
 }
 

@@ -31,6 +31,10 @@ enum class UIWidgetKind : u8 {
     Popup,
     // Button-like single-select option owned by a Popup.
     DropdownItem,
+    // Fixed-row-height virtualized list backed by a borrowed logical data source.
+    ListView,
+    // Internal recycled row node owned by a ListView.
+    ListViewItem,
 };
 
 } // namespace Tina::UI

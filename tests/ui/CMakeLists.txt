@@ -6,6 +6,7 @@ add_executable(tina_ui_tests
     UIEnabledStateTests.cpp
     UISliderTests.cpp
     UIScrollViewTests.cpp
+    UIListViewTests.cpp
     UIPopupDropdownTests.cpp
     UIProgressBarTests.cpp
     UIRadioButtonTests.cpp
@@ -30,6 +31,7 @@ add_executable(tina_ui_tests
     header_isolation/UIProgressBarHeader.cpp
     header_isolation/UIRadioButtonHeader.cpp
     header_isolation/UIScrollViewHeader.cpp
+    header_isolation/UIListViewHeader.cpp
     header_isolation/UIDropdownHeader.cpp
     header_isolation/UIPopupHeader.cpp
     header_isolation/UISliderHeader.cpp

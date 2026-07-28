@@ -17,6 +17,7 @@
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIListView.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>

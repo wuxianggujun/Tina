@@ -152,6 +152,33 @@ struct PopupLayoutScratch final {
     UIPopupMetrics metrics{};
 };
 
+struct ListViewState final {
+    UIListViewStyle style{};
+    UIListViewPaint paint{};
+    UIListViewDataSource dataSource{};
+    UIListViewSelection selection{};
+    UIListViewMetrics committedMetrics{};
+    UILogicalRect committedViewportRect{};
+    float requestedScrollOffset = 0.0F;
+    u32 materializedItemCapacity = 0;
+};
+
+struct ListViewLayoutScratch final {
+    UIListViewMetrics metrics{};
+    UILogicalRect viewportRect{};
+};
+
+struct ListViewItemState final {
+    UIListViewItemKey key = InvalidUIListViewItemKey;
+    u64 logicalIndex = 0;
+    bool bound = false;
+    bool enabled = true;
+    UIListViewItemKey committedKey = InvalidUIListViewItemKey;
+    u64 committedLogicalIndex = 0;
+    bool committedBound = false;
+    bool committedEnabled = true;
+};
+
 inline constexpr u16 ThemeBindingBoxPaint = 1U << 0U;
 inline constexpr u16 ThemeBindingTextStyle = 1U << 1U;
 inline constexpr u16 ThemeBindingButtonPaint = 1U << 2U;
@@ -161,6 +188,7 @@ inline constexpr u16 ThemeBindingProgressBarPaint = 1U << 5U;
 inline constexpr u16 ThemeBindingRadioButtonPaint = 1U << 6U;
 inline constexpr u16 ThemeBindingScrollViewPaint = 1U << 7U;
 inline constexpr u16 ThemeBindingDropdownPaint = 1U << 8U;
+inline constexpr u16 ThemeBindingListViewPaint = 1U << 9U;
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -424,6 +452,48 @@ struct ResolvedLength final {
     paint.thickness = normalizeFloat(paint.thickness);
     paint.minThumbExtent = normalizeFloat(paint.minThumbExtent);
     return paint;
+}
+
+[[nodiscard]] Core::Result<UIListViewCreateConfig> normalizeListViewCreateConfig(UIListViewCreateConfig config)
+{
+    if (config.materializedItemCapacity == 0 ||
+        config.materializedItemCapacity > UIListViewCreateConfig::MaximumMaterializedItemCapacity)
+    {
+        return fail(UIErrorCode::InvalidControlValue,
+                    "UI ListView materialized item capacity must be within the supported range");
+    }
+    return config;
+}
+
+[[nodiscard]] Core::Result<UIListViewStyle> normalizeListViewStyle(UIListViewStyle style)
+{
+    if (!(std::isfinite(style.rowHeight) && style.rowHeight > 0.0F) ||
+        !isValidScrollBarVisibility(style.scrollBarVisibility) ||
+        !(std::isfinite(style.wheelStep) && style.wheelStep > 0.0F))
+    {
+        return fail(UIErrorCode::InvalidControlValue,
+                    "UI ListView row height/wheel step must be finite and positive and visibility must be valid");
+    }
+    style.rowHeight = normalizeFloat(style.rowHeight);
+    style.wheelStep = normalizeFloat(style.wheelStep);
+    return style;
+}
+
+[[nodiscard]] Core::Result<UIListViewPaint> normalizeListViewPaint(UIListViewPaint paint)
+{
+    auto scrollBar = normalizeScrollViewPaint(paint.scrollBar);
+    if (!scrollBar)
+    {
+        return Core::failure(scrollBar.error());
+    }
+    paint.scrollBar = *scrollBar;
+    return paint;
+}
+
+[[nodiscard]] constexpr bool isValidListViewScrollAlignment(UIListViewScrollAlignment alignment) noexcept
+{
+    return alignment == UIListViewScrollAlignment::Nearest || alignment == UIListViewScrollAlignment::Start ||
+           alignment == UIListViewScrollAlignment::Center || alignment == UIListViewScrollAlignment::End;
 }
 
 [[nodiscard]] Core::Result<UIScrollOffset> normalizeScrollOffset(UIScrollOffset offset)
@@ -1049,6 +1119,21 @@ struct ScrollBarPointerHit final {
     return ScrollBarGeometry{.track = track, .thumb = thumb, .visible = true};
 }
 
+[[nodiscard]] ScrollBarGeometry makeListViewScrollBarGeometry(const UIListViewMetrics& metrics,
+                                                              UILogicalRect viewportRect,
+                                                              const UIScrollViewPaint& paint) noexcept
+{
+    return makeScrollBarGeometry(
+        UIScrollViewMetrics{
+            .offset = {.x = 0.0F, .y = metrics.scrollOffset},
+            .viewportSize = metrics.viewportSize,
+            .contentSize = metrics.contentSize,
+            .horizontalScrollBarVisible = false,
+            .verticalScrollBarVisible = metrics.verticalScrollBarVisible,
+        },
+        viewportRect, paint, UIScrollAxes::Vertical);
+}
+
 } // namespace
 
 struct UIContext::Impl final {
@@ -1090,6 +1175,9 @@ struct UIContext::Impl final {
     std::pmr::vector<DropdownState> dropdownStatesByNodeIndex;
     std::pmr::vector<PopupState> popupStatesByNodeIndex;
     std::pmr::vector<PopupLayoutScratch> popupLayoutScratchByNodeIndex;
+    std::pmr::vector<ListViewState> listViewStatesByNodeIndex;
+    std::pmr::vector<ListViewLayoutScratch> listViewLayoutScratchByNodeIndex;
+    std::pmr::vector<ListViewItemState> listViewItemStatesByNodeIndex;
     std::pmr::vector<char> textBytes;
     std::pmr::vector<TextByteAllocation> freeTextAllocations;
     usize textByteUsed = 0;
@@ -1241,6 +1329,7 @@ struct UIContext::Impl final {
     UINodeId activeModalNode{};
     UINodeId activePopupNode{};
     std::array<bool, 5> dropdownCommandPressed{};
+    std::array<bool, 7> listViewCommandPressed{};
     bool popupDismissPointerBarrierActive = false;
     UINodeId pendingDestroyedModalRestoreFocus{};
     bool hasPendingDestroyedModalRestoreFocus = false;
@@ -1268,7 +1357,8 @@ struct UIContext::Impl final {
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
           scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
           dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
-          popupLayoutScratchByNodeIndex(&resource), textBytes(&resource),
+          popupLayoutScratchByNodeIndex(&resource), listViewStatesByNodeIndex(&resource),
+          listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource), textBytes(&resource),
           freeTextAllocations(&resource), dirtyByIndex(&resource), dirtyQueuedByIndex(&resource),
           dirtyReservedByIndex(&resource), dirtyQueue(&resource), routeDirtyReservationScratch(&resource),
           routeDirtyReservationCandidateByIndex(&resource), layoutScratchByIndex(&resource),
@@ -1347,6 +1437,9 @@ struct UIContext::Impl final {
         impl->dropdownStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->popupStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->popupLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
+        impl->listViewStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->listViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
+        impl->listViewItemStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->textBytes.resize(normalized.textByteCapacity, '\0');
         impl->freeTextAllocations.reserve(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
@@ -2050,12 +2143,223 @@ struct UIContext::Impl final {
         };
     }
 
-    void arrangeChildren(u32 parentIndex, UILogicalRect viewportRect, LayoutPassStatistics& statistics) noexcept
+    [[nodiscard]] Core::Status bindListViewItem(u32 itemIndex, u64 logicalIndex,
+                                                const UIListViewItemDescriptor& descriptor)
+    {
+        if (itemIndex >= textStatesByIndex.size() || itemIndex >= listViewItemStatesByNodeIndex.size())
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI ListView item side state is out of range");
+        }
+        if (descriptor.key == InvalidUIListViewItemKey || containsLineBreak(descriptor.label))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI ListView item requires a non-zero key and a single-line label");
+        }
+        if (descriptor.label.size() > (std::numeric_limits<u32>::max)())
+        {
+            return fail(UIErrorCode::CapacityExceeded, "UI ListView item label is too large");
+        }
+
+        WidgetTextState& text = textStatesByIndex[itemIndex];
+        auto metrics = measureWidgetText(descriptor.label, text.style);
+        if (!metrics)
+        {
+            return Core::failure(metrics.error());
+        }
+
+        TextByteAllocation replacement{};
+        bool replaceAllocation = false;
+        if (!descriptor.label.empty() && text.allocation.capacity < descriptor.label.size())
+        {
+            auto allocation = allocateTextBytes(static_cast<u32>(descriptor.label.size()));
+            if (!allocation)
+            {
+                return Core::failure(allocation.error());
+            }
+            replacement = *allocation;
+            replaceAllocation = true;
+        }
+        if (descriptor.label.empty())
+        {
+            releaseTextAllocation(text.allocation);
+            text.allocation = {};
+            text.length = 0;
+            text.metrics = {};
+            text.hasContent = false;
+        } else
+        {
+            if (replaceAllocation)
+            {
+                releaseTextAllocation(text.allocation);
+                text.allocation = replacement;
+            }
+            std::memcpy(textBytes.data() + text.allocation.offset, descriptor.label.data(), descriptor.label.size());
+            text.length = static_cast<u32>(descriptor.label.size());
+            text.metrics = *metrics;
+            text.hasContent = true;
+        }
+        localTextColorCacheByIndex[itemIndex] = text.hasContent ? premultiply(text.style.color)
+                                                               : UIPremultipliedRgba8Color{};
+        ListViewItemState& item = listViewItemStatesByNodeIndex[itemIndex];
+        item.key = descriptor.key;
+        item.logicalIndex = logicalIndex;
+        item.bound = true;
+        item.enabled = descriptor.enabled;
+        return Core::success();
+    }
+
+    void collapseListViewItems(u32 listViewIndex, UILogicalRect contentRect, UILogicalRect parentWorldRect,
+                               UILogicalRect descendantClip) noexcept
+    {
+        const NodeRecord* listRecord = recordByIndex(listViewIndex);
+        u32 childIndex = listRecord == nullptr ? InvalidNodeIndex : listRecord->firstChildIndex;
+        while (childIndex != InvalidNodeIndex)
+        {
+            const NodeRecord* childRecord = recordByIndex(childIndex);
+            if (childRecord == nullptr)
+            {
+                break;
+            }
+            ListViewItemState& item = listViewItemStatesByNodeIndex[childIndex];
+            item.key = InvalidUIListViewItemKey;
+            item.logicalIndex = 0;
+            item.bound = false;
+            item.enabled = true;
+            layoutScratchByIndex[childIndex].effectiveVisibility = UIVisibility::Collapsed;
+            assignLayoutRect(childIndex, contentRect, parentWorldRect, descendantClip);
+            childIndex = childRecord->nextSiblingIndex;
+        }
+    }
+
+    [[nodiscard]] Core::Status arrangeListViewItems(u32 listViewIndex, UILogicalRect unscrolledContentRect,
+                                                    UILogicalRect parentWorldRect, UILogicalRect descendantClip)
+    {
+        ListViewState& state = listViewStatesByNodeIndex[listViewIndex];
+        const u64 logicalItemCount = state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
+        const double contentHeight64 = static_cast<double>(logicalItemCount) * static_cast<double>(state.style.rowHeight);
+        if (!std::isfinite(contentHeight64) || contentHeight64 > (std::numeric_limits<float>::max)())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ListView logical content height is not representable");
+        }
+        const float logicalContentHeight = normalizeFloat(static_cast<float>(contentHeight64));
+        const bool barsHidden = state.style.scrollBarVisibility == UIScrollBarVisibility::Hidden;
+        const bool verticalBar =
+            !barsHidden && (state.style.scrollBarVisibility == UIScrollBarVisibility::Always ||
+                            logicalContentHeight > unscrolledContentRect.height);
+        const UILogicalRect viewportRect{
+            .x = unscrolledContentRect.x,
+            .y = unscrolledContentRect.y,
+            .width = normalizeFloat((std::max)(
+                0.0F, unscrolledContentRect.width - (verticalBar ? state.paint.scrollBar.thickness : 0.0F))),
+            .height = unscrolledContentRect.height,
+        };
+        const float contentHeight = normalizeFloat((std::max)(logicalContentHeight, viewportRect.height));
+        const float maximumOffset = normalizeFloat((std::max)(0.0F, contentHeight - viewportRect.height));
+        const float scrollOffset = normalizeFloat((std::clamp)(state.requestedScrollOffset, 0.0F, maximumOffset));
+
+        u64 firstVisibleIndex = 0;
+        u64 visibleItemCount64 = 0;
+        if (logicalItemCount != 0 && viewportRect.height > 0.0F)
+        {
+            firstVisibleIndex = (std::min)(logicalItemCount - 1,
+                                           static_cast<u64>(std::floor(static_cast<double>(scrollOffset) /
+                                                                       state.style.rowHeight)));
+            const double visibleEnd = std::ceil((static_cast<double>(scrollOffset) + viewportRect.height) /
+                                                state.style.rowHeight);
+            const u64 endIndex = (std::min)(logicalItemCount, static_cast<u64>((std::max)(0.0, visibleEnd)));
+            visibleItemCount64 = endIndex > firstVisibleIndex ? endIndex - firstVisibleIndex : 0;
+        }
+        const u64 firstMaterializedIndex =
+            firstVisibleIndex > state.style.overscanRows ? firstVisibleIndex - state.style.overscanRows : 0;
+        const u64 visibleEndIndex = firstVisibleIndex + visibleItemCount64;
+        const u64 materializedEndIndex =
+            (std::min)(logicalItemCount, visibleEndIndex + static_cast<u64>(state.style.overscanRows));
+        const u64 materializedItemCount64 =
+            materializedEndIndex > firstMaterializedIndex ? materializedEndIndex - firstMaterializedIndex : 0;
+        if (materializedItemCount64 > state.materializedItemCapacity)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI ListView row pool cannot cover the viewport and configured overscan");
+        }
+
+        ListViewLayoutScratch& listLayout = listViewLayoutScratchByNodeIndex[listViewIndex];
+        listLayout = ListViewLayoutScratch{
+            .metrics =
+                UIListViewMetrics{
+                    .logicalItemCount = logicalItemCount,
+                    .firstVisibleIndex = firstVisibleIndex,
+                    .visibleItemCount = static_cast<u32>(visibleItemCount64),
+                    .firstMaterializedIndex = firstMaterializedIndex,
+                    .materializedItemCount = static_cast<u32>(materializedItemCount64),
+                    .materializedItemCapacity = state.materializedItemCapacity,
+                    .scrollOffset = scrollOffset,
+                    .maxScrollOffset = maximumOffset,
+                    .viewportSize = viewportRect.size(),
+                    .contentSize = {.width = viewportRect.width, .height = contentHeight},
+                    .verticalScrollBarVisible = verticalBar,
+                },
+            .viewportRect = viewportRect,
+        };
+
+        const NodeRecord* listRecord = recordByIndex(listViewIndex);
+        u32 childIndex = listRecord == nullptr ? InvalidNodeIndex : listRecord->firstChildIndex;
+        u64 materializedOrdinal = 0;
+        const UIVisibility rowVisibility = layoutScratchByIndex[listViewIndex].effectiveVisibility;
+        const UILogicalRect rowClip = intersectRects(descendantClip, viewportRect);
+        while (childIndex != InvalidNodeIndex)
+        {
+            const NodeRecord* childRecord = recordByIndex(childIndex);
+            if (childRecord == nullptr)
+            {
+                break;
+            }
+            const u32 currentChild = childIndex;
+            childIndex = childRecord->nextSiblingIndex;
+            if (materializedOrdinal >= materializedItemCount64)
+            {
+                ListViewItemState& item = listViewItemStatesByNodeIndex[currentChild];
+                item.key = InvalidUIListViewItemKey;
+                item.logicalIndex = 0;
+                item.bound = false;
+                item.enabled = true;
+                layoutScratchByIndex[currentChild].effectiveVisibility = UIVisibility::Collapsed;
+                assignLayoutRect(currentChild, viewportRect, parentWorldRect, rowClip);
+                continue;
+            }
+
+            const u64 logicalIndex = firstMaterializedIndex + materializedOrdinal;
+            auto descriptor = resolveListViewLogicalItem(idForIndex(listViewIndex), logicalIndex);
+            if (!descriptor)
+            {
+                return Core::failure(descriptor.error());
+            }
+            if (Core::Status bound = bindListViewItem(currentChild, logicalIndex, *descriptor); !bound)
+            {
+                return bound;
+            }
+            layoutScratchByIndex[currentChild].effectiveVisibility = rowVisibility;
+            const double logicalY = static_cast<double>(logicalIndex) * state.style.rowHeight;
+            const float rowY = normalizeFloat(viewportRect.y + static_cast<float>(logicalY) - scrollOffset);
+            assignLayoutRect(currentChild,
+                             UILogicalRect{
+                                 .x = viewportRect.x,
+                                 .y = rowY,
+                                 .width = viewportRect.width,
+                                 .height = state.style.rowHeight,
+                             },
+                             parentWorldRect, rowClip);
+            ++materializedOrdinal;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status arrangeChildren(u32 parentIndex, UILogicalRect viewportRect,
+                                               LayoutPassStatistics& statistics)
     {
         const NodeRecord* parentRecord = recordByIndex(parentIndex);
         if (parentRecord == nullptr)
         {
-            return;
+            return Core::success();
         }
         const UILayoutStyle& parentStyle = layoutStylesByIndex[parentIndex];
         const LayoutScratchState& parentScratch = layoutScratchByIndex[parentIndex];
@@ -2084,6 +2388,12 @@ struct UIContext::Impl final {
             {
                 popupLayoutScratchByNodeIndex[parentIndex] = {};
             }
+            if (parentRecord->kind == UIWidgetKind::ListView && parentIndex < listViewLayoutScratchByNodeIndex.size())
+            {
+                listViewLayoutScratchByNodeIndex[parentIndex] = {};
+                collapseListViewItems(parentIndex, unscrolledContentRect, parentWorldRect, descendantClip);
+                return Core::success();
+            }
             u32 collapsedChild = parentRecord->firstChildIndex;
             while (collapsedChild != InvalidNodeIndex)
             {
@@ -2095,7 +2405,14 @@ struct UIContext::Impl final {
                 assignLayoutRect(collapsedChild, unscrolledContentRect, parentWorldRect, descendantClip);
                 collapsedChild = childRecord->nextSiblingIndex;
             }
-            return;
+            return Core::success();
+        }
+
+        if (parentRecord->kind == UIWidgetKind::ListView && parentIndex < listViewStatesByNodeIndex.size() &&
+            parentIndex < listViewLayoutScratchByNodeIndex.size())
+        {
+            return arrangeListViewItems(parentIndex, unscrolledContentRect, parentWorldRect,
+                                        intersectRects(parentScratch.descendantClip, parentScratch.worldRect));
         }
 
         const bool row = parentStyle.flex.direction == UIFlexDirection::Row;
@@ -2338,10 +2655,11 @@ struct UIContext::Impl final {
 
             mainOffset += childMainSize + mainBefore + mainAfter + gap;
         }
+        return Core::success();
     }
 
-    void arrangeLayout(UILogicalSize viewportSize, const std::pmr::vector<u32>& order,
-                       LayoutPassStatistics& statistics) noexcept
+    [[nodiscard]] Core::Status arrangeLayout(UILogicalSize viewportSize, const std::pmr::vector<u32>& order,
+                                             LayoutPassStatistics& statistics)
     {
         const UILogicalRect viewportRect{
             .x = 0.0F,
@@ -2378,8 +2696,12 @@ struct UIContext::Impl final {
             }
             scratch.layoutOrdinal = currentOrdinal;
             scratch.paintOrdinal = currentOrdinal;
-            arrangeChildren(index, viewportRect, statistics);
+            if (Core::Status arranged = arrangeChildren(index, viewportRect, statistics); !arranged)
+            {
+                return arranged;
+            }
         }
+        return Core::success();
     }
 
     [[nodiscard]] bool isInPopupSubtree(u32 index) const noexcept
@@ -2658,7 +2980,7 @@ struct UIContext::Impl final {
                                                              UIPremultipliedRgba8Color color) const noexcept
     {
         constexpr u8 DisabledOpacity = 140;
-        return isNodeEnabled(node) ? color : applyOpacity(color, DisabledOpacity);
+        return isCandidateNodeEnabled(node) ? color : applyOpacity(color, DisabledOpacity);
     }
 
     [[nodiscard]] UIPremultipliedRgba8Color resolvedBoxFillColor(UINodeId node, u32 nodeIndex,
@@ -2702,7 +3024,7 @@ struct UIContext::Impl final {
         UIBoxPaint chrome = boxPaintsByIndex[nodeIndex];
         const NodeRecord* record = recordByIndex(nodeIndex);
         if (record == nullptr || !isButtonChromeKind(record->kind) || nodeIndex >= buttonPaintsByNodeIndex.size() ||
-            !isNodeEnabled(node))
+            !isCandidateNodeEnabled(node))
         {
             return chrome;
         }
@@ -2765,6 +3087,18 @@ struct UIContext::Impl final {
         return widgetPaintColor(item,
                                 premultiply(dropdownStatesByNodeIndex[dropdown.index()].paint
                                                 .selectedItemBackgroundColor));
+    }
+
+    [[nodiscard]] UIPremultipliedRgba8Color resolvedListViewSelectionColor(UINodeId item) const noexcept
+    {
+        const UINodeId listView = listViewForItem(item);
+        if (!listView.hasValue() || listView.index() >= listViewStatesByNodeIndex.size() ||
+            !isSelectedListViewItem(item))
+        {
+            return {};
+        }
+        return widgetPaintColor(
+            item, premultiply(listViewStatesByNodeIndex[listView.index()].paint.selectedItemBackgroundColor));
     }
 
     [[nodiscard]] Core::Result<usize>
@@ -2850,6 +3184,31 @@ struct UIContext::Impl final {
                 countBar(UIScrollAxes::Horizontal);
                 countBar(UIScrollAxes::Vertical);
             }
+            if (record != nullptr && record->kind == UIWidgetKind::ListView &&
+                nodeIndex < listViewStatesByNodeIndex.size() && nodeIndex < listViewLayoutScratchByNodeIndex.size())
+            {
+                const ListViewState& list = listViewStatesByNodeIndex[nodeIndex];
+                const ListViewLayoutScratch& listLayout = listViewLayoutScratchByNodeIndex[nodeIndex];
+                const ScrollBarGeometry geometry =
+                    makeListViewScrollBarGeometry(listLayout.metrics, listLayout.viewportRect, list.paint.scrollBar);
+                if (geometry.visible)
+                {
+                    if (geometry.track.width > 0.0F && geometry.track.height > 0.0F &&
+                        list.paint.scrollBar.trackColor.alpha != 0)
+                    {
+                        ++paintEntryCount;
+                    }
+                    const UIStraightSrgba8Color thumbColor =
+                        scrollThumbDragActive && armedScrollView == layoutEntry.node &&
+                                list.paint.scrollBar.draggingThumbColor.alpha != 0
+                            ? list.paint.scrollBar.draggingThumbColor
+                            : list.paint.scrollBar.thumbColor;
+                    if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && thumbColor.alpha != 0)
+                    {
+                        ++paintEntryCount;
+                    }
+                }
+            }
             if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
                 nodeIndex < dropdownStatesByNodeIndex.size())
             {
@@ -2862,6 +3221,11 @@ struct UIContext::Impl final {
             }
             if (record != nullptr && record->kind == UIWidgetKind::DropdownItem &&
                 !resolvedDropdownSelectionColor(layoutEntry.node).isTransparent())
+            {
+                ++paintEntryCount;
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::ListViewItem &&
+                !resolvedListViewSelectionColor(layoutEntry.node).isTransparent())
             {
                 ++paintEntryCount;
             }
@@ -3467,6 +3831,46 @@ struct UIContext::Impl final {
                 appendBar(UIScrollAxes::Horizontal);
                 appendBar(UIScrollAxes::Vertical);
             }
+            if (record != nullptr && record->kind == UIWidgetKind::ListView &&
+                nodeIndex < listViewStatesByNodeIndex.size() && nodeIndex < listViewLayoutScratchByNodeIndex.size())
+            {
+                const ListViewState& list = listViewStatesByNodeIndex[nodeIndex];
+                const ListViewLayoutScratch& listLayout = listViewLayoutScratchByNodeIndex[nodeIndex];
+                const ScrollBarGeometry geometry =
+                    makeListViewScrollBarGeometry(listLayout.metrics, listLayout.viewportRect, list.paint.scrollBar);
+                if (geometry.visible)
+                {
+                    const UIPremultipliedRgba8Color track =
+                        widgetPaintColor(layoutEntry.node, premultiply(list.paint.scrollBar.trackColor));
+                    if (geometry.track.width > 0.0F && geometry.track.height > 0.0F && !track.isTransparent())
+                    {
+                        output.push_back(UICommittedPaintEntry{
+                            .node = layoutEntry.node,
+                            .worldRect = geometry.track,
+                            .effectiveClip = layoutEntry.effectiveClip,
+                            .paintOrdinal = nextPaintOrdinal++,
+                            .solidFill = track,
+                        });
+                    }
+                    const UIStraightSrgba8Color thumbSource =
+                        scrollThumbDragActive && armedScrollView == layoutEntry.node &&
+                                list.paint.scrollBar.draggingThumbColor.alpha != 0
+                            ? list.paint.scrollBar.draggingThumbColor
+                            : list.paint.scrollBar.thumbColor;
+                    const UIPremultipliedRgba8Color thumb =
+                        widgetPaintColor(layoutEntry.node, premultiply(thumbSource));
+                    if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && !thumb.isTransparent())
+                    {
+                        output.push_back(UICommittedPaintEntry{
+                            .node = layoutEntry.node,
+                            .worldRect = geometry.thumb,
+                            .effectiveClip = layoutEntry.effectiveClip,
+                            .paintOrdinal = nextPaintOrdinal++,
+                            .solidFill = thumb,
+                        });
+                    }
+                }
+            }
             if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
                 nodeIndex < dropdownStatesByNodeIndex.size())
             {
@@ -3506,6 +3910,20 @@ struct UIContext::Impl final {
             if (record != nullptr && record->kind == UIWidgetKind::DropdownItem)
             {
                 const UIPremultipliedRgba8Color selection = resolvedDropdownSelectionColor(layoutEntry.node);
+                if (!selection.isTransparent())
+                {
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect = layoutEntry.worldRect,
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal++,
+                        .solidFill = selection,
+                    });
+                }
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::ListViewItem)
+            {
+                const UIPremultipliedRgba8Color selection = resolvedListViewSelectionColor(layoutEntry.node);
                 if (!selection.isTransparent())
                 {
                     output.push_back(UICommittedPaintEntry{
@@ -3636,7 +4054,7 @@ struct UIContext::Impl final {
                 return fail(UIErrorCode::CapacityExceeded,
                             "UI committed semantics snapshot capacity has been exhausted");
             }
-            const bool enabled = isNodeEnabled(layoutEntry.node);
+            const bool enabled = isCandidateNodeEnabled(layoutEntry.node);
             UISemanticsEntry entry{
                 .node = layoutEntry.node,
                 .parent = idForIndex(record->parentIndex),
@@ -3648,7 +4066,7 @@ struct UIContext::Impl final {
             };
             if (record->kind == UIWidgetKind::Label || record->kind == UIWidgetKind::Button ||
                 record->kind == UIWidgetKind::RadioButton || record->kind == UIWidgetKind::Dropdown ||
-                record->kind == UIWidgetKind::DropdownItem)
+                record->kind == UIWidgetKind::DropdownItem || record->kind == UIWidgetKind::ListViewItem)
             {
                 if (Core::Status status = copyText(textViewFor(nodeIndex), entry.name); !status)
                 {
@@ -3726,6 +4144,25 @@ struct UIContext::Impl final {
                                   ? metrics.offset.y
                                   : metrics.offset.x;
                 entry.focused = enabled && scrollThumbDragActive && armedScrollView == layoutEntry.node;
+            }
+            if (record->kind == UIWidgetKind::ListView && nodeIndex < listViewStatesByNodeIndex.size() &&
+                nodeIndex < listViewLayoutScratchByNodeIndex.size())
+            {
+                const UIListViewMetrics& metrics = listViewLayoutScratchByNodeIndex[nodeIndex].metrics;
+                entry.hasRange = true;
+                entry.minValue = 0.0F;
+                entry.maxValue = metrics.maxScrollOffset;
+                entry.value = metrics.scrollOffset;
+                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
+            }
+            if (record->kind == UIWidgetKind::ListViewItem && nodeIndex < listViewItemStatesByNodeIndex.size())
+            {
+                const ListViewItemState& item = listViewItemStatesByNodeIndex[nodeIndex];
+                entry.virtualItemKey = item.key;
+                entry.virtualItemIndex = item.logicalIndex;
+                entry.selected = item.bound && isSelectedListViewItem(layoutEntry.node);
+                const UINodeId listView = listViewForItem(layoutEntry.node);
+                entry.focused = enabled && entry.selected && defaultActionFocusButton == listView;
             }
             output.push_back(entry);
         }
@@ -4069,7 +4506,34 @@ struct UIContext::Impl final {
 
     [[nodiscard]] bool isNodeEnabled(UINodeId node) const noexcept
     {
-        return contains(node) && node.index() < enabledByNodeIndex.size() && enabledByNodeIndex[node.index()] != 0;
+        if (!contains(node) || node.index() >= enabledByNodeIndex.size() || enabledByNodeIndex[node.index()] == 0)
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record != nullptr && record->kind == UIWidgetKind::ListViewItem &&
+            node.index() < listViewItemStatesByNodeIndex.size())
+        {
+            const ListViewItemState& item = listViewItemStatesByNodeIndex[node.index()];
+            return item.committedBound && item.committedEnabled;
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool isCandidateNodeEnabled(UINodeId node) const noexcept
+    {
+        if (!contains(node) || node.index() >= enabledByNodeIndex.size() || enabledByNodeIndex[node.index()] == 0)
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record != nullptr && record->kind == UIWidgetKind::ListViewItem &&
+            node.index() < listViewItemStatesByNodeIndex.size())
+        {
+            const ListViewItemState& item = listViewItemStatesByNodeIndex[node.index()];
+            return item.bound && item.enabled;
+        }
+        return true;
     }
 
     [[nodiscard]] Core::Result<NodeRecord*> resolveButton(UINodeId button)
@@ -4079,7 +4543,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if (!isDefaultActivatableKind((*nodeResult)->kind))
+        if (!isDefaultActivatableKind((*nodeResult)->kind) || (*nodeResult)->kind == UIWidgetKind::ListViewItem)
         {
             return fail(UIErrorCode::InvalidButtonAction,
                         "UI Button action requires a Button, Checkbox, RadioButton, Dropdown, or DropdownItem node");
@@ -4090,17 +4554,19 @@ struct UIContext::Impl final {
     [[nodiscard]] static bool isButtonChromeKind(UIWidgetKind kind) noexcept
     {
         return kind == UIWidgetKind::Button || kind == UIWidgetKind::Dropdown ||
-               kind == UIWidgetKind::DropdownItem;
+               kind == UIWidgetKind::DropdownItem || kind == UIWidgetKind::ListViewItem;
     }
 
     [[nodiscard]] static bool isDefaultActivatableKind(UIWidgetKind kind) noexcept
     {
-        return isButtonChromeKind(kind) || kind == UIWidgetKind::Checkbox || kind == UIWidgetKind::RadioButton;
+        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem ||
+               kind == UIWidgetKind::ListViewItem || kind == UIWidgetKind::Checkbox ||
+               kind == UIWidgetKind::RadioButton;
     }
 
     [[nodiscard]] static bool isKeyboardFocusableKind(UIWidgetKind kind) noexcept
     {
-        return isDefaultActivatableKind(kind) || kind == UIWidgetKind::TextEdit;
+        return isDefaultActivatableKind(kind) || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ListView;
     }
 
     [[nodiscard]] Core::Status validateDefaultActionControl(UIButtonActivationSource source,
@@ -5082,7 +5548,7 @@ struct UIContext::Impl final {
     {
         return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::TextEdit ||
                kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Dropdown ||
-               kind == UIWidgetKind::DropdownItem;
+               kind == UIWidgetKind::DropdownItem || kind == UIWidgetKind::ListViewItem;
     }
 
     void resetNodeSideData(u32 index) noexcept
@@ -5183,6 +5649,18 @@ struct UIContext::Impl final {
         if (index < popupLayoutScratchByNodeIndex.size())
         {
             popupLayoutScratchByNodeIndex[index] = {};
+        }
+        if (index < listViewStatesByNodeIndex.size())
+        {
+            listViewStatesByNodeIndex[index] = {};
+        }
+        if (index < listViewLayoutScratchByNodeIndex.size())
+        {
+            listViewLayoutScratchByNodeIndex[index] = {};
+        }
+        if (index < listViewItemStatesByNodeIndex.size())
+        {
+            listViewItemStatesByNodeIndex[index] = {};
         }
     }
 
@@ -5662,6 +6140,8 @@ struct UIContext::Impl final {
             return ThemeBindingBoxPaint;
         case UIWidgetKind::ScrollView:
             return ThemeBindingScrollViewPaint;
+        case UIWidgetKind::ListView:
+            return ThemeBindingBoxPaint | ThemeBindingListViewPaint;
         case UIWidgetKind::Popup:
             return ThemeBindingBoxPaint;
         case UIWidgetKind::Label:
@@ -5672,6 +6152,7 @@ struct UIContext::Impl final {
             return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle |
                    ThemeBindingDropdownPaint;
         case UIWidgetKind::DropdownItem:
+        case UIWidgetKind::ListViewItem:
             return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
         case UIWidgetKind::Checkbox:
             return ThemeBindingBoxPaint | ThemeBindingCheckboxPaint;
@@ -5710,6 +6191,16 @@ struct UIContext::Impl final {
             if ((bindings & ThemeBindingScrollViewPaint) != 0)
             {
                 scrollViewStatesByNodeIndex[index].paint = makeScrollViewPaint(theme);
+            }
+            break;
+        case UIWidgetKind::ListView:
+            if ((bindings & ThemeBindingBoxPaint) != 0)
+            {
+                boxPaintsByIndex[index] = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
+            }
+            if ((bindings & ThemeBindingListViewPaint) != 0)
+            {
+                listViewStatesByNodeIndex[index].paint = makeListViewPaint(theme);
             }
             break;
         case UIWidgetKind::Popup:
@@ -5760,7 +6251,8 @@ struct UIContext::Impl final {
             }
             break;
         }
-        case UIWidgetKind::DropdownItem: {
+        case UIWidgetKind::DropdownItem:
+        case UIWidgetKind::ListViewItem: {
             const UIButtonChrome chrome = makeDropdownItemChrome(theme);
             if ((bindings & ThemeBindingBoxPaint) != 0)
             {
@@ -5861,6 +6353,7 @@ struct UIContext::Impl final {
         case UIWidgetKind::Dropdown:
             return makeDropdownChrome(theme).label;
         case UIWidgetKind::DropdownItem:
+        case UIWidgetKind::ListViewItem:
             return makeDropdownItemChrome(theme).label;
         case UIWidgetKind::TextEdit:
             return makeTextEditChrome(theme).text;
@@ -5873,6 +6366,7 @@ struct UIContext::Impl final {
         case UIWidgetKind::ProgressBar:
         case UIWidgetKind::Modal:
         case UIWidgetKind::ScrollView:
+        case UIWidgetKind::ListView:
         case UIWidgetKind::Popup:
             return std::nullopt;
         }
@@ -5968,6 +6462,25 @@ struct UIContext::Impl final {
             }
             break;
         }
+        case UIWidgetKind::ListView: {
+            const UIBoxPaint box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
+            const UIListViewPaint chrome = makeListViewPaint(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != box)
+            {
+                stageThemePaintChange(index);
+            }
+            if ((bindings & ThemeBindingListViewPaint) != 0 && listViewStatesByNodeIndex[index].paint != chrome)
+            {
+                stageThemePaintChange(index);
+                if (listViewStatesByNodeIndex[index].paint.scrollBar.thickness != chrome.scrollBar.thickness ||
+                    listViewStatesByNodeIndex[index].paint.scrollBar.minThumbExtent !=
+                        chrome.scrollBar.minThumbExtent)
+                {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
+            }
+            break;
+        }
         case UIWidgetKind::Popup: {
             const UIBoxPaint chrome = makePopupBoxPaint(theme);
             if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome)
@@ -6010,7 +6523,8 @@ struct UIContext::Impl final {
             }
             break;
         }
-        case UIWidgetKind::DropdownItem: {
+        case UIWidgetKind::DropdownItem:
+        case UIWidgetKind::ListViewItem: {
             const UIButtonChrome chrome = makeDropdownItemChrome(theme);
             if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
             {
@@ -6259,7 +6773,8 @@ struct UIContext::Impl final {
         pointerHitPoliciesByIndex[node.index()] =
             (kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox || kind == UIWidgetKind::Slider ||
              kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::ScrollView ||
-             kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem)
+             kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem ||
+             kind == UIWidgetKind::ListView || kind == UIWidgetKind::ListViewItem)
                 ? UIPointerHitPolicy::Targetable
                 : UIPointerHitPolicy::Ignore;
         if (capacityConfig.applyDefaultProductChrome)
@@ -6345,10 +6860,19 @@ struct UIContext::Impl final {
             {
                 return fail(UIErrorCode::InvalidParent, "UI DropdownItem requires a Popup parent");
             }
+        } else if (kind == UIWidgetKind::ListViewItem)
+        {
+            if (parentRecord.kind != UIWidgetKind::ListView)
+            {
+                return fail(UIErrorCode::InvalidParent, "UI ListViewItem requires a ListView parent");
+            }
         } else if (parentRecord.kind == UIWidgetKind::Dropdown || parentRecord.kind == UIWidgetKind::Popup)
         {
             return fail(UIErrorCode::InvalidParent,
                         "UI Dropdown composites only accept Popup and DropdownItem children");
+        } else if (parentRecord.kind == UIWidgetKind::ListView)
+        {
+            return fail(UIErrorCode::InvalidParent, "UI ListView only accepts its internal item rows");
         }
         if (parentRecord.depth == (std::numeric_limits<u32>::max)())
         {
@@ -6385,6 +6909,51 @@ struct UIContext::Impl final {
         return node;
     }
 
+    [[nodiscard]] Core::Result<UINodeId> createListViewComposite(UINodeId parent, UIListViewCreateConfig config)
+    {
+        auto normalized = normalizeListViewCreateConfig(config);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        const usize requiredNodes = static_cast<usize>(normalized->materializedItemCapacity) + 1U;
+        if (nodes.availableCount() < requiredNodes)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI ListView row pool exceeds the remaining node capacity");
+        }
+
+        auto listResult = createChild(parent, UIWidgetKind::ListView);
+        if (!listResult)
+        {
+            return Core::failure(listResult.error());
+        }
+        const UINodeId listView = *listResult;
+        auto rollback = Core::makeScopeExit([this, listView]() noexcept {
+            if (contains(listView))
+            {
+                static_cast<void>(destroySubtree(listView));
+            }
+        });
+        ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        state.materializedItemCapacity = normalized->materializedItemCapacity;
+
+        for (u32 row = 0; row < normalized->materializedItemCapacity; ++row)
+        {
+            auto itemResult = createChild(listView, UIWidgetKind::ListViewItem);
+            if (!itemResult)
+            {
+                return Core::failure(itemResult.error());
+            }
+            const UINodeId item = *itemResult;
+            UILayoutStyle& itemLayout = layoutStylesByIndex[item.index()];
+            itemLayout.size.height = UILayoutLength::Px(state.style.rowHeight);
+            itemLayout.padding = UIEdgeSpacing::HorizontalVertical(8.0F, 4.0F);
+        }
+        rollback.release();
+        return listView;
+    }
+
     [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(UINodeId updaterRoot, UINodeId parent,
                                                                 UIWidgetKind kind)
     {
@@ -6416,6 +6985,30 @@ struct UIContext::Impl final {
         }
 
         return createChild(parent, kind);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> createListViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                                  UIListViewCreateConfig config)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto parentResult = resolveParent(parent);
+        if (!parentResult)
+        {
+            return Core::failure(parentResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, parent))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ListView parent is not owned by the updater root");
+        }
+        return createListViewComposite(parent, config);
     }
 
     void unlinkFromTree(u32 index, NodeRecord& record) noexcept
@@ -6623,6 +7216,13 @@ struct UIContext::Impl final {
         if (!isNodeWithinRoot(updaterRoot, node))
         {
             return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record != nullptr && record->kind == UIWidgetKind::ListViewItem)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI ListView item rows are internal and cannot be destroyed independently");
         }
 
         if (sameNode(updaterRoot, node))
@@ -8325,8 +8925,33 @@ struct UIContext::Impl final {
         return record != nullptr && record->kind == UIWidgetKind::ScrollView;
     }
 
+    [[nodiscard]] bool isLiveListView(UINodeId listView) const noexcept
+    {
+        if (!listView.hasValue() || !contains(listView) || listView.index() >= listViewStatesByNodeIndex.size())
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(listView.storageId());
+        return record != nullptr && record->kind == UIWidgetKind::ListView;
+    }
+
+    [[nodiscard]] bool isLiveScrollable(UINodeId node) const noexcept
+    {
+        return isLiveScrollView(node) || isLiveListView(node);
+    }
+
     [[nodiscard]] ScrollBarGeometry committedScrollBarGeometry(UINodeId scrollView, UIScrollAxes axis) const noexcept
     {
+        if (isLiveListView(scrollView))
+        {
+            if (axis != UIScrollAxes::Vertical)
+            {
+                return {};
+            }
+            const ListViewState& state = listViewStatesByNodeIndex[scrollView.index()];
+            return makeListViewScrollBarGeometry(state.committedMetrics, state.committedViewportRect,
+                                                 state.paint.scrollBar);
+        }
         if (!isLiveScrollView(scrollView))
         {
             return {};
@@ -8358,9 +8983,25 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Result<bool> applyScrollOffsetFromInput(UINodeId scrollView, UIScrollOffset requested)
     {
-        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView))
         {
             return false;
+        }
+        if (isLiveListView(scrollView))
+        {
+            ListViewState& state = listViewStatesByNodeIndex[scrollView.index()];
+            requested.x = 0.0F;
+            requested.y = normalizeFloat((std::clamp)(requested.y, 0.0F, state.committedMetrics.maxScrollOffset));
+            if (state.requestedScrollOffset == requested.y)
+            {
+                return false;
+            }
+            if (Core::Status dirty = markScrollOffsetDirty(scrollView); !dirty)
+            {
+                return Core::failure(dirty.error());
+            }
+            state.requestedScrollOffset = requested.y;
+            return true;
         }
         ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
         const UIScrollViewMetrics& metrics = state.committedMetrics;
@@ -8384,9 +9025,19 @@ struct UIContext::Impl final {
 
     [[nodiscard]] UIScrollOffset resolvedScrollWheelOffset(UINodeId scrollView, UILogicalPoint delta) const noexcept
     {
-        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView))
         {
             return {};
+        }
+        if (isLiveListView(scrollView))
+        {
+            const ListViewState& state = listViewStatesByNodeIndex[scrollView.index()];
+            const float wheelDelta = delta.y != 0.0F ? delta.y : delta.x;
+            return UIScrollOffset{
+                .x = 0.0F,
+                .y = normalizeFloat((std::clamp)(state.requestedScrollOffset - wheelDelta * state.style.wheelStep,
+                                                 0.0F, state.committedMetrics.maxScrollOffset)),
+            };
         }
         const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
         const bool horizontal = hasScrollAxis(state.style.axes, UIScrollAxes::Horizontal);
@@ -8418,14 +9069,19 @@ struct UIContext::Impl final {
 
     [[nodiscard]] bool scrollWheelWouldChange(UINodeId scrollView, UILogicalPoint delta) const noexcept
     {
-        return isLiveScrollView(scrollView) && isNodeEnabled(scrollView) &&
-               scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset !=
-                   resolvedScrollWheelOffset(scrollView, delta);
+        if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView))
+        {
+            return false;
+        }
+        const UIScrollOffset resolved = resolvedScrollWheelOffset(scrollView, delta);
+        return isLiveListView(scrollView)
+                   ? listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset != resolved.y
+                   : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset != resolved;
     }
 
     [[nodiscard]] Core::Result<bool> applyScrollWheel(UINodeId scrollView, UILogicalPoint delta)
     {
-        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView))
         {
             return false;
         }
@@ -8436,13 +9092,16 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Result<bool> applyScrollThumbFromPointer(UINodeId scrollView, UIScrollAxes axis,
                                                                 UILogicalPoint position, float grabOffset)
     {
-        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView) ||
+            (isLiveListView(scrollView) && axis != UIScrollAxes::Vertical))
         {
             return false;
         }
-        const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
         const ScrollBarGeometry geometry = committedScrollBarGeometry(scrollView, axis);
-        const float maxOffset = scrollAxisMaxOffset(state.committedMetrics, axis);
+        const float maxOffset = isLiveListView(scrollView)
+                                    ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
+                                    : scrollAxisMaxOffset(scrollViewStatesByNodeIndex[scrollView.index()].committedMetrics,
+                                                          axis);
         const float trackStart = axis == UIScrollAxes::Horizontal ? geometry.track.x : geometry.track.y;
         const float trackExtent = axis == UIScrollAxes::Horizontal ? geometry.track.width : geometry.track.height;
         const float thumbExtent = axis == UIScrollAxes::Horizontal ? geometry.thumb.width : geometry.thumb.height;
@@ -8454,7 +9113,11 @@ struct UIContext::Impl final {
         }
 
         const float thumbStart = (std::clamp)(pointer - grabOffset - trackStart, 0.0F, travel);
-        UIScrollOffset next = state.requestedOffset;
+        UIScrollOffset next = isLiveListView(scrollView)
+                                  ? UIScrollOffset{.x = 0.0F,
+                                                   .y = listViewStatesByNodeIndex[scrollView.index()]
+                                                            .requestedScrollOffset}
+                                  : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
         setScrollAxisOffset(next, axis, normalizeFloat(maxOffset * (thumbStart / travel)));
         return applyScrollOffsetFromInput(scrollView, next);
     }
@@ -8462,11 +9125,11 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Result<bool> applyScrollTrackPage(UINodeId scrollView, UIScrollAxes axis,
                                                          UILogicalPoint position)
     {
-        if (!isLiveScrollView(scrollView) || !isNodeEnabled(scrollView))
+        if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView) ||
+            (isLiveListView(scrollView) && axis != UIScrollAxes::Vertical))
         {
             return false;
         }
-        const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
         const ScrollBarGeometry geometry = committedScrollBarGeometry(scrollView, axis);
         if (!geometry.visible)
         {
@@ -8474,10 +9137,19 @@ struct UIContext::Impl final {
         }
         const float pointer = axis == UIScrollAxes::Horizontal ? position.x : position.y;
         const float thumbStart = axis == UIScrollAxes::Horizontal ? geometry.thumb.x : geometry.thumb.y;
-        const float pageExtent = axis == UIScrollAxes::Horizontal ? state.committedMetrics.viewportSize.width
-                                                                  : state.committedMetrics.viewportSize.height;
+        const float pageExtent = isLiveListView(scrollView)
+                                     ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.viewportSize.height
+                                     : (axis == UIScrollAxes::Horizontal
+                                            ? scrollViewStatesByNodeIndex[scrollView.index()]
+                                                  .committedMetrics.viewportSize.width
+                                            : scrollViewStatesByNodeIndex[scrollView.index()]
+                                                  .committedMetrics.viewportSize.height);
         const float direction = pointer < thumbStart ? -1.0F : 1.0F;
-        UIScrollOffset next = state.requestedOffset;
+        UIScrollOffset next = isLiveListView(scrollView)
+                                  ? UIScrollOffset{.x = 0.0F,
+                                                   .y = listViewStatesByNodeIndex[scrollView.index()]
+                                                            .requestedScrollOffset}
+                                  : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
         setScrollAxisOffset(next, axis,
                             normalizeFloat(scrollAxisOffset(next, axis) + direction * pageExtent));
         return applyScrollOffsetFromInput(scrollView, next);
@@ -8494,8 +9166,27 @@ struct UIContext::Impl final {
                 continue;
             }
             const UINodeId node = entries[routeEntryIndex].node;
-            if (!isLiveScrollView(node) || !isNodeEnabled(node))
+            if (!isLiveScrollable(node) || !isNodeEnabled(node))
             {
+                continue;
+            }
+            if (isLiveListView(node))
+            {
+                const ListViewState& state = listViewStatesByNodeIndex[node.index()];
+                if (!(state.committedMetrics.maxScrollOffset > 0.0F))
+                {
+                    continue;
+                }
+                const ScrollBarGeometry geometry = committedScrollBarGeometry(node, UIScrollAxes::Vertical);
+                if (geometry.visible && containsPointHalfOpen(geometry.track, position))
+                {
+                    return ScrollBarPointerHit{
+                        .scrollView = node,
+                        .axis = UIScrollAxes::Vertical,
+                        .geometry = geometry,
+                        .thumb = containsPointHalfOpen(geometry.thumb, position),
+                    };
+                }
                 continue;
             }
             const ScrollViewState& state = scrollViewStatesByNodeIndex[node.index()];
@@ -8799,6 +9490,79 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidControlValue, "UI Dropdown item API requires a DropdownItem node");
         }
         return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveListView(UINodeId listView)
+    {
+        auto nodeResult = resolveNode(listView);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::ListView || listView.index() >= listViewStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ListView API requires a ListView node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] UINodeId listViewForItem(UINodeId item) const noexcept
+    {
+        if (!contains(item))
+        {
+            return {};
+        }
+        const NodeRecord* itemRecord = nodes.tryGet(item.storageId());
+        if (itemRecord == nullptr || itemRecord->kind != UIWidgetKind::ListViewItem ||
+            itemRecord->parentIndex == InvalidNodeIndex)
+        {
+            return {};
+        }
+        const UINodeId parent = idForIndex(itemRecord->parentIndex);
+        const NodeRecord* parentRecord = contains(parent) ? nodes.tryGet(parent.storageId()) : nullptr;
+        return parentRecord != nullptr && parentRecord->kind == UIWidgetKind::ListView ? parent : UINodeId{};
+    }
+
+    [[nodiscard]] bool isSelectedListViewItem(UINodeId item) const noexcept
+    {
+        const UINodeId listView = listViewForItem(item);
+        if (!listView.hasValue() || item.index() >= listViewItemStatesByNodeIndex.size())
+        {
+            return false;
+        }
+        const ListViewItemState& itemState = listViewItemStatesByNodeIndex[item.index()];
+        const ListViewState& listState = listViewStatesByNodeIndex[listView.index()];
+        return itemState.bound && listState.selection.hasValue() && itemState.key == listState.selection.key;
+    }
+
+    [[nodiscard]] Core::Status selectCommittedListViewItem(UINodeId item)
+    {
+        const UINodeId listView = listViewForItem(item);
+        if (!listView.hasValue() || item.index() >= listViewItemStatesByNodeIndex.size() ||
+            listView.index() >= listViewStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ListView selection requires a bound item row");
+        }
+        const ListViewItemState& itemState = listViewItemStatesByNodeIndex[item.index()];
+        if (!itemState.committedBound || !itemState.committedEnabled)
+        {
+            return Core::success();
+        }
+        ListViewState& listState = listViewStatesByNodeIndex[listView.index()];
+        const UIListViewSelection selection{
+            .key = itemState.committedKey,
+            .logicalIndex = itemState.committedLogicalIndex,
+        };
+        if (selection == listState.selection)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(listView); !dirty)
+        {
+            return dirty;
+        }
+        listState.selection = selection;
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status setPopupOpenState(UINodeId popup, bool open)
@@ -9168,6 +9932,375 @@ struct UIContext::Impl final {
             return Core::failure(openResult.error());
         }
         return dropdownStatesByNodeIndex[dropdown.index()].paint;
+    }
+
+    [[nodiscard]] Core::Status validateListViewUpdater(UINodeId updaterRoot, UINodeId listView) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto listResult = const_cast<Impl*>(this)->resolveListView(listView);
+        if (!listResult)
+        {
+            return Core::failure(listResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, listView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI ListView is not owned by the updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIListViewItemDescriptor> resolveListViewLogicalItem(UINodeId listView,
+                                                                                   u64 logicalIndex) const
+    {
+        const ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        if (!state.dataSource.hasValue())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ListView has no data source");
+        }
+        const u64 itemCount = state.dataSource.itemCount(state.dataSource.state);
+        if (logicalIndex >= itemCount)
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ListView logical item index is out of range");
+        }
+        UIListViewItemDescriptor descriptor{};
+        if (!state.dataSource.resolveItem(state.dataSource.state, logicalIndex, descriptor))
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ListView data source failed to resolve an item");
+        }
+        if (descriptor.key == InvalidUIListViewItemKey || containsLineBreak(descriptor.label))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI ListView item requires a non-zero key and a single-line label");
+        }
+        return descriptor;
+    }
+
+    [[nodiscard]] Core::Status setListViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                               UIListViewDataSource source)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return valid;
+        }
+        if (!source.hasValue())
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI ListView data source requires state, itemCount, and resolveItem");
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(listView); !dirty)
+        {
+            return dirty;
+        }
+        ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        state.dataSource = source;
+        state.selection = {};
+        state.requestedScrollOffset = 0.0F;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearListViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId listView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return valid;
+        }
+        ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        if (!state.dataSource.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(listView); !dirty)
+        {
+            return dirty;
+        }
+        state.dataSource = {};
+        state.selection = {};
+        state.requestedScrollOffset = 0.0F;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status invalidateListViewItemsFromUpdater(UINodeId updaterRoot, UINodeId listView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return valid;
+        }
+        return markLayoutStyleDirty(listView);
+    }
+
+    [[nodiscard]] Core::Status setListViewStyleFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                          const UIListViewStyle& style)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return valid;
+        }
+        auto normalized = normalizeListViewStyle(style);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        if (state.style == *normalized)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(listView); !dirty)
+        {
+            return dirty;
+        }
+        state.style = *normalized;
+        const NodeRecord* listRecord = nodes.tryGet(listView.storageId());
+        u32 child = listRecord == nullptr ? InvalidNodeIndex : listRecord->firstChildIndex;
+        while (child != InvalidNodeIndex)
+        {
+            NodeRecord* childRecord = recordByIndex(child);
+            if (childRecord == nullptr)
+            {
+                break;
+            }
+            layoutStylesByIndex[child].size.height = UILayoutLength::Px(state.style.rowHeight);
+            child = childRecord->nextSiblingIndex;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIListViewStyle> listViewStyleFromUpdater(UINodeId updaterRoot,
+                                                                        UINodeId listView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return listViewStatesByNodeIndex[listView.index()].style;
+    }
+
+    [[nodiscard]] Core::Status setListViewPaintFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                          const UIListViewPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return valid;
+        }
+        auto normalized = normalizeListViewPaint(paint);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        if (state.paint == *normalized)
+        {
+            detachThemeBinding(listView.index(), ThemeBindingListViewPaint);
+            return Core::success();
+        }
+        const bool layoutChanged = state.paint.scrollBar.thickness != normalized->scrollBar.thickness ||
+                                   state.paint.scrollBar.minThumbExtent != normalized->scrollBar.minThumbExtent;
+        Core::Status dirty = layoutChanged ? markLayoutStyleDirty(listView) : markPaintDirty(listView);
+        if (!dirty)
+        {
+            return dirty;
+        }
+        state.paint = *normalized;
+        detachThemeBinding(listView.index(), ThemeBindingListViewPaint);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIListViewPaint> listViewPaintFromUpdater(UINodeId updaterRoot,
+                                                                        UINodeId listView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return listViewStatesByNodeIndex[listView.index()].paint;
+    }
+
+    [[nodiscard]] Core::Result<UIListViewMetrics> listViewMetricsFromUpdater(UINodeId updaterRoot,
+                                                                            UINodeId listView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return listViewStatesByNodeIndex[listView.index()].committedMetrics;
+    }
+
+    [[nodiscard]] Core::Status setListViewSelectedIndexFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                                  u64 logicalIndex)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return valid;
+        }
+        auto descriptor = resolveListViewLogicalItem(listView, logicalIndex);
+        if (!descriptor)
+        {
+            return Core::failure(descriptor.error());
+        }
+        ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        const UIListViewSelection next{.key = descriptor->key, .logicalIndex = logicalIndex};
+        if (state.selection == next)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(listView); !dirty)
+        {
+            return dirty;
+        }
+        state.selection = next;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearListViewSelectionFromUpdater(UINodeId updaterRoot, UINodeId listView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return valid;
+        }
+        ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        if (!state.selection.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(listView); !dirty)
+        {
+            return dirty;
+        }
+        state.selection = {};
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIListViewSelection> listViewSelectionFromUpdater(UINodeId updaterRoot,
+                                                                                UINodeId listView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return listViewStatesByNodeIndex[listView.index()].selection;
+    }
+
+    [[nodiscard]] Core::Status scrollListViewToIndexFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                               u64 logicalIndex,
+                                                               UIListViewScrollAlignment alignment)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateListViewUpdater(updaterRoot, listView); !valid)
+        {
+            return valid;
+        }
+        if (!isValidListViewScrollAlignment(alignment))
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ListView scroll alignment is not recognized");
+        }
+        auto descriptor = resolveListViewLogicalItem(listView, logicalIndex);
+        if (!descriptor)
+        {
+            return Core::failure(descriptor.error());
+        }
+        ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        const float rowStart = static_cast<float>(static_cast<double>(logicalIndex) * state.style.rowHeight);
+        const float rowEnd = rowStart + state.style.rowHeight;
+        const float viewportHeight = state.committedMetrics.viewportSize.height;
+        const u64 logicalItemCount = state.dataSource.itemCount(state.dataSource.state);
+        const double contentHeight64 = static_cast<double>(logicalItemCount) * state.style.rowHeight;
+        if (!std::isfinite(contentHeight64) || contentHeight64 > (std::numeric_limits<float>::max)())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ListView logical content height is not representable");
+        }
+        const float maximumOffset =
+            normalizeFloat((std::max)(0.0F, static_cast<float>(contentHeight64) - viewportHeight));
+        float nextOffset = state.requestedScrollOffset;
+        switch (alignment)
+        {
+        case UIListViewScrollAlignment::Start:
+            nextOffset = rowStart;
+            break;
+        case UIListViewScrollAlignment::Center:
+            nextOffset = rowStart - (viewportHeight - state.style.rowHeight) * 0.5F;
+            break;
+        case UIListViewScrollAlignment::End:
+            nextOffset = rowEnd - viewportHeight;
+            break;
+        case UIListViewScrollAlignment::Nearest:
+            if (rowStart < nextOffset)
+            {
+                nextOffset = rowStart;
+            } else if (rowEnd > nextOffset + viewportHeight)
+            {
+                nextOffset = rowEnd - viewportHeight;
+            }
+            break;
+        }
+        nextOffset = normalizeFloat((std::clamp)(nextOffset, 0.0F, maximumOffset));
+        if (nextOffset == state.requestedScrollOffset)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(listView); !dirty)
+        {
+            return dirty;
+        }
+        state.requestedScrollOffset = nextOffset;
+        return Core::success();
     }
 
     void addDropdownActivationDirtyReservationCandidates(UINodeId control)
@@ -9896,6 +11029,29 @@ struct UIContext::Impl final {
             }
             popupStatesByNodeIndex[index].committedMetrics = popupLayoutScratchByNodeIndex[index].metrics;
         }
+        for (const u32 index : order)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr)
+            {
+                continue;
+            }
+            if (record->kind == UIWidgetKind::ListView && index < listViewStatesByNodeIndex.size() &&
+                index < listViewLayoutScratchByNodeIndex.size())
+            {
+                ListViewState& state = listViewStatesByNodeIndex[index];
+                state.requestedScrollOffset = listViewLayoutScratchByNodeIndex[index].metrics.scrollOffset;
+                state.committedMetrics = listViewLayoutScratchByNodeIndex[index].metrics;
+                state.committedViewportRect = listViewLayoutScratchByNodeIndex[index].viewportRect;
+            } else if (record->kind == UIWidgetKind::ListViewItem && index < listViewItemStatesByNodeIndex.size())
+            {
+                ListViewItemState& item = listViewItemStatesByNodeIndex[index];
+                item.committedKey = item.key;
+                item.committedLogicalIndex = item.logicalIndex;
+                item.committedBound = item.bound;
+                item.committedEnabled = item.enabled;
+            }
+        }
     }
 
     [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize)
@@ -9960,7 +11116,10 @@ struct UIContext::Impl final {
             pass.passCount = layoutOrderScratch.empty() ? 0 : 1;
             prepareLayoutState(viewportSize, layoutOrderScratch, allowLayoutReuse);
             measureLayout(viewportSize, layoutOrderScratch, pass);
-            arrangeLayout(viewportSize, layoutOrderScratch, pass);
+            if (Core::Status arranged = arrangeLayout(viewportSize, layoutOrderScratch, pass); !arranged)
+            {
+                return arranged;
+            }
             if (Core::Status candidateStatus = validateLayoutCandidate(layoutOrderScratch); !candidateStatus)
             {
                 return candidateStatus;
@@ -10974,6 +12133,13 @@ struct UIContext::Impl final {
             }
         }
 
+        const NodeRecord* nearestButtonRecord =
+            nearestButton.hasValue() && contains(nearestButton) ? nodes.tryGet(nearestButton.storageId()) : nullptr;
+        const UINodeId nearestListView =
+            nearestButtonRecord != nullptr && nearestButtonRecord->kind == UIWidgetKind::ListViewItem
+                ? listViewForItem(nearestButton)
+                : UINodeId{};
+
         const UINodeId targetNode = result.routedTarget.node;
         const bool targetNodeEnabledAtRouteStart = isNodeEnabled(targetNode);
         const bool primaryButtonDown =
@@ -11050,6 +12216,7 @@ struct UIContext::Impl final {
             } else if (nearestButton.hasValue() && isNodeEnabled(nearestButton))
             {
                 addRouteDirtyReservationCandidate(nearestButton);
+                addRouteDirtyReservationCandidate(nearestListView);
             }
         } else if (input.kind == UIRoutedPointerEventKind::Move)
         {
@@ -11116,6 +12283,7 @@ struct UIContext::Impl final {
                 if (pointWithinArmedButton && isNodeEnabled(armedButtonAtRouteStart))
                 {
                     addDropdownActivationDirtyReservationCandidates(armedButtonAtRouteStart);
+                    addRouteDirtyReservationCandidate(listViewForItem(armedButtonAtRouteStart));
                 }
             }
         } else if (input.kind == UIRoutedPointerEventKind::Wheel)
@@ -11288,7 +12456,7 @@ struct UIContext::Impl final {
             const bool preserveFocusForModalBarrier = result.blockedByModal && !targetNode.hasValue();
             const bool allowsDefaultAction = !routedEvent.isDefaultActionPrevented();
             const bool willUseScrollBar = allowsDefaultAction && scrollBarHitAtRouteStart.hasValue() &&
-                                          isLiveScrollView(scrollBarHitAtRouteStart.scrollView) &&
+                                          isLiveScrollable(scrollBarHitAtRouteStart.scrollView) &&
                                           isNodeEnabled(scrollBarHitAtRouteStart.scrollView);
             const bool willFocusTextEdit = allowsDefaultAction && !willUseScrollBar && targetsTextEdit;
             const bool willArmSlider =
@@ -11314,7 +12482,8 @@ struct UIContext::Impl final {
                 const NodeRecord* nextButtonRecord = nodes.tryGet(nearestButton.storageId());
                 if (nextButtonRecord != nullptr && isDefaultActivatableKind(nextButtonRecord->kind))
                 {
-                    nextKeyboardFocus = nearestButton;
+                    nextKeyboardFocus = nextButtonRecord->kind == UIWidgetKind::ListViewItem ? nearestListView
+                                                                                              : nearestButton;
                     interactionPaintNode = nearestButton;
                 }
             }
@@ -11430,7 +12599,7 @@ struct UIContext::Impl final {
                 {
                     armedPrimaryButton = nearestButton;
                     armedPrimaryButtonPressed = true;
-                    defaultActionFocusButton = nearestButton;
+                    defaultActionFocusButton = nextKeyboardFocus;
                     capturedPointerNode = nearestButton;
                     clearImeFocus();
                     routedEvent.consumeInputTransition();
@@ -11446,7 +12615,7 @@ struct UIContext::Impl final {
                     continue;
                 }
                 const UINodeId routeNode = entries[routeEntryIndex].node;
-                if (!isLiveScrollView(routeNode) || !isNodeEnabled(routeNode))
+                if (!isLiveScrollable(routeNode) || !isNodeEnabled(routeNode))
                 {
                     continue;
                 }
@@ -11464,7 +12633,7 @@ struct UIContext::Impl final {
         } else if (input.kind == UIRoutedPointerEventKind::Move && hadArmedScrollView &&
                    armedScrollView == armedScrollViewAtRouteStart)
         {
-            if (!isLiveScrollView(armedScrollViewAtRouteStart) || !isNodeEnabled(armedScrollViewAtRouteStart))
+            if (!isLiveScrollable(armedScrollViewAtRouteStart) || !isNodeEnabled(armedScrollViewAtRouteStart))
             {
                 clearArmedScrollView();
                 if (capturedPointerNode == armedScrollViewAtRouteStart)
@@ -11555,7 +12724,7 @@ struct UIContext::Impl final {
             routedEvent.consumeInputTransition();
             static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
             if (scrollViewStillArmed && scrollThumbDragAtRouteStart &&
-                isLiveScrollView(armedScrollViewAtRouteStart) && isNodeEnabled(armedScrollViewAtRouteStart) &&
+                isLiveScrollable(armedScrollViewAtRouteStart) && isNodeEnabled(armedScrollViewAtRouteStart) &&
                 !routedEvent.isDefaultActionPrevented())
             {
                 auto applied = applyScrollThumbFromPointer(armedScrollViewAtRouteStart,
@@ -11660,6 +12829,14 @@ struct UIContext::Impl final {
                         return Core::failure(activated.error());
                     }
                 }
+                if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
+                    armedRecord != nullptr && armedRecord->kind == UIWidgetKind::ListViewItem)
+                {
+                    if (Core::Status selected = selectCommittedListViewItem(armedButtonAtRouteStart); !selected)
+                    {
+                        return Core::failure(selected.error());
+                    }
+                }
                 invokeButtonAction(actionCandidate,
                                    UIButtonActionEvent{
                                        .buttonNode = armedButtonAtRouteStart,
@@ -11729,6 +12906,7 @@ struct UIContext::Impl final {
         capturedPointerNode = {};
         popupDismissPointerBarrierActive = false;
         dropdownCommandPressed.fill(false);
+        listViewCommandPressed.fill(false);
         clearDefaultActionPresses();
         clearImeFocus();
         clearDefaultActionFocus();
@@ -11765,6 +12943,7 @@ struct UIContext::Impl final {
         }
 
         dropdownCommandPressed.fill(false);
+        listViewCommandPressed.fill(false);
 
         if (gamepad.has_value())
         {
@@ -12387,6 +13566,166 @@ struct UIContext::Impl final {
             .consumed = true,
             .changed = true,
             .focus = defaultActionFocus(),
+        };
+    }
+
+    [[nodiscard]] Core::Result<UIListViewCommandResult> routeListViewCommand(UIListViewCommand command,
+                                                                             bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI ListView command cannot run during pointer routing");
+        }
+        drainDeferredRootDestroys();
+
+        const usize commandIndex = static_cast<usize>(command);
+        if (commandIndex >= listViewCommandPressed.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI ListView command is not recognized");
+        }
+        if (!pressed)
+        {
+            const bool consumed = listViewCommandPressed[commandIndex];
+            listViewCommandPressed[commandIndex] = false;
+            return UIListViewCommandResult{.consumed = consumed};
+        }
+        if (listViewCommandPressed[commandIndex])
+        {
+            return UIListViewCommandResult{.consumed = true};
+        }
+
+        UINodeId listView = defaultActionFocusButton;
+        const NodeRecord* focusRecord =
+            contains(listView) ? nodes.tryGet(listView.storageId()) : nullptr;
+        if (focusRecord != nullptr && focusRecord->kind == UIWidgetKind::ListViewItem)
+        {
+            listView = listViewForItem(listView);
+            focusRecord = contains(listView) ? nodes.tryGet(listView.storageId()) : nullptr;
+        }
+        if (focusRecord == nullptr || focusRecord->kind != UIWidgetKind::ListView || !isNodeEnabled(listView))
+        {
+            return UIListViewCommandResult{};
+        }
+
+        ListViewState& state = listViewStatesByNodeIndex[listView.index()];
+        const u64 itemCount = state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
+        if (command == UIListViewCommand::Activate)
+        {
+            listViewCommandPressed[commandIndex] = true;
+            return UIListViewCommandResult{
+                .consumed = state.selection.hasValue(),
+                .changed = false,
+                .activated = state.selection.hasValue(),
+                .selection = state.selection,
+            };
+        }
+        if (itemCount == 0)
+        {
+            return UIListViewCommandResult{};
+        }
+
+        const u64 pageItems = (std::max)(
+            u64{1}, static_cast<u64>(std::floor(state.committedMetrics.viewportSize.height / state.style.rowHeight)));
+        u64 candidate = 0;
+        switch (command)
+        {
+        case UIListViewCommand::PreviousItem:
+            candidate = state.selection.hasValue() && state.selection.logicalIndex != 0
+                            ? state.selection.logicalIndex - 1
+                            : 0;
+            break;
+        case UIListViewCommand::NextItem:
+            candidate = state.selection.hasValue()
+                            ? (std::min)(itemCount - 1, state.selection.logicalIndex + 1)
+                            : 0;
+            break;
+        case UIListViewCommand::PreviousPage:
+            candidate = state.selection.hasValue() && state.selection.logicalIndex > pageItems
+                            ? state.selection.logicalIndex - pageItems
+                            : 0;
+            break;
+        case UIListViewCommand::NextPage:
+            candidate = state.selection.hasValue()
+                            ? (std::min)(itemCount - 1, state.selection.logicalIndex + pageItems)
+                            : 0;
+            break;
+        case UIListViewCommand::FirstItem:
+            candidate = 0;
+            break;
+        case UIListViewCommand::LastItem:
+            candidate = itemCount - 1;
+            break;
+        case UIListViewCommand::Activate:
+            break;
+        }
+
+        const bool searchBackward = command == UIListViewCommand::PreviousItem ||
+                                    command == UIListViewCommand::PreviousPage ||
+                                    command == UIListViewCommand::LastItem;
+        UIListViewItemDescriptor descriptor{};
+        bool found = false;
+        for (u64 visited = 0; visited < itemCount; ++visited)
+        {
+            auto resolved = resolveListViewLogicalItem(listView, candidate);
+            if (!resolved)
+            {
+                return Core::failure(resolved.error());
+            }
+            if (resolved->enabled)
+            {
+                descriptor = *resolved;
+                found = true;
+                break;
+            }
+            if (searchBackward)
+            {
+                if (candidate == 0)
+                {
+                    break;
+                }
+                --candidate;
+            } else
+            {
+                if (candidate + 1 >= itemCount)
+                {
+                    break;
+                }
+                ++candidate;
+            }
+        }
+        if (!found)
+        {
+            return UIListViewCommandResult{};
+        }
+
+        const UIListViewSelection nextSelection{.key = descriptor.key, .logicalIndex = candidate};
+        const bool changed = state.selection != nextSelection;
+        if (changed)
+        {
+            if (Core::Status dirty = markPaintDirty(listView); !dirty)
+            {
+                return Core::failure(dirty.error());
+            }
+            state.selection = nextSelection;
+        }
+        const UINodeId updaterRoot = idForIndex(focusRecord->rootIndex);
+        if (Core::Status revealed = scrollListViewToIndexFromUpdater(
+                updaterRoot, listView, candidate, UIListViewScrollAlignment::Nearest);
+            !revealed)
+        {
+            return Core::failure(revealed.error());
+        }
+        listViewCommandPressed[commandIndex] = true;
+        return UIListViewCommandResult{
+            .consumed = true,
+            .changed = changed,
+            .activated = false,
+            .selection = state.selection,
         };
     }
 
@@ -13268,6 +14607,15 @@ Core::Result<UINodeId> UIRootBuilder::createDropdownItem(UINodeId popup)
     return m_context->createChild(popup, UIWidgetKind::DropdownItem);
 }
 
+Core::Result<UINodeId> UIRootBuilder::createListView(UINodeId parent, UIListViewCreateConfig config)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createListViewChild(parent, config);
+}
+
 UITreeUpdater::UITreeUpdater(UIContext& context, UINodeId root) noexcept : m_context(&context), m_root(root)
 {
 }
@@ -13404,6 +14752,15 @@ Core::Result<UINodeId> UITreeUpdater::createDropdownItem(UINodeId popup)
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->createChildFromUpdater(m_root, popup, UIWidgetKind::DropdownItem);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createListView(UINodeId parent, UIListViewCreateConfig config)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createListViewFromUpdater(m_root, parent, config);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -13906,6 +15263,99 @@ Core::Result<UIDropdownPaint> UITreeUpdater::dropdownPaint(UINodeId dropdown) co
     return m_context->dropdownPaintFromUpdater(m_root, dropdown);
 }
 
+Core::Status UITreeUpdater::setListViewDataSource(UINodeId listView, UIListViewDataSource source)
+{
+    return m_context != nullptr
+               ? m_context->setListViewDataSourceFromUpdater(m_root, listView, source)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::clearListViewDataSource(UINodeId listView)
+{
+    return m_context != nullptr
+               ? m_context->clearListViewDataSourceFromUpdater(m_root, listView)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::invalidateListViewItems(UINodeId listView)
+{
+    return m_context != nullptr
+               ? m_context->invalidateListViewItemsFromUpdater(m_root, listView)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::setListViewStyle(UINodeId listView, const UIListViewStyle& style)
+{
+    return m_context != nullptr
+               ? m_context->setListViewStyleFromUpdater(m_root, listView, style)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Result<UIListViewStyle> UITreeUpdater::listViewStyle(UINodeId listView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->listViewStyleFromUpdater(m_root, listView);
+}
+
+Core::Status UITreeUpdater::setListViewPaint(UINodeId listView, const UIListViewPaint& paint)
+{
+    return m_context != nullptr
+               ? m_context->setListViewPaintFromUpdater(m_root, listView, paint)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Result<UIListViewPaint> UITreeUpdater::listViewPaint(UINodeId listView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->listViewPaintFromUpdater(m_root, listView);
+}
+
+Core::Result<UIListViewMetrics> UITreeUpdater::listViewMetrics(UINodeId listView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->listViewMetricsFromUpdater(m_root, listView);
+}
+
+Core::Status UITreeUpdater::setListViewSelectedIndex(UINodeId listView, u64 logicalIndex)
+{
+    return m_context != nullptr
+               ? m_context->setListViewSelectedIndexFromUpdater(m_root, listView, logicalIndex)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::clearListViewSelection(UINodeId listView)
+{
+    return m_context != nullptr
+               ? m_context->clearListViewSelectionFromUpdater(m_root, listView)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Result<UIListViewSelection> UITreeUpdater::listViewSelection(UINodeId listView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->listViewSelectionFromUpdater(m_root, listView);
+}
+
+Core::Status UITreeUpdater::scrollListViewToIndex(UINodeId listView, u64 logicalIndex,
+                                                 UIListViewScrollAlignment alignment)
+{
+    return m_context != nullptr
+               ? m_context->scrollListViewToIndexFromUpdater(m_root, listView, logicalIndex, alignment)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
 Core::Status UITreeUpdater::setProgressBarRange(UINodeId progressBar, float minValue, float maxValue)
 {
     if (m_context == nullptr)
@@ -14328,6 +15778,11 @@ Core::Result<UIDropdownCommandResult> UIContext::routeDropdownCommand(UIDropdown
     return m_impl->routeDropdownCommand(command, pressed);
 }
 
+Core::Result<UIListViewCommandResult> UIContext::routeListViewCommand(UIListViewCommand command, bool pressed)
+{
+    return m_impl->routeListViewCommand(command, pressed);
+}
+
 UINodeId UIContext::defaultActionFocus() const noexcept
 {
     if (!m_impl->isOwnerThread())
@@ -14462,9 +15917,20 @@ Core::Result<UINodeId> UIContext::createChild(UINodeId parent, UIWidgetKind kind
     return m_impl->createChild(parent, kind);
 }
 
+Core::Result<UINodeId> UIContext::createListViewChild(UINodeId parent, UIListViewCreateConfig config)
+{
+    return m_impl->createListViewComposite(parent, config);
+}
+
 Core::Result<UINodeId> UIContext::createChildFromUpdater(UINodeId updaterRoot, UINodeId parent, UIWidgetKind kind)
 {
     return m_impl->createChildFromUpdater(updaterRoot, parent, kind);
+}
+
+Core::Result<UINodeId> UIContext::createListViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                           UIListViewCreateConfig config)
+{
+    return m_impl->createListViewFromUpdater(updaterRoot, parent, config);
 }
 
 Core::Status UIContext::setLayoutStyleFromUpdater(UINodeId updaterRoot, UINodeId node, const UILayoutStyle& style)
@@ -14758,6 +16224,75 @@ Core::Result<UIDropdownPaint> UIContext::dropdownPaintFromUpdater(UINodeId updat
                                                                   UINodeId dropdown) const
 {
     return m_impl->dropdownPaintFromUpdater(updaterRoot, dropdown);
+}
+
+Core::Status UIContext::setListViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                        UIListViewDataSource source)
+{
+    return m_impl->setListViewDataSourceFromUpdater(updaterRoot, listView, source);
+}
+
+Core::Status UIContext::clearListViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId listView)
+{
+    return m_impl->clearListViewDataSourceFromUpdater(updaterRoot, listView);
+}
+
+Core::Status UIContext::invalidateListViewItemsFromUpdater(UINodeId updaterRoot, UINodeId listView)
+{
+    return m_impl->invalidateListViewItemsFromUpdater(updaterRoot, listView);
+}
+
+Core::Status UIContext::setListViewStyleFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                   const UIListViewStyle& style)
+{
+    return m_impl->setListViewStyleFromUpdater(updaterRoot, listView, style);
+}
+
+Core::Result<UIListViewStyle> UIContext::listViewStyleFromUpdater(UINodeId updaterRoot,
+                                                                 UINodeId listView) const
+{
+    return m_impl->listViewStyleFromUpdater(updaterRoot, listView);
+}
+
+Core::Status UIContext::setListViewPaintFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                   const UIListViewPaint& paint)
+{
+    return m_impl->setListViewPaintFromUpdater(updaterRoot, listView, paint);
+}
+
+Core::Result<UIListViewPaint> UIContext::listViewPaintFromUpdater(UINodeId updaterRoot,
+                                                                 UINodeId listView) const
+{
+    return m_impl->listViewPaintFromUpdater(updaterRoot, listView);
+}
+
+Core::Result<UIListViewMetrics> UIContext::listViewMetricsFromUpdater(UINodeId updaterRoot,
+                                                                     UINodeId listView) const
+{
+    return m_impl->listViewMetricsFromUpdater(updaterRoot, listView);
+}
+
+Core::Status UIContext::setListViewSelectedIndexFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                           u64 logicalIndex)
+{
+    return m_impl->setListViewSelectedIndexFromUpdater(updaterRoot, listView, logicalIndex);
+}
+
+Core::Status UIContext::clearListViewSelectionFromUpdater(UINodeId updaterRoot, UINodeId listView)
+{
+    return m_impl->clearListViewSelectionFromUpdater(updaterRoot, listView);
+}
+
+Core::Result<UIListViewSelection> UIContext::listViewSelectionFromUpdater(UINodeId updaterRoot,
+                                                                         UINodeId listView) const
+{
+    return m_impl->listViewSelectionFromUpdater(updaterRoot, listView);
+}
+
+Core::Status UIContext::scrollListViewToIndexFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                        u64 logicalIndex, UIListViewScrollAlignment alignment)
+{
+    return m_impl->scrollListViewToIndexFromUpdater(updaterRoot, listView, logicalIndex, alignment);
 }
 
 Core::Status UIContext::setProgressBarRangeFromUpdater(UINodeId updaterRoot, UINodeId progressBar, float minValue,

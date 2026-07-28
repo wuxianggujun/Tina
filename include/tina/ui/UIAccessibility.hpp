@@ -59,6 +59,11 @@ struct UIAccessibilityNode final {
     float value = 0.0F;
     float minValue = 0.0F;
     float maxValue = 0.0F;
+    UIListViewItemKey virtualItemKey = InvalidUIListViewItemKey;
+    u64 virtualItemIndex = 0;
+    u32 level = 0;
+    bool expandable = false;
+    bool expanded = false;
     UIAccessibilityState states = UIAccessibilityState::None;
 };
 
@@ -208,6 +213,11 @@ public:
                 .value = entry.value,
                 .minValue = entry.minValue,
                 .maxValue = entry.maxValue,
+                .virtualItemKey = entry.virtualItemKey,
+                .virtualItemIndex = entry.virtualItemIndex,
+                .level = entry.level,
+                .expandable = entry.expandable,
+                .expanded = entry.expanded,
                 .states = statesFromSemantics(entry),
             };
             const usize nameOff = m_text.size();
@@ -281,6 +291,11 @@ private:
                 .value = source.value,
                 .minValue = source.minValue,
                 .maxValue = source.maxValue,
+                .virtualItemKey = source.virtualItemKey,
+                .virtualItemIndex = source.virtualItemIndex,
+                .level = source.level,
+                .expandable = source.expandable,
+                .expanded = source.expanded,
                 .states = source.states,
             };
             const usize nameOff = m_text.size();

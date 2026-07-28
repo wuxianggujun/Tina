@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIListView.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 
@@ -26,6 +27,7 @@ enum class UISemanticsRole : u8 {
     RadioButton,
     ScrollView,
     ComboBox,
+    Tree,
 };
 
 // Owner-thread snapshot entry. Text fields point into the committed snapshot's
@@ -47,6 +49,11 @@ struct UISemanticsEntry final {
     bool selected = false;
     bool enabled = true;
     bool focused = false;
+    UIListViewItemKey virtualItemKey = InvalidUIListViewItemKey;
+    u64 virtualItemIndex = 0;
+    u32 level = 0;
+    bool expandable = false;
+    bool expanded = false;
 };
 
 // Owner-thread borrowed semantics snapshot. Invalidated by the next successful
@@ -147,6 +154,10 @@ class UICommittedSemanticsView final {
         return UISemanticsRole::List;
     case UIWidgetKind::DropdownItem:
         return UISemanticsRole::ListItem;
+    case UIWidgetKind::ListView:
+        return UISemanticsRole::List;
+    case UIWidgetKind::ListViewItem:
+        return UISemanticsRole::ListItem;
     }
     return UISemanticsRole::Group;
 }
@@ -158,7 +169,8 @@ class UICommittedSemanticsView final {
     return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox ||
            kind == UIWidgetKind::Slider || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ProgressBar ||
            kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Modal || kind == UIWidgetKind::ScrollView ||
-           kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::Popup || kind == UIWidgetKind::DropdownItem;
+           kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::Popup || kind == UIWidgetKind::DropdownItem ||
+           kind == UIWidgetKind::ListView || kind == UIWidgetKind::ListViewItem;
 }
 
 } // namespace Tina::UI

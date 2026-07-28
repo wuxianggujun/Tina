@@ -16,6 +16,7 @@
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIListView.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
@@ -181,6 +182,7 @@ class UIRootBuilder final {
     [[nodiscard]] Core::Result<UINodeId> createDropdown(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createPopup(UINodeId dropdown);
     [[nodiscard]] Core::Result<UINodeId> createDropdownItem(UINodeId popup);
+    [[nodiscard]] Core::Result<UINodeId> createListView(UINodeId parent, UIListViewCreateConfig config = {});
 
   private:
     friend class UIContext;
@@ -215,6 +217,7 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UINodeId> createDropdown(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createPopup(UINodeId dropdown);
     [[nodiscard]] Core::Result<UINodeId> createDropdownItem(UINodeId popup);
+    [[nodiscard]] Core::Result<UINodeId> createListView(UINodeId parent, UIListViewCreateConfig config = {});
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UINodeId node, UIPointerHitPolicy policy);
@@ -280,6 +283,20 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<bool> isDropdownItemSelected(UINodeId item) const;
     [[nodiscard]] Core::Status setDropdownPaint(UINodeId dropdown, const UIDropdownPaint& paint);
     [[nodiscard]] Core::Result<UIDropdownPaint> dropdownPaint(UINodeId dropdown) const;
+    [[nodiscard]] Core::Status setListViewDataSource(UINodeId listView, UIListViewDataSource source);
+    [[nodiscard]] Core::Status clearListViewDataSource(UINodeId listView);
+    [[nodiscard]] Core::Status invalidateListViewItems(UINodeId listView);
+    [[nodiscard]] Core::Status setListViewStyle(UINodeId listView, const UIListViewStyle& style);
+    [[nodiscard]] Core::Result<UIListViewStyle> listViewStyle(UINodeId listView) const;
+    [[nodiscard]] Core::Status setListViewPaint(UINodeId listView, const UIListViewPaint& paint);
+    [[nodiscard]] Core::Result<UIListViewPaint> listViewPaint(UINodeId listView) const;
+    [[nodiscard]] Core::Result<UIListViewMetrics> listViewMetrics(UINodeId listView) const;
+    [[nodiscard]] Core::Status setListViewSelectedIndex(UINodeId listView, u64 logicalIndex);
+    [[nodiscard]] Core::Status clearListViewSelection(UINodeId listView);
+    [[nodiscard]] Core::Result<UIListViewSelection> listViewSelection(UINodeId listView) const;
+    [[nodiscard]] Core::Status scrollListViewToIndex(UINodeId listView, u64 logicalIndex,
+                                                    UIListViewScrollAlignment alignment =
+                                                        UIListViewScrollAlignment::Nearest);
     [[nodiscard]] Core::Status setProgressBarRange(UINodeId progressBar, float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValue(UINodeId progressBar, float value);
     [[nodiscard]] Core::Result<float> progressBarValue(UINodeId progressBar) const;
@@ -422,6 +439,8 @@ class UIContext final {
     // previously claimed on key-down without repeating its state transition.
     [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command,
                                                                              bool pressed);
+    [[nodiscard]] Core::Result<UIListViewCommandResult> routeListViewCommand(UIListViewCommand command,
+                                                                             bool pressed);
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
     [[nodiscard]] UINodeId activeFocusScope() const noexcept;
     [[nodiscard]] UINodeId activeModal() const noexcept;
@@ -470,8 +489,11 @@ class UIContext final {
 
     [[nodiscard]] Core::Result<UIRootOwner> createRoot();
     [[nodiscard]] Core::Result<UINodeId> createChild(UINodeId parent, UIWidgetKind kind);
+    [[nodiscard]] Core::Result<UINodeId> createListViewChild(UINodeId parent, UIListViewCreateConfig config);
     [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(UINodeId updaterRoot, UINodeId parent,
                                                                 UIWidgetKind kind);
+    [[nodiscard]] Core::Result<UINodeId> createListViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                                  UIListViewCreateConfig config);
     [[nodiscard]] Core::Status setProgressBarRangeFromUpdater(UINodeId updaterRoot, UINodeId progressBar,
                                                               float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValueFromUpdater(UINodeId updaterRoot, UINodeId progressBar, float value);
@@ -569,6 +591,28 @@ class UIContext final {
                                                           const UIDropdownPaint& paint);
     [[nodiscard]] Core::Result<UIDropdownPaint> dropdownPaintFromUpdater(UINodeId updaterRoot,
                                                                         UINodeId dropdown) const;
+    [[nodiscard]] Core::Status setListViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                               UIListViewDataSource source);
+    [[nodiscard]] Core::Status clearListViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId listView);
+    [[nodiscard]] Core::Status invalidateListViewItemsFromUpdater(UINodeId updaterRoot, UINodeId listView);
+    [[nodiscard]] Core::Status setListViewStyleFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                          const UIListViewStyle& style);
+    [[nodiscard]] Core::Result<UIListViewStyle> listViewStyleFromUpdater(UINodeId updaterRoot,
+                                                                        UINodeId listView) const;
+    [[nodiscard]] Core::Status setListViewPaintFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                          const UIListViewPaint& paint);
+    [[nodiscard]] Core::Result<UIListViewPaint> listViewPaintFromUpdater(UINodeId updaterRoot,
+                                                                        UINodeId listView) const;
+    [[nodiscard]] Core::Result<UIListViewMetrics> listViewMetricsFromUpdater(UINodeId updaterRoot,
+                                                                            UINodeId listView) const;
+    [[nodiscard]] Core::Status setListViewSelectedIndexFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                                  u64 logicalIndex);
+    [[nodiscard]] Core::Status clearListViewSelectionFromUpdater(UINodeId updaterRoot, UINodeId listView);
+    [[nodiscard]] Core::Result<UIListViewSelection> listViewSelectionFromUpdater(UINodeId updaterRoot,
+                                                                                UINodeId listView) const;
+    [[nodiscard]] Core::Status scrollListViewToIndexFromUpdater(UINodeId updaterRoot, UINodeId listView,
+                                                               u64 logicalIndex,
+                                                               UIListViewScrollAlignment alignment);
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListenerFromUpdater(UINodeId updaterRoot, UIRoutedPointerListenerDesc descriptor,
                                         UIRoutedPointerCallback&& callback);

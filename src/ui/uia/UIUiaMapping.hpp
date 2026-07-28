@@ -114,6 +114,8 @@ struct UIUiaMappedNode final {
         return kControlTypePane;
     case UISemanticsRole::ComboBox:
         return kControlTypeComboBox;
+    case UISemanticsRole::Tree:
+        return kControlTypeTree;
     case UISemanticsRole::Group:
         return kControlTypeGroup;
     }
@@ -131,6 +133,7 @@ struct UIUiaMappedNode final {
     case UISemanticsRole::RadioButton:
     case UISemanticsRole::ComboBox:
     case UISemanticsRole::ListItem:
+    case UISemanticsRole::Tree:
         return true;
     case UISemanticsRole::Label:
     case UISemanticsRole::ProgressBar:
