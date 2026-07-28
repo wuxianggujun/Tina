@@ -387,17 +387,25 @@ $gateErrors = New-Object System.Collections.Generic.List[string]
 
 $designRois = @(
     @{ Name = 'title_plate'; L = 16; T = 12; R = 336; B = 68 },
+    @{ Name = 'scene_explorer'; L = 16; T = 84; R = 336; B = 452 },
     @{ Name = 'settings_panel'; L = 668; T = 8; R = 944; B = 456 },
     @{ Name = 'progress_bar'; L = 700; T = 300; R = 940; B = 330 },
-    @{ Name = 'playfield_lower'; L = 40; T = 300; R = 520; B = 500 }
+    @{ Name = 'playfield_lower'; L = 352; R = 652; ClientBottomInset = 40; Height = 200 }
 )
 
 $roiList = @()
 foreach ($d in $designRois) {
     $x0 = Get-DesignRoiFraction -DesignCoord ([int]$d.L) -DesignExtent $DesignWidth -ClientExtent $clientW
-    $y0 = Get-DesignRoiFraction -DesignCoord ([int]$d.T) -DesignExtent $DesignHeight -ClientExtent $clientH
     $x1 = Get-DesignRoiFraction -DesignCoord ([int]$d.R) -DesignExtent $DesignWidth -ClientExtent $clientW
-    $y1 = Get-DesignRoiFraction -DesignCoord ([int]$d.B) -DesignExtent $DesignHeight -ClientExtent $clientH
+    if ($null -ne $d.ClientBottomInset) {
+        $bottom = [Math]::Max(1, $clientH - [int]$d.ClientBottomInset)
+        $top = [Math]::Max(0, $bottom - [int]$d.Height)
+        $y0 = [double]$top / [double][Math]::Max(1, $clientH)
+        $y1 = [double]$bottom / [double][Math]::Max(1, $clientH)
+    } else {
+        $y0 = Get-DesignRoiFraction -DesignCoord ([int]$d.T) -DesignExtent $DesignHeight -ClientExtent $clientH
+        $y1 = Get-DesignRoiFraction -DesignCoord ([int]$d.B) -DesignExtent $DesignHeight -ClientExtent $clientH
+    }
     if ($x1 -le $x0 -or $y1 -le $y0 -or $x0 -ge 1.0 -or $y0 -ge 1.0) {
         [void]$gateErrors.Add(("ROI {0} outside client {1}x{2} (design {3}x{4})" -f $d.Name, $clientW, $clientH, $DesignWidth, $DesignHeight))
         continue
@@ -409,12 +417,16 @@ foreach ($d in $designRois) {
     $roiList += ,(Get-RoiFingerprint -PngPath $pngPath -X0 $x0 -Y0 $y0 -X1 $x1 -Y1 $y1 -Name ([string]$d.Name))
 }
 $progress = $roiList | Where-Object { $_.name -eq 'progress_bar' } | Select-Object -First 1
+$sceneExplorer = $roiList | Where-Object { $_.name -eq 'scene_explorer' } | Select-Object -First 1
 $settings = $roiList | Where-Object { $_.name -eq 'settings_panel' } | Select-Object -First 1
 $playfield = $roiList | Where-Object { $_.name -eq 'playfield_lower' } | Select-Object -First 1
 
 # Progress bar fill is green-ish; allow dark panels but require some G signal.
 if ($null -eq $progress -or [double]$progress.avgG -lt 35.0) {
     [void]$gateErrors.Add('progress_bar ROI lacks green-channel signal (expected filled bar)')
+}
+if ($null -eq $sceneExplorer -or [int]$sceneExplorer.uniqueSampleColors -lt 4) {
+    [void]$gateErrors.Add('scene_explorer ROI too flat (expected virtualized TreeView chrome)')
 }
 if ($null -eq $settings -or [int]$settings.uniqueSampleColors -lt 4) {
     [void]$gateErrors.Add('settings_panel ROI too flat (expected multi-control chrome)')
@@ -639,6 +651,18 @@ if (-not $NoBaselineCompare -and -not [string]::IsNullOrWhiteSpace($resolvedBase
                 [void]$diffs.Add("baseline missing ROI $($roi.name)")
                 continue
             }
+            $baseRect = @($baseRoi.rectPx)
+            $curRect = @($roi.rectPx)
+            if ($baseRect.Count -ne 4 -or $curRect.Count -ne 4) {
+                [void]$diffs.Add("$($roi.name) rectPx must contain four coordinates")
+            } else {
+                for ($i = 0; $i -lt 4; $i++) {
+                    if ([int]$curRect[$i] -ne [int]$baseRect[$i]) {
+                        [void]$diffs.Add(("{0} rectPx[{1}] {2} -> {3}" -f `
+                                $roi.name, $i, [int]$baseRect[$i], [int]$curRect[$i]))
+                    }
+                }
+            }
             $baseAvg = @($baseRoi.avgRgb)
             $curAvg = @($roi.avgRgb)
             for ($i = 0; $i -lt 3; $i++) {
@@ -692,7 +716,7 @@ $gateReport = [pscustomobject]@{
     baselineCompare = $baselineCompare
     errors = @($gateErrors | ForEach-Object { [string]$_ })
     notes = @(
-        'Absolute design ROIs mapped into client capture (product-2d HUD design-locked 960x540)',
+        'Absolute UI ROIs map the design-locked 960x540 HUD; playfield_lower is client-bottom anchored',
         'Proven: single-host ROI + optional baseline + GLFW contentScale consistency + font fingerprint metadata',
         'Font fingerprint mismatch vs baseline fails gate when baseline expects identity/sha256 (prefer fail)',
         'Open: OS Settings display scale 100/150/200% multi-DPI golden matrix (requires host scale change)',

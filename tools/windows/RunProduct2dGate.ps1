@@ -123,7 +123,7 @@ $samplePath = Join-Path $BinDir 'tina_sample_2d.exe'
 if (-not (Test-Path -LiteralPath $samplePath)) {
     Add-Step -Name 'tina_sample_2d' -ExitCode 1 -Detail "missing executable: $samplePath"
 }
-$sampleOut = & $samplePath "--frames=$SampleFrames" '--frame-delay-ms=0' '--ui-theme-demo' 2>&1 | Out-String
+$sampleOut = & $samplePath "--frames=$SampleFrames" '--frame-delay-ms=0' '--ui-theme-demo' '--ui-tree-demo' 2>&1 | Out-String
 $sampleExit = $LASTEXITCODE
 if ($sampleExit -ne 0) {
     Add-Step -Name 'tina_sample_2d' -ExitCode $sampleExit -Detail $sampleOut.Trim()
@@ -133,11 +133,24 @@ if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
 $requiredProductEvidence = @(
-    'evidenceSchema\":13',
+    'evidenceSchema\":14',
     'uiThemeDemoRequested\":true',
     'uiThemeSwitches\":2',
     'uiThemeButtonActivations\":0',
     'uiThemeFinalLight\":false',
+    'uiTreeDemoRequested\":true',
+    'uiTreeViewsCreated\":1',
+    'uiTreeLogicalItems\":13',
+    'uiTreeMaterializedCapacity\":12',
+    'uiTreeSelectionChanges\":2',
+    'uiTreeFinalSelectedKey\":402',
+    'uiTreeFinalSelectedIndex\":12',
+    'uiTreeFinalSelectionVerified\":true',
+    'uiTreeScrolled\":true',
+    'uiTreeThemeVerified\":true',
+    'accessibilityHasTree\":true',
+    'accessibilityHasTreeItem\":true',
+    'accessibilityTreeSelectionVerified\":true',
     'spriteBindingTextures\":2',
     'spriteBindingsReleased\":2',
     'spriteBindingTexturesDestroyed\":2',

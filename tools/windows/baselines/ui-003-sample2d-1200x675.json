@@ -1,4 +1,5 @@
 ﻿{
+    "schema":  3,
     "gate":  "UI-003-visual-roi-baseline",
     "designLogicalSize":  [
                               960,
@@ -9,6 +10,22 @@
                        675
                    ],
     "aspect":  1.7778,
+    "fontFingerprint":  {
+                            "schema":  1,
+                            "envTinaUiFontPath":  null,
+                            "resolvedPath":  "resources/fonts/SourceHanSansSC-Regular.otf",
+                            "source":  "repo-fixture",
+                            "fileName":  "SourceHanSansSC-Regular.otf",
+                            "exists":  true,
+                            "sizeBytes":  16529832,
+                            "sha256":  "f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256",
+                            "freeTypeLikelyOn":  true,
+                            "identity":  "sha256:f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256",
+                            "notes":  [
+                                          "Resolution order matches cmake/TinaUiFont.cmake: env TINA_UI_FONT_PATH then repo fixture",
+                                          "identity prefers sha256 of font file bytes; baseline compare fails on mismatch when baseline has fingerprint"
+                                      ]
+                        },
     "sampleMetrics":  {
                           "parsed":  true,
                           "status":  "ok",
@@ -36,13 +53,31 @@
                                 ],
                      "samples":  700,
                      "avgRgb":  [
-                                    60.73,
-                                    88.93,
-                                    91.38
+                                    27.28,
+                                    40.63,
+                                    52.62
                                 ],
                      "dominantColor":  "121D2B",
-                     "dominantRatio":  0.6429,
-                     "uniqueSampleColors":  4
+                     "dominantRatio":  0.8571,
+                     "uniqueSampleColors":  31
+                 },
+                 {
+                     "name":  "scene_explorer",
+                     "rectPx":  [
+                                    16,
+                                    84,
+                                    321,
+                                    368
+                                ],
+                     "samples":  625,
+                     "avgRgb":  [
+                                    58.97,
+                                    70.83,
+                                    78.06
+                                ],
+                     "dominantColor":  "474D53",
+                     "dominantRatio":  0.5488,
+                     "uniqueSampleColors":  30
                  },
                  {
                      "name":  "settings_panel",
@@ -54,13 +89,13 @@
                                 ],
                      "samples":  650,
                      "avgRgb":  [
-                                    54.33,
-                                    74.13,
-                                    78.04
+                                    27.05,
+                                    51.74,
+                                    54.63
                                 ],
                      "dominantColor":  "0A131D",
-                     "dominantRatio":  0.2492,
-                     "uniqueSampleColors":  31
+                     "dominantRatio":  0.4877,
+                     "uniqueSampleColors":  45
                  },
                  {
                      "name":  "progress_bar",
@@ -72,50 +107,33 @@
                                 ],
                      "samples":  720,
                      "avgRgb":  [
-                                    66.72,
-                                    78.92,
-                                    91.93
+                                    42.86,
+                                    55.67,
+                                    70.11
                                 ],
                      "dominantColor":  "192737",
-                     "dominantRatio":  0.5083,
-                     "uniqueSampleColors":  4
+                     "dominantRatio":  0.7472,
+                     "uniqueSampleColors":  49
                  },
                  {
                      "name":  "playfield_lower",
                      "rectPx":  [
-                                    40,
+                                    352,
+                                    435,
                                     300,
-                                    480,
                                     200
                                 ],
-                     "samples":  600,
+                     "samples":  625,
                      "avgRgb":  [
-                                    21.4,
-                                    45.78,
-                                    67.3
+                                    173.01,
+                                    139.59,
+                                    75.69
                                 ],
-                     "dominantColor":  "102A43",
-                     "dominantRatio":  0.975,
-                     "uniqueSampleColors":  2
+                     "dominantColor":  "F08C28",
+                     "dominantRatio":  0.3328,
+                     "uniqueSampleColors":  24
                  }
              ],
-    "schema":  3,
-    "fontFingerprint":  {
-                            "source":  "repo-fixture",
-                            "fileName":  "SourceHanSansSC-Regular.otf",
-                            "envTinaUiFontPath":  null,
-                            "exists":  true,
-                            "freeTypeLikelyOn":  true,
-                            "notes":  [
-                                          "Resolution order matches cmake/TinaUiFont.cmake: env TINA_UI_FONT_PATH then repo fixture",
-                                          "identity prefers sha256 of font file bytes; baseline compare fails on mismatch when baseline has fingerprint"
-                                      ],
-                            "sha256":  "f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256",
-                            "identity":  "sha256:f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256",
-                            "resolvedPath":  "resources/fonts/SourceHanSansSC-Regular.otf",
-                            "schema":  1,
-                            "sizeBytes":  16529832
-                        },
     "notes":  [
                   "Host-recorded ROI fingerprints for regression on same machine/class of GPU",
                   "avgRgb compared with absolute channel tolerance; uniqueSampleColors is a soft floor",
