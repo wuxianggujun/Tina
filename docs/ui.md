@@ -242,7 +242,7 @@ placeholder text 只用于确定性降级和生命周期 smoke。
 
 标准控件保留 create-time Theme 绑定；Theme Button callback 只记录 pending intent，`updateUI()` 再事务调用
 `setProductTheme()`。Panel 与标题文字是有意的局部层级覆盖，每次换肤集中重算。`--ui-theme-demo`
-在300帧产品门禁中执行 Dark→Light→Dark；schema 13 验证两次切换、最终 Dark、控件创建、TextEdit
+在300帧产品门禁中执行 Dark→Light→Dark；schema 14 验证两次切换、最终 Dark、控件创建、TextEdit
 UTF-8 初值、ProgressBar value 与 Radio 互斥 selection。
 `artifacts/screenshots/sample-2d-product/20260723-013100/report.json` 记录 `ok=true`、exit 0、schema 3，
 3次 960x540 client capture 中2帧稳定非空；首次 `PrintWindow` 白帧由 `blankLike=true` 排除。

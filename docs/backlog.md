@@ -21,7 +21,7 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
-| ASSET-HANDLE-SCENE | InProgress | P1 | A1-A6 已清除 2D/3D Scene 持久 key；N16.1 建立 packet-local resource table，N16.2 已让全部 Sprite2D extraction 只写 `FrameResourceRef` 并由 registry frame pin 保护 binding | N16.2 | N16.3 统一 registry/Lease/GPU retirement owner 并升级产品证据 | Unit + Integration + Smoke；最终产品 ownership 证据待 N16.3 |
+| ASSET-HANDLE-SCENE | InProgress | P1 | N16.1/N16.2 已建立并迁移 Sprite2D packet-local resource；N16.3 已让 Sprite registry 唯一拥有 Lease/GPU/binding 并完成 schema 14 产品 retirement 证据；3D 仍是 key + 分裂 owner | N16.3 | N16.4 将 Mesh3D/Material 迁移到 `FrameResourceRef` 并统一 Mesh/共享 Texture owner | Unit + Integration + Smoke；2D owner 已闭环，最终 3D ownership 证据待 N16.4 |
 
 ## Next
 
@@ -56,6 +56,7 @@
 
 | ID | 完成项 | 证据入口 |
 | --- | --- | --- |
+| ASSET-HANDLE-SCENE-N16.3-SPRITE-OWNER | `Sprite2DBindingRegistry` Entry 唯一拥有 resident `AssetLease`、`GpuTextureId` 与 binding；register 成功才消费 GPU，retirement 失败完整重试，active frame borrow 阻止提交，析构要求空 Entry；product-2d schema 14 证明2份 owner handoff、weak handle 失效和2条 `GpuTexture2D` record 全部 Released | [资源](resources.md) · [2D](game-2d.md) · Registry/Asset retirement tests · 2D product gate |
 | UI-004 | committed `UIFocusScopeMode::Contain`、显式 focus、topmost Modal barrier、嵌套/跨 root focus 恢复；listener 与 Button/Slider/TextEdit 持久 Primary Pointer Capture；Up、cancel、destroy、disable、Hidden/Collapsed 与 Modal scope change 释放；失效沿原 committed ancestry 合成 synthetic-only `PointerCancel`；paint/semantics 失败提交回滚 focus/Modal/capture；UI 282/282、Runtime UI 85/85 | [UI](ui.md) · [ADR 0011](adr/0011-retained-ui.md) · `UIFocusModalTests` / `UIPointerCaptureTests` / `PrimaryWindowUICapabilityTests` |
 | ASSET-HANDLE-SCENE-N16.2-SPRITE | `AssetFrameResourceResolver` + Runtime sink 将 World/TileMap/selection/Particle/Trail 全部迁移为 packet-local Sprite texture ref；registry 同帧去重并以 entry borrow pin 阻止活跃帧 unbind；Null/bgfx 在任何提交副作用前验证 cross-packet/stale/wrong-kind/range；旧 `RenderSprite2D*::spriteKey` 零引用 | [Rendering](rendering.md) · [Scene](scene-ecs.md) · [资源](resources.md) · Runtime/Scene/Asset/Render tests · 2D product smoke |
 | ASSET-HANDLE-SCENE-N16.1-CORE | packet-local `FrameResourceRef`/固定容量资源表按 kind+binding 去重并持有 owning pin；cross-packet/stale/wrong-kind fail closed；Runtime extraction 前 begin 且失败/skip/complete 在 State teardown 前释放；Texture2D 既有 Lease+GPU owner 仅在 backend 接受后消费，PMR/ledger/backend 失败完整恢复 | [Rendering](rendering.md) · [Runtime](runtime.md) · [资源](resources.md) · FramePinPacket/RuntimeLifecycle/AssetGpuRetirement tests |
@@ -63,7 +64,7 @@
 | ASSET-HANDLE-SCENE-3D-A5 | `MeshRenderer3D` 保存 copyable weak StaticMesh/Material Handle；visible extraction 分别借用 kind-specific resolver，invalid/stale/wrong-kind/unbound/zero fail closed，hidden 不解析；Prefab 只做 AssetId→Handle 并事务 rollback；3D product evidence schema 1 记录 handle 发布、两类 resolver hits 与 AssetStore active | [Scene](scene-ecs.md) · [3D](game-3d.md) · Scene tests · 3D product smoke |
 | ASSET-HANDLE-SCENE-2D-A4 | `TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与调用期 borrowed `AssetBindingResolver`，不再保存 `spriteKey`；registry 沿 Tileset 唯一 required Texture2D dependency fail closed；hidden/off-camera/empty 不解析，非空可见集合只解析一次，失败清空输出；product-2d schema 12 提供 TileMap resolver hits | [资源](resources.md) · [2D](game-2d.md) · TileChunk/Registry tests · 2D product gate |
 | ASSET-HANDLE-SCENE-2D-A3 | `ParticleSystem2D`/`Trail2D` 保存 copyable weak Sprite `AssetHandle`，显式 extract 借用共享 resolver；空 handle 在 emit/Create 拒绝，资源失效映射为 `UnresolvedSprite`；空 FX 不解析，Trail 每次非空 extract 解析一次、Particle 按 live item 解析；不持 Lease/payload/GPU owner；product-2d schema 11 提供独立 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | [Scene](scene-ecs.md) · [2D](game-2d.md) · Particle/Trail tests · 2D product gate |
-| ASSET-HANDLE-SCENE-2D-A2 | owner-thread `Sprite2DBindingRegistry` 借用 Store/device；device-instance allocator 将 Texture Handle + GPU texture 事务注册为唯一、单调不复用 key，同 device 多 registry 不冲突；Sprite/Tileset 通过唯一 required Texture2D cooked dependency fail-closed resolve；State 严格 unbind 后 destroy；当前 product-2d schema 13 保留2纹理注册、释放、销毁与 resolver hits | [资源](resources.md) · [2D](game-2d.md) · Registry tests · 2D product gate |
+| ASSET-HANDLE-SCENE-2D-A2 | N11 当时契约：owner-thread `Sprite2DBindingRegistry` 借用 Store/device；device-instance allocator 将 Texture Handle + GPU texture 事务注册为唯一、单调不复用 key，同 device 多 registry 不冲突；Sprite/Tileset 通过唯一 required Texture2D cooked dependency fail-closed resolve；当时由 State 严格 unbind 后 destroy，product-2d schema 13 保留注册/释放/销毁与 resolver hits。该分裂 owner 契约已由 N16.3 的 Registry Lease/GPU/binding 唯一所有权与 schema 14 替代 | [资源](resources.md) · [2D](game-2d.md) · Registry tests · 2D product gate |
 | ASSET-HANDLE-SCENE-2D-A1 | `SpriteRenderer2D` weak `AssetHandle` + borrowed resolver；空/stale/cross-store/wrong-kind/unbound fail closed，hidden 不解析；Scene 不持有 Lease/GPU owner | [Scene](scene-ecs.md) · Scene component/extract tests · 2D product sample |
 | RUNTIME-SHUTDOWN-DEADLINE | `shutdownAndJoinFor` 有界 stop/join；invalid 不触发 stop，timeout 保留 stopping TaskSystem/Worker/owner 并可 retry；Host 仅为 TaskSystem worker-exit/join 使用配置 deadline，超时先写 Diagnostics 再 terminate，绝不继续析构 owner；不 detach/强杀 | [Task](task-system.md) · [Runtime](runtime.md) · Disabled/Bounded Task shutdown tests · EngineHost Task-shutdown deadline/death tests |
 | DONE-001 | Legacy `Tina.exe`、旧横版 2D 与旧 UI 产品图删除 | [M12 退役说明](m12-legacy-ui-retirement.md) |
@@ -88,7 +89,7 @@
 | CLEAN-001 | 删除 vcpkg `legacy` feature 及 EnTT/GLM/spdlog/utfcpp 死依赖声明；preset 无引用 | [dependencies](dependencies.md) |
 | CLEAN-002 | 删除无消费者 `StringUtils.hpp`（EASTL/utfcpp）与 Clock/FrameTimer/FixedStepTicker compatibility；`SteadyMonotonicClock` 实现迁到 `MonotonicClock.cpp` | [core](core.md) |
 | CLEAN-003 | miniaudio 实现 TU 与 CMake FATAL 文案不再暗示 Legacy ON 可运行 | [dependencies](dependencies.md) |
-| TEST-002 | product-2d 同轮：UI/RuntimeUI/bridge/FreeType/Physics2D/Audio/miniaudio/Asset 测试 + sample 300 帧；`productGate=bgfx-physics-freetype-audio`；schema 13 自动 Dark→Light→Dark；脚本 `tools/windows/RunProduct2dGate.ps1` | [building](building.md) · [Windows 证据](m12-evidence-windows.md) |
+| TEST-002 | product-2d 同轮：UI/RuntimeUI/bridge/FreeType/Physics2D/Audio/miniaudio/Asset 测试 + sample 300 帧；`productGate=bgfx-physics-freetype-audio`；schema 14 自动 Dark→Light→Dark，并验证 Sprite owner/retirement handoff；脚本 `tools/windows/RunProduct2dGate.ps1` | [building](building.md) · [Windows 证据](m12-evidence-windows.md) |
 | TEST-003 | product-3d 同轮：Core/Scene/AssetFormat/Asset/bgfx Render/UI/RuntimeUI/bridge/FreeType 测试 + sample 300 帧；schema 3 同时验证 glTF/PBR/3-light/registry 与自动 Dark→Light→Dark；脚本 `tools/windows/RunProduct3dGate.ps1` | [3D](game-3d.md) · [测试](testing.md) |
 | ASSET-001 | glTF 外部 URI root containment/`..`/scheme 拒绝 + 64MiB 上限；`tina_sample_3d` 上传/绑定 Cooked Texture2D 到 materialKey；路径逃逸单测 | [3D](game-3d.md) · GltfCookTests |
 | UI-001 | ProgressBar/RadioButton 已接入 product-2d；190/190 UI、77/77 Runtime UI、12/12 Render bridge 通过，结构化输出与 Windows client-area 视觉证据成立 | [UI](ui.md) · [Windows 证据](m12-evidence-windows.md) |
@@ -96,7 +97,7 @@
 | UI-THEME-AB | 薄 `UITheme` token；`UIBoxPaint` 亮/暗边 + 可选 shadow；sample_2d 设置面板 elevation；hex `rgb`/`argb`；`UIThemeTests` | [UI](ui.md) |
 | UI-THEME-DEFAULT | Context/Runtime phase facade `productTheme`/`setProductTheme`；`create*` 自动 apply `make*Chrome`；既有继承属性事务换肤；属性级局部 override；Button focus border 与 pressed depth；`makeLightProductTheme`；`UIThemeTests` | [UI](ui.md) |
 | UI-SHOWCASE | 独立 `tina_sample_ui_showcase` 同屏展示 13 个成熟控件、Panel/elevation/色板/状态栏、Dark/Light 实时换肤与 Slider→ProgressBar 联动；dark/light 自动 smoke 和 Win32 pointer interaction/capture 通过 | [UI](ui.md) · [测试](testing.md) |
-| UI-PRODUCT-2D-THEME | product-2d Theme Button 提交 pending intent 并在 `updateUI()` 事务换肤；标准控件继承产品 chrome，Panel/标题局部层级随主题重算；schema 13 自动 Dark→Light→Dark 后回到 Dark | [UI](ui.md) · [2D](game-2d.md) · [测试](testing.md) |
+| UI-PRODUCT-2D-THEME | product-2d Theme Button 提交 pending intent 并在 `updateUI()` 事务换肤；标准控件继承产品 chrome，Panel/标题局部层级随主题重算；schema 14 自动 Dark→Light→Dark 后回到 Dark | [UI](ui.md) · [2D](game-2d.md) · [测试](testing.md) |
 | UI-PRODUCT-3D-THEME | `Product3DUI` 独立 root；Theme Button、Auto Rotate Checkbox、Rotation Speed Slider、Frame ProgressBar 驱动实际 3D 状态；标准 chrome 继承、Panel/标题局部层级集中换肤；schema 3 自动 Dark→Light→Dark 与暗/亮 FreeType client capture | [UI](ui.md) · [3D](game-3d.md) · [测试](testing.md) |
 | UI-LAYOUT-PADDING | `UILayoutStyle::padding` 同时约束 text auto-size/paint content origin；多行回到 padded x，TextEdit pointer selection 扣除 left padding；对应 UI 回归通过 | [UI](ui.md) · `UITextTests` / `UITextEditTests` |
 | DOC-002 | `tools/docs/CheckDocs.ps1`：docs 本地链接、cmake configure/build preset、`--target` 名、Legacy 产品文案软警告；不扫 out/build/thirdparty | [building](building.md) · [testing](testing.md) |

@@ -1,5 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
-#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -12,6 +12,9 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstdlib>
+#include <exception>
+#include <limits>
 #include <memory_resource>
 #include <new>
 #include <optional>
@@ -45,6 +48,16 @@ class ThrowingMemoryResource final : public std::pmr::memory_resource {
     [[nodiscard]] Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
+    }
+
+    void rejectAllocationsAtOrAbove(std::size_t minimumBytes) noexcept
+    {
+        m_rejectedAllocationMinimumBytes = minimumBytes;
+    }
+
+    void allowAllocations() noexcept
+    {
+        m_rejectedAllocationMinimumBytes = (std::numeric_limits<std::size_t>::max)();
     }
 
   private:
@@ -124,9 +137,51 @@ class FixedBindingRenderDevice final : public Render::IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status retireTexture2D(Render::GpuTextureId texture,
+                                               Render::FramePin& completionPin) noexcept override
+    {
+        ++m_retirementAttempts;
+        if (m_rejectRetirementAttempt == m_retirementAttempts)
+        {
+            m_rejectRetirementAttempt = 0;
+            return Core::failure(Render::RenderErrorCode::GpuRetirementUnsupported,
+                                 "fixed binding test device rejected retirement");
+        }
+        m_lastRetiredTexture = texture;
+        ++m_retirementCount;
+        if (m_delayRetirement)
+        {
+            m_pendingRetirementPin = std::move(completionPin);
+        } else
+        {
+            completionPin.release();
+        }
+        return Core::success();
+    }
+
     void rejectNextUpdate() noexcept
     {
         m_rejectNext = true;
+    }
+
+    void rejectNextRetirement() noexcept
+    {
+        m_rejectRetirementAttempt = m_retirementAttempts + 1U;
+    }
+
+    void rejectRetirementOnAttempt(Core::usize attempt) noexcept
+    {
+        m_rejectRetirementAttempt = attempt;
+    }
+
+    void delayRetirement() noexcept
+    {
+        m_delayRetirement = true;
+    }
+
+    void completeRetirement() noexcept
+    {
+        m_pendingRetirementPin.release();
     }
 
     [[nodiscard]] Core::usize callCount() const noexcept
@@ -139,10 +194,36 @@ class FixedBindingRenderDevice final : public Render::IRenderDevice {
         return m_calls[index];
     }
 
+    [[nodiscard]] Core::usize retirementAttempts() const noexcept
+    {
+        return m_retirementAttempts;
+    }
+
+    [[nodiscard]] Core::usize retirementCount() const noexcept
+    {
+        return m_retirementCount;
+    }
+
+    [[nodiscard]] Render::GpuTextureId lastRetiredTexture() const noexcept
+    {
+        return m_lastRetiredTexture;
+    }
+
+    [[nodiscard]] bool hasPendingRetirement() const noexcept
+    {
+        return m_pendingRetirementPin.hasValue();
+    }
+
   private:
     std::array<Call, 1024> m_calls{};
     Core::usize m_callCount = 0;
+    Core::usize m_retirementAttempts = 0;
+    Core::usize m_retirementCount = 0;
+    Render::GpuTextureId m_lastRetiredTexture{};
+    Render::FramePin m_pendingRetirementPin{};
     bool m_rejectNext = false;
+    Core::usize m_rejectRetirementAttempt = 0;
+    bool m_delayRetirement = false;
 };
 
 class RejectingFrameResourceSink final : public Render::FrameResourceSink {
@@ -292,24 +373,104 @@ class RejectingFrameResourceSink final : public Render::FrameResourceSink {
     return makeTileset(memory, seed, textureId, dependencies);
 }
 
-[[nodiscard]] Core::Result<AssetStore> makeStore(std::pmr::memory_resource& memory, Core::usize capacity = 16U)
+[[nodiscard]] Core::Result<AssetSystem> makeAssetSystem(std::pmr::memory_resource& memory,
+                                                       Core::usize capacity = 16U)
 {
-    return AssetStore::Create(AssetStoreConfig{.capacity = capacity, .memoryResource = &memory});
+    return AssetSystem::Create(AssetSystemConfig{
+        .storeCapacity = capacity,
+        .memoryResource = &memory,
+        .batch =
+            CookedAssetBatchLoadConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .memoryResource = &memory,
+            },
+    });
+}
+
+class AutoRetiringRegistry final {
+  public:
+    explicit AutoRetiringRegistry(Core::Result<Sprite2DBindingRegistry> registry) noexcept
+        : m_registry(std::move(registry))
+    {
+    }
+
+    ~AutoRetiringRegistry() noexcept
+    {
+        if (m_registry && m_registry->bindingCount() != 0 && !m_registry->retireAllTextureBindings())
+        {
+            std::terminate();
+        }
+    }
+
+    AutoRetiringRegistry(const AutoRetiringRegistry&) = delete;
+    AutoRetiringRegistry& operator=(const AutoRetiringRegistry&) = delete;
+    AutoRetiringRegistry(AutoRetiringRegistry&&) noexcept = default;
+    AutoRetiringRegistry& operator=(AutoRetiringRegistry&&) = delete;
+
+    [[nodiscard]] bool has_value() const noexcept { return m_registry.has_value(); }
+    [[nodiscard]] explicit operator bool() const noexcept { return m_registry.has_value(); }
+    [[nodiscard]] decltype(auto) error() const { return m_registry.error(); }
+    [[nodiscard]] Sprite2DBindingRegistry& operator*() noexcept { return *m_registry; }
+    [[nodiscard]] const Sprite2DBindingRegistry& operator*() const noexcept { return *m_registry; }
+    [[nodiscard]] Sprite2DBindingRegistry* operator->() noexcept { return &*m_registry; }
+    [[nodiscard]] const Sprite2DBindingRegistry* operator->() const noexcept { return &*m_registry; }
+
+  private:
+    Core::Result<Sprite2DBindingRegistry> m_registry;
+};
+
+[[nodiscard]] AutoRetiringRegistry makeRegistry(AssetSystem& assets, Render::IRenderDevice& device,
+                                                Sprite2DBindingRegistryConfig config = {})
+{
+    return AutoRetiringRegistry{Sprite2DBindingRegistry::Create(assets, device, config)};
+}
+
+[[nodiscard]] Core::Result<Core::u32> registerTexture(Sprite2DBindingRegistry& registry,
+                                                      AssetHandle texture,
+                                                      Render::GpuTextureId gpuTexture) noexcept
+{
+    return registry.registerTextureBinding(texture, gpuTexture);
+}
+
+void destroyRegistryWithOwnedBinding()
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    if (!assets)
+    {
+        std::abort();
+    }
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    if (!texture)
+    {
+        std::abort();
+    }
+    FixedBindingRenderDevice device;
+    auto registry = Sprite2DBindingRegistry::Create(*assets, device);
+    if (!registry)
+    {
+        std::abort();
+    }
+    Render::GpuTextureId gpuTexture{1U, 1U};
+    if (!registry->registerTextureBinding(*texture, gpuTexture))
+    {
+        std::abort();
+    }
 }
 
 TEST(Sprite2DBindingRegistryTests, CreateValidatesCapacityBounds)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value()) << store.error().message;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value()) << assets.error().message;
     FixedBindingRenderDevice device;
 
-    auto zero = Sprite2DBindingRegistry::Create(
-        *store, device, Sprite2DBindingRegistryConfig{.textureCapacity = 0, .memoryResource = &memory});
+    auto zero = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 0, .memoryResource = &memory});
     ASSERT_FALSE(zero.has_value());
     EXPECT_EQ(zero.error().code, AssetErrorCode::InvalidCatalogConfig);
 
-    auto excessive = Sprite2DBindingRegistry::Create(*store, device,
+    auto excessive = makeRegistry(*assets, device,
                                                      Sprite2DBindingRegistryConfig{
                                                          .textureCapacity = MaximumSprite2DBindingCapacity + 1U,
                                                          .memoryResource = &memory,
@@ -320,8 +481,8 @@ TEST(Sprite2DBindingRegistryTests, CreateValidatesCapacityBounds)
     // MSVC Debug allocates a small iterator proxy from the PMR inside vector's
     // noexcept allocator constructor. Reject only the actual fixed entry storage.
     ThrowingMemoryResource throwingMemory{64U};
-    auto allocationFailure = Sprite2DBindingRegistry::Create(
-        *store, device,
+    auto allocationFailure = makeRegistry(
+        *assets, device,
         Sprite2DBindingRegistryConfig{
             .textureCapacity = DefaultSprite2DBindingCapacity,
             .memoryResource = &throwingMemory,
@@ -333,27 +494,30 @@ TEST(Sprite2DBindingRegistryTests, CreateValidatesCapacityBounds)
     EXPECT_EQ(throwingMemory.outstandingAllocations(), 0U);
 }
 
-TEST(Sprite2DBindingRegistryTests, SharedAtlasResolvesToOneIdempotentTextureBinding)
+TEST(Sprite2DBindingRegistryTests, RegistrationAdoptsGpuAndLeaseWhileDuplicatePreservesCandidate)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value()) << store.error().message;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto spriteA = store->publish(makeSprite(memory, 2U, textureId));
-    auto spriteB = store->publish(makeSprite(memory, 3U, textureId));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto spriteA = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto spriteB = assets->store().publish(makeSprite(memory, 3U, textureId));
     ASSERT_TRUE(texture.has_value()) << texture.error().message;
     ASSERT_TRUE(spriteA.has_value()) << spriteA.error().message;
     ASSERT_TRUE(spriteB.has_value()) << spriteB.error().message;
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(
-        *store, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value()) << registry.error().message;
-    constexpr Render::GpuTextureId GpuTexture{7U, 3U};
+    constexpr Render::GpuTextureId OriginalGpuTexture{7U, 3U};
+    Render::GpuTextureId gpuTexture = OriginalGpuTexture;
 
-    auto registered = registry->registerTextureBinding(*texture, GpuTexture);
+    auto registered = registry->registerTextureBinding(*texture, gpuTexture);
     ASSERT_TRUE(registered.has_value()) << registered.error().message;
+    EXPECT_FALSE(gpuTexture);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
     EXPECT_NE(*registered, 0U);
     EXPECT_EQ(registry->capacity(), 2U);
     EXPECT_EQ(registry->bindingCount(), 1U);
@@ -362,39 +526,73 @@ TEST(Sprite2DBindingRegistryTests, SharedAtlasResolvesToOneIdempotentTextureBind
     EXPECT_EQ(registry->resolveSprite(*spriteB), *registered);
     ASSERT_EQ(device.callCount(), 1U);
     EXPECT_EQ(device.call(0).bindingKey, *registered);
-    EXPECT_EQ(device.call(0).texture, GpuTexture);
+    EXPECT_EQ(device.call(0).texture, OriginalGpuTexture);
 
-    auto duplicate = registry->registerTextureBinding(*texture, GpuTexture);
-    ASSERT_TRUE(duplicate.has_value()) << duplicate.error().message;
-    EXPECT_EQ(*duplicate, *registered);
+    Render::GpuTextureId duplicateGpu{8U, 4U};
+    const Render::GpuTextureId expectedDuplicateGpu = duplicateGpu;
+    auto duplicate = registry->registerTextureBinding(*texture, duplicateGpu);
+    ASSERT_FALSE(duplicate.has_value());
+    EXPECT_EQ(duplicate.error().code, AssetErrorCode::SpriteBindingConflict);
+    EXPECT_EQ(duplicateGpu, expectedDuplicateGpu);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
     EXPECT_EQ(device.callCount(), 1U);
     EXPECT_EQ(registry->bindingCount(), 1U);
+}
+
+TEST(Sprite2DBindingRegistryTests, RegistrationRejectsGpuOwnerAlreadyHeldByAnotherEntry)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value()) << assets.error().message;
+    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
+    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
+    ASSERT_TRUE(firstTexture.has_value());
+    ASSERT_TRUE(secondTexture.has_value());
+
+    FixedBindingRenderDevice device;
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
+    ASSERT_TRUE(registry.has_value()) << registry.error().message;
+    constexpr Render::GpuTextureId SharedGpuTexture{7U, 3U};
+    Render::GpuTextureId firstGpuTexture = SharedGpuTexture;
+    ASSERT_TRUE(registry->registerTextureBinding(*firstTexture, firstGpuTexture).has_value());
+    EXPECT_FALSE(firstGpuTexture);
+
+    Render::GpuTextureId duplicateGpuTexture = SharedGpuTexture;
+    const auto duplicate = registry->registerTextureBinding(*secondTexture, duplicateGpuTexture);
+    ASSERT_FALSE(duplicate.has_value());
+    EXPECT_EQ(duplicate.error().code, AssetErrorCode::SpriteBindingConflict);
+    EXPECT_EQ(duplicateGpuTexture, SharedGpuTexture);
+    EXPECT_EQ(assets->store().leaseCount(*firstTexture), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*secondTexture), 0U);
+    EXPECT_EQ(registry->bindingCount(), 1U);
+    EXPECT_EQ(device.callCount(), 1U);
 }
 
 TEST(Sprite2DBindingRegistryTests, TilesetResolvesItsRequiredTextureBindingFailClosed)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value()) << store.error().message;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto tileset = store->publish(makeTileset(memory, 2U, textureId));
-    auto unboundTileset = store->publish(makeTileset(memory, 3U, assetId(9U)));
-    auto queuedTileset = store->beginQueued(assetId(4U), AssetFormat::AssetKind::Tileset);
-    auto staleTileset = store->publish(makeTileset(memory, 5U, textureId));
-    auto noDependencyTileset = store->publish(makeTileset(memory, 6U, textureId, {}));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto tileset = assets->store().publish(makeTileset(memory, 2U, textureId));
+    auto unboundTileset = assets->store().publish(makeTileset(memory, 3U, assetId(9U)));
+    auto queuedTileset = assets->store().beginQueued(assetId(4U), AssetFormat::AssetKind::Tileset);
+    auto staleTileset = assets->store().publish(makeTileset(memory, 5U, textureId));
+    auto noDependencyTileset = assets->store().publish(makeTileset(memory, 6U, textureId, {}));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(tileset.has_value());
     ASSERT_TRUE(unboundTileset.has_value());
     ASSERT_TRUE(queuedTileset.has_value());
     ASSERT_TRUE(staleTileset.has_value());
     ASSERT_TRUE(noDependencyTileset.has_value());
-    ASSERT_TRUE(store->unload(*staleTileset).has_value());
+    ASSERT_TRUE(assets->store().unload(*staleTileset).has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value()) << registry.error().message;
-    auto binding = registry->registerTextureBinding(*texture, Render::GpuTextureId{7U, 1U});
+    auto binding = registerTexture(*registry, *texture, Render::GpuTextureId{7U, 1U});
     ASSERT_TRUE(binding.has_value()) << binding.error().message;
 
     EXPECT_EQ(registry->resolveTileset(*tileset), *binding);
@@ -407,23 +605,23 @@ TEST(Sprite2DBindingRegistryTests, TilesetResolvesItsRequiredTextureBindingFailC
     EXPECT_EQ(device.callCount(), 1U);
 }
 
-TEST(Sprite2DBindingRegistryTests, FrameResourcesDeduplicateAndBlockUnbindUntilPacketRelease)
+TEST(Sprite2DBindingRegistryTests, FrameResourcesDeduplicateAndBlockRetirementUntilPacketRelease)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value()) << store.error().message;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto sprite = store->publish(makeSprite(memory, 2U, textureId));
-    auto tileset = store->publish(makeTileset(memory, 3U, textureId));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto tileset = assets->store().publish(makeTileset(memory, 3U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
     ASSERT_TRUE(tileset.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value()) << registry.error().message;
-    auto binding = registry->registerTextureBinding(*texture, Render::GpuTextureId{7U, 1U});
+    auto binding = registerTexture(*registry, *texture, Render::GpuTextureId{7U, 1U});
     ASSERT_TRUE(binding.has_value()) << binding.error().message;
     Render::RenderFramePacket packet;
     ASSERT_TRUE(packet.beginFrame(1).has_value());
@@ -443,40 +641,40 @@ TEST(Sprite2DBindingRegistryTests, FrameResourcesDeduplicateAndBlockUnbindUntilP
     ASSERT_NE(descriptor, nullptr);
     EXPECT_EQ(descriptor->deviceBindingKey, *binding);
 
-    const auto borrowedUnbind = registry->unbindTextureBinding(*texture);
-    ASSERT_FALSE(borrowedUnbind.has_value());
-    EXPECT_EQ(borrowedUnbind.error().code, AssetErrorCode::AssetNotReady);
+    const auto borrowedRetirement = registry->retireTextureBinding(*texture);
+    ASSERT_FALSE(borrowedRetirement.has_value());
+    EXPECT_EQ(borrowedRetirement.error().code, AssetErrorCode::AssetNotReady);
     EXPECT_EQ(registry->bindingCount(), 1U);
 
     ASSERT_TRUE(packet.abandon().has_value());
-    ASSERT_TRUE(registry->unbindTextureBinding(*texture).has_value());
+    ASSERT_TRUE(registry->retireTextureBinding(*texture).has_value());
     EXPECT_EQ(registry->bindingCount(), 0U);
 }
 
 TEST(Sprite2DBindingRegistryTests, UnresolvedFrameResourcesReturnEmptyWithoutTouchingSink)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value()) << store.error().message;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto unboundSprite = store->publish(makeSprite(memory, 2U, assetId(9U)));
-    auto queuedSprite = store->beginQueued(assetId(3U), AssetFormat::AssetKind::Sprite);
-    auto staleSprite = store->publish(makeSprite(memory, 4U, textureId));
-    auto noDependencySprite = store->publish(makeSprite(memory, 5U, textureId, {}));
-    auto noDependencyTileset = store->publish(makeTileset(memory, 6U, textureId, {}));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto unboundSprite = assets->store().publish(makeSprite(memory, 2U, assetId(9U)));
+    auto queuedSprite = assets->store().beginQueued(assetId(3U), AssetFormat::AssetKind::Sprite);
+    auto staleSprite = assets->store().publish(makeSprite(memory, 4U, textureId));
+    auto noDependencySprite = assets->store().publish(makeSprite(memory, 5U, textureId, {}));
+    auto noDependencyTileset = assets->store().publish(makeTileset(memory, 6U, textureId, {}));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(unboundSprite.has_value());
     ASSERT_TRUE(queuedSprite.has_value());
     ASSERT_TRUE(staleSprite.has_value());
     ASSERT_TRUE(noDependencySprite.has_value());
     ASSERT_TRUE(noDependencyTileset.has_value());
-    ASSERT_TRUE(store->unload(*staleSprite).has_value());
+    ASSERT_TRUE(assets->store().unload(*staleSprite).has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value()) << registry.error().message;
-    ASSERT_TRUE(registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U}).has_value());
+    ASSERT_TRUE(registerTexture(*registry, *texture, Render::GpuTextureId{1U, 1U}).has_value());
     RejectingFrameResourceSink sink;
 
     const auto expectUnresolved = [&](auto resource) {
@@ -493,71 +691,74 @@ TEST(Sprite2DBindingRegistryTests, UnresolvedFrameResourcesReturnEmptyWithoutTou
     EXPECT_EQ(sink.callCount(), 0U);
 }
 
-TEST(Sprite2DBindingRegistryTests, SinkFailuresReleaseBorrowAndLeaveBindingUnbindable)
+TEST(Sprite2DBindingRegistryTests, SinkFailuresReleaseBorrowAndLeaveBindingRetirable)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value()) << store.error().message;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto sprite = store->publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value()) << registry.error().message;
-    ASSERT_TRUE(registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U}).has_value());
+    ASSERT_TRUE(registerTexture(*registry, *texture, Render::GpuTextureId{1U, 1U}).has_value());
 
     Render::RenderFramePacket idlePacket;
     const auto idleFailure = registry->internSpriteFrameResource(*sprite, idlePacket.resourceSink());
     ASSERT_FALSE(idleFailure.has_value());
     EXPECT_EQ(idleFailure.error().code, Render::RenderErrorCode::InvalidFrameResource);
-    ASSERT_TRUE(registry->unbindTextureBinding(*texture).has_value());
-
-    ASSERT_TRUE(registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U}).has_value());
     RejectingFrameResourceSink rejectingSink;
     const auto rejected = registry->internSpriteFrameResource(*sprite, rejectingSink);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::InvalidFrameResource);
     EXPECT_EQ(rejectingSink.callCount(), 1U);
-    ASSERT_TRUE(registry->unbindTextureBinding(*texture).has_value());
+    ASSERT_TRUE(registry->retireTextureBinding(*texture).has_value());
 }
 
 TEST(Sprite2DBindingRegistryTests, RegistrationRejectsInvalidStaleWrongKindAndNotReadyHandles)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value()) << store.error().message;
-    auto wrongKind = store->publish(makeSprite(memory, 2U, assetId(1U)));
-    auto stale = store->publish(makeTexture(memory, 3U));
-    auto notReady = store->beginQueued(assetId(4U), AssetFormat::AssetKind::Texture2D);
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value()) << assets.error().message;
+    auto wrongKind = assets->store().publish(makeSprite(memory, 2U, assetId(1U)));
+    auto stale = assets->store().publish(makeTexture(memory, 3U));
+    auto notReady = assets->store().beginQueued(assetId(4U), AssetFormat::AssetKind::Texture2D);
     ASSERT_TRUE(wrongKind.has_value());
     ASSERT_TRUE(stale.has_value());
     ASSERT_TRUE(notReady.has_value());
-    ASSERT_TRUE(store->unload(*stale).has_value());
+    ASSERT_TRUE(assets->store().unload(*stale).has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value()) << registry.error().message;
-    constexpr Render::GpuTextureId GpuTexture{1U, 1U};
+    Render::GpuTextureId gpuTexture{1U, 1U};
+    const Render::GpuTextureId expectedGpuTexture = gpuTexture;
 
-    const auto empty = registry->registerTextureBinding({}, GpuTexture);
+    const auto empty = registry->registerTextureBinding({}, gpuTexture);
     ASSERT_FALSE(empty.has_value());
     EXPECT_EQ(empty.error().code, AssetErrorCode::InvalidHandle);
-    const auto wrong = registry->registerTextureBinding(*wrongKind, GpuTexture);
+    EXPECT_EQ(gpuTexture, expectedGpuTexture);
+    const auto wrong = registry->registerTextureBinding(*wrongKind, gpuTexture);
     ASSERT_FALSE(wrong.has_value());
     EXPECT_EQ(wrong.error().code, AssetErrorCode::InvalidHandle);
-    const auto staleResult = registry->registerTextureBinding(*stale, GpuTexture);
+    EXPECT_EQ(gpuTexture, expectedGpuTexture);
+    const auto staleResult = registry->registerTextureBinding(*stale, gpuTexture);
     ASSERT_FALSE(staleResult.has_value());
     EXPECT_EQ(staleResult.error().code, AssetErrorCode::InvalidHandle);
-    const auto queued = registry->registerTextureBinding(*notReady, GpuTexture);
+    EXPECT_EQ(gpuTexture, expectedGpuTexture);
+    const auto queued = registry->registerTextureBinding(*notReady, gpuTexture);
     ASSERT_FALSE(queued.has_value());
     EXPECT_EQ(queued.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_EQ(gpuTexture, expectedGpuTexture);
 
-    auto ready = store->publish(makeTexture(memory, 5U));
+    auto ready = assets->store().publish(makeTexture(memory, 5U));
     ASSERT_TRUE(ready.has_value());
-    const auto invalidGpu = registry->registerTextureBinding(*ready, {});
+    Render::GpuTextureId invalidGpuCandidate{};
+    const auto invalidGpu = registry->registerTextureBinding(*ready, invalidGpuCandidate);
     ASSERT_FALSE(invalidGpu.has_value());
     EXPECT_EQ(invalidGpu.error().code, Render::RenderErrorCode::InvalidTextureUpload);
     EXPECT_EQ(device.callCount(), 0U);
@@ -568,31 +769,34 @@ TEST(Sprite2DBindingRegistryTests, CrossStoreHandlesFailClosedEvenWhenSlotsColli
 {
     TrackingMemoryResource localMemory;
     TrackingMemoryResource foreignMemory;
-    auto localStore = makeStore(localMemory, 4U);
-    auto foreignStore = makeStore(foreignMemory, 4U);
-    ASSERT_TRUE(localStore.has_value());
-    ASSERT_TRUE(foreignStore.has_value());
+    auto localAssets = makeAssetSystem(localMemory, 4U);
+    auto foreignAssets = makeAssetSystem(foreignMemory, 4U);
+    ASSERT_TRUE(localAssets.has_value());
+    ASSERT_TRUE(foreignAssets.has_value());
 
     const Core::AssetId localTextureId = assetId(1U);
-    auto localTexture = localStore->publish(makeTexture(localMemory, 1U));
-    auto localSprite = localStore->publish(makeSprite(localMemory, 2U, localTextureId));
-    auto foreignTexture = foreignStore->publish(makeTexture(foreignMemory, 7U));
-    auto foreignSprite = foreignStore->publish(makeSprite(foreignMemory, 8U, assetId(7U)));
+    auto localTexture = localAssets->store().publish(makeTexture(localMemory, 1U));
+    auto localSprite = localAssets->store().publish(makeSprite(localMemory, 2U, localTextureId));
+    auto foreignTexture = foreignAssets->store().publish(makeTexture(foreignMemory, 7U));
+    auto foreignSprite = foreignAssets->store().publish(makeSprite(foreignMemory, 8U, assetId(7U)));
     ASSERT_TRUE(localTexture.has_value());
     ASSERT_TRUE(localSprite.has_value());
     ASSERT_TRUE(foreignTexture.has_value());
     ASSERT_TRUE(foreignSprite.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*localStore, device);
+    auto registry = makeRegistry(*localAssets, device);
     ASSERT_TRUE(registry.has_value()) << registry.error().message;
-    auto localBinding = registry->registerTextureBinding(*localTexture, Render::GpuTextureId{3U, 1U});
+    auto localBinding = registerTexture(*registry, *localTexture, Render::GpuTextureId{3U, 1U});
     ASSERT_TRUE(localBinding.has_value()) << localBinding.error().message;
     ASSERT_EQ(registry->resolveSprite(*localSprite), *localBinding);
 
-    const auto foreignRegistration = registry->registerTextureBinding(*foreignTexture, Render::GpuTextureId{4U, 1U});
+    Render::GpuTextureId foreignGpu{4U, 1U};
+    const auto foreignRegistration = registry->registerTextureBinding(*foreignTexture, foreignGpu);
     ASSERT_FALSE(foreignRegistration.has_value());
     EXPECT_EQ(foreignRegistration.error().code, AssetErrorCode::InvalidHandle);
+    EXPECT_EQ(foreignGpu, (Render::GpuTextureId{4U, 1U}));
+    EXPECT_EQ(foreignAssets->store().leaseCount(*foreignTexture), 0U);
     EXPECT_EQ(registry->bindingKey(*foreignTexture), 0U);
     EXPECT_EQ(registry->resolveSprite(*foreignSprite), 0U);
     EXPECT_EQ(device.callCount(), 1U);
@@ -602,28 +806,34 @@ TEST(Sprite2DBindingRegistryTests, CrossStoreHandlesFailClosedEvenWhenSlotsColli
 TEST(Sprite2DBindingRegistryTests, BackendRegisterFailureRollsBackRecordAndBindingKey)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto firstTexture = store->publish(makeTexture(memory, 1U));
-    auto secondTexture = store->publish(makeTexture(memory, 2U));
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
+    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(secondTexture.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(
-        *store, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value());
     device.rejectNextUpdate();
 
-    const auto rejected = registry->registerTextureBinding(*firstTexture, Render::GpuTextureId{1U, 1U});
+    Render::GpuTextureId rejectedGpu{1U, 1U};
+    const auto rejected = registry->registerTextureBinding(*firstTexture, rejectedGpu);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::TextureUploadUnsupported);
     EXPECT_EQ(registry->bindingCount(), 0U);
     EXPECT_EQ(registry->bindingKey(*firstTexture), 0U);
+    EXPECT_EQ(rejectedGpu, (Render::GpuTextureId{1U, 1U}));
+    EXPECT_EQ(assets->store().leaseCount(*firstTexture), 0U);
 
-    auto accepted = registry->registerTextureBinding(*secondTexture, Render::GpuTextureId{2U, 1U});
+    Render::GpuTextureId acceptedGpu{2U, 1U};
+    auto accepted = registry->registerTextureBinding(*secondTexture, acceptedGpu);
     ASSERT_TRUE(accepted.has_value()) << accepted.error().message;
     EXPECT_EQ(*accepted, 1U);
+    EXPECT_FALSE(acceptedGpu);
+    EXPECT_EQ(assets->store().leaseCount(*secondTexture), 1U);
     EXPECT_EQ(registry->bindingCount(), 1U);
     EXPECT_EQ(device.callCount(), 2U);
     EXPECT_EQ(device.call(0).bindingKey, 1U);
@@ -633,19 +843,19 @@ TEST(Sprite2DBindingRegistryTests, BackendRegisterFailureRollsBackRecordAndBindi
 TEST(Sprite2DBindingRegistryTests, ConcurrentLiveTexturesReceiveDistinctNonzeroKeys)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto firstTexture = store->publish(makeTexture(memory, 1U));
-    auto secondTexture = store->publish(makeTexture(memory, 2U));
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
+    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(secondTexture.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(
-        *store, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value());
-    auto firstKey = registry->registerTextureBinding(*firstTexture, Render::GpuTextureId{1U, 1U});
-    auto secondKey = registry->registerTextureBinding(*secondTexture, Render::GpuTextureId{2U, 1U});
+    auto firstKey = registerTexture(*registry, *firstTexture, Render::GpuTextureId{1U, 1U});
+    auto secondKey = registerTexture(*registry, *secondTexture, Render::GpuTextureId{2U, 1U});
     ASSERT_TRUE(firstKey.has_value());
     ASSERT_TRUE(secondKey.has_value());
 
@@ -658,148 +868,315 @@ TEST(Sprite2DBindingRegistryTests, ConcurrentLiveTexturesReceiveDistinctNonzeroK
     EXPECT_EQ(device.callCount(), 2U);
 }
 
-TEST(Sprite2DBindingRegistryTests, RegistriesSharingDeviceReceiveDistinctKeysAndUnbindIndependently)
+TEST(Sprite2DBindingRegistryTests, RegistriesSharingDeviceReceiveDistinctKeysAndRetireIndependently)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
     const Core::AssetId firstTextureId = assetId(1U);
     const Core::AssetId secondTextureId = assetId(2U);
-    auto firstTexture = store->publish(makeTexture(memory, 1U));
-    auto secondTexture = store->publish(makeTexture(memory, 2U));
-    auto firstSprite = store->publish(makeSprite(memory, 3U, firstTextureId));
-    auto secondSprite = store->publish(makeSprite(memory, 4U, secondTextureId));
+    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
+    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
+    auto firstSprite = assets->store().publish(makeSprite(memory, 3U, firstTextureId));
+    auto secondSprite = assets->store().publish(makeSprite(memory, 4U, secondTextureId));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(secondTexture.has_value());
     ASSERT_TRUE(firstSprite.has_value());
     ASSERT_TRUE(secondSprite.has_value());
 
     FixedBindingRenderDevice device;
-    auto firstRegistry = Sprite2DBindingRegistry::Create(
-        *store, device, Sprite2DBindingRegistryConfig{.textureCapacity = 1, .memoryResource = &memory});
-    auto secondRegistry = Sprite2DBindingRegistry::Create(
-        *store, device, Sprite2DBindingRegistryConfig{.textureCapacity = 1, .memoryResource = &memory});
+    auto firstRegistry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 1, .memoryResource = &memory});
+    auto secondRegistry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 1, .memoryResource = &memory});
     ASSERT_TRUE(firstRegistry.has_value());
     ASSERT_TRUE(secondRegistry.has_value());
 
-    auto firstKey = firstRegistry->registerTextureBinding(*firstTexture, Render::GpuTextureId{1U, 1U});
-    auto secondKey = secondRegistry->registerTextureBinding(*secondTexture, Render::GpuTextureId{2U, 1U});
+    auto firstKey = registerTexture(*firstRegistry, *firstTexture, Render::GpuTextureId{1U, 1U});
+    auto secondKey = registerTexture(*secondRegistry, *secondTexture, Render::GpuTextureId{2U, 1U});
     ASSERT_TRUE(firstKey.has_value());
     ASSERT_TRUE(secondKey.has_value());
     EXPECT_NE(*firstKey, *secondKey);
     EXPECT_EQ(firstRegistry->resolveSprite(*firstSprite), *firstKey);
     EXPECT_EQ(secondRegistry->resolveSprite(*secondSprite), *secondKey);
 
-    ASSERT_TRUE(firstRegistry->unbindTextureBinding(*firstTexture).has_value());
+    ASSERT_TRUE(firstRegistry->retireTextureBinding(*firstTexture).has_value());
     EXPECT_EQ(firstRegistry->resolveSprite(*firstSprite), 0U);
     EXPECT_EQ(secondRegistry->resolveSprite(*secondSprite), *secondKey);
-    ASSERT_TRUE(secondRegistry->unbindTextureBinding(*secondTexture).has_value());
-    ASSERT_EQ(device.callCount(), 4U);
-    EXPECT_EQ(device.call(2), (FixedBindingRenderDevice::Call{.bindingKey = *firstKey, .texture = {}}));
-    EXPECT_EQ(device.call(3), (FixedBindingRenderDevice::Call{.bindingKey = *secondKey, .texture = {}}));
+    ASSERT_TRUE(secondRegistry->retireTextureBinding(*secondTexture).has_value());
+    EXPECT_EQ(device.callCount(), 2U);
+    EXPECT_EQ(device.retirementCount(), 2U);
 }
 
 TEST(Sprite2DBindingRegistryTests, ConflictsAndCapacityFailurePreserveExistingBinding)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto sameIdOtherHandle = store->publish(makeTexture(memory, 1U));
-    auto overflowTexture = store->publish(makeTexture(memory, 2U));
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sameIdOtherHandle = assets->store().publish(makeTexture(memory, 1U));
+    auto overflowTexture = assets->store().publish(makeTexture(memory, 2U));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sameIdOtherHandle.has_value());
     ASSERT_TRUE(overflowTexture.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(
-        *store, device, Sprite2DBindingRegistryConfig{.textureCapacity = 1, .memoryResource = &memory});
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 1, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value());
-    constexpr Render::GpuTextureId FirstGpu{1U, 1U};
-    auto first = registry->registerTextureBinding(*texture, FirstGpu);
+    Render::GpuTextureId firstGpu{1U, 1U};
+    auto first = registry->registerTextureBinding(*texture, firstGpu);
     ASSERT_TRUE(first.has_value());
+    EXPECT_FALSE(firstGpu);
 
-    const auto changedGpu = registry->registerTextureBinding(*texture, Render::GpuTextureId{2U, 1U});
+    Render::GpuTextureId changedGpuCandidate{2U, 1U};
+    const auto changedGpu = registry->registerTextureBinding(*texture, changedGpuCandidate);
     ASSERT_FALSE(changedGpu.has_value());
     EXPECT_EQ(changedGpu.error().code, AssetErrorCode::SpriteBindingConflict);
-    const auto duplicateAssetId = registry->registerTextureBinding(*sameIdOtherHandle, Render::GpuTextureId{3U, 1U});
+    EXPECT_EQ(changedGpuCandidate, (Render::GpuTextureId{2U, 1U}));
+    Render::GpuTextureId duplicateAssetIdCandidate{3U, 1U};
+    const auto duplicateAssetId =
+        registry->registerTextureBinding(*sameIdOtherHandle, duplicateAssetIdCandidate);
     ASSERT_FALSE(duplicateAssetId.has_value());
     EXPECT_EQ(duplicateAssetId.error().code, AssetErrorCode::SpriteBindingConflict);
-    const auto capacity = registry->registerTextureBinding(*overflowTexture, Render::GpuTextureId{4U, 1U});
+    EXPECT_EQ(duplicateAssetIdCandidate, (Render::GpuTextureId{3U, 1U}));
+    Render::GpuTextureId capacityCandidate{4U, 1U};
+    const auto capacity = registry->registerTextureBinding(*overflowTexture, capacityCandidate);
     ASSERT_FALSE(capacity.has_value());
     EXPECT_EQ(capacity.error().code, AssetErrorCode::SpriteBindingCapacityExceeded);
+    EXPECT_EQ(capacityCandidate, (Render::GpuTextureId{4U, 1U}));
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*sameIdOtherHandle), 0U);
+    EXPECT_EQ(assets->store().leaseCount(*overflowTexture), 0U);
 
     EXPECT_EQ(registry->bindingCount(), 1U);
     EXPECT_EQ(registry->bindingKey(*texture), *first);
     EXPECT_EQ(device.callCount(), 1U);
 }
 
-TEST(Sprite2DBindingRegistryTests, UnbindFailureIsRetryableAndPreservesResolution)
+TEST(Sprite2DBindingRegistryTests, RetirementFailureIsRetryableAndPreservesOwnersAndResolution)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto sprite = store->publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value());
-    auto binding = registry->registerTextureBinding(*texture, Render::GpuTextureId{5U, 2U});
+    auto binding = registerTexture(*registry, *texture, Render::GpuTextureId{5U, 2U});
     ASSERT_TRUE(binding.has_value());
-    device.rejectNextUpdate();
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+    device.rejectNextRetirement();
 
-    const auto rejected = registry->unbindTextureBinding(*texture);
+    const auto rejected = registry->retireTextureBinding(*texture);
     ASSERT_FALSE(rejected.has_value());
-    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::TextureUploadUnsupported);
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::GpuRetirementUnsupported);
     EXPECT_EQ(registry->bindingCount(), 1U);
     EXPECT_EQ(registry->bindingKey(*texture), *binding);
     EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+    EXPECT_EQ(assets->retirement().records().size(), 0U);
 
-    const auto retried = registry->unbindTextureBinding(*texture);
+    const auto retried = registry->retireTextureBinding(*texture);
     ASSERT_TRUE(retried.has_value()) << retried.error().message;
     EXPECT_EQ(registry->bindingCount(), 0U);
     EXPECT_EQ(registry->bindingKey(*texture), 0U);
     EXPECT_EQ(registry->resolveSprite(*sprite), 0U);
-    ASSERT_EQ(device.callCount(), 3U);
-    const FixedBindingRenderDevice::Call clearCall{.bindingKey = *binding, .texture = {}};
-    EXPECT_EQ(device.call(1), clearCall);
-    EXPECT_EQ(device.call(2), clearCall);
+    EXPECT_EQ(device.callCount(), 1U);
+    EXPECT_EQ(device.retirementAttempts(), 2U);
+    EXPECT_EQ(device.retirementCount(), 1U);
+    EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::Unloaded);
+    ASSERT_EQ(assets->retirement().records().size(), 1U);
+    EXPECT_EQ(assets->retirement().records().front().state, AssetRetirementState::Released);
 
-    const auto missing = registry->unbindTextureBinding(*texture);
+    const auto missing = registry->retireTextureBinding(*texture);
     ASSERT_FALSE(missing.has_value());
     EXPECT_EQ(missing.error().code, AssetErrorCode::SpriteBindingNotFound);
-    EXPECT_EQ(device.callCount(), 3U);
+    EXPECT_EQ(device.retirementAttempts(), 2U);
 }
 
-TEST(Sprite2DBindingRegistryTests, StaleBindingCanBeUnboundAndReleasedKeyIsNeverReused)
+TEST(Sprite2DBindingRegistryTests, DelayedCompletionOutlivesRegistryAndReleasesLeaseExactlyOnce)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory, 3U);
-    ASSERT_TRUE(store.has_value());
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    const Core::AssetId textureId = assetId(1U);
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(sprite.has_value());
+
+    FixedBindingRenderDevice device;
+    device.delayRetirement();
+    {
+        auto registry = makeRegistry(*assets, device);
+        ASSERT_TRUE(registry.has_value());
+        Render::GpuTextureId gpuTexture{9U, 3U};
+        auto binding = registry->registerTextureBinding(*texture, gpuTexture);
+        ASSERT_TRUE(binding.has_value());
+        EXPECT_FALSE(gpuTexture);
+        EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+
+        ASSERT_TRUE(registry->retireTextureBinding(*texture).has_value());
+        EXPECT_EQ(registry->bindingCount(), 0U);
+        EXPECT_EQ(registry->resolveSprite(*sprite), 0U);
+        EXPECT_TRUE(device.hasPendingRetirement());
+        EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::UnloadPending);
+        EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+        ASSERT_EQ(assets->retirement().records().size(), 1U);
+        EXPECT_EQ(assets->retirement().records().front().state, AssetRetirementState::Retiring);
+    }
+
+    EXPECT_TRUE(device.hasPendingRetirement());
+    device.completeRetirement();
+    EXPECT_FALSE(device.hasPendingRetirement());
+    EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::Unloaded);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 0U);
+    ASSERT_EQ(assets->retirement().records().size(), 1U);
+    EXPECT_EQ(assets->retirement().records().front().state, AssetRetirementState::Released);
+}
+
+TEST(Sprite2DBindingRegistryTests, RetirementPayloadAllocationFailurePreservesEntryForRetry)
+{
+    ThrowingMemoryResource memory{(std::numeric_limits<std::size_t>::max)()};
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    const Core::AssetId textureId = assetId(1U);
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(sprite.has_value());
+
+    FixedBindingRenderDevice device;
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 1, .memoryResource = &memory});
+    ASSERT_TRUE(registry.has_value());
+    auto binding = registerTexture(*registry, *texture, Render::GpuTextureId{4U, 2U});
+    ASSERT_TRUE(binding.has_value());
+    memory.rejectAllocationsAtOrAbove(1U);
+
+    const auto rejected = registry->retireTextureBinding(*texture);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, AssetErrorCode::AllocationFailed);
+    EXPECT_EQ(registry->bindingCount(), 1U);
+    EXPECT_EQ(registry->bindingKey(*texture), *binding);
+    EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+    EXPECT_TRUE(assets->retirement().records().empty());
+    EXPECT_EQ(device.retirementAttempts(), 0U);
+
+    memory.allowAllocations();
+    ASSERT_TRUE(registry->retireTextureBinding(*texture).has_value());
+    EXPECT_EQ(registry->bindingCount(), 0U);
+}
+
+TEST(Sprite2DBindingRegistryTests, RetireAllAllowsCommittedPrefixAndRetriesRemainingEntry)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
+    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
+    ASSERT_TRUE(firstTexture.has_value());
+    ASSERT_TRUE(secondTexture.has_value());
+
+    FixedBindingRenderDevice device;
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
+    ASSERT_TRUE(registry.has_value());
+    auto firstKey = registerTexture(*registry, *firstTexture, Render::GpuTextureId{1U, 1U});
+    auto secondKey = registerTexture(*registry, *secondTexture, Render::GpuTextureId{2U, 1U});
+    ASSERT_TRUE(firstKey.has_value());
+    ASSERT_TRUE(secondKey.has_value());
+    device.rejectRetirementOnAttempt(2U);
+
+    const auto partial = registry->retireAllTextureBindings();
+    ASSERT_FALSE(partial.has_value());
+    EXPECT_EQ(partial.error().code, Render::RenderErrorCode::GpuRetirementUnsupported);
+    EXPECT_EQ(registry->bindingCount(), 1U);
+    EXPECT_EQ(registry->bindingKey(*firstTexture), 0U);
+    EXPECT_EQ(registry->bindingKey(*secondTexture), *secondKey);
+    EXPECT_EQ(assets->store().leaseCount(*firstTexture), 0U);
+    EXPECT_EQ(assets->store().leaseCount(*secondTexture), 1U);
+    ASSERT_EQ(assets->retirement().records().size(), 1U);
+    EXPECT_EQ(assets->retirement().records().front().state, AssetRetirementState::Released);
+
+    ASSERT_TRUE(registry->retireAllTextureBindings().has_value());
+    EXPECT_EQ(registry->bindingCount(), 0U);
+    EXPECT_EQ(device.retirementAttempts(), 3U);
+    EXPECT_EQ(device.retirementCount(), 2U);
+    ASSERT_EQ(assets->retirement().records().size(), 2U);
+}
+
+TEST(Sprite2DBindingRegistryTests, RetireAllPreflightsActiveFrameBorrowBeforeAnyCommit)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    const Core::AssetId secondTextureId = assetId(2U);
+    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
+    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
+    auto secondSprite = assets->store().publish(makeSprite(memory, 3U, secondTextureId));
+    ASSERT_TRUE(firstTexture.has_value());
+    ASSERT_TRUE(secondTexture.has_value());
+    ASSERT_TRUE(secondSprite.has_value());
+
+    FixedBindingRenderDevice device;
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
+    ASSERT_TRUE(registry.has_value());
+    ASSERT_TRUE(registerTexture(*registry, *firstTexture, Render::GpuTextureId{1U, 1U}).has_value());
+    ASSERT_TRUE(registerTexture(*registry, *secondTexture, Render::GpuTextureId{2U, 1U}).has_value());
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1U).has_value());
+    ASSERT_TRUE(registry->internSpriteFrameResource(*secondSprite, packet.resourceSink()).has_value());
+
+    const auto blocked = registry->retireAllTextureBindings();
+    ASSERT_FALSE(blocked.has_value());
+    EXPECT_EQ(blocked.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_EQ(registry->bindingCount(), 2U);
+    EXPECT_EQ(device.retirementAttempts(), 0U);
+
+    ASSERT_TRUE(packet.abandon().has_value());
+    ASSERT_TRUE(registry->retireAllTextureBindings().has_value());
+    EXPECT_EQ(device.retirementCount(), 2U);
+}
+
+TEST(Sprite2DBindingRegistryTests, DestructionWithOwnedBindingFailsFast)
+{
+    EXPECT_DEATH(destroyRegistryWithOwnedBinding(), "");
+}
+
+TEST(Sprite2DBindingRegistryTests, UnloadPendingBindingCanBeRetiredAndReleasedKeyIsNeverReused)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory, 3U);
+    ASSERT_TRUE(assets.has_value());
     const Core::AssetId firstTextureId = assetId(1U);
-    auto firstTexture = store->publish(makeTexture(memory, 1U));
-    auto sprite = store->publish(makeSprite(memory, 2U, firstTextureId));
+    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, firstTextureId));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(
-        *store, device, Sprite2DBindingRegistryConfig{.textureCapacity = 1, .memoryResource = &memory});
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 1, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value());
-    auto firstKey = registry->registerTextureBinding(*firstTexture, Render::GpuTextureId{1U, 1U});
+    auto firstKey = registerTexture(*registry, *firstTexture, Render::GpuTextureId{1U, 1U});
     ASSERT_TRUE(firstKey.has_value());
-    ASSERT_TRUE(store->unload(*firstTexture).has_value());
+    ASSERT_TRUE(assets->store().unload(*firstTexture).has_value());
     EXPECT_EQ(registry->bindingKey(*firstTexture), 0U);
     EXPECT_EQ(registry->resolveSprite(*sprite), 0U);
 
-    ASSERT_TRUE(registry->unbindTextureBinding(*firstTexture).has_value());
-    auto secondTexture = store->publish(makeTexture(memory, 3U));
+    ASSERT_TRUE(registry->retireTextureBinding(*firstTexture).has_value());
+    auto secondTexture = assets->store().publish(makeTexture(memory, 3U));
     ASSERT_TRUE(secondTexture.has_value());
-    auto secondKey = registry->registerTextureBinding(*secondTexture, Render::GpuTextureId{2U, 1U});
+    auto secondKey = registerTexture(*registry, *secondTexture, Render::GpuTextureId{2U, 1U});
     ASSERT_TRUE(secondKey.has_value());
     EXPECT_GT(*secondKey, *firstKey);
     EXPECT_EQ(*secondKey, *firstKey + 1U);
@@ -809,14 +1186,14 @@ TEST(Sprite2DBindingRegistryTests, StaleBindingCanBeUnboundAndReleasedKeyIsNever
 TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAndNotReadyInputs)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory, 16U);
-    ASSERT_TRUE(store.has_value());
+    auto assets = makeAssetSystem(memory, 16U);
+    ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto unboundSprite = store->publish(makeSprite(memory, 2U, assetId(9U)));
-    auto queuedSprite = store->beginQueued(assetId(3U), AssetFormat::AssetKind::Sprite);
-    auto staleSprite = store->publish(makeSprite(memory, 4U, textureId));
-    auto noDependencySprite = store->publish(makeSprite(memory, 5U, textureId, {}));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto unboundSprite = assets->store().publish(makeSprite(memory, 2U, assetId(9U)));
+    auto queuedSprite = assets->store().beginQueued(assetId(3U), AssetFormat::AssetKind::Sprite);
+    auto staleSprite = assets->store().publish(makeSprite(memory, 4U, textureId));
+    auto noDependencySprite = assets->store().publish(makeSprite(memory, 5U, textureId, {}));
     const std::array wrongKindDependency{
         AssetFormat::CookedAssetWriteDependency{
             .assetId = textureId,
@@ -824,7 +1201,7 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
             .flags = AssetFormat::DependencyFlags::Required,
         },
     };
-    auto wrongDependencySprite = store->publish(makeSprite(memory, 6U, textureId, wrongKindDependency));
+    auto wrongDependencySprite = assets->store().publish(makeSprite(memory, 6U, textureId, wrongKindDependency));
     const std::array deferredRequiredDependency{
         AssetFormat::CookedAssetWriteDependency{
             .assetId = textureId,
@@ -833,7 +1210,7 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
         },
     };
     auto deferredRequiredDependencySprite =
-        store->publish(makeSprite(memory, 10U, textureId, deferredRequiredDependency));
+        assets->store().publish(makeSprite(memory, 10U, textureId, deferredRequiredDependency));
     const std::array multipleDependencies{
         AssetFormat::CookedAssetWriteDependency{
             .assetId = textureId,
@@ -846,7 +1223,7 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
             .flags = AssetFormat::DependencyFlags::Required,
         },
     };
-    auto multipleDependencySprite = store->publish(makeSprite(memory, 7U, textureId, multipleDependencies));
+    auto multipleDependencySprite = assets->store().publish(makeSprite(memory, 7U, textureId, multipleDependencies));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(unboundSprite.has_value());
     ASSERT_TRUE(queuedSprite.has_value());
@@ -855,12 +1232,12 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
     ASSERT_TRUE(wrongDependencySprite.has_value());
     ASSERT_TRUE(deferredRequiredDependencySprite.has_value());
     ASSERT_TRUE(multipleDependencySprite.has_value());
-    ASSERT_TRUE(store->unload(*staleSprite).has_value());
+    ASSERT_TRUE(assets->store().unload(*staleSprite).has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value());
-    auto textureBinding = registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U});
+    auto textureBinding = registerTexture(*registry, *texture, Render::GpuTextureId{1U, 1U});
     ASSERT_TRUE(textureBinding.has_value());
 
     EXPECT_EQ(registry->resolveSprite({}), 0U);
@@ -878,63 +1255,64 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
 TEST(Sprite2DBindingRegistryTests, UploadQueuedAndReadyGpuPayloadsRemainResolvable)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto sprite = store->publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value());
-    auto binding = registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U});
+    auto binding = registerTexture(*registry, *texture, Render::GpuTextureId{1U, 1U});
     ASSERT_TRUE(binding.has_value());
     EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
 
-    ASSERT_TRUE(store->beginUpload(*texture).has_value());
-    ASSERT_TRUE(store->beginUpload(*sprite).has_value());
+    ASSERT_TRUE(assets->store().beginUpload(*texture).has_value());
+    ASSERT_TRUE(assets->store().beginUpload(*sprite).has_value());
     EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
-    ASSERT_TRUE(store->completeGpu(*texture).has_value());
-    ASSERT_TRUE(store->completeGpu(*sprite).has_value());
+    ASSERT_TRUE(assets->store().completeGpu(*texture).has_value());
+    ASSERT_TRUE(assets->store().completeGpu(*sprite).has_value());
     EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
 }
 
 TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto sprite = store->publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value());
-    auto binding = registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U});
+    auto binding = registerTexture(*registry, *texture, Render::GpuTextureId{1U, 1U});
     ASSERT_TRUE(binding.has_value());
 
     std::optional<Core::ErrorCode> registerError;
-    std::optional<Core::ErrorCode> unbindError;
+    std::optional<Core::ErrorCode> retirementError;
     std::optional<Core::ErrorCode> internError;
+    Render::GpuTextureId foreignGpu{2U, 1U};
     Core::u32 foreignBindingKey = *binding;
     Core::u32 foreignSpriteKey = *binding;
     Render::RenderFramePacket packet;
     ASSERT_TRUE(packet.beginFrame(1).has_value());
     std::thread foreignThread([&] {
-        const auto registration = registry->registerTextureBinding(*texture, Render::GpuTextureId{2U, 1U});
+        const auto registration = registry->registerTextureBinding(*texture, foreignGpu);
         if (!registration)
         {
             registerError = registration.error().code;
         }
-        const auto unbind = registry->unbindTextureBinding(*texture);
-        if (!unbind)
+        const auto retirement = registry->retireTextureBinding(*texture);
+        if (!retirement)
         {
-            unbindError = unbind.error().code;
+            retirementError = retirement.error().code;
         }
         const auto intern = registry->internSpriteFrameResource(*sprite, packet.resourceSink());
         if (!intern)
@@ -948,8 +1326,8 @@ TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation
 
     ASSERT_TRUE(registerError.has_value());
     EXPECT_EQ(*registerError, Render::RenderErrorCode::WrongOwnerThread);
-    ASSERT_TRUE(unbindError.has_value());
-    EXPECT_EQ(*unbindError, Render::RenderErrorCode::WrongOwnerThread);
+    ASSERT_TRUE(retirementError.has_value());
+    EXPECT_EQ(*retirementError, Render::RenderErrorCode::WrongOwnerThread);
     ASSERT_TRUE(internError.has_value());
     EXPECT_EQ(*internError, Render::RenderErrorCode::WrongOwnerThread);
     EXPECT_EQ(packet.resourceCount(), 0U);
@@ -959,22 +1337,24 @@ TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation
     EXPECT_EQ(registry->bindingKey(*texture), *binding);
     EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
     EXPECT_EQ(device.callCount(), 1U);
+    EXPECT_EQ(device.retirementAttempts(), 0U);
+    EXPECT_EQ(foreignGpu, (Render::GpuTextureId{2U, 1U}));
 }
 
 TEST(Sprite2DBindingRegistryTests, MoveTransfersOwnershipAndInvalidatesSourceRegistry)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto sprite = store->publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(*store, device);
+    auto registry = makeRegistry(*assets, device);
     ASSERT_TRUE(registry.has_value());
-    auto binding = registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U});
+    auto binding = registerTexture(*registry, *texture, Render::GpuTextureId{1U, 1U});
     ASSERT_TRUE(binding.has_value());
 
     Sprite2DBindingRegistry moved = std::move(*registry);
@@ -985,7 +1365,7 @@ TEST(Sprite2DBindingRegistryTests, MoveTransfersOwnershipAndInvalidatesSourceReg
     EXPECT_EQ(registry->bindingCount(), 0U);
     EXPECT_EQ(registry->bindingKey(*texture), 0U);
     EXPECT_EQ(registry->resolveSprite(*sprite), 0U);
-    const auto movedFromRegister = registry->registerTextureBinding(*texture, Render::GpuTextureId{2U, 1U});
+    const auto movedFromRegister = registerTexture(*registry, *texture, Render::GpuTextureId{2U, 1U});
     ASSERT_FALSE(movedFromRegister.has_value());
     EXPECT_EQ(movedFromRegister.error().code, Render::RenderErrorCode::WrongOwnerThread);
 
@@ -993,39 +1373,36 @@ TEST(Sprite2DBindingRegistryTests, MoveTransfersOwnershipAndInvalidatesSourceReg
     EXPECT_EQ(moved.resolveSprite(*sprite), *binding);
     EXPECT_EQ(moved.bindingCount(), 1U);
     EXPECT_EQ(device.callCount(), 1U);
+    ASSERT_TRUE(moved.retireAllTextureBindings().has_value());
 }
 
-TEST(Sprite2DBindingRegistryTests, SteadyStateOperationsPerformNoPmrAllocations)
+TEST(Sprite2DBindingRegistryTests, SteadyStateResolutionPerformsNoPmrAllocations)
 {
     TrackingMemoryResource memory;
-    auto store = makeStore(memory);
-    ASSERT_TRUE(store.has_value());
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = store->publish(makeTexture(memory, 1U));
-    auto sprite = store->publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
     FixedBindingRenderDevice device;
-    auto registry = Sprite2DBindingRegistry::Create(
-        *store, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
+    auto registry = makeRegistry(
+        *assets, device, Sprite2DBindingRegistryConfig{.textureCapacity = 2, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value());
+    auto binding = registerTexture(*registry, *texture, Render::GpuTextureId{1U, 1U});
+    ASSERT_TRUE(binding.has_value());
     const Core::usize allocationBaseline = memory.allocationCalls();
-
-    Core::u32 previousBindingKey = 0;
     for (Core::usize iteration = 0; iteration < 300U; ++iteration)
     {
-        auto binding = registry->registerTextureBinding(*texture, Render::GpuTextureId{1U, 1U});
-        ASSERT_TRUE(binding.has_value());
-        EXPECT_GT(*binding, previousBindingKey);
         EXPECT_EQ(registry->bindingKey(*texture), *binding);
         EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
-        ASSERT_TRUE(registry->unbindTextureBinding(*texture).has_value());
-        previousBindingKey = *binding;
     }
 
     EXPECT_EQ(memory.allocationCalls(), allocationBaseline);
-    EXPECT_EQ(registry->bindingCount(), 0U);
-    EXPECT_EQ(device.callCount(), 600U);
+    EXPECT_EQ(registry->bindingCount(), 1U);
+    EXPECT_EQ(device.callCount(), 1U);
+    ASSERT_TRUE(registry->retireTextureBinding(*texture).has_value());
 }
 
 } // namespace

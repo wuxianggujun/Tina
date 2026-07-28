@@ -72,18 +72,20 @@ Sprite 顺序为 sorting layer → order in layer → stable source ordinal。�
 submit。例如 ref 序列 A/A/B/A 会形成3个 batch，而不会重排成 A/A/A/B。空、cross-packet、stale、
 wrong-kind 或 binding 超范围 ref 在提交产生副作用前失败。UI 使用独立 pass，始终不混入 World Sprite batch。
 
-产品 sample 当前上传两张 Cooked Texture2D，并通过 State-owned `Sprite2DBindingRegistry` 注册动态 key；
-registry 借用 `TileMapResources` 中的 Store 与 `DeviceCapture` 中的 RenderDevice，两个外部 owner 都必须
-覆盖 State/registry 生命周期。World 里的 crate/角色帧保存 Catalog Sprite handle，再由 borrowed resolver
+产品 sample 当前上传两张 Cooked Texture2D，并把每张 `GpuTextureId` 连同一份 resident `AssetLease`
+转移给 State-owned `Sprite2DBindingRegistry`；registry 借用 `TileMapResources` 中的 `AssetSystem` 与
+`DeviceCapture` 中的 RenderDevice，两个外部 owner 都必须保持地址稳定并覆盖 State/registry 及已提交的
+retirement pin 生命周期。World 里的 crate/角色帧保存 Catalog Sprite handle，再由 borrowed resolver
 调用 registry 解析。Particle/Trail 保存 Catalog Sprite handle，并分别通过显式借用的 resolver 调用 registry；
 TileMap emit 保存 Catalog Tileset handle，每次非空可见集合通过 resolver 薄调用 `resolveTileset()`，沿
 Tileset 唯一 required Texture2D dependency 取得当前 packet texture ref。hidden/off-camera/empty 不调用
 resolver；解析失败清空输出并返回 `SpriteBindingNotFound`。selection highlight 同样即时解析，不跨帧
 保存 ref。World、TileMap、selection、Particle 与 Trail 对同一 texture 的 intern 由 packet 去重；首次
-登记的 registry entry borrow pin 覆盖 submit/present CPU 借用期，active pin 清零前 unbind 失败。registry 借用
-AssetStore 与 RenderDevice，不拥有 GPU texture、AssetLease 或 retirement；State RAII teardown 必须先成功
-unbind 两项 binding，再 destroy texture。N16.2 已完成全部 Sprite2D `FrameResourceRef` 迁移；统一 registry/
-AssetLease/GPU retirement ownership 仍由 N16.3 收口，因此 `ASSET-HANDLE-SCENE` 总项保持 InProgress。
+登记的 registry entry borrow pin 覆盖 submit/present CPU 借用期，active pin 清零前 retirement 失败且
+Entry 保持可重试。State RAII teardown 只调用 `retireAllTextureBindings()`；backend 接受后原子失效 GPU
+generation、清除引用它的 binding，并由 AssetSystem retirement ledger 持有 Lease 到 completion。
+N16.3 已关闭 Sprite2D registry/Lease/GPU 的分裂 owner；3D Mesh/Material 仍由 N16.4 收口，因此
+`ASSET-HANDLE-SCENE` 总项保持 InProgress。
 Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用不同纹理，不再受历史 fixture key 1 限制。
 
 ## Sprite 动画
@@ -242,10 +244,12 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=14`（含2个 cooked chunk）、`texturesUploaded=2`；
-- `evidenceSchema=13`，`uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
+- `evidenceSchema=14`，`uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
   `uiThemeButtonActivations=0`、`uiThemeFinalLight=false`，证明自动 Dark→Light→Dark 在 UI phase 完成；
-- `spriteBindingTextures=2`、`spriteBindingsReleased=2`、
-  `spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`，并且
+- `spriteBindingTextures=2`、`spriteTextureLeasesAcquired=2`、
+  `spriteTextureRetirementsAccepted=2`、`spriteBindingRegistryReleased=true`、
+  `spriteTextureHandlesInvalidated=2`、`spriteTextureRetirementRecords=2`、
+  `spriteTextureRetirementReleased=2`、`spriteTextureRetirementLive=0`、`spriteBindingResolverHits>0`，并且
   `tileMapSpriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
   `trailSpriteBindingResolverHits>0`；这些字段都进入 evidence hash；
 - `tileMapStreamRequests=2`、`tileMapStreamCommitted=2`、`tileMapStreamResident=2`，且每个 frame 都推进

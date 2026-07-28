@@ -133,14 +133,19 @@ if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
 $requiredProductEvidence = @(
-    'evidenceSchema\":13',
+    'evidenceSchema\":14',
     'uiThemeDemoRequested\":true',
     'uiThemeSwitches\":2',
     'uiThemeButtonActivations\":0',
     'uiThemeFinalLight\":false',
     'spriteBindingTextures\":2',
-    'spriteBindingsReleased\":2',
-    'spriteBindingTexturesDestroyed\":2',
+    'spriteTextureLeasesAcquired\":2',
+    'spriteTextureRetirementsAccepted\":2',
+    'spriteBindingRegistryReleased\":true',
+    'spriteTextureHandlesInvalidated\":2',
+    'spriteTextureRetirementRecords\":2',
+    'spriteTextureRetirementReleased\":2',
+    'spriteTextureRetirementLive\":0',
     'spriteBindingResolverHits\":[1-9][0-9]*',
     'tileMapSpriteBindingResolverHits\":[1-9][0-9]*',
     'particleSpriteBindingResolverHits\":[1-9][0-9]*',

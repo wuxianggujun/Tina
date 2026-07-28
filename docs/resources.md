@@ -19,7 +19,8 @@ Catalog package
   -> Asset owning CatalogSnapshot / CookedAssetFile
   -> load plan + AssetSystem
   -> AssetStore Handle/Lease state
-  -> optional Sprite2DBindingRegistry / Mesh3DBindingRegistry (borrow Store + RenderDevice)
+  -> optional Sprite2DBindingRegistry (borrow AssetSystem + RenderDevice)
+     / Mesh3DBindingRegistry (borrow Store + RenderDevice)
   -> optional TileMapStream chunk residency owner
   -> optional Null UploadTicket coordinator
 ```
@@ -57,8 +58,8 @@ item 解析。TileMap emit 保存 weak Tileset Handle，不缓存 key/resolver�
 handle；Scene extraction 再通过两个 kind-specific resolver 取得 backend key。产品 `AssetStore` 覆盖
 World/extraction 生命周期；A6 的 `Mesh3DBindingRegistry` 原子注册 mesh/material GPU bundle，并由 resolver
 fail closed 解析。N16.1 已落地 packet-local `FrameResourceRef`/资源表基础设施；N16.2 已把全部 2D
-Sprite item 迁移为 frame ref，registry 在首次 intern 时提供 entry borrow pin并阻止活跃帧期间 unbind；统一
-Lease/GPU retirement owner 仍后置。
+Sprite item 迁移为 frame ref；N16.3 让 Sprite registry Entry 唯一拥有 resident Lease/GPU/binding，首次
+intern 的 entry borrow pin 阻止活跃帧期间 retirement。3D Mesh/Material 的对应 owner 统一留给 N16.4。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
@@ -78,9 +79,9 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `CatalogSnapshot` 与 `CookedAssetFile` 是 owning、move-only 对象；
 - `AssetHandle` 是弱 generation lookup，不延长 CPU payload 生命周期；
 - `AssetLease` 是 move-only 强引用，Lease 存在时逻辑 unload 进入 `UnloadPending`；
-- `Sprite2DBindingRegistry` 是 fixed-capacity owner-thread mapping；只借用 Store/device，不拥有 GPU texture、
-  Lease 或 retirement。它为 packet-local Sprite ref 维护 entry borrow count，active frame pin 清零前拒绝
-  unbind；Texture2D 释放前必须先成功 unbind；
+- `Sprite2DBindingRegistry` 是 fixed-capacity owner-thread owner；只借用 AssetSystem/device/可选 PMR，
+  每个 Entry 唯一拥有 Texture2D `AssetLease`、`GpuTextureId` 与 binding。它为 packet-local Sprite ref
+  维护 entry borrow count，active frame pin 清零前拒绝 retirement；成功 handoff 后 Entry 才清空；
 - `Mesh3DBindingRegistry` 分别维护 StaticMesh/Material 固定容量 mapping；Material v2 writer 要求 required
   Texture2D dependency 按 baseColor/MR/normal role 顺序保持 AssetId 严格递增且唯一，registry 从 Cooked
   payload 派生 factors 并逐 role 校验；它只借用 GPU owner，释放前必须 exact unbind；
@@ -95,15 +96,19 @@ submission 保留 CPU payload 时必须持有 Lease，而不是缓存 `tryGet()`
 
 ### Sprite2D binding registry
 
-`Sprite2DBindingRegistry::Create()` 必须在借用 Store 与 RenderDevice 的共享 owner thread 调用，并验证容量
-（1..4096），使用调用方 PMR 一次性建立 entry storage；Store、RenderDevice 与非空自定义 memory resource
-都是借用且必须覆盖 registry 生命周期。该共享 owner thread 同时成为 registry owner；后续
-register/unbind/resolve 不增长 storage，全部在同一线程调用。注册输入是当前 Store 的
-Texture2D `AssetHandle` 与同一借用 RenderDevice 的 `GpuTextureId`：registry 完成 handle/capacity preflight
-后调用 `createSprite2DTextureBinding()`；device binding 失败时不发布 entry，也不消费候选 key。成功 key
-在该 device 实例 namespace 内从1起单调增长，unbind 后不复用；多个 registry 共享 device 时仍获得
-distinct key。live exact duplicate 幂等，GPU/同 AssetId 冲突、registry 容量与 device key exhaustion 都
-显式失败。普通 `bindingKey()` 对 stale/unloaded Texture2D fail closed 返回0。
+`Sprite2DBindingRegistry::Create()` 必须在借用 `AssetSystem` 与 RenderDevice 的共享 owner thread 调用，并
+验证容量（1..4096），使用调用方 PMR 一次性建立 entry storage。AssetSystem 与 RenderDevice 必须保持
+最终地址并覆盖 registry 及已 handoff retirement pin 的生命周期；registry PMR 至少覆盖 registry。
+该共享 owner thread 同时成为 registry owner；后续 register/retire/resolve 不增长 storage，全部在同一
+线程调用。注册输入是当前 Store 的 Texture2D `AssetHandle` 与同一借用 RenderDevice 的
+`GpuTextureId&`：registry 完成 handle/capacity preflight、取得 resident `AssetLease`，再调用
+`createSprite2DTextureBinding()`。任一 preflight/acquire/device failure 都保留调用方 GPU owner，临时 Lease
+自动回滚且不发布 Entry；完整成功才把 Lease/GPU/binding 发布到 Entry 并清空调用方 handle。成功 key 在
+该 device 实例 namespace 内从1起单调增长，retirement 后不复用；多个 registry 共享 device 时仍获得
+distinct key。exact duplicate、同 AssetId 的另一 handle，以及同一 registry 已持有的 GPU texture 都是
+ownership conflict；由于 `GpuTextureId` 仍是可复制的 index+generation，跨 registry/cross-device alias 由
+调用方唯一 owner 契约禁止。普通 `bindingKey()`
+对 stale/unloaded Texture2D fail closed 返回0。
 
 direct `setSprite2DTextureBinding()` 的 caller-chosen key 与 allocator-managed key 共用 namespace；device
 allocator 不追踪 direct key。registry 管理期间不得混用两种写入方式，否则 direct binding 可能被后续
@@ -112,11 +117,13 @@ allocator candidate 覆盖。
 Sprite/Tileset resolve 不缓存 Cooked payload 指针：每次验证 live handle 与 expected kind，读取恰好一个
 expected kind 为 Texture2D、flags 为 `Required` 的 cooked dependency，再验证 registry 中对应 Texture
 handle/payload/binding。低层 `resolve*()` 返回 key/0；产品 extraction 使用 `intern*FrameResource()` 把同一
-binding intern 到当前 packet，首次登记保留 entry borrow pin，同帧重复登记去重并释放重复 pin。只有
-unbind 使用原 exact handle，即使 Store handle 已 stale 仍可清理 device；active borrow 或 device 清除失败时 entry
-保持不变，调用方可重试。registry 析构不替代资源 teardown，产品 State 必须按
-`unbind -> destroy/retire Texture2D` 顺序关闭，之后外部 Asset/Render owner 才能停止；State/registry 只借用
-这些外部 owner，并不负责销毁它们。
+binding intern 到当前 packet，首次登记保留 entry borrow pin，同帧重复登记去重并释放重复 pin。
+`retireTextureBinding()` 使用原 exact handle，因此 Store weak handle 已 stale 时仍能把 Entry 的 Lease/GPU
+交给 `AssetSystem::retireTexture2D()`；active borrow、PMR/ledger 或 backend failure 都保留完整 Entry 供重试。
+backend 接受后会先原子失效 GPU generation 并清除所有引用 binding，再由 completion pin 延长 Lease；
+`retireAllTextureBindings()` 先全表 borrow preflight，再允许成功前缀提交。registry 析构要求所有 Entry
+已经显式 retirement，否则 fail-fast。产品 State 只通过 registry retirement 关闭两张纹理，不再保留
+第二份裸 GPU owner 或执行 direct unbind/destroy。
 
 ## AssetSystem 状态流
 

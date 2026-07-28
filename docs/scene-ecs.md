@@ -123,13 +123,14 @@ binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material r
 A2 提供的产品 resolver 最初把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，由 Asset 层沿
 Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。A3 让 Particle/Trail 保存 Handle；
 A4 将底层通用 seam 下沉为 AssetTypes 的 `AssetBindingResolver`，Scene 名称保留为 alias，并让 TileMap
-保存 weak Tileset Handle、调用 `resolveTileset()`，不再跨帧保存 registry key。产品 State
-拥有 registry 与 GPU texture cleanup 账簿，但只借用 `TileMapResources` 中的 Store 和 `DeviceCapture` 中的
-RenderDevice；外部 owner 必须覆盖 State/registry 生命周期。key 由 RenderDevice 实例 allocator 分配，
+保存 weak Tileset Handle、调用 `resolveTileset()`，不再跨帧保存 registry key。N16.3 后产品 State 只拥有
+registry；每个 Entry 唯一拥有 resident Lease/GPU/binding，State 不再维护第二份 GPU cleanup 账簿。
+registry 借用 `TileMapResources` 中最终地址稳定的 AssetSystem 和 `DeviceCapture` 中的 RenderDevice；外部
+owner 必须覆盖 State/registry 与已提交 retirement pin 的生命周期。key 由 RenderDevice 实例 allocator 分配，
 同一 device 的多个 registry 共享唯一/单调 namespace；allocator-managed registry 管理期间不得混用 direct
 caller-chosen binding key。N16.2 将 2D seam 升级为 `AssetFrameResourceResolver`：registry 把验证后的
-binding intern 到当前 packet，并以 entry borrow pin 阻止活跃帧 unbind；Scene 不参与 key 分配、unbind
-或 retirement，也不保存 frame ref。
+binding intern 到当前 packet，并以 entry borrow pin 阻止活跃帧 retirement；Scene 不参与 key 分配或
+retirement，也不保存 frame ref。
 
 A6 的产品 resolver 把 mesh/material Handle 转交 `Mesh3DBindingRegistry`。registry 固定容量、owner-thread，
 借用 Store/device/PMR；StaticMesh 与 Material 使用独立 device key namespace，Material 通过一次原子 bundle
@@ -177,7 +178,8 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
   extraction、Prefab rollback/AssetId→Handle resolver、3D kind-specific resolver fail-closed，以及
   Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle 保留、resolver fail-closed/解析次数与
   writer capacity；
-- `tina_asset_tests`：Sprite/Mesh3D binding registry 的容量/owner thread、register/unbind transaction、key
+- `tina_asset_tests`：Sprite/Mesh3D binding registry 的容量/owner thread、Sprite register/retirement 与 Mesh
+  register/unbind transaction、key
   non-reuse、Texture/Sprite/Tileset/StaticMesh/Material Handle 与 cooked dependency fail-closed，以及 TileMap
   解析次数/失败清空；
 - `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking；

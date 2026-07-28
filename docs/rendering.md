@@ -46,7 +46,7 @@ EngineHost 只有在 packet abandon 成功后才可继续 State teardown；persi
 重复 pin 并返回同一 ref；invalid/capacity 失败不消费调用方 pin。`FrameResourceTableView::resolve()` 对
 cross-packet、stale、越界与 wrong-kind ref fail closed。view/ref 在 complete、completeSkipped、abandon 或
 packet 复用后立即失效，backend 只能在 `submitFrame()` 内同步解析。N16.2 已让全部 Sprite2D item 只保存
-packet-local texture ref；Mesh3D item 仍使用当前 registry key，由 N16.3 之后的独立切片评估迁移。
+packet-local texture ref；Mesh3D item 仍使用当前 registry key，由 N16.4 迁移并统一 owner。
 
 所有 composition 采用唯一语义：`submitFrame()` 同步消费借用 view，成功 `present()` 返回后关闭 CPU
 submission ticket 并释放 frame pin。该完成点只表示 Host/backend 已不再借用本帧 CPU 数据，**不表示 GPU

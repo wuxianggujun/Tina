@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/AssetHandle.hpp>
+#include <tina/asset/AssetStore.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -14,7 +15,7 @@
 
 namespace Tina::Asset {
 
-class AssetStore;
+class AssetSystem;
 
 inline constexpr Core::usize DefaultSprite2DBindingCapacity = 64;
 inline constexpr Core::usize MaximumSprite2DBindingCapacity = 4096;
@@ -26,10 +27,11 @@ struct Sprite2DBindingRegistryConfig final {
 };
 
 // Owner-thread registry for Texture2D AssetHandle -> backend-neutral Sprite2D
-// binding key. Store, device, and any configured memory resource are borrowed
-// and must outlive the registry.
-// The caller owns GpuTextureId lifetime and must successfully unbind before
-// destroying or retiring a registered texture.
+// binding key. AssetSystem, device, and any configured memory resource are
+// borrowed and must outlive the registry. A successful registration transfers
+// one GpuTextureId owner into the registry and keeps the Texture2D payload alive
+// with an AssetLease until retireTextureBinding() transfers both owners to the
+// AssetSystem retirement path.
 class Sprite2DBindingRegistry final {
   public:
     ~Sprite2DBindingRegistry() noexcept;
@@ -39,25 +41,32 @@ class Sprite2DBindingRegistry final {
     Sprite2DBindingRegistry(Sprite2DBindingRegistry&& other) noexcept;
     Sprite2DBindingRegistry& operator=(Sprite2DBindingRegistry&&) = delete;
 
-    // Must run on the shared owner thread of the borrowed AssetStore and
+    // Must run on the shared owner thread of the borrowed AssetSystem and
     // RenderDevice. That thread becomes the registry owner and must perform
-    // every subsequent registry operation.
-    [[nodiscard]] static Core::Result<Sprite2DBindingRegistry> Create(AssetStore& store, Render::IRenderDevice& device,
+    // every subsequent registry operation. Both borrowed owners must remain at
+    // stable addresses until the registry and every handed-off retirement end.
+    [[nodiscard]] static Core::Result<Sprite2DBindingRegistry> Create(AssetSystem& assets,
+                                                                      Render::IRenderDevice& device,
                                                                       Sprite2DBindingRegistryConfig config = {});
 
     [[nodiscard]] explicit operator bool() const noexcept;
     [[nodiscard]] Core::usize capacity() const noexcept;
     [[nodiscard]] Core::usize bindingCount() const noexcept;
 
-    // Exact duplicate registration of a live handle is idempotent. A different GPU
-    // texture or a second live handle for the same AssetId is a conflict and must be
-    // unbound first.
+    // On success gpuTexture is cleared and the registry owns its GPU lifetime.
+    // Every failure preserves gpuTexture and releases any temporary AssetLease.
+    // A live handle, AssetId, or GPU texture may have only one owned
+    // registration in this registry. Callers must not alias a GPU owner across
+    // registries.
     [[nodiscard]] Core::Result<Core::u32> registerTextureBinding(AssetHandle textureAsset,
-                                                                 Render::GpuTextureId gpuTexture) noexcept;
+                                                                 Render::GpuTextureId& gpuTexture) noexcept;
 
-    // Uses the exact stored handle even after the AssetStore handle becomes stale.
-    // Backend failure preserves the registry record so the caller can retry.
-    [[nodiscard]] Core::Status unbindTextureBinding(AssetHandle textureAsset) noexcept;
+    // Transfers the owned AssetLease and GPU texture to AssetSystem retirement.
+    // The RenderDevice retirement commit atomically invalidates the texture and
+    // clears its bindings. An active frame borrow or any retirement failure
+    // preserves the complete record for retry.
+    [[nodiscard]] Core::Status retireTextureBinding(AssetHandle textureAsset) noexcept;
+    [[nodiscard]] Core::Status retireAllTextureBindings() noexcept;
 
     [[nodiscard]] Core::u32 bindingKey(AssetHandle textureAsset) const noexcept;
     // Fail-closed Sprite -> unique Texture2D dependency -> live binding lookup.
@@ -67,7 +76,7 @@ class Sprite2DBindingRegistry final {
 
     // Resolves the asset's unique Texture2D dependency and interns its current
     // backend binding into a frame-local resource table. The retained FramePin
-    // prevents this binding entry from being unbound until the sink releases it.
+    // prevents this binding entry from being retired until the sink releases it.
     // An unresolved asset returns a successful empty ref without invoking the sink.
     [[nodiscard]] Core::Result<Render::FrameResourceRef>
     internSpriteFrameResource(AssetHandle spriteAsset, Render::FrameResourceSink& sink) noexcept;
@@ -78,12 +87,13 @@ class Sprite2DBindingRegistry final {
     struct Entry final {
         AssetHandle textureAsset{};
         Core::AssetId textureAssetId{};
+        AssetLease lease{};
         Render::GpuTextureId gpuTexture{};
         Core::u32 bindingKey = 0;
         Core::u32 frameBorrowCount = 0;
     };
 
-    Sprite2DBindingRegistry(AssetStore& store, Render::IRenderDevice& device, std::pmr::vector<Entry> entries,
+    Sprite2DBindingRegistry(AssetSystem& assets, Render::IRenderDevice& device, std::pmr::vector<Entry> entries,
                             Core::usize capacity) noexcept;
 
     [[nodiscard]] bool isOwnerThread() const noexcept;
@@ -91,6 +101,7 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] const Entry* findExact(AssetHandle textureAsset) const noexcept;
     [[nodiscard]] Entry* findByAssetId(Core::AssetId textureAssetId) noexcept;
     [[nodiscard]] const Entry* findByAssetId(Core::AssetId textureAssetId) const noexcept;
+    [[nodiscard]] const Entry* findByGpuTexture(Render::GpuTextureId gpuTexture) const noexcept;
     [[nodiscard]] Entry* findFree() noexcept;
     [[nodiscard]] bool isLiveTextureEntry(const Entry& entry) const noexcept;
     [[nodiscard]] const Entry* resolveSingleTextureDependencyEntry(
@@ -104,6 +115,7 @@ class Sprite2DBindingRegistry final {
         Render::FrameResourceSink& sink) noexcept;
     static void releaseFrameBorrow(void* userData) noexcept;
 
+    AssetSystem* m_assets = nullptr;
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;
     std::pmr::vector<Entry> m_entries{};

@@ -160,10 +160,12 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Texture2D destroy");
     }
-    // Logically invalidates texture immediately and releases completionPin only
-    // after the backend can safely hand the native resource to its destroy path.
-    // On failure completionPin is not consumed. Null/default paths complete
-    // synchronously; real backends may retain it until a GPU completion marker.
+    // On success, logically invalidates texture and clears every device binding
+    // that references it before returning. completionPin is released only after
+    // the backend can safely hand the native resource to its destroy path. On
+    // failure, texture, bindings, and completionPin are unchanged. Null/default
+    // paths complete synchronously; real backends may retain the pin until a GPU
+    // completion marker.
     [[nodiscard]] virtual Core::Status retireTexture2D(GpuTextureId texture,
                                                        FramePin& completionPin) noexcept
     {

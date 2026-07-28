@@ -31,7 +31,7 @@
 | N13 | ASSET-HANDLE-SCENE-2D-A4 | 已完成 | TileMap emit 改存 weak Tileset AssetHandle，并在调用期借用 Asset resolver；registry Tileset dependency resolve、单次解析/失败清空与产品 evidence schema 12 已贯通，完整总项仍为 Partial |
 | N14 | ASSET-HANDLE-SCENE-3D-A5 | 已完成 | MeshRenderer3D/Prefab 改存 weak StaticMesh/Material Handle，extraction 借用 kind-specific resolver；3D product evidence schema 1 与 Resources-owned AssetStore 已贯通，完整总项仍为 Partial |
 | N15 | ASSET-HANDLE-SCENE-3D-A6-BINDINGS | 已完成 | fixed-capacity owner-thread Mesh3D registry、独立 device key allocator、原子 material bundle、stale-safe unbind 与 3D product evidence schema 2 已贯通；完整总项仅剩统一 retirement ownership/FrameResourceRef |
-| N16 | ASSET-HANDLE-SCENE-FRAME-RESOURCE | 进行中 | N16.1 已建立 packet-local FrameResourceRef/资源表与 lease-consuming Texture2D retirement 事务；N16.2 已迁移全部 Sprite2D extraction；N16.3 继续统一 registry 与 retirement owner |
+| N16 | ASSET-HANDLE-SCENE-FRAME-RESOURCE | 进行中 | N16.1 已建立 packet-local FrameResourceRef/资源表与 Texture2D retirement 事务；N16.2 已迁移全部 Sprite2D extraction；N16.3 已统一 Sprite owner；N16.4 待统一 3D owner |
 
 ## N1 - 2D-TILEMAP-LAYERS
 
@@ -467,7 +467,7 @@ TileMap Tileset Handle 化，N14 已完成 3D component/Prefab Handle 化，N15 
 
 ## N11 - ASSET-HANDLE-SCENE-2D-A2
 
-### 已完成契约
+### 当时完成契约（已由 N16.3 替代 owner/retirement 部分）
 
 - `Sprite2DBindingRegistry` 是固定容量 owner-thread owner，创建时通过调用方 PMR 建立唯一持久 storage；
   `AssetStore`、`IRenderDevice` 与非空自定义 `memory_resource` 都只被借用，必须覆盖 registry 生命周期。
@@ -477,13 +477,12 @@ TileMap Tileset Handle 化，N14 已完成 3D component/Prefab Handle 化，N15 
   记录。共享同一 device 的多个 registry 安全获得 distinct key。
 - caller-chosen `setSprite2DTextureBinding()` 与 allocator-managed binding 共享 device namespace；registry
   管理期间不得混用，否则 direct key 可与 allocator 候选 key 冲突。
-- `unbindTextureBinding()` 的 device 失败保留记录供重试，成功后才删除记录。
+- 当时独立的 device unbind 失败保留记录供重试，成功后才删除记录。
 - `resolveSprite()` fail closed：只接受当前 Store 中可读取的 Sprite，要求 cooked 文件恰有一个
   required `Texture2D` dependency，并且对应 Texture handle/payload/binding 仍有效；否则返回0。A1 的 borrowed
   resolver ABI 保留，产品 resolver 只转调 registry。
-- registry 不持有 `AssetLease`、GPU texture owner 或 retirement record，也不在析构中隐式销毁资源。
-  产品 State RAII shutdown 必须先成功 unbind，再 destroy Texture2D；失败不能继续释放仍被 binding 引用的
-  GPU owner。
+- N11 当时 registry 不持有 `AssetLease`、GPU texture owner 或 retirement record，产品 State 采用
+  unbind 后 direct destroy；N16.3 已删除这条分裂 owner 路径。
 - N11 完成时 TileMap、selection highlight、Particle/Trail 仍保存 `u32` key，但已统一消费 registry 注册
   返回的动态 key；产品不再维护手写 key 1/2 binding 表。N12 随后完成 Particle/Trail Handle 化。
 
@@ -493,7 +492,7 @@ TileMap Tileset Handle 化，N14 已完成 3D component/Prefab Handle 化，N15 
 | --- | --- |
 | N11.1 | Asset 公共 registry、独立错误码与 RenderDevice instance-scoped transactional key allocator；direct setter 与 allocator 的共享 namespace/禁混契约 |
 | N11.2 | fixed-capacity/owner-thread、duplicate/conflict/capacity/device key nonreuse、same-device multi-registry、register/unbind transaction、Sprite dependency fail-closed 单测与 header isolation |
-| N11.3 | product-2d State 注册2纹理、resolver/TileMap/FX 消费动态 key、先解绑后销毁；完成时 schema 10 输出 `spriteBindingTextures=2`、`spriteBindingsReleased=2`、`spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`；N12 后为11，N13 后当前为12 |
+| N11.3 | product-2d State 注册2纹理、resolver/TileMap/FX 消费动态 key；当时 schema 10 记录注册、解绑、direct destroy 与 resolver hit，后续 schema 持续升级 |
 
 ### 验收
 
@@ -711,7 +710,7 @@ ownership 与 packet-local `FrameResourceRef` 必须作为独立后续切片完�
   当前 packet sink 取得 ref。
 - `Sprite2DBindingRegistry` 沿 Sprite/Tileset 唯一 required Texture2D dependency 校验 live binding，再把
   `{Sprite2DTexture, deviceBindingKey}` intern 到 packet。首次 intern 持有 entry borrow pin，同帧跨消费者
-  重复 intern 立即释放重复 pin并返回同一 ref；active borrow 期间 unbind 明确失败，packet
+  重复 intern 立即释放重复 pin并返回同一 ref；active borrow 期间 retirement 明确失败，packet
   complete/skip/abandon 后可重试。
 - Null/bgfx backend 在提交产生任何 frame/statistics/surface/geometry 副作用前完整解析所有 Sprite ref；
   cross-packet、stale、wrong-kind、越界或超出 `u32` binding range 均返回 `InvalidFrameResource`。suspended
@@ -719,13 +718,29 @@ ownership 与 packet-local `FrameResourceRef` 必须作为独立后续切片完�
 - Runtime `RenderSceneExtractionContext` 同时借出 phase-local `RenderSceneWriter` 与
   `FrameResourceSink`；两者都只在当前 extraction callback 有效，游戏不得缓存。
 
+### N16.3 已完成契约
+
+- `Sprite2DBindingRegistry` 借用最终地址稳定的 `AssetSystem` 与 `IRenderDevice`。Entry 是 Sprite2D
+  resident `AssetLease`、`GpuTextureId` 与 binding key 的唯一 owner；注册成功才消费调用方 GPU，
+  duplicate/AssetId/capacity/acquire/backend failure 均保留调用方 owner。
+- active frame borrow 先阻止 retirement。无 borrow 时直接调用
+  `AssetSystem::retireTexture2D(device, lease, gpu)`；backend 成功原子失效 GPU generation 与所有引用
+  binding，失败保持 Entry 可解析、可重试。`retireAllTextureBindings()` 先全表 borrow preflight，再允许
+  已成功前缀 handoff，失败项与后续项保留。
+- Registry 析构只接受空 Entry；未显式 retirement 的 Lease/GPU owner 会 fail-fast。同步 completion 可在
+  retirement 返回前释放最终 Lease；延迟 completion pin 不引用 Registry storage，因此 Registry 可先析构。
+- product-2d State 不再保存两个裸 GPU owner/registered bool。schema 14 在 Host shutdown 后证明2份 Lease
+  已取得、2次 retirement 被接受、Registry 已释放、weak handles 已失效，以及2条 `GpuTexture2D` record
+  均为 `Released` 且 live=0。
+
 ### 后续切片
 
 | 切片 | 状态 | 完成定义 |
 | --- | --- | --- |
 | N16.1 | 已完成 | Render packet 资源表/引用、Runtime begin/rollback 时序、lease-consuming Texture2D retirement 事务与单元/集成测试 |
 | N16.2 | 已完成 | World/TileMap/Particle/Trail Sprite2D extraction 只写 `FrameResourceRef`，同帧相同资源只 intern 一次，backend 提交前完整验证 table/ref |
-| N16.3 | 待推进 | 统一 Sprite registry、`AssetLease` 与 GPU retirement owner，升级 product-2d evidence 并收口 `ASSET-HANDLE-SCENE` 总项 |
+| N16.3 | 已完成 | 统一 Sprite registry、`AssetLease` 与 GPU retirement owner，升级 product-2d evidence；只收口 2D owner 子项 |
+| N16.4 | 待推进 | Mesh3D/Material 迁移到 packet-local `FrameResourceRef` 并统一 Mesh/共享 Texture owner；完成后再评估 `ASSET-HANDLE-SCENE` 总项 |
 
 ### N16.1 验收
 
@@ -741,8 +756,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 最终验证：`tina_tests` 329/329、`tina_asset_tests` 188/188、`tina_render_bgfx_tests` 52/52；
 `tina_sample_2d` 与 `tina_sample_3d` 均完成 300 帧 smoke；DOC-002 为0 error / 0 warning。
 
-N16.2 已完成 2D Scene item 与 backend 提交链迁移；registry 仍未成为 Lease/GPU retirement owner，因此
-`ASSET-HANDLE-SCENE` 总项继续为 InProgress，由 N16.3 收口。
+N16.2 已完成 2D Scene item 与 backend 提交链迁移；N16.3 关闭 Sprite2D Lease/GPU retirement owner。
+Mesh3D/Material 仍是 key + 分裂 owner 路径，因此 `ASSET-HANDLE-SCENE` 总项继续为 InProgress，由
+N16.4 收口。
 
 ## 每项收口清单
 
