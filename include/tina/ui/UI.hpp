@@ -11,6 +11,7 @@
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIDirty.hpp>
+#include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIFocus.hpp>
@@ -19,6 +20,7 @@
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
+#include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>

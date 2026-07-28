@@ -80,6 +80,7 @@ struct UIUiaMappedNode final {
     bool isEnabled = false;
     bool isKeyboardFocusable = false;
     bool hasKeyboardFocus = false;
+    bool isSelected = false;
     std::optional<UIUiaRangeValue> rangeValue{};
     std::optional<u32> toggleState{};
     std::optional<UIUiaValuePattern> value{};
@@ -111,6 +112,8 @@ struct UIUiaMappedNode final {
         return kControlTypeListItem;
     case UISemanticsRole::ScrollView:
         return kControlTypePane;
+    case UISemanticsRole::ComboBox:
+        return kControlTypeComboBox;
     case UISemanticsRole::Group:
         return kControlTypeGroup;
     }
@@ -126,13 +129,14 @@ struct UIUiaMappedNode final {
     case UISemanticsRole::Slider:
     case UISemanticsRole::TextEdit:
     case UISemanticsRole::RadioButton:
+    case UISemanticsRole::ComboBox:
+    case UISemanticsRole::ListItem:
         return true;
     case UISemanticsRole::Label:
     case UISemanticsRole::ProgressBar:
     case UISemanticsRole::Group:
     case UISemanticsRole::Dialog:
     case UISemanticsRole::List:
-    case UISemanticsRole::ListItem:
     case UISemanticsRole::ScrollView:
         return false;
     }
@@ -150,6 +154,7 @@ struct UIUiaMappedNode final {
         .isEnabled = hasState(source.states, UIAccessibilityState::Enabled),
         .isKeyboardFocusable = false,
         .hasKeyboardFocus = hasState(source.states, UIAccessibilityState::Focused),
+        .isSelected = hasState(source.states, UIAccessibilityState::Selected),
     };
 
     mapped.isKeyboardFocusable = mapped.isEnabled && roleIsKeyboardFocusable(source.role);
@@ -181,13 +186,15 @@ struct UIUiaMappedNode final {
         }
     }
 
-    if (source.role == UISemanticsRole::TextEdit || source.role == UISemanticsRole::Label)
+    if (source.role == UISemanticsRole::TextEdit || source.role == UISemanticsRole::Label ||
+        source.role == UISemanticsRole::ComboBox)
     {
         std::string valueText = source.valueText.empty() ? std::string(source.name) : std::string(source.valueText);
         mapped.value = UIUiaValuePattern{
             .value = std::move(valueText),
             .isReadOnly =
-                source.role == UISemanticsRole::Label || hasState(source.states, UIAccessibilityState::ReadOnly),
+                source.role == UISemanticsRole::Label || source.role == UISemanticsRole::ComboBox ||
+                hasState(source.states, UIAccessibilityState::ReadOnly),
         };
     }
 

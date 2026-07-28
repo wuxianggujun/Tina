@@ -25,6 +25,7 @@ enum class UISemanticsRole : u8 {
     ProgressBar,
     RadioButton,
     ScrollView,
+    ComboBox,
 };
 
 // Owner-thread snapshot entry. Text fields point into the committed snapshot's
@@ -43,6 +44,7 @@ struct UISemanticsEntry final {
     float maxValue = 0.0F;
     bool hasRange = false;
     bool checked = false;
+    bool selected = false;
     bool enabled = true;
     bool focused = false;
 };
@@ -139,6 +141,12 @@ class UICommittedSemanticsView final {
         return UISemanticsRole::Dialog;
     case UIWidgetKind::ScrollView:
         return UISemanticsRole::ScrollView;
+    case UIWidgetKind::Dropdown:
+        return UISemanticsRole::ComboBox;
+    case UIWidgetKind::Popup:
+        return UISemanticsRole::List;
+    case UIWidgetKind::DropdownItem:
+        return UISemanticsRole::ListItem;
     }
     return UISemanticsRole::Group;
 }
@@ -149,7 +157,8 @@ class UICommittedSemanticsView final {
 {
     return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox ||
            kind == UIWidgetKind::Slider || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ProgressBar ||
-           kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Modal || kind == UIWidgetKind::ScrollView;
+           kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Modal || kind == UIWidgetKind::ScrollView ||
+           kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::Popup || kind == UIWidgetKind::DropdownItem;
 }
 
 } // namespace Tina::UI

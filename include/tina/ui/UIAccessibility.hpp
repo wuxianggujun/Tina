@@ -27,6 +27,7 @@ enum class UIAccessibilityState : u32 {
     Unchecked = 1u << 4,
     HasRange = 1u << 5,
     ReadOnly = 1u << 6,
+    Selected = 1u << 7,
 };
 
 [[nodiscard]] constexpr UIAccessibilityState operator|(UIAccessibilityState a, UIAccessibilityState b) noexcept
@@ -77,6 +78,9 @@ struct UIAccessibilityNode final {
     }
     if (entry.hasRange) {
         states = states | UIAccessibilityState::HasRange;
+    }
+    if (entry.selected) {
+        states = states | UIAccessibilityState::Selected;
     }
     if (entry.kind == UIWidgetKind::ProgressBar) {
         states = states | UIAccessibilityState::ReadOnly;

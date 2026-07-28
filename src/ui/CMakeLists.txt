@@ -1,7 +1,9 @@
 set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UI.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIButton.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDropdown.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIProgressBar.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPopup.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRadioButton.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIScrollView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISlider.hpp

@@ -2,6 +2,7 @@
 
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
+#include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
@@ -327,6 +328,45 @@ struct UISettingsPanelChrome final {
         .thickness = 10.0F,
         .minThumbExtent = 24.0F,
     };
+}
+
+struct UIDropdownChrome final {
+    UIBoxPaint box{};
+    UIButtonPaint states{};
+    UITextStyle label{};
+    UIDropdownPaint dropdown{};
+};
+
+[[nodiscard]] constexpr UIDropdownChrome makeDropdownChrome(const UITheme& theme) noexcept
+{
+    const UIButtonChrome button = makeButtonChrome(theme, scaleColorAlpha(theme.surface2, 245));
+    return UIDropdownChrome{
+        .box = button.box,
+        .states = button.states,
+        .label = button.label,
+        .dropdown =
+            UIDropdownPaint{
+                .indicatorColor = theme.textAccent,
+                .selectedItemBackgroundColor = scaleColorAlpha(theme.accent, 150),
+                .indicatorWidth = 10.0F,
+                .indicatorHeight = 6.0F,
+                .indicatorInset = 10.0F,
+            },
+    };
+}
+
+[[nodiscard]] constexpr UIBoxPaint makePopupBoxPaint(const UITheme& theme) noexcept
+{
+    return makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 250), UIElevation::Low);
+}
+
+[[nodiscard]] constexpr UIButtonChrome makeDropdownItemChrome(const UITheme& theme) noexcept
+{
+    UIButtonChrome chrome = makeButtonChrome(theme, scaleColorAlpha(theme.surface1, 245));
+    chrome.box.shadow = {};
+    chrome.box.shadowOffsetX = 0.0F;
+    chrome.box.shadowOffsetY = 0.0F;
+    return chrome;
 }
 
 [[nodiscard]] constexpr UISettingsPanelChrome makeSettingsPanelChrome(const UITheme& theme) noexcept

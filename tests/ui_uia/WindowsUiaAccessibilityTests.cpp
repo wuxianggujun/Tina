@@ -162,6 +162,71 @@ TEST(WindowsUiaMappingTest, DisabledNodeIsNotKeyboardFocusable)
     EXPECT_FALSE(mapped.hasKeyboardFocus);
 }
 
+TEST(WindowsUiaProviderTest, PublishesDropdownValueAndSelectedItem)
+{
+    ASSERT_TRUE(UI::windowsUiaAccessibilityProviderAvailable());
+    auto providerResult = UI::createWindowsUiaAccessibilityProvider();
+    ASSERT_TRUE(providerResult.has_value()) << providerResult.error().message;
+    auto& provider = *providerResult;
+
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    auto updater = createUpdater(*context, root);
+
+    auto dropdown = updater.createDropdown(root.rootNodeId());
+    ASSERT_TRUE(dropdown.has_value()) << dropdown.error().message;
+    auto popup = updater.createPopup(*dropdown);
+    ASSERT_TRUE(popup.has_value()) << popup.error().message;
+    auto firstItem = updater.createDropdownItem(*popup);
+    auto secondItem = updater.createDropdownItem(*popup);
+    ASSERT_TRUE(firstItem.has_value()) << firstItem.error().message;
+    ASSERT_TRUE(secondItem.has_value()) << secondItem.error().message;
+
+    UI::UILayoutStyle popupLayout = fixedSize(160.0F, 56.0F);
+    popupLayout.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(400.0F, 300.0F)));
+    assertOk(updater.setLayoutStyle(*dropdown, fixedSize(160.0F, 32.0F)));
+    assertOk(updater.setLayoutStyle(*popup, popupLayout));
+    assertOk(updater.setLayoutStyle(*firstItem, fixedSize(160.0F, 28.0F)));
+    assertOk(updater.setLayoutStyle(*secondItem, fixedSize(160.0F, 28.0F)));
+    assertOk(updater.setText(*dropdown, "Quality"));
+    assertOk(updater.setText(*firstItem, "Balanced"));
+    assertOk(updater.setText(*secondItem, "High"));
+    assertOk(updater.setDropdownSelectedItem(*dropdown, *secondItem));
+    assertOk(updater.setDropdownOpen(*dropdown, true));
+    assertOk(context->commitLayout({.width = 400.0F, .height = 300.0F}));
+
+    UI::UIAccessibilityTree tree;
+    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(provider->publish(tree));
+
+    auto* uia = dynamic_cast<UI::WindowsUiaAccessibilityProvider*>(provider.get());
+    ASSERT_NE(uia, nullptr);
+    auto dropdownNode = uia->readMappedNode(*dropdown);
+    ASSERT_TRUE(dropdownNode.has_value()) << dropdownNode.error().message;
+    EXPECT_EQ(dropdownNode->controlTypeId, UI::Uia::kControlTypeComboBox);
+    EXPECT_TRUE(dropdownNode->isKeyboardFocusable);
+    ASSERT_TRUE(dropdownNode->value.has_value());
+    EXPECT_EQ(dropdownNode->value->value, "High");
+    EXPECT_TRUE(dropdownNode->value->isReadOnly);
+
+    auto firstItemNode = uia->readMappedNode(*firstItem);
+    ASSERT_TRUE(firstItemNode.has_value()) << firstItemNode.error().message;
+    EXPECT_EQ(firstItemNode->controlTypeId, UI::Uia::kControlTypeListItem);
+    EXPECT_FALSE(firstItemNode->isSelected);
+
+    auto secondItemNode = uia->readMappedNode(*secondItem);
+    ASSERT_TRUE(secondItemNode.has_value()) << secondItemNode.error().message;
+    EXPECT_EQ(secondItemNode->controlTypeId, UI::Uia::kControlTypeListItem);
+    EXPECT_TRUE(secondItemNode->isSelected);
+    EXPECT_TRUE(secondItemNode->isKeyboardFocusable);
+}
+
 TEST(WindowsUiaProviderTest, FactoryAvailableAndPublishMapsWidgetProperties)
 {
     ASSERT_TRUE(UI::windowsUiaAccessibilityProviderAvailable());

@@ -25,6 +25,12 @@ enum class UIWidgetKind : u8 {
     // Clipping container with retained two-axis offset, wheel routing, and
     // interactive scrollbars.
     ScrollView,
+    // Button-like anchor that owns one Popup child and a single selected item.
+    Dropdown,
+    // Absolute overlay list. Popup is a focus scope and starts closed.
+    Popup,
+    // Button-like single-select option owned by a Popup.
+    DropdownItem,
 };
 
 } // namespace Tina::UI

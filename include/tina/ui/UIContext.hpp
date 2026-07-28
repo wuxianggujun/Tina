@@ -5,6 +5,7 @@
 #include <tina/platform/Window.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
+#include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UICommittedHit.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
@@ -18,6 +19,7 @@
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
+#include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
@@ -176,6 +178,9 @@ class UIRootBuilder final {
     [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createModal(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createScrollView(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createDropdown(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createPopup(UINodeId dropdown);
+    [[nodiscard]] Core::Result<UINodeId> createDropdownItem(UINodeId popup);
 
   private:
     friend class UIContext;
@@ -207,6 +212,9 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createModal(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createScrollView(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createDropdown(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createPopup(UINodeId dropdown);
+    [[nodiscard]] Core::Result<UINodeId> createDropdownItem(UINodeId popup);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UINodeId node, UIPointerHitPolicy policy);
@@ -260,6 +268,18 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setScrollViewPaint(UINodeId scrollView, const UIScrollViewPaint& paint);
     [[nodiscard]] Core::Result<UIScrollViewPaint> scrollViewPaint(UINodeId scrollView) const;
     [[nodiscard]] Core::Result<bool> isScrollViewDragging(UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setPopupStyle(UINodeId popup, const UIPopupStyle& style);
+    [[nodiscard]] Core::Result<UIPopupStyle> popupStyle(UINodeId popup) const;
+    [[nodiscard]] Core::Status setPopupOpen(UINodeId popup, bool open);
+    [[nodiscard]] Core::Result<bool> isPopupOpen(UINodeId popup) const;
+    [[nodiscard]] Core::Result<UIPopupMetrics> popupMetrics(UINodeId popup) const;
+    [[nodiscard]] Core::Status setDropdownOpen(UINodeId dropdown, bool open);
+    [[nodiscard]] Core::Result<bool> isDropdownOpen(UINodeId dropdown) const;
+    [[nodiscard]] Core::Status setDropdownSelectedItem(UINodeId dropdown, UINodeId item);
+    [[nodiscard]] Core::Result<UINodeId> dropdownSelectedItem(UINodeId dropdown) const;
+    [[nodiscard]] Core::Result<bool> isDropdownItemSelected(UINodeId item) const;
+    [[nodiscard]] Core::Status setDropdownPaint(UINodeId dropdown, const UIDropdownPaint& paint);
+    [[nodiscard]] Core::Result<UIDropdownPaint> dropdownPaint(UINodeId dropdown) const;
     [[nodiscard]] Core::Status setProgressBarRange(UINodeId progressBar, float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValue(UINodeId progressBar, float value);
     [[nodiscard]] Core::Result<float> progressBarValue(UINodeId progressBar) const;
@@ -398,10 +418,15 @@ class UIContext final {
         UINodeId focus{};
     };
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(bool reverse);
+    // Routes retained Dropdown navigation. pressed=false releases a command
+    // previously claimed on key-down without repeating its state transition.
+    [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command,
+                                                                             bool pressed);
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
     [[nodiscard]] UINodeId activeFocusScope() const noexcept;
     [[nodiscard]] UINodeId activeModal() const noexcept;
     [[nodiscard]] UINodeId pointerCapture() const noexcept;
+    [[nodiscard]] UINodeId activePopup() const noexcept;
     // Explicit focus changes use the last committed hit/focus-scope snapshot.
     // A target must be visible, enabled, Targetable, keyboard-focusable, and
     // inside the active Modal. clearFocus is idempotent.
@@ -527,6 +552,23 @@ class UIContext final {
                                                                              UINodeId scrollView) const;
     [[nodiscard]] Core::Result<bool> isScrollViewDraggingFromUpdater(UINodeId updaterRoot,
                                                                      UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setPopupStyleFromUpdater(UINodeId updaterRoot, UINodeId popup,
+                                                       const UIPopupStyle& style);
+    [[nodiscard]] Core::Result<UIPopupStyle> popupStyleFromUpdater(UINodeId updaterRoot, UINodeId popup) const;
+    [[nodiscard]] Core::Status setPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup, bool open);
+    [[nodiscard]] Core::Result<bool> isPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup) const;
+    [[nodiscard]] Core::Result<UIPopupMetrics> popupMetricsFromUpdater(UINodeId updaterRoot, UINodeId popup) const;
+    [[nodiscard]] Core::Status setDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown, bool open);
+    [[nodiscard]] Core::Result<bool> isDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown) const;
+    [[nodiscard]] Core::Status setDropdownSelectedItemFromUpdater(UINodeId updaterRoot, UINodeId dropdown,
+                                                                 UINodeId item);
+    [[nodiscard]] Core::Result<UINodeId> dropdownSelectedItemFromUpdater(UINodeId updaterRoot,
+                                                                         UINodeId dropdown) const;
+    [[nodiscard]] Core::Result<bool> isDropdownItemSelectedFromUpdater(UINodeId updaterRoot, UINodeId item) const;
+    [[nodiscard]] Core::Status setDropdownPaintFromUpdater(UINodeId updaterRoot, UINodeId dropdown,
+                                                          const UIDropdownPaint& paint);
+    [[nodiscard]] Core::Result<UIDropdownPaint> dropdownPaintFromUpdater(UINodeId updaterRoot,
+                                                                        UINodeId dropdown) const;
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListenerFromUpdater(UINodeId updaterRoot, UIRoutedPointerListenerDesc descriptor,
                                         UIRoutedPointerCallback&& callback);

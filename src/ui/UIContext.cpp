@@ -136,14 +136,31 @@ struct ScrollViewLayoutScratch final {
     UILogicalRect viewportRect{};
 };
 
-inline constexpr u8 ThemeBindingBoxPaint = 1U << 0U;
-inline constexpr u8 ThemeBindingTextStyle = 1U << 1U;
-inline constexpr u8 ThemeBindingButtonPaint = 1U << 2U;
-inline constexpr u8 ThemeBindingCheckboxPaint = 1U << 3U;
-inline constexpr u8 ThemeBindingSliderPaint = 1U << 4U;
-inline constexpr u8 ThemeBindingProgressBarPaint = 1U << 5U;
-inline constexpr u8 ThemeBindingRadioButtonPaint = 1U << 6U;
-inline constexpr u8 ThemeBindingScrollViewPaint = 1U << 7U;
+struct DropdownState final {
+    UINodeId popup{};
+    UINodeId selectedItem{};
+    UIDropdownPaint paint{};
+};
+
+struct PopupState final {
+    UIPopupStyle style{};
+    UIPopupMetrics committedMetrics{};
+    bool open = false;
+};
+
+struct PopupLayoutScratch final {
+    UIPopupMetrics metrics{};
+};
+
+inline constexpr u16 ThemeBindingBoxPaint = 1U << 0U;
+inline constexpr u16 ThemeBindingTextStyle = 1U << 1U;
+inline constexpr u16 ThemeBindingButtonPaint = 1U << 2U;
+inline constexpr u16 ThemeBindingCheckboxPaint = 1U << 3U;
+inline constexpr u16 ThemeBindingSliderPaint = 1U << 4U;
+inline constexpr u16 ThemeBindingProgressBarPaint = 1U << 5U;
+inline constexpr u16 ThemeBindingRadioButtonPaint = 1U << 6U;
+inline constexpr u16 ThemeBindingScrollViewPaint = 1U << 7U;
+inline constexpr u16 ThemeBindingDropdownPaint = 1U << 8U;
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -419,6 +436,38 @@ struct ResolvedLength final {
     offset.x = normalizeFloat(offset.x);
     offset.y = normalizeFloat(offset.y);
     return offset;
+}
+
+[[nodiscard]] bool isValidPopupPlacement(UIPopupPlacement placement) noexcept
+{
+    return placement == UIPopupPlacement::Auto || placement == UIPopupPlacement::Below ||
+           placement == UIPopupPlacement::Above;
+}
+
+[[nodiscard]] Core::Result<UIPopupStyle> normalizePopupStyle(UIPopupStyle style)
+{
+    if (!isValidPopupPlacement(style.placement) || !std::isfinite(style.anchorGap) || style.anchorGap < 0.0F)
+    {
+        return fail(UIErrorCode::InvalidControlValue,
+                    "UI Popup placement must be valid and anchor gap must be finite and non-negative");
+    }
+    style.anchorGap = normalizeFloat(style.anchorGap);
+    return style;
+}
+
+[[nodiscard]] Core::Result<UIDropdownPaint> normalizeDropdownPaint(UIDropdownPaint paint)
+{
+    if (!(std::isfinite(paint.indicatorWidth) && paint.indicatorWidth > 0.0F) ||
+        !(std::isfinite(paint.indicatorHeight) && paint.indicatorHeight > 0.0F) ||
+        !std::isfinite(paint.indicatorInset) || paint.indicatorInset < 0.0F)
+    {
+        return fail(UIErrorCode::InvalidControlValue,
+                    "UI Dropdown indicator size must be finite and positive and inset must be non-negative");
+    }
+    paint.indicatorWidth = normalizeFloat(paint.indicatorWidth);
+    paint.indicatorHeight = normalizeFloat(paint.indicatorHeight);
+    paint.indicatorInset = normalizeFloat(paint.indicatorInset);
+    return paint;
 }
 
 [[nodiscard]] usize countBoxChromePaintEntries(const UIBoxPaint& paint, const UILogicalRect& worldRect,
@@ -1027,7 +1076,7 @@ struct UIContext::Impl final {
     std::pmr::vector<UIButtonPaint> buttonPaintsByNodeIndex;
     // Each bit tracks one property that still inherits product chrome. Theme
     // staging scratch is index-aligned and allocated once during Create().
-    std::pmr::vector<u8> themeBindingsByNodeIndex;
+    std::pmr::vector<u16> themeBindingsByNodeIndex;
     std::pmr::vector<u8> themeDirtyScratchByNodeIndex;
     std::pmr::vector<UITextMetrics> themeTextMetricsScratchByNodeIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
@@ -1038,6 +1087,9 @@ struct UIContext::Impl final {
     std::pmr::vector<RadioButtonState> radioButtonStatesByNodeIndex;
     std::pmr::vector<ScrollViewState> scrollViewStatesByNodeIndex;
     std::pmr::vector<ScrollViewLayoutScratch> scrollViewLayoutScratchByNodeIndex;
+    std::pmr::vector<DropdownState> dropdownStatesByNodeIndex;
+    std::pmr::vector<PopupState> popupStatesByNodeIndex;
+    std::pmr::vector<PopupLayoutScratch> popupLayoutScratchByNodeIndex;
     std::pmr::vector<char> textBytes;
     std::pmr::vector<TextByteAllocation> freeTextAllocations;
     usize textByteUsed = 0;
@@ -1187,6 +1239,9 @@ struct UIContext::Impl final {
     bool hasLastPointerInput = false;
     bool pointerCancelDispatchInProgress = false;
     UINodeId activeModalNode{};
+    UINodeId activePopupNode{};
+    std::array<bool, 5> dropdownCommandPressed{};
+    bool popupDismissPointerBarrierActive = false;
     UINodeId pendingDestroyedModalRestoreFocus{};
     bool hasPendingDestroyedModalRestoreFocus = false;
     // Last Button that received Primary Pointer arm. Keyboard/Gamepad Accept
@@ -1211,7 +1266,9 @@ struct UIContext::Impl final {
           themeTextMetricsScratchByNodeIndex(&resource), localSolidFillCacheByIndex(&resource),
           localTextColorCacheByIndex(&resource), textStatesByIndex(&resource), textEditStatesByNodeIndex(&resource),
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
-          scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource), textBytes(&resource),
+          scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
+          dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
+          popupLayoutScratchByNodeIndex(&resource), textBytes(&resource),
           freeTextAllocations(&resource), dirtyByIndex(&resource), dirtyQueuedByIndex(&resource),
           dirtyReservedByIndex(&resource), dirtyQueue(&resource), routeDirtyReservationScratch(&resource),
           routeDirtyReservationCandidateByIndex(&resource), layoutScratchByIndex(&resource),
@@ -1287,6 +1344,9 @@ struct UIContext::Impl final {
         impl->radioButtonStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->scrollViewStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->scrollViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
+        impl->dropdownStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->popupStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->popupLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->textBytes.resize(normalized.textByteCapacity, '\0');
         impl->freeTextAllocations.reserve(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
@@ -1570,6 +1630,12 @@ struct UIContext::Impl final {
                 continue;
             }
             const UILayoutStyle& style = layoutStylesByIndex[index];
+            UIVisibility ownVisibility = style.visibility;
+            if (record->kind == UIWidgetKind::Popup && index < popupStatesByNodeIndex.size() &&
+                !popupStatesByNodeIndex[index].open)
+            {
+                ownVisibility = UIVisibility::Collapsed;
+            }
             LayoutScratchState& scratch = layoutScratchByIndex[index];
             const LayoutPreparedInputs previous = scratch.preparedInputs;
             if (!allowReuse)
@@ -1579,7 +1645,7 @@ struct UIContext::Impl final {
 
             if (record->parentIndex == InvalidNodeIndex)
             {
-                scratch.effectiveVisibility = style.visibility;
+                scratch.effectiveVisibility = ownVisibility;
                 scratch.parentContentWidthDefinite = true;
                 scratch.parentContentHeightDefinite = true;
                 scratch.parentContentWidth = viewportSize.width;
@@ -1587,7 +1653,7 @@ struct UIContext::Impl final {
             } else
             {
                 const LayoutScratchState& parentScratch = layoutScratchByIndex[record->parentIndex];
-                scratch.effectiveVisibility = combineVisibility(parentScratch.effectiveVisibility, style.visibility);
+                scratch.effectiveVisibility = combineVisibility(parentScratch.effectiveVisibility, ownVisibility);
                 scratch.parentContentWidthDefinite = parentScratch.contentWidthDefinite;
                 scratch.parentContentHeightDefinite = parentScratch.contentHeightDefinite;
                 scratch.parentContentWidth = parentScratch.contentWidth;
@@ -1736,17 +1802,26 @@ struct UIContext::Impl final {
                 childIndex = childRecord->nextSiblingIndex;
             }
 
-            if (flowChildCount == 0 && supportsWidgetText(record->kind) && index < textStatesByIndex.size() &&
-                textStatesByIndex[index].hasContent)
+            if (flowChildCount == 0 && supportsWidgetText(record->kind))
             {
-                const UILogicalSize textSize = textStatesByIndex[index].metrics.measuredSize;
-                autoContentWidth = textSize.width;
-                autoContentHeight = textSize.height;
-                if (record->kind == UIWidgetKind::RadioButton && index < radioButtonStatesByNodeIndex.size())
+                if (const UITextMetrics* metrics = presentationTextMetricsFor(index); metrics != nullptr)
                 {
-                    radioLabelWidth = textSize.width;
-                    hasRadioLabel = true;
+                    const UILogicalSize textSize = metrics->measuredSize;
+                    autoContentWidth = textSize.width;
+                    autoContentHeight = textSize.height;
+                    if (record->kind == UIWidgetKind::RadioButton && index < radioButtonStatesByNodeIndex.size())
+                    {
+                        radioLabelWidth = textSize.width;
+                        hasRadioLabel = true;
+                    }
                 }
+            }
+            if (flowChildCount == 0 && record->kind == UIWidgetKind::Dropdown &&
+                index < dropdownStatesByNodeIndex.size())
+            {
+                const UIDropdownPaint& dropdownPaint = dropdownStatesByNodeIndex[index].paint;
+                autoContentWidth += dropdownPaint.indicatorWidth + dropdownPaint.indicatorInset * 2.0F;
+                autoContentHeight = (std::max)(autoContentHeight, dropdownPaint.indicatorHeight);
             }
 
             if (flowChildCount == 0 && record->kind == UIWidgetKind::RadioButton &&
@@ -1807,7 +1882,7 @@ struct UIContext::Impl final {
     }
 
     void assignLayoutRect(u32 index, UILogicalRect worldRect, UILogicalRect parentWorldRect,
-                          UILogicalRect descendantClip, u32 ordinal) noexcept
+                          UILogicalRect descendantClip) noexcept
     {
         LayoutScratchState& scratch = layoutScratchByIndex[index];
         const UILayoutStyle& style = layoutStylesByIndex[index];
@@ -1836,9 +1911,6 @@ struct UIContext::Impl final {
         scratch.contentHeightDefinite = true;
         scratch.contentWidth = normalizeFloat((std::max)(0.0F, worldRect.width - horizontalMargin(style.padding)));
         scratch.contentHeight = normalizeFloat((std::max)(0.0F, worldRect.height - verticalMargin(style.padding)));
-        scratch.layoutOrdinal = ordinal;
-        scratch.paintOrdinal = ordinal;
-
         if (layoutReuseInProgress &&
             (previousWorldRect != scratch.worldRect || previousLocalRect != scratch.localRect ||
              previousEffectiveClip != scratch.effectiveClip || previousDescendantClip != scratch.descendantClip ||
@@ -1918,10 +1990,67 @@ struct UIContext::Impl final {
                              .width = normalizeFloat((std::max)(0.0F, width)),
                              .height = normalizeFloat((std::max)(0.0F, height)),
                          },
-                         parentWorldRect, descendantClip, 0);
+                         parentWorldRect, descendantClip);
     }
 
-    void arrangeChildren(u32 parentIndex, UILogicalRect, LayoutPassStatistics& statistics) noexcept
+    void arrangePopupChild(u32 popupIndex, UILogicalRect anchorRect, UILogicalRect viewportRect,
+                           LayoutPassStatistics& statistics) noexcept
+    {
+        const UILayoutStyle& popupLayoutStyle = layoutStylesByIndex[popupIndex];
+        LayoutScratchState& popupScratch = layoutScratchByIndex[popupIndex];
+        PopupState& popup = popupStatesByNodeIndex[popupIndex];
+        refreshMeasuredSizeForParentContent(popupIndex, viewportRect, statistics);
+
+        float width = popupScratch.measuredSize.width;
+        float height = popupScratch.measuredSize.height;
+        if (popup.style.matchAnchorWidth)
+        {
+            width = anchorRect.width;
+        }
+        width = (std::min)(clampWidth(width, popupLayoutStyle, popupScratch, statistics), viewportRect.width);
+        height = (std::min)(clampHeight(height, popupLayoutStyle, popupScratch, statistics), viewportRect.height);
+
+        const float belowY = anchorRect.bottom() + popup.style.anchorGap;
+        const float aboveY = anchorRect.y - popup.style.anchorGap - height;
+        const bool fitsBelow = belowY + height <= viewportRect.bottom();
+        const bool fitsAbove = aboveY >= viewportRect.y;
+        const float availableBelow = (std::max)(0.0F, viewportRect.bottom() - belowY);
+        const float availableAbove = (std::max)(0.0F, anchorRect.y - popup.style.anchorGap - viewportRect.y);
+
+        UIPopupPlacement resolved = popup.style.placement;
+        if (resolved == UIPopupPlacement::Auto)
+        {
+            resolved = fitsBelow || (!fitsAbove && availableBelow >= availableAbove) ? UIPopupPlacement::Below
+                                                                                     : UIPopupPlacement::Above;
+        } else if (resolved == UIPopupPlacement::Below && !fitsBelow && fitsAbove)
+        {
+            resolved = UIPopupPlacement::Above;
+        } else if (resolved == UIPopupPlacement::Above && !fitsAbove && fitsBelow)
+        {
+            resolved = UIPopupPlacement::Below;
+        }
+
+        const float maximumX = (std::max)(viewportRect.x, viewportRect.right() - width);
+        const float maximumY = (std::max)(viewportRect.y, viewportRect.bottom() - height);
+        const float x = (std::clamp)(anchorRect.x, viewportRect.x, maximumX);
+        const float requestedY = resolved == UIPopupPlacement::Above ? aboveY : belowY;
+        const float y = (std::clamp)(requestedY, viewportRect.y, maximumY);
+        const UILogicalRect popupRect{
+            .x = normalizeFloat(x),
+            .y = normalizeFloat(y),
+            .width = normalizeFloat((std::max)(0.0F, width)),
+            .height = normalizeFloat((std::max)(0.0F, height)),
+        };
+        assignLayoutRect(popupIndex, popupRect, anchorRect, viewportRect);
+        popupLayoutScratchByNodeIndex[popupIndex].metrics = UIPopupMetrics{
+            .anchorRect = anchorRect,
+            .popupRect = popupRect,
+            .resolvedPlacement = resolved,
+            .open = popupScratch.effectiveVisibility == UIVisibility::Visible,
+        };
+    }
+
+    void arrangeChildren(u32 parentIndex, UILogicalRect viewportRect, LayoutPassStatistics& statistics) noexcept
     {
         const NodeRecord* parentRecord = recordByIndex(parentIndex);
         if (parentRecord == nullptr)
@@ -1939,6 +2068,10 @@ struct UIContext::Impl final {
         };
         UILogicalRect layoutContentRect = unscrolledContentRect;
         UILogicalRect descendantClip = parentScratch.descendantClip;
+        if (parentRecord->kind == UIWidgetKind::Popup)
+        {
+            descendantClip = intersectRects(descendantClip, parentScratch.worldRect);
+        }
 
         if (parentScratch.effectiveVisibility == UIVisibility::Collapsed)
         {
@@ -1946,6 +2079,10 @@ struct UIContext::Impl final {
                 parentIndex < scrollViewLayoutScratchByNodeIndex.size())
             {
                 scrollViewLayoutScratchByNodeIndex[parentIndex] = {};
+            }
+            if (parentRecord->kind == UIWidgetKind::Popup && parentIndex < popupLayoutScratchByNodeIndex.size())
+            {
+                popupLayoutScratchByNodeIndex[parentIndex] = {};
             }
             u32 collapsedChild = parentRecord->firstChildIndex;
             while (collapsedChild != InvalidNodeIndex)
@@ -1955,7 +2092,7 @@ struct UIContext::Impl final {
                 {
                     break;
                 }
-                assignLayoutRect(collapsedChild, unscrolledContentRect, parentWorldRect, descendantClip, 0);
+                assignLayoutRect(collapsedChild, unscrolledContentRect, parentWorldRect, descendantClip);
                 collapsedChild = childRecord->nextSiblingIndex;
             }
             return;
@@ -2114,12 +2251,19 @@ struct UIContext::Impl final {
 
             if (childScratch.effectiveVisibility == UIVisibility::Collapsed)
             {
-                assignLayoutRect(currentChild, layoutContentRect, parentWorldRect, descendantClip, 0);
+                assignLayoutRect(currentChild, layoutContentRect, parentWorldRect, descendantClip);
                 continue;
             }
             if (childStyle.position == UILayoutPositionMode::AbsoluteOverlay)
             {
-                arrangeAbsoluteChild(currentChild, layoutContentRect, parentWorldRect, descendantClip, statistics);
+                if (childRecord->kind == UIWidgetKind::Popup && currentChild < popupStatesByNodeIndex.size() &&
+                    currentChild < popupLayoutScratchByNodeIndex.size())
+                {
+                    arrangePopupChild(currentChild, parentWorldRect, viewportRect, statistics);
+                } else
+                {
+                    arrangeAbsoluteChild(currentChild, layoutContentRect, parentWorldRect, descendantClip, statistics);
+                }
                 continue;
             }
 
@@ -2190,7 +2334,7 @@ struct UIContext::Impl final {
                                  .width = normalizeFloat((std::max)(0.0F, width)),
                                  .height = normalizeFloat((std::max)(0.0F, height)),
                              },
-                             parentWorldRect, descendantClip, 0);
+                             parentWorldRect, descendantClip);
 
             mainOffset += childMainSize + mainBefore + mainAfter + gap;
         }
@@ -2214,6 +2358,7 @@ struct UIContext::Impl final {
             {
                 continue;
             }
+            const u32 currentOrdinal = ordinal++;
             if (!hasLayoutWork(layoutWorkByIndex[index], LayoutWorkArrange))
             {
                 continue;
@@ -2229,34 +2374,60 @@ struct UIContext::Impl final {
                                      .width = scratch.measuredSize.width,
                                      .height = scratch.measuredSize.height,
                                  },
-                                 viewportRect, viewportRect, ordinal);
+                                 viewportRect, viewportRect);
             }
-            scratch.layoutOrdinal = ordinal;
-            scratch.paintOrdinal = ordinal;
+            scratch.layoutOrdinal = currentOrdinal;
+            scratch.paintOrdinal = currentOrdinal;
             arrangeChildren(index, viewportRect, statistics);
-            ++ordinal;
         }
+    }
+
+    [[nodiscard]] bool isInPopupSubtree(u32 index) const noexcept
+    {
+        usize visited = 0;
+        while (index != InvalidNodeIndex && visited++ < nodes.capacity())
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr)
+            {
+                return false;
+            }
+            if (record->kind == UIWidgetKind::Popup)
+            {
+                return true;
+            }
+            index = record->parentIndex;
+        }
+        return false;
     }
 
     void buildCommittedLayout(std::pmr::vector<UICommittedLayoutEntry>& output,
                               const std::pmr::vector<u32>& order) const noexcept
     {
         output.clear();
-        u32 ordinal = 0;
-        for (const u32 index : order)
-        {
-            const LayoutScratchState& scratch = layoutScratchByIndex[index];
-            output.push_back(UICommittedLayoutEntry{
-                .node = idForIndex(index),
-                .localRect = scratch.localRect,
-                .worldRect = scratch.worldRect,
-                .effectiveClip = scratch.effectiveClip,
-                .effectiveVisibility = scratch.effectiveVisibility,
-                .layoutOrdinal = ordinal,
-                .paintOrdinal = ordinal,
-            });
-            ++ordinal;
-        }
+        u32 paintOrdinal = 0;
+        const auto appendPass = [&](bool popupPass) noexcept {
+            for (const u32 index : order)
+            {
+                if (isInPopupSubtree(index) != popupPass)
+                {
+                    continue;
+                }
+                const LayoutScratchState& scratch = layoutScratchByIndex[index];
+                output.push_back(UICommittedLayoutEntry{
+                    .node = idForIndex(index),
+                    .localRect = scratch.localRect,
+                    .worldRect = scratch.worldRect,
+                    .effectiveClip = scratch.effectiveClip,
+                    .effectiveVisibility = scratch.effectiveVisibility,
+                    .layoutOrdinal = scratch.layoutOrdinal,
+                    .paintOrdinal = paintOrdinal,
+                });
+                ++paintOrdinal;
+            }
+        };
+        appendPass(false);
+        appendPass(true);
     }
 
     [[nodiscard]] Core::Result<CommittedHitBuildResult>
@@ -2495,7 +2666,7 @@ struct UIContext::Impl final {
     {
         UIPremultipliedRgba8Color color = normalColor;
         const NodeRecord* record = recordByIndex(nodeIndex);
-        if (record == nullptr || record->kind != UIWidgetKind::Button || nodeIndex >= buttonPaintsByNodeIndex.size())
+        if (record == nullptr || !isButtonChromeKind(record->kind) || nodeIndex >= buttonPaintsByNodeIndex.size())
         {
             return widgetPaintColor(node, color);
         }
@@ -2530,7 +2701,7 @@ struct UIContext::Impl final {
     {
         UIBoxPaint chrome = boxPaintsByIndex[nodeIndex];
         const NodeRecord* record = recordByIndex(nodeIndex);
-        if (record == nullptr || record->kind != UIWidgetKind::Button || nodeIndex >= buttonPaintsByNodeIndex.size() ||
+        if (record == nullptr || !isButtonChromeKind(record->kind) || nodeIndex >= buttonPaintsByNodeIndex.size() ||
             !isNodeEnabled(node))
         {
             return chrome;
@@ -2581,6 +2752,19 @@ struct UIContext::Impl final {
             applyOverride(paint.pressedIndicatorColor);
         }
         return widgetPaintColor(node, color);
+    }
+
+    [[nodiscard]] UIPremultipliedRgba8Color resolvedDropdownSelectionColor(UINodeId item) const noexcept
+    {
+        const UINodeId dropdown = dropdownForItem(item);
+        if (!dropdown.hasValue() || dropdown.index() >= dropdownStatesByNodeIndex.size() ||
+            dropdownStatesByNodeIndex[dropdown.index()].selectedItem != item)
+        {
+            return {};
+        }
+        return widgetPaintColor(item,
+                                premultiply(dropdownStatesByNodeIndex[dropdown.index()].paint
+                                                .selectedItemBackgroundColor));
     }
 
     [[nodiscard]] Core::Result<usize>
@@ -2666,6 +2850,21 @@ struct UIContext::Impl final {
                 countBar(UIScrollAxes::Horizontal);
                 countBar(UIScrollAxes::Vertical);
             }
+            if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
+                nodeIndex < dropdownStatesByNodeIndex.size())
+            {
+                const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[nodeIndex].paint;
+                if (dropdown.indicatorColor.alpha != 0 && dropdown.indicatorWidth > 0.0F &&
+                    dropdown.indicatorHeight > 0.0F)
+                {
+                    paintEntryCount += 3;
+                }
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::DropdownItem &&
+                !resolvedDropdownSelectionColor(layoutEntry.node).isTransparent())
+            {
+                ++paintEntryCount;
+            }
             if (record != nullptr && record->kind == UIWidgetKind::ProgressBar &&
                 nodeIndex < progressBarStatesByNodeIndex.size())
             {
@@ -2696,10 +2895,10 @@ struct UIContext::Impl final {
                                          isNodeEnabled(layoutEntry.node) && textInputFocus == layoutEntry.node &&
                                          isLiveTextEdit(textInputFocus);
             const bool activeIme = focusedTextEdit && imeCompositionActive_;
-            if (nodeIndex < textStatesByIndex.size() && textStatesByIndex[nodeIndex].hasContent &&
+            if (nodeIndex < textStatesByIndex.size() && !presentationTextViewFor(nodeIndex).empty() &&
                 textStatesByIndex[nodeIndex].style.color.alpha != 0)
             {
-                const usize committedCodepoints = countDrawableTextCodepoints(textViewFor(nodeIndex));
+                const usize committedCodepoints = countDrawableTextCodepoints(presentationTextViewFor(nodeIndex));
                 if (activeIme && nodeIndex < textEditStatesByNodeIndex.size())
                 {
                     const UITextSelection selection = textEditStatesByNodeIndex[nodeIndex].selection;
@@ -2997,10 +3196,24 @@ struct UIContext::Impl final {
             nodeIndex < localTextColorCacheByIndex.size()
                 ? widgetPaintColor(layoutEntry.node, localTextColorCacheByIndex[nodeIndex])
                 : UIPremultipliedRgba8Color{};
-        const std::string_view committedText =
-            textState != nullptr && textState->hasContent ? textViewFor(nodeIndex) : std::string_view{};
+        const std::string_view committedText = presentationTextViewFor(nodeIndex);
         const UIEdgeSpacing padding =
             nodeIndex < layoutStylesByIndex.size() ? layoutStylesByIndex[nodeIndex].padding : UIEdgeSpacing{};
+        UICommittedLayoutEntry textLayoutEntry = layoutEntry;
+        if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
+            nodeIndex < dropdownStatesByNodeIndex.size())
+        {
+            const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[nodeIndex].paint;
+            const float reservedWidth = dropdown.indicatorWidth + dropdown.indicatorInset * 2.0F;
+            textLayoutEntry.effectiveClip = intersectRects(
+                textLayoutEntry.effectiveClip,
+                UILogicalRect{
+                    .x = layoutEntry.worldRect.x,
+                    .y = layoutEntry.worldRect.y,
+                    .width = normalizeFloat((std::max)(0.0F, layoutEntry.worldRect.width - reservedWidth)),
+                    .height = layoutEntry.worldRect.height,
+                });
+        }
         float textStartX = normalizeFloat(layoutEntry.worldRect.x + padding.left);
         const float textStartY = normalizeFloat(layoutEntry.worldRect.y + padding.top);
         if (record != nullptr && record->kind == UIWidgetKind::RadioButton &&
@@ -3018,7 +3231,7 @@ struct UIContext::Impl final {
         };
         TextPaintCursor caretCursor = cursor;
         const auto appendText = [&](std::string_view text, UIPremultipliedRgba8Color color) noexcept {
-            appendUtf8TextPaints(output, layoutEntry, nextPaintOrdinal, text, style, color, cursor.x, cursor.y,
+            appendUtf8TextPaints(output, textLayoutEntry, nextPaintOrdinal, text, style, color, cursor.x, cursor.y,
                                  &cursor);
         };
 
@@ -3059,7 +3272,7 @@ struct UIContext::Impl final {
                 output.push_back(UICommittedPaintEntry{
                     .node = layoutEntry.node,
                     .worldRect = {},
-                    .effectiveClip = layoutEntry.effectiveClip,
+                    .effectiveClip = textLayoutEntry.effectiveClip,
                     .paintOrdinal = nextPaintOrdinal,
                     .solidFill = premultiply(UIStraightSrgba8Color{
                         .red = 42,
@@ -3119,7 +3332,7 @@ struct UIContext::Impl final {
                         .width = CaretWidth,
                         .height = normalizeFloat(lineHeight),
                     },
-                .effectiveClip = layoutEntry.effectiveClip,
+                .effectiveClip = textLayoutEntry.effectiveClip,
                 .paintOrdinal = nextPaintOrdinal,
                 .solidFill = caretColor,
                 .isGlyph = false,
@@ -3254,6 +3467,56 @@ struct UIContext::Impl final {
                 appendBar(UIScrollAxes::Horizontal);
                 appendBar(UIScrollAxes::Vertical);
             }
+            if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
+                nodeIndex < dropdownStatesByNodeIndex.size())
+            {
+                const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[nodeIndex].paint;
+                const UIPremultipliedRgba8Color indicator =
+                    widgetPaintColor(layoutEntry.node, premultiply(dropdown.indicatorColor));
+                if (!indicator.isTransparent() && dropdown.indicatorWidth > 0.0F &&
+                    dropdown.indicatorHeight > 0.0F)
+                {
+                    constexpr usize StripeCount = 3;
+                    const float stripeHeight = dropdown.indicatorHeight / static_cast<float>(StripeCount);
+                    const float centerX = layoutEntry.worldRect.right() - dropdown.indicatorInset -
+                                          dropdown.indicatorWidth * 0.5F;
+                    const float top = layoutEntry.worldRect.y +
+                                      (layoutEntry.worldRect.height - dropdown.indicatorHeight) * 0.5F;
+                    for (usize stripe = 0; stripe < StripeCount; ++stripe)
+                    {
+                        const float width = dropdown.indicatorWidth *
+                                            static_cast<float>(StripeCount - stripe) /
+                                            static_cast<float>(StripeCount);
+                        output.push_back(UICommittedPaintEntry{
+                            .node = layoutEntry.node,
+                            .worldRect =
+                                UILogicalRect{
+                                    .x = normalizeFloat(centerX - width * 0.5F),
+                                    .y = normalizeFloat(top + stripeHeight * static_cast<float>(stripe)),
+                                    .width = normalizeFloat(width),
+                                    .height = normalizeFloat(stripeHeight),
+                                },
+                            .effectiveClip = layoutEntry.effectiveClip,
+                            .paintOrdinal = nextPaintOrdinal++,
+                            .solidFill = indicator,
+                        });
+                    }
+                }
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::DropdownItem)
+            {
+                const UIPremultipliedRgba8Color selection = resolvedDropdownSelectionColor(layoutEntry.node);
+                if (!selection.isTransparent())
+                {
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect = layoutEntry.worldRect,
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal++,
+                        .solidFill = selection,
+                    });
+                }
+            }
             if (record != nullptr && record->kind == UIWidgetKind::ProgressBar &&
                 nodeIndex < progressBarStatesByNodeIndex.size())
             {
@@ -3384,7 +3647,8 @@ struct UIContext::Impl final {
                 .focused = false,
             };
             if (record->kind == UIWidgetKind::Label || record->kind == UIWidgetKind::Button ||
-                record->kind == UIWidgetKind::RadioButton)
+                record->kind == UIWidgetKind::RadioButton || record->kind == UIWidgetKind::Dropdown ||
+                record->kind == UIWidgetKind::DropdownItem)
             {
                 if (Core::Status status = copyText(textViewFor(nodeIndex), entry.name); !status)
                 {
@@ -3398,6 +3662,23 @@ struct UIContext::Impl final {
             }
             if (record->kind == UIWidgetKind::Button)
             {
+                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
+            }
+            if (record->kind == UIWidgetKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
+            {
+                const UINodeId selected = dropdownStatesByNodeIndex[nodeIndex].selectedItem;
+                if (selected.hasValue() && contains(selected))
+                {
+                    if (Core::Status status = copyText(textViewFor(selected.index()), entry.valueText); !status)
+                    {
+                        return status;
+                    }
+                }
+                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
+            }
+            if (record->kind == UIWidgetKind::DropdownItem)
+            {
+                entry.selected = isSelectedDropdownItem(layoutEntry.node);
                 entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
             }
             if (record->kind == UIWidgetKind::TextEdit)
@@ -3798,18 +4079,23 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::Button && (*nodeResult)->kind != UIWidgetKind::Checkbox &&
-            (*nodeResult)->kind != UIWidgetKind::RadioButton)
+        if (!isDefaultActivatableKind((*nodeResult)->kind))
         {
             return fail(UIErrorCode::InvalidButtonAction,
-                        "UI Button action requires a Button, Checkbox, or RadioButton node");
+                        "UI Button action requires a Button, Checkbox, RadioButton, Dropdown, or DropdownItem node");
         }
         return *nodeResult;
     }
 
+    [[nodiscard]] static bool isButtonChromeKind(UIWidgetKind kind) noexcept
+    {
+        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Dropdown ||
+               kind == UIWidgetKind::DropdownItem;
+    }
+
     [[nodiscard]] static bool isDefaultActivatableKind(UIWidgetKind kind) noexcept
     {
-        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox || kind == UIWidgetKind::RadioButton;
+        return isButtonChromeKind(kind) || kind == UIWidgetKind::Checkbox || kind == UIWidgetKind::RadioButton;
     }
 
     [[nodiscard]] static bool isKeyboardFocusableKind(UIWidgetKind kind) noexcept
@@ -3980,7 +4266,7 @@ struct UIContext::Impl final {
         if (candidate.hasValue() && isNodeEnabled(candidate))
         {
             const NodeRecord* record = nodes.tryGet(candidate.storageId());
-            if (record != nullptr && record->kind == UIWidgetKind::Button)
+            if (record != nullptr && isButtonChromeKind(record->kind))
             {
                 return candidate;
             }
@@ -4698,6 +4984,89 @@ struct UIContext::Impl final {
         return std::string_view(textBytes.data() + state.allocation.offset, state.length);
     }
 
+    [[nodiscard]] UINodeId dropdownForPopup(UINodeId popup) const noexcept
+    {
+        if (!contains(popup))
+        {
+            return {};
+        }
+        const NodeRecord* popupRecord = nodes.tryGet(popup.storageId());
+        if (popupRecord == nullptr || popupRecord->kind != UIWidgetKind::Popup ||
+            popupRecord->parentIndex == InvalidNodeIndex)
+        {
+            return {};
+        }
+        const NodeRecord* dropdownRecord = recordByIndex(popupRecord->parentIndex);
+        return dropdownRecord != nullptr && dropdownRecord->kind == UIWidgetKind::Dropdown
+                   ? idForIndex(popupRecord->parentIndex)
+                   : UINodeId{};
+    }
+
+    [[nodiscard]] UINodeId popupForDropdown(UINodeId dropdown) const noexcept
+    {
+        if (!contains(dropdown) || dropdown.index() >= dropdownStatesByNodeIndex.size())
+        {
+            return {};
+        }
+        const NodeRecord* record = nodes.tryGet(dropdown.storageId());
+        const UINodeId popup = dropdownStatesByNodeIndex[dropdown.index()].popup;
+        return record != nullptr && record->kind == UIWidgetKind::Dropdown && contains(popup) ? popup : UINodeId{};
+    }
+
+    [[nodiscard]] UINodeId dropdownForItem(UINodeId item) const noexcept
+    {
+        if (!contains(item))
+        {
+            return {};
+        }
+        const NodeRecord* itemRecord = nodes.tryGet(item.storageId());
+        if (itemRecord == nullptr || itemRecord->kind != UIWidgetKind::DropdownItem ||
+            itemRecord->parentIndex == InvalidNodeIndex)
+        {
+            return {};
+        }
+        return dropdownForPopup(idForIndex(itemRecord->parentIndex));
+    }
+
+    [[nodiscard]] bool isSelectedDropdownItem(UINodeId item) const noexcept
+    {
+        const UINodeId dropdown = dropdownForItem(item);
+        return dropdown.hasValue() && dropdown.index() < dropdownStatesByNodeIndex.size() &&
+               dropdownStatesByNodeIndex[dropdown.index()].selectedItem == item;
+    }
+
+    [[nodiscard]] std::string_view presentationTextViewFor(u32 index) const noexcept
+    {
+        const NodeRecord* record = recordByIndex(index);
+        if (record != nullptr && record->kind == UIWidgetKind::Dropdown && index < dropdownStatesByNodeIndex.size())
+        {
+            const UINodeId selected = dropdownStatesByNodeIndex[index].selectedItem;
+            if (contains(selected) && selected.index() < textStatesByIndex.size() &&
+                textStatesByIndex[selected.index()].hasContent)
+            {
+                return textViewFor(selected.index());
+            }
+        }
+        return textViewFor(index);
+    }
+
+    [[nodiscard]] const UITextMetrics* presentationTextMetricsFor(u32 index) const noexcept
+    {
+        const NodeRecord* record = recordByIndex(index);
+        if (record != nullptr && record->kind == UIWidgetKind::Dropdown && index < dropdownStatesByNodeIndex.size())
+        {
+            const UINodeId selected = dropdownStatesByNodeIndex[index].selectedItem;
+            if (contains(selected) && selected.index() < textStatesByIndex.size() &&
+                textStatesByIndex[selected.index()].hasContent)
+            {
+                return &textStatesByIndex[selected.index()].metrics;
+            }
+        }
+        return index < textStatesByIndex.size() && textStatesByIndex[index].hasContent
+                   ? &textStatesByIndex[index].metrics
+                   : nullptr;
+    }
+
     [[nodiscard]] Core::Result<UITextMetrics> measureWidgetText(std::string_view utf8, const UITextStyle& style)
     {
         if (textRasterizer && textFace.hasValue())
@@ -4712,7 +5081,8 @@ struct UIContext::Impl final {
     [[nodiscard]] static bool supportsWidgetText(UIWidgetKind kind) noexcept
     {
         return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::TextEdit ||
-               kind == UIWidgetKind::RadioButton;
+               kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Dropdown ||
+               kind == UIWidgetKind::DropdownItem;
     }
 
     void resetNodeSideData(u32 index) noexcept
@@ -4802,6 +5172,18 @@ struct UIContext::Impl final {
         {
             scrollViewLayoutScratchByNodeIndex[index] = {};
         }
+        if (index < dropdownStatesByNodeIndex.size())
+        {
+            dropdownStatesByNodeIndex[index] = {};
+        }
+        if (index < popupStatesByNodeIndex.size())
+        {
+            popupStatesByNodeIndex[index] = {};
+        }
+        if (index < popupLayoutScratchByNodeIndex.size())
+        {
+            popupLayoutScratchByNodeIndex[index] = {};
+        }
     }
 
     void markStructureChanged() noexcept
@@ -4888,6 +5270,26 @@ struct UIContext::Impl final {
         routeDirtyReservationScratch.push_back(node);
     }
 
+    void addRouteLayoutDirtyReservationCandidates(UINodeId node)
+    {
+        if (!node.hasValue() || !contains(node))
+        {
+            return;
+        }
+        u32 index = node.index();
+        usize visited = 0;
+        while (index != InvalidNodeIndex && visited++ < nodes.capacity())
+        {
+            addRouteDirtyReservationCandidate(idForIndex(index));
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr)
+            {
+                return;
+            }
+            index = record->parentIndex;
+        }
+    }
+
     [[nodiscard]] Core::Status reserveRouteDirtyQueueSlots()
     {
         compactDirtyQueue();
@@ -4940,24 +5342,39 @@ struct UIContext::Impl final {
         routeDirtyReservationScratch.clear();
     }
 
-    [[nodiscard]] Core::Status markLayoutStyleDirty(UINodeId node)
+    [[nodiscard]] Core::Status markLayoutDirtyBatch(std::initializer_list<UINodeId> requestedNodes)
     {
-        if (!contains(node) || node.index() >= dirtyByIndex.size())
-        {
-            return fail(UIErrorCode::InvalidNode, "UI dirty node is invalid");
-        }
-
         layoutOrderScratch.clear();
-        u32 index = node.index();
-        while (index != InvalidNodeIndex)
+        for (const UINodeId requested : requestedNodes)
         {
-            layoutOrderScratch.push_back(index);
-            const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr)
+            if (!requested.hasValue())
             {
-                return fail(UIErrorCode::InvalidNode, "UI dirty ancestry is invalid");
+                continue;
             }
-            index = record->parentIndex;
+            if (!contains(requested) || requested.index() >= dirtyByIndex.size())
+            {
+                return fail(UIErrorCode::InvalidNode, "UI dirty node is invalid");
+            }
+
+            u32 index = requested.index();
+            usize visited = 0;
+            while (index != InvalidNodeIndex && visited++ < nodes.capacity())
+            {
+                if (std::find(layoutOrderScratch.begin(), layoutOrderScratch.end(), index) == layoutOrderScratch.end())
+                {
+                    layoutOrderScratch.push_back(index);
+                }
+                const NodeRecord* record = recordByIndex(index);
+                if (record == nullptr)
+                {
+                    return fail(UIErrorCode::InvalidNode, "UI dirty ancestry is invalid");
+                }
+                index = record->parentIndex;
+            }
+        }
+        if (layoutOrderScratch.empty())
+        {
+            return Core::success();
         }
 
         usize requiredQueueEntries = 0;
@@ -4991,16 +5408,20 @@ struct UIContext::Impl final {
         constexpr UIDirty ChangedNodeDirty = UIDirty::Style | UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite |
                                              UIDirty::HitTest | UIDirty::Semantics;
         constexpr UIDirty AncestorDirty = UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite | UIDirty::HitTest;
-        for (usize pathIndex = 0; pathIndex < layoutOrderScratch.size(); ++pathIndex)
+        for (const u32 dirtyIndex : layoutOrderScratch)
         {
-            const u32 dirtyIndex = layoutOrderScratch[pathIndex];
             if (dirtyQueuedByIndex[dirtyIndex] == 0)
             {
                 consumeDirtyQueueReservation(dirtyIndex);
                 dirtyQueue.push_back(idForIndex(dirtyIndex));
                 dirtyQueuedByIndex[dirtyIndex] = 1;
             }
-            dirtyByIndex[dirtyIndex] |= pathIndex == 0 ? ChangedNodeDirty : AncestorDirty;
+            const bool directlyRequested = std::any_of(
+                requestedNodes.begin(), requestedNodes.end(),
+                [dirtyIndex](UINodeId requested) noexcept {
+                    return requested.hasValue() && requested.index() == dirtyIndex;
+                });
+            dirtyByIndex[dirtyIndex] |= directlyRequested ? ChangedNodeDirty : AncestorDirty;
         }
         dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
         phaseDirty |= PhaseLayout | PhaseHit;
@@ -5230,7 +5651,7 @@ struct UIContext::Impl final {
         return false;
     }
 
-    [[nodiscard]] static constexpr u8 defaultThemeBindingsFor(UIWidgetKind kind) noexcept
+    [[nodiscard]] static constexpr u16 defaultThemeBindingsFor(UIWidgetKind kind) noexcept
     {
         switch (kind)
         {
@@ -5241,9 +5662,16 @@ struct UIContext::Impl final {
             return ThemeBindingBoxPaint;
         case UIWidgetKind::ScrollView:
             return ThemeBindingScrollViewPaint;
+        case UIWidgetKind::Popup:
+            return ThemeBindingBoxPaint;
         case UIWidgetKind::Label:
             return ThemeBindingTextStyle;
         case UIWidgetKind::Button:
+            return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
+        case UIWidgetKind::Dropdown:
+            return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle |
+                   ThemeBindingDropdownPaint;
+        case UIWidgetKind::DropdownItem:
             return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
         case UIWidgetKind::Checkbox:
             return ThemeBindingBoxPaint | ThemeBindingCheckboxPaint;
@@ -5265,7 +5693,7 @@ struct UIContext::Impl final {
         {
             return;
         }
-        const u8 bindings = themeBindingsByNodeIndex[index];
+        const u16 bindings = themeBindingsByNodeIndex[index];
         switch (kind)
         {
         case UIWidgetKind::Root:
@@ -5284,6 +5712,12 @@ struct UIContext::Impl final {
                 scrollViewStatesByNodeIndex[index].paint = makeScrollViewPaint(theme);
             }
             break;
+        case UIWidgetKind::Popup:
+            if ((bindings & ThemeBindingBoxPaint) != 0)
+            {
+                boxPaintsByIndex[index] = makePopupBoxPaint(theme);
+            }
+            break;
         case UIWidgetKind::Label:
             if ((bindings & ThemeBindingTextStyle) != 0)
             {
@@ -5292,6 +5726,42 @@ struct UIContext::Impl final {
             break;
         case UIWidgetKind::Button: {
             const UIButtonChrome chrome = makeButtonChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0)
+            {
+                boxPaintsByIndex[index] = chrome.box;
+            }
+            if ((bindings & ThemeBindingButtonPaint) != 0)
+            {
+                buttonPaintsByNodeIndex[index] = chrome.states;
+            }
+            if ((bindings & ThemeBindingTextStyle) != 0)
+            {
+                textStatesByIndex[index].style = chrome.label;
+            }
+            break;
+        }
+        case UIWidgetKind::Dropdown: {
+            const UIDropdownChrome chrome = makeDropdownChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0)
+            {
+                boxPaintsByIndex[index] = chrome.box;
+            }
+            if ((bindings & ThemeBindingButtonPaint) != 0)
+            {
+                buttonPaintsByNodeIndex[index] = chrome.states;
+            }
+            if ((bindings & ThemeBindingTextStyle) != 0)
+            {
+                textStatesByIndex[index].style = chrome.label;
+            }
+            if ((bindings & ThemeBindingDropdownPaint) != 0)
+            {
+                dropdownStatesByNodeIndex[index].paint = chrome.dropdown;
+            }
+            break;
+        }
+        case UIWidgetKind::DropdownItem: {
+            const UIButtonChrome chrome = makeDropdownItemChrome(theme);
             if ((bindings & ThemeBindingBoxPaint) != 0)
             {
                 boxPaintsByIndex[index] = chrome.box;
@@ -5388,6 +5858,10 @@ struct UIContext::Impl final {
             return makeBodyTextStyle(theme);
         case UIWidgetKind::Button:
             return makeButtonChrome(theme).label;
+        case UIWidgetKind::Dropdown:
+            return makeDropdownChrome(theme).label;
+        case UIWidgetKind::DropdownItem:
+            return makeDropdownItemChrome(theme).label;
         case UIWidgetKind::TextEdit:
             return makeTextEditChrome(theme).text;
         case UIWidgetKind::RadioButton:
@@ -5399,6 +5873,7 @@ struct UIContext::Impl final {
         case UIWidgetKind::ProgressBar:
         case UIWidgetKind::Modal:
         case UIWidgetKind::ScrollView:
+        case UIWidgetKind::Popup:
             return std::nullopt;
         }
         return std::nullopt;
@@ -5415,11 +5890,11 @@ struct UIContext::Impl final {
         themeDirtyScratchByNodeIndex[index] |= ThemeDirtyPaint;
     }
 
-    void detachThemeBinding(u32 index, u8 binding) noexcept
+    void detachThemeBinding(u32 index, u16 binding) noexcept
     {
         if (index < themeBindingsByNodeIndex.size())
         {
-            themeBindingsByNodeIndex[index] &= static_cast<u8>(~binding);
+            themeBindingsByNodeIndex[index] &= static_cast<u16>(~binding);
         }
     }
 
@@ -5451,7 +5926,7 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Status stageBoundProductChrome(u32 index, UIWidgetKind kind, const UITheme& theme)
     {
-        const u8 bindings = themeBindingsByNodeIndex[index];
+        const u16 bindings = themeBindingsByNodeIndex[index];
         if ((bindings & ThemeBindingTextStyle) != 0)
         {
             const auto nextStyle = productTextStyleFor(kind, theme);
@@ -5493,8 +5968,50 @@ struct UIContext::Impl final {
             }
             break;
         }
+        case UIWidgetKind::Popup: {
+            const UIBoxPaint chrome = makePopupBoxPaint(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome)
+            {
+                stageThemePaintChange(index);
+            }
+            break;
+        }
         case UIWidgetKind::Button: {
             const UIButtonChrome chrome = makeButtonChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
+            {
+                stageThemePaintChange(index);
+            }
+            if ((bindings & ThemeBindingButtonPaint) != 0 && buttonPaintsByNodeIndex[index] != chrome.states)
+            {
+                stageThemePaintChange(index);
+            }
+            break;
+        }
+        case UIWidgetKind::Dropdown: {
+            const UIDropdownChrome chrome = makeDropdownChrome(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
+            {
+                stageThemePaintChange(index);
+            }
+            if ((bindings & ThemeBindingButtonPaint) != 0 && buttonPaintsByNodeIndex[index] != chrome.states)
+            {
+                stageThemePaintChange(index);
+            }
+            if ((bindings & ThemeBindingDropdownPaint) != 0 && dropdownStatesByNodeIndex[index].paint != chrome.dropdown)
+            {
+                stageThemePaintChange(index);
+                if (dropdownStatesByNodeIndex[index].paint.indicatorWidth != chrome.dropdown.indicatorWidth ||
+                    dropdownStatesByNodeIndex[index].paint.indicatorHeight != chrome.dropdown.indicatorHeight ||
+                    dropdownStatesByNodeIndex[index].paint.indicatorInset != chrome.dropdown.indicatorInset)
+                {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
+            }
+            break;
+        }
+        case UIWidgetKind::DropdownItem: {
+            const UIButtonChrome chrome = makeDropdownItemChrome(theme);
             if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
             {
                 stageThemePaintChange(index);
@@ -5729,15 +6246,20 @@ struct UIContext::Impl final {
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
         record->rootIndex = node.index();
-        if (kind == UIWidgetKind::Modal)
+        if (kind == UIWidgetKind::Modal || kind == UIWidgetKind::Popup)
         {
             focusScopeModesByNodeIndex[node.index()] = UIFocusScopeMode::Contain;
+        }
+        if (kind == UIWidgetKind::Popup)
+        {
+            layoutStylesByIndex[node.index()].position = UILayoutPositionMode::AbsoluteOverlay;
         }
         // Interactive controls are targetable. Label remains read-only and
         // decorative unless the caller explicitly changes its hit policy.
         pointerHitPoliciesByIndex[node.index()] =
             (kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox || kind == UIWidgetKind::Slider ||
-             kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::ScrollView)
+             kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::ScrollView ||
+             kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem)
                 ? UIPointerHitPolicy::Targetable
                 : UIPointerHitPolicy::Ignore;
         if (capacityConfig.applyDefaultProductChrome)
@@ -5803,6 +6325,31 @@ struct UIContext::Impl final {
             return Core::failure(parentResult.error());
         }
         NodeRecord& parentRecord = **parentResult;
+        if (kind == UIWidgetKind::Popup)
+        {
+            if (parentRecord.kind != UIWidgetKind::Dropdown)
+            {
+                return fail(UIErrorCode::InvalidParent, "UI Popup requires a Dropdown parent");
+            }
+            if (parent.index() >= dropdownStatesByNodeIndex.size())
+            {
+                return fail(Core::CoreErrorCode::Internal, "UI Dropdown state index is out of range");
+            }
+            if (contains(dropdownStatesByNodeIndex[parent.index()].popup))
+            {
+                return fail(UIErrorCode::InvalidParent, "UI Dropdown already owns a Popup");
+            }
+        } else if (kind == UIWidgetKind::DropdownItem)
+        {
+            if (parentRecord.kind != UIWidgetKind::Popup)
+            {
+                return fail(UIErrorCode::InvalidParent, "UI DropdownItem requires a Popup parent");
+            }
+        } else if (parentRecord.kind == UIWidgetKind::Dropdown || parentRecord.kind == UIWidgetKind::Popup)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Dropdown composites only accept Popup and DropdownItem children");
+        }
         if (parentRecord.depth == (std::numeric_limits<u32>::max)())
         {
             return fail(UIErrorCode::InvalidParent, "UI parent depth cannot be represented");
@@ -5830,6 +6377,10 @@ struct UIContext::Impl final {
             parentRecord.firstChildIndex = node.index();
         }
         parentRecord.lastChildIndex = node.index();
+        if (kind == UIWidgetKind::Popup)
+        {
+            dropdownStatesByNodeIndex[parent.index()].popup = node;
+        }
         markStructureChanged();
         return node;
     }
@@ -5949,6 +6500,34 @@ struct UIContext::Impl final {
                     // restores through every removed layer to the surviving scope.
                     pendingDestroyedModalRestoreFocus = focusRestoreByNodeIndex[currentIndex];
                     hasPendingDestroyedModalRestoreFocus = true;
+                }
+            }
+            if (record->kind == UIWidgetKind::DropdownItem)
+            {
+                const UINodeId dropdown = dropdownForItem(node);
+                if (dropdown.hasValue() && dropdown.index() < dropdownStatesByNodeIndex.size() &&
+                    dropdownStatesByNodeIndex[dropdown.index()].selectedItem == node)
+                {
+                    dropdownStatesByNodeIndex[dropdown.index()].selectedItem = {};
+                }
+            }
+            if (record->kind == UIWidgetKind::Popup)
+            {
+                const UINodeId dropdown = dropdownForPopup(node);
+                if (dropdown.hasValue() && dropdown.index() < dropdownStatesByNodeIndex.size())
+                {
+                    DropdownState& dropdownState = dropdownStatesByNodeIndex[dropdown.index()];
+                    if (dropdownState.popup == node)
+                    {
+                        dropdownState.popup = {};
+                        dropdownState.selectedItem = {};
+                    }
+                }
+                if (activePopupNode == node)
+                {
+                    activePopupNode = {};
+                    popupDismissPointerBarrierActive = false;
+                    dropdownCommandPressed.fill(false);
                 }
             }
             deactivateAllRoutedPointerListenersForNode(currentIndex);
@@ -6188,11 +6767,48 @@ struct UIContext::Impl final {
             return Core::success();
         }
 
+        UINodeId popupToClose{};
+        if (!enabled)
+        {
+            if ((*nodeResult)->kind == UIWidgetKind::Dropdown)
+            {
+                const UINodeId popup = popupForDropdown(node);
+                if (popup.hasValue() && popupStatesByNodeIndex[popup.index()].open)
+                {
+                    popupToClose = popup;
+                }
+            } else if ((*nodeResult)->kind == UIWidgetKind::Popup &&
+                       popupStatesByNodeIndex[node.index()].open)
+            {
+                popupToClose = node;
+            }
+        }
+
         // Dirty capacity is reserved before interaction state changes so a
         // rejected setter leaves enabled/focus/arm state untouched.
+        releaseRouteDirtyQueueReservations();
+        addRouteDirtyReservationCandidate(node);
+        if (popupToClose.hasValue())
+        {
+            addRouteLayoutDirtyReservationCandidates(popupToClose);
+            addRouteLayoutDirtyReservationCandidates(dropdownForPopup(popupToClose));
+        }
+        if (Core::Status reservation = reserveRouteDirtyQueueSlots(); !reservation)
+        {
+            releaseRouteDirtyQueueReservations();
+            return reservation;
+        }
+        auto reservationCleanup = Core::makeScopeExit([this]() noexcept { releaseRouteDirtyQueueReservations(); });
         if (Core::Status dirty = markPaintDirty(node); !dirty)
         {
             return dirty;
+        }
+        if (popupToClose.hasValue())
+        {
+            if (Core::Status closed = setPopupOpenState(popupToClose, false); !closed)
+            {
+                return closed;
+            }
         }
         if (!enabled && capturedPointerNode == node)
         {
@@ -6297,9 +6913,10 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidFocusScope, "UI focus-scope mode is not recognized");
         }
-        if ((*nodeResult)->kind == UIWidgetKind::Modal && mode != UIFocusScopeMode::Contain)
+        if (((*nodeResult)->kind == UIWidgetKind::Modal || (*nodeResult)->kind == UIWidgetKind::Popup) &&
+            mode != UIFocusScopeMode::Contain)
         {
-            return fail(UIErrorCode::InvalidFocusScope, "UI Modal nodes always contain focus");
+            return fail(UIErrorCode::InvalidFocusScope, "UI Modal and Popup nodes always contain focus");
         }
         UIFocusScopeMode& current = focusScopeModesByNodeIndex[node.index()];
         if (current == mode)
@@ -7693,6 +8310,11 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status markLayoutStyleDirty(UINodeId node)
+    {
+        return markLayoutDirtyBatch({node});
+    }
+
     [[nodiscard]] bool isLiveScrollView(UINodeId scrollView) const noexcept
     {
         if (!scrollView.hasValue() || !contains(scrollView) || scrollView.index() >= scrollViewStatesByNodeIndex.size())
@@ -8137,6 +8759,511 @@ struct UIContext::Impl final {
         return scrollThumbDragActive && armedScrollView == scrollView;
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolvePopup(UINodeId popup)
+    {
+        auto nodeResult = resolveNode(popup);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::Popup || popup.index() >= popupStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI Popup API requires a Popup node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveDropdown(UINodeId dropdown)
+    {
+        auto nodeResult = resolveNode(dropdown);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::Dropdown || dropdown.index() >= dropdownStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI Dropdown API requires a Dropdown node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveDropdownItem(UINodeId item)
+    {
+        auto nodeResult = resolveNode(item);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::DropdownItem)
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI Dropdown item API requires a DropdownItem node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Status setPopupOpenState(UINodeId popup, bool open)
+    {
+        PopupState& popupState = popupStatesByNodeIndex[popup.index()];
+        if (popupState.open == open && (!open || activePopupNode == popup))
+        {
+            return Core::success();
+        }
+
+        const UINodeId dropdown = dropdownForPopup(popup);
+        if (!dropdown.hasValue())
+        {
+            return fail(UIErrorCode::InvalidParent, "UI Popup is detached from its Dropdown anchor");
+        }
+        if (open && (!isNodeEnabled(dropdown) || !isNodeEnabled(popup)))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Dropdown and Popup must be enabled before the Popup can open");
+        }
+
+        UINodeId previousPopup{};
+        UINodeId previousDropdown{};
+        if (open && activePopupNode.hasValue() && activePopupNode != popup && contains(activePopupNode) &&
+            activePopupNode.index() < popupStatesByNodeIndex.size() &&
+            popupStatesByNodeIndex[activePopupNode.index()].open)
+        {
+            previousPopup = activePopupNode;
+            previousDropdown = dropdownForPopup(previousPopup);
+        }
+        if (Core::Status dirty = markLayoutDirtyBatch({popup, dropdown, previousPopup, previousDropdown}); !dirty)
+        {
+            return dirty;
+        }
+
+        if (previousPopup.hasValue())
+        {
+            popupStatesByNodeIndex[previousPopup.index()].open = false;
+        }
+        const bool focusWasInClosingPopup =
+            (!open && isNodeWithinSubtree(popup, defaultActionFocusButton)) ||
+            (previousPopup.hasValue() && isNodeWithinSubtree(previousPopup, defaultActionFocusButton));
+        if (open)
+        {
+            focusRestoreByNodeIndex[popup.index()] = defaultActionFocusButton;
+            popupState.open = true;
+            activePopupNode = popup;
+        } else
+        {
+            popupState.open = false;
+            if (activePopupNode == popup)
+            {
+                activePopupNode = {};
+            }
+        }
+        popupDismissPointerBarrierActive = false;
+        dropdownCommandPressed.fill(false);
+
+        if (focusWasInClosingPopup)
+        {
+            UINodeId nextFocus = open ? dropdown : focusRestoreByNodeIndex[popup.index()];
+            if (!nextFocus.hasValue() || !contains(nextFocus) || !isNodeEnabled(nextFocus))
+            {
+                nextFocus = isNodeEnabled(dropdown) ? dropdown : UINodeId{};
+            }
+            clearDefaultActionPresses();
+            clearArmedPrimaryButton();
+            clearArmedSlider();
+            clearArmedTextEdit();
+            capturedPointerNode = {};
+            resetImeCompositionState();
+            textInputFocus = {};
+            defaultActionFocusButton = nextFocus;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setPopupStyleFromUpdater(UINodeId updaterRoot, UINodeId popup,
+                                                       const UIPopupStyle& style)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto popupResult = resolvePopup(popup);
+        if (!popupResult)
+        {
+            return Core::failure(popupResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, popup))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI Popup is not owned by the updater root");
+        }
+        auto normalized = normalizePopupStyle(style);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        PopupState& state = popupStatesByNodeIndex[popup.index()];
+        if (state.style == *normalized)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(popup); !dirty)
+        {
+            return dirty;
+        }
+        state.style = *normalized;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIPopupStyle> popupStyleFromUpdater(UINodeId updaterRoot, UINodeId popup) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto popupResult = const_cast<Impl*>(this)->resolvePopup(popup);
+        if (!popupResult)
+        {
+            return Core::failure(popupResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, popup))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI Popup is not owned by the updater root");
+        }
+        return popupStatesByNodeIndex[popup.index()].style;
+    }
+
+    [[nodiscard]] Core::Status setPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup, bool open)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto popupResult = resolvePopup(popup);
+        if (!popupResult)
+        {
+            return Core::failure(popupResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, popup))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI Popup is not owned by the updater root");
+        }
+        return setPopupOpenState(popup, open);
+    }
+
+    [[nodiscard]] Core::Result<bool> isPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup) const
+    {
+        auto styleResult = popupStyleFromUpdater(updaterRoot, popup);
+        if (!styleResult)
+        {
+            return Core::failure(styleResult.error());
+        }
+        return popupStatesByNodeIndex[popup.index()].open;
+    }
+
+    [[nodiscard]] Core::Result<UIPopupMetrics> popupMetricsFromUpdater(UINodeId updaterRoot, UINodeId popup) const
+    {
+        auto styleResult = popupStyleFromUpdater(updaterRoot, popup);
+        if (!styleResult)
+        {
+            return Core::failure(styleResult.error());
+        }
+        return popupStatesByNodeIndex[popup.index()].committedMetrics;
+    }
+
+    [[nodiscard]] Core::Status setDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown, bool open)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto dropdownResult = resolveDropdown(dropdown);
+        if (!dropdownResult)
+        {
+            return Core::failure(dropdownResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, dropdown))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI Dropdown is not owned by the updater root");
+        }
+        const UINodeId popup = popupForDropdown(dropdown);
+        if (!popup.hasValue())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI Dropdown has no live Popup");
+        }
+        return setPopupOpenState(popup, open);
+    }
+
+    [[nodiscard]] Core::Result<bool> isDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto dropdownResult = const_cast<Impl*>(this)->resolveDropdown(dropdown);
+        if (!dropdownResult)
+        {
+            return Core::failure(dropdownResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, dropdown))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI Dropdown is not owned by the updater root");
+        }
+        const UINodeId popup = popupForDropdown(dropdown);
+        return popup.hasValue() && popupStatesByNodeIndex[popup.index()].open;
+    }
+
+    [[nodiscard]] Core::Status setDropdownSelectedItemFromUpdater(UINodeId updaterRoot, UINodeId dropdown,
+                                                                 UINodeId item)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto dropdownResult = resolveDropdown(dropdown);
+        if (!dropdownResult)
+        {
+            return Core::failure(dropdownResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, dropdown))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI Dropdown is not owned by the updater root");
+        }
+        if (item.hasValue())
+        {
+            auto itemResult = resolveDropdownItem(item);
+            if (!itemResult)
+            {
+                return Core::failure(itemResult.error());
+            }
+            if (!isNodeWithinRoot(updaterRoot, item) || dropdownForItem(item) != dropdown)
+            {
+                return fail(UIErrorCode::InvalidParent, "UI DropdownItem belongs to another Dropdown");
+            }
+        }
+
+        DropdownState& state = dropdownStatesByNodeIndex[dropdown.index()];
+        if (state.selectedItem == item)
+        {
+            return Core::success();
+        }
+        const UINodeId previousItem = state.selectedItem;
+        if (Core::Status dirty = markLayoutDirtyBatch({dropdown, previousItem, item}); !dirty)
+        {
+            return dirty;
+        }
+        state.selectedItem = item;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> dropdownSelectedItemFromUpdater(UINodeId updaterRoot,
+                                                                         UINodeId dropdown) const
+    {
+        auto openResult = isDropdownOpenFromUpdater(updaterRoot, dropdown);
+        if (!openResult)
+        {
+            return Core::failure(openResult.error());
+        }
+        const UINodeId selected = dropdownStatesByNodeIndex[dropdown.index()].selectedItem;
+        return contains(selected) ? selected : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Result<bool> isDropdownItemSelectedFromUpdater(UINodeId updaterRoot,
+                                                                       UINodeId item) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto itemResult = const_cast<Impl*>(this)->resolveDropdownItem(item);
+        if (!itemResult)
+        {
+            return Core::failure(itemResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, item))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI DropdownItem is not owned by the updater root");
+        }
+        return isSelectedDropdownItem(item);
+    }
+
+    [[nodiscard]] Core::Status setDropdownPaintFromUpdater(UINodeId updaterRoot, UINodeId dropdown,
+                                                          const UIDropdownPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto dropdownResult = resolveDropdown(dropdown);
+        if (!dropdownResult)
+        {
+            return Core::failure(dropdownResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, dropdown))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI Dropdown is not owned by the updater root");
+        }
+        auto normalized = normalizeDropdownPaint(paint);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        UIDropdownPaint& current = dropdownStatesByNodeIndex[dropdown.index()].paint;
+        if (current == *normalized)
+        {
+            detachThemeBinding(dropdown.index(), ThemeBindingDropdownPaint);
+            return Core::success();
+        }
+        const bool layoutChanged = current.indicatorWidth != normalized->indicatorWidth ||
+                                   current.indicatorHeight != normalized->indicatorHeight ||
+                                   current.indicatorInset != normalized->indicatorInset;
+        Core::Status dirty = layoutChanged ? markLayoutStyleDirty(dropdown) : markPaintDirty(dropdown);
+        if (!dirty)
+        {
+            return dirty;
+        }
+        current = *normalized;
+        detachThemeBinding(dropdown.index(), ThemeBindingDropdownPaint);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIDropdownPaint> dropdownPaintFromUpdater(UINodeId updaterRoot,
+                                                                        UINodeId dropdown) const
+    {
+        auto openResult = isDropdownOpenFromUpdater(updaterRoot, dropdown);
+        if (!openResult)
+        {
+            return Core::failure(openResult.error());
+        }
+        return dropdownStatesByNodeIndex[dropdown.index()].paint;
+    }
+
+    void addDropdownActivationDirtyReservationCandidates(UINodeId control)
+    {
+        const NodeRecord* record = contains(control) ? nodes.tryGet(control.storageId()) : nullptr;
+        if (record == nullptr)
+        {
+            return;
+        }
+        if (record->kind == UIWidgetKind::Dropdown)
+        {
+            const UINodeId popup = popupForDropdown(control);
+            addRouteLayoutDirtyReservationCandidates(control);
+            addRouteLayoutDirtyReservationCandidates(popup);
+            if (popup.hasValue() && !popupStatesByNodeIndex[popup.index()].open && activePopupNode != popup)
+            {
+                addRouteLayoutDirtyReservationCandidates(activePopupNode);
+                addRouteLayoutDirtyReservationCandidates(dropdownForPopup(activePopupNode));
+            }
+            return;
+        }
+        if (record->kind != UIWidgetKind::DropdownItem)
+        {
+            return;
+        }
+
+        const UINodeId dropdown = dropdownForItem(control);
+        const UINodeId popup = dropdown.hasValue() ? popupForDropdown(dropdown) : UINodeId{};
+        addRouteLayoutDirtyReservationCandidates(dropdown);
+        addRouteLayoutDirtyReservationCandidates(popup);
+        addRouteLayoutDirtyReservationCandidates(control);
+        if (dropdown.hasValue())
+        {
+            addRouteLayoutDirtyReservationCandidates(dropdownStatesByNodeIndex[dropdown.index()].selectedItem);
+        }
+    }
+
+    [[nodiscard]] Core::Result<bool> activateDropdownControl(UINodeId control)
+    {
+        const NodeRecord* record = contains(control) ? nodes.tryGet(control.storageId()) : nullptr;
+        if (record == nullptr)
+        {
+            return fail(UIErrorCode::InvalidNode, "UI Dropdown activation target is stale");
+        }
+        if (record->kind == UIWidgetKind::Dropdown)
+        {
+            const UINodeId popup = popupForDropdown(control);
+            if (!popup.hasValue())
+            {
+                return fail(UIErrorCode::InvalidControlValue, "UI Dropdown has no live Popup");
+            }
+            const bool nextOpen = !popupStatesByNodeIndex[popup.index()].open;
+            if (Core::Status status = setPopupOpenState(popup, nextOpen); !status)
+            {
+                return Core::failure(status.error());
+            }
+            return true;
+        }
+        if (record->kind != UIWidgetKind::DropdownItem)
+        {
+            return false;
+        }
+
+        const UINodeId dropdown = dropdownForItem(control);
+        const UINodeId popup = dropdown.hasValue() ? popupForDropdown(dropdown) : UINodeId{};
+        if (!dropdown.hasValue() || !popup.hasValue())
+        {
+            return fail(UIErrorCode::InvalidParent, "UI DropdownItem is detached from its Dropdown");
+        }
+        DropdownState& dropdownState = dropdownStatesByNodeIndex[dropdown.index()];
+        PopupState& popupState = popupStatesByNodeIndex[popup.index()];
+        const UINodeId previousItem = dropdownState.selectedItem;
+        const bool changed = previousItem != control || popupState.open;
+        if (!changed)
+        {
+            return false;
+        }
+        if (Core::Status dirty = markLayoutDirtyBatch({dropdown, popup, previousItem, control}); !dirty)
+        {
+            return Core::failure(dirty.error());
+        }
+
+        dropdownState.selectedItem = control;
+        popupState.open = false;
+        if (activePopupNode == popup)
+        {
+            activePopupNode = {};
+        }
+        popupDismissPointerBarrierActive = false;
+        clearDefaultActionPresses();
+        resetImeCompositionState();
+        textInputFocus = {};
+        defaultActionFocusButton = dropdown;
+        return true;
+    }
+
     [[nodiscard]] Core::Result<NodeRecord*> resolveProgressBar(UINodeId progressBar)
     {
         auto nodeResult = resolveNode(progressBar);
@@ -8158,9 +9285,10 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::Button)
+        if (!isButtonChromeKind((*nodeResult)->kind))
         {
-            return fail(UIErrorCode::InvalidButtonAction, "UI Button paint API requires a Button node");
+            return fail(UIErrorCode::InvalidButtonAction,
+                        "UI Button paint API requires a Button, Dropdown, or DropdownItem node");
         }
         return *nodeResult;
     }
@@ -8742,7 +9870,7 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
-    void publishScrollViewLayoutState(const std::pmr::vector<u32>& order) noexcept
+    void publishControlLayoutState(const std::pmr::vector<u32>& order) noexcept
     {
         for (const u32 index : order)
         {
@@ -8757,6 +9885,16 @@ struct UIContext::Impl final {
             state.requestedOffset = layout.metrics.offset;
             state.committedMetrics = layout.metrics;
             state.committedViewportRect = layout.viewportRect;
+        }
+        for (const u32 index : order)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || record->kind != UIWidgetKind::Popup || index >= popupStatesByNodeIndex.size() ||
+                index >= popupLayoutScratchByNodeIndex.size())
+            {
+                continue;
+            }
+            popupStatesByNodeIndex[index].committedMetrics = popupLayoutScratchByNodeIndex[index].metrics;
         }
     }
 
@@ -9144,7 +10282,7 @@ struct UIContext::Impl final {
         lastPaintSnapshotRebuildCount = paintNeedsCommit ? 1 : 0;
         if (layoutNeedsCommit)
         {
-            publishScrollViewLayoutState(layoutOrderScratch);
+            publishControlLayoutState(layoutOrderScratch);
             layoutReuseCacheValid = true;
         }
         clearDirtyState();
@@ -9842,6 +10980,27 @@ struct UIContext::Impl final {
             input.kind == UIRoutedPointerEventKind::ButtonDown && input.button == Platform::PointerButton::Primary;
         const bool primaryButtonUp =
             input.kind == UIRoutedPointerEventKind::ButtonUp && input.button == Platform::PointerButton::Primary;
+        const UINodeId popupAtRouteStart =
+            activePopupNode.hasValue() && contains(activePopupNode) &&
+                    activePopupNode.index() < popupStatesByNodeIndex.size() &&
+                    popupStatesByNodeIndex[activePopupNode.index()].open
+                ? activePopupNode
+                : UINodeId{};
+        const UINodeId popupDropdownAtRouteStart = dropdownForPopup(popupAtRouteStart);
+        const u32 popupEntryIndexAtRouteStart = findHitEntryIndex(popupAtRouteStart, entries);
+        const bool pointInsideActivePopup =
+            popupEntryIndexAtRouteStart < entries.size() &&
+            containsPointHalfOpen(entries[popupEntryIndexAtRouteStart].worldRect, input.position) &&
+            containsPointHalfOpen(entries[popupEntryIndexAtRouteStart].effectiveClip, input.position);
+        const UINodeId physicalTarget = result.pointQuery.target.node;
+        const bool pointTargetsActivePopup = isNodeWithinSubtree(popupAtRouteStart, physicalTarget);
+        const bool pointTargetsPopupDropdown =
+            isNodeWithinSubtree(popupDropdownAtRouteStart, physicalTarget) && !pointTargetsActivePopup;
+        const bool dismissActivePopupOnPrimaryDown = primaryButtonDown && popupAtRouteStart.hasValue() &&
+                                                     !pointInsideActivePopup && !pointTargetsPopupDropdown;
+        const bool blockPopupChromeClickThrough = primaryButtonDown && popupAtRouteStart.hasValue() &&
+                                                  pointInsideActivePopup && !pointTargetsActivePopup;
+        const bool popupBarrierAtRouteStart = popupDismissPointerBarrierActive;
         const ScrollBarPointerHit scrollBarHitAtRouteStart =
             primaryButtonDown ? scrollBarPointerHit(routePathScratch, entries, input.position) : ScrollBarPointerHit{};
         const UINodeId armedButtonAtRouteStart = armedPrimaryButton;
@@ -9856,6 +11015,11 @@ struct UIContext::Impl final {
         const bool hadArmedScrollView = armedScrollViewAtRouteStart.hasValue();
         const bool hadArmedTextEdit = armedTextEditAtRouteStart.hasValue();
         releaseRouteDirtyQueueReservations();
+        if (dismissActivePopupOnPrimaryDown)
+        {
+            addRouteLayoutDirtyReservationCandidates(popupAtRouteStart);
+            addRouteLayoutDirtyReservationCandidates(popupDropdownAtRouteStart);
+        }
         const UINodeId nextHoveredButton = resolvedHoveredPrimaryButton(physicalNearestButton);
         if (nextHoveredButton != hoveredPrimaryButton)
         {
@@ -9948,6 +11112,10 @@ struct UIContext::Impl final {
                             childIndex = nextSiblingIndex;
                         }
                     }
+                }
+                if (pointWithinArmedButton && isNodeEnabled(armedButtonAtRouteStart))
+                {
+                    addDropdownActivationDirtyReservationCandidates(armedButtonAtRouteStart);
                 }
             }
         } else if (input.kind == UIRoutedPointerEventKind::Wheel)
@@ -10070,6 +11238,32 @@ struct UIContext::Impl final {
             capturedPointerNode = {};
         }
 
+        bool preserveFocusForPopupBarrier = false;
+        if (primaryButtonDown && (dismissActivePopupOnPrimaryDown || blockPopupChromeClickThrough))
+        {
+            if (dismissActivePopupOnPrimaryDown && !routedEvent.isDefaultActionPrevented() &&
+                contains(popupAtRouteStart) && popupAtRouteStart.index() < popupStatesByNodeIndex.size() &&
+                popupStatesByNodeIndex[popupAtRouteStart.index()].open)
+            {
+                if (Core::Status closed = setPopupOpenState(popupAtRouteStart, false); !closed)
+                {
+                    return Core::failure(closed.error());
+                }
+            }
+            popupDismissPointerBarrierActive = true;
+            routedEvent.preventDefaultAction();
+            routedEvent.consumeInputTransition();
+            static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
+            preserveFocusForPopupBarrier = true;
+        } else if (primaryButtonUp && popupBarrierAtRouteStart)
+        {
+            popupDismissPointerBarrierActive = false;
+            routedEvent.preventDefaultAction();
+            routedEvent.consumeInputTransition();
+            static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
+            preserveFocusForPopupBarrier = true;
+        }
+
         Core::Status hoverPaintStatus = updateHoveredPrimaryButton(physicalNearestButton);
         const bool deferHoverFailureForRelease =
             primaryButtonUp && (hadArmedInteraction || hadArmedSlider || hadArmedScrollView || hadArmedTextEdit);
@@ -10100,7 +11294,9 @@ struct UIContext::Impl final {
             const bool willArmSlider =
                 allowsDefaultAction && !willUseScrollBar && !willFocusTextEdit && nearestSlider.hasValue() &&
                 isNodeEnabled(nearestSlider);
-            UINodeId nextKeyboardFocus = preserveFocusForModalBarrier ? previousKeyboardFocus : UINodeId{};
+            UINodeId nextKeyboardFocus = preserveFocusForModalBarrier || preserveFocusForPopupBarrier
+                                             ? previousKeyboardFocus
+                                             : UINodeId{};
             UINodeId interactionPaintNode{};
             if (willUseScrollBar)
             {
@@ -10152,7 +11348,7 @@ struct UIContext::Impl final {
             {
                 return Core::failure(dirty.error());
             }
-            if (!preserveFocusForModalBarrier)
+            if (!preserveFocusForModalBarrier && !preserveFocusForPopupBarrier)
             {
                 clearDefaultActionFocus();
                 if (!willFocusTextEdit && textInputFocus.hasValue())
@@ -10166,6 +11362,10 @@ struct UIContext::Impl final {
             if (preserveFocusForModalBarrier)
             {
                 // A Modal backdrop owns the input but is not a focus target.
+            } else if (preserveFocusForPopupBarrier)
+            {
+                // Popup chrome and outside-dismiss clicks are click-through
+                // barriers and preserve the focus restored by Popup close.
             } else if (willUseScrollBar)
             {
                 armedScrollView = scrollBarHitAtRouteStart.scrollView;
@@ -10451,6 +11651,15 @@ struct UIContext::Impl final {
                         return Core::failure(selected.error());
                     }
                 }
+                if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
+                    armedRecord != nullptr && (armedRecord->kind == UIWidgetKind::Dropdown ||
+                                               armedRecord->kind == UIWidgetKind::DropdownItem))
+                {
+                    if (auto activated = activateDropdownControl(armedButtonAtRouteStart); !activated)
+                    {
+                        return Core::failure(activated.error());
+                    }
+                }
                 invokeButtonAction(actionCandidate,
                                    UIButtonActionEvent{
                                        .buttonNode = armedButtonAtRouteStart,
@@ -10518,6 +11727,8 @@ struct UIContext::Impl final {
         clearArmedScrollView();
         clearArmedTextEdit();
         capturedPointerNode = {};
+        popupDismissPointerBarrierActive = false;
+        dropdownCommandPressed.fill(false);
         clearDefaultActionPresses();
         clearImeFocus();
         clearDefaultActionFocus();
@@ -10552,6 +11763,8 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::WrongOwnerWindow, "UI default-action cancellation belongs to another Window");
         }
+
+        dropdownCommandPressed.fill(false);
 
         if (gamepad.has_value())
         {
@@ -10614,7 +11827,11 @@ struct UIContext::Impl final {
             const UINodeId existingTarget = defaultActionPressedTarget(*control);
             if (existingTarget.hasValue())
             {
-                if (existingTarget == defaultActionFocusButton && isCommittedKeyboardFocusCandidate(existingTarget))
+                const NodeRecord* existingRecord =
+                    contains(existingTarget) ? nodes.tryGet(existingTarget.storageId()) : nullptr;
+                if ((existingTarget == defaultActionFocusButton &&
+                     isCommittedKeyboardFocusCandidate(existingTarget)) ||
+                    (existingRecord != nullptr && existingRecord->kind == UIWidgetKind::DropdownItem))
                 {
                     // Native key repeat and duplicate gamepad Down remain owned
                     // by UI without re-running toggle/callback side effects.
@@ -10659,6 +11876,40 @@ struct UIContext::Impl final {
         }
         const UINodeId activationTarget = defaultActionFocusButton;
         const bool pressedStateChanges = control.has_value() && !isButtonPressed(activationTarget);
+        releaseRouteDirtyQueueReservations();
+        auto reservationCleanup = Core::makeScopeExit([this]() noexcept { releaseRouteDirtyQueueReservations(); });
+        if (pressedStateChanges || record->kind == UIWidgetKind::Checkbox)
+        {
+            addRouteDirtyReservationCandidate(activationTarget);
+        }
+        if (record->kind == UIWidgetKind::RadioButton)
+        {
+            const NodeRecord* parent = recordByIndex(record->parentIndex);
+            if (parent == nullptr)
+            {
+                return fail(UIErrorCode::InvalidParent, "UI RadioButton requires a live parent group");
+            }
+            for (u32 childIndex = parent->firstChildIndex; childIndex != InvalidNodeIndex;)
+            {
+                const NodeRecord* child = recordByIndex(childIndex);
+                if (child == nullptr)
+                {
+                    return fail(Core::CoreErrorCode::Internal, "UI RadioButton group is invalid");
+                }
+                const u32 nextSiblingIndex = child->nextSiblingIndex;
+                if (child->kind == UIWidgetKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size() &&
+                    radioButtonStatesByNodeIndex[childIndex].selected != (childIndex == activationTarget.index()))
+                {
+                    addRouteDirtyReservationCandidate(idForIndex(childIndex));
+                }
+                childIndex = nextSiblingIndex;
+            }
+        }
+        addDropdownActivationDirtyReservationCandidates(activationTarget);
+        if (Core::Status reservation = reserveRouteDirtyQueueSlots(); !reservation)
+        {
+            return Core::failure(reservation.error());
+        }
         if (Core::Status dirty = preflightDefaultActionActivationDirty(activationTarget, pressedStateChanges); !dirty)
         {
             return Core::failure(dirty.error());
@@ -10686,6 +11937,16 @@ struct UIContext::Impl final {
                 return Core::failure(selected.error());
             }
         }
+        bool dropdownActivated = false;
+        if (record->kind == UIWidgetKind::Dropdown || record->kind == UIWidgetKind::DropdownItem)
+        {
+            auto activated = activateDropdownControl(activationTarget);
+            if (!activated)
+            {
+                return Core::failure(activated.error());
+            }
+            dropdownActivated = *activated;
+        }
         if (control.has_value())
         {
             setDefaultActionPressedTarget(*control, activationTarget);
@@ -10698,7 +11959,8 @@ struct UIContext::Impl final {
             // Focused control without a registered action still consumes Accept
             // so gameplay does not also fire. Selection controls already
             // changed state above; a bare Button without a callback did not.
-            const bool activated = record->kind == UIWidgetKind::Checkbox || record->kind == UIWidgetKind::RadioButton;
+            const bool activated = record->kind == UIWidgetKind::Checkbox || record->kind == UIWidgetKind::RadioButton ||
+                                   dropdownActivated;
             return UIDefaultActionResult{.consumed = true, .activated = activated};
         }
         const u64 currentButtonRouteSerial = ++buttonRouteSerial;
@@ -10887,6 +12149,245 @@ struct UIContext::Impl final {
         return isPointerCaptureCandidate(capturedPointerNode, entries, committedActiveModalEntryIndex)
                    ? capturedPointerNode
                    : UINodeId{};
+    }
+
+    [[nodiscard]] UINodeId activePopup() const noexcept
+    {
+        if (!activePopupNode.hasValue() || !contains(activePopupNode) ||
+            activePopupNode.index() >= popupStatesByNodeIndex.size() ||
+            !popupStatesByNodeIndex[activePopupNode.index()].open)
+        {
+            return {};
+        }
+        const NodeRecord* record = nodes.tryGet(activePopupNode.storageId());
+        return record != nullptr && record->kind == UIWidgetKind::Popup ? activePopupNode : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command,
+                                                                             bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI Dropdown command cannot run during pointer routing");
+        }
+        drainDeferredRootDestroys();
+
+        usize commandIndex = 0;
+        switch (command)
+        {
+        case UIDropdownCommand::PreviousItem:
+            commandIndex = 0;
+            break;
+        case UIDropdownCommand::NextItem:
+            commandIndex = 1;
+            break;
+        case UIDropdownCommand::Dismiss:
+            commandIndex = 2;
+            break;
+        case UIDropdownCommand::ExitPrevious:
+            commandIndex = 3;
+            break;
+        case UIDropdownCommand::ExitNext:
+            commandIndex = 4;
+            break;
+        default:
+            return fail(UIErrorCode::InvalidControlValue, "UI Dropdown command is not recognized");
+        }
+
+        if (!pressed)
+        {
+            const bool consumed = dropdownCommandPressed[commandIndex];
+            dropdownCommandPressed[commandIndex] = false;
+            return UIDropdownCommandResult{
+                .consumed = consumed,
+                .changed = false,
+                .focus = defaultActionFocus(),
+            };
+        }
+        if (dropdownCommandPressed[commandIndex])
+        {
+            return UIDropdownCommandResult{
+                .consumed = true,
+                .changed = false,
+                .focus = defaultActionFocus(),
+            };
+        }
+
+        const UINodeId popup = activePopup();
+        const UINodeId dropdown = dropdownForPopup(popup);
+        if (!popup.hasValue() || !dropdown.hasValue())
+        {
+            return UIDropdownCommandResult{};
+        }
+
+        if (command == UIDropdownCommand::Dismiss)
+        {
+            if (Core::Status closed = setPopupOpenState(popup, false); !closed)
+            {
+                return Core::failure(closed.error());
+            }
+            dropdownCommandPressed[commandIndex] = true;
+            return UIDropdownCommandResult{
+                .consumed = true,
+                .changed = true,
+                .focus = defaultActionFocus(),
+            };
+        }
+
+        const auto& entries = committedHitBuffers[publishedHitBufferIndex];
+        if (command == UIDropdownCommand::PreviousItem || command == UIDropdownCommand::NextItem)
+        {
+            const bool next = command == UIDropdownCommand::NextItem;
+            u32 firstCandidate = InvalidUIHitEntryIndex;
+            u32 lastCandidate = InvalidUIHitEntryIndex;
+            u32 previousCandidate = InvalidUIHitEntryIndex;
+            u32 nextCandidate = InvalidUIHitEntryIndex;
+            u32 selectedCandidate = InvalidUIHitEntryIndex;
+            bool currentFound = false;
+            for (u32 entryIndex = 0; entryIndex < entries.size(); ++entryIndex)
+            {
+                const UICommittedHitEntry& entry = entries[entryIndex];
+                if (!contains(entry.node) || entry.kind != UIWidgetKind::DropdownItem ||
+                    dropdownForItem(entry.node) != dropdown || !isNodeEnabled(entry.node) ||
+                    entry.policy != UIPointerHitPolicy::Targetable ||
+                    !hitEntryAllowedByModal(entry, committedActiveModalEntryIndex))
+                {
+                    continue;
+                }
+                if (firstCandidate == InvalidUIHitEntryIndex)
+                {
+                    firstCandidate = entryIndex;
+                }
+                lastCandidate = entryIndex;
+                if (entry.node == dropdownStatesByNodeIndex[dropdown.index()].selectedItem)
+                {
+                    selectedCandidate = entryIndex;
+                }
+                if (currentFound && nextCandidate == InvalidUIHitEntryIndex)
+                {
+                    nextCandidate = entryIndex;
+                }
+                if (entry.node == defaultActionFocusButton)
+                {
+                    currentFound = true;
+                } else if (!currentFound)
+                {
+                    previousCandidate = entryIndex;
+                }
+            }
+
+            u32 targetEntryIndex = InvalidUIHitEntryIndex;
+            if (!currentFound)
+            {
+                targetEntryIndex = selectedCandidate != InvalidUIHitEntryIndex
+                                       ? selectedCandidate
+                                       : (next ? firstCandidate : lastCandidate);
+            } else if (next)
+            {
+                targetEntryIndex = nextCandidate != InvalidUIHitEntryIndex
+                                       ? nextCandidate
+                                       : findHitEntryIndex(defaultActionFocusButton, entries);
+            } else
+            {
+                targetEntryIndex = previousCandidate != InvalidUIHitEntryIndex
+                                       ? previousCandidate
+                                       : findHitEntryIndex(defaultActionFocusButton, entries);
+            }
+
+            bool changed = false;
+            if (targetEntryIndex < entries.size())
+            {
+                const UINodeId nextFocus = entries[targetEntryIndex].node;
+                changed = nextFocus != defaultActionFocusButton;
+                if (changed)
+                {
+                    if (Core::Status focused = applyExplicitFocus(nextFocus); !focused)
+                    {
+                        return Core::failure(focused.error());
+                    }
+                }
+            }
+            dropdownCommandPressed[commandIndex] = true;
+            return UIDropdownCommandResult{
+                .consumed = true,
+                .changed = changed,
+                .focus = defaultActionFocus(),
+            };
+        }
+
+        const u32 dropdownEntryIndex = findHitEntryIndex(dropdown, entries);
+        u32 firstCandidate = InvalidUIHitEntryIndex;
+        u32 lastCandidate = InvalidUIHitEntryIndex;
+        u32 previousCandidate = InvalidUIHitEntryIndex;
+        u32 nextCandidate = InvalidUIHitEntryIndex;
+        if (dropdownEntryIndex < entries.size())
+        {
+            const u32 scopeEntryIndex = entries[dropdownEntryIndex].focusScopeEntryIndex;
+            for (u32 entryIndex = 0; entryIndex < entries.size(); ++entryIndex)
+            {
+                const UICommittedHitEntry& entry = entries[entryIndex];
+                if (!contains(entry.node) || entry.node == dropdown || isNodeWithinSubtree(popup, entry.node) ||
+                    !isNodeEnabled(entry.node) || entry.policy != UIPointerHitPolicy::Targetable ||
+                    !isKeyboardFocusableKind(entry.kind) ||
+                    !hitEntryAllowedByModal(entry, committedActiveModalEntryIndex) ||
+                    !hitEntryIsWithinScope(entryIndex, scopeEntryIndex, entries))
+                {
+                    continue;
+                }
+                if (firstCandidate == InvalidUIHitEntryIndex)
+                {
+                    firstCandidate = entryIndex;
+                }
+                lastCandidate = entryIndex;
+                if (entryIndex < dropdownEntryIndex)
+                {
+                    previousCandidate = entryIndex;
+                } else if (entryIndex > dropdownEntryIndex && nextCandidate == InvalidUIHitEntryIndex)
+                {
+                    nextCandidate = entryIndex;
+                }
+            }
+        }
+
+        const bool exitNext = command == UIDropdownCommand::ExitNext;
+        const u32 exitEntryIndex = exitNext
+                                       ? (nextCandidate != InvalidUIHitEntryIndex ? nextCandidate : firstCandidate)
+                                       : (previousCandidate != InvalidUIHitEntryIndex ? previousCandidate : lastCandidate);
+        const UINodeId exitFocus = exitEntryIndex < entries.size() ? entries[exitEntryIndex].node : dropdown;
+        const UINodeId previousFocus = defaultActionFocusButton;
+        releaseRouteDirtyQueueReservations();
+        auto reservationCleanup = Core::makeScopeExit([this]() noexcept { releaseRouteDirtyQueueReservations(); });
+        addRouteLayoutDirtyReservationCandidates(popup);
+        addRouteLayoutDirtyReservationCandidates(dropdown);
+        addRouteDirtyReservationCandidate(previousFocus);
+        addRouteDirtyReservationCandidate(textInputFocus);
+        addRouteDirtyReservationCandidate(exitFocus);
+        if (Core::Status reservation = reserveRouteDirtyQueueSlots(); !reservation)
+        {
+            return Core::failure(reservation.error());
+        }
+        if (Core::Status closed = setPopupOpenState(popup, false); !closed)
+        {
+            return Core::failure(closed.error());
+        }
+        if (defaultActionFocusButton != exitFocus)
+        {
+            if (Core::Status focused = applyExplicitFocus(exitFocus); !focused)
+            {
+                return Core::failure(focused.error());
+            }
+        }
+        dropdownCommandPressed[commandIndex] = true;
+        return UIDropdownCommandResult{
+            .consumed = true,
+            .changed = true,
+            .focus = defaultActionFocus(),
+        };
     }
 
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(bool reverse)
@@ -11740,6 +13241,33 @@ Core::Result<UINodeId> UIRootBuilder::createScrollView(UINodeId parent)
     return m_context->createChild(parent, UIWidgetKind::ScrollView);
 }
 
+Core::Result<UINodeId> UIRootBuilder::createDropdown(UINodeId parent)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createChild(parent, UIWidgetKind::Dropdown);
+}
+
+Core::Result<UINodeId> UIRootBuilder::createPopup(UINodeId dropdown)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createChild(dropdown, UIWidgetKind::Popup);
+}
+
+Core::Result<UINodeId> UIRootBuilder::createDropdownItem(UINodeId popup)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createChild(popup, UIWidgetKind::DropdownItem);
+}
+
 UITreeUpdater::UITreeUpdater(UIContext& context, UINodeId root) noexcept : m_context(&context), m_root(root)
 {
 }
@@ -11849,6 +13377,33 @@ Core::Result<UINodeId> UITreeUpdater::createScrollView(UINodeId parent)
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::ScrollView);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createDropdown(UINodeId parent)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Dropdown);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createPopup(UINodeId dropdown)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, dropdown, UIWidgetKind::Popup);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createDropdownItem(UINodeId popup)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, popup, UIWidgetKind::DropdownItem);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -12241,6 +13796,114 @@ Core::Result<bool> UITreeUpdater::isScrollViewDragging(UINodeId scrollView) cons
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->isScrollViewDraggingFromUpdater(m_root, scrollView);
+}
+
+Core::Status UITreeUpdater::setPopupStyle(UINodeId popup, const UIPopupStyle& style)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setPopupStyleFromUpdater(m_root, popup, style);
+}
+
+Core::Result<UIPopupStyle> UITreeUpdater::popupStyle(UINodeId popup) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->popupStyleFromUpdater(m_root, popup);
+}
+
+Core::Status UITreeUpdater::setPopupOpen(UINodeId popup, bool open)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setPopupOpenFromUpdater(m_root, popup, open);
+}
+
+Core::Result<bool> UITreeUpdater::isPopupOpen(UINodeId popup) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isPopupOpenFromUpdater(m_root, popup);
+}
+
+Core::Result<UIPopupMetrics> UITreeUpdater::popupMetrics(UINodeId popup) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->popupMetricsFromUpdater(m_root, popup);
+}
+
+Core::Status UITreeUpdater::setDropdownOpen(UINodeId dropdown, bool open)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setDropdownOpenFromUpdater(m_root, dropdown, open);
+}
+
+Core::Result<bool> UITreeUpdater::isDropdownOpen(UINodeId dropdown) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isDropdownOpenFromUpdater(m_root, dropdown);
+}
+
+Core::Status UITreeUpdater::setDropdownSelectedItem(UINodeId dropdown, UINodeId item)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setDropdownSelectedItemFromUpdater(m_root, dropdown, item);
+}
+
+Core::Result<UINodeId> UITreeUpdater::dropdownSelectedItem(UINodeId dropdown) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->dropdownSelectedItemFromUpdater(m_root, dropdown);
+}
+
+Core::Result<bool> UITreeUpdater::isDropdownItemSelected(UINodeId item) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isDropdownItemSelectedFromUpdater(m_root, item);
+}
+
+Core::Status UITreeUpdater::setDropdownPaint(UINodeId dropdown, const UIDropdownPaint& paint)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setDropdownPaintFromUpdater(m_root, dropdown, paint);
+}
+
+Core::Result<UIDropdownPaint> UITreeUpdater::dropdownPaint(UINodeId dropdown) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->dropdownPaintFromUpdater(m_root, dropdown);
 }
 
 Core::Status UITreeUpdater::setProgressBarRange(UINodeId progressBar, float minValue, float maxValue)
@@ -12660,6 +14323,11 @@ Core::Result<UIContext::UIDefaultFocusStepResult> UIContext::routeDefaultActionF
     return m_impl->routeDefaultActionFocusStep(reverse);
 }
 
+Core::Result<UIDropdownCommandResult> UIContext::routeDropdownCommand(UIDropdownCommand command, bool pressed)
+{
+    return m_impl->routeDropdownCommand(command, pressed);
+}
+
 UINodeId UIContext::defaultActionFocus() const noexcept
 {
     if (!m_impl->isOwnerThread())
@@ -12694,6 +14362,15 @@ UINodeId UIContext::pointerCapture() const noexcept
         return {};
     }
     return m_impl->pointerCapture();
+}
+
+UINodeId UIContext::activePopup() const noexcept
+{
+    if (!m_impl->isOwnerThread())
+    {
+        return {};
+    }
+    return m_impl->activePopup();
 }
 
 Core::Status UIContext::requestFocus(UINodeId node)
@@ -13016,6 +14693,71 @@ Core::Result<bool> UIContext::isScrollViewDraggingFromUpdater(UINodeId updaterRo
                                                              UINodeId scrollView) const
 {
     return m_impl->isScrollViewDraggingFromUpdater(updaterRoot, scrollView);
+}
+
+Core::Status UIContext::setPopupStyleFromUpdater(UINodeId updaterRoot, UINodeId popup,
+                                                 const UIPopupStyle& style)
+{
+    return m_impl->setPopupStyleFromUpdater(updaterRoot, popup, style);
+}
+
+Core::Result<UIPopupStyle> UIContext::popupStyleFromUpdater(UINodeId updaterRoot, UINodeId popup) const
+{
+    return m_impl->popupStyleFromUpdater(updaterRoot, popup);
+}
+
+Core::Status UIContext::setPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup, bool open)
+{
+    return m_impl->setPopupOpenFromUpdater(updaterRoot, popup, open);
+}
+
+Core::Result<bool> UIContext::isPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup) const
+{
+    return m_impl->isPopupOpenFromUpdater(updaterRoot, popup);
+}
+
+Core::Result<UIPopupMetrics> UIContext::popupMetricsFromUpdater(UINodeId updaterRoot, UINodeId popup) const
+{
+    return m_impl->popupMetricsFromUpdater(updaterRoot, popup);
+}
+
+Core::Status UIContext::setDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown, bool open)
+{
+    return m_impl->setDropdownOpenFromUpdater(updaterRoot, dropdown, open);
+}
+
+Core::Result<bool> UIContext::isDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown) const
+{
+    return m_impl->isDropdownOpenFromUpdater(updaterRoot, dropdown);
+}
+
+Core::Status UIContext::setDropdownSelectedItemFromUpdater(UINodeId updaterRoot, UINodeId dropdown,
+                                                           UINodeId item)
+{
+    return m_impl->setDropdownSelectedItemFromUpdater(updaterRoot, dropdown, item);
+}
+
+Core::Result<UINodeId> UIContext::dropdownSelectedItemFromUpdater(UINodeId updaterRoot,
+                                                                  UINodeId dropdown) const
+{
+    return m_impl->dropdownSelectedItemFromUpdater(updaterRoot, dropdown);
+}
+
+Core::Result<bool> UIContext::isDropdownItemSelectedFromUpdater(UINodeId updaterRoot, UINodeId item) const
+{
+    return m_impl->isDropdownItemSelectedFromUpdater(updaterRoot, item);
+}
+
+Core::Status UIContext::setDropdownPaintFromUpdater(UINodeId updaterRoot, UINodeId dropdown,
+                                                    const UIDropdownPaint& paint)
+{
+    return m_impl->setDropdownPaintFromUpdater(updaterRoot, dropdown, paint);
+}
+
+Core::Result<UIDropdownPaint> UIContext::dropdownPaintFromUpdater(UINodeId updaterRoot,
+                                                                  UINodeId dropdown) const
+{
+    return m_impl->dropdownPaintFromUpdater(updaterRoot, dropdown);
 }
 
 Core::Status UIContext::setProgressBarRangeFromUpdater(UINodeId updaterRoot, UINodeId progressBar, float minValue,
