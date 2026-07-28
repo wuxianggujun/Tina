@@ -14971,11 +14971,18 @@ struct UIContext::Impl final {
 
         ListViewState& state = listViewStatesByNodeIndex[listView.index()];
         const u64 itemCount = state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
+        const auto consumeWithoutChange = [&]() noexcept {
+            listViewCommandPressed[commandIndex] = true;
+            return UIListViewCommandResult{
+                .consumed = true,
+                .selection = state.selection,
+            };
+        };
         if (command == UIListViewCommand::Activate)
         {
             listViewCommandPressed[commandIndex] = true;
             return UIListViewCommandResult{
-                .consumed = state.selection.hasValue(),
+                .consumed = true,
                 .changed = false,
                 .activated = state.selection.hasValue(),
                 .selection = state.selection,
@@ -14983,7 +14990,7 @@ struct UIContext::Impl final {
         }
         if (itemCount == 0)
         {
-            return UIListViewCommandResult{};
+            return consumeWithoutChange();
         }
 
         const u64 pageItems = (std::max)(
@@ -15057,7 +15064,7 @@ struct UIContext::Impl final {
         }
         if (!found)
         {
-            return UIListViewCommandResult{};
+            return consumeWithoutChange();
         }
 
         const UIListViewSelection nextSelection{.key = descriptor.key, .logicalIndex = candidate};
@@ -15129,6 +15136,13 @@ struct UIContext::Impl final {
 
         TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
         const u64 itemCount = state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
+        const auto consumeWithoutChange = [&]() noexcept {
+            treeViewCommandPressed[commandIndex] = true;
+            return UITreeViewCommandResult{
+                .consumed = true,
+                .selection = state.selection,
+            };
+        };
         u64 selectedIndex = 0;
         UITreeViewItemDescriptor selectedDescriptor{};
         bool hasSelectedItem = false;
@@ -15172,7 +15186,7 @@ struct UIContext::Impl final {
         {
             if (!hasSelectedItem || !selectedDescriptor.enabled)
             {
-                return UITreeViewCommandResult{};
+                return consumeWithoutChange();
             }
             treeViewCommandPressed[commandIndex] = true;
             return UITreeViewCommandResult{
@@ -15183,14 +15197,14 @@ struct UIContext::Impl final {
         }
         if (itemCount == 0)
         {
-            return UITreeViewCommandResult{};
+            return consumeWithoutChange();
         }
 
         const UINodeId updaterRoot = idForIndex(focusRecord->rootIndex);
         auto applyExpansion = [&](bool expanded) -> Core::Result<UITreeViewCommandResult> {
             if (!hasSelectedItem || !selectedDescriptor.enabled || !selectedDescriptor.expandable)
             {
-                return UITreeViewCommandResult{};
+                return consumeWithoutChange();
             }
             if (Core::Status changed =
                     setTreeViewItemExpandedFromUpdater(updaterRoot, treeView, selectedIndex, expanded);
@@ -15297,7 +15311,7 @@ struct UIContext::Impl final {
         case UITreeViewCommand::CollapseOrParent: {
             if (!hasSelectedItem || selectedDescriptor.level == 0)
             {
-                return UITreeViewCommandResult{};
+                return consumeWithoutChange();
             }
             u32 ancestorLevel = selectedDescriptor.level;
             for (u64 logicalIndex = selectedIndex; logicalIndex-- > 0;)
@@ -15329,7 +15343,7 @@ struct UIContext::Impl final {
         case UITreeViewCommand::ExpandOrFirstChild: {
             if (!hasSelectedItem)
             {
-                return UITreeViewCommandResult{};
+                return consumeWithoutChange();
             }
             const u64 childLevel = static_cast<u64>(selectedDescriptor.level) + 1;
             for (u64 logicalIndex = selectedIndex + 1; logicalIndex < itemCount; ++logicalIndex)
@@ -15360,7 +15374,7 @@ struct UIContext::Impl final {
 
         if (!found)
         {
-            return UITreeViewCommandResult{};
+            return consumeWithoutChange();
         }
         const UITreeViewSelection nextSelection{
             .key = candidateDescriptor.key,

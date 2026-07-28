@@ -99,6 +99,96 @@ dropdownCommandForGamepadButton(Platform::GamepadButton button) noexcept
     }
 }
 
+[[nodiscard]] std::optional<UI::UIListViewCommand> listViewCommandForKey(Platform::Key key) noexcept
+{
+    switch (key)
+    {
+    case Platform::Key::Up:
+        return UI::UIListViewCommand::PreviousItem;
+    case Platform::Key::Down:
+        return UI::UIListViewCommand::NextItem;
+    case Platform::Key::PageUp:
+        return UI::UIListViewCommand::PreviousPage;
+    case Platform::Key::PageDown:
+        return UI::UIListViewCommand::NextPage;
+    case Platform::Key::Home:
+        return UI::UIListViewCommand::FirstItem;
+    case Platform::Key::End:
+        return UI::UIListViewCommand::LastItem;
+    case Platform::Key::Enter:
+    case Platform::Key::KeypadEnter:
+        return UI::UIListViewCommand::Activate;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UITreeViewCommand> treeViewCommandForKey(Platform::Key key) noexcept
+{
+    switch (key)
+    {
+    case Platform::Key::Up:
+        return UI::UITreeViewCommand::PreviousItem;
+    case Platform::Key::Down:
+        return UI::UITreeViewCommand::NextItem;
+    case Platform::Key::PageUp:
+        return UI::UITreeViewCommand::PreviousPage;
+    case Platform::Key::PageDown:
+        return UI::UITreeViewCommand::NextPage;
+    case Platform::Key::Home:
+        return UI::UITreeViewCommand::FirstItem;
+    case Platform::Key::End:
+        return UI::UITreeViewCommand::LastItem;
+    case Platform::Key::Left:
+        return UI::UITreeViewCommand::CollapseOrParent;
+    case Platform::Key::Right:
+        return UI::UITreeViewCommand::ExpandOrFirstChild;
+    case Platform::Key::Space:
+        return UI::UITreeViewCommand::ToggleExpanded;
+    case Platform::Key::Enter:
+    case Platform::Key::KeypadEnter:
+        return UI::UITreeViewCommand::Activate;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UIListViewCommand>
+listViewCommandForGamepadButton(Platform::GamepadButton button) noexcept
+{
+    switch (button)
+    {
+    case Platform::GamepadButton::DpadUp:
+        return UI::UIListViewCommand::PreviousItem;
+    case Platform::GamepadButton::DpadDown:
+        return UI::UIListViewCommand::NextItem;
+    case Platform::GamepadButton::South:
+        return UI::UIListViewCommand::Activate;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UITreeViewCommand>
+treeViewCommandForGamepadButton(Platform::GamepadButton button) noexcept
+{
+    switch (button)
+    {
+    case Platform::GamepadButton::DpadUp:
+        return UI::UITreeViewCommand::PreviousItem;
+    case Platform::GamepadButton::DpadDown:
+        return UI::UITreeViewCommand::NextItem;
+    case Platform::GamepadButton::DpadLeft:
+        return UI::UITreeViewCommand::CollapseOrParent;
+    case Platform::GamepadButton::DpadRight:
+        return UI::UITreeViewCommand::ExpandOrFirstChild;
+    case Platform::GamepadButton::South:
+        return UI::UITreeViewCommand::Activate;
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] bool isRepresentableLogicalValue(double value) noexcept
 {
     constexpr double MaximumLogicalValue = static_cast<double>((std::numeric_limits<float>::max)());
@@ -527,6 +617,82 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     anyConsumed = true;
                     continue;
                 }
+            }
+        }
+
+        // Focused collection controls own their navigation and activation keys
+        // before TextEdit/focus traversal/default Accept. Route matching Up to
+        // both command state machines so a focus change cannot strand a pressed
+        // command or expose half of a digital transition to gameplay.
+        if (const auto* key = std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr && key->window == context->ownerWindow())
+        {
+            const bool pressed = key->state == Platform::DigitalTransition::Down;
+            bool consumed = false;
+            if (const auto command = treeViewCommandForKey(key->key); command.has_value())
+            {
+                auto routed = context->routeTreeViewCommand(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(tree-view-key-command)");
+                    return Core::failure(std::move(error));
+                }
+                consumed = routed->consumed;
+            }
+            if (const auto command = listViewCommandForKey(key->key); command.has_value())
+            {
+                auto routed = context->routeListViewCommand(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(list-view-key-command)");
+                    return Core::failure(std::move(error));
+                }
+                consumed = consumed || routed->consumed;
+            }
+            if (consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+                continue;
+            }
+        }
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
+            gamepad != nullptr && gamepad->routedWindow == context->ownerWindow())
+        {
+            const bool pressed = gamepad->state == Platform::DigitalTransition::Down;
+            bool consumed = false;
+            if (const auto command = treeViewCommandForGamepadButton(gamepad->button); command.has_value())
+            {
+                auto routed = context->routeTreeViewCommand(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(tree-view-gamepad-command)");
+                    return Core::failure(std::move(error));
+                }
+                consumed = routed->consumed;
+            }
+            if (const auto command = listViewCommandForGamepadButton(gamepad->button); command.has_value())
+            {
+                auto routed = context->routeListViewCommand(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(list-view-gamepad-command)");
+                    return Core::failure(std::move(error));
+                }
+                consumed = consumed || routed->consumed;
+            }
+            if (consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+                continue;
             }
         }
 
