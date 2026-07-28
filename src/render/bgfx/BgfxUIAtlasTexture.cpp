@@ -3,6 +3,7 @@
 #include <tina/render/RenderErrors.hpp>
 
 #include <limits>
+#include <utility>
 
 namespace Tina::Render::Bgfx {
 namespace {
@@ -60,13 +61,9 @@ Core::Result<bgfx::TextureHandle> createUIGlyphAtlasTexture(
         return Core::failure(invalidAtlas("UI glyph atlas pixel buffer is too large").error());
     }
 
-    const bgfx::Memory* memory =
-        bgfx::copy(pixels.data(), static_cast<u32>(required));
-    if (memory == nullptr)
-    {
-        return Core::failure(RenderErrorCode::DeviceInitializationFailed,
-                             "bgfx failed to allocate UI glyph atlas texture memory");
-    }
+    // Passing initial memory to createTexture2D makes the texture immutable.
+    // The retained atlas grows when text changes, so create it mutable and use
+    // the same update path for both the initial upload and later glyph inserts.
     const bgfx::TextureHandle texture = bgfx::createTexture2D(
         static_cast<uint16_t>(width),
         static_cast<uint16_t>(height),
@@ -74,11 +71,16 @@ Core::Result<bgfx::TextureHandle> createUIGlyphAtlasTexture(
         1,
         bgfx::TextureFormat::R8,
         BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
-        memory);
+        nullptr);
     if (!bgfx::isValid(texture))
     {
         return Core::failure(RenderErrorCode::DeviceInitializationFailed,
                              "bgfx rejected the UI glyph atlas texture");
+    }
+    if (auto status = updateUIGlyphAtlasTexture(texture, width, height, pixels); !status)
+    {
+        bgfx::destroy(texture);
+        return Core::failure(std::move(status.error()));
     }
     return texture;
 }
