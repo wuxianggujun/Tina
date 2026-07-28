@@ -370,6 +370,44 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createScrollView(u64 
     return *child;
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createListView(u64 epoch,
+                                                                          PrimaryWindowUIPhase phase,
+                                                                          UI::UITreeUpdater& updater,
+                                                                          UI::UINodeId parent,
+                                                                          UI::UIListViewCreateConfig config)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createListView";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createListView(parent, config);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createTreeView(u64 epoch,
+                                                                          PrimaryWindowUIPhase phase,
+                                                                          UI::UITreeUpdater& updater,
+                                                                          UI::UINodeId parent,
+                                                                          UI::UITreeViewCreateConfig config)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createTreeView";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createTreeView(parent, config);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
 Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createDropdown(u64 epoch,
                                                                           PrimaryWindowUIPhase phase,
                                                                           UI::UITreeUpdater& updater,
@@ -1168,6 +1206,436 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isScrollViewDragging(u64 epoc
         return Core::failure(rememberFirstError(std::move(dragging.error()), Operation));
     }
     return *dragging;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setListViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                   UI::UITreeUpdater& updater,
+                                                                   UI::UINodeId listView,
+                                                                   UI::UIListViewDataSource source)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setListViewDataSource";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setListViewDataSource(listView, source);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearListViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                     UI::UITreeUpdater& updater,
+                                                                     UI::UINodeId listView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearListViewDataSource";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearListViewDataSource(listView);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::invalidateListViewItems(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                     UI::UITreeUpdater& updater,
+                                                                     UI::UINodeId listView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::invalidateListViewItems";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.invalidateListViewItems(listView);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setListViewStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                                              UI::UITreeUpdater& updater, UI::UINodeId listView,
+                                                              const UI::UIListViewStyle& style)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setListViewStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setListViewStyle(listView, style);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIListViewStyle>
+PrimaryWindowUICapabilityState::listViewStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                              const UI::UITreeUpdater& updater, UI::UINodeId listView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::listViewStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto style = updater.listViewStyle(listView);
+    if (!style)
+    {
+        return Core::failure(rememberFirstError(std::move(style.error()), Operation));
+    }
+    return *style;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setListViewPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                              UI::UITreeUpdater& updater, UI::UINodeId listView,
+                                                              const UI::UIListViewPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setListViewPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setListViewPaint(listView, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIListViewPaint>
+PrimaryWindowUICapabilityState::listViewPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                              const UI::UITreeUpdater& updater, UI::UINodeId listView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::listViewPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.listViewPaint(listView);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
+}
+
+Core::Result<UI::UIListViewMetrics>
+PrimaryWindowUICapabilityState::listViewMetrics(u64 epoch, PrimaryWindowUIPhase phase,
+                                                const UI::UITreeUpdater& updater, UI::UINodeId listView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::listViewMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto metrics = updater.listViewMetrics(listView);
+    if (!metrics)
+    {
+        return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
+    }
+    return *metrics;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setListViewSelectedIndex(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                      UI::UITreeUpdater& updater,
+                                                                      UI::UINodeId listView, u64 logicalIndex)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setListViewSelectedIndex";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setListViewSelectedIndex(listView, logicalIndex);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearListViewSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                    UI::UITreeUpdater& updater,
+                                                                    UI::UINodeId listView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearListViewSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearListViewSelection(listView);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIListViewSelection>
+PrimaryWindowUICapabilityState::listViewSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                                  const UI::UITreeUpdater& updater, UI::UINodeId listView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::listViewSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto selection = updater.listViewSelection(listView);
+    if (!selection)
+    {
+        return Core::failure(rememberFirstError(std::move(selection.error()), Operation));
+    }
+    return *selection;
+}
+
+Core::Status PrimaryWindowUICapabilityState::scrollListViewToIndex(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                   UI::UITreeUpdater& updater,
+                                                                   UI::UINodeId listView, u64 logicalIndex,
+                                                                   UI::UIListViewScrollAlignment alignment)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::scrollListViewToIndex";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.scrollListViewToIndex(listView, logicalIndex, alignment);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTreeViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                   UI::UITreeUpdater& updater,
+                                                                   UI::UINodeId treeView,
+                                                                   UI::UITreeViewDataSource source)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTreeViewDataSource";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTreeViewDataSource(treeView, source);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearTreeViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                     UI::UITreeUpdater& updater,
+                                                                     UI::UINodeId treeView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearTreeViewDataSource";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearTreeViewDataSource(treeView);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::invalidateTreeViewItems(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                     UI::UITreeUpdater& updater,
+                                                                     UI::UINodeId treeView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::invalidateTreeViewItems";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.invalidateTreeViewItems(treeView);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTreeViewStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                                              UI::UITreeUpdater& updater, UI::UINodeId treeView,
+                                                              const UI::UITreeViewStyle& style)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTreeViewStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTreeViewStyle(treeView, style);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITreeViewStyle>
+PrimaryWindowUICapabilityState::treeViewStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                              const UI::UITreeUpdater& updater, UI::UINodeId treeView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::treeViewStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto style = updater.treeViewStyle(treeView);
+    if (!style)
+    {
+        return Core::failure(rememberFirstError(std::move(style.error()), Operation));
+    }
+    return *style;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTreeViewPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                              UI::UITreeUpdater& updater, UI::UINodeId treeView,
+                                                              const UI::UITreeViewPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTreeViewPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTreeViewPaint(treeView, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITreeViewPaint>
+PrimaryWindowUICapabilityState::treeViewPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                              const UI::UITreeUpdater& updater, UI::UINodeId treeView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::treeViewPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.treeViewPaint(treeView);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
+}
+
+Core::Result<UI::UITreeViewMetrics>
+PrimaryWindowUICapabilityState::treeViewMetrics(u64 epoch, PrimaryWindowUIPhase phase,
+                                                const UI::UITreeUpdater& updater, UI::UINodeId treeView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::treeViewMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto metrics = updater.treeViewMetrics(treeView);
+    if (!metrics)
+    {
+        return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
+    }
+    return *metrics;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTreeViewSelectedIndex(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                      UI::UITreeUpdater& updater,
+                                                                      UI::UINodeId treeView, u64 logicalIndex)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTreeViewSelectedIndex";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTreeViewSelectedIndex(treeView, logicalIndex);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearTreeViewSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                    UI::UITreeUpdater& updater,
+                                                                    UI::UINodeId treeView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearTreeViewSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearTreeViewSelection(treeView);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITreeViewSelection>
+PrimaryWindowUICapabilityState::treeViewSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                                  const UI::UITreeUpdater& updater, UI::UINodeId treeView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::treeViewSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto selection = updater.treeViewSelection(treeView);
+    if (!selection)
+    {
+        return Core::failure(rememberFirstError(std::move(selection.error()), Operation));
+    }
+    return *selection;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTreeViewItemExpanded(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                     UI::UITreeUpdater& updater,
+                                                                     UI::UINodeId treeView, u64 logicalIndex,
+                                                                     bool expanded)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTreeViewItemExpanded";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTreeViewItemExpanded(treeView, logicalIndex, expanded);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::scrollTreeViewToIndex(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                   UI::UITreeUpdater& updater,
+                                                                   UI::UINodeId treeView, u64 logicalIndex,
+                                                                   UI::UITreeViewScrollAlignment alignment)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::scrollTreeViewToIndex";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.scrollTreeViewToIndex(treeView, logicalIndex, alignment);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
 }
 
 Core::Status PrimaryWindowUICapabilityState::setPopupStyle(u64 epoch, PrimaryWindowUIPhase phase,

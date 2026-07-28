@@ -62,6 +62,12 @@ class PrimaryWindowUICapabilityState final {
                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createScrollView(u64 epoch, PrimaryWindowUIPhase phase,
                                                               UI::UITreeUpdater& updater, UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId>
+    createListView(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
+                   UI::UIListViewCreateConfig config);
+    [[nodiscard]] Core::Result<UI::UINodeId>
+    createTreeView(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
+                   UI::UITreeViewCreateConfig config);
     [[nodiscard]] Core::Result<UI::UINodeId> createDropdown(u64 epoch, PrimaryWindowUIPhase phase,
                                                             UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createPopup(u64 epoch, PrimaryWindowUIPhase phase,
@@ -161,8 +167,67 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<bool> isScrollViewDragging(u64 epoch, PrimaryWindowUIPhase phase,
                                                           const UI::UITreeUpdater& updater,
                                                           UI::UINodeId scrollView);
+    [[nodiscard]] Core::Status setListViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
+                                                     UI::UITreeUpdater& updater, UI::UINodeId listView,
+                                                     UI::UIListViewDataSource source);
+    [[nodiscard]] Core::Status clearListViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
+                                                       UI::UITreeUpdater& updater, UI::UINodeId listView);
+    [[nodiscard]] Core::Status invalidateListViewItems(u64 epoch, PrimaryWindowUIPhase phase,
+                                                       UI::UITreeUpdater& updater, UI::UINodeId listView);
+    [[nodiscard]] Core::Status setListViewStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                UI::UINodeId listView, const UI::UIListViewStyle& style);
+    [[nodiscard]] Core::Result<UI::UIListViewStyle>
+    listViewStyle(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId listView);
+    [[nodiscard]] Core::Status setListViewPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                UI::UINodeId listView, const UI::UIListViewPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIListViewPaint>
+    listViewPaint(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId listView);
+    [[nodiscard]] Core::Result<UI::UIListViewMetrics>
+    listViewMetrics(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId listView);
+    [[nodiscard]] Core::Status setListViewSelectedIndex(u64 epoch, PrimaryWindowUIPhase phase,
+                                                        UI::UITreeUpdater& updater, UI::UINodeId listView,
+                                                        u64 logicalIndex);
+    [[nodiscard]] Core::Status clearListViewSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                                      UI::UITreeUpdater& updater, UI::UINodeId listView);
+    [[nodiscard]] Core::Result<UI::UIListViewSelection>
+    listViewSelection(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                      UI::UINodeId listView);
+    [[nodiscard]] Core::Status scrollListViewToIndex(u64 epoch, PrimaryWindowUIPhase phase,
+                                                     UI::UITreeUpdater& updater, UI::UINodeId listView,
+                                                     u64 logicalIndex, UI::UIListViewScrollAlignment alignment);
+    [[nodiscard]] Core::Status setTreeViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
+                                                     UI::UITreeUpdater& updater, UI::UINodeId treeView,
+                                                     UI::UITreeViewDataSource source);
+    [[nodiscard]] Core::Status clearTreeViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
+                                                       UI::UITreeUpdater& updater, UI::UINodeId treeView);
+    [[nodiscard]] Core::Status invalidateTreeViewItems(u64 epoch, PrimaryWindowUIPhase phase,
+                                                       UI::UITreeUpdater& updater, UI::UINodeId treeView);
+    [[nodiscard]] Core::Status setTreeViewStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                UI::UINodeId treeView, const UI::UITreeViewStyle& style);
+    [[nodiscard]] Core::Result<UI::UITreeViewStyle>
+    treeViewStyle(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId treeView);
+    [[nodiscard]] Core::Status setTreeViewPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                UI::UINodeId treeView, const UI::UITreeViewPaint& paint);
+    [[nodiscard]] Core::Result<UI::UITreeViewPaint>
+    treeViewPaint(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId treeView);
+    [[nodiscard]] Core::Result<UI::UITreeViewMetrics>
+    treeViewMetrics(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId treeView);
+    [[nodiscard]] Core::Status setTreeViewSelectedIndex(u64 epoch, PrimaryWindowUIPhase phase,
+                                                        UI::UITreeUpdater& updater, UI::UINodeId treeView,
+                                                        u64 logicalIndex);
+    [[nodiscard]] Core::Status clearTreeViewSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                                      UI::UITreeUpdater& updater, UI::UINodeId treeView);
+    [[nodiscard]] Core::Result<UI::UITreeViewSelection>
+    treeViewSelection(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                      UI::UINodeId treeView);
+    [[nodiscard]] Core::Status setTreeViewItemExpanded(u64 epoch, PrimaryWindowUIPhase phase,
+                                                       UI::UITreeUpdater& updater, UI::UINodeId treeView,
+                                                       u64 logicalIndex, bool expanded);
+    [[nodiscard]] Core::Status scrollTreeViewToIndex(u64 epoch, PrimaryWindowUIPhase phase,
+                                                     UI::UITreeUpdater& updater, UI::UINodeId treeView,
+                                                     u64 logicalIndex, UI::UITreeViewScrollAlignment alignment);
     [[nodiscard]] Core::Status setPopupStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
-                                            UI::UINodeId popup, const UI::UIPopupStyle& style);
+                                             UI::UINodeId popup, const UI::UIPopupStyle& style);
     [[nodiscard]] Core::Result<UI::UIPopupStyle> popupStyle(u64 epoch, PrimaryWindowUIPhase phase,
                                                             const UI::UITreeUpdater& updater, UI::UINodeId popup);
     [[nodiscard]] Core::Status setPopupOpen(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,

@@ -6,6 +6,7 @@
 #include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIDropdown.hpp>
+#include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIRadioButton.hpp>
@@ -14,6 +15,7 @@
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
+#include <tina/ui/UITreeView.hpp>
 
 #include <string_view>
 
@@ -48,6 +50,10 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UINodeId> createRadioButton(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createModal(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createScrollView(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId>
+    createListView(UI::UINodeId parent, UI::UIListViewCreateConfig config = {});
+    [[nodiscard]] Core::Result<UI::UINodeId>
+    createTreeView(UI::UINodeId parent, UI::UITreeViewCreateConfig config = {});
     [[nodiscard]] Core::Result<UI::UINodeId> createDropdown(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createPopup(UI::UINodeId dropdown);
     [[nodiscard]] Core::Result<UI::UINodeId> createDropdownItem(UI::UINodeId popup);
@@ -98,6 +104,35 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setScrollViewPaint(UI::UINodeId scrollView, const UI::UIScrollViewPaint& paint);
     [[nodiscard]] Core::Result<UI::UIScrollViewPaint> scrollViewPaint(UI::UINodeId scrollView) const;
     [[nodiscard]] Core::Result<bool> isScrollViewDragging(UI::UINodeId scrollView) const;
+    [[nodiscard]] Core::Status setListViewDataSource(UI::UINodeId listView, UI::UIListViewDataSource source);
+    [[nodiscard]] Core::Status clearListViewDataSource(UI::UINodeId listView);
+    [[nodiscard]] Core::Status invalidateListViewItems(UI::UINodeId listView);
+    [[nodiscard]] Core::Status setListViewStyle(UI::UINodeId listView, const UI::UIListViewStyle& style);
+    [[nodiscard]] Core::Result<UI::UIListViewStyle> listViewStyle(UI::UINodeId listView) const;
+    [[nodiscard]] Core::Status setListViewPaint(UI::UINodeId listView, const UI::UIListViewPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIListViewPaint> listViewPaint(UI::UINodeId listView) const;
+    [[nodiscard]] Core::Result<UI::UIListViewMetrics> listViewMetrics(UI::UINodeId listView) const;
+    [[nodiscard]] Core::Status setListViewSelectedIndex(UI::UINodeId listView, u64 logicalIndex);
+    [[nodiscard]] Core::Status clearListViewSelection(UI::UINodeId listView);
+    [[nodiscard]] Core::Result<UI::UIListViewSelection> listViewSelection(UI::UINodeId listView) const;
+    [[nodiscard]] Core::Status
+    scrollListViewToIndex(UI::UINodeId listView, u64 logicalIndex,
+                          UI::UIListViewScrollAlignment alignment = UI::UIListViewScrollAlignment::Nearest);
+    [[nodiscard]] Core::Status setTreeViewDataSource(UI::UINodeId treeView, UI::UITreeViewDataSource source);
+    [[nodiscard]] Core::Status clearTreeViewDataSource(UI::UINodeId treeView);
+    [[nodiscard]] Core::Status invalidateTreeViewItems(UI::UINodeId treeView);
+    [[nodiscard]] Core::Status setTreeViewStyle(UI::UINodeId treeView, const UI::UITreeViewStyle& style);
+    [[nodiscard]] Core::Result<UI::UITreeViewStyle> treeViewStyle(UI::UINodeId treeView) const;
+    [[nodiscard]] Core::Status setTreeViewPaint(UI::UINodeId treeView, const UI::UITreeViewPaint& paint);
+    [[nodiscard]] Core::Result<UI::UITreeViewPaint> treeViewPaint(UI::UINodeId treeView) const;
+    [[nodiscard]] Core::Result<UI::UITreeViewMetrics> treeViewMetrics(UI::UINodeId treeView) const;
+    [[nodiscard]] Core::Status setTreeViewSelectedIndex(UI::UINodeId treeView, u64 logicalIndex);
+    [[nodiscard]] Core::Status clearTreeViewSelection(UI::UINodeId treeView);
+    [[nodiscard]] Core::Result<UI::UITreeViewSelection> treeViewSelection(UI::UINodeId treeView) const;
+    [[nodiscard]] Core::Status setTreeViewItemExpanded(UI::UINodeId treeView, u64 logicalIndex, bool expanded);
+    [[nodiscard]] Core::Status
+    scrollTreeViewToIndex(UI::UINodeId treeView, u64 logicalIndex,
+                          UI::UITreeViewScrollAlignment alignment = UI::UITreeViewScrollAlignment::Nearest);
     [[nodiscard]] Core::Status setPopupStyle(UI::UINodeId popup, const UI::UIPopupStyle& style);
     [[nodiscard]] Core::Result<UI::UIPopupStyle> popupStyle(UI::UINodeId popup) const;
     [[nodiscard]] Core::Status setPopupOpen(UI::UINodeId popup, bool open);

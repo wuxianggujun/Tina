@@ -145,6 +145,26 @@ Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createScrollView(UI::UINo
     return m_state->createScrollView(m_epoch, m_phase, m_updater, parent);
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createListView(UI::UINodeId parent,
+                                                                      UI::UIListViewCreateConfig config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createListView");
+    }
+    return m_state->createListView(m_epoch, m_phase, m_updater, parent, config);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createTreeView(UI::UINodeId parent,
+                                                                      UI::UITreeViewCreateConfig config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createTreeView");
+    }
+    return m_state->createTreeView(m_epoch, m_phase, m_updater, parent, config);
+}
+
 Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createDropdown(UI::UINodeId parent)
 {
     if (m_state == nullptr)
@@ -578,6 +598,240 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isScrollViewDragging(UI::UINodeId
         return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isScrollViewDragging");
     }
     return m_state->isScrollViewDragging(m_epoch, m_phase, m_updater, scrollView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setListViewDataSource(UI::UINodeId listView,
+                                                               UI::UIListViewDataSource source)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setListViewDataSource");
+    }
+    return m_state->setListViewDataSource(m_epoch, m_phase, m_updater, listView, source);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearListViewDataSource(UI::UINodeId listView)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearListViewDataSource");
+    }
+    return m_state->clearListViewDataSource(m_epoch, m_phase, m_updater, listView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::invalidateListViewItems(UI::UINodeId listView)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::invalidateListViewItems");
+    }
+    return m_state->invalidateListViewItems(m_epoch, m_phase, m_updater, listView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setListViewStyle(UI::UINodeId listView,
+                                                          const UI::UIListViewStyle& style)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setListViewStyle");
+    }
+    return m_state->setListViewStyle(m_epoch, m_phase, m_updater, listView, style);
+}
+
+Core::Result<UI::UIListViewStyle> PrimaryWindowUITreeUpdater::listViewStyle(UI::UINodeId listView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIListViewStyle>("PrimaryWindowUITreeUpdater::listViewStyle");
+    }
+    return m_state->listViewStyle(m_epoch, m_phase, m_updater, listView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setListViewPaint(UI::UINodeId listView,
+                                                          const UI::UIListViewPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setListViewPaint");
+    }
+    return m_state->setListViewPaint(m_epoch, m_phase, m_updater, listView, paint);
+}
+
+Core::Result<UI::UIListViewPaint> PrimaryWindowUITreeUpdater::listViewPaint(UI::UINodeId listView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIListViewPaint>("PrimaryWindowUITreeUpdater::listViewPaint");
+    }
+    return m_state->listViewPaint(m_epoch, m_phase, m_updater, listView);
+}
+
+Core::Result<UI::UIListViewMetrics> PrimaryWindowUITreeUpdater::listViewMetrics(UI::UINodeId listView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIListViewMetrics>("PrimaryWindowUITreeUpdater::listViewMetrics");
+    }
+    return m_state->listViewMetrics(m_epoch, m_phase, m_updater, listView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setListViewSelectedIndex(UI::UINodeId listView, u64 logicalIndex)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setListViewSelectedIndex");
+    }
+    return m_state->setListViewSelectedIndex(m_epoch, m_phase, m_updater, listView, logicalIndex);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearListViewSelection(UI::UINodeId listView)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearListViewSelection");
+    }
+    return m_state->clearListViewSelection(m_epoch, m_phase, m_updater, listView);
+}
+
+Core::Result<UI::UIListViewSelection> PrimaryWindowUITreeUpdater::listViewSelection(UI::UINodeId listView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIListViewSelection>("PrimaryWindowUITreeUpdater::listViewSelection");
+    }
+    return m_state->listViewSelection(m_epoch, m_phase, m_updater, listView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::scrollListViewToIndex(UI::UINodeId listView, u64 logicalIndex,
+                                                               UI::UIListViewScrollAlignment alignment)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::scrollListViewToIndex");
+    }
+    return m_state->scrollListViewToIndex(m_epoch, m_phase, m_updater, listView, logicalIndex, alignment);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setTreeViewDataSource(UI::UINodeId treeView,
+                                                               UI::UITreeViewDataSource source)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTreeViewDataSource");
+    }
+    return m_state->setTreeViewDataSource(m_epoch, m_phase, m_updater, treeView, source);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearTreeViewDataSource(UI::UINodeId treeView)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearTreeViewDataSource");
+    }
+    return m_state->clearTreeViewDataSource(m_epoch, m_phase, m_updater, treeView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::invalidateTreeViewItems(UI::UINodeId treeView)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::invalidateTreeViewItems");
+    }
+    return m_state->invalidateTreeViewItems(m_epoch, m_phase, m_updater, treeView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setTreeViewStyle(UI::UINodeId treeView,
+                                                          const UI::UITreeViewStyle& style)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTreeViewStyle");
+    }
+    return m_state->setTreeViewStyle(m_epoch, m_phase, m_updater, treeView, style);
+}
+
+Core::Result<UI::UITreeViewStyle> PrimaryWindowUITreeUpdater::treeViewStyle(UI::UINodeId treeView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITreeViewStyle>("PrimaryWindowUITreeUpdater::treeViewStyle");
+    }
+    return m_state->treeViewStyle(m_epoch, m_phase, m_updater, treeView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setTreeViewPaint(UI::UINodeId treeView,
+                                                          const UI::UITreeViewPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTreeViewPaint");
+    }
+    return m_state->setTreeViewPaint(m_epoch, m_phase, m_updater, treeView, paint);
+}
+
+Core::Result<UI::UITreeViewPaint> PrimaryWindowUITreeUpdater::treeViewPaint(UI::UINodeId treeView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITreeViewPaint>("PrimaryWindowUITreeUpdater::treeViewPaint");
+    }
+    return m_state->treeViewPaint(m_epoch, m_phase, m_updater, treeView);
+}
+
+Core::Result<UI::UITreeViewMetrics> PrimaryWindowUITreeUpdater::treeViewMetrics(UI::UINodeId treeView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITreeViewMetrics>("PrimaryWindowUITreeUpdater::treeViewMetrics");
+    }
+    return m_state->treeViewMetrics(m_epoch, m_phase, m_updater, treeView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setTreeViewSelectedIndex(UI::UINodeId treeView, u64 logicalIndex)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTreeViewSelectedIndex");
+    }
+    return m_state->setTreeViewSelectedIndex(m_epoch, m_phase, m_updater, treeView, logicalIndex);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearTreeViewSelection(UI::UINodeId treeView)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearTreeViewSelection");
+    }
+    return m_state->clearTreeViewSelection(m_epoch, m_phase, m_updater, treeView);
+}
+
+Core::Result<UI::UITreeViewSelection> PrimaryWindowUITreeUpdater::treeViewSelection(UI::UINodeId treeView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITreeViewSelection>("PrimaryWindowUITreeUpdater::treeViewSelection");
+    }
+    return m_state->treeViewSelection(m_epoch, m_phase, m_updater, treeView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setTreeViewItemExpanded(UI::UINodeId treeView, u64 logicalIndex,
+                                                                 bool expanded)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTreeViewItemExpanded");
+    }
+    return m_state->setTreeViewItemExpanded(m_epoch, m_phase, m_updater, treeView, logicalIndex, expanded);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::scrollTreeViewToIndex(UI::UINodeId treeView, u64 logicalIndex,
+                                                               UI::UITreeViewScrollAlignment alignment)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::scrollTreeViewToIndex");
+    }
+    return m_state->scrollTreeViewToIndex(m_epoch, m_phase, m_updater, treeView, logicalIndex, alignment);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setPopupStyle(UI::UINodeId popup, const UI::UIPopupStyle& style)

@@ -69,6 +69,116 @@ class PrimaryWindowUICapabilityTest : public testing::Test {
         [&activationCount](const UI::UIButtonActionEvent&) noexcept { ++activationCount; }};
 }
 
+struct ListFacadeDataSource final {
+    u64 count = 0;
+    UI::UIListViewItemKey keyBase = 1;
+
+    [[nodiscard]] UI::UIListViewDataSource view() const noexcept
+    {
+        return {
+            .state = this,
+            .itemCount = &itemCount,
+            .resolveItem = &resolveItem,
+        };
+    }
+
+    static u64 itemCount(const void* state) noexcept
+    {
+        return static_cast<const ListFacadeDataSource*>(state)->count;
+    }
+
+    static bool resolveItem(const void* state, u64 logicalIndex, UI::UIListViewItemDescriptor& output) noexcept
+    {
+        const auto& source = *static_cast<const ListFacadeDataSource*>(state);
+        if (logicalIndex >= source.count)
+        {
+            return false;
+        }
+        output = {
+            .key = source.keyBase + logicalIndex,
+            .label = "Item",
+            .enabled = true,
+        };
+        return true;
+    }
+};
+
+struct TreeFacadeDataSource final {
+    static constexpr u64 CollapsedItemCount = 20;
+
+    bool expanded = false;
+    usize expansionCallCount = 0;
+    UI::UITreeViewItemKey lastExpansionKey = UI::InvalidUITreeViewItemKey;
+
+    [[nodiscard]] UI::UITreeViewDataSource view() noexcept
+    {
+        return {
+            .state = this,
+            .itemCount = &itemCount,
+            .resolveItem = &resolveItem,
+            .setItemExpanded = &setItemExpanded,
+        };
+    }
+
+    static u64 itemCount(const void* state) noexcept
+    {
+        return static_cast<const TreeFacadeDataSource*>(state)->expanded ? CollapsedItemCount + 2
+                                                                         : CollapsedItemCount;
+    }
+
+    static bool resolveItem(const void* state, u64 logicalIndex, UI::UITreeViewItemDescriptor& output) noexcept
+    {
+        const auto& source = *static_cast<const TreeFacadeDataSource*>(state);
+        if (logicalIndex >= itemCount(state))
+        {
+            return false;
+        }
+        if (logicalIndex == 0)
+        {
+            output = {
+                .key = 1,
+                .label = "Workspace",
+                .level = 0,
+                .enabled = true,
+                .expandable = true,
+                .expanded = source.expanded,
+            };
+            return true;
+        }
+        if (source.expanded && logicalIndex <= 2)
+        {
+            output = {
+                .key = 100 + logicalIndex,
+                .label = logicalIndex == 1 ? "Scene.cpp" : "Theme.json",
+                .level = 1,
+                .enabled = true,
+            };
+            return true;
+        }
+        const u64 rootKey = source.expanded ? logicalIndex - 1 : logicalIndex + 1;
+        output = {
+            .key = rootKey,
+            .label = "Root item",
+            .level = 0,
+            .enabled = true,
+        };
+        return true;
+    }
+
+    static bool setItemExpanded(void* state, UI::UITreeViewItemKey key, bool expanded) noexcept
+    {
+        auto& source = *static_cast<TreeFacadeDataSource*>(state);
+        if (key != 1)
+        {
+            return false;
+        }
+        source.expanded = expanded;
+        source.lastExpansionKey = key;
+        ++source.expansionCallCount;
+        return true;
+    }
+};
+
 TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAndExpiresUnconditionally)
 {
     CapabilityState state;
@@ -309,6 +419,196 @@ TEST_F(PrimaryWindowUICapabilityTest, ScrollViewFacadeRoundTripsMetricsAndExpire
     Core::Status expiredSet = tree->setScrollViewOffset(*scrollView, {});
     ASSERT_FALSE(expiredSet.has_value());
     EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ListViewFacadeRoundTripsAndExpiresWithPhase)
+{
+    constexpr u32 MaterializedItemCapacity = 12;
+    constexpr UI::UIListViewStyle ListStyle{
+        .rowHeight = 20.0F,
+        .overscanRows = 1,
+        .scrollBarVisibility = UI::UIScrollBarVisibility::Always,
+        .wheelStep = 20.0F,
+    };
+    constexpr UI::UIListViewPaint ListPaint{
+        .scrollBar =
+            {
+                .trackColor = {.red = 24, .green = 30, .blue = 40, .alpha = 255},
+                .thumbColor = {.red = 80, .green = 100, .blue = 140, .alpha = 255},
+                .draggingThumbColor = {.red = 120, .green = 150, .blue = 220, .alpha = 255},
+                .thickness = 9.0F,
+                .minThumbExtent = 18.0F,
+            },
+        .selectedItemBackgroundColor = {.red = 36, .green = 92, .blue = 168, .alpha = 220},
+    };
+
+    auto contextResult = UI::UIContext::Create(window, {
+                                                           .nodeCapacity = 128,
+                                                           .rootCapacity = 4,
+                                                           .paintSnapshotCapacity = 128,
+                                                       });
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    context = std::move(*contextResult);
+
+    ListFacadeDataSource source{.count = 100, .keyBase = 1'000};
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto listView = tree->createListView(root->rootNodeId(), {
+                                                                .materializedItemCapacity = MaterializedItemCapacity,
+                                                            });
+    ASSERT_TRUE(listView.has_value()) << listView.error().message;
+
+    ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(120.0F, 80.0F)).has_value());
+    ASSERT_TRUE(tree->setLayoutStyle(*listView, fixedSize(120.0F, 80.0F)).has_value());
+    ASSERT_TRUE(tree->setListViewStyle(*listView, ListStyle).has_value());
+    ASSERT_TRUE(tree->setListViewPaint(*listView, ListPaint).has_value());
+    ASSERT_TRUE(tree->setListViewDataSource(*listView, source.view()).has_value());
+    ASSERT_TRUE(tree->invalidateListViewItems(*listView).has_value());
+    ASSERT_TRUE(tree->setListViewSelectedIndex(*listView, 3).has_value());
+    ASSERT_TRUE(tree->scrollListViewToIndex(*listView, 40, UI::UIListViewScrollAlignment::Start).has_value());
+    Core::Status initialCommit = context->commitLayout({.width = 120.0F, .height = 80.0F});
+    ASSERT_TRUE(initialCommit.has_value()) << initialCommit.error().message;
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    EXPECT_EQ(treeView.listViewStyle(*listView).value(), ListStyle);
+    EXPECT_EQ(treeView.listViewPaint(*listView).value(), ListPaint);
+    const UI::UIListViewMetrics metrics = treeView.listViewMetrics(*listView).value();
+    EXPECT_EQ(metrics.logicalItemCount, 100U);
+    EXPECT_EQ(metrics.materializedItemCapacity, MaterializedItemCapacity);
+    EXPECT_EQ(metrics.firstVisibleIndex, 40U);
+    EXPECT_EQ(treeView.listViewSelection(*listView).value(),
+              (UI::UIListViewSelection{.key = 1'003, .logicalIndex = 3}));
+
+    ASSERT_TRUE(tree->clearListViewSelection(*listView).has_value());
+    EXPECT_FALSE(treeView.listViewSelection(*listView).value().hasValue());
+    ASSERT_TRUE(tree->clearListViewDataSource(*listView).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
+    EXPECT_EQ(treeView.listViewMetrics(*listView).value().logicalItemCount, 0U);
+    ASSERT_TRUE(tree->setListViewDataSource(*listView, source.view()).has_value());
+    ASSERT_TRUE(tree->invalidateListViewItems(*listView).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
+    EXPECT_EQ(treeView.listViewMetrics(*listView).value().logicalItemCount, 100U);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    auto expiredCreate = tree->createListView(root->rootNodeId(), {.materializedItemCapacity = 4});
+    ASSERT_FALSE(expiredCreate.has_value());
+    EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSet = tree->clearListViewDataSource(*listView);
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredQuery = treeView.listViewMetrics(*listView);
+    ASSERT_FALSE(expiredQuery.has_value());
+    EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, TreeViewFacadeRoundTripsExpansionAndExpiresWithPhase)
+{
+    constexpr u32 MaterializedItemCapacity = 12;
+    constexpr UI::UITreeViewStyle TreeStyle{
+        .rowHeight = 20.0F,
+        .overscanRows = 1,
+        .scrollBarVisibility = UI::UIScrollBarVisibility::Always,
+        .wheelStep = 20.0F,
+        .indentation = 16.0F,
+        .disclosureExtent = 10.0F,
+        .disclosureGap = 5.0F,
+    };
+    constexpr UI::UITreeViewPaint TreePaint{
+        .scrollBar =
+            {
+                .trackColor = {.red = 22, .green = 28, .blue = 38, .alpha = 255},
+                .thumbColor = {.red = 88, .green = 110, .blue = 150, .alpha = 255},
+                .draggingThumbColor = {.red = 130, .green = 160, .blue = 225, .alpha = 255},
+                .thickness = 9.0F,
+                .minThumbExtent = 18.0F,
+            },
+        .selectedItemBackgroundColor = {.red = 42, .green = 96, .blue = 176, .alpha = 220},
+        .disclosureColor = {.red = 224, .green = 232, .blue = 244, .alpha = 255},
+    };
+
+    auto contextResult = UI::UIContext::Create(window, {
+                                                           .nodeCapacity = 128,
+                                                           .rootCapacity = 4,
+                                                           .paintSnapshotCapacity = 128,
+                                                       });
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    context = std::move(*contextResult);
+
+    TreeFacadeDataSource source;
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto treeViewNode = tree->createTreeView(root->rootNodeId(), {
+                                                                    .materializedItemCapacity =
+                                                                        MaterializedItemCapacity,
+                                                                });
+    ASSERT_TRUE(treeViewNode.has_value()) << treeViewNode.error().message;
+
+    ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(160.0F, 80.0F)).has_value());
+    ASSERT_TRUE(tree->setLayoutStyle(*treeViewNode, fixedSize(160.0F, 80.0F)).has_value());
+    ASSERT_TRUE(tree->setTreeViewStyle(*treeViewNode, TreeStyle).has_value());
+    ASSERT_TRUE(tree->setTreeViewPaint(*treeViewNode, TreePaint).has_value());
+    ASSERT_TRUE(tree->setTreeViewDataSource(*treeViewNode, source.view()).has_value());
+    ASSERT_TRUE(tree->invalidateTreeViewItems(*treeViewNode).has_value());
+    ASSERT_TRUE(tree->setTreeViewSelectedIndex(*treeViewNode, 0).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    EXPECT_EQ(treeView.treeViewStyle(*treeViewNode).value(), TreeStyle);
+    EXPECT_EQ(treeView.treeViewPaint(*treeViewNode).value(), TreePaint);
+    EXPECT_EQ(treeView.treeViewMetrics(*treeViewNode).value().logicalItemCount,
+              TreeFacadeDataSource::CollapsedItemCount);
+    EXPECT_EQ(treeView.treeViewMetrics(*treeViewNode).value().materializedItemCapacity, MaterializedItemCapacity);
+    EXPECT_EQ(treeView.treeViewSelection(*treeViewNode).value(),
+              (UI::UITreeViewSelection{.key = 1, .logicalIndex = 0, .level = 0}));
+
+    ASSERT_TRUE(tree->setTreeViewItemExpanded(*treeViewNode, 0, true).has_value());
+    EXPECT_TRUE(source.expanded);
+    EXPECT_EQ(source.expansionCallCount, 1U);
+    EXPECT_EQ(source.lastExpansionKey, 1U);
+    ASSERT_TRUE(tree->setTreeViewSelectedIndex(*treeViewNode, 3).has_value());
+    ASSERT_TRUE(tree->scrollTreeViewToIndex(*treeViewNode, 15, UI::UITreeViewScrollAlignment::Start).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const UI::UITreeViewMetrics expandedMetrics = treeView.treeViewMetrics(*treeViewNode).value();
+    EXPECT_EQ(expandedMetrics.logicalItemCount, TreeFacadeDataSource::CollapsedItemCount + 2);
+    EXPECT_EQ(expandedMetrics.firstVisibleIndex, 15U);
+    EXPECT_EQ(treeView.treeViewSelection(*treeViewNode).value(),
+              (UI::UITreeViewSelection{.key = 2, .logicalIndex = 3, .level = 0}));
+
+    ASSERT_TRUE(tree->clearTreeViewSelection(*treeViewNode).has_value());
+    EXPECT_FALSE(treeView.treeViewSelection(*treeViewNode).value().hasValue());
+    ASSERT_TRUE(tree->clearTreeViewDataSource(*treeViewNode).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    EXPECT_EQ(treeView.treeViewMetrics(*treeViewNode).value().logicalItemCount, 0U);
+    ASSERT_TRUE(tree->setTreeViewDataSource(*treeViewNode, source.view()).has_value());
+    ASSERT_TRUE(tree->invalidateTreeViewItems(*treeViewNode).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    EXPECT_EQ(treeView.treeViewMetrics(*treeViewNode).value().logicalItemCount,
+              TreeFacadeDataSource::CollapsedItemCount + 2);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    auto expiredCreate = tree->createTreeView(root->rootNodeId(), {.materializedItemCapacity = 4});
+    ASSERT_FALSE(expiredCreate.has_value());
+    EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSet = tree->setTreeViewItemExpanded(*treeViewNode, 0, false);
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredQuery = treeView.treeViewMetrics(*treeViewNode);
+    ASSERT_FALSE(expiredQuery.has_value());
+    EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, DropdownPopupFacadeRoundTripsAndExpiresWithPhase)
