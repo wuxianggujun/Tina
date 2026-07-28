@@ -116,6 +116,8 @@ struct UIUiaMappedNode final {
         return kControlTypeComboBox;
     case UISemanticsRole::Tree:
         return kControlTypeTree;
+    case UISemanticsRole::TreeItem:
+        return kControlTypeTreeItem;
     case UISemanticsRole::Group:
         return kControlTypeGroup;
     }
@@ -134,6 +136,7 @@ struct UIUiaMappedNode final {
     case UISemanticsRole::ComboBox:
     case UISemanticsRole::ListItem:
     case UISemanticsRole::Tree:
+    case UISemanticsRole::TreeItem:
         return true;
     case UISemanticsRole::Label:
     case UISemanticsRole::ProgressBar:
@@ -195,9 +198,8 @@ struct UIUiaMappedNode final {
         std::string valueText = source.valueText.empty() ? std::string(source.name) : std::string(source.valueText);
         mapped.value = UIUiaValuePattern{
             .value = std::move(valueText),
-            .isReadOnly =
-                source.role == UISemanticsRole::Label || source.role == UISemanticsRole::ComboBox ||
-                hasState(source.states, UIAccessibilityState::ReadOnly),
+            .isReadOnly = source.role == UISemanticsRole::Label || source.role == UISemanticsRole::ComboBox ||
+                          hasState(source.states, UIAccessibilityState::ReadOnly),
         };
     }
 

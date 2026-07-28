@@ -5,12 +5,12 @@
 #include <tina/platform/Window.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
-#include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UICommittedHit.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIContextConfig.hpp>
+#include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIFocus.hpp>
@@ -19,8 +19,8 @@
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
-#include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIPopup.hpp>
+#include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
@@ -28,6 +28,7 @@
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
+#include <tina/ui/UITreeView.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
@@ -183,6 +184,7 @@ class UIRootBuilder final {
     [[nodiscard]] Core::Result<UINodeId> createPopup(UINodeId dropdown);
     [[nodiscard]] Core::Result<UINodeId> createDropdownItem(UINodeId popup);
     [[nodiscard]] Core::Result<UINodeId> createListView(UINodeId parent, UIListViewCreateConfig config = {});
+    [[nodiscard]] Core::Result<UINodeId> createTreeView(UINodeId parent, UITreeViewCreateConfig config = {});
 
   private:
     friend class UIContext;
@@ -218,6 +220,7 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UINodeId> createPopup(UINodeId dropdown);
     [[nodiscard]] Core::Result<UINodeId> createDropdownItem(UINodeId popup);
     [[nodiscard]] Core::Result<UINodeId> createListView(UINodeId parent, UIListViewCreateConfig config = {});
+    [[nodiscard]] Core::Result<UINodeId> createTreeView(UINodeId parent, UITreeViewCreateConfig config = {});
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UINodeId node, UIPointerHitPolicy policy);
@@ -294,9 +297,24 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setListViewSelectedIndex(UINodeId listView, u64 logicalIndex);
     [[nodiscard]] Core::Status clearListViewSelection(UINodeId listView);
     [[nodiscard]] Core::Result<UIListViewSelection> listViewSelection(UINodeId listView) const;
-    [[nodiscard]] Core::Status scrollListViewToIndex(UINodeId listView, u64 logicalIndex,
-                                                    UIListViewScrollAlignment alignment =
-                                                        UIListViewScrollAlignment::Nearest);
+    [[nodiscard]] Core::Status
+    scrollListViewToIndex(UINodeId listView, u64 logicalIndex,
+                          UIListViewScrollAlignment alignment = UIListViewScrollAlignment::Nearest);
+    [[nodiscard]] Core::Status setTreeViewDataSource(UINodeId treeView, UITreeViewDataSource source);
+    [[nodiscard]] Core::Status clearTreeViewDataSource(UINodeId treeView);
+    [[nodiscard]] Core::Status invalidateTreeViewItems(UINodeId treeView);
+    [[nodiscard]] Core::Status setTreeViewStyle(UINodeId treeView, const UITreeViewStyle& style);
+    [[nodiscard]] Core::Result<UITreeViewStyle> treeViewStyle(UINodeId treeView) const;
+    [[nodiscard]] Core::Status setTreeViewPaint(UINodeId treeView, const UITreeViewPaint& paint);
+    [[nodiscard]] Core::Result<UITreeViewPaint> treeViewPaint(UINodeId treeView) const;
+    [[nodiscard]] Core::Result<UITreeViewMetrics> treeViewMetrics(UINodeId treeView) const;
+    [[nodiscard]] Core::Status setTreeViewSelectedIndex(UINodeId treeView, u64 logicalIndex);
+    [[nodiscard]] Core::Status clearTreeViewSelection(UINodeId treeView);
+    [[nodiscard]] Core::Result<UITreeViewSelection> treeViewSelection(UINodeId treeView) const;
+    [[nodiscard]] Core::Status setTreeViewItemExpanded(UINodeId treeView, u64 logicalIndex, bool expanded);
+    [[nodiscard]] Core::Status
+    scrollTreeViewToIndex(UINodeId treeView, u64 logicalIndex,
+                          UITreeViewScrollAlignment alignment = UITreeViewScrollAlignment::Nearest);
     [[nodiscard]] Core::Status setProgressBarRange(UINodeId progressBar, float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValue(UINodeId progressBar, float value);
     [[nodiscard]] Core::Result<float> progressBarValue(UINodeId progressBar) const;
@@ -437,10 +455,9 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(bool reverse);
     // Routes retained Dropdown navigation. pressed=false releases a command
     // previously claimed on key-down without repeating its state transition.
-    [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command,
-                                                                             bool pressed);
-    [[nodiscard]] Core::Result<UIListViewCommandResult> routeListViewCommand(UIListViewCommand command,
-                                                                             bool pressed);
+    [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command, bool pressed);
+    [[nodiscard]] Core::Result<UIListViewCommandResult> routeListViewCommand(UIListViewCommand command, bool pressed);
+    [[nodiscard]] Core::Result<UITreeViewCommandResult> routeTreeViewCommand(UITreeViewCommand command, bool pressed);
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
     [[nodiscard]] UINodeId activeFocusScope() const noexcept;
     [[nodiscard]] UINodeId activeModal() const noexcept;
@@ -490,10 +507,13 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIRootOwner> createRoot();
     [[nodiscard]] Core::Result<UINodeId> createChild(UINodeId parent, UIWidgetKind kind);
     [[nodiscard]] Core::Result<UINodeId> createListViewChild(UINodeId parent, UIListViewCreateConfig config);
+    [[nodiscard]] Core::Result<UINodeId> createTreeViewChild(UINodeId parent, UITreeViewCreateConfig config);
     [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(UINodeId updaterRoot, UINodeId parent,
                                                                 UIWidgetKind kind);
     [[nodiscard]] Core::Result<UINodeId> createListViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
                                                                   UIListViewCreateConfig config);
+    [[nodiscard]] Core::Result<UINodeId> createTreeViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                                   UITreeViewCreateConfig config);
     [[nodiscard]] Core::Status setProgressBarRangeFromUpdater(UINodeId updaterRoot, UINodeId progressBar,
                                                               float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValueFromUpdater(UINodeId updaterRoot, UINodeId progressBar, float value);
@@ -611,8 +631,28 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIListViewSelection> listViewSelectionFromUpdater(UINodeId updaterRoot,
                                                                                 UINodeId listView) const;
     [[nodiscard]] Core::Status scrollListViewToIndexFromUpdater(UINodeId updaterRoot, UINodeId listView,
-                                                               u64 logicalIndex,
-                                                               UIListViewScrollAlignment alignment);
+                                                                u64 logicalIndex, UIListViewScrollAlignment alignment);
+    [[nodiscard]] Core::Status setTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                                UITreeViewDataSource source);
+    [[nodiscard]] Core::Status clearTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView);
+    [[nodiscard]] Core::Status invalidateTreeViewItemsFromUpdater(UINodeId updaterRoot, UINodeId treeView);
+    [[nodiscard]] Core::Status setTreeViewStyleFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                           const UITreeViewStyle& style);
+    [[nodiscard]] Core::Result<UITreeViewStyle> treeViewStyleFromUpdater(UINodeId updaterRoot, UINodeId treeView) const;
+    [[nodiscard]] Core::Status setTreeViewPaintFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                           const UITreeViewPaint& paint);
+    [[nodiscard]] Core::Result<UITreeViewPaint> treeViewPaintFromUpdater(UINodeId updaterRoot, UINodeId treeView) const;
+    [[nodiscard]] Core::Result<UITreeViewMetrics> treeViewMetricsFromUpdater(UINodeId updaterRoot,
+                                                                             UINodeId treeView) const;
+    [[nodiscard]] Core::Status setTreeViewSelectedIndexFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                                   u64 logicalIndex);
+    [[nodiscard]] Core::Status clearTreeViewSelectionFromUpdater(UINodeId updaterRoot, UINodeId treeView);
+    [[nodiscard]] Core::Result<UITreeViewSelection> treeViewSelectionFromUpdater(UINodeId updaterRoot,
+                                                                                 UINodeId treeView) const;
+    [[nodiscard]] Core::Status setTreeViewItemExpandedFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                                  u64 logicalIndex, bool expanded);
+    [[nodiscard]] Core::Status scrollTreeViewToIndexFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                                u64 logicalIndex, UITreeViewScrollAlignment alignment);
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListenerFromUpdater(UINodeId updaterRoot, UIRoutedPointerListenerDesc descriptor,
                                         UIRoutedPointerCallback&& callback);

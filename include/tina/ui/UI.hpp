@@ -20,8 +20,8 @@
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
-#include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIPopup.hpp>
+#include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
@@ -29,6 +29,7 @@
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
+#include <tina/ui/UITreeView.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 #include <tina/ui/text/UIGlyphAtlas.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>

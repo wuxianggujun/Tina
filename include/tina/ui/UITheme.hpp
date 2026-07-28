@@ -10,6 +10,7 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/UITreeView.hpp>
 
 #include <compare>
 #include <optional>
@@ -336,6 +337,15 @@ struct UISettingsPanelChrome final {
     return UIListViewPaint{
         .scrollBar = makeScrollViewPaint(theme),
         .selectedItemBackgroundColor = scaleColorAlpha(theme.accent, 150),
+    };
+}
+
+[[nodiscard]] constexpr UITreeViewPaint makeTreeViewPaint(const UITheme& theme) noexcept
+{
+    return UITreeViewPaint{
+        .scrollBar = makeScrollViewPaint(theme),
+        .selectedItemBackgroundColor = scaleColorAlpha(theme.accent, 150),
+        .disclosureColor = theme.textSecondary,
     };
 }
 

@@ -179,6 +179,39 @@ struct ListViewItemState final {
     bool committedEnabled = true;
 };
 
+struct TreeViewState final {
+    UITreeViewStyle style{};
+    UITreeViewPaint paint{};
+    UITreeViewDataSource dataSource{};
+    UITreeViewSelection selection{};
+    UITreeViewMetrics committedMetrics{};
+    UILogicalRect committedViewportRect{};
+    float requestedScrollOffset = 0.0F;
+    u32 materializedItemCapacity = 0;
+};
+
+struct TreeViewLayoutScratch final {
+    UITreeViewMetrics metrics{};
+    UILogicalRect viewportRect{};
+};
+
+struct TreeViewItemState final {
+    UITreeViewItemKey key = InvalidUITreeViewItemKey;
+    u64 logicalIndex = 0;
+    u32 level = 0;
+    bool bound = false;
+    bool enabled = true;
+    bool expandable = false;
+    bool expanded = false;
+    UITreeViewItemKey committedKey = InvalidUITreeViewItemKey;
+    u64 committedLogicalIndex = 0;
+    u32 committedLevel = 0;
+    bool committedBound = false;
+    bool committedEnabled = true;
+    bool committedExpandable = false;
+    bool committedExpanded = false;
+};
+
 inline constexpr u16 ThemeBindingBoxPaint = 1U << 0U;
 inline constexpr u16 ThemeBindingTextStyle = 1U << 1U;
 inline constexpr u16 ThemeBindingButtonPaint = 1U << 2U;
@@ -189,6 +222,7 @@ inline constexpr u16 ThemeBindingRadioButtonPaint = 1U << 6U;
 inline constexpr u16 ThemeBindingScrollViewPaint = 1U << 7U;
 inline constexpr u16 ThemeBindingDropdownPaint = 1U << 8U;
 inline constexpr u16 ThemeBindingListViewPaint = 1U << 9U;
+inline constexpr u16 ThemeBindingTreeViewPaint = 1U << 10U;
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -494,6 +528,54 @@ struct ResolvedLength final {
 {
     return alignment == UIListViewScrollAlignment::Nearest || alignment == UIListViewScrollAlignment::Start ||
            alignment == UIListViewScrollAlignment::Center || alignment == UIListViewScrollAlignment::End;
+}
+
+[[nodiscard]] Core::Result<UITreeViewCreateConfig> normalizeTreeViewCreateConfig(UITreeViewCreateConfig config)
+{
+    if (config.materializedItemCapacity == 0 ||
+        config.materializedItemCapacity > UITreeViewCreateConfig::MaximumMaterializedItemCapacity)
+    {
+        return fail(UIErrorCode::InvalidControlValue,
+                    "UI TreeView materialized item capacity must be within the supported range");
+    }
+    return config;
+}
+
+[[nodiscard]] Core::Result<UITreeViewStyle> normalizeTreeViewStyle(UITreeViewStyle style)
+{
+    if (!(std::isfinite(style.rowHeight) && style.rowHeight > 0.0F) ||
+        !isValidScrollBarVisibility(style.scrollBarVisibility) ||
+        !(std::isfinite(style.wheelStep) && style.wheelStep > 0.0F) ||
+        !(std::isfinite(style.indentation) && style.indentation >= 0.0F) ||
+        !(std::isfinite(style.disclosureExtent) && style.disclosureExtent > 0.0F) ||
+        !(std::isfinite(style.disclosureGap) && style.disclosureGap >= 0.0F))
+    {
+        return fail(UIErrorCode::InvalidControlValue,
+                    "UI TreeView row, scroll, indentation, and disclosure metrics must be finite and valid");
+    }
+    style.rowHeight = normalizeFloat(style.rowHeight);
+    style.wheelStep = normalizeFloat(style.wheelStep);
+    style.indentation = normalizeFloat(style.indentation);
+    style.disclosureExtent = normalizeFloat(style.disclosureExtent);
+    style.disclosureGap = normalizeFloat(style.disclosureGap);
+    return style;
+}
+
+[[nodiscard]] Core::Result<UITreeViewPaint> normalizeTreeViewPaint(UITreeViewPaint paint)
+{
+    auto scrollBar = normalizeScrollViewPaint(paint.scrollBar);
+    if (!scrollBar)
+    {
+        return Core::failure(scrollBar.error());
+    }
+    paint.scrollBar = *scrollBar;
+    return paint;
+}
+
+[[nodiscard]] constexpr bool isValidTreeViewScrollAlignment(UITreeViewScrollAlignment alignment) noexcept
+{
+    return alignment == UITreeViewScrollAlignment::Nearest || alignment == UITreeViewScrollAlignment::Start ||
+           alignment == UITreeViewScrollAlignment::Center || alignment == UITreeViewScrollAlignment::End;
 }
 
 [[nodiscard]] Core::Result<UIScrollOffset> normalizeScrollOffset(UIScrollOffset offset)
@@ -1134,6 +1216,38 @@ struct ScrollBarPointerHit final {
         viewportRect, paint, UIScrollAxes::Vertical);
 }
 
+[[nodiscard]] ScrollBarGeometry makeTreeViewScrollBarGeometry(const UITreeViewMetrics& metrics,
+                                                              UILogicalRect viewportRect,
+                                                              const UIScrollViewPaint& paint) noexcept
+{
+    return makeScrollBarGeometry(
+        UIScrollViewMetrics{
+            .offset = {.x = 0.0F, .y = metrics.scrollOffset},
+            .viewportSize = metrics.viewportSize,
+            .contentSize = metrics.contentSize,
+            .horizontalScrollBarVisible = false,
+            .verticalScrollBarVisible = metrics.verticalScrollBarVisible,
+        },
+        viewportRect, paint, UIScrollAxes::Vertical);
+}
+
+[[nodiscard]] UILogicalRect makeTreeViewDisclosureRect(UILogicalRect rowRect, const UITreeViewStyle& style,
+                                                       u32 level) noexcept
+{
+    const double logicalX =
+        static_cast<double>(rowRect.x) + 8.0 + static_cast<double>(level) * static_cast<double>(style.indentation);
+    const float extent = normalizeFloat((std::min)(style.disclosureExtent, rowRect.height));
+    const float x = logicalX >= static_cast<double>((std::numeric_limits<float>::max)())
+                        ? (std::numeric_limits<float>::max)()
+                        : normalizeFloat(static_cast<float>(logicalX));
+    return UILogicalRect{
+        .x = x,
+        .y = normalizeFloat(rowRect.y + (rowRect.height - extent) * 0.5F),
+        .width = extent,
+        .height = extent,
+    };
+}
+
 } // namespace
 
 struct UIContext::Impl final {
@@ -1178,6 +1292,9 @@ struct UIContext::Impl final {
     std::pmr::vector<ListViewState> listViewStatesByNodeIndex;
     std::pmr::vector<ListViewLayoutScratch> listViewLayoutScratchByNodeIndex;
     std::pmr::vector<ListViewItemState> listViewItemStatesByNodeIndex;
+    std::pmr::vector<TreeViewState> treeViewStatesByNodeIndex;
+    std::pmr::vector<TreeViewLayoutScratch> treeViewLayoutScratchByNodeIndex;
+    std::pmr::vector<TreeViewItemState> treeViewItemStatesByNodeIndex;
     std::pmr::vector<char> textBytes;
     std::pmr::vector<TextByteAllocation> freeTextAllocations;
     usize textByteUsed = 0;
@@ -1330,6 +1447,8 @@ struct UIContext::Impl final {
     UINodeId activePopupNode{};
     std::array<bool, 5> dropdownCommandPressed{};
     std::array<bool, 7> listViewCommandPressed{};
+    std::array<bool, 10> treeViewCommandPressed{};
+    bool armedTreeDisclosure = false;
     bool popupDismissPointerBarrierActive = false;
     UINodeId pendingDestroyedModalRestoreFocus{};
     bool hasPendingDestroyedModalRestoreFocus = false;
@@ -1358,9 +1477,11 @@ struct UIContext::Impl final {
           scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
           dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
           popupLayoutScratchByNodeIndex(&resource), listViewStatesByNodeIndex(&resource),
-          listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource), textBytes(&resource),
-          freeTextAllocations(&resource), dirtyByIndex(&resource), dirtyQueuedByIndex(&resource),
-          dirtyReservedByIndex(&resource), dirtyQueue(&resource), routeDirtyReservationScratch(&resource),
+          listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
+          treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
+          treeViewItemStatesByNodeIndex(&resource), textBytes(&resource), freeTextAllocations(&resource),
+          dirtyByIndex(&resource), dirtyQueuedByIndex(&resource), dirtyReservedByIndex(&resource),
+          dirtyQueue(&resource), routeDirtyReservationScratch(&resource),
           routeDirtyReservationCandidateByIndex(&resource), layoutScratchByIndex(&resource),
           layoutWorkByIndex(&resource), layoutOrderScratch(&resource), hitEntryIndexByNodeIndex(&resource),
           routedPointerListenerHeadByNodeIndex(&resource), routedPointerListenerTailByNodeIndex(&resource),
@@ -1440,6 +1561,9 @@ struct UIContext::Impl final {
         impl->listViewStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->listViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->listViewItemStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->treeViewStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->treeViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
+        impl->treeViewItemStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->textBytes.resize(normalized.textByteCapacity, '\0');
         impl->freeTextAllocations.reserve(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
@@ -2353,6 +2477,228 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status bindTreeViewItem(u32 itemIndex, u64 logicalIndex,
+                                                const UITreeViewItemDescriptor& descriptor)
+    {
+        if (itemIndex >= textStatesByIndex.size() || itemIndex >= treeViewItemStatesByNodeIndex.size())
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI TreeView item side state is out of range");
+        }
+        if (descriptor.key == InvalidUITreeViewItemKey || containsLineBreak(descriptor.label) ||
+            (descriptor.expanded && !descriptor.expandable))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TreeView item requires a non-zero key, a single-line label, and valid expansion state");
+        }
+        if (descriptor.label.size() > (std::numeric_limits<u32>::max)())
+        {
+            return fail(UIErrorCode::CapacityExceeded, "UI TreeView item label is too large");
+        }
+
+        WidgetTextState& text = textStatesByIndex[itemIndex];
+        auto metrics = measureWidgetText(descriptor.label, text.style);
+        if (!metrics)
+        {
+            return Core::failure(metrics.error());
+        }
+
+        TextByteAllocation replacement{};
+        bool replaceAllocation = false;
+        if (!descriptor.label.empty() && text.allocation.capacity < descriptor.label.size())
+        {
+            auto allocation = allocateTextBytes(static_cast<u32>(descriptor.label.size()));
+            if (!allocation)
+            {
+                return Core::failure(allocation.error());
+            }
+            replacement = *allocation;
+            replaceAllocation = true;
+        }
+        if (descriptor.label.empty())
+        {
+            releaseTextAllocation(text.allocation);
+            text.allocation = {};
+            text.length = 0;
+            text.metrics = {};
+            text.hasContent = false;
+        } else
+        {
+            if (replaceAllocation)
+            {
+                releaseTextAllocation(text.allocation);
+                text.allocation = replacement;
+            }
+            std::memcpy(textBytes.data() + text.allocation.offset, descriptor.label.data(), descriptor.label.size());
+            text.length = static_cast<u32>(descriptor.label.size());
+            text.metrics = *metrics;
+            text.hasContent = true;
+        }
+        localTextColorCacheByIndex[itemIndex] =
+            text.hasContent ? premultiply(text.style.color) : UIPremultipliedRgba8Color{};
+        TreeViewItemState& item = treeViewItemStatesByNodeIndex[itemIndex];
+        item.key = descriptor.key;
+        item.logicalIndex = logicalIndex;
+        item.level = descriptor.level;
+        item.bound = true;
+        item.enabled = descriptor.enabled;
+        item.expandable = descriptor.expandable;
+        item.expanded = descriptor.expanded;
+        return Core::success();
+    }
+
+    void collapseTreeViewItems(u32 treeViewIndex, UILogicalRect contentRect, UILogicalRect parentWorldRect,
+                               UILogicalRect descendantClip) noexcept
+    {
+        const NodeRecord* treeRecord = recordByIndex(treeViewIndex);
+        u32 childIndex = treeRecord == nullptr ? InvalidNodeIndex : treeRecord->firstChildIndex;
+        while (childIndex != InvalidNodeIndex)
+        {
+            const NodeRecord* childRecord = recordByIndex(childIndex);
+            if (childRecord == nullptr)
+            {
+                break;
+            }
+            TreeViewItemState& item = treeViewItemStatesByNodeIndex[childIndex];
+            item = {};
+            layoutScratchByIndex[childIndex].effectiveVisibility = UIVisibility::Collapsed;
+            assignLayoutRect(childIndex, contentRect, parentWorldRect, descendantClip);
+            childIndex = childRecord->nextSiblingIndex;
+        }
+    }
+
+    [[nodiscard]] Core::Status arrangeTreeViewItems(u32 treeViewIndex, UILogicalRect unscrolledContentRect,
+                                                    UILogicalRect parentWorldRect, UILogicalRect descendantClip)
+    {
+        TreeViewState& state = treeViewStatesByNodeIndex[treeViewIndex];
+        const u64 logicalItemCount =
+            state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
+        const double contentHeight64 =
+            static_cast<double>(logicalItemCount) * static_cast<double>(state.style.rowHeight);
+        if (!std::isfinite(contentHeight64) || contentHeight64 > (std::numeric_limits<float>::max)())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView logical content height is not representable");
+        }
+        const float logicalContentHeight = normalizeFloat(static_cast<float>(contentHeight64));
+        const bool barsHidden = state.style.scrollBarVisibility == UIScrollBarVisibility::Hidden;
+        const bool verticalBar = !barsHidden && (state.style.scrollBarVisibility == UIScrollBarVisibility::Always ||
+                                                 logicalContentHeight > unscrolledContentRect.height);
+        const UILogicalRect viewportRect{
+            .x = unscrolledContentRect.x,
+            .y = unscrolledContentRect.y,
+            .width = normalizeFloat(
+                (std::max)(0.0F, unscrolledContentRect.width - (verticalBar ? state.paint.scrollBar.thickness : 0.0F))),
+            .height = unscrolledContentRect.height,
+        };
+        const float contentHeight = normalizeFloat((std::max)(logicalContentHeight, viewportRect.height));
+        const float maximumOffset = normalizeFloat((std::max)(0.0F, contentHeight - viewportRect.height));
+        const float scrollOffset = normalizeFloat((std::clamp)(state.requestedScrollOffset, 0.0F, maximumOffset));
+
+        u64 firstVisibleIndex = 0;
+        u64 visibleItemCount64 = 0;
+        if (logicalItemCount != 0 && viewportRect.height > 0.0F)
+        {
+            firstVisibleIndex =
+                (std::min)(logicalItemCount - 1,
+                           static_cast<u64>(std::floor(static_cast<double>(scrollOffset) / state.style.rowHeight)));
+            const double visibleEnd =
+                std::ceil((static_cast<double>(scrollOffset) + viewportRect.height) / state.style.rowHeight);
+            const u64 endIndex = visibleEnd >= static_cast<double>(logicalItemCount)
+                                     ? logicalItemCount
+                                     : static_cast<u64>((std::max)(0.0, visibleEnd));
+            visibleItemCount64 = endIndex > firstVisibleIndex ? endIndex - firstVisibleIndex : 0;
+        }
+        const u64 firstMaterializedIndex =
+            firstVisibleIndex > state.style.overscanRows ? firstVisibleIndex - state.style.overscanRows : 0;
+        const u64 visibleEndIndex = firstVisibleIndex + visibleItemCount64;
+        const u64 materializedEndIndex =
+            (std::min)(logicalItemCount, visibleEndIndex + static_cast<u64>(state.style.overscanRows));
+        const u64 materializedItemCount64 =
+            materializedEndIndex > firstMaterializedIndex ? materializedEndIndex - firstMaterializedIndex : 0;
+        if (materializedItemCount64 > state.materializedItemCapacity)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI TreeView row pool cannot cover the viewport and configured overscan");
+        }
+
+        TreeViewLayoutScratch& treeLayout = treeViewLayoutScratchByNodeIndex[treeViewIndex];
+        treeLayout = TreeViewLayoutScratch{
+            .metrics =
+                UITreeViewMetrics{
+                    .logicalItemCount = logicalItemCount,
+                    .firstVisibleIndex = firstVisibleIndex,
+                    .visibleItemCount = static_cast<u32>(visibleItemCount64),
+                    .firstMaterializedIndex = firstMaterializedIndex,
+                    .materializedItemCount = static_cast<u32>(materializedItemCount64),
+                    .materializedItemCapacity = state.materializedItemCapacity,
+                    .scrollOffset = scrollOffset,
+                    .maxScrollOffset = maximumOffset,
+                    .viewportSize = viewportRect.size(),
+                    .contentSize = {.width = viewportRect.width, .height = contentHeight},
+                    .verticalScrollBarVisible = verticalBar,
+                },
+            .viewportRect = viewportRect,
+        };
+
+        const NodeRecord* treeRecord = recordByIndex(treeViewIndex);
+        u32 childIndex = treeRecord == nullptr ? InvalidNodeIndex : treeRecord->firstChildIndex;
+        u64 materializedOrdinal = 0;
+        const UIVisibility rowVisibility = layoutScratchByIndex[treeViewIndex].effectiveVisibility;
+        const UILogicalRect rowClip = intersectRects(descendantClip, viewportRect);
+        while (childIndex != InvalidNodeIndex)
+        {
+            const NodeRecord* childRecord = recordByIndex(childIndex);
+            if (childRecord == nullptr)
+            {
+                break;
+            }
+            const u32 currentChild = childIndex;
+            childIndex = childRecord->nextSiblingIndex;
+            if (materializedOrdinal >= materializedItemCount64)
+            {
+                treeViewItemStatesByNodeIndex[currentChild] = {};
+                layoutScratchByIndex[currentChild].effectiveVisibility = UIVisibility::Collapsed;
+                assignLayoutRect(currentChild, viewportRect, parentWorldRect, rowClip);
+                continue;
+            }
+
+            const u64 logicalIndex = firstMaterializedIndex + materializedOrdinal;
+            auto descriptor = resolveTreeViewLogicalItem(idForIndex(treeViewIndex), logicalIndex);
+            if (!descriptor)
+            {
+                return Core::failure(descriptor.error());
+            }
+            const double leftPadding = 8.0 + static_cast<double>(descriptor->level) * state.style.indentation +
+                                       state.style.disclosureExtent + state.style.disclosureGap;
+            if (!std::isfinite(leftPadding) || leftPadding > (std::numeric_limits<float>::max)())
+            {
+                return fail(UIErrorCode::InvalidControlValue, "UI TreeView item indentation is not representable");
+            }
+            if (Core::Status bound = bindTreeViewItem(currentChild, logicalIndex, *descriptor); !bound)
+            {
+                return bound;
+            }
+            UILayoutStyle& rowStyle = layoutStylesByIndex[currentChild];
+            rowStyle.size.height = UILayoutLength::Px(state.style.rowHeight);
+            rowStyle.padding.left = normalizeFloat(static_cast<float>(leftPadding));
+            rowStyle.padding.right = 8.0F;
+            rowStyle.padding.top = 4.0F;
+            rowStyle.padding.bottom = 4.0F;
+            layoutScratchByIndex[currentChild].effectiveVisibility = rowVisibility;
+            const double logicalY = static_cast<double>(logicalIndex) * state.style.rowHeight;
+            const float rowY = normalizeFloat(viewportRect.y + static_cast<float>(logicalY) - scrollOffset);
+            assignLayoutRect(currentChild,
+                             UILogicalRect{
+                                 .x = viewportRect.x,
+                                 .y = rowY,
+                                 .width = viewportRect.width,
+                                 .height = state.style.rowHeight,
+                             },
+                             parentWorldRect, rowClip);
+            ++materializedOrdinal;
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status arrangeChildren(u32 parentIndex, UILogicalRect viewportRect,
                                                LayoutPassStatistics& statistics)
     {
@@ -2394,6 +2740,12 @@ struct UIContext::Impl final {
                 collapseListViewItems(parentIndex, unscrolledContentRect, parentWorldRect, descendantClip);
                 return Core::success();
             }
+            if (parentRecord->kind == UIWidgetKind::TreeView && parentIndex < treeViewLayoutScratchByNodeIndex.size())
+            {
+                treeViewLayoutScratchByNodeIndex[parentIndex] = {};
+                collapseTreeViewItems(parentIndex, unscrolledContentRect, parentWorldRect, descendantClip);
+                return Core::success();
+            }
             u32 collapsedChild = parentRecord->firstChildIndex;
             while (collapsedChild != InvalidNodeIndex)
             {
@@ -2412,6 +2764,12 @@ struct UIContext::Impl final {
             parentIndex < listViewLayoutScratchByNodeIndex.size())
         {
             return arrangeListViewItems(parentIndex, unscrolledContentRect, parentWorldRect,
+                                        intersectRects(parentScratch.descendantClip, parentScratch.worldRect));
+        }
+        if (parentRecord->kind == UIWidgetKind::TreeView && parentIndex < treeViewStatesByNodeIndex.size() &&
+            parentIndex < treeViewLayoutScratchByNodeIndex.size())
+        {
+            return arrangeTreeViewItems(parentIndex, unscrolledContentRect, parentWorldRect,
                                         intersectRects(parentScratch.descendantClip, parentScratch.worldRect));
         }
 
@@ -3101,6 +3459,33 @@ struct UIContext::Impl final {
             item, premultiply(listViewStatesByNodeIndex[listView.index()].paint.selectedItemBackgroundColor));
     }
 
+    [[nodiscard]] UIPremultipliedRgba8Color resolvedTreeViewSelectionColor(UINodeId item) const noexcept
+    {
+        const UINodeId treeView = treeViewForItem(item);
+        if (!treeView.hasValue() || treeView.index() >= treeViewStatesByNodeIndex.size() ||
+            !isSelectedTreeViewItem(item))
+        {
+            return {};
+        }
+        return widgetPaintColor(
+            item, premultiply(treeViewStatesByNodeIndex[treeView.index()].paint.selectedItemBackgroundColor));
+    }
+
+    [[nodiscard]] UIPremultipliedRgba8Color resolvedTreeViewDisclosureColor(UINodeId item) const noexcept
+    {
+        const UINodeId treeView = treeViewForItem(item);
+        if (!treeView.hasValue() || item.index() >= treeViewItemStatesByNodeIndex.size())
+        {
+            return {};
+        }
+        const TreeViewItemState& itemState = treeViewItemStatesByNodeIndex[item.index()];
+        if (!itemState.bound || !itemState.expandable)
+        {
+            return {};
+        }
+        return widgetPaintColor(item, premultiply(treeViewStatesByNodeIndex[treeView.index()].paint.disclosureColor));
+    }
+
     [[nodiscard]] Core::Result<usize>
     validatePaintCandidateCapacity(std::span<const UICommittedLayoutEntry> layoutEntries) const
     {
@@ -3209,6 +3594,31 @@ struct UIContext::Impl final {
                     }
                 }
             }
+            if (record != nullptr && record->kind == UIWidgetKind::TreeView &&
+                nodeIndex < treeViewStatesByNodeIndex.size() && nodeIndex < treeViewLayoutScratchByNodeIndex.size())
+            {
+                const TreeViewState& tree = treeViewStatesByNodeIndex[nodeIndex];
+                const TreeViewLayoutScratch& treeLayout = treeViewLayoutScratchByNodeIndex[nodeIndex];
+                const ScrollBarGeometry geometry =
+                    makeTreeViewScrollBarGeometry(treeLayout.metrics, treeLayout.viewportRect, tree.paint.scrollBar);
+                if (geometry.visible)
+                {
+                    if (geometry.track.width > 0.0F && geometry.track.height > 0.0F &&
+                        tree.paint.scrollBar.trackColor.alpha != 0)
+                    {
+                        ++paintEntryCount;
+                    }
+                    const UIStraightSrgba8Color thumbColor = scrollThumbDragActive &&
+                                                                     armedScrollView == layoutEntry.node &&
+                                                                     tree.paint.scrollBar.draggingThumbColor.alpha != 0
+                                                                 ? tree.paint.scrollBar.draggingThumbColor
+                                                                 : tree.paint.scrollBar.thumbColor;
+                    if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && thumbColor.alpha != 0)
+                    {
+                        ++paintEntryCount;
+                    }
+                }
+            }
             if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
                 nodeIndex < dropdownStatesByNodeIndex.size())
             {
@@ -3228,6 +3638,19 @@ struct UIContext::Impl final {
                 !resolvedListViewSelectionColor(layoutEntry.node).isTransparent())
             {
                 ++paintEntryCount;
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem)
+            {
+                if (!resolvedTreeViewSelectionColor(layoutEntry.node).isTransparent())
+                {
+                    ++paintEntryCount;
+                }
+                const UIPremultipliedRgba8Color disclosure = resolvedTreeViewDisclosureColor(layoutEntry.node);
+                if (!disclosure.isTransparent())
+                {
+                    const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
+                    paintEntryCount += item.expanded ? 1U : 2U;
+                }
             }
             if (record != nullptr && record->kind == UIWidgetKind::ProgressBar &&
                 nodeIndex < progressBarStatesByNodeIndex.size())
@@ -3871,6 +4294,46 @@ struct UIContext::Impl final {
                     }
                 }
             }
+            if (record != nullptr && record->kind == UIWidgetKind::TreeView &&
+                nodeIndex < treeViewStatesByNodeIndex.size() && nodeIndex < treeViewLayoutScratchByNodeIndex.size())
+            {
+                const TreeViewState& tree = treeViewStatesByNodeIndex[nodeIndex];
+                const TreeViewLayoutScratch& treeLayout = treeViewLayoutScratchByNodeIndex[nodeIndex];
+                const ScrollBarGeometry geometry =
+                    makeTreeViewScrollBarGeometry(treeLayout.metrics, treeLayout.viewportRect, tree.paint.scrollBar);
+                if (geometry.visible)
+                {
+                    const UIPremultipliedRgba8Color track =
+                        widgetPaintColor(layoutEntry.node, premultiply(tree.paint.scrollBar.trackColor));
+                    if (geometry.track.width > 0.0F && geometry.track.height > 0.0F && !track.isTransparent())
+                    {
+                        output.push_back(UICommittedPaintEntry{
+                            .node = layoutEntry.node,
+                            .worldRect = geometry.track,
+                            .effectiveClip = layoutEntry.effectiveClip,
+                            .paintOrdinal = nextPaintOrdinal++,
+                            .solidFill = track,
+                        });
+                    }
+                    const UIStraightSrgba8Color thumbSource = scrollThumbDragActive &&
+                                                                      armedScrollView == layoutEntry.node &&
+                                                                      tree.paint.scrollBar.draggingThumbColor.alpha != 0
+                                                                  ? tree.paint.scrollBar.draggingThumbColor
+                                                                  : tree.paint.scrollBar.thumbColor;
+                    const UIPremultipliedRgba8Color thumb =
+                        widgetPaintColor(layoutEntry.node, premultiply(thumbSource));
+                    if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && !thumb.isTransparent())
+                    {
+                        output.push_back(UICommittedPaintEntry{
+                            .node = layoutEntry.node,
+                            .worldRect = geometry.thumb,
+                            .effectiveClip = layoutEntry.effectiveClip,
+                            .paintOrdinal = nextPaintOrdinal++,
+                            .solidFill = thumb,
+                        });
+                    }
+                }
+            }
             if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
                 nodeIndex < dropdownStatesByNodeIndex.size())
             {
@@ -3933,6 +4396,60 @@ struct UIContext::Impl final {
                         .paintOrdinal = nextPaintOrdinal++,
                         .solidFill = selection,
                     });
+                }
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem &&
+                nodeIndex < treeViewItemStatesByNodeIndex.size())
+            {
+                const UIPremultipliedRgba8Color selection = resolvedTreeViewSelectionColor(layoutEntry.node);
+                if (!selection.isTransparent())
+                {
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect = layoutEntry.worldRect,
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal++,
+                        .solidFill = selection,
+                    });
+                }
+                const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
+                const UINodeId treeView = treeViewForItem(layoutEntry.node);
+                const UIPremultipliedRgba8Color disclosure = resolvedTreeViewDisclosureColor(layoutEntry.node);
+                if (treeView.hasValue() && !disclosure.isTransparent())
+                {
+                    const UITreeViewStyle& style = treeViewStatesByNodeIndex[treeView.index()].style;
+                    const UILogicalRect disclosureRect =
+                        makeTreeViewDisclosureRect(layoutEntry.worldRect, style, item.level);
+                    const float stroke = normalizeFloat((std::max)(1.0F, disclosureRect.height / 6.0F));
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect =
+                            UILogicalRect{
+                                .x = disclosureRect.x,
+                                .y = normalizeFloat(disclosureRect.y + (disclosureRect.height - stroke) * 0.5F),
+                                .width = disclosureRect.width,
+                                .height = stroke,
+                            },
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal++,
+                        .solidFill = disclosure,
+                    });
+                    if (!item.expanded)
+                    {
+                        output.push_back(UICommittedPaintEntry{
+                            .node = layoutEntry.node,
+                            .worldRect =
+                                UILogicalRect{
+                                    .x = normalizeFloat(disclosureRect.x + (disclosureRect.width - stroke) * 0.5F),
+                                    .y = disclosureRect.y,
+                                    .width = stroke,
+                                    .height = disclosureRect.height,
+                                },
+                            .effectiveClip = layoutEntry.effectiveClip,
+                            .paintOrdinal = nextPaintOrdinal++,
+                            .solidFill = disclosure,
+                        });
+                    }
                 }
             }
             if (record != nullptr && record->kind == UIWidgetKind::ProgressBar &&
@@ -4066,7 +4583,8 @@ struct UIContext::Impl final {
             };
             if (record->kind == UIWidgetKind::Label || record->kind == UIWidgetKind::Button ||
                 record->kind == UIWidgetKind::RadioButton || record->kind == UIWidgetKind::Dropdown ||
-                record->kind == UIWidgetKind::DropdownItem || record->kind == UIWidgetKind::ListViewItem)
+                record->kind == UIWidgetKind::DropdownItem || record->kind == UIWidgetKind::ListViewItem ||
+                record->kind == UIWidgetKind::TreeViewItem)
             {
                 if (Core::Status status = copyText(textViewFor(nodeIndex), entry.name); !status)
                 {
@@ -4163,6 +4681,28 @@ struct UIContext::Impl final {
                 entry.selected = item.bound && isSelectedListViewItem(layoutEntry.node);
                 const UINodeId listView = listViewForItem(layoutEntry.node);
                 entry.focused = enabled && entry.selected && defaultActionFocusButton == listView;
+            }
+            if (record->kind == UIWidgetKind::TreeView && nodeIndex < treeViewStatesByNodeIndex.size() &&
+                nodeIndex < treeViewLayoutScratchByNodeIndex.size())
+            {
+                const UITreeViewMetrics& metrics = treeViewLayoutScratchByNodeIndex[nodeIndex].metrics;
+                entry.hasRange = true;
+                entry.minValue = 0.0F;
+                entry.maxValue = metrics.maxScrollOffset;
+                entry.value = metrics.scrollOffset;
+                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
+            }
+            if (record->kind == UIWidgetKind::TreeViewItem && nodeIndex < treeViewItemStatesByNodeIndex.size())
+            {
+                const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
+                entry.virtualItemKey = item.key;
+                entry.virtualItemIndex = item.logicalIndex;
+                entry.level = item.level;
+                entry.expandable = item.bound && item.expandable;
+                entry.expanded = item.bound && item.expanded;
+                entry.selected = item.bound && isSelectedTreeViewItem(layoutEntry.node);
+                const UINodeId treeView = treeViewForItem(layoutEntry.node);
+                entry.focused = enabled && entry.selected && defaultActionFocusButton == treeView;
             }
             output.push_back(entry);
         }
@@ -4517,6 +5057,12 @@ struct UIContext::Impl final {
             const ListViewItemState& item = listViewItemStatesByNodeIndex[node.index()];
             return item.committedBound && item.committedEnabled;
         }
+        if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem &&
+            node.index() < treeViewItemStatesByNodeIndex.size())
+        {
+            const TreeViewItemState& item = treeViewItemStatesByNodeIndex[node.index()];
+            return item.committedBound && item.committedEnabled;
+        }
         return true;
     }
 
@@ -4533,6 +5079,12 @@ struct UIContext::Impl final {
             const ListViewItemState& item = listViewItemStatesByNodeIndex[node.index()];
             return item.bound && item.enabled;
         }
+        if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem &&
+            node.index() < treeViewItemStatesByNodeIndex.size())
+        {
+            const TreeViewItemState& item = treeViewItemStatesByNodeIndex[node.index()];
+            return item.bound && item.enabled;
+        }
         return true;
     }
 
@@ -4543,7 +5095,8 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if (!isDefaultActivatableKind((*nodeResult)->kind) || (*nodeResult)->kind == UIWidgetKind::ListViewItem)
+        if (!isDefaultActivatableKind((*nodeResult)->kind) || (*nodeResult)->kind == UIWidgetKind::ListViewItem ||
+            (*nodeResult)->kind == UIWidgetKind::TreeViewItem)
         {
             return fail(UIErrorCode::InvalidButtonAction,
                         "UI Button action requires a Button, Checkbox, RadioButton, Dropdown, or DropdownItem node");
@@ -4553,20 +5106,21 @@ struct UIContext::Impl final {
 
     [[nodiscard]] static bool isButtonChromeKind(UIWidgetKind kind) noexcept
     {
-        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Dropdown ||
-               kind == UIWidgetKind::DropdownItem || kind == UIWidgetKind::ListViewItem;
+        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem ||
+               kind == UIWidgetKind::ListViewItem || kind == UIWidgetKind::TreeViewItem;
     }
 
     [[nodiscard]] static bool isDefaultActivatableKind(UIWidgetKind kind) noexcept
     {
         return kind == UIWidgetKind::Button || kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem ||
                kind == UIWidgetKind::ListViewItem || kind == UIWidgetKind::Checkbox ||
-               kind == UIWidgetKind::RadioButton;
+               kind == UIWidgetKind::TreeViewItem || kind == UIWidgetKind::RadioButton;
     }
 
     [[nodiscard]] static bool isKeyboardFocusableKind(UIWidgetKind kind) noexcept
     {
-        return isDefaultActivatableKind(kind) || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ListView;
+        return isDefaultActivatableKind(kind) || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ListView ||
+               kind == UIWidgetKind::TreeView;
     }
 
     [[nodiscard]] Core::Status validateDefaultActionControl(UIButtonActivationSource source,
@@ -4720,6 +5274,7 @@ struct UIContext::Impl final {
     {
         armedPrimaryButton = {};
         armedPrimaryButtonPressed = false;
+        armedTreeDisclosure = false;
     }
 
     void clearHoveredPrimaryButton() noexcept
@@ -5548,7 +6103,8 @@ struct UIContext::Impl final {
     {
         return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::TextEdit ||
                kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Dropdown ||
-               kind == UIWidgetKind::DropdownItem || kind == UIWidgetKind::ListViewItem;
+               kind == UIWidgetKind::DropdownItem || kind == UIWidgetKind::ListViewItem ||
+               kind == UIWidgetKind::TreeViewItem;
     }
 
     void resetNodeSideData(u32 index) noexcept
@@ -5661,6 +6217,18 @@ struct UIContext::Impl final {
         if (index < listViewItemStatesByNodeIndex.size())
         {
             listViewItemStatesByNodeIndex[index] = {};
+        }
+        if (index < treeViewStatesByNodeIndex.size())
+        {
+            treeViewStatesByNodeIndex[index] = {};
+        }
+        if (index < treeViewLayoutScratchByNodeIndex.size())
+        {
+            treeViewLayoutScratchByNodeIndex[index] = {};
+        }
+        if (index < treeViewItemStatesByNodeIndex.size())
+        {
+            treeViewItemStatesByNodeIndex[index] = {};
         }
     }
 
@@ -6142,6 +6710,8 @@ struct UIContext::Impl final {
             return ThemeBindingScrollViewPaint;
         case UIWidgetKind::ListView:
             return ThemeBindingBoxPaint | ThemeBindingListViewPaint;
+        case UIWidgetKind::TreeView:
+            return ThemeBindingBoxPaint | ThemeBindingTreeViewPaint;
         case UIWidgetKind::Popup:
             return ThemeBindingBoxPaint;
         case UIWidgetKind::Label:
@@ -6153,6 +6723,7 @@ struct UIContext::Impl final {
                    ThemeBindingDropdownPaint;
         case UIWidgetKind::DropdownItem:
         case UIWidgetKind::ListViewItem:
+        case UIWidgetKind::TreeViewItem:
             return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
         case UIWidgetKind::Checkbox:
             return ThemeBindingBoxPaint | ThemeBindingCheckboxPaint;
@@ -6201,6 +6772,16 @@ struct UIContext::Impl final {
             if ((bindings & ThemeBindingListViewPaint) != 0)
             {
                 listViewStatesByNodeIndex[index].paint = makeListViewPaint(theme);
+            }
+            break;
+        case UIWidgetKind::TreeView:
+            if ((bindings & ThemeBindingBoxPaint) != 0)
+            {
+                boxPaintsByIndex[index] = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
+            }
+            if ((bindings & ThemeBindingTreeViewPaint) != 0)
+            {
+                treeViewStatesByNodeIndex[index].paint = makeTreeViewPaint(theme);
             }
             break;
         case UIWidgetKind::Popup:
@@ -6252,7 +6833,8 @@ struct UIContext::Impl final {
             break;
         }
         case UIWidgetKind::DropdownItem:
-        case UIWidgetKind::ListViewItem: {
+        case UIWidgetKind::ListViewItem:
+        case UIWidgetKind::TreeViewItem: {
             const UIButtonChrome chrome = makeDropdownItemChrome(theme);
             if ((bindings & ThemeBindingBoxPaint) != 0)
             {
@@ -6354,6 +6936,7 @@ struct UIContext::Impl final {
             return makeDropdownChrome(theme).label;
         case UIWidgetKind::DropdownItem:
         case UIWidgetKind::ListViewItem:
+        case UIWidgetKind::TreeViewItem:
             return makeDropdownItemChrome(theme).label;
         case UIWidgetKind::TextEdit:
             return makeTextEditChrome(theme).text;
@@ -6367,6 +6950,7 @@ struct UIContext::Impl final {
         case UIWidgetKind::Modal:
         case UIWidgetKind::ScrollView:
         case UIWidgetKind::ListView:
+        case UIWidgetKind::TreeView:
         case UIWidgetKind::Popup:
             return std::nullopt;
         }
@@ -6473,8 +7057,25 @@ struct UIContext::Impl final {
             {
                 stageThemePaintChange(index);
                 if (listViewStatesByNodeIndex[index].paint.scrollBar.thickness != chrome.scrollBar.thickness ||
-                    listViewStatesByNodeIndex[index].paint.scrollBar.minThumbExtent !=
-                        chrome.scrollBar.minThumbExtent)
+                    listViewStatesByNodeIndex[index].paint.scrollBar.minThumbExtent != chrome.scrollBar.minThumbExtent)
+                {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
+            }
+            break;
+        }
+        case UIWidgetKind::TreeView: {
+            const UIBoxPaint box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
+            const UITreeViewPaint chrome = makeTreeViewPaint(theme);
+            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != box)
+            {
+                stageThemePaintChange(index);
+            }
+            if ((bindings & ThemeBindingTreeViewPaint) != 0 && treeViewStatesByNodeIndex[index].paint != chrome)
+            {
+                stageThemePaintChange(index);
+                if (treeViewStatesByNodeIndex[index].paint.scrollBar.thickness != chrome.scrollBar.thickness ||
+                    treeViewStatesByNodeIndex[index].paint.scrollBar.minThumbExtent != chrome.scrollBar.minThumbExtent)
                 {
                     themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
                 }
@@ -6524,7 +7125,8 @@ struct UIContext::Impl final {
             break;
         }
         case UIWidgetKind::DropdownItem:
-        case UIWidgetKind::ListViewItem: {
+        case UIWidgetKind::ListViewItem:
+        case UIWidgetKind::TreeViewItem: {
             const UIButtonChrome chrome = makeDropdownItemChrome(theme);
             if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
             {
@@ -6773,8 +7375,8 @@ struct UIContext::Impl final {
         pointerHitPoliciesByIndex[node.index()] =
             (kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox || kind == UIWidgetKind::Slider ||
              kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::ScrollView ||
-             kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem ||
-             kind == UIWidgetKind::ListView || kind == UIWidgetKind::ListViewItem)
+             kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem || kind == UIWidgetKind::ListView ||
+             kind == UIWidgetKind::ListViewItem || kind == UIWidgetKind::TreeView || kind == UIWidgetKind::TreeViewItem)
                 ? UIPointerHitPolicy::Targetable
                 : UIPointerHitPolicy::Ignore;
         if (capacityConfig.applyDefaultProductChrome)
@@ -6866,6 +7468,12 @@ struct UIContext::Impl final {
             {
                 return fail(UIErrorCode::InvalidParent, "UI ListViewItem requires a ListView parent");
             }
+        } else if (kind == UIWidgetKind::TreeViewItem)
+        {
+            if (parentRecord.kind != UIWidgetKind::TreeView)
+            {
+                return fail(UIErrorCode::InvalidParent, "UI TreeViewItem requires a TreeView parent");
+            }
         } else if (parentRecord.kind == UIWidgetKind::Dropdown || parentRecord.kind == UIWidgetKind::Popup)
         {
             return fail(UIErrorCode::InvalidParent,
@@ -6873,6 +7481,9 @@ struct UIContext::Impl final {
         } else if (parentRecord.kind == UIWidgetKind::ListView)
         {
             return fail(UIErrorCode::InvalidParent, "UI ListView only accepts its internal item rows");
+        } else if (parentRecord.kind == UIWidgetKind::TreeView)
+        {
+            return fail(UIErrorCode::InvalidParent, "UI TreeView only accepts its internal item rows");
         }
         if (parentRecord.depth == (std::numeric_limits<u32>::max)())
         {
@@ -6954,6 +7565,50 @@ struct UIContext::Impl final {
         return listView;
     }
 
+    [[nodiscard]] Core::Result<UINodeId> createTreeViewComposite(UINodeId parent, UITreeViewCreateConfig config)
+    {
+        auto normalized = normalizeTreeViewCreateConfig(config);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        const usize requiredNodes = static_cast<usize>(normalized->materializedItemCapacity) + 1U;
+        if (nodes.availableCount() < requiredNodes)
+        {
+            return fail(UIErrorCode::CapacityExceeded, "UI TreeView row pool exceeds the remaining node capacity");
+        }
+
+        auto treeResult = createChild(parent, UIWidgetKind::TreeView);
+        if (!treeResult)
+        {
+            return Core::failure(treeResult.error());
+        }
+        const UINodeId treeView = *treeResult;
+        auto rollback = Core::makeScopeExit([this, treeView]() noexcept {
+            if (contains(treeView))
+            {
+                static_cast<void>(destroySubtree(treeView));
+            }
+        });
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        state.materializedItemCapacity = normalized->materializedItemCapacity;
+
+        for (u32 row = 0; row < normalized->materializedItemCapacity; ++row)
+        {
+            auto itemResult = createChild(treeView, UIWidgetKind::TreeViewItem);
+            if (!itemResult)
+            {
+                return Core::failure(itemResult.error());
+            }
+            const UINodeId item = *itemResult;
+            UILayoutStyle& itemLayout = layoutStylesByIndex[item.index()];
+            itemLayout.size.height = UILayoutLength::Px(state.style.rowHeight);
+            itemLayout.padding = UIEdgeSpacing::HorizontalVertical(8.0F, 4.0F);
+        }
+        rollback.release();
+        return treeView;
+    }
+
     [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(UINodeId updaterRoot, UINodeId parent,
                                                                 UIWidgetKind kind)
     {
@@ -7009,6 +7664,30 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidNode, "UI ListView parent is not owned by the updater root");
         }
         return createListViewComposite(parent, config);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> createTreeViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                                   UITreeViewCreateConfig config)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto parentResult = resolveParent(parent);
+        if (!parentResult)
+        {
+            return Core::failure(parentResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, parent))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI TreeView parent is not owned by the updater root");
+        }
+        return createTreeViewComposite(parent, config);
     }
 
     void unlinkFromTree(u32 index, NodeRecord& record) noexcept
@@ -7223,6 +7902,11 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidControlValue,
                         "UI ListView item rows are internal and cannot be destroyed independently");
+        }
+        if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TreeView item rows are internal and cannot be destroyed independently");
         }
 
         if (sameNode(updaterRoot, node))
@@ -8935,9 +9619,24 @@ struct UIContext::Impl final {
         return record != nullptr && record->kind == UIWidgetKind::ListView;
     }
 
+    [[nodiscard]] bool isLiveTreeView(UINodeId treeView) const noexcept
+    {
+        if (!treeView.hasValue() || !contains(treeView) || treeView.index() >= treeViewStatesByNodeIndex.size())
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(treeView.storageId());
+        return record != nullptr && record->kind == UIWidgetKind::TreeView;
+    }
+
+    [[nodiscard]] bool isLiveVirtualView(UINodeId node) const noexcept
+    {
+        return isLiveListView(node) || isLiveTreeView(node);
+    }
+
     [[nodiscard]] bool isLiveScrollable(UINodeId node) const noexcept
     {
-        return isLiveScrollView(node) || isLiveListView(node);
+        return isLiveScrollView(node) || isLiveVirtualView(node);
     }
 
     [[nodiscard]] ScrollBarGeometry committedScrollBarGeometry(UINodeId scrollView, UIScrollAxes axis) const noexcept
@@ -8950,6 +9649,16 @@ struct UIContext::Impl final {
             }
             const ListViewState& state = listViewStatesByNodeIndex[scrollView.index()];
             return makeListViewScrollBarGeometry(state.committedMetrics, state.committedViewportRect,
+                                                 state.paint.scrollBar);
+        }
+        if (isLiveTreeView(scrollView))
+        {
+            if (axis != UIScrollAxes::Vertical)
+            {
+                return {};
+            }
+            const TreeViewState& state = treeViewStatesByNodeIndex[scrollView.index()];
+            return makeTreeViewScrollBarGeometry(state.committedMetrics, state.committedViewportRect,
                                                  state.paint.scrollBar);
         }
         if (!isLiveScrollView(scrollView))
@@ -9003,6 +9712,22 @@ struct UIContext::Impl final {
             state.requestedScrollOffset = requested.y;
             return true;
         }
+        if (isLiveTreeView(scrollView))
+        {
+            TreeViewState& state = treeViewStatesByNodeIndex[scrollView.index()];
+            requested.x = 0.0F;
+            requested.y = normalizeFloat((std::clamp)(requested.y, 0.0F, state.committedMetrics.maxScrollOffset));
+            if (state.requestedScrollOffset == requested.y)
+            {
+                return false;
+            }
+            if (Core::Status dirty = markScrollOffsetDirty(scrollView); !dirty)
+            {
+                return Core::failure(dirty.error());
+            }
+            state.requestedScrollOffset = requested.y;
+            return true;
+        }
         ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
         const UIScrollViewMetrics& metrics = state.committedMetrics;
         requested.x = hasScrollAxis(state.style.axes, UIScrollAxes::Horizontal)
@@ -9035,8 +9760,18 @@ struct UIContext::Impl final {
             const float wheelDelta = delta.y != 0.0F ? delta.y : delta.x;
             return UIScrollOffset{
                 .x = 0.0F,
-                .y = normalizeFloat((std::clamp)(state.requestedScrollOffset - wheelDelta * state.style.wheelStep,
-                                                 0.0F, state.committedMetrics.maxScrollOffset)),
+                .y = normalizeFloat((std::clamp)(state.requestedScrollOffset - wheelDelta * state.style.wheelStep, 0.0F,
+                                                 state.committedMetrics.maxScrollOffset)),
+            };
+        }
+        if (isLiveTreeView(scrollView))
+        {
+            const TreeViewState& state = treeViewStatesByNodeIndex[scrollView.index()];
+            const float wheelDelta = delta.y != 0.0F ? delta.y : delta.x;
+            return UIScrollOffset{
+                .x = 0.0F,
+                .y = normalizeFloat((std::clamp)(state.requestedScrollOffset - wheelDelta * state.style.wheelStep, 0.0F,
+                                                 state.committedMetrics.maxScrollOffset)),
             };
         }
         const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
@@ -9074,9 +9809,15 @@ struct UIContext::Impl final {
             return false;
         }
         const UIScrollOffset resolved = resolvedScrollWheelOffset(scrollView, delta);
-        return isLiveListView(scrollView)
-                   ? listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset != resolved.y
-                   : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset != resolved;
+        if (isLiveListView(scrollView))
+        {
+            return listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset != resolved.y;
+        }
+        if (isLiveTreeView(scrollView))
+        {
+            return treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset != resolved.y;
+        }
+        return scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset != resolved;
     }
 
     [[nodiscard]] Core::Result<bool> applyScrollWheel(UINodeId scrollView, UILogicalPoint delta)
@@ -9093,15 +9834,16 @@ struct UIContext::Impl final {
                                                                 UILogicalPoint position, float grabOffset)
     {
         if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView) ||
-            (isLiveListView(scrollView) && axis != UIScrollAxes::Vertical))
+            (isLiveVirtualView(scrollView) && axis != UIScrollAxes::Vertical))
         {
             return false;
         }
         const ScrollBarGeometry geometry = committedScrollBarGeometry(scrollView, axis);
-        const float maxOffset = isLiveListView(scrollView)
-                                    ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
-                                    : scrollAxisMaxOffset(scrollViewStatesByNodeIndex[scrollView.index()].committedMetrics,
-                                                          axis);
+        const float maxOffset =
+            isLiveListView(scrollView) ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
+            : isLiveTreeView(scrollView)
+                ? treeViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
+                : scrollAxisMaxOffset(scrollViewStatesByNodeIndex[scrollView.index()].committedMetrics, axis);
         const float trackStart = axis == UIScrollAxes::Horizontal ? geometry.track.x : geometry.track.y;
         const float trackExtent = axis == UIScrollAxes::Horizontal ? geometry.track.width : geometry.track.height;
         const float thumbExtent = axis == UIScrollAxes::Horizontal ? geometry.thumb.width : geometry.thumb.height;
@@ -9113,10 +9855,11 @@ struct UIContext::Impl final {
         }
 
         const float thumbStart = (std::clamp)(pointer - grabOffset - trackStart, 0.0F, travel);
-        UIScrollOffset next = isLiveListView(scrollView)
-                                  ? UIScrollOffset{.x = 0.0F,
-                                                   .y = listViewStatesByNodeIndex[scrollView.index()]
-                                                            .requestedScrollOffset}
+        UIScrollOffset next =
+            isLiveListView(scrollView)
+                ? UIScrollOffset{.x = 0.0F, .y = listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
+            : isLiveTreeView(scrollView)
+                ? UIScrollOffset{.x = 0.0F, .y = treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
                                   : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
         setScrollAxisOffset(next, axis, normalizeFloat(maxOffset * (thumbStart / travel)));
         return applyScrollOffsetFromInput(scrollView, next);
@@ -9126,7 +9869,7 @@ struct UIContext::Impl final {
                                                          UILogicalPoint position)
     {
         if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView) ||
-            (isLiveListView(scrollView) && axis != UIScrollAxes::Vertical))
+            (isLiveVirtualView(scrollView) && axis != UIScrollAxes::Vertical))
         {
             return false;
         }
@@ -9139,16 +9882,19 @@ struct UIContext::Impl final {
         const float thumbStart = axis == UIScrollAxes::Horizontal ? geometry.thumb.x : geometry.thumb.y;
         const float pageExtent = isLiveListView(scrollView)
                                      ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.viewportSize.height
+            : isLiveTreeView(scrollView)
+                ? treeViewStatesByNodeIndex[scrollView.index()].committedMetrics.viewportSize.height
                                      : (axis == UIScrollAxes::Horizontal
                                             ? scrollViewStatesByNodeIndex[scrollView.index()]
                                                   .committedMetrics.viewportSize.width
                                             : scrollViewStatesByNodeIndex[scrollView.index()]
                                                   .committedMetrics.viewportSize.height);
         const float direction = pointer < thumbStart ? -1.0F : 1.0F;
-        UIScrollOffset next = isLiveListView(scrollView)
-                                  ? UIScrollOffset{.x = 0.0F,
-                                                   .y = listViewStatesByNodeIndex[scrollView.index()]
-                                                            .requestedScrollOffset}
+        UIScrollOffset next =
+            isLiveListView(scrollView)
+                ? UIScrollOffset{.x = 0.0F, .y = listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
+            : isLiveTreeView(scrollView)
+                ? UIScrollOffset{.x = 0.0F, .y = treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
                                   : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
         setScrollAxisOffset(next, axis,
                             normalizeFloat(scrollAxisOffset(next, axis) + direction * pageExtent));
@@ -9170,10 +9916,12 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            if (isLiveListView(node))
+            if (isLiveVirtualView(node))
             {
-                const ListViewState& state = listViewStatesByNodeIndex[node.index()];
-                if (!(state.committedMetrics.maxScrollOffset > 0.0F))
+                const float maxOffset = isLiveListView(node)
+                                            ? listViewStatesByNodeIndex[node.index()].committedMetrics.maxScrollOffset
+                                            : treeViewStatesByNodeIndex[node.index()].committedMetrics.maxScrollOffset;
+                if (!(maxOffset > 0.0F))
                 {
                     continue;
                 }
@@ -9562,6 +10310,141 @@ struct UIContext::Impl final {
             return dirty;
         }
         listState.selection = selection;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveTreeView(UINodeId treeView)
+    {
+        auto nodeResult = resolveNode(treeView);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::TreeView || treeView.index() >= treeViewStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView API requires a TreeView node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] UINodeId treeViewForItem(UINodeId item) const noexcept
+    {
+        if (!contains(item))
+        {
+            return {};
+        }
+        const NodeRecord* itemRecord = nodes.tryGet(item.storageId());
+        if (itemRecord == nullptr || itemRecord->kind != UIWidgetKind::TreeViewItem ||
+            itemRecord->parentIndex == InvalidNodeIndex)
+        {
+            return {};
+        }
+        const UINodeId parent = idForIndex(itemRecord->parentIndex);
+        const NodeRecord* parentRecord = contains(parent) ? nodes.tryGet(parent.storageId()) : nullptr;
+        return parentRecord != nullptr && parentRecord->kind == UIWidgetKind::TreeView ? parent : UINodeId{};
+    }
+
+    [[nodiscard]] bool pointWithinCommittedTreeDisclosure(UINodeId item, UILogicalPoint point,
+                                                          std::span<const UICommittedHitEntry> entries) const noexcept
+    {
+        const UINodeId treeView = treeViewForItem(item);
+        if (!treeView.hasValue() || item.index() >= treeViewItemStatesByNodeIndex.size() ||
+            treeView.index() >= treeViewStatesByNodeIndex.size())
+        {
+            return false;
+        }
+        const TreeViewItemState& itemState = treeViewItemStatesByNodeIndex[item.index()];
+        if (!itemState.committedBound || !itemState.committedEnabled || !itemState.committedExpandable)
+        {
+            return false;
+        }
+        const u32 entryIndex = findHitEntryIndex(item, entries);
+        if (entryIndex >= entries.size())
+        {
+            return false;
+        }
+        const UICommittedHitEntry& entry = entries[entryIndex];
+        const UILogicalRect disclosure = makeTreeViewDisclosureRect(
+            entry.worldRect, treeViewStatesByNodeIndex[treeView.index()].style, itemState.committedLevel);
+        return containsPointHalfOpen(entry.worldRect, point) && containsPointHalfOpen(disclosure, point) &&
+               containsPointHalfOpen(entry.effectiveClip, point);
+    }
+
+    [[nodiscard]] bool isSelectedTreeViewItem(UINodeId item) const noexcept
+    {
+        const UINodeId treeView = treeViewForItem(item);
+        if (!treeView.hasValue() || item.index() >= treeViewItemStatesByNodeIndex.size())
+        {
+            return false;
+        }
+        const TreeViewItemState& itemState = treeViewItemStatesByNodeIndex[item.index()];
+        const TreeViewState& treeState = treeViewStatesByNodeIndex[treeView.index()];
+        return itemState.bound && treeState.selection.hasValue() && itemState.key == treeState.selection.key;
+    }
+
+    [[nodiscard]] Core::Status selectCommittedTreeViewItem(UINodeId item)
+    {
+        const UINodeId treeView = treeViewForItem(item);
+        if (!treeView.hasValue() || item.index() >= treeViewItemStatesByNodeIndex.size() ||
+            treeView.index() >= treeViewStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView selection requires a bound item row");
+        }
+        const TreeViewItemState& itemState = treeViewItemStatesByNodeIndex[item.index()];
+        if (!itemState.committedBound || !itemState.committedEnabled)
+        {
+            return Core::success();
+        }
+        TreeViewState& treeState = treeViewStatesByNodeIndex[treeView.index()];
+        const UITreeViewSelection selection{
+            .key = itemState.committedKey,
+            .logicalIndex = itemState.committedLogicalIndex,
+            .level = itemState.committedLevel,
+        };
+        if (selection == treeState.selection)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(treeView); !dirty)
+        {
+            return dirty;
+        }
+        treeState.selection = selection;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status toggleCommittedTreeViewItem(UINodeId item)
+    {
+        const UINodeId treeView = treeViewForItem(item);
+        if (!treeView.hasValue() || item.index() >= treeViewItemStatesByNodeIndex.size() ||
+            treeView.index() >= treeViewStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView expansion requires a bound item row");
+        }
+        const TreeViewItemState& itemState = treeViewItemStatesByNodeIndex[item.index()];
+        if (!itemState.committedBound || !itemState.committedEnabled || !itemState.committedExpandable)
+        {
+            return Core::success();
+        }
+        TreeViewState& treeState = treeViewStatesByNodeIndex[treeView.index()];
+        if (!treeState.dataSource.canSetItemExpanded())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView data source does not support expansion");
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(treeView); !dirty)
+        {
+            return dirty;
+        }
+        if (!treeState.dataSource.setItemExpanded(treeState.dataSource.state, itemState.committedKey,
+                                                  !itemState.committedExpanded))
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView data source rejected expansion");
+        }
+        if (treeState.selection.key == itemState.committedKey)
+        {
+            treeState.selection.logicalIndex = itemState.committedLogicalIndex;
+            treeState.selection.level = itemState.committedLevel;
+        }
         return Core::success();
     }
 
@@ -10296,6 +11179,423 @@ struct UIContext::Impl final {
             return Core::success();
         }
         if (Core::Status dirty = markLayoutStyleDirty(listView); !dirty)
+        {
+            return dirty;
+        }
+        state.requestedScrollOffset = nextOffset;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status validateTreeViewUpdater(UINodeId updaterRoot, UINodeId treeView) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto treeResult = const_cast<Impl*>(this)->resolveTreeView(treeView);
+        if (!treeResult)
+        {
+            return Core::failure(treeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, treeView))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI TreeView is not owned by the updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UITreeViewItemDescriptor> resolveTreeViewLogicalItem(UINodeId treeView,
+                                                                                    u64 logicalIndex) const
+    {
+        const TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        if (!state.dataSource.hasValue())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView has no data source");
+        }
+        const u64 itemCount = state.dataSource.itemCount(state.dataSource.state);
+        if (logicalIndex >= itemCount)
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView logical item index is out of range");
+        }
+        UITreeViewItemDescriptor descriptor{};
+        if (!state.dataSource.resolveItem(state.dataSource.state, logicalIndex, descriptor))
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView data source failed to resolve an item");
+        }
+        if (descriptor.key == InvalidUITreeViewItemKey || containsLineBreak(descriptor.label) ||
+            (descriptor.expanded && !descriptor.expandable))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TreeView item requires a non-zero key, a single-line label, and valid expansion state");
+        }
+        return descriptor;
+    }
+
+    [[nodiscard]] Core::Status setTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                                UITreeViewDataSource source)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return valid;
+        }
+        if (!source.hasValue())
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TreeView data source requires state, itemCount, and resolveItem");
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(treeView); !dirty)
+        {
+            return dirty;
+        }
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        state.dataSource = source;
+        state.selection = {};
+        state.requestedScrollOffset = 0.0F;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return valid;
+        }
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        if (!state.dataSource.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(treeView); !dirty)
+        {
+            return dirty;
+        }
+        state.dataSource = {};
+        state.selection = {};
+        state.requestedScrollOffset = 0.0F;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status invalidateTreeViewItemsFromUpdater(UINodeId updaterRoot, UINodeId treeView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return valid;
+        }
+        return markLayoutStyleDirty(treeView);
+    }
+
+    [[nodiscard]] Core::Status setTreeViewStyleFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                           const UITreeViewStyle& style)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return valid;
+        }
+        auto normalized = normalizeTreeViewStyle(style);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        if (state.style == *normalized)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(treeView); !dirty)
+        {
+            return dirty;
+        }
+        state.style = *normalized;
+        const NodeRecord* treeRecord = nodes.tryGet(treeView.storageId());
+        u32 child = treeRecord == nullptr ? InvalidNodeIndex : treeRecord->firstChildIndex;
+        while (child != InvalidNodeIndex)
+        {
+            NodeRecord* childRecord = recordByIndex(child);
+            if (childRecord == nullptr)
+            {
+                break;
+            }
+            layoutStylesByIndex[child].size.height = UILayoutLength::Px(state.style.rowHeight);
+            child = childRecord->nextSiblingIndex;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UITreeViewStyle> treeViewStyleFromUpdater(UINodeId updaterRoot, UINodeId treeView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return treeViewStatesByNodeIndex[treeView.index()].style;
+    }
+
+    [[nodiscard]] Core::Status setTreeViewPaintFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                           const UITreeViewPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return valid;
+        }
+        auto normalized = normalizeTreeViewPaint(paint);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        if (state.paint == *normalized)
+        {
+            detachThemeBinding(treeView.index(), ThemeBindingTreeViewPaint);
+            return Core::success();
+        }
+        const bool layoutChanged = state.paint.scrollBar.thickness != normalized->scrollBar.thickness ||
+                                   state.paint.scrollBar.minThumbExtent != normalized->scrollBar.minThumbExtent;
+        Core::Status dirty = layoutChanged ? markLayoutStyleDirty(treeView) : markPaintDirty(treeView);
+        if (!dirty)
+        {
+            return dirty;
+        }
+        state.paint = *normalized;
+        detachThemeBinding(treeView.index(), ThemeBindingTreeViewPaint);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UITreeViewPaint> treeViewPaintFromUpdater(UINodeId updaterRoot, UINodeId treeView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return treeViewStatesByNodeIndex[treeView.index()].paint;
+    }
+
+    [[nodiscard]] Core::Result<UITreeViewMetrics> treeViewMetricsFromUpdater(UINodeId updaterRoot,
+                                                                             UINodeId treeView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return treeViewStatesByNodeIndex[treeView.index()].committedMetrics;
+    }
+
+    [[nodiscard]] Core::Status setTreeViewSelectedIndexFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                                   u64 logicalIndex)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return valid;
+        }
+        auto descriptor = resolveTreeViewLogicalItem(treeView, logicalIndex);
+        if (!descriptor)
+        {
+            return Core::failure(descriptor.error());
+        }
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        const UITreeViewSelection next{
+            .key = descriptor->key,
+            .logicalIndex = logicalIndex,
+            .level = descriptor->level,
+        };
+        if (state.selection == next)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(treeView); !dirty)
+        {
+            return dirty;
+        }
+        state.selection = next;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearTreeViewSelectionFromUpdater(UINodeId updaterRoot, UINodeId treeView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return valid;
+        }
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        if (!state.selection.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(treeView); !dirty)
+        {
+            return dirty;
+        }
+        state.selection = {};
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UITreeViewSelection> treeViewSelectionFromUpdater(UINodeId updaterRoot,
+                                                                                 UINodeId treeView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return treeViewStatesByNodeIndex[treeView.index()].selection;
+    }
+
+    [[nodiscard]] Core::Status setTreeViewItemExpandedFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                                  u64 logicalIndex, bool expanded)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return valid;
+        }
+        auto descriptor = resolveTreeViewLogicalItem(treeView, logicalIndex);
+        if (!descriptor)
+        {
+            return Core::failure(descriptor.error());
+        }
+        if (!descriptor->expandable)
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView item is not expandable");
+        }
+        if (descriptor->expanded == expanded)
+        {
+            return Core::success();
+        }
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        if (!state.dataSource.canSetItemExpanded())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView data source does not support expansion");
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(treeView); !dirty)
+        {
+            return dirty;
+        }
+        if (!state.dataSource.setItemExpanded(state.dataSource.state, descriptor->key, expanded))
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView data source rejected expansion");
+        }
+        if (state.selection.key == descriptor->key)
+        {
+            state.selection.logicalIndex = logicalIndex;
+            state.selection.level = descriptor->level;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status scrollTreeViewToIndexFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                                u64 logicalIndex, UITreeViewScrollAlignment alignment)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return valid;
+        }
+        if (!isValidTreeViewScrollAlignment(alignment))
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView scroll alignment is not recognized");
+        }
+        auto descriptor = resolveTreeViewLogicalItem(treeView, logicalIndex);
+        if (!descriptor)
+        {
+            return Core::failure(descriptor.error());
+        }
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        const float rowStart = static_cast<float>(static_cast<double>(logicalIndex) * state.style.rowHeight);
+        const float rowEnd = rowStart + state.style.rowHeight;
+        const float viewportHeight = state.committedMetrics.viewportSize.height;
+        const u64 logicalItemCount = state.dataSource.itemCount(state.dataSource.state);
+        const double contentHeight64 = static_cast<double>(logicalItemCount) * state.style.rowHeight;
+        if (!std::isfinite(contentHeight64) || contentHeight64 > (std::numeric_limits<float>::max)())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView logical content height is not representable");
+        }
+        const float maximumOffset =
+            normalizeFloat((std::max)(0.0F, static_cast<float>(contentHeight64) - viewportHeight));
+        float nextOffset = state.requestedScrollOffset;
+        switch (alignment)
+        {
+        case UITreeViewScrollAlignment::Start:
+            nextOffset = rowStart;
+            break;
+        case UITreeViewScrollAlignment::Center:
+            nextOffset = rowStart - (viewportHeight - state.style.rowHeight) * 0.5F;
+            break;
+        case UITreeViewScrollAlignment::End:
+            nextOffset = rowEnd - viewportHeight;
+            break;
+        case UITreeViewScrollAlignment::Nearest:
+            if (rowStart < nextOffset)
+            {
+                nextOffset = rowStart;
+            } else if (rowEnd > nextOffset + viewportHeight)
+            {
+                nextOffset = rowEnd - viewportHeight;
+            }
+            break;
+        }
+        nextOffset = normalizeFloat((std::clamp)(nextOffset, 0.0F, maximumOffset));
+        if (nextOffset == state.requestedScrollOffset)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(treeView); !dirty)
         {
             return dirty;
         }
@@ -11050,6 +12350,23 @@ struct UIContext::Impl final {
                 item.committedLogicalIndex = item.logicalIndex;
                 item.committedBound = item.bound;
                 item.committedEnabled = item.enabled;
+            } else if (record->kind == UIWidgetKind::TreeView && index < treeViewStatesByNodeIndex.size() &&
+                       index < treeViewLayoutScratchByNodeIndex.size())
+            {
+                TreeViewState& state = treeViewStatesByNodeIndex[index];
+                state.requestedScrollOffset = treeViewLayoutScratchByNodeIndex[index].metrics.scrollOffset;
+                state.committedMetrics = treeViewLayoutScratchByNodeIndex[index].metrics;
+                state.committedViewportRect = treeViewLayoutScratchByNodeIndex[index].viewportRect;
+            } else if (record->kind == UIWidgetKind::TreeViewItem && index < treeViewItemStatesByNodeIndex.size())
+            {
+                TreeViewItemState& item = treeViewItemStatesByNodeIndex[index];
+                item.committedKey = item.key;
+                item.committedLogicalIndex = item.logicalIndex;
+                item.committedLevel = item.level;
+                item.committedBound = item.bound;
+                item.committedEnabled = item.enabled;
+                item.committedExpandable = item.expandable;
+                item.committedExpanded = item.expanded;
             }
         }
     }
@@ -12139,6 +13456,12 @@ struct UIContext::Impl final {
             nearestButtonRecord != nullptr && nearestButtonRecord->kind == UIWidgetKind::ListViewItem
                 ? listViewForItem(nearestButton)
                 : UINodeId{};
+        const UINodeId nearestTreeView =
+            nearestButtonRecord != nullptr && nearestButtonRecord->kind == UIWidgetKind::TreeViewItem
+                ? treeViewForItem(nearestButton)
+                : UINodeId{};
+        const bool nearestTreeDisclosureAtRouteStart =
+            nearestTreeView.hasValue() && pointWithinCommittedTreeDisclosure(nearestButton, input.position, entries);
 
         const UINodeId targetNode = result.routedTarget.node;
         const bool targetNodeEnabledAtRouteStart = isNodeEnabled(targetNode);
@@ -12176,10 +13499,14 @@ struct UIContext::Impl final {
         const float scrollDragGrabOffsetAtRouteStart = scrollDragGrabOffset;
         const bool scrollThumbDragAtRouteStart = scrollThumbDragActive;
         const UINodeId armedTextEditAtRouteStart = armedTextEdit;
+        const bool armedTreeDisclosureAtRouteStart = armedTreeDisclosure;
         const bool hadArmedInteraction = armedButtonAtRouteStart.hasValue();
         const bool hadArmedSlider = armedSliderAtRouteStart.hasValue();
         const bool hadArmedScrollView = armedScrollViewAtRouteStart.hasValue();
         const bool hadArmedTextEdit = armedTextEditAtRouteStart.hasValue();
+        const bool pointWithinArmedTreeDisclosure =
+            armedTreeDisclosureAtRouteStart &&
+            pointWithinCommittedTreeDisclosure(armedButtonAtRouteStart, input.position, entries);
         releaseRouteDirtyQueueReservations();
         if (dismissActivePopupOnPrimaryDown)
         {
@@ -12217,6 +13544,7 @@ struct UIContext::Impl final {
             {
                 addRouteDirtyReservationCandidate(nearestButton);
                 addRouteDirtyReservationCandidate(nearestListView);
+                addRouteDirtyReservationCandidate(nearestTreeView);
             }
         } else if (input.kind == UIRoutedPointerEventKind::Move)
         {
@@ -12284,6 +13612,14 @@ struct UIContext::Impl final {
                 {
                     addDropdownActivationDirtyReservationCandidates(armedButtonAtRouteStart);
                     addRouteDirtyReservationCandidate(listViewForItem(armedButtonAtRouteStart));
+                    const UINodeId armedTreeView = treeViewForItem(armedButtonAtRouteStart);
+                    if (pointWithinArmedTreeDisclosure)
+                    {
+                        addRouteLayoutDirtyReservationCandidates(armedTreeView);
+                    } else
+                    {
+                        addRouteDirtyReservationCandidate(armedTreeView);
+                    }
                 }
             }
         } else if (input.kind == UIRoutedPointerEventKind::Wheel)
@@ -12483,6 +13819,7 @@ struct UIContext::Impl final {
                 if (nextButtonRecord != nullptr && isDefaultActivatableKind(nextButtonRecord->kind))
                 {
                     nextKeyboardFocus = nextButtonRecord->kind == UIWidgetKind::ListViewItem ? nearestListView
+                                        : nextButtonRecord->kind == UIWidgetKind::TreeViewItem ? nearestTreeView
                                                                                               : nearestButton;
                     interactionPaintNode = nearestButton;
                 }
@@ -12506,12 +13843,16 @@ struct UIContext::Impl final {
                         armedScrollViewAtRouteStart != interactionPaintNode && contains(armedScrollViewAtRouteStart)
                     ? armedScrollViewAtRouteStart
                     : UINodeId{};
+            const UINodeId interactionFocusNode =
+                nextKeyboardFocus.hasValue() && nextKeyboardFocus != interactionPaintNode ? nextKeyboardFocus
+                                                                                          : UINodeId{};
             if (Core::Status dirty = markPaintDirtyBatch({
                     dirtyPreviousKeyboard,
                     dirtyPreviousText,
                     dirtyPreviousSlider,
                     dirtyPreviousScrollView,
                     interactionPaintNode,
+                    interactionFocusNode,
                 });
                 !dirty)
             {
@@ -12599,6 +13940,7 @@ struct UIContext::Impl final {
                 {
                     armedPrimaryButton = nearestButton;
                     armedPrimaryButtonPressed = true;
+                    armedTreeDisclosure = nearestTreeDisclosureAtRouteStart;
                     defaultActionFocusButton = nextKeyboardFocus;
                     capturedPointerNode = nearestButton;
                     clearImeFocus();
@@ -12837,6 +14179,19 @@ struct UIContext::Impl final {
                         return Core::failure(selected.error());
                     }
                 }
+                if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
+                    armedRecord != nullptr && armedRecord->kind == UIWidgetKind::TreeViewItem)
+                {
+                    Core::Status treeAction = armedTreeDisclosureAtRouteStart
+                                                  ? pointWithinArmedTreeDisclosure
+                                                        ? toggleCommittedTreeViewItem(armedButtonAtRouteStart)
+                                                        : Core::success()
+                                                  : selectCommittedTreeViewItem(armedButtonAtRouteStart);
+                    if (!treeAction)
+                    {
+                        return Core::failure(treeAction.error());
+                    }
+                }
                 invokeButtonAction(actionCandidate,
                                    UIButtonActionEvent{
                                        .buttonNode = armedButtonAtRouteStart,
@@ -12907,6 +14262,7 @@ struct UIContext::Impl final {
         popupDismissPointerBarrierActive = false;
         dropdownCommandPressed.fill(false);
         listViewCommandPressed.fill(false);
+        treeViewCommandPressed.fill(false);
         clearDefaultActionPresses();
         clearImeFocus();
         clearDefaultActionFocus();
@@ -12944,6 +14300,7 @@ struct UIContext::Impl final {
 
         dropdownCommandPressed.fill(false);
         listViewCommandPressed.fill(false);
+        treeViewCommandPressed.fill(false);
 
         if (gamepad.has_value())
         {
@@ -13725,6 +15082,310 @@ struct UIContext::Impl final {
             .consumed = true,
             .changed = changed,
             .activated = false,
+            .selection = state.selection,
+        };
+    }
+
+    [[nodiscard]] Core::Result<UITreeViewCommandResult> routeTreeViewCommand(UITreeViewCommand command, bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI TreeView command cannot run during pointer routing");
+        }
+        drainDeferredRootDestroys();
+
+        const usize commandIndex = static_cast<usize>(command);
+        if (commandIndex >= treeViewCommandPressed.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TreeView command is not recognized");
+        }
+        if (!pressed)
+        {
+            const bool consumed = treeViewCommandPressed[commandIndex];
+            treeViewCommandPressed[commandIndex] = false;
+            return UITreeViewCommandResult{.consumed = consumed};
+        }
+        if (treeViewCommandPressed[commandIndex])
+        {
+            return UITreeViewCommandResult{.consumed = true};
+        }
+
+        UINodeId treeView = defaultActionFocusButton;
+        const NodeRecord* focusRecord = contains(treeView) ? nodes.tryGet(treeView.storageId()) : nullptr;
+        if (focusRecord != nullptr && focusRecord->kind == UIWidgetKind::TreeViewItem)
+        {
+            treeView = treeViewForItem(treeView);
+            focusRecord = contains(treeView) ? nodes.tryGet(treeView.storageId()) : nullptr;
+        }
+        if (focusRecord == nullptr || focusRecord->kind != UIWidgetKind::TreeView || !isNodeEnabled(treeView))
+        {
+            return UITreeViewCommandResult{};
+        }
+
+        TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
+        const u64 itemCount = state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
+        u64 selectedIndex = 0;
+        UITreeViewItemDescriptor selectedDescriptor{};
+        bool hasSelectedItem = false;
+        if (state.selection.hasValue())
+        {
+            if (state.selection.logicalIndex < itemCount)
+            {
+                auto resolved = resolveTreeViewLogicalItem(treeView, state.selection.logicalIndex);
+                if (!resolved)
+                {
+                    return Core::failure(resolved.error());
+                }
+                if (resolved->key == state.selection.key)
+                {
+                    selectedIndex = state.selection.logicalIndex;
+                    selectedDescriptor = *resolved;
+                    hasSelectedItem = true;
+                }
+            }
+            if (!hasSelectedItem)
+            {
+                for (u64 logicalIndex = 0; logicalIndex < itemCount; ++logicalIndex)
+                {
+                    auto resolved = resolveTreeViewLogicalItem(treeView, logicalIndex);
+                    if (!resolved)
+                    {
+                        return Core::failure(resolved.error());
+                    }
+                    if (resolved->key == state.selection.key)
+                    {
+                        selectedIndex = logicalIndex;
+                        selectedDescriptor = *resolved;
+                        hasSelectedItem = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (command == UITreeViewCommand::Activate)
+        {
+            if (!hasSelectedItem || !selectedDescriptor.enabled)
+            {
+                return UITreeViewCommandResult{};
+            }
+            treeViewCommandPressed[commandIndex] = true;
+            return UITreeViewCommandResult{
+                .consumed = true,
+                .activated = true,
+                .selection = state.selection,
+            };
+        }
+        if (itemCount == 0)
+        {
+            return UITreeViewCommandResult{};
+        }
+
+        const UINodeId updaterRoot = idForIndex(focusRecord->rootIndex);
+        auto applyExpansion = [&](bool expanded) -> Core::Result<UITreeViewCommandResult> {
+            if (!hasSelectedItem || !selectedDescriptor.enabled || !selectedDescriptor.expandable)
+            {
+                return UITreeViewCommandResult{};
+            }
+            if (Core::Status changed =
+                    setTreeViewItemExpandedFromUpdater(updaterRoot, treeView, selectedIndex, expanded);
+                !changed)
+            {
+                return Core::failure(changed.error());
+            }
+            treeViewCommandPressed[commandIndex] = true;
+            return UITreeViewCommandResult{
+                .consumed = true,
+                .changed = true,
+                .expansionChanged = true,
+                .selection = state.selection,
+            };
+        };
+
+        if (command == UITreeViewCommand::ToggleExpanded)
+        {
+            return applyExpansion(!selectedDescriptor.expanded);
+        }
+        if (command == UITreeViewCommand::CollapseOrParent && hasSelectedItem && selectedDescriptor.enabled &&
+            selectedDescriptor.expandable && selectedDescriptor.expanded)
+        {
+            return applyExpansion(false);
+        }
+        if (command == UITreeViewCommand::ExpandOrFirstChild && hasSelectedItem && selectedDescriptor.enabled &&
+            selectedDescriptor.expandable && !selectedDescriptor.expanded)
+        {
+            return applyExpansion(true);
+        }
+
+        u64 candidate = 0;
+        UITreeViewItemDescriptor candidateDescriptor{};
+        bool found = false;
+        bool searchBackward = false;
+        switch (command)
+        {
+        case UITreeViewCommand::PreviousItem:
+        case UITreeViewCommand::PreviousPage:
+        case UITreeViewCommand::NextItem:
+        case UITreeViewCommand::NextPage:
+        case UITreeViewCommand::FirstItem:
+        case UITreeViewCommand::LastItem: {
+            const u64 pageItems =
+                (std::max)(u64{1}, static_cast<u64>(
+                                       std::floor(state.committedMetrics.viewportSize.height / state.style.rowHeight)));
+            switch (command)
+            {
+            case UITreeViewCommand::PreviousItem:
+                candidate = hasSelectedItem && selectedIndex != 0 ? selectedIndex - 1 : 0;
+                break;
+            case UITreeViewCommand::NextItem:
+                candidate = hasSelectedItem ? (std::min)(itemCount - 1, selectedIndex + 1) : 0;
+                break;
+            case UITreeViewCommand::PreviousPage:
+                candidate = hasSelectedItem && selectedIndex > pageItems ? selectedIndex - pageItems : 0;
+                break;
+            case UITreeViewCommand::NextPage:
+                candidate = hasSelectedItem ? (std::min)(itemCount - 1, selectedIndex + pageItems) : 0;
+                break;
+            case UITreeViewCommand::FirstItem:
+                candidate = 0;
+                break;
+            case UITreeViewCommand::LastItem:
+                candidate = itemCount - 1;
+                break;
+            default:
+                break;
+            }
+            searchBackward = command == UITreeViewCommand::LastItem ||
+                             (hasSelectedItem && (command == UITreeViewCommand::PreviousItem ||
+                                                  command == UITreeViewCommand::PreviousPage));
+            for (u64 visited = 0; visited < itemCount; ++visited)
+            {
+                auto resolved = resolveTreeViewLogicalItem(treeView, candidate);
+                if (!resolved)
+                {
+                    return Core::failure(resolved.error());
+                }
+                if (resolved->enabled)
+                {
+                    candidateDescriptor = *resolved;
+                    found = true;
+                    break;
+                }
+                if (searchBackward)
+                {
+                    if (candidate == 0)
+                    {
+                        break;
+                    }
+                    --candidate;
+                } else
+                {
+                    if (candidate + 1 >= itemCount)
+                    {
+                        break;
+                    }
+                    ++candidate;
+                }
+            }
+            break;
+        }
+        case UITreeViewCommand::CollapseOrParent: {
+            if (!hasSelectedItem || selectedDescriptor.level == 0)
+            {
+                return UITreeViewCommandResult{};
+            }
+            u32 ancestorLevel = selectedDescriptor.level;
+            for (u64 logicalIndex = selectedIndex; logicalIndex-- > 0;)
+            {
+                auto resolved = resolveTreeViewLogicalItem(treeView, logicalIndex);
+                if (!resolved)
+                {
+                    return Core::failure(resolved.error());
+                }
+                if (resolved->level >= ancestorLevel)
+                {
+                    continue;
+                }
+                ancestorLevel = resolved->level;
+                if (resolved->enabled)
+                {
+                    candidate = logicalIndex;
+                    candidateDescriptor = *resolved;
+                    found = true;
+                    break;
+                }
+                if (ancestorLevel == 0)
+                {
+                    break;
+                }
+            }
+            break;
+        }
+        case UITreeViewCommand::ExpandOrFirstChild: {
+            if (!hasSelectedItem)
+            {
+                return UITreeViewCommandResult{};
+            }
+            const u64 childLevel = static_cast<u64>(selectedDescriptor.level) + 1;
+            for (u64 logicalIndex = selectedIndex + 1; logicalIndex < itemCount; ++logicalIndex)
+            {
+                auto resolved = resolveTreeViewLogicalItem(treeView, logicalIndex);
+                if (!resolved)
+                {
+                    return Core::failure(resolved.error());
+                }
+                if (resolved->level <= selectedDescriptor.level)
+                {
+                    break;
+                }
+                if (static_cast<u64>(resolved->level) == childLevel && resolved->enabled)
+                {
+                    candidate = logicalIndex;
+                    candidateDescriptor = *resolved;
+                    found = true;
+                    break;
+                }
+            }
+            break;
+        }
+        case UITreeViewCommand::ToggleExpanded:
+        case UITreeViewCommand::Activate:
+            break;
+        }
+
+        if (!found)
+        {
+            return UITreeViewCommandResult{};
+        }
+        const UITreeViewSelection nextSelection{
+            .key = candidateDescriptor.key,
+            .logicalIndex = candidate,
+            .level = candidateDescriptor.level,
+        };
+        const bool changed = state.selection != nextSelection;
+        if (changed)
+        {
+            if (Core::Status dirty = markPaintDirty(treeView); !dirty)
+            {
+                return Core::failure(dirty.error());
+            }
+            state.selection = nextSelection;
+        }
+        if (Core::Status revealed =
+                scrollTreeViewToIndexFromUpdater(updaterRoot, treeView, candidate, UITreeViewScrollAlignment::Nearest);
+            !revealed)
+        {
+            return Core::failure(revealed.error());
+        }
+        treeViewCommandPressed[commandIndex] = true;
+        return UITreeViewCommandResult{
+            .consumed = true,
+            .changed = changed,
             .selection = state.selection,
         };
     }
@@ -14616,6 +16277,15 @@ Core::Result<UINodeId> UIRootBuilder::createListView(UINodeId parent, UIListView
     return m_context->createListViewChild(parent, config);
 }
 
+Core::Result<UINodeId> UIRootBuilder::createTreeView(UINodeId parent, UITreeViewCreateConfig config)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createTreeViewChild(parent, config);
+}
+
 UITreeUpdater::UITreeUpdater(UIContext& context, UINodeId root) noexcept : m_context(&context), m_root(root)
 {
 }
@@ -14761,6 +16431,15 @@ Core::Result<UINodeId> UITreeUpdater::createListView(UINodeId parent, UIListView
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->createListViewFromUpdater(m_root, parent, config);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createTreeView(UINodeId parent, UITreeViewCreateConfig config)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createTreeViewFromUpdater(m_root, parent, config);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -15351,8 +17030,99 @@ Core::Result<UIListViewSelection> UITreeUpdater::listViewSelection(UINodeId list
 Core::Status UITreeUpdater::scrollListViewToIndex(UINodeId listView, u64 logicalIndex,
                                                  UIListViewScrollAlignment alignment)
 {
+    return m_context != nullptr ? m_context->scrollListViewToIndexFromUpdater(m_root, listView, logicalIndex, alignment)
+                                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::setTreeViewDataSource(UINodeId treeView, UITreeViewDataSource source)
+{
+    return m_context != nullptr ? m_context->setTreeViewDataSourceFromUpdater(m_root, treeView, source)
+                                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::clearTreeViewDataSource(UINodeId treeView)
+{
+    return m_context != nullptr ? m_context->clearTreeViewDataSourceFromUpdater(m_root, treeView)
+                                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::invalidateTreeViewItems(UINodeId treeView)
+{
+    return m_context != nullptr ? m_context->invalidateTreeViewItemsFromUpdater(m_root, treeView)
+                                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::setTreeViewStyle(UINodeId treeView, const UITreeViewStyle& style)
+{
+    return m_context != nullptr ? m_context->setTreeViewStyleFromUpdater(m_root, treeView, style)
+                                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Result<UITreeViewStyle> UITreeUpdater::treeViewStyle(UINodeId treeView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->treeViewStyleFromUpdater(m_root, treeView);
+}
+
+Core::Status UITreeUpdater::setTreeViewPaint(UINodeId treeView, const UITreeViewPaint& paint)
+{
+    return m_context != nullptr ? m_context->setTreeViewPaintFromUpdater(m_root, treeView, paint)
+                                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Result<UITreeViewPaint> UITreeUpdater::treeViewPaint(UINodeId treeView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->treeViewPaintFromUpdater(m_root, treeView);
+}
+
+Core::Result<UITreeViewMetrics> UITreeUpdater::treeViewMetrics(UINodeId treeView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->treeViewMetricsFromUpdater(m_root, treeView);
+}
+
+Core::Status UITreeUpdater::setTreeViewSelectedIndex(UINodeId treeView, u64 logicalIndex)
+{
+    return m_context != nullptr ? m_context->setTreeViewSelectedIndexFromUpdater(m_root, treeView, logicalIndex)
+                                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::clearTreeViewSelection(UINodeId treeView)
+{
+    return m_context != nullptr ? m_context->clearTreeViewSelectionFromUpdater(m_root, treeView)
+                                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Result<UITreeViewSelection> UITreeUpdater::treeViewSelection(UINodeId treeView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->treeViewSelectionFromUpdater(m_root, treeView);
+}
+
+Core::Status UITreeUpdater::setTreeViewItemExpanded(UINodeId treeView, u64 logicalIndex, bool expanded)
+{
     return m_context != nullptr
-               ? m_context->scrollListViewToIndexFromUpdater(m_root, listView, logicalIndex, alignment)
+               ? m_context->setTreeViewItemExpandedFromUpdater(m_root, treeView, logicalIndex, expanded)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::scrollTreeViewToIndex(UINodeId treeView, u64 logicalIndex,
+                                                  UITreeViewScrollAlignment alignment)
+{
+    return m_context != nullptr ? m_context->scrollTreeViewToIndexFromUpdater(m_root, treeView, logicalIndex, alignment)
                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
 }
 
@@ -15783,6 +17553,11 @@ Core::Result<UIListViewCommandResult> UIContext::routeListViewCommand(UIListView
     return m_impl->routeListViewCommand(command, pressed);
 }
 
+Core::Result<UITreeViewCommandResult> UIContext::routeTreeViewCommand(UITreeViewCommand command, bool pressed)
+{
+    return m_impl->routeTreeViewCommand(command, pressed);
+}
+
 UINodeId UIContext::defaultActionFocus() const noexcept
 {
     if (!m_impl->isOwnerThread())
@@ -15922,6 +17697,11 @@ Core::Result<UINodeId> UIContext::createListViewChild(UINodeId parent, UIListVie
     return m_impl->createListViewComposite(parent, config);
 }
 
+Core::Result<UINodeId> UIContext::createTreeViewChild(UINodeId parent, UITreeViewCreateConfig config)
+{
+    return m_impl->createTreeViewComposite(parent, config);
+}
+
 Core::Result<UINodeId> UIContext::createChildFromUpdater(UINodeId updaterRoot, UINodeId parent, UIWidgetKind kind)
 {
     return m_impl->createChildFromUpdater(updaterRoot, parent, kind);
@@ -15931,6 +17711,12 @@ Core::Result<UINodeId> UIContext::createListViewFromUpdater(UINodeId updaterRoot
                                                            UIListViewCreateConfig config)
 {
     return m_impl->createListViewFromUpdater(updaterRoot, parent, config);
+}
+
+Core::Result<UINodeId> UIContext::createTreeViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                            UITreeViewCreateConfig config)
+{
+    return m_impl->createTreeViewFromUpdater(updaterRoot, parent, config);
 }
 
 Core::Status UIContext::setLayoutStyleFromUpdater(UINodeId updaterRoot, UINodeId node, const UILayoutStyle& style)
@@ -16293,6 +18079,76 @@ Core::Status UIContext::scrollListViewToIndexFromUpdater(UINodeId updaterRoot, U
                                                         u64 logicalIndex, UIListViewScrollAlignment alignment)
 {
     return m_impl->scrollListViewToIndexFromUpdater(updaterRoot, listView, logicalIndex, alignment);
+}
+
+Core::Status UIContext::setTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                         UITreeViewDataSource source)
+{
+    return m_impl->setTreeViewDataSourceFromUpdater(updaterRoot, treeView, source);
+}
+
+Core::Status UIContext::clearTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView)
+{
+    return m_impl->clearTreeViewDataSourceFromUpdater(updaterRoot, treeView);
+}
+
+Core::Status UIContext::invalidateTreeViewItemsFromUpdater(UINodeId updaterRoot, UINodeId treeView)
+{
+    return m_impl->invalidateTreeViewItemsFromUpdater(updaterRoot, treeView);
+}
+
+Core::Status UIContext::setTreeViewStyleFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                    const UITreeViewStyle& style)
+{
+    return m_impl->setTreeViewStyleFromUpdater(updaterRoot, treeView, style);
+}
+
+Core::Result<UITreeViewStyle> UIContext::treeViewStyleFromUpdater(UINodeId updaterRoot, UINodeId treeView) const
+{
+    return m_impl->treeViewStyleFromUpdater(updaterRoot, treeView);
+}
+
+Core::Status UIContext::setTreeViewPaintFromUpdater(UINodeId updaterRoot, UINodeId treeView,
+                                                    const UITreeViewPaint& paint)
+{
+    return m_impl->setTreeViewPaintFromUpdater(updaterRoot, treeView, paint);
+}
+
+Core::Result<UITreeViewPaint> UIContext::treeViewPaintFromUpdater(UINodeId updaterRoot, UINodeId treeView) const
+{
+    return m_impl->treeViewPaintFromUpdater(updaterRoot, treeView);
+}
+
+Core::Result<UITreeViewMetrics> UIContext::treeViewMetricsFromUpdater(UINodeId updaterRoot, UINodeId treeView) const
+{
+    return m_impl->treeViewMetricsFromUpdater(updaterRoot, treeView);
+}
+
+Core::Status UIContext::setTreeViewSelectedIndexFromUpdater(UINodeId updaterRoot, UINodeId treeView, u64 logicalIndex)
+{
+    return m_impl->setTreeViewSelectedIndexFromUpdater(updaterRoot, treeView, logicalIndex);
+}
+
+Core::Status UIContext::clearTreeViewSelectionFromUpdater(UINodeId updaterRoot, UINodeId treeView)
+{
+    return m_impl->clearTreeViewSelectionFromUpdater(updaterRoot, treeView);
+}
+
+Core::Result<UITreeViewSelection> UIContext::treeViewSelectionFromUpdater(UINodeId updaterRoot, UINodeId treeView) const
+{
+    return m_impl->treeViewSelectionFromUpdater(updaterRoot, treeView);
+}
+
+Core::Status UIContext::setTreeViewItemExpandedFromUpdater(UINodeId updaterRoot, UINodeId treeView, u64 logicalIndex,
+                                                           bool expanded)
+{
+    return m_impl->setTreeViewItemExpandedFromUpdater(updaterRoot, treeView, logicalIndex, expanded);
+}
+
+Core::Status UIContext::scrollTreeViewToIndexFromUpdater(UINodeId updaterRoot, UINodeId treeView, u64 logicalIndex,
+                                                         UITreeViewScrollAlignment alignment)
+{
+    return m_impl->scrollTreeViewToIndexFromUpdater(updaterRoot, treeView, logicalIndex, alignment);
 }
 
 Core::Status UIContext::setProgressBarRangeFromUpdater(UINodeId updaterRoot, UINodeId progressBar, float minValue,

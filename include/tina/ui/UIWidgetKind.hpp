@@ -35,6 +35,10 @@ enum class UIWidgetKind : u8 {
     ListView,
     // Internal recycled row node owned by a ListView.
     ListViewItem,
+    // Fixed-row-height virtualized hierarchy backed by a visible projection.
+    TreeView,
+    // Internal recycled row node owned by a TreeView.
+    TreeViewItem,
 };
 
 } // namespace Tina::UI

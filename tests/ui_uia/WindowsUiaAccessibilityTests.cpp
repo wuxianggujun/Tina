@@ -75,6 +75,8 @@ TEST(WindowsUiaMappingTest, RoleMapsToUiaControlTypeConstants)
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::TextEdit), UI::Uia::kControlTypeEdit);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Label), UI::Uia::kControlTypeText);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::ScrollView), UI::Uia::kControlTypePane);
+    EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Tree), UI::Uia::kControlTypeTree);
+    EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::TreeItem), UI::Uia::kControlTypeTreeItem);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Group), UI::Uia::kControlTypeGroup);
 }
 

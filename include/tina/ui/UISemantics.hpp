@@ -4,6 +4,7 @@
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UINodeId.hpp>
+#include <tina/ui/UITreeView.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 
 #include <span>
@@ -28,6 +29,7 @@ enum class UISemanticsRole : u8 {
     ScrollView,
     ComboBox,
     Tree,
+    TreeItem,
 };
 
 // Owner-thread snapshot entry. Text fields point into the committed snapshot's
@@ -158,6 +160,10 @@ class UICommittedSemanticsView final {
         return UISemanticsRole::List;
     case UIWidgetKind::ListViewItem:
         return UISemanticsRole::ListItem;
+    case UIWidgetKind::TreeView:
+        return UISemanticsRole::Tree;
+    case UIWidgetKind::TreeViewItem:
+        return UISemanticsRole::TreeItem;
     }
     return UISemanticsRole::Group;
 }
@@ -170,7 +176,8 @@ class UICommittedSemanticsView final {
            kind == UIWidgetKind::Slider || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ProgressBar ||
            kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Modal || kind == UIWidgetKind::ScrollView ||
            kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::Popup || kind == UIWidgetKind::DropdownItem ||
-           kind == UIWidgetKind::ListView || kind == UIWidgetKind::ListViewItem;
+           kind == UIWidgetKind::ListView || kind == UIWidgetKind::ListViewItem || kind == UIWidgetKind::TreeView ||
+           kind == UIWidgetKind::TreeViewItem;
 }
 
 } // namespace Tina::UI
