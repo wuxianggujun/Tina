@@ -192,6 +192,8 @@ struct SampleOptions final {
     bool uiDisabledDemoButton = false;
     // Product gate only: exercise an owner-thread Dark -> Light -> Dark Theme cycle.
     bool uiThemeDemo = false;
+    // Product gate only: exercise Scene Explorer selection and virtualized scrolling.
+    bool uiTreeDemo = false;
     // Optional controlled product gate: seed one map cell selection after enter
     // without synthesizing OS pointer events (GLFW smoke stays hermetic).
     bool seedTileSelection = false;
@@ -259,6 +261,16 @@ struct LifecycleCounters final {
     u64 uiThemeSwitches = 0;
     u64 uiThemeButtonActivations = 0;
     bool uiThemeFinalLight = false;
+    bool uiTreeDemoRequested = false;
+    u64 uiTreeViewsCreated = 0;
+    u64 uiTreeLogicalItems = 0;
+    u64 uiTreeMaterializedCapacity = 0;
+    u64 uiTreeSelectionChanges = 0;
+    Tina::UI::UITreeViewItemKey uiTreeFinalSelectedKey = Tina::UI::InvalidUITreeViewItemKey;
+    u64 uiTreeFinalSelectedIndex = 0;
+    bool uiTreeFinalSelectionVerified = false;
+    bool uiTreeScrolled = false;
+    bool uiTreeThemeVerified = false;
     // M11-C1/C2: Master/Music/SFX volume Sliders wired to AudioEngine buses.
     u64 uiSlidersCreated = 0;
     u64 uiSliderChanges = 0;
@@ -408,15 +420,34 @@ struct LifecycleCounters final {
     bool accessibilityHasProgressBar = false;
     bool accessibilityHasRadio = false;
     bool accessibilityHasTextEdit = false;
+    bool accessibilityHasTree = false;
+    bool accessibilityHasTreeItem = false;
+    bool accessibilityTreeSelectionVerified = false;
     bool accessibilityPublished = false;
 };
 
-inline constexpr u32 ExpectedUIPanelCount = 3;
-inline constexpr u32 ExpectedUITextLabelCount = 8;
+inline constexpr u32 ExpectedUIPanelCount = 4;
+inline constexpr u32 ExpectedUITextLabelCount = 10;
 inline constexpr u32 ExpectedUITextEditCount = 1;
 inline constexpr u32 ExpectedUIButtonCount = 1;
 inline constexpr u32 ExpectedUIProgressBarCount = 1;
 inline constexpr u32 ExpectedUIRadioButtonCount = 2;
+inline constexpr u32 ExpectedUITreeViewCount = 1;
+inline constexpr u64 SceneTreeLogicalItemCount = 13;
+inline constexpr u32 SceneTreeMaterializedItemCapacity = 12;
+inline constexpr Tina::UI::UITreeViewItemKey AssetsTreeItemKey = 100;
+inline constexpr Tina::UI::UITreeViewItemKey TileTextureTreeItemKey = 101;
+inline constexpr Tina::UI::UITreeViewItemKey TilesetTreeItemKey = 102;
+inline constexpr Tina::UI::UITreeViewItemKey TileMapTreeItemKey = 103;
+inline constexpr Tina::UI::UITreeViewItemKey AudioClipTreeItemKey = 104;
+inline constexpr Tina::UI::UITreeViewItemKey CharacterTextureTreeItemKey = 105;
+inline constexpr Tina::UI::UITreeViewItemKey LayersTreeItemKey = 200;
+inline constexpr Tina::UI::UITreeViewItemKey VisualLayerTreeItemKey = 210;
+inline constexpr Tina::UI::UITreeViewItemKey CollisionLayerTreeItemKey = 220;
+inline constexpr Tina::UI::UITreeViewItemKey GameplayLayerTreeItemKey = 230;
+inline constexpr Tina::UI::UITreeViewItemKey EntitiesTreeItemKey = 300;
+inline constexpr Tina::UI::UITreeViewItemKey PlayerSpawnTreeItemKey = 401;
+inline constexpr Tina::UI::UITreeViewItemKey CrateSpawnTreeItemKey = 402;
 // Authored FixedWorldHeight for product sample; world width/ppm come from surface.
 // Keep height small enough that half-width fits the 8m-wide sample map so follow
 // can pan (height 6m →halfW≥.3m > map half →clamp freezes at center).
@@ -575,6 +606,11 @@ void writeError(const Tina::Core::Error& error)
             options.uiThemeDemo = true;
             continue;
         }
+        if (argument == "--ui-tree-demo")
+        {
+            options.uiTreeDemo = true;
+            continue;
+        }
         if (argument.starts_with("--seed-tile-selection="))
         {
             const auto text = argument.substr(std::string_view{"--seed-tile-selection="}.size());
@@ -629,6 +665,11 @@ void writeError(const Tina::Core::Error& error)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "--ui-theme-demo requires --frames=3 or greater");
+    }
+    if (options.uiTreeDemo && options.targetFrameCount < 3)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "--ui-tree-demo requires --frames=3 or greater");
     }
     return options;
 }
@@ -1905,6 +1946,10 @@ class TileMapBgfxState final : public Tina::IGameState {
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(16.0F), Tina::UI::UILayoutLength::Px(480.0F),
                                              Tina::UI::UILayoutLength::Px(320.0F), Tina::UI::UILayoutLength::Px(10.0F)),
             },
+            PanelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(16.0F), Tina::UI::UILayoutLength::Px(84.0F),
+                                             Tina::UI::UILayoutLength::Px(320.0F), Tina::UI::UILayoutLength::Px(368.0F)),
+            },
         };
         for (std::size_t index = 0; index < panels.size(); ++index)
         {
@@ -1969,6 +2014,16 @@ class TileMapBgfxState final : public Tina::IGameState {
                                              Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Mute SFX",
             },
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(96.0F),
+                                             Tina::UI::UILayoutLength::Px(296.0F), Tina::UI::UILayoutLength::Px(24.0F)),
+                .text = "Scene Explorer",
+            },
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(408.0F),
+                                             Tina::UI::UILayoutLength::Px(296.0F), Tina::UI::UILayoutLength::Px(24.0F)),
+                .text = "Selected: visual #10",
+            },
         };
         for (std::size_t index = 0; index < labels.size(); ++index)
         {
@@ -1990,7 +2045,71 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 uiTitleNodes_[index] = *label;
             }
+            else if (index == ExpectedUITextLabelCount - 2U)
+            {
+                uiSceneExplorerTitle_ = *label;
+            }
+            else if (index == ExpectedUITextLabelCount - 1U)
+            {
+                uiSceneSelectionLabel_ = *label;
+            }
         }
+
+        auto sceneTree = tree->createTreeView(
+            root->rootNodeId(), {.materializedItemCapacity = SceneTreeMaterializedItemCapacity});
+        if (!sceneTree)
+        {
+            return Tina::Core::failure(std::move(sceneTree.error()));
+        }
+        uiSceneTree_ = *sceneTree;
+        if (auto status = tree->setLayoutStyle(
+                *sceneTree, absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F),
+                                                Tina::UI::UILayoutLength::Px(128.0F),
+                                                Tina::UI::UILayoutLength::Px(296.0F),
+                                                Tina::UI::UILayoutLength::Px(260.0F)));
+            !status)
+        {
+            return status;
+        }
+        if (auto status = tree->setTreeViewStyle(
+                *sceneTree,
+                Tina::UI::UITreeViewStyle{
+                    .rowHeight = 24.0F,
+                    .overscanRows = 1,
+                    .scrollBarVisibility = Tina::UI::UIScrollBarVisibility::Auto,
+                    .wheelStep = 24.0F,
+                    .indentation = 14.0F,
+                    .disclosureExtent = 9.0F,
+                    .disclosureGap = 4.0F,
+                });
+            !status)
+        {
+            return status;
+        }
+        if (auto status = tree->setTreeViewDataSource(*sceneTree, sceneTreeDataSource()); !status)
+        {
+            return status;
+        }
+        constexpr u64 InitialSceneSelectionIndex = 7;
+        if (auto status = tree->setTreeViewSelectedIndex(*sceneTree, InitialSceneSelectionIndex); !status)
+        {
+            return status;
+        }
+        auto initialSceneSelection = tree->treeViewSelection(*sceneTree);
+        if (!initialSceneSelection)
+        {
+            return Tina::Core::failure(std::move(initialSceneSelection.error()));
+        }
+        uiSceneSelectionKey_ = initialSceneSelection->key;
+        counters_->uiTreeDemoRequested = options_.uiTreeDemo;
+        counters_->uiTreeViewsCreated = 1;
+        counters_->uiTreeLogicalItems = SceneTreeLogicalItemCount;
+        counters_->uiTreeMaterializedCapacity = SceneTreeMaterializedItemCapacity;
+        counters_->uiTreeFinalSelectedKey = initialSceneSelection->key;
+        counters_->uiTreeFinalSelectedIndex = initialSceneSelection->logicalIndex;
+        counters_->uiTreeFinalSelectionVerified =
+            !options_.uiTreeDemo && initialSceneSelection->key == VisualLayerTreeItemKey &&
+            initialSceneSelection->logicalIndex == InitialSceneSelectionIndex;
 
         // The real Theme command exercises pointer/default-action routing. Its callback
         // only records intent; updateUI() performs the owner-thread Theme transaction.
@@ -3280,6 +3399,18 @@ class TileMapBgfxState final : public Tina::IGameState {
             pendingUiThemeLight_ = false;
             uiThemeDemoDarkQueued_ = true;
         }
+        if (options_.uiTreeDemo && !uiTreeDemoFirstSelectionQueued_ &&
+            counters_->frameUpdates >= firstThemeFrame)
+        {
+            pendingUiTreeSelection_ = 9;
+            uiTreeDemoFirstSelectionQueued_ = true;
+        } else if (options_.uiTreeDemo && uiTreeDemoFirstSelectionQueued_ &&
+                   !uiTreeDemoFinalSelectionQueued_ && counters_->frameUpdates >= secondThemeFrame)
+        {
+            pendingUiTreeSelection_ = 12;
+            pendingUiTreeScrollToEnd_ = true;
+            uiTreeDemoFinalSelectionQueued_ = true;
+        }
 
         auto tree = context.primaryWindowUITreeUpdater(uiRoot_);
         if (!tree)
@@ -3294,6 +3425,69 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 return status;
             }
+        }
+        if (pendingUiTreeSelection_.has_value())
+        {
+            const u64 logicalIndex = *pendingUiTreeSelection_;
+            pendingUiTreeSelection_.reset();
+            if (auto status = tree->setTreeViewSelectedIndex(uiSceneTree_, logicalIndex); !status)
+            {
+                return status;
+            }
+            if (pendingUiTreeScrollToEnd_)
+            {
+                pendingUiTreeScrollToEnd_ = false;
+                if (auto status = tree->scrollTreeViewToIndex(
+                        uiSceneTree_, logicalIndex, Tina::UI::UITreeViewScrollAlignment::End);
+                    !status)
+                {
+                    return status;
+                }
+            }
+        }
+        auto sceneSelection = tree->treeViewSelection(uiSceneTree_);
+        if (!sceneSelection)
+        {
+            return Tina::Core::failure(std::move(sceneSelection.error()));
+        }
+        if (sceneSelection->key != uiSceneSelectionKey_)
+        {
+            uiSceneSelectionKey_ = sceneSelection->key;
+            ++counters_->uiTreeSelectionChanges;
+            std::string selectionText = "Selected: ";
+            selectionText += sceneTreeLabel(sceneSelection->key);
+            if (auto status = tree->setText(uiSceneSelectionLabel_, selectionText); !status)
+            {
+                return status;
+            }
+        }
+        counters_->uiTreeFinalSelectedKey = sceneSelection->key;
+        counters_->uiTreeFinalSelectedIndex = sceneSelection->logicalIndex;
+        Tina::UI::UITreeViewItemDescriptor selectedDescriptor{};
+        const bool selectionMatchesProjection =
+            resolveSceneTreeItem(this, sceneSelection->logicalIndex, selectedDescriptor) &&
+            selectedDescriptor.key == sceneSelection->key;
+        counters_->uiTreeFinalSelectionVerified =
+            selectionMatchesProjection &&
+            (!options_.uiTreeDemo ||
+             (uiTreeDemoFinalSelectionQueued_ && sceneSelection->key == CrateSpawnTreeItemKey &&
+              sceneSelection->logicalIndex == 12U));
+        auto sceneMetrics = tree->treeViewMetrics(uiSceneTree_);
+        if (!sceneMetrics)
+        {
+            return Tina::Core::failure(std::move(sceneMetrics.error()));
+        }
+        if (sceneMetrics->logicalItemCount != sceneTreeItemCount(this))
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Scene Explorer metrics do not match the current tree projection");
+        }
+        counters_->uiTreeLogicalItems = sceneMetrics->logicalItemCount;
+        counters_->uiTreeMaterializedCapacity = sceneMetrics->materializedItemCapacity;
+        if (options_.uiTreeDemo && uiTreeDemoFinalSelectionQueued_ &&
+            sceneMetrics->maxScrollOffset > 0.0F && sceneMetrics->scrollOffset > 0.0F)
+        {
+            counters_->uiTreeScrolled = true;
         }
 
         // Publish accessibility snapshot from the last committed layout (startup/previous frame).
@@ -3327,10 +3521,191 @@ class TileMapBgfxState final : public Tina::IGameState {
             accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::RadioButton) != nullptr;
         counters_->accessibilityHasTextEdit =
             accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::TextEdit) != nullptr;
+        counters_->accessibilityHasTree =
+            accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::Tree) != nullptr;
+        counters_->accessibilityHasTreeItem =
+            accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::TreeItem) != nullptr;
+        bool committedTreeSelectionMatches = false;
+        for (const Tina::UI::UIAccessibilityNode& node : accessibilityTree_.nodes())
+        {
+            if (node.role == Tina::UI::UISemanticsRole::TreeItem &&
+                node.virtualItemKey == counters_->uiTreeFinalSelectedKey &&
+                Tina::UI::hasState(node.states, Tina::UI::UIAccessibilityState::Selected))
+            {
+                committedTreeSelectionMatches = true;
+                break;
+            }
+        }
+        if (options_.uiTreeDemo)
+        {
+            counters_->accessibilityTreeSelectionVerified = committedTreeSelectionMatches;
+        } else
+        {
+            // committedSemantics() trails the live tree by one frame. Preserve
+            // prior proof in interactive mode so a last-frame click stays valid.
+            counters_->accessibilityTreeSelectionVerified =
+                counters_->accessibilityTreeSelectionVerified || committedTreeSelectionMatches;
+        }
         return Tina::Core::success();
     }
 
   private:
+    [[nodiscard]] Tina::UI::UITreeViewDataSource sceneTreeDataSource() noexcept
+    {
+        return Tina::UI::UITreeViewDataSource{
+            .state = this,
+            .itemCount = &TileMapBgfxState::sceneTreeItemCount,
+            .resolveItem = &TileMapBgfxState::resolveSceneTreeItem,
+            .setItemExpanded = &TileMapBgfxState::setSceneTreeItemExpanded,
+        };
+    }
+
+    [[nodiscard]] static u64 sceneTreeItemCount(const void* state) noexcept
+    {
+        if (state == nullptr)
+        {
+            return 0;
+        }
+        const auto& sample = *static_cast<const TileMapBgfxState*>(state);
+        u64 count = 3;
+        count += sample.uiAssetsExpanded_ ? 5U : 0U;
+        count += sample.uiLayersExpanded_ ? 3U : 0U;
+        count += sample.uiEntitiesExpanded_ ? 2U : 0U;
+        return count;
+    }
+
+    [[nodiscard]] static bool resolveSceneTreeItem(
+        const void* state, u64 logicalIndex, Tina::UI::UITreeViewItemDescriptor& output) noexcept
+    {
+        if (state == nullptr || logicalIndex >= sceneTreeItemCount(state))
+        {
+            return false;
+        }
+        const auto& sample = *static_cast<const TileMapBgfxState*>(state);
+        const auto emit = [&logicalIndex, &output](Tina::UI::UITreeViewItemKey key, std::string_view label,
+                                                   u32 level, bool expandable = false,
+                                                   bool expanded = false) noexcept {
+            if (logicalIndex == 0)
+            {
+                output = Tina::UI::UITreeViewItemDescriptor{
+                    .key = key,
+                    .label = label,
+                    .level = level,
+                    .enabled = true,
+                    .expandable = expandable,
+                    .expanded = expanded,
+                };
+                return true;
+            }
+            --logicalIndex;
+            return false;
+        };
+
+        if (emit(AssetsTreeItemKey, "Assets", 0, true, sample.uiAssetsExpanded_))
+        {
+            return true;
+        }
+        if (sample.uiAssetsExpanded_)
+        {
+            if (emit(TileTextureTreeItemKey, "Tile Texture #01", 1) ||
+                emit(TilesetTreeItemKey, "Tileset #02", 1) ||
+                emit(TileMapTreeItemKey, "TileMap #03", 1) ||
+                emit(CharacterTextureTreeItemKey, "Character #05", 1) ||
+                emit(AudioClipTreeItemKey, "Audio Clip #04", 1))
+            {
+                return true;
+            }
+        }
+        if (emit(LayersTreeItemKey, "Layers", 0, true, sample.uiLayersExpanded_))
+        {
+            return true;
+        }
+        if (sample.uiLayersExpanded_)
+        {
+            if (emit(VisualLayerTreeItemKey, "visual #10", 1) ||
+                emit(CollisionLayerTreeItemKey, "collision #20", 1) ||
+                emit(GameplayLayerTreeItemKey, "gameplay #30", 1))
+            {
+                return true;
+            }
+        }
+        if (emit(EntitiesTreeItemKey, "Entities", 0, true, sample.uiEntitiesExpanded_))
+        {
+            return true;
+        }
+        if (sample.uiEntitiesExpanded_)
+        {
+            if (emit(PlayerSpawnTreeItemKey, "player_spawn #101", 1) ||
+                emit(CrateSpawnTreeItemKey, "crate_spawn #102", 1))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] static bool setSceneTreeItemExpanded(
+        void* state, Tina::UI::UITreeViewItemKey key, bool expanded) noexcept
+    {
+        if (state == nullptr)
+        {
+            return false;
+        }
+        auto& sample = *static_cast<TileMapBgfxState*>(state);
+        bool* value = nullptr;
+        switch (key)
+        {
+        case AssetsTreeItemKey:
+            value = &sample.uiAssetsExpanded_;
+            break;
+        case LayersTreeItemKey:
+            value = &sample.uiLayersExpanded_;
+            break;
+        case EntitiesTreeItemKey:
+            value = &sample.uiEntitiesExpanded_;
+            break;
+        default:
+            return false;
+        }
+        *value = expanded;
+        return true;
+    }
+
+    [[nodiscard]] static std::string_view sceneTreeLabel(Tina::UI::UITreeViewItemKey key) noexcept
+    {
+        switch (key)
+        {
+        case AssetsTreeItemKey:
+            return "Assets";
+        case TileTextureTreeItemKey:
+            return "Tile Texture #01";
+        case TilesetTreeItemKey:
+            return "Tileset #02";
+        case TileMapTreeItemKey:
+            return "TileMap #03";
+        case CharacterTextureTreeItemKey:
+            return "Character #05";
+        case AudioClipTreeItemKey:
+            return "Audio Clip #04";
+        case LayersTreeItemKey:
+            return "Layers";
+        case VisualLayerTreeItemKey:
+            return "visual #10";
+        case CollisionLayerTreeItemKey:
+            return "collision #20";
+        case GameplayLayerTreeItemKey:
+            return "gameplay #30";
+        case EntitiesTreeItemKey:
+            return "Entities";
+        case PlayerSpawnTreeItemKey:
+            return "player_spawn #101";
+        case CrateSpawnTreeItemKey:
+            return "crate_spawn #102";
+        default:
+            return "none";
+        }
+    }
+
     Tina::Core::Status applyUITheme(Tina::PrimaryWindowUITreeUpdater& tree, bool light, bool countSwitch)
     {
         const Tina::UI::UITheme theme =
@@ -3346,6 +3721,8 @@ class TileMapBgfxState final : public Tina::IGameState {
             Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.surface0, 236),
                                         Tina::UI::UIElevation::Low),
             Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.textAccent, 230)),
+            Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.surface0, 236),
+                                        Tina::UI::UIElevation::Low),
         };
         for (std::size_t index = 0; index < uiPanelNodes_.size(); ++index)
         {
@@ -3359,6 +3736,16 @@ class TileMapBgfxState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree.setTextStyle(uiTitleNodes_[1], Tina::UI::makeAccentTextStyle(theme, 22.0F)); !status)
+        {
+            return status;
+        }
+        if (auto status = tree.setTextStyle(uiSceneExplorerTitle_, Tina::UI::makeTitleTextStyle(theme, 20.0F));
+            !status)
+        {
+            return status;
+        }
+        if (auto status = tree.setTextStyle(uiSceneSelectionLabel_, Tina::UI::makeSecondaryTextStyle(theme, 15.0F));
+            !status)
         {
             return status;
         }
@@ -3377,11 +3764,18 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(buttonPaint.error()));
         }
-        if (*activeTheme != theme || *buttonPaint != Tina::UI::makeButtonChrome(theme).states)
+        auto treePaint = tree.treeViewPaint(uiSceneTree_);
+        if (!treePaint)
+        {
+            return Tina::Core::failure(std::move(treePaint.error()));
+        }
+        if (*activeTheme != theme || *buttonPaint != Tina::UI::makeButtonChrome(theme).states ||
+            *treePaint != Tina::UI::makeTreeViewPaint(theme))
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "2D product controls did not inherit the requested UI Theme");
         }
+        counters_->uiTreeThemeVerified = true;
 
         if (countSwitch && light != uiThemeLight_)
         {
@@ -3510,10 +3904,21 @@ class TileMapBgfxState final : public Tina::IGameState {
     std::array<Tina::UI::UINodeId, ExpectedUIPanelCount> uiPanelNodes_{};
     std::array<Tina::UI::UINodeId, 2> uiTitleNodes_{};
     Tina::UI::UINodeId uiThemeButton_{};
+    Tina::UI::UINodeId uiSceneExplorerTitle_{};
+    Tina::UI::UINodeId uiSceneSelectionLabel_{};
+    Tina::UI::UINodeId uiSceneTree_{};
     std::optional<bool> pendingUiThemeLight_{};
+    std::optional<u64> pendingUiTreeSelection_{};
+    Tina::UI::UITreeViewItemKey uiSceneSelectionKey_ = Tina::UI::InvalidUITreeViewItemKey;
     bool uiThemeLight_ = false;
     bool uiThemeDemoLightQueued_ = false;
     bool uiThemeDemoDarkQueued_ = false;
+    bool uiTreeDemoFirstSelectionQueued_ = false;
+    bool uiTreeDemoFinalSelectionQueued_ = false;
+    bool pendingUiTreeScrollToEnd_ = false;
+    bool uiAssetsExpanded_ = true;
+    bool uiLayersExpanded_ = true;
+    bool uiEntitiesExpanded_ = true;
     Tina::UI::UIAccessibilityTree accessibilityTree_{};
     Tina::UI::UIAccessibilityProbeProvider accessibilityProbe_{};
     mutable SpriteBindingResolverContext worldSpriteBindingResolverContext_{};
@@ -3684,6 +4089,7 @@ int main(int argc, char** argv)
     LifecycleCounters counters{};
     counters.uiDisabledDemoButtonRequested = options->uiDisabledDemoButton;
     counters.uiThemeDemoRequested = options->uiThemeDemo;
+    counters.uiTreeDemoRequested = options->uiTreeDemo;
     TileMapResources resources{};
     if (const auto status = prepareCatalog(resources, counters); !status)
     {
@@ -3857,6 +4263,21 @@ int main(int argc, char** argv)
         counters.tileMapSpriteBindingResolverHits > 0 &&
         counters.particleSpriteBindingResolverHits > 0 &&
         counters.trailSpriteBindingResolverHits > 0;
+    const bool treeModeValid =
+        options->uiTreeDemo
+            ? (counters.uiTreeLogicalItems == SceneTreeLogicalItemCount &&
+               counters.uiTreeSelectionChanges == 2U &&
+               counters.uiTreeFinalSelectedKey == CrateSpawnTreeItemKey &&
+               counters.uiTreeFinalSelectedIndex == 12U && counters.uiTreeScrolled)
+            : (counters.uiTreeLogicalItems >= 3U &&
+               counters.uiTreeLogicalItems <= SceneTreeLogicalItemCount);
+    const bool treeViewValid =
+        counters.uiTreeDemoRequested == options->uiTreeDemo &&
+        counters.uiTreeViewsCreated == ExpectedUITreeViewCount &&
+        counters.uiTreeMaterializedCapacity == SceneTreeMaterializedItemCapacity &&
+        counters.uiTreeThemeVerified && counters.uiTreeFinalSelectionVerified &&
+        counters.accessibilityHasTree && counters.accessibilityHasTreeItem &&
+        counters.accessibilityTreeSelectionVerified && treeModeValid;
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
     // M11-A16: null-backend device must start, run callbacks, and advance mixRealtime.
     const bool audioDeviceValid =
@@ -3868,7 +4289,7 @@ int main(int argc, char** argv)
 
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
               cameraFollowValid && chunkDirtyValid && tileMapStreamValid && effectsValid && audioValid && audioDeviceValid &&
-              characterAnimationValid && spriteBindingsValid &&
+              characterAnimationValid && spriteBindingsValid && treeViewValid &&
               counters.catalogFromRecipeFile &&
               counters.catalogRecipeAssets == ExpectedCatalogRecipeAssets &&
               counters.objectLayerConsumed && counters.objectLayerObjectCount == 2U &&
@@ -3929,7 +4350,7 @@ int main(int argc, char** argv)
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
     evidenceBytes.reserve(512);
-    appendLeU32(evidenceBytes, 13U); // schema
+    appendLeU32(evidenceBytes, 14U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
@@ -3975,6 +4396,19 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.uiThemeSwitches);
     appendLeU64(evidenceBytes, counters.uiThemeButtonActivations);
     appendLeU32(evidenceBytes, counters.uiThemeFinalLight ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.uiTreeDemoRequested ? 1U : 0U);
+    appendLeU64(evidenceBytes, counters.uiTreeViewsCreated);
+    appendLeU64(evidenceBytes, counters.uiTreeLogicalItems);
+    appendLeU64(evidenceBytes, counters.uiTreeMaterializedCapacity);
+    appendLeU64(evidenceBytes, counters.uiTreeSelectionChanges);
+    appendLeU64(evidenceBytes, counters.uiTreeFinalSelectedKey);
+    appendLeU64(evidenceBytes, counters.uiTreeFinalSelectedIndex);
+    appendLeU32(evidenceBytes, counters.uiTreeFinalSelectionVerified ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.uiTreeScrolled ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.uiTreeThemeVerified ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.accessibilityHasTree ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.accessibilityHasTreeItem ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.accessibilityTreeSelectionVerified ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.uiSlidersCreated);
     appendLeU64(evidenceBytes, counters.uiCheckboxesCreated); // expected 3 after M11-C5
     appendLeU64(evidenceBytes, counters.uiProgressBarsCreated);
@@ -4098,6 +4532,17 @@ int main(int argc, char** argv)
                   << ",\"uiThemeSwitches\":" << counters.uiThemeSwitches
                   << ",\"uiThemeButtonActivations\":" << counters.uiThemeButtonActivations
                   << ",\"uiThemeFinalLight\":" << (counters.uiThemeFinalLight ? "true" : "false")
+                  << ",\"uiTreeDemoRequested\":" << (counters.uiTreeDemoRequested ? "true" : "false")
+                  << ",\"uiTreeViewsCreated\":" << counters.uiTreeViewsCreated
+                  << ",\"uiTreeLogicalItems\":" << counters.uiTreeLogicalItems
+                  << ",\"uiTreeMaterializedCapacity\":" << counters.uiTreeMaterializedCapacity
+                  << ",\"uiTreeSelectionChanges\":" << counters.uiTreeSelectionChanges
+                  << ",\"uiTreeFinalSelectedKey\":" << counters.uiTreeFinalSelectedKey
+                  << ",\"uiTreeFinalSelectedIndex\":" << counters.uiTreeFinalSelectedIndex
+                  << ",\"uiTreeFinalSelectionVerified\":"
+                  << (counters.uiTreeFinalSelectionVerified ? "true" : "false")
+                  << ",\"uiTreeScrolled\":" << (counters.uiTreeScrolled ? "true" : "false")
+                  << ",\"uiTreeThemeVerified\":" << (counters.uiTreeThemeVerified ? "true" : "false")
                   << ",\"uiSliders\":" << counters.uiSlidersCreated
                   << ",\"uiProgressBars\":" << counters.uiProgressBarsCreated
                   << ",\"uiRadioButtons\":" << counters.uiRadioButtonsCreated
@@ -4134,6 +4579,11 @@ int main(int argc, char** argv)
                    << ",\"pauseOverlayFrames\":" << counters.pauseOverlayFrames
                    << ",\"accessibilityPublished\":" << (counters.accessibilityPublished ? "true" : "false")
                    << ",\"accessibilityNodeCount\":" << counters.accessibilityNodeCount
+                   << ",\"accessibilityHasTree\":" << (counters.accessibilityHasTree ? "true" : "false")
+                   << ",\"accessibilityHasTreeItem\":"
+                   << (counters.accessibilityHasTreeItem ? "true" : "false")
+                   << ",\"accessibilityTreeSelectionVerified\":"
+                   << (counters.accessibilityTreeSelectionVerified ? "true" : "false")
                    << ",\"audioEnginePresent\":" << (counters.audioEnginePresent ? "true" : "false")
                    << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
                    << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
@@ -4261,6 +4711,17 @@ int main(int argc, char** argv)
               << ",\"uiThemeSwitches\":" << counters.uiThemeSwitches
               << ",\"uiThemeButtonActivations\":" << counters.uiThemeButtonActivations
               << ",\"uiThemeFinalLight\":" << (counters.uiThemeFinalLight ? "true" : "false")
+              << ",\"uiTreeDemoRequested\":" << (counters.uiTreeDemoRequested ? "true" : "false")
+              << ",\"uiTreeViewsCreated\":" << counters.uiTreeViewsCreated
+              << ",\"uiTreeLogicalItems\":" << counters.uiTreeLogicalItems
+              << ",\"uiTreeMaterializedCapacity\":" << counters.uiTreeMaterializedCapacity
+              << ",\"uiTreeSelectionChanges\":" << counters.uiTreeSelectionChanges
+              << ",\"uiTreeFinalSelectedKey\":" << counters.uiTreeFinalSelectedKey
+              << ",\"uiTreeFinalSelectedIndex\":" << counters.uiTreeFinalSelectedIndex
+              << ",\"uiTreeFinalSelectionVerified\":"
+              << (counters.uiTreeFinalSelectionVerified ? "true" : "false")
+              << ",\"uiTreeScrolled\":" << (counters.uiTreeScrolled ? "true" : "false")
+              << ",\"uiTreeThemeVerified\":" << (counters.uiTreeThemeVerified ? "true" : "false")
               << ",\"uiSlidersCreated\":" << counters.uiSlidersCreated
               << ",\"uiSliderChanges\":" << counters.uiSliderChanges
               << ",\"uiCheckboxesCreated\":" << counters.uiCheckboxesCreated
@@ -4419,8 +4880,12 @@ int main(int argc, char** argv)
               << ",\"accessibilityHasProgressBar\":" << (counters.accessibilityHasProgressBar ? "true" : "false")
               << ",\"accessibilityHasRadio\":" << (counters.accessibilityHasRadio ? "true" : "false")
               << ",\"accessibilityHasTextEdit\":" << (counters.accessibilityHasTextEdit ? "true" : "false")
+              << ",\"accessibilityHasTree\":" << (counters.accessibilityHasTree ? "true" : "false")
+              << ",\"accessibilityHasTreeItem\":" << (counters.accessibilityHasTreeItem ? "true" : "false")
+              << ",\"accessibilityTreeSelectionVerified\":"
+              << (counters.accessibilityTreeSelectionVerified ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":13"
+              << ",\"evidenceSchema\":14"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
