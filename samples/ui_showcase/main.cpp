@@ -278,28 +278,28 @@ class ShowcaseApplication final : public Tina::IGameApplication {
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
     config.applicationName = "Tina UI Showcase";
-    config.primaryWindow.title = "Tina UI Showcase - Retained Controls";
-    config.primaryWindow.initialLogicalExtent = {1280, 720};
+    config.primaryWindow.title = "Tina UI Showcase - Complete Retained Controls";
+    config.primaryWindow.initialLogicalExtent = {1280, 980};
     config.primaryWindow.resizable = false;
     config.primaryWindow.initiallyVisible = true;
 
     config.primaryWindowUICapacities = Tina::UI::UIContextCapacityConfig{
-        .nodeCapacity = 1024,
+        .nodeCapacity = 2048,
         .rootCapacity = 1,
-        .dirtyQueueCapacity = 128,
-        .layoutSnapshotCapacity = 128,
-        .hitSnapshotCapacity = 128,
-        .paintSnapshotCapacity = 1024,
-        .routePathCapacity = 64,
-        .routedPointerListenerCapacity = 32,
-        .buttonActionCapacity = 32,
-        .textByteCapacity = 16U * 1024U,
+        .dirtyQueueCapacity = 256,
+        .layoutSnapshotCapacity = 256,
+        .hitSnapshotCapacity = 256,
+        .paintSnapshotCapacity = 2048,
+        .routePathCapacity = 128,
+        .routedPointerListenerCapacity = 64,
+        .buttonActionCapacity = 64,
+        .textByteCapacity = 32U * 1024U,
         .applyDefaultProductChrome = true,
     };
     config.primaryWindowUIDisplayListCapacities = Tina::PrimaryWindowUIDisplayListCapacityConfig{
-        .commandCapacity = 2048,
-        .clipCapacity = 256,
-        .batchCapacity = 512,
+        .commandCapacity = 4096,
+        .clipCapacity = 512,
+        .batchCapacity = 1024,
     };
     return config;
 }
@@ -309,7 +309,7 @@ class ShowcaseApplication final : public Tina::IGameApplication {
 {
     if (counters.stateEnters != 1 || counters.stateExits != 1 || counters.applicationShutdowns != 1 ||
         counters.uiRootsCreated != 1 || counters.uiRootsReleased != 1 || counters.finalUI.rootAlive ||
-        counters.finalUI.controlCount != 13) {
+        counters.finalUI.controlCount != 20) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "UI showcase lifecycle or control inventory verification failed");
     }
@@ -324,10 +324,16 @@ class ShowcaseApplication final : public Tina::IGameApplication {
                                    "Interactive UI showcase stopped without a window close request");
     }
     if (options.autoDemo) {
+        constexpr Tina::UI::UIListViewItemKey ExpectedListSelectionKey = 1'007;
+        constexpr Tina::UI::UITreeViewItemKey ExpectedTreeSelectionKey = 4;
         if (counters.finalUI.themeSwitches != 2 || counters.finalUI.sliderChanges == 0 ||
-            std::lround(counters.finalUI.progressValue) != 84 || counters.finalUI.theme != options.initialTheme) {
+            std::lround(counters.finalUI.progressValue) != 84 || counters.finalUI.theme != options.initialTheme ||
+            counters.finalUI.treeExpansionChanges != 2 ||
+            counters.finalUI.listSelectionKey != ExpectedListSelectionKey ||
+            counters.finalUI.treeSelectionKey != ExpectedTreeSelectionKey || counters.finalUI.dropdownSelection != 1 ||
+            std::lround(counters.finalUI.scrollOffset) != 80) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "UI showcase automated theme/value exercise did not complete");
+                                       "UI showcase automated theme, value, popup, collection, or scrolling exercise did not complete");
         }
     }
     return Tina::Core::success();
@@ -367,8 +373,13 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     writeJsonString(std::cout, themeName(counters.finalUI.theme));
     std::cout << ",\"themeSwitches\":" << counters.finalUI.themeSwitches
               << ",\"sliderChanges\":" << counters.finalUI.sliderChanges
+              << ",\"treeExpansionChanges\":" << counters.finalUI.treeExpansionChanges
               << ",\"progressValue\":" << counters.finalUI.progressValue
               << ",\"buttonActivations\":" << counters.finalUI.buttonActivations
+              << ",\"listSelectionKey\":" << counters.finalUI.listSelectionKey
+              << ",\"treeSelectionKey\":" << counters.finalUI.treeSelectionKey
+              << ",\"dropdownSelection\":" << counters.finalUI.dropdownSelection
+              << ",\"scrollOffset\":" << counters.finalUI.scrollOffset
               << ",\"controls\":" << counters.finalUI.controlCount << ",\"quality\":";
     writeJsonString(std::cout, qualityName(counters.finalUI.quality));
     std::cout << ",\"notificationsEnabled\":" << (counters.finalUI.notificationsEnabled ? "true" : "false")

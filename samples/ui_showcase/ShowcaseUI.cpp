@@ -22,6 +22,35 @@ struct Rect final {
     float height = 0.0F;
 };
 
+constexpr UI::UIListViewItemKey ListItemKeyBase = 1'000;
+constexpr UI::UITreeViewItemKey WorldTreeItemKey = 1;
+constexpr UI::UITreeViewItemKey CameraTreeItemKey = 2;
+constexpr UI::UITreeViewItemKey PlayerTreeItemKey = 3;
+constexpr UI::UITreeViewItemKey PlayerSpriteTreeItemKey = 4;
+constexpr UI::UITreeViewItemKey PlayerPhysicsTreeItemKey = 5;
+constexpr UI::UITreeViewItemKey LightingTreeItemKey = 6;
+constexpr UI::UITreeViewItemKey UITreeItemKey = 7;
+constexpr UI::UITreeViewItemKey HUDTreeItemKey = 8;
+constexpr UI::UITreeViewItemKey SettingsTreeItemKey = 9;
+constexpr UI::UITreeViewItemKey AudioTreeItemKey = 10;
+
+constexpr std::array<std::string_view, 12> ListItemLabels{
+    "Dashboard",      "Scene viewport", "Asset browser", "Entity inspector",
+    "Animation graph", "Audio mixer",    "Input mapping", "Physics layers",
+    "Render passes",   "Build profiles",  "Diagnostics",   "Package manager",
+};
+
+constexpr std::array<std::string_view, 3> DropdownItemLabels{
+    "All assets",
+    "Ready to ship",
+    "Needs review",
+};
+
+constexpr std::array<std::string_view, 6> ScrollContentLabels{
+    "Scrollable settings", "Bloom intensity", "Shadow quality",
+    "Texture streaming",   "Frame pacing",    "Accessibility scale",
+};
+
 [[nodiscard]] UI::UILayoutStyle absoluteStyle(Rect rect, UI::UIEdgeSpacing padding = {}) noexcept
 {
     UI::UILayoutStyle style{};
@@ -39,6 +68,21 @@ struct Rect final {
     UI::UILayoutStyle style{};
     style.size.width = UI::UILayoutLength::Percent(100.0F);
     style.size.height = UI::UILayoutLength::Percent(100.0F);
+    return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle sizedStyle(float width, float height) noexcept
+{
+    UI::UILayoutStyle style{};
+    style.size.width = UI::UILayoutLength::Px(width);
+    style.size.height = UI::UILayoutLength::Px(height);
+    return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle overlayStyle(float width, float height) noexcept
+{
+    UI::UILayoutStyle style = sizedStyle(width, height);
+    style.position = UI::UILayoutPositionMode::AbsoluteOverlay;
     return style;
 }
 
@@ -141,6 +185,151 @@ struct Rect final {
 
 } // namespace
 
+UI::UIListViewDataSource ShowcaseUI::listDataSource() const noexcept
+{
+    return UI::UIListViewDataSource{
+        .state = this,
+        .itemCount = &ShowcaseUI::listItemCount,
+        .resolveItem = &ShowcaseUI::resolveListItem,
+    };
+}
+
+UI::UITreeViewDataSource ShowcaseUI::treeDataSource() noexcept
+{
+    return UI::UITreeViewDataSource{
+        .state = this,
+        .itemCount = &ShowcaseUI::treeItemCount,
+        .resolveItem = &ShowcaseUI::resolveTreeItem,
+        .setItemExpanded = &ShowcaseUI::setTreeItemExpanded,
+    };
+}
+
+Core::u64 ShowcaseUI::listItemCount(const void* state) noexcept
+{
+    return state != nullptr ? ListItemLabels.size() : 0;
+}
+
+bool ShowcaseUI::resolveListItem(const void* state, Core::u64 logicalIndex,
+                                 UI::UIListViewItemDescriptor& output) noexcept
+{
+    if (state == nullptr || logicalIndex >= ListItemLabels.size()) {
+        return false;
+    }
+    output = UI::UIListViewItemDescriptor{
+        .key = ListItemKeyBase + logicalIndex,
+        .label = ListItemLabels[static_cast<Core::usize>(logicalIndex)],
+        .enabled = true,
+    };
+    return true;
+}
+
+Core::u64 ShowcaseUI::treeItemCount(const void* state) noexcept
+{
+    if (state == nullptr) {
+        return 0;
+    }
+    const auto& showcase = *static_cast<const ShowcaseUI*>(state);
+    Core::u64 count = 3;
+    if (showcase.worldExpanded_) {
+        count += 3;
+        if (showcase.playerExpanded_) {
+            count += 2;
+        }
+    }
+    if (showcase.uiExpanded_) {
+        count += 2;
+    }
+    return count;
+}
+
+bool ShowcaseUI::resolveTreeItem(const void* state, Core::u64 logicalIndex,
+                                 UI::UITreeViewItemDescriptor& output) noexcept
+{
+    if (state == nullptr || logicalIndex >= treeItemCount(state)) {
+        return false;
+    }
+    const auto& showcase = *static_cast<const ShowcaseUI*>(state);
+    const auto emit = [&logicalIndex, &output](UI::UITreeViewItemKey key, std::string_view label, Core::u32 level,
+                                               bool expandable = false, bool expanded = false) noexcept {
+        if (logicalIndex == 0) {
+            output = UI::UITreeViewItemDescriptor{
+                .key = key,
+                .label = label,
+                .level = level,
+                .enabled = true,
+                .expandable = expandable,
+                .expanded = expanded,
+            };
+            return true;
+        }
+        --logicalIndex;
+        return false;
+    };
+
+    if (emit(WorldTreeItemKey, "World", 0, true, showcase.worldExpanded_)) {
+        return true;
+    }
+    if (showcase.worldExpanded_) {
+        if (emit(CameraTreeItemKey, "Camera", 1)) {
+            return true;
+        }
+        if (emit(PlayerTreeItemKey, "Player", 1, true, showcase.playerExpanded_)) {
+            return true;
+        }
+        if (showcase.playerExpanded_) {
+            if (emit(PlayerSpriteTreeItemKey, "Sprite", 2)) {
+                return true;
+            }
+            if (emit(PlayerPhysicsTreeItemKey, "PhysicsBody", 2)) {
+                return true;
+            }
+        }
+        if (emit(LightingTreeItemKey, "Lighting", 1)) {
+            return true;
+        }
+    }
+    if (emit(UITreeItemKey, "UI", 0, true, showcase.uiExpanded_)) {
+        return true;
+    }
+    if (showcase.uiExpanded_) {
+        if (emit(HUDTreeItemKey, "HUD", 1)) {
+            return true;
+        }
+        if (emit(SettingsTreeItemKey, "Settings", 1)) {
+            return true;
+        }
+    }
+    return emit(AudioTreeItemKey, "Audio", 0);
+}
+
+bool ShowcaseUI::setTreeItemExpanded(void* state, UI::UITreeViewItemKey key, bool expanded) noexcept
+{
+    if (state == nullptr) {
+        return false;
+    }
+    auto& showcase = *static_cast<ShowcaseUI*>(state);
+    bool* expansion = nullptr;
+    switch (key) {
+    case WorldTreeItemKey:
+        expansion = &showcase.worldExpanded_;
+        break;
+    case PlayerTreeItemKey:
+        expansion = &showcase.playerExpanded_;
+        break;
+    case UITreeItemKey:
+        expansion = &showcase.uiExpanded_;
+        break;
+    default:
+        return false;
+    }
+    if (*expansion != expanded) {
+        *expansion = expanded;
+        ++showcase.treeExpansionChanges_;
+        showcase.treeExpansionDirty_ = true;
+    }
+    return true;
+}
+
 Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme initialTheme)
 {
     if (root_) {
@@ -172,7 +361,7 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     }
 
     const UI::UINodeId rootNode = root->rootNodeId();
-    if (Core::Status status = storeNode(createPanel(*tree, rootNode, {0.0F, 0.0F, 1280.0F, 720.0F}), nodes_.background);
+    if (Core::Status status = storeNode(createPanel(*tree, rootNode, {0.0F, 0.0F, 1280.0F, 980.0F}), nodes_.background);
         !status) {
         return status;
     }
@@ -185,16 +374,18 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
     if (Core::Status status =
-            storeNode(createPanel(*tree, rootNode, {24.0F, 108.0F, 220.0F, 588.0F}), nodes_.navigation);
+            storeNode(createPanel(*tree, rootNode, {24.0F, 108.0F, 220.0F, 848.0F}), nodes_.navigation);
         !status) {
         return status;
     }
 
-    constexpr std::array<Rect, 4> CardRects{
+    constexpr std::array<Rect, 6> CardRects{
         Rect{264.0F, 108.0F, 476.0F, 270.0F},
         Rect{756.0F, 108.0F, 500.0F, 270.0F},
         Rect{264.0F, 394.0F, 476.0F, 302.0F},
         Rect{756.0F, 394.0F, 500.0F, 302.0F},
+        Rect{264.0F, 712.0F, 476.0F, 244.0F},
+        Rect{756.0F, 712.0F, 500.0F, 244.0F},
     };
     for (Core::usize index = 0; index < CardRects.size(); ++index) {
         if (Core::Status status = storeNode(createPanel(*tree, rootNode, CardRects[index]), nodes_.cards[index]);
@@ -203,11 +394,12 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         }
     }
 
-    constexpr std::array<Rect, 4> NavigationAccentRects{
+    constexpr std::array<Rect, 5> NavigationAccentRects{
         Rect{48.0F, 184.0F, 4.0F, 30.0F},
         Rect{48.0F, 238.0F, 4.0F, 30.0F},
         Rect{48.0F, 292.0F, 4.0F, 30.0F},
         Rect{48.0F, 346.0F, 4.0F, 30.0F},
+        Rect{48.0F, 400.0F, 4.0F, 30.0F},
     };
     for (Core::usize index = 0; index < NavigationAccentRects.size(); ++index) {
         if (Core::Status status =
@@ -269,17 +461,19 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
 
-    constexpr std::array<std::string_view, 4> NavigationTexts{
+    constexpr std::array<std::string_view, 5> NavigationTexts{
         "Buttons & states",
         "Value controls",
         "Form controls",
         "Theme palette",
+        "Data & navigation",
     };
-    constexpr std::array<Rect, 4> NavigationLabelRects{
+    constexpr std::array<Rect, 5> NavigationLabelRects{
         Rect{64.0F, 188.0F, 156.0F, 24.0F},
         Rect{64.0F, 242.0F, 156.0F, 24.0F},
         Rect{64.0F, 296.0F, 156.0F, 24.0F},
         Rect{64.0F, 350.0F, 156.0F, 24.0F},
+        Rect{64.0F, 404.0F, 156.0F, 24.0F},
     };
     for (Core::usize index = 0; index < NavigationTexts.size(); ++index) {
         if (Core::Status status =
@@ -290,35 +484,43 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         }
     }
     if (Core::Status status = storeNode(
-            createLabel(*tree, rootNode, {48.0F, 642.0F, 170.0F, 38.0F}, "13 controls online\nTheme synchronized"),
+            createLabel(*tree, rootNode, {48.0F, 892.0F, 170.0F, 38.0F}, "20 controls online\nTheme synchronized"),
             nodes_.navigationHelp);
         !status) {
         return status;
     }
 
-    constexpr std::array<std::string_view, 4> CardTitles{
+    constexpr std::array<std::string_view, 6> CardTitles{
         "Buttons & states",
         "Value controls",
         "Form controls",
         "Theme & palette",
+        "Selection & popup",
+        "Hierarchy & scrolling",
     };
-    constexpr std::array<std::string_view, 4> CardSubtitles{
+    constexpr std::array<std::string_view, 6> CardSubtitles{
         "Hover, press, focus and disabled chrome",
         "Slider drives a determinate ProgressBar",
         "UTF-8 TextEdit and exclusive Radio groups",
         "Switch the whole retained tree at runtime",
+        "Dropdown plus a virtualized ListView",
+        "TreeView projection and clipped ScrollView",
     };
-    constexpr std::array<Rect, 4> CardTitleRects{
+    constexpr std::array<Rect, 6> CardTitleRects{
         Rect{288.0F, 130.0F, 420.0F, 26.0F},
         Rect{780.0F, 130.0F, 440.0F, 26.0F},
         Rect{288.0F, 416.0F, 420.0F, 26.0F},
         Rect{780.0F, 416.0F, 440.0F, 26.0F},
+        Rect{288.0F, 734.0F, 420.0F, 26.0F},
+        Rect{780.0F, 734.0F, 440.0F, 26.0F},
     };
-    constexpr std::array<Rect, 4> CardSubtitleRects{
+    constexpr std::array<Rect, 6> CardSubtitleRects{
         Rect{288.0F, 158.0F, 420.0F, 22.0F},
         Rect{780.0F, 158.0F, 440.0F, 22.0F},
         Rect{288.0F, 444.0F, 420.0F, 22.0F},
         Rect{780.0F, 444.0F, 440.0F, 22.0F},
+        Rect{288.0F, 762.0F, 420.0F, 22.0F},
+        Rect{780.0F, 762.0F, 440.0F, 22.0F},
     };
     for (Core::usize index = 0; index < CardTitles.size(); ++index) {
         if (Core::Status status = storeNode(createLabel(*tree, rootNode, CardTitleRects[index], CardTitles[index]),
@@ -362,6 +564,30 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     }
     if (Core::Status status =
             storeNode(createLabel(*tree, rootNode, {796.0F, 636.0F, 420.0F, 24.0F}, "Ready"), nodes_.statusLabel);
+        !status) {
+        return status;
+    }
+    if (Core::Status status =
+            storeNode(createLabel(*tree, rootNode, {288.0F, 792.0F, 180.0F, 20.0F}, "Asset filter"),
+                      nodes_.dropdownLabel);
+        !status) {
+        return status;
+    }
+    if (Core::Status status =
+            storeNode(createLabel(*tree, rootNode, {496.0F, 792.0F, 220.0F, 20.0F}, "Virtualized workspace"),
+                      nodes_.listLabel);
+        !status) {
+        return status;
+    }
+    if (Core::Status status =
+            storeNode(createLabel(*tree, rootNode, {780.0F, 792.0F, 250.0F, 20.0F}, "Scene hierarchy"),
+                      nodes_.treeLabel);
+        !status) {
+        return status;
+    }
+    if (Core::Status status =
+            storeNode(createLabel(*tree, rootNode, {1046.0F, 792.0F, 186.0F, 20.0F}, "Settings feed"),
+                      nodes_.scrollLabel);
         !status) {
         return status;
     }
@@ -499,6 +725,154 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
 
+    auto dropdown = tree->createDropdown(rootNode);
+    if (!dropdown) {
+        return Core::failure(std::move(dropdown.error()));
+    }
+    nodes_.dropdown = *dropdown;
+    if (Core::Status status = tree->setLayoutStyle(nodes_.dropdown, absoluteStyle({288.0F, 818.0F, 190.0F, 40.0F},
+                                                                                  UI::UIEdgeSpacing::HorizontalVertical(
+                                                                                      12.0F, 6.0F)));
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setText(nodes_.dropdown, DropdownItemLabels[0]); !status) {
+        return status;
+    }
+    auto popup = tree->createPopup(nodes_.dropdown);
+    if (!popup) {
+        return Core::failure(std::move(popup.error()));
+    }
+    nodes_.dropdownPopup = *popup;
+    if (Core::Status status = tree->setLayoutStyle(nodes_.dropdownPopup, overlayStyle(190.0F, 108.0F)); !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setPopupStyle(nodes_.dropdownPopup,
+                                                  UI::UIPopupStyle{
+                                                      .placement = UI::UIPopupPlacement::Below,
+                                                      .anchorGap = 4.0F,
+                                                      .matchAnchorWidth = true,
+                                                  });
+        !status) {
+        return status;
+    }
+    for (Core::usize index = 0; index < nodes_.dropdownItems.size(); ++index) {
+        auto item = tree->createDropdownItem(nodes_.dropdownPopup);
+        if (!item) {
+            return Core::failure(std::move(item.error()));
+        }
+        nodes_.dropdownItems[index] = *item;
+        if (Core::Status status = tree->setLayoutStyle(*item, sizedStyle(190.0F, 36.0F)); !status) {
+            return status;
+        }
+        if (Core::Status status = tree->setText(*item, DropdownItemLabels[index]); !status) {
+            return status;
+        }
+    }
+    if (Core::Status status = tree->setDropdownSelectedItem(nodes_.dropdown, nodes_.dropdownItems[0]); !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setDropdownOpen(nodes_.dropdown, false); !status) {
+        return status;
+    }
+    dropdownSelection_ = nodes_.dropdownItems[0];
+    dropdownSelectionIndex_ = 0;
+
+    auto listView = tree->createListView(rootNode, {.materializedItemCapacity = 8});
+    if (!listView) {
+        return Core::failure(std::move(listView.error()));
+    }
+    nodes_.listView = *listView;
+    if (Core::Status status = tree->setLayoutStyle(nodes_.listView, absoluteStyle({496.0F, 818.0F, 220.0F, 114.0F}));
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setListViewStyle(nodes_.listView,
+                                                     UI::UIListViewStyle{
+                                                         .rowHeight = 26.0F,
+                                                         .overscanRows = 1,
+                                                         .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                                                         .wheelStep = 26.0F,
+                                                     });
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setListViewDataSource(nodes_.listView, listDataSource()); !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setListViewSelectedIndex(nodes_.listView, 2); !status) {
+        return status;
+    }
+    listSelectionKey_ = ListItemKeyBase + 2;
+
+    auto treeView = tree->createTreeView(rootNode, {.materializedItemCapacity = 9});
+    if (!treeView) {
+        return Core::failure(std::move(treeView.error()));
+    }
+    nodes_.treeView = *treeView;
+    if (Core::Status status = tree->setLayoutStyle(nodes_.treeView, absoluteStyle({780.0F, 818.0F, 250.0F, 114.0F}));
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setTreeViewStyle(nodes_.treeView,
+                                                     UI::UITreeViewStyle{
+                                                         .rowHeight = 26.0F,
+                                                         .overscanRows = 1,
+                                                         .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                                                         .wheelStep = 26.0F,
+                                                         .indentation = 15.0F,
+                                                         .disclosureExtent = 10.0F,
+                                                         .disclosureGap = 5.0F,
+                                                     });
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setTreeViewDataSource(nodes_.treeView, treeDataSource()); !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setTreeViewSelectedIndex(nodes_.treeView, 0); !status) {
+        return status;
+    }
+    treeSelectionKey_ = WorldTreeItemKey;
+
+    auto scrollView = tree->createScrollView(rootNode);
+    if (!scrollView) {
+        return Core::failure(std::move(scrollView.error()));
+    }
+    nodes_.scrollView = *scrollView;
+    if (Core::Status status = tree->setLayoutStyle(nodes_.scrollView,
+                                                   absoluteStyle({1046.0F, 818.0F, 186.0F, 114.0F}));
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree->setScrollViewStyle(nodes_.scrollView,
+                                                       UI::UIScrollViewStyle{
+                                                           .axes = UI::UIScrollAxes::Vertical,
+                                                           .scrollBarVisibility = UI::UIScrollBarVisibility::Always,
+                                                           .wheelStep = 30.0F,
+                                                       });
+        !status) {
+        return status;
+    }
+    auto scrollContent = tree->createPanel(nodes_.scrollView);
+    if (!scrollContent) {
+        return Core::failure(std::move(scrollContent.error()));
+    }
+    nodes_.scrollContent = *scrollContent;
+    if (Core::Status status = tree->setLayoutStyle(nodes_.scrollContent, sizedStyle(170.0F, 248.0F)); !status) {
+        return status;
+    }
+    for (Core::usize index = 0; index < ScrollContentLabels.size(); ++index) {
+        if (Core::Status status = storeNode(
+                createLabel(*tree, nodes_.scrollContent, {8.0F, 10.0F + static_cast<float>(index) * 38.0F,
+                                                          146.0F, 24.0F},
+                            ScrollContentLabels[index]),
+                nodes_.scrollContentLabels[index]);
+            !status) {
+            return status;
+        }
+    }
+
     if (Core::Status status = tree->setButtonAction(
             nodes_.primaryButton, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
                 ++buttonActivations_;
@@ -590,7 +964,7 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
 
-    controlCount_ = 13;
+    controlCount_ = 20;
     root_ = std::move(*root);
     return Core::success();
 }
@@ -633,6 +1007,7 @@ Core::Status ShowcaseUI::applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTh
         theme.textAccent,
         theme.focusRing,
         theme.danger,
+        theme.scrollBarThumbActive,
     };
     for (Core::usize index = 0; index < nodes_.navigationAccents.size(); ++index) {
         if (Core::Status status =
@@ -659,6 +1034,57 @@ Core::Status ShowcaseUI::applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTh
             tree.setBoxPaint(nodes_.statusPanel, UI::makePanelBoxPaint(theme, theme.surface2, UI::UIElevation::None));
         !status) {
         return status;
+    }
+    const UI::UIBoxPaint collectionBox = UI::makePanelBoxPaint(theme, theme.surface0, UI::UIElevation::None);
+    if (Core::Status status = tree.setBoxPaint(nodes_.listView, collectionBox); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setListViewPaint(nodes_.listView, UI::makeListViewPaint(theme)); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setBoxPaint(nodes_.treeView, collectionBox); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setTreeViewPaint(nodes_.treeView, UI::makeTreeViewPaint(theme)); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setBoxPaint(nodes_.scrollView, collectionBox); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setBoxPaint(nodes_.scrollContent, UI::makeSolidBox(theme.surface0)); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setScrollViewPaint(nodes_.scrollView, UI::makeScrollViewPaint(theme)); !status) {
+        return status;
+    }
+
+    const UI::UIDropdownChrome dropdown = UI::makeDropdownChrome(theme);
+    if (Core::Status status = tree.setBoxPaint(nodes_.dropdown, dropdown.box); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setButtonPaint(nodes_.dropdown, dropdown.states); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setDropdownPaint(nodes_.dropdown, dropdown.dropdown); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setTextStyle(nodes_.dropdown, dropdown.label); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setBoxPaint(nodes_.dropdownPopup, UI::makePopupBoxPaint(theme)); !status) {
+        return status;
+    }
+    const UI::UIButtonChrome dropdownItem = UI::makeDropdownItemChrome(theme);
+    for (UI::UINodeId item : nodes_.dropdownItems) {
+        if (Core::Status status = tree.setBoxPaint(item, dropdownItem.box); !status) {
+            return status;
+        }
+        if (Core::Status status = tree.setButtonPaint(item, dropdownItem.states); !status) {
+            return status;
+        }
+        if (Core::Status status = tree.setTextStyle(item, dropdownItem.label); !status) {
+            return status;
+        }
     }
 
     if (Core::Status status = setTextStyle(tree, nodes_.title, UI::makeTitleTextStyle(theme, 28.0F)); !status) {
@@ -700,11 +1126,20 @@ Core::Status ShowcaseUI::applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTh
         nodes_.qualityLabel,
         nodes_.appearanceLabel,
         nodes_.statusLabel,
+        nodes_.dropdownLabel,
+        nodes_.listLabel,
+        nodes_.treeLabel,
+        nodes_.scrollLabel,
     };
     if (Core::Status status = setTextStyles(tree, secondaryLabels, UI::makeSecondaryTextStyle(theme, 16.0F)); !status) {
         return status;
     }
     if (Core::Status status = setTextStyle(tree, nodes_.progressLabel, UI::makeAccentTextStyle(theme, 20.0F));
+        !status) {
+        return status;
+    }
+    if (Core::Status status =
+            setTextStyles(tree, nodes_.scrollContentLabels, UI::makeBodyTextStyle(theme, 14.0F));
         !status) {
         return status;
     }
@@ -789,6 +1224,50 @@ Core::Status ShowcaseUI::applyReset(PrimaryWindowUITreeUpdater& tree)
         return status;
     }
     quality_ = ShowcaseQuality::Balanced;
+
+    if (Core::Status status = tree.setDropdownSelectedItem(nodes_.dropdown, nodes_.dropdownItems[0]); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setDropdownOpen(nodes_.dropdown, false); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setText(nodes_.dropdown, DropdownItemLabels[0]); !status) {
+        return status;
+    }
+    dropdownSelection_ = nodes_.dropdownItems[0];
+    dropdownSelectionIndex_ = 0;
+
+    if (Core::Status status = tree.setListViewSelectedIndex(nodes_.listView, 2); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.scrollListViewToIndex(nodes_.listView, 0, UI::UIListViewScrollAlignment::Start);
+        !status) {
+        return status;
+    }
+    listSelectionKey_ = ListItemKeyBase + 2;
+
+    if (Core::Status status = tree.setTreeViewItemExpanded(nodes_.treeView, 0, true); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setTreeViewItemExpanded(nodes_.treeView, 2, true); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setTreeViewItemExpanded(nodes_.treeView, 6, false); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setTreeViewSelectedIndex(nodes_.treeView, 0); !status) {
+        return status;
+    }
+    if (Core::Status status = tree.scrollTreeViewToIndex(nodes_.treeView, 0, UI::UITreeViewScrollAlignment::Start);
+        !status) {
+        return status;
+    }
+    treeSelectionKey_ = WorldTreeItemKey;
+
+    if (Core::Status status = tree.setScrollViewOffset(nodes_.scrollView, {}); !status) {
+        return status;
+    }
+    scrollOffset_ = 0.0F;
     pendingStatus_ = StatusMessage::Reset;
     statusDirty_ = true;
     return Core::success();
@@ -833,6 +1312,21 @@ Core::Status ShowcaseUI::publishStatus(PrimaryWindowUITreeUpdater& tree, StatusM
     case StatusMessage::ProgressChanged:
         text = "Progress synchronized from Slider";
         break;
+    case StatusMessage::DropdownChanged:
+        text = "Dropdown selection updated";
+        break;
+    case StatusMessage::ListSelectionChanged:
+        text = "ListView selection updated";
+        break;
+    case StatusMessage::TreeSelectionChanged:
+        text = "TreeView selection updated";
+        break;
+    case StatusMessage::TreeExpansionChanged:
+        text = "TreeView projection expanded or collapsed";
+        break;
+    case StatusMessage::ScrollChanged:
+        text = "ScrollView offset updated";
+        break;
     }
     if (Core::Status status = tree.setText(nodes_.statusLabel, text); !status) {
         return status;
@@ -865,6 +1359,73 @@ Core::Status ShowcaseUI::update(UIUpdateContext& context)
             return status;
         }
     }
+    if (requestedListSelection_.has_value()) {
+        const Core::u64 logicalIndex = *requestedListSelection_;
+        requestedListSelection_.reset();
+        if (Core::Status status = tree->setListViewSelectedIndex(nodes_.listView, logicalIndex); !status) {
+            return status;
+        }
+        listSelectionKey_ = ListItemKeyBase + logicalIndex;
+        pendingStatus_ = StatusMessage::ListSelectionChanged;
+        statusDirty_ = true;
+    }
+    if (requestedWorldExpansion_.has_value()) {
+        const bool expanded = *requestedWorldExpansion_;
+        requestedWorldExpansion_.reset();
+        if (Core::Status status = tree->setTreeViewItemExpanded(nodes_.treeView, 0, expanded); !status) {
+            return status;
+        }
+    }
+    if (requestedTreeSelection_.has_value()) {
+        const Core::u64 logicalIndex = *requestedTreeSelection_;
+        requestedTreeSelection_.reset();
+        if (Core::Status status = tree->setTreeViewSelectedIndex(nodes_.treeView, logicalIndex); !status) {
+            return status;
+        }
+        auto selection = tree->treeViewSelection(nodes_.treeView);
+        if (!selection) {
+            return Core::failure(std::move(selection.error()));
+        }
+        treeSelectionKey_ = selection->key;
+        pendingStatus_ = StatusMessage::TreeSelectionChanged;
+        statusDirty_ = true;
+    }
+    if (requestedDropdownSelection_.has_value()) {
+        const Core::usize index = *requestedDropdownSelection_;
+        requestedDropdownSelection_.reset();
+        if (index >= nodes_.dropdownItems.size()) {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "UI showcase requested an invalid Dropdown item");
+        }
+        if (Core::Status status = tree->setDropdownSelectedItem(nodes_.dropdown, nodes_.dropdownItems[index]);
+            !status) {
+            return status;
+        }
+        if (Core::Status status = tree->setText(nodes_.dropdown, DropdownItemLabels[index]); !status) {
+            return status;
+        }
+        dropdownSelection_ = nodes_.dropdownItems[index];
+        dropdownSelectionIndex_ = index;
+        pendingStatus_ = StatusMessage::DropdownChanged;
+        statusDirty_ = true;
+    }
+    if (requestedDropdownOpen_.has_value()) {
+        const bool open = *requestedDropdownOpen_;
+        requestedDropdownOpen_.reset();
+        if (Core::Status status = tree->setDropdownOpen(nodes_.dropdown, open); !status) {
+            return status;
+        }
+    }
+    if (requestedScrollOffset_.has_value()) {
+        const float offset = *requestedScrollOffset_;
+        requestedScrollOffset_.reset();
+        if (Core::Status status = tree->setScrollViewOffset(nodes_.scrollView, {.x = 0.0F, .y = offset}); !status) {
+            return status;
+        }
+        scrollOffset_ = offset;
+        pendingStatus_ = StatusMessage::ScrollChanged;
+        statusDirty_ = true;
+    }
     if (requestedTheme_.has_value()) {
         const ShowcaseTheme theme = *requestedTheme_;
         requestedTheme_.reset();
@@ -888,6 +1449,56 @@ Core::Status ShowcaseUI::update(UIUpdateContext& context)
             notificationsEnabled_ ? StatusMessage::NotificationsEnabled : StatusMessage::NotificationsDisabled;
         statusDirty_ = true;
     }
+    auto listSelection = tree->listViewSelection(nodes_.listView);
+    if (!listSelection) {
+        return Core::failure(std::move(listSelection.error()));
+    }
+    if (listSelection->key != listSelectionKey_) {
+        listSelectionKey_ = listSelection->key;
+        pendingStatus_ = StatusMessage::ListSelectionChanged;
+        statusDirty_ = true;
+    }
+    auto treeSelection = tree->treeViewSelection(nodes_.treeView);
+    if (!treeSelection) {
+        return Core::failure(std::move(treeSelection.error()));
+    }
+    if (treeSelection->key != treeSelectionKey_) {
+        treeSelectionKey_ = treeSelection->key;
+        pendingStatus_ = StatusMessage::TreeSelectionChanged;
+        statusDirty_ = true;
+    }
+    auto dropdownSelection = tree->dropdownSelectedItem(nodes_.dropdown);
+    if (!dropdownSelection) {
+        return Core::failure(std::move(dropdownSelection.error()));
+    }
+    if (*dropdownSelection != dropdownSelection_) {
+        for (Core::usize index = 0; index < nodes_.dropdownItems.size(); ++index) {
+            if (nodes_.dropdownItems[index] == *dropdownSelection) {
+                if (Core::Status status = tree->setText(nodes_.dropdown, DropdownItemLabels[index]); !status) {
+                    return status;
+                }
+                dropdownSelectionIndex_ = index;
+                break;
+            }
+        }
+        dropdownSelection_ = *dropdownSelection;
+        pendingStatus_ = StatusMessage::DropdownChanged;
+        statusDirty_ = true;
+    }
+    auto scrollOffset = tree->scrollViewOffset(nodes_.scrollView);
+    if (!scrollOffset) {
+        return Core::failure(std::move(scrollOffset.error()));
+    }
+    if (scrollOffset->y != scrollOffset_) {
+        scrollOffset_ = scrollOffset->y;
+        pendingStatus_ = StatusMessage::ScrollChanged;
+        statusDirty_ = true;
+    }
+    if (treeExpansionDirty_) {
+        treeExpansionDirty_ = false;
+        pendingStatus_ = StatusMessage::TreeExpansionChanged;
+        statusDirty_ = true;
+    }
     if (statusDirty_) {
         if (Core::Status status = publishStatus(*tree, pendingStatus_); !status) {
             return status;
@@ -898,10 +1509,28 @@ Core::Status ShowcaseUI::update(UIUpdateContext& context)
 
 void ShowcaseUI::requestAutomatedStep(Core::u64 frameIndex) noexcept
 {
-    if (frameIndex == 30) {
+    if (frameIndex == 15) {
+        requestedListSelection_ = 7;
+    } else if (frameIndex == 20) {
+        requestedTreeSelection_ = 3;
+    } else if (frameIndex == 25) {
+        requestedDropdownOpen_ = true;
+    } else if (frameIndex == 30) {
         requestedTheme_ = initialTheme_ == ShowcaseTheme::Dark ? ShowcaseTheme::Light : ShowcaseTheme::Dark;
+    } else if (frameIndex == 40) {
+        requestedDropdownSelection_ = 1;
+    } else if (frameIndex == 45) {
+        requestedDropdownOpen_ = false;
+    } else if (frameIndex == 50) {
+        requestedWorldExpansion_ = false;
     } else if (frameIndex == 60) {
         requestedSliderValue_ = 84.0F;
+    } else if (frameIndex == 70) {
+        requestedWorldExpansion_ = true;
+    } else if (frameIndex == 75) {
+        requestedScrollOffset_ = 80.0F;
+    } else if (frameIndex == 80) {
+        requestedTreeSelection_ = 3;
     } else if (frameIndex == 90) {
         requestedTheme_ = initialTheme_;
     }
@@ -920,6 +1549,11 @@ ShowcaseUISnapshot ShowcaseUI::snapshot() const noexcept
         .themeSwitches = themeSwitches_,
         .buttonActivations = buttonActivations_,
         .sliderChanges = sliderChanges_,
+        .treeExpansionChanges = treeExpansionChanges_,
+        .listSelectionKey = listSelectionKey_,
+        .treeSelectionKey = treeSelectionKey_,
+        .dropdownSelection = dropdownSelectionIndex_,
+        .scrollOffset = scrollOffset_,
         .controlCount = controlCount_,
         .quality = quality_,
         .notificationsEnabled = notificationsEnabled_,
