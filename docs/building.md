@@ -108,8 +108,9 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
   --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
 ```
 
-交互模式关闭窗口退出；自动模式输出 JSON 并校验 13 个控件、两次换肤、Slider→ProgressBar 联动和
-UI root 生命周期。可用 `--theme=light` 改初始主题。字体仍按 CMake cache、环境变量
+交互模式关闭窗口退出；自动模式输出 JSON 并校验20个控件、两次换肤、Slider→ProgressBar、
+Dropdown/List/Tree selection、Tree expansion、ScrollView offset 和 UI root 生命周期。可用
+`--theme=light` 改初始主题。字体仍按 CMake cache、环境变量
 `TINA_UI_FONT_PATH`、可选 repo fixture 的顺序解析；没有真实字体不得记录为 CJK 视觉通过。
 
 ## 完整 product-2d 图
@@ -133,7 +134,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_ui_freetype_tests.ex
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_physics2d_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
 ```
 
 完整图的结构化标签应为 `productGate=bgfx-physics-freetype-audio`。
@@ -142,6 +143,12 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1
+```
+
+完整 product-3d 同轮门禁：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1
 ```
 
 ## Asset CLI

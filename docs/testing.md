@@ -54,9 +54,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 ```
 
-当前 tip 最近直接验证 `tina_ui_tests` 271/271、`tina_runtime_ui_tests` 84/84、
-`tina_ui_render_integration_tests` 15/15 与 product-2d 图的 `tina_ui_freetype_tests` 3/3。其他 target
-必须按最终验证命令重新运行后才能记录本轮数字。
+测试数量随功能增长，不作为永久契约；本轮必须直接运行对应 GoogleTest executable，并以最终 gate
+JSON 与退出码记录结果。
 
 ## UI showcase 门禁
 
@@ -74,13 +73,16 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
   --frames=150 --frame-delay-ms=0 --theme=light --auto-demo
 ```
 
-两个自动 smoke 均须 exit 0，并输出 `controls=13`、`themeSwitches=2`、`sliderChanges>0`、
-`progressValue=84`、`uiRootsCreated=1`、`uiRootsReleased=1`，最终主题回到 `initialTheme`。
+两个自动 smoke 均须 exit 0，并输出 `controls=20`、`themeSwitches=2`、`sliderChanges>0`、
+`progressValue=84`、`dropdownSelection=1`、`listSelectionKey=1007`、`treeSelectionKey=4`、
+`treeExpansionChanges=2`、`scrollOffset=80`、`uiRootsCreated=1`、`uiRootsReleased=1`，最终主题回到
+`initialTheme`。
 `--auto-demo` 与显式 `--frames` 同用时至少 120 帧。
 
 Visual/interaction 验收另跑不带 `--auto-demo` 的窗口：确认 Dark/Light 切换后既有控件同步换肤，
 Primary/Destructive/Disabled Button 层次清楚，pointer press 会压低阴影并反转双边框，Tab focus 可辨，
-Slider 与 ProgressBar 联动，TextEdit 中文可读且左右 padding 与 pointer caret 一致。普通
+Slider 与 ProgressBar 联动，Dropdown、List、Tree、Scroll 可操作，TextEdit 中文可读且左右 padding 与
+pointer caret 一致。普通
 `windows-msvc-vnext-bgfx` 图未启用 FreeType，placeholder text 不能计为字体或 CJK 视觉通过。
 
 ## 改动到门禁映射
@@ -162,7 +164,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - registry 不拥有 GPU/Lease/retirement；产品 State RAII 证明先 unbind 两项 binding，再 destroy 两张 texture；
 - A2 完成时 product evidence schema 10：`spriteBindingTextures=2`、`spriteBindingsReleased=2`、
   `spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`，且 TileMap/selection/Particle/Trail
-  使用 registry 动态 key；A3 升为 schema 11，A4 升为 schema 12，产品 Theme 门禁接入后当前 schema 为13。
+  使用 registry 动态 key；A3 升为 schema 11，A4 升为 schema 12，产品 Theme 门禁接入时升为 schema 13，
+  Scene Explorer TreeView 产品接入后当前 schema 为14。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -367,10 +370,10 @@ Product-2D 同轮门禁已返回 `productGate=bgfx-physics-freetype-audio`，3D 
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；全部 Sprite2D extraction 使用 packet-local `FrameResourceRef`；schema 13 含 Dark→Light→Dark、Sprite registry 注册/释放/纹理销毁、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、registry/Lease/GPU retirement owner 统一、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；全部 Sprite2D extraction 使用 packet-local `FrameResourceRef`；schema 14 含 Dark→Light→Dark、Tree stable-key selection/scroll/semantics、Sprite registry 注册/释放/纹理销毁、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、registry/Lease/GPU retirement owner 统一、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→extract-time key resolve→bgfx；evidence schema 3、原子 baseColor/MR/normal/factors binding、两类 registry 注册/释放、mesh/texture 销毁、唯一0..4 directional-light 提交（产品3灯）、成熟 retained controls、Dark→Light→Dark、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、统一 `FrameResourceRef`/retirement owner、完整 PBR/IBL/shadow/light component、跨 GPU golden |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→extract-time key resolve→bgfx；evidence schema 4、原子 baseColor/MR/normal/factors binding、两类 registry 注册/释放、mesh/texture 销毁、唯一0..4 directional-light 提交（产品3灯）、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、shutdown retirement drain、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、统一 `FrameResourceRef`/retirement owner、完整 PBR/IBL/shadow/light component、跨 GPU golden |
 
 `tina_sample_2d_tilemap_bgfx` 是 `tina_sample_2d` 的兼容 ALIAS；新脚本使用正式 target 名。
 
@@ -431,7 +434,7 @@ cmake --build --preset windows-vnext-debug --target tina_scene_tests -- /m:2 /v:
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 ```
 
-product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=13`。通用结构化
+product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=14`。通用结构化
 字段包括 `spriteBindingTextures=2`、`spriteBindingsReleased=2`、`spriteBindingTexturesDestroyed=2`、
 `spriteBindingResolverHits>0`、`tileMapSpriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
 `trailSpriteBindingResolverHits>0`、
@@ -439,7 +442,8 @@ product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sa
 `trailCapacity=8`、`trailSegmentsCreated=3`、`trailBreaks=1`，以及32字符小写 hex
 `fxInitialFingerprint`；该 fingerprint 的哈希输入内部 schema 为2。Theme 门禁还要求
 `uiThemeDemoRequested=true`、`uiThemeSwitches=2`、`uiThemeButtonActivations=0`、
-`uiThemeFinalLight=false`。300帧 gate 进一步要求
+`uiThemeFinalLight=false`。TreeView 门禁还要求13个 logical item、12个 materialized slot、两次 selection、
+最终 stable key `402`/index `12`、滚动、Theme paint 与 Tree/TreeItem selected semantics。300帧 gate 进一步要求
 `particleExpired=4`、`particleActive=6`、
 `particleExtracted=6`、`trailActive=3`、`trailExtracted=3`。这些字段证明固定配置下的 simulation/extract
 数量与初始状态指纹；`pixelCaptureOk` 和单机 golden/非空窗口证据仍单独证明可见输出。
@@ -493,7 +497,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_physics2d_tests.exe 
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
-  --frames=300 --frame-delay-ms=0 --ui-theme-demo
+  --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
 ```
 
 miniaudio null-device 证明 adapter callback/mix/lifecycle，不证明真实扬声器质量。Physics2D Release bench
@@ -515,7 +519,7 @@ wrong-owner/bounded shutdown、active callback reader quiescence、terminal abso
 
 `MiniaudioDeviceTest.NullBackendConsumesBoundedStreamEofAndCancel` 验证 adapter 作为 realtime consumer 的
 EOF/Cancel 路径。产品 300帧还要求 `audioStreamQueued/submitted/eof/mixed/drained/stopped/retired=true`、
-submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为13。
+submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为14。
 
 Physics2D N2 的模块门禁覆盖：`createBody/createShape` 独立 generation、多 Box/Circle/Capsule shape/body、
 shape 单独销毁、sensor enter/exit、Distance joint create/query/destroy、body 级联退休 shape/joint、
@@ -525,13 +529,14 @@ wrong-world/stale/capacity/PMR rollback，以及 TileMap bridge/CharacterControl
 
 Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化（TEST-002）：包含
 `tina_scene_tests` 的上述测试 executable 全部 exit 0 后，再跑 sample 300 帧并校验
-`productGate=bgfx-physics-freetype-audio` 与 schema 13 Theme、Sprite binding、TileMap/Particle/Trail Handle resolver 字段。
+`productGate=bgfx-physics-freetype-audio` 与 schema 14 Theme、TreeView、Sprite binding、TileMap/Particle/Trail Handle resolver 字段。
 
 Windows 同轮 product-3d 拓扑由 `tools/windows/RunProduct3dGate.ps1` 固化（TEST-003）：默认使用
 `windows-msvc-vnext-bgfx-ui-freetype`，直接构建并运行 Core、Scene、AssetFormat、Asset、bgfx Render、
 UI、Runtime UI、UI Render bridge 与 FreeType 测试，再执行300帧 `--ui-theme=dark --ui-theme-demo`。
-schema 3 同时断言双 mesh/PBR texture/3-light/registry 生命周期、5 Panel/9 Label、Button/Checkbox/Slider/
-ProgressBar 创建、继承 chrome、Dark→Light→Dark、100% progress、final-present capture 与 ledger 归零：
+schema 4 同时断言双 mesh/PBR texture/3-light/registry 生命周期、7 Panel/13 Label、Button/Checkbox/Slider/
+ProgressBar/ListView/TreeView 创建、2次 collection step、stable keys、继承 chrome、Dark→Light→Dark、
+100% progress、final-present capture 与 ledger 归零：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1 `

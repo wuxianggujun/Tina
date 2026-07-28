@@ -12,7 +12,7 @@
 | --- | --- | --- | --- |
 | G0 | 非 clean 构建可复现 | Verified | Windows 现有 build tree 可增量 configure/build；日常门禁禁止 wipe |
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
-| G2 | UI 产品 | Partial | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有产品/结构化/视觉证据；平台 accessibility adapter、跨 DPI/GPU golden 与完整控件矩阵后置 |
+| G2 | UI 产品 | Partial | 20控件 showcase、虚拟 List/Tree、2D/3D 产品集合、Text/Glyph 与主题/交互层次均有结构化和视觉证据；剩余为 Narrator/AT-SPI 真机与跨 DPI/GPU golden |
 | G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + extract-time resolver、原子 material bundle、base/MR/normal 贴图采样、单次有界3-light、Texture/Mesh backend retirement marker 与 stale-safe GPU owner teardown 已落地；统一 FrameResourceRef/retirement owner 与完整 PBR/IBL/shadow 后置 |
 | G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency 已完成；完整 PBR 后置 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
@@ -26,26 +26,26 @@
 
 ## UI 证据
 
-当前工作树 Windows Debug 直接结果：
+当前 Windows gate 直接运行 UI、Runtime UI、Render bridge、FreeType、Scene、Physics2D、Audio 与 Asset
+GoogleTest executable；测试数量随功能增长，不作永久契约。产品证据包括：
 
-- `tina_ui_tests`：190/190；包含 ProgressBar、RadioButton、TextEdit、tree/layout/hit/paint、
-  default action、Semantics、文本 arena/IME 原子性；Checkbox/Slider mutation、TextEdit pointer selection
-  与多节点 focus step 在 dirty queue 容量不足时保持状态/回调原子性，同文本替换 selection 会重绘；
-- `tina_runtime_ui_tests`：77/77；包含 phase/root-scoped capability、三类新控件 facade、
-  TextEdit 输入消费与 Runtime 接线；
-- `tina_ui_render_integration_tests`：12/12；覆盖 committed paint 到 DisplayList bridge 的容量和顺序回归；
-- product-2d 字体图的 `tina_ui_freetype_tests`：2/2；真实 fixture 的中文 measure/raster 通过；
-- product-2d 300 帧：profile-name TextEdit、UTF-8 回读、ProgressBar value=65、RadioButton
-  selection invariant、`evidenceSchema=3` 与 `pixelCaptureOk=true`；
-- `artifacts/screenshots/sample-2d-product/20260723-013100/report.json`：`ok=true`、`exitCode=0`、
+- 20控件 showcase：Dropdown/List/Tree/Scroll 自动交互、Dark/Light 换肤与 root 生命周期；
+- product-2d schema 14：Scene Explorer 13个 logical item/12个 materialized slot、最终 key `402`、滚动、
+  Theme 与 Tree/TreeItem selected semantics；
+- product-3d schema 4：Asset ListView/Scene TreeView、2次 collection step、最终 keys `2003/4`；
+- product-2d 300帧：profile-name TextEdit、ProgressBar value=65、Radio selection 与 `pixelCaptureOk=true`。
+
+2026-07-23 的历史报告 `artifacts/screenshots/sample-2d-product/20260723-013100/report.json` 记录：
+
+- `ok=true`、`exitCode=0`、
   `processOk=true`、`forcedTermination=false`、`stdoutStatusOk=true`；3次 client-only 960x540 capture 中
   有2张稳定非空帧，初始化白帧由 `blankLike=true` 排除；
 - 人工与像素复核：`玩家名：星河` 正常；TextEdit/ProgressBar/RadioButton 无裁剪或重叠；65% fill
   精确为143 px（x=700..842），第一项 Radio 有 selected 内块（x=706..721）、第二项没有，未混入标题栏；
   延长 warmup 后仍只有 `PrintWindow` 首次调用为白帧，后续稳定，因此判定为 capture 瞬态而非持续 UI 异常。
 
-ProgressBar/RadioButton 已完成 UI-001 的产品接入与 Windows client-area 可见证据；G2 仍只因平台
-accessibility adapter、跨 DPI/GPU golden 和完整控件/输入矩阵保持 Partial。
+ProgressBar/RadioButton 与 UI-005 集合控件已完成产品接入；G2 仍只因 Narrator/AT-SPI 真机与跨 DPI/GPU
+golden 保持 Partial。
 
 ## 3D 与 Cooker 边界
 
@@ -84,8 +84,8 @@ M12 只跟踪 Legacy 产品图删除及其替代产品证据；不再把已关�
 cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_asset_tests -- /m:2 /v:m
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 --ui-theme=dark --ui-theme-demo
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 `
   --expect-pixel-fingerprint=<first-run-pixelFingerprint>
 
@@ -108,7 +108,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_ui_freetype_tests.ex
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_physics2d_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
 ```
 
 完整图成功时 sample 标签必须为 `productGate=bgfx-physics-freetype-audio`。

@@ -148,7 +148,9 @@ hard failure policy，但必须保持“join/completion 之前不释放被访问
 | `RUNTIME-001` | stack/四相位 policy **Done**；gameplay input policy / 交互暂停 / stale-owner 矩阵仍后置 |
 | `RUNTIME-002` | FramePin + present-return CPU completion **Done**；RENDER-FENCE 的 Asset/Texture/Mesh readback retirement 亦已完成，通用 submission fence 非当前契约 |
 | `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling **Done**；完整 PBR/IBL/shadow 后置 |
-| `UI-002`～`UI-005` / `TEXT-001` | accessibility、视觉矩阵、focus/modal/capture、虚拟化、复杂 text |
+| `UI-002` / `UI-003` | accessibility 外部真机尾项与跨 DPI/GPU 视觉矩阵仍开放 |
+| `UI-004` / `UI-005` | **Done**：Focus Scope/Modal/Pointer Capture，以及 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView |
+| `TEXT-001` | 多行编辑、grapheme/shaping 与完整 IME 候选窗仍开放 |
 | `PERF-001` | schema v1 **Done**；固定机 hard gate / 多进程 MAD 后置 |
 | `CLEAN-001`～`CLEAN-003` | **Done**（扫尾记录） |
 | `TEST-001` / `TEST-002` | Linux 当前 tip 仍缺；product-2d 同轮门禁 **Done** |

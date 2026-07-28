@@ -211,11 +211,12 @@ ground 后向右行走并撞墙；它与 Box2D dynamic body 共用同一 Tile so
 
 ## UI 与 Audio
 
-产品 HUD 当前包括 Label、Button、Checkbox、Slider、单行 TextEdit、65% ProgressBar 和一组
-Windowed/Fullscreen RadioButton。结构化 evidence 验证控件数量、TextEdit UTF-8 初值、ProgressBar 值
-与 Radio 互斥选择；Theme Button 通过 pending intent 在 `updateUI()` 内执行 Dark/Light 全局换肤，所有
+产品 HUD 当前包括 Label、Button、Checkbox、Slider、单行 TextEdit、65% ProgressBar、一组
+Windowed/Fullscreen RadioButton，以及 Scene Explorer TreeView（13个 logical item、12个 materialized
+row slot）。结构化 evidence 验证控件数量、TextEdit UTF-8 初值、ProgressBar 值、Radio 互斥选择与
+Tree stable-key selection；Theme Button 通过 pending intent 在 `updateUI()` 内执行 Dark/Light 全局换肤，所有
 标准控件继承产品 chrome，标题板、设置面板与标题文字的局部层级样式随 Theme 集中重算。Windows
-client-area 捕获验证可见、无明显裁剪/重叠和中文无乱码。
+Dark client-area 捕获验证 Scene Explorer、选中行、设置控件与 playfield 可见且无明显裁剪或重叠。
 
 AudioClip 来自 Catalog lease。`2D-AUDIO-ADV / N7` 已完成 voice gain/pitch/pan、fade、transient one-shot
 retirement，以及固定容量 PCM stream 的 submit/EOF/underrun/cancel/terminal backpressure/shutdown 收口。
@@ -235,15 +236,18 @@ cmake --build --preset windows-vnext-bgfx-product-2d-debug `
            tina_audio_miniaudio_tests -- /m:1 /v:m
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
-  --frames=300 --frame-delay-ms=0 --ui-theme-demo
+  --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
 ```
 
 当前 sample 的结构化产品门禁要求：
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=14`（含2个 cooked chunk）、`texturesUploaded=2`；
-- `evidenceSchema=13`，`uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
+- `evidenceSchema=14`，`uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
   `uiThemeButtonActivations=0`、`uiThemeFinalLight=false`，证明自动 Dark→Light→Dark 在 UI phase 完成；
+- `uiTreeDemoRequested=true`、`uiTreeViewsCreated=1`、`uiTreeLogicalItems=13`、
+  `uiTreeMaterializedCapacity=12`、`uiTreeSelectionChanges=2`、最终 stable key `402`/index `12`、
+  `uiTreeScrolled=true`、Theme paint 与 Tree/TreeItem selected semantics 均已验证；
 - `spriteBindingTextures=2`、`spriteBindingsReleased=2`、
   `spriteBindingTexturesDestroyed=2`、`spriteBindingResolverHits>0`，并且
   `tileMapSpriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
@@ -264,8 +268,15 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - `stateExits=1`、`applicationShutdowns=1`、`uiRootsReleased=1`；
 - `pixelCaptureOk=true`。
 
-既有 Windows 视觉与完整模块测试证据见 [M12 Windows 证据](m12-evidence-windows.md)；当前代码门禁还会
-校验上述双纹理与动画字段。可复现脚本：
+2026-07-28 的完整报告 `artifacts/reports/product-2d-treeview-gate.json` 记录全部 gate 步骤与300帧 sample
+exit 0。2026-07-29 动态 glyph atlas 修复后的 Dark/Light FreeType 截图分别位于
+`artifacts/screenshots/2d-scene-explorer-freetype-dark-fixed/20260729-001845/frame-03.png` 与
+`artifacts/screenshots/2d-scene-explorer-freetype-light-fixed/20260729-002407/frame-03.png`；对应 report
+均为 `ok=true`、exit 0，运行时新增的 `gameplay #30` 与主题按钮字符完整。尺寸矩阵 compare 报告
+`artifacts/screenshots/ui-003-size-matrix/20260729-004341/matrix-report.json` 为5/5 `ok=true` 且
+`baselineCompare.matched=true`。
+历史与当前 Windows 视觉、完整模块测试证据见 [M12 Windows 证据](m12-evidence-windows.md)；当前代码门禁
+还会校验上述双纹理与动画字段。可复现脚本：
 `tools/windows/RunProduct2dGate.ps1`（TEST-002）。测试数量不是永久基线。
 
 `--frames>=60` 时产品 State 会在收尾前 `requestPush` 一层暂停 overlay（block fixed/frame/UI below，

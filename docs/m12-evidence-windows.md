@@ -42,7 +42,8 @@ cmake --build --preset windows-vnext-bgfx-product-2d-debug `
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 -SkipConfigure -SkipBuild
 ```
 
-2026-07-23 tip `eea065ad`（工作树含 3D-001/TASK-001/CLEAN 未提交改动时同轮复验）Windows product-2d：
+历史证据（2026-07-23、TreeView 接入前）tip `eea065ad`（工作树含 3D-001/TASK-001/CLEAN
+未提交改动时同轮复验）Windows product-2d：
 
 | 步骤 | 结果 |
 | --- | --- |
@@ -65,7 +66,7 @@ sample 关键字段：`productGate=bgfx-physics-freetype-audio`、`physicsEnable
 
 ## UI
 
-当前工作树在基础 Windows Debug 图增量构建并直接运行：
+2026-07-22 当时的工作树在基础 Windows Debug 图增量构建并直接运行：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-debug `
@@ -79,13 +80,39 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_render_integration_tests.exe
 `tina_ui_render_integration_tests` 12/12。覆盖 ProgressBar、RadioButton、对应 Runtime facade、
 TextEdit/Checkbox/Slider/focus dirty 容量原子性与 committed UI paint → Render DisplayList bridge。
 
-2026-07-23 的 product-2d client-area 报告位于
+同一份 TreeView 接入前历史证据的 product-2d client-area 报告位于
 `artifacts/screenshots/sample-2d-product/20260723-013100/report.json`。报告 `ok=true`、exit 0，
 `productGate=bgfx-physics-freetype-audio`、`evidenceSchema=3`；结构化输出确认1个 ProgressBar 的值、
 2个 RadioButton 的 action 与互斥选择。3次 960x540 捕获中2帧稳定非空，初始化白帧由
 `blankLike=true` 排除；人工复核 `frame-02.png` / `frame-03.png` 中 TextEdit、65% ProgressBar 与
 Windowed/Fullscreen RadioButton 可见，中文无乱码，控件无裁剪或重叠。两帧 fill 均为143 px，
 且选中色只出现在 Windowed RadioButton。
+
+### Retained UI 产品化补证（2026-07-28/29）
+
+当前工作树的完整 product-2d 同轮报告位于
+`artifacts/reports/product-2d-treeview-gate.json`；configure、build、Scene/UI/Runtime UI/Render bridge/
+FreeType/Physics2D/Audio/miniaudio/Asset 直接测试与300帧 sample 均 exit 0。直接运行结果包括
+`tina_ui_tests` 313/313、`tina_runtime_ui_tests` 95/95、`tina_scene_tests` 91/91 与
+`tina_asset_tests` 193/193；测试数量只描述本次工作树，不是永久基线。
+
+sample 的当前 `evidenceSchema=14` 同时验证 Dark→Light→Dark 与 Scene Explorer TreeView：13个 logical
+item、12个 materialized slot、两次 stable-key selection、最终 key `402`/index `12`、滚动、Theme paint
+和 Tree/TreeItem selected semantics。动态 glyph atlas 修复后的 Dark/Light FreeType client capture 位于
+`artifacts/screenshots/2d-scene-explorer-freetype-dark-fixed/20260729-001845/frame-03.png` 与
+`artifacts/screenshots/2d-scene-explorer-freetype-light-fixed/20260729-002407/frame-03.png`；对应
+`report.json` 均为 `ok=true`、exit 0，Scene Explorer、选中行、设置控件和 playfield 均可见，
+`gameplay #30` 与主题按钮的运行时新增字符完整。
+
+独立 showcase 当前验证20个控件、集合导航/滚动、交互层次和 Dark/Light 事务换肤；FreeType client
+capture 位于 `artifacts/screenshots/ui-showcase-dark/20260728-155526/frame-03.png` 与
+`artifacts/screenshots/ui-showcase-light/20260728-155914/frame-03.png`。product-3d 当前 schema 4 验证
+7 Panel/13 Label、Asset ListView/Scene TreeView、两次 collection step、最终 stable keys `2003/4` 与
+Dark→Light→Dark；对应截图位于
+`artifacts/screenshots/3d-product-ui-freetype-dark-fixed/20260729-003922/frame-02.png` 与
+`artifacts/screenshots/3d-product-ui-freetype-light-fixed/20260729-004012/frame-01.png`，实际双 mesh 与
+动态 `10%`/`1%` 进度同时可见。`tina_render_bgfx_tests` 56/56 通过，其中生产源码合同测试证明 atlas
+以 mutable R8 texture 创建、首次/后续 glyph 上传复用同一 handle，且首次上传失败会销毁 texture。
 
 ## 3D 产品与 Cooker
 
@@ -134,7 +161,10 @@ cases（16:9，模拟 content-scale 客户端足迹，产品 absolute UI 仍锁 
 
 gate 另解析 sample JSON：`logicalPixel*` / `framebufferPixel*` / `contentScale*`，断言
 `framebuffer ≈ logical * contentScale`（GLFW metrics，无需 COM/DPI API）。
-blankLike 仍由 `CaptureSampleWindow` 排除。摘要：`artifacts/gates/ui-003-size-matrix-*.json`。
+blankLike 仍由 `CaptureSampleWindow` 排除。2026-07-29 的独立 compare 报告
+`artifacts/screenshots/ui-003-size-matrix/20260729-004341/matrix-report.json` 记录5/5 `ok=true`、
+五个 `baselineCompare.matched=true` 和相同字体 fingerprint；摘要为
+`artifacts/gates/ui-003-size-matrix-20260729-004341.json`。
 
 ### UI-003 已证明 vs 仍开放
 

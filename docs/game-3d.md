@@ -32,7 +32,7 @@ tina_sample_3d [--frames=N] [--frame-delay-ms=N] [--gltf=<path>|--gltf <path>]
 | `--frame-delay-ms=N` | 每帧 sleep（默认 0） |
 | `--gltf=<path>` / `--gltf <path>` | 从磁盘 cook 外部 `.gltf`/`.glb`；省略则用内建双 mesh fixture |
 | `--ui-theme=dark|light` | 选择初始产品 Theme（默认 Dark） |
-| `--ui-theme-demo` | 在 UI phase 自动执行 initial→alternate→initial；要求 `--frames>=3` |
+| `--ui-theme-demo` | 在 UI phase 自动执行 initial→alternate→initial，并执行2次 collection step；要求 `--frames>=3` |
 | `--help` / `-h` | 打印用法 |
 
 失败（文件不存在、扩展名非法、cooker 不支持的 Draco / skin 等）在 stderr 输出结构化 JSON：
@@ -43,13 +43,15 @@ tina_sample_3d [--frames=N] [--frame-delay-ms=N] [--gltf=<path>|--gltf <path>]
 
 `samples/3d_product/Product3DUI.*` 独立拥有产品 UI root，固定 1280×720 logical layout 同屏保留 3D
 主视区并提供：标题与 PBR 元信息、Theme Button、Auto Rotate Checkbox、Rotation Speed Slider、逐帧
-ProgressBar 和底部状态条。Slider 与 Checkbox 直接控制模型旋转状态，不是装饰性控件。
+ProgressBar、Asset ListView、Scene TreeView 和底部状态条。Slider 与 Checkbox 直接控制模型旋转状态，
+List/Tree 展示真实产品数据，不是装饰性控件。
 
 标准 Button/Checkbox/Slider/ProgressBar 保持 create-time Theme 继承；标题、面板、accent 与状态文字是
 有意的局部层级覆盖，由 `applyTheme()` 集中重算。交互 callback 只记录 pending intent，实际 Theme、
 Checkbox、Slider 与 ProgressBar 提交统一发生在 `updateUI()`，避免事件路由期间重入 retained tree。
-`--ui-theme-demo` 在产品门禁中执行 Dark→Light→Dark，退出 schema 3 验证两次切换、最终 Dark、继承
-chrome、控件初值、progress 终值与 root 释放。
+`--ui-theme-demo` 在产品门禁中执行 Dark→Light→Dark 和2次 collection step；退出 schema 4 验证
+两次换肤、最终 Dark、继承 chrome、7 Panel/13 Label、ListView/TreeView 各1个、Tree expansion
+changes `2`、最终 stable keys `2003/4`、progress 终值与 root 释放。
 
 完整 Windows 同轮门禁使用 FreeType 图，直接运行模块测试而不是 CTest：
 
@@ -58,10 +60,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
   -OutJson artifacts\gates\product-3d.json
 ```
 
-人工视觉证据位于
-`artifacts/screenshots/sample-3d-ui-dark/20260727-174319` 与
-`artifacts/screenshots/sample-3d-ui-light/20260727-174414`：两组均取得连续两帧 1280×720 非空 client
-capture，文字真实栅格化，面板/控件无裁剪或重叠，Dark/Light 层级差异明确且 3D 主视区未被遮挡。
+最新人工视觉证据位于
+`artifacts/screenshots/3d-product-ui-freetype-dark-fixed/20260729-003922/frame-02.png` 与
+`artifacts/screenshots/3d-product-ui-freetype-light-fixed/20260729-004012/frame-01.png`：两张 1280×720
+FreeType client capture 中实际双 mesh、集合控件、文字和主题层级清晰，动态进度 `10%`/`1%` 完整，
+面板无裁剪或重叠，3D 主视区未被遮挡。该证据同时回归 bgfx mutable glyph atlas 的运行时增量上传。
 
 仓库附带的外部样本（Khronos Sample Models，CC 许可见各目录 README）：
 
@@ -167,16 +170,18 @@ GPU resource 与注册提交位。统一 `FrameResourceRef` 和库级 AssetSyste
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→weak Handle Prefab/Scene→Mesh3D registry→extract-time key resolve→bgfx；原子 material bundle + Opaque3D experimental MR；成熟 retained controls 与事务换肤 | 统一 FrameResourceRef/retirement owner、完整 light system/IBL/shadow |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→weak Handle Prefab/Scene→Mesh3D registry→extract-time key resolve→bgfx；原子 material bundle + Opaque3D experimental MR；成熟 retained controls、虚拟化产品数据与事务换肤 | 统一 FrameResourceRef/retirement owner、完整 light system/IBL/shadow |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
-`sceneExtract`、`evidenceSchema=3`、mesh/material handle 发布数、`meshBindingsRegistered=2`、
+`sceneExtract`、`evidenceSchema=4`、mesh/material handle 发布数、`meshBindingsRegistered=2`、
 `materialBindingsRegistered=2`、`meshBindingsReleased=2`、`materialBindingsReleased=2`、
 `meshesDestroyed=2`、`texturesDestroyed=6`、`bindingRegistryReleased=true`、
 `meshAssetBindingResolverHits=600`、`materialAssetBindingResolverHits=600`、
-`lightingConfigured=true`、`directionalLightCount=3`、`uiPanelsCreated=5`、`uiLabelsCreated=9`、
-四类标准控件各创建1个、`uiThemeSwitches=2`、`uiAutomatedThemeSteps=2`、
+`lightingConfigured=true`、`directionalLightCount=3`、`uiPanelsCreated=7`、`uiLabelsCreated=13`、
+Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwitches=2`、
+`uiAutomatedThemeSteps=2`、`uiAutomatedCollectionSteps=2`、`uiTreeExpansionChanges=2`、
+`uiListFinalSelectedKey=2003`、`uiTreeFinalSelectedKey=4`、
 `uiThemeFinalLight=false`、`uiInheritedChromeVerified=true`、`uiProgressFinal=100`、退出计数、资源归零信息、
 `pixelCaptureOk`、非零 capture 尺寸/字节数与 `pixelFingerprint`。同机 exact 视觉回归把首次 fingerprint
 传给 `--expect-pixel-fingerprint=<32 lowercase hex>`，并要求

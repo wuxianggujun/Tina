@@ -9,16 +9,16 @@
 | 领域 | 已实现 |
 | --- | --- |
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
-| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/DropdownItem，固定容量 mutation |
+| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView，固定容量 mutation |
 | Layout | Flex-lite measure/arrange、logical pixel、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
 | Paint | box/text/control paint、clip、PaintCache、committed paint snapshot |
 | Theme（A/B） | `UITheme` token + `makePanelBoxPaint`：surface 色阶、1px 亮/暗边、可选 Low elevation 假影；hex helper `rgb`/`argb`；**无**圆角/毛玻璃/CSS Theme（C） |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab focus、Keyboard/Gamepad activation、Dropdown navigation/dismiss、TextEdit edit/selection/IME |
-| Semantics | role/name/checked/selected/range/value/valueText/focused snapshot，Modal/Dropdown/Popup 映射 Dialog/ComboBox/List role |
-| Runtime | startup root builder、phase-scoped tree updater、DisplayList/Glyph atlas handoff |
-| Product | 独立 13 控件 showcase（Dark/Light 实时换肤）、product-2d HUD/设置面板、product-3d Scene Controls 与 Windows 视觉证据 |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab focus、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
+| Semantics | role/name/checked/selected/range/value/valueText/focused snapshot，Dialog/ComboBox/List/ListItem/Tree/TreeItem 与虚拟 item 元数据 |
+| Runtime | startup root builder、phase-scoped tree updater（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
+| Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
 ## 所有权与句柄
 
@@ -36,6 +36,10 @@ Runtime 私有持有主窗口 UIContext；普通游戏不取得裸 `UIContext*`�
 - facade 的第一次失败成为 phase sticky error，回调结束后统一返回；
 - builder/updater、span 和 committed view 不得跨 phase 保存。
 
+`PrimaryWindowUITreeUpdater` 已暴露 ListView/TreeView 的 create、DataSource、style/paint、metrics、
+selection、scroll，以及 Tree expansion 操作；这些 facade 与其他 mutation 一样受 phase epoch 和
+owner-thread 约束，不把 `UIContext` 或第三方类型暴露给游戏。
+
 ## Tree 与事务提交
 
 Tree mutation、layout、hit、paint 与 semantics 都有固定容量和明确 commit。失败不能发布半份 snapshot；
@@ -43,8 +47,8 @@ Tree mutation、layout、hit、paint 与 semantics 都有固定容量和明确 c
 后的 layout/paint 在 Render 前提交，并从下一帧开始参与命中。
 
 Layout 使用窗口 logical extent，不直接读取 framebuffer pixel。content scale/resize 更新 layout size，但同一
-WindowId 不重建 Context。clean-subtree measure/arrange reuse 已实现；完整 dirty-range pruning 与大型虚拟
-列表尚未实现。
+WindowId 不重建 Context。clean-subtree measure/arrange reuse 已实现；ListView/TreeView 通过固定 row pool
+支持 100k logical item 虚拟化，完整通用 dirty-range pruning 仍未实现。
 
 `UILayoutStyle::padding` 同时参与 measure/auto-size 与 content origin：Label、Button、TextEdit、
 RadioButton 的文字从 `left/top` padding 后开始绘制，多行文字换行回到同一 padded x；TextEdit 的
@@ -76,6 +80,8 @@ callback 副作用。
 - ScrollView：wheel、thumb drag、轴向 clamp 与持久 pointer capture；
 - Dropdown/Popup：Pointer/Keyboard/Gamepad 开关与选择，Up/Down/D-pad 导航，Escape/Gamepad East dismiss，
   Tab/Shift+Tab 关闭并退出 Popup scope，外部点击关闭且阻止 click-through；
+- ListView：Up/Down、PageUp/PageDown、Home/End、Keyboard/Gamepad activate 与 stable-key selection；
+- TreeView：沿用集合导航，并以 Left/Right 折叠、展开或移动到父/子项；
 - TextEdit：Pointer focus/selection，Tab traversal，Left/Right/Home/End、Backspace/Delete、Shift selection、
   Ctrl+A、committed text 与 IME；
 - ProgressBar：非交互 determinate range/value，hit policy 为 Ignore。
@@ -111,12 +117,13 @@ committed text。多行、grapheme、BiDi/shaping、候选窗定位见 `TEXT-001
 ## Semantics 与 accessibility
 
 `committedSemantics()` 当前发布 Modal、Label、Button、Checkbox、Slider、ProgressBar、RadioButton、TextEdit、
-ScrollView、Dropdown、Popup 与 DropdownItem：
+ScrollView、Dropdown、Popup、DropdownItem、List/ListItem 与 Tree/TreeItem：
 
 - role/name；
 - checked/selected；
 - min/max/value；
 - TextEdit valueText；
+- collection virtual item key/index、Tree level 与 expanded；
 - 有限 focused state；
 - Modal 的 Dialog role。
 
@@ -198,6 +205,8 @@ bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx back
 | `Dropdown` | ComboBox value、Pointer/Keyboard/Gamepad 开关 | Button chrome + 文本 + 下拉指示块 |
 | `Popup` | 独立 List/focus scope、anchor flip/clamp、输入 barrier | 顶层 overlay surface chrome，始终晚于普通树绘制 |
 | `DropdownItem` | ListItem selection 与焦点 | Button chrome + 选中背景 + 文本 |
+| `ListView` | 虚拟化 List/ListItem、键盘/手柄选择与滚动 | 固定 row pool + 选中/hover chrome + scrollbar |
+| `TreeView` | 虚拟化 Tree/TreeItem、层级展开/折叠 | 固定 row pool + disclosure/indent + 选中 chrome + scrollbar |
 
 控件创建入口集中在 `UIRootBuilder`/`UITreeUpdater`；属性 setter 只修改 retained 状态并标记必要的
 dirty 类别。
@@ -205,7 +214,7 @@ dirty 类别。
 **产品 Theme（默认皮肤 + 全局换肤 + 局部覆盖）：**
 
 - `UIContext` 持有 `productTheme()`，默认 `makeDefaultProductTheme()`；
-- `create*`（Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton/ScrollView/Dropdown/Popup/DropdownItem）与 Label 文本样式在创建时
+- `create*`（Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton/ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView）与 Label 文本样式在创建时
   **自动 apply** 对应 `make*Chrome` / text style；Root/Panel 默认无底色（容器），需背景时用
   `makePanelBoxPaint` / `makeSettingsPanelChrome`；
 - `setProductTheme(theme)` 会校验 metric，并事务式重绑所有仍继承产品 Theme 的既有控件属性；容量、
@@ -223,22 +232,24 @@ rounded rectangle、Image widget、毛玻璃与 CSS 式 stylesheet 仍未实现�
 
 ## 产品接入与证据
 
-`tina_sample_ui_showcase` 是控件与换肤的独立工作台，固定 1280×720 logical extent，同屏展示：
+`tina_sample_ui_showcase` 是控件与换肤的独立工作台，固定 1280×980 logical extent，同屏展示20个控件：
 
 - Primary、destructive、disabled 与 reset Button；
 - Checkbox、Slider→ProgressBar 联动、UTF-8 TextEdit；
 - Performance/Balanced/Quality 与 Dark/Light 两组 RadioButton；
+- Dropdown、虚拟化 ListView/TreeView 与 ScrollView；
 - Panel elevation、双边框/阴影、状态栏与主题色板。
 
 它使用默认 product chrome 呈现 hover/pressed/focused/disabled 层次，并通过
 `setProductTheme()` 在既有 retained tree 上事务切换 Dark/Light。`--auto-demo` 会执行
-Dark→Light→Dark（或相反）及 Slider→ProgressBar 联动，并在退出 JSON 中验证 theme switch、value、
-13 个控件与 root 生命周期。完整文字视觉验收必须使用 bgfx + FreeType preset；普通 bgfx preset 的
-placeholder text 只用于确定性降级和生命周期 smoke。
-最新 Dark/Light client capture 分别位于
-`artifacts/screenshots/ui-showcase-final-dark-v3/20260727-191013` 和
-`artifacts/screenshots/ui-showcase-final-light-v3/20260727-191058`：两组均取得连续2帧 1280x720
-非空画面，Performance/Balanced/Quality 三项完整显示且互不遮挡，导航状态文字也未占用控件区域。
+Dark→Light→Dark（或相反）、Slider→ProgressBar、Dropdown/List/Tree selection、Tree expansion 与滚动联动，
+并在退出 JSON 中验证 `controls=20`、`treeExpansionChanges=2`、`listSelectionKey=1007`、
+`treeSelectionKey=4`、`dropdownSelection=1`、`scrollOffset=80` 和 root 生命周期。完整文字视觉验收必须使用
+bgfx + FreeType preset；普通 bgfx preset 的 placeholder text 只用于确定性降级和生命周期 smoke。
+最新 Dark/Light FreeType client capture 分别位于
+`artifacts/screenshots/ui-showcase-dark/20260728-155526/frame-03.png` 和
+`artifacts/screenshots/ui-showcase-light/20260728-155914/frame-03.png`；两张 1280×980 画面完整呈现
+20个控件、集合区、滚动区及主题差异，没有裁剪或重叠。
 
 `tina_sample_2d` 当前 UI 包含：
 
@@ -246,29 +257,48 @@ placeholder text 只用于确定性降级和生命周期 smoke。
 - Master/Music/SFX Checkbox/Slider；
 - profile-name 单行 TextEdit；
 - 65% ProgressBar；
-- Windowed/Fullscreen RadioButton 组。
+- Windowed/Fullscreen RadioButton 组；
+- Scene Explorer TreeView：13个 logical item、12个 materialized row slot、stable-key selection。
 
 标准控件保留 create-time Theme 绑定；Theme Button callback 只记录 pending intent，`updateUI()` 再事务调用
 `setProductTheme()`。Panel 与标题文字是有意的局部层级覆盖，每次换肤集中重算。`--ui-theme-demo`
-在300帧产品门禁中执行 Dark→Light→Dark；schema 13 验证两次切换、最终 Dark、控件创建、TextEdit
-UTF-8 初值、ProgressBar value 与 Radio 互斥 selection。
+在300帧产品门禁中执行 Dark→Light→Dark；`--ui-tree-demo` 同时选择 gameplay 与最终
+`crate_spawn #102`。schema 14 验证 `uiTreeViewsCreated=1`、13/12 logical/materialized、两次 selection、
+最终 stable key `402`/index `12`、滚动、Theme paint 及 Tree/TreeItem selected semantics。
+2026-07-28 的完整门禁报告 `artifacts/reports/product-2d-treeview-gate.json` 记录全部步骤与
+300帧 sample exit 0。动态 glyph atlas 修复后的 Dark/Light FreeType client capture 分别位于
+`artifacts/screenshots/2d-scene-explorer-freetype-dark-fixed/20260729-001845/frame-03.png` 和
+`artifacts/screenshots/2d-scene-explorer-freetype-light-fixed/20260729-002407/frame-03.png`；对应 report
+均为 `ok=true`、exit 0。Scene Explorer、选中行、设置控件与 playfield 无明显裁剪或重叠，
+`gameplay #30` 与 `Switch to dark/light` 的运行时新增字符完整可见。2026-07-29 的 UI-003 compare
+矩阵报告 `artifacts/screenshots/ui-003-size-matrix/20260729-004341/matrix-report.json` 另证明五个逻辑尺寸
+全部 `ok=true` 且 `baselineCompare.matched=true`。
+
+作为 TreeView 接入前的历史 UI-001 证据，2026-07-23 的
 `artifacts/screenshots/sample-2d-product/20260723-013100/report.json` 记录 `ok=true`、exit 0、schema 3，
 3次 960x540 client capture 中2帧稳定非空；首次 `PrintWindow` 白帧由 `blankLike=true` 排除。
-人工复核 `frame-02.png` / `frame-03.png` 中上述控件可见、中文正常且无裁剪或重叠；两帧 65% fill
+人工复核 `frame-02.png` / `frame-03.png` 中 TextEdit、ProgressBar 与 RadioButton 可见、中文正常且
+无裁剪或重叠；两帧 65% fill
 均为 x=700..842（143 px），选中色只出现在 Windowed RadioButton，client capture 未混入标题栏。
 
 `tina_sample_3d` 的 `Product3DUI` 使用同一产品 Theme 契约提供 Theme Button、Auto Rotate Checkbox、
-Rotation Speed Slider、Frame ProgressBar、标题/Inspector/状态层级。Checkbox 与 Slider 控制实际模型旋转；
-callback 只提交 intent，`updateUI()` 统一处理控件状态、ProgressBar 与 `setProductTheme()`。schema 3 的
-自动门禁要求 Dark→Light→Dark、标准控件 chrome 继承验证、5 Panel、9 Label、四类控件各1个、进度
-100% 与 root 释放。FreeType 暗/亮截图分别在
-`artifacts/screenshots/sample-3d-ui-dark/20260727-174319` 和
-`artifacts/screenshots/sample-3d-ui-light/20260727-174414`，均取得连续2帧 1280×720 非空 client capture；
-人工复核文字、控件层级、主题差异及 3D 主视区均成立，无裁剪或重叠。
+Rotation Speed Slider、Frame ProgressBar、Asset ListView、Scene TreeView 与标题/Inspector/状态层级。
+Checkbox 与 Slider 控制实际模型旋转；callback 只提交 intent，`updateUI()` 统一处理控件状态、ProgressBar
+与 `setProductTheme()`。schema 4 的自动门禁要求 Dark→Light→Dark、2次 collection step、7 Panel、
+13 Label、ListView/TreeView 各1个、Tree expansion changes `2`、最终 stable keys `2003/4`、进度100%
+与 root 释放。动态 glyph atlas 修复后的 FreeType 暗/亮截图分别在
+`artifacts/screenshots/3d-product-ui-freetype-dark-fixed/20260729-003922/frame-02.png` 和
+`artifacts/screenshots/3d-product-ui-freetype-light-fixed/20260729-004012/frame-01.png`；实际双 mesh、
+集合控件、主题层级及动态 `10%`/`1%` 进度均清晰可见，没有裁剪或重叠。
 
-当前 tip 最近直接验证为：`tina_ui_tests` 快速回归 296/296（另有 4 个 5 万层压力用例留在最终 gate）、
-`tina_runtime_ui_tests` 89/89、`tina_ui_uia_tests` 10/10、`tina_ui_render_integration_tests` 15/15、
-product-2d 图的 `tina_ui_freetype_tests` 3/3。UI 容量回归
+bgfx glyph atlas 必须保持可变：向 `createTexture2D` 传入 initial memory 会创建 immutable texture，
+导致运行时新 glyph 的 `updateTexture2D` 被拒绝。当前实现以 `nullptr` 创建 R8 atlas，并让首次和后续上传
+统一走 update 路径；首次上传失败会立即销毁 texture。`tina_render_bgfx_tests` 中的生产源码合同测试覆盖
+同一 handle 的首次/后续更新、immutable reject 为零及失败回收。
+
+当前完整门禁直接运行 `tina_ui_tests`、`tina_runtime_ui_tests`、`tina_ui_uia_tests`、
+`tina_ui_render_integration_tests` 与 product-2d 图的 `tina_ui_freetype_tests`；具体数量以本轮
+GoogleTest 输出为准。UI 容量回归
 覆盖 Checkbox/Slider mutation、TextEdit pointer selection 和需要同时重绘旧/新节点的 focus step；
 dirty queue 容量不足时状态与 callback 原子不变，同文本替换 selection 仍发布新 paint；文本 padding
 回归覆盖 auto-size、多行回行和可变 glyph advance 的 TextEdit pointer selection。数字是当前工作树
@@ -311,12 +341,11 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | --- | --- |
 | `UI-002` | 产品 HWND 自动接线 + Narrator/Inspect 金标 + Linux AT-SPI（映射 + HostBridge 已有） |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
-| `UI-005` | 虚拟 ListView、TreeView（ScrollView、Dropdown/Popup 已完成） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | （可选） | Phase C：圆角 clip、backdrop blur、完整 style resolver |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
 Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；UI-002-SPI 与
-可选 `tina_ui_uia` 映射切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture、UI-005 的
-ScrollView 与 Dropdown/Popup 已完成，但不要把 Virtual ListView/TreeView、外部
-Narrator 真机门禁或 UI-003 标成 Done。
+可选 `tina_ui_uia` 映射切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture 与 UI-005 的
+ScrollView、Dropdown/Popup、虚拟 ListView/TreeView 已完成。外部 Narrator 真机门禁与 UI-003
+跨 GPU/DPI 金标仍不能标成 Done。
