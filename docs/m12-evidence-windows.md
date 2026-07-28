@@ -123,6 +123,40 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 记录结果：exit 0，JSON 含 `gltfCooked`、`multiMesh=true`、`meshesUploaded=2`、
 `prefabInstantiated`、`sceneExtract` 和 `renderResourceLedgerBalanced`（3D-001 双 mesh 产品路径）。
 
+2026-07-28 N16.4 复验把 product evidence 升级到 schema 4：300 帧 exit 0，
+`meshFrameResourceResolverHits=600`、`materialFrameResourceResolverHits=600`；complete-PBR fixture 的两个
+Material 共享3个 Texture owner，因此 `texturesUploaded=3`、`textureRetirementsAccepted=3`，同时
+`meshesUploaded=2`、`meshRetirementsAccepted=2`。Mesh/Material/Texture weak handle invalidation 分别为
+2/2/3，5条 GPU retirement record 全部 `Released`、live=0，`bindingRegistryReleased=true`、
+`renderResourceLedgerBalanced=true`、`pixelCaptureOk=true`。完整 bgfx + FreeType TEST-003 报告记录 fingerprint
+`d0e4d69b60869f5669d530d3e5a556fa`；另以该值调用 `--expect-pixel-fingerprint` 完成一次本机精确重放。
+JSON 报告对应的标准 gate 本身未传 expect 参数，因此 `pixelGoldenChecked=false`；fingerprint 与独立重放仅作
+本机/backend 证据，不跨 GPU 作为金标。同轮 TEST-003 由 `tools/windows/RunProduct3dGate.ps1` 固化。
+
+### N16.4 完整 3D feature 图（TEST-003）
+
+2026-07-29 基线 `e61b6a00` + N16.4 工作树使用既有
+`windows-msvc-vnext-bgfx-ui-freetype` configure tree 正式复验：
+
+| 步骤 | 结果 |
+| --- | --- |
+| configure | 复用既有 tree（`-SkipConfigure`） |
+| 脚本全部 target 构建 | OK |
+| `tina_tests` | exit 0（listed 335） |
+| `tina_scene_tests` | exit 0（listed 91） |
+| `tina_asset_format_tests` | exit 0（listed 59） |
+| `tina_asset_tests` | exit 0（listed 204） |
+| `tina_render_scene_tests` | exit 0（listed 39） |
+| `tina_render_bgfx_tests` | exit 0（listed 61） |
+| `tina_ui_tests` | exit 0（listed 282） |
+| `tina_runtime_ui_tests` | exit 0（listed 85） |
+| `tina_ui_render_integration_tests` | exit 0（listed 15） |
+| `tina_ui_freetype_tests` | exit 0（listed 3） |
+| `tina_sample_3d --frames=300` | exit 0 |
+| `productEvidence` | exit 0（schema 4） |
+
+无重建复验写出 `artifacts/gates/product-3d.json`；报告 `ok=true`，结构化字段与上节一致。
+
 ## Audio
 
 product-2d 同轮图证明 `tina_audio_tests` / `tina_audio_miniaudio_tests` exit 0，以及 sample 内

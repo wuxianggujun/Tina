@@ -6,7 +6,9 @@
 #include <tina/render/RenderFrame.hpp>
 #include <tina/render/RenderFrameCapture.hpp>
 
+#include <atomic>
 #include <cstddef>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -31,14 +33,31 @@ struct RenderStatistics final {
     u64 completedGpuRetirements = 0;
 };
 
-// Backend-owned GPU texture handle (generation-aware). Not a weak AssetHandle.
+// Backend-owned GPU texture handle. Owner rejects cross-device use, generation
+// rejects stale slot reuse. Not a weak AssetHandle.
 struct GpuTextureId final {
-    u32 index = (std::numeric_limits<u32>::max)();
+    inline static constexpr u32 InvalidIndex = (std::numeric_limits<u32>::max)();
+    inline static constexpr u32 UnscopedOwner = (std::numeric_limits<u32>::max)();
+
+    u32 owner = 0;
+    u32 index = InvalidIndex;
     u32 generation = 0;
+
+    constexpr GpuTextureId() noexcept = default;
+    // Reserved unscoped namespace for deterministic backend test doubles. Real
+    // devices issue the three-part owner/index/generation form and reject this owner.
+    constexpr GpuTextureId(u32 indexValue, u32 generationValue) noexcept
+        : owner(UnscopedOwner), index(indexValue), generation(generationValue)
+    {
+    }
+    constexpr GpuTextureId(u32 ownerValue, u32 indexValue, u32 generationValue) noexcept
+        : owner(ownerValue), index(indexValue), generation(generationValue)
+    {
+    }
 
     [[nodiscard]] constexpr bool hasValue() const noexcept
     {
-        return index != (std::numeric_limits<u32>::max)() && generation != 0;
+        return owner != 0 && index != InvalidIndex && generation != 0;
     }
     [[nodiscard]] constexpr explicit operator bool() const noexcept
     {
@@ -47,14 +66,31 @@ struct GpuTextureId final {
     [[nodiscard]] friend constexpr bool operator==(const GpuTextureId&, const GpuTextureId&) = default;
 };
 
-// Backend-owned GPU static mesh handle (generation-aware). Product-3D path (M11-E2).
+// Backend-owned GPU static mesh handle. Owner rejects cross-device use,
+// generation rejects stale slot reuse. Product-3D path (M11-E2).
 struct GpuMeshId final {
-    u32 index = (std::numeric_limits<u32>::max)();
+    inline static constexpr u32 InvalidIndex = (std::numeric_limits<u32>::max)();
+    inline static constexpr u32 UnscopedOwner = (std::numeric_limits<u32>::max)();
+
+    u32 owner = 0;
+    u32 index = InvalidIndex;
     u32 generation = 0;
+
+    constexpr GpuMeshId() noexcept = default;
+    // Reserved unscoped namespace for deterministic backend test doubles. Real
+    // devices issue the three-part owner/index/generation form and reject this owner.
+    constexpr GpuMeshId(u32 indexValue, u32 generationValue) noexcept
+        : owner(UnscopedOwner), index(indexValue), generation(generationValue)
+    {
+    }
+    constexpr GpuMeshId(u32 ownerValue, u32 indexValue, u32 generationValue) noexcept
+        : owner(ownerValue), index(indexValue), generation(generationValue)
+    {
+    }
 
     [[nodiscard]] constexpr bool hasValue() const noexcept
     {
-        return index != (std::numeric_limits<u32>::max)() && generation != 0;
+        return owner != 0 && index != InvalidIndex && generation != 0;
     }
     [[nodiscard]] constexpr explicit operator bool() const noexcept
     {
@@ -138,6 +174,11 @@ class IRenderDevice {
   public:
     virtual ~IRenderDevice() = default;
 
+    IRenderDevice(const IRenderDevice&) = delete;
+    IRenderDevice& operator=(const IRenderDevice&) = delete;
+    IRenderDevice(IRenderDevice&&) = delete;
+    IRenderDevice& operator=(IRenderDevice&&) = delete;
+
     // Every borrowed view carried by frame is valid only for this call. The
     // implementation must synchronously consume it and retain no view, span,
     // or element pointer after returning.
@@ -154,16 +195,26 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Texture2D upload");
     }
+    // Non-consuming ownership check. Success proves texture is currently live on
+    // this device; failure leaves the candidate and backend state unchanged.
+    [[nodiscard]] virtual Core::Status validateTexture2D(GpuTextureId texture) const noexcept
+    {
+        static_cast<void>(texture);
+        return Core::failure(RenderErrorCode::TextureUploadUnsupported,
+                             "This render device does not support Texture2D validation");
+    }
     [[nodiscard]] virtual Core::Status destroyTexture2D(GpuTextureId texture) noexcept
     {
         static_cast<void>(texture);
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Texture2D destroy");
     }
-    // Logically invalidates texture immediately and releases completionPin only
-    // after the backend can safely hand the native resource to its destroy path.
-    // On failure completionPin is not consumed. Null/default paths complete
-    // synchronously; real backends may retain it until a GPU completion marker.
+    // On success, logically invalidates texture and clears every device binding
+    // that references it before returning. completionPin is released only after
+    // the backend can safely hand the native resource to its destroy path. On
+    // failure, texture, bindings, and completionPin are unchanged. Null/default
+    // paths complete synchronously; real backends may retain the pin until a GPU
+    // completion marker.
     [[nodiscard]] virtual Core::Status retireTexture2D(GpuTextureId texture,
                                                        FramePin& completionPin) noexcept
     {
@@ -254,8 +305,8 @@ class IRenderDevice {
     {
         return Core::success();
     }
-    // Bind a GPU mesh for Mesh3D batches with matching meshKey (0 clears binding).
-    // meshKey=1 remains the built-in procedural cube fixture when unbound.
+    // Bind a GPU mesh for Mesh3D descriptors with a matching device binding key
+    // (0 clears binding). Key 1 remains the built-in procedural cube fixture when unbound.
     [[nodiscard]] virtual Core::Status setMesh3DBinding(u32 meshKey, GpuMeshId mesh) noexcept
     {
         static_cast<void>(meshKey);
@@ -387,7 +438,31 @@ class IRenderDevice {
                              "This render device does not support Mesh3D lighting");
     }
 
+  protected:
+    IRenderDevice() noexcept = default;
+
+    [[nodiscard]] u32 resourceOwnerId() const noexcept { return m_resourceOwnerId; }
+
   private:
+    [[nodiscard]] static u32 allocateResourceOwnerId() noexcept
+    {
+        static std::atomic<u64> nextOwner{1};
+        constexpr u64 MaximumOwner = static_cast<u64>((std::numeric_limits<u32>::max)()) - 1U;
+
+        u64 candidate = nextOwner.load(std::memory_order_relaxed);
+        while (candidate <= MaximumOwner)
+        {
+            if (nextOwner.compare_exchange_weak(candidate, candidate + 1,
+                                                std::memory_order_relaxed,
+                                                std::memory_order_relaxed))
+            {
+                return static_cast<u32>(candidate);
+            }
+        }
+        std::terminate();
+    }
+
+    u32 m_resourceOwnerId = allocateResourceOwnerId();
     u32 m_nextSprite2DBindingKey = 1;
     u32 m_nextMesh3DBindingKey = 2;
     // Key 1 is reserved for the built-in opaque 3D fixture material.

@@ -1,5 +1,4 @@
 set(TINA_ASSET_PUBLIC_HEADERS
-    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetBindingResolver.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetFrameResourceResolver.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetHandle.hpp
@@ -71,7 +70,6 @@ set(TINA_ASSET_SOURCES
 add_library(tina_asset_types INTERFACE)
 add_library(Tina::AssetTypes ALIAS tina_asset_types)
 target_sources(tina_asset_types INTERFACE
-    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetBindingResolver.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetFrameResourceResolver.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetHandle.hpp
 )

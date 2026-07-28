@@ -56,6 +56,7 @@ $targets = @(
     'tina_scene_tests',
     'tina_asset_format_tests',
     'tina_asset_tests',
+    'tina_render_scene_tests',
     'tina_render_bgfx_tests',
     'tina_ui_tests',
     'tina_runtime_ui_tests',
@@ -68,6 +69,7 @@ $testExes = @(
     'tina_scene_tests.exe',
     'tina_asset_format_tests.exe',
     'tina_asset_tests.exe',
+    'tina_render_scene_tests.exe',
     'tina_render_bgfx_tests.exe',
     'tina_ui_tests.exe',
     'tina_runtime_ui_tests.exe',
@@ -162,7 +164,7 @@ $expectedFields = [ordered]@{
     sceneExtract                        = $true
     multiMesh                           = $true
     materialTextureBound                = $true
-    texturesUploaded                    = 6
+    texturesUploaded                    = 3
     meshesUploaded                      = 2
     materialsLoaded                     = 2
     prefabNodes                         = 2
@@ -172,11 +174,20 @@ $expectedFields = [ordered]@{
     materialBindingsRegistered          = 2
     meshBindingsReleased                = 2
     materialBindingsReleased            = 2
-    meshesDestroyed                     = 2
-    texturesDestroyed                   = 6
-    meshAssetBindingResolverHits        = $expectedResolverHits
-    materialAssetBindingResolverHits    = $expectedResolverHits
-    assetStoreActiveCount               = 11
+    meshRetirementsAccepted             = 2
+    textureRetirementsAccepted          = 3
+    meshRetirementRecords               = 2
+    textureRetirementRecords            = 3
+    meshRetirementReleased              = 2
+    textureRetirementReleased           = 3
+    retirementRecordsLive               = 0
+    meshAssetHandlesInvalidated          = 2
+    materialAssetHandlesInvalidated      = 2
+    textureAssetHandlesInvalidated       = 3
+    meshFrameResourceResolverHits       = $expectedResolverHits
+    materialFrameResourceResolverHits   = $expectedResolverHits
+    assetStoreActiveCount               = 1
+    prefabAssetResident                 = $true
     prefabInstances                     = 2
     meshSlotCount                       = 2
     externalGltf                        = $false

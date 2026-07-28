@@ -1,4 +1,6 @@
 #include <tina/asset/AssetSystem.hpp>
+#include <tina/asset/CookedAssetFile.hpp>
+#include <tina/asset_format/AssetFormat.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
 
@@ -7,19 +9,50 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <memory_resource>
 #include <optional>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace Tina::Asset {
 namespace {
 
 using TestSupport::TrackingMemoryResource;
+using TestSupport::assetId;
 using TestSupport::removePackage;
 using TestSupport::toUtf8;
 using TestSupport::writeTextureMaterialPackage;
+
+[[nodiscard]] Core::Result<AssetHandle> publishStaticMesh(
+    AssetSystem& system,
+    std::pmr::memory_resource& memory,
+    Core::u8 seed)
+{
+    constexpr std::array payload{
+        std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}};
+    auto bytes = AssetFormat::writeCookedAssetBytes(AssetFormat::CookedAssetWriteDesc{
+        .assetKind = AssetFormat::AssetKind::StaticMesh,
+        .assetTypeVersion = 1,
+        .assetId = assetId(seed),
+        .payload = payload,
+    });
+    if (!bytes)
+    {
+        return Core::failure(std::move(bytes.error()));
+    }
+    std::pmr::vector<std::byte> owned{&memory};
+    owned.assign(bytes->begin(), bytes->end());
+    auto file = makeCookedAssetFileFromBytes(
+        std::move(owned), CookedAssetFileLoadConfig{.memoryResource = &memory});
+    if (!file)
+    {
+        return Core::failure(std::move(file.error()));
+    }
+    return system.store().publish(std::move(*file));
+}
 
 class SwitchableFailMemoryResource final : public std::pmr::memory_resource {
   public:
@@ -550,22 +583,27 @@ TEST_F(AssetGpuRetirementTests, NullUploadCleanupPreservesCompletedGpuTextureRet
     EXPECT_EQ((*device)->statistics().completedGpuRetirements, 1U);
 }
 
-TEST_F(AssetGpuRetirementTests, StaticMeshDrainReleasesLeaseAndLedgerRecord)
+TEST_F(AssetGpuRetirementTests, ExistingStaticMeshLeaseAndGpuOwnerTransferUntilDrain)
 {
     auto system = createSystem();
     ASSERT_TRUE(system.has_value()) << system.error().message;
-    auto loaded = system->loadOne(m_package.materialId);
+    auto loaded = publishStaticMesh(*system, m_memory, 0xE1U);
     ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+    auto lease = system->acquire(*loaded);
+    ASSERT_TRUE(lease.has_value()) << lease.error().message;
 
     DelayedRetirementRenderDevice device;
-    constexpr Render::GpuMeshId Mesh{11U, 5U};
-    ASSERT_TRUE(system->retireStaticMesh(device, *loaded, Mesh).has_value());
+    constexpr Render::GpuMeshId ExpectedMesh{11U, 5U};
+    Render::GpuMeshId mesh = ExpectedMesh;
+    ASSERT_TRUE(system->retireStaticMesh(device, *lease, mesh).has_value());
+    EXPECT_FALSE(static_cast<bool>(*lease));
+    EXPECT_FALSE(static_cast<bool>(mesh));
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::UnloadPending);
     EXPECT_EQ(system->store().leaseCount(*loaded), 1U);
     ASSERT_TRUE(device.hasPendingMesh());
     ASSERT_EQ(system->retirement().records().size(), 1U);
     EXPECT_EQ(system->retirement().records()[0].kind, AssetRetirementKind::GpuStaticMesh);
-    EXPECT_EQ(system->retirement().records()[0].mesh, Mesh);
+    EXPECT_EQ(system->retirement().records()[0].mesh, ExpectedMesh);
 
     ASSERT_TRUE(system->drainGpuRetirements().has_value());
     EXPECT_FALSE(device.hasPendingMesh());
@@ -573,6 +611,96 @@ TEST_F(AssetGpuRetirementTests, StaticMeshDrainReleasesLeaseAndLedgerRecord)
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
     EXPECT_EQ(system->retirementStats().released, 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);
+}
+
+TEST_F(AssetGpuRetirementTests, StaticMeshBackendRejectionRestoresCallerOwnersForRetry)
+{
+    auto system = createSystem();
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+    auto loaded = publishStaticMesh(*system, m_memory, 0xE2U);
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+    auto lease = system->acquire(*loaded);
+    ASSERT_TRUE(lease.has_value()) << lease.error().message;
+    const CookedAssetFile* expectedPayload = lease->get();
+    constexpr Render::GpuMeshId ExpectedMesh{12U, 6U};
+    Render::GpuMeshId mesh = ExpectedMesh;
+
+    DelayedRetirementRenderDevice rejectingDevice{
+        DelayedRetirementRenderDevice::Acceptance::Reject};
+    const auto rejected = system->retireStaticMesh(rejectingDevice, *lease, mesh);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::GpuRetirementUnsupported);
+    EXPECT_TRUE(static_cast<bool>(*lease));
+    EXPECT_EQ(lease->handle(), *loaded);
+    EXPECT_EQ(lease->get(), expectedPayload);
+    EXPECT_EQ(mesh, ExpectedMesh);
+    EXPECT_EQ(system->state(*loaded), AssetLogicalState::ReadyCpu);
+    EXPECT_EQ(system->store().leaseCount(*loaded), 1U);
+    EXPECT_TRUE(system->retirement().records().empty());
+    EXPECT_FALSE(rejectingDevice.hasPendingMesh());
+
+    DelayedRetirementRenderDevice acceptingDevice;
+    ASSERT_TRUE(system->retireStaticMesh(acceptingDevice, *lease, mesh).has_value());
+    EXPECT_FALSE(static_cast<bool>(*lease));
+    EXPECT_FALSE(static_cast<bool>(mesh));
+    EXPECT_TRUE(acceptingDevice.completeMesh());
+    EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
+    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().live, 0U);
+}
+
+TEST_F(AssetGpuRetirementTests, StaticMeshLeaseRejectsWrongKindCrossStoreAndWrongThread)
+{
+    auto system = createSystem();
+    auto foreignSystem = createSystem();
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+    ASSERT_TRUE(foreignSystem.has_value()) << foreignSystem.error().message;
+    auto meshHandle = publishStaticMesh(*system, m_memory, 0xE3U);
+    auto foreignMeshHandle = publishStaticMesh(*foreignSystem, m_memory, 0xE4U);
+    auto materialHandle = system->loadOne(m_package.materialId);
+    ASSERT_TRUE(meshHandle.has_value()) << meshHandle.error().message;
+    ASSERT_TRUE(foreignMeshHandle.has_value()) << foreignMeshHandle.error().message;
+    ASSERT_TRUE(materialHandle.has_value()) << materialHandle.error().message;
+    auto meshLease = system->acquire(*meshHandle);
+    auto foreignMeshLease = foreignSystem->acquire(*foreignMeshHandle);
+    auto materialLease = system->acquire(*materialHandle);
+    ASSERT_TRUE(meshLease.has_value());
+    ASSERT_TRUE(foreignMeshLease.has_value());
+    ASSERT_TRUE(materialLease.has_value());
+
+    DelayedRetirementRenderDevice device;
+    constexpr Render::GpuMeshId ExpectedMesh{13U, 7U};
+    Render::GpuMeshId wrongKindMesh = ExpectedMesh;
+    const auto wrongKind = system->retireStaticMesh(device, *materialLease, wrongKindMesh);
+    ASSERT_FALSE(wrongKind.has_value());
+    EXPECT_EQ(wrongKind.error().code, AssetErrorCode::InvalidHandle);
+    EXPECT_TRUE(static_cast<bool>(*materialLease));
+    EXPECT_EQ(wrongKindMesh, ExpectedMesh);
+
+    Render::GpuMeshId crossStoreMesh = ExpectedMesh;
+    const auto crossStore = system->retireStaticMesh(device, *foreignMeshLease, crossStoreMesh);
+    ASSERT_FALSE(crossStore.has_value());
+    EXPECT_EQ(crossStore.error().code, AssetErrorCode::InvalidHandle);
+    EXPECT_TRUE(static_cast<bool>(*foreignMeshLease));
+    EXPECT_EQ(crossStoreMesh, ExpectedMesh);
+
+    Render::GpuMeshId wrongThreadMesh = ExpectedMesh;
+    std::optional<Core::ErrorCode> wrongThreadError;
+    std::thread otherThread([&] {
+        const auto status = system->retireStaticMesh(device, *meshLease, wrongThreadMesh);
+        if (!status)
+        {
+            wrongThreadError = status.error().code;
+        }
+    });
+    otherThread.join();
+    ASSERT_TRUE(wrongThreadError.has_value());
+    EXPECT_EQ(*wrongThreadError, Render::RenderErrorCode::WrongOwnerThread);
+    EXPECT_TRUE(static_cast<bool>(*meshLease));
+    EXPECT_EQ(wrongThreadMesh, ExpectedMesh);
+    EXPECT_TRUE(system->retirement().records().empty());
+    EXPECT_TRUE(foreignSystem->retirement().records().empty());
+    EXPECT_FALSE(device.hasPendingMesh());
 }
 
 TEST_F(AssetGpuRetirementTests, DrainRejectsFalseBackendCompletionWhileLeaseRemainsLive)

@@ -1,6 +1,7 @@
 #include "BgfxRenderDevice.hpp"
 #include "BgfxOpaque3DGeometry.hpp"
 #include "BgfxOpaque3DShader.hpp"
+#include "BgfxResourceSlotGeneration.hpp"
 #include "BgfxRetirementTimeline.hpp"
 #include "BgfxSprite2DGeometry.hpp"
 #include "BgfxSprite2DShader.hpp"
@@ -203,11 +204,6 @@ constexpr u64 kSprite2DPremultipliedAlphaState =
     BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 constexpr u64 kUIPremultipliedAlphaState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
                                            BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
-
-[[nodiscard]] constexpr u32 nextResourceGeneration(u32 generation) noexcept
-{
-    return generation == (std::numeric_limits<u32>::max)() ? 1U : generation + 1U;
-}
 
 static_assert(std::is_standard_layout_v<BgfxUIDisplayVertex>);
 static_assert(sizeof(BgfxUIDisplayVertex) == sizeof(float) * 4U + sizeof(u32));
@@ -471,9 +467,10 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
     };
 }
 
-[[nodiscard]] Core::Result<PreparedOpaque3D> preflightOpaque3D(RenderSceneView scene)
+[[nodiscard]] Core::Result<PreparedOpaque3D>
+preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources)
 {
-    auto requirements = checkedOpaque3DFrame(scene);
+    auto requirements = checkedOpaque3DFrame(scene, resources);
     if (!requirements)
     {
         return Core::failure(std::move(requirements.error()));
@@ -914,6 +911,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(status.error()));
         }
+        if (auto status = validateOpaque3DFrameResources(frame.primaryWorldScene, frame.resources); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
         if (auto status = validateFrameSurfaceBeforeCommit(frame); !status)
         {
             return Core::failure(std::move(status.error()));
@@ -931,7 +932,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         PreparedUIDisplayList preparedUI{};
         if (framePlan->shouldSubmit())
         {
-            auto opaque3DPreflight = preflightOpaque3D(frame.primaryWorldScene);
+            auto opaque3DPreflight = preflightOpaque3D(frame.primaryWorldScene, frame.resources);
             if (!opaque3DPreflight)
             {
                 return Core::failure(std::move(opaque3DPreflight.error()));
@@ -1101,7 +1102,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                     if (slot.live)
                     {
                         slot.live = false;
-                        slot.generation = nextResourceGeneration(slot.generation);
+                        slot.identity.advanceAfterRelease();
                     }
                 }
             }
@@ -1214,7 +1215,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 if (slot.live)
                 {
                     slot.live = false;
-                    slot.generation = nextResourceGeneration(slot.generation);
+                    slot.identity.advanceAfterRelease();
                 }
             }
             spriteTextureBindings_.clear();
@@ -1578,7 +1579,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::touch(kUIView);
     }
 
-    void submitOpaque3D(RenderSceneView scene, PreparedOpaque3D prepared) noexcept
+    void submitOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
+                        PreparedOpaque3D prepared) noexcept
     {
         if (prepared.requirements.instanceCount == 0)
         {
@@ -1592,7 +1594,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             reinterpret_cast<BgfxOpaque3DInstanceData*>(instanceBuffer.data),
             static_cast<usize>(prepared.requirements.instanceCount),
         };
-        auto written = writeOpaque3DInstanceData(scene, instances);
+        auto written = writeOpaque3DInstanceData(scene, resources, instances);
         if (!written || written->instanceCount != prepared.requirements.instanceCount ||
             written->batchCount != prepared.requirements.batchCount)
         {
@@ -1602,19 +1604,32 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::setScissor();
         for (const RenderMesh3DBatch& batch : scene.mesh3DBatches())
         {
+            const FrameResourceDescriptor* meshResource =
+                resources.resolve(batch.mesh, FrameResourceKind::Mesh3DGeometry);
+            const FrameResourceDescriptor* materialResource =
+                resources.resolve(batch.material, FrameResourceKind::Mesh3DMaterial);
+            if (meshResource == nullptr || materialResource == nullptr ||
+                meshResource->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()) ||
+                materialResource->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                // submitFrame preflight validated the same immutable packet view.
+                std::terminate();
+            }
+            const u32 meshKey = static_cast<u32>(meshResource->deviceBindingKey);
+            const u32 materialKey = static_cast<u32>(materialResource->deviceBindingKey);
             const u64 renderState = kOpaque3DState | (batch.doubleSided ? 0 : BGFX_STATE_CULL_CW);
             bgfx::setState(renderState);
 
             bgfx::VertexBufferHandle vb = opaque3DVertexBuffer_;
             bgfx::IndexBufferHandle ib = opaque3DIndexBuffer_;
             // meshKey=1 defaults to built-in cube; other keys require setMesh3DBinding.
-            if (const auto binding = mesh3DBindings_.find(batch.meshKey); binding != mesh3DBindings_.end())
+            if (const auto binding = mesh3DBindings_.find(meshKey); binding != mesh3DBindings_.end())
             {
                 const GpuMeshId id = binding->second;
                 if (id.index < meshes_.size())
                 {
                     const MeshSlot& slot = meshes_[id.index];
-                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.vertexBuffer) &&
+                    if (slot.live && slot.identity.value() == id.generation && bgfx::isValid(slot.vertexBuffer) &&
                         bgfx::isValid(slot.indexBuffer))
                     {
                         vb = slot.vertexBuffer;
@@ -1622,13 +1637,13 @@ class BgfxRenderDevice final : public IRenderDevice {
                     }
                 }
             }
-            else if (batch.meshKey != Opaque3DmeshKey)
+            else if (meshKey != Opaque3DmeshKey)
             {
                 // Unbound non-fixture meshKey: skip submit rather than draw wrong geometry.
                 continue;
             }
 
-            const auto materialBinding = mesh3DMaterialBindings_.find(batch.materialKey);
+            const auto materialBinding = mesh3DMaterialBindings_.find(materialKey);
             const Mesh3DMaterialBindingDesc binding = materialBinding == mesh3DMaterialBindings_.end()
                                                           ? Mesh3DMaterialBindingDesc{}
                                                           : materialBinding->second;
@@ -1640,7 +1655,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 if (id.index < textures_.size())
                 {
                     const TextureSlot& slot = textures_[id.index];
-                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.handle))
+                    if (slot.live && slot.identity.value() == id.generation && bgfx::isValid(slot.handle))
                     {
                         materialTexture = slot.handle;
                     }
@@ -1655,7 +1670,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 if (id.index < textures_.size())
                 {
                     const TextureSlot& slot = textures_[id.index];
-                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.handle))
+                    if (slot.live && slot.identity.value() == id.generation && bgfx::isValid(slot.handle))
                     {
                         mrTexture = slot.handle;
                         mrMapBound = 1.0F;
@@ -1671,7 +1686,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 if (id.index < textures_.size())
                 {
                     const TextureSlot& slot = textures_[id.index];
-                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.handle))
+                    if (slot.live && slot.identity.value() == id.generation && bgfx::isValid(slot.handle))
                     {
                         normalTexture = slot.handle;
                         normalMapBound = 1.0F;
@@ -1754,7 +1769,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 if (id.index < textures_.size())
                 {
                     const TextureSlot& slot = textures_[id.index];
-                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.handle))
+                    if (slot.live && slot.identity.value() == id.generation && bgfx::isValid(slot.handle))
                     {
                         texture = slot.handle;
                     }
@@ -1802,8 +1817,9 @@ class BgfxRenderDevice final : public IRenderDevice {
         u32 index = (std::numeric_limits<u32>::max)();
         for (u32 slotIndex = 0; slotIndex < static_cast<u32>(textures_.size()); ++slotIndex)
         {
-            if (!textures_[slotIndex].live &&
-                textures_[slotIndex].retirementPhase == RetirementPhase::None)
+            if (textures_[slotIndex].identity.canReuse(
+                    textures_[slotIndex].live,
+                    textures_[slotIndex].retirementPhase != RetirementPhase::None))
             {
                 index = slotIndex;
                 break;
@@ -1815,17 +1831,31 @@ class BgfxRenderDevice final : public IRenderDevice {
             textures_.push_back(TextureSlot{});
         }
         TextureSlot& slot = textures_[index];
-        if (slot.generation == 0)
-        {
-            slot.generation = 1;
-        }
         slot.handle = handle;
         slot.width = desc.width;
         slot.height = desc.height;
         slot.live = true;
         slot.retirementPhase = RetirementPhase::None;
         ++statistics_.liveResources;
-        return GpuTextureId{.index = index, .generation = slot.generation};
+        return GpuTextureId{resourceOwnerId(), index, slot.identity.value()};
+    }
+
+    [[nodiscard]] Core::Status validateTexture2D(GpuTextureId texture) const noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::validateTexture2D"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!texture || !isLiveTexture(texture))
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound,
+                                 "Texture2D handle is invalid, stale, or belongs to another device");
+        }
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status destroyTexture2D(GpuTextureId texture) noexcept override
@@ -1852,17 +1882,17 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::GpuRetirementUnsupported,
                                  "This bgfx backend cannot retain an external retirement pin");
         }
-        if (!texture || texture.index >= textures_.size())
+        if (!texture || texture.owner != resourceOwnerId() || texture.index >= textures_.size())
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
         TextureSlot& slot = textures_[texture.index];
-        if (!slot.live || slot.generation != texture.generation)
+        if (!slot.live || slot.identity.value() != texture.generation)
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is stale or destroyed");
         }
         slot.live = false;
-        slot.generation = nextResourceGeneration(slot.generation);
+        slot.identity.advanceAfterRelease();
         for (auto it = spriteTextureBindings_.begin(); it != spriteTextureBindings_.end();)
         {
             if (it->second == texture)
@@ -1932,8 +1962,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             spriteTextureBindings_.erase(deviceBindingKey);
             return Core::success();
         }
-        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
-            textures_[texture.index].generation != texture.generation)
+        if (!isLiveTexture(texture))
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
@@ -1993,7 +2022,9 @@ class BgfxRenderDevice final : public IRenderDevice {
         u32 slotIndex = (std::numeric_limits<u32>::max)();
         for (u32 i = 0; i < static_cast<u32>(meshes_.size()); ++i)
         {
-            if (!meshes_[i].live && meshes_[i].retirementPhase == RetirementPhase::None)
+            if (meshes_[i].identity.canReuse(
+                    meshes_[i].live,
+                    meshes_[i].retirementPhase != RetirementPhase::None))
             {
                 slotIndex = i;
                 break;
@@ -2011,13 +2042,9 @@ class BgfxRenderDevice final : public IRenderDevice {
         slot.indexCount = desc.indexCount;
         slot.live = true;
         slot.retirementPhase = RetirementPhase::None;
-        if (slot.generation == 0)
-        {
-            slot.generation = 1;
-        }
         ++statistics_.liveResources;
         ++statistics_.liveResources;
-        return GpuMeshId{.index = slotIndex, .generation = slot.generation};
+        return GpuMeshId{resourceOwnerId(), slotIndex, slot.identity.value()};
     }
 
     [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
@@ -2044,17 +2071,17 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::GpuRetirementUnsupported,
                                  "This bgfx backend cannot retain an external retirement pin");
         }
-        if (!mesh || mesh.index >= meshes_.size())
+        if (!mesh || mesh.owner != resourceOwnerId() || mesh.index >= meshes_.size())
         {
             return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
         }
         MeshSlot& slot = meshes_[mesh.index];
-        if (!slot.live || slot.generation != mesh.generation)
+        if (!slot.live || slot.identity.value() != mesh.generation)
         {
             return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is stale or destroyed");
         }
         slot.live = false;
-        slot.generation = nextResourceGeneration(slot.generation);
+        slot.identity.advanceAfterRelease();
         for (auto it = mesh3DBindings_.begin(); it != mesh3DBindings_.end();)
         {
             if (it->second == mesh)
@@ -2113,8 +2140,9 @@ class BgfxRenderDevice final : public IRenderDevice {
             mesh3DBindings_.erase(meshKey);
             return Core::success();
         }
-        if (mesh.index >= meshes_.size() || !meshes_[mesh.index].live ||
-            meshes_[mesh.index].generation != mesh.generation)
+        if (mesh.owner != resourceOwnerId() || mesh.index >= meshes_.size() ||
+            !meshes_[mesh.index].live ||
+            meshes_[mesh.index].identity.value() != mesh.generation)
         {
             return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
         }
@@ -2124,8 +2152,9 @@ class BgfxRenderDevice final : public IRenderDevice {
 
     [[nodiscard]] bool isLiveTexture(GpuTextureId texture) const noexcept
     {
-        return !texture || (texture.index < textures_.size() && textures_[texture.index].live &&
-                            textures_[texture.index].generation == texture.generation);
+        return !texture || (texture.owner == resourceOwnerId() && texture.index < textures_.size() &&
+                            textures_[texture.index].live &&
+                            textures_[texture.index].identity.value() == texture.generation);
     }
 
     [[nodiscard]] Mesh3DMaterialBindingDesc materialBindingOrDefault(u32 materialKey) const noexcept
@@ -2544,7 +2573,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (scene.perspectiveCamera().has_value())
         {
             configureOpaque3DView(surface, *scene.perspectiveCamera());
-            submitOpaque3D(scene, preparedOpaque3D);
+            submitOpaque3D(scene, resources, preparedOpaque3D);
         }
         if (scene.camera2D().has_value())
         {
@@ -2597,7 +2626,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
     struct TextureSlot final {
         bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
-        u32 generation = 1;
+        BgfxTextureResourceSlotGeneration identity{};
         u16 width = 0;
         u16 height = 0;
         bool live = false;
@@ -2610,7 +2639,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     struct MeshSlot final {
         bgfx::VertexBufferHandle vertexBuffer = BGFX_INVALID_HANDLE;
         bgfx::IndexBufferHandle indexBuffer = BGFX_INVALID_HANDLE;
-        u32 generation = 1;
+        BgfxMeshResourceSlotGeneration identity{};
         u32 vertexCount = 0;
         u32 indexCount = 0;
         bool live = false;

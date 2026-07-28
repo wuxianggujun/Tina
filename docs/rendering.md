@@ -45,8 +45,9 @@ EngineHost 只有在 packet abandon 成功后才可继续 State teardown；persi
 按 `{FrameResourceKind, deviceBindingKey}` intern：首次登记消费 owning `FramePin`，同帧重复登记立即释放
 重复 pin 并返回同一 ref；invalid/capacity 失败不消费调用方 pin。`FrameResourceTableView::resolve()` 对
 cross-packet、stale、越界与 wrong-kind ref fail closed。view/ref 在 complete、completeSkipped、abandon 或
-packet 复用后立即失效，backend 只能在 `submitFrame()` 内同步解析。N16.2 已让全部 Sprite2D item 只保存
-packet-local texture ref；Mesh3D item 仍使用当前 registry key，由 N16.3 之后的独立切片评估迁移。
+packet 复用后立即失效，backend 只能在 `submitFrame()` 内同步解析。全部 Sprite2D 与 Mesh3D item 都只保存
+packet-local ref；3D geometry/material 分别使用 `Mesh3DGeometry`/`Mesh3DMaterial` kind。Null/bgfx 在任何
+提交副作用前验证 owner/generation/kind/index 与 `u32` device binding range。
 
 所有 composition 采用唯一语义：`submitFrame()` 同步消费借用 view，成功 `present()` 返回后关闭 CPU
 submission ticket 并释放 frame pin。该完成点只表示 Host/backend 已不再借用本帧 CPU 数据，**不表示 GPU
@@ -81,10 +82,11 @@ beginFrame(surface facts)
 - Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻兼容 batch；
 - PerspectiveCamera3D、frustum culling、Opaque3D depth/state 与 stable batch；
 - framebuffer 0x0 suspended 路径；
-- 容量/非法数值/非法 resource ref/key 失败时不发布半份 scene。
+- 容量/非法数值/非法 resource ref 失败时不发布半份 scene。
 
 Scene/Runtime writer 不能创建 GPU resource。产品 State 在安全阶段上传并绑定资源；Sprite2D extraction
-通过 phase-local `FrameResourceSink` intern 当前 binding，Mesh3D 继续输出 backend-neutral key。
+与 Mesh3D extraction 都通过 phase-local `FrameResourceSink` intern 当前 binding，RenderScene 不保存
+持久 device key。
 
 ## UI DisplayList 与 Glyph
 
@@ -109,6 +111,7 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 | API | Null | bgfx |
 | --- | --- | --- |
 | `create/destroyTexture2DRgba8` | 逻辑 generation storage；同步 retire | 私有 RGBA8 texture；逻辑失效后 marker 延迟销毁 |
+| `validateTexture2D` | 非消费式 owner/live/generation 校验；零突变 | owner-thread 非消费式 owner/live/generation 校验；零突变 |
 | `retireTexture2D(texture, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
 | `createSprite2DTextureBinding` | device-instance allocator；bind 成功才消费非0 key | device-instance allocator；bind 成功才消费非0 key |
 | `setSprite2DTextureBinding` | 校验/记录 binding | device binding key → texture |
@@ -133,10 +136,19 @@ Mesh3D mesh/material 分别使用独立的 device-instance allocator namespace�
 caller-chosen setter 与同类 allocator-managed key 不得混用。`setMesh3DMaterialBinding()` 先完整校验三张
 可选纹理与 factors，再原子替换整组状态；`clearMesh3DMaterialBinding()` 幂等清除整组状态。
 
-`GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
-失败；Asset Catalog 使用 `AssetId`。2D extraction resolver 把 live Sprite/Tileset handle映射并 intern 为
-packet-local ref，backend 同步解析 descriptor 中的 binding key；3D Prefab 先映射 weak AssetHandle，
-extraction resolver 再取得 backend-neutral mesh/material key，最后由 RenderDevice binding 映射到 GPU handle。
+`GpuTextureId`/`GpuMeshId` 是 backend owner-scoped generation handle，不是 AssetHandle。wrong-owner 与销毁后
+stale handle 都失败；Asset Catalog 使用 `AssetId`。2D extraction resolver 把 live Sprite/Tileset handle 映射并 intern 为
+packet-local ref；3D Prefab 先映射 weak AssetHandle，Mesh3D registry 再把 live mesh/material binding intern
+为 packet-local ref。backend 只在同步 submit 中解析 descriptor 内的 device key，再映射到 GPU handle。
+`validateTexture2D()` 不消费候选 handle；成功只证明其 owner/index/generation 当前能在目标 device 的
+Texture2D storage 中解析，失败不改变 generation storage、binding 或 retirement 状态。
+
+`Mesh3DBindingRegistry` 是 3D resident owner：Mesh entry 持有 `AssetLease`、`GpuMeshId` 与 binding；Material
+entry 持有 `AssetLease` 与 binding；Texture entry 按 `AssetId` 唯一持有共享 `AssetLease`/`GpuTextureId`，
+并以 material reference count 阻止过早 retirement。geometry/material ref 的首次 intern 持有 entry borrow
+pin；active packet 结束前拒绝对应 retirement。Mesh/Texture 通过 lease-consuming AssetSystem transaction
+交给 backend retirement，Material 先清除原子 bundle 再 logical unload。调用方不再保留 registered flag、
+第二份 GPU cleanup 账簿或持久 binding key。
 
 `UploadTicketLedger` 与 `CpuSubmissionCompletionLedger` 仍分别表达 staging 与 CPU completion。GPU 资源
 retirement 不复用它们：`destroy*` 是无外部 pin 的便利入口，`retire*` 成功才转移 pin；
@@ -165,9 +177,9 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - D3D11/OpenGL/Vulkan 对应 embedded shader 选择（按构建与平台可用性）。
 
 `tina_sample_2d` 已使用 Cooked Texture2D 与产品 sprite binding；`tina_sample_3d` 已使用 Cooked
-StaticMesh/Material/Prefab 的 **双 mesh** engine-provided、State-owned registry binding（3D-001 / N15 Done），并通过原子
-material bundle 提交 baseColor/MR/normal/factors，再调用 lighting API；bgfx Opaque3D 以 experimental MR
-hybrid 着色。
+StaticMesh/Material/Prefab 的 **双 mesh** engine-provided、State-owned registry binding（3D-001 / N15），
+N16.4 再统一其 Lease/GPU/binding owner 与 packet-local resource ref；Material 通过原子 bundle 提交
+baseColor/MR/normal/factors，再调用 lighting API；bgfx Opaque3D 以 experimental MR hybrid 着色。
 
 ## Surface 与线程
 

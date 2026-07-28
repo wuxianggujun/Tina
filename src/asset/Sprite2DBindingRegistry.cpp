@@ -1,7 +1,7 @@
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
-#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/AssetSystem.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
@@ -25,6 +25,12 @@ namespace {
 
 Sprite2DBindingRegistry::~Sprite2DBindingRegistry() noexcept
 {
+    if (m_bindingCount != 0)
+    {
+        // Entry destruction would release the CPU lease while silently leaking
+        // its GPU owner. Callers must explicitly retire every binding first.
+        std::terminate();
+    }
     for (const Entry& entry : m_entries)
     {
         if (entry.frameBorrowCount != 0)
@@ -37,21 +43,23 @@ Sprite2DBindingRegistry::~Sprite2DBindingRegistry() noexcept
     }
 }
 
-Sprite2DBindingRegistry::Sprite2DBindingRegistry(AssetStore& store, Render::IRenderDevice& device,
+Sprite2DBindingRegistry::Sprite2DBindingRegistry(AssetSystem& assets, Render::IRenderDevice& device,
                                                  std::pmr::vector<Entry> entries, Core::usize capacity) noexcept
-    : m_store(&store), m_device(&device), m_entries(std::move(entries)), m_capacity(capacity),
+    : m_assets(&assets), m_store(&assets.store()), m_device(&device), m_entries(std::move(entries)), m_capacity(capacity),
       m_ownerThread(std::this_thread::get_id())
 {
 }
 
 Sprite2DBindingRegistry::Sprite2DBindingRegistry(Sprite2DBindingRegistry&& other) noexcept
-    : m_store(std::exchange(other.m_store, nullptr)), m_device(std::exchange(other.m_device, nullptr)),
+    : m_assets(std::exchange(other.m_assets, nullptr)), m_store(std::exchange(other.m_store, nullptr)),
+      m_device(std::exchange(other.m_device, nullptr)),
       m_entries(std::move(other.m_entries)), m_capacity(std::exchange(other.m_capacity, 0)),
       m_bindingCount(std::exchange(other.m_bindingCount, 0)), m_ownerThread(std::exchange(other.m_ownerThread, {}))
 {
 }
 
-Core::Result<Sprite2DBindingRegistry> Sprite2DBindingRegistry::Create(AssetStore& store, Render::IRenderDevice& device,
+Core::Result<Sprite2DBindingRegistry> Sprite2DBindingRegistry::Create(AssetSystem& assets,
+                                                                      Render::IRenderDevice& device,
                                                                       Sprite2DBindingRegistryConfig config)
 {
     if (config.textureCapacity == 0 || config.textureCapacity > MaximumSprite2DBindingCapacity)
@@ -65,7 +73,7 @@ Core::Result<Sprite2DBindingRegistry> Sprite2DBindingRegistry::Create(AssetStore
     {
         std::pmr::vector<Entry> entries{memoryResource};
         entries.resize(config.textureCapacity);
-        return Sprite2DBindingRegistry{store, device, std::move(entries), config.textureCapacity};
+        return Sprite2DBindingRegistry{assets, device, std::move(entries), config.textureCapacity};
     } catch (const std::bad_alloc&)
     {
         return Core::failure(AssetErrorCode::AllocationFailed, "Sprite2DBindingRegistry storage allocation failed");
@@ -74,7 +82,7 @@ Core::Result<Sprite2DBindingRegistry> Sprite2DBindingRegistry::Create(AssetStore
 
 Sprite2DBindingRegistry::operator bool() const noexcept
 {
-    return m_store != nullptr && m_device != nullptr && m_capacity != 0;
+    return m_assets != nullptr && m_store != nullptr && m_device != nullptr && m_capacity != 0;
 }
 
 Core::usize Sprite2DBindingRegistry::capacity() const noexcept
@@ -88,7 +96,7 @@ Core::usize Sprite2DBindingRegistry::bindingCount() const noexcept
 }
 
 Core::Result<Core::u32> Sprite2DBindingRegistry::registerTextureBinding(AssetHandle textureAsset,
-                                                                        Render::GpuTextureId gpuTexture) noexcept
+                                                                        Render::GpuTextureId& gpuTexture) noexcept
 {
     if (!isOwnerThread())
     {
@@ -111,14 +119,10 @@ Core::Result<Core::u32> Sprite2DBindingRegistry::registerTextureBinding(AssetHan
                              "Sprite2DBindingRegistry requires a live GPU texture");
     }
 
-    if (Entry* exact = findExact(textureAsset); exact != nullptr)
+    if (findExact(textureAsset) != nullptr)
     {
-        if (exact->gpuTexture == gpuTexture)
-        {
-            return exact->bindingKey;
-        }
         return Core::failure(AssetErrorCode::SpriteBindingConflict,
-                             "Texture2D handle is already registered with another GPU texture");
+                             "Texture2D handle already owns a Sprite2D binding");
     }
 
     const Core::AssetId textureAssetId = m_store->assetId(textureAsset);
@@ -131,6 +135,11 @@ Core::Result<Core::u32> Sprite2DBindingRegistry::registerTextureBinding(AssetHan
         return Core::failure(AssetErrorCode::SpriteBindingConflict,
                              "Texture2D AssetId already has another registered handle");
     }
+    if (findByGpuTexture(gpuTexture) != nullptr)
+    {
+        return Core::failure(AssetErrorCode::SpriteBindingConflict,
+                             "GPU texture already belongs to another Sprite2D binding");
+    }
     if (m_bindingCount >= m_capacity)
     {
         return Core::failure(AssetErrorCode::SpriteBindingCapacityExceeded,
@@ -141,6 +150,13 @@ Core::Result<Core::u32> Sprite2DBindingRegistry::registerTextureBinding(AssetHan
     {
         return Core::failure(AssetErrorCode::SpriteBindingCapacityExceeded,
                              "Sprite2DBindingRegistry has no free texture slot");
+    }
+
+    auto lease = m_assets->acquire(textureAsset);
+    if (!lease)
+    {
+        return Core::failure(
+            std::move(lease.error()).withContext("Sprite2DBindingRegistry::registerTextureBinding", "lease"));
     }
 
     auto bindingKey = m_device->createSprite2DTextureBinding(gpuTexture);
@@ -159,19 +175,21 @@ Core::Result<Core::u32> Sprite2DBindingRegistry::registerTextureBinding(AssetHan
     *freeEntry = Entry{
         .textureAsset = textureAsset,
         .textureAssetId = textureAssetId,
+        .lease = std::move(*lease),
         .gpuTexture = gpuTexture,
         .bindingKey = candidateKey,
     };
+    gpuTexture = {};
     ++m_bindingCount;
     return candidateKey;
 }
 
-Core::Status Sprite2DBindingRegistry::unbindTextureBinding(AssetHandle textureAsset) noexcept
+Core::Status Sprite2DBindingRegistry::retireTextureBinding(AssetHandle textureAsset) noexcept
 {
     if (!isOwnerThread())
     {
         return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
-                             "Sprite2DBindingRegistry unbind must run on its owner thread");
+                             "Sprite2DBindingRegistry retirement must run on its owner thread");
     }
     Entry* entry = findExact(textureAsset);
     if (entry == nullptr)
@@ -183,13 +201,45 @@ Core::Status Sprite2DBindingRegistry::unbindTextureBinding(AssetHandle textureAs
         return Core::failure(AssetErrorCode::AssetNotReady,
                              "Sprite2D binding is still borrowed by an active frame resource");
     }
-    if (auto status = m_device->setSprite2DTextureBinding(entry->bindingKey, {}); !status)
+    if (auto status = m_assets->retireTexture2D(*m_device, entry->lease, entry->gpuTexture); !status)
     {
         return Core::failure(
-            std::move(status.error()).withContext("Sprite2DBindingRegistry::unbindTextureBinding", "device"));
+            std::move(status.error()).withContext("Sprite2DBindingRegistry::retireTextureBinding", "assets"));
     }
     *entry = Entry{};
     --m_bindingCount;
+    return Core::success();
+}
+
+Core::Status Sprite2DBindingRegistry::retireAllTextureBindings() noexcept
+{
+    if (!isOwnerThread())
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Sprite2DBindingRegistry retirement must run on its owner thread");
+    }
+    for (const Entry& entry : m_entries)
+    {
+        if (entry.bindingKey != 0 && entry.frameBorrowCount != 0)
+        {
+            return Core::failure(AssetErrorCode::AssetNotReady,
+                                 "Sprite2D binding is still borrowed by an active frame resource");
+        }
+    }
+    for (Entry& entry : m_entries)
+    {
+        if (entry.bindingKey == 0)
+        {
+            continue;
+        }
+        if (auto status = m_assets->retireTexture2D(*m_device, entry.lease, entry.gpuTexture); !status)
+        {
+            return Core::failure(
+                std::move(status.error()).withContext("Sprite2DBindingRegistry::retireAllTextureBindings", "assets"));
+        }
+        entry = Entry{};
+        --m_bindingCount;
+    }
     return Core::success();
 }
 
@@ -367,6 +417,19 @@ Sprite2DBindingRegistry::findByAssetId(Core::AssetId textureAssetId) const noexc
     return nullptr;
 }
 
+const Sprite2DBindingRegistry::Entry*
+Sprite2DBindingRegistry::findByGpuTexture(Render::GpuTextureId gpuTexture) const noexcept
+{
+    for (const Entry& entry : m_entries)
+    {
+        if (entry.bindingKey != 0 && entry.gpuTexture == gpuTexture)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
 Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::findFree() noexcept
 {
     for (Entry& entry : m_entries)
@@ -381,7 +444,7 @@ Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::findFree() noexcept
 
 bool Sprite2DBindingRegistry::isLiveTextureEntry(const Entry& entry) const noexcept
 {
-    return entry.bindingKey != 0 && entry.gpuTexture &&
+    return entry.bindingKey != 0 && entry.lease && entry.gpuTexture &&
            m_store->assetKind(entry.textureAsset) == AssetFormat::AssetKind::Texture2D &&
            hasRenderableCpuPayload(*m_store, entry.textureAsset) && m_store->tryGet(entry.textureAsset) != nullptr &&
            m_store->assetId(entry.textureAsset) == entry.textureAssetId;

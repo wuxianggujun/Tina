@@ -79,9 +79,9 @@ flowchart TD
 | Target | 职责 | 当前状态 |
 | --- | --- | --- |
 | `tina_runtime` | `EngineHost`、帧阶段、Input→Action、Runtime→UI、Render submit | 唯一正式主循环 |
-| `tina_asset_types` | `AssetHandle` 弱 generation identity、borrowed binding/frame-resource resolver | header-only；只传递 Core/Render，不传递完整 Asset/Task/Physics |
+| `tina_asset_types` | `AssetHandle` 弱 generation identity、borrowed frame-resource resolver | header-only；只传递 Core/Render，不传递完整 Asset/Task/Physics |
 | `tina_scene` | generation entity、Transform、2D/3D component 与 extraction | 仅通过 AssetTypes 引用弱 Handle；当前不链接 EnTT/GLM |
-| `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；registry 借用 Store/RenderDevice |
+| `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；两类 registry 都借用 AssetSystem/device，并唯一拥有各自 resident Lease/GPU/binding |
 | `tina_ui` | retained tree、layout/hit/route/paint/semantics、Widget、文本/Glyph | 当前产品 UI 位于 `src/ui` |
 | `tina_physics2d` | Box2D 3.x 的 Tina-owned 生命周期与查询边界 | 可选，Box2D PRIVATE |
 
@@ -106,9 +106,11 @@ flowchart TD
 - Platform、Task、Render、Audio backend 由 bootstrap factory 创建，初始化失败必须逆序回滚。
 - 主窗口 `UIContext` 由 Runtime 私有持有；游戏只拿 root/phase-scoped facade，不拿裸指针。
 - `AssetHandle` 是弱 generation lookup，`AssetLease` 跨异步/帧边界强保活。
-- `Sprite2DBindingRegistry` / `Mesh3DBindingRegistry` 是固定容量 owner-thread 映射，只借用
-  `AssetStore`/`IRenderDevice`；它们不拥有 GPU resource、Lease 或 retirement，产品 State 必须先成功
-  unbind，再 destroy/retire GPU owner。
+- `Sprite2DBindingRegistry` 是固定容量 owner-thread owner，借用 `AssetSystem`/`IRenderDevice`；每个 Entry
+  唯一拥有 resident `AssetLease`、`GpuTextureId` 与 binding，并直接 handoff 到 AssetSystem retirement。
+- `Mesh3DBindingRegistry` 是固定容量 owner-thread owner，借用 `AssetSystem`/`IRenderDevice`；Mesh entry
+  唯一拥有 Lease/GPU/binding，Material entry 拥有 Lease/binding，共享 Texture entry 按 AssetId 去重并拥有
+  Lease/GPU；retirement 失败保留 Entry 供重试。
 - WindowSurface 使用 move-only lease；Render submit 的 Scene/UI view 只在调用期间借用。
 
 ## 启动事务
@@ -176,16 +178,18 @@ source asset
   -> RenderDevice instance allocator binds and returns monotonic non-reused keys
   -> Scene World/Particle/Trail/TileMap/3D MeshRenderer weak AssetHandle
   -> borrowed resolver asks registry for the current binding
-       2D: intern packet-local FrameResourceRef + owning entry borrow pin
-       3D: return current backend-neutral mesh/material key
+       2D: intern packet-local Sprite2DTexture ref + owning entry borrow pin
+       3D: intern packet-local Mesh3DGeometry/Material refs + owning entry borrow pins
   -> RenderFrame submit + present-return CPU frame completion
-  -> State unbinds registry key before GPU owner destroy/retirement
+  -> registry retirement
+       Sprite/Mesh/Texture: hand Entry Lease/GPU to AssetSystem; backend atomically clears bindings
+       Material: clear atomic bundle, logical unload Lease, decrement shared Texture references
   -> backend-specific GPU resource retirement
 ```
 
 multi-mesh / multi-primitive glTF cooking 为每个 TRIANGLES prim 生成独立 StaticMesh/Material，并由
 Prefab 依赖 AssetId（多 prim 展开父+子节点）。`tina_sample_3d` 把 Cooked owner 发布到 Resources-owned
-`AssetStore`；Prefab 按 AssetId 写入 weak mesh/material handle，Scene extraction 再分别解析 backend key，
+`AssetStore`；Prefab 按 AssetId 写入 weak mesh/material handle，Scene extraction 再分别解析 packet-local ref，
 覆盖 multi-mesh cook -> upload/bind -> Prefab resolve -> extract/draw 的产品 E2E。相对文件或
 bufferView 的 baseColor/MR/normal 贴图可 cook 为 RGBA8 Texture2D 并成为 Material dependency；产品路径
 完成外部 URI/size policy、GPU binding 与 experimental metallic-roughness 采样（material factors、
@@ -196,27 +200,25 @@ submit/present 的 CPU 借用期；Texture/Mesh 则使用独立 readback complet
 
 2D World 的 `SpriteRenderer2D` 与 standalone `ParticleSystem2D`/`Trail2D` 已只保存 copyable weak Sprite
 `AssetHandle`；TileMap emit 保存 weak Tileset `AssetHandle`；3D `MeshRenderer3D` 保存 weak StaticMesh/
-Material handle。通用 allocation-free resolver 位于窄 `AssetTypes` 边界；2D 使用
-`AssetFrameResourceResolver`，Scene 保留语义 alias `Sprite2DBindingResolver`，3D key 路径仍使用
-`AssetBindingResolver`；所有路径都只在当前调用借用 resolver。
+Material handle。通用 allocation-free `AssetFrameResourceResolver` 位于窄 `AssetTypes` 边界；2D Scene
+保留语义 alias `Sprite2DBindingResolver`，3D mesh/material 直接使用通用类型；所有路径都只在当前调用
+借用 resolver 与 `FrameResourceSink`。
 产品 2D resolver 薄调用 `Sprite2DBindingRegistry::internSpriteFrameResource()/internTilesetFrameResource()`，
-3D resolver 调用
-`Mesh3DBindingRegistry::resolveMesh()/resolveMaterial()`。registry 在 Asset owner thread 验证 Handle kind、CPU
-payload、Cooked Texture2D dependency 与 live binding。2D 再把 binding intern 为 packet-local ref并让
-resource pin 覆盖 submit/present CPU 借用期；3D 返回 RenderDevice 实例 namespace 内唯一、单调且不复用的
-非零 key。device 只有在 backend bind 成功后才消费候选 key，因此共享同一 device 的多个 registry 不会
-碰撞。allocator-managed registry 存活期间不得混入对应 caller-chosen key setter。
+3D resolver 调用 `Mesh3DBindingRegistry::internMeshFrameResource()/internMaterialFrameResource()`。registry
+在 Asset owner thread 验证 Handle kind、CPU payload、Cooked Texture2D dependency 与 live binding，再把
+binding intern 为 packet-local ref，让 resource pin 覆盖 submit/present CPU 借用期。device 只有在 backend
+bind 成功后才消费候选 key，因此共享同一 device 的多个 registry 不会碰撞。allocator-managed registry
+存活期间不得混入对应 caller-chosen key setter。
 
-Scene/TileMap emit 都不保存 resolver、AssetSystem、AssetLease、Cooked payload 或 GPU handle；registry 同样
-不拥有 GPU、Lease 或 retirement。空 FX 不解析：Trail 每次非空 extract 解析一次，Particle 按 live item
-解析；TileMap hidden/off-camera/empty 不解析，非空可见集合每次 emit 只解析一次。缺 resolver 或
-空/stale/cross-store/wrong-kind/unbound handle 映射为空 ref时分别 fail closed 为 Scene `UnresolvedSprite` 或 Asset
-`SpriteBindingNotFound`，TileMap 失败清空输出。产品 State 的 RAII teardown 必须先 unbind，成功后才
-destroy GPU owner；3D 使用显式 registered 位确保 stale handle 仍走 exact unbind。2D 与 3D Scene component
-的持久 binding key、产品手写 key table 都已删除。N16.1 已建立 packet-local `FrameResourceRef`/固定容量
-resource table、extraction 前 begin/失败释放时序与 lease-consuming Texture2D retirement 事务；N16.2 已
-迁移全部 Sprite2D item，并由 Null/bgfx 在提交前 fail closed 验证。统一 registry/retirement owner 仍由
-N16.3 完成，因此总项保持 InProgress。
+Scene/TileMap emit 都不保存 resolver、AssetSystem、AssetLease、Cooked payload 或 GPU handle。空 FX 不解析：
+Trail 每次非空 extract 解析一次，Particle 按 live item 解析；TileMap hidden/off-camera/empty 不解析，非空
+可见集合每次 emit 只解析一次。缺 resolver 或空/stale/cross-store/wrong-kind/unbound handle 映射为空 ref时
+分别 fail closed 为 Scene `UnresolvedSprite` 或 Asset `SpriteBindingNotFound`，TileMap 失败清空输出。
+N16.3 后 Sprite registry Entry 是 2D resident Lease/GPU/binding 的唯一 owner；N16.4 后 Mesh registry 同样
+统一 Mesh Lease/GPU/binding、Material Lease/binding 与共享 Texture Lease/GPU owner。State teardown 只请求
+registry retirement；backend 接受 Mesh/Texture 后原子失效 generation 与引用 binding，AssetSystem completion
+pin 再释放 Lease。2D 与 3D Scene/Render item 的持久 binding key、产品手写 key table 和调用方 registered/GPU
+cleanup 账簿都已删除。`ASSET-HANDLE-SCENE` 的 A1-A6 与 N16.1-N16.4 已完成。
 
 ## 当前 UI 边界
 

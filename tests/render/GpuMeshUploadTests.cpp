@@ -38,7 +38,9 @@ void countPinRelease(void* userData) noexcept
 TEST(NullRenderDeviceMeshTest, CreateBindDestroyLifecycle)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    auto foreignDevice = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
+    ASSERT_TRUE(foreignDevice.has_value());
 
     std::array<float, 24> vertices{};
     std::array<std::uint16_t, 3> indices{};
@@ -46,7 +48,19 @@ TEST(NullRenderDeviceMeshTest, CreateBindDestroyLifecycle)
 
     auto mesh = (*device)->createStaticMeshP3N3UV2(desc);
     ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
+    auto foreignMesh = (*foreignDevice)->createStaticMeshP3N3UV2(desc);
+    ASSERT_TRUE(foreignMesh.has_value()) << foreignMesh.error().message;
+    EXPECT_EQ(mesh->index, foreignMesh->index);
+    EXPECT_EQ(mesh->generation, foreignMesh->generation);
+    EXPECT_NE(mesh->owner, foreignMesh->owner);
     EXPECT_EQ((*device)->statistics().liveResources, 1U);
+
+    auto foreignBinding = (*device)->setMesh3DBinding(2U, *foreignMesh);
+    ASSERT_FALSE(foreignBinding.has_value());
+    EXPECT_EQ(foreignBinding.error().code, Render::RenderErrorCode::MeshNotFound);
+    auto foreignDestroy = (*device)->destroyStaticMesh(*foreignMesh);
+    ASSERT_FALSE(foreignDestroy.has_value());
+    EXPECT_EQ(foreignDestroy.error().code, Render::RenderErrorCode::MeshNotFound);
 
     ASSERT_TRUE((*device)->setMesh3DBinding(2U, *mesh).has_value());
     ASSERT_TRUE((*device)->setMesh3DBinding(2U, {}).has_value());
@@ -56,6 +70,7 @@ TEST(NullRenderDeviceMeshTest, CreateBindDestroyLifecycle)
     auto stale = (*device)->destroyStaticMesh(*mesh);
     ASSERT_FALSE(stale.has_value());
     EXPECT_EQ(stale.error().code, Render::RenderErrorCode::MeshNotFound);
+    ASSERT_TRUE((*foreignDevice)->destroyStaticMesh(*foreignMesh).has_value());
 }
 
 TEST(NullRenderDeviceMeshTest, RejectsBadUpload)

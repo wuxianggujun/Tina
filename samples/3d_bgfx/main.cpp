@@ -1,5 +1,6 @@
 #include <tina/asset/AssetStore.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
@@ -32,6 +33,23 @@ namespace {
 
 using Tina::Core::u32;
 using Tina::Core::u64;
+
+void releaseFixtureFrameResource(void*) noexcept {}
+
+[[nodiscard]] Tina::Core::Result<Tina::Render::FrameResourceRef>
+internFixtureFrameResource(Tina::Render::FrameResourceSink& sink,
+                           Tina::Render::FrameResourceKind kind) noexcept
+{
+    Tina::Render::FramePin pin{
+        Tina::Render::FramePinKind::Custom,
+        1U,
+        nullptr,
+        &releaseFixtureFrameResource,
+    };
+    return sink.intern(
+        Tina::Render::FrameResourceDescriptor{.kind = kind, .deviceBindingKey = 1U},
+        std::move(pin));
+}
 
 inline constexpr u64 DefaultFrameCount = 300;
 inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
@@ -409,11 +427,11 @@ class Visible3DState final : public Tina::IGameState {
                             .pixelWidth = 1280,
                             .pixelHeight = 720,
                         },
-                    .mesh3DBindingResolver = Tina::Asset::AssetBindingResolver{
+                    .mesh3DBindingResolver = Tina::Asset::AssetFrameResourceResolver{
                         .userData = const_cast<Visible3DState*>(this),
                         .resolve = &resolveFixtureMeshBinding,
                     },
-                    .material3DBindingResolver = Tina::Asset::AssetBindingResolver{
+                    .material3DBindingResolver = Tina::Asset::AssetFrameResourceResolver{
                         .userData = const_cast<Visible3DState*>(this),
                         .resolve = &resolveFixtureMaterialBinding,
                     },
@@ -427,32 +445,36 @@ class Visible3DState final : public Tina::IGameState {
     }
 
   private:
-    [[nodiscard]] static u32 resolveFixtureMeshBinding(
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolveFixtureMeshBinding(
         void* userData,
-        Tina::Asset::AssetHandle asset) noexcept
+        Tina::Asset::AssetHandle asset,
+        Tina::Render::FrameResourceSink& sink) noexcept
     {
         auto& self = *static_cast<Visible3DState*>(userData);
         if (!self.assetStore_.has_value()
             || asset != self.meshAsset_
             || self.assetStore_->assetKind(asset) != Tina::AssetFormat::AssetKind::StaticMesh)
         {
-            return 0;
+            return Tina::Render::FrameResourceRef{};
         }
-        return 1;
+        return internFixtureFrameResource(sink, Tina::Render::FrameResourceKind::Mesh3DGeometry);
     }
 
-    [[nodiscard]] static u32 resolveFixtureMaterialBinding(
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolveFixtureMaterialBinding(
         void* userData,
-        Tina::Asset::AssetHandle asset) noexcept
+        Tina::Asset::AssetHandle asset,
+        Tina::Render::FrameResourceSink& sink) noexcept
     {
         auto& self = *static_cast<Visible3DState*>(userData);
         if (!self.assetStore_.has_value()
             || asset != self.materialAsset_
             || self.assetStore_->assetKind(asset) != Tina::AssetFormat::AssetKind::Material)
         {
-            return 0;
+            return Tina::Render::FrameResourceRef{};
         }
-        return 1;
+        return internFixtureFrameResource(sink, Tina::Render::FrameResourceKind::Mesh3DMaterial);
     }
 
     SampleOptions options_{};

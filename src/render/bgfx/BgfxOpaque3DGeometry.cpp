@@ -84,8 +84,29 @@ std::span<const u16> canonicalCubeIndices() noexcept
     return CubeIndices;
 }
 
+Core::Status validateOpaque3DFrameResources(
+    RenderSceneView scene, FrameResourceTableView resources) noexcept
+{
+    for (const RenderMesh3DItem& item : scene.meshes3D())
+    {
+        const FrameResourceDescriptor* mesh =
+            resources.resolve(item.mesh, FrameResourceKind::Mesh3DGeometry);
+        const FrameResourceDescriptor* material =
+            resources.resolve(item.material, FrameResourceKind::Mesh3DMaterial);
+        if (mesh == nullptr || material == nullptr ||
+            mesh->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()) ||
+            material->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidFrameResource,
+                "Opaque3D refs are stale, cross-packet, wrong-kind, or out of binding range");
+        }
+    }
+    return Core::success();
+}
+
 Core::Result<BgfxOpaque3DFrameRequirements>
-checkedOpaque3DFrame(RenderSceneView scene)
+checkedOpaque3DFrame(RenderSceneView scene, FrameResourceTableView resources)
 {
     const std::span<const RenderMesh3DItem> meshes = scene.meshes3D();
     const std::span<const RenderMesh3DBatch> batches = scene.mesh3DBatches();
@@ -107,6 +128,10 @@ checkedOpaque3DFrame(RenderSceneView scene)
     {
         return invalidFrame("Opaque3D meshes require a perspective camera and instance batches");
     }
+    if (auto status = validateOpaque3DFrameResources(scene, resources); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
 
     usize nextItem = 0;
     for (const RenderMesh3DBatch& batch : batches)
@@ -116,21 +141,18 @@ checkedOpaque3DFrame(RenderSceneView scene)
         {
             return invalidFrame("Opaque3D batches must cover mesh items contiguously");
         }
-        // meshKey: 1 = built-in cube fixture; other non-zero keys require GPU mesh binding.
-        // materialKey: non-zero; texture via setMesh3DMaterialTextureBinding (default white).
         // submeshIndex remains fixture-restricted until multi-submesh product path lands.
-        if (batch.meshKey == 0 || batch.materialKey == 0 ||
-            batch.submeshIndex != Opaque3DFixtureSubmeshIndex)
+        if (batch.submeshIndex != Opaque3DFixtureSubmeshIndex)
         {
             return Core::failure(Core::CoreErrorCode::Unsupported,
-                                 "Opaque3D received an unsupported mesh/material/submesh key");
+                                 "Opaque3D received an unsupported submesh index");
         }
 
         const usize batchEnd = nextItem + static_cast<usize>(batch.itemCount);
         for (; nextItem < batchEnd; ++nextItem)
         {
             const RenderMesh3DItem& item = meshes[nextItem];
-            if (item.meshKey != batch.meshKey || item.materialKey != batch.materialKey ||
+            if (item.mesh != batch.mesh || item.material != batch.material ||
                 item.submeshIndex != batch.submeshIndex || item.doubleSided != batch.doubleSided ||
                 !finiteInstance(item))
             {
@@ -150,10 +172,10 @@ checkedOpaque3DFrame(RenderSceneView scene)
 }
 
 Core::Result<BgfxOpaque3DFrameRequirements>
-writeOpaque3DInstanceData(RenderSceneView scene,
+writeOpaque3DInstanceData(RenderSceneView scene, FrameResourceTableView resources,
                           std::span<BgfxOpaque3DInstanceData> instances)
 {
-    auto requirements = checkedOpaque3DFrame(scene);
+    auto requirements = checkedOpaque3DFrame(scene, resources);
     if (!requirements)
     {
         return Core::failure(std::move(requirements.error()));

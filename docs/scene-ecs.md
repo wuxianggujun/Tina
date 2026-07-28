@@ -105,7 +105,7 @@ updateWorldTransforms
   -> resolve active Camera2D and/or PerspectiveCamera3D
   -> borrowed resolver asks Asset registry to intern current Sprite texture binding
   -> emit visible SpriteRenderer2D items
-  -> borrowed kind-specific resolvers ask Mesh3D registry for current mesh/material keys
+  -> borrowed kind-specific resolvers ask Mesh3D registry to intern current mesh/material bindings
   -> emit visible MeshRenderer3D items
   -> caller commits RenderSceneBuilder
 ```
@@ -116,25 +116,27 @@ borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/gene
 并返回有效 packet-local texture ref。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或空 ref统一
 产生 `UnresolvedSprite`；hidden sprite 不调用 resolver。`MeshRenderer3D` 同样只保存 weak mesh/material
 `AssetHandle` 与 world pose/scale、local bounds、material color 等语义字段。extraction 分别借用
-`mesh3DBindingResolver`/`material3DBindingResolver`，按预期 AssetKind 解析非零 key；任一 handle/resolver/
-binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden mesh 不解析。Scene
-不保存 resolver、AssetLease、Cooked payload 或 GPU handle。
+`mesh3DBindingResolver`/`material3DBindingResolver`，按预期 AssetKind intern 非空 packet-local ref；任一
+handle/resolver/binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden mesh
+不解析。Scene 不保存 resolver、FrameResourceSink/ref、AssetLease、Cooked payload 或 GPU handle。
 
 A2 提供的产品 resolver 最初把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，由 Asset 层沿
 Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。A3 让 Particle/Trail 保存 Handle；
-A4 将底层通用 seam 下沉为 AssetTypes 的 `AssetBindingResolver`，Scene 名称保留为 alias，并让 TileMap
-保存 weak Tileset Handle、调用 `resolveTileset()`，不再跨帧保存 registry key。产品 State
-拥有 registry 与 GPU texture cleanup 账簿，但只借用 `TileMapResources` 中的 Store 和 `DeviceCapture` 中的
-RenderDevice；外部 owner 必须覆盖 State/registry 生命周期。key 由 RenderDevice 实例 allocator 分配，
+A4 当时将通用 borrowed resolver 下沉到 AssetTypes，Scene 名称保留为 alias，并让 TileMap
+保存 weak Tileset Handle、调用 `resolveTileset()`，不再跨帧保存 registry key。N16.3 后产品 State 只拥有
+registry；每个 Entry 唯一拥有 resident Lease/GPU/binding，State 不再维护第二份 GPU cleanup 账簿。
+registry 借用 `TileMapResources` 中最终地址稳定的 AssetSystem 和 `DeviceCapture` 中的 RenderDevice；外部
+owner 必须覆盖 State/registry 与已提交 retirement pin 的生命周期。key 由 RenderDevice 实例 allocator 分配，
 同一 device 的多个 registry 共享唯一/单调 namespace；allocator-managed registry 管理期间不得混用 direct
 caller-chosen binding key。N16.2 将 2D seam 升级为 `AssetFrameResourceResolver`：registry 把验证后的
-binding intern 到当前 packet，并以 entry borrow pin 阻止活跃帧 unbind；Scene 不参与 key 分配、unbind
-或 retirement，也不保存 frame ref。
+binding intern 到当前 packet，并以 entry borrow pin 阻止活跃帧 retirement；Scene 不参与 key 分配或
+retirement，也不保存 frame ref。
 
-A6 的产品 resolver 把 mesh/material Handle 转交 `Mesh3DBindingRegistry`。registry 固定容量、owner-thread，
-借用 Store/device/PMR；StaticMesh 与 Material 使用独立 device key namespace，Material 通过一次原子 bundle
-提交 baseColor/MR/normal texture 与 factors。任一依赖 texture stale 时 Material resolve 返回0。registry
-不拥有 GPU/Lease/retirement；产品按 exact registered 状态 unbind 后再销毁 GPU owner。
+A6 的产品 resolver 把 mesh/material Handle 转交 `Mesh3DBindingRegistry`；N16.4 已替代当时的分裂 owner
+契约。registry 固定容量、owner-thread，借用 AssetSystem/device/PMR；StaticMesh 与 Material 使用独立 device
+key namespace，Material 通过一次原子 bundle 提交 baseColor/MR/normal texture 与 factors。Mesh entry
+唯一拥有 Lease/GPU/binding，Material entry 拥有 Lease/binding，共享 Texture entry 按 AssetId 去重并拥有
+Lease/GPU。extraction 只获得 packet-local ref，active frame pin 阻止 retirement。
 
 writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用内有效，不能保存到下一帧。
 
@@ -152,8 +154,9 @@ createEntity(local transform)
 baseColor。它不分配 Render key；任一步失败都会销毁本次已创建的全部 entity，不留下半份 hierarchy。
 
 multi-mesh Cooker 已能让不同 Prefab node 引用 distinct StaticMesh/Material AssetId；产品 sample 把全部
-Cooked owner 发布到 Resources-owned `AssetStore`，Prefab 保存 handle，extraction 再解析到 distinct backend
-key。双 mesh upload/bind/extract/draw 与 handle resolver evidence 已进入产品门禁。
+Cooked owner 发布到 Resources-owned `AssetStore`，Prefab 保存 handle，extraction 再解析到 distinct
+packet-local refs。双 mesh upload/bind/extract/draw、共享 Texture owner 与 frame-resource resolver evidence
+已进入产品门禁。
 
 ## 与 Runtime/Game 的关系
 
@@ -177,7 +180,8 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
   extraction、Prefab rollback/AssetId→Handle resolver、3D kind-specific resolver fail-closed，以及
   Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle 保留、resolver fail-closed/解析次数与
   writer capacity；
-- `tina_asset_tests`：Sprite/Mesh3D binding registry 的容量/owner thread、register/unbind transaction、key
+- `tina_asset_tests`：Sprite/Mesh3D binding registry 的容量/owner thread、Sprite register/retirement 与 Mesh
+  register/unbind transaction、key
   non-reuse、Texture/Sprite/Tileset/StaticMesh/Material Handle 与 cooked dependency fail-closed，以及 TileMap
   解析次数/失败清空；
 - `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking；

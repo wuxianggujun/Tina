@@ -1,12 +1,13 @@
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
-#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
 
-#include <array>
+#include <exception>
 #include <new>
 #include <utility>
 
@@ -20,60 +21,94 @@ namespace {
            state == AssetLogicalState::ReadyGpu;
 }
 
-[[nodiscard]] bool isLiveTextureBinding(const AssetStore& store,
-                                        const Mesh3DMaterialTextureBinding& binding) noexcept
-{
-    if (!binding.textureAsset)
-    {
-        return !binding.gpuTexture;
-    }
-    return binding.gpuTexture &&
-           store.assetKind(binding.textureAsset) == AssetFormat::AssetKind::Texture2D &&
-           hasRenderableCpuPayload(store, binding.textureAsset) &&
-           store.tryGet(binding.textureAsset) != nullptr && store.assetId(binding.textureAsset).hasValue();
-}
-
 } // namespace
 
-Mesh3DBindingRegistry::Mesh3DBindingRegistry(AssetStore& store, Render::IRenderDevice& device,
-                                             std::pmr::vector<MeshEntry> meshEntries,
-                                             std::pmr::vector<MaterialEntry> materialEntries,
-                                             Core::usize meshCapacity, Core::usize materialCapacity) noexcept
-    : m_store(&store), m_device(&device), m_meshEntries(std::move(meshEntries)),
-      m_materialEntries(std::move(materialEntries)), m_meshCapacity(meshCapacity),
-      m_materialCapacity(materialCapacity), m_ownerThread(std::this_thread::get_id())
+Mesh3DBindingRegistry::~Mesh3DBindingRegistry() noexcept
+{
+    if (m_meshBindingCount != 0 || m_materialBindingCount != 0 || m_textureOwnerCount != 0)
+    {
+        // Releasing CPU leases here would silently leak their GPU owners.
+        std::terminate();
+    }
+    for (const MeshEntry& entry : m_meshEntries)
+    {
+        if (entry.frameBorrowCount != 0)
+        {
+            std::terminate();
+        }
+    }
+    for (const MaterialEntry& entry : m_materialEntries)
+    {
+        if (entry.frameBorrowCount != 0)
+        {
+            std::terminate();
+        }
+    }
+}
+
+Mesh3DBindingRegistry::Mesh3DBindingRegistry(
+    AssetSystem& assets, Render::IRenderDevice& device,
+    std::pmr::vector<MeshEntry> meshEntries,
+    std::pmr::vector<MaterialEntry> materialEntries,
+    std::pmr::vector<TextureEntry> textureEntries,
+    Core::usize meshCapacity, Core::usize materialCapacity,
+    Core::usize textureCapacity) noexcept
+    : m_assets(&assets), m_store(&assets.store()), m_device(&device),
+      m_meshEntries(std::move(meshEntries)), m_materialEntries(std::move(materialEntries)),
+      m_textureEntries(std::move(textureEntries)), m_meshCapacity(meshCapacity),
+      m_materialCapacity(materialCapacity), m_textureCapacity(textureCapacity),
+      m_ownerThread(std::this_thread::get_id())
 {
 }
 
 Mesh3DBindingRegistry::Mesh3DBindingRegistry(Mesh3DBindingRegistry&& other) noexcept
-    : m_store(std::exchange(other.m_store, nullptr)), m_device(std::exchange(other.m_device, nullptr)),
-      m_meshEntries(std::move(other.m_meshEntries)), m_materialEntries(std::move(other.m_materialEntries)),
+    : m_assets(std::exchange(other.m_assets, nullptr)),
+      m_store(std::exchange(other.m_store, nullptr)),
+      m_device(std::exchange(other.m_device, nullptr)),
+      m_meshEntries(std::move(other.m_meshEntries)),
+      m_materialEntries(std::move(other.m_materialEntries)),
+      m_textureEntries(std::move(other.m_textureEntries)),
       m_meshCapacity(std::exchange(other.m_meshCapacity, 0)),
       m_materialCapacity(std::exchange(other.m_materialCapacity, 0)),
+      m_textureCapacity(std::exchange(other.m_textureCapacity, 0)),
       m_meshBindingCount(std::exchange(other.m_meshBindingCount, 0)),
       m_materialBindingCount(std::exchange(other.m_materialBindingCount, 0)),
+      m_textureOwnerCount(std::exchange(other.m_textureOwnerCount, 0)),
       m_ownerThread(std::exchange(other.m_ownerThread, {}))
 {
 }
 
 Core::Result<Mesh3DBindingRegistry> Mesh3DBindingRegistry::Create(
-    AssetStore& store, Render::IRenderDevice& device, Mesh3DBindingRegistryConfig config)
+    AssetSystem& assets, Render::IRenderDevice& device, Mesh3DBindingRegistryConfig config)
 {
     if (config.meshCapacity == 0 || config.meshCapacity > MaximumMesh3DBindingCapacity ||
-        config.materialCapacity == 0 || config.materialCapacity > MaximumMesh3DBindingCapacity)
+        config.materialCapacity == 0 || config.materialCapacity > MaximumMesh3DBindingCapacity ||
+        config.textureCapacity == 0 || config.textureCapacity > MaximumMesh3DTextureCapacity)
     {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "Mesh3DBindingRegistry capacities must be in [1, 4096]");
+        return Core::failure(
+            AssetErrorCode::InvalidCatalogConfig,
+            "Mesh3DBindingRegistry capacities are outside their supported ranges");
     }
-    auto* memoryResource = config.memoryResource != nullptr ? config.memoryResource : std::pmr::get_default_resource();
+    std::pmr::memory_resource* memoryResource =
+        config.memoryResource != nullptr ? config.memoryResource : std::pmr::get_default_resource();
     try
     {
         std::pmr::vector<MeshEntry> meshEntries{memoryResource};
         std::pmr::vector<MaterialEntry> materialEntries{memoryResource};
+        std::pmr::vector<TextureEntry> textureEntries{memoryResource};
         meshEntries.resize(config.meshCapacity);
         materialEntries.resize(config.materialCapacity);
-        return Mesh3DBindingRegistry{store, device, std::move(meshEntries), std::move(materialEntries),
-                                     config.meshCapacity, config.materialCapacity};
+        textureEntries.resize(config.textureCapacity);
+        return Mesh3DBindingRegistry{
+            assets,
+            device,
+            std::move(meshEntries),
+            std::move(materialEntries),
+            std::move(textureEntries),
+            config.meshCapacity,
+            config.materialCapacity,
+            config.textureCapacity,
+        };
     }
     catch (const std::bad_alloc&)
     {
@@ -84,16 +119,19 @@ Core::Result<Mesh3DBindingRegistry> Mesh3DBindingRegistry::Create(
 
 Mesh3DBindingRegistry::operator bool() const noexcept
 {
-    return m_store != nullptr && m_device != nullptr && m_meshCapacity != 0 && m_materialCapacity != 0;
+    return m_assets != nullptr && m_store != nullptr && m_device != nullptr &&
+           m_meshCapacity != 0 && m_materialCapacity != 0 && m_textureCapacity != 0;
 }
 
 Core::usize Mesh3DBindingRegistry::meshCapacity() const noexcept { return m_meshCapacity; }
 Core::usize Mesh3DBindingRegistry::materialCapacity() const noexcept { return m_materialCapacity; }
+Core::usize Mesh3DBindingRegistry::textureCapacity() const noexcept { return m_textureCapacity; }
 Core::usize Mesh3DBindingRegistry::meshBindingCount() const noexcept { return m_meshBindingCount; }
 Core::usize Mesh3DBindingRegistry::materialBindingCount() const noexcept { return m_materialBindingCount; }
+Core::usize Mesh3DBindingRegistry::textureOwnerCount() const noexcept { return m_textureOwnerCount; }
 
 Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBinding(
-    AssetHandle meshAsset, Render::GpuMeshId gpuMesh) noexcept
+    AssetHandle meshAsset, Render::GpuMeshId& gpuMesh) noexcept
 {
     if (!isOwnerThread())
     {
@@ -103,7 +141,7 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBinding(
     if (!meshAsset || m_store->assetKind(meshAsset) != AssetFormat::AssetKind::StaticMesh)
     {
         return Core::failure(AssetErrorCode::InvalidHandle,
-                             "Mesh3DBindingRegistry requires a StaticMesh handle from its AssetStore");
+                             "Mesh3DBindingRegistry requires a StaticMesh handle from its AssetSystem");
     }
     if (!hasRenderableCpuPayload(*m_store, meshAsset) || m_store->tryGet(meshAsset) == nullptr)
     {
@@ -113,17 +151,14 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBinding(
     if (!gpuMesh)
     {
         return Core::failure(Render::RenderErrorCode::InvalidMeshUpload,
-                             "Mesh3DBindingRegistry requires a live GPU mesh");
+                             "Mesh3DBindingRegistry requires a live GPU mesh owner");
     }
-    if (MeshEntry* exact = findMeshExact(meshAsset); exact != nullptr)
+    if (findMeshExact(meshAsset) != nullptr)
     {
-        if (exact->gpuMesh == gpuMesh)
-        {
-            return exact->bindingKey;
-        }
         return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
-                             "StaticMesh handle is already registered with another GPU mesh");
+                             "StaticMesh handle already owns a Mesh3D binding");
     }
+
     const Core::AssetId assetId = m_store->assetId(meshAsset);
     if (!assetId)
     {
@@ -132,7 +167,12 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBinding(
     if (findMeshByAssetId(assetId) != nullptr)
     {
         return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
-                             "StaticMesh AssetId already has another registered handle");
+                             "StaticMesh AssetId already has another owned binding");
+    }
+    if (findMeshByGpu(gpuMesh) != nullptr)
+    {
+        return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
+                             "GPU mesh already belongs to another Mesh3D binding");
     }
     if (m_meshBindingCount >= m_meshCapacity)
     {
@@ -145,38 +185,129 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBinding(
         return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
                              "Mesh3DBindingRegistry has no free mesh slot");
     }
+
+    auto lease = m_assets->acquire(meshAsset);
+    if (!lease)
+    {
+        return Core::failure(std::move(lease.error()).withContext(
+            "Mesh3DBindingRegistry::registerMeshBinding", "lease"));
+    }
     auto bindingKey = m_device->createMesh3DBinding(gpuMesh);
     if (!bindingKey)
     {
         return Core::failure(std::move(bindingKey.error()).withContext(
             "Mesh3DBindingRegistry::registerMeshBinding", "device"));
     }
-    *freeEntry = MeshEntry{.asset = meshAsset, .assetId = assetId, .gpuMesh = gpuMesh, .bindingKey = *bindingKey};
+
+    const Core::u32 candidateKey = *bindingKey;
+    *freeEntry = MeshEntry{
+        .asset = meshAsset,
+        .assetId = assetId,
+        .lease = std::move(*lease),
+        .gpuMesh = gpuMesh,
+        .bindingKey = candidateKey,
+    };
+    gpuMesh = {};
     ++m_meshBindingCount;
-    return *bindingKey;
+    return candidateKey;
+}
+
+Core::Status Mesh3DBindingRegistry::registerMaterialTexture(
+    AssetHandle textureAsset, Render::GpuTextureId& gpuTexture) noexcept
+{
+    if (!isOwnerThread())
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Mesh3DBindingRegistry texture register must run on its owner thread");
+    }
+    if (!textureAsset || m_store->assetKind(textureAsset) != AssetFormat::AssetKind::Texture2D)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "Mesh3DBindingRegistry requires a Texture2D handle from its AssetSystem");
+    }
+    if (!hasRenderableCpuPayload(*m_store, textureAsset) || m_store->tryGet(textureAsset) == nullptr)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "Mesh3DBindingRegistry Texture2D CPU payload is not ready");
+    }
+    if (!gpuTexture)
+    {
+        return Core::failure(Render::RenderErrorCode::InvalidTextureUpload,
+                             "Mesh3DBindingRegistry requires a live GPU texture owner");
+    }
+    if (findTextureExact(textureAsset) != nullptr)
+    {
+        return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
+                             "Texture2D handle already has an owned Material texture");
+    }
+
+    const Core::AssetId assetId = m_store->assetId(textureAsset);
+    if (!assetId)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "Texture2D handle has no AssetId");
+    }
+    if (findTextureByAssetId(assetId) != nullptr)
+    {
+        return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
+                             "Texture2D AssetId already has another owned Material texture");
+    }
+    if (findTextureByGpu(gpuTexture) != nullptr)
+    {
+        return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
+                             "GPU texture already belongs to another Material texture owner");
+    }
+    if (m_textureOwnerCount >= m_textureCapacity)
+    {
+        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
+                             "Mesh3DBindingRegistry has no free Material texture slot");
+    }
+    TextureEntry* freeEntry = findFreeTexture();
+    if (freeEntry == nullptr)
+    {
+        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
+                             "Mesh3DBindingRegistry has no free Material texture slot");
+    }
+
+    auto lease = m_assets->acquire(textureAsset);
+    if (!lease)
+    {
+        return Core::failure(std::move(lease.error()).withContext(
+            "Mesh3DBindingRegistry::registerMaterialTexture", "lease"));
+    }
+    if (auto status = m_device->validateTexture2D(gpuTexture); !status)
+    {
+        return Core::failure(std::move(status.error()).withContext(
+            "Mesh3DBindingRegistry::registerMaterialTexture", "device"));
+    }
+    *freeEntry = TextureEntry{
+        .asset = textureAsset,
+        .assetId = assetId,
+        .lease = std::move(*lease),
+        .gpuTexture = gpuTexture,
+    };
+    gpuTexture = {};
+    ++m_textureOwnerCount;
+    return Core::success();
 }
 
 Core::Result<Core::u32> Mesh3DBindingRegistry::registerMaterialBinding(
-    AssetHandle materialAsset, Mesh3DMaterialGpuBindingDesc gpuBinding) noexcept
+    AssetHandle materialAsset) noexcept
 {
     if (!isOwnerThread())
     {
         return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
                              "Mesh3DBindingRegistry material register must run on its owner thread");
     }
-    auto renderBinding = validateMaterialBinding(materialAsset, gpuBinding);
-    if (!renderBinding)
+    if (findMaterialExact(materialAsset) != nullptr)
     {
-        return Core::failure(std::move(renderBinding.error()));
-    }
-    if (MaterialEntry* exact = findMaterialExact(materialAsset); exact != nullptr)
-    {
-        if (exact->gpuBinding == gpuBinding)
-        {
-            return exact->bindingKey;
-        }
         return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
-                             "Material handle is already registered with another GPU binding");
+                             "Material handle already owns a Mesh3D binding");
+    }
+
+    auto validated = validateMaterialBinding(materialAsset);
+    if (!validated)
+    {
+        return Core::failure(std::move(validated.error()));
     }
     const Core::AssetId assetId = m_store->assetId(materialAsset);
     if (!assetId)
@@ -186,7 +317,7 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMaterialBinding(
     if (findMaterialByAssetId(assetId) != nullptr)
     {
         return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
-                             "Material AssetId already has another registered handle");
+                             "Material AssetId already has another owned binding");
     }
     if (m_materialBindingCount >= m_materialCapacity)
     {
@@ -199,80 +330,301 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMaterialBinding(
         return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
                              "Mesh3DBindingRegistry has no free material slot");
     }
-    auto bindingKey = m_device->createMesh3DMaterialBinding(*renderBinding);
+
+    auto lease = m_assets->acquire(materialAsset);
+    if (!lease)
+    {
+        return Core::failure(std::move(lease.error()).withContext(
+            "Mesh3DBindingRegistry::registerMaterialBinding", "lease"));
+    }
+    auto bindingKey = m_device->createMesh3DMaterialBinding(validated->renderBinding);
     if (!bindingKey)
     {
         return Core::failure(std::move(bindingKey.error()).withContext(
             "Mesh3DBindingRegistry::registerMaterialBinding", "device"));
     }
-    *freeEntry = MaterialEntry{.asset = materialAsset, .assetId = assetId,
-                               .gpuBinding = gpuBinding, .bindingKey = *bindingKey};
+
+    *freeEntry = MaterialEntry{
+        .asset = materialAsset,
+        .assetId = assetId,
+        .lease = std::move(*lease),
+        .textureIndices = validated->textureIndices,
+        .textureCount = validated->textureCount,
+        .bindingKey = *bindingKey,
+    };
+    for (Core::u32 roleIndex = 0; roleIndex < validated->textureCount; ++roleIndex)
+    {
+        TextureEntry& texture = m_textureEntries[validated->textureIndices[roleIndex]];
+        if (texture.materialReferenceCount == (std::numeric_limits<Core::u32>::max)())
+        {
+            std::terminate();
+        }
+        ++texture.materialReferenceCount;
+    }
     ++m_materialBindingCount;
     return *bindingKey;
 }
 
-Core::Status Mesh3DBindingRegistry::unbindMeshBinding(AssetHandle meshAsset) noexcept
+bool Mesh3DBindingRegistry::hasMaterialTexture(AssetHandle textureAsset) const noexcept
+{
+    if (!isOwnerThread())
+    {
+        return false;
+    }
+    const TextureEntry* entry = findTextureExact(textureAsset);
+    return entry != nullptr && isLiveTextureEntry(*entry);
+}
+
+Core::Status Mesh3DBindingRegistry::retireMeshBinding(AssetHandle meshAsset) noexcept
 {
     if (!isOwnerThread())
     {
         return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
-                             "Mesh3DBindingRegistry mesh unbind must run on its owner thread");
+                             "Mesh3DBindingRegistry mesh retirement must run on its owner thread");
     }
     MeshEntry* entry = findMeshExact(meshAsset);
     if (entry == nullptr)
     {
-        return Core::failure(AssetErrorCode::Mesh3DBindingNotFound, "StaticMesh handle has no Mesh3D binding");
+        return Core::failure(AssetErrorCode::Mesh3DBindingNotFound,
+                             "StaticMesh handle has no owned Mesh3D binding");
     }
-    if (auto status = m_device->setMesh3DBinding(entry->bindingKey, {}); !status)
+    if (entry->frameBorrowCount != 0)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "Mesh3D geometry binding is still borrowed by an active frame resource");
+    }
+    if (auto status = m_assets->retireStaticMesh(*m_device, entry->lease, entry->gpuMesh); !status)
     {
         return Core::failure(std::move(status.error()).withContext(
-            "Mesh3DBindingRegistry::unbindMeshBinding", "device"));
+            "Mesh3DBindingRegistry::retireMeshBinding", "assets"));
     }
     *entry = MeshEntry{};
     --m_meshBindingCount;
     return Core::success();
 }
 
-Core::Status Mesh3DBindingRegistry::unbindMaterialBinding(AssetHandle materialAsset) noexcept
+Core::Status Mesh3DBindingRegistry::retireMaterialBinding(AssetHandle materialAsset) noexcept
 {
     if (!isOwnerThread())
     {
         return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
-                             "Mesh3DBindingRegistry material unbind must run on its owner thread");
+                             "Mesh3DBindingRegistry material retirement must run on its owner thread");
     }
     MaterialEntry* entry = findMaterialExact(materialAsset);
     if (entry == nullptr)
     {
-        return Core::failure(AssetErrorCode::Mesh3DBindingNotFound, "Material handle has no Mesh3D binding");
+        return Core::failure(AssetErrorCode::Mesh3DBindingNotFound,
+                             "Material handle has no owned Mesh3D binding");
+    }
+    if (entry->frameBorrowCount != 0)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "Mesh3D material binding is still borrowed by an active frame resource");
     }
     if (auto status = m_device->clearMesh3DMaterialBinding(entry->bindingKey); !status)
     {
         return Core::failure(std::move(status.error()).withContext(
-            "Mesh3DBindingRegistry::unbindMaterialBinding", "device"));
+            "Mesh3DBindingRegistry::retireMaterialBinding", "device"));
+    }
+    if (auto status = m_assets->unload(entry->asset); !status)
+    {
+        // The retained exact lease makes unload infallible after the device
+        // binding has been cleared. Continuing would strand a split owner.
+        std::terminate();
+    }
+    for (Core::u32 roleIndex = 0; roleIndex < entry->textureCount; ++roleIndex)
+    {
+        TextureEntry& texture = m_textureEntries[entry->textureIndices[roleIndex]];
+        if (texture.materialReferenceCount == 0)
+        {
+            std::terminate();
+        }
+        --texture.materialReferenceCount;
     }
     *entry = MaterialEntry{};
     --m_materialBindingCount;
     return Core::success();
 }
 
-Core::u32 Mesh3DBindingRegistry::resolveMesh(AssetHandle meshAsset) const noexcept
+Core::Status Mesh3DBindingRegistry::retireMaterialTexture(AssetHandle textureAsset) noexcept
 {
     if (!isOwnerThread())
     {
-        return 0;
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Mesh3DBindingRegistry texture retirement must run on its owner thread");
     }
-    const MeshEntry* entry = findMeshExact(meshAsset);
-    return entry == nullptr || !isLiveMeshEntry(*entry) ? 0U : entry->bindingKey;
+    TextureEntry* entry = findTextureExact(textureAsset);
+    if (entry == nullptr)
+    {
+        return Core::failure(AssetErrorCode::Mesh3DBindingNotFound,
+                             "Texture2D handle has no owned Material texture");
+    }
+    if (entry->materialReferenceCount != 0)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "Material texture is still referenced by a live Material binding");
+    }
+    if (auto status = m_assets->retireTexture2D(*m_device, entry->lease, entry->gpuTexture); !status)
+    {
+        return Core::failure(std::move(status.error()).withContext(
+            "Mesh3DBindingRegistry::retireMaterialTexture", "assets"));
+    }
+    *entry = TextureEntry{};
+    --m_textureOwnerCount;
+    return Core::success();
 }
 
-Core::u32 Mesh3DBindingRegistry::resolveMaterial(AssetHandle materialAsset) const noexcept
+Core::Status Mesh3DBindingRegistry::retireAllBindings() noexcept
 {
     if (!isOwnerThread())
     {
-        return 0;
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Mesh3DBindingRegistry retirement must run on its owner thread");
     }
-    const MaterialEntry* entry = findMaterialExact(materialAsset);
-    return entry == nullptr || !isLiveMaterialEntry(*entry) ? 0U : entry->bindingKey;
+    for (const MeshEntry& entry : m_meshEntries)
+    {
+        if (entry.bindingKey != 0 && entry.frameBorrowCount != 0)
+        {
+            return Core::failure(AssetErrorCode::AssetNotReady,
+                                 "Mesh3D geometry binding is still borrowed by an active frame resource");
+        }
+    }
+    for (const MaterialEntry& entry : m_materialEntries)
+    {
+        if (entry.bindingKey != 0 && entry.frameBorrowCount != 0)
+        {
+            return Core::failure(AssetErrorCode::AssetNotReady,
+                                 "Mesh3D material binding is still borrowed by an active frame resource");
+        }
+    }
+
+    for (MaterialEntry& entry : m_materialEntries)
+    {
+        if (entry.bindingKey == 0)
+        {
+            continue;
+        }
+        if (auto status = retireMaterialBinding(entry.asset); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "Mesh3DBindingRegistry::retireAllBindings", "material"));
+        }
+    }
+    for (TextureEntry& entry : m_textureEntries)
+    {
+        if (!entry.gpuTexture)
+        {
+            continue;
+        }
+        if (auto status = retireMaterialTexture(entry.asset); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "Mesh3DBindingRegistry::retireAllBindings", "texture"));
+        }
+    }
+    for (MeshEntry& entry : m_meshEntries)
+    {
+        if (entry.bindingKey == 0)
+        {
+            continue;
+        }
+        if (auto status = retireMeshBinding(entry.asset); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "Mesh3DBindingRegistry::retireAllBindings", "mesh"));
+        }
+    }
+    return Core::success();
+}
+
+Core::Result<Render::FrameResourceRef> Mesh3DBindingRegistry::internMeshFrameResource(
+    AssetHandle meshAsset, Render::FrameResourceSink& sink) noexcept
+{
+    if (!isOwnerThread())
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Mesh3DBindingRegistry mesh intern must run on its owner thread");
+    }
+    MeshEntry* entry = findMeshExact(meshAsset);
+    if (entry == nullptr || !isLiveMeshEntry(*entry))
+    {
+        return Render::FrameResourceRef{};
+    }
+    if (entry->frameBorrowCount == (std::numeric_limits<Core::u32>::max)())
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "Mesh3D geometry binding cannot acquire another frame borrow");
+    }
+    ++entry->frameBorrowCount;
+    Render::FramePin pin{Render::FramePinKind::Custom, entry->bindingKey, entry,
+                         &Mesh3DBindingRegistry::releaseMeshFrameBorrow};
+    auto resource = sink.intern(
+        Render::FrameResourceDescriptor{
+            .kind = Render::FrameResourceKind::Mesh3DGeometry,
+            .deviceBindingKey = entry->bindingKey,
+        },
+        std::move(pin));
+    if (!resource)
+    {
+        return Core::failure(std::move(resource.error()).withContext(
+            "Mesh3DBindingRegistry::internMeshFrameResource", "sink"));
+    }
+    return *resource;
+}
+
+Core::Result<Render::FrameResourceRef> Mesh3DBindingRegistry::internMaterialFrameResource(
+    AssetHandle materialAsset, Render::FrameResourceSink& sink) noexcept
+{
+    if (!isOwnerThread())
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Mesh3DBindingRegistry material intern must run on its owner thread");
+    }
+    MaterialEntry* entry = findMaterialExact(materialAsset);
+    if (entry == nullptr || !isLiveMaterialEntry(*entry))
+    {
+        return Render::FrameResourceRef{};
+    }
+    if (entry->frameBorrowCount == (std::numeric_limits<Core::u32>::max)())
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "Mesh3D material binding cannot acquire another frame borrow");
+    }
+    ++entry->frameBorrowCount;
+    Render::FramePin pin{Render::FramePinKind::Custom, entry->bindingKey, entry,
+                         &Mesh3DBindingRegistry::releaseMaterialFrameBorrow};
+    auto resource = sink.intern(
+        Render::FrameResourceDescriptor{
+            .kind = Render::FrameResourceKind::Mesh3DMaterial,
+            .deviceBindingKey = entry->bindingKey,
+        },
+        std::move(pin));
+    if (!resource)
+    {
+        return Core::failure(std::move(resource.error()).withContext(
+            "Mesh3DBindingRegistry::internMaterialFrameResource", "sink"));
+    }
+    return *resource;
+}
+
+void Mesh3DBindingRegistry::releaseMeshFrameBorrow(void* userData) noexcept
+{
+    auto* entry = static_cast<MeshEntry*>(userData);
+    if (entry == nullptr || entry->frameBorrowCount == 0)
+    {
+        std::terminate();
+    }
+    --entry->frameBorrowCount;
+}
+
+void Mesh3DBindingRegistry::releaseMaterialFrameBorrow(void* userData) noexcept
+{
+    auto* entry = static_cast<MaterialEntry*>(userData);
+    if (entry == nullptr || entry->frameBorrowCount == 0)
+    {
+        std::terminate();
+    }
+    --entry->frameBorrowCount;
 }
 
 bool Mesh3DBindingRegistry::isOwnerThread() const noexcept
@@ -282,7 +634,7 @@ bool Mesh3DBindingRegistry::isOwnerThread() const noexcept
 
 bool Mesh3DBindingRegistry::isLiveMeshEntry(const MeshEntry& entry) const noexcept
 {
-    return entry.bindingKey != 0 && entry.gpuMesh &&
+    return entry.bindingKey != 0 && entry.lease && entry.gpuMesh &&
            m_store->assetKind(entry.asset) == AssetFormat::AssetKind::StaticMesh &&
            hasRenderableCpuPayload(*m_store, entry.asset) && m_store->tryGet(entry.asset) != nullptr &&
            m_store->assetId(entry.asset) == entry.assetId;
@@ -290,12 +642,30 @@ bool Mesh3DBindingRegistry::isLiveMeshEntry(const MeshEntry& entry) const noexce
 
 bool Mesh3DBindingRegistry::isLiveMaterialEntry(const MaterialEntry& entry) const noexcept
 {
-    return entry.bindingKey != 0 && m_store->assetKind(entry.asset) == AssetFormat::AssetKind::Material &&
+    if (entry.bindingKey == 0 || !entry.lease ||
+        m_store->assetKind(entry.asset) != AssetFormat::AssetKind::Material ||
+        !hasRenderableCpuPayload(*m_store, entry.asset) || m_store->tryGet(entry.asset) == nullptr ||
+        m_store->assetId(entry.asset) != entry.assetId)
+    {
+        return false;
+    }
+    for (Core::u32 roleIndex = 0; roleIndex < entry.textureCount; ++roleIndex)
+    {
+        if (entry.textureIndices[roleIndex] >= m_textureEntries.size() ||
+            !isLiveTextureEntry(m_textureEntries[entry.textureIndices[roleIndex]]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Mesh3DBindingRegistry::isLiveTextureEntry(const TextureEntry& entry) const noexcept
+{
+    return entry.lease && entry.gpuTexture &&
+           m_store->assetKind(entry.asset) == AssetFormat::AssetKind::Texture2D &&
            hasRenderableCpuPayload(*m_store, entry.asset) && m_store->tryGet(entry.asset) != nullptr &&
-           m_store->assetId(entry.asset) == entry.assetId &&
-           isLiveTextureBinding(*m_store, entry.gpuBinding.baseColor) &&
-           isLiveTextureBinding(*m_store, entry.gpuBinding.metallicRoughness) &&
-           isLiveTextureBinding(*m_store, entry.gpuBinding.normal);
+           m_store->assetId(entry.asset) == entry.assetId;
 }
 
 Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshExact(AssetHandle asset) noexcept
@@ -325,6 +695,16 @@ Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshByAssetId(Core:
     return nullptr;
 }
 
+const Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshByGpu(
+    Render::GpuMeshId gpuMesh) const noexcept
+{
+    for (const MeshEntry& entry : m_meshEntries)
+    {
+        if (entry.bindingKey != 0 && entry.gpuMesh == gpuMesh) return &entry;
+    }
+    return nullptr;
+}
+
 Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findFreeMesh() noexcept
 {
     for (MeshEntry& entry : m_meshEntries)
@@ -343,7 +723,8 @@ Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialExact(A
     return nullptr;
 }
 
-const Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialExact(AssetHandle asset) const noexcept
+const Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialExact(
+    AssetHandle asset) const noexcept
 {
     for (const MaterialEntry& entry : m_materialEntries)
     {
@@ -352,7 +733,8 @@ const Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialE
     return nullptr;
 }
 
-Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialByAssetId(Core::AssetId assetId) noexcept
+Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialByAssetId(
+    Core::AssetId assetId) noexcept
 {
     for (MaterialEntry& entry : m_materialEntries)
     {
@@ -370,13 +752,76 @@ Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findFreeMaterial() 
     return nullptr;
 }
 
-Core::Result<Render::Mesh3DMaterialBindingDesc> Mesh3DBindingRegistry::validateMaterialBinding(
-    AssetHandle materialAsset, const Mesh3DMaterialGpuBindingDesc& gpuBinding) const noexcept
+Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureExact(AssetHandle asset) noexcept
+{
+    for (TextureEntry& entry : m_textureEntries)
+    {
+        if (entry.gpuTexture && entry.asset == asset) return &entry;
+    }
+    return nullptr;
+}
+
+const Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureExact(
+    AssetHandle asset) const noexcept
+{
+    for (const TextureEntry& entry : m_textureEntries)
+    {
+        if (entry.gpuTexture && entry.asset == asset) return &entry;
+    }
+    return nullptr;
+}
+
+Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureByAssetId(
+    Core::AssetId assetId) noexcept
+{
+    for (TextureEntry& entry : m_textureEntries)
+    {
+        if (entry.gpuTexture && entry.assetId == assetId) return &entry;
+    }
+    return nullptr;
+}
+
+const Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureByAssetId(
+    Core::AssetId assetId) const noexcept
+{
+    for (const TextureEntry& entry : m_textureEntries)
+    {
+        if (entry.gpuTexture && entry.assetId == assetId) return &entry;
+    }
+    return nullptr;
+}
+
+const Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureByGpu(
+    Render::GpuTextureId gpuTexture) const noexcept
+{
+    for (const TextureEntry& entry : m_textureEntries)
+    {
+        if (entry.gpuTexture == gpuTexture) return &entry;
+    }
+    return nullptr;
+}
+
+Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findFreeTexture() noexcept
+{
+    for (TextureEntry& entry : m_textureEntries)
+    {
+        if (!entry.gpuTexture) return &entry;
+    }
+    return nullptr;
+}
+
+Core::u32 Mesh3DBindingRegistry::textureIndex(const TextureEntry& entry) const noexcept
+{
+    return static_cast<Core::u32>(&entry - m_textureEntries.data());
+}
+
+Core::Result<Mesh3DBindingRegistry::ValidatedMaterialBinding>
+Mesh3DBindingRegistry::validateMaterialBinding(AssetHandle materialAsset) const noexcept
 {
     if (!materialAsset || m_store->assetKind(materialAsset) != AssetFormat::AssetKind::Material)
     {
         return Core::failure(AssetErrorCode::InvalidHandle,
-                             "Mesh3DBindingRegistry requires a Material handle from its AssetStore");
+                             "Mesh3DBindingRegistry requires a Material handle from its AssetSystem");
     }
     if (!hasRenderableCpuPayload(*m_store, materialAsset))
     {
@@ -397,12 +842,13 @@ Core::Result<Render::Mesh3DMaterialBindingDesc> Mesh3DBindingRegistry::validateM
     }
 
     std::array<Core::AssetId, 3> dependencyIds{};
-    Core::usize dependencyCount = 0;
+    Core::u32 dependencyCount = 0;
     for (Core::u32 index = 0; index < file->header().dependencyCount; ++index)
     {
         const auto dependency = file->dependency(index);
         if (!dependency || dependency->expectedKind != AssetFormat::AssetKind::Texture2D ||
-            dependency->flags != AssetFormat::DependencyFlags::Required || dependencyCount >= dependencyIds.size())
+            dependency->flags != AssetFormat::DependencyFlags::Required ||
+            dependencyCount >= dependencyIds.size())
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "Material dependencies must be at most three required Texture2D assets");
@@ -410,67 +856,72 @@ Core::Result<Render::Mesh3DMaterialBindingDesc> Mesh3DBindingRegistry::validateM
         dependencyIds[dependencyCount++] = dependency->assetId;
     }
 
-    const Core::usize expectedDependencyCount =
-        static_cast<Core::usize>(material->hasBaseColorTexture) +
-        static_cast<Core::usize>(material->hasMetallicRoughnessTexture) +
-        static_cast<Core::usize>(material->hasNormalTexture);
+    const Core::u32 expectedDependencyCount =
+        static_cast<Core::u32>(material->hasBaseColorTexture) +
+        static_cast<Core::u32>(material->hasMetallicRoughnessTexture) +
+        static_cast<Core::u32>(material->hasNormalTexture);
     if (dependencyCount != expectedDependencyCount)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "Material texture flags and cooked dependencies do not match");
     }
 
-    Core::usize dependencyIndex = 0;
-    const auto validateRole = [&](bool required, const Mesh3DMaterialTextureBinding& binding,
-                                  const char* role) -> Core::Status {
+    ValidatedMaterialBinding validated{
+        .renderBinding = Render::Mesh3DMaterialBindingDesc{
+            .metallicFactor = material->metallicFactor,
+            .roughnessFactor = material->roughnessFactor,
+        },
+    };
+    Core::u32 dependencyIndex = 0;
+    const auto resolveRole = [&](bool required, Render::GpuTextureId& gpuTexture,
+                                 const char* role) -> Core::Status {
         if (!required)
         {
-            if (binding.textureAsset || binding.gpuTexture)
-            {
-                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                     "Material GPU binding supplies an undeclared texture role");
-            }
             return Core::success();
         }
-        if (!binding.textureAsset || !binding.gpuTexture ||
-            m_store->assetKind(binding.textureAsset) != AssetFormat::AssetKind::Texture2D)
+        const TextureEntry* texture = findTextureByAssetId(dependencyIds[dependencyIndex++]);
+        if (texture == nullptr || !isLiveTextureEntry(*texture))
         {
-            auto failure = Core::failure(AssetErrorCode::InvalidHandle,
-                                         "Material texture role requires a live Texture2D handle and GPU texture");
+            auto failure = Core::failure(
+                AssetErrorCode::AssetNotReady,
+                "Material texture dependency has no live shared GPU owner");
             return Core::failure(std::move(failure.error()).withContext(
                 "Mesh3DBindingRegistry::registerMaterialBinding", role));
         }
-        if (!hasRenderableCpuPayload(*m_store, binding.textureAsset) ||
-            m_store->tryGet(binding.textureAsset) == nullptr)
+        const Core::u32 index = textureIndex(*texture);
+        for (Core::u32 prior = 0; prior < validated.textureCount; ++prior)
         {
-            return Core::failure(AssetErrorCode::AssetNotReady,
-                                 "Material texture role CPU payload is not ready");
+            if (validated.textureIndices[prior] == index)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "Material texture roles must use distinct cooked dependencies");
+            }
         }
-        const Core::AssetId roleId = m_store->assetId(binding.textureAsset);
-        const Core::AssetId expectedRoleId = dependencyIds[dependencyIndex++];
-        if (!roleId || roleId != expectedRoleId)
-        {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "Material texture role does not match its cooked required dependency");
-        }
+        validated.textureIndices[validated.textureCount++] = index;
+        gpuTexture = texture->gpuTexture;
         return Core::success();
     };
 
-    if (auto status = validateRole(material->hasBaseColorTexture, gpuBinding.baseColor, "baseColor"); !status)
+    if (auto status = resolveRole(material->hasBaseColorTexture,
+                                  validated.renderBinding.baseColorTexture, "baseColor");
+        !status)
+    {
         return Core::failure(std::move(status.error()));
-    if (auto status = validateRole(material->hasMetallicRoughnessTexture, gpuBinding.metallicRoughness,
-                                   "metallicRoughness"); !status)
+    }
+    if (auto status = resolveRole(material->hasMetallicRoughnessTexture,
+                                  validated.renderBinding.metallicRoughnessTexture,
+                                  "metallicRoughness");
+        !status)
+    {
         return Core::failure(std::move(status.error()));
-    if (auto status = validateRole(material->hasNormalTexture, gpuBinding.normal, "normal"); !status)
+    }
+    if (auto status = resolveRole(material->hasNormalTexture,
+                                  validated.renderBinding.normalTexture, "normal");
+        !status)
+    {
         return Core::failure(std::move(status.error()));
-
-    return Render::Mesh3DMaterialBindingDesc{
-        .baseColorTexture = gpuBinding.baseColor.gpuTexture,
-        .metallicRoughnessTexture = gpuBinding.metallicRoughness.gpuTexture,
-        .normalTexture = gpuBinding.normal.gpuTexture,
-        .metallicFactor = material->metallicFactor,
-        .roughnessFactor = material->roughnessFactor,
-    };
+    }
+    return validated;
 }
 
 } // namespace Tina::Asset

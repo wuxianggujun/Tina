@@ -92,8 +92,9 @@ struct TestFrameResourceLifetime final {
     return testFramePacket().resourceSink();
 }
 
-[[nodiscard]] Core::Result<Render::FrameResourceRef> internTestTexture(
+[[nodiscard]] Core::Result<Render::FrameResourceRef> internTestResource(
     Render::FrameResourceSink& sink,
+    Render::FrameResourceKind kind,
     u32 bindingKey) noexcept
 {
     TestFrameResourceLifetime& lifetime = testFrameResourceLifetime();
@@ -112,10 +113,26 @@ struct TestFrameResourceLifetime final {
     };
     return sink.intern(
         Render::FrameResourceDescriptor{
-            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .kind = kind,
             .deviceBindingKey = bindingKey,
         },
         std::move(pin));
+}
+
+[[nodiscard]] Core::Result<Render::FrameResourceRef> internTestTexture(
+    Render::FrameResourceSink& sink,
+    u32 bindingKey) noexcept
+{
+    return internTestResource(sink, Render::FrameResourceKind::Sprite2DTexture, bindingKey);
+}
+
+[[nodiscard]] u64 frameResourceBindingKey(
+    Render::FrameResourceRef resource,
+    Render::FrameResourceKind kind) noexcept
+{
+    const Render::FrameResourceDescriptor* descriptor =
+        testFramePacket().resourceTableView().resolve(resource, kind);
+    return descriptor == nullptr ? 0 : descriptor->deviceBindingKey;
 }
 
 [[nodiscard]] u64 textureBindingKey(Render::FrameResourceRef texture) noexcept
@@ -707,14 +724,14 @@ struct TestMeshBindings final {
         u32 key = 0;
     };
 
-    [[nodiscard]] Asset::AssetBindingResolver meshResolver() noexcept
+    [[nodiscard]] Asset::AssetFrameResourceResolver meshResolver() noexcept
     {
-        return Asset::AssetBindingResolver{.userData = this, .resolve = &resolveMesh};
+        return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolveMesh};
     }
 
-    [[nodiscard]] Asset::AssetBindingResolver materialResolver() noexcept
+    [[nodiscard]] Asset::AssetFrameResourceResolver materialResolver() noexcept
     {
-        return Asset::AssetBindingResolver{.userData = this, .resolve = &resolveMaterial};
+        return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolveMaterial};
     }
 
     void bind(Asset::AssetHandle asset, u32 key) noexcept
@@ -722,35 +739,47 @@ struct TestMeshBindings final {
         bindings[bindingCount++] = Binding{.asset = asset, .key = key};
     }
 
-    [[nodiscard]] static u32 resolveMesh(void* userData, Asset::AssetHandle asset) noexcept
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolveMesh(
+        void* userData,
+        Asset::AssetHandle asset,
+        Render::FrameResourceSink& sink) noexcept
     {
         auto& self = *static_cast<TestMeshBindings*>(userData);
         ++self.meshResolveCalls;
-        return self.resolveExpected(asset, AssetFormat::AssetKind::StaticMesh);
+        return self.resolveExpected(
+            asset, AssetFormat::AssetKind::StaticMesh,
+            Render::FrameResourceKind::Mesh3DGeometry, sink);
     }
 
-    [[nodiscard]] static u32 resolveMaterial(void* userData, Asset::AssetHandle asset) noexcept
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolveMaterial(
+        void* userData,
+        Asset::AssetHandle asset,
+        Render::FrameResourceSink& sink) noexcept
     {
         auto& self = *static_cast<TestMeshBindings*>(userData);
         ++self.materialResolveCalls;
-        return self.resolveExpected(asset, AssetFormat::AssetKind::Material);
+        return self.resolveExpected(
+            asset, AssetFormat::AssetKind::Material,
+            Render::FrameResourceKind::Mesh3DMaterial, sink);
     }
 
-    [[nodiscard]] u32 resolveExpected(
+    [[nodiscard]] Core::Result<Render::FrameResourceRef> resolveExpected(
         Asset::AssetHandle asset,
-        AssetFormat::AssetKind expectedKind) const noexcept
+        AssetFormat::AssetKind expectedKind,
+        Render::FrameResourceKind resourceKind,
+        Render::FrameResourceSink& sink) const noexcept
     {
         if (store == nullptr || !asset
             || store->state(asset) == Asset::AssetLogicalState::Unloaded
             || store->assetKind(asset) != expectedKind) {
-            return 0;
+            return Render::FrameResourceRef{};
         }
         for (usize index = 0; index < bindingCount; ++index) {
             if (bindings[index].asset == asset) {
-                return bindings[index].key;
+                return internTestResource(sink, resourceKind, bindings[index].key);
             }
         }
-        return 0;
+        return Render::FrameResourceRef{};
     }
 
     Asset::AssetStore* store = nullptr;
@@ -880,8 +909,12 @@ TEST_F(SceneMeshAssetTest, ExtractsPerspectiveCameraAndResolvedMeshIntoRenderSce
     EXPECT_FLOAT_EQ(view->perspectiveCamera()->verticalFovDegrees, 60.0F);
 
     ASSERT_EQ(view->meshes3D().size(), 1U);
-    EXPECT_EQ(view->meshes3D()[0].meshKey, 7U);
-    EXPECT_EQ(view->meshes3D()[0].materialKey, 11U);
+    EXPECT_EQ(frameResourceBindingKey(
+                  view->meshes3D()[0].mesh, Render::FrameResourceKind::Mesh3DGeometry),
+              7U);
+    EXPECT_EQ(frameResourceBindingKey(
+                  view->meshes3D()[0].material, Render::FrameResourceKind::Mesh3DMaterial),
+              11U);
     EXPECT_EQ(bindings.meshResolveCalls, 1U);
     EXPECT_EQ(bindings.materialResolveCalls, 1U);
 }

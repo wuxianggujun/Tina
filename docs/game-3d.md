@@ -12,7 +12,7 @@ glTF。默认产品门禁使用仓库 **complete PBR fixture**
 
 Cooker 与产品 sample 支持一个 glTF 中多个 mesh（sample 槽位上限 128）：distinct Mesh/Material
 AssetId、registry 分配的独立 binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与
-产品侧 `setMesh3DMaterialTextureBinding` 已完成（ASSET-001）。Cooked Material v2 携带 metallic/
+产品 Material texture owner/binding 已完成（ASSET-001）。Cooked Material v2 携带 metallic/
 roughness factor 与可选 MR/normal Texture2D dependency。bgfx Opaque3D 在 submit 时采样 baseColor，
 并以 **experimental metallic-roughness hybrid** 着色：唯一 `setMesh3DLighting` 同步提交0..4个 directional
 lights + ambient；`setMesh3DMaterialFactors` 接 Cooked metallic/roughness；可选 MR/normal 贴图 bind。
@@ -92,12 +92,13 @@ source glTF/GLB
   -> CatalogCookRequest
   -> manifest.tmnft + Cooked StaticMesh/Material/Prefab
   -> typed Cooked views
-  -> AssetStore weak AssetHandle + RenderDevice mesh upload/key binding
+  -> AssetSystem weak AssetHandle/Lease + RenderDevice mesh/texture upload
+  -> Mesh3DBindingRegistry owns Mesh/Material/shared Texture bindings
   -> Prefab AssetId-to-AssetHandle resolver
   -> Scene::World
        PerspectiveCamera3D
        MeshRenderer3D
-  -> extraction AssetHandle-to-key resolver
+  -> extraction AssetHandle-to-FrameResourceRef resolver
   -> RenderScene cull/sort/batch
   -> bgfx Opaque3D + UI
 ```
@@ -131,8 +132,8 @@ Camera component。
 
 当前 `MeshRenderer3D` 保存 copyable weak mesh/material `AssetHandle`、`submeshIndex`、bounds、base color
 与可见性，不保存 backend key、Lease、Cooked payload 或 GPU owner。每次 extraction 分别借用 mesh/material
-resolver，把 live handle 解析为非零 backend-neutral key；hidden mesh 不解析，空/stale/cross-store/
-wrong-kind/unbound handle 或0结果统一 fail closed 为 `UnresolvedMesh`。
+resolver，把 live handle intern 为当前 packet 的 `Mesh3DGeometry`/`Mesh3DMaterial` ref；hidden mesh 不解析，
+空/stale/cross-store/wrong-kind/unbound handle 或空结果统一 fail closed 为 `UnresolvedMesh`。
 
 ## Prefab 与资源解析
 
@@ -149,20 +150,23 @@ Mesh/Material AssetId 转成 weak `AssetHandle`。任一步失败都会逆序销
 3. 完整校验 Manifest、ContentHash 与 typed payload；
 4. 加载 N 个 StaticMesh、N 个 Material、相关 Texture2D 和一个 Prefab（N≤128），发布到
    Resources-owned `AssetStore`；slot/Prefab/Scene 只保存 weak handle；
-5. 上传 mesh/texture，并向 State-owned `Mesh3DBindingRegistry` 事务注册 StaticMesh 与原子 Material bundle；
-   device-instance mesh/material allocator 都从2开始生成单调不复用 key，分别保留内置 key 1；
+5. 上传 mesh/texture，并向 State-owned `Mesh3DBindingRegistry` 事务移交 StaticMesh 与去重后的 Texture
+   GPU owner，再原子注册 Material bundle；device-instance mesh/material allocator 都从2开始生成单调不复用
+   key，分别保留内置 key 1；
 6. Prefab resolver 按 node AssetId 映射到对应 mesh/material handle 与 per-mesh bounds/color；每帧 Scene
-   resolver 再通过 registry 按 live handle、严格 AssetKind 与 texture dependency 映射当前 key；
-7. 实例化、extract、提交；退出时先销毁 World，再按显式 registered 状态逆序 unbind，成功后才销毁
-   GPU mesh/texture。unbind 失败保留 registry entry 与 GPU owner 供析构重试。
+   resolver 再通过 registry 按 live handle、严格 AssetKind 与 texture dependency intern 当前 frame ref；
+7. 实例化、extract、提交；退出时先销毁 World，再由 registry 按 Material→共享 Texture→Mesh 顺序 retirement。
+   active frame、backend 或 ledger 失败保留完整 Entry 供重试，Registry 析构前必须全空。
 
-当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding、material texture 绑定，以及 Opaque3D
-experimental MR submit 时按 materialKey **采样** baseColor/MR/normal，并一次提交3个 directional lights
+当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding、两个 Material 共享3个 Texture owner，以及
+Opaque3D experimental MR submit 时按 packet-local material ref 解析 binding 并**采样** baseColor/MR/normal，
+同时一次提交3个 directional lights
 着色（未 bind baseColor 用 1×1 白；未 bind MR 时默认 metallic=0/roughness=1；未 bind normal 时用几何法线）。
 `tina_sample_3d` 的 `Product3DResources` 拥有固定容量 `AssetStore`，Store 覆盖 State/World/extraction
-生命周期；sample 不在组件中保存 Lease、runtime generation bits 或 backend key。engine-provided、
-State-owned `Mesh3DBindingRegistry` 借用 Store/device/PMR，固定容量保存 Handle→key 记录；sample slot 只拥有
-GPU resource 与注册提交位。统一 `FrameResourceRef` 和库级 AssetSystem retirement 仍是后续边界。
+生命周期；sample 不在组件或 slot 中保存 Lease、runtime generation bits、backend key、GPU owner 或注册
+提交位。engine-provided、State-owned `Mesh3DBindingRegistry` 借用 AssetSystem/device/PMR，固定容量拥有
+Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 Texture Lease/GPU。首次 intern 的
+entry pin 覆盖 active packet，Mesh/Texture 通过 AssetSystem retirement ledger 关闭。
 
 ## 三类 3D 门禁
 
@@ -170,18 +174,20 @@ GPU resource 与注册提交位。统一 `FrameResourceRef` 和库级 AssetSyste
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetStore→weak Handle Prefab/Scene→Mesh3D registry→extract-time key resolve→bgfx；原子 material bundle + Opaque3D experimental MR；成熟 retained controls、虚拟化产品数据与事务换肤 | 统一 FrameResourceRef/retirement owner、完整 light system/IBL/shadow |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetSystem→weak Handle Prefab/Scene→Mesh3D registry→packet-local geometry/material ref→bgfx；Mesh/Material/共享 Texture 统一 owner、原子 material bundle + Opaque3D experimental MR、成熟 retained controls、虚拟化产品数据与事务换肤 | 完整 light system/IBL/shadow |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
 `sceneExtract`、`evidenceSchema=4`、mesh/material handle 发布数、`meshBindingsRegistered=2`、
 `materialBindingsRegistered=2`、`meshBindingsReleased=2`、`materialBindingsReleased=2`、
-`meshesDestroyed=2`、`texturesDestroyed=6`、`bindingRegistryReleased=true`、
-`meshAssetBindingResolverHits=600`、`materialAssetBindingResolverHits=600`、
+`texturesUploaded=3`、`meshesUploaded=2`、`meshRetirementsAccepted=2`、
+`textureRetirementsAccepted=3`、对应 retirement records 全部 `Released` 且 live=0、
+mesh/material/texture weak handle invalidation 数分别为2/2/3、`bindingRegistryReleased=true`、
+`meshFrameResourceResolverHits=600`、`materialFrameResourceResolverHits=600`、
 `lightingConfigured=true`、`directionalLightCount=3`、`uiPanelsCreated=7`、`uiLabelsCreated=13`、
 Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwitches=2`、
 `uiAutomatedThemeSteps=2`、`uiAutomatedCollectionSteps=2`、`uiTreeExpansionChanges=2`、
-`uiListFinalSelectedKey=2003`、`uiTreeFinalSelectedKey=4`、
+`uiListSelectionKey=2003`、`uiTreeSelectionKey=4`、
 `uiThemeFinalLight=false`、`uiInheritedChromeVerified=true`、`uiProgressFinal=100`、退出计数、资源归零信息、
 `pixelCaptureOk`、非零 capture 尺寸/字节数与 `pixelFingerprint`。同机 exact 视觉回归把首次 fingerprint
 传给 `--expect-pixel-fingerprint=<32 lowercase hex>`，并要求
@@ -198,9 +204,9 @@ Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwi
   贴图），不是完整 PBR；无 light component/culling、Shadow、transparent、IBL 或 post；
 - glTF Cooker 读取完整 `pbrMetallicRoughness` 与可选 `normalTexture`；外部相对 URI 强制 root
   containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；
-- Scene component 已保存 mesh/material weak `AssetHandle`；RenderScene/RenderDevice 仍消费 extraction 期由
-  `Mesh3DBindingRegistry` 解析的 backend-neutral key。packet-local `FrameResourceRef` table 基础设施已落地，
-  但 registry 尚未输出对应 ref；
+- Scene component 保存 mesh/material weak `AssetHandle`；RenderScene 只保存 packet-local geometry/material
+  `FrameResourceRef`，Null/bgfx 在任何提交副作用前验证 stale/cross-packet/wrong-kind/range。device binding
+  key 只存在于 registry/backend 私有实现；
 - Material v2 由 baseColor/MR/normal flags 和同顺序的 required Texture2D dependency stream 表达 role；writer
   要求 AssetId 严格递增且唯一，拒绝乱序或多个 role 共享同一 ID，registry 因而可精确拒绝 role swap；
 - EngineHost 已有 `RenderFramePacket` + FramePin + present-return CPU completion；它不代表 GPU 退役；

@@ -223,7 +223,7 @@ void hashUnsigned(u64& hash, Value value) noexcept
 
 [[nodiscard]] bool sameMeshBatch(const RenderMesh3DItem& left, const RenderMesh3DItem& right) noexcept
 {
-    return left.meshKey == right.meshKey && left.materialKey == right.materialKey &&
+    return left.mesh == right.mesh && left.material == right.material &&
            left.submeshIndex == right.submeshIndex && left.doubleSided == right.doubleSided;
 }
 
@@ -457,7 +457,7 @@ Core::Status RenderSceneBuilder::validateMesh3D(const RenderMesh3DInput& mesh) c
 {
     const RenderPose3DInput& pose = mesh.worldTransform.pose;
     const RenderBoundingSphereInput& bounds = mesh.localBounds;
-    if (mesh.meshKey == 0 || mesh.materialKey == 0 || mesh.stableEntityKey == 0 || !finite(pose.positionX) ||
+    if (!mesh.mesh.hasValue() || !mesh.material.hasValue() || mesh.stableEntityKey == 0 || !finite(pose.positionX) ||
         !finite(pose.positionY) || !finite(pose.positionZ) || !finite(pose.rotationX) ||
         !finite(pose.rotationY) || !finite(pose.rotationZ) || !finite(pose.rotationW) ||
         !finite(mesh.worldTransform.scaleX) || !finite(mesh.worldTransform.scaleY) ||
@@ -706,8 +706,8 @@ Core::Status RenderSceneBuilder::addMesh3D(const RenderMesh3DInput& mesh)
     }
 
     std::construct_at(&m_meshes3D[m_mesh3DCount], RenderMesh3DItem{
-        .meshKey = mesh.meshKey,
-        .materialKey = mesh.materialKey,
+        .mesh = mesh.mesh,
+        .material = mesh.material,
         .submeshIndex = mesh.submeshIndex,
         .stableEntityKey = mesh.stableEntityKey,
         .insertionOrder = m_mesh3DCount,
@@ -806,8 +806,8 @@ Core::Status RenderSceneBuilder::finalizeMesh3DBatches()
         std::construct_at(&m_mesh3DBatches[m_mesh3DBatchCount], RenderMesh3DBatch{
             .firstItem = firstItem,
             .itemCount = nextItem - firstItem,
-            .meshKey = item.meshKey,
-            .materialKey = item.materialKey,
+            .mesh = item.mesh,
+            .material = item.material,
             .submeshIndex = item.submeshIndex,
             .doubleSided = item.doubleSided,
         });
@@ -931,13 +931,13 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
 
     std::sort(m_meshes3D, m_meshes3D + m_mesh3DCount, [](const RenderMesh3DItem& left,
                                                          const RenderMesh3DItem& right) noexcept {
-        if (left.materialKey != right.materialKey)
+        if (left.material != right.material)
         {
-            return left.materialKey < right.materialKey;
+            return left.material < right.material;
         }
-        if (left.meshKey != right.meshKey)
+        if (left.mesh != right.mesh)
         {
-            return left.meshKey < right.meshKey;
+            return left.mesh < right.mesh;
         }
         if (left.submeshIndex != right.submeshIndex)
         {
@@ -980,8 +980,8 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
     u64 meshChecksum = FnvOffset;
     for (const RenderMesh3DItem& mesh : std::span<const RenderMesh3DItem>{m_meshes3D, m_mesh3DCount})
     {
-        hashUnsigned(meshChecksum, mesh.materialKey);
-        hashUnsigned(meshChecksum, mesh.meshKey);
+        hashUnsigned(meshChecksum, mesh.material.index());
+        hashUnsigned(meshChecksum, mesh.mesh.index());
         hashUnsigned(meshChecksum, mesh.submeshIndex);
         hashUnsigned(meshChecksum, mesh.depthBucket);
         hashUnsigned(meshChecksum, mesh.stableEntityKey);

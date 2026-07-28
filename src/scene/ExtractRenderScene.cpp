@@ -304,14 +304,20 @@ Core::Status extractRenderSceneFromWorld(
                 SceneErrorCode::UnresolvedMesh,
                 "Scene MeshRenderer3D has no resolvable mesh and material assets");
         }
-        const u32 meshKey = params.mesh3DBindingResolver(mesh->mesh);
-        if (meshKey == 0U) {
+        auto meshResource = params.mesh3DBindingResolver(mesh->mesh, frameResources);
+        if (!meshResource) {
+            return Core::failure(std::move(meshResource.error()));
+        }
+        if (!meshResource->hasValue()) {
             return Core::failure(
                 SceneErrorCode::UnresolvedMesh,
                 "Scene MeshRenderer3D mesh asset has no render binding");
         }
-        const u32 materialKey = params.material3DBindingResolver(mesh->material);
-        if (materialKey == 0U) {
+        auto materialResource = params.material3DBindingResolver(mesh->material, frameResources);
+        if (!materialResource) {
+            return Core::failure(std::move(materialResource.error()));
+        }
+        if (!materialResource->hasValue()) {
             return Core::failure(
                 SceneErrorCode::UnresolvedMesh,
                 "Scene MeshRenderer3D material asset has no render binding");
@@ -324,8 +330,8 @@ Core::Status extractRenderSceneFromWorld(
         }
 
         const Render::RenderMesh3DInput input{
-            .meshKey = meshKey,
-            .materialKey = materialKey,
+            .mesh = *meshResource,
+            .material = *materialResource,
             .submeshIndex = mesh->submeshIndex,
             .stableEntityKey = stableEntityKey(entity),
             .worldTransform =

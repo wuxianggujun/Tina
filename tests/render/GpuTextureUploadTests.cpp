@@ -20,7 +20,9 @@ void countPinRelease(void* userData) noexcept
 TEST(NullRenderDeviceTextureTest, CreateBindDestroyLifecycle)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    auto foreignDevice = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
+    ASSERT_TRUE(foreignDevice.has_value());
 
     std::array<std::byte, 4> pixel{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
     auto texture = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
@@ -29,7 +31,26 @@ TEST(NullRenderDeviceTextureTest, CreateBindDestroyLifecycle)
         .rgba8Pixels = pixel,
     });
     ASSERT_TRUE(texture.has_value()) << texture.error().message;
+    auto foreignTexture = (*foreignDevice)->createTexture2DRgba8(Render::Texture2DUploadDesc{
+        .width = 1,
+        .height = 1,
+        .rgba8Pixels = pixel,
+    });
+    ASSERT_TRUE(foreignTexture.has_value()) << foreignTexture.error().message;
+    EXPECT_EQ(texture->index, foreignTexture->index);
+    EXPECT_EQ(texture->generation, foreignTexture->generation);
+    EXPECT_NE(texture->owner, foreignTexture->owner);
     EXPECT_EQ((*device)->statistics().liveResources, 1U);
+
+    auto foreignValidation = (*device)->validateTexture2D(*foreignTexture);
+    ASSERT_FALSE(foreignValidation.has_value());
+    EXPECT_EQ(foreignValidation.error().code, Render::RenderErrorCode::TextureNotFound);
+    auto foreignBinding = (*device)->setSprite2DTextureBinding(1U, *foreignTexture);
+    ASSERT_FALSE(foreignBinding.has_value());
+    EXPECT_EQ(foreignBinding.error().code, Render::RenderErrorCode::TextureNotFound);
+    auto foreignDestroy = (*device)->destroyTexture2D(*foreignTexture);
+    ASSERT_FALSE(foreignDestroy.has_value());
+    EXPECT_EQ(foreignDestroy.error().code, Render::RenderErrorCode::TextureNotFound);
 
     ASSERT_TRUE((*device)->setSprite2DTextureBinding(1U, *texture).has_value());
     ASSERT_TRUE((*device)->setSprite2DTextureBinding(1U, {}).has_value());
@@ -39,6 +60,7 @@ TEST(NullRenderDeviceTextureTest, CreateBindDestroyLifecycle)
     auto stale = (*device)->destroyTexture2D(*texture);
     ASSERT_FALSE(stale.has_value());
     EXPECT_EQ(stale.error().code, Render::RenderErrorCode::TextureNotFound);
+    ASSERT_TRUE((*foreignDevice)->destroyTexture2D(*foreignTexture).has_value());
 }
 
 TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)

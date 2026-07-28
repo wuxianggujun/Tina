@@ -1,6 +1,9 @@
 #include "BgfxOpaque3DGeometry.hpp"
 
 #include <tina/core/error/Error.hpp>
+#include <tina/render/FramePin.hpp>
+#include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
 
 #include <gtest/gtest.h>
@@ -8,11 +11,51 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <type_traits>
 #include <utility>
 
 namespace Tina::Render::Bgfx {
 namespace {
+
+class TestFrameResources final {
+  public:
+    TestFrameResources()
+    {
+        EXPECT_TRUE(packet_.beginFrame(0).has_value());
+    }
+
+    [[nodiscard]] FrameResourceRef intern(FrameResourceKind kind, u64 bindingKey)
+    {
+        FramePin pin{
+            FramePinKind::Custom,
+            bindingKey,
+            &releaseCount_,
+            [](void* userData) noexcept {
+                ++(*static_cast<u32*>(userData));
+            },
+        };
+        auto result = packet_.intern(
+            FrameResourceDescriptor{.kind = kind, .deviceBindingKey = bindingKey},
+            std::move(pin));
+        EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+        return result ? *result : FrameResourceRef{};
+    }
+
+    [[nodiscard]] FrameResourceTableView view() const noexcept
+    {
+        return packet_.resourceTableView();
+    }
+
+    void abandon()
+    {
+        EXPECT_TRUE(packet_.abandon().has_value());
+    }
+
+  private:
+    u32 releaseCount_ = 0;
+    RenderFramePacket packet_{};
+};
 
 [[nodiscard]] RenderSceneBuilder makeBuilder()
 {
@@ -36,14 +79,15 @@ namespace {
     };
 }
 
-[[nodiscard]] RenderMesh3DInput mesh(u32 meshKey, u64 stableEntityKey, float x,
+[[nodiscard]] RenderMesh3DInput mesh(TestFrameResources& resources, u32 meshKey,
+                                     u64 stableEntityKey, float x,
                                      RenderLinearColor color = {},
                                      u32 materialKey = Opaque3DmaterialKey,
                                      u32 submeshIndex = Opaque3DFixtureSubmeshIndex) noexcept
 {
     return RenderMesh3DInput{
-        .meshKey = meshKey,
-        .materialKey = materialKey,
+        .mesh = resources.intern(FrameResourceKind::Mesh3DGeometry, meshKey),
+        .material = resources.intern(FrameResourceKind::Mesh3DMaterial, materialKey),
         .submeshIndex = submeshIndex,
         .stableEntityKey = stableEntityKey,
         .worldTransform = {
@@ -55,7 +99,8 @@ namespace {
 }
 
 [[nodiscard]] Core::Result<RenderSceneView>
-committedScene(RenderSceneBuilder& builder, u32 meshKey = Opaque3DmeshKey,
+committedScene(RenderSceneBuilder& builder, TestFrameResources& resources,
+               u32 meshKey = Opaque3DmeshKey,
                u32 materialKey = Opaque3DmaterialKey,
                u32 submeshIndex = Opaque3DFixtureSubmeshIndex)
 {
@@ -68,17 +113,43 @@ committedScene(RenderSceneBuilder& builder, u32 meshKey = Opaque3DmeshKey,
     {
         return Core::failure(std::move(status.error()));
     }
-    if (auto status = writer.addMesh3D(mesh(meshKey, 10, -1.0F,
+    if (auto status = writer.addMesh3D(mesh(resources, meshKey, 10, -1.0F,
                                             {.red = 0.25F, .green = 0.5F, .blue = 0.75F},
                                             materialKey, submeshIndex));
         !status)
     {
         return Core::failure(std::move(status.error()));
     }
-    if (auto status = writer.addMesh3D(mesh(meshKey, 20, 1.0F,
+    if (auto status = writer.addMesh3D(mesh(resources, meshKey, 20, 1.0F,
                                             {.red = 0.8F, .green = 0.2F, .blue = 0.1F},
                                             materialKey, submeshIndex));
         !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return builder.commit();
+}
+
+[[nodiscard]] Core::Result<RenderSceneView>
+committedSingleMeshScene(RenderSceneBuilder& builder,
+                         FrameResourceRef meshResource,
+                         FrameResourceRef materialResource)
+{
+    if (auto status = builder.beginFrame({.primarySurfaceAspectRatio = 16.0F / 9.0F}); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto writer = builder.writer();
+    if (auto status = writer.setPerspectiveCamera(camera()); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = writer.addMesh3D(RenderMesh3DInput{
+            .mesh = meshResource,
+            .material = materialResource,
+            .stableEntityKey = 1,
+            .localBounds = {.radius = 1.0F},
+        }); !status)
     {
         return Core::failure(std::move(status.error()));
     }
@@ -131,12 +202,13 @@ TEST(BgfxOpaque3DGeometryTest, InstanceDataLayoutMatchesFiveShaderVec4Attributes
 
 TEST(BgfxOpaque3DGeometryTest, EmptySceneNeedsNoInstancesOrBatches)
 {
+    TestFrameResources resources;
     RenderSceneBuilder builder = makeBuilder();
     ASSERT_TRUE(builder.beginFrame());
     auto scene = builder.commit();
     ASSERT_TRUE(scene.has_value());
 
-    auto requirements = checkedOpaque3DFrame(*scene);
+    auto requirements = checkedOpaque3DFrame(*scene, resources.view());
     ASSERT_TRUE(requirements.has_value());
     EXPECT_EQ(requirements->instanceCount, 0U);
     EXPECT_EQ(requirements->batchCount, 0U);
@@ -144,17 +216,18 @@ TEST(BgfxOpaque3DGeometryTest, EmptySceneNeedsNoInstancesOrBatches)
 
 TEST(BgfxOpaque3DGeometryTest, ValidFixtureWritesWorldTransformsAndColors)
 {
+    TestFrameResources resources;
     RenderSceneBuilder builder = makeBuilder();
-    auto sceneResult = committedScene(builder);
+    auto sceneResult = committedScene(builder, resources);
     ASSERT_TRUE(sceneResult.has_value());
     const RenderSceneView scene = *sceneResult;
-    auto requirements = checkedOpaque3DFrame(scene);
+    auto requirements = checkedOpaque3DFrame(scene, resources.view());
     ASSERT_TRUE(requirements.has_value());
     EXPECT_EQ(requirements->instanceCount, 2U);
     EXPECT_EQ(requirements->batchCount, 1U);
 
     std::array<BgfxOpaque3DInstanceData, 2> instances{};
-    auto written = writeOpaque3DInstanceData(scene, instances);
+    auto written = writeOpaque3DInstanceData(scene, resources.view(), instances);
     ASSERT_TRUE(written.has_value());
     EXPECT_EQ(written->instanceCount, 2U);
     EXPECT_EQ(written->batchCount, 1U);
@@ -168,57 +241,133 @@ TEST(BgfxOpaque3DGeometryTest, ValidFixtureWritesWorldTransformsAndColors)
               (std::array<float, 4>{0.8F, 0.2F, 0.1F, 1.0F}));
 }
 
-// Product path: non-fixture meshKey is valid at geometry validation; submit binds GPU mesh.
-// (meshKey=0 is rejected earlier by RenderSceneBuilder, not only here.)
-TEST(BgfxOpaque3DGeometryTest, AcceptsNonmeshKeyAtGeometryStage)
+TEST(BgfxOpaque3DGeometryTest, RejectsCrossPacketMeshResources)
 {
+    TestFrameResources firstResources;
+    TestFrameResources secondResources;
     RenderSceneBuilder builder = makeBuilder();
-    auto sceneResult = committedScene(builder, Opaque3DmeshKey + 1U);
+    auto scene = committedSingleMeshScene(
+        builder,
+        firstResources.intern(FrameResourceKind::Mesh3DGeometry, 11),
+        secondResources.intern(FrameResourceKind::Mesh3DMaterial, 22));
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+
+    auto requirements = checkedOpaque3DFrame(*scene, firstResources.view());
+    ASSERT_FALSE(requirements.has_value());
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
+}
+
+TEST(BgfxOpaque3DGeometryTest, RejectsWrongKindMeshResources)
+{
+    TestFrameResources resources;
+    RenderSceneBuilder builder = makeBuilder();
+    auto scene = committedSingleMeshScene(
+        builder,
+        resources.intern(FrameResourceKind::Mesh3DMaterial, 11),
+        resources.intern(FrameResourceKind::Mesh3DGeometry, 22));
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+
+    auto requirements = checkedOpaque3DFrame(*scene, resources.view());
+    ASSERT_FALSE(requirements.has_value());
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
+}
+
+TEST(BgfxOpaque3DGeometryTest, RejectsStaleMeshResources)
+{
+    TestFrameResources resources;
+    RenderSceneBuilder builder = makeBuilder();
+    auto scene = committedSingleMeshScene(
+        builder,
+        resources.intern(FrameResourceKind::Mesh3DGeometry, 11),
+        resources.intern(FrameResourceKind::Mesh3DMaterial, 22));
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+    const FrameResourceTableView staleResources = resources.view();
+    resources.abandon();
+
+    auto requirements = checkedOpaque3DFrame(*scene, staleResources);
+    ASSERT_FALSE(requirements.has_value());
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
+}
+
+TEST(BgfxOpaque3DGeometryTest, RejectsBindingKeyOutsideMesh3DDeviceRange)
+{
+    constexpr u64 OversizedBindingKey =
+        static_cast<u64>((std::numeric_limits<u32>::max)()) + 1U;
+
+    for (const bool oversizedGeometry : {false, true})
+    {
+        TestFrameResources resources;
+        RenderSceneBuilder builder = makeBuilder();
+        auto scene = committedSingleMeshScene(
+            builder,
+            resources.intern(FrameResourceKind::Mesh3DGeometry,
+                             oversizedGeometry ? OversizedBindingKey : 11U),
+            resources.intern(FrameResourceKind::Mesh3DMaterial,
+                             oversizedGeometry ? 22U : OversizedBindingKey));
+        ASSERT_TRUE(scene.has_value()) << scene.error().message;
+
+        auto status = validateOpaque3DFrameResources(*scene, resources.view());
+        ASSERT_FALSE(status.has_value());
+        EXPECT_EQ(status.error().code, RenderErrorCode::InvalidFrameResource);
+    }
+}
+
+// Product path: a non-fixture mesh binding is valid at geometry validation;
+// submit resolves the packet-local ref and binds the uploaded GPU mesh.
+TEST(BgfxOpaque3DGeometryTest, AcceptsNonFixtureMeshBindingAtGeometryStage)
+{
+    TestFrameResources resources;
+    RenderSceneBuilder builder = makeBuilder();
+    auto sceneResult = committedScene(builder, resources, Opaque3DmeshKey + 1U);
     ASSERT_TRUE(sceneResult.has_value());
     const RenderSceneView scene = *sceneResult;
-    auto requirements = checkedOpaque3DFrame(scene);
+    auto requirements = checkedOpaque3DFrame(scene, resources.view());
     ASSERT_TRUE(requirements.has_value()) << (requirements ? "" : requirements.error().message);
     EXPECT_EQ(requirements->instanceCount, 2U);
     EXPECT_EQ(requirements->batchCount, 1U);
 }
 
-// M11-E5: non-fixture materialKey is valid; texture binds via materialKey at submit.
-TEST(BgfxOpaque3DGeometryTest, AcceptsNonmaterialKeyAtGeometryStage)
+// M11-E5: a non-fixture material binding is valid; textures bind through its
+// resolved device binding key at submit.
+TEST(BgfxOpaque3DGeometryTest, AcceptsNonFixtureMaterialBindingAtGeometryStage)
 {
+    TestFrameResources resources;
     RenderSceneBuilder builder = makeBuilder();
-    auto sceneResult = committedScene(builder, Opaque3DmeshKey,
+    auto sceneResult = committedScene(builder, resources, Opaque3DmeshKey,
                                       Opaque3DmaterialKey + 1U);
     ASSERT_TRUE(sceneResult.has_value());
 
-    auto requirements = checkedOpaque3DFrame(*sceneResult);
+    auto requirements = checkedOpaque3DFrame(*sceneResult, resources.view());
     ASSERT_TRUE(requirements.has_value()) << (requirements ? "" : requirements.error().message);
     EXPECT_EQ(requirements->instanceCount, 2U);
 }
 
 TEST(BgfxOpaque3DGeometryTest, RejectsUnsupportedSubmeshIndexExplicitly)
 {
+    TestFrameResources resources;
     RenderSceneBuilder builder = makeBuilder();
-    auto sceneResult = committedScene(builder, Opaque3DmeshKey,
+    auto sceneResult = committedScene(builder, resources, Opaque3DmeshKey,
                                       Opaque3DmaterialKey,
                                       Opaque3DFixtureSubmeshIndex + 1U);
     ASSERT_TRUE(sceneResult.has_value());
 
-    auto requirements = checkedOpaque3DFrame(*sceneResult);
+    auto requirements = checkedOpaque3DFrame(*sceneResult, resources.view());
     ASSERT_FALSE(requirements.has_value());
     EXPECT_EQ(requirements.error().code, Core::CoreErrorCode::Unsupported);
 }
 
 TEST(BgfxOpaque3DGeometryTest, InsufficientOutputDoesNotPublishPartialInstanceData)
 {
+    TestFrameResources resources;
     RenderSceneBuilder builder = makeBuilder();
-    auto sceneResult = committedScene(builder);
+    auto sceneResult = committedScene(builder, resources);
     ASSERT_TRUE(sceneResult.has_value());
     const RenderSceneView scene = *sceneResult;
     std::array<BgfxOpaque3DInstanceData, 1> instances{};
     instances[0].baseColorFactor = {9.0F, 8.0F, 7.0F, 6.0F};
     const BgfxOpaque3DInstanceData before = instances[0];
 
-    auto result = writeOpaque3DInstanceData(scene, instances);
+    auto result = writeOpaque3DInstanceData(scene, resources.view(), instances);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, Core::CoreErrorCode::CapacityExceeded);
     EXPECT_EQ(instances[0].columnMajorWorldTransform, before.columnMajorWorldTransform);
