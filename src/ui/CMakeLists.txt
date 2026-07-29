@@ -48,6 +48,8 @@ add_library(tina_ui STATIC
     detail/UIImeCompositionState.cpp
     detail/UIPropertyNormalization.hpp
     detail/UIPropertyNormalization.cpp
+    detail/UIThemeBindingResolver.hpp
+    detail/UIThemeBindingResolver.cpp
     detail/UIRoutedPointerListenerRegistry.hpp
     detail/UIRoutedPointerListenerRegistry.cpp
     detail/UISliderChangeCallbackRegistry.hpp

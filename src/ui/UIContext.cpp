@@ -18,6 +18,7 @@
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UITextStorage.hpp"
+#include "detail/UIThemeBindingResolver.hpp"
 
 #include <algorithm>
 #include <array>
@@ -57,6 +58,17 @@ struct NormalizedCapacityConfig final {
 };
 
 using TextByteAllocation = Detail::UITextStorage::Allocation;
+using Detail::ThemeBindingBoxPaint;
+using Detail::ThemeBindingButtonPaint;
+using Detail::ThemeBindingCheckboxPaint;
+using Detail::ThemeBindingDropdownPaint;
+using Detail::ThemeBindingListViewPaint;
+using Detail::ThemeBindingProgressBarPaint;
+using Detail::ThemeBindingRadioButtonPaint;
+using Detail::ThemeBindingScrollViewPaint;
+using Detail::ThemeBindingSliderPaint;
+using Detail::ThemeBindingTextStyle;
+using Detail::ThemeBindingTreeViewPaint;
 
 struct WidgetTextState final {
     TextByteAllocation allocation{};
@@ -170,18 +182,6 @@ struct TreeViewItemState final {
     bool committedExpandable = false;
     bool committedExpanded = false;
 };
-
-inline constexpr u16 ThemeBindingBoxPaint = 1U << 0U;
-inline constexpr u16 ThemeBindingTextStyle = 1U << 1U;
-inline constexpr u16 ThemeBindingButtonPaint = 1U << 2U;
-inline constexpr u16 ThemeBindingCheckboxPaint = 1U << 3U;
-inline constexpr u16 ThemeBindingSliderPaint = 1U << 4U;
-inline constexpr u16 ThemeBindingProgressBarPaint = 1U << 5U;
-inline constexpr u16 ThemeBindingRadioButtonPaint = 1U << 6U;
-inline constexpr u16 ThemeBindingScrollViewPaint = 1U << 7U;
-inline constexpr u16 ThemeBindingDropdownPaint = 1U << 8U;
-inline constexpr u16 ThemeBindingListViewPaint = 1U << 9U;
-inline constexpr u16 ThemeBindingTreeViewPaint = 1U << 10U;
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -5444,46 +5444,22 @@ struct UIContext::Impl final {
         return false;
     }
 
-    [[nodiscard]] static constexpr u16 defaultThemeBindingsFor(UIWidgetKind kind) noexcept
+    [[nodiscard]] Detail::UIThemeNodeChrome themeChromeForNode(u32 index) const noexcept
     {
-        switch (kind)
-        {
-        case UIWidgetKind::Root:
-        case UIWidgetKind::Panel:
-            return 0;
-        case UIWidgetKind::Modal:
-            return ThemeBindingBoxPaint;
-        case UIWidgetKind::ScrollView:
-            return ThemeBindingScrollViewPaint;
-        case UIWidgetKind::ListView:
-            return ThemeBindingBoxPaint | ThemeBindingListViewPaint;
-        case UIWidgetKind::TreeView:
-            return ThemeBindingBoxPaint | ThemeBindingTreeViewPaint;
-        case UIWidgetKind::Popup:
-            return ThemeBindingBoxPaint;
-        case UIWidgetKind::Label:
-            return ThemeBindingTextStyle;
-        case UIWidgetKind::Button:
-            return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
-        case UIWidgetKind::Dropdown:
-            return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle |
-                   ThemeBindingDropdownPaint;
-        case UIWidgetKind::DropdownItem:
-        case UIWidgetKind::ListViewItem:
-        case UIWidgetKind::TreeViewItem:
-            return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
-        case UIWidgetKind::Checkbox:
-            return ThemeBindingBoxPaint | ThemeBindingCheckboxPaint;
-        case UIWidgetKind::Slider:
-            return ThemeBindingBoxPaint | ThemeBindingSliderPaint;
-        case UIWidgetKind::TextEdit:
-            return ThemeBindingBoxPaint | ThemeBindingTextStyle;
-        case UIWidgetKind::ProgressBar:
-            return ThemeBindingBoxPaint | ThemeBindingProgressBarPaint;
-        case UIWidgetKind::RadioButton:
-            return ThemeBindingRadioButtonPaint | ThemeBindingTextStyle;
-        }
-        return 0;
+        return Detail::UIThemeNodeChrome{
+            .bindings = themeBindingsByNodeIndex[index],
+            .boxPaint = boxPaintsByIndex[index],
+            .textStyle = textStatesByIndex[index].style,
+            .buttonPaint = buttonPaintsByNodeIndex[index],
+            .checkboxPaint = checkboxPaintsByNodeIndex[index],
+            .sliderPaint = sliderStatesByNodeIndex[index].paint,
+            .progressBarPaint = progressBarStatesByNodeIndex[index].paint,
+            .radioButtonPaint = radioButtonStatesByNodeIndex[index].paint,
+            .scrollViewPaint = scrollViewStatesByNodeIndex[index].paint,
+            .dropdownPaint = dropdownStatesByNodeIndex[index].paint,
+            .listViewPaint = listViewStatesByNodeIndex[index].paint,
+            .treeViewPaint = treeViewStatesByNodeIndex[index].paint,
+        };
     }
 
     void applyBoundProductChrome(u32 index, UIWidgetKind kind, const UITheme& theme) noexcept
@@ -5492,171 +5468,53 @@ struct UIContext::Impl final {
         {
             return;
         }
-        const u16 bindings = themeBindingsByNodeIndex[index];
-        switch (kind)
+        const Detail::UIThemeNodeChrome chrome =
+            Detail::resolveProductThemeChrome(kind, theme);
+        const u16 bindings = static_cast<u16>(themeBindingsByNodeIndex[index] &
+                                              chrome.bindings);
+        if (Detail::hasThemeBinding(bindings, ThemeBindingBoxPaint))
         {
-        case UIWidgetKind::Root:
-        case UIWidgetKind::Panel:
-            break;
-        case UIWidgetKind::Modal:
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] =
-                    makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 248), UIElevation::Low);
-            }
-            break;
-        case UIWidgetKind::ScrollView:
-            if ((bindings & ThemeBindingScrollViewPaint) != 0)
-            {
-                scrollViewStatesByNodeIndex[index].paint = makeScrollViewPaint(theme);
-            }
-            break;
-        case UIWidgetKind::ListView:
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
-            }
-            if ((bindings & ThemeBindingListViewPaint) != 0)
-            {
-                listViewStatesByNodeIndex[index].paint = makeListViewPaint(theme);
-            }
-            break;
-        case UIWidgetKind::TreeView:
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
-            }
-            if ((bindings & ThemeBindingTreeViewPaint) != 0)
-            {
-                treeViewStatesByNodeIndex[index].paint = makeTreeViewPaint(theme);
-            }
-            break;
-        case UIWidgetKind::Popup:
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = makePopupBoxPaint(theme);
-            }
-            break;
-        case UIWidgetKind::Label:
-            if ((bindings & ThemeBindingTextStyle) != 0)
-            {
-                textStatesByIndex[index].style = makeBodyTextStyle(theme);
-            }
-            break;
-        case UIWidgetKind::Button: {
-            const UIButtonChrome chrome = makeButtonChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = chrome.box;
-            }
-            if ((bindings & ThemeBindingButtonPaint) != 0)
-            {
-                buttonPaintsByNodeIndex[index] = chrome.states;
-            }
-            if ((bindings & ThemeBindingTextStyle) != 0)
-            {
-                textStatesByIndex[index].style = chrome.label;
-            }
-            break;
+            boxPaintsByIndex[index] = chrome.boxPaint;
         }
-        case UIWidgetKind::Dropdown: {
-            const UIDropdownChrome chrome = makeDropdownChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = chrome.box;
-            }
-            if ((bindings & ThemeBindingButtonPaint) != 0)
-            {
-                buttonPaintsByNodeIndex[index] = chrome.states;
-            }
-            if ((bindings & ThemeBindingTextStyle) != 0)
-            {
-                textStatesByIndex[index].style = chrome.label;
-            }
-            if ((bindings & ThemeBindingDropdownPaint) != 0)
-            {
-                dropdownStatesByNodeIndex[index].paint = chrome.dropdown;
-            }
-            break;
+        if (Detail::hasThemeBinding(bindings, ThemeBindingTextStyle))
+        {
+            textStatesByIndex[index].style = chrome.textStyle;
         }
-        case UIWidgetKind::DropdownItem:
-        case UIWidgetKind::ListViewItem:
-        case UIWidgetKind::TreeViewItem: {
-            const UIButtonChrome chrome = makeDropdownItemChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = chrome.box;
-            }
-            if ((bindings & ThemeBindingButtonPaint) != 0)
-            {
-                buttonPaintsByNodeIndex[index] = chrome.states;
-            }
-            if ((bindings & ThemeBindingTextStyle) != 0)
-            {
-                textStatesByIndex[index].style = chrome.label;
-            }
-            break;
+        if (Detail::hasThemeBinding(bindings, ThemeBindingButtonPaint))
+        {
+            buttonPaintsByNodeIndex[index] = chrome.buttonPaint;
         }
-        case UIWidgetKind::Checkbox: {
-            const UICheckboxChrome chrome = makeCheckboxChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = chrome.box;
-            }
-            if ((bindings & ThemeBindingCheckboxPaint) != 0)
-            {
-                checkboxPaintsByNodeIndex[index] = chrome.indicator;
-            }
-            break;
+        if (Detail::hasThemeBinding(bindings, ThemeBindingCheckboxPaint))
+        {
+            checkboxPaintsByNodeIndex[index] = chrome.checkboxPaint;
         }
-        case UIWidgetKind::Slider: {
-            const UISliderChrome chrome = makeSliderChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = chrome.track;
-            }
-            if ((bindings & ThemeBindingSliderPaint) != 0)
-            {
-                sliderStatesByNodeIndex[index].paint = chrome.slider;
-            }
-            break;
+        if (Detail::hasThemeBinding(bindings, ThemeBindingSliderPaint))
+        {
+            sliderStatesByNodeIndex[index].paint = chrome.sliderPaint;
         }
-        case UIWidgetKind::TextEdit: {
-            const UITextEditChrome chrome = makeTextEditChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = chrome.box;
-            }
-            if ((bindings & ThemeBindingTextStyle) != 0)
-            {
-                textStatesByIndex[index].style = chrome.text;
-            }
-            break;
+        if (Detail::hasThemeBinding(bindings, ThemeBindingProgressBarPaint))
+        {
+            progressBarStatesByNodeIndex[index].paint = chrome.progressBarPaint;
         }
-        case UIWidgetKind::ProgressBar: {
-            const UIProgressBarChrome chrome = makeProgressBarChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0)
-            {
-                boxPaintsByIndex[index] = chrome.track;
-            }
-            if ((bindings & ThemeBindingProgressBarPaint) != 0)
-            {
-                progressBarStatesByNodeIndex[index].paint = chrome.bar;
-            }
-            break;
+        if (Detail::hasThemeBinding(bindings, ThemeBindingRadioButtonPaint))
+        {
+            radioButtonStatesByNodeIndex[index].paint = chrome.radioButtonPaint;
         }
-        case UIWidgetKind::RadioButton: {
-            const UIRadioButtonChrome chrome = makeRadioButtonChrome(theme);
-            if ((bindings & ThemeBindingRadioButtonPaint) != 0)
-            {
-                radioButtonStatesByNodeIndex[index].paint = chrome.radio;
-            }
-            if ((bindings & ThemeBindingTextStyle) != 0)
-            {
-                textStatesByIndex[index].style = chrome.label;
-            }
-            break;
+        if (Detail::hasThemeBinding(bindings, ThemeBindingScrollViewPaint))
+        {
+            scrollViewStatesByNodeIndex[index].paint = chrome.scrollViewPaint;
         }
+        if (Detail::hasThemeBinding(bindings, ThemeBindingDropdownPaint))
+        {
+            dropdownStatesByNodeIndex[index].paint = chrome.dropdownPaint;
+        }
+        if (Detail::hasThemeBinding(bindings, ThemeBindingListViewPaint))
+        {
+            listViewStatesByNodeIndex[index].paint = chrome.listViewPaint;
+        }
+        if (Detail::hasThemeBinding(bindings, ThemeBindingTreeViewPaint))
+        {
+            treeViewStatesByNodeIndex[index].paint = chrome.treeViewPaint;
         }
     }
 
@@ -5666,42 +5524,9 @@ struct UIContext::Impl final {
         {
             return;
         }
-        themeBindingsByNodeIndex[index] = defaultThemeBindingsFor(kind);
+        themeBindingsByNodeIndex[index] =
+            Detail::resolveProductThemeChrome(kind, productTheme).bindings;
         applyBoundProductChrome(index, kind, productTheme);
-    }
-
-    [[nodiscard]] static std::optional<UITextStyle> productTextStyleFor(UIWidgetKind kind,
-                                                                        const UITheme& theme) noexcept
-    {
-        switch (kind)
-        {
-        case UIWidgetKind::Label:
-            return makeBodyTextStyle(theme);
-        case UIWidgetKind::Button:
-            return makeButtonChrome(theme).label;
-        case UIWidgetKind::Dropdown:
-            return makeDropdownChrome(theme).label;
-        case UIWidgetKind::DropdownItem:
-        case UIWidgetKind::ListViewItem:
-        case UIWidgetKind::TreeViewItem:
-            return makeDropdownItemChrome(theme).label;
-        case UIWidgetKind::TextEdit:
-            return makeTextEditChrome(theme).text;
-        case UIWidgetKind::RadioButton:
-            return makeRadioButtonChrome(theme).label;
-        case UIWidgetKind::Root:
-        case UIWidgetKind::Panel:
-        case UIWidgetKind::Checkbox:
-        case UIWidgetKind::Slider:
-        case UIWidgetKind::ProgressBar:
-        case UIWidgetKind::Modal:
-        case UIWidgetKind::ScrollView:
-        case UIWidgetKind::ListView:
-        case UIWidgetKind::TreeView:
-        case UIWidgetKind::Popup:
-            return std::nullopt;
-        }
-        return std::nullopt;
     }
 
     [[nodiscard]] static bool textMeasureInputsDiffer(const UITextStyle& left, const UITextStyle& right) noexcept
@@ -5752,197 +5577,37 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Status stageBoundProductChrome(u32 index, UIWidgetKind kind, const UITheme& theme)
     {
         const u16 bindings = themeBindingsByNodeIndex[index];
-        if ((bindings & ThemeBindingTextStyle) != 0)
+        const Detail::UIThemeNodeChrome nextChrome =
+            Detail::resolveProductThemeChrome(kind, theme);
+        if (Detail::hasThemeBinding(bindings, ThemeBindingTextStyle))
         {
-            const auto nextStyle = productTextStyleFor(kind, theme);
-            if (!nextStyle.has_value())
+            if (!Detail::hasThemeBinding(nextChrome.bindings,
+                                         ThemeBindingTextStyle))
             {
                 return fail(Core::CoreErrorCode::Internal, "UI Theme text binding does not match the node kind");
             }
-            if (Core::Status status = stageThemeTextStyle(index, *nextStyle); !status)
+            if (Core::Status status =
+                    stageThemeTextStyle(index, nextChrome.textStyle);
+                !status)
             {
                 return status;
             }
         }
 
-        switch (kind)
+        const u16 supportedBindings =
+            static_cast<u16>(bindings & nextChrome.bindings);
+        const u16 nonTextBindings = static_cast<u16>(
+            supportedBindings & static_cast<u16>(~ThemeBindingTextStyle));
+        const Detail::UIThemeChromeChanges changes =
+            Detail::classifyBoundThemeChromeChanges(
+                nonTextBindings, themeChromeForNode(index), nextChrome);
+        if (changes.paint)
         {
-        case UIWidgetKind::Root:
-        case UIWidgetKind::Panel:
-        case UIWidgetKind::Label:
-            break;
-        case UIWidgetKind::Modal: {
-            const UIBoxPaint chrome = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 248), UIElevation::Low);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome)
-            {
-                stageThemePaintChange(index);
-            }
-            break;
+            stageThemePaintChange(index);
         }
-        case UIWidgetKind::ScrollView: {
-            const UIScrollViewPaint chrome = makeScrollViewPaint(theme);
-            if ((bindings & ThemeBindingScrollViewPaint) != 0 &&
-                scrollViewStatesByNodeIndex[index].paint != chrome)
-            {
-                stageThemePaintChange(index);
-                if (scrollViewStatesByNodeIndex[index].paint.thickness != chrome.thickness ||
-                    scrollViewStatesByNodeIndex[index].paint.minThumbExtent != chrome.minThumbExtent)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
-            break;
-        }
-        case UIWidgetKind::ListView: {
-            const UIBoxPaint box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
-            const UIListViewPaint chrome = makeListViewPaint(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != box)
-            {
-                stageThemePaintChange(index);
-            }
-            if ((bindings & ThemeBindingListViewPaint) != 0 && listViewStatesByNodeIndex[index].paint != chrome)
-            {
-                stageThemePaintChange(index);
-                if (listViewStatesByNodeIndex[index].paint.scrollBar.thickness != chrome.scrollBar.thickness ||
-                    listViewStatesByNodeIndex[index].paint.scrollBar.minThumbExtent != chrome.scrollBar.minThumbExtent)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
-            break;
-        }
-        case UIWidgetKind::TreeView: {
-            const UIBoxPaint box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
-            const UITreeViewPaint chrome = makeTreeViewPaint(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != box)
-            {
-                stageThemePaintChange(index);
-            }
-            if ((bindings & ThemeBindingTreeViewPaint) != 0 && treeViewStatesByNodeIndex[index].paint != chrome)
-            {
-                stageThemePaintChange(index);
-                if (treeViewStatesByNodeIndex[index].paint.scrollBar.thickness != chrome.scrollBar.thickness ||
-                    treeViewStatesByNodeIndex[index].paint.scrollBar.minThumbExtent != chrome.scrollBar.minThumbExtent)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
-            break;
-        }
-        case UIWidgetKind::Popup: {
-            const UIBoxPaint chrome = makePopupBoxPaint(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome)
-            {
-                stageThemePaintChange(index);
-            }
-            break;
-        }
-        case UIWidgetKind::Button: {
-            const UIButtonChrome chrome = makeButtonChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
-            {
-                stageThemePaintChange(index);
-            }
-            if ((bindings & ThemeBindingButtonPaint) != 0 && buttonPaintsByNodeIndex[index] != chrome.states)
-            {
-                stageThemePaintChange(index);
-            }
-            break;
-        }
-        case UIWidgetKind::Dropdown: {
-            const UIDropdownChrome chrome = makeDropdownChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
-            {
-                stageThemePaintChange(index);
-            }
-            if ((bindings & ThemeBindingButtonPaint) != 0 && buttonPaintsByNodeIndex[index] != chrome.states)
-            {
-                stageThemePaintChange(index);
-            }
-            if ((bindings & ThemeBindingDropdownPaint) != 0 && dropdownStatesByNodeIndex[index].paint != chrome.dropdown)
-            {
-                stageThemePaintChange(index);
-                if (dropdownStatesByNodeIndex[index].paint.indicatorWidth != chrome.dropdown.indicatorWidth ||
-                    dropdownStatesByNodeIndex[index].paint.indicatorHeight != chrome.dropdown.indicatorHeight ||
-                    dropdownStatesByNodeIndex[index].paint.indicatorInset != chrome.dropdown.indicatorInset)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
-            break;
-        }
-        case UIWidgetKind::DropdownItem:
-        case UIWidgetKind::ListViewItem:
-        case UIWidgetKind::TreeViewItem: {
-            const UIButtonChrome chrome = makeDropdownItemChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
-            {
-                stageThemePaintChange(index);
-            }
-            if ((bindings & ThemeBindingButtonPaint) != 0 && buttonPaintsByNodeIndex[index] != chrome.states)
-            {
-                stageThemePaintChange(index);
-            }
-            break;
-        }
-        case UIWidgetKind::Checkbox: {
-            const UICheckboxChrome chrome = makeCheckboxChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
-            {
-                stageThemePaintChange(index);
-            }
-            if ((bindings & ThemeBindingCheckboxPaint) != 0 && checkboxPaintsByNodeIndex[index] != chrome.indicator)
-            {
-                stageThemePaintChange(index);
-            }
-            break;
-        }
-        case UIWidgetKind::Slider: {
-            const UISliderChrome chrome = makeSliderChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.track)
-            {
-                stageThemePaintChange(index);
-            }
-            if ((bindings & ThemeBindingSliderPaint) != 0 && sliderStatesByNodeIndex[index].paint != chrome.slider)
-            {
-                stageThemePaintChange(index);
-            }
-            break;
-        }
-        case UIWidgetKind::TextEdit: {
-            const UITextEditChrome chrome = makeTextEditChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.box)
-            {
-                stageThemePaintChange(index);
-            }
-            break;
-        }
-        case UIWidgetKind::ProgressBar: {
-            const UIProgressBarChrome chrome = makeProgressBarChrome(theme);
-            if ((bindings & ThemeBindingBoxPaint) != 0 && boxPaintsByIndex[index] != chrome.track)
-            {
-                stageThemePaintChange(index);
-            }
-            if ((bindings & ThemeBindingProgressBarPaint) != 0 &&
-                progressBarStatesByNodeIndex[index].paint != chrome.bar)
-            {
-                stageThemePaintChange(index);
-            }
-            break;
-        }
-        case UIWidgetKind::RadioButton: {
-            const UIRadioButtonChrome chrome = makeRadioButtonChrome(theme);
-            if ((bindings & ThemeBindingRadioButtonPaint) != 0 &&
-                radioButtonStatesByNodeIndex[index].paint != chrome.radio)
-            {
-                stageThemePaintChange(index);
-                if (radioButtonStatesByNodeIndex[index].paint.labelGap != chrome.radio.labelGap)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
-            break;
-        }
+        if (changes.layout)
+        {
+            themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
         }
         return Core::success();
     }
@@ -6076,10 +5741,15 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            const auto nextTextStyle = productTextStyleFor(record->kind, theme);
+            const Detail::UIThemeNodeChrome nextChrome =
+                Detail::resolveProductThemeChrome(record->kind, theme);
             WidgetTextState& textState = textStatesByIndex[index];
-            if ((themeBindingsByNodeIndex[index] & ThemeBindingTextStyle) != 0 && nextTextStyle.has_value() &&
-                textState.hasContent && textMeasureInputsDiffer(textState.style, *nextTextStyle))
+            if (Detail::hasThemeBinding(themeBindingsByNodeIndex[index],
+                                        ThemeBindingTextStyle) &&
+                Detail::hasThemeBinding(nextChrome.bindings,
+                                        ThemeBindingTextStyle) &&
+                textState.hasContent &&
+                textMeasureInputsDiffer(textState.style, nextChrome.textStyle))
             {
                 textState.metrics = themeTextMetricsScratchByNodeIndex[index];
             }
