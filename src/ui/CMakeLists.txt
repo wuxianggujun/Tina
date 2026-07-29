@@ -48,6 +48,7 @@ add_library(tina_ui STATIC
     detail/UIDefaultActionPressState.cpp
     detail/UIImeCompositionState.hpp
     detail/UIImeCompositionState.cpp
+    detail/UIInputPrimitives.hpp
     detail/UILayoutPrimitives.hpp
     detail/UIPropertyNormalization.hpp
     detail/UIPropertyNormalization.cpp
@@ -63,6 +64,7 @@ add_library(tina_ui STATIC
     detail/UITextStorage.cpp
     detail/UITextEditModel.hpp
     detail/UITextEditModel.cpp
+    detail/UIWidgetTraits.hpp
     UIText.cpp
     UIGlyphAtlas.cpp
     UITextRasterizer.cpp

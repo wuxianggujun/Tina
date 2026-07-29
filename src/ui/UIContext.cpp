@@ -15,6 +15,7 @@
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIImeCompositionState.hpp"
+#include "detail/UIInputPrimitives.hpp"
 #include "detail/UILayoutPrimitives.hpp"
 #include "detail/UIPaintPrimitives.hpp"
 #include "detail/UIPropertyNormalization.hpp"
@@ -23,6 +24,7 @@
 #include "detail/UITextEditModel.hpp"
 #include "detail/UITextStorage.hpp"
 #include "detail/UIThemeBindingResolver.hpp"
+#include "detail/UIWidgetTraits.hpp"
 
 #include <algorithm>
 #include <array>
@@ -73,7 +75,14 @@ using Detail::countDrawableTextCodepoints;
 using Detail::hasLayoutWork;
 using Detail::horizontalMargin;
 using Detail::intersectRects;
+using Detail::isButtonChromeKind;
+using Detail::isDefaultActivatableKind;
 using Detail::isFiniteNonNegative;
+using Detail::isKeyboardFocusableKind;
+using Detail::isValidEventPhaseMask;
+using Detail::isValidFocusScopeMode;
+using Detail::isValidPointerHitPolicy;
+using Detail::isValidRoutedPointerEventKind;
 using Detail::layoutSubtreeCompletionMask;
 using Detail::LayoutPassStatistics;
 using Detail::LayoutWorkArrange;
@@ -109,6 +118,11 @@ using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
 using Detail::utf8ByteOffsetForCodepoint;
 using Detail::verticalMargin;
+using Detail::findHitEntryIndex;
+using Detail::hitEntryAllowedByModal;
+using Detail::hitEntryIsWithinScope;
+using Detail::phaseMaskFor;
+using Detail::supportsWidgetText;
 
 struct WidgetTextState final {
     TextByteAllocation allocation{};
@@ -332,62 +346,6 @@ struct CommittedHitBuildResult final {
         .textByteCapacity = textByteCapacity,
         .applyDefaultProductChrome = config.applyDefaultProductChrome,
     };
-}
-
-[[nodiscard]] bool sameNode(UINodeId left, UINodeId right) noexcept
-{
-    return left == right;
-}
-
-[[nodiscard]] bool isValidPointerHitPolicy(UIPointerHitPolicy policy) noexcept
-{
-    switch (policy)
-    {
-    case UIPointerHitPolicy::Ignore:
-    case UIPointerHitPolicy::Targetable:
-        return true;
-    }
-    return false;
-}
-
-[[nodiscard]] bool isValidFocusScopeMode(UIFocusScopeMode mode) noexcept
-{
-    return mode == UIFocusScopeMode::None || mode == UIFocusScopeMode::Contain;
-}
-
-[[nodiscard]] bool isValidRoutedPointerEventKind(UIRoutedPointerEventKind kind) noexcept
-{
-    switch (kind)
-    {
-    case UIRoutedPointerEventKind::Move:
-    case UIRoutedPointerEventKind::ButtonDown:
-    case UIRoutedPointerEventKind::ButtonUp:
-    case UIRoutedPointerEventKind::Wheel:
-    case UIRoutedPointerEventKind::PointerCancel:
-        return true;
-    }
-    return false;
-}
-
-[[nodiscard]] bool isValidEventPhaseMask(UIEventPhaseMask phases) noexcept
-{
-    const auto bits = static_cast<u8>(phases);
-    const auto allBits = static_cast<u8>(UIEventPhaseMask::All);
-    return bits != 0 && (bits & static_cast<u8>(~allBits)) == 0;
-}
-
-[[nodiscard]] UIEventPhaseMask phaseMaskFor(UIEventPhase phase) noexcept
-{
-    switch (phase)
-    {
-    case UIEventPhase::Capture:
-        return UIEventPhaseMask::Capture;
-    case UIEventPhase::Target:
-        return UIEventPhaseMask::Target;
-    case UIEventPhase::Bubble:
-        return UIEventPhaseMask::Bubble;
-    }
-    return UIEventPhaseMask::None;
 }
 
 } // namespace
@@ -3888,25 +3846,6 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
-    [[nodiscard]] static bool isButtonChromeKind(UIWidgetKind kind) noexcept
-    {
-        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem ||
-               kind == UIWidgetKind::ListViewItem || kind == UIWidgetKind::TreeViewItem;
-    }
-
-    [[nodiscard]] static bool isDefaultActivatableKind(UIWidgetKind kind) noexcept
-    {
-        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem ||
-               kind == UIWidgetKind::ListViewItem || kind == UIWidgetKind::Checkbox ||
-               kind == UIWidgetKind::TreeViewItem || kind == UIWidgetKind::RadioButton;
-    }
-
-    [[nodiscard]] static bool isKeyboardFocusableKind(UIWidgetKind kind) noexcept
-    {
-        return isDefaultActivatableKind(kind) || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ListView ||
-               kind == UIWidgetKind::TreeView;
-    }
-
     [[nodiscard]] bool isButtonPressed(UINodeId node) const noexcept
     {
         return (armedPrimaryButton == node && armedPrimaryButtonPressed) ||
@@ -4040,47 +3979,6 @@ struct UIContext::Impl final {
         }
         const NodeRecord* record = nodes.tryGet(node.storageId());
         return record != nullptr && record->kind == UIWidgetKind::TextEdit;
-    }
-
-    [[nodiscard]] static u32 findHitEntryIndex(UINodeId node, std::span<const UICommittedHitEntry> entries) noexcept
-    {
-        for (u32 index = 0; index < entries.size(); ++index)
-        {
-            if (entries[index].node == node)
-            {
-                return index;
-            }
-        }
-        return InvalidUIHitEntryIndex;
-    }
-
-    [[nodiscard]] static bool hitEntryIsWithinScope(u32 entryIndex, u32 scopeEntryIndex,
-                                                    std::span<const UICommittedHitEntry> entries) noexcept
-    {
-        if (scopeEntryIndex == InvalidUIHitEntryIndex)
-        {
-            return true;
-        }
-        usize visited = 0;
-        while (entryIndex != InvalidUIHitEntryIndex && entryIndex < entries.size())
-        {
-            if (entryIndex == scopeEntryIndex)
-            {
-                return true;
-            }
-            entryIndex = entries[entryIndex].parentEntryIndex;
-            if (++visited > entries.size())
-            {
-                return false;
-            }
-        }
-        return false;
-    }
-
-    [[nodiscard]] static bool hitEntryAllowedByModal(const UICommittedHitEntry& entry,
-                                                     u32 activeModalEntryIndex) noexcept
-    {
-        return activeModalEntryIndex == InvalidUIHitEntryIndex || entry.modalScopeEntryIndex == activeModalEntryIndex;
     }
 
     [[nodiscard]] bool isPointerInteractionCandidate(UINodeId node, std::span<const UICommittedHitEntry> entries,
@@ -4351,14 +4249,6 @@ struct UIContext::Impl final {
         // Fallback keeps measure available when a custom FreeType rasterizer is
         // injected before any face is opened.
         return measurePlaceholderText(utf8, style);
-    }
-
-    [[nodiscard]] static bool supportsWidgetText(UIWidgetKind kind) noexcept
-    {
-        return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::TextEdit ||
-               kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Dropdown ||
-               kind == UIWidgetKind::DropdownItem || kind == UIWidgetKind::ListViewItem ||
-               kind == UIWidgetKind::TreeViewItem;
     }
 
     void resetNodeSideData(u32 index) noexcept
@@ -5829,7 +5719,7 @@ struct UIContext::Impl final {
                         "UI TreeView item rows are internal and cannot be destroyed independently");
         }
 
-        if (sameNode(updaterRoot, node))
+        if (updaterRoot == node)
         {
             return fail(UIErrorCode::RootRequired, "Destroying a root node requires UIRootOwner::reset");
         }

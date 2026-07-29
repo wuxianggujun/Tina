@@ -13,6 +13,7 @@ add_executable(tina_ui_tests
     UIContextLifetimeControlTests.cpp
     UIDefaultActionPressStateTests.cpp
     UIEnabledStateTests.cpp
+    UIInputPrimitivesTests.cpp
     UIRoutedPointerListenerRegistryTests.cpp
     UISliderChangeCallbackRegistryTests.cpp
     UISliderTests.cpp
@@ -24,6 +25,7 @@ add_executable(tina_ui_tests
     UIPaintPrimitivesTests.cpp
     UIPropertyNormalizationTests.cpp
     UIThemeBindingResolverTests.cpp
+    UIWidgetTraitsTests.cpp
     UIRadioButtonTests.cpp
     UISemanticsTests.cpp
     UIAccessibilityTests.cpp
