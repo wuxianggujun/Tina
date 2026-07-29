@@ -10,6 +10,7 @@
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include "detail/UIButtonActionRegistry.hpp"
+#include "detail/UICommandPressLatch.hpp"
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIImeCompositionState.hpp"
@@ -1299,9 +1300,12 @@ struct UIContext::Impl final {
     bool pointerCancelDispatchInProgress = false;
     UINodeId activeModalNode{};
     UINodeId activePopupNode{};
-    std::array<bool, 5> dropdownCommandPressed{};
-    std::array<bool, 7> listViewCommandPressed{};
-    std::array<bool, 10> treeViewCommandPressed{};
+    Detail::UICommandPressLatch<UIDropdownCommand, UIDropdownCommand::ExitNext>
+        dropdownCommandPressLatch;
+    Detail::UICommandPressLatch<UIListViewCommand, UIListViewCommand::Activate>
+        listViewCommandPressLatch;
+    Detail::UICommandPressLatch<UITreeViewCommand, UITreeViewCommand::Activate>
+        treeViewCommandPressLatch;
     bool armedTreeDisclosure = false;
     bool popupDismissPointerBarrierActive = false;
     UINodeId pendingDestroyedModalRestoreFocus{};
@@ -6909,7 +6913,7 @@ struct UIContext::Impl final {
                 {
                     activePopupNode = {};
                     popupDismissPointerBarrierActive = false;
-                    dropdownCommandPressed.fill(false);
+                    dropdownCommandPressLatch.clear();
                 }
             }
             deactivateAllRoutedPointerListenersForNode(currentIndex);
@@ -9527,7 +9531,7 @@ struct UIContext::Impl final {
             }
         }
         popupDismissPointerBarrierActive = false;
-        dropdownCommandPressed.fill(false);
+        dropdownCommandPressLatch.clear();
 
         if (focusWasInClosingPopup)
         {
@@ -13220,9 +13224,9 @@ struct UIContext::Impl final {
         clearArmedTextEdit();
         capturedPointerNode = {};
         popupDismissPointerBarrierActive = false;
-        dropdownCommandPressed.fill(false);
-        listViewCommandPressed.fill(false);
-        treeViewCommandPressed.fill(false);
+        dropdownCommandPressLatch.clear();
+        listViewCommandPressLatch.clear();
+        treeViewCommandPressLatch.clear();
         defaultActionPressState.clearAll();
         clearImeFocus();
         clearDefaultActionFocus();
@@ -13258,9 +13262,9 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::WrongOwnerWindow, "UI default-action cancellation belongs to another Window");
         }
 
-        dropdownCommandPressed.fill(false);
-        listViewCommandPressed.fill(false);
-        treeViewCommandPressed.fill(false);
+        dropdownCommandPressLatch.clear();
+        listViewCommandPressLatch.clear();
+        treeViewCommandPressLatch.clear();
 
         if (gamepad.has_value())
         {
@@ -13756,39 +13760,20 @@ struct UIContext::Impl final {
         }
         drainDeferredRootDestroys();
 
-        usize commandIndex = 0;
-        switch (command)
+        if (!dropdownCommandPressLatch.accepts(command))
         {
-        case UIDropdownCommand::PreviousItem:
-            commandIndex = 0;
-            break;
-        case UIDropdownCommand::NextItem:
-            commandIndex = 1;
-            break;
-        case UIDropdownCommand::Dismiss:
-            commandIndex = 2;
-            break;
-        case UIDropdownCommand::ExitPrevious:
-            commandIndex = 3;
-            break;
-        case UIDropdownCommand::ExitNext:
-            commandIndex = 4;
-            break;
-        default:
             return fail(UIErrorCode::InvalidControlValue, "UI Dropdown command is not recognized");
         }
 
         if (!pressed)
         {
-            const bool consumed = dropdownCommandPressed[commandIndex];
-            dropdownCommandPressed[commandIndex] = false;
             return UIDropdownCommandResult{
-                .consumed = consumed,
+                .consumed = dropdownCommandPressLatch.release(command),
                 .changed = false,
                 .focus = defaultActionFocus(),
             };
         }
-        if (dropdownCommandPressed[commandIndex])
+        if (dropdownCommandPressLatch.isLatched(command))
         {
             return UIDropdownCommandResult{
                 .consumed = true,
@@ -13810,7 +13795,7 @@ struct UIContext::Impl final {
             {
                 return Core::failure(closed.error());
             }
-            dropdownCommandPressed[commandIndex] = true;
+            dropdownCommandPressLatch.latch(command);
             return UIDropdownCommandResult{
                 .consumed = true,
                 .changed = true,
@@ -13891,7 +13876,7 @@ struct UIContext::Impl final {
                     }
                 }
             }
-            dropdownCommandPressed[commandIndex] = true;
+            dropdownCommandPressLatch.latch(command);
             return UIDropdownCommandResult{
                 .consumed = true,
                 .changed = changed,
@@ -13961,7 +13946,7 @@ struct UIContext::Impl final {
                 return Core::failure(focused.error());
             }
         }
-        dropdownCommandPressed[commandIndex] = true;
+        dropdownCommandPressLatch.latch(command);
         return UIDropdownCommandResult{
             .consumed = true,
             .changed = true,
@@ -13983,18 +13968,16 @@ struct UIContext::Impl final {
         }
         drainDeferredRootDestroys();
 
-        const usize commandIndex = static_cast<usize>(command);
-        if (commandIndex >= listViewCommandPressed.size())
+        if (!listViewCommandPressLatch.accepts(command))
         {
             return fail(UIErrorCode::InvalidControlValue, "UI ListView command is not recognized");
         }
         if (!pressed)
         {
-            const bool consumed = listViewCommandPressed[commandIndex];
-            listViewCommandPressed[commandIndex] = false;
-            return UIListViewCommandResult{.consumed = consumed};
+            return UIListViewCommandResult{
+                .consumed = listViewCommandPressLatch.release(command)};
         }
-        if (listViewCommandPressed[commandIndex])
+        if (listViewCommandPressLatch.isLatched(command))
         {
             return UIListViewCommandResult{.consumed = true};
         }
@@ -14015,7 +13998,7 @@ struct UIContext::Impl final {
         ListViewState& state = listViewStatesByNodeIndex[listView.index()];
         const u64 itemCount = state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
         const auto consumeWithoutChange = [&]() noexcept {
-            listViewCommandPressed[commandIndex] = true;
+            listViewCommandPressLatch.latch(command);
             return UIListViewCommandResult{
                 .consumed = true,
                 .selection = state.selection,
@@ -14023,7 +14006,7 @@ struct UIContext::Impl final {
         };
         if (command == UIListViewCommand::Activate)
         {
-            listViewCommandPressed[commandIndex] = true;
+            listViewCommandPressLatch.latch(command);
             return UIListViewCommandResult{
                 .consumed = true,
                 .changed = false,
@@ -14127,7 +14110,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(revealed.error());
         }
-        listViewCommandPressed[commandIndex] = true;
+        listViewCommandPressLatch.latch(command);
         return UIListViewCommandResult{
             .consumed = true,
             .changed = changed,
@@ -14149,18 +14132,16 @@ struct UIContext::Impl final {
         }
         drainDeferredRootDestroys();
 
-        const usize commandIndex = static_cast<usize>(command);
-        if (commandIndex >= treeViewCommandPressed.size())
+        if (!treeViewCommandPressLatch.accepts(command))
         {
             return fail(UIErrorCode::InvalidControlValue, "UI TreeView command is not recognized");
         }
         if (!pressed)
         {
-            const bool consumed = treeViewCommandPressed[commandIndex];
-            treeViewCommandPressed[commandIndex] = false;
-            return UITreeViewCommandResult{.consumed = consumed};
+            return UITreeViewCommandResult{
+                .consumed = treeViewCommandPressLatch.release(command)};
         }
-        if (treeViewCommandPressed[commandIndex])
+        if (treeViewCommandPressLatch.isLatched(command))
         {
             return UITreeViewCommandResult{.consumed = true};
         }
@@ -14180,7 +14161,7 @@ struct UIContext::Impl final {
         TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
         const u64 itemCount = state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
         const auto consumeWithoutChange = [&]() noexcept {
-            treeViewCommandPressed[commandIndex] = true;
+            treeViewCommandPressLatch.latch(command);
             return UITreeViewCommandResult{
                 .consumed = true,
                 .selection = state.selection,
@@ -14231,7 +14212,7 @@ struct UIContext::Impl final {
             {
                 return consumeWithoutChange();
             }
-            treeViewCommandPressed[commandIndex] = true;
+            treeViewCommandPressLatch.latch(command);
             return UITreeViewCommandResult{
                 .consumed = true,
                 .activated = true,
@@ -14255,7 +14236,7 @@ struct UIContext::Impl final {
             {
                 return Core::failure(changed.error());
             }
-            treeViewCommandPressed[commandIndex] = true;
+            treeViewCommandPressLatch.latch(command);
             return UITreeViewCommandResult{
                 .consumed = true,
                 .changed = true,
@@ -14439,7 +14420,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(revealed.error());
         }
-        treeViewCommandPressed[commandIndex] = true;
+        treeViewCommandPressLatch.latch(command);
         return UITreeViewCommandResult{
             .consumed = true,
             .changed = changed,

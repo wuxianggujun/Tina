@@ -39,6 +39,7 @@ add_library(tina_ui STATIC
     UIContextConfig.cpp
     detail/UIButtonActionRegistry.hpp
     detail/UIButtonActionRegistry.cpp
+    detail/UICommandPressLatch.hpp
     detail/UIContextLifetimeControl.hpp
     detail/UIContextLifetimeControl.cpp
     detail/UIDefaultActionPressState.hpp
