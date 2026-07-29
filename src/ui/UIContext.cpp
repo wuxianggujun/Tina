@@ -10,6 +10,7 @@
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include "detail/UIButtonActionRegistry.hpp"
+#include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIImeCompositionState.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
@@ -18,14 +19,12 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <exception>
 #include <expected>
 #include <initializer_list>
 #include <limits>
-#include <mutex>
 #include <new>
 #include <string>
 #include <string_view>
@@ -33,38 +32,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-namespace Tina::UI::Detail {
-
-struct DeferredRoutedPointerListenerRelease final {
-    u32 slot = 0;
-    u32 generation = 0;
-};
-
-struct RoutedPointerListenerTokenState final {
-    u32 generation = 0;
-    bool active = false;
-};
-
-struct UIContextLifetimeControl final {
-    UIContextLifetimeControl(std::thread::id threadId, usize rootCapacity, usize routedPointerListenerCapacity)
-        : ownerThreadId(threadId), routedPointerListenerStates(routedPointerListenerCapacity)
-    {
-        deferredRootDestroys.reserve(rootCapacity);
-        deferredRoutedPointerListenerReleases.reserve(routedPointerListenerCapacity);
-    }
-
-    std::mutex mutex;
-    UIContext* context = nullptr;
-    std::thread::id ownerThreadId{};
-    std::vector<UINodeId> deferredRootDestroys;
-    std::atomic_bool hasDeferredRootDestroys = false;
-    std::vector<RoutedPointerListenerTokenState> routedPointerListenerStates;
-    std::vector<DeferredRoutedPointerListenerRelease> deferredRoutedPointerListenerReleases;
-    std::atomic_bool hasDeferredRoutedPointerListenerReleases = false;
-};
-
-} // namespace Tina::UI::Detail
 
 namespace Tina::UI {
 namespace {
@@ -1482,22 +1449,9 @@ struct UIContext::Impl final {
 
     void detachLifetime(UIContext* context) noexcept
     {
-        if (!lifetime)
+        if (lifetime && context != nullptr)
         {
-            return;
-        }
-        const std::scoped_lock lock(lifetime->mutex);
-        if (lifetime->context == context)
-        {
-            lifetime->context = nullptr;
-            lifetime->deferredRootDestroys.clear();
-            lifetime->hasDeferredRootDestroys.store(false, std::memory_order_release);
-            lifetime->deferredRoutedPointerListenerReleases.clear();
-            lifetime->hasDeferredRoutedPointerListenerReleases.store(false, std::memory_order_release);
-            for (Detail::RoutedPointerListenerTokenState& state : lifetime->routedPointerListenerStates)
-            {
-                state.active = false;
-            }
+            lifetime->detach(*context);
         }
     }
 
@@ -4593,24 +4547,10 @@ struct UIContext::Impl final {
 
     void publishRoutedPointerListenerTokenState(u32 slot, u32 generation, bool active) noexcept
     {
-        if (!lifetime)
+        if (lifetime)
         {
-            return;
+            lifetime->publishRoutedPointerListenerState(slot, generation, active);
         }
-        const std::scoped_lock lock(lifetime->mutex);
-        if (slot >= lifetime->routedPointerListenerStates.size())
-        {
-            return;
-        }
-        Detail::RoutedPointerListenerTokenState& state = lifetime->routedPointerListenerStates[slot];
-        if (!active && state.generation != generation)
-        {
-            return;
-        }
-        state = Detail::RoutedPointerListenerTokenState{
-            .generation = generation,
-            .active = active,
-        };
     }
 
     static void publishRoutedPointerListenerTokenStateFromRegistry(void* context, u32 slot,
@@ -4656,17 +4596,8 @@ struct UIContext::Impl final {
         {
             return;
         }
-        if (!lifetime->hasDeferredRoutedPointerListenerReleases.load(std::memory_order_acquire))
-        {
-            reclaimInactiveRoutedPointerListeners();
-            return;
-        }
-        deferredRoutedPointerListenerReleaseBuffer.clear();
-        {
-            const std::scoped_lock lock(lifetime->mutex);
-            deferredRoutedPointerListenerReleaseBuffer.swap(lifetime->deferredRoutedPointerListenerReleases);
-            lifetime->hasDeferredRoutedPointerListenerReleases.store(false, std::memory_order_release);
-        }
+        lifetime->takeDeferredRoutedPointerListenerReleases(
+            deferredRoutedPointerListenerReleaseBuffer);
         for (const Detail::DeferredRoutedPointerListenerRelease release : deferredRoutedPointerListenerReleaseBuffer)
         {
             deactivateRoutedPointerListener(release.slot, release.generation, false);
@@ -4682,21 +4613,12 @@ struct UIContext::Impl final {
             return;
         }
 
-        if (lifetime->hasDeferredRootDestroys.load(std::memory_order_acquire))
+        lifetime->takeDeferredRootDestroys(deferredRootDestroyBuffer);
+        for (const UINodeId root : deferredRootDestroyBuffer)
         {
-            deferredRootDestroyBuffer.clear();
-            {
-                const std::scoped_lock lock(lifetime->mutex);
-                deferredRootDestroyBuffer.swap(lifetime->deferredRootDestroys);
-                lifetime->hasDeferredRootDestroys.store(false, std::memory_order_release);
-            }
-
-            for (const UINodeId root : deferredRootDestroyBuffer)
-            {
-                destroyRootImmediately(root);
-            }
-            deferredRootDestroyBuffer.clear();
+            destroyRootImmediately(root);
         }
+        deferredRootDestroyBuffer.clear();
         drainDeferredRoutedPointerListenerReleases();
     }
 
@@ -15109,39 +15031,9 @@ void UIRoutedPointerListenerToken::reset() noexcept
     }
 
     const std::shared_ptr<Detail::UIContextLifetimeControl> lifetime = m_lifetime.lock();
-    UIContext* immediateContext = nullptr;
-    if (lifetime)
-    {
-        const std::scoped_lock lock(lifetime->mutex);
-        if (m_slot < lifetime->routedPointerListenerStates.size())
-        {
-            Detail::RoutedPointerListenerTokenState& state = lifetime->routedPointerListenerStates[m_slot];
-            if (state.active && state.generation == generation)
-            {
-                state.active = false;
-                if (lifetime->context != nullptr)
-                {
-                    if (std::this_thread::get_id() == lifetime->ownerThreadId)
-                    {
-                        immediateContext = lifetime->context;
-                    } else
-                    {
-                        if (lifetime->deferredRoutedPointerListenerReleases.size() ==
-                            lifetime->deferredRoutedPointerListenerReleases.capacity())
-                        {
-                            std::terminate();
-                        }
-                        lifetime->deferredRoutedPointerListenerReleases.push_back(
-                            Detail::DeferredRoutedPointerListenerRelease{
-                                .slot = m_slot,
-                                .generation = generation,
-                            });
-                        lifetime->hasDeferredRoutedPointerListenerReleases.store(true, std::memory_order_release);
-                    }
-                }
-            }
-        }
-    }
+    UIContext* immediateContext =
+        lifetime ? lifetime->releaseRoutedPointerListener(m_slot, generation)
+                 : nullptr;
 
     if (immediateContext != nullptr)
     {
@@ -15163,13 +15055,7 @@ bool UIRoutedPointerListenerToken::isActive() const noexcept
     {
         return false;
     }
-    const std::scoped_lock lock(lifetime->mutex);
-    if (lifetime->context == nullptr || m_slot >= lifetime->routedPointerListenerStates.size())
-    {
-        return false;
-    }
-    const Detail::RoutedPointerListenerTokenState& state = lifetime->routedPointerListenerStates[m_slot];
-    return state.active && state.generation == m_generation;
+    return lifetime->isRoutedPointerListenerActive(m_slot, m_generation);
 }
 
 UIRoutedPointerListenerToken::operator bool() const noexcept
@@ -15223,23 +15109,7 @@ void UIRootOwner::reset() noexcept
         return;
     }
 
-    UIContext* context = nullptr;
-    {
-        const std::scoped_lock lock(lifetime->mutex);
-        context = lifetime->context;
-        if (context != nullptr && std::this_thread::get_id() != lifetime->ownerThreadId)
-        {
-            // One move-only owner exists per live root, so the queue reserved to
-            // rootCapacity cannot fill before the owner thread drains it.
-            if (lifetime->deferredRootDestroys.size() == lifetime->deferredRootDestroys.capacity())
-            {
-                std::terminate();
-            }
-            lifetime->deferredRootDestroys.push_back(root);
-            lifetime->hasDeferredRootDestroys.store(true, std::memory_order_release);
-            context = nullptr;
-        }
-    }
+    UIContext* context = lifetime->releaseRoot(root);
 
     if (context != nullptr)
     {
@@ -16470,7 +16340,7 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(Platform::WindowId ow
         }
 
         auto context = std::unique_ptr<UIContext>(new UIContext(std::move(*implResult)));
-        lifetime->context = context.get();
+        lifetime->attach(*context);
         return context;
     } catch (const std::bad_alloc&)
     {
@@ -16549,11 +16419,12 @@ Core::Result<UITreeUpdater> UIContext::treeUpdater(UIRootOwner& rootOwner)
         return fail(UIErrorCode::WrongOwnerWindow, "UI root owner belongs to another owner window");
     }
     const std::shared_ptr<Detail::UIContextLifetimeControl> lifetime = rootOwner.m_lifetime.lock();
-    if (!lifetime || lifetime->context == nullptr)
+    UIContext* attachedContext = lifetime ? lifetime->attachedContext() : nullptr;
+    if (attachedContext == nullptr)
     {
         return fail(UIErrorCode::RootRequired, "UI root owner is detached");
     }
-    if (lifetime->context != this)
+    if (attachedContext != this)
     {
         return fail(UIErrorCode::WrongContext, "UI root owner belongs to another context");
     }
