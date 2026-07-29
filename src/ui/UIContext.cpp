@@ -12,6 +12,7 @@
 #include "detail/UIButtonActionRegistry.hpp"
 #include "detail/UICommandPressLatch.hpp"
 #include "detail/UIControlGeometry.hpp"
+#include "detail/UIControlValuePrimitives.hpp"
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIImeCompositionState.hpp"
@@ -96,15 +97,19 @@ using Detail::makeTreeViewScrollBarGeometry;
 using Detail::normalizedRangeFraction;
 using Detail::normalizeFloat;
 using Detail::planTextEditCommand;
+using Detail::quantizeSliderValue;
 using Detail::ResolvedLength;
 using Detail::resolveLength;
 using Detail::resolveLengthNoFallbackCount;
+using Detail::scrollAxisMaxOffset;
+using Detail::scrollAxisOffset;
 using Detail::ScrollBarGeometry;
 using Detail::ScrollBarPointerHit;
 using Detail::SliderPaintGeometry;
 using Detail::SliderTrackGeometry;
 using Detail::sliderPaintGeometry;
 using Detail::sliderTrackGeometry;
+using Detail::setScrollAxisOffset;
 using Detail::ThemeBindingBoxPaint;
 using Detail::ThemeBindingButtonPaint;
 using Detail::ThemeBindingCheckboxPaint;
@@ -6809,25 +6814,6 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
-    [[nodiscard]] static float quantizeSliderValue(double value, float minValue, float maxValue, float step) noexcept
-    {
-        const double minimum = static_cast<double>(minValue);
-        const double maximum = static_cast<double>(maxValue);
-        const double clamped = std::clamp(value, minimum, maximum);
-        if (!(step > 0.0F) || !std::isfinite(step))
-        {
-            return static_cast<float>(clamped);
-        }
-        const double span = maximum - minimum;
-        if (!(span > 0.0))
-        {
-            return minValue;
-        }
-        const double steps = std::round((clamped - minimum) / static_cast<double>(step));
-        const double quantized = std::clamp(minimum + steps * static_cast<double>(step), minimum, maximum);
-        return static_cast<float>(quantized);
-    }
-
     // Map pointer X into [min,max] using last committed hit worldRect for the slider.
     [[nodiscard]] Core::Result<bool> applySliderValueFromPointer(UINodeId slider, UILogicalPoint position,
                                                                  Platform::PlatformFrameId platformFrame,
@@ -7389,27 +7375,6 @@ struct UIContext::Impl final {
         }
         const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
         return makeScrollBarGeometry(state.committedMetrics, state.committedViewportRect, state.paint, axis);
-    }
-
-    [[nodiscard]] static float scrollAxisOffset(UIScrollOffset offset, UIScrollAxes axis) noexcept
-    {
-        return axis == UIScrollAxes::Horizontal ? offset.x : offset.y;
-    }
-
-    static void setScrollAxisOffset(UIScrollOffset& offset, UIScrollAxes axis, float value) noexcept
-    {
-        if (axis == UIScrollAxes::Horizontal)
-        {
-            offset.x = value;
-        } else
-        {
-            offset.y = value;
-        }
-    }
-
-    [[nodiscard]] static float scrollAxisMaxOffset(const UIScrollViewMetrics& metrics, UIScrollAxes axis) noexcept
-    {
-        return axis == UIScrollAxes::Horizontal ? metrics.maxOffsetX() : metrics.maxOffsetY();
     }
 
     [[nodiscard]] Core::Result<bool> applyScrollOffsetFromInput(UINodeId scrollView, UIScrollOffset requested)
