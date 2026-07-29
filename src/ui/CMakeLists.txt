@@ -39,6 +39,8 @@ add_library(tina_ui STATIC
     UIContextConfig.cpp
     detail/UIButtonActionRegistry.hpp
     detail/UIButtonActionRegistry.cpp
+    detail/UIDefaultActionPressState.hpp
+    detail/UIDefaultActionPressState.cpp
     detail/UIImeCompositionState.hpp
     detail/UIImeCompositionState.cpp
     detail/UIRoutedPointerListenerRegistry.hpp

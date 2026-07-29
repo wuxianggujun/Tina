@@ -10,6 +10,7 @@
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include "detail/UIButtonActionRegistry.hpp"
+#include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIImeCompositionState.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
@@ -70,20 +71,6 @@ namespace {
 
 using NodeStorageId = Core::GenerationId<Detail::UINodeRegistryTag>;
 
-[[nodiscard]] std::optional<usize> defaultAcceptKeySlot(Platform::Key key) noexcept
-{
-    switch (key)
-    {
-    case Platform::Key::Enter:
-        return 0;
-    case Platform::Key::Space:
-        return 1;
-    case Platform::Key::KeypadEnter:
-        return 2;
-    default:
-        return std::nullopt;
-    }
-}
 inline constexpr u32 InvalidNodeIndex = NodeStorageId::InvalidIndex;
 
 struct NormalizedCapacityConfig final {
@@ -1255,6 +1242,7 @@ struct UIContext::Impl final {
     // routed callback, so it cannot reuse the outer dispatch ancestry scratch.
     std::pmr::vector<u32> pointerCancelRoutePathScratch;
     Detail::UIButtonActionRegistry buttonActionRegistry;
+    Detail::UIDefaultActionPressState defaultActionPressState;
     // M11-C0: Checkbox checked bit (index-aligned with nodes; false for non-Checkbox).
     std::pmr::vector<u8> checkboxCheckedByNodeIndex;
     std::pmr::vector<UICheckboxPaint> checkboxPaintsByNodeIndex;
@@ -1331,16 +1319,6 @@ struct UIContext::Impl final {
     UINodeId armedPrimaryButton{};
     bool armedPrimaryButtonPressed = false;
     UINodeId hoveredPrimaryButton{};
-    // Keyboard Accept keys and gamepad South buttons each own an independent
-    // pressed target. Generation-aware gamepad identity prevents a reused
-    // slot's Up from clearing a newer device's state.
-    std::array<UINodeId, 3> defaultActionKeyPressedTargets{};
-    struct DefaultActionGamepadPress final {
-        Platform::GamepadId gamepad{};
-        UINodeId target{};
-    };
-    std::array<DefaultActionGamepadPress, Platform::PlatformFrameBuilder::MaximumGamepadSlots>
-        defaultActionGamepadPressed{};
     // M11-C1: exclusive Primary drag capture for Slider (clears Button arm).
     UINodeId armedSlider{};
     UINodeId armedScrollView{};
@@ -1393,6 +1371,7 @@ struct UIContext::Impl final {
           routedPointerListenerRegistry(capacities.nodeCapacity, capacities.routedPointerListenerCapacity, resource),
           routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
           buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, resource),
+          defaultActionPressState(owner),
           checkboxCheckedByNodeIndex(&resource), checkboxPaintsByNodeIndex(&resource),
           sliderStatesByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
           committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&resource),
@@ -4869,151 +4848,10 @@ struct UIContext::Impl final {
                kind == UIWidgetKind::TreeView;
     }
 
-    [[nodiscard]] Core::Status validateDefaultActionControl(UIButtonActivationSource source,
-                                                            const Platform::DigitalControlIdentity& control) const
-    {
-        if (source == UIButtonActivationSource::Keyboard)
-        {
-            const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
-            if (key != nullptr && key->window == ownerWindow && defaultAcceptKeySlot(key->key).has_value())
-            {
-                return Core::success();
-            }
-        } else if (source == UIButtonActivationSource::Gamepad)
-        {
-            const auto* gamepad = std::get_if<Platform::GamepadButtonControlIdentity>(&control);
-            if (gamepad != nullptr && gamepad->routedWindow == ownerWindow && gamepad->gamepad.hasValue() &&
-                gamepad->gamepad.index() < Platform::PlatformFrameBuilder::MaximumGamepadSlots &&
-                gamepad->button == Platform::GamepadButton::South)
-            {
-                return Core::success();
-            }
-        }
-        return fail(UIErrorCode::InvalidButtonAction, "UI default-action control does not match its activation source");
-    }
-
-    [[nodiscard]] UINodeId defaultActionPressedTarget(const Platform::DigitalControlIdentity& control) const noexcept
-    {
-        if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control); key != nullptr)
-        {
-            const auto slot = defaultAcceptKeySlot(key->key);
-            return key->window == ownerWindow && slot.has_value() ? defaultActionKeyPressedTargets[*slot] : UINodeId{};
-        }
-        if (const auto* gamepad = std::get_if<Platform::GamepadButtonControlIdentity>(&control);
-            gamepad != nullptr && gamepad->routedWindow == ownerWindow && gamepad->gamepad.hasValue() &&
-            gamepad->gamepad.index() < defaultActionGamepadPressed.size())
-        {
-            const DefaultActionGamepadPress& pressed = defaultActionGamepadPressed[gamepad->gamepad.index()];
-            return pressed.gamepad == gamepad->gamepad ? pressed.target : UINodeId{};
-        }
-        return {};
-    }
-
-    void setDefaultActionPressedTarget(const Platform::DigitalControlIdentity& control, UINodeId target) noexcept
-    {
-        if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control); key != nullptr)
-        {
-            if (const auto slot = defaultAcceptKeySlot(key->key); slot.has_value())
-            {
-                defaultActionKeyPressedTargets[*slot] = target;
-            }
-            return;
-        }
-        const auto* gamepad = std::get_if<Platform::GamepadButtonControlIdentity>(&control);
-        if (gamepad == nullptr || !gamepad->gamepad.hasValue() ||
-            gamepad->gamepad.index() >= defaultActionGamepadPressed.size())
-        {
-            return;
-        }
-        defaultActionGamepadPressed[gamepad->gamepad.index()] = {
-            .gamepad = gamepad->gamepad,
-            .target = target,
-        };
-    }
-
-    void clearDefaultActionPressedTarget(const Platform::DigitalControlIdentity& control) noexcept
-    {
-        if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control); key != nullptr)
-        {
-            if (const auto slot = defaultAcceptKeySlot(key->key); slot.has_value())
-            {
-                defaultActionKeyPressedTargets[*slot] = {};
-            }
-            return;
-        }
-        const auto* gamepad = std::get_if<Platform::GamepadButtonControlIdentity>(&control);
-        if (gamepad == nullptr || !gamepad->gamepad.hasValue() ||
-            gamepad->gamepad.index() >= defaultActionGamepadPressed.size())
-        {
-            return;
-        }
-        DefaultActionGamepadPress& pressed = defaultActionGamepadPressed[gamepad->gamepad.index()];
-        if (pressed.gamepad == gamepad->gamepad)
-        {
-            pressed = {};
-        }
-    }
-
-    void clearDefaultActionPresses() noexcept
-    {
-        defaultActionKeyPressedTargets.fill({});
-        defaultActionGamepadPressed.fill({});
-    }
-
-    void clearDefaultActionPressesForNode(UINodeId node) noexcept
-    {
-        if (!node.hasValue())
-        {
-            return;
-        }
-        for (UINodeId& target : defaultActionKeyPressedTargets)
-        {
-            if (target == node)
-            {
-                target = {};
-            }
-        }
-        for (DefaultActionGamepadPress& pressed : defaultActionGamepadPressed)
-        {
-            if (pressed.target == node)
-            {
-                pressed = {};
-            }
-        }
-    }
-
-    void clearDefaultActionPressesForGamepad(Platform::GamepadId gamepad) noexcept
-    {
-        if (!gamepad.hasValue() || gamepad.index() >= defaultActionGamepadPressed.size())
-        {
-            return;
-        }
-        DefaultActionGamepadPress& pressed = defaultActionGamepadPressed[gamepad.index()];
-        if (pressed.gamepad == gamepad)
-        {
-            pressed = {};
-        }
-    }
-
-    [[nodiscard]] bool isDefaultActionPressed(UINodeId node) const noexcept
-    {
-        if (!node.hasValue())
-        {
-            return false;
-        }
-        if (std::ranges::any_of(defaultActionKeyPressedTargets,
-                                [node](UINodeId target) noexcept { return target == node; }))
-        {
-            return true;
-        }
-        return std::ranges::any_of(
-            defaultActionGamepadPressed,
-            [node](const DefaultActionGamepadPress& pressed) noexcept { return pressed.target == node; });
-    }
-
     [[nodiscard]] bool isButtonPressed(UINodeId node) const noexcept
     {
-        return (armedPrimaryButton == node && armedPrimaryButtonPressed) || isDefaultActionPressed(node);
+        return (armedPrimaryButton == node && armedPrimaryButtonPressed) ||
+               defaultActionPressState.isPressed(node);
     }
 
     void clearArmedPrimaryButton() noexcept
@@ -5091,7 +4929,7 @@ struct UIContext::Impl final {
     void clearDefaultActionFocus() noexcept
     {
         defaultActionFocusButton = {};
-        clearDefaultActionPresses();
+        defaultActionPressState.clearAll();
     }
 
     void resetImeCompositionState() noexcept
@@ -5247,25 +5085,9 @@ struct UIContext::Impl final {
             return;
         }
         const UINodeId node = idForIndex(nodeIndex);
-        if (isDefaultActionPressed(node))
-        {
-            // Node destruction makes every matching control identity stale;
-            // no synthetic Up is emitted for the destroyed target.
-            for (UINodeId& target : defaultActionKeyPressedTargets)
-            {
-                if (target == node)
-                {
-                    target = {};
-                }
-            }
-            for (DefaultActionGamepadPress& pressed : defaultActionGamepadPressed)
-            {
-                if (pressed.target == node)
-                {
-                    pressed = {};
-                }
-            }
-        }
+        // Node destruction makes every matching control identity stale; no
+        // synthetic Up is emitted for the destroyed target.
+        defaultActionPressState.clearNode(node);
         if (hoveredPrimaryButton == node)
         {
             hoveredPrimaryButton = {};
@@ -7474,7 +7296,7 @@ struct UIContext::Impl final {
         enabledByNodeIndex[node.index()] = next;
         if (!enabled)
         {
-            clearDefaultActionPressesForNode(node);
+            defaultActionPressState.clearNode(node);
             if (hoveredPrimaryButton == node)
             {
                 hoveredPrimaryButton = {};
@@ -9792,7 +9614,7 @@ struct UIContext::Impl final {
             {
                 nextFocus = isNodeEnabled(dropdown) ? dropdown : UINodeId{};
             }
-            clearDefaultActionPresses();
+            defaultActionPressState.clearAll();
             clearArmedPrimaryButton();
             clearArmedSlider();
             clearArmedTextEdit();
@@ -10971,7 +10793,7 @@ struct UIContext::Impl final {
             activePopupNode = {};
         }
         popupDismissPointerBarrierActive = false;
-        clearDefaultActionPresses();
+        defaultActionPressState.clearAll();
         resetImeCompositionState();
         textInputFocus = {};
         defaultActionFocusButton = dropdown;
@@ -11764,8 +11586,8 @@ struct UIContext::Impl final {
         const UINodeId previousArmedPrimaryButton = armedPrimaryButton;
         const bool previousArmedPrimaryButtonPressed = armedPrimaryButtonPressed;
         const UINodeId previousHoveredPrimaryButton = hoveredPrimaryButton;
-        const auto previousDefaultActionKeyPressedTargets = defaultActionKeyPressedTargets;
-        const auto previousDefaultActionGamepadPressed = defaultActionGamepadPressed;
+        const Detail::UIDefaultActionPressState previousDefaultActionPressState =
+            defaultActionPressState;
         const UINodeId previousArmedSlider = armedSlider;
         const UINodeId previousArmedScrollView = armedScrollView;
         const UIScrollAxes previousArmedScrollAxis = armedScrollAxis;
@@ -11806,8 +11628,7 @@ struct UIContext::Impl final {
             armedPrimaryButton = previousArmedPrimaryButton;
             armedPrimaryButtonPressed = previousArmedPrimaryButtonPressed;
             hoveredPrimaryButton = previousHoveredPrimaryButton;
-            defaultActionKeyPressedTargets = previousDefaultActionKeyPressedTargets;
-            defaultActionGamepadPressed = previousDefaultActionGamepadPressed;
+            defaultActionPressState = previousDefaultActionPressState;
             armedSlider = previousArmedSlider;
             armedScrollView = previousArmedScrollView;
             armedScrollAxis = previousArmedScrollAxis;
@@ -11904,7 +11725,7 @@ struct UIContext::Impl final {
         {
             defaultActionFocusButton = desiredFocus;
             textInputFocus = desiredTextFocus;
-            clearDefaultActionPresses();
+            defaultActionPressState.clearAll();
             if (desiredTextFocus != previousTextInputFocus)
             {
                 resetImeCompositionState();
@@ -13480,7 +13301,7 @@ struct UIContext::Impl final {
         dropdownCommandPressed.fill(false);
         listViewCommandPressed.fill(false);
         treeViewCommandPressed.fill(false);
-        clearDefaultActionPresses();
+        defaultActionPressState.clearAll();
         clearImeFocus();
         clearDefaultActionFocus();
         clearHoveredPrimaryButton();
@@ -13521,16 +13342,8 @@ struct UIContext::Impl final {
 
         if (gamepad.has_value())
         {
-            UINodeId cancelledTarget{};
-            if (gamepad->hasValue() && gamepad->index() < defaultActionGamepadPressed.size())
-            {
-                const DefaultActionGamepadPress& pressed = defaultActionGamepadPressed[gamepad->index()];
-                if (pressed.gamepad == *gamepad)
-                {
-                    cancelledTarget = pressed.target;
-                }
-            }
-            clearDefaultActionPressesForGamepad(*gamepad);
+            const UINodeId cancelledTarget = defaultActionPressState.pressedTarget(*gamepad);
+            defaultActionPressState.clearGamepad(*gamepad);
             if (cancelledTarget.hasValue() && contains(cancelledTarget) && !isButtonPressed(cancelledTarget))
             {
                 static_cast<void>(markPaintDirty(cancelledTarget));
@@ -13539,7 +13352,7 @@ struct UIContext::Impl final {
         }
 
         const UINodeId cancelledTarget = defaultActionFocusButton;
-        clearDefaultActionPresses();
+        defaultActionPressState.clearAll();
         if (cancelledTarget.hasValue() && contains(cancelledTarget))
         {
             static_cast<void>(markPaintDirty(cancelledTarget));
@@ -13574,11 +13387,12 @@ struct UIContext::Impl final {
         }
         if (control.has_value())
         {
-            if (Core::Status validControl = validateDefaultActionControl(source, *control); !validControl)
+            if (Core::Status validControl = defaultActionPressState.validateControl(source, *control);
+                !validControl)
             {
                 return Core::failure(validControl.error());
             }
-            const UINodeId existingTarget = defaultActionPressedTarget(*control);
+            const UINodeId existingTarget = defaultActionPressState.pressedTarget(*control);
             if (existingTarget.hasValue())
             {
                 const NodeRecord* existingRecord =
@@ -13594,7 +13408,7 @@ struct UIContext::Impl final {
                         .activated = false,
                     };
                 }
-                clearDefaultActionPressedTarget(*control);
+                defaultActionPressState.clearPressedTarget(*control);
             }
         }
         if (!isCommittedKeyboardFocusCandidate(defaultActionFocusButton))
@@ -13703,7 +13517,7 @@ struct UIContext::Impl final {
         }
         if (control.has_value())
         {
-            setDefaultActionPressedTarget(*control, activationTarget);
+            defaultActionPressState.setPressedTarget(*control, activationTarget);
         }
         const u64 actionRegistrationSerialBoundary = buttonActionRegistry.registrationSerial();
         const Detail::UIButtonActionInvocation actionCandidate =
@@ -13833,18 +13647,19 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidPointerInput,
                         "UI default-action release requires a platform frame and sequence");
         }
-        if (Core::Status validControl = validateDefaultActionControl(source, control); !validControl)
+        if (Core::Status validControl = defaultActionPressState.validateControl(source, control);
+            !validControl)
         {
             return Core::failure(validControl.error());
         }
 
-        const UINodeId releasedTarget = defaultActionPressedTarget(control);
+        const UINodeId releasedTarget = defaultActionPressState.pressedTarget(control);
         if (!releasedTarget.hasValue())
         {
             return UIDefaultActionResult{};
         }
 
-        clearDefaultActionPressedTarget(control);
+        defaultActionPressState.clearPressedTarget(control);
         if (contains(releasedTarget) && !isButtonPressed(releasedTarget))
         {
             // Physical Up cannot be replayed. Keep release as a successful
@@ -13887,7 +13702,7 @@ struct UIContext::Impl final {
             return dirty;
         }
 
-        clearDefaultActionPresses();
+        defaultActionPressState.clearAll();
         if (previousTextFocus != nextFocus)
         {
             resetImeCompositionState();
@@ -14804,7 +14619,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(dirty.error());
         }
-        clearDefaultActionPresses();
+        defaultActionPressState.clearAll();
         defaultActionFocusButton = nextFocus;
         // Tab navigation does not keep a live pointer arm.
         clearArmedPrimaryButton();
