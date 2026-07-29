@@ -9,6 +9,7 @@ add_executable(tina_ui_tests
     UIButtonVisualTests.cpp
     UICheckboxTests.cpp
     UIEnabledStateTests.cpp
+    UIRoutedPointerListenerRegistryTests.cpp
     UISliderChangeCallbackRegistryTests.cpp
     UISliderTests.cpp
     UIScrollViewTests.cpp

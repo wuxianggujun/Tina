@@ -41,6 +41,8 @@ add_library(tina_ui STATIC
     detail/UIButtonActionRegistry.cpp
     detail/UIImeCompositionState.hpp
     detail/UIImeCompositionState.cpp
+    detail/UIRoutedPointerListenerRegistry.hpp
+    detail/UIRoutedPointerListenerRegistry.cpp
     detail/UISliderChangeCallbackRegistry.hpp
     detail/UISliderChangeCallbackRegistry.cpp
     detail/UITextStorage.hpp

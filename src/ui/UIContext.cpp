@@ -11,6 +11,7 @@
 
 #include "detail/UIButtonActionRegistry.hpp"
 #include "detail/UIImeCompositionState.hpp"
+#include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UITextStorage.hpp"
 
@@ -247,23 +248,6 @@ inline constexpr u8 ThemeDirtyLayoutAncestor = 1U << 2U;
     }
     return (std::min)(byteOffset, text.size());
 }
-
-inline constexpr u32 InvalidRoutedPointerListenerIndex = (std::numeric_limits<u32>::max)();
-
-struct RoutedPointerListenerRecord final {
-    UINodeId node{};
-    UIRoutedPointerEventKind kind = UIRoutedPointerEventKind::Move;
-    UIEventPhaseMask phases = UIEventPhaseMask::None;
-    UIRoutedPointerCallback callback{};
-    u32 generation = 0;
-    u32 previousNodeListenerIndex = InvalidRoutedPointerListenerIndex;
-    u32 nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
-    u32 nextFreeIndex = InvalidRoutedPointerListenerIndex;
-    u64 registrationSerial = 0;
-    bool active = false;
-};
-
-static_assert(std::is_nothrow_destructible_v<RoutedPointerListenerRecord>);
 
 struct NodeRecord final {
     u32 parentIndex = InvalidNodeIndex;
@@ -1265,14 +1249,11 @@ struct UIContext::Impl final {
     std::pmr::vector<u8> layoutWorkByIndex;
     std::pmr::vector<u32> layoutOrderScratch;
     std::pmr::vector<u32> hitEntryIndexByNodeIndex;
-    std::pmr::vector<u32> routedPointerListenerHeadByNodeIndex;
-    std::pmr::vector<u32> routedPointerListenerTailByNodeIndex;
-    std::pmr::vector<RoutedPointerListenerRecord> routedPointerListeners;
+    Detail::UIRoutedPointerListenerRegistry routedPointerListenerRegistry;
     std::pmr::vector<u32> routePathScratch;
     // PointerCancel may be synthesized by a mutation performed from inside a
     // routed callback, so it cannot reuse the outer dispatch ancestry scratch.
     std::pmr::vector<u32> pointerCancelRoutePathScratch;
-    std::pmr::vector<u32> inactiveRoutedPointerListenerIndices;
     Detail::UIButtonActionRegistry buttonActionRegistry;
     // M11-C0: Checkbox checked bit (index-aligned with nodes; false for non-Checkbox).
     std::pmr::vector<u8> checkboxCheckedByNodeIndex;
@@ -1344,13 +1325,7 @@ struct UIContext::Impl final {
     usize lastHitRebuildCount = 0;
     usize lastPaintCacheRebuildCount = 0;
     usize lastPaintSnapshotRebuildCount = 0;
-    u32 freeRoutedPointerListenerHead = InvalidRoutedPointerListenerIndex;
-    usize activeRoutedPointerListenerCount = 0;
-    usize routedPointerListenerHighWater = 0;
-    u64 routedPointerListenerRegistrationSerial = 0;
     usize routeDispatchDepth = 0;
-    usize listenerCallbackOperationDepth = 0;
-    bool reclaimingInactiveRoutedPointerListeners = false;
     u64 buttonRouteSerial = 0;
     u64 accessibilityActionSequence = 0;
     UINodeId armedPrimaryButton{};
@@ -1415,9 +1390,8 @@ struct UIContext::Impl final {
           dirtyQueue(&resource), routeDirtyReservationScratch(&resource),
           routeDirtyReservationCandidateByIndex(&resource), layoutScratchByIndex(&resource),
           layoutWorkByIndex(&resource), layoutOrderScratch(&resource), hitEntryIndexByNodeIndex(&resource),
-          routedPointerListenerHeadByNodeIndex(&resource), routedPointerListenerTailByNodeIndex(&resource),
-          routedPointerListeners(&resource), routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
-          inactiveRoutedPointerListenerIndices(&resource),
+          routedPointerListenerRegistry(capacities.nodeCapacity, capacities.routedPointerListenerCapacity, resource),
+          routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
           buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, resource),
           checkboxCheckedByNodeIndex(&resource), checkboxPaintsByNodeIndex(&resource),
           sliderStatesByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
@@ -1504,21 +1478,8 @@ struct UIContext::Impl final {
         impl->layoutWorkByIndex.resize(normalized.nodeCapacity, 0);
         impl->layoutOrderScratch.reserve(normalized.nodeCapacity);
         impl->hitEntryIndexByNodeIndex.resize(normalized.nodeCapacity, InvalidUIHitEntryIndex);
-        impl->routedPointerListenerHeadByNodeIndex.resize(normalized.nodeCapacity, InvalidRoutedPointerListenerIndex);
-        impl->routedPointerListenerTailByNodeIndex.resize(normalized.nodeCapacity, InvalidRoutedPointerListenerIndex);
-        impl->routedPointerListeners.resize(normalized.routedPointerListenerCapacity);
-        for (usize listenerIndex = 0; listenerIndex < normalized.routedPointerListenerCapacity; ++listenerIndex)
-        {
-            RoutedPointerListenerRecord& listener = impl->routedPointerListeners[listenerIndex];
-            listener.nextFreeIndex = listenerIndex + 1 < normalized.routedPointerListenerCapacity
-                                         ? static_cast<u32>(listenerIndex + 1)
-                                         : InvalidRoutedPointerListenerIndex;
-        }
-        impl->freeRoutedPointerListenerHead =
-            normalized.routedPointerListenerCapacity == 0 ? InvalidRoutedPointerListenerIndex : 0;
         impl->routePathScratch.reserve(normalized.routePathCapacity);
         impl->pointerCancelRoutePathScratch.reserve(normalized.routePathCapacity);
-        impl->inactiveRoutedPointerListenerIndices.reserve(normalized.routedPointerListenerCapacity);
         impl->checkboxCheckedByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->checkboxPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->sliderStatesByNodeIndex.resize(normalized.nodeCapacity);
@@ -4662,154 +4623,52 @@ struct UIContext::Impl final {
         {
             return;
         }
-        lifetime->routedPointerListenerStates[slot] = Detail::RoutedPointerListenerTokenState{
+        Detail::RoutedPointerListenerTokenState& state = lifetime->routedPointerListenerStates[slot];
+        if (!active && state.generation != generation)
+        {
+            return;
+        }
+        state = Detail::RoutedPointerListenerTokenState{
             .generation = generation,
             .active = active,
         };
     }
 
-    void unlinkRoutedPointerListener(u32 listenerIndex) noexcept
+    static void publishRoutedPointerListenerTokenStateFromRegistry(void* context, u32 slot,
+                                                                   u32 generation, bool active) noexcept
     {
-        if (listenerIndex >= routedPointerListeners.size())
+        if (context != nullptr)
         {
-            return;
+            static_cast<Impl*>(context)->publishRoutedPointerListenerTokenState(slot, generation, active);
         }
-        RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
-        const u32 nodeIndex = listener.node.index();
-        if (nodeIndex >= routedPointerListenerHeadByNodeIndex.size())
-        {
-            return;
-        }
-
-        if (listener.previousNodeListenerIndex != InvalidRoutedPointerListenerIndex)
-        {
-            routedPointerListeners[listener.previousNodeListenerIndex].nextNodeListenerIndex =
-                listener.nextNodeListenerIndex;
-        } else if (routedPointerListenerHeadByNodeIndex[nodeIndex] == listenerIndex)
-        {
-            routedPointerListenerHeadByNodeIndex[nodeIndex] = listener.nextNodeListenerIndex;
-        }
-        if (listener.nextNodeListenerIndex != InvalidRoutedPointerListenerIndex)
-        {
-            routedPointerListeners[listener.nextNodeListenerIndex].previousNodeListenerIndex =
-                listener.previousNodeListenerIndex;
-        } else if (routedPointerListenerTailByNodeIndex[nodeIndex] == listenerIndex)
-        {
-            routedPointerListenerTailByNodeIndex[nodeIndex] = listener.previousNodeListenerIndex;
-        }
-        listener.previousNodeListenerIndex = InvalidRoutedPointerListenerIndex;
-        listener.nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
     }
 
-    void recycleRoutedPointerListener(u32 listenerIndex) noexcept
+    [[nodiscard]] Detail::UIRoutedPointerListenerStatePublisher
+    routedPointerListenerStatePublisher() noexcept
     {
-        if (listenerIndex >= routedPointerListeners.size())
-        {
-            return;
-        }
-        RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
-        unlinkRoutedPointerListener(listenerIndex);
-
-        // Stabilize every intrusive/free-list field before invoking a user
-        // callable's move/destructor. Those operations are noexcept but may
-        // release UI owners or tokens and therefore re-enter the context.
-        listener.node = {};
-        listener.kind = UIRoutedPointerEventKind::Move;
-        listener.phases = UIEventPhaseMask::None;
-        listener.registrationSerial = 0;
-        listener.active = false;
-        listener.previousNodeListenerIndex = InvalidRoutedPointerListenerIndex;
-        listener.nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
-        listener.nextFreeIndex = InvalidRoutedPointerListenerIndex;
-
-        ++listenerCallbackOperationDepth;
-        auto callbackOperation = Core::makeScopeExit([this]() noexcept { --listenerCallbackOperationDepth; });
-        UIRoutedPointerCallback detachedCallback(std::move(listener.callback));
-
-        listener.nextFreeIndex = freeRoutedPointerListenerHead;
-        freeRoutedPointerListenerHead = listenerIndex;
-        detachedCallback.reset();
+        return Detail::UIRoutedPointerListenerStatePublisher{
+            .context = this,
+            .publish = &Impl::publishRoutedPointerListenerTokenStateFromRegistry,
+        };
     }
 
     void reclaimInactiveRoutedPointerListeners() noexcept
     {
-        if (routeDispatchDepth != 0 || listenerCallbackOperationDepth != 0 || reclaimingInactiveRoutedPointerListeners)
-        {
-            return;
-        }
-
-        reclaimingInactiveRoutedPointerListeners = true;
-        auto reclaimGuard =
-            Core::makeScopeExit([this]() noexcept { reclaimingInactiveRoutedPointerListeners = false; });
-        while (!inactiveRoutedPointerListenerIndices.empty())
-        {
-            const u32 listenerIndex = inactiveRoutedPointerListenerIndices.back();
-            inactiveRoutedPointerListenerIndices.pop_back();
-            if (listenerIndex < routedPointerListeners.size() && !routedPointerListeners[listenerIndex].active &&
-                routedPointerListeners[listenerIndex].node.hasValue())
-            {
-                recycleRoutedPointerListener(listenerIndex);
-            }
-        }
+        routedPointerListenerRegistry.reclaim(routeDispatchDepth != 0);
     }
 
-    [[nodiscard]] Core::Result<std::pair<u32, u32>> rollbackRoutedPointerListenerRegistration(u32 listenerIndex,
-                                                                                              Core::Error error)
+    void deactivateRoutedPointerListener(u32 listenerIndex, u32 generation,
+                                         bool publishTokenState) noexcept
     {
-        recycleRoutedPointerListener(listenerIndex);
-        reclaimInactiveRoutedPointerListeners();
-        return Core::failure(std::move(error));
-    }
-
-    void deactivateRoutedPointerListener(u32 listenerIndex, u32 generation, bool publishTokenState) noexcept
-    {
-        if (listenerIndex >= routedPointerListeners.size())
-        {
-            return;
-        }
-        RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
-        if (!listener.active || listener.generation != generation)
-        {
-            return;
-        }
-
-        listener.active = false;
-        if (activeRoutedPointerListenerCount > 0)
-        {
-            --activeRoutedPointerListenerCount;
-        }
-        if (publishTokenState)
-        {
-            publishRoutedPointerListenerTokenState(listenerIndex, generation, false);
-        }
-        if (routeDispatchDepth != 0 || listenerCallbackOperationDepth != 0 || reclaimingInactiveRoutedPointerListeners)
-        {
-            inactiveRoutedPointerListenerIndices.push_back(listenerIndex);
-            return;
-        }
-        recycleRoutedPointerListener(listenerIndex);
-        reclaimInactiveRoutedPointerListeners();
+        const auto statePublisher = publishTokenState ? routedPointerListenerStatePublisher()
+                                                      : Detail::UIRoutedPointerListenerStatePublisher{};
+        static_cast<void>(routedPointerListenerRegistry.deactivate(
+            listenerIndex, generation, statePublisher, routeDispatchDepth != 0));
     }
 
     void deactivateAllRoutedPointerListenersForNode(u32 nodeIndex) noexcept
     {
-        if (nodeIndex >= routedPointerListenerHeadByNodeIndex.size())
-        {
-            return;
-        }
-        u32 listenerIndex = routedPointerListenerHeadByNodeIndex[nodeIndex];
-        while (listenerIndex != InvalidRoutedPointerListenerIndex)
-        {
-            RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
-            const u32 nextListenerIndex = listener.nextNodeListenerIndex;
-            deactivateRoutedPointerListener(listenerIndex, listener.generation, true);
-            listenerIndex = nextListenerIndex;
-        }
-        if (routeDispatchDepth == 0)
-        {
-            routedPointerListenerHeadByNodeIndex[nodeIndex] = InvalidRoutedPointerListenerIndex;
-            routedPointerListenerTailByNodeIndex[nodeIndex] = InvalidRoutedPointerListenerIndex;
-        }
+        routedPointerListenerRegistry.clearNode(nodeIndex, routedPointerListenerStatePublisher());
     }
 
     void drainDeferredRoutedPointerListenerReleases() noexcept
@@ -5439,7 +5298,9 @@ struct UIContext::Impl final {
         {
             clearImeFocus();
         }
-        buttonActionRegistry.clearNode(nodeIndex, routeDispatchDepth != 0);
+        // Callback destruction is delayed until the node generation has been
+        // erased, so a callable destructor cannot register against a dying node.
+        buttonActionRegistry.clearNode(nodeIndex, true);
     }
 
     [[nodiscard]] Detail::UIButtonActionInvocation
@@ -5666,8 +5527,7 @@ struct UIContext::Impl final {
         }
         layoutScratchByIndex[index] = {};
         layoutWorkByIndex[index] = 0;
-        routedPointerListenerHeadByNodeIndex[index] = InvalidRoutedPointerListenerIndex;
-        routedPointerListenerTailByNodeIndex[index] = InvalidRoutedPointerListenerIndex;
+        routedPointerListenerRegistry.resetNodeSlot(index);
         if (index < checkboxCheckedByNodeIndex.size())
         {
             checkboxCheckedByNodeIndex[index] = 0;
@@ -7310,10 +7170,13 @@ struct UIContext::Impl final {
             }
             deactivateAllRoutedPointerListenersForNode(currentIndex);
             deactivateButtonActionForNode(currentIndex);
-            sliderChangeCallbackRegistry.clearNode(currentIndex, routeDispatchDepth != 0);
+            sliderChangeCallbackRegistry.clearNode(currentIndex, true);
             idsByIndex[currentIndex] = {};
-            resetNodeSideData(currentIndex);
             static_cast<void>(nodes.erase(node.storageId()));
+            resetNodeSideData(currentIndex);
+            routedPointerListenerRegistry.reclaim(routeDispatchDepth != 0);
+            buttonActionRegistry.reclaim(routeDispatchDepth != 0);
+            sliderChangeCallbackRegistry.reclaim(routeDispatchDepth != 0);
 
             if (currentIndex == index)
             {
@@ -12393,82 +12256,45 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidRoutedPointerListener,
                         "UI routed pointer listener descriptor or callback is invalid");
         }
-        if (freeRoutedPointerListenerHead == InvalidRoutedPointerListenerIndex)
+        auto registrationResult = routedPointerListenerRegistry.stage(
+            descriptor, std::move(callback), routeDispatchDepth != 0);
+        if (!registrationResult)
         {
-            return fail(UIErrorCode::CapacityExceeded, "UI routed pointer listener capacity has been exhausted");
+            return Core::failure(registrationResult.error());
         }
-        if (routedPointerListenerRegistrationSerial == (std::numeric_limits<u64>::max)())
-        {
-            return fail(UIErrorCode::CapacityExceeded, "UI routed pointer listener registration serial is exhausted");
-        }
-
-        const u32 listenerIndex = freeRoutedPointerListenerHead;
-        RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
-        freeRoutedPointerListenerHead = listener.nextFreeIndex;
-
-        ++listener.generation;
-        if (listener.generation == 0)
-        {
-            ++listener.generation;
-        }
-        listener.node = descriptor.node;
-        listener.kind = descriptor.kind;
-        listener.phases = descriptor.phases;
-        listener.previousNodeListenerIndex = InvalidRoutedPointerListenerIndex;
-        listener.nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
-        listener.nextFreeIndex = InvalidRoutedPointerListenerIndex;
-        listener.registrationSerial = 0;
-        listener.active = false;
-        {
-            ++listenerCallbackOperationDepth;
-            auto callbackOperation = Core::makeScopeExit([this]() noexcept { --listenerCallbackOperationDepth; });
-            listener.callback = std::move(callback);
-        }
-        reclaimInactiveRoutedPointerListeners();
+        const Detail::UIRoutedPointerListenerRegistration registration = *registrationResult;
+        auto rollbackRegistration = [this, &registration](Core::Error error)
+            -> Core::Result<std::pair<u32, u32>> {
+            routedPointerListenerRegistry.rollback(registration, routeDispatchDepth != 0);
+            return Core::failure(std::move(error));
+        };
 
         // Moving a valid fixed-inline callable may execute user move/destructor
         // code. Revalidate generation ownership before publishing the slot.
         if (updaterRoot.hasValue() && !contains(updaterRoot))
         {
-            return rollbackRoutedPointerListenerRegistration(
-                listenerIndex,
+            return rollbackRegistration(
                 makeError(UIErrorCode::RootRequired,
                           "UI tree updater root was released while registering a routed pointer listener"));
         }
         auto liveNodeResult = resolveNode(descriptor.node);
         if (!liveNodeResult)
         {
-            return rollbackRoutedPointerListenerRegistration(listenerIndex, liveNodeResult.error());
+            return rollbackRegistration(liveNodeResult.error());
         }
         if (updaterRoot.hasValue() && !isNodeWithinRoot(updaterRoot, descriptor.node))
         {
-            return rollbackRoutedPointerListenerRegistration(
-                listenerIndex, makeError(UIErrorCode::InvalidNode,
-                                         "UI routed pointer listener node left the updater root during registration"));
+            return rollbackRegistration(
+                makeError(UIErrorCode::InvalidNode,
+                          "UI routed pointer listener node left the updater root during registration"));
         }
-        if (routedPointerListenerRegistrationSerial == (std::numeric_limits<u64>::max)())
+        Core::Status commitStatus = routedPointerListenerRegistry.commit(
+            registration, routedPointerListenerStatePublisher(), routeDispatchDepth != 0);
+        if (!commitStatus)
         {
-            return rollbackRoutedPointerListenerRegistration(
-                listenerIndex, makeError(UIErrorCode::CapacityExceeded,
-                                         "UI routed pointer listener registration serial is exhausted"));
+            return rollbackRegistration(commitStatus.error());
         }
-
-        listener.previousNodeListenerIndex = routedPointerListenerTailByNodeIndex[descriptor.node.index()];
-        listener.registrationSerial = ++routedPointerListenerRegistrationSerial;
-        listener.active = true;
-
-        if (listener.previousNodeListenerIndex != InvalidRoutedPointerListenerIndex)
-        {
-            routedPointerListeners[listener.previousNodeListenerIndex].nextNodeListenerIndex = listenerIndex;
-        } else
-        {
-            routedPointerListenerHeadByNodeIndex[descriptor.node.index()] = listenerIndex;
-        }
-        routedPointerListenerTailByNodeIndex[descriptor.node.index()] = listenerIndex;
-        ++activeRoutedPointerListenerCount;
-        routedPointerListenerHighWater = (std::max)(routedPointerListenerHighWater, activeRoutedPointerListenerCount);
-        publishRoutedPointerListenerTokenState(listenerIndex, listener.generation, true);
-        return std::pair<u32, u32>{listenerIndex, listener.generation};
+        return std::pair<u32, u32>{registration.listenerIndex, registration.generation};
     }
 
     [[nodiscard]] Core::Result<std::pair<u32, u32>>
@@ -12516,35 +12342,14 @@ struct UIContext::Impl final {
                                         u64 registrationSerialBoundary, UIRoutedPointerEvent& event,
                                         UIPointerRouteResult& result) noexcept
     {
-        if (!contains(node) || node.index() >= routedPointerListenerHeadByNodeIndex.size())
+        if (!contains(node))
         {
             return;
         }
         Detail::UIRoutedPointerEventAccess::setRouteState(event, phase, node, result.routedTarget.node,
                                                           result.routedTarget.rootNode);
-        const UIEventPhaseMask requiredPhase = phaseMaskFor(phase);
-        u32 listenerIndex = routedPointerListenerHeadByNodeIndex[node.index()];
-        while (listenerIndex != InvalidRoutedPointerListenerIndex)
-        {
-            if (listenerIndex >= routedPointerListeners.size())
-            {
-                return;
-            }
-            RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
-            const u32 nextListenerIndex = listener.nextNodeListenerIndex;
-            if (listener.active && listener.node == node && listener.kind == kind &&
-                listener.registrationSerial <= registrationSerialBoundary &&
-                hasEventPhase(listener.phases, requiredPhase))
-            {
-                ++result.listenerInvocationCount;
-                listener.callback(event);
-                if (event.isImmediatePropagationStopped())
-                {
-                    return;
-                }
-            }
-            listenerIndex = nextListenerIndex;
-        }
+        result.listenerInvocationCount += routedPointerListenerRegistry.dispatch(
+            node, kind, phaseMaskFor(phase), registrationSerialBoundary, event);
     }
 
     void finishRoutedPointerDispatch() noexcept
@@ -12627,7 +12432,7 @@ struct UIContext::Impl final {
         cancelInput.delta = {};
         UIRoutedPointerEvent routedEvent = Detail::UIRoutedPointerEventAccess::Create(cancelInput);
         Detail::UIRoutedPointerEventAccess::setPointerCaptureRoute(routedEvent, true);
-        const u64 registrationSerialBoundary = routedPointerListenerRegistrationSerial;
+        const u64 registrationSerialBoundary = routedPointerListenerRegistry.registrationSerial();
 
         pointerCancelDispatchInProgress = true;
         ++routeDispatchDepth;
@@ -13081,7 +12886,7 @@ struct UIContext::Impl final {
                 ? captureButtonAction(armedButtonAtRouteStart, actionRegistrationSerialBoundary)
                 : Detail::UIButtonActionInvocation{};
         const u64 currentButtonRouteSerial = ++buttonRouteSerial;
-        const u64 registrationSerialBoundary = routedPointerListenerRegistrationSerial;
+        const u64 registrationSerialBoundary = routedPointerListenerRegistry.registrationSerial();
         UIRoutedPointerEvent routedEvent = Detail::UIRoutedPointerEventAccess::Create(input);
         Detail::UIRoutedPointerEventAccess::setPointerCaptureRoute(routedEvent, result.routedThroughPointerCapture);
         ++routeDispatchDepth;
@@ -15408,8 +15213,8 @@ struct UIContext::Impl final {
             .paintSnapshotCapacity = capacityConfig.paintSnapshotCapacity,
             .routePathCapacity = capacityConfig.routePathCapacity,
             .routedPointerListenerCapacity = capacityConfig.routedPointerListenerCapacity,
-            .activeRoutedPointerListenerCount = activeRoutedPointerListenerCount,
-            .routedPointerListenerHighWater = routedPointerListenerHighWater,
+            .activeRoutedPointerListenerCount = routedPointerListenerRegistry.activeCount(),
+            .routedPointerListenerHighWater = routedPointerListenerRegistry.highWater(),
             .buttonActionCapacity = capacityConfig.buttonActionCapacity,
             .activeButtonActionCount = buttonActionRegistry.activeCount(),
             .buttonActionHighWater = buttonActionRegistry.highWater(),
@@ -16873,7 +16678,7 @@ UIContext::~UIContext() noexcept
     if (m_impl)
     {
         if (!m_impl->isOwnerThread() || m_impl->routeDispatchDepth != 0 ||
-            m_impl->listenerCallbackOperationDepth != 0 ||
+            m_impl->routedPointerListenerRegistry.operationInProgress() ||
             m_impl->buttonActionRegistry.operationInProgress() ||
             m_impl->sliderChangeCallbackRegistry.operationInProgress())
         {
