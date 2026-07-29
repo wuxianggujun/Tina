@@ -1,6 +1,7 @@
 add_executable(tina_ui_tests
     UIDeepTreeStressTests.cpp
     UIHitSnapshotTests.cpp
+    UIButtonActionRegistryTests.cpp
     UIButtonActionTests.cpp
     UIButtonVisualTests.cpp
     UICheckboxTests.cpp

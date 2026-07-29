@@ -37,6 +37,8 @@ add_library(tina_ui STATIC
     ${TINA_UI_PUBLIC_HEADERS}
     UIContext.cpp
     UIContextConfig.cpp
+    detail/UIButtonActionRegistry.hpp
+    detail/UIButtonActionRegistry.cpp
     detail/UIImeCompositionState.hpp
     detail/UIImeCompositionState.cpp
     detail/UISliderChangeCallbackRegistry.hpp
