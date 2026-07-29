@@ -9,6 +9,8 @@
 #include <tina/ui/text/UIGlyphAtlas.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
+#include "detail/UITextStorage.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -94,10 +96,7 @@ struct NormalizedCapacityConfig final {
     bool applyDefaultProductChrome = true;
 };
 
-struct TextByteAllocation final {
-    u32 offset = 0;
-    u32 capacity = 0;
-};
+using TextByteAllocation = Detail::UITextStorage::Allocation;
 
 struct WidgetTextState final {
     TextByteAllocation allocation{};
@@ -1295,11 +1294,7 @@ struct UIContext::Impl final {
     std::pmr::vector<TreeViewState> treeViewStatesByNodeIndex;
     std::pmr::vector<TreeViewLayoutScratch> treeViewLayoutScratchByNodeIndex;
     std::pmr::vector<TreeViewItemState> treeViewItemStatesByNodeIndex;
-    std::pmr::vector<char> textBytes;
-    std::pmr::vector<TextByteAllocation> freeTextAllocations;
-    usize textByteUsed = 0;
-    usize textByteHighWater = 0;
-    usize textByteBumpOffset = 0;
+    Detail::UITextStorage textStorage;
     std::unique_ptr<IUITextRasterizer> textRasterizer;
     UIFontFaceId textFace{};
     std::unique_ptr<UIGlyphAtlas> glyphAtlas;
@@ -1480,7 +1475,8 @@ struct UIContext::Impl final {
           popupLayoutScratchByNodeIndex(&resource), listViewStatesByNodeIndex(&resource),
           listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
           treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
-          treeViewItemStatesByNodeIndex(&resource), textBytes(&resource), freeTextAllocations(&resource),
+          treeViewItemStatesByNodeIndex(&resource),
+          textStorage(capacities.textByteCapacity, capacities.nodeCapacity, resource),
           dirtyByIndex(&resource), dirtyQueuedByIndex(&resource), dirtyReservedByIndex(&resource),
           dirtyQueue(&resource), routeDirtyReservationScratch(&resource),
           routeDirtyReservationCandidateByIndex(&resource), layoutScratchByIndex(&resource),
@@ -1565,8 +1561,6 @@ struct UIContext::Impl final {
         impl->treeViewStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->treeViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->treeViewItemStatesByNodeIndex.resize(normalized.nodeCapacity);
-        impl->textBytes.resize(normalized.textByteCapacity, '\0');
-        impl->freeTextAllocations.reserve(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
         impl->dirtyQueuedByIndex.resize(normalized.nodeCapacity, 0);
         impl->dirtyReservedByIndex.resize(normalized.nodeCapacity, 0);
@@ -2296,7 +2290,7 @@ struct UIContext::Impl final {
         bool replaceAllocation = false;
         if (!descriptor.label.empty() && text.allocation.capacity < descriptor.label.size())
         {
-            auto allocation = allocateTextBytes(static_cast<u32>(descriptor.label.size()));
+            auto allocation = textStorage.allocate(static_cast<u32>(descriptor.label.size()));
             if (!allocation)
             {
                 return Core::failure(allocation.error());
@@ -2306,7 +2300,7 @@ struct UIContext::Impl final {
         }
         if (descriptor.label.empty())
         {
-            releaseTextAllocation(text.allocation);
+            textStorage.release(text.allocation);
             text.allocation = {};
             text.length = 0;
             text.metrics = {};
@@ -2315,10 +2309,10 @@ struct UIContext::Impl final {
         {
             if (replaceAllocation)
             {
-                releaseTextAllocation(text.allocation);
+                textStorage.release(text.allocation);
                 text.allocation = replacement;
             }
-            std::memcpy(textBytes.data() + text.allocation.offset, descriptor.label.data(), descriptor.label.size());
+            textStorage.write(text.allocation, descriptor.label);
             text.length = static_cast<u32>(descriptor.label.size());
             text.metrics = *metrics;
             text.hasContent = true;
@@ -2507,7 +2501,7 @@ struct UIContext::Impl final {
         bool replaceAllocation = false;
         if (!descriptor.label.empty() && text.allocation.capacity < descriptor.label.size())
         {
-            auto allocation = allocateTextBytes(static_cast<u32>(descriptor.label.size()));
+            auto allocation = textStorage.allocate(static_cast<u32>(descriptor.label.size()));
             if (!allocation)
             {
                 return Core::failure(allocation.error());
@@ -2517,7 +2511,7 @@ struct UIContext::Impl final {
         }
         if (descriptor.label.empty())
         {
-            releaseTextAllocation(text.allocation);
+            textStorage.release(text.allocation);
             text.allocation = {};
             text.length = 0;
             text.metrics = {};
@@ -2526,10 +2520,10 @@ struct UIContext::Impl final {
         {
             if (replaceAllocation)
             {
-                releaseTextAllocation(text.allocation);
+                textStorage.release(text.allocation);
                 text.allocation = replacement;
             }
-            std::memcpy(textBytes.data() + text.allocation.offset, descriptor.label.data(), descriptor.label.size());
+            textStorage.write(text.allocation, descriptor.label);
             text.length = static_cast<u32>(descriptor.label.size());
             text.metrics = *metrics;
             text.hasContent = true;
@@ -5889,98 +5883,6 @@ struct UIContext::Impl final {
         reclaimInactiveSliderChangeCallbacks();
     }
 
-    void releaseTextAllocation(TextByteAllocation allocation) noexcept
-    {
-        if (allocation.capacity == 0)
-        {
-            return;
-        }
-        if (textByteUsed >= allocation.capacity)
-        {
-            textByteUsed -= allocation.capacity;
-        } else
-        {
-            textByteUsed = 0;
-        }
-
-        usize mergedBegin = allocation.offset;
-        usize mergedEnd = allocation.offset + allocation.capacity;
-        bool mergedAnotherBlock = true;
-        while (mergedAnotherBlock)
-        {
-            mergedAnotherBlock = false;
-            for (usize index = 0; index < freeTextAllocations.size();)
-            {
-                const TextByteAllocation candidate = freeTextAllocations[index];
-                const usize candidateBegin = candidate.offset;
-                const usize candidateEnd = candidate.offset + candidate.capacity;
-                if (candidateEnd < mergedBegin || candidateBegin > mergedEnd)
-                {
-                    ++index;
-                    continue;
-                }
-                mergedBegin = (std::min)(mergedBegin, candidateBegin);
-                mergedEnd = (std::max)(mergedEnd, candidateEnd);
-                freeTextAllocations[index] = freeTextAllocations.back();
-                freeTextAllocations.pop_back();
-                mergedAnotherBlock = true;
-            }
-        }
-
-        if (mergedEnd == textByteBumpOffset)
-        {
-            textByteBumpOffset = mergedBegin;
-            return;
-        }
-        freeTextAllocations.push_back(TextByteAllocation{
-            .offset = static_cast<u32>(mergedBegin),
-            .capacity = static_cast<u32>(mergedEnd - mergedBegin),
-        });
-    }
-
-    [[nodiscard]] Core::Result<TextByteAllocation> allocateTextBytes(u32 byteCount)
-    {
-        if (byteCount == 0)
-        {
-            return TextByteAllocation{};
-        }
-        for (usize freeIndex = 0; freeIndex < freeTextAllocations.size(); ++freeIndex)
-        {
-            TextByteAllocation& candidate = freeTextAllocations[freeIndex];
-            if (candidate.capacity < byteCount)
-            {
-                continue;
-            }
-            const TextByteAllocation allocated{
-                .offset = candidate.offset,
-                .capacity = byteCount,
-            };
-            candidate.offset += byteCount;
-            candidate.capacity -= byteCount;
-            if (candidate.capacity == 0)
-            {
-                freeTextAllocations[freeIndex] = freeTextAllocations.back();
-                freeTextAllocations.pop_back();
-            }
-            textByteUsed += byteCount;
-            textByteHighWater = (std::max)(textByteHighWater, textByteUsed);
-            return allocated;
-        }
-        if (textByteBumpOffset > capacityConfig.textByteCapacity ||
-            static_cast<usize>(byteCount) > capacityConfig.textByteCapacity - textByteBumpOffset)
-        {
-            return fail(UIErrorCode::CapacityExceeded, "UI text byte capacity has been exhausted");
-        }
-        const TextByteAllocation allocated{
-            .offset = static_cast<u32>(textByteBumpOffset),
-            .capacity = byteCount,
-        };
-        textByteBumpOffset += byteCount;
-        textByteUsed += byteCount;
-        textByteHighWater = (std::max)(textByteHighWater, textByteUsed);
-        return allocated;
-    }
-
     void clearTextState(u32 index) noexcept
     {
         if (index >= textStatesByIndex.size())
@@ -5988,7 +5890,7 @@ struct UIContext::Impl final {
             return;
         }
         WidgetTextState& state = textStatesByIndex[index];
-        releaseTextAllocation(state.allocation);
+        textStorage.release(state.allocation);
         state = {};
     }
 
@@ -6003,7 +5905,7 @@ struct UIContext::Impl final {
         {
             return {};
         }
-        return std::string_view(textBytes.data() + state.allocation.offset, state.length);
+        return textStorage.view(state.allocation, state.length);
     }
 
     [[nodiscard]] UINodeId dropdownForPopup(UINodeId popup) const noexcept
@@ -8409,7 +8311,7 @@ struct UIContext::Impl final {
         bool reservedNewAllocation = false;
         if (!utf8.empty() && state.allocation.capacity < utf8.size())
         {
-            auto allocation = allocateTextBytes(static_cast<u32>(utf8.size()));
+            auto allocation = textStorage.allocate(static_cast<u32>(utf8.size()));
             if (!allocation)
             {
                 return Core::failure(allocation.error());
@@ -8422,7 +8324,7 @@ struct UIContext::Impl final {
         {
             if (reservedNewAllocation)
             {
-                releaseTextAllocation(reservedAllocation);
+                textStorage.release(reservedAllocation);
             }
             return dirtyStatus;
         }
@@ -8430,14 +8332,14 @@ struct UIContext::Impl final {
         {
             if (reservedNewAllocation)
             {
-                releaseTextAllocation(reservedAllocation);
+                textStorage.release(reservedAllocation);
             }
             return paintStatus;
         }
 
         if (utf8.empty())
         {
-            releaseTextAllocation(state.allocation);
+            textStorage.release(state.allocation);
             state.allocation = {};
             state.length = 0;
             state.metrics = {};
@@ -8455,10 +8357,10 @@ struct UIContext::Impl final {
 
         if (reservedNewAllocation)
         {
-            releaseTextAllocation(state.allocation);
+            textStorage.release(state.allocation);
             state.allocation = reservedAllocation;
         }
-        std::memcpy(textBytes.data() + state.allocation.offset, utf8.data(), utf8.size());
+        textStorage.write(state.allocation, utf8);
         state.length = static_cast<u32>(utf8.size());
         state.metrics = *metrics;
         state.hasContent = true;
@@ -16011,9 +15913,9 @@ struct UIContext::Impl final {
             .buttonActionCapacity = capacityConfig.buttonActionCapacity,
             .activeButtonActionCount = activeButtonActionCount,
             .buttonActionHighWater = buttonActionHighWater,
-            .textByteCapacity = capacityConfig.textByteCapacity,
-            .textByteUsed = textByteUsed,
-            .textByteHighWater = textByteHighWater,
+            .textByteCapacity = textStorage.capacity(),
+            .textByteUsed = textStorage.used(),
+            .textByteHighWater = textStorage.highWater(),
             .liveNodeCount = nodes.activeCount(),
             .liveRootCount = liveRootCount,
             .committedNodeCount = committedBuffers[publishedBufferIndex].size(),

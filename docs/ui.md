@@ -29,6 +29,14 @@ cross-context、cross-window ID 必须失败。
 `UIRootOwner` 是 root 的唯一 RAII owner。销毁 root 会使其子树 ID 失效；listener token 不保活 Context/
 root。产品 State 在退出时应先 reset listener，再 reset root。Context 只能在 owner thread mutation/commit。
 
+### 私有实现职责边界
+
+公开 `UIContext` 继续作为每窗口唯一的生命周期、owner-thread、capacity 与提交门面，不新增第二套 UI
+ABI。大体量私有实现按可独立验证的职责逐步下沉到 `src/ui/detail`：`UITextStorage` 已独立拥有固定容量
+UTF-8 arena、空闲块复用/合并、bump 回收与 used/high-water 统计；`UIContext::Impl` 只保存节点文本状态并
+编排测量、dirty transaction 与控件行为。私有组件不得反向持有 `UIContext`，也不得绕开 committed
+snapshot、owner-thread 或 PMR 固定容量约束。
+
 Runtime 私有持有主窗口 UIContext；普通游戏不取得裸 `UIContext*`：
 
 - `GameStateEnterContext::primaryWindowUIRootBuilder()` 只在 `onEnter()` 当前 epoch 有效；

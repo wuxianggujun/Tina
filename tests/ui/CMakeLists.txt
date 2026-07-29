@@ -22,6 +22,7 @@ add_executable(tina_ui_tests
     UIPaintSnapshotTests.cpp
     UIThemeTests.cpp
     UITextTests.cpp
+    UITextStorageTests.cpp
     UITextEditTests.cpp
     UITextRasterizerTests.cpp
     UIGlyphAtlasTests.cpp
@@ -63,6 +64,7 @@ add_executable(tina_ui_tests
 )
 
 target_compile_features(tina_ui_tests PRIVATE cxx_std_23)
+target_include_directories(tina_ui_tests PRIVATE ${PROJECT_SOURCE_DIR}/src/ui)
 target_link_libraries(tina_ui_tests
     PRIVATE
         Tina::ProjectOptions
