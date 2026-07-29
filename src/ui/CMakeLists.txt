@@ -40,6 +40,8 @@ add_library(tina_ui STATIC
     detail/UIButtonActionRegistry.hpp
     detail/UIButtonActionRegistry.cpp
     detail/UICommandPressLatch.hpp
+    detail/UIControlGeometry.hpp
+    detail/UIControlGeometry.cpp
     detail/UIContextLifetimeControl.hpp
     detail/UIContextLifetimeControl.cpp
     detail/UIDefaultActionPressState.hpp
@@ -48,6 +50,8 @@ add_library(tina_ui STATIC
     detail/UIImeCompositionState.cpp
     detail/UIPropertyNormalization.hpp
     detail/UIPropertyNormalization.cpp
+    detail/UIPaintPrimitives.hpp
+    detail/UIPaintPrimitives.cpp
     detail/UIThemeBindingResolver.hpp
     detail/UIThemeBindingResolver.cpp
     detail/UIRoutedPointerListenerRegistry.hpp

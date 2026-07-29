@@ -11,9 +11,11 @@
 
 #include "detail/UIButtonActionRegistry.hpp"
 #include "detail/UICommandPressLatch.hpp"
+#include "detail/UIControlGeometry.hpp"
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIImeCompositionState.hpp"
+#include "detail/UIPaintPrimitives.hpp"
 #include "detail/UIPropertyNormalization.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
@@ -58,6 +60,21 @@ struct NormalizedCapacityConfig final {
 };
 
 using TextByteAllocation = Detail::UITextStorage::Allocation;
+using Detail::appendBoxChromePaints;
+using Detail::applyOpacity;
+using Detail::countBoxChromePaintEntries;
+using Detail::countDrawableTextCodepoints;
+using Detail::makeListViewScrollBarGeometry;
+using Detail::makeScrollBarGeometry;
+using Detail::makeTreeViewDisclosureRect;
+using Detail::makeTreeViewScrollBarGeometry;
+using Detail::normalizedRangeFraction;
+using Detail::ScrollBarGeometry;
+using Detail::ScrollBarPointerHit;
+using Detail::SliderPaintGeometry;
+using Detail::SliderTrackGeometry;
+using Detail::sliderPaintGeometry;
+using Detail::sliderTrackGeometry;
 using Detail::ThemeBindingBoxPaint;
 using Detail::ThemeBindingButtonPaint;
 using Detail::ThemeBindingCheckboxPaint;
@@ -318,143 +335,6 @@ struct ResolvedLength final {
     return value == 0.0F ? 0.0F : value;
 }
 
-[[nodiscard]] usize countBoxChromePaintEntries(const UIBoxPaint& paint, const UILogicalRect& worldRect,
-                                               bool hasResolvedFill) noexcept
-{
-    usize count = 0;
-    if (hasResolvedFill)
-    {
-        ++count;
-    }
-    if (paint.shadow.alpha != 0 && (paint.shadowOffsetX != 0.0F || paint.shadowOffsetY != 0.0F) &&
-        worldRect.width > 0.0F && worldRect.height > 0.0F)
-    {
-        ++count;
-    }
-    if (paint.borderWidth > 0.0F && worldRect.width > paint.borderWidth * 2.0F &&
-        worldRect.height > paint.borderWidth * 2.0F)
-    {
-        if (paint.borderLight.alpha != 0)
-        {
-            count += 2; // top + left
-        }
-        if (paint.borderDark.alpha != 0)
-        {
-            count += 2; // bottom + right
-        }
-    }
-    return count;
-}
-
-void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output, UINodeId node,
-                           const UILogicalRect& worldRect, const UILogicalRect& effectiveClip, u32& nextPaintOrdinal,
-                           const UIBoxPaint& paint, UIPremultipliedRgba8Color resolvedFill) noexcept
-{
-    if (paint.shadow.alpha != 0 && (paint.shadowOffsetX != 0.0F || paint.shadowOffsetY != 0.0F) &&
-        worldRect.width > 0.0F && worldRect.height > 0.0F)
-    {
-        output.push_back(UICommittedPaintEntry{
-            .node = node,
-            .worldRect =
-                UILogicalRect{
-                    .x = normalizeFloat(worldRect.x + paint.shadowOffsetX),
-                    .y = normalizeFloat(worldRect.y + paint.shadowOffsetY),
-                    .width = worldRect.width,
-                    .height = worldRect.height,
-                },
-            .effectiveClip = effectiveClip,
-            .paintOrdinal = nextPaintOrdinal,
-            .solidFill = premultiply(paint.shadow),
-        });
-        ++nextPaintOrdinal;
-    }
-    if (!resolvedFill.isTransparent())
-    {
-        output.push_back(UICommittedPaintEntry{
-            .node = node,
-            .worldRect = worldRect,
-            .effectiveClip = effectiveClip,
-            .paintOrdinal = nextPaintOrdinal,
-            .solidFill = resolvedFill,
-        });
-        ++nextPaintOrdinal;
-    }
-    if (!(paint.borderWidth > 0.0F) || worldRect.width <= paint.borderWidth * 2.0F ||
-        worldRect.height <= paint.borderWidth * 2.0F)
-    {
-        return;
-    }
-    const float bw = paint.borderWidth;
-    if (paint.borderLight.alpha != 0)
-    {
-        const UIPremultipliedRgba8Color light = premultiply(paint.borderLight);
-        // Top
-        output.push_back(UICommittedPaintEntry{
-            .node = node,
-            .worldRect =
-                UILogicalRect{
-                    .x = worldRect.x,
-                    .y = worldRect.y,
-                    .width = worldRect.width,
-                    .height = normalizeFloat(bw),
-                },
-            .effectiveClip = effectiveClip,
-            .paintOrdinal = nextPaintOrdinal,
-            .solidFill = light,
-        });
-        ++nextPaintOrdinal;
-        // Left
-        output.push_back(UICommittedPaintEntry{
-            .node = node,
-            .worldRect =
-                UILogicalRect{
-                    .x = worldRect.x,
-                    .y = normalizeFloat(worldRect.y + bw),
-                    .width = normalizeFloat(bw),
-                    .height = normalizeFloat(worldRect.height - bw),
-                },
-            .effectiveClip = effectiveClip,
-            .paintOrdinal = nextPaintOrdinal,
-            .solidFill = light,
-        });
-        ++nextPaintOrdinal;
-    }
-    if (paint.borderDark.alpha != 0)
-    {
-        const UIPremultipliedRgba8Color dark = premultiply(paint.borderDark);
-        // Bottom
-        output.push_back(UICommittedPaintEntry{
-            .node = node,
-            .worldRect =
-                UILogicalRect{
-                    .x = worldRect.x,
-                    .y = normalizeFloat(worldRect.y + worldRect.height - bw),
-                    .width = worldRect.width,
-                    .height = normalizeFloat(bw),
-                },
-            .effectiveClip = effectiveClip,
-            .paintOrdinal = nextPaintOrdinal,
-            .solidFill = dark,
-        });
-        ++nextPaintOrdinal;
-        // Right
-        output.push_back(UICommittedPaintEntry{
-            .node = node,
-            .worldRect =
-                UILogicalRect{
-                    .x = normalizeFloat(worldRect.x + worldRect.width - bw),
-                    .y = worldRect.y,
-                    .width = normalizeFloat(bw),
-                    .height = normalizeFloat(worldRect.height - bw),
-                },
-            .effectiveClip = effectiveClip,
-            .paintOrdinal = nextPaintOrdinal,
-            .solidFill = dark,
-        });
-        ++nextPaintOrdinal;
-    }
-}
-
 [[nodiscard]] bool isFiniteNonNegative(float value) noexcept
 {
     return std::isfinite(value) && value >= 0.0F;
@@ -650,126 +530,6 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output, UINo
 {
     return rect.width > 0.0F && rect.height > 0.0F && point.x >= rect.x && point.y >= rect.y &&
            point.x < rect.right() && point.y < rect.bottom();
-}
-
-struct ScrollBarGeometry final {
-    UILogicalRect track{};
-    UILogicalRect thumb{};
-    bool visible = false;
-};
-
-struct ScrollBarPointerHit final {
-    UINodeId scrollView{};
-    UIScrollAxes axis = UIScrollAxes::None;
-    ScrollBarGeometry geometry{};
-    bool thumb = false;
-
-    [[nodiscard]] bool hasValue() const noexcept
-    {
-        return scrollView.hasValue() && axis != UIScrollAxes::None;
-    }
-};
-
-[[nodiscard]] ScrollBarGeometry makeScrollBarGeometry(const UIScrollViewMetrics& metrics,
-                                                      UILogicalRect viewportRect,
-                                                      const UIScrollViewPaint& paint,
-                                                      UIScrollAxes axis) noexcept
-{
-    const bool horizontal = axis == UIScrollAxes::Horizontal;
-    const bool visible = horizontal ? metrics.horizontalScrollBarVisible : metrics.verticalScrollBarVisible;
-    if (!visible)
-    {
-        return {};
-    }
-
-    const float viewportExtent = horizontal ? metrics.viewportSize.width : metrics.viewportSize.height;
-    const float contentExtent = horizontal ? metrics.contentSize.width : metrics.contentSize.height;
-    const float offset = horizontal ? metrics.offset.x : metrics.offset.y;
-    const UILogicalRect track = horizontal
-                                    ? UILogicalRect{
-                                          .x = viewportRect.x,
-                                          .y = normalizeFloat(viewportRect.bottom()),
-                                          .width = viewportRect.width,
-                                          .height = paint.thickness,
-                                      }
-                                    : UILogicalRect{
-                                          .x = normalizeFloat(viewportRect.right()),
-                                          .y = viewportRect.y,
-                                          .width = paint.thickness,
-                                          .height = viewportRect.height,
-                                      };
-    const float trackExtent = horizontal ? track.width : track.height;
-    if (!(trackExtent > 0.0F))
-    {
-        return ScrollBarGeometry{.track = track, .visible = true};
-    }
-    const float proportionalExtent = contentExtent > 0.0F ? trackExtent * viewportExtent / contentExtent : trackExtent;
-    const float thumbExtent = normalizeFloat((std::clamp)(proportionalExtent, (std::min)(paint.minThumbExtent, trackExtent),
-                                                          trackExtent));
-    const float maxOffset = (std::max)(0.0F, contentExtent - viewportExtent);
-    const float travel = (std::max)(0.0F, trackExtent - thumbExtent);
-    const float thumbStart = maxOffset > 0.0F ? travel * ((std::clamp)(offset, 0.0F, maxOffset) / maxOffset) : 0.0F;
-    const UILogicalRect thumb = horizontal
-                                    ? UILogicalRect{
-                                          .x = normalizeFloat(track.x + thumbStart),
-                                          .y = track.y,
-                                          .width = thumbExtent,
-                                          .height = track.height,
-                                      }
-                                    : UILogicalRect{
-                                          .x = track.x,
-                                          .y = normalizeFloat(track.y + thumbStart),
-                                          .width = track.width,
-                                          .height = thumbExtent,
-                                      };
-    return ScrollBarGeometry{.track = track, .thumb = thumb, .visible = true};
-}
-
-[[nodiscard]] ScrollBarGeometry makeListViewScrollBarGeometry(const UIListViewMetrics& metrics,
-                                                              UILogicalRect viewportRect,
-                                                              const UIScrollViewPaint& paint) noexcept
-{
-    return makeScrollBarGeometry(
-        UIScrollViewMetrics{
-            .offset = {.x = 0.0F, .y = metrics.scrollOffset},
-            .viewportSize = metrics.viewportSize,
-            .contentSize = metrics.contentSize,
-            .horizontalScrollBarVisible = false,
-            .verticalScrollBarVisible = metrics.verticalScrollBarVisible,
-        },
-        viewportRect, paint, UIScrollAxes::Vertical);
-}
-
-[[nodiscard]] ScrollBarGeometry makeTreeViewScrollBarGeometry(const UITreeViewMetrics& metrics,
-                                                              UILogicalRect viewportRect,
-                                                              const UIScrollViewPaint& paint) noexcept
-{
-    return makeScrollBarGeometry(
-        UIScrollViewMetrics{
-            .offset = {.x = 0.0F, .y = metrics.scrollOffset},
-            .viewportSize = metrics.viewportSize,
-            .contentSize = metrics.contentSize,
-            .horizontalScrollBarVisible = false,
-            .verticalScrollBarVisible = metrics.verticalScrollBarVisible,
-        },
-        viewportRect, paint, UIScrollAxes::Vertical);
-}
-
-[[nodiscard]] UILogicalRect makeTreeViewDisclosureRect(UILogicalRect rowRect, const UITreeViewStyle& style,
-                                                       u32 level) noexcept
-{
-    const double logicalX =
-        static_cast<double>(rowRect.x) + 8.0 + static_cast<double>(level) * static_cast<double>(style.indentation);
-    const float extent = normalizeFloat((std::min)(style.disclosureExtent, rowRect.height));
-    const float x = logicalX >= static_cast<double>((std::numeric_limits<float>::max)())
-                        ? (std::numeric_limits<float>::max)()
-                        : normalizeFloat(static_cast<float>(logicalX));
-    return UILogicalRect{
-        .x = x,
-        .y = normalizeFloat(rowRect.y + (rowRect.height - extent) * 0.5F),
-        .width = extent,
-        .height = extent,
-    };
 }
 
 } // namespace
@@ -2633,126 +2393,6 @@ struct UIContext::Impl final {
         };
     }
 
-    [[nodiscard]] static usize countDrawableTextCodepoints(std::string_view utf8) noexcept
-    {
-        usize count = 0;
-        usize index = 0;
-        while (index < utf8.size())
-        {
-            const auto first = static_cast<unsigned char>(utf8[index]);
-            usize unitLength = 1;
-            if (first <= 0x7FU)
-            {
-                unitLength = 1;
-            } else if ((first & 0xE0U) == 0xC0U)
-            {
-                unitLength = 2;
-            } else if ((first & 0xF0U) == 0xE0U)
-            {
-                unitLength = 3;
-            } else
-            {
-                unitLength = 4;
-            }
-            if (unitLength > utf8.size() - index)
-            {
-                break;
-            }
-            if (!(unitLength == 1 && first == '\n'))
-            {
-                ++count;
-            }
-            index += unitLength;
-        }
-        return count;
-    }
-
-    [[nodiscard]] static float normalizedRangeFraction(float value, float minValue, float maxValue) noexcept
-    {
-        if (!(std::isfinite(value) && std::isfinite(minValue) && std::isfinite(maxValue) && maxValue > minValue))
-        {
-            return 0.0F;
-        }
-        const double numerator = static_cast<double>(value) - static_cast<double>(minValue);
-        const double denominator = static_cast<double>(maxValue) - static_cast<double>(minValue);
-        return static_cast<float>(std::clamp(numerator / denominator, 0.0, 1.0));
-    }
-
-    struct SliderTrackGeometry final {
-        float verticalInset = 0.0F;
-        float thumbWidth = 0.0F;
-        float startCenterX = 0.0F;
-        float endCenterX = 0.0F;
-    };
-
-    [[nodiscard]] static SliderTrackGeometry sliderTrackGeometry(UILogicalRect worldRect,
-                                                                 const SliderState& slider) noexcept
-    {
-        const float width = (std::max)(0.0F, worldRect.width);
-        const float height = (std::max)(0.0F, worldRect.height);
-        const float horizontalInset = (std::min)(slider.paint.contentInset, width * 0.5F);
-        const float verticalInset = (std::min)(slider.paint.contentInset, height * 0.5F);
-        const float thumbWidth = (std::min)(slider.paint.thumbWidth, width);
-        const float minimumCenterX = worldRect.x + thumbWidth * 0.5F;
-        const float maximumCenterX = worldRect.x + width - thumbWidth * 0.5F;
-        const float rawStartCenterX = worldRect.x + horizontalInset;
-        const float rawEndCenterX = worldRect.x + width - horizontalInset;
-        return SliderTrackGeometry{
-            .verticalInset = verticalInset,
-            .thumbWidth = thumbWidth,
-            .startCenterX = std::clamp(rawStartCenterX, minimumCenterX, maximumCenterX),
-            .endCenterX = std::clamp(rawEndCenterX, minimumCenterX, maximumCenterX),
-        };
-    }
-
-    struct SliderPaintGeometry final {
-        UILogicalRect filledTrack{};
-        UILogicalRect thumb{};
-        float fraction = 0.0F;
-    };
-
-    [[nodiscard]] static SliderPaintGeometry sliderPaintGeometry(UILogicalRect worldRect,
-                                                                 const SliderState& slider) noexcept
-    {
-        const float fraction = normalizedRangeFraction(slider.value, slider.minValue, slider.maxValue);
-        const SliderTrackGeometry track = sliderTrackGeometry(worldRect, slider);
-        const float centerSpan = (std::max)(0.0F, track.endCenterX - track.startCenterX);
-        const float thumbCenterX = track.startCenterX + centerSpan * fraction;
-        const float thumbX = thumbCenterX - track.thumbWidth * 0.5F;
-        const float trackHeight = (std::max)(0.0F, worldRect.height - track.verticalInset * 2.0F);
-        return SliderPaintGeometry{
-            .filledTrack =
-                UILogicalRect{
-                    .x = normalizeFloat(track.startCenterX),
-                    .y = normalizeFloat(worldRect.y + track.verticalInset),
-                    .width = normalizeFloat(centerSpan * fraction),
-                    .height = normalizeFloat(trackHeight),
-                },
-            .thumb =
-                UILogicalRect{
-                    .x = normalizeFloat(thumbX),
-                    .y = worldRect.y,
-                    .width = normalizeFloat(track.thumbWidth),
-                    .height = worldRect.height,
-                },
-            .fraction = fraction,
-        };
-    }
-
-    [[nodiscard]] static constexpr UIPremultipliedRgba8Color applyOpacity(UIPremultipliedRgba8Color color,
-                                                                          u8 opacity) noexcept
-    {
-        const auto scale = [opacity](u8 channel) constexpr noexcept -> u8 {
-            return static_cast<u8>((static_cast<u16>(channel) * static_cast<u16>(opacity) + u16{127}) / u16{255});
-        };
-        return UIPremultipliedRgba8Color{
-            .red = scale(color.red),
-            .green = scale(color.green),
-            .blue = scale(color.blue),
-            .alpha = scale(color.alpha),
-        };
-    }
-
     [[nodiscard]] UIPremultipliedRgba8Color widgetPaintColor(UINodeId node,
                                                              UIPremultipliedRgba8Color color) const noexcept
     {
@@ -2943,7 +2583,8 @@ struct UIContext::Impl final {
             if (record != nullptr && record->kind == UIWidgetKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
             {
                 const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
-                const SliderPaintGeometry geometry = sliderPaintGeometry(layoutEntry.worldRect, slider);
+                const SliderPaintGeometry geometry = sliderPaintGeometry(
+                    layoutEntry.worldRect, slider.minValue, slider.maxValue, slider.value, slider.paint);
                 if (geometry.filledTrack.width > 0.0F && geometry.filledTrack.height > 0.0F &&
                     geometry.fraction > 0.0F && slider.paint.filledTrackColor.alpha != 0)
                 {
@@ -3594,7 +3235,8 @@ struct UIContext::Impl final {
             if (record != nullptr && record->kind == UIWidgetKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
             {
                 const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
-                const SliderPaintGeometry geometry = sliderPaintGeometry(layoutEntry.worldRect, slider);
+                const SliderPaintGeometry geometry = sliderPaintGeometry(
+                    layoutEntry.worldRect, slider.minValue, slider.maxValue, slider.value, slider.paint);
                 const UIPremultipliedRgba8Color filledTrack =
                     widgetPaintColor(layoutEntry.node, premultiply(slider.paint.filledTrackColor));
                 if (geometry.filledTrack.width > 0.0F && geometry.filledTrack.height > 0.0F &&
@@ -7475,7 +7117,7 @@ struct UIContext::Impl final {
             return false;
         }
 
-        const SliderTrackGeometry track = sliderTrackGeometry(worldRect, state);
+        const SliderTrackGeometry track = sliderTrackGeometry(worldRect, state.paint);
         const float centerSpan = track.endCenterX - track.startCenterX;
         if (!(centerSpan > 0.0F))
         {
