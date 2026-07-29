@@ -34,8 +34,10 @@ root。产品 State 在退出时应先 reset listener，再 reset root。Context
 公开 `UIContext` 继续作为每窗口唯一的生命周期、owner-thread、capacity 与提交门面，不新增第二套 UI
 ABI。大体量私有实现按可独立验证的职责逐步下沉到 `src/ui/detail`：`UITextStorage` 已独立拥有固定容量
 UTF-8 arena、空闲块复用/合并、bump 回收与 used/high-water 统计；`UIImeCompositionState` 独立拥有
-固定 preedit buffer、active/cursor 状态、容量契约和可复制的事务快照。`UIContext::Impl` 只保存节点文本
-状态并编排 UTF-8 语义校验、测量、dirty transaction、焦点和控件行为。私有组件不得反向持有
+固定 preedit buffer、active/cursor 状态、容量契约和可复制的事务快照；
+`UISliderChangeCallbackRegistry` 独立拥有 Slider callback 的固定容量 slot、stage/commit/rollback、
+generation-aware capture/invoke 与调用期间延迟回收。`UIContext::Impl` 只保留 owner/root/kind 校验并编排
+UTF-8 语义校验、测量、dirty transaction、焦点和控件行为。私有组件不得反向持有
 `UIContext`，也不得绕开 committed snapshot、owner-thread 或 PMR 固定容量约束。
 
 Runtime 私有持有主窗口 UIContext；普通游戏不取得裸 `UIContext*`：

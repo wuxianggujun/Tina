@@ -10,6 +10,7 @@
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include "detail/UIImeCompositionState.hpp"
+#include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UITextStorage.hpp"
 
 #include <algorithm>
@@ -286,31 +287,6 @@ struct ButtonActionInvocationCandidate final {
     [[nodiscard]] bool hasValue() const noexcept
     {
         return button.hasValue() && actionIndex != InvalidButtonActionIndex && generation != 0;
-    }
-};
-
-inline constexpr u32 InvalidSliderChangeCallbackIndex = (std::numeric_limits<u32>::max)();
-
-struct SliderChangeCallbackRecord final {
-    UINodeId node{};
-    UISliderChangeCallback callback{};
-    u32 generation = 0;
-    u32 nextFreeIndex = InvalidSliderChangeCallbackIndex;
-    bool active = false;
-    bool queuedForReclaim = false;
-    bool invoking = false;
-};
-
-static_assert(std::is_nothrow_destructible_v<SliderChangeCallbackRecord>);
-
-struct SliderChangeCallbackInvocationCandidate final {
-    UINodeId slider{};
-    u32 callbackIndex = InvalidSliderChangeCallbackIndex;
-    u32 generation = 0;
-
-    [[nodiscard]] bool hasValue() const noexcept
-    {
-        return slider.hasValue() && callbackIndex != InvalidSliderChangeCallbackIndex && generation != 0;
     }
 };
 
@@ -1336,9 +1312,7 @@ struct UIContext::Impl final {
         UISliderPaint paint{};
     };
     std::pmr::vector<SliderState> sliderStatesByNodeIndex;
-    std::pmr::vector<u32> sliderChangeCallbackIndexByNodeIndex;
-    std::pmr::vector<SliderChangeCallbackRecord> sliderChangeCallbacks;
-    std::pmr::vector<u32> inactiveSliderChangeCallbackIndices;
+    Detail::UISliderChangeCallbackRegistry sliderChangeCallbackRegistry;
     std::pmr::vector<ButtonActionRecord> buttonActions;
     std::pmr::vector<u32> inactiveButtonActionIndices;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
@@ -1413,10 +1387,6 @@ struct UIContext::Impl final {
     u64 accessibilityActionSequence = 0;
     usize buttonActionCallbackOperationDepth = 0;
     bool reclaimingInactiveButtonActions = false;
-    u32 freeSliderChangeCallbackHead = InvalidSliderChangeCallbackIndex;
-    usize activeSliderChangeCallbackCount = 0;
-    usize sliderChangeCallbackOperationDepth = 0;
-    bool reclaimingInactiveSliderChangeCallbacks = false;
     UINodeId armedPrimaryButton{};
     bool armedPrimaryButtonPressed = false;
     UINodeId hoveredPrimaryButton{};
@@ -1482,11 +1452,11 @@ struct UIContext::Impl final {
           routedPointerListenerHeadByNodeIndex(&resource), routedPointerListenerTailByNodeIndex(&resource),
           routedPointerListeners(&resource), routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
           inactiveRoutedPointerListenerIndices(&resource), buttonActionIndexByNodeIndex(&resource),
+          buttonActionClearRouteSerialByNodeIndex(&resource),
           checkboxCheckedByNodeIndex(&resource), checkboxPaintsByNodeIndex(&resource),
-          sliderStatesByNodeIndex(&resource), sliderChangeCallbackIndexByNodeIndex(&resource),
-          sliderChangeCallbacks(&resource), inactiveSliderChangeCallbackIndices(&resource),
-          buttonActionClearRouteSerialByNodeIndex(&resource), buttonActions(&resource),
-          inactiveButtonActionIndices(&resource), committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&resource),
+          sliderStatesByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
+          buttonActions(&resource), inactiveButtonActionIndices(&resource),
+          committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&resource),
                                                                    std::pmr::vector<UICommittedNodeEntry>(&resource)},
           committedLayoutBuffers{std::pmr::vector<UICommittedLayoutEntry>(&resource),
                                  std::pmr::vector<UICommittedLayoutEntry>(&resource)},
@@ -1589,18 +1559,6 @@ struct UIContext::Impl final {
         impl->checkboxCheckedByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->checkboxPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->sliderStatesByNodeIndex.resize(normalized.nodeCapacity);
-        impl->sliderChangeCallbackIndexByNodeIndex.resize(normalized.nodeCapacity, InvalidSliderChangeCallbackIndex);
-        const usize sliderChangeCallbackStorageCapacity = normalized.nodeCapacity + 1;
-        impl->sliderChangeCallbacks.resize(sliderChangeCallbackStorageCapacity);
-        for (usize callbackIndex = 0; callbackIndex < sliderChangeCallbackStorageCapacity; ++callbackIndex)
-        {
-            SliderChangeCallbackRecord& callback = impl->sliderChangeCallbacks[callbackIndex];
-            callback.nextFreeIndex = callbackIndex + 1 < sliderChangeCallbackStorageCapacity
-                                         ? static_cast<u32>(callbackIndex + 1)
-                                         : InvalidSliderChangeCallbackIndex;
-        }
-        impl->freeSliderChangeCallbackHead = 0;
-        impl->inactiveSliderChangeCallbackIndices.reserve(sliderChangeCallbackStorageCapacity);
         const usize buttonActionStorageCapacity = normalized.buttonActionCapacity + 1;
         impl->buttonActions.resize(buttonActionStorageCapacity);
         for (usize actionIndex = 0; actionIndex < buttonActionStorageCapacity; ++actionIndex)
@@ -5693,173 +5651,29 @@ struct UIContext::Impl final {
         }
     }
 
-    void recycleSliderChangeCallback(u32 callbackIndex) noexcept
+    [[nodiscard]] Detail::UISliderChangeCallbackInvocation
+    captureSliderChangeCallback(UINodeId slider) const noexcept
     {
-        if (callbackIndex >= sliderChangeCallbacks.size())
-        {
-            return;
-        }
-        SliderChangeCallbackRecord& callback = sliderChangeCallbacks[callbackIndex];
-        if (callback.node.hasValue() && callback.node.index() < sliderChangeCallbackIndexByNodeIndex.size() &&
-            sliderChangeCallbackIndexByNodeIndex[callback.node.index()] == callbackIndex)
-        {
-            sliderChangeCallbackIndexByNodeIndex[callback.node.index()] = InvalidSliderChangeCallbackIndex;
-        }
-
-        callback.node = {};
-        callback.active = false;
-        callback.queuedForReclaim = false;
-        callback.invoking = false;
-        callback.nextFreeIndex = InvalidSliderChangeCallbackIndex;
-
-        ++sliderChangeCallbackOperationDepth;
-        auto callbackOperation = Core::makeScopeExit([this]() noexcept { --sliderChangeCallbackOperationDepth; });
-        UISliderChangeCallback detachedCallback(std::move(callback.callback));
-
-        callback.nextFreeIndex = freeSliderChangeCallbackHead;
-        freeSliderChangeCallbackHead = callbackIndex;
-        detachedCallback.reset();
-    }
-
-    void reclaimInactiveSliderChangeCallbacks() noexcept
-    {
-        if (routeDispatchDepth != 0 || sliderChangeCallbackOperationDepth != 0 ||
-            reclaimingInactiveSliderChangeCallbacks)
-        {
-            return;
-        }
-
-        reclaimingInactiveSliderChangeCallbacks = true;
-        auto reclaimGuard = Core::makeScopeExit([this]() noexcept { reclaimingInactiveSliderChangeCallbacks = false; });
-        while (!inactiveSliderChangeCallbackIndices.empty())
-        {
-            const u32 callbackIndex = inactiveSliderChangeCallbackIndices.back();
-            inactiveSliderChangeCallbackIndices.pop_back();
-            if (callbackIndex >= sliderChangeCallbacks.size())
-            {
-                continue;
-            }
-            SliderChangeCallbackRecord& callback = sliderChangeCallbacks[callbackIndex];
-            callback.queuedForReclaim = false;
-            if (!callback.active && !callback.invoking && callback.node.hasValue())
-            {
-                recycleSliderChangeCallback(callbackIndex);
-            }
-        }
-    }
-
-    void deactivateSliderChangeCallback(u32 callbackIndex) noexcept
-    {
-        if (callbackIndex >= sliderChangeCallbacks.size())
-        {
-            return;
-        }
-        SliderChangeCallbackRecord& callback = sliderChangeCallbacks[callbackIndex];
-        if (!callback.node.hasValue())
-        {
-            return;
-        }
-        if (callback.node.index() < sliderChangeCallbackIndexByNodeIndex.size() &&
-            sliderChangeCallbackIndexByNodeIndex[callback.node.index()] == callbackIndex)
-        {
-            sliderChangeCallbackIndexByNodeIndex[callback.node.index()] = InvalidSliderChangeCallbackIndex;
-        }
-        if (callback.active)
-        {
-            callback.active = false;
-            if (activeSliderChangeCallbackCount > 0)
-            {
-                --activeSliderChangeCallbackCount;
-            }
-        }
-        if (routeDispatchDepth != 0 || sliderChangeCallbackOperationDepth != 0 || callback.invoking ||
-            reclaimingInactiveSliderChangeCallbacks)
-        {
-            if (!callback.queuedForReclaim)
-            {
-                callback.queuedForReclaim = true;
-                inactiveSliderChangeCallbackIndices.push_back(callbackIndex);
-            }
-            return;
-        }
-        recycleSliderChangeCallback(callbackIndex);
-        reclaimInactiveSliderChangeCallbacks();
-    }
-
-    void deactivateSliderChangeCallbackForNode(u32 nodeIndex) noexcept
-    {
-        if (nodeIndex >= sliderChangeCallbackIndexByNodeIndex.size())
-        {
-            return;
-        }
-        const u32 callbackIndex = sliderChangeCallbackIndexByNodeIndex[nodeIndex];
-        sliderChangeCallbackIndexByNodeIndex[nodeIndex] = InvalidSliderChangeCallbackIndex;
-        if (callbackIndex != InvalidSliderChangeCallbackIndex)
-        {
-            deactivateSliderChangeCallback(callbackIndex);
-        }
-    }
-
-    [[nodiscard]] Core::Status rollbackSliderChangeCallbackRegistration(u32 callbackIndex, Core::Error error)
-    {
-        deactivateSliderChangeCallback(callbackIndex);
-        reclaimInactiveSliderChangeCallbacks();
-        return Core::failure(std::move(error));
-    }
-
-    [[nodiscard]] SliderChangeCallbackInvocationCandidate captureSliderChangeCallback(UINodeId slider) const noexcept
-    {
-        if (!contains(slider) || slider.index() >= sliderChangeCallbackIndexByNodeIndex.size())
+        if (!contains(slider))
         {
             return {};
         }
-        const u32 callbackIndex = sliderChangeCallbackIndexByNodeIndex[slider.index()];
-        if (callbackIndex >= sliderChangeCallbacks.size())
-        {
-            return {};
-        }
-        const SliderChangeCallbackRecord& callback = sliderChangeCallbacks[callbackIndex];
-        if (!callback.active || callback.node != slider || !callback.callback.hasValue())
-        {
-            return {};
-        }
-        return SliderChangeCallbackInvocationCandidate{
-            .slider = slider,
-            .callbackIndex = callbackIndex,
-            .generation = callback.generation,
-        };
+        return sliderChangeCallbackRegistry.capture(slider);
     }
 
-    void invokeSliderChangeCallback(SliderChangeCallbackInvocationCandidate candidate,
+    void invokeSliderChangeCallback(Detail::UISliderChangeCallbackInvocation candidate,
                                     const UISliderChangeEvent& event) noexcept
     {
-        if (!candidate.hasValue() || !contains(candidate.slider) ||
-            candidate.callbackIndex >= sliderChangeCallbacks.size())
+        if (!candidate.hasValue() || !contains(candidate.slider))
         {
             return;
         }
         const NodeRecord* sliderRecord = nodes.tryGet(candidate.slider.storageId());
-        SliderChangeCallbackRecord& callback = sliderChangeCallbacks[candidate.callbackIndex];
-        if (sliderRecord == nullptr || sliderRecord->kind != UIWidgetKind::Slider || !callback.active ||
-            callback.generation != candidate.generation || callback.node != candidate.slider ||
-            !callback.callback.hasValue())
+        if (sliderRecord == nullptr || sliderRecord->kind != UIWidgetKind::Slider)
         {
             return;
         }
-
-        callback.invoking = true;
-        ++sliderChangeCallbackOperationDepth;
-        callback.callback(event);
-        --sliderChangeCallbackOperationDepth;
-        if (candidate.callbackIndex < sliderChangeCallbacks.size())
-        {
-            SliderChangeCallbackRecord& current = sliderChangeCallbacks[candidate.callbackIndex];
-            if (current.generation == candidate.generation)
-            {
-                current.invoking = false;
-            }
-        }
-        reclaimInactiveSliderChangeCallbacks();
+        sliderChangeCallbackRegistry.invoke(candidate, event, routeDispatchDepth != 0);
     }
 
     void clearTextState(u32 index) noexcept
@@ -6051,10 +5865,6 @@ struct UIContext::Impl final {
         if (index < sliderStatesByNodeIndex.size())
         {
             sliderStatesByNodeIndex[index] = {};
-        }
-        if (index < sliderChangeCallbackIndexByNodeIndex.size())
-        {
-            sliderChangeCallbackIndexByNodeIndex[index] = InvalidSliderChangeCallbackIndex;
         }
         if (index < textEditStatesByNodeIndex.size())
         {
@@ -7686,7 +7496,7 @@ struct UIContext::Impl final {
             }
             deactivateAllRoutedPointerListenersForNode(currentIndex);
             deactivateButtonActionForNode(currentIndex);
-            deactivateSliderChangeCallbackForNode(currentIndex);
+            sliderChangeCallbackRegistry.clearNode(currentIndex, routeDispatchDepth != 0);
             idsByIndex[currentIndex] = {};
             resetNodeSideData(currentIndex);
             static_cast<void>(nodes.erase(node.storageId()));
@@ -9326,75 +9136,42 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidButtonAction, "UI Slider change callback is empty");
         }
 
-        const u32 previousCallbackIndex = sliderChangeCallbackIndexByNodeIndex[slider.index()];
-        const bool replacing = previousCallbackIndex < sliderChangeCallbacks.size() &&
-                               sliderChangeCallbacks[previousCallbackIndex].active &&
-                               sliderChangeCallbacks[previousCallbackIndex].node == slider;
-        if (previousCallbackIndex != InvalidSliderChangeCallbackIndex && !replacing)
+        auto registration = sliderChangeCallbackRegistry.stage(
+            slider, std::move(callback), routeDispatchDepth != 0);
+        if (!registration)
         {
-            return fail(Core::CoreErrorCode::Internal, "UI Slider change callback mapping is inconsistent");
-        }
-        if (!replacing && activeSliderChangeCallbackCount >= capacityConfig.nodeCapacity)
-        {
-            return fail(UIErrorCode::CapacityExceeded, "UI Slider change callback capacity has been exhausted");
-        }
-        if (freeSliderChangeCallbackHead == InvalidSliderChangeCallbackIndex)
-        {
-            return fail(UIErrorCode::CapacityExceeded,
-                        "UI Slider change callback transaction storage has been exhausted");
+            return Core::failure(registration.error());
         }
 
-        const u32 callbackIndex = freeSliderChangeCallbackHead;
-        SliderChangeCallbackRecord& callbackRecord = sliderChangeCallbacks[callbackIndex];
-        freeSliderChangeCallbackHead = callbackRecord.nextFreeIndex;
-        ++callbackRecord.generation;
-        if (callbackRecord.generation == 0)
-        {
-            ++callbackRecord.generation;
-        }
-        callbackRecord.node = slider;
-        callbackRecord.nextFreeIndex = InvalidSliderChangeCallbackIndex;
-        callbackRecord.active = false;
-        callbackRecord.queuedForReclaim = false;
-        callbackRecord.invoking = false;
-        {
-            ++sliderChangeCallbackOperationDepth;
-            auto callbackOperation = Core::makeScopeExit([this]() noexcept { --sliderChangeCallbackOperationDepth; });
-            callbackRecord.callback = std::move(callback);
-        }
-        reclaimInactiveSliderChangeCallbacks();
+        const auto rollbackRegistration = [&](Core::Error error) {
+            sliderChangeCallbackRegistry.rollback(*registration, routeDispatchDepth != 0);
+            return Core::failure(std::move(error));
+        };
 
         if (!contains(updaterRoot))
         {
-            return rollbackSliderChangeCallbackRegistration(
-                callbackIndex, makeError(UIErrorCode::RootRequired,
-                                         "UI tree updater root was released while setting a Slider callback"));
+            return rollbackRegistration(makeError(
+                UIErrorCode::RootRequired,
+                "UI tree updater root was released while setting a Slider callback"));
         }
         auto liveSliderResult = resolveSlider(slider);
         if (!liveSliderResult)
         {
-            return rollbackSliderChangeCallbackRegistration(callbackIndex, liveSliderResult.error());
+            return rollbackRegistration(liveSliderResult.error());
         }
         if (!isNodeWithinRoot(updaterRoot, slider))
         {
-            return rollbackSliderChangeCallbackRegistration(
-                callbackIndex,
+            return rollbackRegistration(
                 makeError(UIErrorCode::InvalidNode, "UI Slider left the updater root while setting its callback"));
         }
-        if (sliderChangeCallbackIndexByNodeIndex[slider.index()] != previousCallbackIndex)
+        if (!sliderChangeCallbackRegistry.canCommit(*registration))
         {
-            return rollbackSliderChangeCallbackRegistration(
-                callbackIndex, makeError(UIErrorCode::InvalidButtonAction,
-                                         "UI Slider change callback changed during callback transfer"));
+            return rollbackRegistration(makeError(
+                UIErrorCode::InvalidButtonAction,
+                "UI Slider change callback changed during callback transfer"));
         }
 
-        callbackRecord.active = true;
-        sliderChangeCallbackIndexByNodeIndex[slider.index()] = callbackIndex;
-        ++activeSliderChangeCallbackCount;
-        if (replacing)
-        {
-            deactivateSliderChangeCallback(previousCallbackIndex);
-        }
+        sliderChangeCallbackRegistry.commit(*registration, routeDispatchDepth != 0);
         return Core::success();
     }
 
@@ -9418,12 +9195,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
         }
-        const u32 callbackIndex = sliderChangeCallbackIndexByNodeIndex[slider.index()];
-        sliderChangeCallbackIndexByNodeIndex[slider.index()] = InvalidSliderChangeCallbackIndex;
-        if (callbackIndex != InvalidSliderChangeCallbackIndex)
-        {
-            deactivateSliderChangeCallback(callbackIndex);
-        }
+        sliderChangeCallbackRegistry.clear(slider, routeDispatchDepth != 0);
         return Core::success();
     }
 
@@ -13025,7 +12797,7 @@ struct UIContext::Impl final {
         drainDeferredRoutedPointerListenerReleases();
         reclaimInactiveRoutedPointerListeners();
         reclaimInactiveButtonActions();
-        reclaimInactiveSliderChangeCallbacks();
+        sliderChangeCallbackRegistry.reclaim(false);
     }
 
     void dispatchPointerCancelToCapture(std::span<const UICommittedHitEntry> entries) noexcept
@@ -17338,7 +17110,7 @@ UIContext::~UIContext() noexcept
     {
         if (!m_impl->isOwnerThread() || m_impl->routeDispatchDepth != 0 ||
             m_impl->listenerCallbackOperationDepth != 0 || m_impl->buttonActionCallbackOperationDepth != 0 ||
-            m_impl->sliderChangeCallbackOperationDepth != 0)
+            m_impl->sliderChangeCallbackRegistry.operationInProgress())
         {
             std::terminate();
         }

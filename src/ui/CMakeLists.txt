@@ -39,6 +39,8 @@ add_library(tina_ui STATIC
     UIContextConfig.cpp
     detail/UIImeCompositionState.hpp
     detail/UIImeCompositionState.cpp
+    detail/UISliderChangeCallbackRegistry.hpp
+    detail/UISliderChangeCallbackRegistry.cpp
     detail/UITextStorage.hpp
     detail/UITextStorage.cpp
     UIText.cpp
