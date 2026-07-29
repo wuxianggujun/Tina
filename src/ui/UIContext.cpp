@@ -25,6 +25,7 @@
 #include "detail/UITextEditModel.hpp"
 #include "detail/UITextStorage.hpp"
 #include "detail/UIThemeBindingResolver.hpp"
+#include "detail/UIWidgetStateModels.hpp"
 #include "detail/UIWidgetTraits.hpp"
 
 #include <algorithm>
@@ -73,11 +74,13 @@ using Detail::containsLineBreak;
 using Detail::containsPointHalfOpen;
 using Detail::countBoxChromePaintEntries;
 using Detail::countDrawableTextCodepoints;
+using Detail::DropdownState;
 using Detail::hasLayoutWork;
 using Detail::horizontalMargin;
 using Detail::intersectRects;
 using Detail::isButtonChromeKind;
 using Detail::isDefaultActivatableKind;
+using Detail::isFiniteLayoutRect;
 using Detail::isFiniteNonNegative;
 using Detail::isKeyboardFocusableKind;
 using Detail::isValidEventPhaseMask;
@@ -90,6 +93,9 @@ using Detail::LayoutWorkArrange;
 using Detail::LayoutWorkArrangeComplete;
 using Detail::LayoutWorkMeasure;
 using Detail::LayoutWorkMeasureComplete;
+using Detail::ListViewItemState;
+using Detail::ListViewLayoutScratch;
+using Detail::ListViewState;
 using Detail::makeListViewScrollBarGeometry;
 using Detail::makeScrollBarGeometry;
 using Detail::makeTreeViewDisclosureRect;
@@ -105,6 +111,9 @@ using Detail::scrollAxisMaxOffset;
 using Detail::scrollAxisOffset;
 using Detail::ScrollBarGeometry;
 using Detail::ScrollBarPointerHit;
+using Detail::ScrollViewLayoutScratch;
+using Detail::ScrollViewState;
+using Detail::SliderState;
 using Detail::SliderPaintGeometry;
 using Detail::SliderTrackGeometry;
 using Detail::sliderPaintGeometry;
@@ -121,126 +130,22 @@ using Detail::ThemeBindingScrollViewPaint;
 using Detail::ThemeBindingSliderPaint;
 using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
+using Detail::TextEditState;
+using Detail::TreeViewItemState;
+using Detail::TreeViewLayoutScratch;
+using Detail::TreeViewState;
 using Detail::utf8ByteOffsetForCodepoint;
 using Detail::verticalMargin;
+using Detail::WidgetTextState;
 using Detail::findHitEntryIndex;
 using Detail::hitEntryAllowedByModal;
 using Detail::hitEntryIsWithinScope;
 using Detail::phaseMaskFor;
+using Detail::PopupLayoutScratch;
+using Detail::PopupState;
+using Detail::ProgressBarState;
+using Detail::RadioButtonState;
 using Detail::supportsWidgetText;
-
-struct WidgetTextState final {
-    TextByteAllocation allocation{};
-    u32 length = 0;
-    UITextStyle style{};
-    UITextMetrics metrics{};
-    bool hasContent = false;
-};
-
-struct TextEditState final {
-    UITextSelection selection{};
-};
-
-struct ProgressBarState final {
-    float minValue = 0.0F;
-    float maxValue = 1.0F;
-    float value = 0.0F;
-    UIProgressBarPaint paint{};
-};
-
-struct RadioButtonState final {
-    UIRadioButtonPaint paint{};
-    bool selected = false;
-};
-
-struct ScrollViewState final {
-    UIScrollViewStyle style{};
-    UIScrollViewPaint paint{};
-    UIScrollOffset requestedOffset{};
-    UIScrollViewMetrics committedMetrics{};
-    UILogicalRect committedViewportRect{};
-};
-
-struct ScrollViewLayoutScratch final {
-    UIScrollViewMetrics metrics{};
-    UILogicalRect viewportRect{};
-};
-
-struct DropdownState final {
-    UINodeId popup{};
-    UINodeId selectedItem{};
-    UIDropdownPaint paint{};
-};
-
-struct PopupState final {
-    UIPopupStyle style{};
-    UIPopupMetrics committedMetrics{};
-    bool open = false;
-};
-
-struct PopupLayoutScratch final {
-    UIPopupMetrics metrics{};
-};
-
-struct ListViewState final {
-    UIListViewStyle style{};
-    UIListViewPaint paint{};
-    UIListViewDataSource dataSource{};
-    UIListViewSelection selection{};
-    UIListViewMetrics committedMetrics{};
-    UILogicalRect committedViewportRect{};
-    float requestedScrollOffset = 0.0F;
-    u32 materializedItemCapacity = 0;
-};
-
-struct ListViewLayoutScratch final {
-    UIListViewMetrics metrics{};
-    UILogicalRect viewportRect{};
-};
-
-struct ListViewItemState final {
-    UIListViewItemKey key = InvalidUIListViewItemKey;
-    u64 logicalIndex = 0;
-    bool bound = false;
-    bool enabled = true;
-    UIListViewItemKey committedKey = InvalidUIListViewItemKey;
-    u64 committedLogicalIndex = 0;
-    bool committedBound = false;
-    bool committedEnabled = true;
-};
-
-struct TreeViewState final {
-    UITreeViewStyle style{};
-    UITreeViewPaint paint{};
-    UITreeViewDataSource dataSource{};
-    UITreeViewSelection selection{};
-    UITreeViewMetrics committedMetrics{};
-    UILogicalRect committedViewportRect{};
-    float requestedScrollOffset = 0.0F;
-    u32 materializedItemCapacity = 0;
-};
-
-struct TreeViewLayoutScratch final {
-    UITreeViewMetrics metrics{};
-    UILogicalRect viewportRect{};
-};
-
-struct TreeViewItemState final {
-    UITreeViewItemKey key = InvalidUITreeViewItemKey;
-    u64 logicalIndex = 0;
-    u32 level = 0;
-    bool bound = false;
-    bool enabled = true;
-    bool expandable = false;
-    bool expanded = false;
-    UITreeViewItemKey committedKey = InvalidUITreeViewItemKey;
-    u64 committedLogicalIndex = 0;
-    u32 committedLevel = 0;
-    bool committedBound = false;
-    bool committedEnabled = true;
-    bool committedExpandable = false;
-    bool committedExpanded = false;
-};
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -429,13 +334,6 @@ struct UIContext::Impl final {
     std::pmr::vector<u8> checkboxCheckedByNodeIndex;
     std::pmr::vector<UICheckboxPaint> checkboxPaintsByNodeIndex;
     // M11-C1: Slider range/value/callback (index-aligned; default 0..1).
-    struct SliderState final {
-        float minValue = 0.0F;
-        float maxValue = 1.0F;
-        float step = 0.0F;
-        float value = 0.0F;
-        UISliderPaint paint{};
-    };
     std::pmr::vector<SliderState> sliderStatesByNodeIndex;
     Detail::UISliderChangeCallbackRegistry sliderChangeCallbackRegistry;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
@@ -846,12 +744,6 @@ struct UIContext::Impl final {
         }
     }
 
-    [[nodiscard]] static bool samePreparedLayoutInputs(const LayoutPreparedInputs& previous,
-                                                       const LayoutPreparedInputs& current) noexcept
-    {
-        return previous == current;
-    }
-
     void prepareLayoutState(UILogicalSize viewportSize, const std::pmr::vector<u32>& order, bool allowReuse) noexcept
     {
         initializeLayoutWork(order, allowReuse);
@@ -923,7 +815,7 @@ struct UIContext::Impl final {
             };
             scratch.preparedInputs = currentInputs;
 
-            if (allowReuse && !samePreparedLayoutInputs(previous, currentInputs))
+            if (allowReuse && previous != currentInputs)
             {
                 // Parent constraint or effective visibility changes can
                 // invalidate every descendant even when only an ancestor was
@@ -3588,12 +3480,6 @@ struct UIContext::Impl final {
             output.push_back(entry);
         }
         return Core::success();
-    }
-
-    [[nodiscard]] static bool isFiniteLayoutRect(UILogicalRect rect) noexcept
-    {
-        return std::isfinite(rect.x) && std::isfinite(rect.y) && isFiniteNonNegative(rect.width) &&
-               isFiniteNonNegative(rect.height) && std::isfinite(rect.right()) && std::isfinite(rect.bottom());
     }
 
     [[nodiscard]] Core::Status validateLayoutCandidate(const std::pmr::vector<u32>& order) const

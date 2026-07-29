@@ -20,6 +20,24 @@ TEST(UILayoutPrimitivesTests, NormalizesNegativeZeroAndChecksFiniteExtent)
         (std::numeric_limits<float>::infinity)()));
 }
 
+TEST(UILayoutPrimitivesTests, LayoutRectRequiresFiniteOriginExtentAndEdges)
+{
+    EXPECT_TRUE(UI::Detail::isFiniteLayoutRect(
+        {.x = 1.0F, .y = 2.0F, .width = 3.0F, .height = 4.0F}));
+    EXPECT_FALSE(UI::Detail::isFiniteLayoutRect(
+        {.x = 1.0F, .y = 2.0F, .width = -1.0F, .height = 4.0F}));
+    EXPECT_FALSE(UI::Detail::isFiniteLayoutRect(
+        {.x = (std::numeric_limits<float>::infinity)(),
+         .y = 2.0F,
+         .width = 3.0F,
+         .height = 4.0F}));
+    EXPECT_FALSE(UI::Detail::isFiniteLayoutRect(
+        {.x = (std::numeric_limits<float>::max)(),
+         .y = 2.0F,
+         .width = (std::numeric_limits<float>::max)(),
+         .height = 4.0F}));
+}
+
 TEST(UILayoutPrimitivesTests, ResolvesPixelsAndPercentWithExplicitFallbackCount)
 {
     UI::Detail::LayoutPassStatistics statistics{};

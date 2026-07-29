@@ -53,6 +53,13 @@ struct ResolvedLength final {
     return std::isfinite(value) && value >= 0.0F;
 }
 
+[[nodiscard]] inline bool isFiniteLayoutRect(UILogicalRect rect) noexcept
+{
+    return std::isfinite(rect.x) && std::isfinite(rect.y) &&
+           isFiniteNonNegative(rect.width) && isFiniteNonNegative(rect.height) &&
+           std::isfinite(rect.right()) && std::isfinite(rect.bottom());
+}
+
 [[nodiscard]] inline ResolvedLength resolveLength(
     UILayoutLength length, bool basisDefinite, float basis,
     LayoutPassStatistics& statistics) noexcept

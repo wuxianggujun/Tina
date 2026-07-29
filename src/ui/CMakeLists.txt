@@ -66,6 +66,7 @@ add_library(tina_ui STATIC
     detail/UITextEditModel.hpp
     detail/UITextEditModel.cpp
     detail/UIWidgetTraits.hpp
+    detail/UIWidgetStateModels.hpp
     UIText.cpp
     UIGlyphAtlas.cpp
     UITextRasterizer.cpp

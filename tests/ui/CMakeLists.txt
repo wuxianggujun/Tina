@@ -27,6 +27,7 @@ add_executable(tina_ui_tests
     UIPropertyNormalizationTests.cpp
     UIThemeBindingResolverTests.cpp
     UIWidgetTraitsTests.cpp
+    UIWidgetStateModelsTests.cpp
     UIRadioButtonTests.cpp
     UISemanticsTests.cpp
     UIAccessibilityTests.cpp
