@@ -14,6 +14,7 @@
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIImeCompositionState.hpp"
+#include "detail/UIPropertyNormalization.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UITextStorage.hpp"
@@ -317,202 +318,6 @@ struct ResolvedLength final {
     return value == 0.0F ? 0.0F : value;
 }
 
-[[nodiscard]] UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept
-{
-    if (paint.solidFill.has_value() && paint.solidFill->color.alpha == 0)
-    {
-        paint.solidFill.reset();
-    }
-    if (!(std::isfinite(paint.borderWidth) && paint.borderWidth > 0.0F))
-    {
-        paint.borderWidth = 0.0F;
-        paint.borderLight = {};
-        paint.borderDark = {};
-    }
-    if (paint.borderLight.alpha == 0 && paint.borderDark.alpha == 0)
-    {
-        paint.borderWidth = 0.0F;
-    }
-    if (!(std::isfinite(paint.shadowOffsetX) && std::isfinite(paint.shadowOffsetY)) || paint.shadow.alpha == 0)
-    {
-        paint.shadow = {};
-        paint.shadowOffsetX = 0.0F;
-        paint.shadowOffsetY = 0.0F;
-    }
-    return paint;
-}
-
-[[nodiscard]] bool isValidScrollAxes(UIScrollAxes axes) noexcept
-{
-    return axes == UIScrollAxes::None || axes == UIScrollAxes::Horizontal || axes == UIScrollAxes::Vertical ||
-           axes == UIScrollAxes::Both;
-}
-
-[[nodiscard]] bool isValidScrollBarVisibility(UIScrollBarVisibility visibility) noexcept
-{
-    return visibility == UIScrollBarVisibility::Auto || visibility == UIScrollBarVisibility::Always ||
-           visibility == UIScrollBarVisibility::Hidden;
-}
-
-[[nodiscard]] Core::Result<UIScrollViewStyle> normalizeScrollViewStyle(UIScrollViewStyle style)
-{
-    if (!isValidScrollAxes(style.axes) || !isValidScrollBarVisibility(style.scrollBarVisibility) ||
-        !(std::isfinite(style.wheelStep) && style.wheelStep > 0.0F))
-    {
-        return fail(UIErrorCode::InvalidControlValue,
-                    "UI ScrollView axes/visibility must be valid and wheel step must be finite and positive");
-    }
-    style.wheelStep = normalizeFloat(style.wheelStep);
-    return style;
-}
-
-[[nodiscard]] Core::Result<UIScrollViewPaint> normalizeScrollViewPaint(UIScrollViewPaint paint)
-{
-    if (!(std::isfinite(paint.thickness) && paint.thickness > 0.0F) ||
-        !(std::isfinite(paint.minThumbExtent) && paint.minThumbExtent > 0.0F))
-    {
-        return fail(UIErrorCode::InvalidControlValue,
-                    "UI ScrollView scrollbar thickness and minimum thumb extent must be finite and positive");
-    }
-    paint.thickness = normalizeFloat(paint.thickness);
-    paint.minThumbExtent = normalizeFloat(paint.minThumbExtent);
-    return paint;
-}
-
-[[nodiscard]] Core::Result<UIListViewCreateConfig> normalizeListViewCreateConfig(UIListViewCreateConfig config)
-{
-    if (config.materializedItemCapacity == 0 ||
-        config.materializedItemCapacity > UIListViewCreateConfig::MaximumMaterializedItemCapacity)
-    {
-        return fail(UIErrorCode::InvalidControlValue,
-                    "UI ListView materialized item capacity must be within the supported range");
-    }
-    return config;
-}
-
-[[nodiscard]] Core::Result<UIListViewStyle> normalizeListViewStyle(UIListViewStyle style)
-{
-    if (!(std::isfinite(style.rowHeight) && style.rowHeight > 0.0F) ||
-        !isValidScrollBarVisibility(style.scrollBarVisibility) ||
-        !(std::isfinite(style.wheelStep) && style.wheelStep > 0.0F))
-    {
-        return fail(UIErrorCode::InvalidControlValue,
-                    "UI ListView row height/wheel step must be finite and positive and visibility must be valid");
-    }
-    style.rowHeight = normalizeFloat(style.rowHeight);
-    style.wheelStep = normalizeFloat(style.wheelStep);
-    return style;
-}
-
-[[nodiscard]] Core::Result<UIListViewPaint> normalizeListViewPaint(UIListViewPaint paint)
-{
-    auto scrollBar = normalizeScrollViewPaint(paint.scrollBar);
-    if (!scrollBar)
-    {
-        return Core::failure(scrollBar.error());
-    }
-    paint.scrollBar = *scrollBar;
-    return paint;
-}
-
-[[nodiscard]] constexpr bool isValidListViewScrollAlignment(UIListViewScrollAlignment alignment) noexcept
-{
-    return alignment == UIListViewScrollAlignment::Nearest || alignment == UIListViewScrollAlignment::Start ||
-           alignment == UIListViewScrollAlignment::Center || alignment == UIListViewScrollAlignment::End;
-}
-
-[[nodiscard]] Core::Result<UITreeViewCreateConfig> normalizeTreeViewCreateConfig(UITreeViewCreateConfig config)
-{
-    if (config.materializedItemCapacity == 0 ||
-        config.materializedItemCapacity > UITreeViewCreateConfig::MaximumMaterializedItemCapacity)
-    {
-        return fail(UIErrorCode::InvalidControlValue,
-                    "UI TreeView materialized item capacity must be within the supported range");
-    }
-    return config;
-}
-
-[[nodiscard]] Core::Result<UITreeViewStyle> normalizeTreeViewStyle(UITreeViewStyle style)
-{
-    if (!(std::isfinite(style.rowHeight) && style.rowHeight > 0.0F) ||
-        !isValidScrollBarVisibility(style.scrollBarVisibility) ||
-        !(std::isfinite(style.wheelStep) && style.wheelStep > 0.0F) ||
-        !(std::isfinite(style.indentation) && style.indentation >= 0.0F) ||
-        !(std::isfinite(style.disclosureExtent) && style.disclosureExtent > 0.0F) ||
-        !(std::isfinite(style.disclosureGap) && style.disclosureGap >= 0.0F))
-    {
-        return fail(UIErrorCode::InvalidControlValue,
-                    "UI TreeView row, scroll, indentation, and disclosure metrics must be finite and valid");
-    }
-    style.rowHeight = normalizeFloat(style.rowHeight);
-    style.wheelStep = normalizeFloat(style.wheelStep);
-    style.indentation = normalizeFloat(style.indentation);
-    style.disclosureExtent = normalizeFloat(style.disclosureExtent);
-    style.disclosureGap = normalizeFloat(style.disclosureGap);
-    return style;
-}
-
-[[nodiscard]] Core::Result<UITreeViewPaint> normalizeTreeViewPaint(UITreeViewPaint paint)
-{
-    auto scrollBar = normalizeScrollViewPaint(paint.scrollBar);
-    if (!scrollBar)
-    {
-        return Core::failure(scrollBar.error());
-    }
-    paint.scrollBar = *scrollBar;
-    return paint;
-}
-
-[[nodiscard]] constexpr bool isValidTreeViewScrollAlignment(UITreeViewScrollAlignment alignment) noexcept
-{
-    return alignment == UITreeViewScrollAlignment::Nearest || alignment == UITreeViewScrollAlignment::Start ||
-           alignment == UITreeViewScrollAlignment::Center || alignment == UITreeViewScrollAlignment::End;
-}
-
-[[nodiscard]] Core::Result<UIScrollOffset> normalizeScrollOffset(UIScrollOffset offset)
-{
-    if (!std::isfinite(offset.x) || !std::isfinite(offset.y) || offset.x < 0.0F || offset.y < 0.0F)
-    {
-        return fail(UIErrorCode::InvalidControlValue,
-                    "UI ScrollView offset must contain finite non-negative coordinates");
-    }
-    offset.x = normalizeFloat(offset.x);
-    offset.y = normalizeFloat(offset.y);
-    return offset;
-}
-
-[[nodiscard]] bool isValidPopupPlacement(UIPopupPlacement placement) noexcept
-{
-    return placement == UIPopupPlacement::Auto || placement == UIPopupPlacement::Below ||
-           placement == UIPopupPlacement::Above;
-}
-
-[[nodiscard]] Core::Result<UIPopupStyle> normalizePopupStyle(UIPopupStyle style)
-{
-    if (!isValidPopupPlacement(style.placement) || !std::isfinite(style.anchorGap) || style.anchorGap < 0.0F)
-    {
-        return fail(UIErrorCode::InvalidControlValue,
-                    "UI Popup placement must be valid and anchor gap must be finite and non-negative");
-    }
-    style.anchorGap = normalizeFloat(style.anchorGap);
-    return style;
-}
-
-[[nodiscard]] Core::Result<UIDropdownPaint> normalizeDropdownPaint(UIDropdownPaint paint)
-{
-    if (!(std::isfinite(paint.indicatorWidth) && paint.indicatorWidth > 0.0F) ||
-        !(std::isfinite(paint.indicatorHeight) && paint.indicatorHeight > 0.0F) ||
-        !std::isfinite(paint.indicatorInset) || paint.indicatorInset < 0.0F)
-    {
-        return fail(UIErrorCode::InvalidControlValue,
-                    "UI Dropdown indicator size must be finite and positive and inset must be non-negative");
-    }
-    paint.indicatorWidth = normalizeFloat(paint.indicatorWidth);
-    paint.indicatorHeight = normalizeFloat(paint.indicatorHeight);
-    paint.indicatorInset = normalizeFloat(paint.indicatorInset);
-    return paint;
-}
-
 [[nodiscard]] usize countBoxChromePaintEntries(const UIBoxPaint& paint, const UILogicalRect& worldRect,
                                                bool hasResolvedFill) noexcept
 {
@@ -653,178 +458,6 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output, UINo
 [[nodiscard]] bool isFiniteNonNegative(float value) noexcept
 {
     return std::isfinite(value) && value >= 0.0F;
-}
-
-[[nodiscard]] Core::Status validateProductTheme(const UITheme& theme)
-{
-    if (!isFiniteNonNegative(theme.panelBorderWidth) || !std::isfinite(theme.panelShadowOffsetX) ||
-        !std::isfinite(theme.panelShadowOffsetY) || !isFiniteNonNegative(theme.checkboxIndicatorInset) ||
-        !isFiniteNonNegative(theme.radioSelectedInset) || !isFiniteNonNegative(theme.radioLabelGap) ||
-        !isFiniteNonNegative(theme.sliderContentInset) || !isFiniteNonNegative(theme.sliderThumbWidth) ||
-        !(std::isfinite(theme.buttonTextSize) && theme.buttonTextSize > 0.0F) ||
-        !(std::isfinite(theme.bodyTextSize) && theme.bodyTextSize > 0.0F) ||
-        !(std::isfinite(theme.titleTextSize) && theme.titleTextSize > 0.0F))
-    {
-        return fail(UIErrorCode::InvalidTheme,
-                    "UI Theme metrics must be finite; sizes must be positive and insets non-negative");
-    }
-    return Core::success();
-}
-
-[[nodiscard]] Core::Status normalizeLayoutLength(UILayoutLength& length, bool allowAuto)
-{
-    switch (length.unit)
-    {
-    case UILayoutLengthUnit::Auto:
-        if (!allowAuto)
-        {
-            return fail(UIErrorCode::InvalidLayout, "UI layout length cannot be Auto here");
-        }
-        length.value = 0.0F;
-        return Core::success();
-    case UILayoutLengthUnit::Px:
-        if (!isFiniteNonNegative(length.value))
-        {
-            return fail(UIErrorCode::InvalidLayout, "UI layout length must be finite and non-negative");
-        }
-        length.value = normalizeFloat(length.value);
-        return Core::success();
-    case UILayoutLengthUnit::Percent:
-        if (!isFiniteNonNegative(length.value) || length.value > 100.0F)
-        {
-            return fail(UIErrorCode::InvalidLayout, "UI layout percent must be finite and within 0..100");
-        }
-        length.value = normalizeFloat(length.value);
-        return Core::success();
-    }
-
-    return fail(UIErrorCode::InvalidLayout, "UI layout length unit is invalid");
-}
-
-[[nodiscard]] Core::Status normalizeSpacing(float& value)
-{
-    if (!isFiniteNonNegative(value))
-    {
-        return fail(UIErrorCode::InvalidLayout, "UI layout spacing must be finite and non-negative");
-    }
-    value = normalizeFloat(value);
-    return Core::success();
-}
-
-[[nodiscard]] Core::Status normalizeEdgeSpacing(UIEdgeSpacing& spacing)
-{
-    if (Core::Status status = normalizeSpacing(spacing.left); !status)
-    {
-        return status;
-    }
-    if (Core::Status status = normalizeSpacing(spacing.top); !status)
-    {
-        return status;
-    }
-    if (Core::Status status = normalizeSpacing(spacing.right); !status)
-    {
-        return status;
-    }
-    return normalizeSpacing(spacing.bottom);
-}
-
-[[nodiscard]] bool isValidFlexDirection(UIFlexDirection value) noexcept
-{
-    return value == UIFlexDirection::Row || value == UIFlexDirection::Column;
-}
-
-[[nodiscard]] bool isValidJustifyContent(UIJustifyContent value) noexcept
-{
-    return value == UIJustifyContent::Start || value == UIJustifyContent::Center || value == UIJustifyContent::End ||
-           value == UIJustifyContent::SpaceBetween;
-}
-
-[[nodiscard]] bool isValidAlignItems(UIAlignItems value) noexcept
-{
-    return value == UIAlignItems::Start || value == UIAlignItems::Center || value == UIAlignItems::End ||
-           value == UIAlignItems::Stretch;
-}
-
-[[nodiscard]] bool isValidPositionMode(UILayoutPositionMode value) noexcept
-{
-    return value == UILayoutPositionMode::InFlow || value == UILayoutPositionMode::AbsoluteOverlay;
-}
-
-[[nodiscard]] bool isValidVisibility(UIVisibility value) noexcept
-{
-    return value == UIVisibility::Visible || value == UIVisibility::Hidden || value == UIVisibility::Collapsed;
-}
-
-[[nodiscard]] Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
-{
-    if (Core::Status status = normalizeLayoutLength(style.size.width, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(style.size.height, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(style.minMax.minWidth, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(style.minMax.minHeight, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(style.minMax.maxWidth, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(style.minMax.maxHeight, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeEdgeSpacing(style.margin); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeEdgeSpacing(style.padding); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(style.absoluteInset.left, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(style.absoluteInset.top, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(style.absoluteInset.right, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(style.absoluteInset.bottom, true); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeSpacing(style.flex.grow); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeSpacing(style.flex.gap.row); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeSpacing(style.flex.gap.column); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (!isValidFlexDirection(style.flex.direction) || !isValidJustifyContent(style.flex.justify) ||
-        !isValidAlignItems(style.flex.alignItems) || !isValidPositionMode(style.position) ||
-        !isValidVisibility(style.visibility))
-    {
-        return fail(UIErrorCode::InvalidLayout, "UI layout enum value is invalid");
-    }
-
-    return style;
 }
 
 [[nodiscard]] ResolvedLength resolveLength(UILayoutLength length, bool basisDefinite, float basis,
@@ -6408,7 +6041,7 @@ struct UIContext::Impl final {
             return ownerThread;
         }
         drainDeferredRootDestroys();
-        if (Core::Status validation = validateProductTheme(theme); !validation)
+        if (Core::Status validation = Detail::validateProductTheme(theme); !validation)
         {
             return validation;
         }
@@ -6636,7 +6269,7 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Result<UINodeId> createListViewComposite(UINodeId parent, UIListViewCreateConfig config)
     {
-        auto normalized = normalizeListViewCreateConfig(config);
+        auto normalized = Detail::normalizeListViewCreateConfig(config);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -6681,7 +6314,7 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Result<UINodeId> createTreeViewComposite(UINodeId parent, UITreeViewCreateConfig config)
     {
-        auto normalized = normalizeTreeViewCreateConfig(config);
+        auto normalized = Detail::normalizeTreeViewCreateConfig(config);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -7049,7 +6682,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
         }
-        auto normalizedStyle = normalizeLayoutStyle(style);
+        auto normalizedStyle = Detail::normalizeLayoutStyle(style);
         if (!normalizedStyle)
         {
             return Core::failure(normalizedStyle.error());
@@ -7379,7 +7012,7 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
         }
 
-        const UIBoxPaint normalizedPaint = normalizeBoxPaint(paint);
+        const UIBoxPaint normalizedPaint = Detail::normalizeBoxPaint(paint);
         UIBoxPaint& currentPaint = boxPaintsByIndex[node.index()];
         if (currentPaint == normalizedPaint)
         {
@@ -9011,7 +8644,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
         }
-        auto normalized = normalizeScrollViewStyle(style);
+        auto normalized = Detail::normalizeScrollViewStyle(style);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -9073,7 +8706,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
         }
-        auto normalized = normalizeScrollOffset(offset);
+        auto normalized = Detail::normalizeScrollOffset(offset);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -9158,7 +8791,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
         }
-        auto normalized = normalizeScrollViewPaint(paint);
+        auto normalized = Detail::normalizeScrollViewPaint(paint);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -9573,7 +9206,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI Popup is not owned by the updater root");
         }
-        auto normalized = normalizePopupStyle(style);
+        auto normalized = Detail::normalizePopupStyle(style);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -9811,7 +9444,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI Dropdown is not owned by the updater root");
         }
-        auto normalized = normalizeDropdownPaint(paint);
+        auto normalized = Detail::normalizeDropdownPaint(paint);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -9970,7 +9603,7 @@ struct UIContext::Impl final {
         {
             return valid;
         }
-        auto normalized = normalizeListViewStyle(style);
+        auto normalized = Detail::normalizeListViewStyle(style);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -10026,7 +9659,7 @@ struct UIContext::Impl final {
         {
             return valid;
         }
-        auto normalized = normalizeListViewPaint(paint);
+        auto normalized = Detail::normalizeListViewPaint(paint);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -10159,7 +9792,7 @@ struct UIContext::Impl final {
         {
             return valid;
         }
-        if (!isValidListViewScrollAlignment(alignment))
+        if (!Detail::isValidListViewScrollAlignment(alignment))
         {
             return fail(UIErrorCode::InvalidControlValue, "UI ListView scroll alignment is not recognized");
         }
@@ -10340,7 +9973,7 @@ struct UIContext::Impl final {
         {
             return valid;
         }
-        auto normalized = normalizeTreeViewStyle(style);
+        auto normalized = Detail::normalizeTreeViewStyle(style);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -10395,7 +10028,7 @@ struct UIContext::Impl final {
         {
             return valid;
         }
-        auto normalized = normalizeTreeViewPaint(paint);
+        auto normalized = Detail::normalizeTreeViewPaint(paint);
         if (!normalized)
         {
             return Core::failure(normalized.error());
@@ -10576,7 +10209,7 @@ struct UIContext::Impl final {
         {
             return valid;
         }
-        if (!isValidTreeViewScrollAlignment(alignment))
+        if (!Detail::isValidTreeViewScrollAlignment(alignment))
         {
             return fail(UIErrorCode::InvalidControlValue, "UI TreeView scroll alignment is not recognized");
         }

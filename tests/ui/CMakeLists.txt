@@ -20,6 +20,7 @@ add_executable(tina_ui_tests
     UITreeViewTests.cpp
     UIPopupDropdownTests.cpp
     UIProgressBarTests.cpp
+    UIPropertyNormalizationTests.cpp
     UIRadioButtonTests.cpp
     UISemanticsTests.cpp
     UIAccessibilityTests.cpp
