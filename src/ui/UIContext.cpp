@@ -9,6 +9,7 @@
 #include <tina/ui/text/UIGlyphAtlas.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
+#include "detail/UIImeCompositionState.hpp"
 #include "detail/UITextStorage.hpp"
 
 #include <algorithm>
@@ -1453,11 +1454,7 @@ struct UIContext::Impl final {
     UINodeId defaultActionFocusButton{};
     // Focused single-line editor that receives keyboard and IME input.
     UINodeId textInputFocus{};
-    static constexpr usize MaxImePreeditBytes = 512;
-    std::array<char, MaxImePreeditBytes> imePreeditBytes_{};
-    usize imePreeditSize_ = 0;
-    u32 imePreeditCursor_ = 0;
-    bool imeCompositionActive_ = false;
+    Detail::UIImeCompositionState imeComposition;
 
     Impl(Platform::WindowId owner, UIContextCapacityConfig capacities, std::thread::id threadId,
          std::shared_ptr<Detail::UIContextLifetimeControl> lifetimeControl, NodePool&& nodePool,
@@ -3676,7 +3673,7 @@ struct UIContext::Impl final {
             const bool focusedTextEdit = record != nullptr && record->kind == UIWidgetKind::TextEdit &&
                                          isNodeEnabled(layoutEntry.node) && textInputFocus == layoutEntry.node &&
                                          isLiveTextEdit(textInputFocus);
-            const bool activeIme = focusedTextEdit && imeCompositionActive_;
+            const bool activeIme = focusedTextEdit && imeComposition.active();
             if (nodeIndex < textStatesByIndex.size() && !presentationTextViewFor(nodeIndex).empty() &&
                 textStatesByIndex[nodeIndex].style.color.alpha != 0)
             {
@@ -3699,8 +3696,7 @@ struct UIContext::Impl final {
                 {
                     // Active IME preedit replaces both the selected text and its
                     // highlight, so count only the replacement glyphs.
-                    paintEntryCount +=
-                        countDrawableTextCodepoints(std::string_view(imePreeditBytes_.data(), imePreeditSize_));
+                    paintEntryCount += countDrawableTextCodepoints(imeComposition.preeditUtf8());
                 } else if (nodeIndex < textEditStatesByNodeIndex.size() &&
                            !textEditStatesByNodeIndex[nodeIndex].selection.isCollapsed())
                 {
@@ -4032,10 +4028,10 @@ struct UIContext::Impl final {
         appendText(committedText.substr(0, selectionBeginByte), textColor);
         const TextPaintCursor selectionStartCursor = cursor;
 
-        if (imeCompositionActive_)
+        if (imeComposition.active())
         {
-            const std::string_view preedit(imePreeditBytes_.data(), imePreeditSize_);
-            const usize preeditCursorByte = utf8ByteOffsetForCodepoint(preedit, imePreeditCursor_);
+            const std::string_view preedit = imeComposition.preeditUtf8();
+            const usize preeditCursorByte = utf8ByteOffsetForCodepoint(preedit, imeComposition.cursorCodepoint());
             const UIPremultipliedRgba8Color preeditColor = premultiply(UIStraightSrgba8Color{
                 .red = 0,
                 .green = 180,
@@ -5345,14 +5341,12 @@ struct UIContext::Impl final {
 
     void resetImeCompositionState() noexcept
     {
-        imeCompositionActive_ = false;
-        imePreeditSize_ = 0;
-        imePreeditCursor_ = 0;
+        imeComposition.reset();
     }
 
     [[nodiscard]] Core::Status clearImeComposition()
     {
-        const bool wasActive = imeCompositionActive_;
+        const bool wasActive = imeComposition.active();
         const UINodeId focus = textInputFocus;
         if (wasActive && focus.hasValue() && contains(focus))
         {
@@ -8297,7 +8291,7 @@ struct UIContext::Impl final {
         WidgetTextState& state = textStatesByIndex[node.index()];
         const std::string_view current = textViewFor(node.index());
         const bool clearActiveIme =
-            record->kind == UIWidgetKind::TextEdit && textInputFocus == node && imeCompositionActive_;
+            record->kind == UIWidgetKind::TextEdit && textInputFocus == node && imeComposition.active();
         if (state.hasContent == !utf8.empty() && current == utf8 && state.metrics == *metrics)
         {
             if (clearActiveIme)
@@ -12396,10 +12390,7 @@ struct UIContext::Impl final {
         const UINodeId previousArmedTextEdit = armedTextEdit;
         const UINodeId previousCapturedPointer = capturedPointerNode;
         const usize previousPublishedHitBufferIndex = publishedHitBufferIndex;
-        const auto previousImePreeditBytes = imePreeditBytes_;
-        const usize previousImePreeditSize = imePreeditSize_;
-        const u32 previousImePreeditCursor = imePreeditCursor_;
-        const bool previousImeCompositionActive = imeCompositionActive_;
+        const Detail::UIImeCompositionState previousImeComposition = imeComposition;
         struct FocusRestoreRollbackEntry final {
             u32 index = InvalidNodeIndex;
             UINodeId value{};
@@ -12440,10 +12431,7 @@ struct UIContext::Impl final {
             scrollThumbDragActive = previousScrollThumbDragActive;
             armedTextEdit = previousArmedTextEdit;
             capturedPointerNode = previousCapturedPointer;
-            imePreeditBytes_ = previousImePreeditBytes;
-            imePreeditSize_ = previousImePreeditSize;
-            imePreeditCursor_ = previousImePreeditCursor;
-            imeCompositionActive_ = previousImeCompositionActive;
+            imeComposition = previousImeComposition;
             for (usize saved = 0; saved < focusRestoreRollbackCount; ++saved)
             {
                 const FocusRestoreRollbackEntry& entry = focusRestoreRollbackEntries[saved];
@@ -15541,22 +15529,18 @@ struct UIContext::Impl final {
 
     [[nodiscard]] bool imeCompositionActive() const noexcept
     {
-        return imeCompositionActive_ && isCommittedTextEditFocusCandidate(textInputFocus) &&
+        return imeComposition.active() && isCommittedTextEditFocusCandidate(textInputFocus) &&
                defaultActionFocusButton == textInputFocus;
     }
 
     [[nodiscard]] std::string_view imePreeditUtf8() const noexcept
     {
-        if (!imeCompositionActive_)
-        {
-            return {};
-        }
-        return std::string_view(imePreeditBytes_.data(), imePreeditSize_);
+        return imeComposition.preeditUtf8();
     }
 
     [[nodiscard]] u32 imePreeditCursorCodepoint() const noexcept
     {
-        return imeCompositionActive_ ? imePreeditCursor_ : 0U;
+        return imeComposition.cursorCodepoint();
     }
 
     [[nodiscard]] Core::Result<UITextInputRouteResult>
@@ -15607,9 +15591,10 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidText, "UI TextEdit preedit accepts one logical line without CR or LF");
         }
-        if (preeditUtf8.size() > MaxImePreeditBytes)
+        if (Core::Status capacityStatus = Detail::UIImeCompositionState::validateCapacity(preeditUtf8);
+            !capacityStatus)
         {
-            return fail(UIErrorCode::CapacityExceeded, "UI IME preedit exceeds the fixed context buffer");
+            return Core::failure(capacityStatus.error());
         }
         const auto codepoints = Core::countStrictUtf8CodepointsWithoutNul(preeditUtf8);
         if (!codepoints.has_value())
@@ -15620,13 +15605,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(paintStatus.error());
         }
-        if (!preeditUtf8.empty())
-        {
-            std::memcpy(imePreeditBytes_.data(), preeditUtf8.data(), preeditUtf8.size());
-        }
-        imePreeditSize_ = preeditUtf8.size();
-        imePreeditCursor_ = (std::min)(cursorCodepoint, *codepoints);
-        imeCompositionActive_ = true;
+        imeComposition.assign(preeditUtf8, cursorCodepoint, *codepoints);
         return UITextInputRouteResult{.consumed = true, .applied = true};
     }
 
