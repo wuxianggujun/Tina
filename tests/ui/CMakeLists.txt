@@ -33,6 +33,7 @@ add_executable(tina_ui_tests
 
     UIDirtySubtreeTests.cpp
     UILayoutTests.cpp
+    UILayoutPrimitivesTests.cpp
     UIPaintSnapshotTests.cpp
     UIThemeTests.cpp
     UIImeCompositionStateTests.cpp

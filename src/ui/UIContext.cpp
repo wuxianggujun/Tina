@@ -15,6 +15,7 @@
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIImeCompositionState.hpp"
+#include "detail/UILayoutPrimitives.hpp"
 #include "detail/UIPaintPrimitives.hpp"
 #include "detail/UIPropertyNormalization.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
@@ -63,15 +64,32 @@ struct NormalizedCapacityConfig final {
 using TextByteAllocation = Detail::UITextStorage::Allocation;
 using Detail::appendBoxChromePaints;
 using Detail::applyOpacity;
+using Detail::clampWithMinMax;
+using Detail::combineVisibility;
 using Detail::containsLineBreak;
+using Detail::containsPointHalfOpen;
 using Detail::countBoxChromePaintEntries;
 using Detail::countDrawableTextCodepoints;
+using Detail::hasLayoutWork;
+using Detail::horizontalMargin;
+using Detail::intersectRects;
+using Detail::isFiniteNonNegative;
+using Detail::layoutSubtreeCompletionMask;
+using Detail::LayoutPassStatistics;
+using Detail::LayoutWorkArrange;
+using Detail::LayoutWorkArrangeComplete;
+using Detail::LayoutWorkMeasure;
+using Detail::LayoutWorkMeasureComplete;
 using Detail::makeListViewScrollBarGeometry;
 using Detail::makeScrollBarGeometry;
 using Detail::makeTreeViewDisclosureRect;
 using Detail::makeTreeViewScrollBarGeometry;
 using Detail::normalizedRangeFraction;
+using Detail::normalizeFloat;
 using Detail::planTextEditCommand;
+using Detail::ResolvedLength;
+using Detail::resolveLength;
+using Detail::resolveLengthNoFallbackCount;
 using Detail::ScrollBarGeometry;
 using Detail::ScrollBarPointerHit;
 using Detail::SliderPaintGeometry;
@@ -90,6 +108,7 @@ using Detail::ThemeBindingSliderPaint;
 using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
 using Detail::utf8ByteOffsetForCodepoint;
+using Detail::verticalMargin;
 
 struct WidgetTextState final {
     TextByteAllocation allocation{};
@@ -263,45 +282,9 @@ struct LayoutScratchState final {
     LayoutPreparedInputs preparedInputs{};
 };
 
-struct LayoutPassStatistics final {
-    usize passCount = 0;
-    usize measuredNodeCount = 0;
-    usize arrangedNodeCount = 0;
-    usize percentMeasureFallbackCount = 0;
-};
-
 struct CommittedHitBuildResult final {
     usize targetCount = 0;
     u32 activeModalEntryIndex = InvalidUIHitEntryIndex;
-};
-
-inline constexpr u8 LayoutWorkMeasure = 1u << 0;
-inline constexpr u8 LayoutWorkArrange = 1u << 1;
-inline constexpr u8 LayoutWorkMeasureComplete = 1u << 2;
-inline constexpr u8 LayoutWorkArrangeComplete = 1u << 3;
-
-[[nodiscard]] constexpr bool hasLayoutWork(u8 work, u8 flag) noexcept
-{
-    return (work & flag) != 0;
-}
-
-[[nodiscard]] constexpr u8 layoutSubtreeCompletionMask(u8 work) noexcept
-{
-    u8 mask = 0;
-    if ((work & LayoutWorkMeasure) != 0)
-    {
-        mask |= LayoutWorkMeasureComplete;
-    }
-    if ((work & LayoutWorkArrange) != 0)
-    {
-        mask |= LayoutWorkArrangeComplete;
-    }
-    return mask;
-}
-
-struct ResolvedLength final {
-    bool hasValue = false;
-    float value = 0.0F;
 };
 
 [[nodiscard]] Core::Error makeError(Core::ErrorCode code, std::string_view message,
@@ -314,111 +297,6 @@ struct ResolvedLength final {
                                                 Core::SourceLocation location = Core::SourceLocation::current())
 {
     return Core::failure(makeError(code, message, location));
-}
-
-[[nodiscard]] float normalizeFloat(float value) noexcept
-{
-    return value == 0.0F ? 0.0F : value;
-}
-
-[[nodiscard]] bool isFiniteNonNegative(float value) noexcept
-{
-    return std::isfinite(value) && value >= 0.0F;
-}
-
-[[nodiscard]] ResolvedLength resolveLength(UILayoutLength length, bool basisDefinite, float basis,
-                                           LayoutPassStatistics& statistics) noexcept
-{
-    if (length.unit == UILayoutLengthUnit::Px)
-    {
-        return ResolvedLength{.hasValue = true, .value = length.value};
-    }
-    if (length.unit == UILayoutLengthUnit::Percent)
-    {
-        if (basisDefinite && isFiniteNonNegative(basis))
-        {
-            return ResolvedLength{
-                .hasValue = true,
-                .value = normalizeFloat(basis * (length.value * 0.01F)),
-            };
-        }
-        ++statistics.percentMeasureFallbackCount;
-    }
-    return {};
-}
-
-[[nodiscard]] ResolvedLength resolveLengthNoFallbackCount(UILayoutLength length, bool basisDefinite,
-                                                          float basis) noexcept
-{
-    if (length.unit == UILayoutLengthUnit::Px)
-    {
-        return ResolvedLength{.hasValue = true, .value = length.value};
-    }
-    if (length.unit == UILayoutLengthUnit::Percent && basisDefinite && isFiniteNonNegative(basis))
-    {
-        return ResolvedLength{
-            .hasValue = true,
-            .value = normalizeFloat(basis * (length.value * 0.01F)),
-        };
-    }
-    return {};
-}
-
-[[nodiscard]] float clampWithMinMax(float value, UILayoutLength minLength, UILayoutLength maxLength, bool basisDefinite,
-                                    float basis, LayoutPassStatistics& statistics) noexcept
-{
-    const ResolvedLength minValue = resolveLength(minLength, basisDefinite, basis, statistics);
-    ResolvedLength maxValue = resolveLength(maxLength, basisDefinite, basis, statistics);
-    if (minValue.hasValue && maxValue.hasValue && maxValue.value < minValue.value)
-    {
-        maxValue.value = minValue.value;
-    }
-    if (maxValue.hasValue)
-    {
-        value = (std::min)(value, maxValue.value);
-    }
-    if (minValue.hasValue)
-    {
-        value = (std::max)(value, minValue.value);
-    }
-    return normalizeFloat((std::max)(0.0F, value));
-}
-
-[[nodiscard]] float horizontalMargin(const UIEdgeSpacing& margin) noexcept
-{
-    return margin.left + margin.right;
-}
-
-[[nodiscard]] float verticalMargin(const UIEdgeSpacing& margin) noexcept
-{
-    return margin.top + margin.bottom;
-}
-
-[[nodiscard]] UILogicalRect intersectRects(UILogicalRect first, UILogicalRect second) noexcept
-{
-    const float left = (std::max)(first.x, second.x);
-    const float top = (std::max)(first.y, second.y);
-    const float right = (std::min)(first.right(), second.right());
-    const float bottom = (std::min)(first.bottom(), second.bottom());
-    return UILogicalRect{
-        .x = normalizeFloat(left),
-        .y = normalizeFloat(top),
-        .width = normalizeFloat((std::max)(0.0F, right - left)),
-        .height = normalizeFloat((std::max)(0.0F, bottom - top)),
-    };
-}
-
-[[nodiscard]] UIVisibility combineVisibility(UIVisibility parent, UIVisibility local) noexcept
-{
-    if (parent == UIVisibility::Collapsed || local == UIVisibility::Collapsed)
-    {
-        return UIVisibility::Collapsed;
-    }
-    if (parent == UIVisibility::Hidden || local == UIVisibility::Hidden)
-    {
-        return UIVisibility::Hidden;
-    }
-    return UIVisibility::Visible;
 }
 
 [[nodiscard]] Core::Result<NormalizedCapacityConfig> normalizeCapacity(UIContextCapacityConfig config)
@@ -510,12 +388,6 @@ struct ResolvedLength final {
         return UIEventPhaseMask::Bubble;
     }
     return UIEventPhaseMask::None;
-}
-
-[[nodiscard]] bool containsPointHalfOpen(UILogicalRect rect, UILogicalPoint point) noexcept
-{
-    return rect.width > 0.0F && rect.height > 0.0F && point.x >= rect.x && point.y >= rect.y &&
-           point.x < rect.right() && point.y < rect.bottom();
 }
 
 } // namespace

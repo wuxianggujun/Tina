@@ -48,6 +48,7 @@ add_library(tina_ui STATIC
     detail/UIDefaultActionPressState.cpp
     detail/UIImeCompositionState.hpp
     detail/UIImeCompositionState.cpp
+    detail/UILayoutPrimitives.hpp
     detail/UIPropertyNormalization.hpp
     detail/UIPropertyNormalization.cpp
     detail/UIPaintPrimitives.hpp
