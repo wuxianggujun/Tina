@@ -587,35 +587,5 @@ TEST_F(UIPaintSnapshotTest, NoChangeAndViewportCommitsUseFixedPmrStorage)
     EXPECT_EQ(resource.allocationCount(), resource.deallocationCount());
 }
 
-TEST_F(UIPaintSnapshotTest, DeepTreePaintSnapshotBuildIsNonRecursive)
-{
-    constexpr usize DeepNodeCount = 50'000;
-    auto context = createContext(
-        window,
-        {
-            .nodeCapacity = DeepNodeCount,
-            .rootCapacity = 1,
-            .dirtyQueueCapacity = DeepNodeCount,
-            .layoutSnapshotCapacity = DeepNodeCount,
-            .hitSnapshotCapacity = DeepNodeCount,
-            .paintSnapshotCapacity = DeepNodeCount,
-        });
-    ASSERT_NE(context, nullptr);
-    auto root = createRoot(*context);
-    ASSERT_TRUE(root);
-    UI::UINodeId parent = root.rootNodeId();
-    for (usize index = 1; index < DeepNodeCount; ++index) {
-        parent = createPanel(*context, parent);
-        ASSERT_TRUE(parent.hasValue()) << "index=" << index;
-    }
-    auto updater = createUpdater(*context, root);
-    expectOk(updater.setBoxPaint(parent, solidFill(1, 2, 3, 4)));
-    expectOk(context->commitLayout({.width = 1.0F, .height = 1.0F}));
-
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries().front().node, parent);
-    EXPECT_EQ(context->statistics().lastPaintCacheRebuildCount, 1U);
-}
-
 } // namespace
 } // namespace Tina::Tests

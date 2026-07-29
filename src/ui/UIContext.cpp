@@ -353,6 +353,7 @@ struct LayoutScratchState final {
     // pass it through; ScrollView replaces it with its content viewport.
     UILogicalRect descendantClip{};
     UIVisibility effectiveVisibility = UIVisibility::Visible;
+    bool inPopupSubtree = false;
     bool parentContentWidthDefinite = false;
     bool parentContentHeightDefinite = false;
     float parentContentWidth = 0.0F;
@@ -1855,6 +1856,7 @@ struct UIContext::Impl final {
             if (record->parentIndex == InvalidNodeIndex)
             {
                 scratch.effectiveVisibility = ownVisibility;
+                scratch.inPopupSubtree = record->kind == UIWidgetKind::Popup;
                 scratch.parentContentWidthDefinite = true;
                 scratch.parentContentHeightDefinite = true;
                 scratch.parentContentWidth = viewportSize.width;
@@ -1863,6 +1865,8 @@ struct UIContext::Impl final {
             {
                 const LayoutScratchState& parentScratch = layoutScratchByIndex[record->parentIndex];
                 scratch.effectiveVisibility = combineVisibility(parentScratch.effectiveVisibility, ownVisibility);
+                scratch.inPopupSubtree =
+                    record->kind == UIWidgetKind::Popup || parentScratch.inPopupSubtree;
                 scratch.parentContentWidthDefinite = parentScratch.contentWidthDefinite;
                 scratch.parentContentHeightDefinite = parentScratch.contentHeightDefinite;
                 scratch.parentContentWidth = parentScratch.contentWidth;
@@ -3054,25 +3058,6 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
-    [[nodiscard]] bool isInPopupSubtree(u32 index) const noexcept
-    {
-        usize visited = 0;
-        while (index != InvalidNodeIndex && visited++ < nodes.capacity())
-        {
-            const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr)
-            {
-                return false;
-            }
-            if (record->kind == UIWidgetKind::Popup)
-            {
-                return true;
-            }
-            index = record->parentIndex;
-        }
-        return false;
-    }
-
     void buildCommittedLayout(std::pmr::vector<UICommittedLayoutEntry>& output,
                               const std::pmr::vector<u32>& order) const noexcept
     {
@@ -3081,7 +3066,7 @@ struct UIContext::Impl final {
         const auto appendPass = [&](bool popupPass) noexcept {
             for (const u32 index : order)
             {
-                if (isInPopupSubtree(index) != popupPass)
+                if (layoutScratchByIndex[index].inPopupSubtree != popupPass)
                 {
                     continue;
                 }

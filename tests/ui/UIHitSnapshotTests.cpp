@@ -744,38 +744,6 @@ TEST_F(UIHitSnapshotTest, ThreeHundredPointerQueriesDoNotAllocateOrMutateUiState
     EXPECT_EQ(after.lastHitRebuildCount, before.lastHitRebuildCount);
 }
 
-TEST_F(UIHitSnapshotTest, BuildsFiftyThousandDeepEntriesWithoutRecursion)
-{
-    constexpr usize DeepNodeCount = 50'000;
-    auto context = createContext(
-        firstWindow,
-        {
-            .nodeCapacity = DeepNodeCount,
-            .rootCapacity = 1,
-            .dirtyQueueCapacity = DeepNodeCount,
-            .layoutSnapshotCapacity = DeepNodeCount,
-            .hitSnapshotCapacity = DeepNodeCount,
-        });
-    ASSERT_NE(context, nullptr);
-    auto root = createRoot(*context);
-    ASSERT_TRUE(root);
-    UI::UINodeId parent = root.rootNodeId();
-    for (usize index = 1; index < DeepNodeCount; ++index) {
-        parent = createPanel(*context, parent);
-        ASSERT_TRUE(parent);
-    }
-    auto updater = createUpdater(*context, root);
-    assertOk(updater.setPointerHitPolicy(parent, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 1.0F, .height = 1.0F}));
-
-    const UI::UICommittedHitView hit = context->committedHit();
-    ASSERT_EQ(hit.size(), DeepNodeCount);
-    EXPECT_EQ(hit.entries().back().node, parent);
-    EXPECT_EQ(hit.entries().back().parentEntryIndex, DeepNodeCount - 2U);
-    EXPECT_EQ(hit.entries().back().rootEntryIndex, 0U);
-    EXPECT_EQ(context->statistics().committedHitTargetCount, 1U);
-}
-
 TEST_F(UIHitSnapshotTest, ReleasesAllSuppliedPmrStorage)
 {
     ObservingMemoryResource resource;

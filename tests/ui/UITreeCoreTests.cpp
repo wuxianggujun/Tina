@@ -593,46 +593,6 @@ TEST_F(UITreeCoreTest, DestroyInvalidatesImmediatelyButKeepsCommittedSnapshotUnt
     EXPECT_EQ(replacement.entries()[0].node, root.rootNodeId());
 }
 
-TEST_F(UITreeCoreTest, DeepTreesCommitAndDestroyWithoutRecursiveStackGrowth)
-{
-    constexpr usize DeepNodeCount = 50'000;
-    auto context = createContext(
-        firstWindow,
-        {.nodeCapacity = DeepNodeCount, .rootCapacity = 1});
-    ASSERT_NE(context, nullptr);
-    auto root = createRoot(*context);
-    ASSERT_TRUE(root);
-
-    UI::UIRootBuilder builder = context->rootBuilder();
-    UI::UINodeId parent = root.rootNodeId();
-    UI::UINodeId firstChild;
-    for (usize nodeIndex = 1; nodeIndex < DeepNodeCount; ++nodeIndex) {
-        auto childResult = builder.createPanel(parent);
-        ASSERT_TRUE(childResult.has_value()) << "nodeIndex=" << nodeIndex;
-        parent = *childResult;
-        if (nodeIndex == 1) {
-            firstChild = parent;
-        }
-    }
-
-    ASSERT_TRUE(context->commitStructure().has_value());
-    const UI::UICommittedStructureView committed = context->committedStructure();
-    ASSERT_EQ(committed.size(), DeepNodeCount);
-    EXPECT_EQ(committed.entries().back().node, parent);
-    EXPECT_EQ(committed.entries().back().depth, DeepNodeCount - 1);
-
-    auto updaterResult = context->treeUpdater(root);
-    ASSERT_TRUE(updaterResult.has_value());
-    ASSERT_TRUE(updaterResult->destroy(firstChild).has_value());
-    EXPECT_EQ(context->liveNodeCount(), 1U);
-    EXPECT_FALSE(context->contains(parent));
-
-    ASSERT_TRUE(context->commitStructure().has_value());
-    EXPECT_EQ(context->committedStructure().size(), 1U);
-    root.reset();
-    EXPECT_EQ(context->liveNodeCount(), 0U);
-}
-
 TEST_F(UITreeCoreTest, UiTreeStorageMemoryReturnsToZeroAfterAllOwnersAndContextAreReleased)
 {
     ObservingMemoryResource resource;

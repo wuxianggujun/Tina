@@ -3,6 +3,7 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/ui/UI.hpp>
 
+#include <array>
 #include <memory>
 #include <memory_resource>
 #include <utility>
@@ -263,6 +264,55 @@ TEST_F(UIPopupDropdownTest, EnforcesCompositeOwnershipAndRoundTripsState)
     EXPECT_TRUE(updater.isDropdownItemSelected(*item).value());
     assertOk(updater.setDropdownSelectedItem(*dropdown, {}));
     EXPECT_FALSE(updater.dropdownSelectedItem(*dropdown).value().hasValue());
+}
+
+TEST_F(UIPopupDropdownTest, LayoutPublishesPopupSubtreesAfterNormalContentInStablePreorder)
+{
+    auto localContext = createContext(window, {
+        .nodeCapacity = 128,
+        .rootCapacity = 2,
+        .paintSnapshotCapacity = 128,
+    });
+    ASSERT_NE(localContext, nullptr);
+    auto firstRoot = createRoot(*localContext);
+    auto secondRoot = createRoot(*localContext);
+    ASSERT_TRUE(firstRoot);
+    ASSERT_TRUE(secondRoot);
+    auto firstUpdater = createUpdater(*localContext, firstRoot);
+    auto secondUpdater = createUpdater(*localContext, secondRoot);
+    const DropdownTree first = createDropdownTree(firstUpdater, firstRoot.rootNodeId());
+    const DropdownTree second = createDropdownTree(secondUpdater, secondRoot.rootNodeId());
+    ASSERT_TRUE(first.after.hasValue());
+    ASSERT_TRUE(second.after.hasValue());
+
+    assertOk(localContext->commitLayout({.width = 320.0F, .height = 240.0F}));
+    const std::array expectedOrder{
+        firstRoot.rootNodeId(),
+        first.before,
+        first.dropdown,
+        first.after,
+        secondRoot.rootNodeId(),
+        second.before,
+        second.dropdown,
+        second.after,
+        first.popup,
+        first.firstItem,
+        first.secondItem,
+        second.popup,
+        second.firstItem,
+        second.secondItem,
+    };
+    const std::array expectedLayoutOrdinals{
+        0U, 1U, 2U, 6U, 7U, 8U, 9U, 13U, 3U, 4U, 5U, 10U, 11U, 12U,
+    };
+    const UI::UICommittedLayoutView layout = localContext->committedLayout();
+    ASSERT_EQ(layout.size(), expectedOrder.size());
+    for (usize index = 0; index < expectedOrder.size(); ++index)
+    {
+        EXPECT_EQ(layout.entries()[index].node, expectedOrder[index]) << "index=" << index;
+        EXPECT_EQ(layout.entries()[index].layoutOrdinal, expectedLayoutOrdinals[index]) << "index=" << index;
+        EXPECT_EQ(layout.entries()[index].paintOrdinal, index) << "index=" << index;
+    }
 }
 
 TEST_F(UIPopupDropdownTest, AutoPlacementMatchesAnchorAndClampsToViewport)

@@ -1015,35 +1015,6 @@ TEST_F(UILayoutTest, StaleDirtyEntryCannotClearReusedGenerationDirtyState)
     EXPECT_FALSE(context->statistics().layoutDirty);
 }
 
-TEST_F(UILayoutTest, LayoutCommitHandlesDeepTreesWithoutRecursiveStackGrowth)
-{
-    constexpr usize DeepNodeCount = 50'000;
-    auto context = makeContext({
-        .nodeCapacity = DeepNodeCount,
-        .rootCapacity = 1,
-        .dirtyQueueCapacity = DeepNodeCount,
-        .layoutSnapshotCapacity = DeepNodeCount,
-    });
-    ASSERT_NE(context, nullptr);
-    auto root = createRoot(*context);
-    ASSERT_TRUE(root);
-
-    UI::UINodeId parent = root.rootNodeId();
-    for (usize nodeIndex = 1; nodeIndex < DeepNodeCount; ++nodeIndex) {
-        parent = createPanel(*context, parent);
-        ASSERT_TRUE(parent.hasValue()) << "nodeIndex=" << nodeIndex;
-    }
-
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 1.0F, .height = 1.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
-    ASSERT_EQ(layout.size(), DeepNodeCount);
-    EXPECT_EQ(layout.entries().back().node, parent);
-    EXPECT_EQ(layout.entries().back().layoutOrdinal, DeepNodeCount - 1);
-    EXPECT_EQ(context->statistics().lastLayoutPassCount, 1U);
-    EXPECT_EQ(context->statistics().lastLayoutArrangedNodeCount, DeepNodeCount);
-}
-
 TEST_F(UILayoutTest, LayoutStorageMemoryReturnsToZeroAfterContextRelease)
 {
     ObservingMemoryResource resource;
