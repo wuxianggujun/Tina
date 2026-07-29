@@ -1413,6 +1413,7 @@ struct UIContext::Impl final {
     usize buttonActionHighWater = 0;
     u64 buttonActionRegistrationSerial = 0;
     u64 buttonRouteSerial = 0;
+    u64 accessibilityActionSequence = 0;
     usize buttonActionCallbackOperationDepth = 0;
     bool reclaimingInactiveButtonActions = false;
     u32 freeSliderChangeCallbackHead = InvalidSliderChangeCallbackIndex;
@@ -14349,10 +14350,11 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidPointerInput,
                         "UI default-action activation requires a platform frame and sequence");
         }
-        if (source != UIButtonActivationSource::Keyboard && source != UIButtonActivationSource::Gamepad)
+        if (source != UIButtonActivationSource::Keyboard && source != UIButtonActivationSource::Gamepad &&
+            source != UIButtonActivationSource::Accessibility)
         {
             return fail(UIErrorCode::InvalidButtonAction,
-                        "UI default-action activation source must be Keyboard or Gamepad");
+                        "UI default-action activation source must be Keyboard, Gamepad, or Accessibility");
         }
         if (control.has_value())
         {
@@ -14511,6 +14513,94 @@ struct UIContext::Impl final {
                            },
                            currentButtonRouteSerial);
         return UIDefaultActionResult{.consumed = true, .activated = true};
+    }
+
+    [[nodiscard]] Core::Status performAccessibilityAction(const UIAccessibilityAction& action)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI accessibility action cannot nest during routing");
+        }
+        drainDeferredRootDestroys();
+        auto nodeResult = resolveNode(action.node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        NodeRecord* record = *nodeResult;
+        if (!isNodeEnabled(action.node))
+        {
+            return fail(UIErrorCode::InvalidAccessibilityAction,
+                        "UI accessibility action target is disabled");
+        }
+
+        switch (action.kind)
+        {
+        case UIAccessibilityActionKind::Focus:
+            return requestFocus(action.node);
+        case UIAccessibilityActionKind::Invoke:
+            if (record->kind != UIWidgetKind::Button)
+            {
+                return fail(UIErrorCode::InvalidAccessibilityAction,
+                            "UI accessibility Invoke requires a Button");
+            }
+            break;
+        case UIAccessibilityActionKind::Toggle:
+            if (record->kind != UIWidgetKind::Checkbox && record->kind != UIWidgetKind::RadioButton)
+            {
+                return fail(UIErrorCode::InvalidAccessibilityAction,
+                            "UI accessibility Toggle requires a Checkbox or RadioButton");
+            }
+            break;
+        case UIAccessibilityActionKind::SetRangeValue: {
+            if (record->kind != UIWidgetKind::Slider || !std::isfinite(action.rangeValue) ||
+                action.rangeValue < static_cast<double>(sliderStatesByNodeIndex[action.node.index()].minValue) ||
+                action.rangeValue > static_cast<double>(sliderStatesByNodeIndex[action.node.index()].maxValue) ||
+                action.rangeValue < static_cast<double>((std::numeric_limits<float>::lowest)()) ||
+                action.rangeValue > static_cast<double>((std::numeric_limits<float>::max)()))
+            {
+                return fail(UIErrorCode::InvalidAccessibilityAction,
+                            "UI accessibility range value is invalid for the target Slider");
+            }
+            const UINodeId root = idForIndex(record->rootIndex);
+            return setSliderValueFromUpdater(root, action.node, static_cast<float>(action.rangeValue));
+        }
+        case UIAccessibilityActionKind::SetTextValue: {
+            if (record->kind != UIWidgetKind::TextEdit)
+            {
+                return fail(UIErrorCode::InvalidAccessibilityAction,
+                            "UI accessibility text value requires a TextEdit");
+            }
+            const UINodeId root = idForIndex(record->rootIndex);
+            return setTextFromUpdater(root, action.node, action.textValue);
+        }
+        }
+
+        if (accessibilityActionSequence == (std::numeric_limits<u64>::max)())
+        {
+            return fail(UIErrorCode::CapacityExceeded, "UI accessibility action sequence is exhausted");
+        }
+        if (Core::Status focus = requestFocus(action.node); !focus)
+        {
+            return focus;
+        }
+        auto activated = routeDefaultActionActivate(Platform::PlatformFrameId{1}, ++accessibilityActionSequence,
+                                                    UIButtonActivationSource::Accessibility, std::nullopt);
+        if (!activated)
+        {
+            return Core::failure(activated.error());
+        }
+        if (!activated->consumed)
+        {
+            return fail(UIErrorCode::InvalidAccessibilityAction,
+                        "UI accessibility action target could not be activated");
+        }
+        return Core::success();
     }
 
     [[nodiscard]] Core::Result<UIDefaultActionResult>
@@ -17625,6 +17715,11 @@ Core::Status UIContext::requestFocus(UINodeId node)
 Core::Status UIContext::clearFocus()
 {
     return m_impl->clearFocus();
+}
+
+Core::Status UIContext::performAccessibilityAction(const UIAccessibilityAction& action)
+{
+    return m_impl->performAccessibilityAction(action);
 }
 
 UINodeId UIContext::imeFocus() const noexcept

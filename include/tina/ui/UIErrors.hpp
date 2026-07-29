@@ -30,5 +30,6 @@ inline constexpr Core::ErrorCode AccessibilityNodeStale{Core::ErrorDomain::UI, 2
 inline constexpr Core::ErrorCode InvalidTheme{Core::ErrorDomain::UI, 22};
 inline constexpr Core::ErrorCode InvalidFocusScope{Core::ErrorDomain::UI, 23};
 inline constexpr Core::ErrorCode InvalidFocusTarget{Core::ErrorDomain::UI, 24};
+inline constexpr Core::ErrorCode InvalidAccessibilityAction{Core::ErrorDomain::UI, 25};
 
 } // namespace Tina::UI::UIErrorCode

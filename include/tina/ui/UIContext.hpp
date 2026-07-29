@@ -3,6 +3,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/Window.hpp>
+#include <tina/ui/UIAccessibility.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UICommittedHit.hpp>
@@ -468,6 +469,10 @@ class UIContext final {
     // inside the active Modal. clearFocus is idempotent.
     [[nodiscard]] Core::Status requestFocus(UINodeId node);
     [[nodiscard]] Core::Status clearFocus();
+    // Synchronous owner-thread action seam shared by UIA/AT-SPI adapters. It
+    // preserves normal control callbacks and rejects stale, disabled, or
+    // kind-incompatible targets without partially changing retained state.
+    [[nodiscard]] Core::Status performAccessibilityAction(const UIAccessibilityAction& action);
 
     // IME/text target. Pointer-down or Tab focus on a TextEdit sets text focus.
     // Composition preedit is retained separately; commit replaces the selection.

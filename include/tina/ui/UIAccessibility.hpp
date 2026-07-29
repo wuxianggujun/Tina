@@ -67,6 +67,23 @@ struct UIAccessibilityNode final {
     UIAccessibilityState states = UIAccessibilityState::None;
 };
 
+enum class UIAccessibilityActionKind : u8 {
+    Focus,
+    Invoke,
+    Toggle,
+    SetRangeValue,
+    SetTextValue,
+};
+
+// Platform-neutral synchronous action. Platform adapters marshal this onto the
+// UIContext owner thread; textValue is borrowed only for the duration of the call.
+struct UIAccessibilityAction final {
+    UIAccessibilityActionKind kind = UIAccessibilityActionKind::Focus;
+    UINodeId node{};
+    double rangeValue = 0.0;
+    std::string_view textValue{};
+};
+
 [[nodiscard]] constexpr UIAccessibilityState statesFromSemantics(const UISemanticsEntry& entry) noexcept
 {
     UIAccessibilityState states = UIAccessibilityState::None;

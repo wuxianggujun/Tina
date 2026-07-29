@@ -37,6 +37,9 @@ enum class UIButtonActivationSource : u8 {
     // or keyboard focus traversal).
     Keyboard,
     Gamepad,
+    // Platform accessibility adapters invoke controls through the owner-thread
+    // UIAccessibilityAction seam rather than synthesizing physical input.
+    Accessibility,
 };
 
 struct UIButtonActionEvent final {

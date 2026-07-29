@@ -229,5 +229,96 @@ TEST(UIAccessibilityTest, DisabledStateMapsToDisabledFlag)
     EXPECT_FALSE(UI::hasState(node->states, UI::UIAccessibilityState::Enabled));
 }
 
+TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTargets)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+
+    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    auto checkbox = context->rootBuilder().createCheckbox(root.rootNodeId());
+    auto slider = context->rootBuilder().createSlider(root.rootNodeId());
+    auto progress = context->rootBuilder().createProgressBar(root.rootNodeId());
+    auto textEdit = context->rootBuilder().createTextEdit(root.rootNodeId());
+    ASSERT_TRUE(button.has_value());
+    ASSERT_TRUE(checkbox.has_value());
+    ASSERT_TRUE(slider.has_value());
+    ASSERT_TRUE(progress.has_value());
+    ASSERT_TRUE(textEdit.has_value());
+
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(400.0F, 300.0F)));
+    assertOk(updater.setLayoutStyle(*button, fixedSize(80.0F, 32.0F)));
+    assertOk(updater.setLayoutStyle(*checkbox, fixedSize(24.0F, 24.0F)));
+    assertOk(updater.setLayoutStyle(*slider, fixedSize(120.0F, 20.0F)));
+    assertOk(updater.setLayoutStyle(*progress, fixedSize(120.0F, 12.0F)));
+    assertOk(updater.setLayoutStyle(*textEdit, fixedSize(160.0F, 32.0F)));
+    assertOk(updater.setSliderRange(*slider, 0.0F, 100.0F, 1.0F));
+
+    u32 buttonActivations = 0;
+    u32 checkboxActivations = 0;
+    UI::UIButtonActivationSource lastSource = UI::UIButtonActivationSource::PrimaryPointer;
+    assertOk(updater.setButtonAction(
+        *button,
+        UI::UIButtonActionCallback([&](const UI::UIButtonActionEvent& event) noexcept {
+            ++buttonActivations;
+            lastSource = event.source;
+        })));
+    assertOk(updater.setCheckboxAction(
+        *checkbox,
+        UI::UIButtonActionCallback([&](const UI::UIButtonActionEvent& event) noexcept {
+            ++checkboxActivations;
+            lastSource = event.source;
+        })));
+    assertOk(context->commitLayout({.width = 400.0F, .height = 300.0F}));
+
+    assertOk(context->performAccessibilityAction({
+        .kind = UI::UIAccessibilityActionKind::Invoke,
+        .node = *button,
+    }));
+    EXPECT_EQ(buttonActivations, 1U);
+    EXPECT_EQ(lastSource, UI::UIButtonActivationSource::Accessibility);
+
+    assertOk(context->performAccessibilityAction({
+        .kind = UI::UIAccessibilityActionKind::Toggle,
+        .node = *checkbox,
+    }));
+    EXPECT_EQ(checkboxActivations, 1U);
+    EXPECT_EQ(lastSource, UI::UIButtonActivationSource::Accessibility);
+    auto checked = updater.isChecked(*checkbox);
+    ASSERT_TRUE(checked.has_value());
+    EXPECT_TRUE(*checked);
+
+    assertOk(context->performAccessibilityAction({
+        .kind = UI::UIAccessibilityActionKind::SetRangeValue,
+        .node = *slider,
+        .rangeValue = 72.0,
+    }));
+    auto sliderValue = updater.sliderValue(*slider);
+    ASSERT_TRUE(sliderValue.has_value());
+    EXPECT_FLOAT_EQ(*sliderValue, 72.0F);
+
+    assertOk(context->performAccessibilityAction({
+        .kind = UI::UIAccessibilityActionKind::SetTextValue,
+        .node = *textEdit,
+        .textValue = "Accessible Player",
+    }));
+    auto text = updater.text(*textEdit);
+    ASSERT_TRUE(text.has_value());
+    EXPECT_EQ(*text, "Accessible Player");
+
+    auto readOnly = context->performAccessibilityAction({
+        .kind = UI::UIAccessibilityActionKind::SetRangeValue,
+        .node = *progress,
+        .rangeValue = 50.0,
+    });
+    ASSERT_FALSE(readOnly.has_value());
+    EXPECT_EQ(readOnly.error().code, UI::UIErrorCode::InvalidAccessibilityAction);
+}
+
 } // namespace
 } // namespace Tina::Tests
