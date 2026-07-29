@@ -60,6 +60,8 @@ add_library(tina_ui STATIC
     detail/UISliderChangeCallbackRegistry.cpp
     detail/UITextStorage.hpp
     detail/UITextStorage.cpp
+    detail/UITextEditModel.hpp
+    detail/UITextEditModel.cpp
     UIText.cpp
     UIGlyphAtlas.cpp
     UITextRasterizer.cpp

@@ -19,6 +19,7 @@
 #include "detail/UIPropertyNormalization.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
+#include "detail/UITextEditModel.hpp"
 #include "detail/UITextStorage.hpp"
 #include "detail/UIThemeBindingResolver.hpp"
 
@@ -62,6 +63,7 @@ struct NormalizedCapacityConfig final {
 using TextByteAllocation = Detail::UITextStorage::Allocation;
 using Detail::appendBoxChromePaints;
 using Detail::applyOpacity;
+using Detail::containsLineBreak;
 using Detail::countBoxChromePaintEntries;
 using Detail::countDrawableTextCodepoints;
 using Detail::makeListViewScrollBarGeometry;
@@ -69,6 +71,7 @@ using Detail::makeScrollBarGeometry;
 using Detail::makeTreeViewDisclosureRect;
 using Detail::makeTreeViewScrollBarGeometry;
 using Detail::normalizedRangeFraction;
+using Detail::planTextEditCommand;
 using Detail::ScrollBarGeometry;
 using Detail::ScrollBarPointerHit;
 using Detail::SliderPaintGeometry;
@@ -86,6 +89,7 @@ using Detail::ThemeBindingScrollViewPaint;
 using Detail::ThemeBindingSliderPaint;
 using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
+using Detail::utf8ByteOffsetForCodepoint;
 
 struct WidgetTextState final {
     TextByteAllocation allocation{};
@@ -203,24 +207,6 @@ struct TreeViewItemState final {
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
 inline constexpr u8 ThemeDirtyLayoutAncestor = 1U << 2U;
-
-[[nodiscard]] constexpr bool containsLineBreak(std::string_view text) noexcept
-{
-    return text.find('\r') != std::string_view::npos || text.find('\n') != std::string_view::npos;
-}
-
-[[nodiscard]] constexpr usize utf8ByteOffsetForCodepoint(std::string_view text, u32 codepointOffset) noexcept
-{
-    usize byteOffset = 0;
-    u32 codepoint = 0;
-    while (byteOffset < text.size() && codepoint < codepointOffset)
-    {
-        const auto first = static_cast<unsigned char>(text[byteOffset]);
-        byteOffset += first <= 0x7FU ? 1U : (first & 0xE0U) == 0xC0U ? 2U : (first & 0xF0U) == 0xE0U ? 3U : 4U;
-        ++codepoint;
-    }
-    return (std::min)(byteOffset, text.size());
-}
 
 struct NodeRecord final {
     u32 parentIndex = InvalidNodeIndex;
@@ -13736,80 +13722,16 @@ struct UIContext::Impl final {
         TextEditState& editState = textEditStatesByNodeIndex[focusedTextEdit.index()];
         const u32 codepointCount = textStatesByIndex[focusedTextEdit.index()].metrics.codepointCount;
         const UITextSelection currentSelection = editState.selection;
-        const u32 selectionBegin = (std::min)(currentSelection.anchorCodepoint, currentSelection.caretCodepoint);
-        const u32 selectionEnd = (std::max)(currentSelection.anchorCodepoint, currentSelection.caretCodepoint);
-
-        UITextSelection nextSelection = currentSelection;
-        bool deletesText = false;
-        u32 deleteBegin = selectionBegin;
-        u32 deleteEnd = selectionEnd;
-        switch (command)
+        const auto plan = planTextEditCommand(currentSelection, codepointCount,
+                                              command, extendSelection);
+        if (!plan.has_value())
         {
-        case UITextEditCommand::MoveLeft: {
-            const u32 nextCaret = !extendSelection && !currentSelection.isCollapsed() ? selectionBegin
-                                  : currentSelection.caretCodepoint > 0 ? currentSelection.caretCodepoint - 1U
-                                                                        : 0U;
-            nextSelection.caretCodepoint = nextCaret;
-            if (!extendSelection)
-            {
-                nextSelection.anchorCodepoint = nextCaret;
-            }
-            break;
-        }
-        case UITextEditCommand::MoveRight: {
-            const u32 nextCaret = !extendSelection && !currentSelection.isCollapsed()
-                                      ? selectionEnd
-                                      : (std::min)(currentSelection.caretCodepoint + 1U, codepointCount);
-            nextSelection.caretCodepoint = nextCaret;
-            if (!extendSelection)
-            {
-                nextSelection.anchorCodepoint = nextCaret;
-            }
-            break;
-        }
-        case UITextEditCommand::MoveHome:
-            nextSelection.caretCodepoint = 0;
-            if (!extendSelection)
-            {
-                nextSelection.anchorCodepoint = 0;
-            }
-            break;
-        case UITextEditCommand::MoveEnd:
-            nextSelection.caretCodepoint = codepointCount;
-            if (!extendSelection)
-            {
-                nextSelection.anchorCodepoint = codepointCount;
-            }
-            break;
-        case UITextEditCommand::SelectAll:
-            nextSelection = {
-                .anchorCodepoint = 0,
-                .caretCodepoint = codepointCount,
-            };
-            break;
-        case UITextEditCommand::Backspace:
-            deletesText = true;
-            if (currentSelection.isCollapsed())
-            {
-                deleteBegin = currentSelection.caretCodepoint > 0 ? currentSelection.caretCodepoint - 1U : 0U;
-                deleteEnd = currentSelection.caretCodepoint;
-            }
-            break;
-        case UITextEditCommand::Delete:
-            deletesText = true;
-            if (currentSelection.isCollapsed())
-            {
-                deleteBegin = currentSelection.caretCodepoint;
-                deleteEnd = (std::min)(currentSelection.caretCodepoint + 1U, codepointCount);
-            }
-            break;
-        default:
             return fail(UIErrorCode::InvalidText, "UI TextEdit command is not recognized");
         }
 
-        if (!deletesText)
+        if (!plan->deletesText)
         {
-            if (nextSelection == currentSelection)
+            if (plan->nextSelection == currentSelection)
             {
                 if (Core::Status status = clearImeComposition(); !status)
                 {
@@ -13825,11 +13747,11 @@ struct UIContext::Impl final {
             {
                 return Core::failure(status.error());
             }
-            editState.selection = nextSelection;
+            editState.selection = plan->nextSelection;
             return UITextInputRouteResult{.consumed = true, .applied = true};
         }
 
-        if (deleteBegin == deleteEnd)
+        if (plan->deleteBeginCodepoint == plan->deleteEndCodepoint)
         {
             if (Core::Status status = clearImeComposition(); !status)
             {
@@ -13838,8 +13760,10 @@ struct UIContext::Impl final {
             return UITextInputRouteResult{.consumed = true, .applied = false};
         }
         const std::string_view current = textViewFor(focusedTextEdit.index());
-        const usize deleteBeginByte = utf8ByteOffsetForCodepoint(current, deleteBegin);
-        const usize deleteEndByte = utf8ByteOffsetForCodepoint(current, deleteEnd);
+        const usize deleteBeginByte =
+            utf8ByteOffsetForCodepoint(current, plan->deleteBeginCodepoint);
+        const usize deleteEndByte =
+            utf8ByteOffsetForCodepoint(current, plan->deleteEndCodepoint);
         std::string combined;
         try
         {
@@ -13855,8 +13779,8 @@ struct UIContext::Impl final {
             return Core::failure(status.error());
         }
         editState.selection = {
-            .anchorCodepoint = deleteBegin,
-            .caretCodepoint = deleteBegin,
+            .anchorCodepoint = plan->deleteBeginCodepoint,
+            .caretCodepoint = plan->deleteBeginCodepoint,
         };
         if (Core::Status status = clearImeComposition(); !status)
         {
