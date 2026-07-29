@@ -85,6 +85,7 @@ if(TINA_BUILD_UI_UIA)
         uia/UIUiaMapping.hpp
         uia/WindowsUiaAccessibilityProvider.hpp
         uia/WindowsUiaAccessibilityProvider.cpp
+        uia/WindowsUiaActionDispatch.hpp
         uia/WindowsUiaComProviders.hpp
         uia/WindowsUiaComProviders.cpp
         uia/WindowsUiaHostBridge.hpp

@@ -1,20 +1,26 @@
 #include "WindowsUiaComProviders.hpp"
 
+#include "WindowsUiaActionDispatch.hpp"
+
 #include <UIAutomationClient.h>
 
 #include <cmath>
 #include <cstdio>
+#include <cwchar>
+#include <map>
+#include <new>
 #include <string>
+#include <utility>
 
 namespace Tina::UI::UiaCom {
 namespace {
 
+constexpr UINT kActionTimeoutMs = 5'000;
+
 [[nodiscard]] RECT clientRelativeToScreen(HWND hwnd, const UI::UILogicalRect& logical) noexcept
 {
-    RECT client{};
     POINT origin{0, 0};
     if (hwnd != nullptr) {
-        (void)::GetClientRect(hwnd, &client);
         (void)::ClientToScreen(hwnd, &origin);
     }
     RECT out{};
@@ -25,57 +31,168 @@ namespace {
     return out;
 }
 
-[[nodiscard]] BSTR bstrFromUtf8(std::string_view utf8)
+[[nodiscard]] HRESULT bstrFromUtf8(std::string_view utf8, BSTR* output) noexcept
 {
+    if (output == nullptr) {
+        return E_POINTER;
+    }
+    *output = nullptr;
+    if (utf8.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+        return E_INVALIDARG;
+    }
     if (utf8.empty()) {
-        return ::SysAllocString(L"");
+        *output = ::SysAllocStringLen(nullptr, 0);
+        return *output != nullptr ? S_OK : E_OUTOFMEMORY;
     }
-    const int wideCount = ::MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+    const int sourceLength = static_cast<int>(utf8.size());
+    const int wideCount =
+        ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(), sourceLength, nullptr, 0);
     if (wideCount <= 0) {
-        return ::SysAllocString(L"");
+        return E_INVALIDARG;
     }
-    std::wstring wide(static_cast<std::size_t>(wideCount), L'\0');
-    (void)::MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), wide.data(), wideCount);
-    return ::SysAllocStringLen(wide.data(), static_cast<UINT>(wide.size()));
+    try {
+        std::wstring wide(static_cast<std::size_t>(wideCount), L'\0');
+        if (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(), sourceLength,
+                                  wide.data(), wideCount) != wideCount) {
+            return E_INVALIDARG;
+        }
+        *output = ::SysAllocStringLen(wide.data(), static_cast<UINT>(wide.size()));
+        return *output != nullptr ? S_OK : E_OUTOFMEMORY;
+    } catch (const std::bad_alloc&) {
+        return E_OUTOFMEMORY;
+    }
 }
 
-void setBoolVariant(VARIANT* v, bool value) noexcept
+[[nodiscard]] HRESULT utf8FromWide(LPCWSTR wide, std::string& output) noexcept
 {
-    ::VariantInit(v);
-    v->vt = VT_BOOL;
-    v->boolVal = value ? VARIANT_TRUE : VARIANT_FALSE;
+    if (wide == nullptr) {
+        return E_INVALIDARG;
+    }
+    const std::size_t wideLength = std::wcslen(wide);
+    if (wideLength > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+        return E_INVALIDARG;
+    }
+    if (wideLength == 0) {
+        output.clear();
+        return S_OK;
+    }
+    const int sourceLength = static_cast<int>(wideLength);
+    const int utf8Count = ::WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, sourceLength,
+                                                nullptr, 0, nullptr, nullptr);
+    if (utf8Count <= 0) {
+        return E_INVALIDARG;
+    }
+    try {
+        output.resize(static_cast<std::size_t>(utf8Count));
+        if (::WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, sourceLength,
+                                  output.data(), utf8Count, nullptr, nullptr) != utf8Count) {
+            output.clear();
+            return E_INVALIDARG;
+        }
+        return S_OK;
+    } catch (const std::bad_alloc&) {
+        output.clear();
+        return E_OUTOFMEMORY;
+    }
 }
 
-void setI4Variant(VARIANT* v, LONG value) noexcept
+void setBoolVariant(VARIANT* value, bool enabled) noexcept
 {
-    ::VariantInit(v);
-    v->vt = VT_I4;
-    v->lVal = value;
+    ::VariantInit(value);
+    value->vt = VT_BOOL;
+    value->boolVal = enabled ? VARIANT_TRUE : VARIANT_FALSE;
 }
 
-void setR8Variant(VARIANT* v, double value) noexcept
+void setI4Variant(VARIANT* value, LONG number) noexcept
 {
-    ::VariantInit(v);
-    v->vt = VT_R8;
-    v->dblVal = value;
+    ::VariantInit(value);
+    value->vt = VT_I4;
+    value->lVal = number;
 }
 
-void setBstrVariant(VARIANT* v, std::string_view utf8)
+void setR8Variant(VARIANT* value, double number) noexcept
 {
-    ::VariantInit(v);
-    v->vt = VT_BSTR;
-    v->bstrVal = bstrFromUtf8(utf8);
+    ::VariantInit(value);
+    value->vt = VT_R8;
+    value->dblVal = number;
+}
+
+[[nodiscard]] HRESULT setBstrVariant(VARIANT* value, std::string_view utf8) noexcept
+{
+    ::VariantInit(value);
+    BSTR result = nullptr;
+    const HRESULT status = bstrFromUtf8(utf8, &result);
+    if (FAILED(status)) {
+        return status;
+    }
+    value->vt = VT_BSTR;
+    value->bstrVal = result;
+    return S_OK;
+}
+
+[[nodiscard]] bool pointInside(const RECT& rect, double x, double y) noexcept
+{
+    return x >= static_cast<double>(rect.left) && x < static_cast<double>(rect.right) &&
+           y >= static_cast<double>(rect.top) && y < static_cast<double>(rect.bottom);
 }
 
 } // namespace
 
-// --- NodeProvider ---
-
-NodeProvider::NodeProvider(HostBridgeRoot* root, Uia::UIUiaMappedNode mapped, RECT bounds) noexcept
-    : m_root(root)
-    , m_mapped(std::move(mapped))
-    , m_bounds(bounds)
+NodeProvider::NodeProvider(HostBridgeRoot& root, std::shared_ptr<const ProviderSnapshot> snapshot,
+                           std::size_t nodeIndex) noexcept
+    : m_root(&root)
+    , m_snapshot(std::move(snapshot))
+    , m_nodeIndex(nodeIndex)
 {
+    m_root->AddRef();
+}
+
+NodeProvider::~NodeProvider() noexcept
+{
+    if (m_root != nullptr) {
+        m_root->Release();
+    }
+}
+
+const ProviderSnapshotNode& NodeProvider::node() const noexcept
+{
+    return m_snapshot->nodes[m_nodeIndex];
+}
+
+bool NodeProvider::supportsInvoke() const noexcept
+{
+    return node().mapped.controlTypeId == Uia::kControlTypeButton;
+}
+
+bool NodeProvider::supportsToggle() const noexcept
+{
+    return node().mapped.toggleState.has_value();
+}
+
+bool NodeProvider::supportsRangeValue() const noexcept
+{
+    return node().mapped.rangeValue.has_value();
+}
+
+bool NodeProvider::supportsValue() const noexcept
+{
+    const u32 controlType = node().mapped.controlTypeId;
+    return node().mapped.value.has_value() &&
+           (controlType == Uia::kControlTypeEdit || controlType == Uia::kControlTypeComboBox);
+}
+
+HRESULT NodeProvider::ensureActionable(bool readOnly) const noexcept
+{
+    if (m_root == nullptr || m_root->hwnd() == nullptr) {
+        return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    if (!node().mapped.isEnabled) {
+        return UIA_E_ELEMENTNOTENABLED;
+    }
+    if (readOnly) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE NodeProvider::QueryInterface(REFIID riid, void** ppvObject)
@@ -83,12 +200,20 @@ HRESULT STDMETHODCALLTYPE NodeProvider::QueryInterface(REFIID riid, void** ppvOb
     if (ppvObject == nullptr) {
         return E_POINTER;
     }
+    *ppvObject = nullptr;
     if (riid == IID_IUnknown || riid == IID_IRawElementProviderSimple) {
         *ppvObject = static_cast<IRawElementProviderSimple*>(this);
     } else if (riid == IID_IRawElementProviderFragment) {
         *ppvObject = static_cast<IRawElementProviderFragment*>(this);
+    } else if (riid == IID_IInvokeProvider && supportsInvoke()) {
+        *ppvObject = static_cast<IInvokeProvider*>(this);
+    } else if (riid == IID_IToggleProvider && supportsToggle()) {
+        *ppvObject = static_cast<IToggleProvider*>(this);
+    } else if (riid == IID_IRangeValueProvider && supportsRangeValue()) {
+        *ppvObject = static_cast<IRangeValueProvider*>(this);
+    } else if (riid == IID_IValueProvider && supportsValue()) {
+        *ppvObject = static_cast<IValueProvider*>(this);
     } else {
-        *ppvObject = nullptr;
         return E_NOINTERFACE;
     }
     AddRef();
@@ -118,13 +243,24 @@ HRESULT STDMETHODCALLTYPE NodeProvider::get_ProviderOptions(ProviderOptions* pRe
     return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE NodeProvider::GetPatternProvider(PATTERNID, IUnknown** pRetVal)
+HRESULT STDMETHODCALLTYPE NodeProvider::GetPatternProvider(PATTERNID patternId, IUnknown** pRetVal)
 {
     if (pRetVal == nullptr) {
         return E_POINTER;
     }
-    // Patterns are mirrored via GetPropertyValue in this slice.
     *pRetVal = nullptr;
+    if (patternId == UIA_InvokePatternId && supportsInvoke()) {
+        return QueryInterface(IID_IInvokeProvider, reinterpret_cast<void**>(pRetVal));
+    }
+    if (patternId == UIA_TogglePatternId && supportsToggle()) {
+        return QueryInterface(IID_IToggleProvider, reinterpret_cast<void**>(pRetVal));
+    }
+    if (patternId == UIA_RangeValuePatternId && supportsRangeValue()) {
+        return QueryInterface(IID_IRangeValueProvider, reinterpret_cast<void**>(pRetVal));
+    }
+    if (patternId == UIA_ValuePatternId && supportsValue()) {
+        return QueryInterface(IID_IValueProvider, reinterpret_cast<void**>(pRetVal));
+    }
     return S_OK;
 }
 
@@ -134,62 +270,82 @@ HRESULT STDMETHODCALLTYPE NodeProvider::GetPropertyValue(PROPERTYID propertyId, 
         return E_POINTER;
     }
     ::VariantInit(pRetVal);
+    const auto& mapped = node().mapped;
     switch (propertyId) {
     case UIA_NamePropertyId:
-        setBstrVariant(pRetVal, m_mapped.name);
-        return S_OK;
+        return setBstrVariant(pRetVal, mapped.name);
+    case UIA_HelpTextPropertyId:
+        return setBstrVariant(pRetVal, mapped.description);
     case UIA_ControlTypePropertyId:
-        setI4Variant(pRetVal, static_cast<LONG>(m_mapped.controlTypeId));
+        setI4Variant(pRetVal, static_cast<LONG>(mapped.controlTypeId));
         return S_OK;
     case UIA_IsEnabledPropertyId:
-        setBoolVariant(pRetVal, m_mapped.isEnabled);
+        setBoolVariant(pRetVal, mapped.isEnabled);
         return S_OK;
     case UIA_IsKeyboardFocusablePropertyId:
-        setBoolVariant(pRetVal, m_mapped.isKeyboardFocusable);
+        setBoolVariant(pRetVal, mapped.isKeyboardFocusable);
         return S_OK;
     case UIA_HasKeyboardFocusPropertyId:
-        setBoolVariant(pRetVal, m_mapped.hasKeyboardFocus);
+        setBoolVariant(pRetVal, mapped.hasKeyboardFocus);
         return S_OK;
     case UIA_IsControlElementPropertyId:
     case UIA_IsContentElementPropertyId:
         setBoolVariant(pRetVal, true);
         return S_OK;
     case UIA_ProviderDescriptionPropertyId:
-        setBstrVariant(pRetVal, "Tina.UI.WindowsUia.NodeProvider");
-        return S_OK;
+        return setBstrVariant(pRetVal, "Tina.UI.WindowsUia.NodeProvider");
+    case UIA_FrameworkIdPropertyId:
+        return setBstrVariant(pRetVal, "Tina");
     case UIA_AutomationIdPropertyId: {
         char buffer[64]{};
-        std::snprintf(buffer, sizeof(buffer), "tina-ui-node-%u-%u", m_mapped.node.index(), m_mapped.node.generation());
-        setBstrVariant(pRetVal, buffer);
-        return S_OK;
+        std::snprintf(buffer, sizeof(buffer), "tina-ui-node-%u-%u", mapped.node.index(), mapped.node.generation());
+        return setBstrVariant(pRetVal, buffer);
     }
     case UIA_ValueValuePropertyId:
-        if (m_mapped.value.has_value()) {
-            setBstrVariant(pRetVal, m_mapped.value->value);
+        if (mapped.value.has_value()) {
+            return setBstrVariant(pRetVal, mapped.value->value);
+        }
+        break;
+    case UIA_ValueIsReadOnlyPropertyId:
+        if (mapped.value.has_value()) {
+            setBoolVariant(pRetVal, mapped.value->isReadOnly);
             return S_OK;
         }
         break;
     case UIA_RangeValueValuePropertyId:
-        if (m_mapped.rangeValue.has_value()) {
-            setR8Variant(pRetVal, m_mapped.rangeValue->value);
+        if (mapped.rangeValue.has_value()) {
+            setR8Variant(pRetVal, mapped.rangeValue->value);
             return S_OK;
         }
         break;
     case UIA_RangeValueMinimumPropertyId:
-        if (m_mapped.rangeValue.has_value()) {
-            setR8Variant(pRetVal, m_mapped.rangeValue->minimum);
+        if (mapped.rangeValue.has_value()) {
+            setR8Variant(pRetVal, mapped.rangeValue->minimum);
             return S_OK;
         }
         break;
     case UIA_RangeValueMaximumPropertyId:
-        if (m_mapped.rangeValue.has_value()) {
-            setR8Variant(pRetVal, m_mapped.rangeValue->maximum);
+        if (mapped.rangeValue.has_value()) {
+            setR8Variant(pRetVal, mapped.rangeValue->maximum);
+            return S_OK;
+        }
+        break;
+    case UIA_RangeValueIsReadOnlyPropertyId:
+        if (mapped.rangeValue.has_value()) {
+            setBoolVariant(pRetVal, mapped.rangeValue->isReadOnly);
+            return S_OK;
+        }
+        break;
+    case UIA_RangeValueLargeChangePropertyId:
+    case UIA_RangeValueSmallChangePropertyId:
+        if (mapped.rangeValue.has_value()) {
+            setR8Variant(pRetVal, (std::numeric_limits<double>::quiet_NaN)());
             return S_OK;
         }
         break;
     case UIA_ToggleToggleStatePropertyId:
-        if (m_mapped.toggleState.has_value()) {
-            setI4Variant(pRetVal, static_cast<LONG>(*m_mapped.toggleState));
+        if (mapped.toggleState.has_value()) {
+            setI4Variant(pRetVal, static_cast<LONG>(*mapped.toggleState));
             return S_OK;
         }
         break;
@@ -216,26 +372,27 @@ HRESULT STDMETHODCALLTYPE NodeProvider::Navigate(NavigateDirection direction, IR
     }
     *pRetVal = nullptr;
     if (m_root == nullptr) {
-        return S_OK;
+        return UIA_E_ELEMENTNOTAVAILABLE;
     }
+    const ProviderSnapshotNode& current = node();
     switch (direction) {
     case NavigateDirection_Parent:
-        return m_root->QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void**>(pRetVal));
+        if (current.parent == InvalidProviderNodeIndex) {
+            return m_root->QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void**>(pRetVal));
+        }
+        return m_root->createNodeProvider(m_snapshot, current.parent, pRetVal);
     case NavigateDirection_NextSibling:
-        if (NodeProvider* next = m_root->childAt(m_siblingIndex + 1); next != nullptr) {
-            return next->QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void**>(pRetVal));
-        }
-        break;
+        return current.nextSibling == InvalidProviderNodeIndex
+                   ? S_OK
+                   : m_root->createNodeProvider(m_snapshot, current.nextSibling, pRetVal);
     case NavigateDirection_PreviousSibling:
-        if (m_siblingIndex > 0) {
-            if (NodeProvider* prev = m_root->childAt(m_siblingIndex - 1); prev != nullptr) {
-                return prev->QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void**>(pRetVal));
-            }
-        }
-        break;
+        return current.previousSibling == InvalidProviderNodeIndex
+                   ? S_OK
+                   : m_root->createNodeProvider(m_snapshot, current.previousSibling, pRetVal);
     case NavigateDirection_FirstChild:
+        return current.children.empty() ? S_OK : m_root->createNodeProvider(m_snapshot, current.children.front(), pRetVal);
     case NavigateDirection_LastChild:
-        break;
+        return current.children.empty() ? S_OK : m_root->createNodeProvider(m_snapshot, current.children.back(), pRetVal);
     }
     return S_OK;
 }
@@ -245,19 +402,23 @@ HRESULT STDMETHODCALLTYPE NodeProvider::GetRuntimeId(SAFEARRAY** pRetVal)
     if (pRetVal == nullptr) {
         return E_POINTER;
     }
-    // UiaAppendRuntimeId, hwnd-derived uniqueness, node index, generation
+    *pRetVal = nullptr;
+    const auto& mapped = node().mapped;
     LONG ids[4] = {
         static_cast<LONG>(UiaAppendRuntimeId),
-        static_cast<LONG>(reinterpret_cast<uintptr_t>(m_root != nullptr ? m_root->hwnd() : nullptr) & 0x7fffffff),
-        static_cast<LONG>(m_mapped.node.index()),
-        static_cast<LONG>(m_mapped.node.generation()),
+        static_cast<LONG>(m_snapshot->hwndIdentity & 0x7fffffffU),
+        static_cast<LONG>(mapped.node.index()),
+        static_cast<LONG>(mapped.node.generation()),
     };
     SAFEARRAY* array = ::SafeArrayCreateVector(VT_I4, 0, 4);
     if (array == nullptr) {
         return E_OUTOFMEMORY;
     }
-    for (LONG i = 0; i < 4; ++i) {
-        (void)::SafeArrayPutElement(array, &i, &ids[i]);
+    for (LONG index = 0; index < 4; ++index) {
+        if (FAILED(::SafeArrayPutElement(array, &index, &ids[index]))) {
+            (void)::SafeArrayDestroy(array);
+            return E_FAIL;
+        }
     }
     *pRetVal = array;
     return S_OK;
@@ -268,10 +429,11 @@ HRESULT STDMETHODCALLTYPE NodeProvider::get_BoundingRectangle(UiaRect* pRetVal)
     if (pRetVal == nullptr) {
         return E_POINTER;
     }
-    pRetVal->left = static_cast<double>(m_bounds.left);
-    pRetVal->top = static_cast<double>(m_bounds.top);
-    pRetVal->width = static_cast<double>(m_bounds.right - m_bounds.left);
-    pRetVal->height = static_cast<double>(m_bounds.bottom - m_bounds.top);
+    const RECT& bounds = node().bounds;
+    pRetVal->left = static_cast<double>(bounds.left);
+    pRetVal->top = static_cast<double>(bounds.top);
+    pRetVal->width = static_cast<double>(bounds.right - bounds.left);
+    pRetVal->height = static_cast<double>(bounds.bottom - bounds.top);
     return S_OK;
 }
 
@@ -286,7 +448,13 @@ HRESULT STDMETHODCALLTYPE NodeProvider::GetEmbeddedFragmentRoots(SAFEARRAY** pRe
 
 HRESULT STDMETHODCALLTYPE NodeProvider::SetFocus()
 {
-    return S_OK;
+    if (!node().mapped.isKeyboardFocusable) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    if (const HRESULT status = ensureActionable(); FAILED(status)) {
+        return status;
+    }
+    return m_root->performAction({.kind = UIAccessibilityActionKind::Focus, .node = node().mapped.node});
 }
 
 HRESULT STDMETHODCALLTYPE NodeProvider::get_FragmentRoot(IRawElementProviderFragmentRoot** pRetVal)
@@ -296,54 +464,266 @@ HRESULT STDMETHODCALLTYPE NodeProvider::get_FragmentRoot(IRawElementProviderFrag
     }
     if (m_root == nullptr) {
         *pRetVal = nullptr;
-        return S_OK;
+        return UIA_E_ELEMENTNOTAVAILABLE;
     }
     return m_root->QueryInterface(IID_IRawElementProviderFragmentRoot, reinterpret_cast<void**>(pRetVal));
 }
 
-// --- HostBridgeRoot ---
+HRESULT STDMETHODCALLTYPE NodeProvider::Invoke()
+{
+    if (!supportsInvoke()) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    if (const HRESULT status = ensureActionable(); FAILED(status)) {
+        return status;
+    }
+    return m_root->performAction({.kind = UIAccessibilityActionKind::Invoke, .node = node().mapped.node});
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::Toggle()
+{
+    if (!supportsToggle()) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    if (const HRESULT status = ensureActionable(); FAILED(status)) {
+        return status;
+    }
+    return m_root->performAction({.kind = UIAccessibilityActionKind::Toggle, .node = node().mapped.node});
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::get_ToggleState(ToggleState* pRetVal)
+{
+    if (pRetVal == nullptr) {
+        return E_POINTER;
+    }
+    if (!supportsToggle()) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    *pRetVal = static_cast<ToggleState>(*node().mapped.toggleState);
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::SetValue(double value)
+{
+    if (!supportsRangeValue()) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    const bool readOnly = node().mapped.rangeValue->isReadOnly;
+    if (const HRESULT status = ensureActionable(readOnly); FAILED(status)) {
+        return status;
+    }
+    const auto& range = *node().mapped.rangeValue;
+    if (!std::isfinite(value) || value < range.minimum || value > range.maximum) {
+        return E_INVALIDARG;
+    }
+    return m_root->performAction({
+        .kind = UIAccessibilityActionKind::SetRangeValue,
+        .node = node().mapped.node,
+        .rangeValue = value,
+    });
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::get_Value(double* pRetVal)
+{
+    if (pRetVal == nullptr) {
+        return E_POINTER;
+    }
+    if (!supportsRangeValue()) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    *pRetVal = node().mapped.rangeValue->value;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::get_IsReadOnly(BOOL* pRetVal)
+{
+    if (pRetVal == nullptr) {
+        return E_POINTER;
+    }
+    if (supportsRangeValue()) {
+        *pRetVal = node().mapped.rangeValue->isReadOnly ? TRUE : FALSE;
+        return S_OK;
+    }
+    if (supportsValue()) {
+        *pRetVal = node().mapped.value->isReadOnly ? TRUE : FALSE;
+        return S_OK;
+    }
+    return UIA_E_NOTSUPPORTED;
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::get_Maximum(double* pRetVal)
+{
+    if (pRetVal == nullptr) {
+        return E_POINTER;
+    }
+    if (!supportsRangeValue()) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    *pRetVal = node().mapped.rangeValue->maximum;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::get_Minimum(double* pRetVal)
+{
+    if (pRetVal == nullptr) {
+        return E_POINTER;
+    }
+    if (!supportsRangeValue()) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    *pRetVal = node().mapped.rangeValue->minimum;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::get_LargeChange(double* pRetVal)
+{
+    if (pRetVal == nullptr) {
+        return E_POINTER;
+    }
+    if (!supportsRangeValue()) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    *pRetVal = (std::numeric_limits<double>::quiet_NaN)();
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::get_SmallChange(double* pRetVal)
+{
+    return get_LargeChange(pRetVal);
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::SetValue(LPCWSTR value)
+{
+    if (!supportsValue()) {
+        return UIA_E_NOTSUPPORTED;
+    }
+    if (const HRESULT status = ensureActionable(node().mapped.value->isReadOnly); FAILED(status)) {
+        return status;
+    }
+    std::string utf8;
+    if (const HRESULT status = utf8FromWide(value, utf8); FAILED(status)) {
+        return status;
+    }
+    return m_root->performAction({
+        .kind = UIAccessibilityActionKind::SetTextValue,
+        .node = node().mapped.node,
+        .textValue = utf8,
+    });
+}
+
+HRESULT STDMETHODCALLTYPE NodeProvider::get_Value(BSTR* pRetVal)
+{
+    if (pRetVal == nullptr) {
+        return E_POINTER;
+    }
+    if (!supportsValue()) {
+        *pRetVal = nullptr;
+        return UIA_E_NOTSUPPORTED;
+    }
+    return bstrFromUtf8(node().mapped.value->value, pRetVal);
+}
 
 HostBridgeRoot::HostBridgeRoot(HWND hwnd) noexcept
     : m_hwnd(hwnd)
 {
 }
 
-HostBridgeRoot::~HostBridgeRoot() noexcept
+bool HostBridgeRoot::rebuildSnapshot(const WindowsUiaAccessibilityProvider& provider, HWND hwnd) noexcept
 {
-    clearChildren();
-}
+    try {
+        auto next = std::make_shared<ProviderSnapshot>();
+        const auto mapped = provider.mappedNodes();
+        const auto sourceNodes = provider.tree().nodes();
+        next->hwndIdentity = reinterpret_cast<std::uintptr_t>(hwnd);
+        next->nodes.reserve(mapped.size());
 
-void HostBridgeRoot::clearChildren() noexcept
-{
-    for (NodeProvider* child : m_children) {
-        if (child != nullptr) {
-            child->Release();
+        std::map<UINodeId, std::size_t> indices;
+        for (std::size_t index = 0; index < mapped.size(); ++index) {
+            RECT bounds{};
+            if (index < sourceNodes.size()) {
+                bounds = clientRelativeToScreen(hwnd, sourceNodes[index].worldRect);
+            }
+            next->nodes.push_back(ProviderSnapshotNode{
+                .mapped = mapped[index],
+                .bounds = bounds,
+            });
+            indices.emplace(mapped[index].node, index);
         }
-    }
-    m_children.clear();
-}
 
-void HostBridgeRoot::rebuildChildren(const WindowsUiaAccessibilityProvider& provider, HWND hwnd)
-{
-    clearChildren();
-    m_hwnd = hwnd;
-    const auto mapped = provider.mappedNodes();
-    const auto nodes = provider.tree().nodes();
-    m_children.reserve(mapped.size());
-    for (std::size_t i = 0; i < mapped.size(); ++i) {
-        RECT bounds{};
-        if (i < nodes.size()) {
-            bounds = clientRelativeToScreen(hwnd, nodes[i].worldRect);
+        next->children.reserve(next->nodes.size());
+        for (std::size_t index = 0; index < next->nodes.size(); ++index) {
+            ProviderSnapshotNode& current = next->nodes[index];
+            const auto parent = indices.find(current.mapped.parent);
+            std::vector<std::size_t>* siblings = &next->children;
+            if (parent != indices.end() && parent->second != index) {
+                current.parent = parent->second;
+                siblings = &next->nodes[parent->second].children;
+            }
+            if (!siblings->empty()) {
+                current.previousSibling = siblings->back();
+                next->nodes[siblings->back()].nextSibling = index;
+            }
+            siblings->push_back(index);
         }
-        auto* child = new NodeProvider(this, mapped[i], bounds);
-        child->setSiblingIndex(i);
-        m_children.push_back(child);
+
+        m_hwnd.store(hwnd, std::memory_order_release);
+        m_snapshot.store(std::shared_ptr<const ProviderSnapshot>(std::move(next)), std::memory_order_release);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
     }
 }
 
-NodeProvider* HostBridgeRoot::childAt(std::size_t index) const noexcept
+void HostBridgeRoot::clearSnapshot() noexcept
 {
-    return index < m_children.size() ? m_children[index] : nullptr;
+    m_snapshot.store({}, std::memory_order_release);
+}
+
+void HostBridgeRoot::disconnect() noexcept
+{
+    clearSnapshot();
+    m_hwnd.store(nullptr, std::memory_order_release);
+}
+
+std::shared_ptr<const ProviderSnapshot> HostBridgeRoot::snapshot() const noexcept
+{
+    return m_snapshot.load(std::memory_order_acquire);
+}
+
+HRESULT HostBridgeRoot::performAction(const UIAccessibilityAction& action) const noexcept
+{
+    const HWND target = hwnd();
+    const UINT message = windowsUiaActionMessage();
+    if (target == nullptr || message == 0 || !::IsWindow(target)) {
+        return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    WindowsUiaActionRequest request{.action = action};
+    DWORD_PTR messageResult = 0;
+    const LRESULT sent = ::SendMessageTimeoutW(target, message, 0, reinterpret_cast<LPARAM>(&request),
+                                               SMTO_ABORTIFHUNG | SMTO_BLOCK, kActionTimeoutMs, &messageResult);
+    if (sent == 0 || !request.handled) {
+        return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    return request.result;
+}
+
+HRESULT HostBridgeRoot::createNodeProvider(const std::shared_ptr<const ProviderSnapshot>& current,
+                                           std::size_t nodeIndex,
+                                           IRawElementProviderFragment** pRetVal) noexcept
+{
+    if (pRetVal == nullptr) {
+        return E_POINTER;
+    }
+    *pRetVal = nullptr;
+    if (!current || nodeIndex >= current->nodes.size()) {
+        return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    auto* provider = new (std::nothrow) NodeProvider(*this, current, nodeIndex);
+    if (provider == nullptr) {
+        return E_OUTOFMEMORY;
+    }
+    *pRetVal = static_cast<IRawElementProviderFragment*>(provider);
+    return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE HostBridgeRoot::QueryInterface(REFIID riid, void** ppvObject)
@@ -351,6 +731,7 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::QueryInterface(REFIID riid, void** ppv
     if (ppvObject == nullptr) {
         return E_POINTER;
     }
+    *ppvObject = nullptr;
     if (riid == IID_IUnknown || riid == IID_IRawElementProviderSimple) {
         *ppvObject = static_cast<IRawElementProviderSimple*>(this);
     } else if (riid == IID_IRawElementProviderFragment) {
@@ -358,7 +739,6 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::QueryInterface(REFIID riid, void** ppv
     } else if (riid == IID_IRawElementProviderFragmentRoot) {
         *ppvObject = static_cast<IRawElementProviderFragmentRoot*>(this);
     } else {
-        *ppvObject = nullptr;
         return E_NOINTERFACE;
     }
     AddRef();
@@ -405,8 +785,7 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::GetPropertyValue(PROPERTYID propertyId
     ::VariantInit(pRetVal);
     switch (propertyId) {
     case UIA_NamePropertyId:
-        setBstrVariant(pRetVal, "Tina UI Root");
-        return S_OK;
+        return setBstrVariant(pRetVal, "Tina UI Root");
     case UIA_ControlTypePropertyId:
         setI4Variant(pRetVal, static_cast<LONG>(Uia::kControlTypePane));
         return S_OK;
@@ -417,17 +796,17 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::GetPropertyValue(PROPERTYID propertyId
         setBoolVariant(pRetVal, false);
         return S_OK;
     case UIA_ProviderDescriptionPropertyId:
-        setBstrVariant(pRetVal, "Tina.UI.WindowsUia.HostBridgeRoot");
-        return S_OK;
+        return setBstrVariant(pRetVal, "Tina.UI.WindowsUia.HostBridgeRoot");
+    case UIA_FrameworkIdPropertyId:
+        return setBstrVariant(pRetVal, "Tina");
     case UIA_IsControlElementPropertyId:
     case UIA_IsContentElementPropertyId:
         setBoolVariant(pRetVal, true);
         return S_OK;
     default:
-        break;
+        pRetVal->vt = VT_EMPTY;
+        return S_OK;
     }
-    pRetVal->vt = VT_EMPTY;
-    return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE HostBridgeRoot::get_HostRawElementProvider(IRawElementProviderSimple** pRetVal)
@@ -435,11 +814,12 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::get_HostRawElementProvider(IRawElement
     if (pRetVal == nullptr) {
         return E_POINTER;
     }
-    if (m_hwnd == nullptr) {
+    const HWND target = hwnd();
+    if (target == nullptr) {
         *pRetVal = nullptr;
-        return S_OK;
+        return UIA_E_ELEMENTNOTAVAILABLE;
     }
-    return ::UiaHostProviderFromHwnd(m_hwnd, pRetVal);
+    return ::UiaHostProviderFromHwnd(target, pRetVal);
 }
 
 HRESULT STDMETHODCALLTYPE HostBridgeRoot::Navigate(NavigateDirection direction, IRawElementProviderFragment** pRetVal)
@@ -448,16 +828,15 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::Navigate(NavigateDirection direction, 
         return E_POINTER;
     }
     *pRetVal = nullptr;
-    if (m_children.empty()) {
+    const auto current = snapshot();
+    if (!current || current->children.empty()) {
         return S_OK;
     }
-    switch (direction) {
-    case NavigateDirection_FirstChild:
-        return m_children.front()->QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void**>(pRetVal));
-    case NavigateDirection_LastChild:
-        return m_children.back()->QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void**>(pRetVal));
-    default:
-        break;
+    if (direction == NavigateDirection_FirstChild) {
+        return createNodeProvider(current, current->children.front(), pRetVal);
+    }
+    if (direction == NavigateDirection_LastChild) {
+        return createNodeProvider(current, current->children.back(), pRetVal);
     }
     return S_OK;
 }
@@ -467,16 +846,20 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::GetRuntimeId(SAFEARRAY** pRetVal)
     if (pRetVal == nullptr) {
         return E_POINTER;
     }
+    *pRetVal = nullptr;
     LONG ids[2] = {
         static_cast<LONG>(UiaAppendRuntimeId),
-        static_cast<LONG>(reinterpret_cast<uintptr_t>(m_hwnd) & 0x7fffffff),
+        static_cast<LONG>(reinterpret_cast<std::uintptr_t>(hwnd()) & 0x7fffffffU),
     };
     SAFEARRAY* array = ::SafeArrayCreateVector(VT_I4, 0, 2);
     if (array == nullptr) {
         return E_OUTOFMEMORY;
     }
-    for (LONG i = 0; i < 2; ++i) {
-        (void)::SafeArrayPutElement(array, &i, &ids[i]);
+    for (LONG index = 0; index < 2; ++index) {
+        if (FAILED(::SafeArrayPutElement(array, &index, &ids[index]))) {
+            (void)::SafeArrayDestroy(array);
+            return E_FAIL;
+        }
     }
     *pRetVal = array;
     return S_OK;
@@ -488,10 +871,11 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::get_BoundingRectangle(UiaRect* pRetVal
         return E_POINTER;
     }
     RECT rect{};
-    if (m_hwnd != nullptr) {
-        (void)::GetClientRect(m_hwnd, &rect);
+    const HWND target = hwnd();
+    if (target != nullptr) {
+        (void)::GetClientRect(target, &rect);
         POINT origin{0, 0};
-        (void)::ClientToScreen(m_hwnd, &origin);
+        (void)::ClientToScreen(target, &origin);
         rect.left += origin.x;
         rect.right += origin.x;
         rect.top += origin.y;
@@ -515,10 +899,7 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::GetEmbeddedFragmentRoots(SAFEARRAY** p
 
 HRESULT STDMETHODCALLTYPE HostBridgeRoot::SetFocus()
 {
-    if (m_hwnd != nullptr) {
-        (void)::SetFocus(m_hwnd);
-    }
-    return S_OK;
+    return UIA_E_NOTSUPPORTED;
 }
 
 HRESULT STDMETHODCALLTYPE HostBridgeRoot::get_FragmentRoot(IRawElementProviderFragmentRoot** pRetVal)
@@ -529,24 +910,19 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::get_FragmentRoot(IRawElementProviderFr
     return QueryInterface(IID_IRawElementProviderFragmentRoot, reinterpret_cast<void**>(pRetVal));
 }
 
-HRESULT STDMETHODCALLTYPE HostBridgeRoot::ElementProviderFromPoint(double x, double y, IRawElementProviderFragment** pRetVal)
+HRESULT STDMETHODCALLTYPE HostBridgeRoot::ElementProviderFromPoint(double x, double y,
+                                                                   IRawElementProviderFragment** pRetVal)
 {
     if (pRetVal == nullptr) {
         return E_POINTER;
     }
     *pRetVal = nullptr;
-    const LONG px = static_cast<LONG>(x);
-    const LONG py = static_cast<LONG>(y);
-    for (NodeProvider* child : m_children) {
-        if (child == nullptr) {
-            continue;
-        }
-        UiaRect rect{};
-        if (FAILED(child->get_BoundingRectangle(&rect))) {
-            continue;
-        }
-        if (px >= rect.left && px < rect.left + rect.width && py >= rect.top && py < rect.top + rect.height) {
-            return child->QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void**>(pRetVal));
+    const auto current = snapshot();
+    if (current && std::isfinite(x) && std::isfinite(y)) {
+        for (std::size_t index = current->nodes.size(); index > 0; --index) {
+            if (pointInside(current->nodes[index - 1].bounds, x, y)) {
+                return createNodeProvider(current, index - 1, pRetVal);
+            }
         }
     }
     return QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void**>(pRetVal));
@@ -558,9 +934,13 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::GetFocus(IRawElementProviderFragment**
         return E_POINTER;
     }
     *pRetVal = nullptr;
-    for (NodeProvider* child : m_children) {
-        if (child != nullptr && child->mapped().hasKeyboardFocus) {
-            return child->QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void**>(pRetVal));
+    const auto current = snapshot();
+    if (!current) {
+        return S_OK;
+    }
+    for (std::size_t index = 0; index < current->nodes.size(); ++index) {
+        if (current->nodes[index].mapped.hasKeyboardFocus) {
+            return createNodeProvider(current, index, pRetVal);
         }
     }
     return S_OK;

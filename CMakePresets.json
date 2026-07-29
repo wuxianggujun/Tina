@@ -108,7 +108,8 @@
       "inherits": "windows-msvc-vnext-platform",
       "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-bgfx",
       "cacheVariables": {
-        "TINA_BUILD_RENDER_BGFX": "ON"
+        "TINA_BUILD_RENDER_BGFX": "ON",
+        "TINA_BUILD_UI_UIA": "ON"
       }
     },
     {

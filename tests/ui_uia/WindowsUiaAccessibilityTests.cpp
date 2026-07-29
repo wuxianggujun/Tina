@@ -10,6 +10,7 @@
 
 #include <UIAutomation.h>
 #include <Windows.h>
+#include <wrl/client.h>
 
 #include <memory>
 #include <memory_resource>
@@ -19,6 +20,7 @@ namespace Tina::Tests {
 namespace {
 
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
+using Microsoft::WRL::ComPtr;
 
 [[nodiscard]] std::unique_ptr<UI::UIContext>
 createContext(Platform::WindowId window,
@@ -429,7 +431,7 @@ TEST(WindowsUiaHostBridgeTest, AttachPublishExposesRootProviderAndChildren)
 
     UI::UIAccessibilityTree tree;
     assertOk(tree.rebuildFrom(context->committedSemantics()));
-    assertOk(bridge->publish(tree));
+    assertOk(bridge->publish(tree, *context));
     EXPECT_TRUE(bridge->hasPublishedTree());
     EXPECT_GE(bridge->publishCount(), 1U);
 
@@ -468,6 +470,227 @@ TEST(WindowsUiaHostBridgeTest, AttachPublishExposesRootProviderAndChildren)
     EXPECT_GE(bridge->clearCount(), 1U);
     bridge->detach();
     EXPECT_FALSE(bridge->isAttached());
+    (void)::DestroyWindow(hwnd);
+}
+
+TEST(WindowsUiaHostBridgeTest, PatternsMarshalActionsAndPreserveControlBehavior)
+{
+    auto bridgeResult = UI::createWindowsUiaHostBridge();
+    ASSERT_TRUE(bridgeResult.has_value());
+    auto bridge = std::move(*bridgeResult);
+    const HWND hwnd =
+        ::CreateWindowExW(0, L"STATIC", L"TinaUiaPatternTest", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                          400, 260, nullptr, nullptr, ::GetModuleHandleW(nullptr), nullptr);
+    ASSERT_NE(hwnd, nullptr);
+    assertOk(bridge->attach(hwnd));
+
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    auto updater = createUpdater(*context, root);
+
+    auto button = updater.createButton(root.rootNodeId());
+    auto checkbox = updater.createCheckbox(root.rootNodeId());
+    auto slider = updater.createSlider(root.rootNodeId());
+    auto progress = updater.createProgressBar(root.rootNodeId());
+    auto textEdit = updater.createTextEdit(root.rootNodeId());
+    ASSERT_TRUE(button.has_value());
+    ASSERT_TRUE(checkbox.has_value());
+    ASSERT_TRUE(slider.has_value());
+    ASSERT_TRUE(progress.has_value());
+    ASSERT_TRUE(textEdit.has_value());
+
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(360.0F, 220.0F)));
+    assertOk(updater.setLayoutStyle(*button, fixedSize(100.0F, 32.0F)));
+    assertOk(updater.setLayoutStyle(*checkbox, fixedSize(100.0F, 32.0F)));
+    assertOk(updater.setLayoutStyle(*slider, fixedSize(160.0F, 24.0F)));
+    assertOk(updater.setLayoutStyle(*progress, fixedSize(160.0F, 16.0F)));
+    assertOk(updater.setLayoutStyle(*textEdit, fixedSize(180.0F, 32.0F)));
+    assertOk(updater.setText(*button, "Apply"));
+    assertOk(updater.setText(*textEdit, "Player"));
+    assertOk(updater.setSliderRange(*slider, 0.0F, 100.0F, 1.0F));
+    assertOk(updater.setProgressBarRange(*progress, 0.0F, 100.0F));
+
+    u32 buttonActivations = 0;
+    u32 checkboxActivations = 0;
+    assertOk(updater.setButtonAction(
+        *button, UI::UIButtonActionCallback([&](const UI::UIButtonActionEvent& event) noexcept {
+            EXPECT_EQ(event.source, UI::UIButtonActivationSource::Accessibility);
+            ++buttonActivations;
+        })));
+    assertOk(updater.setCheckboxAction(
+        *checkbox, UI::UIButtonActionCallback([&](const UI::UIButtonActionEvent& event) noexcept {
+            EXPECT_EQ(event.source, UI::UIButtonActivationSource::Accessibility);
+            ++checkboxActivations;
+        })));
+    assertOk(context->commitLayout({.width = 360.0F, .height = 220.0F}));
+
+    UI::UIAccessibilityTree tree;
+    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(bridge->publish(tree, *context));
+
+    ComPtr<IRawElementProviderSimple> rootSimple;
+    rootSimple.Attach(bridge->acquireRootProvider());
+    ASSERT_NE(rootSimple.Get(), nullptr);
+    ComPtr<IRawElementProviderFragment> rootFragment;
+    ASSERT_HRESULT_SUCCEEDED(rootSimple.As(&rootFragment));
+
+    ComPtr<IRawElementProviderFragment> buttonFragment;
+    ASSERT_HRESULT_SUCCEEDED(rootFragment->Navigate(NavigateDirection_FirstChild, &buttonFragment));
+    ASSERT_NE(buttonFragment.Get(), nullptr);
+    ComPtr<IRawElementProviderSimple> buttonSimple;
+    ASSERT_HRESULT_SUCCEEDED(buttonFragment.As(&buttonSimple));
+    ComPtr<IUnknown> invokeUnknown;
+    ASSERT_HRESULT_SUCCEEDED(buttonSimple->GetPatternProvider(UIA_InvokePatternId, &invokeUnknown));
+    ASSERT_NE(invokeUnknown.Get(), nullptr);
+    ComPtr<IInvokeProvider> invoke;
+    ASSERT_HRESULT_SUCCEEDED(invokeUnknown.As(&invoke));
+    EXPECT_HRESULT_SUCCEEDED(invoke->Invoke());
+    EXPECT_EQ(buttonActivations, 1U);
+    EXPECT_HRESULT_SUCCEEDED(buttonFragment->SetFocus());
+    EXPECT_EQ(context->defaultActionFocus(), *button);
+
+    ComPtr<IRawElementProviderFragment> checkboxFragment;
+    ASSERT_HRESULT_SUCCEEDED(buttonFragment->Navigate(NavigateDirection_NextSibling, &checkboxFragment));
+    ASSERT_NE(checkboxFragment.Get(), nullptr);
+    ComPtr<IRawElementProviderSimple> checkboxSimple;
+    ASSERT_HRESULT_SUCCEEDED(checkboxFragment.As(&checkboxSimple));
+    ComPtr<IUnknown> toggleUnknown;
+    ASSERT_HRESULT_SUCCEEDED(checkboxSimple->GetPatternProvider(UIA_TogglePatternId, &toggleUnknown));
+    ASSERT_NE(toggleUnknown.Get(), nullptr);
+    ComPtr<IToggleProvider> toggle;
+    ASSERT_HRESULT_SUCCEEDED(toggleUnknown.As(&toggle));
+    ToggleState toggleState = ToggleState_Indeterminate;
+    EXPECT_HRESULT_SUCCEEDED(toggle->get_ToggleState(&toggleState));
+    EXPECT_EQ(toggleState, ToggleState_Off);
+    EXPECT_HRESULT_SUCCEEDED(toggle->Toggle());
+    EXPECT_EQ(checkboxActivations, 1U);
+    auto checked = updater.isChecked(*checkbox);
+    ASSERT_TRUE(checked.has_value());
+    EXPECT_TRUE(*checked);
+
+    ComPtr<IRawElementProviderFragment> sliderFragment;
+    ASSERT_HRESULT_SUCCEEDED(checkboxFragment->Navigate(NavigateDirection_NextSibling, &sliderFragment));
+    ComPtr<IRawElementProviderSimple> sliderSimple;
+    ASSERT_HRESULT_SUCCEEDED(sliderFragment.As(&sliderSimple));
+    ComPtr<IUnknown> rangeUnknown;
+    ASSERT_HRESULT_SUCCEEDED(sliderSimple->GetPatternProvider(UIA_RangeValuePatternId, &rangeUnknown));
+    ASSERT_NE(rangeUnknown.Get(), nullptr);
+    ComPtr<IRangeValueProvider> range;
+    ASSERT_HRESULT_SUCCEEDED(rangeUnknown.As(&range));
+    EXPECT_HRESULT_SUCCEEDED(range->SetValue(72.0));
+    EXPECT_EQ(range->SetValue(101.0), E_INVALIDARG);
+    auto sliderValue = updater.sliderValue(*slider);
+    ASSERT_TRUE(sliderValue.has_value());
+    EXPECT_FLOAT_EQ(*sliderValue, 72.0F);
+
+    ComPtr<IRawElementProviderFragment> progressFragment;
+    ASSERT_HRESULT_SUCCEEDED(sliderFragment->Navigate(NavigateDirection_NextSibling, &progressFragment));
+    ComPtr<IRawElementProviderSimple> progressSimple;
+    ASSERT_HRESULT_SUCCEEDED(progressFragment.As(&progressSimple));
+    ComPtr<IUnknown> progressRangeUnknown;
+    ASSERT_HRESULT_SUCCEEDED(progressSimple->GetPatternProvider(UIA_RangeValuePatternId, &progressRangeUnknown));
+    ComPtr<IRangeValueProvider> progressRange;
+    ASSERT_HRESULT_SUCCEEDED(progressRangeUnknown.As(&progressRange));
+    BOOL readOnly = FALSE;
+    EXPECT_HRESULT_SUCCEEDED(progressRange->get_IsReadOnly(&readOnly));
+    EXPECT_EQ(readOnly, TRUE);
+    EXPECT_EQ(progressRange->SetValue(50.0), UIA_E_NOTSUPPORTED);
+
+    ComPtr<IRawElementProviderFragment> textFragment;
+    ASSERT_HRESULT_SUCCEEDED(progressFragment->Navigate(NavigateDirection_NextSibling, &textFragment));
+    ComPtr<IRawElementProviderSimple> textSimple;
+    ASSERT_HRESULT_SUCCEEDED(textFragment.As(&textSimple));
+    ComPtr<IUnknown> valueUnknown;
+    ASSERT_HRESULT_SUCCEEDED(textSimple->GetPatternProvider(UIA_ValuePatternId, &valueUnknown));
+    ASSERT_NE(valueUnknown.Get(), nullptr);
+    ComPtr<IValueProvider> value;
+    ASSERT_HRESULT_SUCCEEDED(valueUnknown.As(&value));
+    BSTR oldValue = nullptr;
+    EXPECT_HRESULT_SUCCEEDED(value->get_Value(&oldValue));
+    EXPECT_STREQ(oldValue, L"Player");
+    ::SysFreeString(oldValue);
+    EXPECT_HRESULT_SUCCEEDED(value->SetValue(L"Accessible Player"));
+    auto text = updater.text(*textEdit);
+    ASSERT_TRUE(text.has_value());
+    EXPECT_EQ(*text, "Accessible Player");
+
+    bridge->detach();
+    (void)::DestroyWindow(hwnd);
+}
+
+TEST(WindowsUiaHostBridgeTest, FragmentHierarchyAndOldSnapshotSurviveRepublishAndClear)
+{
+    auto bridgeResult = UI::createWindowsUiaHostBridge();
+    ASSERT_TRUE(bridgeResult.has_value());
+    auto bridge = std::move(*bridgeResult);
+    const HWND hwnd =
+        ::CreateWindowExW(0, L"STATIC", L"TinaUiaLifetimeTest", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                          320, 200, nullptr, nullptr, ::GetModuleHandleW(nullptr), nullptr);
+    ASSERT_NE(hwnd, nullptr);
+    assertOk(bridge->attach(hwnd));
+
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    auto updater = createUpdater(*context, root);
+    auto modal = updater.createModal(root.rootNodeId());
+    ASSERT_TRUE(modal.has_value());
+    auto button = updater.createButton(*modal);
+    ASSERT_TRUE(button.has_value());
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(280.0F, 160.0F)));
+    assertOk(updater.setLayoutStyle(*modal, fixedSize(240.0F, 120.0F)));
+    assertOk(updater.setLayoutStyle(*button, fixedSize(100.0F, 32.0F)));
+    assertOk(updater.setText(*button, "Before"));
+    assertOk(context->commitLayout({.width = 280.0F, .height = 160.0F}));
+
+    UI::UIAccessibilityTree tree;
+    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(bridge->publish(tree, *context));
+    ComPtr<IRawElementProviderSimple> rootSimple;
+    rootSimple.Attach(bridge->acquireRootProvider());
+    ComPtr<IRawElementProviderFragment> rootFragment;
+    ASSERT_HRESULT_SUCCEEDED(rootSimple.As(&rootFragment));
+    ComPtr<IRawElementProviderFragment> modalFragment;
+    ASSERT_HRESULT_SUCCEEDED(rootFragment->Navigate(NavigateDirection_FirstChild, &modalFragment));
+    ASSERT_NE(modalFragment.Get(), nullptr);
+    ComPtr<IRawElementProviderFragment> oldButtonFragment;
+    ASSERT_HRESULT_SUCCEEDED(modalFragment->Navigate(NavigateDirection_FirstChild, &oldButtonFragment));
+    ASSERT_NE(oldButtonFragment.Get(), nullptr);
+    ComPtr<IRawElementProviderFragment> parentFragment;
+    ASSERT_HRESULT_SUCCEEDED(oldButtonFragment->Navigate(NavigateDirection_Parent, &parentFragment));
+    ASSERT_NE(parentFragment.Get(), nullptr);
+
+    assertOk(updater.setText(*button, "After"));
+    assertOk(context->commitLayout({.width = 280.0F, .height = 160.0F}));
+    UI::UIAccessibilityTree fresh;
+    assertOk(fresh.rebuildFrom(context->committedSemantics()));
+    assertOk(bridge->publish(fresh, *context));
+    bridge->clear();
+
+    ComPtr<IRawElementProviderSimple> oldButtonSimple;
+    ASSERT_HRESULT_SUCCEEDED(oldButtonFragment.As(&oldButtonSimple));
+    VARIANT oldName{};
+    ::VariantInit(&oldName);
+    ASSERT_HRESULT_SUCCEEDED(oldButtonSimple->GetPropertyValue(UIA_NamePropertyId, &oldName));
+    ASSERT_EQ(oldName.vt, VT_BSTR);
+    EXPECT_STREQ(oldName.bstrVal, L"Before");
+    ::VariantClear(&oldName);
+    ComPtr<IUnknown> oldInvokeUnknown;
+    ASSERT_HRESULT_SUCCEEDED(oldButtonSimple->GetPatternProvider(UIA_InvokePatternId, &oldInvokeUnknown));
+    ComPtr<IInvokeProvider> oldInvoke;
+    ASSERT_HRESULT_SUCCEEDED(oldInvokeUnknown.As(&oldInvoke));
+    EXPECT_EQ(oldInvoke->Invoke(), UIA_E_ELEMENTNOTAVAILABLE);
+
+    bridge->detach();
     (void)::DestroyWindow(hwnd);
 }
 

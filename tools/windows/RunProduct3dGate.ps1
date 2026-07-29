@@ -62,6 +62,7 @@ $targets = @(
     'tina_runtime_ui_tests',
     'tina_ui_render_integration_tests',
     'tina_ui_freetype_tests',
+    'tina_ui_uia_tests',
     'tina_sample_3d'
 )
 $testExes = @(
@@ -74,7 +75,8 @@ $testExes = @(
     'tina_ui_tests.exe',
     'tina_runtime_ui_tests.exe',
     'tina_ui_render_integration_tests.exe',
-    'tina_ui_freetype_tests.exe'
+    'tina_ui_freetype_tests.exe',
+    'tina_ui_uia_tests.exe'
 )
 
 $report = [ordered]@{

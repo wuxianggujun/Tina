@@ -16,6 +16,8 @@ struct IRawElementProviderSimple;
 
 namespace Tina::UI {
 
+class UIContext;
+
 class WindowsUiaHostBridge final {
 public:
     WindowsUiaHostBridge() = default;
@@ -29,7 +31,7 @@ public:
     [[nodiscard]] bool isAttached() const noexcept { return m_hwnd != nullptr; }
     [[nodiscard]] HWND hwnd() const noexcept { return m_hwnd; }
 
-    [[nodiscard]] Core::Status publish(const UIAccessibilityTree& tree);
+    [[nodiscard]] Core::Status publish(const UIAccessibilityTree& tree, UIContext& actionContext);
     void clear() noexcept;
 
     [[nodiscard]] bool hasPublishedTree() const noexcept;
@@ -45,11 +47,13 @@ public:
 
 private:
     void noteWmGetObject() noexcept { ++m_wmGetObjectCount; }
+    [[nodiscard]] HRESULT dispatchAccessibilityAction(const UIAccessibilityAction& action) noexcept;
     [[nodiscard]] IRawElementProviderSimple* rootProviderNoAddRef() const noexcept { return m_rootProvider; }
 
     HWND m_hwnd = nullptr;
     std::unique_ptr<WindowsUiaAccessibilityProvider> m_provider{};
     IRawElementProviderSimple* m_rootProvider = nullptr;
+    UIContext* m_actionContext = nullptr;
     u64 m_wmGetObjectCount = 0;
 };
 

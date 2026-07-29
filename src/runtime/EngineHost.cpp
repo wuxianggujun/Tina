@@ -1568,12 +1568,19 @@ class EngineHostImplementation final {
         {
             return Core::success();
         }
-        if (auto status = m_uiaTree.rebuildFrom(context->committedSemantics()); !status)
+        const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+        if (m_uiaHostBridge->hasPublishedTree() && m_uiaTree.matchesRevision(semantics.semanticsRevision()) &&
+            m_uiaTree.structureRevision() == semantics.structureRevision() &&
+            m_uiaTree.layoutRevision() == semantics.layoutRevision())
+        {
+            return Core::success();
+        }
+        if (auto status = m_uiaTree.rebuildFrom(semantics); !status)
         {
             // Semantics rebuild failure is a real UI invariant; keep hard.
             return status;
         }
-        if (auto status = m_uiaHostBridge->publish(m_uiaTree); !status)
+        if (auto status = m_uiaHostBridge->publish(m_uiaTree, *context); !status)
         {
             disablePrimaryWindowUia();
             return Core::success();

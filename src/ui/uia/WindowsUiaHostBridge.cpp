@@ -1,8 +1,10 @@
 #include "WindowsUiaHostBridge.hpp"
 
+#include "WindowsUiaActionDispatch.hpp"
 #include "WindowsUiaComProviders.hpp"
 
 #include <tina/core/error/Error.hpp>
+#include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIErrors.hpp>
 
 #include <UIAutomation.h>
@@ -26,6 +28,16 @@ LRESULT CALLBACK WindowsUiaHostBridge::subclassProc(HWND hwnd, UINT msg, WPARAM 
                                                     UINT_PTR /*subclassId*/, DWORD_PTR refData)
 {
     auto* bridge = reinterpret_cast<WindowsUiaHostBridge*>(refData);
+    const UINT actionMessage = UiaCom::windowsUiaActionMessage();
+    if (bridge != nullptr && actionMessage != 0 && msg == actionMessage) {
+        auto* request = reinterpret_cast<UiaCom::WindowsUiaActionRequest*>(lParam);
+        if (request != nullptr) {
+            request->result = bridge->dispatchAccessibilityAction(request->action);
+            request->handled = true;
+            return 1;
+        }
+        return 0;
+    }
     if (msg == WM_GETOBJECT && bridge != nullptr) {
         if (static_cast<LONG>(lParam) == static_cast<LONG>(UiaRootObjectId)) {
             bridge->noteWmGetObject();
@@ -81,6 +93,7 @@ Core::Status WindowsUiaHostBridge::attach(HWND hwnd)
 
 void WindowsUiaHostBridge::detach() noexcept
 {
+    m_actionContext = nullptr;
     if (m_hwnd != nullptr) {
         (void)::RemoveWindowSubclass(m_hwnd, &WindowsUiaHostBridge::subclassProc, kSubclassId);
         m_hwnd = nullptr;
@@ -89,7 +102,7 @@ void WindowsUiaHostBridge::detach() noexcept
         if (::UiaClientsAreListening()) {
             (void)::UiaDisconnectProvider(m_rootProvider);
         }
-        static_cast<UiaCom::HostBridgeRoot*>(m_rootProvider)->clearChildren();
+        static_cast<UiaCom::HostBridgeRoot*>(m_rootProvider)->disconnect();
         m_rootProvider->Release();
         m_rootProvider = nullptr;
     }
@@ -100,7 +113,7 @@ void WindowsUiaHostBridge::detach() noexcept
     m_wmGetObjectCount = 0;
 }
 
-Core::Status WindowsUiaHostBridge::publish(const UIAccessibilityTree& tree)
+Core::Status WindowsUiaHostBridge::publish(const UIAccessibilityTree& tree, UIContext& actionContext)
 {
     if (m_hwnd == nullptr || m_provider == nullptr || m_rootProvider == nullptr) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "WindowsUiaHostBridge is not attached");
@@ -109,7 +122,11 @@ Core::Status WindowsUiaHostBridge::publish(const UIAccessibilityTree& tree)
         return status;
     }
     auto* root = static_cast<UiaCom::HostBridgeRoot*>(m_rootProvider);
-    root->rebuildChildren(*m_provider, m_hwnd);
+    if (!root->rebuildSnapshot(*m_provider, m_hwnd)) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "WindowsUiaHostBridge could not allocate an immutable provider snapshot");
+    }
+    m_actionContext = &actionContext;
     if (::UiaClientsAreListening()) {
         (void)::UiaRaiseStructureChangedEvent(m_rootProvider, StructureChangeType_ChildrenInvalidated, nullptr, 0);
     }
@@ -118,12 +135,40 @@ Core::Status WindowsUiaHostBridge::publish(const UIAccessibilityTree& tree)
 
 void WindowsUiaHostBridge::clear() noexcept
 {
+    m_actionContext = nullptr;
     if (m_provider) {
         m_provider->clear();
     }
     if (m_rootProvider != nullptr) {
-        static_cast<UiaCom::HostBridgeRoot*>(m_rootProvider)->clearChildren();
+        static_cast<UiaCom::HostBridgeRoot*>(m_rootProvider)->clearSnapshot();
     }
+}
+
+HRESULT WindowsUiaHostBridge::dispatchAccessibilityAction(const UIAccessibilityAction& action) noexcept
+{
+    if (m_actionContext == nullptr) {
+        return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    if (action.kind == UIAccessibilityActionKind::Focus && m_hwnd != nullptr) {
+        (void)::SetFocus(m_hwnd);
+    }
+    const Core::Status status = m_actionContext->performAccessibilityAction(action);
+    if (status) {
+        return S_OK;
+    }
+    const Core::ErrorCode code = status.error().code;
+    if (code == UIErrorCode::InvalidNode || code == UIErrorCode::WrongOwnerWindow ||
+        code == UIErrorCode::WrongContext || code == UIErrorCode::AccessibilityNodeStale) {
+        return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    if (code == UIErrorCode::WrongOwnerThread) {
+        return RPC_E_WRONG_THREAD;
+    }
+    if (code == UIErrorCode::InvalidAccessibilityAction || code == UIErrorCode::InvalidFocusTarget ||
+        code == UIErrorCode::InvalidControlValue || code == UIErrorCode::InvalidText) {
+        return E_INVALIDARG;
+    }
+    return E_FAIL;
 }
 
 bool WindowsUiaHostBridge::hasPublishedTree() const noexcept
