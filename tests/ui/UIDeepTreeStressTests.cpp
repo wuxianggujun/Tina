@@ -59,7 +59,7 @@ protected:
         UI::UINodeId firstChild;
         for (usize nodeIndex = 1; nodeIndex < DeepNodeCount; ++nodeIndex)
         {
-            auto childResult = builder.createPanel(parent);
+            auto childResult = builder.createElement(parent, UI::makePanelElement());
             if (!childResult)
             {
                 ADD_FAILURE() << "nodeIndex=" << nodeIndex

@@ -86,7 +86,7 @@ TEST(WindowsUiaMappingTest, MapsEnabledFocusRangeToggleAndValue)
 {
     UI::UIAccessibilityNode button{
         .role = UI::UISemanticsRole::Button,
-        .kind = UI::UIWidgetKind::Button,
+        .actions = UI::UISemanticsAction::Focus | UI::UISemanticsAction::Activate,
         .name = "Apply",
         .states = UI::UIAccessibilityState::Enabled | UI::UIAccessibilityState::Focused,
     };
@@ -102,7 +102,7 @@ TEST(WindowsUiaMappingTest, MapsEnabledFocusRangeToggleAndValue)
 
     UI::UIAccessibilityNode checkbox{
         .role = UI::UISemanticsRole::Checkbox,
-        .kind = UI::UIWidgetKind::Checkbox,
+        .actions = UI::UISemanticsAction::Focus | UI::UISemanticsAction::Toggle,
         .name = "Music",
         .states = UI::UIAccessibilityState::Enabled | UI::UIAccessibilityState::Checked,
     };
@@ -112,7 +112,7 @@ TEST(WindowsUiaMappingTest, MapsEnabledFocusRangeToggleAndValue)
 
     UI::UIAccessibilityNode slider{
         .role = UI::UISemanticsRole::Slider,
-        .kind = UI::UIWidgetKind::Slider,
+        .actions = UI::UISemanticsAction::Focus | UI::UISemanticsAction::SetRangeValue,
         .value = 0.4F,
         .minValue = 0.0F,
         .maxValue = 1.0F,
@@ -127,7 +127,6 @@ TEST(WindowsUiaMappingTest, MapsEnabledFocusRangeToggleAndValue)
 
     UI::UIAccessibilityNode progress{
         .role = UI::UISemanticsRole::ProgressBar,
-        .kind = UI::UIWidgetKind::ProgressBar,
         .value = 55.0F,
         .minValue = 0.0F,
         .maxValue = 100.0F,
@@ -141,7 +140,7 @@ TEST(WindowsUiaMappingTest, MapsEnabledFocusRangeToggleAndValue)
 
     UI::UIAccessibilityNode textEdit{
         .role = UI::UISemanticsRole::TextEdit,
-        .kind = UI::UIWidgetKind::TextEdit,
+        .actions = UI::UISemanticsAction::Focus | UI::UISemanticsAction::SetTextValue,
         .valueText = "Player",
         .states = UI::UIAccessibilityState::Enabled,
     };
@@ -156,7 +155,7 @@ TEST(WindowsUiaMappingTest, DisabledNodeIsNotKeyboardFocusable)
 {
     UI::UIAccessibilityNode button{
         .role = UI::UISemanticsRole::Button,
-        .kind = UI::UIWidgetKind::Button,
+        .actions = UI::UISemanticsAction::Focus | UI::UISemanticsAction::Activate,
         .name = "Off",
         .states = UI::UIAccessibilityState::Disabled | UI::UIAccessibilityState::Focused,
     };
@@ -182,17 +181,17 @@ TEST(WindowsUiaProviderTest, PublishesDropdownValueAndSelectedItem)
     ASSERT_TRUE(root.hasValue());
     auto updater = createUpdater(*context, root);
 
-    auto dropdown = updater.createDropdown(root.rootNodeId());
+    auto dropdown = updater.createElement(root.rootNodeId(), UI::makeDropdownElement());
     ASSERT_TRUE(dropdown.has_value()) << dropdown.error().message;
-    auto popup = updater.createPopup(*dropdown);
+    auto popup = updater.createElement(*dropdown, UI::makePopupElement());
     ASSERT_TRUE(popup.has_value()) << popup.error().message;
-    auto firstItem = updater.createDropdownItem(*popup);
-    auto secondItem = updater.createDropdownItem(*popup);
+    auto firstItem = updater.createElement(*popup, UI::makeDropdownItemElement());
+    auto secondItem = updater.createElement(*popup, UI::makeDropdownItemElement());
     ASSERT_TRUE(firstItem.has_value()) << firstItem.error().message;
     ASSERT_TRUE(secondItem.has_value()) << secondItem.error().message;
 
     UI::UILayoutStyle popupLayout = fixedSize(160.0F, 56.0F);
-    popupLayout.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    popupLayout.placement = UI::UILayoutPlacement::Overlay;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(400.0F, 300.0F)));
     assertOk(updater.setLayoutStyle(*dropdown, fixedSize(160.0F, 32.0F)));
     assertOk(updater.setLayoutStyle(*popup, popupLayout));
@@ -246,12 +245,12 @@ TEST(WindowsUiaProviderTest, FactoryAvailableAndPublishMapsWidgetProperties)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
-    auto checkbox = context->rootBuilder().createCheckbox(root.rootNodeId());
-    auto slider = context->rootBuilder().createSlider(root.rootNodeId());
-    auto progress = context->rootBuilder().createProgressBar(root.rootNodeId());
-    auto radio = context->rootBuilder().createRadioButton(root.rootNodeId());
-    auto textEdit = context->rootBuilder().createTextEdit(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto slider = context->rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
+    auto progress = context->rootBuilder().createElement(root.rootNodeId(), UI::makeProgressBarElement());
+    auto radio = context->rootBuilder().createElement(root.rootNodeId(), UI::makeRadioButtonElement());
+    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(button.has_value());
     ASSERT_TRUE(checkbox.has_value());
     ASSERT_TRUE(slider.has_value());
@@ -344,7 +343,7 @@ TEST(WindowsUiaProviderTest, StaleNodeAfterDestroyIsRejected)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
@@ -421,7 +420,7 @@ TEST(WindowsUiaHostBridgeTest, AttachPublishExposesRootProviderAndChildren)
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
@@ -493,11 +492,11 @@ TEST(WindowsUiaHostBridgeTest, PatternsMarshalActionsAndPreserveControlBehavior)
     ASSERT_TRUE(root.hasValue());
     auto updater = createUpdater(*context, root);
 
-    auto button = updater.createButton(root.rootNodeId());
-    auto checkbox = updater.createCheckbox(root.rootNodeId());
-    auto slider = updater.createSlider(root.rootNodeId());
-    auto progress = updater.createProgressBar(root.rootNodeId());
-    auto textEdit = updater.createTextEdit(root.rootNodeId());
+    auto button = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto checkbox = updater.createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto slider = updater.createElement(root.rootNodeId(), UI::makeSliderElement());
+    auto progress = updater.createElement(root.rootNodeId(), UI::makeProgressBarElement());
+    auto textEdit = updater.createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(button.has_value());
     ASSERT_TRUE(checkbox.has_value());
     ASSERT_TRUE(slider.has_value());
@@ -642,9 +641,9 @@ TEST(WindowsUiaHostBridgeTest, FragmentHierarchyAndOldSnapshotSurviveRepublishAn
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
     auto updater = createUpdater(*context, root);
-    auto modal = updater.createModal(root.rootNodeId());
+    auto modal = updater.createElement(root.rootNodeId(), UI::makeModalElement());
     ASSERT_TRUE(modal.has_value());
-    auto button = updater.createButton(*modal);
+    auto button = updater.createElement(*modal, UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(280.0F, 160.0F)));
     assertOk(updater.setLayoutStyle(*modal, fixedSize(240.0F, 120.0F)));

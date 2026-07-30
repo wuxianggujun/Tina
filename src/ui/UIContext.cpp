@@ -24,7 +24,6 @@
 #include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UITextEditModel.hpp"
 #include "detail/UITextStorage.hpp"
-#include "detail/UIThemeBindingResolver.hpp"
 #include "detail/UIWidgetStateModels.hpp"
 #include "detail/UIWidgetTraits.hpp"
 
@@ -54,6 +53,7 @@ inline constexpr u32 InvalidNodeIndex = NodeStorageId::InvalidIndex;
 using TextByteAllocation = Detail::UITextStorage::Allocation;
 using Detail::appendBoxChromePaints;
 using Detail::applyOpacity;
+using Detail::BuiltinElementKind;
 using Detail::clampHeight;
 using Detail::clampWidth;
 using Detail::combineVisibility;
@@ -61,6 +61,7 @@ using Detail::containsLineBreak;
 using Detail::containsPointHalfOpen;
 using Detail::countBoxChromePaintEntries;
 using Detail::countDrawableTextCodepoints;
+using Detail::defaultContentAlignment;
 using Detail::DropdownState;
 using Detail::hasLayoutWork;
 using Detail::horizontalMargin;
@@ -70,6 +71,7 @@ using Detail::isCrossAxisAuto;
 using Detail::isDefaultActivatableKind;
 using Detail::isFiniteLayoutRect;
 using Detail::isFiniteNonNegative;
+using Detail::isValidContentAlignment;
 using Detail::isKeyboardFocusableKind;
 using Detail::isValidEventPhaseMask;
 using Detail::isValidFocusScopeMode;
@@ -91,12 +93,26 @@ using Detail::makeScrollBarGeometry;
 using Detail::makeTreeViewDisclosureRect;
 using Detail::makeTreeViewScrollBarGeometry;
 using Detail::normalizedRangeFraction;
+using Detail::normalizeBoxPaint;
+using Detail::normalizeDropdownPaint;
 using Detail::normalizeFloat;
+using Detail::normalizeLayoutStyle;
+using Detail::normalizeListViewCreateConfig;
+using Detail::normalizeListViewPaint;
+using Detail::normalizeListViewStyle;
+using Detail::normalizePopupStyle;
+using Detail::normalizeScrollOffset;
+using Detail::normalizeScrollViewPaint;
+using Detail::normalizeScrollViewStyle;
+using Detail::normalizeTreeViewCreateConfig;
+using Detail::normalizeTreeViewPaint;
+using Detail::normalizeTreeViewStyle;
 using Detail::NormalizedUIContextCapacityConfig;
 using Detail::planTextEditCommand;
 using Detail::quantizeSliderValue;
 using Detail::ResolvedLength;
 using Detail::resolveInset;
+using Detail::resolvedItemAlignment;
 using Detail::resolveLength;
 using Detail::resolveLengthNoFallbackCount;
 using Detail::resolveScrollThumbOffset;
@@ -117,17 +133,6 @@ using Detail::SliderState;
 using Detail::SliderPaintGeometry;
 using Detail::sliderPaintGeometry;
 using Detail::setScrollAxisOffset;
-using Detail::ThemeBindingBoxPaint;
-using Detail::ThemeBindingButtonPaint;
-using Detail::ThemeBindingCheckboxPaint;
-using Detail::ThemeBindingDropdownPaint;
-using Detail::ThemeBindingListViewPaint;
-using Detail::ThemeBindingProgressBarPaint;
-using Detail::ThemeBindingRadioButtonPaint;
-using Detail::ThemeBindingScrollViewPaint;
-using Detail::ThemeBindingSliderPaint;
-using Detail::ThemeBindingTextStyle;
-using Detail::ThemeBindingTreeViewPaint;
 using Detail::TextEditState;
 using Detail::textEditCodepointFromHorizontalPosition;
 using Detail::TreeViewItemState;
@@ -145,6 +150,31 @@ using Detail::PopupState;
 using Detail::ProgressBarState;
 using Detail::RadioButtonState;
 using Detail::supportsWidgetText;
+inline constexpr u16 ThemeBindingBoxPaint = 1U << 0U;
+inline constexpr u16 ThemeBindingTextStyle = 1U << 1U;
+inline constexpr u16 ThemeBindingButtonPaint = 1U << 2U;
+inline constexpr u16 ThemeBindingCheckboxPaint = 1U << 3U;
+inline constexpr u16 ThemeBindingSliderPaint = 1U << 4U;
+inline constexpr u16 ThemeBindingProgressBarPaint = 1U << 5U;
+inline constexpr u16 ThemeBindingRadioButtonPaint = 1U << 6U;
+inline constexpr u16 ThemeBindingScrollViewPaint = 1U << 7U;
+inline constexpr u16 ThemeBindingDropdownPaint = 1U << 8U;
+inline constexpr u16 ThemeBindingListViewPaint = 1U << 9U;
+inline constexpr u16 ThemeBindingTreeViewPaint = 1U << 10U;
+
+struct ProductChrome final {
+    UIBoxPaint box{};
+    UITextStyle text{};
+    UIButtonPaint button{};
+    UICheckboxPaint checkbox{};
+    UISliderPaint slider{};
+    UIProgressBarPaint progressBar{};
+    UIRadioButtonPaint radioButton{};
+    UIScrollViewPaint scrollView{};
+    UIDropdownPaint dropdown{};
+    UIListViewPaint listView{};
+    UITreeViewPaint treeView{};
+};
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -158,7 +188,46 @@ struct NodeRecord final {
     u32 nextSiblingIndex = InvalidNodeIndex;
     u32 rootIndex = InvalidNodeIndex;
     u32 depth = 0;
-    UIWidgetKind kind = UIWidgetKind::Panel;
+    BuiltinElementKind kind = BuiltinElementKind::Panel;
+    UIElementBehavior behaviors = UIElementBehavior::None;
+};
+
+struct SemanticsState final {
+    TextByteAllocation textAllocation{};
+    u32 nameLength = 0;
+    u32 descriptionLength = 0;
+    UISemanticsMode mode = UISemanticsMode::Automatic;
+    UISemanticsRole role = UISemanticsRole::Group;
+    UISemanticsAction actions = UISemanticsAction::None;
+    bool hasExplicitName = false;
+    bool useContentAsName = false;
+    bool readOnly = false;
+};
+
+struct SemanticsNodeBuildScratch final {
+    u32 nearestPublishedEntryIndex = InvalidUIHitEntryIndex;
+    u32 mergeEntryIndex = InvalidUIHitEntryIndex;
+    u32 nameTargetEntryIndex = InvalidUIHitEntryIndex;
+    bool excluded = false;
+};
+
+struct SemanticsEntryBuildScratch final {
+    usize nameByteCount = 0;
+    usize nameOffset = 0;
+    usize nameBytesWritten = 0;
+    bool hasNamePart = false;
+};
+
+inline constexpr u32 InvalidCanvasCommandIndex = (std::numeric_limits<u32>::max)();
+
+struct CanvasCommandSlot final {
+    UICanvasCommand command{};
+    u32 next = InvalidCanvasCommandIndex;
+};
+
+struct CanvasCommandState final {
+    u32 first = InvalidCanvasCommandIndex;
+    u32 count = 0;
 };
 
 static_assert(sizeof(NodeRecord) <= 48);
@@ -183,6 +252,291 @@ struct CommittedHitBuildResult final {
     return Core::failure(makeError(code, message, location));
 }
 
+[[nodiscard]] bool isValidStyleRole(UIStyleRoleId role) noexcept
+{
+    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::TreeView;
+}
+
+[[nodiscard]] bool isValidSemanticsMode(UISemanticsMode mode) noexcept
+{
+    return mode >= UISemanticsMode::Automatic && mode <= UISemanticsMode::Exclude;
+}
+
+[[nodiscard]] bool isValidSemanticsRole(UISemanticsRole role) noexcept
+{
+    return role >= UISemanticsRole::Group && role <= UISemanticsRole::TreeItem;
+}
+
+[[nodiscard]] bool isValidSemanticsActions(UISemanticsAction actions) noexcept
+{
+    constexpr u8 AllActions = static_cast<u8>(UISemanticsAction::Focus) |
+                              static_cast<u8>(UISemanticsAction::Activate) |
+                              static_cast<u8>(UISemanticsAction::Toggle) |
+                              static_cast<u8>(UISemanticsAction::SetRangeValue) |
+                              static_cast<u8>(UISemanticsAction::SetTextValue);
+    return (static_cast<u8>(actions) & static_cast<u8>(~AllActions)) == 0;
+}
+
+[[nodiscard]] bool isValidElementBehaviors(UIElementBehavior behaviors) noexcept
+{
+    constexpr u32 AllBehaviors = (1U << 16U) - 1U;
+    return (static_cast<u32>(behaviors) & ~AllBehaviors) == 0;
+}
+
+[[nodiscard]] Core::Result<BuiltinElementKind> elementBuiltinKind(const UIElementDescriptor& descriptor)
+{
+    const bool hasText = descriptor.text.has_value();
+    const auto requireText = [hasText](BuiltinElementKind kind) -> Core::Result<BuiltinElementKind> {
+        if (!hasText)
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI element behavior requires intrinsic text content");
+        }
+        return kind;
+    };
+    const auto rejectText = [hasText](BuiltinElementKind kind) -> Core::Result<BuiltinElementKind> {
+        if (hasText)
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI element behavior does not accept intrinsic text content");
+        }
+        return kind;
+    };
+
+    if (!isValidElementBehaviors(descriptor.behaviors))
+    {
+        return fail(UIErrorCode::InvalidElementDescriptor, "UI element behaviors contain an unknown capability");
+    }
+
+    const auto specialized = static_cast<UIElementBehavior>(
+        static_cast<u32>(descriptor.behaviors) & ~static_cast<u32>(UIElementBehavior::Focusable));
+    if (specialized == UIElementBehavior::None)
+    {
+        return hasText ? BuiltinElementKind::Label : BuiltinElementKind::Panel;
+    }
+    if (specialized == UIElementBehavior::Activate)
+    {
+        return requireText(BuiltinElementKind::Button);
+    }
+    if (specialized == (UIElementBehavior::Activate | UIElementBehavior::Toggle))
+    {
+        return rejectText(BuiltinElementKind::Checkbox);
+    }
+    if (specialized == UIElementBehavior::RangeInput)
+    {
+        return rejectText(BuiltinElementKind::Slider);
+    }
+    if (specialized == UIElementBehavior::TextInput)
+    {
+        return requireText(BuiltinElementKind::TextEdit);
+    }
+    if (specialized == UIElementBehavior::ProgressValue)
+    {
+        return rejectText(BuiltinElementKind::ProgressBar);
+    }
+    if (specialized == (UIElementBehavior::Activate | UIElementBehavior::ExclusiveChoice))
+    {
+        return requireText(BuiltinElementKind::RadioButton);
+    }
+    if (specialized == UIElementBehavior::ModalBarrier)
+    {
+        return rejectText(BuiltinElementKind::Modal);
+    }
+    if (specialized == UIElementBehavior::Scroll)
+    {
+        return rejectText(BuiltinElementKind::ScrollView);
+    }
+    if (specialized == (UIElementBehavior::Activate | UIElementBehavior::Select))
+    {
+        return requireText(BuiltinElementKind::Dropdown);
+    }
+    if (specialized == UIElementBehavior::Popup)
+    {
+        if (descriptor.layout.placement != UILayoutPlacement::Overlay)
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI Popup elements require Overlay placement");
+        }
+        return rejectText(BuiltinElementKind::Popup);
+    }
+    if (specialized == (UIElementBehavior::Activate | UIElementBehavior::SelectOption))
+    {
+        return requireText(BuiltinElementKind::DropdownItem);
+    }
+    if (specialized == UIElementBehavior::VirtualList)
+    {
+        return rejectText(BuiltinElementKind::ListView);
+    }
+    if (specialized == UIElementBehavior::VirtualTree)
+    {
+        return rejectText(BuiltinElementKind::TreeView);
+    }
+    return fail(UIErrorCode::InvalidElementDescriptor,
+                "UI element behavior composition has no retained built-in storage contract");
+}
+
+[[nodiscard]] constexpr UIElementBehavior defaultBehaviorsFor(BuiltinElementKind kind) noexcept
+{
+    switch (kind)
+    {
+    case BuiltinElementKind::Button:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate;
+    case BuiltinElementKind::Checkbox:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::Toggle;
+    case BuiltinElementKind::Slider:
+        return UIElementBehavior::Focusable | UIElementBehavior::RangeInput;
+    case BuiltinElementKind::TextEdit:
+        return UIElementBehavior::Focusable | UIElementBehavior::TextInput;
+    case BuiltinElementKind::ProgressBar:
+        return UIElementBehavior::ProgressValue;
+    case BuiltinElementKind::RadioButton:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::ExclusiveChoice;
+    case BuiltinElementKind::Modal:
+        return UIElementBehavior::ModalBarrier;
+    case BuiltinElementKind::ScrollView:
+        return UIElementBehavior::Scroll;
+    case BuiltinElementKind::Dropdown:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::Select;
+    case BuiltinElementKind::Popup:
+        return UIElementBehavior::Popup;
+    case BuiltinElementKind::DropdownItem:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::SelectOption;
+    case BuiltinElementKind::ListView:
+        return UIElementBehavior::Focusable | UIElementBehavior::VirtualList;
+    case BuiltinElementKind::ListViewItem:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::VirtualListItem;
+    case BuiltinElementKind::TreeView:
+        return UIElementBehavior::Focusable | UIElementBehavior::VirtualTree;
+    case BuiltinElementKind::TreeViewItem:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::VirtualTreeItem;
+    case BuiltinElementKind::Root:
+    case BuiltinElementKind::Panel:
+    case BuiltinElementKind::Label:
+        return UIElementBehavior::None;
+    }
+    return UIElementBehavior::None;
+}
+
+[[nodiscard]] constexpr UIStyleRoleId defaultStyleRoleFor(BuiltinElementKind kind) noexcept
+{
+    switch (kind)
+    {
+    case BuiltinElementKind::Label:
+        return UIStyleRoleId::TextBody;
+    case BuiltinElementKind::Button:
+        return UIStyleRoleId::ButtonPrimary;
+    case BuiltinElementKind::Checkbox:
+        return UIStyleRoleId::Checkbox;
+    case BuiltinElementKind::Slider:
+        return UIStyleRoleId::Slider;
+    case BuiltinElementKind::TextEdit:
+        return UIStyleRoleId::TextInput;
+    case BuiltinElementKind::ProgressBar:
+        return UIStyleRoleId::ProgressBar;
+    case BuiltinElementKind::RadioButton:
+        return UIStyleRoleId::RadioButton;
+    case BuiltinElementKind::Modal:
+        return UIStyleRoleId::ModalSurface;
+    case BuiltinElementKind::ScrollView:
+        return UIStyleRoleId::ScrollView;
+    case BuiltinElementKind::Dropdown:
+        return UIStyleRoleId::Dropdown;
+    case BuiltinElementKind::Popup:
+        return UIStyleRoleId::PopupSurface;
+    case BuiltinElementKind::DropdownItem:
+    case BuiltinElementKind::ListViewItem:
+    case BuiltinElementKind::TreeViewItem:
+        return UIStyleRoleId::CollectionItem;
+    case BuiltinElementKind::ListView:
+        return UIStyleRoleId::ListView;
+    case BuiltinElementKind::TreeView:
+        return UIStyleRoleId::TreeView;
+    case BuiltinElementKind::Root:
+    case BuiltinElementKind::Panel:
+        return UIStyleRoleId::None;
+    }
+    return UIStyleRoleId::None;
+}
+
+[[nodiscard]] constexpr SemanticsState defaultSemanticsFor(BuiltinElementKind kind) noexcept
+{
+    SemanticsState state{};
+    state.mode = UISemanticsMode::Publish;
+    switch (kind)
+    {
+    case BuiltinElementKind::Root:
+    case BuiltinElementKind::Panel:
+        state.mode = UISemanticsMode::Automatic;
+        break;
+    case BuiltinElementKind::Label:
+        state.role = UISemanticsRole::Label;
+        state.useContentAsName = true;
+        state.readOnly = true;
+        break;
+    case BuiltinElementKind::Button:
+        state.role = UISemanticsRole::Button;
+        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
+        state.useContentAsName = true;
+        break;
+    case BuiltinElementKind::Checkbox:
+        state.role = UISemanticsRole::Checkbox;
+        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate | UISemanticsAction::Toggle;
+        break;
+    case BuiltinElementKind::Slider:
+        state.role = UISemanticsRole::Slider;
+        state.actions = UISemanticsAction::Focus | UISemanticsAction::SetRangeValue;
+        break;
+    case BuiltinElementKind::TextEdit:
+        state.role = UISemanticsRole::TextEdit;
+        state.actions = UISemanticsAction::Focus | UISemanticsAction::SetTextValue;
+        break;
+    case BuiltinElementKind::ProgressBar:
+        state.role = UISemanticsRole::ProgressBar;
+        state.readOnly = true;
+        break;
+    case BuiltinElementKind::RadioButton:
+        state.role = UISemanticsRole::RadioButton;
+        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate | UISemanticsAction::Toggle;
+        state.useContentAsName = true;
+        break;
+    case BuiltinElementKind::Modal:
+        state.role = UISemanticsRole::Dialog;
+        break;
+    case BuiltinElementKind::ScrollView:
+        state.role = UISemanticsRole::ScrollView;
+        break;
+    case BuiltinElementKind::Dropdown:
+        state.role = UISemanticsRole::ComboBox;
+        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
+        state.useContentAsName = true;
+        break;
+    case BuiltinElementKind::Popup:
+        state.role = UISemanticsRole::List;
+        break;
+    case BuiltinElementKind::DropdownItem:
+    case BuiltinElementKind::ListViewItem:
+        state.role = UISemanticsRole::ListItem;
+        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
+        state.useContentAsName = true;
+        break;
+    case BuiltinElementKind::ListView:
+        state.role = UISemanticsRole::List;
+        state.actions = UISemanticsAction::Focus;
+        break;
+    case BuiltinElementKind::TreeView:
+        state.role = UISemanticsRole::Tree;
+        state.actions = UISemanticsAction::Focus;
+        break;
+    case BuiltinElementKind::TreeViewItem:
+        state.role = UISemanticsRole::TreeItem;
+        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
+        state.useContentAsName = true;
+        break;
+    }
+    return state;
+}
+
+
 } // namespace
 
 struct UIContext::Impl final {
@@ -206,16 +560,23 @@ struct UIContext::Impl final {
     // A Modal stores the focus that should be restored when that committed
     // scope stops being topmost. Storage is fixed and index-aligned.
     std::pmr::vector<UINodeId> focusRestoreByNodeIndex;
+    std::pmr::vector<UIStyleRoleId> styleRolesByNodeIndex;
     std::pmr::vector<UIBoxPaint> boxPaintsByIndex;
     std::pmr::vector<UIButtonPaint> buttonPaintsByNodeIndex;
     // Each bit tracks one property that still inherits product chrome. Theme
     // staging scratch is index-aligned and allocated once during Create().
     std::pmr::vector<u16> themeBindingsByNodeIndex;
+    std::pmr::vector<u16> styleOverridesByNodeIndex;
     std::pmr::vector<u8> themeDirtyScratchByNodeIndex;
     std::pmr::vector<UITextMetrics> themeTextMetricsScratchByNodeIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
     std::pmr::vector<WidgetTextState> textStatesByIndex;
+    std::pmr::vector<SemanticsState> semanticsStatesByNodeIndex;
+    std::pmr::vector<SemanticsNodeBuildScratch> semanticsNodeBuildScratchByIndex;
+    std::pmr::vector<SemanticsEntryBuildScratch> semanticsEntryBuildScratch;
+    std::pmr::vector<CanvasCommandState> canvasCommandStatesByNodeIndex;
+    std::pmr::vector<CanvasCommandSlot> canvasCommandSlots;
     std::pmr::vector<TextEditState> textEditStatesByNodeIndex;
     std::pmr::vector<ProgressBarState> progressBarStatesByNodeIndex;
     std::pmr::vector<RadioButtonState> radioButtonStatesByNodeIndex;
@@ -295,6 +656,7 @@ struct UIContext::Impl final {
     UILogicalSize committedViewportSize{};
     bool hasCommittedViewport = false;
     usize liveRootCount = 0;
+    usize activeBuildTransactionCount = 0;
     u32 firstRootIndex = InvalidNodeIndex;
     u32 lastRootIndex = InvalidNodeIndex;
     // Single phase-level dirty truth. Node-level dirtyByIndex remains the
@@ -318,6 +680,9 @@ struct UIContext::Impl final {
     usize lastHitRebuildCount = 0;
     usize lastPaintCacheRebuildCount = 0;
     usize lastPaintSnapshotRebuildCount = 0;
+    u32 freeCanvasCommandHead = InvalidCanvasCommandIndex;
+    usize activeCanvasCommandCount = 0;
+    usize canvasCommandHighWater = 0;
     usize routeDispatchDepth = 0;
     u64 buttonRouteSerial = 0;
     u64 accessibilityActionSequence = 0;
@@ -360,10 +725,14 @@ struct UIContext::Impl final {
         : ownerWindow(owner), capacityConfig(capacities), ownerThreadId(threadId), lifetime(std::move(lifetimeControl)),
           nodes(std::move(nodePool)), idsByIndex(&resource), layoutStylesByIndex(&resource),
           pointerHitPoliciesByIndex(&resource), enabledByNodeIndex(&resource), focusScopeModesByNodeIndex(&resource),
-          focusRestoreByNodeIndex(&resource), boxPaintsByIndex(&resource), buttonPaintsByNodeIndex(&resource),
-          themeBindingsByNodeIndex(&resource), themeDirtyScratchByNodeIndex(&resource),
+          focusRestoreByNodeIndex(&resource), styleRolesByNodeIndex(&resource), boxPaintsByIndex(&resource),
+          buttonPaintsByNodeIndex(&resource),
+          themeBindingsByNodeIndex(&resource), styleOverridesByNodeIndex(&resource), themeDirtyScratchByNodeIndex(&resource),
           themeTextMetricsScratchByNodeIndex(&resource), localSolidFillCacheByIndex(&resource),
-          localTextColorCacheByIndex(&resource), textStatesByIndex(&resource), textEditStatesByNodeIndex(&resource),
+          localTextColorCacheByIndex(&resource), textStatesByIndex(&resource), semanticsStatesByNodeIndex(&resource),
+          semanticsNodeBuildScratchByIndex(&resource), semanticsEntryBuildScratch(&resource),
+          canvasCommandStatesByNodeIndex(&resource), canvasCommandSlots(&resource),
+          textEditStatesByNodeIndex(&resource),
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
           scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
           dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
@@ -371,7 +740,7 @@ struct UIContext::Impl final {
           listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
           treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
           treeViewItemStatesByNodeIndex(&resource),
-          textStorage(capacities.textByteCapacity, capacities.nodeCapacity, resource),
+          textStorage(capacities.textByteCapacity, capacities.nodeCapacity * 2U, resource),
           dirtyByIndex(&resource), dirtyQueuedByIndex(&resource), dirtyReservedByIndex(&resource),
           dirtyQueue(&resource), routeDirtyReservationScratch(&resource),
           routeDirtyReservationCandidateByIndex(&resource), layoutScratchByIndex(&resource),
@@ -418,6 +787,7 @@ struct UIContext::Impl final {
             .layoutSnapshotCapacity = normalized.layoutSnapshotCapacity,
             .hitSnapshotCapacity = normalized.hitSnapshotCapacity,
             .paintSnapshotCapacity = normalized.paintSnapshotCapacity,
+            .canvasCommandCapacity = normalized.canvasCommandCapacity,
             .routePathCapacity = normalized.routePathCapacity,
             .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
             .buttonActionCapacity = normalized.buttonActionCapacity,
@@ -433,14 +803,29 @@ struct UIContext::Impl final {
         impl->enabledByNodeIndex.resize(normalized.nodeCapacity, 1);
         impl->focusScopeModesByNodeIndex.resize(normalized.nodeCapacity, UIFocusScopeMode::None);
         impl->focusRestoreByNodeIndex.resize(normalized.nodeCapacity);
+        impl->styleRolesByNodeIndex.resize(normalized.nodeCapacity, UIStyleRoleId::None);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
         impl->buttonPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->themeBindingsByNodeIndex.resize(normalized.nodeCapacity, 0);
+        impl->styleOverridesByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->themeDirtyScratchByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->themeTextMetricsScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
         impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
         impl->textStatesByIndex.resize(normalized.nodeCapacity);
+        impl->semanticsStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->semanticsNodeBuildScratchByIndex.resize(normalized.nodeCapacity);
+        impl->semanticsEntryBuildScratch.resize(normalized.paintSnapshotCapacity);
+        impl->canvasCommandStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->canvasCommandSlots.resize(normalized.canvasCommandCapacity);
+        for (usize commandIndex = 0; commandIndex < normalized.canvasCommandCapacity; ++commandIndex)
+        {
+            impl->canvasCommandSlots[commandIndex].next =
+                commandIndex + 1U < normalized.canvasCommandCapacity ? static_cast<u32>(commandIndex + 1U)
+                                                                    : InvalidCanvasCommandIndex;
+        }
+        impl->freeCanvasCommandHead =
+            normalized.canvasCommandCapacity == 0 ? InvalidCanvasCommandIndex : 0U;
         impl->textEditStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->progressBarStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->radioButtonStatesByNodeIndex.resize(normalized.nodeCapacity);
@@ -681,7 +1066,7 @@ struct UIContext::Impl final {
             }
             const UILayoutStyle& style = layoutStylesByIndex[index];
             UIVisibility ownVisibility = style.visibility;
-            if (record->kind == UIWidgetKind::Popup && index < popupStatesByNodeIndex.size() &&
+            if (record->kind == BuiltinElementKind::Popup && index < popupStatesByNodeIndex.size() &&
                 !popupStatesByNodeIndex[index].open)
             {
                 ownVisibility = UIVisibility::Collapsed;
@@ -696,7 +1081,7 @@ struct UIContext::Impl final {
             if (record->parentIndex == InvalidNodeIndex)
             {
                 scratch.effectiveVisibility = ownVisibility;
-                scratch.inPopupSubtree = record->kind == UIWidgetKind::Popup;
+                scratch.inPopupSubtree = record->kind == BuiltinElementKind::Popup;
                 scratch.parentContentWidthDefinite = true;
                 scratch.parentContentHeightDefinite = true;
                 scratch.parentContentWidth = viewportSize.width;
@@ -706,7 +1091,7 @@ struct UIContext::Impl final {
                 const LayoutScratchState& parentScratch = layoutScratchByIndex[record->parentIndex];
                 scratch.effectiveVisibility = combineVisibility(parentScratch.effectiveVisibility, ownVisibility);
                 scratch.inPopupSubtree =
-                    record->kind == UIWidgetKind::Popup || parentScratch.inPopupSubtree;
+                    record->kind == BuiltinElementKind::Popup || parentScratch.inPopupSubtree;
                 scratch.parentContentWidthDefinite = parentScratch.contentWidthDefinite;
                 scratch.parentContentHeightDefinite = parentScratch.contentHeightDefinite;
                 scratch.parentContentWidth = parentScratch.contentWidth;
@@ -799,15 +1184,15 @@ struct UIContext::Impl final {
                 const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
                 const LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
                 if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
-                    childStyle.position == UILayoutPositionMode::InFlow)
+                    childStyle.placement == UILayoutPlacement::Flow)
                 {
                     const float childOuterWidth = childScratch.measuredSize.width + horizontalMargin(childStyle.margin);
                     const float childOuterHeight = childScratch.measuredSize.height + verticalMargin(childStyle.margin);
-                    if (style.flex.direction == UIFlexDirection::Row)
+                    if (style.flexContainer.direction == UIFlexDirection::Row)
                     {
                         if (flowChildCount > 0)
                         {
-                            autoContentWidth += style.flex.gap.column;
+                            autoContentWidth += style.flexContainer.gap.column;
                         }
                         autoContentWidth += childOuterWidth;
                         autoContentHeight = (std::max)(autoContentHeight, childOuterHeight);
@@ -816,7 +1201,7 @@ struct UIContext::Impl final {
                         autoContentWidth = (std::max)(autoContentWidth, childOuterWidth);
                         if (flowChildCount > 0)
                         {
-                            autoContentHeight += style.flex.gap.row;
+                            autoContentHeight += style.flexContainer.gap.row;
                         }
                         autoContentHeight += childOuterHeight;
                     }
@@ -832,14 +1217,14 @@ struct UIContext::Impl final {
                     const UILogicalSize textSize = metrics->measuredSize;
                     autoContentWidth = textSize.width;
                     autoContentHeight = textSize.height;
-                    if (record->kind == UIWidgetKind::RadioButton && index < radioButtonStatesByNodeIndex.size())
+                    if (record->kind == BuiltinElementKind::RadioButton && index < radioButtonStatesByNodeIndex.size())
                     {
                         radioLabelWidth = textSize.width;
                         hasRadioLabel = true;
                     }
                 }
             }
-            if (flowChildCount == 0 && record->kind == UIWidgetKind::Dropdown &&
+            if (flowChildCount == 0 && record->kind == BuiltinElementKind::Dropdown &&
                 index < dropdownStatesByNodeIndex.size())
             {
                 const UIDropdownPaint& dropdownPaint = dropdownStatesByNodeIndex[index].paint;
@@ -847,7 +1232,7 @@ struct UIContext::Impl final {
                 autoContentHeight = (std::max)(autoContentHeight, dropdownPaint.indicatorHeight);
             }
 
-            if (flowChildCount == 0 && record->kind == UIWidgetKind::RadioButton &&
+            if (flowChildCount == 0 && record->kind == BuiltinElementKind::RadioButton &&
                 index < radioButtonStatesByNodeIndex.size())
             {
                 hasRadioIndicator = true;
@@ -899,6 +1284,19 @@ struct UIContext::Impl final {
         }
     }
 
+    [[nodiscard]] float flexBaseMainSize(const UILayoutStyle& style, const LayoutScratchState& scratch,
+                                         bool row, float contentMain,
+                                         LayoutPassStatistics& statistics) const noexcept
+    {
+        float base = row ? scratch.measuredSize.width : scratch.measuredSize.height;
+        const ResolvedLength basis = resolveLength(style.flexItem.basis, true, contentMain, statistics);
+        if (basis.hasValue)
+        {
+            base = basis.value;
+        }
+        return row ? clampWidth(base, style, scratch, statistics)
+                   : clampHeight(base, style, scratch, statistics);
+    }
     void assignLayoutRect(u32 index, UILogicalRect worldRect, UILogicalRect parentWorldRect,
                           UILogicalRect descendantClip) noexcept
     {
@@ -963,36 +1361,62 @@ struct UIContext::Impl final {
         }
     }
 
-    void arrangeAbsoluteChild(u32 childIndex, UILogicalRect parentContentRect, UILogicalRect parentWorldRect,
-                              UILogicalRect descendantClip, LayoutPassStatistics& statistics) noexcept
+    void arrangeOverlayChild(u32 childIndex, UILogicalRect parentContentRect, UILogicalRect parentWorldRect,
+                             UILogicalRect descendantClip, LayoutPassStatistics& statistics) noexcept
     {
         const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
         LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
         refreshMeasuredSizeForParentContent(childIndex, parentContentRect, statistics);
-        const float left = resolveInset(childStyle.absoluteInset.left, parentContentRect.width, statistics);
-        const float right = resolveInset(childStyle.absoluteInset.right, parentContentRect.width, statistics);
-        const float top = resolveInset(childStyle.absoluteInset.top, parentContentRect.height, statistics);
-        const float bottom = resolveInset(childStyle.absoluteInset.bottom, parentContentRect.height, statistics);
-
         float width = childScratch.measuredSize.width;
         float height = childScratch.measuredSize.height;
-        if (childStyle.size.width.isAuto() && left >= 0.0F && right >= 0.0F)
+
+        if (childStyle.overlay.horizontal == UIAxisAlignment::Stretch)
         {
-            width = (std::max)(0.0F, parentContentRect.width - left - right);
+            width = (std::max)(0.0F, parentContentRect.width - horizontalMargin(childStyle.margin));
         }
-        if (childStyle.size.height.isAuto() && top >= 0.0F && bottom >= 0.0F)
+        if (childStyle.overlay.vertical == UIAxisAlignment::Stretch)
         {
-            height = (std::max)(0.0F, parentContentRect.height - top - bottom);
+            height = (std::max)(0.0F, parentContentRect.height - verticalMargin(childStyle.margin));
         }
         width = clampWidth(width, childStyle, childScratch, statistics);
         height = clampHeight(height, childStyle, childScratch, statistics);
 
-        const float x = left >= 0.0F
-                            ? parentContentRect.x + left
-                            : (right >= 0.0F ? parentContentRect.right() - right - width : parentContentRect.x);
-        const float y = top >= 0.0F
-                            ? parentContentRect.y + top
-                            : (bottom >= 0.0F ? parentContentRect.bottom() - bottom - height : parentContentRect.y);
+        const float availableWidth =
+            (std::max)(0.0F, parentContentRect.width - horizontalMargin(childStyle.margin));
+        const float availableHeight =
+            (std::max)(0.0F, parentContentRect.height - verticalMargin(childStyle.margin));
+        const ResolvedLength horizontalOffset =
+            resolveLength(childStyle.overlay.offset.x, true, parentContentRect.width, statistics);
+        const ResolvedLength verticalOffset =
+            resolveLength(childStyle.overlay.offset.y, true, parentContentRect.height, statistics);
+        float x = parentContentRect.x + childStyle.margin.left;
+        float y = parentContentRect.y + childStyle.margin.top;
+        switch (childStyle.overlay.horizontal)
+        {
+        case UIAxisAlignment::Center:
+            x += (availableWidth - width) * 0.5F;
+            break;
+        case UIAxisAlignment::End:
+            x += availableWidth - width;
+            break;
+        case UIAxisAlignment::Start:
+        case UIAxisAlignment::Stretch:
+            break;
+        }
+        switch (childStyle.overlay.vertical)
+        {
+        case UIAxisAlignment::Center:
+            y += (availableHeight - height) * 0.5F;
+            break;
+        case UIAxisAlignment::End:
+            y += availableHeight - height;
+            break;
+        case UIAxisAlignment::Start:
+        case UIAxisAlignment::Stretch:
+            break;
+        }
+        x += horizontalOffset.hasValue ? horizontalOffset.value : 0.0F;
+        y += verticalOffset.hasValue ? verticalOffset.value : 0.0F;
 
         assignLayoutRect(childIndex,
                          UILogicalRect{
@@ -1512,29 +1936,29 @@ struct UIContext::Impl final {
         };
         UILogicalRect layoutContentRect = unscrolledContentRect;
         UILogicalRect descendantClip = parentScratch.descendantClip;
-        if (parentRecord->kind == UIWidgetKind::Popup)
+        if (parentRecord->kind == BuiltinElementKind::Popup)
         {
             descendantClip = intersectRects(descendantClip, parentScratch.worldRect);
         }
 
         if (parentScratch.effectiveVisibility == UIVisibility::Collapsed)
         {
-            if (parentRecord->kind == UIWidgetKind::ScrollView &&
+            if (parentRecord->kind == BuiltinElementKind::ScrollView &&
                 parentIndex < scrollViewLayoutScratchByNodeIndex.size())
             {
                 scrollViewLayoutScratchByNodeIndex[parentIndex] = {};
             }
-            if (parentRecord->kind == UIWidgetKind::Popup && parentIndex < popupLayoutScratchByNodeIndex.size())
+            if (parentRecord->kind == BuiltinElementKind::Popup && parentIndex < popupLayoutScratchByNodeIndex.size())
             {
                 popupLayoutScratchByNodeIndex[parentIndex] = {};
             }
-            if (parentRecord->kind == UIWidgetKind::ListView && parentIndex < listViewLayoutScratchByNodeIndex.size())
+            if (parentRecord->kind == BuiltinElementKind::ListView && parentIndex < listViewLayoutScratchByNodeIndex.size())
             {
                 listViewLayoutScratchByNodeIndex[parentIndex] = {};
                 collapseListViewItems(parentIndex, unscrolledContentRect, parentWorldRect, descendantClip);
                 return Core::success();
             }
-            if (parentRecord->kind == UIWidgetKind::TreeView && parentIndex < treeViewLayoutScratchByNodeIndex.size())
+            if (parentRecord->kind == BuiltinElementKind::TreeView && parentIndex < treeViewLayoutScratchByNodeIndex.size())
             {
                 treeViewLayoutScratchByNodeIndex[parentIndex] = {};
                 collapseTreeViewItems(parentIndex, unscrolledContentRect, parentWorldRect, descendantClip);
@@ -1554,26 +1978,28 @@ struct UIContext::Impl final {
             return Core::success();
         }
 
-        if (parentRecord->kind == UIWidgetKind::ListView && parentIndex < listViewStatesByNodeIndex.size() &&
+        if (parentRecord->kind == BuiltinElementKind::ListView && parentIndex < listViewStatesByNodeIndex.size() &&
             parentIndex < listViewLayoutScratchByNodeIndex.size())
         {
             return arrangeListViewItems(parentIndex, unscrolledContentRect, parentWorldRect,
                                         intersectRects(parentScratch.descendantClip, parentScratch.worldRect));
         }
-        if (parentRecord->kind == UIWidgetKind::TreeView && parentIndex < treeViewStatesByNodeIndex.size() &&
+        if (parentRecord->kind == BuiltinElementKind::TreeView && parentIndex < treeViewStatesByNodeIndex.size() &&
             parentIndex < treeViewLayoutScratchByNodeIndex.size())
         {
             return arrangeTreeViewItems(parentIndex, unscrolledContentRect, parentWorldRect,
                                         intersectRects(parentScratch.descendantClip, parentScratch.worldRect));
         }
 
-        const bool row = parentStyle.flex.direction == UIFlexDirection::Row;
-        const float configuredGap = row ? parentStyle.flex.gap.column : parentStyle.flex.gap.row;
+        const bool row = parentStyle.flexContainer.direction == UIFlexDirection::Row;
+        const float configuredGap = row ? parentStyle.flexContainer.gap.column : parentStyle.flexContainer.gap.row;
 
         usize flowChildCount = 0;
         float totalMain = 0.0F;
         float totalCross = 0.0F;
         double totalGrow = 0.0;
+        double totalShrinkWeight = 0.0;
+        const float initialContentMain = row ? unscrolledContentRect.width : unscrolledContentRect.height;
         u32 childIndex = parentRecord->firstChildIndex;
         while (childIndex != InvalidNodeIndex)
         {
@@ -1585,24 +2011,35 @@ struct UIContext::Impl final {
             const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
             LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
             if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
-                childStyle.position == UILayoutPositionMode::InFlow)
+                childStyle.placement == UILayoutPlacement::Flow)
             {
                 refreshMeasuredSizeForParentContent(childIndex, unscrolledContentRect, statistics);
                 if (flowChildCount > 0)
                 {
                     totalMain += configuredGap;
                 }
-                const float childOuterWidth = childScratch.measuredSize.width + horizontalMargin(childStyle.margin);
-                const float childOuterHeight = childScratch.measuredSize.height + verticalMargin(childStyle.margin);
+                const float baseMain = flexBaseMainSize(childStyle, childScratch, row, initialContentMain, statistics);
+                const float childOuterWidth =
+                    (row ? baseMain : childScratch.measuredSize.width) + horizontalMargin(childStyle.margin);
+                const float childOuterHeight =
+                    (row ? childScratch.measuredSize.height : baseMain) + verticalMargin(childStyle.margin);
                 totalMain += row ? childOuterWidth : childOuterHeight;
                 totalCross = (std::max)(totalCross, row ? childOuterHeight : childOuterWidth);
-                totalGrow += static_cast<double>(childStyle.flex.grow);
+                totalGrow += static_cast<double>(childStyle.flexItem.grow);
+                totalShrinkWeight += static_cast<double>(childStyle.flexItem.shrink) *
+                                     static_cast<double>((std::max)(0.0F, baseMain));
                 ++flowChildCount;
             }
             childIndex = childRecord->nextSiblingIndex;
         }
 
-        if (parentRecord->kind == UIWidgetKind::ScrollView && parentIndex < scrollViewStatesByNodeIndex.size() &&
+        if (!isFiniteNonNegative(totalMain) || !isFiniteNonNegative(totalCross) || !std::isfinite(totalGrow) ||
+            totalGrow < 0.0 || !std::isfinite(totalShrinkWeight) || totalShrinkWeight < 0.0)
+        {
+            return fail(UIErrorCode::InvalidLayout, "UI flex layout accumulation produced a non-finite value");
+        }
+
+        if (parentRecord->kind == BuiltinElementKind::ScrollView && parentIndex < scrollViewStatesByNodeIndex.size() &&
             parentIndex < scrollViewLayoutScratchByNodeIndex.size())
         {
             ScrollViewState& state = scrollViewStatesByNodeIndex[parentIndex];
@@ -1682,11 +2119,12 @@ struct UIContext::Impl final {
 
         const float freeSpace = contentMain - totalMain;
         const float growSpace = totalGrow > 0.0 ? (std::max)(0.0F, freeSpace) : 0.0F;
+        const float shrinkSpace = totalShrinkWeight > 0.0 ? (std::max)(0.0F, -freeSpace) : 0.0F;
         float mainOffset = 0.0F;
         float gap = configuredGap;
         if (totalGrow == 0.0 && freeSpace > 0.0F)
         {
-            switch (parentStyle.flex.justify)
+            switch (parentStyle.flexContainer.justifyContent)
             {
             case UIJustifyContent::Center:
                 mainOffset = freeSpace * 0.5F;
@@ -1723,24 +2161,32 @@ struct UIContext::Impl final {
                 assignLayoutRect(currentChild, layoutContentRect, parentWorldRect, descendantClip);
                 continue;
             }
-            if (childStyle.position == UILayoutPositionMode::AbsoluteOverlay)
+            if (childStyle.placement == UILayoutPlacement::Overlay)
             {
-                if (childRecord->kind == UIWidgetKind::Popup && currentChild < popupStatesByNodeIndex.size() &&
+                if (childRecord->kind == BuiltinElementKind::Popup && currentChild < popupStatesByNodeIndex.size() &&
                     currentChild < popupLayoutScratchByNodeIndex.size())
                 {
                     arrangePopupChild(currentChild, parentWorldRect, viewportRect, statistics);
                 } else
                 {
-                    arrangeAbsoluteChild(currentChild, layoutContentRect, parentWorldRect, descendantClip, statistics);
+                    arrangeOverlayChild(currentChild, layoutContentRect, parentWorldRect, descendantClip, statistics);
                 }
                 continue;
             }
 
             float width = childScratch.measuredSize.width;
             float height = childScratch.measuredSize.height;
-            if (totalGrow > 0.0 && childStyle.flex.grow > 0.0F)
+            const float baseMain = flexBaseMainSize(childStyle, childScratch, row, contentMain, statistics);
+            if (row)
             {
-                const double growRatio = static_cast<double>(childStyle.flex.grow) / totalGrow;
+                width = baseMain;
+            } else
+            {
+                height = baseMain;
+            }
+            if (growSpace > 0.0F && childStyle.flexItem.grow > 0.0F)
+            {
+                const double growRatio = static_cast<double>(childStyle.flexItem.grow) / totalGrow;
                 const float share = growSpace * static_cast<float>(growRatio);
                 if (row)
                 {
@@ -1749,12 +2195,27 @@ struct UIContext::Impl final {
                 {
                     height += share;
                 }
+            } else if (shrinkSpace > 0.0F && childStyle.flexItem.shrink > 0.0F)
+            {
+                const double childWeight = static_cast<double>(childStyle.flexItem.shrink) *
+                                           static_cast<double>((std::max)(0.0F, baseMain));
+                const float reduction =
+                    shrinkSpace * static_cast<float>(childWeight / totalShrinkWeight);
+                if (row)
+                {
+                    width = (std::max)(0.0F, width - reduction);
+                } else
+                {
+                    height = (std::max)(0.0F, height - reduction);
+                }
             }
 
             const float crossAvailable = (std::max)(0.0F, contentCross - (row ? verticalMargin(childStyle.margin)
                                                                               : horizontalMargin(childStyle.margin)));
-            if (parentStyle.flex.alignItems == UIAlignItems::Stretch &&
-                isCrossAxisAuto(childStyle, parentStyle.flex.direction))
+            const UIAxisAlignment crossAlignment =
+                resolvedItemAlignment(parentStyle.flexContainer.alignItems, childStyle.flexItem.alignSelf);
+            if (crossAlignment == UIAxisAlignment::Stretch &&
+                isCrossAxisAuto(childStyle, parentStyle.flexContainer.direction))
             {
                 if (row)
                 {
@@ -1778,16 +2239,16 @@ struct UIContext::Impl final {
             const float crossFree = contentCross - childCrossSize - crossBefore - crossAfter;
             if (crossFree > 0.0F)
             {
-                switch (parentStyle.flex.alignItems)
+                switch (crossAlignment)
                 {
-                case UIAlignItems::Center:
+                case UIAxisAlignment::Center:
                     crossOffset = crossBefore + crossFree * 0.5F;
                     break;
-                case UIAlignItems::End:
+                case UIAxisAlignment::End:
                     crossOffset = crossBefore + crossFree;
                     break;
-                case UIAlignItems::Stretch:
-                case UIAlignItems::Start:
+                case UIAxisAlignment::Stretch:
+                case UIAxisAlignment::Start:
                     break;
                 }
             }
@@ -1856,6 +2317,73 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] UICommittedContentPlacement contentPlacementFor(u32 index) const noexcept
+    {
+        const LayoutScratchState& scratch = layoutScratchByIndex[index];
+        const UILayoutStyle& layout = layoutStylesByIndex[index];
+        const NodeRecord* record = recordByIndex(index);
+        UILogicalRect contentBox{
+            .x = normalizeFloat(scratch.worldRect.x + layout.padding.left),
+            .y = normalizeFloat(scratch.worldRect.y + layout.padding.top),
+            .width = normalizeFloat((std::max)(0.0F, scratch.worldRect.width - horizontalMargin(layout.padding))),
+            .height = normalizeFloat((std::max)(0.0F, scratch.worldRect.height - verticalMargin(layout.padding))),
+        };
+
+        if (record != nullptr && record->kind == BuiltinElementKind::Dropdown &&
+            index < dropdownStatesByNodeIndex.size())
+        {
+            const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[index].paint;
+            const float reservedWidth = dropdown.indicatorWidth + dropdown.indicatorInset * 2.0F;
+            contentBox.width = normalizeFloat((std::max)(0.0F, contentBox.width - reservedWidth));
+        }
+        if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
+            index < radioButtonStatesByNodeIndex.size())
+        {
+            const float indicatorExtent = (std::min)(scratch.worldRect.width, scratch.worldRect.height);
+            const float reservedWidth = indicatorExtent + radioButtonStatesByNodeIndex[index].paint.labelGap;
+            contentBox.x = normalizeFloat(contentBox.x + reservedWidth);
+            contentBox.width = normalizeFloat((std::max)(0.0F, contentBox.width - reservedWidth));
+        }
+
+        UICommittedContentPlacement placement{
+            .contentBox = contentBox,
+            .origin = contentBox.origin(),
+        };
+        if (index >= textStatesByIndex.size())
+        {
+            return placement;
+        }
+        const UITextMetrics* metrics = presentationTextMetricsFor(index);
+        if (metrics == nullptr)
+        {
+            return placement;
+        }
+
+        const UIContentAlignment alignment = textStatesByIndex[index].alignment;
+        const float horizontalFree = (std::max)(0.0F, contentBox.width - metrics->measuredSize.width);
+        const float verticalFree = (std::max)(0.0F, contentBox.height - metrics->measuredSize.height);
+        const auto alignedOffset = [](UIAxisAlignment axis, float freeSpace) noexcept {
+            switch (axis)
+            {
+            case UIAxisAlignment::Center:
+                return freeSpace * 0.5F;
+            case UIAxisAlignment::End:
+                return freeSpace;
+            case UIAxisAlignment::Start:
+            case UIAxisAlignment::Stretch:
+                return 0.0F;
+            }
+            return 0.0F;
+        };
+        placement.origin = UILogicalPoint{
+            .x = normalizeFloat(contentBox.x + alignedOffset(alignment.horizontal, horizontalFree)),
+            .y = normalizeFloat(contentBox.y + alignedOffset(alignment.vertical, verticalFree)),
+        };
+        placement.intrinsicSize = metrics->measuredSize;
+        placement.hasIntrinsicContent = true;
+        return placement;
+    }
+
     void buildCommittedLayout(std::pmr::vector<UICommittedLayoutEntry>& output,
                               const std::pmr::vector<u32>& order) const noexcept
     {
@@ -1874,6 +2402,7 @@ struct UIContext::Impl final {
                     .localRect = scratch.localRect,
                     .worldRect = scratch.worldRect,
                     .effectiveClip = scratch.effectiveClip,
+                    .contentPlacement = contentPlacementFor(index),
                     .effectiveVisibility = scratch.effectiveVisibility,
                     .layoutOrdinal = scratch.layoutOrdinal,
                     .paintOrdinal = paintOrdinal,
@@ -1955,11 +2484,12 @@ struct UIContext::Impl final {
                 focusScopeEntryIndex = output[parentEntryIndex].focusScopeEntryIndex;
                 modalScopeEntryIndex = output[parentEntryIndex].modalScopeEntryIndex;
             }
-            if (focusScopeMode == UIFocusScopeMode::Contain || record->kind == UIWidgetKind::Modal)
+            if (focusScopeMode == UIFocusScopeMode::Contain ||
+                hasBehavior(record->behaviors, UIElementBehavior::ModalBarrier))
             {
                 focusScopeEntryIndex = entryIndex;
             }
-            if (record->kind == UIWidgetKind::Modal)
+            if (hasBehavior(record->behaviors, UIElementBehavior::ModalBarrier))
             {
                 modalScopeEntryIndex = entryIndex;
                 activeModalEntryIndex = entryIndex;
@@ -1975,7 +2505,7 @@ struct UIContext::Impl final {
                 .effectiveClip = layoutEntry.effectiveClip,
                 .paintOrdinal = layoutEntry.paintOrdinal,
                 .policy = policy,
-                .kind = record->kind,
+                .behaviors = record->behaviors,
             });
             hitEntryIndexByNodeIndex[nodeIndex] = entryIndex;
             if (policy == UIPointerHitPolicy::Targetable)
@@ -2141,6 +2671,75 @@ struct UIContext::Impl final {
         return widgetPaintColor(item, premultiply(treeViewStatesByNodeIndex[treeView.index()].paint.disclosureColor));
     }
 
+    [[nodiscard]] usize countCanvasPaintEntries(u32 nodeIndex) const noexcept
+    {
+        if (nodeIndex >= canvasCommandStatesByNodeIndex.size())
+        {
+            return 0;
+        }
+        const CanvasCommandState& state = canvasCommandStatesByNodeIndex[nodeIndex];
+        u32 commandIndex = state.first;
+        usize count = 0;
+        for (u32 visited = 0; commandIndex != InvalidCanvasCommandIndex && visited < state.count;
+             ++visited)
+        {
+            if (commandIndex >= canvasCommandSlots.size())
+            {
+                break;
+            }
+            const CanvasCommandSlot& slot = canvasCommandSlots[commandIndex];
+            if (slot.command.kind == UICanvasCommandKind::SolidRect && slot.command.color.alpha != 0 &&
+                slot.command.bounds.width > 0.0F && slot.command.bounds.height > 0.0F)
+            {
+                ++count;
+            }
+            commandIndex = slot.next;
+        }
+        return count;
+    }
+
+    void appendCanvasPaints(std::pmr::vector<UICommittedPaintEntry>& output,
+                            const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) noexcept
+    {
+        const u32 nodeIndex = layoutEntry.node.index();
+        if (nodeIndex >= canvasCommandStatesByNodeIndex.size())
+        {
+            return;
+        }
+        const CanvasCommandState& state = canvasCommandStatesByNodeIndex[nodeIndex];
+        const UILogicalRect canvasClip = intersectRects(layoutEntry.effectiveClip, layoutEntry.worldRect);
+        u32 commandIndex = state.first;
+        for (u32 visited = 0; commandIndex != InvalidCanvasCommandIndex && visited < state.count;
+             ++visited)
+        {
+            if (commandIndex >= canvasCommandSlots.size())
+            {
+                return;
+            }
+            const CanvasCommandSlot& slot = canvasCommandSlots[commandIndex];
+            const UICanvasCommand& command = slot.command;
+            if (command.kind == UICanvasCommandKind::SolidRect && command.color.alpha != 0 &&
+                command.bounds.width > 0.0F && command.bounds.height > 0.0F)
+            {
+                output.push_back(UICommittedPaintEntry{
+                    .node = layoutEntry.node,
+                    .worldRect =
+                        UILogicalRect{
+                            .x = normalizeFloat(layoutEntry.worldRect.x + command.bounds.x),
+                            .y = normalizeFloat(layoutEntry.worldRect.y + command.bounds.y),
+                            .width = command.bounds.width,
+                            .height = command.bounds.height,
+                        },
+                    .effectiveClip = canvasClip,
+                    .paintOrdinal = nextPaintOrdinal,
+                    .solidFill = premultiply(command.color),
+                });
+                ++nextPaintOrdinal;
+            }
+            commandIndex = slot.next;
+        }
+    }
+
     [[nodiscard]] Core::Result<usize>
     validatePaintCandidateCapacity(std::span<const UICommittedLayoutEntry> layoutEntries) const
     {
@@ -2163,8 +2762,9 @@ struct UIContext::Impl final {
                 resolvedBoxFillColor(layoutEntry.node, nodeIndex, normalColor);
             paintEntryCount +=
                 countBoxChromePaintEntries(boxPaint, layoutEntry.worldRect, !resolvedFill.isTransparent());
+            paintEntryCount += countCanvasPaintEntries(nodeIndex);
             const NodeRecord* record = recordByIndex(nodeIndex);
-            if (record != nullptr && record->kind == UIWidgetKind::Checkbox &&
+            if (record != nullptr && record->kind == BuiltinElementKind::Checkbox &&
                 nodeIndex < checkboxCheckedByNodeIndex.size() && nodeIndex < checkboxPaintsByNodeIndex.size() &&
                 checkboxCheckedByNodeIndex[nodeIndex] != 0)
             {
@@ -2176,7 +2776,7 @@ struct UIContext::Impl final {
                     ++paintEntryCount;
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
+            if (record != nullptr && record->kind == BuiltinElementKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
             {
                 const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
                 const SliderPaintGeometry geometry = sliderPaintGeometry(
@@ -2195,7 +2795,7 @@ struct UIContext::Impl final {
                     ++paintEntryCount;
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::ScrollView &&
+            if (record != nullptr && record->kind == BuiltinElementKind::ScrollView &&
                 nodeIndex < scrollViewStatesByNodeIndex.size() &&
                 nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
             {
@@ -2225,7 +2825,7 @@ struct UIContext::Impl final {
                 countBar(UIScrollAxes::Horizontal);
                 countBar(UIScrollAxes::Vertical);
             }
-            if (record != nullptr && record->kind == UIWidgetKind::ListView &&
+            if (record != nullptr && record->kind == BuiltinElementKind::ListView &&
                 nodeIndex < listViewStatesByNodeIndex.size() && nodeIndex < listViewLayoutScratchByNodeIndex.size())
             {
                 const ListViewState& list = listViewStatesByNodeIndex[nodeIndex];
@@ -2250,7 +2850,7 @@ struct UIContext::Impl final {
                     }
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::TreeView &&
+            if (record != nullptr && record->kind == BuiltinElementKind::TreeView &&
                 nodeIndex < treeViewStatesByNodeIndex.size() && nodeIndex < treeViewLayoutScratchByNodeIndex.size())
             {
                 const TreeViewState& tree = treeViewStatesByNodeIndex[nodeIndex];
@@ -2275,7 +2875,7 @@ struct UIContext::Impl final {
                     }
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
+            if (record != nullptr && record->kind == BuiltinElementKind::Dropdown &&
                 nodeIndex < dropdownStatesByNodeIndex.size())
             {
                 const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[nodeIndex].paint;
@@ -2285,17 +2885,17 @@ struct UIContext::Impl final {
                     paintEntryCount += 3;
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::DropdownItem &&
+            if (record != nullptr && record->kind == BuiltinElementKind::DropdownItem &&
                 !resolvedDropdownSelectionColor(layoutEntry.node).isTransparent())
             {
                 ++paintEntryCount;
             }
-            if (record != nullptr && record->kind == UIWidgetKind::ListViewItem &&
+            if (record != nullptr && record->kind == BuiltinElementKind::ListViewItem &&
                 !resolvedListViewSelectionColor(layoutEntry.node).isTransparent())
             {
                 ++paintEntryCount;
             }
-            if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem)
+            if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem)
             {
                 if (!resolvedTreeViewSelectionColor(layoutEntry.node).isTransparent())
                 {
@@ -2308,7 +2908,7 @@ struct UIContext::Impl final {
                     paintEntryCount += item.expanded ? 1U : 2U;
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::ProgressBar &&
+            if (record != nullptr && record->kind == BuiltinElementKind::ProgressBar &&
                 nodeIndex < progressBarStatesByNodeIndex.size())
             {
                 const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
@@ -2319,7 +2919,7 @@ struct UIContext::Impl final {
                     ++paintEntryCount;
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::RadioButton &&
+            if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
                 nodeIndex < radioButtonStatesByNodeIndex.size())
             {
                 const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
@@ -2334,7 +2934,7 @@ struct UIContext::Impl final {
                     ++paintEntryCount;
                 }
             }
-            const bool focusedTextEdit = record != nullptr && record->kind == UIWidgetKind::TextEdit &&
+            const bool focusedTextEdit = record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
                                          isNodeEnabled(layoutEntry.node) && textInputFocus == layoutEntry.node &&
                                          isLiveTextEdit(textInputFocus);
             const bool activeIme = focusedTextEdit && imeComposition.active();
@@ -2376,6 +2976,17 @@ struct UIContext::Impl final {
         return paintEntryCount;
     }
 
+    void refreshLocalPaintCache(u32 nodeIndex) noexcept
+    {
+        const UIBoxPaint& paint = boxPaintsByIndex[nodeIndex];
+        localSolidFillCacheByIndex[nodeIndex] =
+            paint.solidFill.has_value() ? premultiply(paint.solidFill->color) : UIPremultipliedRgba8Color{};
+        localTextColorCacheByIndex[nodeIndex] =
+            nodeIndex < textStatesByIndex.size() && textStatesByIndex[nodeIndex].hasContent
+                ? premultiply(textStatesByIndex[nodeIndex].style.color)
+                : UIPremultipliedRgba8Color{};
+    }
+
     [[nodiscard]] usize rebuildDirtyPaintCaches(std::span<const UICommittedLayoutEntry> layoutEntries) noexcept
     {
         usize rebuildCount = 0;
@@ -2387,13 +2998,7 @@ struct UIContext::Impl final {
                 continue;
             }
 
-            const UIBoxPaint& paint = boxPaintsByIndex[nodeIndex];
-            localSolidFillCacheByIndex[nodeIndex] =
-                paint.solidFill.has_value() ? premultiply(paint.solidFill->color) : UIPremultipliedRgba8Color{};
-            localTextColorCacheByIndex[nodeIndex] =
-                nodeIndex < textStatesByIndex.size() && textStatesByIndex[nodeIndex].hasContent
-                    ? premultiply(textStatesByIndex[nodeIndex].style.color)
-                    : UIPremultipliedRgba8Color{};
+            refreshLocalPaintCache(nodeIndex);
             ++rebuildCount;
         }
         return rebuildCount;
@@ -2628,7 +3233,7 @@ struct UIContext::Impl final {
     {
         const u32 nodeIndex = layoutEntry.node.index();
         const NodeRecord* record = recordByIndex(nodeIndex);
-        const bool focusedTextEdit = record != nullptr && record->kind == UIWidgetKind::TextEdit &&
+        const bool focusedTextEdit = record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
                                      isNodeEnabled(layoutEntry.node) && textInputFocus == layoutEntry.node &&
                                      isLiveTextEdit(textInputFocus);
         const WidgetTextState* textState =
@@ -2639,32 +3244,11 @@ struct UIContext::Impl final {
                 ? widgetPaintColor(layoutEntry.node, localTextColorCacheByIndex[nodeIndex])
                 : UIPremultipliedRgba8Color{};
         const std::string_view committedText = presentationTextViewFor(nodeIndex);
-        const UIEdgeSpacing padding =
-            nodeIndex < layoutStylesByIndex.size() ? layoutStylesByIndex[nodeIndex].padding : UIEdgeSpacing{};
         UICommittedLayoutEntry textLayoutEntry = layoutEntry;
-        if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
-            nodeIndex < dropdownStatesByNodeIndex.size())
-        {
-            const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[nodeIndex].paint;
-            const float reservedWidth = dropdown.indicatorWidth + dropdown.indicatorInset * 2.0F;
-            textLayoutEntry.effectiveClip = intersectRects(
-                textLayoutEntry.effectiveClip,
-                UILogicalRect{
-                    .x = layoutEntry.worldRect.x,
-                    .y = layoutEntry.worldRect.y,
-                    .width = normalizeFloat((std::max)(0.0F, layoutEntry.worldRect.width - reservedWidth)),
-                    .height = layoutEntry.worldRect.height,
-                });
-        }
-        float textStartX = normalizeFloat(layoutEntry.worldRect.x + padding.left);
-        const float textStartY = normalizeFloat(layoutEntry.worldRect.y + padding.top);
-        if (record != nullptr && record->kind == UIWidgetKind::RadioButton &&
-            nodeIndex < radioButtonStatesByNodeIndex.size())
-        {
-            const float indicatorExtent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
-            textStartX = normalizeFloat(layoutEntry.worldRect.x + indicatorExtent +
-                                        radioButtonStatesByNodeIndex[nodeIndex].paint.labelGap + padding.left);
-        }
+        textLayoutEntry.effectiveClip =
+            intersectRects(textLayoutEntry.effectiveClip, layoutEntry.contentPlacement.contentBox);
+        const float textStartX = layoutEntry.contentPlacement.origin.x;
+        const float textStartY = layoutEntry.contentPlacement.origin.y;
         TextPaintCursor cursor{
             .x = textStartX,
             .y = textStartY,
@@ -2800,8 +3384,9 @@ struct UIContext::Impl final {
                 resolvedBoxFillColor(layoutEntry.node, nodeIndex, localSolidFillCacheByIndex[nodeIndex]);
             appendBoxChromePaints(output, layoutEntry.node, layoutEntry.worldRect, layoutEntry.effectiveClip,
                                   nextPaintOrdinal, boxPaint, fill);
+            appendCanvasPaints(output, layoutEntry, nextPaintOrdinal);
             const NodeRecord* record = recordByIndex(nodeIndex);
-            if (record != nullptr && record->kind == UIWidgetKind::Checkbox &&
+            if (record != nullptr && record->kind == BuiltinElementKind::Checkbox &&
                 nodeIndex < checkboxCheckedByNodeIndex.size() && nodeIndex < checkboxPaintsByNodeIndex.size() &&
                 checkboxCheckedByNodeIndex[nodeIndex] != 0)
             {
@@ -2828,7 +3413,7 @@ struct UIContext::Impl final {
                     ++nextPaintOrdinal;
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
+            if (record != nullptr && record->kind == BuiltinElementKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
             {
                 const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
                 const SliderPaintGeometry geometry = sliderPaintGeometry(
@@ -2864,7 +3449,7 @@ struct UIContext::Impl final {
                     ++nextPaintOrdinal;
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::ScrollView &&
+            if (record != nullptr && record->kind == BuiltinElementKind::ScrollView &&
                 nodeIndex < scrollViewStatesByNodeIndex.size() &&
                 nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
             {
@@ -2910,7 +3495,7 @@ struct UIContext::Impl final {
                 appendBar(UIScrollAxes::Horizontal);
                 appendBar(UIScrollAxes::Vertical);
             }
-            if (record != nullptr && record->kind == UIWidgetKind::ListView &&
+            if (record != nullptr && record->kind == BuiltinElementKind::ListView &&
                 nodeIndex < listViewStatesByNodeIndex.size() && nodeIndex < listViewLayoutScratchByNodeIndex.size())
             {
                 const ListViewState& list = listViewStatesByNodeIndex[nodeIndex];
@@ -2950,7 +3535,7 @@ struct UIContext::Impl final {
                     }
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::TreeView &&
+            if (record != nullptr && record->kind == BuiltinElementKind::TreeView &&
                 nodeIndex < treeViewStatesByNodeIndex.size() && nodeIndex < treeViewLayoutScratchByNodeIndex.size())
             {
                 const TreeViewState& tree = treeViewStatesByNodeIndex[nodeIndex];
@@ -2990,7 +3575,7 @@ struct UIContext::Impl final {
                     }
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::Dropdown &&
+            if (record != nullptr && record->kind == BuiltinElementKind::Dropdown &&
                 nodeIndex < dropdownStatesByNodeIndex.size())
             {
                 const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[nodeIndex].paint;
@@ -3026,7 +3611,7 @@ struct UIContext::Impl final {
                     }
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::DropdownItem)
+            if (record != nullptr && record->kind == BuiltinElementKind::DropdownItem)
             {
                 const UIPremultipliedRgba8Color selection = resolvedDropdownSelectionColor(layoutEntry.node);
                 if (!selection.isTransparent())
@@ -3040,7 +3625,7 @@ struct UIContext::Impl final {
                     });
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::ListViewItem)
+            if (record != nullptr && record->kind == BuiltinElementKind::ListViewItem)
             {
                 const UIPremultipliedRgba8Color selection = resolvedListViewSelectionColor(layoutEntry.node);
                 if (!selection.isTransparent())
@@ -3054,7 +3639,7 @@ struct UIContext::Impl final {
                     });
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem &&
+            if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem &&
                 nodeIndex < treeViewItemStatesByNodeIndex.size())
             {
                 const UIPremultipliedRgba8Color selection = resolvedTreeViewSelectionColor(layoutEntry.node);
@@ -3108,7 +3693,7 @@ struct UIContext::Impl final {
                     }
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::ProgressBar &&
+            if (record != nullptr && record->kind == BuiltinElementKind::ProgressBar &&
                 nodeIndex < progressBarStatesByNodeIndex.size())
             {
                 const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
@@ -3134,7 +3719,7 @@ struct UIContext::Impl final {
                     ++nextPaintOrdinal;
                 }
             }
-            if (record != nullptr && record->kind == UIWidgetKind::RadioButton &&
+            if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
                 nodeIndex < radioButtonStatesByNodeIndex.size())
             {
                 const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
@@ -3183,16 +3768,228 @@ struct UIContext::Impl final {
         }
     }
 
-    // Publish semantic controls into a stable owner-thread snapshot.
-    // Decorative Root/Panel are omitted.
-    // Capacity reuses paintSnapshotCapacity as a fixed entry budget for emitted
-    // semantics rows (not layout node count — Root/Panel do not publish).
+    // Semantics uses two fixed-capacity linear passes. The first resolves the
+    // published parent and merge target for every node; the second writes merged
+    // names into stable contiguous ranges in the inactive snapshot buffer.
     [[nodiscard]] Core::Status buildCommittedSemantics(std::pmr::vector<UISemanticsEntry>& output,
                                                        std::pmr::vector<char>& textOutput,
-                                                       std::span<const UICommittedLayoutEntry> layoutEntries) const
+                                                       std::span<const UICommittedLayoutEntry> layoutEntries)
     {
         output.clear();
+        std::fill(semanticsEntryBuildScratch.begin(), semanticsEntryBuildScratch.end(),
+                  SemanticsEntryBuildScratch{});
+
+        const auto fillControlState = [&](UISemanticsEntry& entry, u32 nodeIndex,
+                                          const NodeRecord& record) noexcept {
+            const UINodeId node = entry.node;
+            const bool enabled = entry.enabled;
+            entry.focused = enabled && defaultActionFocusButton == node;
+            if (record.kind == BuiltinElementKind::Checkbox && nodeIndex < checkboxCheckedByNodeIndex.size())
+            {
+                entry.checked = checkboxCheckedByNodeIndex[nodeIndex] != 0;
+            } else if (record.kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
+            {
+                entry.focused = enabled && defaultActionFocusButton == node;
+            } else if (record.kind == BuiltinElementKind::DropdownItem)
+            {
+                entry.selected = isSelectedDropdownItem(node);
+            } else if (record.kind == BuiltinElementKind::TextEdit)
+            {
+                entry.focused = enabled && textInputFocus == node;
+            } else if (record.kind == BuiltinElementKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
+            {
+                const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
+                entry.focused = enabled && armedSlider == node;
+                entry.hasRange = true;
+                entry.minValue = slider.minValue;
+                entry.maxValue = slider.maxValue;
+                entry.value = slider.value;
+            } else if (record.kind == BuiltinElementKind::ProgressBar &&
+                       nodeIndex < progressBarStatesByNodeIndex.size())
+            {
+                const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
+                entry.hasRange = true;
+                entry.minValue = progress.minValue;
+                entry.maxValue = progress.maxValue;
+                entry.value = progress.value;
+            } else if (record.kind == BuiltinElementKind::RadioButton &&
+                       nodeIndex < radioButtonStatesByNodeIndex.size())
+            {
+                entry.checked = radioButtonStatesByNodeIndex[nodeIndex].selected;
+            } else if (record.kind == BuiltinElementKind::ScrollView &&
+                       nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
+            {
+                const UIScrollViewMetrics& metrics = scrollViewLayoutScratchByNodeIndex[nodeIndex].metrics;
+                const bool vertical = hasScrollAxis(scrollViewStatesByNodeIndex[nodeIndex].style.axes,
+                                                    UIScrollAxes::Vertical);
+                entry.focused = enabled && scrollThumbDragActive && armedScrollView == node;
+                entry.hasRange = true;
+                entry.maxValue = vertical ? metrics.maxOffsetY() : metrics.maxOffsetX();
+                entry.value = vertical ? metrics.offset.y : metrics.offset.x;
+            } else if (record.kind == BuiltinElementKind::ListView &&
+                       nodeIndex < listViewLayoutScratchByNodeIndex.size())
+            {
+                const UIListViewMetrics& metrics = listViewLayoutScratchByNodeIndex[nodeIndex].metrics;
+                entry.hasRange = true;
+                entry.maxValue = metrics.maxScrollOffset;
+                entry.value = metrics.scrollOffset;
+            } else if (record.kind == BuiltinElementKind::ListViewItem &&
+                       nodeIndex < listViewItemStatesByNodeIndex.size())
+            {
+                const ListViewItemState& item = listViewItemStatesByNodeIndex[nodeIndex];
+                entry.virtualItemKey = item.key;
+                entry.virtualItemIndex = item.logicalIndex;
+                entry.selected = item.bound && isSelectedListViewItem(node);
+                entry.focused = entry.enabled && entry.selected && defaultActionFocusButton == listViewForItem(node);
+            } else if (record.kind == BuiltinElementKind::TreeView &&
+                       nodeIndex < treeViewLayoutScratchByNodeIndex.size())
+            {
+                const UITreeViewMetrics& metrics = treeViewLayoutScratchByNodeIndex[nodeIndex].metrics;
+                entry.hasRange = true;
+                entry.maxValue = metrics.maxScrollOffset;
+                entry.value = metrics.scrollOffset;
+            } else if (record.kind == BuiltinElementKind::TreeViewItem &&
+                       nodeIndex < treeViewItemStatesByNodeIndex.size())
+            {
+                const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
+                entry.virtualItemKey = item.key;
+                entry.virtualItemIndex = item.logicalIndex;
+                entry.level = item.level;
+                entry.expandable = item.bound && item.expandable;
+                entry.expanded = item.bound && item.expanded;
+                entry.selected = item.bound && isSelectedTreeViewItem(node);
+                entry.focused = entry.enabled && entry.selected && defaultActionFocusButton == treeViewForItem(node);
+            }
+        };
+
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries)
+        {
+            const u32 nodeIndex = layoutEntry.node.index();
+            if (nodeIndex >= semanticsNodeBuildScratchByIndex.size() ||
+                nodeIndex >= semanticsStatesByNodeIndex.size())
+            {
+                return fail(Core::CoreErrorCode::Internal, "UI semantics node scratch index is out of range");
+            }
+            SemanticsNodeBuildScratch& scratch = semanticsNodeBuildScratchByIndex[nodeIndex];
+            scratch = {};
+            const NodeRecord* record = recordByIndex(nodeIndex);
+            if (record == nullptr)
+            {
+                return fail(UIErrorCode::InvalidNode, "UI semantics layout references a stale node");
+            }
+            const SemanticsState& state = semanticsStatesByNodeIndex[nodeIndex];
+            const SemanticsNodeBuildScratch* parentScratch =
+                record->parentIndex != InvalidNodeIndex && record->parentIndex < semanticsNodeBuildScratchByIndex.size()
+                    ? &semanticsNodeBuildScratchByIndex[record->parentIndex]
+                    : nullptr;
+            scratch.nearestPublishedEntryIndex =
+                parentScratch == nullptr ? InvalidUIHitEntryIndex : parentScratch->nearestPublishedEntryIndex;
+            scratch.mergeEntryIndex =
+                parentScratch == nullptr ? InvalidUIHitEntryIndex : parentScratch->mergeEntryIndex;
+            scratch.excluded = layoutEntry.effectiveVisibility != UIVisibility::Visible ||
+                               state.mode == UISemanticsMode::Exclude ||
+                               (parentScratch != nullptr && parentScratch->excluded);
+            if (scratch.excluded)
+            {
+                continue;
+            }
+
+            const bool inheritedMerge = scratch.mergeEntryIndex != InvalidUIHitEntryIndex;
+            const bool publishes = !inheritedMerge &&
+                                   (state.mode == UISemanticsMode::Publish ||
+                                    state.mode == UISemanticsMode::MergeDescendants);
+            if (publishes)
+            {
+                if (output.size() >= capacityConfig.paintSnapshotCapacity ||
+                    output.size() >= semanticsEntryBuildScratch.size())
+                {
+                    return fail(UIErrorCode::CapacityExceeded,
+                                "UI committed semantics snapshot capacity has been exhausted");
+                }
+                const u32 entryIndex = static_cast<u32>(output.size());
+                const UINodeId semanticParent =
+                    scratch.nearestPublishedEntryIndex < output.size()
+                        ? output[scratch.nearestPublishedEntryIndex].node
+                        : UINodeId{};
+                UISemanticsEntry entry{
+                    .node = layoutEntry.node,
+                    .parent = semanticParent,
+                    .role = state.role,
+                    .actions = state.actions,
+                    .worldRect = layoutEntry.worldRect,
+                    .enabled = isCandidateNodeEnabled(layoutEntry.node),
+                    .readOnly = state.readOnly,
+                };
+                fillControlState(entry, nodeIndex, *record);
+                output.push_back(entry);
+                scratch.nearestPublishedEntryIndex = entryIndex;
+                if (state.mode == UISemanticsMode::MergeDescendants)
+                {
+                    scratch.mergeEntryIndex = entryIndex;
+                }
+                scratch.nameTargetEntryIndex = entryIndex;
+            } else if (inheritedMerge)
+            {
+                scratch.nameTargetEntryIndex = scratch.mergeEntryIndex;
+            }
+
+            const std::string_view nameSource = semanticsNameSourceFor(nodeIndex);
+            if (!nameSource.empty() && scratch.nameTargetEntryIndex < semanticsEntryBuildScratch.size())
+            {
+                SemanticsEntryBuildScratch& entryScratch =
+                    semanticsEntryBuildScratch[scratch.nameTargetEntryIndex];
+                const usize separatorBytes = entryScratch.hasNamePart ? 1U : 0U;
+                if (entryScratch.nameByteCount > (std::numeric_limits<usize>::max)() - separatorBytes ||
+                    entryScratch.nameByteCount + separatorBytes >
+                        (std::numeric_limits<usize>::max)() - nameSource.size())
+                {
+                    return fail(UIErrorCode::CapacityExceeded, "UI merged semantics name size overflowed");
+                }
+                entryScratch.nameByteCount += separatorBytes + nameSource.size();
+                entryScratch.hasNamePart = true;
+            }
+        }
+
         usize textOutputSize = 0;
+        for (usize entryIndex = 0; entryIndex < output.size(); ++entryIndex)
+        {
+            SemanticsEntryBuildScratch& scratch = semanticsEntryBuildScratch[entryIndex];
+            if (scratch.nameByteCount > textOutput.size() - textOutputSize)
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI committed semantics text snapshot capacity has been exhausted");
+            }
+            scratch.nameOffset = textOutputSize;
+            scratch.nameBytesWritten = 0;
+            if (scratch.nameByteCount != 0)
+            {
+                output[entryIndex].name =
+                    std::string_view(textOutput.data() + textOutputSize, scratch.nameByteCount);
+                textOutputSize += scratch.nameByteCount;
+            }
+        }
+
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries)
+        {
+            const u32 nodeIndex = layoutEntry.node.index();
+            const SemanticsNodeBuildScratch& nodeScratch = semanticsNodeBuildScratchByIndex[nodeIndex];
+            const std::string_view source = semanticsNameSourceFor(nodeIndex);
+            if (source.empty() || nodeScratch.nameTargetEntryIndex >= output.size())
+            {
+                continue;
+            }
+            SemanticsEntryBuildScratch& entryScratch =
+                semanticsEntryBuildScratch[nodeScratch.nameTargetEntryIndex];
+            char* destination = textOutput.data() + entryScratch.nameOffset + entryScratch.nameBytesWritten;
+            if (entryScratch.nameBytesWritten != 0)
+            {
+                *destination++ = ' ';
+                ++entryScratch.nameBytesWritten;
+            }
+            std::memcpy(destination, source.data(), source.size());
+            entryScratch.nameBytesWritten += source.size();
+        }
+
         const auto copyText = [&](std::string_view source, std::string_view& destination) -> Core::Status {
             destination = {};
             if (source.empty())
@@ -3210,157 +4007,31 @@ struct UIContext::Impl final {
             textOutputSize += source.size();
             return Core::success();
         };
-        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries)
+        for (UISemanticsEntry& entry : output)
         {
-            if (layoutEntry.effectiveVisibility != UIVisibility::Visible)
-            {
-                continue;
-            }
-            const u32 nodeIndex = layoutEntry.node.index();
+            const u32 nodeIndex = entry.node.index();
             const NodeRecord* record = recordByIndex(nodeIndex);
-            if (record == nullptr || !isSemanticsPublishedKind(record->kind))
+            if (record == nullptr)
             {
-                continue;
+                return fail(UIErrorCode::InvalidNode, "UI semantics entry references a stale node");
             }
-            if (output.size() >= capacityConfig.paintSnapshotCapacity)
+            if (Core::Status status = copyText(semanticsDescriptionViewFor(nodeIndex), entry.description); !status)
             {
-                return fail(UIErrorCode::CapacityExceeded,
-                            "UI committed semantics snapshot capacity has been exhausted");
+                return status;
             }
-            const bool enabled = isCandidateNodeEnabled(layoutEntry.node);
-            UISemanticsEntry entry{
-                .node = layoutEntry.node,
-                .parent = idForIndex(record->parentIndex),
-                .role = semanticsRoleForWidgetKind(record->kind),
-                .kind = record->kind,
-                .worldRect = layoutEntry.worldRect,
-                .enabled = enabled,
-                .focused = false,
-            };
-            if (record->kind == UIWidgetKind::Label || record->kind == UIWidgetKind::Button ||
-                record->kind == UIWidgetKind::RadioButton || record->kind == UIWidgetKind::Dropdown ||
-                record->kind == UIWidgetKind::DropdownItem || record->kind == UIWidgetKind::ListViewItem ||
-                record->kind == UIWidgetKind::TreeViewItem)
-            {
-                if (Core::Status status = copyText(textViewFor(nodeIndex), entry.name); !status)
-                {
-                    return status;
-                }
-            }
-            if (record->kind == UIWidgetKind::Checkbox && nodeIndex < checkboxCheckedByNodeIndex.size())
-            {
-                entry.checked = checkboxCheckedByNodeIndex[nodeIndex] != 0;
-                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
-            }
-            if (record->kind == UIWidgetKind::Button)
-            {
-                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
-            }
-            if (record->kind == UIWidgetKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
+            std::string_view valueSource{};
+            if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
             {
                 const UINodeId selected = dropdownStatesByNodeIndex[nodeIndex].selectedItem;
-                if (selected.hasValue() && contains(selected))
-                {
-                    if (Core::Status status = copyText(textViewFor(selected.index()), entry.valueText); !status)
-                    {
-                        return status;
-                    }
-                }
-                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
-            }
-            if (record->kind == UIWidgetKind::DropdownItem)
+                valueSource = contains(selected) ? textViewFor(selected.index()) : std::string_view{};
+            } else if (record->kind == BuiltinElementKind::TextEdit)
             {
-                entry.selected = isSelectedDropdownItem(layoutEntry.node);
-                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
+                valueSource = textViewFor(nodeIndex);
             }
-            if (record->kind == UIWidgetKind::TextEdit)
+            if (Core::Status status = copyText(valueSource, entry.valueText); !status)
             {
-                if (Core::Status status = copyText(textViewFor(nodeIndex), entry.valueText); !status)
-                {
-                    return status;
-                }
-                entry.focused = enabled && textInputFocus == layoutEntry.node;
+                return status;
             }
-            if (record->kind == UIWidgetKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
-            {
-                const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
-                entry.hasRange = true;
-                entry.minValue = slider.minValue;
-                entry.maxValue = slider.maxValue;
-                entry.value = slider.value;
-                entry.focused = enabled && armedSlider == layoutEntry.node;
-            }
-            if (record->kind == UIWidgetKind::ProgressBar && nodeIndex < progressBarStatesByNodeIndex.size())
-            {
-                const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
-                entry.hasRange = true;
-                entry.minValue = progress.minValue;
-                entry.maxValue = progress.maxValue;
-                entry.value = progress.value;
-            }
-            if (record->kind == UIWidgetKind::RadioButton && nodeIndex < radioButtonStatesByNodeIndex.size())
-            {
-                entry.checked = radioButtonStatesByNodeIndex[nodeIndex].selected;
-                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
-            }
-            if (record->kind == UIWidgetKind::ScrollView &&
-                nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
-            {
-                const UIScrollViewMetrics& metrics = scrollViewLayoutScratchByNodeIndex[nodeIndex].metrics;
-                entry.hasRange = true;
-                entry.minValue = 0.0F;
-                entry.maxValue = hasScrollAxis(scrollViewStatesByNodeIndex[nodeIndex].style.axes,
-                                               UIScrollAxes::Vertical)
-                                     ? metrics.maxOffsetY()
-                                     : metrics.maxOffsetX();
-                entry.value = hasScrollAxis(scrollViewStatesByNodeIndex[nodeIndex].style.axes,
-                                            UIScrollAxes::Vertical)
-                                  ? metrics.offset.y
-                                  : metrics.offset.x;
-                entry.focused = enabled && scrollThumbDragActive && armedScrollView == layoutEntry.node;
-            }
-            if (record->kind == UIWidgetKind::ListView && nodeIndex < listViewStatesByNodeIndex.size() &&
-                nodeIndex < listViewLayoutScratchByNodeIndex.size())
-            {
-                const UIListViewMetrics& metrics = listViewLayoutScratchByNodeIndex[nodeIndex].metrics;
-                entry.hasRange = true;
-                entry.minValue = 0.0F;
-                entry.maxValue = metrics.maxScrollOffset;
-                entry.value = metrics.scrollOffset;
-                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
-            }
-            if (record->kind == UIWidgetKind::ListViewItem && nodeIndex < listViewItemStatesByNodeIndex.size())
-            {
-                const ListViewItemState& item = listViewItemStatesByNodeIndex[nodeIndex];
-                entry.virtualItemKey = item.key;
-                entry.virtualItemIndex = item.logicalIndex;
-                entry.selected = item.bound && isSelectedListViewItem(layoutEntry.node);
-                const UINodeId listView = listViewForItem(layoutEntry.node);
-                entry.focused = enabled && entry.selected && defaultActionFocusButton == listView;
-            }
-            if (record->kind == UIWidgetKind::TreeView && nodeIndex < treeViewStatesByNodeIndex.size() &&
-                nodeIndex < treeViewLayoutScratchByNodeIndex.size())
-            {
-                const UITreeViewMetrics& metrics = treeViewLayoutScratchByNodeIndex[nodeIndex].metrics;
-                entry.hasRange = true;
-                entry.minValue = 0.0F;
-                entry.maxValue = metrics.maxScrollOffset;
-                entry.value = metrics.scrollOffset;
-                entry.focused = enabled && defaultActionFocusButton == layoutEntry.node;
-            }
-            if (record->kind == UIWidgetKind::TreeViewItem && nodeIndex < treeViewItemStatesByNodeIndex.size())
-            {
-                const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
-                entry.virtualItemKey = item.key;
-                entry.virtualItemIndex = item.logicalIndex;
-                entry.level = item.level;
-                entry.expandable = item.bound && item.expandable;
-                entry.expanded = item.bound && item.expanded;
-                entry.selected = item.bound && isSelectedTreeViewItem(layoutEntry.node);
-                const UINodeId treeView = treeViewForItem(layoutEntry.node);
-                entry.focused = enabled && entry.selected && defaultActionFocusButton == treeView;
-            }
-            output.push_back(entry);
         }
         return Core::success();
     }
@@ -3567,13 +4238,13 @@ struct UIContext::Impl final {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(node.storageId());
-        if (record != nullptr && record->kind == UIWidgetKind::ListViewItem &&
+        if (record != nullptr && record->kind == BuiltinElementKind::ListViewItem &&
             node.index() < listViewItemStatesByNodeIndex.size())
         {
             const ListViewItemState& item = listViewItemStatesByNodeIndex[node.index()];
             return item.committedBound && item.committedEnabled;
         }
-        if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem &&
+        if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem &&
             node.index() < treeViewItemStatesByNodeIndex.size())
         {
             const TreeViewItemState& item = treeViewItemStatesByNodeIndex[node.index()];
@@ -3589,13 +4260,13 @@ struct UIContext::Impl final {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(node.storageId());
-        if (record != nullptr && record->kind == UIWidgetKind::ListViewItem &&
+        if (record != nullptr && record->kind == BuiltinElementKind::ListViewItem &&
             node.index() < listViewItemStatesByNodeIndex.size())
         {
             const ListViewItemState& item = listViewItemStatesByNodeIndex[node.index()];
             return item.bound && item.enabled;
         }
-        if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem &&
+        if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem &&
             node.index() < treeViewItemStatesByNodeIndex.size())
         {
             const TreeViewItemState& item = treeViewItemStatesByNodeIndex[node.index()];
@@ -3611,8 +4282,8 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if (!isDefaultActivatableKind((*nodeResult)->kind) || (*nodeResult)->kind == UIWidgetKind::ListViewItem ||
-            (*nodeResult)->kind == UIWidgetKind::TreeViewItem)
+        if (!isDefaultActivatableKind((*nodeResult)->kind) || (*nodeResult)->kind == BuiltinElementKind::ListViewItem ||
+            (*nodeResult)->kind == BuiltinElementKind::TreeViewItem)
         {
             return fail(UIErrorCode::InvalidButtonAction,
                         "UI Button action requires a Button, Checkbox, RadioButton, Dropdown, or DropdownItem node");
@@ -3752,7 +4423,7 @@ struct UIContext::Impl final {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(node.storageId());
-        return record != nullptr && record->kind == UIWidgetKind::TextEdit;
+        return record != nullptr && record->kind == BuiltinElementKind::TextEdit;
     }
 
     [[nodiscard]] bool isPointerInteractionCandidate(UINodeId node, std::span<const UICommittedHitEntry> entries,
@@ -3901,7 +4572,7 @@ struct UIContext::Impl final {
             return;
         }
         const NodeRecord* sliderRecord = nodes.tryGet(candidate.slider.storageId());
-        if (sliderRecord == nullptr || sliderRecord->kind != UIWidgetKind::Slider)
+        if (sliderRecord == nullptr || sliderRecord->kind != BuiltinElementKind::Slider)
         {
             return;
         }
@@ -3917,6 +4588,138 @@ struct UIContext::Impl final {
         WidgetTextState& state = textStatesByIndex[index];
         textStorage.release(state.allocation);
         state = {};
+    }
+
+    void clearSemanticsState(u32 index) noexcept
+    {
+        if (index >= semanticsStatesByNodeIndex.size())
+        {
+            return;
+        }
+        SemanticsState& state = semanticsStatesByNodeIndex[index];
+        textStorage.release(state.textAllocation);
+        state = {};
+    }
+
+    [[nodiscard]] std::string_view semanticsNameViewFor(u32 index) const noexcept
+    {
+        if (index >= semanticsStatesByNodeIndex.size())
+        {
+            return {};
+        }
+        const SemanticsState& state = semanticsStatesByNodeIndex[index];
+        return textStorage.view(
+            TextByteAllocation{
+                .offset = state.textAllocation.offset,
+                .capacity = state.nameLength,
+            },
+            state.nameLength);
+    }
+
+    [[nodiscard]] std::string_view semanticsDescriptionViewFor(u32 index) const noexcept
+    {
+        if (index >= semanticsStatesByNodeIndex.size())
+        {
+            return {};
+        }
+        const SemanticsState& state = semanticsStatesByNodeIndex[index];
+        return textStorage.view(
+            TextByteAllocation{
+                .offset = state.textAllocation.offset + state.nameLength,
+                .capacity = state.descriptionLength,
+            },
+            state.descriptionLength);
+    }
+
+    [[nodiscard]] std::string_view semanticsNameSourceFor(u32 index) const noexcept
+    {
+        if (index >= semanticsStatesByNodeIndex.size())
+        {
+            return {};
+        }
+        const SemanticsState& state = semanticsStatesByNodeIndex[index];
+        if (state.hasExplicitName)
+        {
+            return semanticsNameViewFor(index);
+        }
+        return state.useContentAsName ? textViewFor(index) : std::string_view{};
+    }
+
+    void releaseCanvasCommands(u32 index) noexcept
+    {
+        if (index >= canvasCommandStatesByNodeIndex.size())
+        {
+            return;
+        }
+        CanvasCommandState& state = canvasCommandStatesByNodeIndex[index];
+        u32 commandIndex = state.first;
+        u32 releasedCount = 0;
+        while (commandIndex != InvalidCanvasCommandIndex && releasedCount < state.count &&
+               commandIndex < canvasCommandSlots.size())
+        {
+            CanvasCommandSlot& slot = canvasCommandSlots[commandIndex];
+            const u32 next = slot.next;
+            slot = {};
+            slot.next = freeCanvasCommandHead;
+            freeCanvasCommandHead = commandIndex;
+            commandIndex = next;
+            ++releasedCount;
+        }
+        activeCanvasCommandCount =
+            releasedCount <= activeCanvasCommandCount ? activeCanvasCommandCount - releasedCount : 0;
+        state = {};
+    }
+
+    [[nodiscard]] Core::Status assignCanvasCommands(u32 index, std::span<const UICanvasCommand> commands)
+    {
+        if (index >= canvasCommandStatesByNodeIndex.size())
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI canvas state index is out of range");
+        }
+        if (activeCanvasCommandCount > canvasCommandSlots.size() ||
+            commands.size() > (std::numeric_limits<u32>::max)() ||
+            commands.size() > canvasCommandSlots.size() - activeCanvasCommandCount)
+        {
+            return fail(UIErrorCode::CapacityExceeded, "UI canvas command capacity has been exhausted");
+        }
+        for (const UICanvasCommand& command : commands)
+        {
+            if (command.kind != UICanvasCommandKind::SolidRect || !std::isfinite(command.bounds.x) ||
+                !std::isfinite(command.bounds.y) || !isFiniteNonNegative(command.bounds.width) ||
+                !isFiniteNonNegative(command.bounds.height))
+            {
+                return fail(UIErrorCode::InvalidElementDescriptor,
+                            "UI canvas commands require a supported kind and finite non-negative bounds");
+            }
+        }
+
+        CanvasCommandState nextState{};
+        u32 previous = InvalidCanvasCommandIndex;
+        for (const UICanvasCommand& command : commands)
+        {
+            const u32 commandIndex = freeCanvasCommandHead;
+            if (commandIndex == InvalidCanvasCommandIndex || commandIndex >= canvasCommandSlots.size())
+            {
+                return fail(Core::CoreErrorCode::Internal, "UI canvas free-list is inconsistent");
+            }
+            CanvasCommandSlot& slot = canvasCommandSlots[commandIndex];
+            freeCanvasCommandHead = slot.next;
+            slot.command = command;
+            slot.next = InvalidCanvasCommandIndex;
+            if (previous == InvalidCanvasCommandIndex)
+            {
+                nextState.first = commandIndex;
+            } else
+            {
+                canvasCommandSlots[previous].next = commandIndex;
+            }
+            previous = commandIndex;
+            ++nextState.count;
+        }
+        canvasCommandStatesByNodeIndex[index] = nextState;
+        activeCanvasCommandCount += commands.size();
+        canvasCommandHighWater = (std::max)(canvasCommandHighWater, activeCanvasCommandCount);
+        return Core::success();
     }
 
     [[nodiscard]] std::string_view textViewFor(u32 index) const noexcept
@@ -3940,13 +4743,13 @@ struct UIContext::Impl final {
             return {};
         }
         const NodeRecord* popupRecord = nodes.tryGet(popup.storageId());
-        if (popupRecord == nullptr || popupRecord->kind != UIWidgetKind::Popup ||
+        if (popupRecord == nullptr || popupRecord->kind != BuiltinElementKind::Popup ||
             popupRecord->parentIndex == InvalidNodeIndex)
         {
             return {};
         }
         const NodeRecord* dropdownRecord = recordByIndex(popupRecord->parentIndex);
-        return dropdownRecord != nullptr && dropdownRecord->kind == UIWidgetKind::Dropdown
+        return dropdownRecord != nullptr && dropdownRecord->kind == BuiltinElementKind::Dropdown
                    ? idForIndex(popupRecord->parentIndex)
                    : UINodeId{};
     }
@@ -3959,7 +4762,7 @@ struct UIContext::Impl final {
         }
         const NodeRecord* record = nodes.tryGet(dropdown.storageId());
         const UINodeId popup = dropdownStatesByNodeIndex[dropdown.index()].popup;
-        return record != nullptr && record->kind == UIWidgetKind::Dropdown && contains(popup) ? popup : UINodeId{};
+        return record != nullptr && record->kind == BuiltinElementKind::Dropdown && contains(popup) ? popup : UINodeId{};
     }
 
     [[nodiscard]] UINodeId dropdownForItem(UINodeId item) const noexcept
@@ -3969,7 +4772,7 @@ struct UIContext::Impl final {
             return {};
         }
         const NodeRecord* itemRecord = nodes.tryGet(item.storageId());
-        if (itemRecord == nullptr || itemRecord->kind != UIWidgetKind::DropdownItem ||
+        if (itemRecord == nullptr || itemRecord->kind != BuiltinElementKind::DropdownItem ||
             itemRecord->parentIndex == InvalidNodeIndex)
         {
             return {};
@@ -3987,7 +4790,7 @@ struct UIContext::Impl final {
     [[nodiscard]] std::string_view presentationTextViewFor(u32 index) const noexcept
     {
         const NodeRecord* record = recordByIndex(index);
-        if (record != nullptr && record->kind == UIWidgetKind::Dropdown && index < dropdownStatesByNodeIndex.size())
+        if (record != nullptr && record->kind == BuiltinElementKind::Dropdown && index < dropdownStatesByNodeIndex.size())
         {
             const UINodeId selected = dropdownStatesByNodeIndex[index].selectedItem;
             if (contains(selected) && selected.index() < textStatesByIndex.size() &&
@@ -4002,7 +4805,7 @@ struct UIContext::Impl final {
     [[nodiscard]] const UITextMetrics* presentationTextMetricsFor(u32 index) const noexcept
     {
         const NodeRecord* record = recordByIndex(index);
-        if (record != nullptr && record->kind == UIWidgetKind::Dropdown && index < dropdownStatesByNodeIndex.size())
+        if (record != nullptr && record->kind == BuiltinElementKind::Dropdown && index < dropdownStatesByNodeIndex.size())
         {
             const UINodeId selected = dropdownStatesByNodeIndex[index].selectedItem;
             if (contains(selected) && selected.index() < textStatesByIndex.size() &&
@@ -4047,17 +4850,24 @@ struct UIContext::Impl final {
         {
             focusRestoreByNodeIndex[index] = {};
         }
+        if (index < styleRolesByNodeIndex.size())
+        {
+            styleRolesByNodeIndex[index] = UIStyleRoleId::None;
+        }
         boxPaintsByIndex[index] = {};
         buttonPaintsByNodeIndex[index] = {};
         if (index < themeBindingsByNodeIndex.size())
         {
             themeBindingsByNodeIndex[index] = 0;
+            styleOverridesByNodeIndex[index] = 0;
             themeDirtyScratchByNodeIndex[index] = 0;
             themeTextMetricsScratchByNodeIndex[index] = {};
         }
         localSolidFillCacheByIndex[index] = {};
         localTextColorCacheByIndex[index] = {};
         clearTextState(index);
+        clearSemanticsState(index);
+        releaseCanvasCommands(index);
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;
         if (index < dirtyReservedByIndex.size() && dirtyReservedByIndex[index] != 0)
@@ -4610,89 +5420,222 @@ struct UIContext::Impl final {
         return false;
     }
 
-    [[nodiscard]] Detail::UIThemeNodeChrome themeChromeForNode(u32 index) const noexcept
+    [[nodiscard]] static constexpr u16 defaultThemeBindingsFor(UIStyleRoleId role) noexcept
     {
-        return Detail::UIThemeNodeChrome{
-            .bindings = themeBindingsByNodeIndex[index],
-            .boxPaint = boxPaintsByIndex[index],
-            .textStyle = textStatesByIndex[index].style,
-            .buttonPaint = buttonPaintsByNodeIndex[index],
-            .checkboxPaint = checkboxPaintsByNodeIndex[index],
-            .sliderPaint = sliderStatesByNodeIndex[index].paint,
-            .progressBarPaint = progressBarStatesByNodeIndex[index].paint,
-            .radioButtonPaint = radioButtonStatesByNodeIndex[index].paint,
-            .scrollViewPaint = scrollViewStatesByNodeIndex[index].paint,
-            .dropdownPaint = dropdownStatesByNodeIndex[index].paint,
-            .listViewPaint = listViewStatesByNodeIndex[index].paint,
-            .treeViewPaint = treeViewStatesByNodeIndex[index].paint,
-        };
+        switch (role)
+        {
+        case UIStyleRoleId::None:
+            return 0;
+        case UIStyleRoleId::PanelSurface:
+        case UIStyleRoleId::PanelElevated:
+        case UIStyleRoleId::ModalSurface:
+        case UIStyleRoleId::PopupSurface:
+            return ThemeBindingBoxPaint;
+        case UIStyleRoleId::TextBody:
+        case UIStyleRoleId::TextTitle:
+        case UIStyleRoleId::TextSecondary:
+        case UIStyleRoleId::TextAccent:
+            return ThemeBindingTextStyle;
+        case UIStyleRoleId::ButtonPrimary:
+        case UIStyleRoleId::ButtonDanger:
+        case UIStyleRoleId::CollectionItem:
+            return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
+        case UIStyleRoleId::Checkbox:
+            return ThemeBindingBoxPaint | ThemeBindingCheckboxPaint;
+        case UIStyleRoleId::Slider:
+            return ThemeBindingBoxPaint | ThemeBindingSliderPaint;
+        case UIStyleRoleId::TextInput:
+            return ThemeBindingBoxPaint | ThemeBindingTextStyle;
+        case UIStyleRoleId::ProgressBar:
+            return ThemeBindingBoxPaint | ThemeBindingProgressBarPaint;
+        case UIStyleRoleId::RadioButton:
+            return ThemeBindingRadioButtonPaint | ThemeBindingTextStyle;
+        case UIStyleRoleId::ScrollView:
+            return ThemeBindingScrollViewPaint;
+        case UIStyleRoleId::Dropdown:
+            return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle |
+                   ThemeBindingDropdownPaint;
+        case UIStyleRoleId::ListView:
+            return ThemeBindingBoxPaint | ThemeBindingListViewPaint;
+        case UIStyleRoleId::TreeView:
+            return ThemeBindingBoxPaint | ThemeBindingTreeViewPaint;
+        }
+        return 0;
     }
 
-    void applyBoundProductChrome(u32 index, UIWidgetKind kind, const UITheme& theme) noexcept
+    [[nodiscard]] static ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcept
+    {
+        ProductChrome chrome{};
+        switch (role)
+        {
+        case UIStyleRoleId::None:
+            break;
+        case UIStyleRoleId::PanelSurface:
+            chrome.box = makePanelBoxPaint(theme, theme.surface1);
+            break;
+        case UIStyleRoleId::PanelElevated:
+            chrome.box = makePanelBoxPaint(theme, theme.surface1, UIElevation::Low);
+            break;
+        case UIStyleRoleId::ModalSurface:
+            chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 248), UIElevation::Low);
+            break;
+        case UIStyleRoleId::PopupSurface:
+            chrome.box = makePopupBoxPaint(theme);
+            break;
+        case UIStyleRoleId::TextBody:
+            chrome.text = makeBodyTextStyle(theme);
+            break;
+        case UIStyleRoleId::TextTitle:
+            chrome.text = makeTitleTextStyle(theme);
+            break;
+        case UIStyleRoleId::TextSecondary:
+            chrome.text = makeSecondaryTextStyle(theme);
+            break;
+        case UIStyleRoleId::TextAccent:
+            chrome.text = makeAccentTextStyle(theme);
+            break;
+        case UIStyleRoleId::ButtonPrimary:
+        case UIStyleRoleId::ButtonDanger: {
+            const UIButtonChrome button =
+                makeButtonChrome(theme, role == UIStyleRoleId::ButtonDanger ? theme.danger : UIStraightSrgba8Color{});
+            chrome.box = button.box;
+            chrome.button = button.states;
+            chrome.text = button.label;
+            break;
+        }
+        case UIStyleRoleId::Checkbox: {
+            const UICheckboxChrome checkbox = makeCheckboxChrome(theme);
+            chrome.box = checkbox.box;
+            chrome.checkbox = checkbox.indicator;
+            break;
+        }
+        case UIStyleRoleId::Slider: {
+            const UISliderChrome slider = makeSliderChrome(theme);
+            chrome.box = slider.track;
+            chrome.slider = slider.slider;
+            break;
+        }
+        case UIStyleRoleId::TextInput: {
+            const UITextEditChrome textInput = makeTextEditChrome(theme);
+            chrome.box = textInput.box;
+            chrome.text = textInput.text;
+            break;
+        }
+        case UIStyleRoleId::ProgressBar: {
+            const UIProgressBarChrome progressBar = makeProgressBarChrome(theme);
+            chrome.box = progressBar.track;
+            chrome.progressBar = progressBar.bar;
+            break;
+        }
+        case UIStyleRoleId::RadioButton: {
+            const UIRadioButtonChrome radioButton = makeRadioButtonChrome(theme);
+            chrome.radioButton = radioButton.radio;
+            chrome.text = radioButton.label;
+            break;
+        }
+        case UIStyleRoleId::ScrollView:
+            chrome.scrollView = makeScrollViewPaint(theme);
+            break;
+        case UIStyleRoleId::Dropdown: {
+            const UIDropdownChrome dropdown = makeDropdownChrome(theme);
+            chrome.box = dropdown.box;
+            chrome.button = dropdown.states;
+            chrome.text = dropdown.label;
+            chrome.dropdown = dropdown.dropdown;
+            break;
+        }
+        case UIStyleRoleId::CollectionItem: {
+            const UIButtonChrome item = makeDropdownItemChrome(theme);
+            chrome.box = item.box;
+            chrome.button = item.states;
+            chrome.text = item.label;
+            break;
+        }
+        case UIStyleRoleId::ListView:
+            chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
+            chrome.listView = makeListViewPaint(theme);
+            break;
+        case UIStyleRoleId::TreeView:
+            chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
+            chrome.treeView = makeTreeViewPaint(theme);
+            break;
+        }
+        return chrome;
+    }
+
+    void applyProductChromeTransition(u32 index, UIStyleRoleId role, const UITheme& theme,
+                                      u16 affectedBindings, u16 targetBindings) noexcept
     {
         if (index >= themeBindingsByNodeIndex.size())
         {
             return;
         }
-        const Detail::UIThemeNodeChrome chrome =
-            Detail::resolveProductThemeChrome(kind, theme);
-        const u16 bindings = static_cast<u16>(themeBindingsByNodeIndex[index] &
-                                              chrome.bindings);
-        if (Detail::hasThemeBinding(bindings, ThemeBindingBoxPaint))
+        const ProductChrome chrome = productChromeFor(role, theme);
+        if ((affectedBindings & ThemeBindingBoxPaint) != 0)
         {
-            boxPaintsByIndex[index] = chrome.boxPaint;
+            boxPaintsByIndex[index] =
+                (targetBindings & ThemeBindingBoxPaint) != 0 ? chrome.box : UIBoxPaint{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingTextStyle))
+        if ((affectedBindings & ThemeBindingTextStyle) != 0)
         {
-            textStatesByIndex[index].style = chrome.textStyle;
+            textStatesByIndex[index].style =
+                (targetBindings & ThemeBindingTextStyle) != 0 ? chrome.text : UITextStyle{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingButtonPaint))
+        if ((affectedBindings & ThemeBindingButtonPaint) != 0)
         {
-            buttonPaintsByNodeIndex[index] = chrome.buttonPaint;
+            buttonPaintsByNodeIndex[index] =
+                (targetBindings & ThemeBindingButtonPaint) != 0 ? chrome.button : UIButtonPaint{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingCheckboxPaint))
+        if ((affectedBindings & ThemeBindingCheckboxPaint) != 0)
         {
-            checkboxPaintsByNodeIndex[index] = chrome.checkboxPaint;
+            checkboxPaintsByNodeIndex[index] =
+                (targetBindings & ThemeBindingCheckboxPaint) != 0 ? chrome.checkbox : UICheckboxPaint{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingSliderPaint))
+        if ((affectedBindings & ThemeBindingSliderPaint) != 0)
         {
-            sliderStatesByNodeIndex[index].paint = chrome.sliderPaint;
+            sliderStatesByNodeIndex[index].paint =
+                (targetBindings & ThemeBindingSliderPaint) != 0 ? chrome.slider : UISliderPaint{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingProgressBarPaint))
+        if ((affectedBindings & ThemeBindingProgressBarPaint) != 0)
         {
-            progressBarStatesByNodeIndex[index].paint = chrome.progressBarPaint;
+            progressBarStatesByNodeIndex[index].paint =
+                (targetBindings & ThemeBindingProgressBarPaint) != 0 ? chrome.progressBar : UIProgressBarPaint{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingRadioButtonPaint))
+        if ((affectedBindings & ThemeBindingRadioButtonPaint) != 0)
         {
-            radioButtonStatesByNodeIndex[index].paint = chrome.radioButtonPaint;
+            radioButtonStatesByNodeIndex[index].paint =
+                (targetBindings & ThemeBindingRadioButtonPaint) != 0 ? chrome.radioButton : UIRadioButtonPaint{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingScrollViewPaint))
+        if ((affectedBindings & ThemeBindingScrollViewPaint) != 0)
         {
-            scrollViewStatesByNodeIndex[index].paint = chrome.scrollViewPaint;
+            scrollViewStatesByNodeIndex[index].paint =
+                (targetBindings & ThemeBindingScrollViewPaint) != 0 ? chrome.scrollView : UIScrollViewPaint{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingDropdownPaint))
+        if ((affectedBindings & ThemeBindingDropdownPaint) != 0)
         {
-            dropdownStatesByNodeIndex[index].paint = chrome.dropdownPaint;
+            dropdownStatesByNodeIndex[index].paint =
+                (targetBindings & ThemeBindingDropdownPaint) != 0 ? chrome.dropdown : UIDropdownPaint{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingListViewPaint))
+        if ((affectedBindings & ThemeBindingListViewPaint) != 0)
         {
-            listViewStatesByNodeIndex[index].paint = chrome.listViewPaint;
+            listViewStatesByNodeIndex[index].paint =
+                (targetBindings & ThemeBindingListViewPaint) != 0 ? chrome.listView : UIListViewPaint{};
         }
-        if (Detail::hasThemeBinding(bindings, ThemeBindingTreeViewPaint))
+        if ((affectedBindings & ThemeBindingTreeViewPaint) != 0)
         {
-            treeViewStatesByNodeIndex[index].paint = chrome.treeViewPaint;
+            treeViewStatesByNodeIndex[index].paint =
+                (targetBindings & ThemeBindingTreeViewPaint) != 0 ? chrome.treeView : UITreeViewPaint{};
         }
     }
-
-    void applyDefaultProductChrome(u32 index, UIWidgetKind kind) noexcept
+    void applyDefaultProductChrome(u32 index, UIStyleRoleId role) noexcept
     {
         if (index >= themeBindingsByNodeIndex.size())
         {
             return;
         }
-        themeBindingsByNodeIndex[index] =
-            Detail::resolveProductThemeChrome(kind, productTheme).bindings;
-        applyBoundProductChrome(index, kind, productTheme);
+        const u16 bindings = defaultThemeBindingsFor(role);
+        themeBindingsByNodeIndex[index] = bindings;
+        applyProductChromeTransition(index, role, productTheme, bindings, bindings);
     }
 
     [[nodiscard]] static bool textMeasureInputsDiffer(const UITextStyle& left, const UITextStyle& right) noexcept
@@ -4711,6 +5654,7 @@ struct UIContext::Impl final {
         if (index < themeBindingsByNodeIndex.size())
         {
             themeBindingsByNodeIndex[index] &= static_cast<u16>(~binding);
+            styleOverridesByNodeIndex[index] |= binding;
         }
     }
 
@@ -4740,42 +5684,153 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status stageBoundProductChrome(u32 index, UIWidgetKind kind, const UITheme& theme)
+    [[nodiscard]] Core::Status stageProductChromeTransition(u32 index, UIStyleRoleId role,
+                                                            const UITheme& theme, u16 affectedBindings,
+                                                            u16 targetBindings)
     {
-        const u16 bindings = themeBindingsByNodeIndex[index];
-        const Detail::UIThemeNodeChrome nextChrome =
-            Detail::resolveProductThemeChrome(kind, theme);
-        if (Detail::hasThemeBinding(bindings, ThemeBindingTextStyle))
+        if (index >= themeBindingsByNodeIndex.size())
         {
-            if (!Detail::hasThemeBinding(nextChrome.bindings,
-                                         ThemeBindingTextStyle))
-            {
-                return fail(Core::CoreErrorCode::Internal, "UI Theme text binding does not match the node kind");
-            }
-            if (Core::Status status =
-                    stageThemeTextStyle(index, nextChrome.textStyle);
-                !status)
+            return fail(Core::CoreErrorCode::Internal, "UI Theme node index is out of range");
+        }
+        const ProductChrome chrome = productChromeFor(role, theme);
+        if ((affectedBindings & ThemeBindingTextStyle) != 0)
+        {
+            const UITextStyle target =
+                (targetBindings & ThemeBindingTextStyle) != 0 ? chrome.text : UITextStyle{};
+            if (Core::Status status = stageThemeTextStyle(index, target); !status)
             {
                 return status;
             }
         }
 
-        const u16 supportedBindings =
-            static_cast<u16>(bindings & nextChrome.bindings);
-        const u16 nonTextBindings = static_cast<u16>(
-            supportedBindings & static_cast<u16>(~ThemeBindingTextStyle));
-        const Detail::UIThemeChromeChanges changes =
-            Detail::classifyBoundThemeChromeChanges(
-                nonTextBindings, themeChromeForNode(index), nextChrome);
-        if (changes.paint)
+        const auto stagePaintIfChanged = [this, index](bool changed) noexcept {
+            if (changed)
+            {
+                stageThemePaintChange(index);
+            }
+        };
+        if ((affectedBindings & ThemeBindingBoxPaint) != 0)
         {
-            stageThemePaintChange(index);
+            const UIBoxPaint target =
+                (targetBindings & ThemeBindingBoxPaint) != 0 ? chrome.box : UIBoxPaint{};
+            stagePaintIfChanged(boxPaintsByIndex[index] != target);
         }
-        if (changes.layout)
+        if ((affectedBindings & ThemeBindingButtonPaint) != 0)
         {
-            themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+            const UIButtonPaint target =
+                (targetBindings & ThemeBindingButtonPaint) != 0 ? chrome.button : UIButtonPaint{};
+            stagePaintIfChanged(buttonPaintsByNodeIndex[index] != target);
+        }
+        if ((affectedBindings & ThemeBindingCheckboxPaint) != 0)
+        {
+            const UICheckboxPaint target =
+                (targetBindings & ThemeBindingCheckboxPaint) != 0 ? chrome.checkbox : UICheckboxPaint{};
+            stagePaintIfChanged(checkboxPaintsByNodeIndex[index] != target);
+        }
+        if ((affectedBindings & ThemeBindingSliderPaint) != 0)
+        {
+            const UISliderPaint target =
+                (targetBindings & ThemeBindingSliderPaint) != 0 ? chrome.slider : UISliderPaint{};
+            stagePaintIfChanged(sliderStatesByNodeIndex[index].paint != target);
+        }
+        if ((affectedBindings & ThemeBindingProgressBarPaint) != 0)
+        {
+            const UIProgressBarPaint target =
+                (targetBindings & ThemeBindingProgressBarPaint) != 0 ? chrome.progressBar : UIProgressBarPaint{};
+            stagePaintIfChanged(progressBarStatesByNodeIndex[index].paint != target);
+        }
+        if ((affectedBindings & ThemeBindingRadioButtonPaint) != 0)
+        {
+            const UIRadioButtonPaint target =
+                (targetBindings & ThemeBindingRadioButtonPaint) != 0 ? chrome.radioButton : UIRadioButtonPaint{};
+            const UIRadioButtonPaint& current = radioButtonStatesByNodeIndex[index].paint;
+            if (current != target)
+            {
+                stageThemePaintChange(index);
+                if (current.labelGap != target.labelGap)
+                {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
+            }
+        }
+        if ((affectedBindings & ThemeBindingScrollViewPaint) != 0)
+        {
+            const UIScrollViewPaint target =
+                (targetBindings & ThemeBindingScrollViewPaint) != 0 ? chrome.scrollView : UIScrollViewPaint{};
+            const UIScrollViewPaint& current = scrollViewStatesByNodeIndex[index].paint;
+            if (current != target)
+            {
+                stageThemePaintChange(index);
+                if (current.thickness != target.thickness || current.minThumbExtent != target.minThumbExtent)
+                {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
+            }
+        }
+        if ((affectedBindings & ThemeBindingDropdownPaint) != 0)
+        {
+            const UIDropdownPaint target =
+                (targetBindings & ThemeBindingDropdownPaint) != 0 ? chrome.dropdown : UIDropdownPaint{};
+            const UIDropdownPaint& current = dropdownStatesByNodeIndex[index].paint;
+            if (current != target)
+            {
+                stageThemePaintChange(index);
+                if (current.indicatorWidth != target.indicatorWidth ||
+                    current.indicatorHeight != target.indicatorHeight ||
+                    current.indicatorInset != target.indicatorInset)
+                {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
+            }
+        }
+        if ((affectedBindings & ThemeBindingListViewPaint) != 0)
+        {
+            const UIListViewPaint target =
+                (targetBindings & ThemeBindingListViewPaint) != 0 ? chrome.listView : UIListViewPaint{};
+            const UIListViewPaint& current = listViewStatesByNodeIndex[index].paint;
+            if (current != target)
+            {
+                stageThemePaintChange(index);
+                if (current.scrollBar.thickness != target.scrollBar.thickness ||
+                    current.scrollBar.minThumbExtent != target.scrollBar.minThumbExtent)
+                {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
+            }
+        }
+        if ((affectedBindings & ThemeBindingTreeViewPaint) != 0)
+        {
+            const UITreeViewPaint target =
+                (targetBindings & ThemeBindingTreeViewPaint) != 0 ? chrome.treeView : UITreeViewPaint{};
+            const UITreeViewPaint& current = treeViewStatesByNodeIndex[index].paint;
+            if (current != target)
+            {
+                stageThemePaintChange(index);
+                if (current.scrollBar.thickness != target.scrollBar.thickness ||
+                    current.scrollBar.minThumbExtent != target.scrollBar.minThumbExtent)
+                {
+                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
+                }
+            }
         }
         return Core::success();
+    }
+
+    void applyStagedProductChromeTransition(u32 index, UIStyleRoleId role, const UITheme& theme,
+                                            u16 affectedBindings, u16 targetBindings) noexcept
+    {
+        if ((affectedBindings & ThemeBindingTextStyle) != 0)
+        {
+            const ProductChrome chrome = productChromeFor(role, theme);
+            const UITextStyle target =
+                (targetBindings & ThemeBindingTextStyle) != 0 ? chrome.text : UITextStyle{};
+            WidgetTextState& textState = textStatesByIndex[index];
+            if (textState.hasContent && textMeasureInputsDiffer(textState.style, target))
+            {
+                textState.metrics = themeTextMetricsScratchByNodeIndex[index];
+            }
+        }
+        applyProductChromeTransition(index, role, theme, affectedBindings, targetBindings);
     }
 
     void propagateThemeLayoutDirtyToAncestors() noexcept
@@ -4885,11 +5940,14 @@ struct UIContext::Impl final {
         for (u32 index = 0; index < themeBindingsByNodeIndex.size(); ++index)
         {
             const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr || themeBindingsByNodeIndex[index] == 0)
+            const u16 bindings = themeBindingsByNodeIndex[index];
+            if (record == nullptr || bindings == 0)
             {
                 continue;
             }
-            if (Core::Status staged = stageBoundProductChrome(index, record->kind, theme); !staged)
+            if (Core::Status staged =
+                    stageProductChromeTransition(index, styleRolesByNodeIndex[index], theme, bindings, bindings);
+                !staged)
             {
                 return staged;
             }
@@ -4903,30 +5961,20 @@ struct UIContext::Impl final {
         for (u32 index = 0; index < themeBindingsByNodeIndex.size(); ++index)
         {
             const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr || themeBindingsByNodeIndex[index] == 0)
+            const u16 bindings = themeBindingsByNodeIndex[index];
+            if (record == nullptr || bindings == 0)
             {
                 continue;
             }
-            const Detail::UIThemeNodeChrome nextChrome =
-                Detail::resolveProductThemeChrome(record->kind, theme);
-            WidgetTextState& textState = textStatesByIndex[index];
-            if (Detail::hasThemeBinding(themeBindingsByNodeIndex[index],
-                                        ThemeBindingTextStyle) &&
-                Detail::hasThemeBinding(nextChrome.bindings,
-                                        ThemeBindingTextStyle) &&
-                textState.hasContent &&
-                textMeasureInputsDiffer(textState.style, nextChrome.textStyle))
-            {
-                textState.metrics = themeTextMetricsScratchByNodeIndex[index];
-            }
-            applyBoundProductChrome(index, record->kind, theme);
+            const UIStyleRoleId role = styleRolesByNodeIndex[index];
+            applyStagedProductChromeTransition(index, role, theme, bindings, bindings);
         }
         productTheme = theme;
         publishThemeDirtyState();
         return Core::success();
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createNode(UIWidgetKind kind)
+    [[nodiscard]] Core::Result<UINodeId> createNode(BuiltinElementKind kind)
     {
         auto idResult = nodes.tryEmplace();
         if (!idResult)
@@ -4944,28 +5992,291 @@ struct UIContext::Impl final {
         resetNodeSideData(node.index());
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
+        record->behaviors = defaultBehaviorsFor(kind);
         record->rootIndex = node.index();
-        if (kind == UIWidgetKind::Modal || kind == UIWidgetKind::Popup)
+        const UIStyleRoleId styleRole = defaultStyleRoleFor(kind);
+        styleRolesByNodeIndex[node.index()] = styleRole;
+        semanticsStatesByNodeIndex[node.index()] = defaultSemanticsFor(kind);
+        textStatesByIndex[node.index()].alignment = defaultContentAlignment(kind);
+        if (kind == BuiltinElementKind::Modal || kind == BuiltinElementKind::Popup)
         {
             focusScopeModesByNodeIndex[node.index()] = UIFocusScopeMode::Contain;
         }
-        if (kind == UIWidgetKind::Popup)
+        if (kind == BuiltinElementKind::Popup)
         {
-            layoutStylesByIndex[node.index()].position = UILayoutPositionMode::AbsoluteOverlay;
+            layoutStylesByIndex[node.index()].placement = UILayoutPlacement::Overlay;
         }
         // Interactive controls are targetable. Label remains read-only and
         // decorative unless the caller explicitly changes its hit policy.
+        const UIElementBehavior behaviors = record->behaviors;
         pointerHitPoliciesByIndex[node.index()] =
-            (kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox || kind == UIWidgetKind::Slider ||
-             kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::ScrollView ||
-             kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::DropdownItem || kind == UIWidgetKind::ListView ||
-             kind == UIWidgetKind::ListViewItem || kind == UIWidgetKind::TreeView || kind == UIWidgetKind::TreeViewItem)
+            (hasBehavior(behaviors, UIElementBehavior::Focusable) ||
+             hasBehavior(behaviors, UIElementBehavior::Activate) ||
+             hasBehavior(behaviors, UIElementBehavior::RangeInput) ||
+             hasBehavior(behaviors, UIElementBehavior::TextInput) ||
+             hasBehavior(behaviors, UIElementBehavior::Scroll) ||
+             hasBehavior(behaviors, UIElementBehavior::SelectOption))
                 ? UIPointerHitPolicy::Targetable
                 : UIPointerHitPolicy::Ignore;
         if (capacityConfig.applyDefaultProductChrome)
         {
-            applyDefaultProductChrome(node.index(), kind);
+            applyDefaultProductChrome(node.index(), styleRole);
         }
+        return node;
+    }
+
+    [[nodiscard]] Core::Status initializeSemantics(u32 index, const UISemanticsDescriptor& descriptor,
+                                                   UIElementBehavior behaviors)
+    {
+        if (!isValidSemanticsMode(descriptor.mode) || !isValidSemanticsRole(descriptor.role) ||
+            !isValidSemanticsActions(descriptor.actions))
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI element semantics contain an unknown mode, role, or action");
+        }
+        if ((hasSemanticsAction(descriptor.actions, UISemanticsAction::Focus) &&
+             !hasBehavior(behaviors, UIElementBehavior::Focusable)) ||
+            (hasSemanticsAction(descriptor.actions, UISemanticsAction::Activate) &&
+             !hasBehavior(behaviors, UIElementBehavior::Activate)) ||
+            (hasSemanticsAction(descriptor.actions, UISemanticsAction::Toggle) &&
+             !hasBehavior(behaviors, UIElementBehavior::Toggle) &&
+             !hasBehavior(behaviors, UIElementBehavior::ExclusiveChoice)) ||
+            (hasSemanticsAction(descriptor.actions, UISemanticsAction::SetRangeValue) &&
+             !hasBehavior(behaviors, UIElementBehavior::RangeInput)) ||
+            (hasSemanticsAction(descriptor.actions, UISemanticsAction::SetTextValue) &&
+             !hasBehavior(behaviors, UIElementBehavior::TextInput)))
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI element semantics actions require matching behavior capabilities");
+        }
+
+        const std::string_view name = descriptor.name.value_or(std::string_view{});
+        const std::string_view description = descriptor.description.value_or(std::string_view{});
+        if (!Core::isStrictUtf8WithoutNul(name) || !Core::isStrictUtf8WithoutNul(description))
+        {
+            return fail(UIErrorCode::InvalidText, "UI semantics text must be strict UTF-8 without NUL");
+        }
+        if (name.size() > (std::numeric_limits<u32>::max)() ||
+            description.size() > (std::numeric_limits<u32>::max)() - name.size())
+        {
+            return fail(UIErrorCode::CapacityExceeded, "UI semantics text payload is too large");
+        }
+
+        const u32 nameLength = static_cast<u32>(name.size());
+        const u32 descriptionLength = static_cast<u32>(description.size());
+        auto allocation = textStorage.allocate(nameLength + descriptionLength);
+        if (!allocation)
+        {
+            return Core::failure(allocation.error());
+        }
+        textStorage.write(
+            TextByteAllocation{
+                .offset = allocation->offset,
+                .capacity = nameLength,
+            },
+            name);
+        textStorage.write(
+            TextByteAllocation{
+                .offset = allocation->offset + nameLength,
+                .capacity = descriptionLength,
+            },
+            description);
+        semanticsStatesByNodeIndex[index] = SemanticsState{
+            .textAllocation = *allocation,
+            .nameLength = nameLength,
+            .descriptionLength = descriptionLength,
+            .mode = descriptor.mode,
+            .role = descriptor.role,
+            .actions = descriptor.actions,
+            .hasExplicitName = descriptor.name.has_value(),
+            .useContentAsName = descriptor.useContentAsName,
+            .readOnly = descriptor.readOnly,
+        };
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status initializeElement(UINodeId node, BuiltinElementKind kind,
+                                                 const UIElementDescriptor& descriptor,
+                                                 const UILayoutStyle& normalizedLayout)
+    {
+        NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr)
+        {
+            return fail(UIErrorCode::InvalidNode, "UI element initialization references a stale node");
+        }
+        record->behaviors = descriptor.behaviors;
+        layoutStylesByIndex[node.index()] = normalizedLayout;
+        enabledByNodeIndex[node.index()] = descriptor.enabled ? 1 : 0;
+        const u16 previousBindings = themeBindingsByNodeIndex[node.index()];
+        const u16 nextBindings = capacityConfig.applyDefaultProductChrome
+                                     ? defaultThemeBindingsFor(descriptor.visual.styleRole)
+                                     : 0;
+        styleRolesByNodeIndex[node.index()] = descriptor.visual.styleRole;
+        themeBindingsByNodeIndex[node.index()] = nextBindings;
+        applyProductChromeTransition(node.index(), descriptor.visual.styleRole, productTheme,
+                                     previousBindings | nextBindings, nextBindings);
+        if (Core::Status semantics = initializeSemantics(node.index(), descriptor.semantics, descriptor.behaviors);
+            !semantics)
+        {
+            return semantics;
+        }
+        if (Core::Status canvas = assignCanvasCommands(node.index(), descriptor.visual.canvas); !canvas)
+        {
+            return canvas;
+        }
+        if (descriptor.visual.boxPaint.has_value())
+        {
+            boxPaintsByIndex[node.index()] = normalizeBoxPaint(*descriptor.visual.boxPaint);
+            detachThemeBinding(node.index(), ThemeBindingBoxPaint);
+            styleOverridesByNodeIndex[node.index()] |= static_cast<u16>(UIStyleOverride::BoxPaint);
+        }
+        if (descriptor.pointerHitPolicy.has_value())
+        {
+            pointerHitPoliciesByIndex[node.index()] = *descriptor.pointerHitPolicy;
+        }
+        if (descriptor.focusScopeMode.has_value())
+        {
+            focusScopeModesByNodeIndex[node.index()] = *descriptor.focusScopeMode;
+        }
+
+        if (!descriptor.text.has_value())
+        {
+            refreshLocalPaintCache(node.index());
+            return Core::success();
+        }
+
+        WidgetTextState& state = textStatesByIndex[node.index()];
+        if (descriptor.textStyle.has_value())
+        {
+            state.style = *descriptor.textStyle;
+            detachThemeBinding(node.index(), ThemeBindingTextStyle);
+            styleOverridesByNodeIndex[node.index()] |= static_cast<u16>(UIStyleOverride::TextStyle);
+        }
+        state.alignment = descriptor.contentAlignment;
+
+        const std::string_view text = *descriptor.text;
+        auto metrics = measureWidgetText(text, state.style);
+        if (!metrics)
+        {
+            return Core::failure(metrics.error());
+        }
+        if (text.empty())
+        {
+            state.metrics = {};
+            refreshLocalPaintCache(node.index());
+            return Core::success();
+        }
+
+        auto allocation = textStorage.allocate(static_cast<u32>(text.size()));
+        if (!allocation)
+        {
+            return Core::failure(allocation.error());
+        }
+        textStorage.write(*allocation, text);
+        state.allocation = *allocation;
+        state.length = static_cast<u32>(text.size());
+        state.metrics = *metrics;
+        state.hasContent = true;
+        if (kind == BuiltinElementKind::TextEdit)
+        {
+            textEditStatesByNodeIndex[node.index()].selection = {};
+        }
+        refreshLocalPaintCache(node.index());
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> createElement(UINodeId parent,
+                                                       const UIElementDescriptor& descriptor)
+    {
+        auto kindResult = elementBuiltinKind(descriptor);
+        if (!kindResult)
+        {
+            return Core::failure(kindResult.error());
+        }
+        const BuiltinElementKind kind = *kindResult;
+
+        auto normalizedLayout = normalizeLayoutStyle(descriptor.layout);
+        if (!normalizedLayout)
+        {
+            return Core::failure(normalizedLayout.error());
+        }
+        if (descriptor.pointerHitPolicy.has_value() && !isValidPointerHitPolicy(*descriptor.pointerHitPolicy))
+        {
+            return fail(UIErrorCode::InvalidPointerPolicy, "UI element pointer hit policy is not recognized");
+        }
+        if (descriptor.focusScopeMode.has_value() && !isValidFocusScopeMode(*descriptor.focusScopeMode))
+        {
+            return fail(UIErrorCode::InvalidFocusScope, "UI element focus-scope mode is not recognized");
+        }
+        if ((kind == BuiltinElementKind::Modal || kind == BuiltinElementKind::Popup) &&
+            descriptor.focusScopeMode.has_value() && *descriptor.focusScopeMode != UIFocusScopeMode::Contain)
+        {
+            return fail(UIErrorCode::InvalidFocusScope, "UI Modal and Popup elements always contain focus");
+        }
+        if (kind != BuiltinElementKind::ListView && descriptor.listView != UIListViewCreateConfig{})
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI ListView creation config requires the VirtualList behavior");
+        }
+        if (kind != BuiltinElementKind::TreeView && descriptor.treeView != UITreeViewCreateConfig{})
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI TreeView creation config requires the VirtualTree behavior");
+        }
+        if (!isValidStyleRole(descriptor.visual.styleRole))
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor, "UI element style role is not recognized");
+        }
+        if (descriptor.textStyle.has_value() && !descriptor.text.has_value())
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI element text style requires intrinsic text content");
+        }
+        if (descriptor.text.has_value())
+        {
+            if (!isValidContentAlignment(descriptor.contentAlignment))
+            {
+                return fail(UIErrorCode::InvalidLayout,
+                            "UI intrinsic content alignment supports Start, Center, or End on each axis");
+            }
+            if (descriptor.text->size() > (std::numeric_limits<u32>::max)())
+            {
+                return fail(UIErrorCode::CapacityExceeded, "UI element text payload is too large");
+            }
+            if ((kind == BuiltinElementKind::TextEdit || kind == BuiltinElementKind::RadioButton) &&
+                containsLineBreak(*descriptor.text))
+            {
+                return fail(UIErrorCode::InvalidText,
+                            "UI TextEdit and RadioButton accept one logical line without CR or LF");
+            }
+        } else if (descriptor.contentAlignment != UIContentAlignment{})
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI element content alignment requires intrinsic text content");
+        }
+
+        Core::Result<UINodeId> nodeResult =
+            kind == BuiltinElementKind::ListView
+                ? createListViewComposite(parent, descriptor.listView)
+                : kind == BuiltinElementKind::TreeView ? createTreeViewComposite(parent, descriptor.treeView)
+                                                 : createChild(parent, kind);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+
+        const UINodeId node = *nodeResult;
+        auto rollback = Core::makeScopeExit([this, node]() noexcept {
+            if (contains(node))
+            {
+                static_cast<void>(destroySubtree(node));
+            }
+        });
+        if (Core::Status initialized = initializeElement(node, kind, descriptor, *normalizedLayout); !initialized)
+        {
+            return Core::failure(initialized.error());
+        }
+        rollback.release();
         return node;
     }
 
@@ -4981,7 +6292,7 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::CapacityExceeded, "UI root capacity has been exhausted");
         }
 
-        auto nodeResult = createNode(UIWidgetKind::Root);
+        auto nodeResult = createNode(BuiltinElementKind::Root);
         if (!nodeResult)
         {
             return Core::failure(nodeResult.error());
@@ -5007,9 +6318,9 @@ struct UIContext::Impl final {
         return UIRootOwner(context.m_impl->lifetime, root);
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createChild(UINodeId parent, UIWidgetKind kind)
+    [[nodiscard]] Core::Result<UINodeId> createChild(UINodeId parent, BuiltinElementKind kind)
     {
-        if (kind == UIWidgetKind::Root)
+        if (kind == BuiltinElementKind::Root)
         {
             return fail(UIErrorCode::InvalidParent, "Root nodes cannot be created as children");
         }
@@ -5025,9 +6336,9 @@ struct UIContext::Impl final {
             return Core::failure(parentResult.error());
         }
         NodeRecord& parentRecord = **parentResult;
-        if (kind == UIWidgetKind::Popup)
+        if (kind == BuiltinElementKind::Popup)
         {
-            if (parentRecord.kind != UIWidgetKind::Dropdown)
+            if (parentRecord.kind != BuiltinElementKind::Dropdown)
             {
                 return fail(UIErrorCode::InvalidParent, "UI Popup requires a Dropdown parent");
             }
@@ -5039,32 +6350,32 @@ struct UIContext::Impl final {
             {
                 return fail(UIErrorCode::InvalidParent, "UI Dropdown already owns a Popup");
             }
-        } else if (kind == UIWidgetKind::DropdownItem)
+        } else if (kind == BuiltinElementKind::DropdownItem)
         {
-            if (parentRecord.kind != UIWidgetKind::Popup)
+            if (parentRecord.kind != BuiltinElementKind::Popup)
             {
                 return fail(UIErrorCode::InvalidParent, "UI DropdownItem requires a Popup parent");
             }
-        } else if (kind == UIWidgetKind::ListViewItem)
+        } else if (kind == BuiltinElementKind::ListViewItem)
         {
-            if (parentRecord.kind != UIWidgetKind::ListView)
+            if (parentRecord.kind != BuiltinElementKind::ListView)
             {
                 return fail(UIErrorCode::InvalidParent, "UI ListViewItem requires a ListView parent");
             }
-        } else if (kind == UIWidgetKind::TreeViewItem)
+        } else if (kind == BuiltinElementKind::TreeViewItem)
         {
-            if (parentRecord.kind != UIWidgetKind::TreeView)
+            if (parentRecord.kind != BuiltinElementKind::TreeView)
             {
                 return fail(UIErrorCode::InvalidParent, "UI TreeViewItem requires a TreeView parent");
             }
-        } else if (parentRecord.kind == UIWidgetKind::Dropdown || parentRecord.kind == UIWidgetKind::Popup)
+        } else if (parentRecord.kind == BuiltinElementKind::Dropdown || parentRecord.kind == BuiltinElementKind::Popup)
         {
             return fail(UIErrorCode::InvalidParent,
                         "UI Dropdown composites only accept Popup and DropdownItem children");
-        } else if (parentRecord.kind == UIWidgetKind::ListView)
+        } else if (parentRecord.kind == BuiltinElementKind::ListView)
         {
             return fail(UIErrorCode::InvalidParent, "UI ListView only accepts its internal item rows");
-        } else if (parentRecord.kind == UIWidgetKind::TreeView)
+        } else if (parentRecord.kind == BuiltinElementKind::TreeView)
         {
             return fail(UIErrorCode::InvalidParent, "UI TreeView only accepts its internal item rows");
         }
@@ -5095,7 +6406,7 @@ struct UIContext::Impl final {
             parentRecord.firstChildIndex = node.index();
         }
         parentRecord.lastChildIndex = node.index();
-        if (kind == UIWidgetKind::Popup)
+        if (kind == BuiltinElementKind::Popup)
         {
             dropdownStatesByNodeIndex[parent.index()].popup = node;
         }
@@ -5117,7 +6428,7 @@ struct UIContext::Impl final {
                         "UI ListView row pool exceeds the remaining node capacity");
         }
 
-        auto listResult = createChild(parent, UIWidgetKind::ListView);
+        auto listResult = createChild(parent, BuiltinElementKind::ListView);
         if (!listResult)
         {
             return Core::failure(listResult.error());
@@ -5134,7 +6445,7 @@ struct UIContext::Impl final {
 
         for (u32 row = 0; row < normalized->materializedItemCapacity; ++row)
         {
-            auto itemResult = createChild(listView, UIWidgetKind::ListViewItem);
+            auto itemResult = createChild(listView, BuiltinElementKind::ListViewItem);
             if (!itemResult)
             {
                 return Core::failure(itemResult.error());
@@ -5161,7 +6472,7 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::CapacityExceeded, "UI TreeView row pool exceeds the remaining node capacity");
         }
 
-        auto treeResult = createChild(parent, UIWidgetKind::TreeView);
+        auto treeResult = createChild(parent, BuiltinElementKind::TreeView);
         if (!treeResult)
         {
             return Core::failure(treeResult.error());
@@ -5178,7 +6489,7 @@ struct UIContext::Impl final {
 
         for (u32 row = 0; row < normalized->materializedItemCapacity; ++row)
         {
-            auto itemResult = createChild(treeView, UIWidgetKind::TreeViewItem);
+            auto itemResult = createChild(treeView, BuiltinElementKind::TreeViewItem);
             if (!itemResult)
             {
                 return Core::failure(itemResult.error());
@@ -5192,13 +6503,9 @@ struct UIContext::Impl final {
         return treeView;
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                                                UIWidgetKind kind)
+    [[nodiscard]] Core::Result<UINodeId> createElementFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                                  const UIElementDescriptor& descriptor)
     {
-        if (kind == UIWidgetKind::Root)
-        {
-            return fail(UIErrorCode::InvalidParent, "Root nodes cannot be created as children");
-        }
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
             return Core::failure(ownerThread.error());
@@ -5222,55 +6529,150 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidNode, "UI parent is not owned by the updater root");
         }
 
-        return createChild(parent, kind);
+        return createElement(parent, descriptor);
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createListViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                                                  UIListViewCreateConfig config)
+    [[nodiscard]] Core::Result<usize> requiredNodeCountForElement(const UIElementDescriptor& descriptor) const
+    {
+        auto kind = elementBuiltinKind(descriptor);
+        if (!kind)
+        {
+            return Core::failure(kind.error());
+        }
+        if (*kind == BuiltinElementKind::ListView)
+        {
+            auto config = normalizeListViewCreateConfig(descriptor.listView);
+            if (!config)
+            {
+                return Core::failure(config.error());
+            }
+            return static_cast<usize>(config->materializedItemCapacity) + 1U;
+        }
+        if (*kind == BuiltinElementKind::TreeView)
+        {
+            auto config = normalizeTreeViewCreateConfig(descriptor.treeView);
+            if (!config)
+            {
+                return Core::failure(config.error());
+            }
+            return static_cast<usize>(config->materializedItemCapacity) + 1U;
+        }
+        return 1U;
+    }
+
+    [[nodiscard]] Core::Result<UIElementBuildTransaction>
+    beginBuildTransaction(UIContext& context, UINodeId updaterRoot, UINodeId parent,
+                          const UIElementDescriptor& rootDescriptor, usize nodeBudget)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
             return Core::failure(ownerThread.error());
         }
         drainDeferredRootDestroys();
-        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        if (nodeBudget == 0)
         {
-            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI component build transaction requires a positive node budget");
         }
-        auto parentResult = resolveParent(parent);
-        if (!parentResult)
+        if (nodeBudget > nodes.availableCount())
         {
-            return Core::failure(parentResult.error());
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI component build transaction budget exceeds remaining node capacity");
         }
-        if (!isNodeWithinRoot(updaterRoot, parent))
+        auto requiredNodes = requiredNodeCountForElement(rootDescriptor);
+        if (!requiredNodes)
         {
-            return fail(UIErrorCode::InvalidNode, "UI ListView parent is not owned by the updater root");
+            return Core::failure(requiredNodes.error());
         }
-        return createListViewComposite(parent, config);
+        if (*requiredNodes > nodeBudget)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI component root exceeds its build transaction node budget");
+        }
+        auto componentRoot = createElementFromUpdater(updaterRoot, parent, rootDescriptor);
+        if (!componentRoot)
+        {
+            return Core::failure(componentRoot.error());
+        }
+        ++activeBuildTransactionCount;
+        return UIElementBuildTransaction{
+            context,
+            updaterRoot,
+            *componentRoot,
+            nodeBudget - *requiredNodes,
+        };
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createTreeViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                                                   UITreeViewCreateConfig config)
+    [[nodiscard]] Core::Result<UINodeId>
+    createElementFromBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot, UINodeId parent,
+                                      const UIElementDescriptor& descriptor, usize& remainingNodeBudget)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
             return Core::failure(ownerThread.error());
         }
-        drainDeferredRootDestroys();
-        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        if (activeBuildTransactionCount == 0 || !contains(updaterRoot) || !contains(componentRoot) ||
+            !isNodeWithinRoot(updaterRoot, componentRoot))
         {
-            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+            return fail(UIErrorCode::InvalidNode, "UI component build transaction is no longer active");
         }
-        auto parentResult = resolveParent(parent);
-        if (!parentResult)
+        if (!contains(parent) || !isNodeWithinSubtree(componentRoot, parent))
         {
-            return Core::failure(parentResult.error());
+            return fail(UIErrorCode::InvalidParent,
+                        "UI component build transaction parent must belong to its component subtree");
         }
-        if (!isNodeWithinRoot(updaterRoot, parent))
+        auto requiredNodes = requiredNodeCountForElement(descriptor);
+        if (!requiredNodes)
         {
-            return fail(UIErrorCode::InvalidNode, "UI TreeView parent is not owned by the updater root");
+            return Core::failure(requiredNodes.error());
         }
-        return createTreeViewComposite(parent, config);
+        if (*requiredNodes > remainingNodeBudget)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI component build transaction node budget has been exhausted");
+        }
+        auto node = createElement(parent, descriptor);
+        if (!node)
+        {
+            return Core::failure(node.error());
+        }
+        remainingNodeBudget -= *requiredNodes;
+        return node;
+    }
+
+    [[nodiscard]] Core::Status commitBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        if (activeBuildTransactionCount == 0)
+        {
+            return fail(UIErrorCode::InvalidNode, "UI component build transaction is no longer active");
+        }
+        if (!contains(updaterRoot) || !contains(componentRoot) || !isNodeWithinRoot(updaterRoot, componentRoot))
+        {
+            --activeBuildTransactionCount;
+            return fail(UIErrorCode::InvalidNode, "UI component build transaction root is no longer alive");
+        }
+        --activeBuildTransactionCount;
+        return Core::success();
+    }
+
+    void rollbackBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot) noexcept
+    {
+        if (!isOwnerThread())
+        {
+            std::terminate();
+        }
+        if (activeBuildTransactionCount != 0)
+        {
+            --activeBuildTransactionCount;
+        }
+        if (contains(updaterRoot) && contains(componentRoot) && isNodeWithinRoot(updaterRoot, componentRoot))
+        {
+            static_cast<void>(destroySubtree(componentRoot));
+        }
     }
 
     void unlinkFromTree(u32 index, NodeRecord& record) noexcept
@@ -5342,7 +6744,7 @@ struct UIContext::Impl final {
             }
 
             const UINodeId node = idForIndex(currentIndex);
-            if (record->kind == UIWidgetKind::Modal && currentIndex < focusRestoreByNodeIndex.size())
+            if (record->kind == BuiltinElementKind::Modal && currentIndex < focusRestoreByNodeIndex.size())
             {
                 const auto& committedEntries = committedHitBuffers[publishedHitBufferIndex];
                 const u32 destroyedModalEntryIndex = findHitEntryIndex(node, committedEntries);
@@ -5357,7 +6759,7 @@ struct UIContext::Impl final {
                     hasPendingDestroyedModalRestoreFocus = true;
                 }
             }
-            if (record->kind == UIWidgetKind::DropdownItem)
+            if (record->kind == BuiltinElementKind::DropdownItem)
             {
                 const UINodeId dropdown = dropdownForItem(node);
                 if (dropdown.hasValue() && dropdown.index() < dropdownStatesByNodeIndex.size() &&
@@ -5366,7 +6768,7 @@ struct UIContext::Impl final {
                     dropdownStatesByNodeIndex[dropdown.index()].selectedItem = {};
                 }
             }
-            if (record->kind == UIWidgetKind::Popup)
+            if (record->kind == BuiltinElementKind::Popup)
             {
                 const UINodeId dropdown = dropdownForPopup(node);
                 if (dropdown.hasValue() && dropdown.index() < dropdownStatesByNodeIndex.size())
@@ -5424,7 +6826,7 @@ struct UIContext::Impl final {
             // destruction. Generation validation makes that outcome idempotent.
             return Core::success();
         }
-        const bool wasRoot = record->kind == UIWidgetKind::Root;
+        const bool wasRoot = record->kind == BuiltinElementKind::Root;
         unlinkFromTree(node.index(), *record);
         eraseDetachedSubtree(node.index());
         if (wasRoot && liveRootCount > 0)
@@ -5444,7 +6846,7 @@ struct UIContext::Impl final {
 
         dispatchPointerCancelForSubtree(root);
         NodeRecord* rootRecord = nodes.tryGet(root.storageId());
-        if (rootRecord == nullptr || rootRecord->kind != UIWidgetKind::Root)
+        if (rootRecord == nullptr || rootRecord->kind != BuiltinElementKind::Root)
         {
             return;
         }
@@ -5484,12 +6886,12 @@ struct UIContext::Impl final {
         }
 
         const NodeRecord* record = nodes.tryGet(node.storageId());
-        if (record != nullptr && record->kind == UIWidgetKind::ListViewItem)
+        if (record != nullptr && record->kind == BuiltinElementKind::ListViewItem)
         {
             return fail(UIErrorCode::InvalidControlValue,
                         "UI ListView item rows are internal and cannot be destroyed independently");
         }
-        if (record != nullptr && record->kind == UIWidgetKind::TreeViewItem)
+        if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem)
         {
             return fail(UIErrorCode::InvalidControlValue,
                         "UI TreeView item rows are internal and cannot be destroyed independently");
@@ -5622,7 +7024,8 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
         }
-        if (!isSemanticsPublishedKind((*nodeResult)->kind))
+        const UISemanticsMode semanticsMode = semanticsStatesByNodeIndex[node.index()].mode;
+        if (semanticsMode != UISemanticsMode::Publish && semanticsMode != UISemanticsMode::MergeDescendants)
         {
             return fail(UIErrorCode::InvalidControlValue, "UI enabled state requires a published widget node");
         }
@@ -5640,14 +7043,14 @@ struct UIContext::Impl final {
         UINodeId popupToClose{};
         if (!enabled)
         {
-            if ((*nodeResult)->kind == UIWidgetKind::Dropdown)
+            if ((*nodeResult)->kind == BuiltinElementKind::Dropdown)
             {
                 const UINodeId popup = popupForDropdown(node);
                 if (popup.hasValue() && popupStatesByNodeIndex[popup.index()].open)
                 {
                     popupToClose = popup;
                 }
-            } else if ((*nodeResult)->kind == UIWidgetKind::Popup &&
+            } else if ((*nodeResult)->kind == BuiltinElementKind::Popup &&
                        popupStatesByNodeIndex[node.index()].open)
             {
                 popupToClose = node;
@@ -5748,7 +7151,8 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
         }
-        if (!isSemanticsPublishedKind((*nodeResult)->kind))
+        const UISemanticsMode semanticsMode = semanticsStatesByNodeIndex[node.index()].mode;
+        if (semanticsMode != UISemanticsMode::Publish && semanticsMode != UISemanticsMode::MergeDescendants)
         {
             return fail(UIErrorCode::InvalidControlValue, "UI enabled state requires a published widget node");
         }
@@ -5783,7 +7187,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidFocusScope, "UI focus-scope mode is not recognized");
         }
-        if (((*nodeResult)->kind == UIWidgetKind::Modal || (*nodeResult)->kind == UIWidgetKind::Popup) &&
+        if (((*nodeResult)->kind == BuiltinElementKind::Modal || (*nodeResult)->kind == BuiltinElementKind::Popup) &&
             mode != UIFocusScopeMode::Contain)
         {
             return fail(UIErrorCode::InvalidFocusScope, "UI Modal and Popup nodes always contain focus");
@@ -5821,6 +7225,150 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidNode, "UI focus scope is not owned by the updater root");
         }
         return focusScopeModesByNodeIndex[node.index()];
+    }
+
+    [[nodiscard]] Core::Status setStyleRoleFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                       UIStyleRoleId role)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI style role is not owned by the updater root");
+        }
+        if (!isValidStyleRole(role))
+        {
+            return fail(UIErrorCode::InvalidTheme, "UI style role is not recognized");
+        }
+
+        const u32 index = node.index();
+        if (styleRolesByNodeIndex[index] == role)
+        {
+            return Core::success();
+        }
+        const u16 previousBindings = themeBindingsByNodeIndex[index];
+        const u16 supportedBindings =
+            capacityConfig.applyDefaultProductChrome ? defaultThemeBindingsFor(role) : 0;
+        const u16 nextBindings =
+            supportedBindings & static_cast<u16>(~styleOverridesByNodeIndex[index]);
+        const u16 affectedBindings = previousBindings | nextBindings;
+
+        std::fill(themeDirtyScratchByNodeIndex.begin(), themeDirtyScratchByNodeIndex.end(), u8{0});
+        if (Core::Status staged =
+                stageProductChromeTransition(index, role, productTheme, affectedBindings, nextBindings);
+            !staged)
+        {
+            return staged;
+        }
+        propagateThemeLayoutDirtyToAncestors();
+        if (Core::Status capacity = preflightThemeDirtyQueue(); !capacity)
+        {
+            return capacity;
+        }
+
+        styleRolesByNodeIndex[index] = role;
+        themeBindingsByNodeIndex[index] = nextBindings;
+        applyStagedProductChromeTransition(index, role, productTheme, affectedBindings, nextBindings);
+        publishThemeDirtyState();
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIStyleRoleId> styleRoleFromUpdater(UINodeId updaterRoot,
+                                                                   UINodeId node) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = const_cast<Impl*>(this)->resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI style role is not owned by the updater root");
+        }
+        return styleRolesByNodeIndex[node.index()];
+    }
+
+    [[nodiscard]] Core::Status clearOverrideFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                        UIStyleOverride properties)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI style override is not owned by the updater root");
+        }
+
+        constexpr u16 ValidOverrides = static_cast<u16>(UIStyleOverride::All);
+        const u16 requested = static_cast<u16>(properties);
+        if ((requested & static_cast<u16>(~ValidOverrides)) != 0)
+        {
+            return fail(UIErrorCode::InvalidTheme, "UI style override mask contains an unknown property");
+        }
+        const u32 index = node.index();
+        const u16 overridesToClear = styleOverridesByNodeIndex[index] & requested;
+        if (overridesToClear == 0)
+        {
+            return Core::success();
+        }
+
+        const UIStyleRoleId role = styleRolesByNodeIndex[index];
+        const u16 supportedBindings =
+            capacityConfig.applyDefaultProductChrome ? defaultThemeBindingsFor(role) : 0;
+        const u16 restoredBindings = supportedBindings & overridesToClear;
+        const u16 previousBindings = themeBindingsByNodeIndex[index];
+        const u16 nextBindings = previousBindings | restoredBindings;
+        const u16 affectedBindings = nextBindings & static_cast<u16>(~previousBindings);
+
+        std::fill(themeDirtyScratchByNodeIndex.begin(), themeDirtyScratchByNodeIndex.end(), u8{0});
+        if (Core::Status staged =
+                stageProductChromeTransition(index, role, productTheme, affectedBindings, affectedBindings);
+            !staged)
+        {
+            return staged;
+        }
+        propagateThemeLayoutDirtyToAncestors();
+        if (Core::Status capacity = preflightThemeDirtyQueue(); !capacity)
+        {
+            return capacity;
+        }
+
+        styleOverridesByNodeIndex[index] &= static_cast<u16>(~requested);
+        themeBindingsByNodeIndex[index] = nextBindings;
+        applyStagedProductChromeTransition(index, role, productTheme, affectedBindings, affectedBindings);
+        publishThemeDirtyState();
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status setBoxPaintFromUpdater(UINodeId updaterRoot, UINodeId node, const UIBoxPaint& paint)
@@ -5957,10 +7505,9 @@ struct UIContext::Impl final {
         const NodeRecord* record = nodes.tryGet(node.storageId());
         if (record == nullptr || !supportsWidgetText(record->kind))
         {
-            return fail(UIErrorCode::InvalidText,
-                        "UI text is only supported on Label, Button, RadioButton, and TextEdit nodes");
+            return fail(UIErrorCode::InvalidText, "UI text requires an element with intrinsic text content");
         }
-        if ((record->kind == UIWidgetKind::TextEdit || record->kind == UIWidgetKind::RadioButton) &&
+        if ((record->kind == BuiltinElementKind::TextEdit || record->kind == BuiltinElementKind::RadioButton) &&
             containsLineBreak(utf8))
         {
             return fail(UIErrorCode::InvalidText,
@@ -5980,7 +7527,7 @@ struct UIContext::Impl final {
         WidgetTextState& state = textStatesByIndex[node.index()];
         const std::string_view current = textViewFor(node.index());
         const bool clearActiveIme =
-            record->kind == UIWidgetKind::TextEdit && textInputFocus == node && imeComposition.active();
+            record->kind == BuiltinElementKind::TextEdit && textInputFocus == node && imeComposition.active();
         if (state.hasContent == !utf8.empty() && current == utf8 && state.metrics == *metrics)
         {
             if (clearActiveIme)
@@ -6027,7 +7574,7 @@ struct UIContext::Impl final {
             state.length = 0;
             state.metrics = {};
             state.hasContent = false;
-            if (record->kind == UIWidgetKind::TextEdit)
+            if (record->kind == BuiltinElementKind::TextEdit)
             {
                 textEditStatesByNodeIndex[node.index()].selection = {};
                 if (clearActiveIme)
@@ -6047,7 +7594,7 @@ struct UIContext::Impl final {
         state.length = static_cast<u32>(utf8.size());
         state.metrics = *metrics;
         state.hasContent = true;
-        if (record->kind == UIWidgetKind::TextEdit)
+        if (record->kind == BuiltinElementKind::TextEdit)
         {
             UITextSelection& selection = textEditStatesByNodeIndex[node.index()].selection;
             selection.anchorCodepoint = (std::min)(selection.anchorCodepoint, metrics->codepointCount);
@@ -6087,8 +7634,7 @@ struct UIContext::Impl final {
         const NodeRecord* record = nodes.tryGet(node.storageId());
         if (record == nullptr || !supportsWidgetText(record->kind))
         {
-            return fail(UIErrorCode::InvalidText,
-                        "UI text style is only supported on Label, Button, RadioButton, and TextEdit nodes");
+            return fail(UIErrorCode::InvalidText, "UI text style requires an element with intrinsic text content");
         }
 
         WidgetTextState& state = textStatesByIndex[node.index()];
@@ -6123,6 +7669,55 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setContentAlignmentFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                               UIContentAlignment alignment)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind))
+        {
+            return fail(UIErrorCode::InvalidText, "UI content alignment requires an element with intrinsic text");
+        }
+        if (!isValidContentAlignment(alignment))
+        {
+            return fail(UIErrorCode::InvalidLayout,
+                        "UI intrinsic content alignment supports Start, Center, or End on each axis");
+        }
+
+        WidgetTextState& state = textStatesByIndex[node.index()];
+        if (state.alignment == alignment)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus)
+        {
+            return dirtyStatus;
+        }
+        if (Core::Status paintStatus = markPaintDirty(node); !paintStatus)
+        {
+            return paintStatus;
+        }
+        state.alignment = alignment;
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Result<std::string_view> textFromUpdater(UINodeId updaterRoot, UINodeId node)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
@@ -6150,8 +7745,7 @@ struct UIContext::Impl final {
         const NodeRecord* record = nodes.tryGet(node.storageId());
         if (record == nullptr || !supportsWidgetText(record->kind))
         {
-            return fail(UIErrorCode::InvalidText,
-                        "UI text is only supported on Label, Button, RadioButton, and TextEdit nodes");
+            return fail(UIErrorCode::InvalidText, "UI text requires an element with intrinsic text content");
         }
         return textViewFor(node.index());
     }
@@ -6183,10 +7777,38 @@ struct UIContext::Impl final {
         const NodeRecord* record = nodes.tryGet(node.storageId());
         if (record == nullptr || !supportsWidgetText(record->kind))
         {
-            return fail(UIErrorCode::InvalidText,
-                        "UI text style is only supported on Label, Button, RadioButton, and TextEdit nodes");
+            return fail(UIErrorCode::InvalidText, "UI text style requires an element with intrinsic text content");
         }
         return textStatesByIndex[node.index()].style;
+    }
+
+    [[nodiscard]] Core::Result<UIContentAlignment> contentAlignmentFromUpdater(UINodeId updaterRoot,
+                                                                                UINodeId node)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind))
+        {
+            return fail(UIErrorCode::InvalidText, "UI content alignment requires an element with intrinsic text");
+        }
+        return textStatesByIndex[node.index()].alignment;
     }
 
     [[nodiscard]] Core::Status setTextSelectionFromUpdater(UINodeId updaterRoot, UINodeId textEdit,
@@ -6207,7 +7829,7 @@ struct UIContext::Impl final {
             return Core::failure(nodeResult.error());
         }
         const NodeRecord* record = nodes.tryGet(textEdit.storageId());
-        if (record == nullptr || record->kind != UIWidgetKind::TextEdit)
+        if (record == nullptr || record->kind != BuiltinElementKind::TextEdit)
         {
             return fail(UIErrorCode::InvalidText, "UI selection requires a TextEdit node");
         }
@@ -6253,7 +7875,7 @@ struct UIContext::Impl final {
             return Core::failure(nodeResult.error());
         }
         const NodeRecord* record = nodes.tryGet(textEdit.storageId());
-        if (record == nullptr || record->kind != UIWidgetKind::TextEdit)
+        if (record == nullptr || record->kind != BuiltinElementKind::TextEdit)
         {
             return fail(UIErrorCode::InvalidText, "UI selection requires a TextEdit node");
         }
@@ -6388,7 +8010,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::Checkbox)
+        if ((*nodeResult)->kind != BuiltinElementKind::Checkbox)
         {
             return fail(UIErrorCode::InvalidButtonAction, "UI Checkbox API requires a Checkbox node");
         }
@@ -6578,7 +8200,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::Slider)
+        if ((*nodeResult)->kind != BuiltinElementKind::Slider)
         {
             return fail(UIErrorCode::InvalidButtonAction, "UI Slider API requires a Slider node");
         }
@@ -6595,7 +8217,7 @@ struct UIContext::Impl final {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(slider.storageId());
-        if (record == nullptr || record->kind != UIWidgetKind::Slider)
+        if (record == nullptr || record->kind != BuiltinElementKind::Slider)
         {
             return false;
         }
@@ -6649,25 +8271,24 @@ struct UIContext::Impl final {
         {
             return 0;
         }
-        UILogicalRect worldRect{};
-        bool foundRect = false;
-        for (const UICommittedHitEntry& entry : committedHit().entries())
+        UICommittedContentPlacement placement{};
+        bool foundPlacement = false;
+        for (const UICommittedLayoutEntry& entry : committedLayout().entries())
         {
             if (entry.node == textEdit)
             {
-                worldRect = entry.worldRect;
-                foundRect = true;
+                placement = entry.contentPlacement;
+                foundPlacement = true;
                 break;
             }
         }
         const WidgetTextState& textState = textStatesByIndex[textEdit.index()];
         const u32 codepointCount = textState.metrics.codepointCount;
-        if (!foundRect || codepointCount == 0)
+        if (!foundPlacement || codepointCount == 0)
         {
             return 0;
         }
-        const float textStartX = worldRect.x + layoutStylesByIndex[textEdit.index()].padding.left;
-        const float relativeX = position.x - textStartX;
+        const float relativeX = position.x - placement.origin.x;
         const float fallbackAdvance =
             textState.style.logicalSize * textState.style.advanceScale;
 
@@ -7014,7 +8635,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::ScrollView)
+        if ((*nodeResult)->kind != BuiltinElementKind::ScrollView)
         {
             return fail(UIErrorCode::InvalidControlValue, "UI ScrollView API requires a ScrollView node");
         }
@@ -7046,7 +8667,7 @@ struct UIContext::Impl final {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(scrollView.storageId());
-        return record != nullptr && record->kind == UIWidgetKind::ScrollView;
+        return record != nullptr && record->kind == BuiltinElementKind::ScrollView;
     }
 
     [[nodiscard]] bool isLiveListView(UINodeId listView) const noexcept
@@ -7056,7 +8677,7 @@ struct UIContext::Impl final {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(listView.storageId());
-        return record != nullptr && record->kind == UIWidgetKind::ListView;
+        return record != nullptr && record->kind == BuiltinElementKind::ListView;
     }
 
     [[nodiscard]] bool isLiveTreeView(UINodeId treeView) const noexcept
@@ -7066,7 +8687,7 @@ struct UIContext::Impl final {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(treeView.storageId());
-        return record != nullptr && record->kind == UIWidgetKind::TreeView;
+        return record != nullptr && record->kind == BuiltinElementKind::TreeView;
     }
 
     [[nodiscard]] bool isLiveVirtualView(UINodeId node) const noexcept
@@ -7600,7 +9221,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::Popup || popup.index() >= popupStatesByNodeIndex.size())
+        if ((*nodeResult)->kind != BuiltinElementKind::Popup || popup.index() >= popupStatesByNodeIndex.size())
         {
             return fail(UIErrorCode::InvalidControlValue, "UI Popup API requires a Popup node");
         }
@@ -7614,7 +9235,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::Dropdown || dropdown.index() >= dropdownStatesByNodeIndex.size())
+        if ((*nodeResult)->kind != BuiltinElementKind::Dropdown || dropdown.index() >= dropdownStatesByNodeIndex.size())
         {
             return fail(UIErrorCode::InvalidControlValue, "UI Dropdown API requires a Dropdown node");
         }
@@ -7628,7 +9249,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::DropdownItem)
+        if ((*nodeResult)->kind != BuiltinElementKind::DropdownItem)
         {
             return fail(UIErrorCode::InvalidControlValue, "UI Dropdown item API requires a DropdownItem node");
         }
@@ -7642,7 +9263,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::ListView || listView.index() >= listViewStatesByNodeIndex.size())
+        if ((*nodeResult)->kind != BuiltinElementKind::ListView || listView.index() >= listViewStatesByNodeIndex.size())
         {
             return fail(UIErrorCode::InvalidControlValue, "UI ListView API requires a ListView node");
         }
@@ -7656,14 +9277,14 @@ struct UIContext::Impl final {
             return {};
         }
         const NodeRecord* itemRecord = nodes.tryGet(item.storageId());
-        if (itemRecord == nullptr || itemRecord->kind != UIWidgetKind::ListViewItem ||
+        if (itemRecord == nullptr || itemRecord->kind != BuiltinElementKind::ListViewItem ||
             itemRecord->parentIndex == InvalidNodeIndex)
         {
             return {};
         }
         const UINodeId parent = idForIndex(itemRecord->parentIndex);
         const NodeRecord* parentRecord = contains(parent) ? nodes.tryGet(parent.storageId()) : nullptr;
-        return parentRecord != nullptr && parentRecord->kind == UIWidgetKind::ListView ? parent : UINodeId{};
+        return parentRecord != nullptr && parentRecord->kind == BuiltinElementKind::ListView ? parent : UINodeId{};
     }
 
     [[nodiscard]] bool isSelectedListViewItem(UINodeId item) const noexcept
@@ -7715,7 +9336,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::TreeView || treeView.index() >= treeViewStatesByNodeIndex.size())
+        if ((*nodeResult)->kind != BuiltinElementKind::TreeView || treeView.index() >= treeViewStatesByNodeIndex.size())
         {
             return fail(UIErrorCode::InvalidControlValue, "UI TreeView API requires a TreeView node");
         }
@@ -7729,14 +9350,14 @@ struct UIContext::Impl final {
             return {};
         }
         const NodeRecord* itemRecord = nodes.tryGet(item.storageId());
-        if (itemRecord == nullptr || itemRecord->kind != UIWidgetKind::TreeViewItem ||
+        if (itemRecord == nullptr || itemRecord->kind != BuiltinElementKind::TreeViewItem ||
             itemRecord->parentIndex == InvalidNodeIndex)
         {
             return {};
         }
         const UINodeId parent = idForIndex(itemRecord->parentIndex);
         const NodeRecord* parentRecord = contains(parent) ? nodes.tryGet(parent.storageId()) : nullptr;
-        return parentRecord != nullptr && parentRecord->kind == UIWidgetKind::TreeView ? parent : UINodeId{};
+        return parentRecord != nullptr && parentRecord->kind == BuiltinElementKind::TreeView ? parent : UINodeId{};
     }
 
     [[nodiscard]] bool pointWithinCommittedTreeDisclosure(UINodeId item, UILogicalPoint point,
@@ -8957,7 +10578,7 @@ struct UIContext::Impl final {
         {
             return;
         }
-        if (record->kind == UIWidgetKind::Dropdown)
+        if (record->kind == BuiltinElementKind::Dropdown)
         {
             const UINodeId popup = popupForDropdown(control);
             addRouteLayoutDirtyReservationCandidates(control);
@@ -8969,7 +10590,7 @@ struct UIContext::Impl final {
             }
             return;
         }
-        if (record->kind != UIWidgetKind::DropdownItem)
+        if (record->kind != BuiltinElementKind::DropdownItem)
         {
             return;
         }
@@ -8992,7 +10613,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI Dropdown activation target is stale");
         }
-        if (record->kind == UIWidgetKind::Dropdown)
+        if (record->kind == BuiltinElementKind::Dropdown)
         {
             const UINodeId popup = popupForDropdown(control);
             if (!popup.hasValue())
@@ -9006,7 +10627,7 @@ struct UIContext::Impl final {
             }
             return true;
         }
-        if (record->kind != UIWidgetKind::DropdownItem)
+        if (record->kind != BuiltinElementKind::DropdownItem)
         {
             return false;
         }
@@ -9051,7 +10672,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::ProgressBar)
+        if ((*nodeResult)->kind != BuiltinElementKind::ProgressBar)
         {
             return fail(UIErrorCode::InvalidControlValue, "UI ProgressBar API requires a ProgressBar node");
         }
@@ -9241,7 +10862,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::RadioButton)
+        if ((*nodeResult)->kind != BuiltinElementKind::RadioButton)
         {
             return fail(UIErrorCode::InvalidControlValue, "UI RadioButton API requires a RadioButton node");
         }
@@ -9264,13 +10885,13 @@ struct UIContext::Impl final {
                 ++requiredQueueEntries;
             }
         };
-        const bool targetStateChanges = pressedStateChanges || targetRecord->kind == UIWidgetKind::Checkbox;
+        const bool targetStateChanges = pressedStateChanges || targetRecord->kind == BuiltinElementKind::Checkbox;
         if (targetStateChanges)
         {
             countNode(target);
         }
 
-        if (targetRecord->kind == UIWidgetKind::RadioButton)
+        if (targetRecord->kind == BuiltinElementKind::RadioButton)
         {
             const NodeRecord* parent = recordByIndex(targetRecord->parentIndex);
             if (parent == nullptr)
@@ -9285,7 +10906,7 @@ struct UIContext::Impl final {
                     return fail(Core::CoreErrorCode::Internal, "UI RadioButton group is invalid");
                 }
                 const u32 nextSiblingIndex = child->nextSiblingIndex;
-                if (child->kind == UIWidgetKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size() &&
+                if (child->kind == BuiltinElementKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size() &&
                     radioButtonStatesByNodeIndex[childIndex].selected != (childIndex == target.index()) &&
                     !(targetStateChanges && childIndex == target.index()) && dirtyQueuedByIndex[childIndex] == 0 &&
                     dirtyReservedByIndex[childIndex] == 0)
@@ -9308,7 +10929,7 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Status applyRadioButtonSelection(UINodeId radioButton, bool selected)
     {
         NodeRecord* radioRecord = nodes.tryGet(radioButton.storageId());
-        if (radioRecord == nullptr || radioRecord->kind != UIWidgetKind::RadioButton ||
+        if (radioRecord == nullptr || radioRecord->kind != BuiltinElementKind::RadioButton ||
             radioButton.index() >= radioButtonStatesByNodeIndex.size())
         {
             return fail(UIErrorCode::InvalidNode, "UI RadioButton is stale");
@@ -9343,7 +10964,7 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal, "UI RadioButton group is invalid");
             }
             const u32 nextSiblingIndex = child->nextSiblingIndex;
-            if (child->kind == UIWidgetKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size())
+            if (child->kind == BuiltinElementKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size())
             {
                 const bool nextSelected = childIndex == radioButton.index();
                 if (radioButtonStatesByNodeIndex[childIndex].selected != nextSelected)
@@ -9375,7 +10996,7 @@ struct UIContext::Impl final {
                     return fail(Core::CoreErrorCode::Internal, "UI RadioButton group is invalid");
                 }
                 const u32 nextSiblingIndex = child->nextSiblingIndex;
-                if (child->kind == UIWidgetKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size() &&
+                if (child->kind == BuiltinElementKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size() &&
                     radioButtonStatesByNodeIndex[childIndex].selected != (childIndex == radioButton.index()) &&
                     dirtyQueuedByIndex[childIndex] == 0 && dirtyReservedByIndex[childIndex] == 0)
                 {
@@ -9398,7 +11019,7 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal, "UI RadioButton group is invalid");
             }
             const u32 nextSiblingIndex = child->nextSiblingIndex;
-            if (child->kind == UIWidgetKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size())
+            if (child->kind == BuiltinElementKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size())
             {
                 RadioButtonState& state = radioButtonStatesByNodeIndex[childIndex];
                 const bool nextSelected = childIndex == radioButton.index();
@@ -9596,7 +11217,6 @@ struct UIContext::Impl final {
                 .depth = record->depth,
                 .preorder = currentOrdinal,
                 .paintOrdinal = currentOrdinal,
-                .kind = record->kind,
             });
 
             if (record->firstChildIndex != InvalidNodeIndex)
@@ -9637,6 +11257,11 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::PointerRouteAlreadyInProgress,
                         "UI structure cannot be committed during pointer routing");
         }
+        if (activeBuildTransactionCount != 0)
+        {
+            return fail(UIErrorCode::BuildTransactionInProgress,
+                        "UI structure cannot be committed while a component build transaction is active");
+        }
         drainDeferredRootDestroys();
         return publishStructureIfDirty();
     }
@@ -9655,7 +11280,7 @@ struct UIContext::Impl final {
         for (const u32 index : order)
         {
             const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr || record->kind != UIWidgetKind::ScrollView ||
+            if (record == nullptr || record->kind != BuiltinElementKind::ScrollView ||
                 index >= scrollViewStatesByNodeIndex.size() || index >= scrollViewLayoutScratchByNodeIndex.size())
             {
                 continue;
@@ -9669,7 +11294,7 @@ struct UIContext::Impl final {
         for (const u32 index : order)
         {
             const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr || record->kind != UIWidgetKind::Popup || index >= popupStatesByNodeIndex.size() ||
+            if (record == nullptr || record->kind != BuiltinElementKind::Popup || index >= popupStatesByNodeIndex.size() ||
                 index >= popupLayoutScratchByNodeIndex.size())
             {
                 continue;
@@ -9683,28 +11308,28 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            if (record->kind == UIWidgetKind::ListView && index < listViewStatesByNodeIndex.size() &&
+            if (record->kind == BuiltinElementKind::ListView && index < listViewStatesByNodeIndex.size() &&
                 index < listViewLayoutScratchByNodeIndex.size())
             {
                 ListViewState& state = listViewStatesByNodeIndex[index];
                 state.requestedScrollOffset = listViewLayoutScratchByNodeIndex[index].metrics.scrollOffset;
                 state.committedMetrics = listViewLayoutScratchByNodeIndex[index].metrics;
                 state.committedViewportRect = listViewLayoutScratchByNodeIndex[index].viewportRect;
-            } else if (record->kind == UIWidgetKind::ListViewItem && index < listViewItemStatesByNodeIndex.size())
+            } else if (record->kind == BuiltinElementKind::ListViewItem && index < listViewItemStatesByNodeIndex.size())
             {
                 ListViewItemState& item = listViewItemStatesByNodeIndex[index];
                 item.committedKey = item.key;
                 item.committedLogicalIndex = item.logicalIndex;
                 item.committedBound = item.bound;
                 item.committedEnabled = item.enabled;
-            } else if (record->kind == UIWidgetKind::TreeView && index < treeViewStatesByNodeIndex.size() &&
+            } else if (record->kind == BuiltinElementKind::TreeView && index < treeViewStatesByNodeIndex.size() &&
                        index < treeViewLayoutScratchByNodeIndex.size())
             {
                 TreeViewState& state = treeViewStatesByNodeIndex[index];
                 state.requestedScrollOffset = treeViewLayoutScratchByNodeIndex[index].metrics.scrollOffset;
                 state.committedMetrics = treeViewLayoutScratchByNodeIndex[index].metrics;
                 state.committedViewportRect = treeViewLayoutScratchByNodeIndex[index].viewportRect;
-            } else if (record->kind == UIWidgetKind::TreeViewItem && index < treeViewItemStatesByNodeIndex.size())
+            } else if (record->kind == BuiltinElementKind::TreeViewItem && index < treeViewItemStatesByNodeIndex.size())
             {
                 TreeViewItemState& item = treeViewItemStatesByNodeIndex[index];
                 item.committedKey = item.key;
@@ -9728,6 +11353,11 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::PointerRouteAlreadyInProgress,
                         "UI layout cannot be committed during pointer routing");
+        }
+        if (activeBuildTransactionCount != 0)
+        {
+            return fail(UIErrorCode::BuildTransactionInProgress,
+                        "UI layout cannot be committed while a component build transaction is active");
         }
         drainDeferredRootDestroys();
         if (Core::Status viewportStatus = validateViewport(viewportSize); !viewportStatus)
@@ -9896,7 +11526,7 @@ struct UIContext::Impl final {
             {
                 const UICommittedHitEntry& entry = candidateHitEntries[entryIndex];
                 if (entry.policy == UIPointerHitPolicy::Targetable && contains(entry.node) &&
-                    isNodeEnabled(entry.node) && isKeyboardFocusableKind(entry.kind) &&
+                    isNodeEnabled(entry.node) && hasBehavior(entry.behaviors, UIElementBehavior::Focusable) &&
                     hitEntryAllowedByModal(entry, candidateActiveModalEntryIndex) &&
                     hitEntryIsWithinScope(entryIndex, scopeEntryIndex, candidateHitEntries))
                 {
@@ -9962,7 +11592,8 @@ struct UIContext::Impl final {
 
         const u32 desiredFocusEntryIndex = findHitEntryIndex(desiredFocus, candidateHitEntries);
         const bool desiredFocusIsTextEdit = desiredFocusEntryIndex < candidateHitEntries.size() &&
-                                            candidateHitEntries[desiredFocusEntryIndex].kind == UIWidgetKind::TextEdit;
+                                            hasBehavior(candidateHitEntries[desiredFocusEntryIndex].behaviors,
+                                                        UIElementBehavior::TextInput);
         const UINodeId desiredTextFocus = desiredFocusIsTextEdit ? desiredFocus : UINodeId{};
         const bool focusChanged = desiredFocus != defaultActionFocusButton || desiredTextFocus != textInputFocus;
         if (focusChanged)
@@ -10655,7 +12286,7 @@ struct UIContext::Impl final {
                 pointWithinArmedButton = true;
             }
             if (!physicalNearestButton.hasValue() && isNodeEnabled(physicalEntry.node) &&
-                isDefaultActivatableKind(physicalEntry.kind))
+                hasBehavior(physicalEntry.behaviors, UIElementBehavior::Activate))
             {
                 physicalNearestButton = physicalEntry.node;
             }
@@ -10679,14 +12310,14 @@ struct UIContext::Impl final {
             const UINodeId routeNode = entries[routeEntryIndex].node;
             if (!nearestButton.hasValue() && isNodeEnabled(routeNode))
             {
-                if (isDefaultActivatableKind(entries[routeEntryIndex].kind))
+                if (hasBehavior(entries[routeEntryIndex].behaviors, UIElementBehavior::Activate))
                 {
                     nearestButton = routeNode;
                 }
             }
             if (!nearestSlider.hasValue() && isNodeEnabled(routeNode))
             {
-                if (entries[routeEntryIndex].kind == UIWidgetKind::Slider)
+                if (hasBehavior(entries[routeEntryIndex].behaviors, UIElementBehavior::RangeInput))
                 {
                     nearestSlider = routeNode;
                 }
@@ -10696,11 +12327,11 @@ struct UIContext::Impl final {
         const NodeRecord* nearestButtonRecord =
             nearestButton.hasValue() && contains(nearestButton) ? nodes.tryGet(nearestButton.storageId()) : nullptr;
         const UINodeId nearestListView =
-            nearestButtonRecord != nullptr && nearestButtonRecord->kind == UIWidgetKind::ListViewItem
+            nearestButtonRecord != nullptr && nearestButtonRecord->kind == BuiltinElementKind::ListViewItem
                 ? listViewForItem(nearestButton)
                 : UINodeId{};
         const UINodeId nearestTreeView =
-            nearestButtonRecord != nullptr && nearestButtonRecord->kind == UIWidgetKind::TreeViewItem
+            nearestButtonRecord != nullptr && nearestButtonRecord->kind == BuiltinElementKind::TreeViewItem
                 ? treeViewForItem(nearestButton)
                 : UINodeId{};
         const bool nearestTreeDisclosureAtRouteStart =
@@ -10776,7 +12407,7 @@ struct UIContext::Impl final {
             if (scrollBarHitAtRouteStart.hasValue())
             {
                 addRouteDirtyReservationCandidate(scrollBarHitAtRouteStart.scrollView);
-            } else if (targetRecord != nullptr && targetRecord->kind == UIWidgetKind::TextEdit &&
+            } else if (targetRecord != nullptr && targetRecord->kind == BuiltinElementKind::TextEdit &&
                 targetNodeEnabledAtRouteStart)
             {
                 addRouteDirtyReservationCandidate(targetNode);
@@ -10827,7 +12458,7 @@ struct UIContext::Impl final {
                 const NodeRecord* armedRecord =
                     contains(armedButtonAtRouteStart) ? nodes.tryGet(armedButtonAtRouteStart.storageId()) : nullptr;
                 if (pointWithinArmedButton && isNodeEnabled(armedButtonAtRouteStart) && armedRecord != nullptr &&
-                    armedRecord->kind == UIWidgetKind::RadioButton)
+                    armedRecord->kind == BuiltinElementKind::RadioButton)
                 {
                     const NodeRecord* parent = recordByIndex(armedRecord->parentIndex);
                     if (parent != nullptr)
@@ -10840,7 +12471,7 @@ struct UIContext::Impl final {
                                 break;
                             }
                             const u32 nextSiblingIndex = child->nextSiblingIndex;
-                            if (child->kind == UIWidgetKind::RadioButton &&
+                            if (child->kind == BuiltinElementKind::RadioButton &&
                                 childIndex < radioButtonStatesByNodeIndex.size() &&
                                 radioButtonStatesByNodeIndex[childIndex].selected !=
                                     (childIndex == armedButtonAtRouteStart.index()))
@@ -11028,7 +12659,7 @@ struct UIContext::Impl final {
             capturedPointerNode = {};
             const NodeRecord* targetRecord =
                 targetNode.hasValue() && contains(targetNode) ? nodes.tryGet(targetNode.storageId()) : nullptr;
-            const bool targetsTextEdit = targetRecord != nullptr && targetRecord->kind == UIWidgetKind::TextEdit &&
+            const bool targetsTextEdit = targetRecord != nullptr && targetRecord->kind == BuiltinElementKind::TextEdit &&
                                          targetNodeEnabledAtRouteStart;
             const UINodeId previousKeyboardFocus = defaultActionFocusButton;
             const UINodeId previousTextFocus = textInputFocus;
@@ -11061,8 +12692,8 @@ struct UIContext::Impl final {
                 const NodeRecord* nextButtonRecord = nodes.tryGet(nearestButton.storageId());
                 if (nextButtonRecord != nullptr && isDefaultActivatableKind(nextButtonRecord->kind))
                 {
-                    nextKeyboardFocus = nextButtonRecord->kind == UIWidgetKind::ListViewItem ? nearestListView
-                                        : nextButtonRecord->kind == UIWidgetKind::TreeViewItem ? nearestTreeView
+                    nextKeyboardFocus = nextButtonRecord->kind == BuiltinElementKind::ListViewItem ? nearestListView
+                                        : nextButtonRecord->kind == BuiltinElementKind::TreeViewItem ? nearestTreeView
                                                                                               : nearestButton;
                     interactionPaintNode = nearestButton;
                 }
@@ -11387,7 +13018,7 @@ struct UIContext::Impl final {
                 isNodeEnabled(armedButtonAtRouteStart))
             {
                 if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
-                    armedRecord != nullptr && armedRecord->kind == UIWidgetKind::Checkbox &&
+                    armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::Checkbox &&
                     armedButtonAtRouteStart.index() < checkboxCheckedByNodeIndex.size())
                 {
                     if (Core::Status dirty = markPaintDirty(armedButtonAtRouteStart); !dirty)
@@ -11398,7 +13029,7 @@ struct UIContext::Impl final {
                         checkboxCheckedByNodeIndex[armedButtonAtRouteStart.index()] == 0 ? 1 : 0;
                 }
                 if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
-                    armedRecord != nullptr && armedRecord->kind == UIWidgetKind::RadioButton)
+                    armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::RadioButton)
                 {
                     if (Core::Status selected = applyRadioButtonSelection(armedButtonAtRouteStart, true); !selected)
                     {
@@ -11406,8 +13037,8 @@ struct UIContext::Impl final {
                     }
                 }
                 if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
-                    armedRecord != nullptr && (armedRecord->kind == UIWidgetKind::Dropdown ||
-                                               armedRecord->kind == UIWidgetKind::DropdownItem))
+                    armedRecord != nullptr && (armedRecord->kind == BuiltinElementKind::Dropdown ||
+                                               armedRecord->kind == BuiltinElementKind::DropdownItem))
                 {
                     if (auto activated = activateDropdownControl(armedButtonAtRouteStart); !activated)
                     {
@@ -11415,7 +13046,7 @@ struct UIContext::Impl final {
                     }
                 }
                 if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
-                    armedRecord != nullptr && armedRecord->kind == UIWidgetKind::ListViewItem)
+                    armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::ListViewItem)
                 {
                     if (Core::Status selected = selectCommittedListViewItem(armedButtonAtRouteStart); !selected)
                     {
@@ -11423,7 +13054,7 @@ struct UIContext::Impl final {
                     }
                 }
                 if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
-                    armedRecord != nullptr && armedRecord->kind == UIWidgetKind::TreeViewItem)
+                    armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::TreeViewItem)
                 {
                     Core::Status treeAction = armedTreeDisclosureAtRouteStart
                                                   ? pointWithinArmedTreeDisclosure
@@ -11604,7 +13235,7 @@ struct UIContext::Impl final {
                     contains(existingTarget) ? nodes.tryGet(existingTarget.storageId()) : nullptr;
                 if ((existingTarget == defaultActionFocusButton &&
                      isCommittedKeyboardFocusCandidate(existingTarget)) ||
-                    (existingRecord != nullptr && existingRecord->kind == UIWidgetKind::DropdownItem))
+                    (existingRecord != nullptr && existingRecord->kind == BuiltinElementKind::DropdownItem))
                 {
                     // Native key repeat and duplicate gamepad Down remain owned
                     // by UI without re-running toggle/callback side effects.
@@ -11628,7 +13259,7 @@ struct UIContext::Impl final {
             return UIDefaultActionResult{};
         }
         const NodeRecord* record = nodes.tryGet(defaultActionFocusButton.storageId());
-        if (record != nullptr && record->kind == UIWidgetKind::TextEdit)
+        if (record != nullptr && record->kind == BuiltinElementKind::TextEdit)
         {
             if (textInputFocus != defaultActionFocusButton)
             {
@@ -11651,11 +13282,11 @@ struct UIContext::Impl final {
         const bool pressedStateChanges = control.has_value() && !isButtonPressed(activationTarget);
         releaseRouteDirtyQueueReservations();
         auto reservationCleanup = Core::makeScopeExit([this]() noexcept { releaseRouteDirtyQueueReservations(); });
-        if (pressedStateChanges || record->kind == UIWidgetKind::Checkbox)
+        if (pressedStateChanges || record->kind == BuiltinElementKind::Checkbox)
         {
             addRouteDirtyReservationCandidate(activationTarget);
         }
-        if (record->kind == UIWidgetKind::RadioButton)
+        if (record->kind == BuiltinElementKind::RadioButton)
         {
             const NodeRecord* parent = recordByIndex(record->parentIndex);
             if (parent == nullptr)
@@ -11670,7 +13301,7 @@ struct UIContext::Impl final {
                     return fail(Core::CoreErrorCode::Internal, "UI RadioButton group is invalid");
                 }
                 const u32 nextSiblingIndex = child->nextSiblingIndex;
-                if (child->kind == UIWidgetKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size() &&
+                if (child->kind == BuiltinElementKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size() &&
                     radioButtonStatesByNodeIndex[childIndex].selected != (childIndex == activationTarget.index()))
                 {
                     addRouteDirtyReservationCandidate(idForIndex(childIndex));
@@ -11694,7 +13325,7 @@ struct UIContext::Impl final {
                 return Core::failure(dirty.error());
             }
         }
-        if (record->kind == UIWidgetKind::Checkbox && activationTarget.index() < checkboxCheckedByNodeIndex.size())
+        if (record->kind == BuiltinElementKind::Checkbox && activationTarget.index() < checkboxCheckedByNodeIndex.size())
         {
             if (Core::Status dirty = markPaintDirty(activationTarget); !dirty)
             {
@@ -11703,7 +13334,7 @@ struct UIContext::Impl final {
             checkboxCheckedByNodeIndex[activationTarget.index()] =
                 checkboxCheckedByNodeIndex[activationTarget.index()] == 0 ? 1 : 0;
         }
-        if (record->kind == UIWidgetKind::RadioButton)
+        if (record->kind == BuiltinElementKind::RadioButton)
         {
             if (Core::Status selected = applyRadioButtonSelection(activationTarget, true); !selected)
             {
@@ -11711,7 +13342,7 @@ struct UIContext::Impl final {
             }
         }
         bool dropdownActivated = false;
-        if (record->kind == UIWidgetKind::Dropdown || record->kind == UIWidgetKind::DropdownItem)
+        if (record->kind == BuiltinElementKind::Dropdown || record->kind == BuiltinElementKind::DropdownItem)
         {
             auto activated = activateDropdownControl(activationTarget);
             if (!activated)
@@ -11732,7 +13363,7 @@ struct UIContext::Impl final {
             // Focused control without a registered action still consumes Accept
             // so gameplay does not also fire. Selection controls already
             // changed state above; a bare Button without a callback did not.
-            const bool activated = record->kind == UIWidgetKind::Checkbox || record->kind == UIWidgetKind::RadioButton ||
+            const bool activated = record->kind == BuiltinElementKind::Checkbox || record->kind == BuiltinElementKind::RadioButton ||
                                    dropdownActivated;
             return UIDefaultActionResult{.consumed = true, .activated = activated};
         }
@@ -11774,26 +13405,62 @@ struct UIContext::Impl final {
                         "UI accessibility action target is disabled");
         }
 
+        UISemanticsAction requiredAction = UISemanticsAction::None;
+        switch (action.kind)
+        {
+        case UIAccessibilityActionKind::Focus:
+            requiredAction = UISemanticsAction::Focus;
+            break;
+        case UIAccessibilityActionKind::Invoke:
+            requiredAction = UISemanticsAction::Activate;
+            break;
+        case UIAccessibilityActionKind::Toggle:
+            requiredAction = UISemanticsAction::Toggle;
+            break;
+        case UIAccessibilityActionKind::SetRangeValue:
+            requiredAction = UISemanticsAction::SetRangeValue;
+            break;
+        case UIAccessibilityActionKind::SetTextValue:
+            requiredAction = UISemanticsAction::SetTextValue;
+            break;
+        default:
+            return fail(UIErrorCode::InvalidAccessibilityAction,
+                        "UI accessibility action kind is not recognized");
+        }
+        const auto& committedSemantics = committedSemanticsBuffers[publishedSemanticsBufferIndex];
+        const auto semanticsEntry =
+            std::find_if(committedSemantics.begin(), committedSemantics.end(), [&](const UISemanticsEntry& entry) {
+                return entry.node == action.node;
+            });
+        if (semanticsEntry == committedSemantics.end() ||
+            !hasSemanticsAction(semanticsEntry->actions, requiredAction))
+        {
+            return fail(UIErrorCode::InvalidAccessibilityAction,
+                        "UI accessibility action is not published for the target semantics node");
+        }
+
         switch (action.kind)
         {
         case UIAccessibilityActionKind::Focus:
             return requestFocus(action.node);
         case UIAccessibilityActionKind::Invoke:
-            if (record->kind != UIWidgetKind::Button)
+            if (!hasBehavior(record->behaviors, UIElementBehavior::Activate))
             {
                 return fail(UIErrorCode::InvalidAccessibilityAction,
-                            "UI accessibility Invoke requires a Button");
+                            "UI accessibility Invoke requires Activate behavior");
             }
             break;
         case UIAccessibilityActionKind::Toggle:
-            if (record->kind != UIWidgetKind::Checkbox && record->kind != UIWidgetKind::RadioButton)
+            if (!hasBehavior(record->behaviors, UIElementBehavior::Toggle) &&
+                !hasBehavior(record->behaviors, UIElementBehavior::ExclusiveChoice))
             {
                 return fail(UIErrorCode::InvalidAccessibilityAction,
-                            "UI accessibility Toggle requires a Checkbox or RadioButton");
+                            "UI accessibility Toggle requires toggle behavior");
             }
             break;
         case UIAccessibilityActionKind::SetRangeValue: {
-            if (record->kind != UIWidgetKind::Slider || !std::isfinite(action.rangeValue) ||
+            if (!hasBehavior(record->behaviors, UIElementBehavior::RangeInput) ||
+                record->kind != BuiltinElementKind::Slider || !std::isfinite(action.rangeValue) ||
                 action.rangeValue < static_cast<double>(sliderStatesByNodeIndex[action.node.index()].minValue) ||
                 action.rangeValue > static_cast<double>(sliderStatesByNodeIndex[action.node.index()].maxValue) ||
                 action.rangeValue < static_cast<double>((std::numeric_limits<float>::lowest)()) ||
@@ -11806,7 +13473,8 @@ struct UIContext::Impl final {
             return setSliderValueFromUpdater(root, action.node, static_cast<float>(action.rangeValue));
         }
         case UIAccessibilityActionKind::SetTextValue: {
-            if (record->kind != UIWidgetKind::TextEdit)
+            if (!hasBehavior(record->behaviors, UIElementBehavior::TextInput) ||
+                record->kind != BuiltinElementKind::TextEdit)
             {
                 return fail(UIErrorCode::InvalidAccessibilityAction,
                             "UI accessibility text value requires a TextEdit");
@@ -11915,7 +13583,7 @@ struct UIContext::Impl final {
         defaultActionFocusButton = nextFocus;
         const NodeRecord* nextRecord =
             nextFocus.hasValue() && contains(nextFocus) ? nodes.tryGet(nextFocus.storageId()) : nullptr;
-        textInputFocus = nextRecord != nullptr && nextRecord->kind == UIWidgetKind::TextEdit ? nextFocus : UINodeId{};
+        textInputFocus = nextRecord != nullptr && nextRecord->kind == BuiltinElementKind::TextEdit ? nextFocus : UINodeId{};
         return Core::success();
     }
 
@@ -12022,7 +13690,7 @@ struct UIContext::Impl final {
             return {};
         }
         const NodeRecord* record = nodes.tryGet(activePopupNode.storageId());
-        return record != nullptr && record->kind == UIWidgetKind::Popup ? activePopupNode : UINodeId{};
+        return record != nullptr && record->kind == BuiltinElementKind::Popup ? activePopupNode : UINodeId{};
     }
 
     [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command,
@@ -12095,7 +13763,7 @@ struct UIContext::Impl final {
             for (u32 entryIndex = 0; entryIndex < entries.size(); ++entryIndex)
             {
                 const UICommittedHitEntry& entry = entries[entryIndex];
-                if (!contains(entry.node) || entry.kind != UIWidgetKind::DropdownItem ||
+                if (!contains(entry.node) || !hasBehavior(entry.behaviors, UIElementBehavior::SelectOption) ||
                     dropdownForItem(entry.node) != dropdown || !isNodeEnabled(entry.node) ||
                     entry.policy != UIPointerHitPolicy::Targetable ||
                     !hitEntryAllowedByModal(entry, committedActiveModalEntryIndex))
@@ -12176,7 +13844,7 @@ struct UIContext::Impl final {
                 const UICommittedHitEntry& entry = entries[entryIndex];
                 if (!contains(entry.node) || entry.node == dropdown || isNodeWithinSubtree(popup, entry.node) ||
                     !isNodeEnabled(entry.node) || entry.policy != UIPointerHitPolicy::Targetable ||
-                    !isKeyboardFocusableKind(entry.kind) ||
+                    !hasBehavior(entry.behaviors, UIElementBehavior::Focusable) ||
                     !hitEntryAllowedByModal(entry, committedActiveModalEntryIndex) ||
                     !hitEntryIsWithinScope(entryIndex, scopeEntryIndex, entries))
                 {
@@ -12264,12 +13932,12 @@ struct UIContext::Impl final {
         UINodeId listView = defaultActionFocusButton;
         const NodeRecord* focusRecord =
             contains(listView) ? nodes.tryGet(listView.storageId()) : nullptr;
-        if (focusRecord != nullptr && focusRecord->kind == UIWidgetKind::ListViewItem)
+        if (focusRecord != nullptr && focusRecord->kind == BuiltinElementKind::ListViewItem)
         {
             listView = listViewForItem(listView);
             focusRecord = contains(listView) ? nodes.tryGet(listView.storageId()) : nullptr;
         }
-        if (focusRecord == nullptr || focusRecord->kind != UIWidgetKind::ListView || !isNodeEnabled(listView))
+        if (focusRecord == nullptr || focusRecord->kind != BuiltinElementKind::ListView || !isNodeEnabled(listView))
         {
             return UIListViewCommandResult{};
         }
@@ -12427,12 +14095,12 @@ struct UIContext::Impl final {
 
         UINodeId treeView = defaultActionFocusButton;
         const NodeRecord* focusRecord = contains(treeView) ? nodes.tryGet(treeView.storageId()) : nullptr;
-        if (focusRecord != nullptr && focusRecord->kind == UIWidgetKind::TreeViewItem)
+        if (focusRecord != nullptr && focusRecord->kind == BuiltinElementKind::TreeViewItem)
         {
             treeView = treeViewForItem(treeView);
             focusRecord = contains(treeView) ? nodes.tryGet(treeView.storageId()) : nullptr;
         }
-        if (focusRecord == nullptr || focusRecord->kind != UIWidgetKind::TreeView || !isNodeEnabled(treeView))
+        if (focusRecord == nullptr || focusRecord->kind != BuiltinElementKind::TreeView || !isNodeEnabled(treeView))
         {
             return UITreeViewCommandResult{};
         }
@@ -12739,7 +14407,7 @@ struct UIContext::Impl final {
         {
             const UICommittedHitEntry& entry = entries[entryIndex];
             if (!contains(entry.node) || !isNodeEnabled(entry.node) || entry.policy != UIPointerHitPolicy::Targetable ||
-                !isKeyboardFocusableKind(entry.kind) ||
+                !hasBehavior(entry.behaviors, UIElementBehavior::Focusable) ||
                 !hitEntryAllowedByModal(entry, committedActiveModalEntryIndex) ||
                 !hitEntryIsWithinScope(entryIndex, scopeEntryIndex, entries))
             {
@@ -12809,7 +14477,7 @@ struct UIContext::Impl final {
         clearArmedTextEdit();
         capturedPointerNode = {};
         const NodeRecord* nextRecord = nodes.tryGet(nextFocus.storageId());
-        if (nextRecord != nullptr && nextRecord->kind == UIWidgetKind::TextEdit)
+        if (nextRecord != nullptr && nextRecord->kind == BuiltinElementKind::TextEdit)
         {
             if (textInputFocus != nextFocus)
             {
@@ -12834,7 +14502,7 @@ struct UIContext::Impl final {
             return {};
         }
         const NodeRecord* record = nodes.tryGet(defaultActionFocusButton.storageId());
-        if (record != nullptr && record->kind == UIWidgetKind::TextEdit && textInputFocus != defaultActionFocusButton)
+        if (record != nullptr && record->kind == BuiltinElementKind::TextEdit && textInputFocus != defaultActionFocusButton)
         {
             return {};
         }
@@ -13146,6 +14814,9 @@ struct UIContext::Impl final {
             .layoutSnapshotCapacity = capacityConfig.layoutSnapshotCapacity,
             .hitSnapshotCapacity = capacityConfig.hitSnapshotCapacity,
             .paintSnapshotCapacity = capacityConfig.paintSnapshotCapacity,
+            .canvasCommandCapacity = capacityConfig.canvasCommandCapacity,
+            .activeCanvasCommandCount = activeCanvasCommandCount,
+            .canvasCommandHighWater = canvasCommandHighWater,
             .routePathCapacity = capacityConfig.routePathCapacity,
             .routedPointerListenerCapacity = capacityConfig.routedPointerListenerCapacity,
             .activeRoutedPointerListenerCount = routedPointerListenerRegistry.activeCount(),
@@ -13345,139 +15016,165 @@ Core::Result<UIRootOwner> UIRootBuilder::createRoot()
     return m_context->createRoot();
 }
 
-Core::Result<UINodeId> UIRootBuilder::createPanel(UINodeId parent)
+Core::Result<UINodeId> UIRootBuilder::createElement(UINodeId parent, const UIElementDescriptor& descriptor)
 {
     if (m_context == nullptr)
     {
         return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
     }
-    return m_context->createChild(parent, UIWidgetKind::Panel);
+    return m_context->createElement(parent, descriptor);
 }
 
-Core::Result<UINodeId> UIRootBuilder::createLabel(UINodeId parent)
+UIElementBuildTransaction::UIElementBuildTransaction(UIContext& context, UINodeId updaterRoot,
+                                                     UINodeId componentRoot,
+                                                     usize remainingNodeBudget) noexcept
+    : m_lifetime(context.m_impl->lifetime), m_updaterRoot(updaterRoot), m_componentRoot(componentRoot),
+      m_remainingNodeBudget(remainingNodeBudget)
 {
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
-    }
-    return m_context->createChild(parent, UIWidgetKind::Label);
 }
 
-Core::Result<UINodeId> UIRootBuilder::createButton(UINodeId parent)
+UIElementBuildTransaction::~UIElementBuildTransaction() noexcept
 {
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
-    }
-    return m_context->createChild(parent, UIWidgetKind::Button);
+    reset();
 }
 
-Core::Result<UINodeId> UIRootBuilder::createCheckbox(UINodeId parent)
+UIElementBuildTransaction::UIElementBuildTransaction(UIElementBuildTransaction&& other) noexcept
+    : m_lifetime(std::move(other.m_lifetime)), m_updaterRoot(std::exchange(other.m_updaterRoot, {})),
+      m_componentRoot(std::exchange(other.m_componentRoot, {})),
+      m_remainingNodeBudget(std::exchange(other.m_remainingNodeBudget, 0)),
+      m_failure(std::move(other.m_failure))
 {
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
-    }
-    return m_context->createChild(parent, UIWidgetKind::Checkbox);
+    other.m_failure.reset();
 }
 
-Core::Result<UINodeId> UIRootBuilder::createSlider(UINodeId parent)
+UIElementBuildTransaction& UIElementBuildTransaction::operator=(UIElementBuildTransaction&& other) noexcept
 {
-    if (m_context == nullptr)
+    if (this == &other)
     {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+        return *this;
     }
-    return m_context->createChild(parent, UIWidgetKind::Slider);
+    reset();
+    m_lifetime = std::move(other.m_lifetime);
+    m_updaterRoot = std::exchange(other.m_updaterRoot, {});
+    m_componentRoot = std::exchange(other.m_componentRoot, {});
+    m_remainingNodeBudget = std::exchange(other.m_remainingNodeBudget, 0);
+    m_failure = std::move(other.m_failure);
+    other.m_failure.reset();
+    return *this;
 }
 
-Core::Result<UINodeId> UIRootBuilder::createTextEdit(UINodeId parent)
+Core::Result<UINodeId> UIElementBuildTransaction::createElement(UINodeId parent,
+                                                                const UIElementDescriptor& descriptor)
 {
-    if (m_context == nullptr)
+    if (m_failure.has_value())
     {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+        return Core::failure(*m_failure);
     }
-    return m_context->createChild(parent, UIWidgetKind::TextEdit);
+    if (!m_componentRoot.hasValue())
+    {
+        return fail(UIErrorCode::InvalidNode, "UI component build transaction is not active");
+    }
+    const std::shared_ptr<Detail::UIContextLifetimeControl> lifetime = m_lifetime.lock();
+    UIContext* context = lifetime ? lifetime->attachedContext() : nullptr;
+    if (context == nullptr)
+    {
+        m_componentRoot = {};
+        return fail(UIErrorCode::WrongContext, "UI component build transaction context no longer exists");
+    }
+    auto created = context->createElementFromBuildTransaction(
+        m_updaterRoot, m_componentRoot, parent, descriptor, m_remainingNodeBudget);
+    if (!created)
+    {
+        if (created.error().code == UIErrorCode::WrongOwnerThread)
+        {
+            return Core::failure(created.error());
+        }
+        m_failure = created.error();
+        context->rollbackBuildTransaction(m_updaterRoot, m_componentRoot);
+        m_componentRoot = {};
+        m_remainingNodeBudget = 0;
+        return Core::failure(*m_failure);
+    }
+    return created;
 }
 
-Core::Result<UINodeId> UIRootBuilder::createProgressBar(UINodeId parent)
+Core::Result<UINodeId> UIElementBuildTransaction::commit()
 {
-    if (m_context == nullptr)
+    if (m_failure.has_value())
     {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+        return Core::failure(*m_failure);
     }
-    return m_context->createChild(parent, UIWidgetKind::ProgressBar);
+    if (!m_componentRoot.hasValue())
+    {
+        return fail(UIErrorCode::InvalidNode, "UI component build transaction is not active");
+    }
+    const std::shared_ptr<Detail::UIContextLifetimeControl> lifetime = m_lifetime.lock();
+    UIContext* context = lifetime ? lifetime->attachedContext() : nullptr;
+    if (context == nullptr)
+    {
+        m_componentRoot = {};
+        return fail(UIErrorCode::WrongContext, "UI component build transaction context no longer exists");
+    }
+    const UINodeId componentRoot = m_componentRoot;
+    if (Core::Status status = context->commitBuildTransaction(m_updaterRoot, componentRoot); !status)
+    {
+        if (status.error().code == UIErrorCode::WrongOwnerThread)
+        {
+            return Core::failure(status.error());
+        }
+        m_failure = status.error();
+        m_componentRoot = {};
+        m_remainingNodeBudget = 0;
+        return Core::failure(*m_failure);
+    }
+    m_lifetime.reset();
+    m_updaterRoot = {};
+    m_componentRoot = {};
+    m_remainingNodeBudget = 0;
+    return componentRoot;
 }
 
-Core::Result<UINodeId> UIRootBuilder::createRadioButton(UINodeId parent)
+void UIElementBuildTransaction::reset() noexcept
 {
-    if (m_context == nullptr)
+    const UINodeId componentRoot = m_componentRoot;
+    if (componentRoot.hasValue())
     {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+        const std::shared_ptr<Detail::UIContextLifetimeControl> lifetime = m_lifetime.lock();
+        UIContext* context = lifetime ? lifetime->attachedContext() : nullptr;
+        if (context != nullptr)
+        {
+            context->rollbackBuildTransaction(m_updaterRoot, componentRoot);
+        }
     }
-    return m_context->createChild(parent, UIWidgetKind::RadioButton);
+    m_lifetime.reset();
+    m_updaterRoot = {};
+    m_componentRoot = {};
+    m_remainingNodeBudget = 0;
+    m_failure.reset();
 }
 
-Core::Result<UINodeId> UIRootBuilder::createModal(UINodeId parent)
+UINodeId UIElementBuildTransaction::rootNodeId() const noexcept
 {
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
-    }
-    return m_context->createChild(parent, UIWidgetKind::Modal);
+    return m_componentRoot;
 }
 
-Core::Result<UINodeId> UIRootBuilder::createScrollView(UINodeId parent)
+usize UIElementBuildTransaction::remainingNodeBudget() const noexcept
 {
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
-    }
-    return m_context->createChild(parent, UIWidgetKind::ScrollView);
+    return m_remainingNodeBudget;
 }
 
-Core::Result<UINodeId> UIRootBuilder::createDropdown(UINodeId parent)
+bool UIElementBuildTransaction::isActive() const noexcept
 {
-    if (m_context == nullptr)
+    if (!m_componentRoot.hasValue())
     {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+        return false;
     }
-    return m_context->createChild(parent, UIWidgetKind::Dropdown);
-}
-
-Core::Result<UINodeId> UIRootBuilder::createPopup(UINodeId dropdown)
-{
-    if (m_context == nullptr)
+    const std::shared_ptr<Detail::UIContextLifetimeControl> lifetime = m_lifetime.lock();
+    if (!lifetime)
     {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+        return false;
     }
-    return m_context->createChild(dropdown, UIWidgetKind::Popup);
-}
-
-Core::Result<UINodeId> UIRootBuilder::createDropdownItem(UINodeId popup)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
-    }
-    return m_context->createChild(popup, UIWidgetKind::DropdownItem);
-}
-
-Core::Result<UINodeId> UIRootBuilder::createListView(UINodeId parent, UIListViewCreateConfig config)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
-    }
-    return m_context->createListViewChild(parent, config);
-}
-
-Core::Result<UINodeId> UIRootBuilder::createTreeView(UINodeId parent, UITreeViewCreateConfig config)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
-    }
-    return m_context->createTreeViewChild(parent, config);
+    return lifetime->attachedContext() != nullptr;
 }
 
 UITreeUpdater::UITreeUpdater(UIContext& context, UINodeId root) noexcept : m_context(&context), m_root(root)
@@ -13501,139 +15198,24 @@ UITreeUpdater& UITreeUpdater::operator=(UITreeUpdater&& other) noexcept
     return *this;
 }
 
-Core::Result<UINodeId> UITreeUpdater::createPanel(UINodeId parent)
+Core::Result<UINodeId> UITreeUpdater::createElement(UINodeId parent, const UIElementDescriptor& descriptor)
 {
     if (m_context == nullptr)
     {
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Panel);
+    return m_context->createElementFromUpdater(m_root, parent, descriptor);
 }
 
-Core::Result<UINodeId> UITreeUpdater::createLabel(UINodeId parent)
+Core::Result<UIElementBuildTransaction>
+UITreeUpdater::beginBuildTransaction(UINodeId parent, const UIElementDescriptor& rootDescriptor,
+                                     usize nodeBudget)
 {
     if (m_context == nullptr)
     {
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Label);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createButton(UINodeId parent)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Button);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createCheckbox(UINodeId parent)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Checkbox);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createSlider(UINodeId parent)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Slider);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createTextEdit(UINodeId parent)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::TextEdit);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createProgressBar(UINodeId parent)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::ProgressBar);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createRadioButton(UINodeId parent)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::RadioButton);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createModal(UINodeId parent)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Modal);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createScrollView(UINodeId parent)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::ScrollView);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createDropdown(UINodeId parent)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Dropdown);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createPopup(UINodeId dropdown)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, dropdown, UIWidgetKind::Popup);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createDropdownItem(UINodeId popup)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createChildFromUpdater(m_root, popup, UIWidgetKind::DropdownItem);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createListView(UINodeId parent, UIListViewCreateConfig config)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createListViewFromUpdater(m_root, parent, config);
-}
-
-Core::Result<UINodeId> UITreeUpdater::createTreeView(UINodeId parent, UITreeViewCreateConfig config)
-{
-    if (m_context == nullptr)
-    {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
-    }
-    return m_context->createTreeViewFromUpdater(m_root, parent, config);
+    return m_context->beginBuildTransactionFromUpdater(m_root, parent, rootDescriptor, nodeBudget);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -13713,6 +15295,33 @@ Core::Status UITreeUpdater::clearFocus()
     return m_context->clearFocusFromUpdater(m_root);
 }
 
+Core::Status UITreeUpdater::setStyleRole(UINodeId node, UIStyleRoleId role)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setStyleRoleFromUpdater(m_root, node, role);
+}
+
+Core::Result<UIStyleRoleId> UITreeUpdater::styleRole(UINodeId node) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->styleRoleFromUpdater(m_root, node);
+}
+
+Core::Status UITreeUpdater::clearOverride(UINodeId node, UIStyleOverride properties)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->clearOverrideFromUpdater(m_root, node, properties);
+}
+
 Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
 {
     if (m_context == nullptr)
@@ -13758,6 +15367,15 @@ Core::Status UITreeUpdater::setTextStyle(UINodeId node, const UITextStyle& style
     return m_context->setTextStyleFromUpdater(m_root, node, style);
 }
 
+Core::Status UITreeUpdater::setContentAlignment(UINodeId node, UIContentAlignment alignment)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setContentAlignmentFromUpdater(m_root, node, alignment);
+}
+
 Core::Result<std::string_view> UITreeUpdater::text(UINodeId node)
 {
     if (m_context == nullptr)
@@ -13774,6 +15392,15 @@ Core::Result<UITextStyle> UITreeUpdater::textStyle(UINodeId node)
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->textStyleFromUpdater(m_root, node);
+}
+
+Core::Result<UIContentAlignment> UITreeUpdater::contentAlignment(UINodeId node) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->contentAlignmentFromUpdater(m_root, node);
 }
 
 Core::Status UITreeUpdater::setTextSelection(UINodeId textEdit, UITextSelection selection)
@@ -14888,36 +16515,40 @@ Core::Result<UIRootOwner> UIContext::createRoot()
     return m_impl->createRoot(*this);
 }
 
-Core::Result<UINodeId> UIContext::createChild(UINodeId parent, UIWidgetKind kind)
+Core::Result<UINodeId> UIContext::createElement(UINodeId parent, const UIElementDescriptor& descriptor)
 {
-    return m_impl->createChild(parent, kind);
+    return m_impl->createElement(parent, descriptor);
 }
 
-Core::Result<UINodeId> UIContext::createListViewChild(UINodeId parent, UIListViewCreateConfig config)
+Core::Result<UINodeId> UIContext::createElementFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                           const UIElementDescriptor& descriptor)
 {
-    return m_impl->createListViewComposite(parent, config);
+    return m_impl->createElementFromUpdater(updaterRoot, parent, descriptor);
 }
 
-Core::Result<UINodeId> UIContext::createTreeViewChild(UINodeId parent, UITreeViewCreateConfig config)
+Core::Result<UIElementBuildTransaction>
+UIContext::beginBuildTransactionFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                            const UIElementDescriptor& rootDescriptor, usize nodeBudget)
 {
-    return m_impl->createTreeViewComposite(parent, config);
+    return m_impl->beginBuildTransaction(*this, updaterRoot, parent, rootDescriptor, nodeBudget);
 }
 
-Core::Result<UINodeId> UIContext::createChildFromUpdater(UINodeId updaterRoot, UINodeId parent, UIWidgetKind kind)
+Core::Result<UINodeId>
+UIContext::createElementFromBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot, UINodeId parent,
+                                             const UIElementDescriptor& descriptor, usize& remainingNodeBudget)
 {
-    return m_impl->createChildFromUpdater(updaterRoot, parent, kind);
+    return m_impl->createElementFromBuildTransaction(
+        updaterRoot, componentRoot, parent, descriptor, remainingNodeBudget);
 }
 
-Core::Result<UINodeId> UIContext::createListViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                                           UIListViewCreateConfig config)
+Core::Status UIContext::commitBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot)
 {
-    return m_impl->createListViewFromUpdater(updaterRoot, parent, config);
+    return m_impl->commitBuildTransaction(updaterRoot, componentRoot);
 }
 
-Core::Result<UINodeId> UIContext::createTreeViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                                            UITreeViewCreateConfig config)
+void UIContext::rollbackBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot) noexcept
 {
-    return m_impl->createTreeViewFromUpdater(updaterRoot, parent, config);
+    m_impl->rollbackBuildTransaction(updaterRoot, componentRoot);
 }
 
 Core::Status UIContext::setLayoutStyleFromUpdater(UINodeId updaterRoot, UINodeId node, const UILayoutStyle& style)
@@ -14955,6 +16586,22 @@ Core::Status UIContext::clearFocusFromUpdater(UINodeId updaterRoot)
     return m_impl->clearFocusFromUpdater(updaterRoot);
 }
 
+Core::Status UIContext::setStyleRoleFromUpdater(UINodeId updaterRoot, UINodeId node, UIStyleRoleId role)
+{
+    return m_impl->setStyleRoleFromUpdater(updaterRoot, node, role);
+}
+
+Core::Result<UIStyleRoleId> UIContext::styleRoleFromUpdater(UINodeId updaterRoot, UINodeId node) const
+{
+    return m_impl->styleRoleFromUpdater(updaterRoot, node);
+}
+
+Core::Status UIContext::clearOverrideFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                UIStyleOverride properties)
+{
+    return m_impl->clearOverrideFromUpdater(updaterRoot, node, properties);
+}
+
 Core::Result<bool> UIContext::isEnabledFromUpdater(UINodeId updaterRoot, UINodeId node) const
 {
     return m_impl->isEnabledFromUpdater(updaterRoot, node);
@@ -14985,6 +16632,12 @@ Core::Status UIContext::setTextStyleFromUpdater(UINodeId updaterRoot, UINodeId n
     return m_impl->setTextStyleFromUpdater(updaterRoot, node, style);
 }
 
+Core::Status UIContext::setContentAlignmentFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                       UIContentAlignment alignment)
+{
+    return m_impl->setContentAlignmentFromUpdater(updaterRoot, node, alignment);
+}
+
 Core::Result<std::string_view> UIContext::textFromUpdater(UINodeId updaterRoot, UINodeId node)
 {
     return m_impl->textFromUpdater(updaterRoot, node);
@@ -14993,6 +16646,12 @@ Core::Result<std::string_view> UIContext::textFromUpdater(UINodeId updaterRoot, 
 Core::Result<UITextStyle> UIContext::textStyleFromUpdater(UINodeId updaterRoot, UINodeId node)
 {
     return m_impl->textStyleFromUpdater(updaterRoot, node);
+}
+
+Core::Result<UIContentAlignment> UIContext::contentAlignmentFromUpdater(UINodeId updaterRoot,
+                                                                        UINodeId node) const
+{
+    return m_impl->contentAlignmentFromUpdater(updaterRoot, node);
 }
 
 Core::Status UIContext::setTextSelectionFromUpdater(UINodeId updaterRoot, UINodeId textEdit, UITextSelection selection)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/ui/UIDropdown.hpp>
+#include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIProgressBar.hpp>
@@ -19,6 +20,7 @@ struct WidgetTextState final {
     UITextStorage::Allocation allocation{};
     u32 length = 0;
     UITextStyle style{};
+    UIContentAlignment alignment{};
     UITextMetrics metrics{};
     bool hasContent = false;
 };

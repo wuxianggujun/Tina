@@ -2,6 +2,7 @@
 
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/ui/UITheme.hpp>
+#include <tina/ui/UIElement.hpp>
 
 #include <algorithm>
 #include <array>
@@ -13,6 +14,8 @@
 
 namespace Tina::Sample3D {
 namespace {
+
+namespace UI = Tina::UI;
 
 inline constexpr Core::u64 PanelCount = 7;
 inline constexpr Core::u64 LabelCount = 13;
@@ -39,9 +42,9 @@ struct Rect final {
 [[nodiscard]] UI::UILayoutStyle absoluteStyle(Rect rect, UI::UIEdgeSpacing padding = {}) noexcept
 {
     UI::UILayoutStyle style{};
-    style.position = UI::UILayoutPositionMode::AbsoluteOverlay;
-    style.absoluteInset.left = UI::UILayoutLength::Px(rect.left);
-    style.absoluteInset.top = UI::UILayoutLength::Px(rect.top);
+    style.placement = UI::UILayoutPlacement::Overlay;
+    style.overlay.offset.x = UI::UILayoutLength::Px(rect.left);
+    style.overlay.offset.y = UI::UILayoutLength::Px(rect.top);
     style.size.width = UI::UILayoutLength::Px(rect.width);
     style.size.height = UI::UILayoutLength::Px(rect.height);
     style.padding = padding;
@@ -68,7 +71,7 @@ struct Rect final {
 
 [[nodiscard]] Core::Result<UI::UINodeId> createPanel(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent, Rect rect)
 {
-    auto node = tree.createPanel(parent);
+    auto node = tree.createElement(parent, UI::makePanelElement());
     if (!node)
     {
         return Core::failure(std::move(node.error()));
@@ -83,7 +86,7 @@ struct Rect final {
 [[nodiscard]] Core::Result<UI::UINodeId> createLabel(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent, Rect rect,
                                                      std::string_view text)
 {
-    auto node = tree.createLabel(parent);
+    auto node = tree.createElement(parent, UI::makeLabelElement());
     if (!node)
     {
         return Core::failure(std::move(node.error()));
@@ -102,7 +105,7 @@ struct Rect final {
 [[nodiscard]] Core::Result<UI::UINodeId> createButton(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent, Rect rect,
                                                       std::string_view text)
 {
-    auto node = tree.createButton(parent);
+    auto node = tree.createElement(parent, UI::makeButtonElement());
     if (!node)
     {
         return Core::failure(std::move(node.error()));
@@ -481,7 +484,7 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
         return status;
     }
 
-    auto checkbox = tree->createCheckbox(rootNode);
+    auto checkbox = tree->createElement(rootNode, UI::makeCheckboxElement());
     if (!checkbox)
     {
         return Core::failure(std::move(checkbox.error()));
@@ -505,7 +508,7 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
         return status;
     }
 
-    auto slider = tree->createSlider(rootNode);
+    auto slider = tree->createElement(rootNode, UI::makeSliderElement());
     if (!slider)
     {
         return Core::failure(std::move(slider.error()));
@@ -533,7 +536,7 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
         return status;
     }
 
-    auto progress = tree->createProgressBar(rootNode);
+    auto progress = tree->createElement(rootNode, UI::makeProgressBarElement());
     if (!progress)
     {
         return Core::failure(std::move(progress.error()));
@@ -552,7 +555,7 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
         return status;
     }
 
-    auto assetList = tree->createListView(rootNode, {.materializedItemCapacity = 7});
+    auto assetList = tree->createElement(rootNode, UI::makeListViewElement({.materializedItemCapacity = 7}));
     if (!assetList)
     {
         return Core::failure(std::move(assetList.error()));
@@ -584,7 +587,7 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
         return status;
     }
 
-    auto sceneTree = tree->createTreeView(rootNode, {.materializedItemCapacity = 7});
+    auto sceneTree = tree->createElement(rootNode, UI::makeTreeViewElement({.materializedItemCapacity = 7}));
     if (!sceneTree)
     {
         return Core::failure(std::move(sceneTree.error()));

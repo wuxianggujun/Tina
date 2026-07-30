@@ -13,25 +13,30 @@ constexpr Tina::UI::UIEdgeSpacing Spacing =
 static_assert(Spacing.left == 8.0F);
 static_assert(Spacing.top == 4.0F);
 
-constexpr Tina::UI::UILayoutInsets Insets =
-    Tina::UI::UILayoutInsets::HorizontalVertical(
-        Tina::UI::UILayoutLength::Px(8.0F),
-        Tina::UI::UILayoutLength::Percent(100.0F));
-static_assert(Insets.left == Tina::UI::UILayoutLength::Px(8.0F));
-static_assert(Insets.top == Tina::UI::UILayoutLength::Percent(100.0F));
+constexpr Tina::UI::UIOverlayOffset Offset{
+    .x = Tina::UI::UILayoutLength::Px(8.0F),
+    .y = Tina::UI::UILayoutLength::Percent(100.0F),
+};
+static_assert(Offset.x == Tina::UI::UILayoutLength::Px(8.0F));
+static_assert(Offset.y == Tina::UI::UILayoutLength::Percent(100.0F));
 
 constexpr Tina::UI::UILayoutStyle OverlayStyle{
     .size = {.width = Tina::UI::UILayoutLength::Percent(100.0F),
              .height = Tina::UI::UILayoutLength::Auto()},
     .margin = Tina::UI::UIEdgeSpacing::All(0.0F),
     .padding = Tina::UI::UIEdgeSpacing::HorizontalVertical(12.0F, 8.0F),
-    .absoluteInset = Tina::UI::UILayoutInsets::All(Tina::UI::UILayoutLength::Px(0.0F)),
-    .flex = {.direction = Tina::UI::UIFlexDirection::Row,
-             .justify = Tina::UI::UIJustifyContent::SpaceBetween,
-             .alignItems = Tina::UI::UIAlignItems::Center,
-             .grow = 1.0F},
-    .position = Tina::UI::UILayoutPositionMode::AbsoluteOverlay,
+    .flexContainer = {.direction = Tina::UI::UIFlexDirection::Row,
+                      .justifyContent = Tina::UI::UIJustifyContent::SpaceBetween,
+                      .alignItems = Tina::UI::UIAxisAlignment::Center},
+    .flexItem = {.grow = 1.0F,
+                 .shrink = 1.0F,
+                 .basis = Tina::UI::UILayoutLength::Auto(),
+                 .alignSelf = Tina::UI::UIAlignSelf::Center},
+    .overlay = {.horizontal = Tina::UI::UIAxisAlignment::Center,
+                .vertical = Tina::UI::UIAxisAlignment::End,
+                .offset = Offset},
+    .placement = Tina::UI::UILayoutPlacement::Overlay,
     .visibility = Tina::UI::UIVisibility::Visible,
 };
-static_assert(OverlayStyle.position == Tina::UI::UILayoutPositionMode::AbsoluteOverlay);
-static_assert(OverlayStyle.flex.direction == Tina::UI::UIFlexDirection::Row);
+static_assert(OverlayStyle.placement == Tina::UI::UILayoutPlacement::Overlay);
+static_assert(OverlayStyle.flexContainer.direction == Tina::UI::UIFlexDirection::Row);

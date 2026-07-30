@@ -8,31 +8,31 @@ namespace Tina::Tests {
 namespace {
 
 struct ExpectedWidgetTraits final {
-    UI::UIWidgetKind kind = UI::UIWidgetKind::Panel;
+    UI::Detail::BuiltinElementKind kind = UI::Detail::BuiltinElementKind::Panel;
     UI::Detail::UIWidgetTraits traits{};
 };
 
 TEST(UIWidgetTraitsTests, ClassifiesEveryWidgetKindThroughOneCanonicalTable)
 {
     constexpr std::array Cases{
-        ExpectedWidgetTraits{UI::UIWidgetKind::Root, {}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::Panel, {}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::Label, {.supportsText = true}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::Button, {true, true, true, true}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::Checkbox, {false, true, true, false}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::Slider, {}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::TextEdit, {false, false, true, true}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::ProgressBar, {}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::RadioButton, {false, true, true, true}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::Modal, {}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::ScrollView, {}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::Dropdown, {true, true, true, true}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::Popup, {}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::DropdownItem, {true, true, true, true}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::ListView, {false, false, true, false}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::ListViewItem, {true, true, true, true}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::TreeView, {false, false, true, false}},
-        ExpectedWidgetTraits{UI::UIWidgetKind::TreeViewItem, {true, true, true, true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Root, {}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Panel, {}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Label, {.supportsText = true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Button, {true, true, true, true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Checkbox, {false, true, true, false}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Slider, {}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::TextEdit, {false, false, true, true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::ProgressBar, {}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::RadioButton, {false, true, true, true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Modal, {}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::ScrollView, {}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Dropdown, {true, true, true, true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Popup, {}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::DropdownItem, {true, true, true, true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::ListView, {false, false, true, false}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::ListViewItem, {true, true, true, true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::TreeView, {false, false, true, false}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::TreeViewItem, {true, true, true, true}},
     };
 
     for (const auto& testCase : Cases)
@@ -56,7 +56,7 @@ TEST(UIWidgetTraitsTests, ClassifiesEveryWidgetKindThroughOneCanonicalTable)
 
 TEST(UIWidgetTraitsTests, UnknownKindHasNoCapabilities)
 {
-    const auto unknown = static_cast<UI::UIWidgetKind>(255);
+    const auto unknown = static_cast<UI::Detail::BuiltinElementKind>(255);
     const auto traits = UI::Detail::widgetTraits(unknown);
 
     EXPECT_FALSE(traits.supportsButtonChrome);

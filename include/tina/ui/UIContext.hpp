@@ -10,7 +10,9 @@
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
+#include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIContextConfig.hpp>
+#include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
@@ -30,7 +32,6 @@
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
 #include <tina/ui/UITreeView.hpp>
-#include <tina/ui/UIWidgetKind.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <memory>
@@ -57,6 +58,9 @@ struct UIContextStatistics final {
     usize layoutSnapshotCapacity = 0;
     usize hitSnapshotCapacity = 0;
     usize paintSnapshotCapacity = 0;
+    usize canvasCommandCapacity = 0;
+    usize activeCanvasCommandCount = 0;
+    usize canvasCommandHighWater = 0;
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     usize activeRoutedPointerListenerCount = 0;
@@ -103,6 +107,7 @@ struct UIContextStatistics final {
 };
 
 class UIContext;
+class UIElementBuildTransaction;
 
 // Move-only ownership of one routed-pointer listener registration. Owner-thread
 // reset takes effect immediately, including during dispatch. Off-thread reset is
@@ -171,21 +176,7 @@ class UIRootBuilder final {
     UIRootBuilder() noexcept = default;
 
     [[nodiscard]] Core::Result<UIRootOwner> createRoot();
-    [[nodiscard]] Core::Result<UINodeId> createPanel(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createLabel(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createButton(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createCheckbox(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createSlider(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createTextEdit(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createProgressBar(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createModal(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createScrollView(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createDropdown(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createPopup(UINodeId dropdown);
-    [[nodiscard]] Core::Result<UINodeId> createDropdownItem(UINodeId popup);
-    [[nodiscard]] Core::Result<UINodeId> createListView(UINodeId parent, UIListViewCreateConfig config = {});
-    [[nodiscard]] Core::Result<UINodeId> createTreeView(UINodeId parent, UITreeViewCreateConfig config = {});
+    [[nodiscard]] Core::Result<UINodeId> createElement(UINodeId parent, const UIElementDescriptor& descriptor);
 
   private:
     friend class UIContext;
@@ -193,6 +184,45 @@ class UIRootBuilder final {
     explicit UIRootBuilder(UIContext& context) noexcept;
 
     UIContext* m_context = nullptr;
+};
+
+// Move-only bounded construction of one component subtree. The root and every
+// descendant remain live retained nodes, but no committed snapshot can observe
+// them until the caller commits layout. Any create failure poisons the build;
+// destruction or reset then reclaims the entire component subtree and its
+// retained text/canvas storage.
+class UIElementBuildTransaction final {
+  public:
+    UIElementBuildTransaction() noexcept = default;
+    ~UIElementBuildTransaction() noexcept;
+
+    UIElementBuildTransaction(const UIElementBuildTransaction&) = delete;
+    UIElementBuildTransaction& operator=(const UIElementBuildTransaction&) = delete;
+
+    UIElementBuildTransaction(UIElementBuildTransaction&& other) noexcept;
+    UIElementBuildTransaction& operator=(UIElementBuildTransaction&& other) noexcept;
+
+    [[nodiscard]] Core::Result<UINodeId> createElement(UINodeId parent,
+                                                       const UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<UINodeId> commit();
+    void reset() noexcept;
+
+    [[nodiscard]] UINodeId rootNodeId() const noexcept;
+    [[nodiscard]] usize remainingNodeBudget() const noexcept;
+    [[nodiscard]] bool isActive() const noexcept;
+
+  private:
+    friend class UIContext;
+    friend class UITreeUpdater;
+
+    UIElementBuildTransaction(UIContext& context, UINodeId updaterRoot, UINodeId componentRoot,
+                              usize remainingNodeBudget) noexcept;
+
+    std::weak_ptr<Detail::UIContextLifetimeControl> m_lifetime{};
+    UINodeId m_updaterRoot{};
+    UINodeId m_componentRoot{};
+    usize m_remainingNodeBudget = 0;
+    std::optional<Core::Error> m_failure{};
 };
 
 // Non-owning owner-thread view scoped to one live root. It must not outlive its
@@ -207,21 +237,9 @@ class UITreeUpdater final {
     UITreeUpdater(UITreeUpdater&& other) noexcept;
     UITreeUpdater& operator=(UITreeUpdater&& other) noexcept;
 
-    [[nodiscard]] Core::Result<UINodeId> createPanel(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createLabel(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createButton(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createCheckbox(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createSlider(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createTextEdit(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createProgressBar(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createModal(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createScrollView(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createDropdown(UINodeId parent);
-    [[nodiscard]] Core::Result<UINodeId> createPopup(UINodeId dropdown);
-    [[nodiscard]] Core::Result<UINodeId> createDropdownItem(UINodeId popup);
-    [[nodiscard]] Core::Result<UINodeId> createListView(UINodeId parent, UIListViewCreateConfig config = {});
-    [[nodiscard]] Core::Result<UINodeId> createTreeView(UINodeId parent, UITreeViewCreateConfig config = {});
+    [[nodiscard]] Core::Result<UINodeId> createElement(UINodeId parent, const UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<UIElementBuildTransaction>
+    beginBuildTransaction(UINodeId parent, const UIElementDescriptor& rootDescriptor, usize nodeBudget);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UINodeId node, UIPointerHitPolicy policy);
@@ -235,16 +253,21 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UIFocusScopeMode> focusScopeMode(UINodeId node) const;
     [[nodiscard]] Core::Status requestFocus(UINodeId node);
     [[nodiscard]] Core::Status clearFocus();
+    [[nodiscard]] Core::Status setStyleRole(UINodeId node, UIStyleRoleId role);
+    [[nodiscard]] Core::Result<UIStyleRoleId> styleRole(UINodeId node) const;
+    [[nodiscard]] Core::Status clearOverride(UINodeId node, UIStyleOverride properties = UIStyleOverride::All);
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
     [[nodiscard]] Core::Status setButtonPaint(UINodeId button, const UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UIButtonPaint> buttonPaint(UINodeId button) const;
-    // Label/Button/RadioButton/TextEdit only. Stores strict UTF-8 without NUL into the fixed text
-    // byte budget and dirties Measure for Auto-sized intrinsic placeholders.
+    // Intrinsic-text elements only. Stores strict UTF-8 without NUL into the
+    // fixed text byte budget and dirties Measure for Auto-sized content.
     // Glyph raster and FreeType remain out of this API.
     [[nodiscard]] Core::Status setText(UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(UINodeId node, const UITextStyle& style);
+    [[nodiscard]] Core::Status setContentAlignment(UINodeId node, UIContentAlignment alignment);
     [[nodiscard]] Core::Result<std::string_view> text(UINodeId node);
     [[nodiscard]] Core::Result<UITextStyle> textStyle(UINodeId node);
+    [[nodiscard]] Core::Result<UIContentAlignment> contentAlignment(UINodeId node) const;
     [[nodiscard]] Core::Status setTextSelection(UINodeId textEdit, UITextSelection selection);
     [[nodiscard]] Core::Result<UITextSelection> textSelection(UINodeId textEdit) const;
     [[nodiscard]] Core::Status setButtonAction(UINodeId button, UIButtonActionCallback callback);
@@ -503,6 +526,7 @@ class UIContext final {
     friend class UIRootOwner;
     friend class UIRootBuilder;
     friend class UITreeUpdater;
+    friend class UIElementBuildTransaction;
     friend class UIRoutedPointerListenerToken;
 
     struct Impl;
@@ -510,15 +534,17 @@ class UIContext final {
     explicit UIContext(std::unique_ptr<Impl> impl) noexcept;
 
     [[nodiscard]] Core::Result<UIRootOwner> createRoot();
-    [[nodiscard]] Core::Result<UINodeId> createChild(UINodeId parent, UIWidgetKind kind);
-    [[nodiscard]] Core::Result<UINodeId> createListViewChild(UINodeId parent, UIListViewCreateConfig config);
-    [[nodiscard]] Core::Result<UINodeId> createTreeViewChild(UINodeId parent, UITreeViewCreateConfig config);
-    [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                                                UIWidgetKind kind);
-    [[nodiscard]] Core::Result<UINodeId> createListViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                                                  UIListViewCreateConfig config);
-    [[nodiscard]] Core::Result<UINodeId> createTreeViewFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                                                   UITreeViewCreateConfig config);
+    [[nodiscard]] Core::Result<UINodeId> createElement(UINodeId parent, const UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<UINodeId> createElementFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                                                  const UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<UIElementBuildTransaction>
+    beginBuildTransactionFromUpdater(UINodeId updaterRoot, UINodeId parent,
+                                     const UIElementDescriptor& rootDescriptor, usize nodeBudget);
+    [[nodiscard]] Core::Result<UINodeId>
+    createElementFromBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot, UINodeId parent,
+                                      const UIElementDescriptor& descriptor, usize& remainingNodeBudget);
+    [[nodiscard]] Core::Status commitBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot);
+    void rollbackBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot) noexcept;
     [[nodiscard]] Core::Status setProgressBarRangeFromUpdater(UINodeId updaterRoot, UINodeId progressBar,
                                                               float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValueFromUpdater(UINodeId updaterRoot, UINodeId progressBar, float value);
@@ -547,6 +573,10 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIFocusScopeMode> focusScopeModeFromUpdater(UINodeId updaterRoot, UINodeId node) const;
     [[nodiscard]] Core::Status requestFocusFromUpdater(UINodeId updaterRoot, UINodeId node);
     [[nodiscard]] Core::Status clearFocusFromUpdater(UINodeId updaterRoot);
+    [[nodiscard]] Core::Status setStyleRoleFromUpdater(UINodeId updaterRoot, UINodeId node, UIStyleRoleId role);
+    [[nodiscard]] Core::Result<UIStyleRoleId> styleRoleFromUpdater(UINodeId updaterRoot, UINodeId node) const;
+    [[nodiscard]] Core::Status clearOverrideFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                       UIStyleOverride properties);
     [[nodiscard]] Core::Result<bool> isEnabledFromUpdater(UINodeId updaterRoot, UINodeId node) const;
     [[nodiscard]] Core::Status setBoxPaintFromUpdater(UINodeId updaterRoot, UINodeId node, const UIBoxPaint& paint);
     [[nodiscard]] Core::Status setButtonPaintFromUpdater(UINodeId updaterRoot, UINodeId button,
@@ -554,8 +584,12 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIButtonPaint> buttonPaintFromUpdater(UINodeId updaterRoot, UINodeId button) const;
     [[nodiscard]] Core::Status setTextFromUpdater(UINodeId updaterRoot, UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyleFromUpdater(UINodeId updaterRoot, UINodeId node, const UITextStyle& style);
+    [[nodiscard]] Core::Status setContentAlignmentFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                              UIContentAlignment alignment);
     [[nodiscard]] Core::Result<std::string_view> textFromUpdater(UINodeId updaterRoot, UINodeId node);
     [[nodiscard]] Core::Result<UITextStyle> textStyleFromUpdater(UINodeId updaterRoot, UINodeId node);
+    [[nodiscard]] Core::Result<UIContentAlignment> contentAlignmentFromUpdater(UINodeId updaterRoot,
+                                                                               UINodeId node) const;
     [[nodiscard]] Core::Status setTextSelectionFromUpdater(UINodeId updaterRoot, UINodeId textEdit,
                                                            UITextSelection selection);
     [[nodiscard]] Core::Result<UITextSelection> textSelectionFromUpdater(UINodeId updaterRoot, UINodeId textEdit) const;

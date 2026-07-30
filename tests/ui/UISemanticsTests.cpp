@@ -67,12 +67,12 @@ TEST(UISemanticsTest, PublishesInteractiveKindsAndOmitsDecorators)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto panel = context->rootBuilder().createPanel(root.rootNodeId());
-    auto label = context->rootBuilder().createLabel(root.rootNodeId());
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
-    auto checkbox = context->rootBuilder().createCheckbox(root.rootNodeId());
-    auto slider = context->rootBuilder().createSlider(root.rootNodeId());
-    auto textEdit = context->rootBuilder().createTextEdit(root.rootNodeId());
+    auto panel = context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
+    auto label = context->rootBuilder().createElement(root.rootNodeId(), UI::makeLabelElement());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto slider = context->rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
+    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(panel.has_value());
     ASSERT_TRUE(label.has_value());
     ASSERT_TRUE(button.has_value());
@@ -173,7 +173,7 @@ TEST(UISemanticsTest, CheckboxToggleAdvancesSemanticsRevision)
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
-    auto checkbox = context->rootBuilder().createCheckbox(root.rootNodeId());
+    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
     ASSERT_TRUE(checkbox.has_value());
 
     auto updater = createUpdater(*context, root);
@@ -199,8 +199,8 @@ TEST(UISemanticsTest, PublishedTextRemainsStableUntilTheNextCommit)
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
-    auto label = context->rootBuilder().createLabel(root.rootNodeId());
-    auto textEdit = context->rootBuilder().createTextEdit(root.rootNodeId());
+    auto label = context->rootBuilder().createElement(root.rootNodeId(), UI::makeLabelElement());
+    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(label.has_value());
     ASSERT_TRUE(textEdit.has_value());
 

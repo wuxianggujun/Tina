@@ -4,8 +4,10 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
+#include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIDropdown.hpp>
+#include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIPopup.hpp>
@@ -13,6 +15,7 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
+#include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITreeView.hpp>
@@ -40,23 +43,8 @@ class PrimaryWindowUITreeUpdater final {
     PrimaryWindowUITreeUpdater& operator=(PrimaryWindowUITreeUpdater&& other) noexcept;
 
     [[nodiscard]] Core::Result<bool> isAlive(UI::UINodeId node) const;
-    [[nodiscard]] Core::Result<UI::UINodeId> createPanel(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createLabel(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createTextEdit(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createButton(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createCheckbox(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createSlider(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createProgressBar(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createRadioButton(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createModal(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createScrollView(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId>
-    createListView(UI::UINodeId parent, UI::UIListViewCreateConfig config = {});
-    [[nodiscard]] Core::Result<UI::UINodeId>
-    createTreeView(UI::UINodeId parent, UI::UITreeViewCreateConfig config = {});
-    [[nodiscard]] Core::Result<UI::UINodeId> createDropdown(UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createPopup(UI::UINodeId dropdown);
-    [[nodiscard]] Core::Result<UI::UINodeId> createDropdownItem(UI::UINodeId popup);
+    [[nodiscard]] Core::Result<UI::UINodeId> createElement(UI::UINodeId parent,
+                                                          const UI::UIElementDescriptor& descriptor);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);
@@ -65,6 +53,11 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UIFocusScopeMode> focusScopeMode(UI::UINodeId node) const;
     [[nodiscard]] Core::Status requestFocus(UI::UINodeId node);
     [[nodiscard]] Core::Status clearFocus();
+    [[nodiscard]] Core::Status setStyleRole(UI::UINodeId node, UI::UIStyleRoleId role);
+    [[nodiscard]] Core::Result<UI::UIStyleRoleId> styleRole(UI::UINodeId node) const;
+    [[nodiscard]] Core::Status clearOverride(
+        UI::UINodeId node,
+        UI::UIStyleOverride properties = UI::UIStyleOverride::All);
     // Context-wide theme mutation remains phase-scoped even though this facade
     // is rooted. Existing local paint/text overrides are preserved.
     [[nodiscard]] Core::Result<UI::UITheme> productTheme() const;
@@ -74,8 +67,10 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(UI::UINodeId button) const;
     [[nodiscard]] Core::Status setText(UI::UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(UI::UINodeId node, const UI::UITextStyle& style);
+    [[nodiscard]] Core::Status setContentAlignment(UI::UINodeId node, UI::UIContentAlignment alignment);
     [[nodiscard]] Core::Result<std::string_view> text(UI::UINodeId node);
     [[nodiscard]] Core::Result<UI::UITextStyle> textStyle(UI::UINodeId node);
+    [[nodiscard]] Core::Result<UI::UIContentAlignment> contentAlignment(UI::UINodeId node) const;
     [[nodiscard]] Core::Status setTextSelection(UI::UINodeId textEdit, UI::UITextSelection selection);
     [[nodiscard]] Core::Result<UI::UITextSelection> textSelection(UI::UINodeId textEdit) const;
     [[nodiscard]] Core::Status setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback);

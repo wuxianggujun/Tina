@@ -5,7 +5,6 @@
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UISemantics.hpp>
-#include <tina/ui/UIWidgetKind.hpp>
 
 #include <cstring>
 #include <limits>
@@ -51,7 +50,7 @@ struct UIAccessibilityNode final {
     UINodeId node{};
     UINodeId parent{};
     UISemanticsRole role = UISemanticsRole::Group;
-    UIWidgetKind kind = UIWidgetKind::Panel;
+    UISemanticsAction actions = UISemanticsAction::None;
     UILogicalRect worldRect{};
     std::string_view name{};
     std::string_view description{};
@@ -95,7 +94,7 @@ struct UIAccessibilityAction final {
     if (entry.focused) {
         states = states | UIAccessibilityState::Focused;
     }
-    if (entry.kind == UIWidgetKind::Checkbox || entry.kind == UIWidgetKind::RadioButton) {
+    if (entry.role == UISemanticsRole::Checkbox || entry.role == UISemanticsRole::RadioButton) {
         states = states | (entry.checked ? UIAccessibilityState::Checked : UIAccessibilityState::Unchecked);
     }
     if (entry.hasRange) {
@@ -104,10 +103,7 @@ struct UIAccessibilityAction final {
     if (entry.selected) {
         states = states | UIAccessibilityState::Selected;
     }
-    if (entry.kind == UIWidgetKind::ProgressBar) {
-        states = states | UIAccessibilityState::ReadOnly;
-    }
-    if (entry.kind == UIWidgetKind::Label) {
+    if (entry.readOnly) {
         states = states | UIAccessibilityState::ReadOnly;
     }
     return states;
@@ -225,7 +221,7 @@ public:
                 .node = entry.node,
                 .parent = entry.parent,
                 .role = entry.role,
-                .kind = entry.kind,
+                .actions = entry.actions,
                 .worldRect = entry.worldRect,
                 .value = entry.value,
                 .minValue = entry.minValue,
@@ -303,7 +299,7 @@ private:
                 .node = source.node,
                 .parent = source.parent,
                 .role = source.role,
-                .kind = source.kind,
+                .actions = source.actions,
                 .worldRect = source.worldRect,
                 .value = source.value,
                 .minValue = source.minValue,

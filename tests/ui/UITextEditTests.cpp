@@ -241,7 +241,7 @@ class UITextEditTest : public ::testing::Test {
         float width = 240.0F,
         float height = 32.0F)
     {
-        auto result = updater.createTextEdit(root.rootNodeId());
+        auto result = updater.createElement(root.rootNodeId(), UI::makeTextEditElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -274,7 +274,7 @@ class UITextEditTest : public ::testing::Test {
 
 TEST_F(UITextEditTest, DefaultsTargetableWhileLabelRemainsReadOnly)
 {
-    auto labelResult = updater.createLabel(root.rootNodeId());
+    auto labelResult = updater.createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value());
     const UI::UINodeId label = *labelResult;
     assertOk(updater.setLayoutStyle(label, fixedSize(100.0F, 24.0F)));
@@ -791,7 +791,7 @@ TEST_F(UITextEditTest, PointerSelectionUsesRasterizedVariableGlyphAdvances)
     assertOk(localUpdater.setLayoutStyle(
         localRoot.rootNodeId(),
         fixedSize(120.0F, 40.0F)));
-    auto textEditResult = localUpdater.createTextEdit(localRoot.rootNodeId());
+    auto textEditResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value())
         << (textEditResult ? "" : textEditResult.error().message);
     const UI::UINodeId textEdit = *textEditResult;
@@ -888,10 +888,10 @@ TEST_F(UITextEditTest, SmallTextArenaReusesReleasedLargeBlockAtRequestedSize)
     ASSERT_TRUE(localRoot.hasValue());
     auto localUpdater = createUpdater(*localContext, localRoot);
 
-    auto firstResult = localUpdater.createTextEdit(localRoot.rootNodeId());
+    auto firstResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(firstResult.has_value()) << (firstResult ? "" : firstResult.error().message);
     const UI::UINodeId first = *firstResult;
-    auto secondResult = localUpdater.createTextEdit(localRoot.rootNodeId());
+    auto secondResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(secondResult.has_value()) << (secondResult ? "" : secondResult.error().message);
     const UI::UINodeId second = *secondResult;
 
@@ -1012,11 +1012,11 @@ TEST_F(UITextEditTest, ImePreeditDirtyQueueFailureLeavesPreviousComposition)
     ASSERT_TRUE(localRoot.hasValue());
     auto localUpdater = createUpdater(*localContext, localRoot);
 
-    auto textEditResult = localUpdater.createTextEdit(localRoot.rootNodeId());
+    auto textEditResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value())
         << (textEditResult ? "" : textEditResult.error().message);
     const UI::UINodeId textEdit = *textEditResult;
-    auto blockerResult = localUpdater.createPanel(localRoot.rootNodeId());
+    auto blockerResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(blockerResult.has_value())
         << (blockerResult ? "" : blockerResult.error().message);
     const UI::UINodeId blocker = *blockerResult;
@@ -1077,15 +1077,15 @@ TEST_F(UITextEditTest, PointerSelectionDirtyQueueFailurePreservesSelectionAndFoc
     ASSERT_TRUE(localRoot.hasValue());
     auto localUpdater = createUpdater(*localContext, localRoot);
 
-    auto textEditResult = localUpdater.createTextEdit(localRoot.rootNodeId());
+    auto textEditResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value())
         << (textEditResult ? "" : textEditResult.error().message);
     const UI::UINodeId textEdit = *textEditResult;
-    auto firstBlockerResult = localUpdater.createPanel(localRoot.rootNodeId());
+    auto firstBlockerResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(firstBlockerResult.has_value())
         << (firstBlockerResult ? "" : firstBlockerResult.error().message);
     const UI::UINodeId firstBlocker = *firstBlockerResult;
-    auto secondBlockerResult = localUpdater.createPanel(localRoot.rootNodeId());
+    auto secondBlockerResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(secondBlockerResult.has_value())
         << (secondBlockerResult ? "" : secondBlockerResult.error().message);
     const UI::UINodeId secondBlocker = *secondBlockerResult;
@@ -1156,7 +1156,7 @@ TEST_F(UITextEditTest, PaintSnapshotCapacityFiveAcceptsSelectionAndPreedit)
     assertOk(localUpdater.setLayoutStyle(
         localRoot.rootNodeId(),
         fixedSize(200.0F, 40.0F)));
-    auto textEditResult = localUpdater.createTextEdit(localRoot.rootNodeId());
+    auto textEditResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value())
         << (textEditResult ? "" : textEditResult.error().message);
     const UI::UINodeId textEdit = *textEditResult;
@@ -1198,10 +1198,10 @@ TEST_F(UITextEditTest, PaintSnapshotCapacityFiveAcceptsSelectionAndPreedit)
 
 TEST_F(UITextEditTest, NestedInButtonPrimaryUpAndStrayUpDoNotActivateParent)
 {
-    auto buttonResult = updater.createButton(root.rootNodeId());
+    auto buttonResult = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value()) << (buttonResult ? "" : buttonResult.error().message);
     const UI::UINodeId button = *buttonResult;
-    auto textEditResult = updater.createTextEdit(button);
+    auto textEditResult = updater.createElement(button, UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value())
         << (textEditResult ? "" : textEditResult.error().message);
     const UI::UINodeId textEdit = *textEditResult;
@@ -1256,10 +1256,10 @@ TEST_F(UITextEditTest, NestedInButtonPrimaryUpAndStrayUpDoNotActivateParent)
 
 TEST_F(UITextEditTest, NestedInSliderPrimaryUpAndStrayUpDoNotDragParent)
 {
-    auto sliderResult = updater.createSlider(root.rootNodeId());
+    auto sliderResult = updater.createElement(root.rootNodeId(), UI::makeSliderElement());
     ASSERT_TRUE(sliderResult.has_value()) << (sliderResult ? "" : sliderResult.error().message);
     const UI::UINodeId slider = *sliderResult;
-    auto textEditResult = updater.createTextEdit(slider);
+    auto textEditResult = updater.createElement(slider, UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value())
         << (textEditResult ? "" : textEditResult.error().message);
     const UI::UINodeId textEdit = *textEditResult;

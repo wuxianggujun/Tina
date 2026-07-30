@@ -89,7 +89,7 @@ createContext(Platform::WindowId window, UI::UIContextCapacityConfig capacities 
 [[nodiscard]] UI::UILayoutStyle popupSize(float width, float height) noexcept
 {
     UI::UILayoutStyle style = fixedSize(width, height);
-    style.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    style.placement = UI::UILayoutPlacement::Overlay;
     return style;
 }
 
@@ -153,23 +153,23 @@ struct DropdownTree final {
 
 [[nodiscard]] DropdownTree createDropdownTree(UI::UITreeUpdater& updater, UI::UINodeId root)
 {
-    auto before = updater.createButton(root);
-    auto dropdown = updater.createDropdown(root);
+    auto before = updater.createElement(root, UI::makeButtonElement());
+    auto dropdown = updater.createElement(root, UI::makeDropdownElement());
     if (!before || !dropdown)
     {
         EXPECT_TRUE(before.has_value()) << (before ? "" : before.error().message);
         EXPECT_TRUE(dropdown.has_value()) << (dropdown ? "" : dropdown.error().message);
         return {};
     }
-    auto popup = updater.createPopup(*dropdown);
+    auto popup = updater.createElement(*dropdown, UI::makePopupElement());
     if (!popup)
     {
         EXPECT_TRUE(popup.has_value()) << popup.error().message;
         return {};
     }
-    auto firstItem = updater.createDropdownItem(*popup);
-    auto secondItem = updater.createDropdownItem(*popup);
-    auto after = updater.createButton(root);
+    auto firstItem = updater.createElement(*popup, UI::makeDropdownItemElement());
+    auto secondItem = updater.createElement(*popup, UI::makeDropdownItemElement());
+    auto after = updater.createElement(root, UI::makeButtonElement());
     if (!firstItem || !secondItem || !after)
     {
         EXPECT_TRUE(firstItem.has_value()) << (firstItem ? "" : firstItem.error().message);
@@ -223,22 +223,22 @@ class UIPopupDropdownTest : public testing::Test {
 
 TEST_F(UIPopupDropdownTest, EnforcesCompositeOwnershipAndRoundTripsState)
 {
-    auto invalidPopup = updater.createPopup(root.rootNodeId());
+    auto invalidPopup = updater.createElement(root.rootNodeId(), UI::makePopupElement());
     ASSERT_FALSE(invalidPopup.has_value());
     EXPECT_EQ(invalidPopup.error().code, UI::UIErrorCode::InvalidParent);
 
-    auto dropdown = updater.createDropdown(root.rootNodeId());
+    auto dropdown = updater.createElement(root.rootNodeId(), UI::makeDropdownElement());
     ASSERT_TRUE(dropdown.has_value()) << dropdown.error().message;
-    auto invalidItem = updater.createDropdownItem(*dropdown);
+    auto invalidItem = updater.createElement(*dropdown, UI::makeDropdownItemElement());
     ASSERT_FALSE(invalidItem.has_value());
     EXPECT_EQ(invalidItem.error().code, UI::UIErrorCode::InvalidParent);
 
-    auto popup = updater.createPopup(*dropdown);
+    auto popup = updater.createElement(*dropdown, UI::makePopupElement());
     ASSERT_TRUE(popup.has_value()) << popup.error().message;
-    auto duplicatePopup = updater.createPopup(*dropdown);
+    auto duplicatePopup = updater.createElement(*dropdown, UI::makePopupElement());
     ASSERT_FALSE(duplicatePopup.has_value());
     EXPECT_EQ(duplicatePopup.error().code, UI::UIErrorCode::InvalidParent);
-    auto item = updater.createDropdownItem(*popup);
+    auto item = updater.createElement(*popup, UI::makeDropdownItemElement());
     ASSERT_TRUE(item.has_value()) << item.error().message;
 
     EXPECT_EQ(updater.focusScopeMode(*popup).value(), UI::UIFocusScopeMode::Contain);
@@ -317,17 +317,17 @@ TEST_F(UIPopupDropdownTest, LayoutPublishesPopupSubtreesAfterNormalContentInStab
 
 TEST_F(UIPopupDropdownTest, AutoPlacementMatchesAnchorAndClampsToViewport)
 {
-    auto dropdown = updater.createDropdown(root.rootNodeId());
+    auto dropdown = updater.createElement(root.rootNodeId(), UI::makeDropdownElement());
     ASSERT_TRUE(dropdown.has_value()) << dropdown.error().message;
-    auto popup = updater.createPopup(*dropdown);
+    auto popup = updater.createElement(*dropdown, UI::makePopupElement());
     ASSERT_TRUE(popup.has_value()) << popup.error().message;
-    auto item = updater.createDropdownItem(*popup);
+    auto item = updater.createElement(*popup, UI::makeDropdownItemElement());
     ASSERT_TRUE(item.has_value()) << item.error().message;
 
     UI::UILayoutStyle dropdownLayout = fixedSize(80.0F, 20.0F);
-    dropdownLayout.position = UI::UILayoutPositionMode::AbsoluteOverlay;
-    dropdownLayout.absoluteInset.left = UI::UILayoutLength::Px(170.0F);
-    dropdownLayout.absoluteInset.top = UI::UILayoutLength::Px(70.0F);
+    dropdownLayout.placement = UI::UILayoutPlacement::Overlay;
+    dropdownLayout.overlay.offset.x = UI::UILayoutLength::Px(170.0F);
+    dropdownLayout.overlay.offset.y = UI::UILayoutLength::Px(70.0F);
     assertOk(updater.setLayoutStyle(*dropdown, dropdownLayout));
     assertOk(updater.setLayoutStyle(*popup, popupSize(120.0F, 40.0F)));
     assertOk(updater.setLayoutStyle(*item, fixedSize(120.0F, 40.0F)));
@@ -556,8 +556,8 @@ TEST(UIPopupDropdownCapacityTest, ActivationFailureIsAtomicAndSteadyStateDoesNot
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     const DropdownTree tree = createDropdownTree(updater, root.rootNodeId());
-    auto extraOne = updater.createPanel(root.rootNodeId());
-    auto extraTwo = updater.createPanel(root.rootNodeId());
+    auto extraOne = updater.createElement(root.rootNodeId(), UI::makePanelElement());
+    auto extraTwo = updater.createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(extraOne.has_value()) << (extraOne ? "" : extraOne.error().message);
     ASSERT_TRUE(extraTwo.has_value()) << (extraTwo ? "" : extraTwo.error().message);
     assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));

@@ -5,6 +5,7 @@
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIPaint.hpp>
 
 #include <array>
@@ -23,6 +24,8 @@
 #include "../common/SampleSpriteFrameResource.hpp"
 
 namespace {
+
+namespace UI = Tina::UI;
 
 using Tina::Core::u32;
 using Tina::Core::u64;
@@ -54,9 +57,9 @@ struct LifecycleCounters final {
                                                          Tina::UI::UILayoutLength height) noexcept
 {
     Tina::UI::UILayoutStyle style{};
-    style.position = Tina::UI::UILayoutPositionMode::AbsoluteOverlay;
-    style.absoluteInset.left = left;
-    style.absoluteInset.top = top;
+    style.placement = Tina::UI::UILayoutPlacement::Overlay;
+    style.overlay.offset.x = left;
+    style.overlay.offset.y = top;
     style.size.width = width;
     style.size.height = height;
     return style;
@@ -209,7 +212,7 @@ class Visible2DState final : public Tina::IGameState {
         };
         for (const PanelSpec& panelSpec : panels)
         {
-            auto panel = tree->createPanel(root->rootNodeId());
+            auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
             if (!panel)
             {
                 return Tina::Core::failure(std::move(panel.error()));

@@ -170,12 +170,12 @@ protected:
         ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
         root_ = std::move(*rootResult);
 
-        auto firstSliderResult = context_->rootBuilder().createSlider(root_.rootNodeId());
+        auto firstSliderResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
         ASSERT_TRUE(firstSliderResult.has_value())
             << (firstSliderResult ? "" : firstSliderResult.error().message);
         firstSlider_ = *firstSliderResult;
 
-        auto secondSliderResult = context_->rootBuilder().createSlider(root_.rootNodeId());
+        auto secondSliderResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
         ASSERT_TRUE(secondSliderResult.has_value())
             << (secondSliderResult ? "" : secondSliderResult.error().message);
         secondSlider_ = *secondSliderResult;
@@ -438,7 +438,7 @@ TEST_F(UISliderChangeCallbackRegistryTests, StaleNodeIdCannotClearReusedNodeCall
     UI::UITreeUpdater updater = std::move(*updaterResult);
     ASSERT_TRUE(updater.destroy(firstSlider_).has_value());
 
-    auto replacementSliderResult = context_->rootBuilder().createSlider(root_.rootNodeId());
+    auto replacementSliderResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
     ASSERT_TRUE(replacementSliderResult.has_value())
         << (replacementSliderResult ? "" : replacementSliderResult.error().message);
     const UI::UINodeId replacementSlider = *replacementSliderResult;
@@ -557,7 +557,7 @@ TEST_F(UISliderChangeCallbackRegistryTests, FullCapacityReplacementUsesTransacti
         registry.commit(*registration, false);
     }
 
-    auto thirdSliderResult = context_->rootBuilder().createSlider(root_.rootNodeId());
+    auto thirdSliderResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
     ASSERT_TRUE(thirdSliderResult.has_value())
         << (thirdSliderResult ? "" : thirdSliderResult.error().message);
     auto fourthRegistration = registry.stage(

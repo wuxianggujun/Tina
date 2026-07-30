@@ -245,12 +245,14 @@ protected:
         ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
         root_ = std::move(*rootResult);
 
-        auto firstNodeResult = context_->rootBuilder().createPanel(root_.rootNodeId());
+        auto firstNodeResult = context_->rootBuilder().createElement(
+            root_.rootNodeId(), UI::makePanelElement());
         ASSERT_TRUE(firstNodeResult.has_value())
             << (firstNodeResult ? "" : firstNodeResult.error().message);
         firstNode_ = *firstNodeResult;
 
-        auto secondNodeResult = context_->rootBuilder().createPanel(root_.rootNodeId());
+        auto secondNodeResult = context_->rootBuilder().createElement(
+            root_.rootNodeId(), UI::makePanelElement());
         ASSERT_TRUE(secondNodeResult.has_value())
             << (secondNodeResult ? "" : secondNodeResult.error().message);
         secondNode_ = *secondNodeResult;

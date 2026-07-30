@@ -22,8 +22,6 @@
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
 
-当前无 Now 项；`ASSET-HANDLE-SCENE` 已由 N16.4 收口并移入 Done。
-
 ## Next
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
@@ -56,6 +54,7 @@
 
 | ID | 完成项 | 证据入口 |
 | --- | --- | --- |
+| UI-ELEMENT-AUTHORING | ADR 0022 已完成：descriptor/recipe `createElement()`、Flex/Overlay 与统一 content placement、显式 Semantics/Merge/Exclude、Theme style role 与属性级 override reset、固定容量多节点 build transaction、bounded backend-neutral Canvas `SolidRect` 首切片全部落地；公开 `UIWidgetKind` 与 create-by-kind surface 已删除，Showcase 普通页面迁移到 Flow/Flex | [ADR 0022](adr/0022-ui-element-authoring-and-layout.md) · [UI](ui.md) · `UIElementTests` / UI + Runtime UI + UI-Render + FreeType + UIA + bgfx tests · Showcase Dark/Light smoke/capture · UI-003 visual gate |
 | ASSET-HANDLE-SCENE | A1-A6 与 N16.1-N16.4 完成：Scene/Prefab/FX/TileMap 保存 weak Handle，全部 Sprite2D/Mesh3D Render item 使用 packet-local `FrameResourceRef`；Sprite/Mesh3D registry 分别唯一拥有 Lease/GPU/binding，并以 active frame pin 与 retirement ledger 关闭资源 | [资源](resources.md) · [Rendering](rendering.md) · [Scene](scene-ecs.md) · 2D/3D product gates |
 | ASSET-HANDLE-SCENE-N16.4-MESH-OWNER | Mesh/Material extraction 迁移到 `Mesh3DGeometry`/`Mesh3DMaterial` frame ref；`Mesh3DBindingRegistry` 唯一拥有 Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 Texture Lease/GPU；active frame 与 Material reference count 阻止过早 retirement；product-3d schema 4 证明2 Mesh、2 Material、3共享 Texture 的 owner handoff、weak handle 失效和 retirement ledger Released | [资源](resources.md) · [Rendering](rendering.md) · [3D](game-3d.md) · Mesh3D/Asset retirement/Render tests · 3D product gate |
 | ASSET-HANDLE-SCENE-N16.3-SPRITE-OWNER | `Sprite2DBindingRegistry` Entry 唯一拥有 resident `AssetLease`、`GpuTextureId` 与 binding；register 成功才消费 GPU，retirement 失败完整重试，active frame borrow 阻止提交，析构要求空 Entry；product-2d schema 14 证明2份 owner handoff、weak handle 失效和2条 `GpuTexture2D` record 全部 Released | [资源](resources.md) · [2D](game-2d.md) · Registry/Asset retirement tests · 2D product gate |
@@ -102,7 +101,7 @@
 | UI-SHOWCASE | 独立 `tina_sample_ui_showcase` 同屏展示20个成熟控件、Panel/elevation/色板/状态栏、Dark/Light 实时换肤、集合导航/滚动与 Slider→ProgressBar 联动；dark/light 自动 smoke 和 Win32 pointer interaction/capture 通过 | [UI](ui.md) · [测试](testing.md) |
 | UI-PRODUCT-2D-THEME | product-2d Theme Button 提交 pending intent 并在 `updateUI()` 事务换肤；标准控件继承产品 chrome，Panel/标题局部层级随主题重算；schema 14 自动 Dark→Light→Dark 与 Scene Explorer TreeView 后回到 Dark | [UI](ui.md) · [2D](game-2d.md) · [测试](testing.md) |
 | UI-PRODUCT-3D-THEME | `Product3DUI` 独立 root；Theme Button、Auto Rotate Checkbox、Rotation Speed Slider、Frame ProgressBar、Asset ListView、Scene TreeView 驱动实际 3D 状态；标准 chrome 继承、Panel/标题局部层级集中换肤；schema 4 自动 Dark→Light→Dark、集合导航与暗/亮 FreeType client capture | [UI](ui.md) · [3D](game-3d.md) · [测试](testing.md) |
-| UI-LAYOUT-PADDING | `UILayoutStyle::padding` 同时约束 text auto-size/paint content origin；多行回到 padded x，TextEdit pointer selection 扣除 left padding；对应 UI 回归通过 | [UI](ui.md) · `UITextTests` / `UITextEditTests` |
+| UI-LAYOUT-PADDING | `UILayoutStyle::padding` 同时约束 text auto-size 与 committed content box；多行、paint、TextEdit caret/selection/pointer mapping 共用 committed origin；对应 UI 回归通过 | [UI](ui.md) · `UITextTests` / `UITextEditTests` |
 | DOC-002 | `tools/docs/CheckDocs.ps1`：docs 本地链接、cmake configure/build preset、`--target` 名、Legacy 产品文案软警告；不扫 out/build/thirdparty | [building](building.md) · [testing](testing.md) |
 | RUNTIME-001 | `GameStateStack` + commands + 唯一 commit；**policy 向下阻断**（fixed/frame/render/UI 自顶向下 `forEachDispatch`）；enter 失败丢 candidate；`GameStateStackTests` / policy dispatch 单测 | [gameplay](gameplay.md) · ADR 0014 |
 | RUNTIME-002 | `FramePin`/`FramePinSink`、`RenderFramePacket`、`CpuSubmissionCompletionLedger`；EngineHost submit/present 挂 pin 并在 present/skip 后 complete；shutdown abandon；`FramePinPacketTests` | [rendering](rendering.md) · ADR 0016 |

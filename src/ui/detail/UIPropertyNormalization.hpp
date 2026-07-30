@@ -20,6 +20,7 @@ struct NormalizedUIContextCapacityConfig final {
     usize layoutSnapshotCapacity = 0;
     usize hitSnapshotCapacity = 0;
     usize paintSnapshotCapacity = 0;
+    usize canvasCommandCapacity = 0;
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     usize buttonActionCapacity = 0;
@@ -65,5 +66,7 @@ normalizeDropdownPaint(UIDropdownPaint paint);
 [[nodiscard]] Core::Status validateProductTheme(const UITheme& theme);
 [[nodiscard]] Core::Result<UILayoutStyle>
 normalizeLayoutStyle(UILayoutStyle style);
+[[nodiscard]] bool
+isValidContentAlignment(UIContentAlignment alignment) noexcept;
 
 } // namespace Tina::UI::Detail

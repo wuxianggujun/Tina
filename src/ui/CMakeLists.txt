@@ -1,5 +1,6 @@
 set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UI.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIBehavior.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIButton.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDropdown.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIListView.hpp
@@ -9,15 +10,18 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRadioButton.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIScrollView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISlider.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIStyle.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDirty.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedHit.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedLayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedPaint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedStructure.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContent.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISemantics.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIAccessibility.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContext.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContextConfig.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIElement.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIEventRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
@@ -30,7 +34,6 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UITextRasterizer.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/InputRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UINodeId.hpp
-    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIWidgetKind.hpp
 )
 
 add_library(tina_ui STATIC
@@ -55,8 +58,6 @@ add_library(tina_ui STATIC
     detail/UIPropertyNormalization.cpp
     detail/UIPaintPrimitives.hpp
     detail/UIPaintPrimitives.cpp
-    detail/UIThemeBindingResolver.hpp
-    detail/UIThemeBindingResolver.cpp
     detail/UIRoutedPointerListenerRegistry.hpp
     detail/UIRoutedPointerListenerRegistry.cpp
     detail/UISliderChangeCallbackRegistry.hpp

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/ui/UIBehavior.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
-#include <tina/ui/UIWidgetKind.hpp>
 
 #include <span>
 
@@ -21,7 +21,7 @@ struct UICommittedHitEntry final {
     UILogicalRect effectiveClip{};
     u32 paintOrdinal = 0;
     UIPointerHitPolicy policy = UIPointerHitPolicy::Ignore;
-    UIWidgetKind kind = UIWidgetKind::Panel;
+    UIElementBehavior behaviors = UIElementBehavior::None;
 };
 
 // Owner-thread borrowed hit/route-ancestry view. It is invalidated by the next

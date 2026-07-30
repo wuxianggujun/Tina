@@ -3,7 +3,7 @@
 namespace Tina::Tests {
 namespace {
 
-TEST_F(UIButtonActionTest, WidgetKindsPublishExpectedDefaultHitPolicies)
+TEST_F(UIButtonActionTest, ElementRecipesPublishExpectedDefaultHitPolicies)
 {
     auto context = createContext(firstWindow, {.nodeCapacity = 5, .rootCapacity = 1});
     ASSERT_NE(context, nullptr);
@@ -12,7 +12,7 @@ TEST_F(UIButtonActionTest, WidgetKindsPublishExpectedDefaultHitPolicies)
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
     const UI::UINodeId label = createLabel(*context, panel);
     const UI::UINodeId button = createButton(*context, panel);
-    auto textEditResult = context->rootBuilder().createTextEdit(panel);
+    auto textEditResult = context->rootBuilder().createElement(panel, UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value());
     const UI::UINodeId textEdit = *textEditResult;
     auto updater = createUpdater(*context, root);

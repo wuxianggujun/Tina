@@ -151,7 +151,7 @@ class PrimaryWindowUIDisplayCoordinatorTest : public testing::Test {
         auto updaterResult = context->treeUpdater(root);
         ASSERT_TRUE(updaterResult.has_value());
         auto& updater = *updaterResult;
-        auto panelResult = updater.createPanel(root.rootNodeId());
+        auto panelResult = updater.createElement(root.rootNodeId(), UI::makePanelElement());
         ASSERT_TRUE(panelResult.has_value());
         panel = *panelResult;
 
@@ -183,7 +183,7 @@ class PrimaryWindowUIDisplayCoordinatorTest : public testing::Test {
         {
             return Core::failure(std::move(updaterResult.error()));
         }
-        auto panelResult = updaterResult->createPanel(root.rootNodeId());
+        auto panelResult = updaterResult->createElement(root.rootNodeId(), UI::makePanelElement());
         if (!panelResult)
         {
             return Core::failure(std::move(panelResult.error()));

@@ -66,9 +66,11 @@ TEST(UIInputPrimitivesTests, QueriesHitIdentityAncestryCyclesAndModalScope)
     auto rootResult = context->rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     auto root = std::move(*rootResult);
-    auto panelResult = context->rootBuilder().createPanel(root.rootNodeId());
+    auto panelResult = context->rootBuilder().createElement(
+        root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value());
-    auto buttonResult = context->rootBuilder().createButton(*panelResult);
+    auto buttonResult = context->rootBuilder().createElement(
+        *panelResult, UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value());
 
     const std::array entries{
@@ -85,7 +87,8 @@ TEST(UIInputPrimitivesTests, QueriesHitIdentityAncestryCyclesAndModalScope)
             .parentEntryIndex = 1,
             .modalScopeEntryIndex = 0,
             .policy = UI::UIPointerHitPolicy::Targetable,
-            .kind = UI::UIWidgetKind::Button,
+            .behaviors = UI::UIElementBehavior::Focusable |
+                         UI::UIElementBehavior::Activate,
         },
     };
 
@@ -140,9 +143,11 @@ TEST(UIInputPrimitivesTests, QueriesCommittedHitInFrontToBackOrderWithClipModalA
     auto rootResult = context->rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     auto root = std::move(*rootResult);
-    auto panelResult = context->rootBuilder().createPanel(root.rootNodeId());
+    auto panelResult = context->rootBuilder().createElement(
+        root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value());
-    auto buttonResult = context->rootBuilder().createButton(*panelResult);
+    auto buttonResult = context->rootBuilder().createElement(
+        *panelResult, UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value());
 
     const UI::UILogicalRect fullRect{.x = 0.0F, .y = 0.0F,
@@ -155,7 +160,7 @@ TEST(UIInputPrimitivesTests, QueriesCommittedHitInFrontToBackOrderWithClipModalA
             .effectiveClip = fullRect,
             .paintOrdinal = 0,
             .policy = UI::UIPointerHitPolicy::Targetable,
-            .kind = UI::UIWidgetKind::Root,
+            .behaviors = UI::UIElementBehavior::None,
         },
         UI::UICommittedHitEntry{
             .node = *panelResult,
@@ -167,7 +172,7 @@ TEST(UIInputPrimitivesTests, QueriesCommittedHitInFrontToBackOrderWithClipModalA
             .effectiveClip = fullRect,
             .paintOrdinal = 1,
             .policy = UI::UIPointerHitPolicy::Ignore,
-            .kind = UI::UIWidgetKind::Modal,
+            .behaviors = UI::UIElementBehavior::ModalBarrier,
         },
         UI::UICommittedHitEntry{
             .node = *buttonResult,
@@ -180,7 +185,8 @@ TEST(UIInputPrimitivesTests, QueriesCommittedHitInFrontToBackOrderWithClipModalA
                               .width = 20.0F, .height = 20.0F},
             .paintOrdinal = 2,
             .policy = UI::UIPointerHitPolicy::Targetable,
-            .kind = UI::UIWidgetKind::Button,
+            .behaviors = UI::UIElementBehavior::Focusable |
+                         UI::UIElementBehavior::Activate,
         },
     };
 

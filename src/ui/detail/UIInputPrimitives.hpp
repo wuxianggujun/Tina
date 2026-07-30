@@ -5,8 +5,6 @@
 #include <tina/ui/UIFocus.hpp>
 
 #include "UILayoutPrimitives.hpp"
-#include "UIWidgetTraits.hpp"
-
 #include <cmath>
 #include <span>
 
@@ -132,7 +130,8 @@ namespace Tina::UI::Detail {
 {
     return hitEntryAllowsPointerInteraction(
                entryIndex, entries, activeModalEntryIndex) &&
-           isKeyboardFocusableKind(entries[entryIndex].kind);
+           hasBehavior(entries[entryIndex].behaviors,
+                       UIElementBehavior::Focusable);
 }
 
 [[nodiscard]] inline UIPointerHitQueryResult queryCommittedPointerHit(

@@ -145,7 +145,7 @@ void assertOk(Core::Status status)
 {
     for (const UI::UISemanticsEntry& entry : view.entries())
     {
-        if (entry.kind == UI::UIWidgetKind::ListViewItem && entry.virtualItemIndex == logicalIndex)
+        if (entry.role == UI::UISemanticsRole::ListItem && entry.virtualItemIndex == logicalIndex)
         {
             return &entry;
         }
@@ -178,7 +178,7 @@ TEST_F(UIListViewTest, VirtualizesOneHundredThousandItemsWithFixedNodePool)
     auto updater = createUpdater(*context, root);
     ListDataSource source{.count = 100'000, .keyBase = 1'000};
 
-    auto listResult = updater.createListView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    auto listResult = updater.createElement(root.rootNodeId(), UI::makeListViewElement({.materializedItemCapacity = RowCapacity}));
     ASSERT_TRUE(listResult.has_value()) << listResult.error().message;
     const UI::UINodeId listView = *listResult;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
@@ -235,7 +235,7 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
     auto updater = createUpdater(*context, root);
     ListDataSource source{.count = 100};
 
-    auto listResult = updater.createListView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    auto listResult = updater.createElement(root.rootNodeId(), UI::makeListViewElement({.materializedItemCapacity = RowCapacity}));
     ASSERT_TRUE(listResult.has_value()) << listResult.error().message;
     const UI::UINodeId listView = *listResult;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
@@ -325,7 +325,7 @@ TEST_F(UIListViewTest, KeyboardCommandsSkipDisabledRowsDebounceAndActivate)
     auto updater = createUpdater(*context, root);
     ListDataSource source{.count = 30, .disabledIndex = 1, .keyBase = 100};
 
-    const UI::UINodeId listView = *updater.createListView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    const UI::UINodeId listView = *updater.createElement(root.rootNodeId(), UI::makeListViewElement({.materializedItemCapacity = RowCapacity}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(120.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(listView, fixedSize(120.0F, 100.0F)));
     assertOk(updater.setListViewStyle(listView, {.rowHeight = 20.0F, .overscanRows = 1}));
@@ -373,7 +373,7 @@ TEST_F(UIListViewTest, FailedSourceAndRowPoolOverflowPreserveCommittedSnapshots)
     auto updater = createUpdater(*context, root);
     ListDataSource source{.count = 20, .label = "Old"};
 
-    const UI::UINodeId listView = *updater.createListView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    const UI::UINodeId listView = *updater.createElement(root.rootNodeId(), UI::makeListViewElement({.materializedItemCapacity = RowCapacity}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 60.0F)));
     assertOk(updater.setLayoutStyle(listView, fixedSize(100.0F, 60.0F)));
     assertOk(updater.setListViewStyle(listView, {
@@ -433,7 +433,7 @@ TEST_F(UIListViewTest, InternalRowsCannotBeDestroyedIndependently)
     auto updater = createUpdater(*context, root);
     ListDataSource source{.count = 10};
 
-    const UI::UINodeId listView = *updater.createListView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    const UI::UINodeId listView = *updater.createElement(root.rootNodeId(), UI::makeListViewElement({.materializedItemCapacity = RowCapacity}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 60.0F)));
     assertOk(updater.setLayoutStyle(listView, fixedSize(100.0F, 60.0F)));
     assertOk(updater.setListViewStyle(listView, {.rowHeight = 20.0F, .overscanRows = 1}));
@@ -461,7 +461,7 @@ TEST_F(UIListViewTest, WheelAndCommitRemainAllocationFreeAfterWarmup)
     auto updater = createUpdater(*context, root);
     ListDataSource source{.count = 1'000};
 
-    const UI::UINodeId listView = *updater.createListView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    const UI::UINodeId listView = *updater.createElement(root.rootNodeId(), UI::makeListViewElement({.materializedItemCapacity = RowCapacity}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(listView, fixedSize(100.0F, 100.0F)));
     assertOk(updater.setListViewStyle(listView, {

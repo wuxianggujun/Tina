@@ -1510,19 +1510,19 @@ class ScriptedGameState final : public IGameState {
             {
                 return Core::failure(std::move(tree.error()));
             }
-            auto panel = tree->createPanel(root_.rootNodeId());
+            auto panel = tree->createElement(root_.rootNodeId(), UI::makePanelElement());
             if (!panel)
             {
                 return Core::failure(std::move(panel.error()));
             }
             panel_ = *panel;
-            auto button = tree->createButton(panel_);
+            auto button = tree->createElement(panel_, UI::makeButtonElement());
             if (!button)
             {
                 return Core::failure(std::move(button.error()));
             }
             button_ = *button;
-            auto label = tree->createLabel(panel_);
+            auto label = tree->createElement(panel_, UI::makeLabelElement());
             if (!label)
             {
                 return Core::failure(std::move(label.error()));
@@ -1919,7 +1919,7 @@ class ScriptedGameState final : public IGameState {
             }
             if (probe_->triggerPrimaryWindowUICrossRootFailureOnUpdateAndIgnore)
             {
-                auto crossRootPanel = tree->createPanel(secondaryRoot_.rootNodeId());
+                auto crossRootPanel = tree->createElement(secondaryRoot_.rootNodeId(), UI::makePanelElement());
                 if (crossRootPanel)
                 {
                     return Core::failure(Core::CoreErrorCode::Internal,

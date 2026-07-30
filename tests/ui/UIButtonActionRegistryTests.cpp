@@ -125,12 +125,12 @@ protected:
         ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
         root_ = std::move(*rootResult);
 
-        auto firstButtonResult = context_->rootBuilder().createButton(root_.rootNodeId());
+        auto firstButtonResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeButtonElement());
         ASSERT_TRUE(firstButtonResult.has_value())
             << (firstButtonResult ? "" : firstButtonResult.error().message);
         firstButton_ = *firstButtonResult;
 
-        auto secondButtonResult = context_->rootBuilder().createButton(root_.rootNodeId());
+        auto secondButtonResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeButtonElement());
         ASSERT_TRUE(secondButtonResult.has_value())
             << (secondButtonResult ? "" : secondButtonResult.error().message);
         secondButton_ = *secondButtonResult;
@@ -315,7 +315,7 @@ TEST_F(UIButtonActionRegistryTests, StaleNodeIdCannotClearReusedNodeAction)
     ASSERT_TRUE(updaterResult.has_value()) << (updaterResult ? "" : updaterResult.error().message);
     UI::UITreeUpdater updater = std::move(*updaterResult);
     ASSERT_TRUE(updater.destroy(firstButton_).has_value());
-    auto replacementButtonResult = context_->rootBuilder().createButton(root_.rootNodeId());
+    auto replacementButtonResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(replacementButtonResult.has_value())
         << (replacementButtonResult ? "" : replacementButtonResult.error().message);
     const UI::UINodeId replacementButton = *replacementButtonResult;

@@ -45,9 +45,11 @@ protected:
             << (rootResult ? "" : rootResult.error().message);
         root_ = std::move(*rootResult);
         auto firstNodeResult =
-            context_->rootBuilder().createButton(root_.rootNodeId());
+            context_->rootBuilder().createElement(
+                root_.rootNodeId(), UI::makeButtonElement());
         auto secondNodeResult =
-            context_->rootBuilder().createButton(root_.rootNodeId());
+            context_->rootBuilder().createElement(
+                root_.rootNodeId(), UI::makeButtonElement());
         ASSERT_TRUE(firstNodeResult.has_value());
         ASSERT_TRUE(secondNodeResult.has_value());
         firstNode_ = *firstNodeResult;

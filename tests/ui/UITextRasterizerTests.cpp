@@ -117,7 +117,7 @@ TEST(UITextRasterizerTests, ContextCreateWiresPlaceholderRasterizerForTextMeasur
     auto& context = **contextResult;
     auto root = *context.rootBuilder().createRoot();
     auto updater = *context.treeUpdater(root);
-    auto label = *updater.createLabel(root.rootNodeId());
+    auto label = *updater.createElement(root.rootNodeId(), UI::makeLabelElement());
 
     assertOk(updater.setText(label, "Hi"));
     auto text = updater.text(label);

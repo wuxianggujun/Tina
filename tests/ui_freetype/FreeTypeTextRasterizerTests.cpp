@@ -195,9 +195,9 @@ TEST(FreeTypeTextRasterizerTests, ContextSkipsZeroCoverageSpacePaintAndKeepsAtla
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
     UI::UILayoutStyle rootStyle{};
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     ASSERT_TRUE(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
-    auto labelResult = updater.createLabel(root.rootNodeId());
+    auto labelResult = updater.createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value())
         << (labelResult ? "" : labelResult.error().message);
     const UI::UINodeId label = *labelResult;

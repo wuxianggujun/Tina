@@ -97,16 +97,22 @@ namespace {
            value == UIJustifyContent::SpaceBetween;
 }
 
-[[nodiscard]] bool isValidAlignItems(UIAlignItems value) noexcept
+[[nodiscard]] bool isValidAxisAlignment(UIAxisAlignment value) noexcept
 {
-    return value == UIAlignItems::Start || value == UIAlignItems::Center ||
-           value == UIAlignItems::End || value == UIAlignItems::Stretch;
+    return value == UIAxisAlignment::Start || value == UIAxisAlignment::Center ||
+           value == UIAxisAlignment::End || value == UIAxisAlignment::Stretch;
 }
 
-[[nodiscard]] bool isValidPositionMode(UILayoutPositionMode value) noexcept
+[[nodiscard]] bool isValidAlignSelf(UIAlignSelf value) noexcept
 {
-    return value == UILayoutPositionMode::InFlow ||
-           value == UILayoutPositionMode::AbsoluteOverlay;
+    return value == UIAlignSelf::Auto || value == UIAlignSelf::Start ||
+           value == UIAlignSelf::Center || value == UIAlignSelf::End ||
+           value == UIAlignSelf::Stretch;
+}
+
+[[nodiscard]] bool isValidPlacement(UILayoutPlacement value) noexcept
+{
+    return value == UILayoutPlacement::Flow || value == UILayoutPlacement::Overlay;
 }
 
 [[nodiscard]] bool isValidVisibility(UIVisibility value) noexcept
@@ -150,6 +156,7 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
         .layoutSnapshotCapacity = deriveFromNodeCapacity(config.layoutSnapshotCapacity),
         .hitSnapshotCapacity = deriveFromNodeCapacity(config.hitSnapshotCapacity),
         .paintSnapshotCapacity = deriveFromNodeCapacity(config.paintSnapshotCapacity),
+        .canvasCommandCapacity = deriveFromNodeCapacity(config.canvasCommandCapacity),
         .routePathCapacity = deriveFromNodeCapacity(config.routePathCapacity),
         .routedPointerListenerCapacity =
             deriveFromNodeCapacity(config.routedPointerListenerCapacity),
@@ -441,46 +448,46 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeLayoutLength(
-            style.absoluteInset.left, true);
+    if (Core::Status status = normalizeSpacing(style.flexItem.grow); !status)
+    {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeSpacing(style.flexItem.shrink); !status)
+    {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.flexItem.basis, true);
         !status)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeLayoutLength(
-            style.absoluteInset.top, true);
+    if (Core::Status status = normalizeSpacing(style.flexContainer.gap.row);
         !status)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeLayoutLength(
-            style.absoluteInset.right, true);
+    if (Core::Status status = normalizeSpacing(style.flexContainer.gap.column);
         !status)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeLayoutLength(
-            style.absoluteInset.bottom, true);
+    if (Core::Status status = normalizeLayoutLength(style.overlay.offset.x, false);
         !status)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeSpacing(style.flex.grow); !status)
+    if (Core::Status status = normalizeLayoutLength(style.overlay.offset.y, false);
+        !status)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeSpacing(style.flex.gap.row); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeSpacing(style.flex.gap.column); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (!isValidFlexDirection(style.flex.direction) ||
-        !isValidJustifyContent(style.flex.justify) ||
-        !isValidAlignItems(style.flex.alignItems) ||
-        !isValidPositionMode(style.position) ||
+    if (!isValidFlexDirection(style.flexContainer.direction) ||
+        !isValidJustifyContent(style.flexContainer.justifyContent) ||
+        !isValidAxisAlignment(style.flexContainer.alignItems) ||
+        !isValidAlignSelf(style.flexItem.alignSelf) ||
+        !isValidAxisAlignment(style.overlay.horizontal) ||
+        !isValidAxisAlignment(style.overlay.vertical) ||
+        !isValidPlacement(style.placement) ||
         !isValidVisibility(style.visibility))
     {
         return Core::failure(UIErrorCode::InvalidLayout,
@@ -488,6 +495,16 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     }
 
     return style;
+}
+
+bool isValidContentAlignment(UIContentAlignment alignment) noexcept
+{
+    const auto validAxis = [](UIAxisAlignment axis) noexcept {
+        return axis == UIAxisAlignment::Start ||
+               axis == UIAxisAlignment::Center ||
+               axis == UIAxisAlignment::End;
+    };
+    return validAxis(alignment.horizontal) && validAxis(alignment.vertical);
 }
 
 } // namespace Tina::UI::Detail

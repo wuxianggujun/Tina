@@ -210,6 +210,25 @@ struct ResolvedLength final {
                                              : style.size.width.isAuto();
 }
 
+[[nodiscard]] constexpr UIAxisAlignment resolvedItemAlignment(
+    UIAxisAlignment parentAlignment, UIAlignSelf alignSelf) noexcept
+{
+    switch (alignSelf)
+    {
+    case UIAlignSelf::Start:
+        return UIAxisAlignment::Start;
+    case UIAlignSelf::Center:
+        return UIAxisAlignment::Center;
+    case UIAlignSelf::End:
+        return UIAxisAlignment::End;
+    case UIAlignSelf::Stretch:
+        return UIAxisAlignment::Stretch;
+    case UIAlignSelf::Auto:
+        return parentAlignment;
+    }
+    return parentAlignment;
+}
+
 [[nodiscard]] inline float resolveInset(
     UILayoutLength length, float basis,
     LayoutPassStatistics& statistics) noexcept

@@ -1,4 +1,4 @@
-﻿#include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
@@ -50,6 +50,7 @@
 #endif
 #include <tina/ui/UIAccessibility.hpp>
 #include <tina/ui/UIButton.hpp>
+#include <tina/ui/UIElement.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
@@ -88,6 +89,8 @@
 #include <vector>
 
 namespace {
+
+namespace UI = Tina::UI;
 
 using Tina::Core::u16;
 using Tina::Core::u32;
@@ -506,9 +509,9 @@ inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 1;
                                                          Tina::UI::UILayoutLength height) noexcept
 {
     Tina::UI::UILayoutStyle style{};
-    style.position = Tina::UI::UILayoutPositionMode::AbsoluteOverlay;
-    style.absoluteInset.left = left;
-    style.absoluteInset.top = top;
+    style.placement = Tina::UI::UILayoutPlacement::Overlay;
+    style.overlay.offset.x = left;
+    style.overlay.offset.y = top;
     style.size.width = width;
     style.size.height = height;
     return style;
@@ -1983,7 +1986,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         for (std::size_t index = 0; index < panels.size(); ++index)
         {
             const PanelSpec& panelSpec = panels[index];
-            auto panel = tree->createPanel(root->rootNodeId());
+            auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
             if (!panel)
             {
                 return Tina::Core::failure(std::move(panel.error()));
@@ -2057,7 +2060,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         for (std::size_t index = 0; index < labels.size(); ++index)
         {
             const LabelSpec& labelSpec = labels[index];
-            auto label = tree->createLabel(root->rootNodeId());
+            auto label = tree->createElement(root->rootNodeId(), UI::makeLabelElement());
             if (!label)
             {
                 return Tina::Core::failure(std::move(label.error()));
@@ -2084,8 +2087,9 @@ class TileMapBgfxState final : public Tina::IGameState {
             }
         }
 
-        auto sceneTree = tree->createTreeView(
-            root->rootNodeId(), {.materializedItemCapacity = SceneTreeMaterializedItemCapacity});
+        auto sceneTree = tree->createElement(
+            root->rootNodeId(),
+            Tina::UI::makeTreeViewElement({.materializedItemCapacity = SceneTreeMaterializedItemCapacity}));
         if (!sceneTree)
         {
             return Tina::Core::failure(std::move(sceneTree.error()));
@@ -2143,7 +2147,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         // The real Theme command exercises pointer/default-action routing. Its callback
         // only records intent; updateUI() performs the owner-thread Theme transaction.
         {
-            auto button = tree->createButton(root->rootNodeId());
+            auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
             if (!button)
             {
                 return Tina::Core::failure(std::move(button.error()));
@@ -2217,7 +2221,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             [&](float y, float initialValue,
                 float& pendingVolume, bool& hasPending, float& lastVolume, bool& fromSlider)
             -> Tina::Core::Status {
-                auto slider = tree->createSlider(root->rootNodeId());
+                auto slider = tree->createElement(root->rootNodeId(), UI::makeSliderElement());
                 if (!slider)
                 {
                     return Tina::Core::failure(std::move(slider.error()));
@@ -2286,7 +2290,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         enum class MuteBus : u8 { Master = 0, Music = 1, Sfx = 2 };
         const auto wireMuteCheckbox =
             [&](float y, MuteBus bus, bool initiallyChecked) -> Tina::Core::Status {
-                auto checkbox = tree->createCheckbox(root->rootNodeId());
+                auto checkbox = tree->createElement(root->rootNodeId(), UI::makeCheckboxElement());
                 if (!checkbox)
                 {
                     return Tina::Core::failure(std::move(checkbox.error()));
@@ -2363,7 +2367,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         // Single-line profile-name TextEdit. It is separated from the final mute
         // checkbox by 16 px so the settings column remains readable at 960x540.
         {
-            auto profileName = tree->createTextEdit(root->rootNodeId());
+            auto profileName = tree->createElement(root->rootNodeId(), UI::makeTextEditElement());
             if (!profileName)
             {
                 return Tina::Core::failure(std::move(profileName.error()));
@@ -2406,7 +2410,7 @@ class TileMapBgfxState final : public Tina::IGameState {
 
         // Determinate loading/status indicator inherits its track and fill Theme chrome.
         {
-            auto progress = tree->createProgressBar(root->rootNodeId());
+            auto progress = tree->createElement(root->rootNodeId(), UI::makeProgressBarElement());
             if (!progress)
             {
                 return Tina::Core::failure(std::move(progress.error()));
@@ -2451,7 +2455,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             std::array<Tina::UI::UINodeId, radioSpecs.size()> radioButtons{};
             for (std::size_t index = 0; index < radioSpecs.size(); ++index)
             {
-                auto radioButton = tree->createRadioButton(root->rootNodeId());
+                auto radioButton = tree->createElement(root->rootNodeId(), UI::makeRadioButtonElement());
                 if (!radioButton)
                 {
                     return Tina::Core::failure(std::move(radioButton.error()));

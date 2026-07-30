@@ -81,18 +81,6 @@ void expectInvalidControlValue(Core::Status status)
     EXPECT_EQ(status.error().code, UI::UIErrorCode::InvalidControlValue);
 }
 
-[[nodiscard]] const UI::UICommittedNodeEntry* findStructureEntry(
-    UI::UICommittedStructureView view,
-    UI::UINodeId node) noexcept
-{
-    for (const UI::UICommittedNodeEntry& entry : view.entries()) {
-        if (entry.node == node) {
-            return &entry;
-        }
-    }
-    return nullptr;
-}
-
 [[nodiscard]] const UI::UICommittedHitEntry* findHitEntry(
     UI::UICommittedHitView view,
     UI::UINodeId node) noexcept
@@ -142,7 +130,7 @@ protected:
         float width = 120.0F,
         float height = 20.0F)
     {
-        auto result = updater.createProgressBar(root.rootNodeId());
+        auto result = updater.createElement(root.rootNodeId(), UI::makeProgressBarElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -176,15 +164,11 @@ TEST_F(UIProgressBarTest, DefaultsToZeroAndIgnoredPointerPolicy)
     EXPECT_EQ(*paint, UI::UIProgressBarPaint{});
 
     publishLayout();
-    const UI::UICommittedNodeEntry* const structureEntry =
-        findStructureEntry(context->committedStructure(), progressBar);
-    ASSERT_NE(structureEntry, nullptr);
-    EXPECT_EQ(structureEntry->kind, UI::UIWidgetKind::ProgressBar);
-
     const UI::UICommittedHitEntry* const hitEntry =
         findHitEntry(context->committedHit(), progressBar);
     ASSERT_NE(hitEntry, nullptr);
     EXPECT_EQ(hitEntry->policy, UI::UIPointerHitPolicy::Ignore);
+    EXPECT_TRUE(UI::hasBehavior(hitEntry->behaviors, UI::UIElementBehavior::ProgressValue));
     EXPECT_FALSE(context->queryPointerHit({10.0F, 10.0F}).hasTarget());
 }
 
@@ -217,7 +201,7 @@ TEST_F(UIProgressBarTest, RangeAndValueClampAndPublishSemantics)
         findSemanticsEntry(context->committedSemantics(), progressBar);
     ASSERT_NE(semantics, nullptr);
     EXPECT_EQ(semantics->role, UI::UISemanticsRole::ProgressBar);
-    EXPECT_EQ(semantics->kind, UI::UIWidgetKind::ProgressBar);
+    EXPECT_EQ(semantics->actions, UI::UISemanticsAction::None);
     EXPECT_TRUE(semantics->hasRange);
     EXPECT_FLOAT_EQ(semantics->minValue, 10.0F);
     EXPECT_FLOAT_EQ(semantics->maxValue, 30.0F);
@@ -396,7 +380,7 @@ TEST_F(UIProgressBarTest, PaintCapacityCountsValueDerivedFillAtomically)
     auto limitedRoot = createRoot(*limitedContext);
     ASSERT_TRUE(limitedRoot.hasValue());
     auto limitedUpdater = createUpdater(*limitedContext, limitedRoot);
-    auto progressResult = limitedUpdater.createProgressBar(limitedRoot.rootNodeId());
+    auto progressResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makeProgressBarElement());
     ASSERT_TRUE(progressResult.has_value())
         << (progressResult ? "" : progressResult.error().message);
     const UI::UINodeId progressBar = *progressResult;
@@ -431,7 +415,7 @@ TEST_F(UIProgressBarTest, RejectsInvalidInputsAndWrongKindsWithoutMutation)
 {
     const UI::UINodeId progressBar = createProgressBar();
     ASSERT_TRUE(progressBar.hasValue());
-    auto buttonResult = updater.createButton(root.rootNodeId());
+    auto buttonResult = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value()) << (buttonResult ? "" : buttonResult.error().message);
     const UI::UINodeId button = *buttonResult;
 

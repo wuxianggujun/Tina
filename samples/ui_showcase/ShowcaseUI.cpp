@@ -2,6 +2,7 @@
 
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/ui/UITheme.hpp>
+#include <tina/ui/UIElement.hpp>
 
 #include <algorithm>
 #include <array>
@@ -15,12 +16,7 @@
 namespace Tina::SampleUI {
 namespace {
 
-struct Rect final {
-    float left = 0.0F;
-    float top = 0.0F;
-    float width = 0.0F;
-    float height = 0.0F;
-};
+namespace UI = Tina::UI;
 
 constexpr UI::UIListViewItemKey ListItemKeyBase = 1'000;
 constexpr UI::UITreeViewItemKey WorldTreeItemKey = 1;
@@ -51,18 +47,6 @@ constexpr std::array<std::string_view, 6> ScrollContentLabels{
     "Texture streaming",   "Frame pacing",    "Accessibility scale",
 };
 
-[[nodiscard]] UI::UILayoutStyle absoluteStyle(Rect rect, UI::UIEdgeSpacing padding = {}) noexcept
-{
-    UI::UILayoutStyle style{};
-    style.position = UI::UILayoutPositionMode::AbsoluteOverlay;
-    style.absoluteInset.left = UI::UILayoutLength::Px(rect.left);
-    style.absoluteInset.top = UI::UILayoutLength::Px(rect.top);
-    style.size.width = UI::UILayoutLength::Px(rect.width);
-    style.size.height = UI::UILayoutLength::Px(rect.height);
-    style.padding = padding;
-    return style;
-}
-
 [[nodiscard]] UI::UILayoutStyle rootStyle() noexcept
 {
     UI::UILayoutStyle style{};
@@ -79,10 +63,30 @@ constexpr std::array<std::string_view, 6> ScrollContentLabels{
     return style;
 }
 
+[[nodiscard]] UI::UILayoutStyle fillStyle() noexcept
+{
+    return rootStyle();
+}
+
+[[nodiscard]] UI::UILayoutStyle fillWidthStyle(float height) noexcept
+{
+    UI::UILayoutStyle style = sizedStyle(0.0F, height);
+    style.size.width = UI::UILayoutLength::Percent(100.0F);
+    return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle growingStyle() noexcept
+{
+    UI::UILayoutStyle style{};
+    style.flexItem.grow = 1.0F;
+    style.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    return style;
+}
+
 [[nodiscard]] UI::UILayoutStyle overlayStyle(float width, float height) noexcept
 {
     UI::UILayoutStyle style = sizedStyle(width, height);
-    style.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    style.placement = UI::UILayoutPlacement::Overlay;
     return style;
 }
 
@@ -95,66 +99,28 @@ constexpr std::array<std::string_view, 6> ScrollContentLabels{
     return Core::success();
 }
 
-[[nodiscard]] Core::Result<UI::UINodeId> createPanel(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent, Rect rect)
+[[nodiscard]] Core::Result<UI::UINodeId> createPanel(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
+                                                     const UI::UILayoutStyle& layout)
 {
-    auto node = tree.createPanel(parent);
-    if (!node) {
-        return Core::failure(std::move(node.error()));
-    }
-    if (Core::Status status = tree.setLayoutStyle(*node, absoluteStyle(rect)); !status) {
-        return Core::failure(std::move(status.error()));
-    }
-    return *node;
+    return tree.createElement(parent, UI::makePanelElement(layout));
 }
 
-[[nodiscard]] Core::Result<UI::UINodeId> createLabel(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent, Rect rect,
-                                                     std::string_view text)
+[[nodiscard]] Core::Result<UI::UINodeId> createLabel(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
+                                                     const UI::UILayoutStyle& layout, std::string_view text)
 {
-    auto node = tree.createLabel(parent);
-    if (!node) {
-        return Core::failure(std::move(node.error()));
-    }
-    if (Core::Status status = tree.setLayoutStyle(*node, absoluteStyle(rect)); !status) {
-        return Core::failure(std::move(status.error()));
-    }
-    if (Core::Status status = tree.setText(*node, text); !status) {
-        return Core::failure(std::move(status.error()));
-    }
-    return *node;
+    return tree.createElement(parent, UI::makeLabelElement(text, layout));
 }
 
-[[nodiscard]] Core::Result<UI::UINodeId> createButton(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent, Rect rect,
-                                                      std::string_view text)
+[[nodiscard]] Core::Result<UI::UINodeId> createButton(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
+                                                      const UI::UILayoutStyle& layout, std::string_view text)
 {
-    auto node = tree.createButton(parent);
-    if (!node) {
-        return Core::failure(std::move(node.error()));
-    }
-    if (Core::Status status =
-            tree.setLayoutStyle(*node, absoluteStyle(rect, UI::UIEdgeSpacing::HorizontalVertical(14.0F, 8.0F)));
-        !status) {
-        return Core::failure(std::move(status.error()));
-    }
-    if (Core::Status status = tree.setText(*node, text); !status) {
-        return Core::failure(std::move(status.error()));
-    }
-    return *node;
+    return tree.createElement(parent, UI::makeButtonElement(text, layout));
 }
 
-[[nodiscard]] Core::Result<UI::UINodeId> createRadio(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent, Rect rect,
-                                                     std::string_view text)
+[[nodiscard]] Core::Result<UI::UINodeId> createRadio(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
+                                                     const UI::UILayoutStyle& layout, std::string_view text)
 {
-    auto node = tree.createRadioButton(parent);
-    if (!node) {
-        return Core::failure(std::move(node.error()));
-    }
-    if (Core::Status status = tree.setLayoutStyle(*node, absoluteStyle(rect)); !status) {
-        return Core::failure(std::move(status.error()));
-    }
-    if (Core::Status status = tree.setText(*node, text); !status) {
-        return Core::failure(std::move(status.error()));
-    }
-    return *node;
+    return tree.createElement(parent, UI::makeRadioButtonElement(text, layout));
 }
 
 [[nodiscard]] Core::Status setTextStyle(PrimaryWindowUITreeUpdater& tree, UI::UINodeId node,
@@ -361,102 +327,152 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     }
 
     const UI::UINodeId rootNode = root->rootNodeId();
-    if (Core::Status status = storeNode(createPanel(*tree, rootNode, {0.0F, 0.0F, 1280.0F, 980.0F}), nodes_.background);
-        !status) {
-        return status;
-    }
-    if (Core::Status status = storeNode(createPanel(*tree, rootNode, {24.0F, 20.0F, 1232.0F, 72.0F}), nodes_.header);
-        !status) {
-        return status;
-    }
-    if (Core::Status status = storeNode(createPanel(*tree, rootNode, {24.0F, 20.0F, 8.0F, 72.0F}), nodes_.headerAccent);
-        !status) {
-        return status;
-    }
-    if (Core::Status status =
-            storeNode(createPanel(*tree, rootNode, {24.0F, 108.0F, 220.0F, 848.0F}), nodes_.navigation);
+    UI::UILayoutStyle backgroundLayout = fillStyle();
+    backgroundLayout.padding = {
+        .left = 24.0F,
+        .top = 20.0F,
+        .right = 24.0F,
+        .bottom = 24.0F,
+    };
+    backgroundLayout.flexContainer.gap = UI::UILayoutGap::All(16.0F);
+    if (Core::Status status = storeNode(createPanel(*tree, rootNode, backgroundLayout), nodes_.background);
         !status) {
         return status;
     }
 
-    constexpr std::array<Rect, 6> CardRects{
-        Rect{264.0F, 108.0F, 476.0F, 270.0F},
-        Rect{756.0F, 108.0F, 500.0F, 270.0F},
-        Rect{264.0F, 394.0F, 476.0F, 302.0F},
-        Rect{756.0F, 394.0F, 500.0F, 302.0F},
-        Rect{264.0F, 712.0F, 476.0F, 244.0F},
-        Rect{756.0F, 712.0F, 500.0F, 244.0F},
+    UI::UILayoutStyle headerLayout = fillWidthStyle(72.0F);
+    headerLayout.padding.right = 34.0F;
+    headerLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    headerLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    headerLayout.flexContainer.gap.column = 16.0F;
+    if (Core::Status status = storeNode(createPanel(*tree, nodes_.background, headerLayout), nodes_.header);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle headerAccentLayout = sizedStyle(8.0F, 0.0F);
+    headerAccentLayout.size.height = UI::UILayoutLength::Percent(100.0F);
+    headerAccentLayout.flexItem.shrink = 0.0F;
+    if (Core::Status status =
+            storeNode(createPanel(*tree, nodes_.header, headerAccentLayout), nodes_.headerAccent);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId headerCopy{};
+    UI::UILayoutStyle headerCopyLayout = growingStyle();
+    headerCopyLayout.size.height = UI::UILayoutLength::Px(52.0F);
+    headerCopyLayout.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    if (Core::Status status = storeNode(createPanel(*tree, nodes_.header, headerCopyLayout), headerCopy);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId main{};
+    UI::UILayoutStyle mainLayout = growingStyle();
+    mainLayout.size.width = UI::UILayoutLength::Percent(100.0F);
+    mainLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    mainLayout.flexContainer.gap.column = 20.0F;
+    if (Core::Status status = storeNode(createPanel(*tree, nodes_.background, mainLayout), main); !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle navigationLayout = sizedStyle(220.0F, 0.0F);
+    navigationLayout.size.height = UI::UILayoutLength::Percent(100.0F);
+    navigationLayout.flexItem.shrink = 0.0F;
+    navigationLayout.padding = {
+        .left = 24.0F,
+        .top = 24.0F,
+        .right = 24.0F,
+        .bottom = 26.0F,
     };
-    for (Core::usize index = 0; index < CardRects.size(); ++index) {
-        if (Core::Status status = storeNode(createPanel(*tree, rootNode, CardRects[index]), nodes_.cards[index]);
+    if (Core::Status status = storeNode(createPanel(*tree, main, navigationLayout), nodes_.navigation);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId cardsArea{};
+    UI::UILayoutStyle cardsAreaLayout = growingStyle();
+    cardsAreaLayout.size.height = UI::UILayoutLength::Percent(100.0F);
+    cardsAreaLayout.flexContainer.gap.row = 16.0F;
+    if (Core::Status status = storeNode(createPanel(*tree, main, cardsAreaLayout), cardsArea); !status) {
+        return status;
+    }
+
+    constexpr std::array<float, 3> CardRowHeights{270.0F, 302.0F, 244.0F};
+    std::array<UI::UINodeId, 3> cardRows{};
+    for (Core::usize rowIndex = 0; rowIndex < cardRows.size(); ++rowIndex) {
+        UI::UILayoutStyle rowLayout = fillWidthStyle(CardRowHeights[rowIndex]);
+        rowLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+        rowLayout.flexContainer.gap.column = 16.0F;
+        if (Core::Status status = storeNode(createPanel(*tree, cardsArea, rowLayout), cardRows[rowIndex]);
             !status) {
             return status;
         }
-    }
 
-    constexpr std::array<Rect, 5> NavigationAccentRects{
-        Rect{48.0F, 184.0F, 4.0F, 30.0F},
-        Rect{48.0F, 238.0F, 4.0F, 30.0F},
-        Rect{48.0F, 292.0F, 4.0F, 30.0F},
-        Rect{48.0F, 346.0F, 4.0F, 30.0F},
-        Rect{48.0F, 400.0F, 4.0F, 30.0F},
-    };
-    for (Core::usize index = 0; index < NavigationAccentRects.size(); ++index) {
+        UI::UILayoutStyle firstCardLayout = sizedStyle(476.0F, 0.0F);
+        firstCardLayout.size.height = UI::UILayoutLength::Percent(100.0F);
+        firstCardLayout.flexItem.shrink = 0.0F;
+        firstCardLayout.padding = {
+            .left = 24.0F,
+            .top = 22.0F,
+            .right = 24.0F,
+            .bottom = 24.0F,
+        };
         if (Core::Status status =
-                storeNode(createPanel(*tree, rootNode, NavigationAccentRects[index]), nodes_.navigationAccents[index]);
+                storeNode(createPanel(*tree, cardRows[rowIndex], firstCardLayout), nodes_.cards[rowIndex * 2U]);
             !status) {
             return status;
         }
-    }
 
-    if (Core::Status status =
-            storeNode(createPanel(*tree, rootNode, {780.0F, 482.0F, 452.0F, 54.0F}), nodes_.themeGroup);
-        !status) {
-        return status;
-    }
-    if (Core::Status status =
-            storeNode(createPanel(*tree, rootNode, {288.0F, 598.0F, 420.0F, 56.0F}), nodes_.qualityGroup);
-        !status) {
-        return status;
-    }
-    if (Core::Status status =
-            storeNode(createPanel(*tree, rootNode, {780.0F, 624.0F, 452.0F, 48.0F}), nodes_.statusPanel);
-        !status) {
-        return status;
-    }
-
-    constexpr std::array<Rect, 4> SwatchRects{
-        Rect{780.0F, 558.0F, 92.0F, 44.0F},
-        Rect{900.0F, 558.0F, 92.0F, 44.0F},
-        Rect{1020.0F, 558.0F, 92.0F, 44.0F},
-        Rect{1140.0F, 558.0F, 92.0F, 44.0F},
-    };
-    for (Core::usize index = 0; index < SwatchRects.size(); ++index) {
-        if (Core::Status status =
-                storeNode(createPanel(*tree, rootNode, SwatchRects[index]), nodes_.paletteSwatches[index]);
+        UI::UILayoutStyle secondCardLayout = growingStyle();
+        secondCardLayout.size.height = UI::UILayoutLength::Percent(100.0F);
+        secondCardLayout.padding = firstCardLayout.padding;
+        if (Core::Status status = storeNode(createPanel(*tree, cardRows[rowIndex], secondCardLayout),
+                                            nodes_.cards[rowIndex * 2U + 1U]);
             !status) {
             return status;
         }
     }
 
     if (Core::Status status = storeNode(
-            createLabel(*tree, rootNode, {48.0F, 30.0F, 520.0F, 30.0F}, "Tina UI Control Studio"), nodes_.title);
+            createLabel(*tree, headerCopy, fillWidthStyle(30.0F), "Tina UI Control Studio"), nodes_.title);
         !status) {
         return status;
     }
-    if (Core::Status status = storeNode(createLabel(*tree, rootNode, {48.0F, 60.0F, 700.0F, 22.0F},
+    if (Core::Status status = storeNode(createLabel(*tree, headerCopy, fillWidthStyle(22.0F),
                                                     "Retained controls · 即时换肤 · Keyboard / Gamepad"),
                                         nodes_.subtitle);
         !status) {
         return status;
     }
-    if (Core::Status status =
-            storeNode(createLabel(*tree, rootNode, {1050.0F, 43.0F, 172.0F, 24.0F}, "LIVE THEME"), nodes_.liveBadge);
+    if (Core::Status status = storeNode(
+            createLabel(*tree, nodes_.header, sizedStyle(172.0F, 24.0F), "LIVE THEME"), nodes_.liveBadge);
         !status) {
         return status;
     }
+    if (Core::Status status = storeNode(
+            createLabel(*tree, nodes_.navigation, fillWidthStyle(22.0F), "控件索引"), nodes_.navigationTitle);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId navigationBody{};
+    UI::UILayoutStyle navigationBodyLayout = growingStyle();
+    navigationBodyLayout.size.width = UI::UILayoutLength::Percent(100.0F);
+    navigationBodyLayout.margin.top = 30.0F;
+    navigationBodyLayout.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
     if (Core::Status status =
-            storeNode(createLabel(*tree, rootNode, {48.0F, 132.0F, 170.0F, 22.0F}, "控件索引"), nodes_.navigationTitle);
+            storeNode(createPanel(*tree, nodes_.navigation, navigationBodyLayout), navigationBody);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId navigationItems{};
+    UI::UILayoutStyle navigationItemsLayout = fillWidthStyle(246.0F);
+    navigationItemsLayout.flexContainer.gap.row = 24.0F;
+    if (Core::Status status =
+            storeNode(createPanel(*tree, navigationBody, navigationItemsLayout), navigationItems);
         !status) {
         return status;
     }
@@ -468,23 +484,34 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         "Theme palette",
         "Data & navigation",
     };
-    constexpr std::array<Rect, 5> NavigationLabelRects{
-        Rect{64.0F, 188.0F, 156.0F, 24.0F},
-        Rect{64.0F, 242.0F, 156.0F, 24.0F},
-        Rect{64.0F, 296.0F, 156.0F, 24.0F},
-        Rect{64.0F, 350.0F, 156.0F, 24.0F},
-        Rect{64.0F, 404.0F, 156.0F, 24.0F},
-    };
     for (Core::usize index = 0; index < NavigationTexts.size(); ++index) {
-        if (Core::Status status =
-                storeNode(createLabel(*tree, rootNode, NavigationLabelRects[index], NavigationTexts[index]),
-                          nodes_.navigationLabels[index]);
+        UI::UINodeId navigationRow{};
+        UI::UILayoutStyle rowLayout = fillWidthStyle(30.0F);
+        rowLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+        rowLayout.flexContainer.gap.column = 12.0F;
+        if (Core::Status status = storeNode(createPanel(*tree, navigationItems, rowLayout), navigationRow);
+            !status) {
+            return status;
+        }
+        if (Core::Status status = storeNode(
+                createPanel(*tree, navigationRow, sizedStyle(4.0F, 30.0F)), nodes_.navigationAccents[index]);
+            !status) {
+            return status;
+        }
+
+        UI::UILayoutStyle labelLayout = growingStyle();
+        labelLayout.size.height = UI::UILayoutLength::Px(24.0F);
+        labelLayout.margin.top = 4.0F;
+        if (Core::Status status = storeNode(
+                createLabel(*tree, navigationRow, labelLayout, NavigationTexts[index]),
+                nodes_.navigationLabels[index]);
             !status) {
             return status;
         }
     }
     if (Core::Status status = storeNode(
-            createLabel(*tree, rootNode, {48.0F, 892.0F, 170.0F, 38.0F}, "20 controls online\nTheme synchronized"),
+            createLabel(*tree, navigationBody, sizedStyle(170.0F, 38.0F),
+                        "20 controls online\nTheme synchronized"),
             nodes_.navigationHelp);
         !status) {
         return status;
@@ -506,123 +533,73 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         "Dropdown plus a virtualized ListView",
         "TreeView projection and clipped ScrollView",
     };
-    constexpr std::array<Rect, 6> CardTitleRects{
-        Rect{288.0F, 130.0F, 420.0F, 26.0F},
-        Rect{780.0F, 130.0F, 440.0F, 26.0F},
-        Rect{288.0F, 416.0F, 420.0F, 26.0F},
-        Rect{780.0F, 416.0F, 440.0F, 26.0F},
-        Rect{288.0F, 734.0F, 420.0F, 26.0F},
-        Rect{780.0F, 734.0F, 440.0F, 26.0F},
-    };
-    constexpr std::array<Rect, 6> CardSubtitleRects{
-        Rect{288.0F, 158.0F, 420.0F, 22.0F},
-        Rect{780.0F, 158.0F, 440.0F, 22.0F},
-        Rect{288.0F, 444.0F, 420.0F, 22.0F},
-        Rect{780.0F, 444.0F, 440.0F, 22.0F},
-        Rect{288.0F, 762.0F, 420.0F, 22.0F},
-        Rect{780.0F, 762.0F, 440.0F, 22.0F},
-    };
     for (Core::usize index = 0; index < CardTitles.size(); ++index) {
-        if (Core::Status status = storeNode(createLabel(*tree, rootNode, CardTitleRects[index], CardTitles[index]),
-                                            nodes_.cardTitles[index]);
+        if (Core::Status status = storeNode(
+                createLabel(*tree, nodes_.cards[index], fillWidthStyle(26.0F), CardTitles[index]),
+                nodes_.cardTitles[index]);
             !status) {
             return status;
         }
+        UI::UILayoutStyle subtitleLayout = fillWidthStyle(22.0F);
+        subtitleLayout.margin.top = 2.0F;
         if (Core::Status status =
-                storeNode(createLabel(*tree, rootNode, CardSubtitleRects[index], CardSubtitles[index]),
+                storeNode(createLabel(*tree, nodes_.cards[index], subtitleLayout, CardSubtitles[index]),
                           nodes_.cardSubtitles[index]);
             !status) {
             return status;
         }
     }
 
-    if (Core::Status status =
-            storeNode(createLabel(*tree, rootNode, {328.0F, 329.0F, 250.0F, 26.0F}, "Enable notifications"),
-                      nodes_.notificationsLabel);
-        !status) {
-        return status;
-    }
-    if (Core::Status status =
-            storeNode(createLabel(*tree, rootNode, {780.0F, 292.0F, 200.0F, 28.0F}, "72%"), nodes_.progressLabel);
-        !status) {
-        return status;
-    }
-    if (Core::Status status = storeNode(createLabel(*tree, rootNode, {288.0F, 478.0F, 180.0F, 22.0F}, "Profile name"),
-                                        nodes_.profileLabel);
-        !status) {
-        return status;
-    }
-    if (Core::Status status = storeNode(createLabel(*tree, rootNode, {288.0F, 572.0F, 180.0F, 22.0F}, "Render profile"),
-                                        nodes_.qualityLabel);
-        !status) {
-        return status;
-    }
-    if (Core::Status status = storeNode(createLabel(*tree, rootNode, {780.0F, 466.0F, 180.0F, 20.0F}, "Appearance"),
-                                        nodes_.appearanceLabel);
-        !status) {
-        return status;
-    }
-    if (Core::Status status =
-            storeNode(createLabel(*tree, rootNode, {796.0F, 636.0F, 420.0F, 24.0F}, "Ready"), nodes_.statusLabel);
-        !status) {
-        return status;
-    }
-    if (Core::Status status =
-            storeNode(createLabel(*tree, rootNode, {288.0F, 792.0F, 180.0F, 20.0F}, "Asset filter"),
-                      nodes_.dropdownLabel);
-        !status) {
-        return status;
-    }
-    if (Core::Status status =
-            storeNode(createLabel(*tree, rootNode, {496.0F, 792.0F, 220.0F, 20.0F}, "Virtualized workspace"),
-                      nodes_.listLabel);
-        !status) {
-        return status;
-    }
-    if (Core::Status status =
-            storeNode(createLabel(*tree, rootNode, {780.0F, 792.0F, 250.0F, 20.0F}, "Scene hierarchy"),
-                      nodes_.treeLabel);
-        !status) {
-        return status;
-    }
-    if (Core::Status status =
-            storeNode(createLabel(*tree, rootNode, {1046.0F, 792.0F, 186.0F, 20.0F}, "Settings feed"),
-                      nodes_.scrollLabel);
-        !status) {
-        return status;
+    std::array<UI::UINodeId, 3> buttonRows{};
+    for (Core::usize rowIndex = 0; rowIndex < buttonRows.size(); ++rowIndex) {
+        UI::UILayoutStyle rowLayout = fillWidthStyle(rowIndex < 2U ? 44.0F : 28.0F);
+        rowLayout.margin.top = rowIndex == 0U ? 18.0F : 20.0F;
+        rowLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+        rowLayout.flexContainer.gap.column = rowIndex < 2U ? 24.0F : 12.0F;
+        if (Core::Status status =
+                storeNode(createPanel(*tree, nodes_.cards[0], rowLayout), buttonRows[rowIndex]);
+            !status) {
+            return status;
+        }
     }
 
+    UI::UILayoutStyle buttonLayout = sizedStyle(198.0F, 44.0F);
+    buttonLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(14.0F, 8.0F);
     if (Core::Status status = storeNode(
-            createButton(*tree, rootNode, {288.0F, 198.0F, 198.0F, 44.0F}, "Primary action"), nodes_.primaryButton);
+            createButton(*tree, buttonRows[0], buttonLayout, "Primary action"), nodes_.primaryButton);
         !status) {
         return status;
     }
-    if (Core::Status status = storeNode(createButton(*tree, rootNode, {510.0F, 198.0F, 198.0F, 44.0F}, "Destructive"),
-                                        nodes_.destructiveButton);
+    if (Core::Status status = storeNode(
+            createButton(*tree, buttonRows[0], buttonLayout, "Destructive"), nodes_.destructiveButton);
         !status) {
-        return status;
-    }
-    if (Core::Status status = storeNode(createButton(*tree, rootNode, {288.0F, 262.0F, 198.0F, 44.0F}, "Disabled"),
-                                        nodes_.disabledButton);
-        !status) {
-        return status;
-    }
-    if (Core::Status status = storeNode(createButton(*tree, rootNode, {510.0F, 262.0F, 198.0F, 44.0F}, "Reset state"),
-                                        nodes_.resetButton);
-        !status) {
-        return status;
-    }
-    if (Core::Status status = tree->setEnabled(nodes_.disabledButton, false); !status) {
         return status;
     }
 
-    auto checkbox = tree->createCheckbox(rootNode);
+    UI::UIElementDescriptor disabledButton = UI::makeButtonElement("Disabled", buttonLayout);
+    disabledButton.enabled = false;
+    if (Core::Status status =
+            storeNode(tree->createElement(buttonRows[1], disabledButton), nodes_.disabledButton);
+        !status) {
+        return status;
+    }
+    if (Core::Status status =
+            storeNode(createButton(*tree, buttonRows[1], buttonLayout, "Reset state"), nodes_.resetButton);
+        !status) {
+        return status;
+    }
+
+    auto checkbox = tree->createElement(buttonRows[2], UI::makeCheckboxElement(sizedStyle(28.0F, 28.0F)));
     if (!checkbox) {
         return Core::failure(std::move(checkbox.error()));
     }
     nodes_.notificationsCheckbox = *checkbox;
-    if (Core::Status status =
-            tree->setLayoutStyle(nodes_.notificationsCheckbox, absoluteStyle({288.0F, 326.0F, 28.0F, 28.0F}));
+    UI::UILayoutStyle notificationLabelLayout = growingStyle();
+    notificationLabelLayout.size.height = UI::UILayoutLength::Px(25.0F);
+    notificationLabelLayout.margin.top = 3.0F;
+    if (Core::Status status = storeNode(
+            createLabel(*tree, buttonRows[2], notificationLabelLayout, "Enable notifications"),
+            nodes_.notificationsLabel);
         !status) {
         return status;
     }
@@ -631,16 +608,13 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     }
     notificationsEnabled_ = true;
 
-    auto slider = tree->createSlider(rootNode);
+    UI::UILayoutStyle sliderLayout = fillWidthStyle(30.0F);
+    sliderLayout.margin.top = 22.0F;
+    auto slider = tree->createElement(nodes_.cards[1], UI::makeSliderElement(sliderLayout));
     if (!slider) {
         return Core::failure(std::move(slider.error()));
     }
     nodes_.progressSlider = *slider;
-    if (Core::Status status =
-            tree->setLayoutStyle(nodes_.progressSlider, absoluteStyle({780.0F, 202.0F, 452.0F, 30.0F}));
-        !status) {
-        return status;
-    }
     if (Core::Status status = tree->setSliderRange(nodes_.progressSlider, 0.0F, 100.0F, 1.0F); !status) {
         return status;
     }
@@ -648,15 +622,13 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
 
-    auto progress = tree->createProgressBar(rootNode);
+    UI::UILayoutStyle progressLayout = fillWidthStyle(22.0F);
+    progressLayout.margin.top = 20.0F;
+    auto progress = tree->createElement(nodes_.cards[1], UI::makeProgressBarElement(progressLayout));
     if (!progress) {
         return Core::failure(std::move(progress.error()));
     }
     nodes_.progressBar = *progress;
-    if (Core::Status status = tree->setLayoutStyle(nodes_.progressBar, absoluteStyle({780.0F, 252.0F, 452.0F, 22.0F}));
-        !status) {
-        return status;
-    }
     if (Core::Status status = tree->setProgressBarRange(nodes_.progressBar, 0.0F, 100.0F); !status) {
         return status;
     }
@@ -664,22 +636,52 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
 
-    auto textEdit = tree->createTextEdit(rootNode);
+    UI::UILayoutStyle progressLabelLayout = sizedStyle(200.0F, 28.0F);
+    progressLabelLayout.margin.top = 18.0F;
+    if (Core::Status status = storeNode(
+            createLabel(*tree, nodes_.cards[1], progressLabelLayout, "72%"), nodes_.progressLabel);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle profileLabelLayout = sizedStyle(180.0F, 22.0F);
+    profileLabelLayout.margin.top = 12.0F;
+    if (Core::Status status = storeNode(
+            createLabel(*tree, nodes_.cards[2], profileLabelLayout, "Profile name"), nodes_.profileLabel);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle textEditLayout = fillWidthStyle(46.0F);
+    textEditLayout.margin.top = 6.0F;
+    textEditLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(12.0F, 6.0F);
+    auto textEdit = tree->createElement(nodes_.cards[2], UI::makeTextEditElement("Tina Player", textEditLayout));
     if (!textEdit) {
         return Core::failure(std::move(textEdit.error()));
     }
     nodes_.profileTextEdit = *textEdit;
-    if (Core::Status status = tree->setLayoutStyle(
-            nodes_.profileTextEdit,
-            absoluteStyle({288.0F, 506.0F, 420.0F, 46.0F}, UI::UIEdgeSpacing::HorizontalVertical(12.0F, 6.0F)));
+    if (Core::Status status = tree->setTextSelection(nodes_.profileTextEdit,
+                                                     UI::UITextSelection{.anchorCodepoint = 11, .caretCodepoint = 11});
         !status) {
         return status;
     }
-    if (Core::Status status = tree->setText(nodes_.profileTextEdit, "Tina Player"); !status) {
+
+    UI::UILayoutStyle qualityLabelLayout = sizedStyle(180.0F, 22.0F);
+    qualityLabelLayout.margin.top = 20.0F;
+    if (Core::Status status = storeNode(
+            createLabel(*tree, nodes_.cards[2], qualityLabelLayout, "Render profile"), nodes_.qualityLabel);
+        !status) {
         return status;
     }
-    if (Core::Status status = tree->setTextSelection(nodes_.profileTextEdit,
-                                                     UI::UITextSelection{.anchorCodepoint = 11, .caretCodepoint = 11});
+
+    UI::UILayoutStyle qualityGroupLayout = sizedStyle(420.0F, 56.0F);
+    qualityGroupLayout.margin.top = 4.0F;
+    qualityGroupLayout.padding.top = 4.0F;
+    qualityGroupLayout.padding.bottom = 12.0F;
+    qualityGroupLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    qualityGroupLayout.flexContainer.gap.column = 6.0F;
+    if (Core::Status status = storeNode(
+            createPanel(*tree, nodes_.cards[2], qualityGroupLayout), nodes_.qualityGroup);
         !status) {
         return status;
     }
@@ -689,14 +691,11 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         "Balanced",
         "Quality",
     };
-    constexpr std::array<Rect, 3> QualityRects{
-        Rect{0.0F, 4.0F, 164.0F, 40.0F},
-        Rect{170.0F, 4.0F, 132.0F, 40.0F},
-        Rect{308.0F, 4.0F, 112.0F, 40.0F},
-    };
+    constexpr std::array<float, 3> QualityWidths{164.0F, 132.0F, 112.0F};
     for (Core::usize index = 0; index < QualityLabels.size(); ++index) {
         if (Core::Status status =
-                storeNode(createRadio(*tree, nodes_.qualityGroup, QualityRects[index], QualityLabels[index]),
+                storeNode(createRadio(*tree, nodes_.qualityGroup, sizedStyle(QualityWidths[index], 40.0F),
+                                      QualityLabels[index]),
                           nodes_.qualityRadios[index]);
             !status) {
             return status;
@@ -706,14 +705,26 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
 
+    if (Core::Status status = storeNode(
+            createLabel(*tree, nodes_.cards[3], fillWidthStyle(20.0F), "Appearance"),
+            nodes_.appearanceLabel);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle themeGroupLayout = sizedStyle(286.0F, 40.0F);
+    themeGroupLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    themeGroupLayout.flexContainer.gap.column = 22.0F;
+    if (Core::Status status =
+            storeNode(createPanel(*tree, nodes_.cards[3], themeGroupLayout), nodes_.themeGroup);
+        !status) {
+        return status;
+    }
+
     constexpr std::array<std::string_view, 2> ThemeLabels{"Dark", "Light"};
-    constexpr std::array<Rect, 2> ThemeRects{
-        Rect{0.0F, 4.0F, 132.0F, 40.0F},
-        Rect{154.0F, 4.0F, 132.0F, 40.0F},
-    };
     for (Core::usize index = 0; index < ThemeLabels.size(); ++index) {
         if (Core::Status status =
-                storeNode(createRadio(*tree, nodes_.themeGroup, ThemeRects[index], ThemeLabels[index]),
+                storeNode(createRadio(*tree, nodes_.themeGroup, sizedStyle(132.0F, 40.0F), ThemeLabels[index]),
                           nodes_.themeRadios[index]);
             !status) {
             return status;
@@ -725,28 +736,90 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
 
-    auto dropdown = tree->createDropdown(rootNode);
+    UI::UINodeId paletteRow{};
+    UI::UILayoutStyle paletteRowLayout = fillWidthStyle(44.0F);
+    paletteRowLayout.margin.top = 32.0F;
+    paletteRowLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    paletteRowLayout.flexContainer.gap.column = 28.0F;
+    if (Core::Status status =
+            storeNode(createPanel(*tree, nodes_.cards[3], paletteRowLayout), paletteRow);
+        !status) {
+        return status;
+    }
+    for (UI::UINodeId& swatch : nodes_.paletteSwatches) {
+        if (Core::Status status = storeNode(createPanel(*tree, paletteRow, sizedStyle(92.0F, 44.0F)), swatch);
+            !status) {
+            return status;
+        }
+    }
+
+    UI::UILayoutStyle statusPanelLayout = fillWidthStyle(48.0F);
+    statusPanelLayout.margin.top = 22.0F;
+    statusPanelLayout.padding.left = 16.0F;
+    statusPanelLayout.padding.right = 16.0F;
+    statusPanelLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    statusPanelLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    if (Core::Status status =
+            storeNode(createPanel(*tree, nodes_.cards[3], statusPanelLayout), nodes_.statusPanel);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle statusLabelLayout = growingStyle();
+    statusLabelLayout.size.height = UI::UILayoutLength::Px(24.0F);
+    if (Core::Status status = storeNode(
+            createLabel(*tree, nodes_.statusPanel, statusLabelLayout, "Ready"), nodes_.statusLabel);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId selectionLabels{};
+    UI::UILayoutStyle selectionLabelsLayout = fillWidthStyle(20.0F);
+    selectionLabelsLayout.margin.top = 8.0F;
+    selectionLabelsLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    selectionLabelsLayout.flexContainer.gap.column = 18.0F;
+    if (Core::Status status =
+            storeNode(createPanel(*tree, nodes_.cards[4], selectionLabelsLayout), selectionLabels);
+        !status) {
+        return status;
+    }
+    if (Core::Status status = storeNode(
+            createLabel(*tree, selectionLabels, sizedStyle(190.0F, 20.0F), "Asset filter"),
+            nodes_.dropdownLabel);
+        !status) {
+        return status;
+    }
+    if (Core::Status status = storeNode(
+            createLabel(*tree, selectionLabels, sizedStyle(220.0F, 20.0F), "Virtualized workspace"),
+            nodes_.listLabel);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId selectionControls{};
+    UI::UILayoutStyle selectionControlsLayout = fillWidthStyle(114.0F);
+    selectionControlsLayout.margin.top = 6.0F;
+    selectionControlsLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    selectionControlsLayout.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    selectionControlsLayout.flexContainer.gap.column = 18.0F;
+    if (Core::Status status =
+            storeNode(createPanel(*tree, nodes_.cards[4], selectionControlsLayout), selectionControls);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle dropdownLayout = sizedStyle(190.0F, 40.0F);
+    dropdownLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(12.0F, 6.0F);
+    auto dropdown = tree->createElement(
+        selectionControls, UI::makeDropdownElement(DropdownItemLabels[0], dropdownLayout));
     if (!dropdown) {
         return Core::failure(std::move(dropdown.error()));
     }
     nodes_.dropdown = *dropdown;
-    if (Core::Status status = tree->setLayoutStyle(nodes_.dropdown, absoluteStyle({288.0F, 818.0F, 190.0F, 40.0F},
-                                                                                  UI::UIEdgeSpacing::HorizontalVertical(
-                                                                                      12.0F, 6.0F)));
-        !status) {
-        return status;
-    }
-    if (Core::Status status = tree->setText(nodes_.dropdown, DropdownItemLabels[0]); !status) {
-        return status;
-    }
-    auto popup = tree->createPopup(nodes_.dropdown);
+    auto popup = tree->createElement(nodes_.dropdown, UI::makePopupElement(overlayStyle(190.0F, 108.0F)));
     if (!popup) {
         return Core::failure(std::move(popup.error()));
     }
     nodes_.dropdownPopup = *popup;
-    if (Core::Status status = tree->setLayoutStyle(nodes_.dropdownPopup, overlayStyle(190.0F, 108.0F)); !status) {
-        return status;
-    }
     if (Core::Status status = tree->setPopupStyle(nodes_.dropdownPopup,
                                                   UI::UIPopupStyle{
                                                       .placement = UI::UIPopupPlacement::Below,
@@ -757,17 +830,13 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
     for (Core::usize index = 0; index < nodes_.dropdownItems.size(); ++index) {
-        auto item = tree->createDropdownItem(nodes_.dropdownPopup);
+        auto item = tree->createElement(
+            nodes_.dropdownPopup,
+            UI::makeDropdownItemElement(DropdownItemLabels[index], sizedStyle(190.0F, 36.0F)));
         if (!item) {
             return Core::failure(std::move(item.error()));
         }
         nodes_.dropdownItems[index] = *item;
-        if (Core::Status status = tree->setLayoutStyle(*item, sizedStyle(190.0F, 36.0F)); !status) {
-            return status;
-        }
-        if (Core::Status status = tree->setText(*item, DropdownItemLabels[index]); !status) {
-            return status;
-        }
     }
     if (Core::Status status = tree->setDropdownSelectedItem(nodes_.dropdown, nodes_.dropdownItems[0]); !status) {
         return status;
@@ -778,15 +847,13 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     dropdownSelection_ = nodes_.dropdownItems[0];
     dropdownSelectionIndex_ = 0;
 
-    auto listView = tree->createListView(rootNode, {.materializedItemCapacity = 8});
+    auto listView = tree->createElement(
+        selectionControls,
+        UI::makeListViewElement({.materializedItemCapacity = 8}, sizedStyle(220.0F, 114.0F)));
     if (!listView) {
         return Core::failure(std::move(listView.error()));
     }
     nodes_.listView = *listView;
-    if (Core::Status status = tree->setLayoutStyle(nodes_.listView, absoluteStyle({496.0F, 818.0F, 220.0F, 114.0F}));
-        !status) {
-        return status;
-    }
     if (Core::Status status = tree->setListViewStyle(nodes_.listView,
                                                      UI::UIListViewStyle{
                                                          .rowHeight = 26.0F,
@@ -805,15 +872,48 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     }
     listSelectionKey_ = ListItemKeyBase + 2;
 
-    auto treeView = tree->createTreeView(rootNode, {.materializedItemCapacity = 9});
+    UI::UINodeId hierarchyLabels{};
+    UI::UILayoutStyle hierarchyLabelsLayout = fillWidthStyle(20.0F);
+    hierarchyLabelsLayout.margin.top = 8.0F;
+    hierarchyLabelsLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    hierarchyLabelsLayout.flexContainer.gap.column = 16.0F;
+    if (Core::Status status =
+            storeNode(createPanel(*tree, nodes_.cards[5], hierarchyLabelsLayout), hierarchyLabels);
+        !status) {
+        return status;
+    }
+    if (Core::Status status = storeNode(
+            createLabel(*tree, hierarchyLabels, sizedStyle(250.0F, 20.0F), "Scene hierarchy"),
+            nodes_.treeLabel);
+        !status) {
+        return status;
+    }
+    if (Core::Status status = storeNode(
+            createLabel(*tree, hierarchyLabels, sizedStyle(186.0F, 20.0F), "Settings feed"),
+            nodes_.scrollLabel);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId hierarchyControls{};
+    UI::UILayoutStyle hierarchyControlsLayout = fillWidthStyle(114.0F);
+    hierarchyControlsLayout.margin.top = 6.0F;
+    hierarchyControlsLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    hierarchyControlsLayout.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    hierarchyControlsLayout.flexContainer.gap.column = 16.0F;
+    if (Core::Status status =
+            storeNode(createPanel(*tree, nodes_.cards[5], hierarchyControlsLayout), hierarchyControls);
+        !status) {
+        return status;
+    }
+
+    auto treeView = tree->createElement(
+        hierarchyControls,
+        UI::makeTreeViewElement({.materializedItemCapacity = 9}, sizedStyle(250.0F, 114.0F)));
     if (!treeView) {
         return Core::failure(std::move(treeView.error()));
     }
     nodes_.treeView = *treeView;
-    if (Core::Status status = tree->setLayoutStyle(nodes_.treeView, absoluteStyle({780.0F, 818.0F, 250.0F, 114.0F}));
-        !status) {
-        return status;
-    }
     if (Core::Status status = tree->setTreeViewStyle(nodes_.treeView,
                                                      UI::UITreeViewStyle{
                                                          .rowHeight = 26.0F,
@@ -835,16 +935,12 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     }
     treeSelectionKey_ = WorldTreeItemKey;
 
-    auto scrollView = tree->createScrollView(rootNode);
+    auto scrollView = tree->createElement(
+        hierarchyControls, UI::makeScrollViewElement(sizedStyle(186.0F, 114.0F)));
     if (!scrollView) {
         return Core::failure(std::move(scrollView.error()));
     }
     nodes_.scrollView = *scrollView;
-    if (Core::Status status = tree->setLayoutStyle(nodes_.scrollView,
-                                                   absoluteStyle({1046.0F, 818.0F, 186.0F, 114.0F}));
-        !status) {
-        return status;
-    }
     if (Core::Status status = tree->setScrollViewStyle(nodes_.scrollView,
                                                        UI::UIScrollViewStyle{
                                                            .axes = UI::UIScrollAxes::Vertical,
@@ -854,19 +950,23 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         !status) {
         return status;
     }
-    auto scrollContent = tree->createPanel(nodes_.scrollView);
+    UI::UILayoutStyle scrollContentLayout = sizedStyle(170.0F, 248.0F);
+    scrollContentLayout.padding = {
+        .left = 8.0F,
+        .top = 10.0F,
+        .right = 8.0F,
+        .bottom = 24.0F,
+    };
+    scrollContentLayout.flexContainer.gap.row = 14.0F;
+    auto scrollContent = tree->createElement(
+        nodes_.scrollView, UI::makePanelElement(scrollContentLayout));
     if (!scrollContent) {
         return Core::failure(std::move(scrollContent.error()));
     }
     nodes_.scrollContent = *scrollContent;
-    if (Core::Status status = tree->setLayoutStyle(nodes_.scrollContent, sizedStyle(170.0F, 248.0F)); !status) {
-        return status;
-    }
     for (Core::usize index = 0; index < ScrollContentLabels.size(); ++index) {
         if (Core::Status status = storeNode(
-                createLabel(*tree, nodes_.scrollContent, {8.0F, 10.0F + static_cast<float>(index) * 38.0F,
-                                                          146.0F, 24.0F},
-                            ScrollContentLabels[index]),
+                createLabel(*tree, nodes_.scrollContent, sizedStyle(146.0F, 24.0F), ScrollContentLabels[index]),
                 nodes_.scrollContentLabels[index]);
             !status) {
             return status;

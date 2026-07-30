@@ -242,13 +242,15 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
         return tree;
     }
     tree.root = std::move(*root);
-    auto panel = tree.context->rootBuilder().createPanel(tree.root.rootNodeId());
+    auto panel = tree.context->rootBuilder().createElement(
+        tree.root.rootNodeId(), UI::makePanelElement());
     EXPECT_TRUE(panel.has_value()) << (panel ? "" : panel.error().message);
     if (!panel)
     {
         return tree;
     }
-    auto target = tree.context->rootBuilder().createButton(*panel);
+    auto target = tree.context->rootBuilder().createElement(
+        *panel, UI::makeButtonElement());
     EXPECT_TRUE(target.has_value()) << (target ? "" : target.error().message);
     if (!target)
     {
@@ -288,7 +290,8 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
         return tree;
     }
 
-    auto textEdit = tree.updater.createTextEdit(tree.panel);
+    auto textEdit = tree.updater.createElement(
+        tree.panel, UI::makeTextEditElement());
     EXPECT_TRUE(textEdit.has_value()) << (textEdit ? "" : textEdit.error().message);
     if (!textEdit)
     {
@@ -331,23 +334,29 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     }
     tree.updater = std::move(*updater);
 
-    auto before = tree.updater.createButton(tree.root.rootNodeId());
-    auto dropdown = tree.updater.createDropdown(tree.root.rootNodeId());
+    auto before = tree.updater.createElement(
+        tree.root.rootNodeId(), UI::makeButtonElement());
+    auto dropdown = tree.updater.createElement(
+        tree.root.rootNodeId(), UI::makeDropdownElement());
     EXPECT_TRUE(before.has_value()) << (before ? "" : before.error().message);
     EXPECT_TRUE(dropdown.has_value()) << (dropdown ? "" : dropdown.error().message);
     if (!before || !dropdown)
     {
         return tree;
     }
-    auto popup = tree.updater.createPopup(*dropdown);
+    auto popup = tree.updater.createElement(
+        *dropdown, UI::makePopupElement());
     EXPECT_TRUE(popup.has_value()) << (popup ? "" : popup.error().message);
     if (!popup)
     {
         return tree;
     }
-    auto firstItem = tree.updater.createDropdownItem(*popup);
-    auto secondItem = tree.updater.createDropdownItem(*popup);
-    auto after = tree.updater.createButton(tree.root.rootNodeId());
+    auto firstItem = tree.updater.createElement(
+        *popup, UI::makeDropdownItemElement());
+    auto secondItem = tree.updater.createElement(
+        *popup, UI::makeDropdownItemElement());
+    auto after = tree.updater.createElement(
+        tree.root.rootNodeId(), UI::makeButtonElement());
     EXPECT_TRUE(firstItem.has_value()) << (firstItem ? "" : firstItem.error().message);
     EXPECT_TRUE(secondItem.has_value()) << (secondItem ? "" : secondItem.error().message);
     EXPECT_TRUE(after.has_value()) << (after ? "" : after.error().message);
@@ -363,7 +372,7 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     tree.secondItem = *secondItem;
     tree.after = *after;
     UI::UILayoutStyle popupLayout = fixedSize(80.0F, 40.0F);
-    popupLayout.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    popupLayout.placement = UI::UILayoutPlacement::Overlay;
     expectOk(tree.updater.setLayoutStyle(tree.root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.before, fixedSize(80.0F, 20.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.dropdown, fixedSize(80.0F, 24.0F)));
@@ -408,11 +417,14 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     tree.listSource = std::make_unique<ListRouteSource>();
     tree.treeSource = std::make_unique<TreeRouteSource>();
 
-    auto listView = tree.updater.createListView(
-        tree.root.rootNodeId(), {.materializedItemCapacity = 6});
-    auto treeView = tree.updater.createTreeView(
-        tree.root.rootNodeId(), {.materializedItemCapacity = 6});
-    auto other = tree.updater.createButton(tree.root.rootNodeId());
+    auto listView = tree.updater.createElement(
+        tree.root.rootNodeId(),
+        UI::makeListViewElement({.materializedItemCapacity = 6}));
+    auto treeView = tree.updater.createElement(
+        tree.root.rootNodeId(),
+        UI::makeTreeViewElement({.materializedItemCapacity = 6}));
+    auto other = tree.updater.createElement(
+        tree.root.rootNodeId(), UI::makeButtonElement());
     EXPECT_TRUE(listView.has_value()) << (listView ? "" : listView.error().message);
     EXPECT_TRUE(treeView.has_value()) << (treeView ? "" : treeView.error().message);
     EXPECT_TRUE(other.has_value()) << (other ? "" : other.error().message);

@@ -105,8 +105,8 @@ void assertOk(Core::Status status)
     }
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
-    auto leftResult = updater.createPanel(fixture.root.rootNodeId());
-    auto rightResult = updater.createPanel(fixture.root.rootNodeId());
+    auto leftResult = updater.createElement(fixture.root.rootNodeId(), UI::makePanelElement());
+    auto rightResult = updater.createElement(fixture.root.rootNodeId(), UI::makePanelElement());
     EXPECT_TRUE(leftResult.has_value());
     EXPECT_TRUE(rightResult.has_value());
     if (!leftResult || !rightResult) {
@@ -118,8 +118,8 @@ void assertOk(Core::Status status)
     // Leaves are Panels (not Labels): Labels publish semantics and share
     // paintSnapshotCapacity; capacity-stress tests (paint cap=1) would fail
     // makeFixture before exercising paint reuse.
-    auto leftLeafResult = updater.createPanel(fixture.left);
-    auto rightLeafResult = updater.createPanel(fixture.right);
+    auto leftLeafResult = updater.createElement(fixture.left, UI::makePanelElement());
+    auto rightLeafResult = updater.createElement(fixture.right, UI::makePanelElement());
     EXPECT_TRUE(leftLeafResult.has_value());
     EXPECT_TRUE(rightLeafResult.has_value());
     if (!leftLeafResult || !rightLeafResult) {
@@ -129,7 +129,7 @@ void assertOk(Core::Status status)
     fixture.rightLeaf = *rightLeafResult;
 
     UI::UILayoutStyle rootStyle = fixedSize(rootWidth, 100.0F);
-    rootStyle.flex.direction = UI::UIFlexDirection::Column;
+    rootStyle.flexContainer.direction = UI::UIFlexDirection::Column;
     UI::UILayoutStyle leftBranchStyle = fixedSize(200.0F, 40.0F);
     assertOk(updater.setLayoutStyle(fixture.root.rootNodeId(), rootStyle));
     assertOk(updater.setLayoutStyle(fixture.left, leftBranchStyle));
@@ -230,7 +230,7 @@ TEST(UIDirtySubtreeTest, ViewportConstraintChangeForcesCompleteLayoutPass)
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UILayoutStyle rootStyle = fixedSize(240.0F, 100.0F);
-    rootStyle.flex.direction = UI::UIFlexDirection::Column;
+    rootStyle.flexContainer.direction = UI::UIFlexDirection::Column;
     assertOk(updater.setLayoutStyle(fixture.root.rootNodeId(), rootStyle));
     assertOk(fixture.context->commitLayout({.width = 240.0F, .height = 100.0F}));
 
@@ -257,7 +257,7 @@ TEST(UIDirtySubtreeTest, ParentStyleConstraintChangeForcesCompleteLayoutPass)
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UILayoutStyle rootStyle = fixedSize(240.0F, 100.0F);
-    rootStyle.flex.direction = UI::UIFlexDirection::Column;
+    rootStyle.flexContainer.direction = UI::UIFlexDirection::Column;
     assertOk(updater.setLayoutStyle(fixture.root.rootNodeId(), rootStyle));
 
     // Keep the viewport unchanged so this exercises the parent-style dirty
@@ -291,8 +291,8 @@ TEST(UIDirtySubtreeTest, RecomputesAutoAncestorAfterLeafStyleMutation)
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
     UI::UILayoutStyle rootStyle = fixedSize(200.0F, 100.0F);
-    rootStyle.flex.direction = UI::UIFlexDirection::Column;
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.direction = UI::UIFlexDirection::Column;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     UI::UILayoutStyle autoBranchStyle;
     assertOk(updater.setLayoutStyle(fixture.root.rootNodeId(), rootStyle));
     assertOk(updater.setLayoutStyle(fixture.left, autoBranchStyle));
@@ -433,7 +433,7 @@ TEST(UIDirtySubtreeTest, PhaseDirtyStatsTrackStructureLayoutHitPaintAndSemantics
     EXPECT_TRUE(afterPaint.paintDirty);
     EXPECT_TRUE(afterPaint.semanticsDirty);
 
-    auto panelResult = updater.createPanel(fixture.root.rootNodeId());
+    auto panelResult = updater.createElement(fixture.root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value());
     UI::UIContextStatistics afterStructure = fixture.context->statistics();
     EXPECT_TRUE(afterStructure.structureDirty);

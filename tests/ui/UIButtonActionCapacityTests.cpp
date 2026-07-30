@@ -48,7 +48,7 @@ TEST_F(
     ActionRecorder recorder;
 
     UI::UILayoutStyle row = fixedSize(100.0F, 100.0F);
-    row.flex.direction = UI::UIFlexDirection::Column;
+    row.flexContainer.direction = UI::UIFlexDirection::Column;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), row));
     assertOk(updater.setLayoutStyle(first, fixedSize(40.0F, 40.0F)));
     assertOk(updater.setLayoutStyle(second, fixedSize(40.0F, 40.0F)));

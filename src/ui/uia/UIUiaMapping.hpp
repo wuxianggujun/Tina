@@ -124,31 +124,6 @@ struct UIUiaMappedNode final {
     return kControlTypeCustom;
 }
 
-[[nodiscard]] constexpr bool roleIsKeyboardFocusable(UISemanticsRole role) noexcept
-{
-    switch (role)
-    {
-    case UISemanticsRole::Button:
-    case UISemanticsRole::Checkbox:
-    case UISemanticsRole::Slider:
-    case UISemanticsRole::TextEdit:
-    case UISemanticsRole::RadioButton:
-    case UISemanticsRole::ComboBox:
-    case UISemanticsRole::ListItem:
-    case UISemanticsRole::Tree:
-    case UISemanticsRole::TreeItem:
-        return true;
-    case UISemanticsRole::Label:
-    case UISemanticsRole::ProgressBar:
-    case UISemanticsRole::Group:
-    case UISemanticsRole::Dialog:
-    case UISemanticsRole::List:
-    case UISemanticsRole::ScrollView:
-        return false;
-    }
-    return false;
-}
-
 [[nodiscard]] inline UIUiaMappedNode mapAccessibilityNode(const UIAccessibilityNode& source)
 {
     UIUiaMappedNode mapped{
@@ -163,7 +138,8 @@ struct UIUiaMappedNode final {
         .isSelected = hasState(source.states, UIAccessibilityState::Selected),
     };
 
-    mapped.isKeyboardFocusable = mapped.isEnabled && roleIsKeyboardFocusable(source.role);
+    mapped.isKeyboardFocusable =
+        mapped.isEnabled && hasSemanticsAction(source.actions, UISemanticsAction::Focus);
     if (!mapped.isKeyboardFocusable)
     {
         mapped.hasKeyboardFocus = false;

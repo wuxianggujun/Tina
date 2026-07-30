@@ -1,4 +1,4 @@
-﻿#include <gtest/gtest.h>
+#include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
@@ -192,11 +192,11 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto panel = tree->createPanel(root->rootNodeId());
+    auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
-    auto label = tree->createLabel(*panel);
+    auto label = tree->createElement(*panel, UI::makeLabelElement());
     ASSERT_TRUE(label.has_value()) << label.error().message;
-    auto button = tree->createButton(*panel);
+    auto button = tree->createElement(*panel, UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << button.error().message;
     EXPECT_EQ(context->liveRootCount(), 1U);
     EXPECT_EQ(context->liveNodeCount(), 4U);
@@ -204,7 +204,7 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
     EXPECT_FALSE(state.hasPrimaryWindowUI(*epoch, CapabilityPhase::GameStateEnter));
 
-    auto expiredTree = tree->createPanel(*panel);
+    auto expiredTree = tree->createElement(*panel, UI::makePanelElement());
     ASSERT_FALSE(expiredTree.has_value());
     EXPECT_EQ(expiredTree.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     auto expiredBuilder = builder->createRoot();
@@ -223,24 +223,38 @@ TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpire
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto textEdit = tree->createTextEdit(root->rootNodeId());
+    auto textEdit = tree->createElement(root->rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEdit.has_value()) << textEdit.error().message;
     ASSERT_TRUE(tree->setText(*textEdit, "Tina").has_value());
 
+    constexpr UI::UIContentAlignment Alignment{
+        .horizontal = UI::UIAxisAlignment::End,
+        .vertical = UI::UIAxisAlignment::Center,
+    };
+    ASSERT_TRUE(tree->setContentAlignment(*textEdit, Alignment).has_value());
     constexpr UI::UITextSelection Selection{.anchorCodepoint = 1, .caretCodepoint = 3};
     ASSERT_TRUE(tree->setTextSelection(*textEdit, Selection).has_value());
     const PrimaryWindowUITreeUpdater& treeView = *tree;
+    auto currentAlignment = treeView.contentAlignment(*textEdit);
+    ASSERT_TRUE(currentAlignment.has_value()) << currentAlignment.error().message;
+    EXPECT_EQ(*currentAlignment, Alignment);
     auto currentSelection = treeView.textSelection(*textEdit);
     ASSERT_TRUE(currentSelection.has_value()) << currentSelection.error().message;
     EXPECT_EQ(*currentSelection, Selection);
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
 
-    auto expiredCreate = tree->createTextEdit(root->rootNodeId());
+    auto expiredCreate = tree->createElement(root->rootNodeId(), UI::makeTextEditElement());
     ASSERT_FALSE(expiredCreate.has_value());
     EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     Core::Status expiredSet = tree->setTextSelection(*textEdit, {});
     ASSERT_FALSE(expiredSet.has_value());
     EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredAlignmentSet = tree->setContentAlignment(*textEdit, {});
+    ASSERT_FALSE(expiredAlignmentSet.has_value());
+    EXPECT_EQ(expiredAlignmentSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredAlignmentQuery = treeView.contentAlignment(*textEdit);
+    ASSERT_FALSE(expiredAlignmentQuery.has_value());
+    EXPECT_EQ(expiredAlignmentQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     auto expiredQuery = treeView.textSelection(*textEdit);
     ASSERT_FALSE(expiredQuery.has_value());
     EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
@@ -257,7 +271,7 @@ TEST_F(PrimaryWindowUICapabilityTest, EnabledFacadeRoundTripsAndExpiresWithPhase
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto button = tree->createButton(root->rootNodeId());
+    auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << button.error().message;
 
     const PrimaryWindowUITreeUpdater& treeView = *tree;
@@ -290,7 +304,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ModalAndFocusFacadesRoundTripAndExpireWith
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
 
-    auto panel = tree->createPanel(root->rootNodeId());
+    auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
     ASSERT_TRUE(tree->setFocusScopeMode(*panel, UI::UIFocusScopeMode::Contain).has_value());
     const PrimaryWindowUITreeUpdater& treeView = *tree;
@@ -298,9 +312,9 @@ TEST_F(PrimaryWindowUICapabilityTest, ModalAndFocusFacadesRoundTripAndExpireWith
     ASSERT_TRUE(scopeMode.has_value()) << scopeMode.error().message;
     EXPECT_EQ(*scopeMode, UI::UIFocusScopeMode::Contain);
 
-    auto modal = tree->createModal(root->rootNodeId());
+    auto modal = tree->createElement(root->rootNodeId(), UI::makeModalElement());
     ASSERT_TRUE(modal.has_value()) << modal.error().message;
-    auto modalButton = tree->createButton(*modal);
+    auto modalButton = tree->createElement(*modal, UI::makeButtonElement());
     ASSERT_TRUE(modalButton.has_value()) << modalButton.error().message;
     ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 90.0F}).has_value());
     EXPECT_EQ(context->activeModal(), *modal);
@@ -310,7 +324,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ModalAndFocusFacadesRoundTripAndExpireWith
     EXPECT_FALSE(context->defaultActionFocus().hasValue());
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
-    auto expiredModal = tree->createModal(root->rootNodeId());
+    auto expiredModal = tree->createElement(root->rootNodeId(), UI::makeModalElement());
     ASSERT_FALSE(expiredModal.has_value());
     EXPECT_EQ(expiredModal.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     Core::Status expiredRequest = tree->requestFocus(*modalButton);
@@ -335,15 +349,28 @@ TEST_F(PrimaryWindowUICapabilityTest, ProductThemeFacadeUpdatesExistingControlsA
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto button = tree->createButton(root->rootNodeId());
+    auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << button.error().message;
 
     auto initialTheme = tree->productTheme();
     ASSERT_TRUE(initialTheme.has_value()) << initialTheme.error().message;
     EXPECT_EQ(*initialTheme, UI::makeDefaultProductTheme());
+
+    ASSERT_TRUE(tree->setStyleRole(*button, UI::UIStyleRoleId::ButtonDanger).has_value());
+    EXPECT_EQ(tree->styleRole(*button).value(), UI::UIStyleRoleId::ButtonDanger);
+    EXPECT_EQ(
+        tree->buttonPaint(*button).value(),
+        UI::makeButtonChrome(UI::makeDefaultProductTheme(), UI::makeDefaultProductTheme().danger).states);
+
+    const UI::UIButtonPaint localPaint{};
+    ASSERT_TRUE(tree->setButtonPaint(*button, localPaint).has_value());
     ASSERT_TRUE(tree->setProductTheme(UI::makeLightProductTheme()).has_value());
     EXPECT_EQ(tree->productTheme().value(), UI::makeLightProductTheme());
-    EXPECT_EQ(tree->buttonPaint(*button).value(), UI::makeButtonChrome(UI::makeLightProductTheme()).states);
+    EXPECT_EQ(tree->buttonPaint(*button).value(), localPaint);
+    ASSERT_TRUE(tree->clearOverride(*button, UI::UIStyleOverride::ButtonPaint).has_value());
+    EXPECT_EQ(
+        tree->buttonPaint(*button).value(),
+        UI::makeButtonChrome(UI::makeLightProductTheme(), UI::makeLightProductTheme().danger).states);
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
     Core::Status expiredSet = tree->setProductTheme(UI::makeDefaultProductTheme());
@@ -352,6 +379,15 @@ TEST_F(PrimaryWindowUICapabilityTest, ProductThemeFacadeUpdatesExistingControlsA
     auto expiredGet = tree->productTheme();
     ASSERT_FALSE(expiredGet.has_value());
     EXPECT_EQ(expiredGet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredRoleSet = tree->setStyleRole(*button, UI::UIStyleRoleId::ButtonPrimary);
+    ASSERT_FALSE(expiredRoleSet.has_value());
+    EXPECT_EQ(expiredRoleSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredRole = tree->styleRole(*button);
+    ASSERT_FALSE(expiredRole.has_value());
+    EXPECT_EQ(expiredRole.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredClearOverride = tree->clearOverride(*button);
+    ASSERT_FALSE(expiredClearOverride.has_value());
+    EXPECT_EQ(expiredClearOverride.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, ScrollViewFacadeRoundTripsMetricsAndExpiresWithPhase)
@@ -378,9 +414,9 @@ TEST_F(PrimaryWindowUICapabilityTest, ScrollViewFacadeRoundTripsMetricsAndExpire
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto scrollView = tree->createScrollView(root->rootNodeId());
+    auto scrollView = tree->createElement(root->rootNodeId(), UI::makeScrollViewElement());
     ASSERT_TRUE(scrollView.has_value()) << scrollView.error().message;
-    auto content = tree->createPanel(*scrollView);
+    auto content = tree->createElement(*scrollView, UI::makePanelElement());
     ASSERT_TRUE(content.has_value()) << content.error().message;
 
     ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(100.0F, 100.0F)).has_value());
@@ -410,7 +446,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ScrollViewFacadeRoundTripsMetricsAndExpire
     EXPECT_FALSE(*dragging);
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
-    auto expiredCreate = tree->createScrollView(root->rootNodeId());
+    auto expiredCreate = tree->createElement(root->rootNodeId(), UI::makeScrollViewElement());
     ASSERT_FALSE(expiredCreate.has_value());
     EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     auto expiredMetrics = treeView.scrollViewMetrics(*scrollView);
@@ -460,9 +496,9 @@ TEST_F(PrimaryWindowUICapabilityTest, ListViewFacadeRoundTripsAndExpiresWithPhas
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto listView = tree->createListView(root->rootNodeId(), {
-                                                                .materializedItemCapacity = MaterializedItemCapacity,
-                                                            });
+    auto listView = tree->createElement(
+        root->rootNodeId(),
+        UI::makeListViewElement({.materializedItemCapacity = MaterializedItemCapacity}));
     ASSERT_TRUE(listView.has_value()) << listView.error().message;
 
     ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(120.0F, 80.0F)).has_value());
@@ -497,7 +533,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ListViewFacadeRoundTripsAndExpiresWithPhas
     EXPECT_EQ(treeView.listViewMetrics(*listView).value().logicalItemCount, 100U);
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
-    auto expiredCreate = tree->createListView(root->rootNodeId(), {.materializedItemCapacity = 4});
+    auto expiredCreate = tree->createElement(root->rootNodeId(), UI::makeListViewElement({.materializedItemCapacity = 4}));
     ASSERT_FALSE(expiredCreate.has_value());
     EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     Core::Status expiredSet = tree->clearListViewDataSource(*listView);
@@ -551,10 +587,9 @@ TEST_F(PrimaryWindowUICapabilityTest, TreeViewFacadeRoundTripsExpansionAndExpire
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto treeViewNode = tree->createTreeView(root->rootNodeId(), {
-                                                                    .materializedItemCapacity =
-                                                                        MaterializedItemCapacity,
-                                                                });
+    auto treeViewNode = tree->createElement(
+        root->rootNodeId(),
+        UI::makeTreeViewElement({.materializedItemCapacity = MaterializedItemCapacity}));
     ASSERT_TRUE(treeViewNode.has_value()) << treeViewNode.error().message;
 
     ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(160.0F, 80.0F)).has_value());
@@ -600,7 +635,7 @@ TEST_F(PrimaryWindowUICapabilityTest, TreeViewFacadeRoundTripsExpansionAndExpire
               TreeFacadeDataSource::CollapsedItemCount + 2);
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
-    auto expiredCreate = tree->createTreeView(root->rootNodeId(), {.materializedItemCapacity = 4});
+    auto expiredCreate = tree->createElement(root->rootNodeId(), UI::makeTreeViewElement({.materializedItemCapacity = 4}));
     ASSERT_FALSE(expiredCreate.has_value());
     EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     Core::Status expiredSet = tree->setTreeViewItemExpanded(*treeViewNode, 0, false);
@@ -640,17 +675,17 @@ TEST_F(PrimaryWindowUICapabilityTest, DropdownPopupFacadeRoundTripsAndExpiresWit
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
 
-    auto dropdown = tree->createDropdown(root->rootNodeId());
+    auto dropdown = tree->createElement(root->rootNodeId(), UI::makeDropdownElement());
     ASSERT_TRUE(dropdown.has_value()) << dropdown.error().message;
-    auto popup = tree->createPopup(*dropdown);
+    auto popup = tree->createElement(*dropdown, UI::makePopupElement());
     ASSERT_TRUE(popup.has_value()) << popup.error().message;
-    auto firstItem = tree->createDropdownItem(*popup);
-    auto secondItem = tree->createDropdownItem(*popup);
+    auto firstItem = tree->createElement(*popup, UI::makeDropdownItemElement());
+    auto secondItem = tree->createElement(*popup, UI::makeDropdownItemElement());
     ASSERT_TRUE(firstItem.has_value()) << firstItem.error().message;
     ASSERT_TRUE(secondItem.has_value()) << secondItem.error().message;
 
     UI::UILayoutStyle popupLayout = fixedSize(140.0F, 48.0F);
-    popupLayout.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    popupLayout.placement = UI::UILayoutPlacement::Overlay;
     ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(200.0F, 120.0F)).has_value());
     ASSERT_TRUE(tree->setLayoutStyle(*dropdown, fixedSize(120.0F, 32.0F)).has_value());
     ASSERT_TRUE(tree->setLayoutStyle(*popup, popupLayout).has_value());
@@ -679,7 +714,7 @@ TEST_F(PrimaryWindowUICapabilityTest, DropdownPopupFacadeRoundTripsAndExpiresWit
     EXPECT_FALSE(treeView.isDropdownOpen(*dropdown).value());
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
 
-    auto expiredCreate = tree->createDropdown(root->rootNodeId());
+    auto expiredCreate = tree->createElement(root->rootNodeId(), UI::makeDropdownElement());
     ASSERT_FALSE(expiredCreate.has_value());
     EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     auto expiredMetrics = treeView.popupMetrics(*popup);
@@ -699,11 +734,11 @@ TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAn
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
 
-    auto progressBar = tree->createProgressBar(root->rootNodeId());
-    auto slider = tree->createSlider(root->rootNodeId());
-    auto checkbox = tree->createCheckbox(root->rootNodeId());
-    auto firstRadio = tree->createRadioButton(root->rootNodeId());
-    auto secondRadio = tree->createRadioButton(root->rootNodeId());
+    auto progressBar = tree->createElement(root->rootNodeId(), UI::makeProgressBarElement());
+    auto slider = tree->createElement(root->rootNodeId(), UI::makeSliderElement());
+    auto checkbox = tree->createElement(root->rootNodeId(), UI::makeCheckboxElement());
+    auto firstRadio = tree->createElement(root->rootNodeId(), UI::makeRadioButtonElement());
+    auto secondRadio = tree->createElement(root->rootNodeId(), UI::makeRadioButtonElement());
     ASSERT_TRUE(progressBar.has_value()) << progressBar.error().message;
     ASSERT_TRUE(slider.has_value()) << slider.error().message;
     ASSERT_TRUE(checkbox.has_value()) << checkbox.error().message;
@@ -781,7 +816,7 @@ TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAn
     EXPECT_EQ(activations, 0U);
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
 
-    auto expiredCreate = tree->createProgressBar(root->rootNodeId());
+    auto expiredCreate = tree->createElement(root->rootNodeId(), UI::makeProgressBarElement());
     ASSERT_FALSE(expiredCreate.has_value());
     EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     auto expiredValue = treeView.progressBarValue(*progressBar);
@@ -819,7 +854,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonPaintFacadeRoundTripsAndExpiresWithP
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto button = tree->createButton(root->rootNodeId());
+    auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << button.error().message;
 
     const PrimaryWindowUITreeUpdater& treeView = *tree;
@@ -859,8 +894,8 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonPaintWrongKindFailureIsStickyAndPrev
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto panel = tree->createPanel(root->rootNodeId());
-    auto button = tree->createButton(root->rootNodeId());
+    auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
+    auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
     ASSERT_TRUE(button.has_value()) << button.error().message;
 
@@ -896,7 +931,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonActionFacadeSetsReplacesClearsAndQue
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto button = tree->createButton(root->rootNodeId());
+    auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << button.error().message;
 
     auto initialPressed = tree->isButtonPressed(*button);
@@ -927,7 +962,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonActionFacadeExpiresWithItsPhase)
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto button = tree->createButton(root->rootNodeId());
+    auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << button.error().message;
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
 
@@ -958,8 +993,8 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonActionWrongRootFailureIsStickyAndPre
     ASSERT_TRUE(firstTree.has_value()) << firstTree.error().message;
     auto secondTree = builder->treeUpdater(*secondRoot);
     ASSERT_TRUE(secondTree.has_value()) << secondTree.error().message;
-    auto firstButton = firstTree->createButton(firstRoot->rootNodeId());
-    auto secondButton = secondTree->createButton(secondRoot->rootNodeId());
+    auto firstButton = firstTree->createElement(firstRoot->rootNodeId(), UI::makeButtonElement());
+    auto secondButton = secondTree->createElement(secondRoot->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(firstButton.has_value()) << firstButton.error().message;
     ASSERT_TRUE(secondButton.has_value()) << secondButton.error().message;
 
@@ -989,8 +1024,8 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonActionWrongKindFailureIsStickyAndPre
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto panel = tree->createPanel(root->rootNodeId());
-    auto button = tree->createButton(root->rootNodeId());
+    auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
+    auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
     ASSERT_TRUE(button.has_value()) << button.error().message;
 
@@ -1020,7 +1055,7 @@ TEST_F(PrimaryWindowUICapabilityTest, RoutedPointerListenerSurvivesItsRegistrati
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto button = tree->createButton(root->rootNodeId());
+    auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << button.error().message;
 
     UI::UILayoutStyle rootStyle{};
@@ -1160,12 +1195,12 @@ TEST_F(PrimaryWindowUICapabilityTest, FirstTreeFailureIsStickyAndPreventsLaterMu
     auto firstTree = builder->treeUpdater(*firstRoot);
     ASSERT_TRUE(firstTree.has_value()) << firstTree.error().message;
 
-    auto crossRoot = firstTree->createPanel(secondRoot->rootNodeId());
+    auto crossRoot = firstTree->createElement(secondRoot->rootNodeId(), UI::makePanelElement());
     ASSERT_FALSE(crossRoot.has_value());
     EXPECT_EQ(crossRoot.error().code, UI::UIErrorCode::InvalidNode);
     const usize nodesAfterFailure = context->liveNodeCount();
 
-    auto otherwiseValid = firstTree->createPanel(firstRoot->rootNodeId());
+    auto otherwiseValid = firstTree->createElement(firstRoot->rootNodeId(), UI::makePanelElement());
     ASSERT_FALSE(otherwiseValid.has_value());
     EXPECT_EQ(otherwiseValid.error().code, crossRoot.error().code);
     EXPECT_EQ(context->liveNodeCount(), nodesAfterFailure);
@@ -1186,7 +1221,7 @@ TEST_F(PrimaryWindowUICapabilityTest, UpdateCapabilityMutatesOwnedTreeThenExpire
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto enterTree = builder->treeUpdater(*root);
     ASSERT_TRUE(enterTree.has_value()) << enterTree.error().message;
-    auto panel = enterTree->createPanel(root->rootNodeId());
+    auto panel = enterTree->createElement(root->rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
     ASSERT_TRUE(state.finishPhase(*enterEpoch, CapabilityPhase::GameStateEnter).has_value());
 
@@ -1222,7 +1257,7 @@ TEST_F(PrimaryWindowUICapabilityTest, SetBoxPaintFailureIsStickyAcrossContextAnd
     std::unique_ptr<UI::UIContext> foreignContext = std::move(*foreignContextResult);
     auto foreignRoot = foreignContext->rootBuilder().createRoot();
     ASSERT_TRUE(foreignRoot.has_value()) << foreignRoot.error().message;
-    auto foreignPanel = foreignContext->rootBuilder().createPanel(foreignRoot->rootNodeId());
+    auto foreignPanel = foreignContext->rootBuilder().createElement(foreignRoot->rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(foreignPanel.has_value()) << foreignPanel.error().message;
 
     CapabilityState state;
@@ -1234,7 +1269,7 @@ TEST_F(PrimaryWindowUICapabilityTest, SetBoxPaintFailureIsStickyAcrossContextAnd
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto panel = tree->createPanel(root->rootNodeId());
+    auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
 
     Core::Status wrongContext = tree->setBoxPaint(*foreignPanel, solidFill(255, 0, 0));
@@ -1266,7 +1301,7 @@ TEST_F(PrimaryWindowUICapabilityTest, SetBoxPaintRejectsStaleGenerationAndSticks
     ASSERT_TRUE(root.has_value()) << root.error().message;
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
-    auto panel = tree->createPanel(root->rootNodeId());
+    auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
     ASSERT_TRUE(tree->destroy(*panel).has_value());
 
