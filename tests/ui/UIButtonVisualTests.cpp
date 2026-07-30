@@ -76,7 +76,7 @@ constexpr UI::UIButtonPaint StatePaint{
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createButton(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -85,7 +85,7 @@ constexpr UI::UIButtonPaint StatePaint{
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createPanel(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -385,7 +385,7 @@ TEST(UIButtonVisualTest, ProductChromeFocusesWithBorderAndPressCollapsesShadow)
     publishLayout(*context);
 
     const UI::UIButtonChrome chrome = UI::makeButtonChrome(context->productTheme());
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 5U);
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 6U);
     EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
 
     const UI::UIPointerRouteResult downRoute = route(

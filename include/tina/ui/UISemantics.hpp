@@ -5,8 +5,8 @@
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UITreeView.hpp>
-#include <tina/ui/UIWidgetKind.hpp>
 
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -32,13 +32,66 @@ enum class UISemanticsRole : u8 {
     TreeItem,
 };
 
+enum class UISemanticsMode : u8 {
+    // The Element itself is omitted while eligible descendants remain visible.
+    Automatic = 0,
+    Publish,
+    // Publish this Element and fold eligible descendant names into it. Merged
+    // descendants do not appear as separate committed semantics entries.
+    MergeDescendants,
+    // Exclude this Element and its complete subtree.
+    Exclude,
+};
+
+enum class UISemanticsAction : u8 {
+    None = 0,
+    Focus = 1U << 0U,
+    Activate = 1U << 1U,
+    Toggle = 1U << 2U,
+    SetRangeValue = 1U << 3U,
+    SetTextValue = 1U << 4U,
+};
+
+[[nodiscard]] constexpr UISemanticsAction operator|(UISemanticsAction left, UISemanticsAction right) noexcept
+{
+    return static_cast<UISemanticsAction>(static_cast<u8>(left) | static_cast<u8>(right));
+}
+
+[[nodiscard]] constexpr UISemanticsAction operator&(UISemanticsAction left, UISemanticsAction right) noexcept
+{
+    return static_cast<UISemanticsAction>(static_cast<u8>(left) & static_cast<u8>(right));
+}
+
+constexpr UISemanticsAction& operator|=(UISemanticsAction& left, UISemanticsAction right) noexcept
+{
+    left = left | right;
+    return left;
+}
+
+[[nodiscard]] constexpr bool hasSemanticsAction(UISemanticsAction set, UISemanticsAction action) noexcept
+{
+    return (set & action) == action;
+}
+
+struct UISemanticsDescriptor final {
+    UISemanticsMode mode = UISemanticsMode::Automatic;
+    UISemanticsRole role = UISemanticsRole::Group;
+    std::optional<std::string_view> name{};
+    std::optional<std::string_view> description{};
+    UISemanticsAction actions = UISemanticsAction::None;
+    // Uses intrinsic Element text when an explicit name is absent. A merged
+    // node additionally appends eligible descendant names in tree order.
+    bool useContentAsName = false;
+    bool readOnly = false;
+};
+
 // Owner-thread snapshot entry. Text fields point into the committed snapshot's
 // private, double-buffered text storage and are invalidated with the view.
 struct UISemanticsEntry final {
     UINodeId node{};
     UINodeId parent{};
     UISemanticsRole role = UISemanticsRole::Group;
-    UIWidgetKind kind = UIWidgetKind::Panel;
+    UISemanticsAction actions = UISemanticsAction::None;
     UILogicalRect worldRect{};
     std::string_view name{};
     std::string_view description{};
@@ -51,6 +104,7 @@ struct UISemanticsEntry final {
     bool selected = false;
     bool enabled = true;
     bool focused = false;
+    bool readOnly = false;
     UIListViewItemKey virtualItemKey = InvalidUIListViewItemKey;
     u64 virtualItemIndex = 0;
     u32 level = 0;
@@ -124,60 +178,5 @@ class UICommittedSemanticsView final {
     u64 m_layoutRevision = 0;
     u64 m_semanticsRevision = 0;
 };
-
-[[nodiscard]] constexpr UISemanticsRole semanticsRoleForWidgetKind(UIWidgetKind kind) noexcept
-{
-    switch (kind)
-    {
-    case UIWidgetKind::Root:
-    case UIWidgetKind::Panel:
-        return UISemanticsRole::Group;
-    case UIWidgetKind::Label:
-        return UISemanticsRole::Label;
-    case UIWidgetKind::Button:
-        return UISemanticsRole::Button;
-    case UIWidgetKind::Checkbox:
-        return UISemanticsRole::Checkbox;
-    case UIWidgetKind::Slider:
-        return UISemanticsRole::Slider;
-    case UIWidgetKind::TextEdit:
-        return UISemanticsRole::TextEdit;
-    case UIWidgetKind::ProgressBar:
-        return UISemanticsRole::ProgressBar;
-    case UIWidgetKind::RadioButton:
-        return UISemanticsRole::RadioButton;
-    case UIWidgetKind::Modal:
-        return UISemanticsRole::Dialog;
-    case UIWidgetKind::ScrollView:
-        return UISemanticsRole::ScrollView;
-    case UIWidgetKind::Dropdown:
-        return UISemanticsRole::ComboBox;
-    case UIWidgetKind::Popup:
-        return UISemanticsRole::List;
-    case UIWidgetKind::DropdownItem:
-        return UISemanticsRole::ListItem;
-    case UIWidgetKind::ListView:
-        return UISemanticsRole::List;
-    case UIWidgetKind::ListViewItem:
-        return UISemanticsRole::ListItem;
-    case UIWidgetKind::TreeView:
-        return UISemanticsRole::Tree;
-    case UIWidgetKind::TreeViewItem:
-        return UISemanticsRole::TreeItem;
-    }
-    return UISemanticsRole::Group;
-}
-
-// Interactive roles enter the semantics tree; Root/Panel groups are omitted
-// unless they later gain explicit accessible names (not in this slice).
-[[nodiscard]] constexpr bool isSemanticsPublishedKind(UIWidgetKind kind) noexcept
-{
-    return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox ||
-           kind == UIWidgetKind::Slider || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::ProgressBar ||
-           kind == UIWidgetKind::RadioButton || kind == UIWidgetKind::Modal || kind == UIWidgetKind::ScrollView ||
-           kind == UIWidgetKind::Dropdown || kind == UIWidgetKind::Popup || kind == UIWidgetKind::DropdownItem ||
-           kind == UIWidgetKind::ListView || kind == UIWidgetKind::ListViewItem || kind == UIWidgetKind::TreeView ||
-           kind == UIWidgetKind::TreeViewItem;
-}
 
 } // namespace Tina::UI

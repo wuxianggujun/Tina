@@ -68,12 +68,12 @@ TEST(UIAccessibilityTest, ProbeReadsRolesNamesAndStatesFromCommittedSemantics)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
-    auto checkbox = context->rootBuilder().createCheckbox(root.rootNodeId());
-    auto slider = context->rootBuilder().createSlider(root.rootNodeId());
-    auto progress = context->rootBuilder().createProgressBar(root.rootNodeId());
-    auto radio = context->rootBuilder().createRadioButton(root.rootNodeId());
-    auto textEdit = context->rootBuilder().createTextEdit(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto slider = context->rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
+    auto progress = context->rootBuilder().createElement(root.rootNodeId(), UI::makeProgressBarElement());
+    auto radio = context->rootBuilder().createElement(root.rootNodeId(), UI::makeRadioButtonElement());
+    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(button.has_value());
     ASSERT_TRUE(checkbox.has_value());
     ASSERT_TRUE(slider.has_value());
@@ -161,7 +161,7 @@ TEST(UIAccessibilityTest, StaleNodeAfterDestroyIsRejected)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
@@ -212,7 +212,7 @@ TEST(UIAccessibilityTest, DisabledStateMapsToDisabledFlag)
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
@@ -239,16 +239,21 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
-    auto checkbox = context->rootBuilder().createCheckbox(root.rootNodeId());
-    auto slider = context->rootBuilder().createSlider(root.rootNodeId());
-    auto progress = context->rootBuilder().createProgressBar(root.rootNodeId());
-    auto textEdit = context->rootBuilder().createTextEdit(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto slider = context->rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
+    auto progress = context->rootBuilder().createElement(root.rootNodeId(), UI::makeProgressBarElement());
+    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
+    UI::UIElementDescriptor unpublishedInvokeDescriptor = UI::makeButtonElement("Not invokable");
+    unpublishedInvokeDescriptor.semantics.actions = UI::UISemanticsAction::Focus;
+    auto unpublishedInvoke =
+        context->rootBuilder().createElement(root.rootNodeId(), unpublishedInvokeDescriptor);
     ASSERT_TRUE(button.has_value());
     ASSERT_TRUE(checkbox.has_value());
     ASSERT_TRUE(slider.has_value());
     ASSERT_TRUE(progress.has_value());
     ASSERT_TRUE(textEdit.has_value());
+    ASSERT_TRUE(unpublishedInvoke.has_value());
 
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(400.0F, 300.0F)));
@@ -257,10 +262,12 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
     assertOk(updater.setLayoutStyle(*slider, fixedSize(120.0F, 20.0F)));
     assertOk(updater.setLayoutStyle(*progress, fixedSize(120.0F, 12.0F)));
     assertOk(updater.setLayoutStyle(*textEdit, fixedSize(160.0F, 32.0F)));
+    assertOk(updater.setLayoutStyle(*unpublishedInvoke, fixedSize(120.0F, 32.0F)));
     assertOk(updater.setSliderRange(*slider, 0.0F, 100.0F, 1.0F));
 
     u32 buttonActivations = 0;
     u32 checkboxActivations = 0;
+    u32 unpublishedActivations = 0;
     UI::UIButtonActivationSource lastSource = UI::UIButtonActivationSource::PrimaryPointer;
     assertOk(updater.setButtonAction(
         *button,
@@ -273,6 +280,11 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
         UI::UIButtonActionCallback([&](const UI::UIButtonActionEvent& event) noexcept {
             ++checkboxActivations;
             lastSource = event.source;
+        })));
+    assertOk(updater.setButtonAction(
+        *unpublishedInvoke,
+        UI::UIButtonActionCallback([&](const UI::UIButtonActionEvent&) noexcept {
+            ++unpublishedActivations;
         })));
     assertOk(context->commitLayout({.width = 400.0F, .height = 300.0F}));
 
@@ -318,6 +330,14 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
     });
     ASSERT_FALSE(readOnly.has_value());
     EXPECT_EQ(readOnly.error().code, UI::UIErrorCode::InvalidAccessibilityAction);
+
+    auto unpublished = context->performAccessibilityAction({
+        .kind = UI::UIAccessibilityActionKind::Invoke,
+        .node = *unpublishedInvoke,
+    });
+    ASSERT_FALSE(unpublished.has_value());
+    EXPECT_EQ(unpublished.error().code, UI::UIErrorCode::InvalidAccessibilityAction);
+    EXPECT_EQ(unpublishedActivations, 0U);
 }
 
 } // namespace

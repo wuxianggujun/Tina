@@ -159,17 +159,17 @@ TEST_F(UITreeCoreTest, RejectsCrossWindowAndCrossContextNodes)
 
     auto firstRoot = createRoot(*firstContext);
     ASSERT_TRUE(firstRoot);
-    auto panelResult = firstContext->rootBuilder().createPanel(firstRoot.rootNodeId());
+    auto panelResult = firstContext->rootBuilder().createElement(firstRoot.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value());
     const UI::UINodeId panel = *panelResult;
 
     EXPECT_FALSE(secondWindowContext->contains(panel));
-    const auto wrongWindowParent = secondWindowContext->rootBuilder().createPanel(panel);
+    const auto wrongWindowParent = secondWindowContext->rootBuilder().createElement(panel, UI::makePanelElement());
     ASSERT_FALSE(wrongWindowParent.has_value());
     EXPECT_EQ(wrongWindowParent.error().code, UI::UIErrorCode::WrongOwnerWindow);
 
     EXPECT_FALSE(sameWindowContext->contains(panel));
-    const auto wrongContextParent = sameWindowContext->rootBuilder().createPanel(panel);
+    const auto wrongContextParent = sameWindowContext->rootBuilder().createElement(panel, UI::makePanelElement());
     ASSERT_FALSE(wrongContextParent.has_value());
     EXPECT_EQ(wrongContextParent.error().code, UI::UIErrorCode::WrongContext);
 
@@ -190,7 +190,7 @@ TEST_F(UITreeCoreTest, RootOwnerMoveResetAndDestructionReleaseTheWholeRoot)
         auto original = createRoot(*context);
         ASSERT_TRUE(original);
         rootId = original.rootNodeId();
-        ASSERT_TRUE(context->rootBuilder().createPanel(rootId).has_value());
+        ASSERT_TRUE(context->rootBuilder().createElement(rootId, UI::makePanelElement()).has_value());
 
         UI::UIRootOwner moved = std::move(original);
         EXPECT_FALSE(original.hasValue());
@@ -209,7 +209,7 @@ TEST_F(UITreeCoreTest, RootOwnerMoveResetAndDestructionReleaseTheWholeRoot)
         auto scoped = createRoot(*context);
         ASSERT_TRUE(scoped);
         rootId = scoped.rootNodeId();
-        ASSERT_TRUE(context->rootBuilder().createButton(rootId).has_value());
+        ASSERT_TRUE(context->rootBuilder().createElement(rootId, UI::makeButtonElement()).has_value());
     }
     EXPECT_FALSE(context->contains(rootId));
     EXPECT_EQ(context->liveNodeCount(), 0U);
@@ -244,7 +244,7 @@ TEST_F(UITreeCoreTest, RootOwnerDestroyedOffThreadIsReclaimedOnTheOwnerThread)
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
     const UI::UINodeId rootId = root.rootNodeId();
-    ASSERT_TRUE(context->rootBuilder().createPanel(rootId).has_value());
+    ASSERT_TRUE(context->rootBuilder().createElement(rootId, UI::makePanelElement()).has_value());
 
     std::thread releaseThread([ownedRoot = std::move(root)]() mutable {
         ownedRoot.reset();
@@ -293,11 +293,11 @@ TEST_F(UITreeCoreTest, DestroyingANodeRecursivelyDestroysOnlyItsSubtree)
     ASSERT_TRUE(root);
 
     UI::UIRootBuilder builder = context->rootBuilder();
-    auto panelResult = builder.createPanel(root.rootNodeId());
-    auto siblingResult = builder.createButton(root.rootNodeId());
+    auto panelResult = builder.createElement(root.rootNodeId(), UI::makePanelElement());
+    auto siblingResult = builder.createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(panelResult.has_value());
     ASSERT_TRUE(siblingResult.has_value());
-    auto labelResult = builder.createLabel(*panelResult);
+    auto labelResult = builder.createElement(*panelResult, UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value());
 
     auto updaterResult = context->treeUpdater(root);
@@ -321,7 +321,7 @@ TEST_F(UITreeCoreTest, ReusingADeletedSlotIncrementsGenerationAndKeepsTheOldIdSt
     ASSERT_TRUE(root);
 
     UI::UIRootBuilder builder = context->rootBuilder();
-    auto panelResult = builder.createPanel(root.rootNodeId());
+    auto panelResult = builder.createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value());
     const UI::UINodeId stalePanel = *panelResult;
 
@@ -330,7 +330,7 @@ TEST_F(UITreeCoreTest, ReusingADeletedSlotIncrementsGenerationAndKeepsTheOldIdSt
     ASSERT_TRUE(updaterResult->destroy(stalePanel).has_value());
     EXPECT_FALSE(context->contains(stalePanel));
 
-    auto replacementResult = builder.createLabel(root.rootNodeId());
+    auto replacementResult = builder.createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(replacementResult.has_value());
     EXPECT_EQ(replacementResult->index(), stalePanel.index());
     EXPECT_EQ(replacementResult->generation(), stalePanel.generation() + 1);
@@ -344,10 +344,10 @@ TEST_F(UITreeCoreTest, NodeAndRootCapacityFailuresDoNotPublishPartialNodes)
     ASSERT_NE(nodeLimited, nullptr);
     auto root = createRoot(*nodeLimited);
     ASSERT_TRUE(root);
-    auto panelResult = nodeLimited->rootBuilder().createPanel(root.rootNodeId());
+    auto panelResult = nodeLimited->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value());
 
-    const auto exhaustedNode = nodeLimited->rootBuilder().createLabel(root.rootNodeId());
+    const auto exhaustedNode = nodeLimited->rootBuilder().createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_FALSE(exhaustedNode.has_value());
     EXPECT_EQ(exhaustedNode.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(nodeLimited->liveNodeCount(), 2U);
@@ -375,11 +375,11 @@ TEST_F(UITreeCoreTest, RejectsInvalidParentAndUpdaterRootOwnership)
     ASSERT_TRUE(firstRoot);
     ASSERT_TRUE(secondRoot);
 
-    const auto emptyParent = context->rootBuilder().createPanel({});
+    const auto emptyParent = context->rootBuilder().createElement({}, UI::makePanelElement());
     ASSERT_FALSE(emptyParent.has_value());
     EXPECT_EQ(emptyParent.error().code, UI::UIErrorCode::InvalidParent);
 
-    auto secondPanelResult = context->rootBuilder().createPanel(secondRoot.rootNodeId());
+    auto secondPanelResult = context->rootBuilder().createElement(secondRoot.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(secondPanelResult.has_value());
     auto firstUpdaterResult = context->treeUpdater(firstRoot);
     ASSERT_TRUE(firstUpdaterResult.has_value());
@@ -403,11 +403,11 @@ TEST_F(UITreeCoreTest, TreeUpdaterCreatesChildrenOnlyInsideItsRoot)
 
     auto updaterResult = context->treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
-    auto panel = updaterResult->createPanel(root.rootNodeId());
+    auto panel = updaterResult->createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
-    auto label = updaterResult->createLabel(*panel);
+    auto label = updaterResult->createElement(*panel, UI::makeLabelElement());
     ASSERT_TRUE(label.has_value()) << label.error().message;
-    auto button = updaterResult->createButton(root.rootNodeId());
+    auto button = updaterResult->createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << button.error().message;
 
     EXPECT_TRUE(updaterResult->isAlive(*panel));
@@ -419,13 +419,13 @@ TEST_F(UITreeCoreTest, TreeUpdaterCreatesChildrenOnlyInsideItsRoot)
     const UI::UICommittedStructureView committed = context->committedStructure();
     ASSERT_EQ(committed.size(), 4U);
     EXPECT_EQ(committed.entries()[0].node, root.rootNodeId());
-    EXPECT_EQ(committed.entries()[0].kind, UI::UIWidgetKind::Root);
     EXPECT_EQ(committed.entries()[1].node, *panel);
-    EXPECT_EQ(committed.entries()[1].kind, UI::UIWidgetKind::Panel);
     EXPECT_EQ(committed.entries()[2].node, *label);
-    EXPECT_EQ(committed.entries()[2].kind, UI::UIWidgetKind::Label);
     EXPECT_EQ(committed.entries()[3].node, *button);
-    EXPECT_EQ(committed.entries()[3].kind, UI::UIWidgetKind::Button);
+    EXPECT_EQ(committed.entries()[0].depth, 0U);
+    EXPECT_EQ(committed.entries()[1].parent, root.rootNodeId());
+    EXPECT_EQ(committed.entries()[2].parent, *panel);
+    EXPECT_EQ(committed.entries()[3].parent, root.rootNodeId());
 }
 
 TEST_F(UITreeCoreTest, TreeUpdaterRejectsCreatingChildrenUnderAnotherRoot)
@@ -442,11 +442,11 @@ TEST_F(UITreeCoreTest, TreeUpdaterRejectsCreatingChildrenUnderAnotherRoot)
     ASSERT_TRUE(firstUpdaterResult.has_value()) << firstUpdaterResult.error().message;
     ASSERT_TRUE(secondUpdaterResult.has_value()) << secondUpdaterResult.error().message;
 
-    auto secondPanel = secondUpdaterResult->createPanel(secondRoot.rootNodeId());
+    auto secondPanel = secondUpdaterResult->createElement(secondRoot.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(secondPanel.has_value()) << secondPanel.error().message;
     const usize liveNodeCountBeforeRejectedCreate = context->liveNodeCount();
 
-    const auto rejectedLabel = firstUpdaterResult->createLabel(*secondPanel);
+    const auto rejectedLabel = firstUpdaterResult->createElement(*secondPanel, UI::makeLabelElement());
     ASSERT_FALSE(rejectedLabel.has_value());
     EXPECT_EQ(rejectedLabel.error().code, UI::UIErrorCode::InvalidNode);
     EXPECT_TRUE(context->contains(*secondPanel));
@@ -465,7 +465,7 @@ TEST_F(UITreeCoreTest, TreeUpdaterRejectsCreationAfterRootOwnerReset)
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
     root.reset();
 
-    const auto rejectedPanel = updaterResult->createPanel(rootId);
+    const auto rejectedPanel = updaterResult->createElement(rootId, UI::makePanelElement());
     ASSERT_FALSE(rejectedPanel.has_value());
     EXPECT_EQ(rejectedPanel.error().code, UI::UIErrorCode::RootRequired);
     EXPECT_FALSE(updaterResult->isAlive(rootId));
@@ -473,7 +473,7 @@ TEST_F(UITreeCoreTest, TreeUpdaterRejectsCreationAfterRootOwnerReset)
     EXPECT_EQ(context->liveRootCount(), 0U);
 }
 
-TEST_F(UITreeCoreTest, CommitPublishesStablePreorderParentDepthKindAndPaintOrdinal)
+TEST_F(UITreeCoreTest, CommitPublishesStablePreorderParentDepthAndPaintOrdinal)
 {
     auto context = createContext(firstWindow, {.nodeCapacity = 8, .rootCapacity = 2});
     ASSERT_NE(context, nullptr);
@@ -487,12 +487,12 @@ TEST_F(UITreeCoreTest, CommitPublishesStablePreorderParentDepthKindAndPaintOrdin
     ASSERT_TRUE(firstRoot);
     ASSERT_TRUE(secondRoot);
     UI::UIRootBuilder builder = context->rootBuilder();
-    auto panel = builder.createPanel(firstRoot.rootNodeId());
-    auto button = builder.createButton(firstRoot.rootNodeId());
+    auto panel = builder.createElement(firstRoot.rootNodeId(), UI::makePanelElement());
+    auto button = builder.createElement(firstRoot.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(panel.has_value());
     ASSERT_TRUE(button.has_value());
-    auto label = builder.createLabel(*panel);
-    auto secondPanel = builder.createPanel(secondRoot.rootNodeId());
+    auto label = builder.createElement(*panel, UI::makeLabelElement());
+    auto secondPanel = builder.createElement(secondRoot.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(label.has_value());
     ASSERT_TRUE(secondPanel.has_value());
 
@@ -513,14 +513,6 @@ TEST_F(UITreeCoreTest, CommitPublishesStablePreorderParentDepthKindAndPaintOrdin
         {}, firstRoot.rootNodeId(), *panel, firstRoot.rootNodeId(), {}, secondRoot.rootNodeId(),
     };
     const u32 expectedDepths[] = {0, 1, 2, 1, 0, 1};
-    const UI::UIWidgetKind expectedKinds[] = {
-        UI::UIWidgetKind::Root,
-        UI::UIWidgetKind::Panel,
-        UI::UIWidgetKind::Label,
-        UI::UIWidgetKind::Button,
-        UI::UIWidgetKind::Root,
-        UI::UIWidgetKind::Panel,
-    };
 
     for (usize index = 0; index < committed.size(); ++index) {
         const UI::UICommittedNodeEntry& entry = committed.entries()[index];
@@ -529,7 +521,6 @@ TEST_F(UITreeCoreTest, CommitPublishesStablePreorderParentDepthKindAndPaintOrdin
         EXPECT_EQ(entry.depth, expectedDepths[index]);
         EXPECT_EQ(entry.preorder, index);
         EXPECT_EQ(entry.paintOrdinal, index);
-        EXPECT_EQ(entry.kind, expectedKinds[index]);
     }
 }
 
@@ -543,7 +534,7 @@ TEST_F(UITreeCoreTest, UnchangedCommitPreservesRevisionAndDoesNotAllocateUiPersi
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
-    ASSERT_TRUE(context->rootBuilder().createPanel(root.rootNodeId()).has_value());
+    ASSERT_TRUE(context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement()).has_value());
     ASSERT_TRUE(context->commitStructure().has_value());
 
     const u64 revision = context->committedStructure().revision();
@@ -563,9 +554,9 @@ TEST_F(UITreeCoreTest, DestroyInvalidatesImmediatelyButKeepsCommittedSnapshotUnt
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
-    auto panel = context->rootBuilder().createPanel(root.rootNodeId());
+    auto panel = context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panel.has_value());
-    auto label = context->rootBuilder().createLabel(*panel);
+    auto label = context->rootBuilder().createElement(*panel, UI::makeLabelElement());
     ASSERT_TRUE(label.has_value());
     ASSERT_TRUE(context->commitStructure().has_value());
 
@@ -606,8 +597,8 @@ TEST_F(UITreeCoreTest, UiTreeStorageMemoryReturnsToZeroAfterAllOwnersAndContextA
         auto secondRoot = createRoot(*context);
         ASSERT_TRUE(firstRoot);
         ASSERT_TRUE(secondRoot);
-        ASSERT_TRUE(context->rootBuilder().createPanel(firstRoot.rootNodeId()).has_value());
-        ASSERT_TRUE(context->rootBuilder().createLabel(secondRoot.rootNodeId()).has_value());
+        ASSERT_TRUE(context->rootBuilder().createElement(firstRoot.rootNodeId(), UI::makePanelElement()).has_value());
+        ASSERT_TRUE(context->rootBuilder().createElement(secondRoot.rootNodeId(), UI::makeLabelElement()).has_value());
         ASSERT_TRUE(context->commitStructure().has_value());
         EXPECT_GT(resource.currentBytes(), 0U);
         EXPECT_GT(resource.peakBytes(), 0U);

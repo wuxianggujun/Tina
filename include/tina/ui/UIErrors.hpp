@@ -31,5 +31,7 @@ inline constexpr Core::ErrorCode InvalidTheme{Core::ErrorDomain::UI, 22};
 inline constexpr Core::ErrorCode InvalidFocusScope{Core::ErrorDomain::UI, 23};
 inline constexpr Core::ErrorCode InvalidFocusTarget{Core::ErrorDomain::UI, 24};
 inline constexpr Core::ErrorCode InvalidAccessibilityAction{Core::ErrorDomain::UI, 25};
+inline constexpr Core::ErrorCode InvalidElementDescriptor{Core::ErrorDomain::UI, 26};
+inline constexpr Core::ErrorCode BuildTransactionInProgress{Core::ErrorDomain::UI, 27};
 
 } // namespace Tina::UI::UIErrorCode

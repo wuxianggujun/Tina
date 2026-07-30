@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/ui/UIContent.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
 
@@ -13,6 +14,7 @@ struct UICommittedLayoutEntry final {
     UILogicalRect localRect{};
     UILogicalRect worldRect{};
     UILogicalRect effectiveClip{};
+    UICommittedContentPlacement contentPlacement{};
     UIVisibility effectiveVisibility = UIVisibility::Visible;
     u32 layoutOrdinal = 0;
     u32 paintOrdinal = 0;

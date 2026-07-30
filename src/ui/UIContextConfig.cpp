@@ -48,6 +48,10 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     {
         return invalidContextConfig("UI Button action capacity exceeds the configured maximum");
     }
+    if (config.canvasCommandCapacity > UIContextCapacityConfig::MaxCanvasCommandCapacity)
+    {
+        return invalidContextConfig("UI canvas command capacity exceeds the configured maximum");
+    }
     if (config.textByteCapacity > UIContextCapacityConfig::MaxTextByteCapacity)
     {
         return invalidContextConfig("UI text byte capacity exceeds the configured maximum");

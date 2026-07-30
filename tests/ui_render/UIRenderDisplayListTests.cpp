@@ -138,7 +138,7 @@ TEST_F(UIRenderDisplayListTest, ConvertsCommittedUISolidFillAndIntegerPremultipl
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
-    auto panelResult = context->rootBuilder().createPanel(root.rootNodeId());
+    auto panelResult = context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value()) << panelResult.error().message;
     auto updaterResult = context->treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;

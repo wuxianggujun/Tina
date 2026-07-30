@@ -3,6 +3,7 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/ui/UI.hpp>
 
+#include <algorithm>
 #include <array>
 #include <limits>
 #include <memory>
@@ -42,14 +43,14 @@ using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
 
 [[nodiscard]] UI::UINodeId createCheckbox(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createCheckbox(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makeCheckboxElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
 
 [[nodiscard]] UI::UINodeId createRadioButton(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createRadioButton(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makeRadioButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -135,7 +136,7 @@ void publishLayout(UI::UIContext& context, float width = 100.0F, float height = 
     assertOk(context.commitLayout(UI::UILogicalSize{.width = width, .height = height}));
 }
 
-TEST(UICheckboxTest, KindIsTargetableAndDefaultsUnchecked)
+TEST(UICheckboxTest, CapabilitiesAreTargetableAndDefaultUnchecked)
 {
     auto windows = WindowPool::Create(1);
     ASSERT_TRUE(windows.has_value());
@@ -152,16 +153,15 @@ TEST(UICheckboxTest, KindIsTargetableAndDefaultsUnchecked)
     ASSERT_TRUE(checked.has_value()) << (checked ? "" : checked.error().message);
     EXPECT_FALSE(*checked);
 
-    assertOk(context->commitStructure());
-    const auto structure = context->committedStructure();
-    bool found = false;
-    for (const auto& entry : structure.entries()) {
-        if (entry.node == checkbox) {
-            found = true;
-            EXPECT_EQ(entry.kind, UI::UIWidgetKind::Checkbox);
-        }
-    }
-    EXPECT_TRUE(found);
+    assertOk(context->commitLayout({.width = 160.0F, .height = 80.0F}));
+    const auto hit = context->committedHit();
+    const auto entry = std::ranges::find_if(
+        hit, [checkbox](const UI::UICommittedHitEntry& candidate) { return candidate.node == checkbox; });
+    ASSERT_NE(entry, hit.end());
+    EXPECT_EQ(entry->policy, UI::UIPointerHitPolicy::Targetable);
+    EXPECT_TRUE(UI::hasBehavior(entry->behaviors, UI::UIElementBehavior::Focusable));
+    EXPECT_TRUE(UI::hasBehavior(entry->behaviors, UI::UIElementBehavior::Activate));
+    EXPECT_TRUE(UI::hasBehavior(entry->behaviors, UI::UIElementBehavior::Toggle));
 }
 
 TEST(UICheckboxTest, UnarmedMoveDoesNotReserveButtonHoverCapacity)
@@ -180,7 +180,7 @@ TEST(UICheckboxTest, UnarmedMoveDoesNotReserveButtonHoverCapacity)
     ASSERT_TRUE(root.hasValue());
     const UI::UINodeId checkbox =
         createCheckbox(*context, root.rootNodeId());
-    auto blocker = context->rootBuilder().createPanel(root.rootNodeId());
+    auto blocker = context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(checkbox.hasValue());
     ASSERT_TRUE(blocker.has_value());
     auto updater = createUpdater(*context, root);
@@ -413,7 +413,7 @@ TEST(UICheckboxTest, SetCheckedSilentAndRejectsWrongKind)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
     auto checkbox = createCheckbox(*context, root.rootNodeId());
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(checkbox.hasValue());
     ASSERT_TRUE(button.has_value());
 
@@ -903,7 +903,7 @@ TEST(UICheckboxTest, TypedWrappersRejectOffThreadBeforeKindResolution)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
     auto updater = createUpdater(*context, root);
-    auto buttonResult = updater.createButton(root.rootNodeId());
+    auto buttonResult = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value())
         << (buttonResult ? "" : buttonResult.error().message);
     const UI::UINodeId wrongKind = *buttonResult;

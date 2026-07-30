@@ -461,7 +461,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorStartupPublishesInitial
     auto rootResult = context->rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
     auto root = std::move(*rootResult);
-    ASSERT_TRUE(context->rootBuilder().createButton(root.rootNodeId()).has_value());
+    ASSERT_TRUE(context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement()).has_value());
 
     PrimaryWindowUILayoutCoordinator coordinator;
     ASSERT_TRUE(coordinator
@@ -656,7 +656,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
     auto rootResult = context->rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
     auto root = std::move(*rootResult);
-    ASSERT_TRUE(context->rootBuilder().createPanel(root.rootNodeId()).has_value());
+    ASSERT_TRUE(context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement()).has_value());
     PrimaryWindowUILayoutCoordinator coordinator;
     ASSERT_TRUE(coordinator
                     .commitForStartup(context.get(), windowMetrics(WindowFrameSpec{
@@ -679,7 +679,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
     const usize oldHitSize = oldHit.size();
     const usize oldHitTargetCount = oldStatistics.committedHitTargetCount;
 
-    ASSERT_TRUE(context->rootBuilder().createPanel(root.rootNodeId()).has_value());
+    ASSERT_TRUE(context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement()).has_value());
     auto frame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 

@@ -9,6 +9,7 @@
 #include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISlider.hpp>
+#include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITreeView.hpp>
 

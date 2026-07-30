@@ -170,7 +170,7 @@ protected:
         float width = 120.0F,
         float height = 24.0F)
     {
-        auto result = updater.createLabel(root.rootNodeId());
+        auto result = updater.createElement(root.rootNodeId(), UI::makeLabelElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -183,7 +183,7 @@ protected:
         float width = 120.0F,
         float height = 32.0F)
     {
-        auto result = updater.createButton(root.rootNodeId());
+        auto result = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -196,7 +196,7 @@ protected:
         float width = 120.0F,
         float height = 24.0F)
     {
-        auto result = updater.createCheckbox(root.rootNodeId());
+        auto result = updater.createElement(root.rootNodeId(), UI::makeCheckboxElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -209,7 +209,7 @@ protected:
         float width = 120.0F,
         float height = 24.0F)
     {
-        auto result = updater.createSlider(root.rootNodeId());
+        auto result = updater.createElement(root.rootNodeId(), UI::makeSliderElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -222,7 +222,7 @@ protected:
         float width = 200.0F,
         float height = 32.0F)
     {
-        auto result = updater.createTextEdit(root.rootNodeId());
+        auto result = updater.createElement(root.rootNodeId(), UI::makeTextEditElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -235,7 +235,7 @@ protected:
         float width = 120.0F,
         float height = 16.0F)
     {
-        auto result = updater.createProgressBar(root.rootNodeId());
+        auto result = updater.createElement(root.rootNodeId(), UI::makeProgressBarElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -248,7 +248,7 @@ protected:
         float width = 120.0F,
         float height = 24.0F)
     {
-        auto result = updater.createRadioButton(root.rootNodeId());
+        auto result = updater.createElement(root.rootNodeId(), UI::makeRadioButtonElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -320,10 +320,10 @@ TEST_F(UIEnabledStateTest, RejectsDecorativeForeignContextForeignRootAndStaleNod
     ASSERT_TRUE(firstRoot);
     ASSERT_TRUE(secondRoot);
     auto firstUpdater = createUpdater(*localContext, firstRoot);
-    auto panel = firstUpdater.createPanel(firstRoot.rootNodeId());
-    auto stale = firstUpdater.createLabel(firstRoot.rootNodeId());
-    auto foreignRootButton = localContext->rootBuilder().createButton(
-        secondRoot.rootNodeId());
+    auto panel = firstUpdater.createElement(firstRoot.rootNodeId(), UI::makePanelElement());
+    auto stale = firstUpdater.createElement(firstRoot.rootNodeId(), UI::makeLabelElement());
+    auto foreignRootButton = localContext->rootBuilder().createElement(
+        secondRoot.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(panel.has_value());
     ASSERT_TRUE(stale.has_value());
     ASSERT_TRUE(foreignRootButton.has_value());
@@ -345,8 +345,8 @@ TEST_F(UIEnabledStateTest, RejectsDecorativeForeignContextForeignRootAndStaleNod
     ASSERT_NE(sameWindowContext, nullptr);
     auto sameWindowRoot = createRoot(*sameWindowContext);
     ASSERT_TRUE(sameWindowRoot);
-    auto foreignContextButton = sameWindowContext->rootBuilder().createButton(
-        sameWindowRoot.rootNodeId());
+    auto foreignContextButton = sameWindowContext->rootBuilder().createElement(
+        sameWindowRoot.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(foreignContextButton.has_value());
     const Core::Status wrongContext =
         firstUpdater.setEnabled(*foreignContextButton, false);
@@ -371,7 +371,7 @@ TEST_F(UIEnabledStateTest, ReusedNodeSlotRestoresEnabledDefault)
     auto localRoot = createRoot(*localContext);
     ASSERT_TRUE(localRoot);
     auto localUpdater = createUpdater(*localContext, localRoot);
-    auto originalResult = localUpdater.createButton(localRoot.rootNodeId());
+    auto originalResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(originalResult.has_value());
     const UI::UINodeId original = *originalResult;
 
@@ -379,7 +379,7 @@ TEST_F(UIEnabledStateTest, ReusedNodeSlotRestoresEnabledDefault)
     EXPECT_FALSE(isEnabled(localUpdater, original));
     assertOk(localUpdater.destroy(original));
 
-    auto replacementResult = localUpdater.createLabel(localRoot.rootNodeId());
+    auto replacementResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(replacementResult.has_value());
     const UI::UINodeId replacement = *replacementResult;
     EXPECT_EQ(replacement.index(), original.index());
@@ -784,7 +784,7 @@ TEST_F(UIEnabledStateTest, DirtyQueueFailurePreservesEnabledFocusAndArmAtomicall
     auto localRoot = createRoot(*localContext);
     ASSERT_TRUE(localRoot);
     auto localUpdater = createUpdater(*localContext, localRoot);
-    auto buttonResult = localUpdater.createButton(localRoot.rootNodeId());
+    auto buttonResult = localUpdater.createElement(localRoot.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value());
     const UI::UINodeId button = *buttonResult;
     assertOk(localUpdater.setLayoutStyle(
@@ -802,8 +802,8 @@ TEST_F(UIEnabledStateTest, DirtyQueueFailurePreservesEnabledFocusAndArmAtomicall
     ASSERT_TRUE(down->consumed);
     assertOk(localContext->commitLayout({.width = 100.0F, .height = 80.0F}));
 
-    auto firstBlocker = localUpdater.createPanel(localRoot.rootNodeId());
-    auto secondBlocker = localUpdater.createPanel(localRoot.rootNodeId());
+    auto firstBlocker = localUpdater.createElement(localRoot.rootNodeId(), UI::makePanelElement());
+    auto secondBlocker = localUpdater.createElement(localRoot.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(firstBlocker.has_value());
     ASSERT_TRUE(secondBlocker.has_value());
     assertOk(localUpdater.setBoxPaint(*firstBlocker, solidFill(1, 2, 3)));

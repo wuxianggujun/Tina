@@ -142,32 +142,6 @@ struct UIEdgeSpacing final {
     auto operator<=>(const UIEdgeSpacing&) const = default;
 };
 
-struct UILayoutInsets final {
-    UILayoutLength left = UILayoutLength::Auto();
-    UILayoutLength top = UILayoutLength::Auto();
-    UILayoutLength right = UILayoutLength::Auto();
-    UILayoutLength bottom = UILayoutLength::Auto();
-
-    [[nodiscard]] static constexpr UILayoutInsets All(UILayoutLength value) noexcept
-    {
-        return UILayoutInsets{.left = value, .top = value, .right = value, .bottom = value};
-    }
-
-    [[nodiscard]] static constexpr UILayoutInsets HorizontalVertical(
-        UILayoutLength horizontal,
-        UILayoutLength vertical) noexcept
-    {
-        return UILayoutInsets{
-            .left = horizontal,
-            .top = vertical,
-            .right = horizontal,
-            .bottom = vertical,
-        };
-    }
-
-    auto operator<=>(const UILayoutInsets&) const = default;
-};
-
 struct UILayoutGap final {
     // Logical pixels; normalization rejects non-finite or negative values.
     float row = 0.0F;
@@ -193,16 +167,27 @@ enum class UIJustifyContent : u8 {
     SpaceBetween,
 };
 
-enum class UIAlignItems : u8 {
+// Shared physical-axis alignment used by Flex containers, overlay placement,
+// and retained content placement. Content alignment rejects Stretch because
+// text and other intrinsic content cannot be stretched without a new measure.
+enum class UIAxisAlignment : u8 {
     Start,
     Center,
     End,
     Stretch,
 };
 
-enum class UILayoutPositionMode : u8 {
-    InFlow,
-    AbsoluteOverlay,
+enum class UIAlignSelf : u8 {
+    Auto,
+    Start,
+    Center,
+    End,
+    Stretch,
+};
+
+enum class UILayoutPlacement : u8 {
+    Flow,
+    Overlay,
 };
 
 enum class UIVisibility : u8 {
@@ -211,14 +196,42 @@ enum class UIVisibility : u8 {
     Collapsed,
 };
 
-struct UIFlexStyle final {
+// Properties interpreted by an element while arranging its children.
+struct UIFlexContainerStyle final {
     UIFlexDirection direction = UIFlexDirection::Column;
-    UIJustifyContent justify = UIJustifyContent::Start;
-    UIAlignItems alignItems = UIAlignItems::Stretch;
-    float grow = 0.0F;
+    UIJustifyContent justifyContent = UIJustifyContent::Start;
+    UIAxisAlignment alignItems = UIAxisAlignment::Stretch;
     UILayoutGap gap{};
 
-    auto operator<=>(const UIFlexStyle&) const = default;
+    auto operator<=>(const UIFlexContainerStyle&) const = default;
+};
+
+// Properties interpreted by the parent Flex container for this element.
+struct UIFlexItemStyle final {
+    float grow = 0.0F;
+    float shrink = 1.0F;
+    UILayoutLength basis = UILayoutLength::Auto();
+    UIAlignSelf alignSelf = UIAlignSelf::Auto;
+
+    auto operator<=>(const UIFlexItemStyle&) const = default;
+};
+
+struct UIOverlayOffset final {
+    UILayoutLength x = UILayoutLength::Px(0.0F);
+    UILayoutLength y = UILayoutLength::Px(0.0F);
+
+    auto operator<=>(const UIOverlayOffset&) const = default;
+};
+
+// Overlay deliberately models alignment plus a finite logical offset instead
+// of CSS-like left/top/right/bottom coordinates. Use margin with Stretch to
+// create edge insets. Popups keep their anchored placement policy internally.
+struct UIOverlayStyle final {
+    UIAxisAlignment horizontal = UIAxisAlignment::Start;
+    UIAxisAlignment vertical = UIAxisAlignment::Start;
+    UIOverlayOffset offset{};
+
+    auto operator<=>(const UIOverlayStyle&) const = default;
 };
 
 struct UILayoutStyle final {
@@ -226,9 +239,10 @@ struct UILayoutStyle final {
     UILayoutMinMaxSpec minMax{};
     UIEdgeSpacing margin{};
     UIEdgeSpacing padding{};
-    UILayoutInsets absoluteInset{};
-    UIFlexStyle flex{};
-    UILayoutPositionMode position = UILayoutPositionMode::InFlow;
+    UIFlexContainerStyle flexContainer{};
+    UIFlexItemStyle flexItem{};
+    UIOverlayStyle overlay{};
+    UILayoutPlacement placement = UILayoutPlacement::Flow;
     UIVisibility visibility = UIVisibility::Visible;
 
     auto operator<=>(const UILayoutStyle&) const = default;

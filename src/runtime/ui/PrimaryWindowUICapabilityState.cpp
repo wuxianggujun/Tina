@@ -204,256 +204,17 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isAlive(u64 epoch, PrimaryWin
     return updater.isAlive(node);
 }
 
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createPanel(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                       UI::UITreeUpdater& updater, UI::UINodeId parent)
+Core::Result<UI::UINodeId>
+PrimaryWindowUICapabilityState::createElement(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                              UI::UINodeId parent,
+                                              const UI::UIElementDescriptor& descriptor)
 {
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createPanel";
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createElement";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
     {
         return Core::failure(std::move(status.error()));
     }
-    auto child = updater.createPanel(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createLabel(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                       UI::UITreeUpdater& updater, UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createLabel";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createLabel(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createTextEdit(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                          UI::UITreeUpdater& updater,
-                                                                          UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createTextEdit";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createTextEdit(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createButton(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                        UI::UITreeUpdater& updater, UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createButton";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createButton(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createCheckbox(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                          UI::UITreeUpdater& updater,
-                                                                          UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createCheckbox";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createCheckbox(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createSlider(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                        UI::UITreeUpdater& updater, UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createSlider";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createSlider(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createProgressBar(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                             UI::UITreeUpdater& updater,
-                                                                             UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createProgressBar";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createProgressBar(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createRadioButton(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                             UI::UITreeUpdater& updater,
-                                                                             UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createRadioButton";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createRadioButton(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createModal(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                       UI::UITreeUpdater& updater, UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createModal";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createModal(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createScrollView(u64 epoch,
-                                                                            PrimaryWindowUIPhase phase,
-                                                                            UI::UITreeUpdater& updater,
-                                                                            UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createScrollView";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createScrollView(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createListView(u64 epoch,
-                                                                          PrimaryWindowUIPhase phase,
-                                                                          UI::UITreeUpdater& updater,
-                                                                          UI::UINodeId parent,
-                                                                          UI::UIListViewCreateConfig config)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createListView";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createListView(parent, config);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createTreeView(u64 epoch,
-                                                                          PrimaryWindowUIPhase phase,
-                                                                          UI::UITreeUpdater& updater,
-                                                                          UI::UINodeId parent,
-                                                                          UI::UITreeViewCreateConfig config)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createTreeView";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createTreeView(parent, config);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createDropdown(u64 epoch,
-                                                                          PrimaryWindowUIPhase phase,
-                                                                          UI::UITreeUpdater& updater,
-                                                                          UI::UINodeId parent)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createDropdown";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createDropdown(parent);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createPopup(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                       UI::UITreeUpdater& updater,
-                                                                       UI::UINodeId dropdown)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createPopup";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createPopup(dropdown);
-    if (!child)
-    {
-        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
-    }
-    return *child;
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createDropdownItem(u64 epoch,
-                                                                              PrimaryWindowUIPhase phase,
-                                                                              UI::UITreeUpdater& updater,
-                                                                              UI::UINodeId popup)
-{
-    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createDropdownItem";
-    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
-    {
-        return Core::failure(std::move(status.error()));
-    }
-    auto child = updater.createDropdownItem(popup);
+    auto child = updater.createElement(parent, descriptor);
     if (!child)
     {
         return Core::failure(rememberFirstError(std::move(child.error()), Operation));
@@ -593,6 +354,57 @@ Core::Status PrimaryWindowUICapabilityState::clearFocus(u64 epoch, PrimaryWindow
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setStyleRole(u64 epoch, PrimaryWindowUIPhase phase,
+                                                          UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                          UI::UIStyleRoleId role)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setStyleRole";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setStyleRole(node, role);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIStyleRoleId>
+PrimaryWindowUICapabilityState::styleRole(u64 epoch, PrimaryWindowUIPhase phase,
+                                          const UI::UITreeUpdater& updater, UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::styleRole";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto role = updater.styleRole(node);
+    if (!role)
+    {
+        return Core::failure(rememberFirstError(std::move(role.error()), Operation));
+    }
+    return *role;
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearOverride(u64 epoch, PrimaryWindowUIPhase phase,
+                                                           UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                           UI::UIStyleOverride properties)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearOverride";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearOverride(node, properties);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Result<UI::UITheme> PrimaryWindowUICapabilityState::productTheme(u64 epoch, PrimaryWindowUIPhase phase)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::productTheme";
@@ -703,6 +515,23 @@ Core::Status PrimaryWindowUICapabilityState::setTextStyle(u64 epoch, PrimaryWind
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setContentAlignment(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                  UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                                  UI::UIContentAlignment alignment)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setContentAlignment";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setContentAlignment(node, alignment);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Result<std::string_view> PrimaryWindowUICapabilityState::text(u64 epoch, PrimaryWindowUIPhase phase,
                                                                     UI::UITreeUpdater& updater, UI::UINodeId node)
 {
@@ -728,6 +557,23 @@ Core::Result<UI::UITextStyle> PrimaryWindowUICapabilityState::textStyle(u64 epoc
         return Core::failure(status.error());
     }
     auto result = updater.textStyle(node);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Result<UI::UIContentAlignment>
+PrimaryWindowUICapabilityState::contentAlignment(u64 epoch, PrimaryWindowUIPhase phase,
+                                                  const UI::UITreeUpdater& updater, UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::contentAlignment";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = updater.contentAlignment(node);
     if (!result)
     {
         return Core::failure(rememberFirstError(std::move(result.error()), Operation));

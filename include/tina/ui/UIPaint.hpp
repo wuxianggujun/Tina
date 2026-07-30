@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/ui/UILayout.hpp>
 
 #include <compare>
 #include <optional>
@@ -94,6 +95,22 @@ struct UIBoxPaint final {
     float shadowOffsetY = 0.0F;
 
     auto operator<=>(const UIBoxPaint&) const = default;
+};
+
+// Backend-neutral bounded canvas command. Bounds are local to the Element's
+// border box and are clipped by the Element's committed effective clip. The
+// first command slice intentionally supports solid rectangles, which map to the
+// existing backend-neutral SolidQuad display-list command.
+enum class UICanvasCommandKind : u8 {
+    SolidRect = 0,
+};
+
+struct UICanvasCommand final {
+    UICanvasCommandKind kind = UICanvasCommandKind::SolidRect;
+    UILogicalRect bounds{};
+    UIStraightSrgba8Color color{};
+
+    auto operator<=>(const UICanvasCommand&) const = default;
 };
 
 } // namespace Tina::UI

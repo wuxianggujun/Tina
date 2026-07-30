@@ -215,15 +215,37 @@ backend 在同步 submit 中分别按 `Sprite2DTexture`、`Mesh3DGeometry`、`Me
 
 ## UI
 
-`UIContext`、`UINodeId`、`UIRootOwner` 与 builder/updater 提供 retained tree。当前 Widget：Root、Panel、
-Modal、Label、Button、Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit、ScrollView，以及
-Dropdown/Popup/DropdownItem 组合控件。
+`UIContext`、`UINodeId`、`UIRootOwner` 与 builder/updater 提供 retained tree。公开 authoring 统一为
+`createElement(parent, descriptor)`；`UIElementDescriptor` 一次给出 layout、behavior、content、visual
+StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配置，`makeButtonElement()`、
+`makeListViewElement()` 等是内建控件的官方 recipes。旧 `createPanel/createButton/createListView/...`
+成员入口已删除，不提供 compatibility alias。当前内建行为覆盖 Root、Panel、Modal、Label、Button、
+Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit、ScrollView，以及
+Dropdown/Popup/DropdownItem、ListView/TreeView。
 
-游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8；
+`UILayoutStyle` 将父容器 `flexContainer`、子项 `flexItem` 与 `Flow/Overlay` placement 分开；Overlay 使用
+alignment + offset，Stretch 的边距用 margin 表达，Popup recipe 强制 Overlay 并继续采用 anchor policy。
+控件内部文字由独立 `UIContentAlignment` 定位，layout snapshot 发布
+`UICommittedContentPlacement`，paint、caret/selection 与 pointer-to-text mapping 共用该 committed origin。
+
+游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
+descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
 `PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup phase-scoped mutation/query；
 `setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
 paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
 错误或 dirty queue 容量不足均零发布。
+
+`UISemanticsDescriptor` 支持 Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions；
+committed semantics 使用最近 published ancestor，显式空 name 不回退 content。`UIStyleRoleId` 与 behavior/
+semantics 分离，`setStyleRole()` 切换 recipe，`clearOverride()` 从当前 product theme 恢复选定属性；Runtime
+phase facade 同样暴露 role/query/reset。`UIElementBuildTransaction` 为直接 `UITreeUpdater` authoring 提供固定
+node budget，多节点创建失败/析构回滚整棵子树并阻止中途 snapshot commit；它不作为可逃逸的 Runtime
+phase facade 对象。
+
+`UIElementVisual::canvas` 当前接受 borrowed、backend-neutral `SolidRect` command span；命令在
+`createElement()` 返回前复制到 Context 固定容量 pool，destroy/transaction rollback 回收 slot。公开
+`UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。RoundedRect/Image/NineSlice 与
+stylesheet 仍是后续扩展。
 
 可选 FreeType、R8 Glyph atlas、semantics snapshot 与 `UIAccessibilityTree`/probe provider 均为 Tina API。
 可选 Windows UIA 私有 adapter（`TINA_BUILD_UI_UIA`）映射 UIA 形属性，公开头无 COM；产品路径可经

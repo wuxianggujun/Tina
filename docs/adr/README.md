@@ -26,6 +26,7 @@ ADR 记录已经接受或被替代的架构决定。主题文档描述完整设�
 | [0019](0019-generation-handles.md) | Accepted | 强类型 generation handle + owner 边界 |
 | [0020](0020-window-surface-handoff.md) | Accepted | 主窗口、move-only native surface lease 与 bgfx 交接 |
 | [0021](0021-runtime-ui-startup-capability.md) | Accepted | 主窗口 UI 启动事务与 root/phase-scoped Game SDK 能力 |
+| [0022](0022-ui-element-authoring-and-layout.md) | Accepted | Element 组合 authoring、父/子布局分离与统一 committed 内容放置 |
 
 新增 ADR 从 [模板](0000-template.md) 复制。替代旧决定时新建 ADR，并把旧记录状态改为
 Superseded 和链接新编号；不要改写历史理由。

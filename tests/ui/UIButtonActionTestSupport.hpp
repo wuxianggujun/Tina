@@ -76,7 +76,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createPanel(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -85,7 +85,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createLabel(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makeLabelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -94,7 +94,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createButton(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }

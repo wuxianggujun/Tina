@@ -76,7 +76,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createPanel(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -85,7 +85,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createButton(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -673,7 +673,7 @@ TEST_F(UIInputRouteTest, DestroyingTargetDuringCaptureDoesNotRouteToReusedGenera
             if (!destroyed) {
                 return;
             }
-            auto replacement = state.context->rootBuilder().createButton(state.panel);
+            auto replacement = state.context->rootBuilder().createElement(state.panel, UI::makeButtonElement());
             state.createSucceeded = replacement.has_value();
             if (!replacement) {
                 return;

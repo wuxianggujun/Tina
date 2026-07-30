@@ -162,13 +162,13 @@ struct VerticalScrollTree final {
 createVerticalScrollTree(UI::UITreeUpdater& updater, UI::UINodeId root,
                          UI::UIScrollBarVisibility visibility = UI::UIScrollBarVisibility::Auto)
 {
-    auto scrollResult = updater.createScrollView(root);
+    auto scrollResult = updater.createElement(root, UI::makeScrollViewElement());
     EXPECT_TRUE(scrollResult.has_value()) << (scrollResult ? "" : scrollResult.error().message);
     if (!scrollResult)
     {
         return {};
     }
-    auto contentResult = updater.createPanel(*scrollResult);
+    auto contentResult = updater.createElement(*scrollResult, UI::makePanelElement());
     EXPECT_TRUE(contentResult.has_value()) << (contentResult ? "" : contentResult.error().message);
     if (!contentResult)
     {
@@ -210,7 +210,7 @@ class UIScrollViewTest : public testing::Test {
 
 TEST_F(UIScrollViewTest, DefaultsRoundTripAndInvalidValuesDoNotMutate)
 {
-    auto scrollResult = updater.createScrollView(root.rootNodeId());
+    auto scrollResult = updater.createElement(root.rootNodeId(), UI::makeScrollViewElement());
     ASSERT_TRUE(scrollResult.has_value()) << scrollResult.error().message;
     const UI::UINodeId scrollView = *scrollResult;
 
@@ -244,7 +244,7 @@ TEST_F(UIScrollViewTest, DefaultsRoundTripAndInvalidValuesDoNotMutate)
     invalidPaint.thickness = (std::numeric_limits<float>::infinity)();
     EXPECT_EQ(updater.setScrollViewPaint(scrollView, invalidPaint).error().code, UI::UIErrorCode::InvalidControlValue);
 
-    auto panelResult = updater.createPanel(root.rootNodeId());
+    auto panelResult = updater.createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value()) << panelResult.error().message;
     EXPECT_EQ(updater.setScrollViewOffset(*panelResult, {}).error().code, UI::UIErrorCode::InvalidControlValue);
     EXPECT_FALSE(updater.scrollViewMetrics(*panelResult).has_value());
@@ -260,13 +260,13 @@ TEST_F(UIScrollViewTest, AxesAndVisibilityResolveDeterministicViewportMetrics)
 
     const auto createCase = [&](UI::UIScrollViewStyle scrollStyle, UI::UILayoutStyle containerStyle,
                                 UI::UILayoutStyle contentStyle) {
-        auto scrollResult = updater.createScrollView(root.rootNodeId());
+        auto scrollResult = updater.createElement(root.rootNodeId(), UI::makeScrollViewElement());
         EXPECT_TRUE(scrollResult.has_value()) << (scrollResult ? "" : scrollResult.error().message);
         if (!scrollResult)
         {
             return UI::UINodeId{};
         }
-        auto childResult = updater.createPanel(*scrollResult);
+        auto childResult = updater.createElement(*scrollResult, UI::makePanelElement());
         EXPECT_TRUE(childResult.has_value()) << (childResult ? "" : childResult.error().message);
         if (!childResult)
         {
@@ -280,7 +280,7 @@ TEST_F(UIScrollViewTest, AxesAndVisibilityResolveDeterministicViewportMetrics)
 
     UI::UILayoutStyle column = fixedSize(100.0F, 100.0F);
     UI::UILayoutStyle row = column;
-    row.flex.direction = UI::UIFlexDirection::Row;
+    row.flexContainer.direction = UI::UIFlexDirection::Row;
     const UI::UINodeId vertical =
         createCase({.axes = UI::UIScrollAxes::Vertical, .scrollBarVisibility = UI::UIScrollBarVisibility::Auto}, column,
                    fixedSize(100.0F, 200.0F));
@@ -364,14 +364,14 @@ TEST_F(UIScrollViewTest, OffsetClampsAndDescendantsUseTheCommittedViewportClip)
 TEST_F(UIScrollViewTest, WheelConsumesOnlyTheNearestScrollableAncestorThatCanMove)
 {
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
-    auto outerResult = updater.createScrollView(root.rootNodeId());
+    auto outerResult = updater.createElement(root.rootNodeId(), UI::makeScrollViewElement());
     ASSERT_TRUE(outerResult.has_value()) << outerResult.error().message;
     const UI::UINodeId outer = *outerResult;
-    auto innerResult = updater.createScrollView(outer);
-    auto fillerResult = updater.createPanel(outer);
+    auto innerResult = updater.createElement(outer, UI::makeScrollViewElement());
+    auto fillerResult = updater.createElement(outer, UI::makePanelElement());
     ASSERT_TRUE(innerResult.has_value() && fillerResult.has_value());
     const UI::UINodeId inner = *innerResult;
-    auto innerContentResult = updater.createPanel(inner);
+    auto innerContentResult = updater.createElement(inner, UI::makePanelElement());
     ASSERT_TRUE(innerContentResult.has_value());
 
     assertOk(updater.setLayoutStyle(outer, fixedSize(100.0F, 100.0F)));
@@ -512,7 +512,7 @@ TEST_F(UIScrollViewTest, CancelDisableModalAndDestroyClearThumbCapture)
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
 
     arm(3);
-    auto modalResult = updater.createModal(root.rootNodeId());
+    auto modalResult = updater.createElement(root.rootNodeId(), UI::makeModalElement());
     ASSERT_TRUE(modalResult.has_value()) << modalResult.error().message;
     assertOk(updater.setLayoutStyle(*modalResult, fixedSize(100.0F, 100.0F)));
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
@@ -596,7 +596,7 @@ TEST_F(UIScrollViewTest, SemanticsCapacityFailurePreservesPublishedMetricsAtomic
     const u64 oldSemanticsRevision = limitedContext->committedSemantics().semanticsRevision();
 
     assertOk(limitedUpdater.setScrollViewOffset(tree.scrollView, {.x = 0.0F, .y = 50.0F}));
-    auto labelResult = limitedUpdater.createLabel(tree.scrollView);
+    auto labelResult = limitedUpdater.createElement(tree.scrollView, UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value()) << labelResult.error().message;
     assertOk(limitedUpdater.setLayoutStyle(*labelResult, fixedSize(10.0F, 10.0F)));
     const Core::Status overflow = limitedContext->commitLayout({.width = 100.0F, .height = 100.0F});
@@ -623,7 +623,7 @@ TEST(UIScrollViewStandaloneTest, ThemeInheritanceAndLocalPaintOverrideRemainInde
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
     auto updater = createUpdater(*context, root);
-    auto scrollResult = updater.createScrollView(root.rootNodeId());
+    auto scrollResult = updater.createElement(root.rootNodeId(), UI::makeScrollViewElement());
     ASSERT_TRUE(scrollResult.has_value()) << scrollResult.error().message;
 
     EXPECT_EQ(updater.scrollViewPaint(*scrollResult).value(), UI::makeScrollViewPaint(UI::makeDefaultProductTheme()));

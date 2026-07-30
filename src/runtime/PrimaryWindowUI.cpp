@@ -55,141 +55,14 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isAlive(UI::UINodeId node) const
     return m_state->isAlive(m_epoch, m_phase, m_updater, node);
 }
 
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createPanel(UI::UINodeId parent)
+Core::Result<UI::UINodeId>
+PrimaryWindowUITreeUpdater::createElement(UI::UINodeId parent, const UI::UIElementDescriptor& descriptor)
 {
     if (m_state == nullptr)
     {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createPanel");
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createElement");
     }
-    return m_state->createPanel(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createLabel(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createLabel");
-    }
-    return m_state->createLabel(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createTextEdit(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createTextEdit");
-    }
-    return m_state->createTextEdit(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createButton(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createButton");
-    }
-    return m_state->createButton(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createCheckbox(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createCheckbox");
-    }
-    return m_state->createCheckbox(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createSlider(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createSlider");
-    }
-    return m_state->createSlider(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createProgressBar(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createProgressBar");
-    }
-    return m_state->createProgressBar(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createRadioButton(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createRadioButton");
-    }
-    return m_state->createRadioButton(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createModal(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createModal");
-    }
-    return m_state->createModal(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createScrollView(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createScrollView");
-    }
-    return m_state->createScrollView(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createListView(UI::UINodeId parent,
-                                                                      UI::UIListViewCreateConfig config)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createListView");
-    }
-    return m_state->createListView(m_epoch, m_phase, m_updater, parent, config);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createTreeView(UI::UINodeId parent,
-                                                                      UI::UITreeViewCreateConfig config)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createTreeView");
-    }
-    return m_state->createTreeView(m_epoch, m_phase, m_updater, parent, config);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createDropdown(UI::UINodeId parent)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createDropdown");
-    }
-    return m_state->createDropdown(m_epoch, m_phase, m_updater, parent);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createPopup(UI::UINodeId dropdown)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createPopup");
-    }
-    return m_state->createPopup(m_epoch, m_phase, m_updater, dropdown);
-}
-
-Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createDropdownItem(UI::UINodeId popup)
-{
-    if (m_state == nullptr)
-    {
-        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createDropdownItem");
-    }
-    return m_state->createDropdownItem(m_epoch, m_phase, m_updater, popup);
+    return m_state->createElement(m_epoch, m_phase, m_updater, parent, descriptor);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style)
@@ -264,6 +137,33 @@ Core::Status PrimaryWindowUITreeUpdater::clearFocus()
     return m_state->clearFocus(m_epoch, m_phase, m_updater);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setStyleRole(UI::UINodeId node, UI::UIStyleRoleId role)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setStyleRole");
+    }
+    return m_state->setStyleRole(m_epoch, m_phase, m_updater, node, role);
+}
+
+Core::Result<UI::UIStyleRoleId> PrimaryWindowUITreeUpdater::styleRole(UI::UINodeId node) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIStyleRoleId>("PrimaryWindowUITreeUpdater::styleRole");
+    }
+    return m_state->styleRole(m_epoch, m_phase, m_updater, node);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearOverride(UI::UINodeId node, UI::UIStyleOverride properties)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearOverride");
+    }
+    return m_state->clearOverride(m_epoch, m_phase, m_updater, node, properties);
+}
+
 Core::Result<UI::UITheme> PrimaryWindowUITreeUpdater::productTheme() const
 {
     if (m_state == nullptr)
@@ -327,6 +227,16 @@ Core::Status PrimaryWindowUITreeUpdater::setTextStyle(UI::UINodeId node, const U
     return m_state->setTextStyle(m_epoch, m_phase, m_updater, node, style);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setContentAlignment(UI::UINodeId node,
+                                                              UI::UIContentAlignment alignment)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setContentAlignment");
+    }
+    return m_state->setContentAlignment(m_epoch, m_phase, m_updater, node, alignment);
+}
+
 Core::Result<std::string_view> PrimaryWindowUITreeUpdater::text(UI::UINodeId node)
 {
     if (m_state == nullptr)
@@ -343,6 +253,15 @@ Core::Result<UI::UITextStyle> PrimaryWindowUITreeUpdater::textStyle(UI::UINodeId
         return expiredFacade<UI::UITextStyle>("PrimaryWindowUITreeUpdater::textStyle");
     }
     return m_state->textStyle(m_epoch, m_phase, m_updater, node);
+}
+
+Core::Result<UI::UIContentAlignment> PrimaryWindowUITreeUpdater::contentAlignment(UI::UINodeId node) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIContentAlignment>("PrimaryWindowUITreeUpdater::contentAlignment");
+    }
+    return m_state->contentAlignment(m_epoch, m_phase, m_updater, node);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setTextSelection(UI::UINodeId textEdit, UI::UITextSelection selection)

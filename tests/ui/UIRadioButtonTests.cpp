@@ -105,18 +105,6 @@ void expectInvalidControlValue(Core::Status status)
     };
 }
 
-[[nodiscard]] const UI::UICommittedNodeEntry* findStructureEntry(
-    UI::UICommittedStructureView view,
-    UI::UINodeId node) noexcept
-{
-    for (const UI::UICommittedNodeEntry& entry : view.entries()) {
-        if (entry.node == node) {
-            return &entry;
-        }
-    }
-    return nullptr;
-}
-
 [[nodiscard]] const UI::UICommittedHitEntry* findHitEntry(
     UI::UICommittedHitView view,
     UI::UINodeId node) noexcept
@@ -205,7 +193,7 @@ protected:
         float width = 80.0F,
         float height = 24.0F)
     {
-        auto result = updater.createRadioButton(parent);
+        auto result = updater.createElement(parent, UI::makeRadioButtonElement());
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         if (!result) {
             return {};
@@ -233,7 +221,7 @@ protected:
     UI::UITreeUpdater updater;
 };
 
-TEST_F(UIRadioButtonTest, DefaultsExposeTextPaintKindAndSemantics)
+TEST_F(UIRadioButtonTest, DefaultsExposeTextPaintCapabilitiesAndSemantics)
 {
     const UI::UINodeId radioButton = createRadioButton();
     ASSERT_TRUE(radioButton.hasValue());
@@ -263,20 +251,19 @@ TEST_F(UIRadioButtonTest, DefaultsExposeTextPaintKindAndSemantics)
     assertOk(updater.setRadioButtonSelected(radioButton, true));
     publishLayout();
 
-    const UI::UICommittedNodeEntry* const structureEntry =
-        findStructureEntry(context->committedStructure(), radioButton);
-    ASSERT_NE(structureEntry, nullptr);
-    EXPECT_EQ(structureEntry->kind, UI::UIWidgetKind::RadioButton);
     const UI::UICommittedHitEntry* const hitEntry =
         findHitEntry(context->committedHit(), radioButton);
     ASSERT_NE(hitEntry, nullptr);
     EXPECT_EQ(hitEntry->policy, UI::UIPointerHitPolicy::Targetable);
+    EXPECT_TRUE(UI::hasBehavior(hitEntry->behaviors, UI::UIElementBehavior::Focusable));
+    EXPECT_TRUE(UI::hasBehavior(hitEntry->behaviors, UI::UIElementBehavior::Activate));
+    EXPECT_TRUE(UI::hasBehavior(hitEntry->behaviors, UI::UIElementBehavior::ExclusiveChoice));
 
     const UI::UISemanticsEntry* const semantics =
         findSemanticsEntry(context->committedSemantics(), radioButton);
     ASSERT_NE(semantics, nullptr);
     EXPECT_EQ(semantics->role, UI::UISemanticsRole::RadioButton);
-    EXPECT_EQ(semantics->kind, UI::UIWidgetKind::RadioButton);
+    EXPECT_TRUE(UI::hasSemanticsAction(semantics->actions, UI::UISemanticsAction::Toggle));
     EXPECT_EQ(semantics->name, "Graphics");
     EXPECT_TRUE(semantics->checked);
     EXPECT_TRUE(semantics->enabled);
@@ -285,8 +272,8 @@ TEST_F(UIRadioButtonTest, DefaultsExposeTextPaintKindAndSemantics)
 
 TEST_F(UIRadioButtonTest, DirectParentScopesExclusiveSelectionAndSetterIsSilent)
 {
-    auto firstGroupResult = updater.createPanel(root.rootNodeId());
-    auto secondGroupResult = updater.createPanel(root.rootNodeId());
+    auto firstGroupResult = updater.createElement(root.rootNodeId(), UI::makePanelElement());
+    auto secondGroupResult = updater.createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(firstGroupResult.has_value())
         << (firstGroupResult ? "" : firstGroupResult.error().message);
     ASSERT_TRUE(secondGroupResult.has_value())
@@ -440,10 +427,10 @@ TEST_F(UIRadioButtonTest, PressedFocusedAndDisabledStatesResolveCommittedIndicat
 TEST_F(UIRadioButtonTest, AutoWidthUsesResolvedHeightAndTracksLabelGap)
 {
     UI::UILayoutStyle rootStyle = fixedSize(160.0F, 120.0F);
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto radioResult = updater.createRadioButton(root.rootNodeId());
+    auto radioResult = updater.createElement(root.rootNodeId(), UI::makeRadioButtonElement());
     ASSERT_TRUE(radioResult.has_value()) << radioResult.error().message;
     const UI::UINodeId radioButton = *radioResult;
     UI::UILayoutStyle style{};
@@ -477,10 +464,10 @@ TEST_F(UIRadioButtonTest, AutoWidthUsesResolvedHeightAndTracksLabelGap)
 TEST_F(UIRadioButtonTest, EmptyLabelAutoSizeKeepsIndicatorVisible)
 {
     UI::UILayoutStyle rootStyle = fixedSize(160.0F, 120.0F);
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto radioResult = updater.createRadioButton(root.rootNodeId());
+    auto radioResult = updater.createElement(root.rootNodeId(), UI::makeRadioButtonElement());
     ASSERT_TRUE(radioResult.has_value()) << (radioResult ? "" : radioResult.error().message);
     const UI::UINodeId radioButton = *radioResult;
     assertOk(updater.setRadioButtonPaint(
@@ -518,8 +505,8 @@ TEST_F(UIRadioButtonTest, GroupDirtyCapacityFailurePreservesSelectionAtomically)
     auto limitedRoot = createRoot(*limitedContext);
     ASSERT_TRUE(limitedRoot.hasValue());
     auto limitedUpdater = createUpdater(*limitedContext, limitedRoot);
-    auto firstResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
-    auto secondResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
+    auto firstResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makeRadioButtonElement());
+    auto secondResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makeRadioButtonElement());
     ASSERT_TRUE(firstResult.has_value());
     ASSERT_TRUE(secondResult.has_value());
     const UI::UINodeId first = *firstResult;
@@ -551,7 +538,7 @@ TEST_F(UIRadioButtonTest, PaintCapacityCountsSelectedIndicatorAtomically)
     auto limitedRoot = createRoot(*limitedContext);
     ASSERT_TRUE(limitedRoot.hasValue());
     auto limitedUpdater = createUpdater(*limitedContext, limitedRoot);
-    auto radioResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
+    auto radioResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makeRadioButtonElement());
     ASSERT_TRUE(radioResult.has_value()) << (radioResult ? "" : radioResult.error().message);
     const UI::UINodeId radioButton = *radioResult;
     assertOk(limitedUpdater.setLayoutStyle(
@@ -599,7 +586,7 @@ TEST_F(UIRadioButtonTest, FocusedOverrideIsIncludedInPaintCapacityPreflight)
     auto limitedRoot = createRoot(*limitedContext);
     ASSERT_TRUE(limitedRoot.hasValue());
     auto limitedUpdater = createUpdater(*limitedContext, limitedRoot);
-    auto radioResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
+    auto radioResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makeRadioButtonElement());
     ASSERT_TRUE(radioResult.has_value()) << (radioResult ? "" : radioResult.error().message);
     const UI::UINodeId radioButton = *radioResult;
     assertOk(limitedUpdater.setLayoutStyle(
@@ -754,11 +741,11 @@ TEST_F(UIRadioButtonTest, PointerRouteReservationSurvivesListenerSiblingMutation
     ASSERT_TRUE(limitedRoot.hasValue());
     auto limitedUpdater = createUpdater(*limitedContext, limitedRoot);
 
-    auto firstResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
-    auto secondResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
-    auto thirdResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
-    auto firstBlockerResult = limitedUpdater.createPanel(limitedRoot.rootNodeId());
-    auto secondBlockerResult = limitedUpdater.createPanel(limitedRoot.rootNodeId());
+    auto firstResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makeRadioButtonElement());
+    auto secondResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makeRadioButtonElement());
+    auto thirdResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makeRadioButtonElement());
+    auto firstBlockerResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makePanelElement());
+    auto secondBlockerResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(firstResult.has_value());
     ASSERT_TRUE(secondResult.has_value());
     ASSERT_TRUE(thirdResult.has_value());
@@ -911,7 +898,7 @@ TEST_F(UIRadioButtonTest, RejectsInvalidPaintMultilineTextAndWrongKinds)
 {
     const UI::UINodeId radioButton = createRadioButton();
     ASSERT_TRUE(radioButton.hasValue());
-    auto buttonResult = updater.createButton(root.rootNodeId());
+    auto buttonResult = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value()) << (buttonResult ? "" : buttonResult.error().message);
     const UI::UINodeId button = *buttonResult;
 
@@ -971,7 +958,7 @@ TEST_F(UIRadioButtonTest, RejectsInvalidPaintMultilineTextAndWrongKinds)
 
 TEST_F(UIRadioButtonTest, TypedWrappersRejectOffThreadBeforeKindResolution)
 {
-    auto buttonResult = updater.createButton(root.rootNodeId());
+    auto buttonResult = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value())
         << (buttonResult ? "" : buttonResult.error().message);
     const UI::UINodeId wrongKind = *buttonResult;

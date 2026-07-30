@@ -2,15 +2,18 @@
 
 #include <tina/ui/InputRouting.hpp>
 #include <tina/ui/UIAccessibility.hpp>
+#include <tina/ui/UIBehavior.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UICommittedHit.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
+#include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIDirty.hpp>
+#include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
@@ -26,10 +29,10 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
+#include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
 #include <tina/ui/UITreeView.hpp>
-#include <tina/ui/UIWidgetKind.hpp>
 #include <tina/ui/text/UIGlyphAtlas.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>

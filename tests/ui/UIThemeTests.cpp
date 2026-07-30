@@ -120,7 +120,7 @@ TEST(UIThemeTest, CreateAppliesDefaultButtonChrome)
 
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value()) << (root ? "" : root.error().message);
-    auto button = context->rootBuilder().createButton(root->rootNodeId());
+    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << (button ? "" : button.error().message);
 
     auto updater = context->treeUpdater(*root);
@@ -145,13 +145,13 @@ TEST(UIThemeTest, SetProductThemeUpdatesExistingAndSubsequentControls)
 
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto darkButton = context->rootBuilder().createButton(root->rootNodeId());
+    auto darkButton = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(darkButton.has_value());
 
     ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
     EXPECT_TRUE(context->productTheme() == UI::makeLightProductTheme());
 
-    auto lightButton = context->rootBuilder().createButton(root->rootNodeId());
+    auto lightButton = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(lightButton.has_value());
 
     auto updater = context->treeUpdater(*root);
@@ -173,7 +173,7 @@ TEST(UIThemeTest, LocalPaintOverrideDoesNotClearButtonStateChrome)
     ASSERT_NE(context, nullptr);
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto button = context->rootBuilder().createButton(root->rootNodeId());
+    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
 
     auto updater = context->treeUpdater(*root);
@@ -193,7 +193,7 @@ TEST(UIThemeTest, LocalOverridesDetachOnlyTheirCorrespondingThemeProperties)
     ASSERT_NE(context, nullptr);
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto button = context->rootBuilder().createButton(root->rootNodeId());
+    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
@@ -223,7 +223,7 @@ TEST(UIThemeTest, ExplicitSameValueSetterStillDetachesThatProperty)
     ASSERT_NE(context, nullptr);
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto button = context->rootBuilder().createButton(root->rootNodeId());
+    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
@@ -242,12 +242,12 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
     auto builder = context->rootBuilder();
-    auto label = builder.createLabel(root->rootNodeId());
-    auto checkbox = builder.createCheckbox(root->rootNodeId());
-    auto slider = builder.createSlider(root->rootNodeId());
-    auto textEdit = builder.createTextEdit(root->rootNodeId());
-    auto progress = builder.createProgressBar(root->rootNodeId());
-    auto radio = builder.createRadioButton(root->rootNodeId());
+    auto label = builder.createElement(root->rootNodeId(), UI::makeLabelElement());
+    auto checkbox = builder.createElement(root->rootNodeId(), UI::makeCheckboxElement());
+    auto slider = builder.createElement(root->rootNodeId(), UI::makeSliderElement());
+    auto textEdit = builder.createElement(root->rootNodeId(), UI::makeTextEditElement());
+    auto progress = builder.createElement(root->rootNodeId(), UI::makeProgressBarElement());
+    auto radio = builder.createElement(root->rootNodeId(), UI::makeRadioButtonElement());
     ASSERT_TRUE(label && checkbox && slider && textEdit && progress && radio);
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
@@ -302,8 +302,8 @@ TEST(UIThemeTest, DirtyCapacityFailureLeavesThemeAndManagedPropertiesUntouched)
     auto& context = *contextResult;
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto first = context->rootBuilder().createButton(root->rootNodeId());
-    auto second = context->rootBuilder().createButton(root->rootNodeId());
+    auto first = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto second = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(first && second);
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
@@ -339,8 +339,8 @@ TEST(UIThemeTest, CreateAppliesDefaultSliderAndProgressChrome)
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
 
-    auto slider = context->rootBuilder().createSlider(root->rootNodeId());
-    auto progress = context->rootBuilder().createProgressBar(root->rootNodeId());
+    auto slider = context->rootBuilder().createElement(root->rootNodeId(), UI::makeSliderElement());
+    auto progress = context->rootBuilder().createElement(root->rootNodeId(), UI::makeProgressBarElement());
     ASSERT_TRUE(slider.has_value());
     ASSERT_TRUE(progress.has_value());
 
@@ -365,7 +365,7 @@ TEST(UIThemeTest, ConfigCanDisableDefaultChromeForTests)
     auto& context = *contextResult;
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto button = context->rootBuilder().createButton(root->rootNodeId());
+    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());

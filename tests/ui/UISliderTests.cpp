@@ -41,14 +41,14 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] UI::UINodeId createSlider(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createSlider(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makeSliderElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
 
 [[nodiscard]] UI::UINodeId createRadioButton(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createRadioButton(parent);
+    auto result = context.rootBuilder().createElement(parent, UI::makeRadioButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -170,7 +170,7 @@ TEST(UISliderTest, DefaultsAndSetValue)
     ASSERT_TRUE(value.has_value());
     EXPECT_FLOAT_EQ(*value, 0.5F); // quantized to step 0.25 from min
 
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     EXPECT_FALSE(updater.setSliderValue(*button, 0.1F).has_value());
 }
@@ -443,7 +443,7 @@ TEST(UISliderTest, PaintRejectsInvalidMetricsAndWrongKindsWithoutMutation)
     ASSERT_TRUE(root.hasValue());
     const UI::UINodeId slider = createSlider(*context, root.rootNodeId());
     ASSERT_TRUE(slider.hasValue());
-    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     const UI::UISliderPaint expected{
@@ -514,8 +514,8 @@ TEST(UISliderTest, CancelClearsDraggingWhenDirtyQueueIsFull)
     ASSERT_TRUE(dragging.has_value());
     EXPECT_TRUE(*dragging);
 
-    auto firstBlocker = updater.createPanel(root.rootNodeId());
-    auto secondBlocker = updater.createPanel(root.rootNodeId());
+    auto firstBlocker = updater.createElement(root.rootNodeId(), UI::makePanelElement());
+    auto secondBlocker = updater.createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(firstBlocker.has_value());
     ASSERT_TRUE(secondBlocker.has_value());
     assertOk(updater.setBoxPaint(*firstBlocker, solidFill(1, 2, 3)));
@@ -950,7 +950,7 @@ TEST(UISliderTest, DestroyingSliderFromCallbackDefersCallbackReclaim)
     EXPECT_FALSE(context->contains(slider));
     EXPECT_FALSE(updater.sliderValue(slider).has_value());
 
-    auto replacement = updater.createSlider(root.rootNodeId());
+    auto replacement = updater.createElement(root.rootNodeId(), UI::makeSliderElement());
     ASSERT_TRUE(replacement.has_value()) << replacement.error().message;
     EXPECT_NE(*replacement, slider);
     assertOk(updater.setSliderValue(*replacement, 0.75F));
@@ -1005,8 +1005,8 @@ TEST(UISliderTest, DestroyingRootFromCallbackDefersCallbackReclaim)
     auto replacementRoot = createRoot(*context);
     ASSERT_TRUE(replacementRoot.hasValue());
     auto replacementUpdater = createUpdater(*context, replacementRoot);
-    auto replacementSlider = replacementUpdater.createSlider(
-        replacementRoot.rootNodeId());
+    auto replacementSlider = replacementUpdater.createElement(
+        replacementRoot.rootNodeId(), UI::makeSliderElement());
     ASSERT_TRUE(replacementSlider.has_value());
     assertOk(replacementUpdater.setSliderValue(*replacementSlider, 0.5F));
 }

@@ -22,9 +22,9 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 [[nodiscard]] UI::UILayoutStyle overlay(float x, float y, float width, float height) noexcept
 {
     UI::UILayoutStyle style = fixedSize(width, height);
-    style.position = UI::UILayoutPositionMode::AbsoluteOverlay;
-    style.absoluteInset.left = UI::UILayoutLength::Px(x);
-    style.absoluteInset.top = UI::UILayoutLength::Px(y);
+    style.placement = UI::UILayoutPlacement::Overlay;
+    style.overlay.offset.x = UI::UILayoutLength::Px(x);
+    style.overlay.offset.y = UI::UILayoutLength::Px(y);
     return style;
 }
 
@@ -77,28 +77,28 @@ void expectOk(Core::Status status)
 
 [[nodiscard]] UI::UINodeId createButton(UI::UITreeUpdater& updater, UI::UINodeId parent)
 {
-    auto result = updater.createButton(parent);
+    auto result = updater.createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
 
 [[nodiscard]] UI::UINodeId createPanel(UI::UITreeUpdater& updater, UI::UINodeId parent)
 {
-    auto result = updater.createPanel(parent);
+    auto result = updater.createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
 
 [[nodiscard]] UI::UINodeId createLabel(UI::UITreeUpdater& updater, UI::UINodeId parent)
 {
-    auto result = updater.createLabel(parent);
+    auto result = updater.createElement(parent, UI::makeLabelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
 
 [[nodiscard]] UI::UINodeId createModal(UI::UITreeUpdater& updater, UI::UINodeId parent)
 {
-    auto result = updater.createModal(parent);
+    auto result = updater.createElement(parent, UI::makeModalElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -162,7 +162,7 @@ TEST_F(UIFocusModalTest, ModalPublishesAtomicallyBlocksOutsideAndPreservesFocus)
     expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
     expectOk(context->requestFocus(background));
 
-    auto modalResult = context->rootBuilder().createModal(rootNode);
+    auto modalResult = context->rootBuilder().createElement(rootNode, UI::makeModalElement());
     ASSERT_TRUE(modalResult.has_value()) << (modalResult ? "" : modalResult.error().message);
     const UI::UINodeId modal = *modalResult;
     const UI::UINodeId modalButton = createButton(updater, modal);
@@ -198,7 +198,6 @@ TEST_F(UIFocusModalTest, ModalPublishesAtomicallyBlocksOutsideAndPreservesFocus)
     const UI::UISemanticsEntry* modalSemantics = findSemanticsEntry(context->committedSemantics(), modal);
     ASSERT_NE(modalSemantics, nullptr);
     EXPECT_EQ(modalSemantics->role, UI::UISemanticsRole::Dialog);
-    EXPECT_EQ(modalSemantics->kind, UI::UIWidgetKind::Modal);
 
     UI::UILayoutStyle hiddenModal = overlay(80.0F, 80.0F, 100.0F, 100.0F);
     hiddenModal.visibility = UI::UIVisibility::Hidden;

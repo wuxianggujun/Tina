@@ -249,7 +249,7 @@ void assertOk(Core::Status status)
 {
     for (const UI::UISemanticsEntry& entry : view.entries())
     {
-        if (entry.kind == UI::UIWidgetKind::TreeViewItem && entry.virtualItemIndex == logicalIndex)
+        if (entry.role == UI::UISemanticsRole::TreeItem && entry.virtualItemIndex == logicalIndex)
         {
             return &entry;
         }
@@ -295,7 +295,7 @@ TEST_F(UITreeViewTest, VirtualizesOneHundredThousandItemsWithFixedNodePool)
     auto updater = createUpdater(*context, root);
     FlatTreeDataSource source{.count = 100'000, .keyBase = 1'000};
 
-    auto treeResult = updater.createTreeView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    auto treeResult = updater.createElement(root.rootNodeId(), UI::makeTreeViewElement({.materializedItemCapacity = RowCapacity}));
     ASSERT_TRUE(treeResult.has_value()) << treeResult.error().message;
     const UI::UINodeId treeView = *treeResult;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
@@ -351,7 +351,7 @@ TEST_F(UITreeViewTest, PointerSelectsRowsAndDisclosureTogglesCommittedStableKey)
     auto updater = createUpdater(*context, root);
     MutableTreeDataSource source;
 
-    const UI::UINodeId treeView = *updater.createTreeView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    const UI::UINodeId treeView = *updater.createElement(root.rootNodeId(), UI::makeTreeViewElement({.materializedItemCapacity = RowCapacity}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(160.0F, 120.0F)));
     assertOk(updater.setLayoutStyle(treeView, fixedSize(160.0F, 120.0F)));
     assertOk(updater.setTreeViewStyle(treeView, {
@@ -449,7 +449,7 @@ TEST_F(UITreeViewTest, KeyboardCommandsNavigateHierarchySkipDisabledRowsAndDebou
     auto updater = createUpdater(*context, root);
     MutableTreeDataSource source;
 
-    const UI::UINodeId treeView = *updater.createTreeView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    const UI::UINodeId treeView = *updater.createElement(root.rootNodeId(), UI::makeTreeViewElement({.materializedItemCapacity = RowCapacity}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(160.0F, 120.0F)));
     assertOk(updater.setLayoutStyle(treeView, fixedSize(160.0F, 120.0F)));
     assertOk(updater.setTreeViewStyle(treeView, {.rowHeight = 24.0F, .overscanRows = 1}));
@@ -524,7 +524,7 @@ TEST_F(UITreeViewTest, RejectedExpansionAndFailedCommitPreservePublishedState)
     auto updater = createUpdater(*context, root);
     FlatTreeDataSource source{.count = 20, .label = "Old"};
 
-    const UI::UINodeId treeView = *updater.createTreeView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    const UI::UINodeId treeView = *updater.createElement(root.rootNodeId(), UI::makeTreeViewElement({.materializedItemCapacity = RowCapacity}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 60.0F)));
     assertOk(updater.setLayoutStyle(treeView, fixedSize(100.0F, 60.0F)));
     assertOk(updater.setTreeViewStyle(treeView, {
@@ -581,7 +581,7 @@ TEST_F(UITreeViewTest, ExpansionRejectionLeavesVisibleProjectionUnchanged)
     auto updater = createUpdater(*context, root);
     MutableTreeDataSource source;
 
-    const UI::UINodeId treeView = *updater.createTreeView(root.rootNodeId(), {.materializedItemCapacity = 10});
+    const UI::UINodeId treeView = *updater.createElement(root.rootNodeId(), UI::makeTreeViewElement({.materializedItemCapacity = 10}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(160.0F, 120.0F)));
     assertOk(updater.setLayoutStyle(treeView, fixedSize(160.0F, 120.0F)));
     assertOk(updater.setTreeViewStyle(treeView, {.rowHeight = 24.0F, .overscanRows = 1}));
@@ -610,7 +610,7 @@ TEST_F(UITreeViewTest, InternalRowsCannotBeDestroyedIndependently)
     auto updater = createUpdater(*context, root);
     FlatTreeDataSource source{.count = 10};
 
-    const UI::UINodeId treeView = *updater.createTreeView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    const UI::UINodeId treeView = *updater.createElement(root.rootNodeId(), UI::makeTreeViewElement({.materializedItemCapacity = RowCapacity}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 60.0F)));
     assertOk(updater.setLayoutStyle(treeView, fixedSize(100.0F, 60.0F)));
     assertOk(updater.setTreeViewStyle(treeView, {.rowHeight = 20.0F, .overscanRows = 1}));
@@ -638,7 +638,7 @@ TEST_F(UITreeViewTest, WheelAndCommitRemainAllocationFreeAfterWarmup)
     auto updater = createUpdater(*context, root);
     FlatTreeDataSource source{.count = 1'000};
 
-    const UI::UINodeId treeView = *updater.createTreeView(root.rootNodeId(), {.materializedItemCapacity = RowCapacity});
+    const UI::UINodeId treeView = *updater.createElement(root.rootNodeId(), UI::makeTreeViewElement({.materializedItemCapacity = RowCapacity}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(treeView, fixedSize(100.0F, 100.0F)));
     assertOk(updater.setTreeViewStyle(treeView, {

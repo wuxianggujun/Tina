@@ -8,6 +8,7 @@ add_executable(tina_ui_tests
     UIButtonActionLifecycleTests.cpp
     UIButtonVisualTests.cpp
     UICheckboxTests.cpp
+    UIElementTests.cpp
     UIEnabledStateTests.cpp
     UISliderChangeCallbackRegistryTests.cpp
     UISliderTests.cpp
@@ -35,6 +36,7 @@ add_executable(tina_ui_tests
     UIGlyphAtlasTests.cpp
     UITreeCoreTests.cpp
     header_isolation/InputRoutingHeader.cpp
+    header_isolation/UIBehaviorHeader.cpp
     header_isolation/UIButtonHeader.cpp
     header_isolation/UICheckboxHeader.cpp
     header_isolation/UIProgressBarHeader.cpp
@@ -45,6 +47,7 @@ add_executable(tina_ui_tests
     header_isolation/UIDropdownHeader.cpp
     header_isolation/UIPopupHeader.cpp
     header_isolation/UISliderHeader.cpp
+    header_isolation/UIStyleHeader.cpp
     header_isolation/UISemanticsHeader.cpp
     header_isolation/UIAccessibilityHeader.cpp
     header_isolation/UIDirtyHeader.cpp
@@ -52,8 +55,10 @@ add_executable(tina_ui_tests
     header_isolation/UICommittedLayoutHeader.cpp
     header_isolation/UICommittedPaintHeader.cpp
     header_isolation/UICommittedStructureHeader.cpp
+    header_isolation/UIContentHeader.cpp
     header_isolation/UIContextHeader.cpp
     header_isolation/UIContextConfigHeader.cpp
+    header_isolation/UIElementHeader.cpp
     header_isolation/UIErrorsHeader.cpp
     header_isolation/UIEventRoutingHeader.cpp
     header_isolation/UIFocusHeader.cpp
@@ -67,7 +72,6 @@ add_executable(tina_ui_tests
     header_isolation/UIGlyphAtlasHeader.cpp
     header_isolation/UINodeIdHeader.cpp
     header_isolation/UIUmbrellaHeader.cpp
-    header_isolation/UIWidgetKindHeader.cpp
 )
 
 target_compile_features(tina_ui_tests PRIVATE cxx_std_23)

@@ -42,38 +42,9 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot(u64 epoch);
     [[nodiscard]] Core::Result<bool> isAlive(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
                                              UI::UINodeId node);
-    [[nodiscard]] Core::Result<UI::UINodeId> createPanel(u64 epoch, PrimaryWindowUIPhase phase,
-                                                         UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createLabel(u64 epoch, PrimaryWindowUIPhase phase,
-                                                         UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createTextEdit(u64 epoch, PrimaryWindowUIPhase phase,
-                                                            UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createButton(u64 epoch, PrimaryWindowUIPhase phase,
-                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createCheckbox(u64 epoch, PrimaryWindowUIPhase phase,
-                                                            UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createSlider(u64 epoch, PrimaryWindowUIPhase phase,
-                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createProgressBar(u64 epoch, PrimaryWindowUIPhase phase,
-                                                               UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createRadioButton(u64 epoch, PrimaryWindowUIPhase phase,
-                                                               UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createModal(u64 epoch, PrimaryWindowUIPhase phase,
-                                                         UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createScrollView(u64 epoch, PrimaryWindowUIPhase phase,
-                                                              UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId>
-    createListView(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
-                   UI::UIListViewCreateConfig config);
-    [[nodiscard]] Core::Result<UI::UINodeId>
-    createTreeView(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
-                   UI::UITreeViewCreateConfig config);
-    [[nodiscard]] Core::Result<UI::UINodeId> createDropdown(u64 epoch, PrimaryWindowUIPhase phase,
-                                                            UI::UITreeUpdater& updater, UI::UINodeId parent);
-    [[nodiscard]] Core::Result<UI::UINodeId> createPopup(u64 epoch, PrimaryWindowUIPhase phase,
-                                                         UI::UITreeUpdater& updater, UI::UINodeId dropdown);
-    [[nodiscard]] Core::Result<UI::UINodeId> createDropdownItem(u64 epoch, PrimaryWindowUIPhase phase,
-                                                                UI::UITreeUpdater& updater, UI::UINodeId popup);
+    createElement(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
+                  const UI::UIElementDescriptor& descriptor);
     [[nodiscard]] Core::Status setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -89,6 +60,12 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Status requestFocus(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                             UI::UINodeId node);
     [[nodiscard]] Core::Status clearFocus(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater);
+    [[nodiscard]] Core::Status setStyleRole(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                            UI::UINodeId node, UI::UIStyleRoleId role);
+    [[nodiscard]] Core::Result<UI::UIStyleRoleId>
+    styleRole(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId node);
+    [[nodiscard]] Core::Status clearOverride(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                             UI::UINodeId node, UI::UIStyleOverride properties);
     [[nodiscard]] Core::Result<UI::UITheme> productTheme(u64 epoch, PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Status setProductTheme(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITheme& theme);
     [[nodiscard]] Core::Status setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -101,10 +78,16 @@ class PrimaryWindowUICapabilityState final {
                                        UI::UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                             UI::UINodeId node, const UI::UITextStyle& style);
+    [[nodiscard]] Core::Status setContentAlignment(u64 epoch, PrimaryWindowUIPhase phase,
+                                                   UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                   UI::UIContentAlignment alignment);
     [[nodiscard]] Core::Result<std::string_view> text(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                       UI::UINodeId node);
     [[nodiscard]] Core::Result<UI::UITextStyle> textStyle(u64 epoch, PrimaryWindowUIPhase phase,
                                                           UI::UITreeUpdater& updater, UI::UINodeId node);
+    [[nodiscard]] Core::Result<UI::UIContentAlignment>
+    contentAlignment(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                     UI::UINodeId node);
     [[nodiscard]] Core::Status setTextSelection(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                 UI::UINodeId textEdit, UI::UITextSelection selection);
     [[nodiscard]] Core::Result<UI::UITextSelection>

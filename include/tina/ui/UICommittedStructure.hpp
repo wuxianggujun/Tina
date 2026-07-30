@@ -2,7 +2,6 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UINodeId.hpp>
-#include <tina/ui/UIWidgetKind.hpp>
 
 #include <span>
 
@@ -14,7 +13,6 @@ struct UICommittedNodeEntry final {
     u32 depth = 0;
     u32 preorder = 0;
     u32 paintOrdinal = 0;
-    UIWidgetKind kind = UIWidgetKind::Panel;
 };
 
 // Owner-thread borrowed view. It is invalidated by the next successful

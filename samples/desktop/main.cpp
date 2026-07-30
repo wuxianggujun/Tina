@@ -5,6 +5,7 @@
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIText.hpp>
 
@@ -22,6 +23,8 @@
 #include <utility>
 
 namespace {
+
+namespace UI = Tina::UI;
 
 using Tina::Core::u32;
 using Tina::Core::u64;
@@ -50,9 +53,9 @@ struct LifecycleCounters final {
     Tina::UI::UILayoutLength width, Tina::UI::UILayoutLength height) noexcept
 {
     Tina::UI::UILayoutStyle style{};
-    style.position = Tina::UI::UILayoutPositionMode::AbsoluteOverlay;
-    style.absoluteInset.left = left;
-    style.absoluteInset.top = top;
+    style.placement = Tina::UI::UILayoutPlacement::Overlay;
+    style.overlay.offset.x = left;
+    style.overlay.offset.y = top;
     style.size.width = width;
     style.size.height = height;
     return style;
@@ -299,7 +302,7 @@ class DesktopSmokeState final : public Tina::IGameState {
 
         for (const PanelSpec& panelSpec : panels)
         {
-            auto panel = tree->createPanel(root->rootNodeId());
+            auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
             if (!panel)
             {
                 return Tina::Core::failure(std::move(panel.error()));
@@ -318,7 +321,7 @@ class DesktopSmokeState final : public Tina::IGameState {
         // codepoint is a solid bar; real glyphs remain a later M7 slice. Place
         // labels on a dark rail with high-contrast colors so the bars are obvious.
         {
-            auto textRail = tree->createPanel(root->rootNodeId());
+            auto textRail = tree->createElement(root->rootNodeId(), UI::makePanelElement());
             if (!textRail)
             {
                 return Tina::Core::failure(std::move(textRail.error()));
@@ -382,7 +385,7 @@ class DesktopSmokeState final : public Tina::IGameState {
 
         for (const LabelSpec& labelSpec : labels)
         {
-            auto label = tree->createLabel(root->rootNodeId());
+            auto label = tree->createElement(root->rootNodeId(), UI::makeLabelElement());
             if (!label)
             {
                 return Tina::Core::failure(std::move(label.error()));

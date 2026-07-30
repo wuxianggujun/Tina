@@ -3,6 +3,7 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/ui/UI.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -105,10 +106,10 @@ TEST(UITextTests, LabelAutoSizeUsesPlaceholderMetricsAndStoresUtf8)
     ASSERT_TRUE(root.hasValue());
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle{};
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto labelResult = updater.createLabel(root.rootNodeId());
+    auto labelResult = updater.createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value()) << (labelResult ? "" : labelResult.error().message);
     const UI::UINodeId label = *labelResult;
 
@@ -145,6 +146,71 @@ TEST(UITextTests, LabelAutoSizeUsesPlaceholderMetricsAndStoresUtf8)
     EXPECT_GE(stats.textByteHighWater, stats.textByteUsed);
 }
 
+TEST(UITextTests, ButtonContentAlignmentPublishesOnePlacementForLayoutPaintAndPointerConsumers)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+
+    auto context = createContext(*windowResult, {.nodeCapacity = 3, .rootCapacity = 1, .textByteCapacity = 32});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    auto buttonResult = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
+    ASSERT_TRUE(buttonResult.has_value());
+    const UI::UINodeId button = *buttonResult;
+
+    UI::UILayoutStyle buttonLayout{};
+    buttonLayout.size = {
+        .width = UI::UILayoutLength::Px(100.0F),
+        .height = UI::UILayoutLength::Px(40.0F),
+    };
+    buttonLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(10.0F, 4.0F);
+    assertOk(updater.setLayoutStyle(button, buttonLayout));
+    assertOk(updater.setText(button, "OK"));
+
+    auto defaultAlignment = updater.contentAlignment(button);
+    ASSERT_TRUE(defaultAlignment.has_value());
+    EXPECT_EQ(defaultAlignment->horizontal, UI::UIAxisAlignment::Center);
+    EXPECT_EQ(defaultAlignment->vertical, UI::UIAxisAlignment::Center);
+
+    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    const UI::UICommittedLayoutView centeredLayout = context->committedLayout();
+    const auto centeredEntry = std::ranges::find_if(
+        centeredLayout, [button](const UI::UICommittedLayoutEntry& entry) { return entry.node == button; });
+    ASSERT_NE(centeredEntry, centeredLayout.end());
+    const UI::UICommittedLayoutEntry& centered = *centeredEntry;
+    EXPECT_TRUE(centered.contentPlacement.hasIntrinsicContent);
+    EXPECT_FLOAT_EQ(centered.contentPlacement.contentBox.x, 10.0F);
+    EXPECT_FLOAT_EQ(centered.contentPlacement.contentBox.y, 4.0F);
+    EXPECT_FLOAT_EQ(centered.contentPlacement.contentBox.width, 80.0F);
+    EXPECT_FLOAT_EQ(centered.contentPlacement.contentBox.height, 32.0F);
+    EXPECT_FLOAT_EQ(centered.contentPlacement.origin.x, 40.4F);
+    EXPECT_FLOAT_EQ(centered.contentPlacement.origin.y, 10.4F);
+
+    assertOk(updater.setContentAlignment(button, {
+                                                     .horizontal = UI::UIAxisAlignment::End,
+                                                     .vertical = UI::UIAxisAlignment::Start,
+                                                 }));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    const UI::UICommittedLayoutView alignedLayout = context->committedLayout();
+    const auto alignedEntry = std::ranges::find_if(
+        alignedLayout, [button](const UI::UICommittedLayoutEntry& entry) { return entry.node == button; });
+    ASSERT_NE(alignedEntry, alignedLayout.end());
+    const UI::UICommittedLayoutEntry& aligned = *alignedEntry;
+    EXPECT_FLOAT_EQ(aligned.contentPlacement.origin.x, 70.8F);
+    EXPECT_FLOAT_EQ(aligned.contentPlacement.origin.y, 4.0F);
+
+    const Core::Status rejected = updater.setContentAlignment(button, {
+                                                                          .horizontal = UI::UIAxisAlignment::Stretch,
+                                                                          .vertical = UI::UIAxisAlignment::Center,
+                                                                      });
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
+}
+
 TEST(UITextTests, RejectsPanelTextInvalidUtf8AndTextByteCapacity)
 {
     auto windowsResult = WindowPool::Create(1);
@@ -165,13 +231,13 @@ TEST(UITextTests, RejectsPanelTextInvalidUtf8AndTextByteCapacity)
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
 
-    auto panelResult = updater.createPanel(root.rootNodeId());
+    auto panelResult = updater.createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value());
     const Core::Status panelText = updater.setText(*panelResult, "x");
     ASSERT_FALSE(panelText);
     EXPECT_EQ(panelText.error().code, UI::UIErrorCode::InvalidText);
 
-    auto labelResult = updater.createLabel(root.rootNodeId());
+    auto labelResult = updater.createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value());
     const Core::Status invalid =
         updater.setText(*labelResult, std::string_view("\xC3\x28", 2));
@@ -207,10 +273,10 @@ TEST(UITextTests, TextPlaceholderPaintEmitsPerCodepointSolidQuads)
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle{};
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto labelResult = updater.createLabel(root.rootNodeId());
+    auto labelResult = updater.createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value());
     const UI::UINodeId label = *labelResult;
     UI::UITextStyle style{};
@@ -268,10 +334,10 @@ TEST(UITextTests, TextPaintUsesRasterizerAdvancesForMultiLine)
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle{};
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto labelResult = updater.createLabel(root.rootNodeId());
+    auto labelResult = updater.createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value());
     const UI::UINodeId label = *labelResult;
     UI::UITextStyle style{};
@@ -316,10 +382,10 @@ TEST(UITextTests, TextPaintAndAutoSizeRespectLayoutPaddingAcrossLines)
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle{};
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto labelResult = updater.createLabel(root.rootNodeId());
+    auto labelResult = updater.createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value());
     const UI::UINodeId label = *labelResult;
     UI::UILayoutStyle labelStyle{};
@@ -373,9 +439,9 @@ TEST(UITextTests, SameTextIsNoOpAndClearingTextShrinksAutoSize)
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle{};
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
-    auto labelResult = updater.createLabel(root.rootNodeId());
+    auto labelResult = updater.createElement(root.rootNodeId(), UI::makeLabelElement());
     ASSERT_TRUE(labelResult.has_value());
     const UI::UINodeId label = *labelResult;
 
@@ -422,10 +488,10 @@ TEST(UITextTests, TextEditImeFocusCompositionAndCommitAtCaret)
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle{};
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto textEditResult = updater.createTextEdit(root.rootNodeId());
+    auto textEditResult = updater.createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value());
     const UI::UINodeId textEdit = *textEditResult;
     UI::UILayoutStyle textEditStyle{};
@@ -537,10 +603,10 @@ TEST(UITextTests, TextEditImePreeditPaintsAtCaret)
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle{};
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto textEditResult = updater.createTextEdit(root.rootNodeId());
+    auto textEditResult = updater.createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value());
     const UI::UINodeId textEdit = *textEditResult;
     UI::UILayoutStyle textEditStyle{};
@@ -617,10 +683,10 @@ TEST(UITextTests, FocusedTextEditPaintsCaretAfterCommittedText)
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle{};
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto textEditResult = updater.createTextEdit(root.rootNodeId());
+    auto textEditResult = updater.createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value());
     const UI::UINodeId textEdit = *textEditResult;
     UI::UILayoutStyle textEditStyle{};
@@ -680,7 +746,7 @@ TEST(UITextTests, ImeReplacementCapacityCountsOnlyThePaintedSelectionReplacement
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), UI::UILayoutStyle{}));
 
-    auto textEditResult = updater.createTextEdit(root.rootNodeId());
+    auto textEditResult = updater.createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value());
     const UI::UINodeId textEdit = *textEditResult;
     UI::UILayoutStyle textEditStyle{};

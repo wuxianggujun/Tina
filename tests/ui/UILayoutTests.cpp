@@ -71,7 +71,7 @@ private:
 
 [[nodiscard]] UI::UINodeId createPanel(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto panelResult = context.rootBuilder().createPanel(parent);
+    auto panelResult = context.rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(panelResult.has_value())
         << (panelResult ? "" : panelResult.error().message);
     return panelResult ? *panelResult : UI::UINodeId{};
@@ -79,7 +79,7 @@ private:
 
 [[nodiscard]] UI::UINodeId createLabel(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto labelResult = context.rootBuilder().createLabel(parent);
+    auto labelResult = context.rootBuilder().createElement(parent, UI::makeLabelElement());
     EXPECT_TRUE(labelResult.has_value())
         << (labelResult ? "" : labelResult.error().message);
     return labelResult ? *labelResult : UI::UINodeId{};
@@ -87,7 +87,7 @@ private:
 
 [[nodiscard]] UI::UINodeId createButton(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto buttonResult = context.rootBuilder().createButton(parent);
+    auto buttonResult = context.rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(buttonResult.has_value())
         << (buttonResult ? "" : buttonResult.error().message);
     return buttonResult ? *buttonResult : UI::UINodeId{};
@@ -217,11 +217,11 @@ TEST_F(UILayoutTest, RejectsNonFiniteAndNegativeStylesWithoutDirtyingLayout)
     expectInvalid(style);
 
     style = fixedSize(20.0F, 10.0F);
-    style.flex.grow = -1.0F;
+    style.flexItem.grow = -1.0F;
     expectInvalid(style);
 
     style = fixedSize(20.0F, 10.0F);
-    style.flex.gap.row = -2.0F;
+    style.flexContainer.gap.row = -2.0F;
     expectInvalid(style);
 
     assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
@@ -275,7 +275,7 @@ TEST_F(UILayoutTest, InvalidPercentEnumAndViewportPreserveCommittedStateAndPendi
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 0U);
 
     UI::UILayoutStyle invalidEnum = fixedSize(20.0F, 10.0F);
-    invalidEnum.flex.direction = static_cast<UI::UIFlexDirection>(0xff);
+    invalidEnum.flexContainer.direction = static_cast<UI::UIFlexDirection>(0xff);
     rejected = updater.setLayoutStyle(panel, invalidEnum);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
@@ -326,7 +326,7 @@ TEST_F(UILayoutTest, FiniteInputOverflowCannotPublishNonFiniteGeometry)
 
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rowStyle = fixedSize(100.0F, 20.0F);
-    rowStyle.flex.direction = UI::UIFlexDirection::Row;
+    rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
     assertOk(updater.setLayoutStyle(row, rowStyle));
     assertOk(updater.setLayoutStyle(child, fixedSize(10.0F, 10.0F)));
     assertOk(context->commitLayout({.width = 100.0F, .height = 20.0F}));
@@ -464,12 +464,12 @@ TEST_F(UILayoutTest, AutoColumnContainerIncludesChildMarginPaddingAndGap)
 
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle;
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
     UI::UILayoutStyle containerStyle;
     containerStyle.padding = UI::UIEdgeSpacing::All(4.0F);
-    containerStyle.flex.direction = UI::UIFlexDirection::Column;
-    containerStyle.flex.gap.row = 3.0F;
+    containerStyle.flexContainer.direction = UI::UIFlexDirection::Column;
+    containerStyle.flexContainer.gap.row = 3.0F;
     assertOk(updater.setLayoutStyle(container, containerStyle));
 
     UI::UILayoutStyle firstStyle = fixedSize(20.0F, 10.0F);
@@ -512,20 +512,20 @@ TEST_F(UILayoutTest, RowAndColumnGrowDistributeRemainingMainAxisSpace)
 
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rowStyle = fixedSize(120.0F, 20.0F);
-    rowStyle.flex.direction = UI::UIFlexDirection::Row;
+    rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
     assertOk(updater.setLayoutStyle(row, rowStyle));
     assertOk(updater.setLayoutStyle(fixedRowChild, fixedSize(20.0F, 20.0F)));
     UI::UILayoutStyle growRowStyle = fixedSize(0.0F, 20.0F);
-    growRowStyle.flex.grow = (std::numeric_limits<float>::max)();
+    growRowStyle.flexItem.grow = (std::numeric_limits<float>::max)();
     assertOk(updater.setLayoutStyle(growRowChild, growRowStyle));
     assertOk(updater.setLayoutStyle(secondGrowRowChild, growRowStyle));
     assertOk(updater.setLayoutStyle(percentGrowGrandchild, percentSize(50.0F, 50.0F)));
 
     UI::UILayoutStyle columnStyle = fixedSize(40.0F, 100.0F);
-    columnStyle.flex.direction = UI::UIFlexDirection::Column;
+    columnStyle.flexContainer.direction = UI::UIFlexDirection::Column;
     assertOk(updater.setLayoutStyle(column, columnStyle));
     UI::UILayoutStyle growColumnStyle = fixedSize(40.0F, 0.0F);
-    growColumnStyle.flex.grow = 1.0F;
+    growColumnStyle.flexItem.grow = 1.0F;
     assertOk(updater.setLayoutStyle(growColumnChild, growColumnStyle));
     assertOk(updater.setLayoutStyle(percentColumnGrandchild, percentSize(25.0F, 50.0F)));
 
@@ -565,9 +565,9 @@ TEST_F(UILayoutTest, JustifyAndAlignPlaceChildrenDeterministically)
 
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rowStyle = fixedSize(100.0F, 50.0F);
-    rowStyle.flex.direction = UI::UIFlexDirection::Row;
-    rowStyle.flex.justify = UI::UIJustifyContent::SpaceBetween;
-    rowStyle.flex.alignItems = UI::UIAlignItems::Center;
+    rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    rowStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
+    rowStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
     assertOk(updater.setLayoutStyle(row, rowStyle));
     assertOk(updater.setLayoutStyle(first, fixedSize(10.0F, 10.0F)));
     assertOk(updater.setLayoutStyle(second, fixedSize(20.0F, 20.0F)));
@@ -584,6 +584,42 @@ TEST_F(UILayoutTest, JustifyAndAlignPlaceChildrenDeterministically)
         {.x = 80.0F, .y = 15.0F, .width = 20.0F, .height = 20.0F});
 }
 
+TEST_F(UILayoutTest, FlexItemBasisShrinkAndAlignSelfOverrideParentPolicy)
+{
+    auto context = makeContext({.nodeCapacity = 4, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    const UI::UINodeId row = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId centered = createPanel(*context, row);
+    const UI::UINodeId ended = createPanel(*context, row);
+    auto updater = createUpdater(*context, root);
+
+    UI::UILayoutStyle rowStyle = fixedSize(100.0F, 40.0F);
+    rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    rowStyle.flexContainer.alignItems = UI::UIAxisAlignment::End;
+    assertOk(updater.setLayoutStyle(row, rowStyle));
+
+    UI::UILayoutStyle centeredStyle = fixedSize(10.0F, 10.0F);
+    centeredStyle.flexItem.basis = UI::UILayoutLength::Px(60.0F);
+    centeredStyle.flexItem.shrink = 1.0F;
+    centeredStyle.flexItem.alignSelf = UI::UIAlignSelf::Center;
+    assertOk(updater.setLayoutStyle(centered, centeredStyle));
+
+    UI::UILayoutStyle endedStyle = fixedSize(20.0F, 10.0F);
+    endedStyle.flexItem.basis = UI::UILayoutLength::Px(60.0F);
+    endedStyle.flexItem.shrink = 1.0F;
+    assertOk(updater.setLayoutStyle(ended, endedStyle));
+
+    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    const UI::UICommittedLayoutView layout = context->committedLayout();
+    expectRectNear(
+        requireLayoutEntry(layout, centered).worldRect,
+        {.x = 0.0F, .y = 15.0F, .width = 50.0F, .height = 10.0F});
+    expectRectNear(
+        requireLayoutEntry(layout, ended).worldRect,
+        {.x = 50.0F, .y = 30.0F, .width = 50.0F, .height = 10.0F});
+}
+
 TEST_F(UILayoutTest, AlignStretchUsesContainerCrossAxisWhenChildCrossSizeIsAuto)
 {
     auto context = makeContext({.nodeCapacity = 3, .rootCapacity = 1});
@@ -595,8 +631,8 @@ TEST_F(UILayoutTest, AlignStretchUsesContainerCrossAxisWhenChildCrossSizeIsAuto)
 
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rowStyle = fixedSize(100.0F, 40.0F);
-    rowStyle.flex.direction = UI::UIFlexDirection::Row;
-    rowStyle.flex.alignItems = UI::UIAlignItems::Stretch;
+    rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    rowStyle.flexContainer.alignItems = UI::UIAxisAlignment::Stretch;
     assertOk(updater.setLayoutStyle(row, rowStyle));
     UI::UILayoutStyle childStyle;
     childStyle.size.width = UI::UILayoutLength::Px(25.0F);
@@ -610,7 +646,7 @@ TEST_F(UILayoutTest, AlignStretchUsesContainerCrossAxisWhenChildCrossSizeIsAuto)
         {.x = 0.0F, .y = 0.0F, .width = 25.0F, .height = 40.0F});
 }
 
-TEST_F(UILayoutTest, AbsoluteOverlayDoesNotParticipateInFlowAndKeepsSnapshotOrder)
+TEST_F(UILayoutTest, OverlayDoesNotParticipateInFlowAndKeepsSnapshotOrder)
 {
     auto context = makeContext({.nodeCapacity = 4, .rootCapacity = 1});
     ASSERT_NE(context, nullptr);
@@ -624,11 +660,15 @@ TEST_F(UILayoutTest, AbsoluteOverlayDoesNotParticipateInFlowAndKeepsSnapshotOrde
     assertOk(updater.setLayoutStyle(container, fixedSize(100.0F, 80.0F)));
     assertOk(updater.setLayoutStyle(flowChild, fixedSize(20.0F, 10.0F)));
     UI::UILayoutStyle overlayStyle;
-    overlayStyle.position = UI::UILayoutPositionMode::AbsoluteOverlay;
-    overlayStyle.absoluteInset.left = UI::UILayoutLength::Px(5.0F);
-    overlayStyle.absoluteInset.top = UI::UILayoutLength::Px(6.0F);
-    overlayStyle.absoluteInset.right = UI::UILayoutLength::Px(10.0F);
-    overlayStyle.absoluteInset.bottom = UI::UILayoutLength::Px(11.0F);
+    overlayStyle.placement = UI::UILayoutPlacement::Overlay;
+    overlayStyle.overlay.horizontal = UI::UIAxisAlignment::Stretch;
+    overlayStyle.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    overlayStyle.margin = UI::UIEdgeSpacing{
+        .left = 5.0F,
+        .top = 6.0F,
+        .right = 10.0F,
+        .bottom = 11.0F,
+    };
     assertOk(updater.setLayoutStyle(overlay, overlayStyle));
 
     assertOk(context->commitStructure());
@@ -661,10 +701,10 @@ TEST_F(UILayoutTest, HiddenParticipatesInLayoutButCollapsedIsExcludedFromFlow)
 
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle;
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
     UI::UILayoutStyle rowStyle;
-    rowStyle.flex.direction = UI::UIFlexDirection::Row;
+    rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
     assertOk(updater.setLayoutStyle(row, rowStyle));
     assertOk(updater.setLayoutStyle(visible, fixedSize(10.0F, 10.0F)));
 
@@ -717,7 +757,7 @@ TEST_F(UILayoutTest, MinConstraintWinsWhenMinAndMaxConflict)
         {.x = 0.0F, .y = 0.0F, .width = 80.0F, .height = 30.0F});
 }
 
-TEST_F(UILayoutTest, GrowStretchAndAbsoluteInsetResultsRemainClampedByMinMax)
+TEST_F(UILayoutTest, GrowStretchAndOverlayResultsRemainClampedByMinMax)
 {
     auto context = makeContext({.nodeCapacity = 7, .rootCapacity = 1});
     ASSERT_NE(context, nullptr);
@@ -726,18 +766,18 @@ TEST_F(UILayoutTest, GrowStretchAndAbsoluteInsetResultsRemainClampedByMinMax)
     const UI::UINodeId row = createPanel(*context, root.rootNodeId());
     const UI::UINodeId grow = createPanel(*context, row);
     const UI::UINodeId stretch = createPanel(*context, row);
-    const UI::UINodeId absolute = createPanel(*context, row);
+    const UI::UINodeId overlay = createPanel(*context, row);
     const UI::UINodeId stretchPercentChild = createPanel(*context, stretch);
-    const UI::UINodeId absolutePercentChild = createPanel(*context, absolute);
+    const UI::UINodeId overlayPercentChild = createPanel(*context, overlay);
 
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rowStyle = fixedSize(300.0F, 20.0F);
-    rowStyle.flex.direction = UI::UIFlexDirection::Row;
-    rowStyle.flex.alignItems = UI::UIAlignItems::Stretch;
+    rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    rowStyle.flexContainer.alignItems = UI::UIAxisAlignment::Stretch;
     assertOk(updater.setLayoutStyle(row, rowStyle));
 
     UI::UILayoutStyle growStyle = fixedSize(20.0F, 10.0F);
-    growStyle.flex.grow = 1.0F;
+    growStyle.flexItem.grow = 1.0F;
     growStyle.minMax.minWidth = UI::UILayoutLength::Px(60.0F);
     growStyle.minMax.maxWidth = UI::UILayoutLength::Px(80.0F);
     assertOk(updater.setLayoutStyle(grow, growStyle));
@@ -749,19 +789,18 @@ TEST_F(UILayoutTest, GrowStretchAndAbsoluteInsetResultsRemainClampedByMinMax)
     stretchStyle.minMax.maxHeight = UI::UILayoutLength::Px(40.0F);
     assertOk(updater.setLayoutStyle(stretch, stretchStyle));
 
-    UI::UILayoutStyle absoluteStyle;
-    absoluteStyle.position = UI::UILayoutPositionMode::AbsoluteOverlay;
-    absoluteStyle.absoluteInset.left = UI::UILayoutLength::Px(10.0F);
-    absoluteStyle.absoluteInset.right = UI::UILayoutLength::Px(10.0F);
-    absoluteStyle.absoluteInset.top = UI::UILayoutLength::Px(8.0F);
-    absoluteStyle.absoluteInset.bottom = UI::UILayoutLength::Px(8.0F);
-    absoluteStyle.minMax.minWidth = UI::UILayoutLength::Px(50.0F);
-    absoluteStyle.minMax.maxWidth = UI::UILayoutLength::Px(70.0F);
-    absoluteStyle.minMax.minHeight = UI::UILayoutLength::Px(12.0F);
-    absoluteStyle.minMax.maxHeight = UI::UILayoutLength::Px(16.0F);
-    assertOk(updater.setLayoutStyle(absolute, absoluteStyle));
+    UI::UILayoutStyle overlayStyle;
+    overlayStyle.placement = UI::UILayoutPlacement::Overlay;
+    overlayStyle.overlay.horizontal = UI::UIAxisAlignment::Stretch;
+    overlayStyle.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    overlayStyle.margin = UI::UIEdgeSpacing::HorizontalVertical(10.0F, 8.0F);
+    overlayStyle.minMax.minWidth = UI::UILayoutLength::Px(50.0F);
+    overlayStyle.minMax.maxWidth = UI::UILayoutLength::Px(70.0F);
+    overlayStyle.minMax.minHeight = UI::UILayoutLength::Px(12.0F);
+    overlayStyle.minMax.maxHeight = UI::UILayoutLength::Px(16.0F);
+    assertOk(updater.setLayoutStyle(overlay, overlayStyle));
     assertOk(updater.setLayoutStyle(stretchPercentChild, percentSize(50.0F, 50.0F)));
-    assertOk(updater.setLayoutStyle(absolutePercentChild, percentSize(50.0F, 50.0F)));
+    assertOk(updater.setLayoutStyle(overlayPercentChild, percentSize(50.0F, 50.0F)));
 
     assertOk(context->commitStructure());
     assertOk(context->commitLayout({.width = 300.0F, .height = 20.0F}));
@@ -773,13 +812,13 @@ TEST_F(UILayoutTest, GrowStretchAndAbsoluteInsetResultsRemainClampedByMinMax)
         requireLayoutEntry(layout, stretch).worldRect,
         {.x = 80.0F, .y = 0.0F, .width = 20.0F, .height = 30.0F});
     expectRectNear(
-        requireLayoutEntry(layout, absolute).worldRect,
+        requireLayoutEntry(layout, overlay).worldRect,
         {.x = 10.0F, .y = 8.0F, .width = 70.0F, .height = 12.0F});
     expectRectNear(
         requireLayoutEntry(layout, stretchPercentChild).worldRect,
         {.x = 80.0F, .y = 0.0F, .width = 10.0F, .height = 15.0F});
     expectRectNear(
-        requireLayoutEntry(layout, absolutePercentChild).worldRect,
+        requireLayoutEntry(layout, overlayPercentChild).worldRect,
         {.x = 10.0F, .y = 8.0F, .width = 35.0F, .height = 6.0F});
 }
 
@@ -871,17 +910,20 @@ TEST_F(UILayoutTest, PercentInAutoAxisFallsBackDeterministicallyAndReportsDiagno
 
     auto updater = createUpdater(*context, root);
     UI::UILayoutStyle rootStyle;
-    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
     UI::UILayoutStyle autoPanelStyle;
     autoPanelStyle.size.width = UI::UILayoutLength::Auto();
     autoPanelStyle.size.height = UI::UILayoutLength::Auto();
-    autoPanelStyle.flex.direction = UI::UIFlexDirection::Row;
+    autoPanelStyle.flexContainer.direction = UI::UIFlexDirection::Row;
     assertOk(updater.setLayoutStyle(autoPanel, autoPanelStyle));
-    assertOk(updater.setLayoutStyle(fixedChild, fixedSize(100.0F, 10.0F)));
+    UI::UILayoutStyle fixedChildStyle = fixedSize(100.0F, 10.0F);
+    fixedChildStyle.flexItem.shrink = 0.0F;
+    assertOk(updater.setLayoutStyle(fixedChild, fixedChildStyle));
     UI::UILayoutStyle childStyle;
     childStyle.size.width = UI::UILayoutLength::Percent(50.0F);
     childStyle.size.height = UI::UILayoutLength::Px(10.0F);
+    childStyle.flexItem.shrink = 0.0F;
     assertOk(updater.setLayoutStyle(percentChild, childStyle));
 
     assertOk(context->commitStructure());

@@ -64,7 +64,7 @@ private:
 
 [[nodiscard]] UI::UINodeId createPanel(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto panelResult = context.rootBuilder().createPanel(parent);
+    auto panelResult = context.rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(panelResult.has_value())
         << (panelResult ? "" : panelResult.error().message);
     return panelResult ? *panelResult : UI::UINodeId{};
@@ -72,7 +72,7 @@ private:
 
 [[nodiscard]] UI::UINodeId createButton(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto buttonResult = context.rootBuilder().createButton(parent);
+    auto buttonResult = context.rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(buttonResult.has_value())
         << (buttonResult ? "" : buttonResult.error().message);
     return buttonResult ? *buttonResult : UI::UINodeId{};
@@ -220,7 +220,7 @@ TEST_F(UIHitSnapshotTest, PublishesOneStrictGlobalPaintOrderAcrossSiblingsAndRoo
     auto firstUpdater = createUpdater(*context, firstRoot);
     auto secondUpdater = createUpdater(*context, secondRoot);
     UI::UILayoutStyle overlappingStyle = fixedSize(50.0F, 50.0F);
-    overlappingStyle.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    overlappingStyle.placement = UI::UILayoutPlacement::Overlay;
     assertOk(firstUpdater.setLayoutStyle(firstSibling, overlappingStyle));
     assertOk(firstUpdater.setLayoutStyle(secondSibling, overlappingStyle));
     assertOk(secondUpdater.setLayoutStyle(topRootChild, overlappingStyle));
@@ -604,7 +604,7 @@ TEST_F(UIHitSnapshotTest, QueryPointerHitSelectsTheTopmostTargetAndBindsItsSnaps
 
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     UI::UILayoutStyle overlap = fixedSize(60.0F, 40.0F);
-    overlap.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    overlap.placement = UI::UILayoutPlacement::Overlay;
     assertOk(updater.setLayoutStyle(lower, overlap));
     assertOk(updater.setLayoutStyle(upper, overlap));
     assertOk(updater.setPointerHitPolicy(lower, UI::UIPointerHitPolicy::Targetable));
@@ -644,7 +644,7 @@ TEST_F(UIHitSnapshotTest, QueryPointerHitSkipsAnIgnoredFrontmostEntry)
 
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     UI::UILayoutStyle overlap = fixedSize(60.0F, 40.0F);
-    overlap.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    overlap.placement = UI::UILayoutPlacement::Overlay;
     assertOk(updater.setLayoutStyle(lower, overlap));
     assertOk(updater.setLayoutStyle(ignoredUpper, overlap));
     assertOk(updater.setPointerHitPolicy(lower, UI::UIPointerHitPolicy::Targetable));
@@ -668,9 +668,9 @@ TEST_F(UIHitSnapshotTest, QueryPointerHitUsesWorldAndClipHalfOpenBounds)
 
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     UI::UILayoutStyle clipped = fixedSize(40.0F, 20.0F);
-    clipped.position = UI::UILayoutPositionMode::AbsoluteOverlay;
-    clipped.absoluteInset.left = UI::UILayoutLength::Px(80.0F);
-    clipped.absoluteInset.top = UI::UILayoutLength::Px(10.0F);
+    clipped.placement = UI::UILayoutPlacement::Overlay;
+    clipped.overlay.offset.x = UI::UILayoutLength::Px(80.0F);
+    clipped.overlay.offset.y = UI::UILayoutLength::Px(10.0F);
     assertOk(updater.setLayoutStyle(button, clipped));
     assertOk(updater.setPointerHitPolicy(button, UI::UIPointerHitPolicy::Targetable));
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
