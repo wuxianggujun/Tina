@@ -315,6 +315,7 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
         .filledTrackColor = {.red = 40, .green = 160, .blue = 220, .alpha = 255},
         .thumbColor = {.red = 235, .green = 240, .blue = 245, .alpha = 255},
         .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
+        .focusedThumbColor = {.red = 80, .green = 180, .blue = 250, .alpha = 255},
         .contentInset = 4.0F,
         .thumbWidth = 8.0F,
     };
@@ -344,6 +345,7 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
         {.x = 75.0F, .y = 10.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
+    EXPECT_EQ(context->defaultActionFocus(), slider);
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
     paint = context->committedPaint();
     ASSERT_EQ(paint.size(), 3U);
@@ -368,7 +370,9 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
     paint = context->committedPaint();
     ASSERT_EQ(paint.size(), 3U);
-    EXPECT_EQ(paint.entries()[2].solidFill, (UI::UIPremultipliedRgba8Color{.red = 235, .green = 240, .blue = 245, .alpha = 255}));
+    EXPECT_EQ(
+        paint.entries()[2].solidFill,
+        (UI::UIPremultipliedRgba8Color{.red = 80, .green = 180, .blue = 250, .alpha = 255}));
     dragging = updater.isSliderDragging(slider);
     ASSERT_TRUE(dragging.has_value());
     EXPECT_FALSE(*dragging);
@@ -379,6 +383,64 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     ASSERT_EQ(paint.size(), 3U);
     EXPECT_EQ(paint.entries()[1].solidFill, (UI::UIPremultipliedRgba8Color{.red = 22, .green = 88, .blue = 121, .alpha = 140}));
     EXPECT_EQ(paint.entries()[2].solidFill, (UI::UIPremultipliedRgba8Color{.red = 129, .green = 132, .blue = 135, .alpha = 140}));
+}
+
+TEST(UISliderTest, ExplicitFocusPublishesFocusSemanticsAndFocusedThumb)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    const UI::UINodeId slider = createSlider(*context, root.rootNodeId());
+    ASSERT_TRUE(slider.hasValue());
+
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 40.0F)));
+    assertOk(updater.setLayoutStyle(slider, fixedSize(100.0F, 20.0F)));
+    assertOk(updater.setBoxPaint(slider, solidFill(30, 40, 50)));
+    assertOk(updater.setSliderPaint(
+        slider,
+        UI::UISliderPaint{
+            .filledTrackColor = {.red = 40, .green = 160, .blue = 220, .alpha = 255},
+            .thumbColor = {.red = 235, .green = 240, .blue = 245, .alpha = 255},
+            .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
+            .focusedThumbColor = {.red = 80, .green = 180, .blue = 250, .alpha = 255},
+            .contentInset = 4.0F,
+            .thumbWidth = 8.0F,
+        }));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+
+    auto tabFocus = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(tabFocus.has_value()) << (tabFocus ? "" : tabFocus.error().message);
+    EXPECT_TRUE(tabFocus->consumed);
+    EXPECT_EQ(tabFocus->focus, slider);
+    EXPECT_EQ(context->defaultActionFocus(), slider);
+    assertOk(context->clearFocus());
+
+    assertOk(context->requestFocus(slider));
+    EXPECT_EQ(context->defaultActionFocus(), slider);
+    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 2U);
+    EXPECT_EQ(
+        paint.entries()[1].solidFill,
+        (UI::UIPremultipliedRgba8Color{.red = 80, .green = 180, .blue = 250, .alpha = 255}));
+
+    bool sawFocusedSlider = false;
+    for (const UI::UISemanticsEntry& entry : context->committedSemantics().entries())
+    {
+        if (entry.node == slider)
+        {
+            sawFocusedSlider = true;
+            EXPECT_TRUE(entry.focused);
+            EXPECT_TRUE(entry.hasRange);
+        }
+    }
+    EXPECT_TRUE(sawFocusedSlider);
 }
 
 TEST(UISliderTest, PaintCapacityFailurePreservesPublishedSnapshotAtomically)

@@ -2046,7 +2046,9 @@ struct UIContext::Impl final {
             const UIStraightSrgba8Color thumbColor =
                 armedSlider == layoutEntry.node && slider.paint.draggingThumbColor.alpha != 0
                     ? slider.paint.draggingThumbColor
-                    : slider.paint.thumbColor;
+                    : defaultActionFocusButton == layoutEntry.node && slider.paint.focusedThumbColor.alpha != 0
+                        ? slider.paint.focusedThumbColor
+                        : slider.paint.thumbColor;
             add(geometry.thumb, controlColor(thumbColor));
         } else if (record != nullptr && record->kind == BuiltinElementKind::ScrollView &&
                    nodeIndex < scrollViewStatesByNodeIndex.size() &&
@@ -2402,7 +2404,7 @@ struct UIContext::Impl final {
         } else if (record->kind == BuiltinElementKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
         {
             const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
-            entry.focused = enabled && armedSlider == node;
+            entry.focused = enabled && defaultActionFocusButton == node;
             entry.hasRange = true;
             entry.minValue = slider.minValue;
             entry.maxValue = slider.maxValue;
@@ -10656,6 +10658,7 @@ struct UIContext::Impl final {
                 interactionPaintNode = targetNode;
             } else if (willArmSlider)
             {
+                nextKeyboardFocus = nearestSlider;
                 interactionPaintNode = nearestSlider;
             } else if (allowsDefaultAction && nearestButton.hasValue() && isNodeEnabled(nearestButton))
             {
@@ -10768,6 +10771,7 @@ struct UIContext::Impl final {
             } else if (willArmSlider)
             {
                 armedSlider = nearestSlider;
+                defaultActionFocusButton = nextKeyboardFocus;
                 capturedPointerNode = nearestSlider;
                 routedEvent.consumeInputTransition();
                 static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));

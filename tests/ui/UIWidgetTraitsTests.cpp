@@ -20,7 +20,7 @@ TEST(UIWidgetTraitsTests, ClassifiesEveryWidgetKindThroughOneCanonicalTable)
         ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Label, {.supportsText = true}},
         ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Button, {true, true, true, true}},
         ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Checkbox, {false, true, true, false}},
-        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Slider, {}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Slider, {false, false, true, false}},
         ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::TextEdit, {false, false, true, true}},
         ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::ProgressBar, {}},
         ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::RadioButton, {false, true, true, true}},

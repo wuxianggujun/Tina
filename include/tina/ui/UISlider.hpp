@@ -21,6 +21,7 @@ struct UISliderPaint final {
     UIStraightSrgba8Color filledTrackColor{};
     UIStraightSrgba8Color thumbColor{};
     UIStraightSrgba8Color draggingThumbColor{};
+    UIStraightSrgba8Color focusedThumbColor{};
     float contentInset = 3.0F;
     float thumbWidth = 8.0F;
 

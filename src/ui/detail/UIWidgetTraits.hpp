@@ -66,6 +66,10 @@ struct UIWidgetTraits final {
             .keyboardFocusable = true,
             .supportsText = true,
         };
+    case BuiltinElementKind::Slider:
+        return {
+            .keyboardFocusable = true,
+        };
     case BuiltinElementKind::ListView:
     case BuiltinElementKind::TreeView:
         return {
@@ -77,7 +81,6 @@ struct UIWidgetTraits final {
         };
     case BuiltinElementKind::Root:
     case BuiltinElementKind::Panel:
-    case BuiltinElementKind::Slider:
     case BuiltinElementKind::ProgressBar:
     case BuiltinElementKind::Modal:
     case BuiltinElementKind::ScrollView:

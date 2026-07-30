@@ -274,6 +274,7 @@ struct UISliderChrome final {
                 .filledTrackColor = filled,
                 .thumbColor = theme.textPrimary,
                 .draggingThumbColor = theme.textAccent,
+                .focusedThumbColor = theme.focusRing,
                 .contentInset = theme.sliderContentInset,
                 .thumbWidth = theme.sliderThumbWidth,
             },
