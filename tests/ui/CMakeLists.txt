@@ -56,6 +56,7 @@ add_executable(tina_ui_tests
     UITextEditInteractionTests.cpp
     UITextEditTests.cpp
     UITextEditModelTests.cpp
+    UITextPaintEmitterTests.cpp
     UITextRasterizerTests.cpp
     UIGlyphAtlasTests.cpp
     UITreeCoreTests.cpp

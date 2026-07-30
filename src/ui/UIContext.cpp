@@ -31,6 +31,7 @@
 #include "detail/UIStyleRoleResolver.hpp"
 #include "detail/UIThemeTransitionResolver.hpp"
 #include "detail/UITextEditModel.hpp"
+#include "detail/UITextPaintEmitter.hpp"
 #include "detail/UITextStorage.hpp"
 #include "detail/UIWidgetStateModels.hpp"
 #include "detail/UIWidgetTraits.hpp"
@@ -2546,230 +2547,6 @@ struct UIContext::Impl final {
         return rebuildCount;
     }
 
-    // Shared UTF-8 → glyph/solid paint emitter. Returns final cursor after the
-    // last drawable codepoint (for chaining IME preedit after committed text).
-    struct TextPaintCursor final {
-        float x = 0.0F;
-        float y = 0.0F;
-        float lineHeight = 0.0F;
-        float baseX = 0.0F;
-    };
-
-    void appendUtf8TextPaints(std::pmr::vector<UICommittedPaintEntry>& output,
-                              const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal, std::string_view utf8,
-                              const UITextStyle& style, UIPremultipliedRgba8Color color, float startX, float startY,
-                              TextPaintCursor* outCursor) noexcept
-    {
-        const float lineStartX = outCursor != nullptr ? outCursor->baseX : startX;
-        if (outCursor != nullptr)
-        {
-            *outCursor = TextPaintCursor{
-                .x = startX,
-                .y = startY,
-                .lineHeight = style.logicalSize * style.lineHeightScale,
-                .baseX = lineStartX,
-            };
-        }
-        if (utf8.empty() || color.isTransparent())
-        {
-            return;
-        }
-        const float fallbackAdvance = style.logicalSize * style.advanceScale;
-        const float lineHeight = style.logicalSize * style.lineHeightScale;
-        if (!(std::isfinite(fallbackAdvance) && fallbackAdvance > 0.0F && std::isfinite(lineHeight) &&
-              lineHeight > 0.0F))
-        {
-            return;
-        }
-        const u32 pixelSize = static_cast<u32>((std::max)(1.0F, std::floor(style.logicalSize)));
-
-        if (textRasterizer && textFace.hasValue() && glyphAtlas)
-        {
-            auto batch = textRasterizer->raster(textFace, utf8, style);
-            if (batch)
-            {
-                const usize outputBase = output.size();
-                const u32 ordinalBase = nextPaintOrdinal;
-                float cursorX = startX;
-                float cursorY = startY;
-                usize glyphIndex = 0;
-                usize index = 0;
-                bool usedAtlasPath = true;
-                while (index < utf8.size())
-                {
-                    const auto first = static_cast<unsigned char>(utf8[index]);
-                    usize unitLength = 1;
-                    if (first <= 0x7FU)
-                    {
-                        unitLength = 1;
-                    } else if ((first & 0xE0U) == 0xC0U)
-                    {
-                        unitLength = 2;
-                    } else if ((first & 0xF0U) == 0xE0U)
-                    {
-                        unitLength = 3;
-                    } else
-                    {
-                        unitLength = 4;
-                    }
-                    if (unitLength > utf8.size() - index)
-                    {
-                        usedAtlasPath = false;
-                        break;
-                    }
-                    if (unitLength == 1 && first == '\n')
-                    {
-                        cursorX = lineStartX;
-                        cursorY = normalizeFloat(cursorY + lineHeight);
-                        index += unitLength;
-                        continue;
-                    }
-                    if (glyphIndex >= batch->glyphs.size())
-                    {
-                        usedAtlasPath = false;
-                        break;
-                    }
-                    const UITextGlyphRaster& glyph = batch->glyphs[glyphIndex];
-                    ++glyphIndex;
-                    float advance = glyph.advance;
-                    if (!(std::isfinite(advance) && advance > 0.0F))
-                    {
-                        advance = fallbackAdvance;
-                    }
-
-                    if (glyph.width == 0 || glyph.height == 0)
-                    {
-                        cursorX = normalizeFloat(cursorX + advance);
-                        index += unitLength;
-                        continue;
-                    }
-
-                    std::span<const u8> coverage{};
-                    const usize coverageBytes = static_cast<usize>(glyph.width) * glyph.height;
-                    if (glyph.coverageOffset + coverageBytes > batch->coverage.size())
-                    {
-                        usedAtlasPath = false;
-                        break;
-                    }
-                    coverage = std::span<const u8>(batch->coverage.data() + glyph.coverageOffset, coverageBytes);
-                    auto placed = glyphAtlas->insert(
-                        UIGlyphKey{
-                            .face = textFace,
-                            .codepoint = glyph.codepoint,
-                            .pixelSize = pixelSize,
-                        },
-                        glyph, coverage);
-                    if (!placed)
-                    {
-                        usedAtlasPath = false;
-                        break;
-                    }
-
-                    const float drawX = normalizeFloat(cursorX + glyph.bearingX);
-                    const float drawY = normalizeFloat(cursorY + (lineHeight - glyph.bearingY));
-                    const float drawW = static_cast<float>(placed->width);
-                    const float drawH = static_cast<float>(placed->height);
-
-                    output.push_back(UICommittedPaintEntry{
-                        .node = layoutEntry.node,
-                        .worldRect =
-                            UILogicalRect{
-                                .x = drawX,
-                                .y = drawY,
-                                .width = normalizeFloat((std::max)(0.0F, drawW)),
-                                .height = normalizeFloat((std::max)(0.0F, drawH)),
-                            },
-                        .effectiveClip = layoutEntry.effectiveClip,
-                        .paintOrdinal = nextPaintOrdinal,
-                        .solidFill = color,
-                        .isGlyph = true,
-                        .atlasX = placed->atlasX,
-                        .atlasY = placed->atlasY,
-                        .atlasWidth = placed->width,
-                        .atlasHeight = placed->height,
-                        .atlasPage = 0,
-                    });
-                    ++nextPaintOrdinal;
-                    cursorX = normalizeFloat(cursorX + advance);
-                    index += unitLength;
-                }
-                if (usedAtlasPath)
-                {
-                    if (outCursor != nullptr)
-                    {
-                        outCursor->x = cursorX;
-                        outCursor->y = cursorY;
-                        outCursor->lineHeight = lineHeight;
-                        outCursor->baseX = lineStartX;
-                    }
-                    return;
-                }
-                while (output.size() > outputBase)
-                {
-                    output.pop_back();
-                }
-                nextPaintOrdinal = ordinalBase;
-            }
-        }
-
-        float cursorX = startX;
-        float cursorY = startY;
-        usize index = 0;
-        while (index < utf8.size())
-        {
-            const auto first = static_cast<unsigned char>(utf8[index]);
-            usize unitLength = 1;
-            if (first <= 0x7FU)
-            {
-                unitLength = 1;
-            } else if ((first & 0xE0U) == 0xC0U)
-            {
-                unitLength = 2;
-            } else if ((first & 0xF0U) == 0xE0U)
-            {
-                unitLength = 3;
-            } else
-            {
-                unitLength = 4;
-            }
-            if (unitLength > utf8.size() - index)
-            {
-                break;
-            }
-            if (unitLength == 1 && first == '\n')
-            {
-                cursorX = lineStartX;
-                cursorY = normalizeFloat(cursorY + lineHeight);
-                index += unitLength;
-                continue;
-            }
-            output.push_back(UICommittedPaintEntry{
-                .node = layoutEntry.node,
-                .worldRect =
-                    UILogicalRect{
-                        .x = normalizeFloat(cursorX),
-                        .y = normalizeFloat(cursorY),
-                        .width = normalizeFloat(fallbackAdvance),
-                        .height = normalizeFloat(lineHeight),
-                    },
-                .effectiveClip = layoutEntry.effectiveClip,
-                .paintOrdinal = nextPaintOrdinal,
-                .solidFill = color,
-                .isGlyph = false,
-            });
-            ++nextPaintOrdinal;
-            cursorX = normalizeFloat(cursorX + fallbackAdvance);
-            index += unitLength;
-        }
-        if (outCursor != nullptr)
-        {
-            outCursor->x = cursorX;
-            outCursor->y = cursorY;
-            outCursor->lineHeight = lineHeight;
-            outCursor->baseX = lineStartX;
-        }
-    }
-
     void appendTextGlyphPaints(std::pmr::vector<UICommittedPaintEntry>& output,
                                const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) noexcept
     {
@@ -2791,16 +2568,22 @@ struct UIContext::Impl final {
             intersectRects(textLayoutEntry.effectiveClip, layoutEntry.contentPlacement.contentBox);
         const float textStartX = layoutEntry.contentPlacement.origin.x;
         const float textStartY = layoutEntry.contentPlacement.origin.y;
-        TextPaintCursor cursor{
+        Detail::UITextPaintCursor cursor{
             .x = textStartX,
             .y = textStartY,
             .lineHeight = style.logicalSize * style.lineHeightScale,
             .baseX = textStartX,
         };
-        TextPaintCursor caretCursor = cursor;
+        Detail::UITextPaintCursor caretCursor = cursor;
         const auto appendText = [&](std::string_view text, UIPremultipliedRgba8Color color) noexcept {
-            appendUtf8TextPaints(output, textLayoutEntry, nextPaintOrdinal, text, style, color, cursor.x, cursor.y,
-                                 &cursor);
+            Detail::UITextPaintEmitter::append(
+                output, textLayoutEntry, nextPaintOrdinal, text, style, color, cursor.x, cursor.y,
+                Detail::UITextPaintRasterSource{
+                    .rasterizer = textRasterizer.get(),
+                    .face = textFace,
+                    .atlas = glyphAtlas.get(),
+                },
+                &cursor);
         };
 
         if (!focusedTextEdit)
@@ -2816,7 +2599,7 @@ struct UIContext::Impl final {
         const usize selectionEndByte = utf8ByteOffsetForCodepoint(committedText, selectionEnd);
 
         appendText(committedText.substr(0, selectionBeginByte), textColor);
-        const TextPaintCursor selectionStartCursor = cursor;
+        const Detail::UITextPaintCursor selectionStartCursor = cursor;
 
         if (imeComposition.active())
         {
@@ -2853,7 +2636,7 @@ struct UIContext::Impl final {
                 ++nextPaintOrdinal;
             }
             appendText(committedText.substr(selectionBeginByte, selectionEndByte - selectionBeginByte), textColor);
-            const TextPaintCursor selectionEndCursor = cursor;
+            const Detail::UITextPaintCursor selectionEndCursor = cursor;
             if (selectionBegin != selectionEnd)
             {
                 output[selectionPaintIndex].worldRect = UILogicalRect{
