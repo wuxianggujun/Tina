@@ -82,6 +82,8 @@ add_library(tina_ui STATIC
     detail/UITextStorage.cpp
     detail/UITextEditModel.hpp
     detail/UITextEditModel.cpp
+    detail/UITextEditPaintEmitter.hpp
+    detail/UITextEditPaintEmitter.cpp
     detail/UITextPaintEmitter.hpp
     detail/UITextPaintEmitter.cpp
     detail/UIWidgetTraits.hpp

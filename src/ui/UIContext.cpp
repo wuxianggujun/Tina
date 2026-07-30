@@ -31,7 +31,7 @@
 #include "detail/UIStyleRoleResolver.hpp"
 #include "detail/UIThemeTransitionResolver.hpp"
 #include "detail/UITextEditModel.hpp"
-#include "detail/UITextPaintEmitter.hpp"
+#include "detail/UITextEditPaintEmitter.hpp"
 #include "detail/UITextStorage.hpp"
 #include "detail/UIWidgetStateModels.hpp"
 #include "detail/UIWidgetTraits.hpp"
@@ -69,7 +69,6 @@ using Detail::combineVisibility;
 using Detail::containsLineBreak;
 using Detail::containsPointHalfOpen;
 using Detail::countBoxChromePaintEntries;
-using Detail::countDrawableTextCodepoints;
 using Detail::defaultBehaviorsForKind;
 using Detail::defaultContentAlignment;
 using Detail::defaultSemanticsForKind;
@@ -2456,6 +2455,41 @@ struct UIContext::Impl final {
         return batch;
     }
 
+    [[nodiscard]] Detail::UITextEditPaintState resolveTextEditPaintState(UINodeId node,
+                                                                         bool applyDisabledOpacity) const noexcept
+    {
+        const u32 nodeIndex = node.index();
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        const bool focused = record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
+                             isNodeEnabled(node) && textInputFocus == node && isLiveTextEdit(textInputFocus);
+        const WidgetTextState* textState =
+            nodeIndex < textStatesByIndex.size() ? &textStatesByIndex[nodeIndex] : nullptr;
+        const UITextStyle style = textState != nullptr ? textState->style : UITextStyle{};
+        const UIPremultipliedRgba8Color textColor =
+            applyDisabledOpacity && nodeIndex < localTextColorCacheByIndex.size()
+                ? widgetPaintColor(node, localTextColorCacheByIndex[nodeIndex])
+                : (textState != nullptr ? premultiply(style.color) : UIPremultipliedRgba8Color{});
+        const bool preeditActive = focused && imeComposition.active();
+        return Detail::UITextEditPaintState{
+            .focused = focused,
+            .preeditActive = preeditActive,
+            .committedText = presentationTextViewFor(nodeIndex),
+            .selection = focused && nodeIndex < textEditStatesByNodeIndex.size()
+                             ? textEditStatesByNodeIndex[nodeIndex].selection
+                             : UITextSelection{},
+            .preeditText = preeditActive ? imeComposition.preeditUtf8() : std::string_view{},
+            .preeditCursorCodepoint = preeditActive ? imeComposition.cursorCodepoint() : 0,
+            .style = style,
+            .textColor = textColor,
+            .rasterSource =
+                Detail::UITextPaintRasterSource{
+                    .rasterizer = textRasterizer.get(),
+                    .face = textFace,
+                    .atlas = glyphAtlas.get(),
+                },
+        };
+    }
+
     [[nodiscard]] Core::Result<usize> countPaintEntries(const UICommittedLayoutEntry& layoutEntry) const
     {
         usize paintEntryCount = 0;
@@ -2481,41 +2515,8 @@ struct UIContext::Impl final {
             return Core::failure(controlPaintBatch.error());
         }
         paintEntryCount += controlPaintBatch->size();
-        const NodeRecord* record = recordByIndex(nodeIndex);
-        const bool focusedTextEdit = record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
-                                     isNodeEnabled(layoutEntry.node) && textInputFocus == layoutEntry.node &&
-                                     isLiveTextEdit(textInputFocus);
-        const bool activeIme = focusedTextEdit && imeComposition.active();
-        if (nodeIndex < textStatesByIndex.size() && !presentationTextViewFor(nodeIndex).empty() &&
-            textStatesByIndex[nodeIndex].style.color.alpha != 0)
-        {
-            const usize committedCodepoints = countDrawableTextCodepoints(presentationTextViewFor(nodeIndex));
-            if (activeIme && nodeIndex < textEditStatesByNodeIndex.size())
-            {
-                const UITextSelection selection = textEditStatesByNodeIndex[nodeIndex].selection;
-                const usize selectedCodepoints =
-                    static_cast<usize>((std::max)(selection.anchorCodepoint, selection.caretCodepoint) -
-                                       (std::min)(selection.anchorCodepoint, selection.caretCodepoint));
-                paintEntryCount += committedCodepoints - (std::min)(committedCodepoints, selectedCodepoints);
-            } else
-            {
-                paintEntryCount += committedCodepoints;
-            }
-        }
-        if (focusedTextEdit)
-        {
-            if (activeIme)
-            {
-                // Active IME preedit replaces both the selected text and its
-                // highlight, so count only the replacement glyphs.
-                paintEntryCount += countDrawableTextCodepoints(imeComposition.preeditUtf8());
-            } else if (nodeIndex < textEditStatesByNodeIndex.size() &&
-                       !textEditStatesByNodeIndex[nodeIndex].selection.isCollapsed())
-            {
-                ++paintEntryCount;
-            }
-            ++paintEntryCount;
-        }
+        paintEntryCount +=
+            Detail::UITextEditPaintEmitter::countEntries(resolveTextEditPaintState(layoutEntry.node, false));
         return paintEntryCount;
     }
 
@@ -2550,146 +2551,8 @@ struct UIContext::Impl final {
     void appendTextGlyphPaints(std::pmr::vector<UICommittedPaintEntry>& output,
                                const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) noexcept
     {
-        const u32 nodeIndex = layoutEntry.node.index();
-        const NodeRecord* record = recordByIndex(nodeIndex);
-        const bool focusedTextEdit = record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
-                                     isNodeEnabled(layoutEntry.node) && textInputFocus == layoutEntry.node &&
-                                     isLiveTextEdit(textInputFocus);
-        const WidgetTextState* textState =
-            nodeIndex < textStatesByIndex.size() ? &textStatesByIndex[nodeIndex] : nullptr;
-        const UITextStyle style = textState != nullptr ? textState->style : UITextStyle{};
-        const UIPremultipliedRgba8Color textColor =
-            nodeIndex < localTextColorCacheByIndex.size()
-                ? widgetPaintColor(layoutEntry.node, localTextColorCacheByIndex[nodeIndex])
-                : UIPremultipliedRgba8Color{};
-        const std::string_view committedText = presentationTextViewFor(nodeIndex);
-        UICommittedLayoutEntry textLayoutEntry = layoutEntry;
-        textLayoutEntry.effectiveClip =
-            intersectRects(textLayoutEntry.effectiveClip, layoutEntry.contentPlacement.contentBox);
-        const float textStartX = layoutEntry.contentPlacement.origin.x;
-        const float textStartY = layoutEntry.contentPlacement.origin.y;
-        Detail::UITextPaintCursor cursor{
-            .x = textStartX,
-            .y = textStartY,
-            .lineHeight = style.logicalSize * style.lineHeightScale,
-            .baseX = textStartX,
-        };
-        Detail::UITextPaintCursor caretCursor = cursor;
-        const auto appendText = [&](std::string_view text, UIPremultipliedRgba8Color color) noexcept {
-            Detail::UITextPaintEmitter::append(
-                output, textLayoutEntry, nextPaintOrdinal, text, style, color, cursor.x, cursor.y,
-                Detail::UITextPaintRasterSource{
-                    .rasterizer = textRasterizer.get(),
-                    .face = textFace,
-                    .atlas = glyphAtlas.get(),
-                },
-                &cursor);
-        };
-
-        if (!focusedTextEdit)
-        {
-            appendText(committedText, textColor);
-            return;
-        }
-
-        const UITextSelection selection = textEditStatesByNodeIndex[nodeIndex].selection;
-        const u32 selectionBegin = (std::min)(selection.anchorCodepoint, selection.caretCodepoint);
-        const u32 selectionEnd = (std::max)(selection.anchorCodepoint, selection.caretCodepoint);
-        const usize selectionBeginByte = utf8ByteOffsetForCodepoint(committedText, selectionBegin);
-        const usize selectionEndByte = utf8ByteOffsetForCodepoint(committedText, selectionEnd);
-
-        appendText(committedText.substr(0, selectionBeginByte), textColor);
-        const Detail::UITextPaintCursor selectionStartCursor = cursor;
-
-        if (imeComposition.active())
-        {
-            const std::string_view preedit = imeComposition.preeditUtf8();
-            const usize preeditCursorByte = utf8ByteOffsetForCodepoint(preedit, imeComposition.cursorCodepoint());
-            const UIPremultipliedRgba8Color preeditColor = premultiply(UIStraightSrgba8Color{
-                .red = 0,
-                .green = 180,
-                .blue = 255,
-                .alpha = 255,
-            });
-            appendText(preedit.substr(0, preeditCursorByte), preeditColor);
-            caretCursor = cursor;
-            appendText(preedit.substr(preeditCursorByte), preeditColor);
-            appendText(committedText.substr(selectionEndByte), textColor);
-        } else
-        {
-            usize selectionPaintIndex = output.size();
-            if (selectionBegin != selectionEnd)
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect = {},
-                    .effectiveClip = textLayoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal,
-                    .solidFill = premultiply(UIStraightSrgba8Color{
-                        .red = 42,
-                        .green = 112,
-                        .blue = 190,
-                        .alpha = 190,
-                    }),
-                    .isGlyph = false,
-                });
-                ++nextPaintOrdinal;
-            }
-            appendText(committedText.substr(selectionBeginByte, selectionEndByte - selectionBeginByte), textColor);
-            const Detail::UITextPaintCursor selectionEndCursor = cursor;
-            if (selectionBegin != selectionEnd)
-            {
-                output[selectionPaintIndex].worldRect = UILogicalRect{
-                    .x = normalizeFloat(selectionStartCursor.x),
-                    .y = normalizeFloat(selectionStartCursor.y),
-                    .width = normalizeFloat((std::max)(0.0F, selectionEndCursor.x - selectionStartCursor.x)),
-                    .height = normalizeFloat((std::max)(1.0F, selectionEndCursor.lineHeight)),
-                };
-            }
-            caretCursor = selection.caretCodepoint == selectionBegin ? selectionStartCursor : selectionEndCursor;
-            appendText(committedText.substr(selectionEndByte), textColor);
-        }
-
-        {
-            float lineHeight = caretCursor.lineHeight;
-            if (!(std::isfinite(lineHeight) && lineHeight > 0.0F))
-            {
-                if (nodeIndex < textStatesByIndex.size())
-                {
-                    const UITextStyle& style = textStatesByIndex[nodeIndex].style;
-                    lineHeight = style.logicalSize * style.lineHeightScale;
-                } else
-                {
-                    lineHeight = 16.0F * 1.2F;
-                }
-            }
-            if (!(std::isfinite(lineHeight) && lineHeight > 0.0F))
-            {
-                lineHeight = 19.2F;
-            }
-            constexpr float CaretWidth = 2.0F;
-            const UIPremultipliedRgba8Color caretColor = premultiply(UIStraightSrgba8Color{
-                .red = 255,
-                .green = 255,
-                .blue = 255,
-                .alpha = 255,
-            });
-            output.push_back(UICommittedPaintEntry{
-                .node = layoutEntry.node,
-                .worldRect =
-                    UILogicalRect{
-                        .x = normalizeFloat(caretCursor.x),
-                        .y = normalizeFloat(caretCursor.y),
-                        .width = CaretWidth,
-                        .height = normalizeFloat(lineHeight),
-                    },
-                .effectiveClip = textLayoutEntry.effectiveClip,
-                .paintOrdinal = nextPaintOrdinal,
-                .solidFill = caretColor,
-                .isGlyph = false,
-            });
-            ++nextPaintOrdinal;
-        }
+        Detail::UITextEditPaintEmitter::append(output, layoutEntry, nextPaintOrdinal,
+                                               resolveTextEditPaintState(layoutEntry.node, true));
     }
 
     [[nodiscard]] Core::Status appendPaintEntries(std::pmr::vector<UICommittedPaintEntry>& output,
