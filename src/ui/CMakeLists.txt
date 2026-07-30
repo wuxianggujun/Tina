@@ -61,6 +61,7 @@ add_library(tina_ui STATIC
     detail/UIImeCompositionState.hpp
     detail/UIImeCompositionState.cpp
     detail/UIInputPrimitives.hpp
+    detail/UILayoutMeasurement.hpp
     detail/UILayoutPrimitives.hpp
     detail/UIPropertyNormalization.hpp
     detail/UIPropertyNormalization.cpp

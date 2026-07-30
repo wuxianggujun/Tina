@@ -47,6 +47,7 @@ add_executable(tina_ui_tests
     UILayoutTestSupport.hpp
     UILayoutLifecycleTests.cpp
     UILayoutTests.cpp
+    UILayoutMeasurementTests.cpp
     UILayoutPrimitivesTests.cpp
     UIPaintSnapshotTests.cpp
     UIThemeTests.cpp

@@ -21,6 +21,7 @@
 #include "detail/UIDirtyQueueStorage.hpp"
 #include "detail/UIImeCompositionState.hpp"
 #include "detail/UIInputPrimitives.hpp"
+#include "detail/UILayoutMeasurement.hpp"
 #include "detail/UILayoutPrimitives.hpp"
 #include "detail/UIPaintPrimitives.hpp"
 #include "detail/UIPaintSnapshotBuilder.hpp"
@@ -61,6 +62,7 @@ inline constexpr u32 InvalidNodeIndex = NodeStorageId::InvalidIndex;
 
 using TextByteAllocation = Detail::UITextStorage::Allocation;
 using Detail::appendBoxChromePaints;
+using Detail::appendFlowMeasuredChild;
 using Detail::applyOpacity;
 using Detail::BuiltinElementKind;
 using Detail::clampHeight;
@@ -90,6 +92,8 @@ using Detail::isValidFocusScopeMode;
 using Detail::isValidPointerHitPolicy;
 using Detail::isValidRoutedPointerEventKind;
 using Detail::layoutSubtreeCompletionMask;
+using Detail::LayoutFlowMeasurement;
+using Detail::LayoutNodeMeasureContent;
 using Detail::LayoutPassStatistics;
 using Detail::LayoutPreparedInputs;
 using Detail::LayoutScratchState;
@@ -129,6 +133,7 @@ using Detail::resolveElementBuiltinKind;
 using Detail::resolvedItemAlignment;
 using Detail::resolveLength;
 using Detail::resolveLengthNoFallbackCount;
+using Detail::resolveMeasuredLayoutSize;
 using Detail::resolveOverlayRect;
 using Detail::resolvePopupPlacement;
 using Detail::resolveScrollThumbOffset;
@@ -833,12 +838,7 @@ struct UIContext::Impl final {
                 continue;
             }
 
-            float autoContentWidth = 0.0F;
-            float autoContentHeight = 0.0F;
-            float radioLabelWidth = 0.0F;
-            bool hasRadioLabel = false;
-            bool hasRadioIndicator = false;
-            usize flowChildCount = 0;
+            LayoutFlowMeasurement flowMeasurement{};
 
             u32 childIndex = record->firstChildIndex;
             while (childIndex != InvalidNodeIndex)
@@ -853,97 +853,64 @@ struct UIContext::Impl final {
                 if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
                     childStyle.placement == UILayoutPlacement::Flow)
                 {
-                    const float childOuterWidth = childScratch.measuredSize.width + horizontalMargin(childStyle.margin);
-                    const float childOuterHeight = childScratch.measuredSize.height + verticalMargin(childStyle.margin);
-                    if (style.flexContainer.direction == UIFlexDirection::Row)
-                    {
-                        if (flowChildCount > 0)
-                        {
-                            autoContentWidth += style.flexContainer.gap.column;
-                        }
-                        autoContentWidth += childOuterWidth;
-                        autoContentHeight = (std::max)(autoContentHeight, childOuterHeight);
-                    } else
-                    {
-                        autoContentWidth = (std::max)(autoContentWidth, childOuterWidth);
-                        if (flowChildCount > 0)
-                        {
-                            autoContentHeight += style.flexContainer.gap.row;
-                        }
-                        autoContentHeight += childOuterHeight;
-                    }
-                    ++flowChildCount;
+                    const float gap = style.flexContainer.direction == UIFlexDirection::Row
+                                          ? style.flexContainer.gap.column
+                                          : style.flexContainer.gap.row;
+                    appendFlowMeasuredChild(
+                        flowMeasurement,
+                        style.flexContainer.direction,
+                        gap,
+                        childStyle,
+                        childScratch.measuredSize);
                 }
                 childIndex = childRecord->nextSiblingIndex;
             }
 
-            if (flowChildCount == 0 && supportsWidgetText(record->kind))
+            LayoutNodeMeasureContent content{.size = flowMeasurement.contentSize};
+            if (flowMeasurement.childCount == 0 && supportsWidgetText(record->kind))
             {
                 if (const UITextMetrics* metrics = presentationTextMetricsFor(index); metrics != nullptr)
                 {
                     const UILogicalSize textSize = metrics->measuredSize;
-                    autoContentWidth = textSize.width;
-                    autoContentHeight = textSize.height;
+                    content.size = textSize;
                     if (record->kind == BuiltinElementKind::RadioButton && index < radioButtonStatesByNodeIndex.size())
                     {
-                        radioLabelWidth = textSize.width;
-                        hasRadioLabel = true;
+                        content.indicatorLabelWidth = textSize.width;
+                        content.hasIndicatorLabel = true;
                     }
                 }
             }
-            if (flowChildCount == 0 && record->kind == BuiltinElementKind::Dropdown &&
+            if (flowMeasurement.childCount == 0 && record->kind == BuiltinElementKind::Dropdown &&
                 index < dropdownStatesByNodeIndex.size())
             {
                 const UIDropdownPaint& dropdownPaint = dropdownStatesByNodeIndex[index].paint;
-                autoContentWidth += dropdownPaint.indicatorWidth + dropdownPaint.indicatorInset * 2.0F;
-                autoContentHeight = (std::max)(autoContentHeight, dropdownPaint.indicatorHeight);
+                content.size.width += dropdownPaint.indicatorWidth + dropdownPaint.indicatorInset * 2.0F;
+                content.size.height = (std::max)(content.size.height, dropdownPaint.indicatorHeight);
             }
 
-            if (flowChildCount == 0 && record->kind == BuiltinElementKind::RadioButton &&
+            if (flowMeasurement.childCount == 0 && record->kind == BuiltinElementKind::RadioButton &&
                 index < radioButtonStatesByNodeIndex.size())
             {
-                hasRadioIndicator = true;
-                if (!hasRadioLabel && index < textStatesByIndex.size())
+                content.squareLeadingIndicator = true;
+                content.indicatorLabelGap = radioButtonStatesByNodeIndex[index].paint.labelGap;
+                if (!content.hasIndicatorLabel && index < textStatesByIndex.size())
                 {
                     const UITextStyle& textStyle = textStatesByIndex[index].style;
                     const float defaultIndicatorExtent = textStyle.logicalSize * textStyle.lineHeightScale;
                     if (std::isfinite(defaultIndicatorExtent) && defaultIndicatorExtent > 0.0F)
                     {
-                        autoContentHeight = defaultIndicatorExtent;
+                        content.size.height = defaultIndicatorExtent;
                     }
                 }
             }
 
-            float outerHeight = resolvedHeight(style, scratch, statistics);
-            if (outerHeight < 0.0F)
-            {
-                outerHeight = record->parentIndex == InvalidNodeIndex
-                                  ? (std::max)(autoContentHeight + verticalMargin(style.padding), viewportSize.height)
-                                  : autoContentHeight + verticalMargin(style.padding);
-            }
-            outerHeight = clampHeight(outerHeight, style, scratch, statistics);
-            if (hasRadioIndicator)
-            {
-                autoContentWidth = outerHeight;
-                if (hasRadioLabel)
-                {
-                    autoContentWidth += radioLabelWidth + radioButtonStatesByNodeIndex[index].paint.labelGap;
-                }
-            }
-
-            float outerWidth = resolvedWidth(style, scratch, statistics);
-            if (outerWidth < 0.0F)
-            {
-                outerWidth = record->parentIndex == InvalidNodeIndex
-                                 ? (std::max)(autoContentWidth + horizontalMargin(style.padding), viewportSize.width)
-                                 : autoContentWidth + horizontalMargin(style.padding);
-            }
-            outerWidth = clampWidth(outerWidth, style, scratch, statistics);
-
-            scratch.measuredSize = UILogicalSize{
-                .width = normalizeFloat(outerWidth),
-                .height = normalizeFloat(outerHeight),
-            };
+            scratch.measuredSize = resolveMeasuredLayoutSize(
+                style,
+                scratch,
+                viewportSize,
+                record->parentIndex == InvalidNodeIndex,
+                content,
+                statistics);
             if (scratch.measuredSize != previousMeasuredSize)
             {
                 ensureLayoutSubtreeWork(index, LayoutWorkArrange);
