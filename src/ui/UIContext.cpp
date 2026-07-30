@@ -17,6 +17,7 @@
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIElementContractResolver.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
+#include "detail/UIDirtyQueueStorage.hpp"
 #include "detail/UIImeCompositionState.hpp"
 #include "detail/UIInputPrimitives.hpp"
 #include "detail/UILayoutPrimitives.hpp"
@@ -287,16 +288,10 @@ struct UIContext::Impl final {
     std::unique_ptr<IUITextRasterizer> textRasterizer;
     UIFontFaceId textFace{};
     std::unique_ptr<UIGlyphAtlas> glyphAtlas;
-    std::pmr::vector<UIDirty> dirtyByIndex;
-    std::pmr::vector<u8> dirtyQueuedByIndex;
     // Pointer routes reserve the queue entries needed by their post-dispatch
-    // state transition before invoking user listeners. A listener may still
-    // dirty one of the reserved nodes, but unrelated mutations cannot steal
-    // the reserved capacity and make the route fail half-way through.
-    std::pmr::vector<u8> dirtyReservedByIndex;
-    std::pmr::vector<UINodeId> dirtyQueue;
-    std::pmr::vector<UINodeId> routeDirtyReservationScratch;
-    std::pmr::vector<u8> routeDirtyReservationCandidateByIndex;
+    // state transition before invoking user listeners. Storage owns the fixed
+    // queue, node flags, reservation bits, and route candidate scratch.
+    Detail::UIDirtyQueueStorage dirtyQueueStorage;
     std::pmr::vector<LayoutScratchState> layoutScratchByIndex;
     std::pmr::vector<u8> layoutWorkByIndex;
     std::pmr::vector<u32> layoutOrderScratch;
@@ -351,7 +346,7 @@ struct UIContext::Impl final {
     usize activeBuildTransactionCount = 0;
     u32 firstRootIndex = InvalidNodeIndex;
     u32 lastRootIndex = InvalidNodeIndex;
-    // Single phase-level dirty truth. Node-level dirtyByIndex remains the
+    // Single phase-level dirty truth. Node-level dirty flags remain the
     // incremental work queue; these bits only say which published snapshots
     // still need a successful commit.
     static constexpr UIDirty PhaseStructure = UIDirty::Structure;
@@ -365,8 +360,6 @@ struct UIContext::Impl final {
     bool layoutReuseCacheValid = false;
     bool layoutReuseInProgress = false;
     LayoutPassStatistics lastLayoutPass{};
-    usize dirtyQueueHighWater = 0;
-    usize dirtyQueueReservationCount = 0;
     usize committedHitTargetCount = 0;
     u32 committedActiveModalEntryIndex = InvalidUIHitEntryIndex;
     usize lastHitRebuildCount = 0;
@@ -430,9 +423,8 @@ struct UIContext::Impl final {
           treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
           treeViewItemStatesByNodeIndex(&resource),
           textStorage(capacities.textByteCapacity, capacities.nodeCapacity * 2U, resource),
-          dirtyByIndex(&resource), dirtyQueuedByIndex(&resource), dirtyReservedByIndex(&resource),
-          dirtyQueue(&resource), routeDirtyReservationScratch(&resource),
-          routeDirtyReservationCandidateByIndex(&resource), layoutScratchByIndex(&resource),
+          dirtyQueueStorage(capacities.nodeCapacity, capacities.dirtyQueueCapacity, resource),
+          layoutScratchByIndex(&resource),
           layoutWorkByIndex(&resource), layoutOrderScratch(&resource), hitEntryIndexByNodeIndex(&resource),
           routedPointerListenerRegistry(capacities.nodeCapacity, capacities.routedPointerListenerCapacity, resource),
           routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
@@ -517,12 +509,6 @@ struct UIContext::Impl final {
         impl->treeViewStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->treeViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->treeViewItemStatesByNodeIndex.resize(normalized.nodeCapacity);
-        impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
-        impl->dirtyQueuedByIndex.resize(normalized.nodeCapacity, 0);
-        impl->dirtyReservedByIndex.resize(normalized.nodeCapacity, 0);
-        impl->dirtyQueue.reserve(normalized.dirtyQueueCapacity);
-        impl->routeDirtyReservationScratch.reserve(normalized.nodeCapacity);
-        impl->routeDirtyReservationCandidateByIndex.resize(normalized.nodeCapacity, 0);
         impl->layoutScratchByIndex.resize(normalized.nodeCapacity);
         impl->layoutWorkByIndex.resize(normalized.nodeCapacity, 0);
         impl->layoutOrderScratch.reserve(normalized.nodeCapacity);
@@ -713,7 +699,7 @@ struct UIContext::Impl final {
 
         for (const u32 index : order)
         {
-            const UIDirty dirty = dirtyByIndex[index];
+            const UIDirty dirty = dirtyQueueStorage.flags(index);
             if (hasDirty(dirty, UIDirty::Measure))
             {
                 layoutWorkByIndex[index] |= LayoutWorkMeasure | LayoutWorkArrange;
@@ -2502,7 +2488,7 @@ struct UIContext::Impl final {
         for (const UICommittedLayoutEntry& layoutEntry : layoutEntries)
         {
             const u32 nodeIndex = layoutEntry.node.index();
-            if (nodeIndex >= dirtyByIndex.size() || !hasDirty(dirtyByIndex[nodeIndex], UIDirty::Paint))
+            if (nodeIndex >= dirtyQueueStorage.nodeCapacity() || !hasDirty(dirtyQueueStorage.flags(nodeIndex), UIDirty::Paint))
             {
                 continue;
             }
@@ -4161,20 +4147,7 @@ struct UIContext::Impl final {
         clearTextState(index);
         clearSemanticsState(index);
         canvasCommandStorage.release(index);
-        dirtyByIndex[index] = UIDirty::None;
-        dirtyQueuedByIndex[index] = 0;
-        if (index < dirtyReservedByIndex.size() && dirtyReservedByIndex[index] != 0)
-        {
-            dirtyReservedByIndex[index] = 0;
-            if (dirtyQueueReservationCount != 0)
-            {
-                --dirtyQueueReservationCount;
-            }
-        }
-        if (index < routeDirtyReservationCandidateByIndex.size())
-        {
-            routeDirtyReservationCandidateByIndex[index] = 0;
-        }
+        dirtyQueueStorage.resetNode(index);
         layoutScratchByIndex[index] = {};
         layoutWorkByIndex[index] = 0;
         routedPointerListenerRegistry.resetNodeSlot(index);
@@ -4254,67 +4227,45 @@ struct UIContext::Impl final {
         layoutReuseCacheValid = false;
     }
 
+    [[nodiscard]] Detail::UIDirtyQueueEntryDisposition classifyDirtyQueueEntry(UINodeId queued) const noexcept
+    {
+        const u32 index = queued.index();
+        if (idForIndex(index) != queued)
+        {
+            // A stale generation may share its slot with a newly queued node.
+            // Never clear the current generation's side-state from the stale entry.
+            return Detail::UIDirtyQueueEntryDisposition::DiscardStale;
+        }
+        if (!contains(queued) || !dirtyQueueStorage.isQueued(index) || !anyDirty(dirtyQueueStorage.flags(index)))
+        {
+            return Detail::UIDirtyQueueEntryDisposition::DiscardCurrent;
+        }
+        return Detail::UIDirtyQueueEntryDisposition::Keep;
+    }
+
+    [[nodiscard]] Detail::UIDirtyQueueEntryClassifier dirtyQueueEntryClassifier() const noexcept
+    {
+        return Detail::UIDirtyQueueEntryClassifier{
+            .context = this,
+            .classify = [](const void* context, UINodeId queued) noexcept {
+                return static_cast<const Impl*>(context)->classifyDirtyQueueEntry(queued);
+            },
+        };
+    }
+
     void compactDirtyQueue() noexcept
     {
-        usize writeIndex = 0;
-        for (const UINodeId queued : dirtyQueue)
-        {
-            if (!queued.hasValue() || queued.index() >= dirtyQueuedByIndex.size())
-            {
-                continue;
-            }
-            const u32 index = queued.index();
-            if (idForIndex(index) != queued)
-            {
-                // A stale generation may share its slot with a newly queued node.
-                // Never clear the current generation's side-state from the stale entry.
-                continue;
-            }
-            if (!contains(queued) || dirtyQueuedByIndex[index] == 0 || !anyDirty(dirtyByIndex[index]))
-            {
-                dirtyQueuedByIndex[index] = 0;
-                continue;
-            }
-            dirtyQueue[writeIndex++] = queued;
-        }
-        dirtyQueue.resize(writeIndex);
+        dirtyQueueStorage.compact(dirtyQueueEntryClassifier());
     }
 
     [[nodiscard]] usize validDirtyQueueCount() const noexcept
     {
-        usize count = 0;
-        for (const UINodeId queued : dirtyQueue)
-        {
-            if (!queued.hasValue() || queued.index() >= dirtyQueuedByIndex.size())
-            {
-                continue;
-            }
-            const u32 index = queued.index();
-            if (idForIndex(index) == queued && contains(queued) && dirtyQueuedByIndex[index] != 0 &&
-                anyDirty(dirtyByIndex[index]))
-            {
-                ++count;
-            }
-        }
-        return count;
+        return dirtyQueueStorage.validCount(dirtyQueueEntryClassifier());
     }
 
     [[nodiscard]] usize occupiedDirtyQueueSlotCount() const noexcept
     {
-        return dirtyQueue.size() + dirtyQueueReservationCount;
-    }
-
-    void consumeDirtyQueueReservation(u32 index) noexcept
-    {
-        if (index >= dirtyReservedByIndex.size() || dirtyReservedByIndex[index] == 0)
-        {
-            return;
-        }
-        dirtyReservedByIndex[index] = 0;
-        if (dirtyQueueReservationCount != 0)
-        {
-            --dirtyQueueReservationCount;
-        }
+        return dirtyQueueStorage.occupiedSlotCount();
     }
 
     void addRouteDirtyReservationCandidate(UINodeId node)
@@ -4324,12 +4275,11 @@ struct UIContext::Impl final {
             return;
         }
         const u32 index = node.index();
-        if (index >= routeDirtyReservationCandidateByIndex.size() || routeDirtyReservationCandidateByIndex[index] != 0)
+        if (index >= dirtyQueueStorage.nodeCapacity() || dirtyQueueStorage.isRouteCandidate(index))
         {
             return;
         }
-        routeDirtyReservationCandidateByIndex[index] = 1;
-        routeDirtyReservationScratch.push_back(node);
+        dirtyQueueStorage.addRouteCandidate(node);
     }
 
     void addRouteLayoutDirtyReservationCandidates(UINodeId node)
@@ -4356,33 +4306,32 @@ struct UIContext::Impl final {
     {
         compactDirtyQueue();
         usize requiredQueueEntries = 0;
-        for (const UINodeId node : routeDirtyReservationScratch)
+        for (const UINodeId node : dirtyQueueStorage.routeCandidates())
         {
-            if (!contains(node) || node.index() >= dirtyByIndex.size())
+            if (!contains(node) || node.index() >= dirtyQueueStorage.nodeCapacity())
             {
                 return fail(UIErrorCode::InvalidNode, "UI pointer route dirty reservation node is invalid");
             }
             const u32 index = node.index();
-            if (dirtyQueuedByIndex[index] == 0 && dirtyReservedByIndex[index] == 0)
+            if (!dirtyQueueStorage.isQueued(index) && !dirtyQueueStorage.isReserved(index))
             {
                 ++requiredQueueEntries;
             }
         }
 
         const usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             return fail(UIErrorCode::CapacityExceeded, "UI dirty queue capacity has been exhausted");
         }
 
-        for (const UINodeId node : routeDirtyReservationScratch)
+        for (const UINodeId node : dirtyQueueStorage.routeCandidates())
         {
             const u32 index = node.index();
-            if (dirtyQueuedByIndex[index] == 0 && dirtyReservedByIndex[index] == 0)
+            if (!dirtyQueueStorage.isQueued(index) && !dirtyQueueStorage.isReserved(index))
             {
-                dirtyReservedByIndex[index] = 1;
-                ++dirtyQueueReservationCount;
+                dirtyQueueStorage.reserve(index);
             }
         }
         return Core::success();
@@ -4390,18 +4339,7 @@ struct UIContext::Impl final {
 
     void releaseRouteDirtyQueueReservations() noexcept
     {
-        for (const UINodeId node : routeDirtyReservationScratch)
-        {
-            if (node.hasValue() && node.index() < dirtyReservedByIndex.size())
-            {
-                consumeDirtyQueueReservation(node.index());
-            }
-            if (node.hasValue() && node.index() < routeDirtyReservationCandidateByIndex.size())
-            {
-                routeDirtyReservationCandidateByIndex[node.index()] = 0;
-            }
-        }
-        routeDirtyReservationScratch.clear();
+        dirtyQueueStorage.releaseRouteReservations();
     }
 
     [[nodiscard]] Core::Status markLayoutDirtyBatch(std::initializer_list<UINodeId> requestedNodes)
@@ -4413,7 +4351,7 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            if (!contains(requested) || requested.index() >= dirtyByIndex.size())
+            if (!contains(requested) || requested.index() >= dirtyQueueStorage.nodeCapacity())
             {
                 return fail(UIErrorCode::InvalidNode, "UI dirty node is invalid");
             }
@@ -4442,28 +4380,28 @@ struct UIContext::Impl final {
         usize requiredQueueEntries = 0;
         for (const u32 dirtyIndex : layoutOrderScratch)
         {
-            if (dirtyQueuedByIndex[dirtyIndex] == 0 && dirtyReservedByIndex[dirtyIndex] == 0)
+            if (!dirtyQueueStorage.isQueued(dirtyIndex) && !dirtyQueueStorage.isReserved(dirtyIndex))
             {
                 ++requiredQueueEntries;
             }
         }
         usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             compactDirtyQueue();
             requiredQueueEntries = 0;
             for (const u32 dirtyIndex : layoutOrderScratch)
             {
-                if (dirtyQueuedByIndex[dirtyIndex] == 0 && dirtyReservedByIndex[dirtyIndex] == 0)
+                if (!dirtyQueueStorage.isQueued(dirtyIndex) && !dirtyQueueStorage.isReserved(dirtyIndex))
                 {
                     ++requiredQueueEntries;
                 }
             }
             occupiedQueueEntries = occupiedDirtyQueueSlotCount();
         }
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             return fail(UIErrorCode::CapacityExceeded, "UI dirty queue capacity has been exhausted");
         }
@@ -4472,48 +4410,43 @@ struct UIContext::Impl final {
         constexpr UIDirty AncestorDirty = UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite | UIDirty::HitTest;
         for (const u32 dirtyIndex : layoutOrderScratch)
         {
-            if (dirtyQueuedByIndex[dirtyIndex] == 0)
+            if (!dirtyQueueStorage.isQueued(dirtyIndex))
             {
-                consumeDirtyQueueReservation(dirtyIndex);
-                dirtyQueue.push_back(idForIndex(dirtyIndex));
-                dirtyQueuedByIndex[dirtyIndex] = 1;
+                dirtyQueueStorage.enqueue(idForIndex(dirtyIndex));
             }
             const bool directlyRequested = std::any_of(
                 requestedNodes.begin(), requestedNodes.end(),
                 [dirtyIndex](UINodeId requested) noexcept {
                     return requested.hasValue() && requested.index() == dirtyIndex;
                 });
-            dirtyByIndex[dirtyIndex] |= directlyRequested ? ChangedNodeDirty : AncestorDirty;
+            dirtyQueueStorage.flags(dirtyIndex) |= directlyRequested ? ChangedNodeDirty : AncestorDirty;
         }
-        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
         phaseDirty |= PhaseLayout | PhaseHit;
         return Core::success();
     }
 
     [[nodiscard]] Core::Status markHitTestDirty(UINodeId node)
     {
-        if (!contains(node) || node.index() >= dirtyByIndex.size())
+        if (!contains(node) || node.index() >= dirtyQueueStorage.nodeCapacity())
         {
             return fail(UIErrorCode::InvalidNode, "UI hit-test dirty node is invalid");
         }
 
         const u32 index = node.index();
-        if (dirtyQueuedByIndex[index] == 0)
+        if (!dirtyQueueStorage.isQueued(index))
         {
-            if (occupiedDirtyQueueSlotCount() >= capacityConfig.dirtyQueueCapacity)
+            if (occupiedDirtyQueueSlotCount() >= dirtyQueueStorage.queueCapacity())
             {
                 compactDirtyQueue();
             }
-            if (occupiedDirtyQueueSlotCount() >= capacityConfig.dirtyQueueCapacity && dirtyReservedByIndex[index] == 0)
+            if (occupiedDirtyQueueSlotCount() >= dirtyQueueStorage.queueCapacity() &&
+                !dirtyQueueStorage.isReserved(index))
             {
                 return fail(UIErrorCode::CapacityExceeded, "UI dirty queue capacity has been exhausted");
             }
-            consumeDirtyQueueReservation(index);
-            dirtyQueue.push_back(node);
-            dirtyQueuedByIndex[index] = 1;
+            dirtyQueueStorage.enqueue(node);
         }
-        dirtyByIndex[index] |= UIDirty::HitTest;
-        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
+        dirtyQueueStorage.flags(index) |= UIDirty::HitTest;
         phaseDirty |= PhaseHit;
         return Core::success();
     }
@@ -4527,7 +4460,7 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            if (!contains(*current) || current->index() >= dirtyByIndex.size())
+            if (!contains(*current) || current->index() >= dirtyQueueStorage.nodeCapacity())
             {
                 return fail(UIErrorCode::InvalidNode, "UI paint dirty node is invalid");
             }
@@ -4540,15 +4473,15 @@ struct UIContext::Impl final {
                     break;
                 }
             }
-            if (!duplicate && dirtyQueuedByIndex[current->index()] == 0 && dirtyReservedByIndex[current->index()] == 0)
+            if (!duplicate && !dirtyQueueStorage.isQueued(current->index()) && !dirtyQueueStorage.isReserved(current->index()))
             {
                 ++requiredQueueEntries;
             }
         }
 
-        const usize occupiedQueueEntries = validDirtyQueueCount() + dirtyQueueReservationCount;
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        const usize occupiedQueueEntries = validDirtyQueueCount() + dirtyQueueStorage.reservationCount();
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             return fail(UIErrorCode::CapacityExceeded, "UI dirty queue capacity has been exhausted");
         }
@@ -4565,7 +4498,7 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            if (!contains(*current) || current->index() >= dirtyByIndex.size())
+            if (!contains(*current) || current->index() >= dirtyQueueStorage.nodeCapacity())
             {
                 return fail(UIErrorCode::InvalidNode, "UI paint dirty node is invalid");
             }
@@ -4578,7 +4511,7 @@ struct UIContext::Impl final {
                     break;
                 }
             }
-            if (!duplicate && dirtyQueuedByIndex[current->index()] == 0 && dirtyReservedByIndex[current->index()] == 0)
+            if (!duplicate && !dirtyQueueStorage.isQueued(current->index()) && !dirtyQueueStorage.isReserved(current->index()))
             {
                 ++requiredQueueEntries;
             }
@@ -4593,8 +4526,8 @@ struct UIContext::Impl final {
         }
 
         usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             compactDirtyQueue();
             requiredQueueEntries = 0;
@@ -4613,16 +4546,16 @@ struct UIContext::Impl final {
                         break;
                     }
                 }
-                if (!duplicate && dirtyQueuedByIndex[current->index()] == 0 &&
-                    dirtyReservedByIndex[current->index()] == 0)
+                if (!duplicate && !dirtyQueueStorage.isQueued(current->index()) &&
+                    !dirtyQueueStorage.isReserved(current->index()))
                 {
                     ++requiredQueueEntries;
                 }
             }
             occupiedQueueEntries = occupiedDirtyQueueSlotCount();
         }
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             return fail(UIErrorCode::CapacityExceeded, "UI dirty queue capacity has been exhausted");
         }
@@ -4647,15 +4580,12 @@ struct UIContext::Impl final {
                 continue;
             }
             const u32 index = current->index();
-            if (dirtyQueuedByIndex[index] == 0)
+            if (!dirtyQueueStorage.isQueued(index))
             {
-                consumeDirtyQueueReservation(index);
-                dirtyQueue.push_back(*current);
-                dirtyQueuedByIndex[index] = 1;
+                dirtyQueueStorage.enqueue(*current);
             }
-            dirtyByIndex[index] |= UIDirty::Paint | UIDirty::Semantics;
+            dirtyQueueStorage.flags(index) |= UIDirty::Paint | UIDirty::Semantics;
         }
-        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
         phaseDirty |= PhasePaint | PhaseSemantics;
         return Core::success();
     }
@@ -4667,9 +4597,7 @@ struct UIContext::Impl final {
 
     void clearDirtyState() noexcept
     {
-        std::fill(dirtyByIndex.begin(), dirtyByIndex.end(), UIDirty::None);
-        std::fill(dirtyQueuedByIndex.begin(), dirtyQueuedByIndex.end(), 0);
-        dirtyQueue.clear();
+        dirtyQueueStorage.clearQueuedDirtyState();
         phaseDirty = UIDirty::None;
     }
 
@@ -4868,15 +4796,15 @@ struct UIContext::Impl final {
         usize requiredQueueEntries = 0;
         for (u32 index = 0; index < themeDirtyScratchByNodeIndex.size(); ++index)
         {
-            if (themeDirtyScratchByNodeIndex[index] != 0 && dirtyQueuedByIndex[index] == 0 &&
-                dirtyReservedByIndex[index] == 0)
+            if (themeDirtyScratchByNodeIndex[index] != 0 && !dirtyQueueStorage.isQueued(index) &&
+                !dirtyQueueStorage.isReserved(index))
             {
                 ++requiredQueueEntries;
             }
         }
         const usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             return fail(UIErrorCode::CapacityExceeded, "UI Theme update exceeds dirty queue capacity");
         }
@@ -4898,28 +4826,25 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            if (dirtyQueuedByIndex[index] == 0)
+            if (!dirtyQueueStorage.isQueued(index))
             {
-                consumeDirtyQueueReservation(index);
-                dirtyQueue.push_back(idForIndex(index));
-                dirtyQueuedByIndex[index] = 1;
+                dirtyQueueStorage.enqueue(idForIndex(index));
             }
             if ((staged & ThemeDirtyLayoutSelf) != 0)
             {
-                dirtyByIndex[index] |= ChangedNodeLayoutDirty;
+                dirtyQueueStorage.flags(index) |= ChangedNodeLayoutDirty;
                 hasLayoutChange = true;
             } else if ((staged & ThemeDirtyLayoutAncestor) != 0)
             {
-                dirtyByIndex[index] |= AncestorLayoutDirty;
+                dirtyQueueStorage.flags(index) |= AncestorLayoutDirty;
                 hasLayoutChange = true;
             }
             if ((staged & ThemeDirtyPaint) != 0)
             {
-                dirtyByIndex[index] |= UIDirty::Paint | UIDirty::Semantics;
+                dirtyQueueStorage.flags(index) |= UIDirty::Paint | UIDirty::Semantics;
                 hasPaintChange = true;
             }
         }
-        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
         if (hasLayoutChange)
         {
             phaseDirty |= PhaseLayout | PhaseHit;
@@ -7651,7 +7576,7 @@ struct UIContext::Impl final {
             return dirty;
         }
         const u32 index = scrollView.index();
-        dirtyByIndex[index] |=
+        dirtyQueueStorage.flags(index) |=
             UIDirty::Arrange | UIDirty::Composite | UIDirty::Paint | UIDirty::Semantics;
         phaseDirty |= PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
         return Core::success();
@@ -9881,8 +9806,8 @@ struct UIContext::Impl final {
 
         usize requiredQueueEntries = 0;
         const auto countNode = [this, &requiredQueueEntries](UINodeId node) {
-            if (node.hasValue() && contains(node) && dirtyQueuedByIndex[node.index()] == 0 &&
-                dirtyReservedByIndex[node.index()] == 0)
+            if (node.hasValue() && contains(node) && !dirtyQueueStorage.isQueued(node.index()) &&
+                !dirtyQueueStorage.isReserved(node.index()))
             {
                 ++requiredQueueEntries;
             }
@@ -9910,8 +9835,8 @@ struct UIContext::Impl final {
                 const u32 nextSiblingIndex = child->nextSiblingIndex;
                 if (child->kind == BuiltinElementKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size() &&
                     radioButtonStatesByNodeIndex[childIndex].selected != (childIndex == target.index()) &&
-                    !(targetStateChanges && childIndex == target.index()) && dirtyQueuedByIndex[childIndex] == 0 &&
-                    dirtyReservedByIndex[childIndex] == 0)
+                    !(targetStateChanges && childIndex == target.index()) && !dirtyQueueStorage.isQueued(childIndex) &&
+                    !dirtyQueueStorage.isReserved(childIndex))
                 {
                     ++requiredQueueEntries;
                 }
@@ -9919,9 +9844,9 @@ struct UIContext::Impl final {
             }
         }
 
-        const usize occupiedQueueEntries = validDirtyQueueCount() + dirtyQueueReservationCount;
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        const usize occupiedQueueEntries = validDirtyQueueCount() + dirtyQueueStorage.reservationCount();
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             return fail(UIErrorCode::CapacityExceeded, "UI dirty queue capacity has been exhausted");
         }
@@ -9972,7 +9897,7 @@ struct UIContext::Impl final {
                 if (radioButtonStatesByNodeIndex[childIndex].selected != nextSelected)
                 {
                     selectionChanged = true;
-                    if (dirtyQueuedByIndex[childIndex] == 0 && dirtyReservedByIndex[childIndex] == 0)
+                    if (!dirtyQueueStorage.isQueued(childIndex) && !dirtyQueueStorage.isReserved(childIndex))
                     {
                         ++requiredQueueEntries;
                     }
@@ -9985,8 +9910,8 @@ struct UIContext::Impl final {
             return Core::success();
         }
         usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             compactDirtyQueue();
             requiredQueueEntries = 0;
@@ -10000,7 +9925,7 @@ struct UIContext::Impl final {
                 const u32 nextSiblingIndex = child->nextSiblingIndex;
                 if (child->kind == BuiltinElementKind::RadioButton && childIndex < radioButtonStatesByNodeIndex.size() &&
                     radioButtonStatesByNodeIndex[childIndex].selected != (childIndex == radioButton.index()) &&
-                    dirtyQueuedByIndex[childIndex] == 0 && dirtyReservedByIndex[childIndex] == 0)
+                    !dirtyQueueStorage.isQueued(childIndex) && !dirtyQueueStorage.isReserved(childIndex))
                 {
                     ++requiredQueueEntries;
                 }
@@ -10008,8 +9933,8 @@ struct UIContext::Impl final {
             }
             occupiedQueueEntries = occupiedDirtyQueueSlotCount();
         }
-        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity ||
-            requiredQueueEntries > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries)
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries > dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
         {
             return fail(UIErrorCode::CapacityExceeded, "UI RadioButton group selection exceeds dirty queue capacity");
         }
@@ -10027,19 +9952,16 @@ struct UIContext::Impl final {
                 const bool nextSelected = childIndex == radioButton.index();
                 if (state.selected != nextSelected)
                 {
-                    if (dirtyQueuedByIndex[childIndex] == 0)
+                    if (!dirtyQueueStorage.isQueued(childIndex))
                     {
-                        consumeDirtyQueueReservation(childIndex);
-                        dirtyQueue.push_back(idForIndex(childIndex));
-                        dirtyQueuedByIndex[childIndex] = 1;
+                        dirtyQueueStorage.enqueue(idForIndex(childIndex));
                     }
-                    dirtyByIndex[childIndex] |= UIDirty::Paint | UIDirty::Semantics;
+                    dirtyQueueStorage.flags(childIndex) |= UIDirty::Paint | UIDirty::Semantics;
                     state.selected = nextSelected;
                 }
             }
             childIndex = nextSiblingIndex;
         }
-        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
         phaseDirty |= PhasePaint | PhaseSemantics;
         return Core::success();
     }
@@ -13812,7 +13734,7 @@ struct UIContext::Impl final {
         return UIContextStatistics{
             .nodeCapacity = capacityConfig.nodeCapacity,
             .rootCapacity = capacityConfig.rootCapacity,
-            .dirtyQueueCapacity = capacityConfig.dirtyQueueCapacity,
+            .dirtyQueueCapacity = dirtyQueueStorage.queueCapacity(),
             .layoutSnapshotCapacity = capacityConfig.layoutSnapshotCapacity,
             .hitSnapshotCapacity = capacityConfig.hitSnapshotCapacity,
             .paintSnapshotCapacity = capacityConfig.paintSnapshotCapacity,
@@ -13856,7 +13778,7 @@ struct UIContext::Impl final {
             .lastPaintCacheRebuildCount = lastPaintCacheRebuildCount,
             .lastPaintSnapshotRebuildCount = lastPaintSnapshotRebuildCount,
             .dirtyQueuePendingCount = validDirtyQueueCount(),
-            .dirtyQueueHighWater = dirtyQueueHighWater,
+            .dirtyQueueHighWater = dirtyQueueStorage.highWater(),
         };
     }
 };

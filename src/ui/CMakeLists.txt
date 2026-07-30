@@ -54,6 +54,8 @@ add_library(tina_ui STATIC
     detail/UIElementContractResolver.cpp
     detail/UIDefaultActionPressState.hpp
     detail/UIDefaultActionPressState.cpp
+    detail/UIDirtyQueueStorage.hpp
+    detail/UIDirtyQueueStorage.cpp
     detail/UIImeCompositionState.hpp
     detail/UIImeCompositionState.cpp
     detail/UIInputPrimitives.hpp
