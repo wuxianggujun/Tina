@@ -5,6 +5,7 @@
 #include <tina/ui/UIFocus.hpp>
 
 #include "UILayoutPrimitives.hpp"
+#include "UIPointerRoutePath.hpp"
 #include <cmath>
 #include <span>
 
@@ -165,16 +166,8 @@ namespace Tina::UI::Detail {
             continue;
         }
 
-        const UICommittedHitEntry& root = entries[entry.rootEntryIndex];
-        result.target = UIPointerHitTarget{
-            .node = entry.node,
-            .rootNode = root.node,
-            .hitEntryIndex = static_cast<u32>(entryIndex),
-            .rootEntryIndex = entry.rootEntryIndex,
-            .worldRect = entry.worldRect,
-            .effectiveClip = entry.effectiveClip,
-            .paintOrdinal = entry.paintOrdinal,
-        };
+        result.target = pointerHitTargetForEntry(
+            entries, static_cast<u32>(entryIndex));
         return result;
     }
     return result;

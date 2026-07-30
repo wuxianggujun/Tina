@@ -68,6 +68,7 @@ using Detail::appendBoxChromePaints;
 using Detail::appendFlexLineItem;
 using Detail::appendFlowMeasuredChild;
 using Detail::applyOpacity;
+using Detail::buildPointerRoutePath;
 using Detail::BuiltinElementKind;
 using Detail::clampHeight;
 using Detail::clampWidth;
@@ -176,6 +177,7 @@ using Detail::findHitEntryIndex;
 using Detail::hitEntryAllowedByModal;
 using Detail::hitEntryIsWithinScope;
 using Detail::phaseMaskFor;
+using Detail::pointerHitTargetForEntry;
 using Detail::PopupLayoutScratch;
 using Detail::PopupState;
 using Detail::ProgressBarState;
@@ -195,6 +197,7 @@ using Detail::ThemeBindingScrollViewPaint;
 using Detail::ThemeBindingSliderPaint;
 using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
+using Detail::UIPointerRoutePathError;
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -10191,32 +10194,12 @@ struct UIContext::Impl final {
         };
         const UICommittedHitView hit = committedHit();
         const std::span<const UICommittedHitEntry> entries = hit.entries();
-        const auto hitTargetForEntry = [&](u32 entryIndex) noexcept {
-            if (entryIndex >= entries.size())
-            {
-                return UIPointerHitTarget{};
-            }
-            const UICommittedHitEntry& entry = entries[entryIndex];
-            if (entry.rootEntryIndex >= entries.size())
-            {
-                return UIPointerHitTarget{};
-            }
-            return UIPointerHitTarget{
-                .node = entry.node,
-                .rootNode = entries[entry.rootEntryIndex].node,
-                .hitEntryIndex = entryIndex,
-                .rootEntryIndex = entry.rootEntryIndex,
-                .worldRect = entry.worldRect,
-                .effectiveClip = entry.effectiveClip,
-                .paintOrdinal = entry.paintOrdinal,
-            };
-        };
         const UINodeId captureAtRouteStart = capturedPointerNode;
         const u32 capturedEntryIndex = findHitEntryIndex(capturedPointerNode, entries);
         if (capturedEntryIndex < entries.size() &&
             isPointerCaptureCandidate(capturedPointerNode, entries, committedActiveModalEntryIndex))
         {
-            result.routedTarget = hitTargetForEntry(capturedEntryIndex);
+            result.routedTarget = pointerHitTargetForEntry(entries, capturedEntryIndex);
             result.routedThroughPointerCapture = result.routedTarget.hasValue();
         } else
         {
@@ -10235,38 +10218,27 @@ struct UIContext::Impl final {
                 result.targetInvalidated = true;
             } else
             {
-                u32 entryIndex = result.routedTarget.hitEntryIndex;
-                while (entryIndex != InvalidUIHitEntryIndex)
+                const auto routePath = buildPointerRoutePath(
+                    result.routedTarget, entries,
+                    capacityConfig.routePathCapacity, routePathScratch);
+                switch (routePath.error)
                 {
-                    if (entryIndex >= entries.size())
-                    {
-                        return fail(Core::CoreErrorCode::Internal, "UI committed pointer route entry index is invalid");
-                    }
-                    if (routePathScratch.size() >= capacityConfig.routePathCapacity)
-                    {
-                        routePathScratch.clear();
-                        return fail(UIErrorCode::CapacityExceeded, "UI pointer route path capacity has been exhausted");
-                    }
-                    routePathScratch.push_back(entryIndex);
-                    if (entryIndex == result.routedTarget.rootEntryIndex)
-                    {
-                        break;
-                    }
-                    entryIndex = entries[entryIndex].parentEntryIndex;
-                    if (routePathScratch.size() > entries.size())
-                    {
-                        routePathScratch.clear();
-                        return fail(Core::CoreErrorCode::Internal,
-                                    "UI committed pointer route ancestry contains a cycle");
-                    }
+                case UIPointerRoutePathError::None:
+                    result.routeDepth = routePath.depth;
+                    break;
+                case UIPointerRoutePathError::InvalidEntryIndex:
+                    return fail(Core::CoreErrorCode::Internal,
+                                "UI committed pointer route entry index is invalid");
+                case UIPointerRoutePathError::CapacityExceeded:
+                    return fail(UIErrorCode::CapacityExceeded,
+                                "UI pointer route path capacity has been exhausted");
+                case UIPointerRoutePathError::AncestryCycle:
+                    return fail(Core::CoreErrorCode::Internal,
+                                "UI committed pointer route ancestry contains a cycle");
+                case UIPointerRoutePathError::InvalidRoot:
+                    return fail(Core::CoreErrorCode::Internal,
+                                "UI committed pointer route root is invalid");
                 }
-                if (routePathScratch.empty() || routePathScratch.back() != result.routedTarget.rootEntryIndex ||
-                    entries[routePathScratch.back()].node != result.routedTarget.rootNode)
-                {
-                    routePathScratch.clear();
-                    return fail(Core::CoreErrorCode::Internal, "UI committed pointer route root is invalid");
-                }
-                result.routeDepth = routePathScratch.size();
             }
         }
 
