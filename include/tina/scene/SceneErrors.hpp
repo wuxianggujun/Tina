@@ -22,6 +22,7 @@ inline constexpr Core::ErrorCode MultipleActiveCameras{Core::ErrorDomain::Scene,
 inline constexpr Core::ErrorCode UnresolvedSprite{Core::ErrorDomain::Scene, 14};
 inline constexpr Core::ErrorCode UnresolvedMesh{Core::ErrorDomain::Scene, 15};
 inline constexpr Core::ErrorCode InvalidAnimation{Core::ErrorDomain::Scene, 16};
+inline constexpr Core::ErrorCode TooManyActiveDirectionalLights{Core::ErrorDomain::Scene, 17};
 
 } // namespace SceneErrorCode
 

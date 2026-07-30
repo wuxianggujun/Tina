@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <limits>
 #include <memory_resource>
 #include <new>
@@ -408,6 +409,83 @@ TEST(RenderSceneBuilderTest, ReplacementBuildInvalidatesOldPublicationAndFailure
     ASSERT_FALSE(builder.writer().addSprite2D(sprite(resources, 3, 3, 0.0F, 0.0F)));
     ASSERT_FALSE(builder.commit());
     EXPECT_TRUE(builder.publishedView().empty());
+}
+
+TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    std::array lights{
+        Mesh3DDirectionalLight{
+            .directionTowardLightX = 1.0F,
+            .directionTowardLightY = 2.0F,
+            .directionTowardLightZ = 3.0F,
+            .colorR = 0.5F,
+            .colorG = 0.6F,
+            .colorB = 0.7F,
+        },
+        Mesh3DDirectionalLight{
+            .directionTowardLightX = -1.0F,
+            .colorR = 0.2F,
+            .colorG = 0.3F,
+            .colorB = 0.4F,
+        },
+    };
+    ASSERT_TRUE(builder.writer().setMesh3DLighting({
+        .directionalLights = lights,
+        .ambientScale = 0.25F,
+    }));
+    lights[0].colorR = 9.0F;
+
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value());
+    ASSERT_TRUE(committed->mesh3DLighting().has_value());
+    const RenderMesh3DLighting& lighting = *committed->mesh3DLighting();
+    ASSERT_EQ(lighting.directionalLights().size(), 2U);
+    EXPECT_FLOAT_EQ(lighting.directionalLights()[0].colorR, 0.5F);
+    EXPECT_FLOAT_EQ(lighting.directionalLights()[1].directionTowardLightX, -1.0F);
+    EXPECT_FLOAT_EQ(lighting.ambientScale(), 0.25F);
+    EXPECT_TRUE(committed->statistics().mesh3DLightingConfigured);
+    EXPECT_EQ(committed->statistics().directionalLightCount, 2U);
+    EXPECT_FALSE(committed->empty());
+}
+
+TEST(RenderSceneBuilderTest, InvalidOrDuplicateMesh3DLightingFailsTheBuildAtomically)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array invalidLights{
+        Mesh3DDirectionalLight{
+            .directionTowardLightX = 0.0F,
+            .directionTowardLightY = 0.0F,
+            .directionTowardLightZ = 0.0F,
+        },
+    };
+    auto invalid = builder.writer().setMesh3DLighting({.directionalLights = invalidLights});
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array overflowingLights{
+        Mesh3DDirectionalLight{
+            .directionTowardLightX = std::numeric_limits<float>::max(),
+            .directionTowardLightY = std::numeric_limits<float>::max(),
+        },
+    };
+    auto overflowing =
+        builder.writer().setMesh3DLighting({.directionalLights = overflowingLights});
+    ASSERT_FALSE(overflowing);
+    EXPECT_EQ(overflowing.error().code, RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array validLights{Mesh3DDirectionalLight{}};
+    ASSERT_TRUE(builder.writer().setMesh3DLighting({.directionalLights = validLights}));
+    auto duplicate = builder.writer().setMesh3DLighting({.directionalLights = validLights});
+    ASSERT_FALSE(duplicate);
+    EXPECT_EQ(duplicate.error().code, RenderErrorCode::RenderSceneLightingConflict);
+    EXPECT_FALSE(builder.commit().has_value());
 }
 
 TEST(RenderSceneBuilderTest, PerspectiveCameraRequiresCurrentSurfaceAspectAndValidProjection)

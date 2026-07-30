@@ -1,4 +1,5 @@
-#include <tina/render/RenderDevice.hpp>
+#include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderScene.hpp>
 
 #include <cmath>
 
@@ -33,10 +34,10 @@ Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noex
             light.directionTowardLightX * light.directionTowardLightX +
             light.directionTowardLightY * light.directionTowardLightY +
             light.directionTowardLightZ * light.directionTowardLightZ;
-        if (directionLengthSquared <= 1.0e-12F)
+        if (!std::isfinite(directionLengthSquared) || directionLengthSquared <= 1.0e-12F)
         {
             return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
-                                 "Mesh3D directional light direction must be non-zero");
+                                 "Mesh3D directional light direction must have a finite non-zero length");
         }
     }
 

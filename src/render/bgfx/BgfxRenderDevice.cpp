@@ -239,6 +239,36 @@ struct PreparedUIDisplayList final {
     u32 indexCount = 0;
 };
 
+using Mesh3DLightUniformStorage =
+    std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U>;
+
+void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
+                          Mesh3DLightUniformStorage& directions,
+                          Mesh3DLightUniformStorage& colors,
+                          float& ambientScale) noexcept
+{
+    directions.fill(0.0F);
+    colors.fill(0.0F);
+    for (std::size_t lightIndex = 0; lightIndex < lighting.directionalLights.size(); ++lightIndex)
+    {
+        const Mesh3DDirectionalLight& source = lighting.directionalLights[lightIndex];
+        const float lengthSquared = source.directionTowardLightX * source.directionTowardLightX +
+                                    source.directionTowardLightY * source.directionTowardLightY +
+                                    source.directionTowardLightZ * source.directionTowardLightZ;
+        const float inverseLength = 1.0F / std::sqrt(lengthSquared);
+        const std::size_t base = lightIndex * 4U;
+        directions[base + 0U] = source.directionTowardLightX * inverseLength;
+        directions[base + 1U] = source.directionTowardLightY * inverseLength;
+        directions[base + 2U] = source.directionTowardLightZ * inverseLength;
+        directions[base + 3U] = 1.0F;
+        colors[base + 0U] = source.colorR;
+        colors[base + 1U] = source.colorG;
+        colors[base + 2U] = source.colorB;
+        colors[base + 3U] = 1.0F;
+    }
+    ambientScale = lighting.ambientScale;
+}
+
 struct BgfxScissorRect final {
     u16 x = 0;
     u16 y = 0;
@@ -918,6 +948,15 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (auto status = validateOpaque3DFrameResources(frame.primaryWorldScene, frame.resources); !status)
         {
             return Core::failure(std::move(status.error()));
+        }
+        if (frame.primaryWorldScene.mesh3DLighting().has_value())
+        {
+            if (auto status = validateMesh3DLightingDesc(
+                    frame.primaryWorldScene.mesh3DLighting()->descriptor());
+                !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
         }
         if (auto status = validateFrameSurfaceBeforeCommit(frame); !status)
         {
@@ -1605,6 +1644,19 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
 
+        const Mesh3DLightUniformStorage* lightDirections = &mesh3DLightDirections_;
+        const Mesh3DLightUniformStorage* lightColors = &mesh3DLightColors_;
+        float ambientScale = mesh3DAmbientScale_;
+        Mesh3DLightUniformStorage frameLightDirections{};
+        Mesh3DLightUniformStorage frameLightColors{};
+        if (scene.mesh3DLighting().has_value())
+        {
+            encodeMesh3DLighting(scene.mesh3DLighting()->descriptor(), frameLightDirections,
+                                 frameLightColors, ambientScale);
+            lightDirections = &frameLightDirections;
+            lightColors = &frameLightColors;
+        }
+
         bgfx::setScissor();
         for (const RenderMesh3DBatch& batch : scene.mesh3DBatches())
         {
@@ -1698,9 +1750,9 @@ class BgfxRenderDevice final : public IRenderDevice {
                 }
             }
 
-            // ambient from setMesh3DLighting; w = MR map bound flag.
+            // ambient from the current frame snapshot or device fallback; w = MR map bound flag.
             const std::array<float, 4> mrParams{
-                binding.metallicFactor, binding.roughnessFactor, mesh3DAmbientScale_, mrMapBound};
+                binding.metallicFactor, binding.roughnessFactor, ambientScale, mrMapBound};
             const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
 
             bgfx::setVertexBuffer(0, vb);
@@ -1709,9 +1761,9 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setTexture(0, opaque3DSampler_, materialTexture);
             bgfx::setTexture(1, opaque3DMrSampler_, mrTexture);
             bgfx::setTexture(2, opaque3DNormalSampler_, normalTexture);
-            bgfx::setUniform(opaque3DLightDirectionsUniform_, mesh3DLightDirections_.data(),
+            bgfx::setUniform(opaque3DLightDirectionsUniform_, lightDirections->data(),
                              static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
-            bgfx::setUniform(opaque3DLightColorsUniform_, mesh3DLightColors_.data(),
+            bgfx::setUniform(opaque3DLightColorsUniform_, lightColors->data(),
                              static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
             bgfx::setUniform(opaque3DMrParamsUniform_, mrParams.data());
             bgfx::setUniform(opaque3DNormalParamsUniform_, normalParams.data());
@@ -2385,27 +2437,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             return status;
         }
 
-        mesh3DLightDirections_.fill(0.0F);
-        mesh3DLightColors_.fill(0.0F);
-        for (std::size_t lightIndex = 0; lightIndex < lighting.directionalLights.size(); ++lightIndex)
-        {
-            const Mesh3DDirectionalLight& source = lighting.directionalLights[lightIndex];
-            const float lengthSquared =
-                source.directionTowardLightX * source.directionTowardLightX +
-                source.directionTowardLightY * source.directionTowardLightY +
-                source.directionTowardLightZ * source.directionTowardLightZ;
-            const float inverseLength = 1.0F / std::sqrt(lengthSquared);
-            const std::size_t base = lightIndex * 4U;
-            mesh3DLightDirections_[base + 0U] = source.directionTowardLightX * inverseLength;
-            mesh3DLightDirections_[base + 1U] = source.directionTowardLightY * inverseLength;
-            mesh3DLightDirections_[base + 2U] = source.directionTowardLightZ * inverseLength;
-            mesh3DLightDirections_[base + 3U] = 1.0F;
-            mesh3DLightColors_[base + 0U] = source.colorR;
-            mesh3DLightColors_[base + 1U] = source.colorG;
-            mesh3DLightColors_[base + 2U] = source.colorB;
-            mesh3DLightColors_[base + 3U] = 1.0F;
-        }
-        mesh3DAmbientScale_ = lighting.ambientScale;
+        encodeMesh3DLighting(lighting, mesh3DLightDirections_, mesh3DLightColors_,
+                             mesh3DAmbientScale_);
         return Core::success();
     }
 
@@ -2653,9 +2686,9 @@ class BgfxRenderDevice final : public IRenderDevice {
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> mesh3DBindings_{};
     std::unordered_map<u32, Mesh3DMaterialBindingDesc> mesh3DMaterialBindings_{};
-    std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U> mesh3DLightDirections_{
+    Mesh3DLightUniformStorage mesh3DLightDirections_{
         0.4F, 0.85F, 0.35F, 1.0F};
-    std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U> mesh3DLightColors_{
+    Mesh3DLightUniformStorage mesh3DLightColors_{
         1.0F, 0.98F, 0.92F, 1.0F};
     float mesh3DAmbientScale_ = 0.18F;
 

@@ -5,6 +5,7 @@
 #include <tina/render/FrameResource.hpp>
 
 #include <array>
+#include <cstddef>
 #include <compare>
 #include <memory_resource>
 #include <optional>
@@ -120,6 +121,56 @@ struct RenderLinearColor final {
     float green = 1.0F;
     float blue = 1.0F;
     float alpha = 1.0F;
+
+    friend constexpr bool operator==(const RenderLinearColor&,
+                                     const RenderLinearColor&) noexcept = default;
+};
+
+struct Mesh3DDirectionalLight final {
+    float directionTowardLightX = 0.0F;
+    float directionTowardLightY = 1.0F;
+    float directionTowardLightZ = 0.0F;
+    float colorR = 1.0F;
+    float colorG = 1.0F;
+    float colorB = 1.0F;
+};
+
+struct Mesh3DLightingDesc final {
+    static constexpr std::size_t MaximumDirectionalLightCount = 4;
+
+    // Consumed synchronously by the receiving writer/device; no span is retained.
+    std::span<const Mesh3DDirectionalLight> directionalLights{};
+    float ambientScale = 0.18F;
+};
+
+[[nodiscard]] Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noexcept;
+
+// Self-contained committed frame snapshot. Unlike Mesh3DLightingDesc, this type
+// owns its fixed-capacity light array and is safe to publish through RenderSceneView.
+class RenderMesh3DLighting final {
+  public:
+    [[nodiscard]] constexpr std::span<const Mesh3DDirectionalLight> directionalLights() const noexcept
+    {
+        return {m_directionalLights.data(), m_directionalLightCount};
+    }
+
+    [[nodiscard]] constexpr float ambientScale() const noexcept
+    {
+        return m_ambientScale;
+    }
+
+    [[nodiscard]] constexpr Mesh3DLightingDesc descriptor() const noexcept
+    {
+        return {.directionalLights = directionalLights(), .ambientScale = m_ambientScale};
+    }
+
+  private:
+    friend class RenderSceneBuilder;
+
+    std::array<Mesh3DDirectionalLight, Mesh3DLightingDesc::MaximumDirectionalLightCount>
+        m_directionalLights{};
+    u32 m_directionalLightCount = 0;
+    float m_ambientScale = 0.18F;
 };
 
 // The camera pose is resolved from Scene WorldTransform. Local -Z is forward
@@ -244,6 +295,8 @@ struct RenderSceneStatistics final {
     u32 prunedInvisibleMesh3DCount = 0;
     u32 mesh3DBatchCount = 0;
     u64 mesh3DSortOrderChecksum = 0;
+    bool mesh3DLightingConfigured = false;
+    u32 directionalLightCount = 0;
 };
 
 struct RenderSceneBuilderStatistics final {
@@ -286,6 +339,11 @@ class RenderSceneView final {
         return m_mesh3DBatches;
     }
 
+    [[nodiscard]] constexpr const std::optional<RenderMesh3DLighting>& mesh3DLighting() const noexcept
+    {
+        return m_mesh3DLighting;
+    }
+
     [[nodiscard]] constexpr const RenderSceneStatistics& statistics() const noexcept
     {
         return m_statistics;
@@ -294,7 +352,7 @@ class RenderSceneView final {
     [[nodiscard]] constexpr bool empty() const noexcept
     {
         return !m_camera.has_value() && m_sprites.empty() && !m_perspectiveCamera.has_value() &&
-               m_meshes3D.empty();
+               m_meshes3D.empty() && !m_mesh3DLighting.has_value();
     }
 
   private:
@@ -305,10 +363,12 @@ class RenderSceneView final {
                               std::optional<RenderPerspectiveCamera> perspectiveCamera,
                               std::span<const RenderMesh3DItem> meshes3D,
                               std::span<const RenderMesh3DBatch> mesh3DBatches,
+                              std::optional<RenderMesh3DLighting> mesh3DLighting,
                               RenderSceneStatistics statistics) noexcept
         : m_camera(std::move(camera)), m_sprites(sprites),
           m_perspectiveCamera(std::move(perspectiveCamera)), m_meshes3D(meshes3D),
-          m_mesh3DBatches(mesh3DBatches), m_statistics(statistics)
+          m_mesh3DBatches(mesh3DBatches), m_mesh3DLighting(std::move(mesh3DLighting)),
+          m_statistics(statistics)
     {
     }
 
@@ -317,6 +377,7 @@ class RenderSceneView final {
     std::optional<RenderPerspectiveCamera> m_perspectiveCamera{};
     std::span<const RenderMesh3DItem> m_meshes3D{};
     std::span<const RenderMesh3DBatch> m_mesh3DBatches{};
+    std::optional<RenderMesh3DLighting> m_mesh3DLighting{};
     RenderSceneStatistics m_statistics{};
 };
 
@@ -332,6 +393,7 @@ class RenderSceneWriter final {
     [[nodiscard]] Core::Status addSprite2D(const RenderSprite2DInput& sprite);
     [[nodiscard]] Core::Status setPerspectiveCamera(const RenderPerspectiveCameraInput& camera);
     [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
+    [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting);
 
   private:
     friend class RenderSceneBuilder;
@@ -381,6 +443,7 @@ class RenderSceneBuilder final {
     [[nodiscard]] Core::Status addSprite2D(const RenderSprite2DInput& sprite);
     [[nodiscard]] Core::Status setPerspectiveCamera(const RenderPerspectiveCameraInput& camera);
     [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
+    [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting);
     [[nodiscard]] Core::Status failBuild(Core::ErrorCode code, const char* message);
     [[nodiscard]] Core::Status validateCamera(const RenderCamera2DInput& camera) const noexcept;
     [[nodiscard]] Core::Status validateSprite(const RenderSprite2DInput& sprite) const noexcept;
@@ -407,6 +470,7 @@ class RenderSceneBuilder final {
     u32 m_mesh3DBatchCount = 0;
     std::optional<RenderCamera2D> m_camera{};
     std::optional<RenderPerspectiveCamera> m_perspectiveCamera{};
+    std::optional<RenderMesh3DLighting> m_mesh3DLighting{};
     RenderSceneFrameParameters m_frameParameters{};
     RenderSceneStatistics m_candidateStatistics{};
     RenderSceneStatistics m_publishedStatistics{};

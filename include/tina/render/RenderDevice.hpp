@@ -126,25 +126,6 @@ struct Mesh3DMaterialBindingDesc final {
                                                    const Mesh3DMaterialBindingDesc&) = default;
 };
 
-struct Mesh3DDirectionalLight final {
-    float directionTowardLightX = 0.0F;
-    float directionTowardLightY = 1.0F;
-    float directionTowardLightZ = 0.0F;
-    float colorR = 1.0F;
-    float colorG = 1.0F;
-    float colorB = 1.0F;
-};
-
-struct Mesh3DLightingDesc final {
-    static constexpr std::size_t MaximumDirectionalLightCount = 4;
-
-    // Consumed synchronously by setMesh3DLighting(); the backend retains no span.
-    std::span<const Mesh3DDirectionalLight> directionalLights{};
-    float ambientScale = 0.18F;
-};
-
-[[nodiscard]] Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noexcept;
-
 enum class RenderFrameSubmissionKind : u8 {
     Submitted,
     SkippedSuspendedSurface,

@@ -27,6 +27,7 @@
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/DirectionalLight3D.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
@@ -81,6 +82,27 @@ inline constexpr u32 MaxProductMeshSlots = 128;
     return out;
 }
 
+[[nodiscard]] Tina::Scene::Quaternion rotationFromPositiveZ(
+    Tina::Scene::Vec3 directionTowardLight) noexcept
+{
+    const double lengthSquared =
+        static_cast<double>(directionTowardLight.x) * directionTowardLight.x +
+        static_cast<double>(directionTowardLight.y) * directionTowardLight.y +
+        static_cast<double>(directionTowardLight.z) * directionTowardLight.z;
+    const float inverseLength = static_cast<float>(1.0 / std::sqrt(lengthSquared));
+    directionTowardLight = directionTowardLight * inverseLength;
+    if (directionTowardLight.z <= -0.999999F)
+    {
+        return {1.0F, 0.0F, 0.0F, 0.0F};
+    }
+    return Tina::Scene::normalized(Tina::Scene::Quaternion{
+        .x = -directionTowardLight.y,
+        .y = directionTowardLight.x,
+        .z = 0.0F,
+        .w = 1.0F + directionTowardLight.z,
+    });
+}
+
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
@@ -96,6 +118,7 @@ struct SampleOptions final {
 struct LifecycleCounters final {
     u64 frameUpdates = 0;
     u64 renderExtractions = 0;
+    u64 sceneLightingFrames = 0;
     u64 stateEnters = 0;
     u64 stateExits = 0;
     u64 applicationShutdowns = 0;
@@ -1117,46 +1140,43 @@ class Product3DState final : public Tina::IGameState {
         }
         world_.emplace(std::move(*worldResult));
 
-        // Bounded N-light submission for experimental MR (sphere grid readability).
-        if (auto* device = capture_->get(); device != nullptr)
+        struct ProductDirectionalLight final {
+            Tina::Scene::Vec3 directionTowardLight{};
+            Tina::Render::RenderLinearColor color{};
+        };
+        constexpr std::array ProductLights{
+            ProductDirectionalLight{
+                .directionTowardLight = {0.35F, 0.9F, 0.4F},
+                .color = {.red = 1.0F, .green = 0.98F, .blue = 0.92F},
+            },
+            ProductDirectionalLight{
+                .directionTowardLight = {-0.55F, 0.25F, -0.35F},
+                .color = {.red = 0.28F, .green = 0.34F, .blue = 0.45F},
+            },
+            ProductDirectionalLight{
+                .directionTowardLight = {0.15F, 0.45F, -0.9F},
+                .color = {.red = 0.14F, .green = 0.18F, .blue = 0.30F},
+            },
+        };
+        for (const ProductDirectionalLight& light : ProductLights)
         {
-            constexpr std::array<Tina::Render::Mesh3DDirectionalLight, 3> ProductLights{
-                Tina::Render::Mesh3DDirectionalLight{
-                    .directionTowardLightX = 0.35F,
-                    .directionTowardLightY = 0.9F,
-                    .directionTowardLightZ = 0.4F,
-                    .colorR = 1.0F,
-                    .colorG = 0.98F,
-                    .colorB = 0.92F,
-                },
-                Tina::Render::Mesh3DDirectionalLight{
-                    .directionTowardLightX = -0.55F,
-                    .directionTowardLightY = 0.25F,
-                    .directionTowardLightZ = -0.35F,
-                    .colorR = 0.28F,
-                    .colorG = 0.34F,
-                    .colorB = 0.45F,
-                },
-                Tina::Render::Mesh3DDirectionalLight{
-                    .directionTowardLightX = 0.15F,
-                    .directionTowardLightY = 0.45F,
-                    .directionTowardLightZ = -0.9F,
-                    .colorR = 0.14F,
-                    .colorG = 0.18F,
-                    .colorB = 0.30F,
-                },
-            };
-            if (auto status = device->setMesh3DLighting(Tina::Render::Mesh3DLightingDesc{
-                    .directionalLights = ProductLights,
-                    .ambientScale = 0.16F,
-                });
+            auto lightEntity = world_->createEntity(Tina::Scene::LocalTransform{
+                .rotation = rotationFromPositiveZ(light.directionTowardLight),
+            });
+            if (!lightEntity)
+            {
+                return Tina::Core::failure(std::move(lightEntity.error()));
+            }
+            if (auto status = world_->setDirectionalLight3D(
+                    *lightEntity,
+                    Tina::Scene::DirectionalLight3D{.color = light.color});
                 !status)
             {
                 return status;
             }
-            counters_->directionalLightCount = static_cast<u32>(ProductLights.size());
-            counters_->lightingConfigured = true;
         }
+        counters_->directionalLightCount = static_cast<u32>(ProductLights.size());
+        counters_->lightingConfigured = true;
 
         const Tina::Asset::CookedAssetFile* prefabFile =
             resources_->assetSystem->tryGet(resources_->prefabAsset);
@@ -1428,12 +1448,14 @@ class Product3DState final : public Tina::IGameState {
                         .userData = const_cast<Product3DState*>(this),
                         .resolve = &resolveProductMaterialBinding,
                     },
+                    .ambientLightScale = 0.16F,
                 });
             !status)
         {
             return status;
         }
         ++counters_->renderExtractions;
+        ++counters_->sceneLightingFrames;
         return Tina::Core::success();
     }
 
@@ -1708,7 +1730,8 @@ class Product3DApplication final : public Tina::IGameApplication {
         ui.progressUpdates >= options.targetFrameCount && ui.finalProgress >= 99.9F;
     if (*runResult != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame ||
         counters.frameUpdates != options.targetFrameCount ||
-        counters.renderExtractions != options.targetFrameCount || counters.stateEnters != 1 ||
+        counters.renderExtractions != options.targetFrameCount ||
+        counters.sceneLightingFrames != options.targetFrameCount || counters.stateEnters != 1 ||
         counters.stateExits != 1 || counters.applicationShutdowns != 1 || !uiValid ||
         counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMeshes || !texturesOk ||
         counters.meshAssetHandlesPublished != expectedMeshes
@@ -1812,7 +1835,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":4,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":5,\"frames\":"
               << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
@@ -1848,6 +1871,7 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"materialNormalTextureBound\":" << (counters.materialNormalTextureBound ? "true" : "false")
               << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
               << ",\"directionalLightCount\":" << counters.directionalLightCount
+              << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
               << ",\"bindingRegistryReleased\":"
               << (counters.bindingRegistryReleased ? "true" : "false");
     if (resources.externalGltf || resources.completePbrFixture)

@@ -57,5 +57,6 @@ inline constexpr Core::ErrorCode Mesh3DMaterialBindingKeyExhausted{Core::ErrorDo
 inline constexpr Core::ErrorCode InvalidFrameResource{Core::ErrorDomain::Render, 49};
 inline constexpr Core::ErrorCode FrameResourceCapacityExceeded{Core::ErrorDomain::Render, 50};
 inline constexpr Core::ErrorCode FrameResourceIdentityExhausted{Core::ErrorDomain::Render, 51};
+inline constexpr Core::ErrorCode RenderSceneLightingConflict{Core::ErrorDomain::Render, 52};
 
 } // namespace Tina::Render::RenderErrorCode

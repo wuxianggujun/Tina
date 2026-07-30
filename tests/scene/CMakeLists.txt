@@ -5,6 +5,7 @@ set(TINA_SCENE_TEST_SOURCES
     SpriteAnimator2DTests.cpp
     Trail2DTests.cpp
     header_isolation/Camera2DHeader.cpp
+    header_isolation/DirectionalLight3DHeader.cpp
     header_isolation/EntityHeader.cpp
     header_isolation/ExtractRenderSceneHeader.cpp
     header_isolation/MeshRenderer3DHeader.cpp

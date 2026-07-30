@@ -28,6 +28,8 @@ struct World::EntityRecord final {
     PerspectiveCamera3D perspectiveCamera3D{};
     bool hasMeshRenderer3D = false;
     MeshRenderer3D meshRenderer3D{};
+    bool hasDirectionalLight3D = false;
+    DirectionalLight3D directionalLight3D{};
 };
 
 struct World::Impl final {
@@ -1168,6 +1170,65 @@ Core::Status World::clearMeshRenderer3D(EntityId entity) noexcept
     return Core::success();
 }
 
+Core::Status World::setDirectionalLight3D(
+    EntityId entity,
+    DirectionalLight3D light) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(light)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene DirectionalLight3D has invalid color or intensity");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for DirectionalLight3D");
+    }
+    entityRecord->directionalLight3D = light;
+    entityRecord->hasDirectionalLight3D = true;
+    return Core::success();
+}
+
+Core::Status World::clearDirectionalLight3D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for DirectionalLight3D clear");
+    }
+    entityRecord->hasDirectionalLight3D = false;
+    entityRecord->directionalLight3D = {};
+    return Core::success();
+}
+
 const PerspectiveCamera3D* World::perspectiveCamera3D(EntityId entity) const noexcept
 {
     if (m_impl == nullptr || !m_impl->isOwnerThread()) {
@@ -1190,6 +1251,18 @@ const MeshRenderer3D* World::meshRenderer3D(EntityId entity) const noexcept
         return nullptr;
     }
     return &entityRecord->meshRenderer3D;
+}
+
+const DirectionalLight3D* World::directionalLight3D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasDirectionalLight3D) {
+        return nullptr;
+    }
+    return &entityRecord->directionalLight3D;
 }
 
 std::span<const EntityId> World::liveEntities() const noexcept

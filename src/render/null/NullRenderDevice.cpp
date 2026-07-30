@@ -84,6 +84,15 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(status.error()));
         }
+        if (frame.primaryWorldScene.mesh3DLighting().has_value())
+        {
+            if (auto status = validateMesh3DLightingDesc(
+                    frame.primaryWorldScene.mesh3DLighting()->descriptor());
+                !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
+        }
 
         if (auto status = surfaceStateTracker_.validateAndCommit(frame.primaryWindowSurface); !status)
         {

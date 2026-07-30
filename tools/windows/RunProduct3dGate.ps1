@@ -7,7 +7,7 @@
   Asset, Render, and retained UI GoogleTest executables directly, then run the
   tina_sample_3d 300-frame product smoke with automated Dark -> Light -> Dark
   switching plus ListView/TreeView collection interaction. The final JSON is
-  validated as evidence schema 4.
+  validated as evidence schema 5.
 
   Does not use CTest. Does not clean-first wipe. Exits non-zero on first failure.
 
@@ -156,7 +156,7 @@ $expectedResolverHits = [long]$SampleFrames * 2
 $expectedFields = [ordered]@{
     status                              = 'ok'
     sample                              = 'tina_sample_3d'
-    evidenceSchema                      = 4
+    evidenceSchema                      = 5
     frames                              = $SampleFrames
     gltfCooked                          = $true
     cookedStaticMesh                    = $true
@@ -199,6 +199,7 @@ $expectedFields = [ordered]@{
     materialNormalTextureBound          = $true
     lightingConfigured                  = $true
     directionalLightCount               = 3
+    sceneLightingFrames                 = $SampleFrames
     bindingRegistryReleased             = $true
     instanceBatchesPerFrame             = 2
     catalogCooked                       = 1
@@ -266,7 +267,7 @@ if ($evidenceErrors.Count -ne 0) {
     Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$($sampleOut.Trim())")
 }
 
-Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=4 frames=$SampleFrames theme=dark-light-dark collections=list-tree"
+Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=5 frames=$SampleFrames theme=dark-light-dark collections=list-tree"
 Add-Step -Name 'tina_sample_3d' -ExitCode 0 -Detail "frames=$SampleFrames pixelFingerprint=$($evidence.pixelFingerprint)"
 
 $report.finishedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
@@ -283,5 +284,5 @@ if ($OutJson) {
     Write-Output "wrote $OutJson"
 }
 
-Write-Output "product-3d gate ok schema=4 frames=$SampleFrames theme=dark-light-dark collections=list-tree"
+Write-Output "product-3d gate ok schema=5 frames=$SampleFrames theme=dark-light-dark collections=list-tree"
 exit 0

@@ -1,12 +1,15 @@
 #include <tina/scene/ExtractRenderScene.hpp>
 
 #include <tina/scene/Camera2D.hpp>
+#include <tina/scene/DirectionalLight3D.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace Tina::Scene {
@@ -50,6 +53,100 @@ namespace {
         return sprite.pivotOverride;
     }
     return {0.5F, 0.5F};
+}
+
+struct DirectionalLightCandidate final {
+    u64 stableKey = 0;
+    Render::Mesh3DDirectionalLight light{};
+};
+
+[[nodiscard]] Core::Status publishDirectionalLights(
+    World& world,
+    Render::RenderSceneWriter& writer,
+    float ambientLightScale) noexcept
+{
+    if (!std::isfinite(ambientLightScale) || ambientLightScale < 0.0F) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene ambient light scale must be finite and non-negative");
+    }
+
+    std::array<DirectionalLightCandidate,
+               Render::Mesh3DLightingDesc::MaximumDirectionalLightCount>
+        candidates{};
+    usize lightCount = 0;
+    bool hasDirectionalLight = false;
+
+    for (const EntityId entity : world.liveEntities()) {
+        const DirectionalLight3D* component = world.directionalLight3D(entity);
+        if (component == nullptr) {
+            continue;
+        }
+        hasDirectionalLight = true;
+        if (!component->active) {
+            continue;
+        }
+        if (lightCount >= candidates.size()) {
+            return Core::failure(
+                SceneErrorCode::TooManyActiveDirectionalLights,
+                "Scene extract exceeded the fixed active DirectionalLight3D limit");
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        if (!isValid(*component) || transform == nullptr || !isValid(*transform)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene active DirectionalLight3D or its WorldTransform is invalid");
+        }
+
+        const Vec3 directionTowardLight =
+            rotate(normalized(transform->rotation), Vec3{0.0F, 0.0F, 1.0F});
+        const float colorR = component->color.red * component->intensity;
+        const float colorG = component->color.green * component->intensity;
+        const float colorB = component->color.blue * component->intensity;
+        if (!isFinite(directionTowardLight) || !std::isfinite(colorR) ||
+            !std::isfinite(colorG) || !std::isfinite(colorB)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene DirectionalLight3D extraction overflowed");
+        }
+
+        candidates[lightCount] = DirectionalLightCandidate{
+            .stableKey = stableEntityKey(entity),
+            .light =
+                Render::Mesh3DDirectionalLight{
+                    .directionTowardLightX = directionTowardLight.x,
+                    .directionTowardLightY = directionTowardLight.y,
+                    .directionTowardLightZ = directionTowardLight.z,
+                    .colorR = colorR,
+                    .colorG = colorG,
+                    .colorB = colorB,
+                },
+        };
+        ++lightCount;
+    }
+
+    // No authored component preserves the low-level device fallback. An authored
+    // but fully inactive set publishes ambient-only lighting and disables it.
+    if (!hasDirectionalLight) {
+        return Core::success();
+    }
+
+    std::sort(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(lightCount),
+              [](const DirectionalLightCandidate& left,
+                 const DirectionalLightCandidate& right) noexcept {
+                  return left.stableKey < right.stableKey;
+              });
+    std::array<Render::Mesh3DDirectionalLight,
+               Render::Mesh3DLightingDesc::MaximumDirectionalLightCount>
+        lights{};
+    for (usize index = 0; index < lightCount; ++index) {
+        lights[index] = candidates[index].light;
+    }
+    return writer.setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights =
+            std::span<const Render::Mesh3DDirectionalLight>{lights.data(), lightCount},
+        .ambientScale = ambientLightScale,
+    });
 }
 
 } // namespace
@@ -283,6 +380,12 @@ Core::Status extractRenderSceneFromWorld(
                 return status;
             }
         }
+    }
+
+    if (const Core::Status status =
+            publishDirectionalLights(world, writer, params.ambientLightScale);
+        !status) {
+        return status;
     }
 
     for (const EntityId entity : world.liveEntities()) {

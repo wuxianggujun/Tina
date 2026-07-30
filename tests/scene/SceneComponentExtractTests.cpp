@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <memory_resource>
 #include <numbers>
 #include <optional>
@@ -843,6 +844,151 @@ TEST_F(SceneMeshAssetTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
     EXPECT_EQ(world.perspectiveCamera3D(entity), nullptr);
     ASSERT_TRUE(world.clearMeshRenderer3D(entity));
     EXPECT_EQ(world.meshRenderer3D(entity), nullptr);
+}
+
+TEST(SceneDirectionalLightTest, SetsClearsQueriesAndRejectsInvalidComponent)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    DirectionalLight3D light{
+        .color = {.red = 0.25F, .green = 0.5F, .blue = 0.75F},
+        .intensity = 2.0F,
+    };
+    ASSERT_TRUE(world.setDirectionalLight3D(entity, light));
+    ASSERT_NE(world.directionalLight3D(entity), nullptr);
+    EXPECT_EQ(*world.directionalLight3D(entity), light);
+
+    light.intensity = std::numeric_limits<float>::quiet_NaN();
+    auto invalid = world.setDirectionalLight3D(entity, light);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_FLOAT_EQ(world.directionalLight3D(entity)->intensity, 2.0F);
+
+    ASSERT_TRUE(world.clearDirectionalLight3D(entity));
+    EXPECT_EQ(world.directionalLight3D(entity), nullptr);
+}
+
+TEST(SceneDirectionalLightTest, DestroyedEntityDoesNotLeakLightIntoReusedSlot)
+{
+    World world = makeWorld(1);
+    const EntityId original = world.createEntity().value();
+    ASSERT_TRUE(world.setDirectionalLight3D(original, DirectionalLight3D{}));
+    ASSERT_TRUE(world.destroyEntity(original));
+
+    const EntityId replacement = world.createEntity().value();
+    EXPECT_EQ(replacement.index(), original.index());
+    EXPECT_NE(replacement.generation(), original.generation());
+    EXPECT_EQ(world.directionalLight3D(original), nullptr);
+    EXPECT_EQ(world.directionalLight3D(replacement), nullptr);
+}
+
+TEST(SceneDirectionalLightTest, ExtractsStableWorldDirectionsColorsAndAmbientIntoRenderScene)
+{
+    World world = makeWorld();
+    constexpr float HalfSqrtTwo = 0.70710678118F;
+    const EntityId first = world.createEntity().value();
+    const EntityId second = world.createEntity(LocalTransform{
+        .rotation = {.y = HalfSqrtTwo, .w = HalfSqrtTwo},
+    }).value();
+    const EntityId inactive = world.createEntity().value();
+    ASSERT_TRUE(world.setDirectionalLight3D(first, DirectionalLight3D{
+        .color = {.red = 0.5F, .green = 0.25F, .blue = 0.125F},
+        .intensity = 2.0F,
+    }));
+    ASSERT_TRUE(world.setDirectionalLight3D(second, DirectionalLight3D{
+        .color = {.red = 0.1F, .green = 0.2F, .blue = 0.3F},
+        .intensity = 3.0F,
+    }));
+    ASSERT_TRUE(world.setDirectionalLight3D(inactive, DirectionalLight3D{.active = false}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{.ambientLightScale = 0.3F}));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_TRUE(view->mesh3DLighting().has_value());
+    const auto lights = view->mesh3DLighting()->directionalLights();
+    ASSERT_EQ(lights.size(), 2U);
+    EXPECT_NEAR(lights[0].directionTowardLightX, 0.0F, 1.0e-5F);
+    EXPECT_NEAR(lights[0].directionTowardLightY, 0.0F, 1.0e-5F);
+    EXPECT_NEAR(lights[0].directionTowardLightZ, 1.0F, 1.0e-5F);
+    EXPECT_FLOAT_EQ(lights[0].colorR, 1.0F);
+    EXPECT_FLOAT_EQ(lights[0].colorG, 0.5F);
+    EXPECT_FLOAT_EQ(lights[0].colorB, 0.25F);
+    EXPECT_NEAR(lights[1].directionTowardLightX, 1.0F, 1.0e-5F);
+    EXPECT_NEAR(lights[1].directionTowardLightY, 0.0F, 1.0e-5F);
+    EXPECT_NEAR(lights[1].directionTowardLightZ, 0.0F, 1.0e-5F);
+    EXPECT_FLOAT_EQ(lights[1].colorR, 0.3F);
+    EXPECT_FLOAT_EQ(lights[1].colorG, 0.6F);
+    EXPECT_FLOAT_EQ(lights[1].colorB, 0.9F);
+    EXPECT_FLOAT_EQ(view->mesh3DLighting()->ambientScale(), 0.3F);
+}
+
+TEST(SceneDirectionalLightTest, RejectsMoreThanTheFixedActiveLightLimit)
+{
+    World world = makeWorld(5);
+    for (usize index = 0; index < 5; ++index) {
+        const EntityId entity = world.createEntity().value();
+        ASSERT_TRUE(world.setDirectionalLight3D(entity, DirectionalLight3D{}));
+    }
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    auto status = extractRenderSceneFromWorld(world, writer, packet.resourceSink());
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActiveDirectionalLights);
+    builder->rollback();
+}
+
+TEST(SceneDirectionalLightTest, InactiveLightsPublishAmbientOnlyAndInvalidAmbientAlwaysFails)
+{
+    World world = makeWorld();
+    const EntityId inactive = world.createEntity().value();
+    ASSERT_TRUE(world.setDirectionalLight3D(inactive, DirectionalLight3D{.active = false}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{.ambientLightScale = 0.4F}));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_TRUE(view->mesh3DLighting().has_value());
+    EXPECT_TRUE(view->mesh3DLighting()->directionalLights().empty());
+    EXPECT_FLOAT_EQ(view->mesh3DLighting()->ambientScale(), 0.4F);
+
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter invalidWriter = builder->writer();
+    auto invalid = extractRenderSceneFromWorld(
+        world,
+        invalidWriter,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .ambientLightScale = std::numeric_limits<float>::quiet_NaN(),
+        });
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    builder->rollback();
 }
 
 TEST_F(SceneMeshAssetTest, RejectsInvalidPropertiesButStoresWeakMeshHandles)

@@ -302,13 +302,15 @@ RenderSceneBuilder::RenderSceneBuilder(RenderSceneBuilder&& other) noexcept
       m_mesh3DBatches(std::exchange(other.m_mesh3DBatches, nullptr)),
       m_spriteCount(std::exchange(other.m_spriteCount, 0)), m_mesh3DCount(std::exchange(other.m_mesh3DCount, 0)),
       m_mesh3DBatchCount(std::exchange(other.m_mesh3DBatchCount, 0)), m_camera(std::move(other.m_camera)),
-      m_perspectiveCamera(std::move(other.m_perspectiveCamera)), m_frameParameters(other.m_frameParameters),
+      m_perspectiveCamera(std::move(other.m_perspectiveCamera)),
+      m_mesh3DLighting(std::move(other.m_mesh3DLighting)), m_frameParameters(other.m_frameParameters),
       m_candidateStatistics(other.m_candidateStatistics), m_publishedStatistics(other.m_publishedStatistics),
       m_statistics(other.m_statistics), m_stickyBuildError(std::move(other.m_stickyBuildError)), m_state(other.m_state)
 {
     other.m_capacity = {};
     other.m_camera.reset();
     other.m_perspectiveCamera.reset();
+    other.m_mesh3DLighting.reset();
     other.m_frameParameters = {};
     other.m_candidateStatistics = {};
     other.m_publishedStatistics = {};
@@ -388,6 +390,16 @@ Core::Status RenderSceneWriter::addMesh3D(const RenderMesh3DInput& mesh)
                              "The RenderScene writer is no longer attached to a builder");
     }
     return m_builder->addMesh3D(mesh);
+}
+
+Core::Status RenderSceneWriter::setMesh3DLighting(const Mesh3DLightingDesc& lighting)
+{
+    if (m_builder == nullptr)
+    {
+        return Core::failure(RenderErrorCode::RenderSceneBuildNotOpen,
+                             "The RenderScene writer is no longer attached to a builder");
+    }
+    return m_builder->setMesh3DLighting(lighting);
 }
 
 Core::Status RenderSceneBuilder::validateCamera(const RenderCamera2DInput& camera) const noexcept
@@ -725,6 +737,38 @@ Core::Status RenderSceneBuilder::addMesh3D(const RenderMesh3DInput& mesh)
     return Core::success();
 }
 
+Core::Status RenderSceneBuilder::setMesh3DLighting(const Mesh3DLightingDesc& lighting)
+{
+    if (m_state != State::Building)
+    {
+        return buildStateFailure(RenderErrorCode::RenderSceneBuildNotOpen,
+                                 "A RenderScene build must be open before setting 3D lighting");
+    }
+    if (m_stickyBuildError.has_value())
+    {
+        return Core::failure(Core::Error{m_stickyBuildError->code, m_stickyBuildError->message,
+                                         m_stickyBuildError->origin});
+    }
+    if (m_mesh3DLighting.has_value())
+    {
+        return failBuild(RenderErrorCode::RenderSceneLightingConflict,
+                         "A RenderScene may contain only one Mesh3D lighting snapshot");
+    }
+    if (auto status = validateMesh3DLightingDesc(lighting); !status)
+    {
+        return failBuild(status.error().code, status.error().message.c_str());
+    }
+
+    RenderMesh3DLighting snapshot;
+    snapshot.m_directionalLightCount = static_cast<u32>(lighting.directionalLights.size());
+    snapshot.m_ambientScale = lighting.ambientScale;
+    std::ranges::copy(lighting.directionalLights, snapshot.m_directionalLights.begin());
+    m_mesh3DLighting = snapshot;
+    m_candidateStatistics.mesh3DLightingConfigured = true;
+    m_candidateStatistics.directionalLightCount = snapshot.m_directionalLightCount;
+    return Core::success();
+}
+
 bool RenderSceneBuilder::intersectsCamera(const RenderSprite2DItem& sprite,
                                           const RenderCamera2D& camera) const noexcept
 {
@@ -1022,6 +1066,7 @@ void RenderSceneBuilder::clearCandidate() noexcept
     }
     m_camera.reset();
     m_perspectiveCamera.reset();
+    m_mesh3DLighting.reset();
     m_frameParameters = {};
     m_candidateStatistics = {};
     m_stickyBuildError.reset();
@@ -1069,6 +1114,7 @@ RenderSceneView RenderSceneBuilder::makePublishedView() const noexcept
         m_perspectiveCamera,
         std::span<const RenderMesh3DItem>{m_meshes3D, m_mesh3DCount},
         std::span<const RenderMesh3DBatch>{m_mesh3DBatches, m_mesh3DBatchCount},
+        m_mesh3DLighting,
         m_publishedStatistics,
     };
 }
