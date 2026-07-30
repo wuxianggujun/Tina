@@ -1,7 +1,7 @@
 # Tina 可执行 Backlog
 
 本文件是未完成工作的唯一明细表。Roadmap 只表达优先级窗口，ADR 只表达决策，不在多个主题文档
-重复维护任务状态。
+重复维护任务状态。`Done` 仅保留已关闭任务的证据索引，不再作为活跃完成度来源。
 
 ## 状态与证据
 
@@ -13,7 +13,10 @@
 - `Integration`：跨模块测试；
 - `Smoke`：sample/CLI 生命周期与结构化输出；
 - `Visual`：截图、像素或人工视觉；
-- `Platform`：指定 OS/toolchain/backend 门禁。
+- `Platform`：指定 OS/toolchain/backend 门禁；
+- `Manual`：Narrator/Inspect 等不能由自动 gate 替代的人工验收记录；
+- `Consumer`：脱离源码树、只通过安装/package 边界构建的外部调用方门禁；
+- `Benchmark`：固定 workload/fingerprint/baseline 与多进程统计协议产生的可复现性能证据。
 
 `Done` 必须满足验收条件并留下对应证据；“已经写代码”不自动等于产品门禁完成。
 
@@ -21,26 +24,23 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
+| ASSET-SEC-001 | Planned | P0 | 闭合 glTF 外部文件的 symlink/reparse escape 与资源炸弹矩阵 | 现有 `ASSET-001` lexical/canonical containment + 64MiB 单文件上限 | Windows/Linux fixture 覆盖 symlink/junction/reparse escape、外部 buffer/image 替换边界、超限文件与 accessor/bufferView/image dimension/count/overflow；失败不读取 root 外文件、不发布半包 | Unit + Platform |
+| UI-002 | InProgress | P1 | Windows UIA 产品验收收口 | UI-002-SPI / UI-002-UIA-MAP / UI-002-HWND / UI-002-HOST | 属性/fragment、Invoke/Toggle/RangeValue/Value action 与真实 HWND 跨进程 gate 可复现；补 Narrator/Inspect 人工金标。Linux AT-SPI 已拆为 `UI-002-LINUX`，不阻塞 Windows 收口 | Unit + Integration + Platform + Manual |
 
 ## Next
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
-
-
-| UI-002 | Partial | P1 | Windows UIA 真机 adapter | UI-002-SPI | **已完成** 属性映射 + HostBridge + **EngineHost 产品 HWND 自动 attach/publish**（lease 解码 Win32）；**待** Narrator/Inspect 人工金标、Linux AT-SPI | Unit + Integration |
-| UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性 + **字体 identity fingerprint**（`fontFingerprint`：path/sha256/env `TINA_UI_FONT_PATH`/FreeType-on；baseline schema 3；mismatch 默认 fail）；**待** OS 级 100/150/200% DPI 真机矩阵、跨 GPU 像素金标 | Unit + Visual |
-
-
-
-
-
+| UI-003 | InProgress | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性 + **字体 identity fingerprint**（`fontFingerprint`：path/sha256/env `TINA_UI_FONT_PATH`/FreeType-on；baseline schema 3；mismatch 默认 fail）；**待** OS 级 100/150/200% DPI 真机矩阵、跨 GPU 像素金标 | Unit + Visual |
+| PERF-002 | Planned | P1 | 建立固定机 hard gate 与多进程 median/MAD 协议 | PERF-001 `tina_bench` schema v1/fingerprint | 固定 workload 与兼容 fingerprint 可选中受审 baseline；多进程 median/MAD、噪声拒绝和回归阈值规则版本化；非门禁机继续只输出 `provisional` | Benchmark + Platform |
+| SDK-001 | Planned | P1 | 建立可安装的 Tina Game SDK 与外部 consumer gate | 当前 Public API/target 边界稳定 | 提供版本化 `TinaConfig.cmake`/export、明确的 Game SDK target 集合和一个只通过安装前缀 `find_package(Tina CONFIG REQUIRED)` 的外部最小游戏；Windows/Linux consumer 编译且安装公开头无第三方 token 泄漏 | Consumer + Platform |
 
 ## Later
 
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
-| RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal；唯一 `setMesh3DLighting` 有界 0..4 directional lights；sample_3d 一次提交3灯 + 自动相机 + Khronos 球体/盒。**待** IBL/shadow、light component/culling、pass scheduling、vertex tangents |
+| RENDER-001 | Deferred | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal；唯一 `setMesh3DLighting` 有界 0..4 directional lights；sample_3d 一次提交3灯 + 自动相机 + Khronos 球体/盒。**待** IBL/shadow、light component/culling、pass scheduling、vertex tangents |
+| UI-002-LINUX | Deferred | P2 | Windows UI-002 稳定后实现 Linux AT-SPI adapter 与真实辅助技术验收 | AT-SPI backend 不暴露平台类型到 Game SDK；真实 AT client 可发现、读取并执行支持的 action；生命周期与 stale node 门禁通过 |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | TEXT-001 | Deferred | P2 | 多行 TextEdit、grapheme/shaping、候选窗定位 | 中英混排、组合输入、selection 与平台 IME 矩阵通过 |
 | ASSET-002 | Deferred | P2 | 热重载与增量 Cooker | 不破坏 AssetId/Lease/retirement 契约，失败不发布半包 |
@@ -112,6 +112,9 @@
 | UI-002-UIA-MAP | 可选 `tina_ui_uia`：UIA 形属性映射 + factory 零 COM；`tina_ui_uia_tests` | [UI](ui.md) |
 | UI-002-HWND | `WindowsUiaHostBridge`：SetWindowSubclass + WM_GETOBJECT + fragment root/children `IRawElementProviderSimple`；HostBridge 单测 | [UI](ui.md) |
 | UI-002-HOST | `TINA_HAS_UI_UIA`：`EngineHost` 从 surface lease 取 Win32 HWND，startup/每帧 layout 后 publish `committedSemantics`；shutdown detach | [UI](ui.md) · Runtime |
+| UI-002-ACTION | 平台中立 `UIAccessibilityAction` + owner-thread `UIContext::performAccessibilityAction()`：Focus/Invoke/Toggle/SetRangeValue/SetTextValue 校验 generation、enabled 与控件 kind；Button/selection callback 仍走正常 action 路径，不兼容或 stale target fail closed（`7d84ae67`） | [UI](ui.md) · `UIAccessibilityTests` |
+| UI-002-CONTROL-PATTERNS | Windows UIA provider 完成 Button Invoke、Checkbox/RadioButton Toggle、Slider/ProgressBar RangeValue 与 TextEdit Value pattern；跨线程调用经 HWND 消息回到 UI owner thread，旧 provider snapshot 在 republish/detach 后返回 element unavailable（`e82f1aaf`） | [UI](ui.md) · `WindowsUiaAccessibilityTests` |
+| UI-002-EXTERNAL-HWND-GATE | `RunUi002UiaGate.ps1` 配置/构建 UIA+bgfx+FreeType 图并直接运行测试，再由独立 `System.Windows.Automation` client 连接真实 `tina_sample_ui_showcase` HWND，验证属性/fragment、Invoke/Toggle/RangeValue/Value action 与 `WM_CLOSE` 正常退出，输出 schema 1 JSON；该自动 gate 明确不替代 Narrator/Inspect 人工金标（`e82f1aaf`） | [测试](testing.md) · `tools/windows/RunUi002UiaGate.ps1` |
 | API-CLEAN-POLICY | `blocksUIUpdateBelow` 替换误导名 `blocksUIInputBelow`；文档/sample/tests 同步 | [gameplay](gameplay.md) |
 | API-CLEAN-ASSET-READY | 删除 `AssetLogicalState Ready` 别名（仅 ReadyCpu/ReadyGpu） | [resources](resources.md) |
 | API-CLEAN-SCENE-KEYS | Scene `fixture*Key` → `meshKey`/`materialKey`/`spriteKey`；注释改为 bind-table 语义 | [Scene](scene-ecs.md) · [3D](game-3d.md) |

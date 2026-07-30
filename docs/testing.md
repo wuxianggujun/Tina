@@ -29,7 +29,7 @@ CTest 测试。测试进程任一返回非0即失败。
 | `tina_platform_glfw_tests` | GLFW adapter 与 WindowSurface | `TINA_BUILD_PLATFORM_GLFW=ON` |
 | `tina_render_bgfx_tests` | bgfx lifecycle、2D/3D/UI geometry/resource | `TINA_BUILD_RENDER_BGFX=ON` |
 | `tina_ui_freetype_tests` | FreeType font open/measure/rasterize | `TINA_BUILD_UI_FREETYPE=ON` |
-| `tina_ui_uia_tests` | Windows UIA property mapping / provider lifecycle | `TINA_BUILD_UI_UIA=ON` (Windows) |
+| `tina_ui_uia_tests` | Windows UIA property/fragment、control pattern、action 与 provider lifecycle | `TINA_BUILD_UI_UIA=ON` (Windows) |
 | `tina_physics2d_tests` | Box2D lifecycle/contact/query/deferred command/grid bridge | `TINA_BUILD_PHYSICS2D=ON` |
 | `tina_audio_miniaudio_tests` | miniaudio null-device、decode/mix adapter | `TINA_BUILD_AUDIO_MINIAUDIO=ON` |
 
@@ -85,6 +85,19 @@ Slider 与 ProgressBar 联动，Dropdown、List、Tree、Scroll 可操作，Text
 pointer caret 一致。普通
 `windows-msvc-vnext-bgfx` 图未启用 FreeType，placeholder text 不能计为字体或 CJK 视觉通过。
 
+## Windows UIA 产品门禁
+
+`RunUi002UiaGate.ps1` 使用 Windows UI Automation client API 从独立进程连接真实
+`tina_sample_ui_showcase` HWND，验证外部发现、属性、fragment 与
+Invoke/Toggle/RangeValue/Value action；脚本正常发送 `WM_CLOSE`，让 EngineHost/UI owner 按产品路径退出。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunUi002UiaGate.ps1
+```
+
+该 gate 不替代 Narrator/Inspect 人工金标，也不证明 Linux AT-SPI。已有 build 可使用
+`-SkipConfigure -SkipBuild`，并通过 `-OutJson` 固化结构化证据。
+
 ## 改动到门禁映射
 
 | 改动范围 | 最小测试 | 追加 smoke/平台 |
@@ -94,6 +107,7 @@ pointer caret 一致。普通
 | Task/关闭顺序 | `tina_tests` | Null/Desktop 300帧，失败注入 |
 | Runtime phase/state | `tina_tests`、`tina_runtime_ui_tests` | Null、2D、3D products |
 | UI/Widget/Text | `tina_ui_tests`、`tina_runtime_ui_tests`、bridge | FreeType、UI showcase、product-2d、截图 |
+| Windows UIA/accessibility action | `tina_ui_tests`、`tina_ui_uia_tests`、`tina_runtime_ui_tests` | `RunUi002UiaGate.ps1` + Narrator/Inspect 人工金标 |
 | RenderScene/Scene/2D-FX | `tina_render_scene_tests`、`tina_scene_tests` | extraction samples、2D/3D products |
 | bgfx backend | `tina_render_bgfx_tests` | Desktop/2D/3D GPU samples + Visual |
 | Asset format/Cooker | `tina_asset_format_tests`、`tina_asset_tests` | `assetc`→validate→sample、3D product |
@@ -502,6 +516,7 @@ UI 逻辑门禁至少包括：
 
 - generation/root ownership、容量失败与 PMR 回收；
 - layout/hit/paint/semantics 的事务提交；
+- 50,000 层 structure/layout/hit/paint 非递归 stress 与 popup stable publication；
 - routed input、default action、consume/claim、reset/cancel；
 - Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit 的 kind/property/错误路径；
 - UTF-8、IME preedit/commit、Glyph atlas 与 FreeType adapter；

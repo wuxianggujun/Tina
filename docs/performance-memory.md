@@ -1,7 +1,8 @@
 # 性能与内存
 
-本文区分“已有可验证机制”和“尚未接受的 benchmark protocol”。绝对毫秒预算只有在固定 workload、
-固定机器与兼容 fingerprint 上才有意义；当前没有正式 `tina_bench` 或 hard-gate baseline。
+本文区分“已有可验证机制”和“尚未建立的固定机 hard gate”。绝对毫秒预算只有在固定 workload、
+固定机器与兼容 fingerprint 上才有意义；当前已有 ADR 0018 接受的 `tina_bench` schema v1，
+但没有固定机 hard-gate baseline 或多进程 MAD 结论。
 
 ## 当前内存基础
 
@@ -39,12 +40,13 @@ Scene、UI、RenderScene、Asset、Task、Audio、Physics2D 等模块也使用�
 
 - Null/Platform/Desktop/2D/3D 的固定帧 sample 与结构化 checksum/count；
 - RenderScene 的 culling/sort/batch、UI dirty/layout/DisplayList、Tile chunk dirty cache；
+- UI 50,000 层 retained tree 的非递归 structure/layout/hit/paint stress gate；
 - Asset queue/upload/retirement 与资源归零；
 - `tina_physics2d_bench` 的单线程 step/ray p50/p95/p99 JSON。
 
-`tina_physics2d_bench` 明确不是 ADR 0018 的统一 `tina_bench` schema，不能把它扩写成全引擎 benchmark
-protocol。共享 CI 上的墙钟差异默认 informational；确定性失败（checksum、容量、stale、资源不归零）
-可以直接阻断。
+`tina_bench` 当前提供版本化 schema v1 与 `null_runtime_frames` workload；`tina_physics2d_bench` 仍是独立
+模块 bench，不能冒充统一 schema。共享 CI 上的墙钟差异默认 informational；确定性失败（checksum、容量、
+stale、资源不归零）可以直接阻断。
 
 ## 测量原则
 
@@ -62,7 +64,7 @@ protocol。共享 CI 上的墙钟差异默认 informational；确定性失败（
 
 ## 候选 workload
 
-以下是 `PERF-001` 需要选择和版本化的候选，不是当前通过的硬门禁：
+以下是 `PERF-002` 需要选择和版本化的候选，不是当前通过的硬门禁：
 
 - Null Runtime 长跑；
 - Entity/Transform 层级传播；

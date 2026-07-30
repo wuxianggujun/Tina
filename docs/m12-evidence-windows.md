@@ -210,7 +210,14 @@ blankLike 仍由 `CaptureSampleWindow` 排除。2026-07-29 的独立 compare 报
 | sample JSON contentScale/logical/fb 一致性 | |
 | 字体 identity fingerprint（path/sha256/env/FreeType-on；baseline schema 3；mismatch fail） | |
 
+## UI-002 可执行门禁（结果待固化）
+
+当前仓库已提供 `tools/windows/RunUi002UiaGate.ps1`，可从独立 Windows UI Automation client 进程连接
+真实 `tina_sample_ui_showcase` HWND，并验证属性、fragment 与 Invoke/Toggle/RangeValue/Value action。
+本文尚未记录该 gate 在当前 tip 的带日期结果，也没有 Narrator/Inspect 人工金标；二者仍属于 UI-002 Now
+的验收，不从脚本存在本身推导为已通过。
+
 ## 未关闭
 
-- OS 级多 DPI 截图矩阵与跨 GPU 像素金标（UI-003 尾巴；字体 identity fingerprint 已进 gate/baseline）、UIA/AT-SPI 真机（UI-002）、PBR（RENDER-001）；
+- OS 级多 DPI 截图矩阵与跨 GPU 像素金标（UI-003 尾巴；字体 identity fingerprint 已进 gate/baseline）、Narrator/Inspect 人工金标（UI-002）、Linux AT-SPI（UI-002-LINUX）、PBR（RENDER-001）；
 - Linux 可选 Wayland / 真显示器（TEST-001 主验收已关，见 [Linux 证据](m12-evidence-linux.md)）。

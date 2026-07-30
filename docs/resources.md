@@ -241,21 +241,23 @@ component/culling 与通用 pass scheduler 仍属 `RENDER-001`。glTF importer �
 - Manifest entry 按 AssetId 严格升序，依赖范围必须完整、无 gap/overlap，依赖 kind 必须匹配；
 - full package validation 每次最多持有一个 Cooked file，并强制 parse、ContentHash 与 Catalog 对齐；
 - publish 先在 staging 写入并重新验证，最后原子替换 Manifest，失败不发布半个 Catalog；
-- glTF Cooker 已能读取 relative-file/bufferView image，但 relative URI 的 root containment、规范化与
-  symlink 逃逸策略尚未闭合；Runtime 仍不得直接打开任意 URI。
+- glTF Cooker 已拒绝 scheme/绝对路径/`..`，使用 canonical containment，并限制外部单文件最大 64MiB；
+  symlink/junction/reparse、文件替换竞态及更完整 count/dimension 资源炸弹矩阵仍由 `ASSET-SEC-001`
+  闭合。Runtime 仍不得直接打开任意源 URI。
 
 ## 当前限制与下一步
 
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
-- glTF 外部 buffer/texture 的 root containment、URI/type/size 上限与产品接入由 `ASSET-001` 跟踪；
+- glTF 外部 buffer/texture 的基础 containment、URI/size policy 与产品接入已由 `ASSET-001` 完成；
+  跨平台 symlink/reparse 与更完整资源炸弹 corpus 由 `ASSET-SEC-001` 跟踪；
 - hot reload、增量 Cooker、通用 Asset cache/LRU、Bundle/Patch 与 network Asset 尚未实现，见
   `ASSET-002`；
 - TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；
   优先级 IO 调度、editor authoring/undo/redo、自动 gameplay 生成、navigation 与旧 schema migration
   仍须独立验收；
 - shader/font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收；
-- Linux 当前 tip 复验属于 `TEST-001`，现有 Windows 证据不能代替它。
+- Linux 当前 tip GCC13/Clang22（含 sanitizer）复验已由 `TEST-001` 关闭；可选 Wayland/真显示器是独立扩展。
 
 构建与直接 GoogleTest 命令见[构建说明](building.md)和[测试说明](testing.md)；公开契约与第三方隔离见
 [公开 API](public-api.md)。

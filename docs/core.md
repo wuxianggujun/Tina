@@ -102,4 +102,5 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 ```
 
 测试覆盖 Result、ScopeExit、time、UTF-8、Read/WriteFile、hash、memory、generation、assert/diagnostics 与
-header isolation。Linux sanitizer 与正式 benchmark 见 [测试说明](testing.md)和 `TEST-001`/`PERF-001`。
+header isolation。Linux sanitizer 与正式 benchmark 见 [测试说明](testing.md)和
+`TEST-001`/`PERF-001`/`PERF-002`。

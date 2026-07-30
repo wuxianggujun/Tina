@@ -1,7 +1,7 @@
 # Runtime 与 Frame Pipeline
 
-本文描述当前 `tina_runtime` 与 `Tina::Desktop::CreateEngine`。未完成扩展（如通用 GPU submission fence、产品
-暂停 sample）见 [Backlog](backlog.md)；已落地 stack/packet 能力见下文「当前结论」。
+本文描述当前 `tina_runtime` 与 `Tina::Desktop::CreateEngine`。未完成扩展（如通用 GPU submission fence、
+多 World/editor orchestration）见 [Backlog](backlog.md)；已落地 stack/packet 能力见下文「当前结论」。
 
 ## 当前结论
 
@@ -53,7 +53,8 @@ IGameApplication::createInitialState
   -> IGameState::onEnter through phase-scoped UI capability
   -> sample IGameState::initialPolicy
   -> commit startup UI layout/hit snapshot
-  -> publish the single committed State
+  -> pushCommitted initial State onto GameStateStack
+  -> publish the committed stack
 ```
 
 候选 State 在提交前失败时直接销毁，不调用其 `onExit()`，也不调用 Application `onShutdown()`。
@@ -128,9 +129,16 @@ Gamepad generation）按 `SumClamped` 或 `StrongestMagnitude` 合成，snapshot
 `isActive()` 暴露结果。UI consume/claim 会取消对应 gameplay source，并使 digital 抑制到真实 release、
 axis 抑制到 neutral/deadzone。
 
-Button、Checkbox、Slider、RadioButton、TextEdit 的当前默认行为在 UI route 阶段完成，早于 Action
-Mapping。Tab/Shift+Tab、Enter/Space/KeypadEnter 和 Gamepad South 已有窄 focus/default-action 路径；
-通用 Focus Scope、Modal 和持久 Pointer Capture 尚未实现。
+Button、Checkbox、Slider、RadioButton、TextEdit、ScrollView、Dropdown/Popup 与虚拟 ListView/TreeView
+的当前默认行为在 UI route 阶段完成，早于 Action Mapping。Tab/Shift+Tab、Enter/Space/KeypadEnter、
+Gamepad South/D-pad 与集合导航已有控件路径。UI-004 已完成 committed Focus Scope、显式 focus、topmost
+Modal barrier/焦点恢复与持久 Primary Pointer Capture；capture 在 Up、cancel、节点失效或 Modal scope
+变化时按契约释放，并在需要时沿原 committed ancestry 合成一次 `PointerCancel`。
+
+平台 accessibility adapter 不合成物理输入；它通过 owner-thread `UIAccessibilityAction` seam 执行
+Focus/Invoke/Toggle/SetRangeValue/SetTextValue，并复用正常控件 callback 与事务失败语义。Windows UIA
+已接入 Invoke/Toggle/RangeValue/Value patterns；Narrator/Inspect 人工金标由 UI-002 跟踪，Linux AT-SPI
+由 UI-002-LINUX 跟踪，二者仍是开放证据。
 
 未被 UI 消费或 claim 的 primary Pointer transition 可以形成带 `WorldPointerSample` 的 Simulation
 edge。坐标使用 last-presented Camera2D 与对应 surface revision 锁存；跨 0 步帧延迟消费时不会用新

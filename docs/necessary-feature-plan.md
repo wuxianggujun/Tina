@@ -1,8 +1,12 @@
-# Tina 必要功能推进计划
+# Tina 必要功能推进计划（N1-N16 完成归档）
+
+> 状态：Archived。N1-N16 已全部完成；本文保留切片契约与历史验收，不再承担当前任务排序，
+> 也不要求后续功能继续追加 N 编号。当前工作只从 [Roadmap](roadmap.md) 与
+> [Backlog](backlog.md) 选择。
 
 ## 目的与执行规则
 
-本计划覆盖 Tina vNext Runtime 的必要 2D/3D 能力切片。事实优先级固定为：当前源码、CMake target、测试和 sample 实际运行结果；其次是 Accepted ADR；主题文档仅作为线索。每个切片完成时，必须同步更新本文件、`docs/backlog.md` 和对应主题文档。
+本计划记录 Tina vNext Runtime 已完成的 N1-N16 必要 2D/3D 能力切片。事实优先级固定为：当前源码、CMake target、测试和 sample 实际运行结果；其次是 Accepted ADR；本文只保存历史切片，不再作为活跃状态源。
 
 统一约束：
 

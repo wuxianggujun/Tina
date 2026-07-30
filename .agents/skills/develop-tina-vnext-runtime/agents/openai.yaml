@@ -1,4 +1,4 @@
 interface:
   display_name: "Tina vNext Runtime 开发"
-  short_description: "开发 Tina vNext Runtime、输入、平台、渲染与生命周期边界"
-  default_prompt: "使用 $develop-tina-vnext-runtime 实现或排查 Tina vNext Runtime 与后端改动。"
+  short_description: "开发 Tina Runtime、State、平台、资源、渲染与生命周期边界"
+  default_prompt: "使用 $develop-tina-vnext-runtime 实现或排查 Tina Runtime、资源与后端改动。"

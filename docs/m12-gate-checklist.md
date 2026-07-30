@@ -12,17 +12,17 @@
 | --- | --- | --- | --- |
 | G0 | 非 clean 构建可复现 | Verified | Windows 现有 build tree 可增量 configure/build；日常门禁禁止 wipe |
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
-| G2 | UI 产品 | Partial | 20控件 showcase、虚拟 List/Tree、2D/3D 产品集合、Text/Glyph 与主题/交互层次均有结构化和视觉证据；剩余为 Narrator/AT-SPI 真机与跨 DPI/GPU golden |
+| G2 | UI 产品 | Partial | 20控件 showcase、虚拟 List/Tree、2D/3D 产品集合、Text/Glyph 与主题/交互层次均有结构化和视觉证据；Windows UIA action/control patterns 与跨进程外部 HWND gate 已有，剩余为 Narrator/Inspect 人工金标、Linux AT-SPI（UI-002-LINUX）与跨 DPI/GPU golden |
 | G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、base/MR/normal 贴图采样、单次有界3-light、Texture/Mesh backend retirement marker 与 stale-safe teardown 已落地；仅完整 PBR/IBL/shadow/light system 后置 |
-| G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency 已完成；完整 PBR 后置 |
+| G4 | Asset/Cooker | Partial | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency 已完成；`ASSET-SEC-001` 的 symlink/reparse escape 与资源炸弹矩阵仍开放，完整 PBR 另行后置 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
 | G6 | 平台矩阵 | Strong | tip Docker：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 sanitizer 均 exit 0（见 [Linux 证据](m12-evidence-linux.md)） |
 | G7 | Legacy smoke | N/A | 产品已删除，不再运行 Legacy smoke |
 | G8 | 产品旧接口零引用 | Done | Legacy product target/source 已删除；整库残留见 CLEAN-001～003 |
 | G9 | 独立产品删除 | Done | `e2ef3d5e` 起的删除及后续迁移提交 |
 
-门禁状态与功能路线分开。G2/G3/G6 尚未关闭不改变“M12 产品删除 Done”，只表示当前产品/平台
-证据仍需扩展。
+门禁状态与功能路线分开。G2/G3/G4 的后续证据不改变“M12 产品删除 Done”。G6 的 Linux TEST-001
+已经完成；可选 Wayland/真显示器仍是独立扩展，不能反向写成当前 tip 未复验。
 
 ## UI 证据
 
@@ -30,6 +30,8 @@
 GoogleTest executable；测试数量随功能增长，不作永久契约。产品证据包括：
 
 - 20控件 showcase：Dropdown/List/Tree/Scroll 自动交互、Dark/Light 换肤与 root 生命周期；
+- Windows UIA：Invoke/Toggle/RangeValue/Value control patterns 已经通过 owner-thread action seam 接入，
+  `RunUi002UiaGate.ps1` 可从独立进程连接真实 showcase HWND；
 - product-2d schema 14：Scene Explorer 13个 logical item/12个 materialized slot、最终 key `402`、滚动、
   Theme 与 Tree/TreeItem selected semantics；
 - product-3d schema 4：Asset ListView/Scene TreeView、2次 collection step、最终 keys `2003/4`；
@@ -44,8 +46,8 @@ GoogleTest executable；测试数量随功能增长，不作永久契约。产�
   精确为143 px（x=700..842），第一项 Radio 有 selected 内块（x=706..721）、第二项没有，未混入标题栏；
   延长 warmup 后仍只有 `PrintWindow` 首次调用为白帧，后续稳定，因此判定为 capture 瞬态而非持续 UI 异常。
 
-ProgressBar/RadioButton 与 UI-005 集合控件已完成产品接入；G2 仍只因 Narrator/AT-SPI 真机与跨 DPI/GPU
-golden 保持 Partial。
+ProgressBar/RadioButton 与 UI-005 集合控件已完成产品接入；G2 仍因 Narrator/Inspect 人工金标、
+UI-002-LINUX 的 AT-SPI 真机验收与跨 DPI/GPU golden 保持 Partial。自动 UIA gate 不能冒充读屏人工金标。
 
 ## 3D 与 Cooker 边界
 
@@ -57,6 +59,7 @@ golden 保持 Partial。
 | multi-primitive mesh (SPLIT) | Done | 每 TRIANGLES prim → StaticMesh+Material；Prefab 展开父+子节点；非三角 prim 结构化失败 |
 | multi-mesh product bind/draw | Done | sample 通过 engine-provided、State-owned registry 注册多个 mesh/material binding，以 packet-local ref 解析并由 registry retirement；见 3D-001 / N15 / N16.4 |
 | PBR/其他纹理通道 | Partial | metallic-roughness/normal 首切片已进 Material/Render 产品门禁；emissive、IBL、shadow 与完整 PBR 后置 |
+| 外部文件安全矩阵 | Partial | 现有 lexical/canonical containment 与 64MiB 单文件上限已落地；symlink/junction/reparse escape、替换边界以及 accessor/bufferView/image dimension/count/overflow corpus 由 `ASSET-SEC-001` 继续关闭 |
 
 3D 视觉证据分为两层：`tina_sample_3d` 在最后一次 present 后读取 primary framebuffer，stdout JSON 必须
 包含 `pixelCaptureOk=true`、非零尺寸/字节数和非空 `pixelFingerprint`；同机、同 backend、同窗口尺寸与
@@ -72,8 +75,8 @@ fingerprint 或 PNG hash。
 
 M12 只跟踪 Legacy 产品图删除及其替代产品证据；不再把已关闭的 `TEST-001`、`TEST-002`、`3D-001` 和
 `CLEAN-001`～`CLEAN-003` 重新列为待办。当前未关闭的功能和验证风险以 [Backlog](backlog.md) 为唯一
-明细：Now 的 TileMap/Physics2D/Input 工作、Partial 的 UI-002/UI-003，以及 Later 的 `RENDER-001`；
-`RENDER-FENCE` 已完成。
+明细：Now 是 P0 `ASSET-SEC-001` 与 Windows `UI-002` 收口，Next 是 `UI-003` 与 `SDK-001`；Linux
+AT-SPI 已拆为 Later 的 `UI-002-LINUX`，`RENDER-FENCE` 已完成，`RENDER-001` 保持 Deferred。
 
 ## Windows 快速复验
 
@@ -109,6 +112,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_physics2d_tests.exe 
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
+
+# External Windows UIA HWND client gate; Narrator/Inspect remains a separate manual gate
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunUi002UiaGate.ps1
 ```
 
 完整图成功时 sample 标签必须为 `productGate=bgfx-physics-freetype-audio`。

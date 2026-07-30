@@ -28,7 +28,7 @@
 | Render | bgfx 是首个真实 backend，保持私有 | [0008](adr/0008-bgfx-render-backend.md) | Implemented |
 | Asset | Runtime 只读 Cooked；cgltf 只在 Cooker | [0009](adr/0009-cooked-assets-and-cgltf.md) | Implemented；baseColor/MR/normal Texture2D cook + 外部 URI 安全 + 产品 material binding；bgfx Opaque3D experimental MR 与有界4 directional lights 已落地；完整 PBR 后置 |
 | Physics | Box2D 与 Jolt API 分离 | [0010](adr/0010-separate-physics-backends.md) | Box2D implemented：Box/Circle/Capsule、sensor、Distance joint；Jolt deferred |
-| UI | Tina Retained UI 输出后端无关 DisplayList | [0011](adr/0011-retained-ui.md) | Implemented foundation/product slice |
+| UI | Tina Retained UI 输出后端无关 DisplayList | [0011](adr/0011-retained-ui.md) | Implemented product slice；UI-004 Focus Scope/Modal/Pointer Capture 与 UI-005 ScrollView/Dropdown/Popup/虚拟 ListView/TreeView 已完成；accessibility action seam + Windows UIA Invoke/Toggle/RangeValue/Value patterns 已落地 |
 | Audio | miniaudio 是唯一真实 audio backend | [0012](adr/0012-miniaudio-backend.md) | Implemented optional adapter |
 | ECS | 若使用 EnTT，只能是 Scene 私有存储 | [0013](adr/0013-entt-internal-storage.md) | Not used：当前 Scene 不链接 EnTT |
 | Runtime | `IGameApplication` lifecycle + `IGameState` frame behavior | [0014](adr/0014-runtime-phase-and-state.md) | stack/commands + 四相位阻断 + `blocksGameplayInputBelow` 空 snapshot 已落地；`blocksUIUpdateBelow` 仅拦 `updateUI`（不回改当帧 UI route） |
@@ -42,7 +42,7 @@
 
 ## Proposed
 
-当前无 Proposed ADR。固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-001 扩展），不单独占 Proposed 行。
+当前无 Proposed ADR。固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-002），不单独占 Proposed 行。
 
 ## Deferred
 
@@ -50,16 +50,17 @@
 | --- | --- | --- |
 | Render | 完整 PBR/IBL/shadow、通用 pass scheduler、自研 RHI | experimental MR 产品路径稳定且有 profile/视觉需求 |
 | Physics | Jolt 3D adapter | 有明确 3D gameplay 场景与性能预算 |
-| UI | 通用 Modal/Focus Scope/Capture、虚拟列表、复杂 shaping、多行编辑 | 当前 Widget/产品/accessibility 门禁稳定 |
+| UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；圆角/Image/stylesheet 等 Phase C 视觉能力 | 当前控件、产品与 accessibility 门禁稳定，并有明确文本/视觉需求 |
 | Asset | 热重载、增量 Cooker、在线编辑 | Cooked schema、Lease/retirement 与产品打包稳定 |
 | Task | work stealing、fiber、lock-free 重写 | profile 证明共享有界队列是瓶颈，并新增 ADR |
-| Runtime | 多 World/editor orchestration | 游戏 Runtime 的 State/packet 生命周期先完成 |
+| Runtime | 多 World/editor orchestration | 有明确产品/editor 场景，并先冻结 World owner、State TaskGroup barrier 与跨 World 提交/关闭语义 |
 
 ## 当前必须解决的偏差
 
 | 偏差 | 事实 | 处理方式 |
 | --- | --- | --- |
-| UI 平台证据 | Semantics + probe + `tina_ui_uia` 映射/HostBridge + EngineHost 自动 HWND 接线已有；Narrator 人工金标与 AT-SPI 后置 | 见 UI-002；勿把单测写成合规读屏门禁 |
+| UI 平台证据 | Semantics + probe + accessibility action seam + `tina_ui_uia` 映射/HostBridge + EngineHost 自动 HWND 接线已有；Invoke/Toggle/RangeValue/Value patterns 与跨进程 HWND client gate 已实现，Narrator/Inspect 人工金标与 AT-SPI 后置 | Windows 收口见 UI-002，Linux adapter 见 UI-002-LINUX；勿把自动 gate 写成合规读屏门禁 |
+| UI 深树复杂度 | 50,000 节点 structure commit/destroy、layout、hit、paint publication 已有非递归回归；Popup publication 不再逐节点回溯祖先，当前步骤为线性 | 这是当前实现事实，不替代完整 dirty-range pruning 或固定机 PERF hard gate |
 | Linux 状态 | tip Docker：GCC13 Null/Platform + Clang22 Null/sanitizer 已有证据 | 见 [m12-evidence-linux.md](m12-evidence-linux.md)；TEST-001 Done |
 | UI route vs policy | `blocksUIUpdateBelow` 不回改当帧 UI route（route 在 stack 前） | 文档已标明；若需真挡 UI 输入另开切片 |
 | AssetHandle 终态 | 2D World Sprite、standalone Particle/Trail、TileMap emit 与 3D MeshRenderer 保存 weak Handle；Sprite/Mesh/Material Render item 只保存 packet-local ref；两类 registry 分别唯一拥有 resident Lease/GPU/binding，3D Texture owner 按 AssetId 跨 Material 共享并由引用计数保护；active frame pin 阻止 retirement | A1-A6 + N16.1-N16.4 已完成；`ASSET-HANDLE-SCENE` Done |

@@ -14,19 +14,23 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 ## Now：契约一致与产品收口
 
-当前没有尚未关闭的 P1 契约收口项。
+| Backlog | 目标 | 为什么现在做 |
+| --- | --- | --- |
+| ASSET-SEC-001 | 闭合 glTF 外部文件 symlink/reparse escape 与资源炸弹矩阵 | Cooker 接收不可信 authoring 输入；现有 canonical containment/单文件上限尚缺专门跨平台逃逸与 count/dimension corpus，P0 证据优先于新增功能 |
+| UI-002 | 收口 Windows UIA 产品验收：固化真实 HWND 跨进程 action gate 证据，并完成 Narrator/Inspect 人工金标 | action seam、UIA control patterns 与自动 gate 已落地；现在补齐外部验收，避免实现继续领先于产品证据 |
 
-Now 的退出条件：当前 P1 条目均满足各自验收条件；受影响的 Windows product-2d/3d 门禁可复现；
-没有未解释的 Accepted ADR/实现冲突。
+Now 的退出条件：ASSET-SEC-001 的 Windows/Linux escape/oversize/count corpus 明确且失败不发布半包；
+UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
+人工记录明确；没有未解释的 Accepted ADR/实现冲突。Linux AT-SPI 作为独立后置项，不阻塞 Windows
+UI-002 关闭。
 
-## Next：可用性与资源寿命
+## Next：产品验收、性能基线与对外可用
 
 | Backlog | 目标 |
 | --- | --- |
-| UI-002 | 产品 HWND 自动接线 / Narrator 金标 / AT-SPI（映射 + HostBridge 已落地） |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
-
-
+| PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
+| SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 
 ## Later：扩展能力
 
@@ -34,6 +38,7 @@ Now 的退出条件：当前 P1 条目均满足各自验收条件；受影响的
 - Jolt 3D physics adapter；
 - Image widget、rounded rectangle、可组合 stylesheet 与更完整的视觉效果；
 - 多行 TextEdit、grapheme/shaping 与完整 IME 候选窗；
+- Linux AT-SPI adapter 与真实辅助技术验收；
 - Asset 热重载与增量 Cooker；
 - TileMap/Scene/动画 editor tooling、undo/redo 与 cook preview；
 
@@ -74,10 +79,14 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | ASSET-HANDLE-SCENE-N16.4-MESH-OWNER | Mesh/Material Render item 迁移为 packet-local geometry/material ref；Mesh3D registry 唯一拥有 Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 Texture Lease/GPU；active frame/material reference count 阻止过早 retirement；product-3d schema 4 证明2 Mesh、2 Material、3 Texture handoff 与 ledger Released |
 | ASSET-HANDLE-SCENE | A1-A6 与 N16.1-N16.4 全部完成；Scene/Prefab/FX/TileMap 只持 weak Handle，Render item 只持 packet-local ref，Sprite2D/Mesh3D resident ownership 与 retirement 均收敛到 registry + AssetSystem |
 | UI-SHOWCASE / PRODUCT-2D / PRODUCT-3D | 独立20控件 showcase、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 统一使用继承式产品 Theme；Button pressed/focus/elevation 层级、Dark/Light 事务换肤、实际 Slider/Checkbox 状态联动、FreeType client capture 与结构化生命周期证据成立 |
+| UI-DEEP-TREE | 50,000 层 retained tree 的 structure/layout/hit/paint publication 与 subtree destroy 使用非递归路径；popup publication 不再对每个节点重复回溯祖先链 |
+| UI-002-ACTION | 平台中立 `UIAccessibilityAction` seam 完成 Focus/Invoke/Toggle/SetRangeValue/SetTextValue；owner-thread dispatch 保留正常控件 callback，并对 stale、disabled 与 kind 不兼容目标 fail closed（`7d84ae67`） |
+| UI-002-CONTROL-PATTERNS | Windows UIA 完成 Invoke/Toggle/RangeValue/Value pattern、跨线程 HWND action dispatch 与 provider snapshot 生命周期门禁；对应 UI/UIA 单测落地（`e82f1aaf`） |
+| UI-002-EXTERNAL-HWND-GATE | `RunUi002UiaGate.ps1` 由独立 Windows UI Automation client 连接真实 showcase HWND，自动验证属性/fragment、四类 control pattern action 与 `WM_CLOSE` 正常退出，并输出 schema 1 JSON；不声称 Narrator 合规（`e82f1aaf`） |
 | TEST-003 | bgfx + FreeType 图同轮运行 Core/Scene/Asset/Render/UI 模块测试和 300 帧 product-3d；schema 4 同时验证 glTF/PBR/3-light、Mesh/Material/共享 Texture owner retirement、packet-local resolver、Asset ListView/Scene TreeView 与 Dark→Light→Dark retained UI |
 
-“M12 Done”只表示产品删除完成，不表示 Linux、PBR、accessibility、benchmark 或整库 Legacy 字符串全部
-完成。剩余工作已经拆入 Backlog，不再继续扩写 M12 历史清单。
+“M12 Done”只表示产品删除完成，不自动证明后续 Linux、PBR、accessibility 或 benchmark 门禁；
+其中 Linux tip 已由 TEST-001 另行关闭，其他剩余工作继续由 Backlog 跟踪，不再扩写 M12 历史清单。
 
 ## 产品门禁视图
 
@@ -86,6 +95,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle 已完成；全部 Sprite2D item 使用 packet-local `FrameResourceRef`，fixed-capacity registry 唯一拥有 resident Lease/GPU/binding；schema 14 记录 Dark→Light→Dark、Scene Explorer TreeView stable-key selection/scroll/theme/semantics、2份 owner/retirement handoff、weak handle 失效、ledger Released 与四类 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 均为独立后续项 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
 | UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 层次、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction 与 Canvas `SolidRect` 组合面已关闭 | OS 级 DPI 与跨 GPU 金标；RoundedRect/Image/NineSlice 等更宽视觉能力由 `UI-THEME-C` 跟踪 |
+| UI accessibility | 平台中立 action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns 与真实 showcase HWND 跨进程自动 gate 已落地；gate 可输出属性/fragment、action 结果和正常关闭的 schema 1 JSON | 固化当前 tip 的带日期 gate 结果并完成 Windows Narrator/Inspect 人工金标；Linux AT-SPI 由 `UI-002-LINUX` 独立跟踪 |
 | 3D product | 双 mesh + Resources-owned AssetSystem + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material resolver、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、有界0..4 directional lights 已有证据（产品提交3灯）；schema 4 进一步证明2 Mesh/2 Material/3 Texture handoff、weak handle 失效、ledger Released、成熟 retained controls、Asset ListView/Scene TreeView 与 Dark→Light→Dark | RENDER-001 的完整 PBR/IBL/shadow/light component/pass scheduling |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion、独立 Texture/Mesh AssetLease readback retirement，以及 Task timeout/retry + Host-enforced TaskSystem worker-exit/join deadline 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |
 | Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v3 root/TileMapChunk v1 + eager Tileset/deferred chunk dependency/localId 发布前验证及 retain-window LRU 已完成 | 更完整资源炸弹矩阵、TileMap priority IO/editor、热重载与增量 Cooker |

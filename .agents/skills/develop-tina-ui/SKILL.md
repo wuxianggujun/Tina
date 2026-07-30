@@ -1,30 +1,31 @@
 ---
 name: develop-tina-ui
-description: 实现、重构或排查 Tina 的 Retained UI，包括 Element authoring、节点所有权、布局/内容放置、focus/capture、事件路由、输入消费、控件、中文字体和 UI 渲染。Use when editing src/ui, include/tina/ui, tests/ui, tests/ui_freetype, docs/ui.md, ADR 0011, or ADR 0022.
+description: 实现、重构或排查 Tina C++23 Retained UI，包括 Element authoring、树与固定容量事务、布局/内容放置、Focus/Modal/Pointer Capture、控件与虚拟集合、Text/IME、semantics/accessibility、FreeType/UIA adapter 和 UI-Render 桥。Use when editing include/tina/ui、src/ui、tests/ui、tests/ui_freetype、tests/ui_uia、tests/runtime_ui、tests/ui_render、docs/ui.md、ADR 0011 或 ADR 0022。
 ---
 
-# 开发 Tina UI
+# 开发 Tina Retained UI
 
-## 唯一产品轨道
+## 建立事实
 
-Tina **只有一套** 产品 UI：`include/tina/ui/**` + `src/ui/**`（Retained）。  
-Legacy UI / `Tina.exe` 产品图已删除；禁止再引入第二套 UI ABI。
+先执行 `git status --short` 并保留用户改动。阅读 `docs/ui.md`、`docs/design-freeze.md`、
+ADR 0011、ADR 0022、相关公开头/实现/测试与模块 `CMakeLists.txt`。完成度以源码、target 和实际结果为准，
+不要从旧设计段落推断当前能力。
 
-| 项 | 路径 / 事实 |
-| --- | --- |
-| 公开头 | `include/tina/ui/**` |
-| 实现 | `src/ui/**`（可选 `src/ui/freetype`） |
-| 测试 | `tests/ui`、`tests/ui_freetype`、`tests/runtime_ui`、`tests/ui_render` |
-| Context / ID | `UIContext`、`UINodeId`（owner WindowId + generation） |
+Tina 只有一套产品 UI：`include/tina/ui/**` + `src/ui/**`。Legacy UI 已删除，不得恢复第二套 UI ABI。
+当前已有 Element composition、Focus Scope/Modal/持久 Pointer Capture、ScrollView、Dropdown/Popup、
+虚拟 ListView/TreeView、Windows UIA 属性/fragment/control pattern/action；开放项见 `docs/backlog.md`。
 
-先读：`docs/ui.md`、`docs/adr/0011-retained-ui.md`、
-`docs/adr/0022-ui-element-authoring-and-layout.md`、相关 `include/tina/ui/*.hpp`、`src/ui/**`、对应测试
-CMakeLists。
+## 所有权与事务
 
-## 约定
+- `UIContext` owner-thread、固定容量 PMR；`UIRootOwner` move-only，node 使用 Window owner + generation。
+- Tree mutation 与 structure/layout/hit/paint/semantics 分阶段事务提交；失败保留旧 committed snapshot。
+- route 读取上一份 committed hit；route 不隐式 layout，本帧 UI commit 从下一帧参与命中。
+- committed view 到下一次对应 commit 或 Context 析构失效；builder/updater/facade 到当前 phase 返回失效。
+- 结构发布、subtree destroy、layout/hit/paint snapshot 构建保持非递归；50,000 层专项 gate 防止栈溢出。
+- Popup/Modal 的最终 hit/paint 顺序必须稳定，不通过每节点祖先回溯重新引入平方复杂度。
 
-- owner-thread、固定容量 PMR、move-only root owner。
-- 布局 / hit / paint 用 committed snapshot；route 不隐式 layout。
+## Element、布局与 Theme
+
 - Game SDK 不暴露 FreeType/bgfx；字体字节由游戏或可选 fixture 注入。
 - FreeType 字体路径：`TINA_UI_FONT_PATH`（CMake/env）或可选 `resources/fonts/*.otf`（见 `cmake/TinaUiFont.cmake`）。
 - 公开创建统一使用 `createElement(parent, descriptor)`；内建控件通过 `make*Element()` recipe authoring。
@@ -41,25 +42,40 @@ CMakeLists。
 - 自定义 Canvas command 必须 backend-neutral、复制进 Context 固定容量 storage；当前只冻结 `SolidRect`，
   不开放 GPU callback。
 
-## ADR 0022 当前边界
-
-已经实现：Layout/Content、完整 `UIElementDescriptor` authoring、官方内建 recipes、统一
+ADR 0022 已实现 Layout/Content、完整 `UIElementDescriptor` authoring、官方内建 recipes、统一
 `createElement()`、组合 Semantics、StyleRole/属性 override reset、固定预算 multi-node transaction、
 固定容量 `SolidRect` Canvas、Showcase Flow/Flex 层级，以及所有 create 失败的节点/text/canvas 回滚。
 公开 `UIWidgetKind` 与 create-by-kind API 已删除；私有 `BuiltinElementKind` 只负责既有控件 storage/行为分派。
 
-尚未实现：RoundedRect/Image/NineSlice 等更宽 Canvas command、圆角 clip 与可组合 stylesheet；不要把
+RoundedRect/Image/NineSlice 等更宽 Canvas command、圆角 clip 与可组合 stylesheet 尚未实现；不要把
 当前第一阶段 Canvas 描述成任意 GPU 绘制或完整 CSS/Widget 扩展系统。
 
-## 验证
+## 输入、焦点与控件
 
-```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests -- /m:2 /v:m
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
-```
+- 路由顺序固定为 Capture -> Target -> Bubble；consume、prevent-default、gameplay claim 含义分开。
+- 持久 Pointer Capture 在 Up/cancel/destroy/disable/Hidden/Collapsed/Modal scope change 时精确释放；
+  synthetic cancel 沿原 committed ancestry 发送。
+- Modal barrier、Focus Scope 与 focus restore 使用 committed 状态；提交失败不能泄漏半份 focus/capture。
+- 默认行为复用控件状态机；UIA、键盘、Gamepad 与 Pointer action 不建立平行的业务实现。
+- ListView/TreeView 使用固定 row pool、stable item key 和 datasource；warmup 后稳态操作不得增长 storage。
 
-有 FreeType 时再编/跑 `tina_ui_freetype_tests`；无字体则相关用例应 skip。
+## Text、Render 与 accessibility
+
+- 所有公开文本严格 UTF-8；MSVC target 保持 `/utf-8`。FreeType 私有，字体通过 `TINA_UI_FONT_PATH`
+  或显式字节注入；placeholder 不能冒充 CJK 视觉通过。
+- TextEdit 当前是单行 scalar selection + committed text/IME preedit；多行、grapheme/BiDi/shaping、候选窗
+  定位属于 `TEXT-001`，不要无意冻结新契约。
+- UI 只输出后端无关 committed paint/DisplayList/Glyph atlas，不调用 bgfx。
+- `UIAccessibilityAction` 只表达 Focus/Invoke/Toggle/SetRangeValue/SetTextValue；Context owner thread 验证后
+  复用默认行为。Windows UIA adapter 负责 COM/线程 marshal，不直接写 retained storage。
+- `RunUi002UiaGate.ps1` 证明外部进程发现和 action；Narrator/Inspect 人工金标与 Linux AT-SPI 是独立证据。
+
+## 验证路由
+
+按改动选择 `tina_ui_tests`、`tina_runtime_ui_tests`、`tina_ui_render_integration_tests`、
+`tina_ui_freetype_tests`、`tina_ui_uia_tests` 与 UI showcase/product gate。直接运行 executable，
+视觉、结构化 JSON、UIA 外部 client 与 screen reader 人工证据分别报告。具体命令使用
+`$build-and-test-tina` 与 `docs/testing.md`。无字体时 FreeType 相关用例应 skip。
 
 静态收口至少检查旧 create-by-kind 成员调用和旧布局字段零命中、Showcase 普通页面无 Overlay，并运行
 `git diff --check`。公开头新增契约同时补 header-isolation translation unit；第三方 token 仍必须留在

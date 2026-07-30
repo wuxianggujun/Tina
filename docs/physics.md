@@ -111,7 +111,8 @@ bridge 和 CharacterController coexistence。测试数量不是永久基线；pr
 | Backlog | 范围 |
 | --- | --- |
 | `PHYSICS-001` | Jolt 3D adapter、独立 Tina::Physics3D API 与性能门禁 |
-| `PERF-001` | 统一 `tina_bench` schema、固定 workload/fingerprint 与 p50/p95/p99 baseline |
+| `PERF-001` | **Done**：统一 `tina_bench` schema v1、`null_runtime_frames` workload/fingerprint 与 p50/p95/p99 |
+| `PERF-002` | 固定机受审 baseline、hard gate 与多进程 median/MAD 协议 |
 
 Polygon/chain、revolute/prismatic 等更多 2D shape/joint，跨平台 bitwise determinism、CCD/vehicle 等高级
 语义只有在真实产品场景和固定线程策略冻结后才能承诺。

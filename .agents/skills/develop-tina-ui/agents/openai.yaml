@@ -1,4 +1,4 @@
 interface:
   display_name: "Tina UI 开发"
-  short_description: "开发 Tina Legacy 与 vNext Retained UI、布局和输入路由"
+  short_description: "开发 Tina Retained UI、控件、输入、文本与无障碍适配"
   default_prompt: "使用 $develop-tina-ui 在正确架构轨道中实现或排查 Tina UI 改动。"

@@ -2,8 +2,9 @@
 
 - 状态：Accepted
 - 日期：2026-07-16
-- 修订：2026-07-19
-- 实施状态：M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 PMR Pointer policy/
+- 修订：2026-07-19（原始正文）；实施补充至 2026-07-29
+- 实施状态（历史 M7 切片摘要；各项以后文命名时点为准）：M7-C1b 已实现事务式 Flex-lite layout；
+  M7-C1c-a 已实现固定容量 PMR Pointer policy/
   route-ancestry scratch、`Ignore`/`Targetable`、双缓冲 `UICommittedHitView` 与成功 `commitLayout()` 的
   structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count。
   M7-C1c-b2 已实现 fixed-capacity synthetic routed pointer event：generation-safe RAII listener token、
@@ -25,6 +26,10 @@
   Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、
   Disabled/theme 视觉、Image/Text/Glyph PaintCache、Runtime `RenderFramePacket`、完整 dirty-range pruning、
   nested clip 与含资源 bgfx UI pass 仍后置。
+
+> 阅读说明：本 ADR 保留决策时和各命名切片当时的实现边界。正文中“当前”“仍后置”“首批控件”等
+> 表述只描述紧邻的历史时点，不应被当作 2026-07-29 tip 的能力清单；当前增量状态见文末实施补充与
+> [UI 主题文档](../ui.md)。原始决策理由和不变量未被改写。
 
 ## 背景
 
@@ -386,3 +391,47 @@ UI-004 已按本 ADR 的 committed snapshot 与输入所有权语义完成：
 
 Windows MSVC Debug 的直接证据为 `tina_ui_tests` 282/282（含 `UIFocusModalTests` 与
 `UIPointerCaptureTests`）和 `tina_runtime_ui_tests` 85/85。空间/方向导航不属于本切片，仍未实现。
+
+## 2026-07-28 实施补充：UI-005
+
+UI-005 在不改变本 ADR 的 tree/snapshot/capacity/DisplayList 边界下完成 retained collection 控件：
+
+- `ScrollView` 支持 wheel、thumb drag、轴向 clamp、viewport clip 与持久 Primary Pointer Capture；
+- `Dropdown`/`Popup`/`DropdownItem` 支持 anchor placement、Pointer/Keyboard/Gamepad 开关与选择、
+  dismiss/focus scope、外部点击 barrier，并阻止下层 click-through；
+- `ListView`/`TreeView` 使用固定 row pool 虚拟化 100k logical item，保存 stable-key selection、scroll 与
+  Tree expansion；Tree 另支持 Left/Right 折叠、展开及父子导航；
+- semantics 发布 List/ListItem、Tree/TreeItem、virtual key/index、Tree level/expanded；Runtime
+  phase-scoped facade 已覆盖 DataSource、metrics、selection、scroll 与 expansion，不向游戏暴露裸
+  `UIContext`。
+
+这些能力关闭 UI-005；它们不证明完整 dirty-range pruning、空间 focus navigation 或复杂文本已经完成。
+
+## 2026-07-29 实施补充：Accessibility action 与 Windows UIA patterns
+
+平台中立 `UIAccessibilityAction` seam 已实现 Focus、Invoke、Toggle、SetRangeValue 与 SetTextValue。
+action 在 `UIContext` owner thread 同步执行，复用正常 Button/Checkbox/RadioButton/Slider/TextEdit callback
+与对应 retained mutation；stale、disabled、类型不匹配和非法 range/text 返回明确错误，setter 仍遵守各自
+已有的事务失败语义。
+
+可选 Windows UIA adapter 已在现有 HWND HostBridge/fragment provider 上实现：
+
+- Button `IInvokeProvider`；Checkbox/RadioButton `IToggleProvider`；
+- Slider/ProgressBar `IRangeValueProvider`（只读控件拒绝 SetValue）；
+- TextEdit/ComboBox `IValueProvider`；
+- provider 发起的 action 经 HWND owner-thread dispatch 进入上述 Tina seam，公开头继续不暴露 COM。
+
+`RunUi002UiaGate.ps1` 还可从独立 client 进程连接真实 showcase HWND，验证属性、fragment 与上述
+control action。它关闭 Windows UIA control-pattern/跨进程自动 gate 代码切片，但不等于
+Narrator/Inspect 人工合规金标完成；Linux AT-SPI adapter 也仍未实现，分别由 UI-002 与
+UI-002-LINUX 跟踪。
+
+## 2026-07-29 实施补充：50,000 节点深树 publication
+
+当前直接回归统一覆盖 50,000 节点单链深树的非递归 structure commit/destroy、layout、hit snapshot 与
+paint snapshot publication。Popup 子树归属在 layout traversal 时缓存，committed layout 的普通内容/
+Popup 双 pass 不再为每个节点回溯祖先，因此该 publication 路径由深树上的二次行为收敛为按节点线性
+扫描，并保持稳定 preorder/Popup-late paint order。
+
+这项补充只冻结当前非递归与 publication 复杂度事实；完整 dirty-range pruning、全 UI pipeline 固定机
+hard gate 和跨 GPU/DPI 视觉门禁仍须独立证明。

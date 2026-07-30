@@ -101,6 +101,10 @@ Layout 使用窗口 logical extent，不直接读取 framebuffer pixel。content
 WindowId 不重建 Context。clean-subtree measure/arrange reuse 已实现；ListView/TreeView 通过固定 row pool
 支持 100k logical item 虚拟化，完整通用 dirty-range pruning 仍未实现。
 
+Tree structure publication、subtree destroy 以及 layout/hit/paint snapshot 构建不依赖 C++ 调用栈递归；
+专项 stress gate 使用 50,000 层 retained tree 覆盖这些路径。Popup 最终绘制顺序所需的
+`inPopupSubtree` 在 layout preorder 中一次传播，publication 不再为每个节点重复回溯祖先链。
+
 `UILayoutStyle::padding` 同时参与 measure/auto-size 与 committed content box。所有 intrinsic-text
 element（Label、Button、TextEdit、RadioButton、Dropdown/DropdownItem 及虚拟 List/Tree row）的文字
 origin 都由 `UIContentAlignment` 在该 content box 内计算；多行文字回到同一 committed origin，
@@ -194,17 +198,27 @@ Exclude 删除自身和完整语义子树。entry parent 始终是最近 publish
 暴露同一快照；`tina_sample_2d` 每帧 `updateUI` 经 probe 发布并输出 `accessibility*` JSON 证据。
 Probe 可验证 stale node 拒绝。
 
+平台无关 action seam 使用 `UIAccessibilityAction` 表达 Focus、Invoke、Toggle、SetRangeValue 与
+SetTextValue；`UIContext::performAccessibilityAction()` 在 owner thread 验证 generation、控件 kind、
+enabled/read-only/range 与 UTF-8，再复用控件默认行为。平台 adapter 只负责线程 marshal 和平台协议映射，
+不能直接修改 retained storage。
+
 **Windows UIA 私有 adapter（UI-002，可选）：** `TINA_BUILD_UI_UIA=ON`（Windows-only）时构建
 `tina_ui_uia` 并让 `tina_runtime` 在 WindowSurface 产品路径上自动接线：
 
-1. 属性映射：`UIAccessibilityTree` → UIA 形 ControlType/Name/Enabled/Focus/Selection/Range/Toggle/Value；
+1. 属性映射：`UIAccessibilityTree` → UIA ControlType/Name/Enabled/Focus/Selection/Range/Toggle/Value；
 2. **HWND 桥**：`WindowsUiaHostBridge`（`SetWindowSubclass` + `WM_GETOBJECT` +
    `IRawElementProviderSimple` 根/子 fragment）；公开工厂头仍零 COM；
 3. **产品自动 attach**：`EngineHost` 从主窗口 lease 解码 Win32 HWND，startup layout 与每帧
-   `commitForFrame` 后 `rebuildFrom(committedSemantics)` 并 `publish`；shutdown 时 detach。
+   `commitForFrame` 后 `rebuildFrom(committedSemantics)` 并 `publish`；shutdown 时 detach；
+4. **Control patterns 与 action**：Button/Checkbox/RadioButton/Slider/TextEdit 分别发布并执行适用的
+   `IInvokeProvider`、`IToggleProvider`、`IRangeValueProvider`、`IValueProvider`；跨线程 COM 调用通过
+   HWND registered message 同步 marshal 回 UI owner thread。
 
-`tina_ui_uia_tests` 覆盖映射、provider 与 HostBridge attach/navigate。**Narrator/Inspect 人工金标与
-Linux AT-SPI 仍后置**；不得把单测写成「真机 screen reader 合规已过」。
+`tina_ui_uia_tests` 覆盖映射、provider、control patterns 与 HostBridge attach/navigate；
+`RunUi002UiaGate.ps1` 从外部进程连接真实 showcase HWND，验证属性发现以及
+Invoke/Toggle/RangeValue/Value action。**Narrator/Inspect 人工金标仍是 Windows UI-002 的开放验收；
+Linux AT-SPI 已拆为独立后置项**。自动 gate 不等于真实 screen reader 合规金标。
 
 ## Render 边界
 
@@ -408,14 +422,15 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 
 | ID | 范围 |
 | --- | --- |
-| `UI-002` | 产品 HWND 自动接线 + Narrator/Inspect 金标 + Linux AT-SPI（映射 + HostBridge 已有） |
+| `UI-002` | Windows UIA 产品验收：真实 HWND 跨进程属性/action gate 已有，待固化证据并完成 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | `UI-THEME-C` | RoundedRect/Image/NineSlice 等 Canvas 扩展、圆角 clip、backdrop blur 与完整 stylesheet resolver |
+| `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
 Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；UI-002-SPI 与
-可选 `tina_ui_uia` 映射切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture 与 UI-005 的
+可选 `tina_ui_uia` 属性、fragment、control pattern 与 action 切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture 与 UI-005 的
 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView 已完成。外部 Narrator 真机门禁与 UI-003
 跨 GPU/DPI 金标仍不能标成 Done。ADR 0022 的 Element composition 主体已完成，后续只保留更宽
 Theme/Paint 能力，不再重复列已删除的 `UIWidgetKind` 迁移。

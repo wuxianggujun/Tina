@@ -82,7 +82,7 @@ flowchart TD
 | `tina_asset_types` | `AssetHandle` 弱 generation identity、borrowed frame-resource resolver | header-only；只传递 Core/Render，不传递完整 Asset/Task/Physics |
 | `tina_scene` | generation entity、Transform、2D/3D component 与 extraction | 仅通过 AssetTypes 引用弱 Handle；当前不链接 EnTT/GLM |
 | `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；两类 registry 都借用 AssetSystem/device，并唯一拥有各自 resident Lease/GPU/binding |
-| `tina_ui` | retained tree、layout/hit/route/paint/semantics、Widget、文本/Glyph | 当前产品 UI 位于 `src/ui` |
+| `tina_ui` | retained tree、layout/hit/route/paint/semantics、Widget、文本/Glyph、accessibility action | 当前产品 UI 位于 `src/ui`；UI-004/UI-005 已完成 |
 | `tina_physics2d` | Box2D 3.x 的 Tina-owned 生命周期与查询边界 | 可选，Box2D PRIVATE |
 
 ### 私有 adapter 与组合
@@ -222,15 +222,25 @@ cleanup 账簿都已删除。`ASSET-HANDLE-SCENE` 的 A1-A6 与 N16.1-N16.4 已�
 
 ## 当前 UI 边界
 
-当前 Widget 包括 `Root`、`Panel`、`Label`、`Button`、`Checkbox`、`Slider`、`ProgressBar`、
-`RadioButton` 和单行 `TextEdit`。文本使用严格 UTF-8；MSVC target 强制 `/utf-8`。可选 FreeType
-负责 rasterization，UI/Render 通过 R8 Glyph atlas 与后端无关 DisplayList 连接。
+当前 Widget 包括 `Root`、`Panel`、`Modal`、`Label`、`Button`、`Checkbox`、`Slider`、`ProgressBar`、
+`RadioButton`、单行 `TextEdit`、`ScrollView`、`Dropdown`/`Popup`/`DropdownItem`，以及虚拟化
+`ListView`/`TreeView`。UI-004 的 Focus Scope、显式 focus、Modal barrier/焦点恢复与持久 Pointer Capture
+已经完成；UI-005 的滚动、弹出组合控件与固定 row pool 集合控件也已经完成。
 
-ProgressBar 是非交互的 determinate range/value 控件；RadioButton 按直接父节点形成互斥组；TextEdit
-按 Unicode scalar 保存 selection/caret，并支持 committed text 与 IME preedit 首切片。通用 Focus Scope、
-Modal、持久 Pointer Capture、多行编辑、复杂 shaping、虚拟列表尚未完成。Windows UIA 私有 adapter 与
-Host HWND 桥接已有首切片（`tina_ui_uia`）；Narrator 人工金标与 AT-SPI 仍后置，见 [Backlog](backlog.md)
-UI-002。
+文本使用严格 UTF-8；MSVC target 强制 `/utf-8`。可选 FreeType 负责 rasterization，UI/Render 通过 R8
+Glyph atlas 与后端无关 DisplayList 连接。ProgressBar 是非交互的 determinate range/value 控件；
+RadioButton 按直接父节点形成互斥组；TextEdit 按 Unicode scalar 保存 selection/caret，并支持 committed
+text 与 IME preedit 首切片。多行编辑、grapheme、BiDi/复杂 shaping 与完整候选窗定位仍未完成。
+
+后端无关 `UIAccessibilityAction` seam 已支持 Focus、Invoke、Toggle、SetRangeValue 与 SetTextValue，
+并在 owner thread 保留正常控件 callback/事务语义。可选 Windows UIA 私有 adapter 与 Host HWND 桥接
+已把 Button/Checkbox/Slider/TextEdit 等映射到 Invoke/Toggle/RangeValue/Value patterns；Narrator/Inspect
+人工金标仍由 UI-002 跟踪，Linux AT-SPI 已拆为 UI-002-LINUX。现有跨进程 HWND action gate 不替代
+真实 screen reader/辅助技术验收。
+
+当前回归还覆盖 50,000 节点深树的非递归 structure commit/destroy、layout、hit 与 paint publication；
+Popup 子树归属在 layout traversal 中缓存，避免 publication 逐节点回溯祖先，使该发布步骤保持线性。
+这项事实不等同于完整 dirty-range pruning 或固定机性能 hard gate。
 
 ## Legacy 与剩余扫尾
 
@@ -241,7 +251,8 @@ UI-002。
 - miniaudio 实现注释与 FATAL 文案不再暗示 Legacy ON 可运行；
 - `TINA_BUILD_LEGACY=ON` 仍为永久 FATAL 拒绝开关。
 
-剩余跨平台证据与扩展能力见 [Backlog](backlog.md)（如 TEST-001 Linux 复验）。不得误删当前
+剩余跨平台证据与扩展能力见 [Backlog](backlog.md)（如 UI-002 的外部读屏证据、UI-002-LINUX 的
+AT-SPI adapter 与 UI-003 的 OS 级 DPI/跨 GPU 矩阵）；TEST-001 Linux tip 复验已经完成。不得误删当前
 `src/ui` 或其他 vNext 模块。
 
 ## 架构不变量

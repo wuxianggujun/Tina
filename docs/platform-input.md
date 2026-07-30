@@ -54,8 +54,9 @@ Windows 还接入 `Imm32CompositionHostWin32`：窗口 subclass 把 IMM32 preedi
 `TextCompositionTransition`/`TextInputTransition`，固定 preedit 容量并校验 UTF-16→UTF-8。对应 session
 测试覆盖 started/updated/ended、focus-lost cancel、非法 UTF-8 与 surrogate。
 
-Linux 当前只保证 GLFW committed text；原生 XIM/Wayland preedit、候选窗定位仍未完成。真实设备
-Gamepad 矩阵、Linux 当前 tip 与不同窗口系统必须通过平台门禁证明，不能由 translation 单测替代。
+Linux 当前只保证 GLFW committed text；原生 XIM/Wayland preedit、候选窗定位仍未完成。TEST-001 已完成
+GCC13 Null + Platform/GLFW(Xvfb) 与 Clang22 Null/sanitizer 的当前 tip 复验；可选 Wayland/真显示器和真实
+设备 Gamepad 矩阵仍需独立平台证据，不能由 translation 单测替代。
 
 ## WindowSurface
 
@@ -86,6 +87,11 @@ Hidden/Collapsed 与 Modal scope change 会释放 capture，其中 target 失效
 
 `preventDefaultAction()`、route stop、transition consume 和 control claim 是不同语义：consume/claim 阻止
 Gameplay Action，不能隐式替代 UI default-action policy。
+
+Accessibility action 不伪造 Platform transition。平台中立 `UIAccessibilityAction` seam 在 UI owner
+thread 执行 Focus/Invoke/Toggle/SetRangeValue/SetTextValue，并复用正常控件行为。Windows UIA 已实现
+Invoke/Toggle/RangeValue/Value control patterns，`RunUi002UiaGate.ps1` 可从独立进程连接真实 showcase
+HWND；这仍不等于 Narrator/Inspect 人工金标。Linux AT-SPI 已拆为 `UI-002-LINUX`。
 
 ## Action domain
 
@@ -131,13 +137,15 @@ out\build\windows-msvc-vnext-platform\bin\Debug\tina_platform_glfw_tests.exe --g
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe --frames=300
 ```
 
-UI/Input 修改还需运行 `tina_ui_tests`、`tina_runtime_ui_tests` 与 product-2d smoke。Linux X11/Wayland、
-真实 Gamepad 与 sanitizer 结果按 [测试说明](testing.md) 单独记录。
+UI/Input 修改还需运行 `tina_ui_tests`、`tina_runtime_ui_tests` 与 product-2d smoke。TEST-001 的 Linux
+X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Gamepad 与后续平台结果按
+[测试说明](testing.md) 单独记录。
 
 ## 尚未完成
 
-- Linux 当前 tip 的 GCC/Clang/X11/Wayland 复验：`TEST-001`；
-- Windows UIA / Linux AT-SPI：`UI-002`；
+- 可选 Linux Wayland/真显示器与真实设备 Gamepad 矩阵；TEST-001 当前 tip 已完成；
+- Windows Narrator/Inspect 人工金标：`UI-002`（action/control patterns 与跨进程 HWND gate 已有）；
+- Linux AT-SPI adapter 与真实辅助技术验收：`UI-002-LINUX`；
 - 方向/手柄空间导航；
 - 多行编辑、复杂 shaping 与候选窗定位：`TEXT-001`。
 

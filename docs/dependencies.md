@@ -21,7 +21,7 @@
 | GLFW | Windows/Linux Window、键鼠、标准 Gamepad | vcpkg feature `platform-glfw` | `tina_platform_glfw` PRIVATE |
 | bgfx/bx/bimg/shaderc | 唯一真实 Render backend 与离线 shader | `thirdparty/bgfx.cmake` submodule | `tina_render_bgfx`/shader tool PRIVATE |
 | FreeType | 字形 raster；Atlas/布局仍由 Tina UI 拥有 | vcpkg feature `ui-freetype` | `tina_ui_freetype` PRIVATE |
-| UI Automation (system) | Windows UIA 无障碍属性映射 | OS SDK headers（无 vcpkg feature） | `tina_ui_uia` PRIVATE；`TINA_BUILD_UI_UIA` |
+| UI Automation (system) | Windows UIA 属性/fragment、Invoke/Toggle/RangeValue/Value control patterns 与 HWND client gate | OS SDK headers（无 vcpkg feature） | `tina_ui_uia` PRIVATE；`TINA_BUILD_UI_UIA` |
 | miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | `tina_audio_miniaudio` PRIVATE |
 | libvorbis | 可选 Ogg Vorbis decode | feature `audio-miniaudio-vorbis` | miniaudio adapter PRIVATE；默认 OFF |
 | libopus/opusfile | 可选 Opus decode | feature `audio-miniaudio-opus` | miniaudio adapter PRIVATE；默认 OFF |
@@ -76,7 +76,9 @@ TINA_BUILD_LEGACY=OFF only
 
 不存在 `TINA_PROFILE_BACKEND`、`TINA_PROFILE_TRACY_*`、`profile-tracy` feature、
 `tina_profile_config` 或 `tina_profile_tracy` target。ADR 0002 保留 Tracy 作为未来定位工具方向，但当前
-只有基础 Trace/Metrics 设计和 `PERF-001`；`tina_bench` 也尚未成为正式 target。
+只有基础 Trace/Metrics 设计和 `tina_bench` schema v1。`tina_bench` target 在
+`TINA_BUILD_BENCHMARKS=ON` 或 examples 图中存在；固定机 hard gate 与多进程 MAD 由
+`PERF-002` 跟踪，不得把共享机 provisional 结果写成发布门禁。
 
 Jolt/`tina_physics3d` 同样尚未接入。它们分别由 `PHYSICS-001` 与后续设计负责，不能出现在当前 build
 命令或发布依赖中。

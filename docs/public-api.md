@@ -230,7 +230,8 @@ alignment + offset，Stretch 的边距用 margin 表达，Popup recipe 强制 Ov
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
-`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup phase-scoped mutation/query；
+`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/ListView/TreeView phase-scoped
+mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree expansion；
 `setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
 paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
 错误或 dirty queue 容量不足均零发布。
@@ -247,10 +248,20 @@ phase facade 对象。
 `UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。RoundedRect/Image/NineSlice 与
 stylesheet 仍是后续扩展。
 
+UI-004 的 committed Focus Scope、显式 focus、Modal barrier/焦点恢复和持久 Primary Pointer Capture 已实现；
+UI-005 的 ScrollView、Dropdown/Popup 与固定 row pool ListView/TreeView 已实现。集合控件支持 100k logical
+item 的虚拟化，但完整通用 dirty-range pruning 仍未完成。当前回归覆盖 50,000 节点深树的非递归
+structure commit/destroy、layout、hit 与 paint publication；Popup membership 在 layout traversal 中缓存，
+避免 publication 对每个节点重复回溯祖先。
+
 可选 FreeType、R8 Glyph atlas、semantics snapshot 与 `UIAccessibilityTree`/probe provider 均为 Tina API。
-可选 Windows UIA 私有 adapter（`TINA_BUILD_UI_UIA`）映射 UIA 形属性，公开头无 COM；产品路径可经
-EngineHost 自动附着 HWND HostBridge（`IRawElementProviderSimple` 首切片）。Narrator 人工金标与
-Linux AT-SPI 仍未完成（UI-002）。
+平台中立 `UIAccessibilityAction`/`UIAccessibilityActionKind` 提供同步 owner-thread Focus、Invoke、
+Toggle、SetRangeValue 与 SetTextValue seam；adapter 通过它保留正常控件 callback，stale、disabled、
+类型不匹配或非法 action 返回明确错误。可选 Windows UIA 私有 adapter（`TINA_BUILD_UI_UIA`）映射 UIA 属性，
+公开头无 COM；产品路径经 EngineHost 自动附着 HWND HostBridge，并实现 Invoke/Toggle/RangeValue/Value
+patterns 的 owner-thread dispatch；`RunUi002UiaGate.ps1` 可由外部 client 进程连接真实 showcase HWND。
+Narrator/Inspect 人工金标仍由 UI-002 跟踪，Linux AT-SPI adapter/真机验收由 UI-002-LINUX 跟踪；自动 gate
+不等于真实 screen reader 合规金标。
 
 ## Scene
 
@@ -444,14 +455,16 @@ Jolt/Physics3D 尚未接入。
 | `AudioPcmStreamChunkView` | 调用期 non-owning | `submitPcmStreamFrames()` 返回；成功数据已复制到 Tina-owned ring，失败零发布 |
 | `TileMapLayerPayloadView` / object/property view | `TileMapPayloadView` 或 `TileMapInstance` 借用 | backing payload 释放；instance view 还会在 instance move/destroy 时失效 |
 
-不要手工构造 generation ID、跨 owner 混用、持久化 Runtime handle，或把 non-owning view包装成“看似
+不要手工构造 generation ID、跨 owner 混用、持久化 Runtime handle，或把 non-owning view 包装成“看似
 拥有”的裸 pointer成员。
 
 ## 尚不存在或仅部分落地的公共能力
 
 **已存在（勿再文档成“没有”）：** `GameStateStack` 与 structural commands；相位 `blocks*Below` 与
 `blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / present-return CPU
-submission ledger；Windows UIA provider + HWND HostBridge 首切片。
+submission ledger；Focus Scope/Modal/持久 Pointer Capture；ScrollView/Dropdown/Popup/虚拟
+ListView/TreeView；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
+Invoke/Toggle/RangeValue/Value patterns。
 
 **仍不存在或未完成：**
 
@@ -460,8 +473,8 @@ submission ledger；Windows UIA provider + HWND HostBridge 首切片。
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh retirement）；
 - 完整 PBR/IBL/shadow、light component/culling 与通用 pass scheduler；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
-- 完整 Focus Scope / Modal / 持久 Capture、复杂 text / 虚拟列表；
-- Narrator 合规金标、Linux AT-SPI；
+- 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
+- Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
 - 正式 `Tina::GameSDK` install/export/package ABI。
 
