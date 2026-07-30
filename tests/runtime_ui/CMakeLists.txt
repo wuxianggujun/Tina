@@ -3,7 +3,13 @@ add_executable(tina_runtime_ui_tests
     PrimaryWindowUICapabilityTests.cpp
     PrimaryWindowUIContextOwnerTests.cpp
     PrimaryWindowUIDisplayCoordinatorTests.cpp
-    UIInputRouteProducerTests.cpp
+    UIInputRouteProducerTestSupport.cpp
+    UIInputRouteProducerTextAndPopupTests.cpp
+    UIInputRouteProducerCollectionTests.cpp
+    UIInputRouteProducerButtonTests.cpp
+    UIInputRouteProducerPointerTests.cpp
+    UIInputRouteProducerContractTests.cpp
+    UIInputRouteProducerActionMappingTests.cpp
     WorldPointerActionMappingTests.cpp
 )
 
