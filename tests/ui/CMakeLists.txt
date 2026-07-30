@@ -44,6 +44,8 @@ add_executable(tina_ui_tests
     UIPointerCaptureTests.cpp
 
     UIDirtySubtreeTests.cpp
+    UILayoutTestSupport.hpp
+    UILayoutLifecycleTests.cpp
     UILayoutTests.cpp
     UILayoutPrimitivesTests.cpp
     UIPaintSnapshotTests.cpp
