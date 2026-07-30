@@ -66,6 +66,8 @@ add_library(tina_ui STATIC
     detail/UISliderChangeCallbackRegistry.cpp
     detail/UIStyleRoleResolver.hpp
     detail/UIStyleRoleResolver.cpp
+    detail/UIThemeTransitionResolver.hpp
+    detail/UIThemeTransitionResolver.cpp
     detail/UITextStorage.hpp
     detail/UITextStorage.cpp
     detail/UITextEditModel.hpp

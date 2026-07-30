@@ -24,6 +24,7 @@
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UIStyleRoleResolver.hpp"
+#include "detail/UIThemeTransitionResolver.hpp"
 #include "detail/UITextEditModel.hpp"
 #include "detail/UITextStorage.hpp"
 #include "detail/UIWidgetStateModels.hpp"
@@ -163,8 +164,7 @@ using Detail::RadioButtonState;
 using Detail::supportsWidgetText;
 using Detail::defaultThemeBindingsFor;
 using Detail::isValidStyleRole;
-using Detail::productChromeFor;
-using Detail::ProductChrome;
+using Detail::ProductChromeStorage;
 using Detail::ThemeBindingBoxPaint;
 using Detail::ThemeBindingButtonPaint;
 using Detail::ThemeBindingCheckboxPaint;
@@ -4999,6 +4999,23 @@ struct UIContext::Impl final {
         return false;
     }
 
+    [[nodiscard]] ProductChromeStorage productChromeStorageFor(u32 index) noexcept
+    {
+        return {
+            .box = boxPaintsByIndex[index],
+            .text = textStatesByIndex[index].style,
+            .button = buttonPaintsByNodeIndex[index],
+            .checkbox = checkboxPaintsByNodeIndex[index],
+            .slider = sliderStatesByNodeIndex[index].paint,
+            .progressBar = progressBarStatesByNodeIndex[index].paint,
+            .radioButton = radioButtonStatesByNodeIndex[index].paint,
+            .scrollView = scrollViewStatesByNodeIndex[index].paint,
+            .dropdown = dropdownStatesByNodeIndex[index].paint,
+            .listView = listViewStatesByNodeIndex[index].paint,
+            .treeView = treeViewStatesByNodeIndex[index].paint,
+        };
+    }
+
     void applyProductChromeTransition(u32 index, UIStyleRoleId role, const UITheme& theme,
                                       u16 affectedBindings, u16 targetBindings) noexcept
     {
@@ -5006,63 +5023,12 @@ struct UIContext::Impl final {
         {
             return;
         }
-        const ProductChrome chrome = productChromeFor(role, theme);
-        if ((affectedBindings & ThemeBindingBoxPaint) != 0)
-        {
-            boxPaintsByIndex[index] =
-                (targetBindings & ThemeBindingBoxPaint) != 0 ? chrome.box : UIBoxPaint{};
-        }
-        if ((affectedBindings & ThemeBindingTextStyle) != 0)
-        {
-            textStatesByIndex[index].style =
-                (targetBindings & ThemeBindingTextStyle) != 0 ? chrome.text : UITextStyle{};
-        }
-        if ((affectedBindings & ThemeBindingButtonPaint) != 0)
-        {
-            buttonPaintsByNodeIndex[index] =
-                (targetBindings & ThemeBindingButtonPaint) != 0 ? chrome.button : UIButtonPaint{};
-        }
-        if ((affectedBindings & ThemeBindingCheckboxPaint) != 0)
-        {
-            checkboxPaintsByNodeIndex[index] =
-                (targetBindings & ThemeBindingCheckboxPaint) != 0 ? chrome.checkbox : UICheckboxPaint{};
-        }
-        if ((affectedBindings & ThemeBindingSliderPaint) != 0)
-        {
-            sliderStatesByNodeIndex[index].paint =
-                (targetBindings & ThemeBindingSliderPaint) != 0 ? chrome.slider : UISliderPaint{};
-        }
-        if ((affectedBindings & ThemeBindingProgressBarPaint) != 0)
-        {
-            progressBarStatesByNodeIndex[index].paint =
-                (targetBindings & ThemeBindingProgressBarPaint) != 0 ? chrome.progressBar : UIProgressBarPaint{};
-        }
-        if ((affectedBindings & ThemeBindingRadioButtonPaint) != 0)
-        {
-            radioButtonStatesByNodeIndex[index].paint =
-                (targetBindings & ThemeBindingRadioButtonPaint) != 0 ? chrome.radioButton : UIRadioButtonPaint{};
-        }
-        if ((affectedBindings & ThemeBindingScrollViewPaint) != 0)
-        {
-            scrollViewStatesByNodeIndex[index].paint =
-                (targetBindings & ThemeBindingScrollViewPaint) != 0 ? chrome.scrollView : UIScrollViewPaint{};
-        }
-        if ((affectedBindings & ThemeBindingDropdownPaint) != 0)
-        {
-            dropdownStatesByNodeIndex[index].paint =
-                (targetBindings & ThemeBindingDropdownPaint) != 0 ? chrome.dropdown : UIDropdownPaint{};
-        }
-        if ((affectedBindings & ThemeBindingListViewPaint) != 0)
-        {
-            listViewStatesByNodeIndex[index].paint =
-                (targetBindings & ThemeBindingListViewPaint) != 0 ? chrome.listView : UIListViewPaint{};
-        }
-        if ((affectedBindings & ThemeBindingTreeViewPaint) != 0)
-        {
-            treeViewStatesByNodeIndex[index].paint =
-                (targetBindings & ThemeBindingTreeViewPaint) != 0 ? chrome.treeView : UITreeViewPaint{};
-        }
+        ProductChromeStorage storage = productChromeStorageFor(index);
+        const Detail::ProductChromeTransition transition = Detail::resolveProductChromeTransition(
+            storage, role, theme, affectedBindings, targetBindings);
+        Detail::applyProductChromeTransition(storage, transition, affectedBindings);
     }
+
     void applyDefaultProductChrome(u32 index, UIStyleRoleId role) noexcept
     {
         if (index >= themeBindingsByNodeIndex.size())
@@ -5072,12 +5038,6 @@ struct UIContext::Impl final {
         const u16 bindings = defaultThemeBindingsFor(role);
         themeBindingsByNodeIndex[index] = bindings;
         applyProductChromeTransition(index, role, productTheme, bindings, bindings);
-    }
-
-    [[nodiscard]] static bool textMeasureInputsDiffer(const UITextStyle& left, const UITextStyle& right) noexcept
-    {
-        return left.logicalSize != right.logicalSize || left.advanceScale != right.advanceScale ||
-               left.lineHeightScale != right.lineHeightScale;
     }
 
     void stageThemePaintChange(u32 index) noexcept
@@ -5102,7 +5062,7 @@ struct UIContext::Impl final {
             return Core::success();
         }
         stageThemePaintChange(index);
-        if (!state.hasContent || !textMeasureInputsDiffer(state.style, nextStyle))
+        if (!state.hasContent || !Detail::textMeasureInputsDiffer(state.style, nextStyle))
         {
             themeTextMetricsScratchByNodeIndex[index] = state.metrics;
             return Core::success();
@@ -5128,126 +5088,26 @@ struct UIContext::Impl final {
         {
             return fail(Core::CoreErrorCode::Internal, "UI Theme node index is out of range");
         }
-        const ProductChrome chrome = productChromeFor(role, theme);
+
+        ProductChromeStorage storage = productChromeStorageFor(index);
+        const Detail::ProductChromeTransition transition = Detail::resolveProductChromeTransition(
+            storage, role, theme, affectedBindings, targetBindings);
         if ((affectedBindings & ThemeBindingTextStyle) != 0)
         {
-            const UITextStyle target =
-                (targetBindings & ThemeBindingTextStyle) != 0 ? chrome.text : UITextStyle{};
-            if (Core::Status status = stageThemeTextStyle(index, target); !status)
+            if (Core::Status status = stageThemeTextStyle(index, transition.target.text); !status)
             {
                 return status;
             }
         }
 
-        const auto stagePaintIfChanged = [this, index](bool changed) noexcept {
-            if (changed)
-            {
-                stageThemePaintChange(index);
-            }
-        };
-        if ((affectedBindings & ThemeBindingBoxPaint) != 0)
+        constexpr u16 NonTextBindings = static_cast<u16>(~ThemeBindingTextStyle);
+        if ((transition.changedBindings & NonTextBindings) != 0)
         {
-            const UIBoxPaint target =
-                (targetBindings & ThemeBindingBoxPaint) != 0 ? chrome.box : UIBoxPaint{};
-            stagePaintIfChanged(boxPaintsByIndex[index] != target);
+            stageThemePaintChange(index);
         }
-        if ((affectedBindings & ThemeBindingButtonPaint) != 0)
+        if ((transition.layoutAffectingBindings & NonTextBindings) != 0)
         {
-            const UIButtonPaint target =
-                (targetBindings & ThemeBindingButtonPaint) != 0 ? chrome.button : UIButtonPaint{};
-            stagePaintIfChanged(buttonPaintsByNodeIndex[index] != target);
-        }
-        if ((affectedBindings & ThemeBindingCheckboxPaint) != 0)
-        {
-            const UICheckboxPaint target =
-                (targetBindings & ThemeBindingCheckboxPaint) != 0 ? chrome.checkbox : UICheckboxPaint{};
-            stagePaintIfChanged(checkboxPaintsByNodeIndex[index] != target);
-        }
-        if ((affectedBindings & ThemeBindingSliderPaint) != 0)
-        {
-            const UISliderPaint target =
-                (targetBindings & ThemeBindingSliderPaint) != 0 ? chrome.slider : UISliderPaint{};
-            stagePaintIfChanged(sliderStatesByNodeIndex[index].paint != target);
-        }
-        if ((affectedBindings & ThemeBindingProgressBarPaint) != 0)
-        {
-            const UIProgressBarPaint target =
-                (targetBindings & ThemeBindingProgressBarPaint) != 0 ? chrome.progressBar : UIProgressBarPaint{};
-            stagePaintIfChanged(progressBarStatesByNodeIndex[index].paint != target);
-        }
-        if ((affectedBindings & ThemeBindingRadioButtonPaint) != 0)
-        {
-            const UIRadioButtonPaint target =
-                (targetBindings & ThemeBindingRadioButtonPaint) != 0 ? chrome.radioButton : UIRadioButtonPaint{};
-            const UIRadioButtonPaint& current = radioButtonStatesByNodeIndex[index].paint;
-            if (current != target)
-            {
-                stageThemePaintChange(index);
-                if (current.labelGap != target.labelGap)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
-        }
-        if ((affectedBindings & ThemeBindingScrollViewPaint) != 0)
-        {
-            const UIScrollViewPaint target =
-                (targetBindings & ThemeBindingScrollViewPaint) != 0 ? chrome.scrollView : UIScrollViewPaint{};
-            const UIScrollViewPaint& current = scrollViewStatesByNodeIndex[index].paint;
-            if (current != target)
-            {
-                stageThemePaintChange(index);
-                if (current.thickness != target.thickness || current.minThumbExtent != target.minThumbExtent)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
-        }
-        if ((affectedBindings & ThemeBindingDropdownPaint) != 0)
-        {
-            const UIDropdownPaint target =
-                (targetBindings & ThemeBindingDropdownPaint) != 0 ? chrome.dropdown : UIDropdownPaint{};
-            const UIDropdownPaint& current = dropdownStatesByNodeIndex[index].paint;
-            if (current != target)
-            {
-                stageThemePaintChange(index);
-                if (current.indicatorWidth != target.indicatorWidth ||
-                    current.indicatorHeight != target.indicatorHeight ||
-                    current.indicatorInset != target.indicatorInset)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
-        }
-        if ((affectedBindings & ThemeBindingListViewPaint) != 0)
-        {
-            const UIListViewPaint target =
-                (targetBindings & ThemeBindingListViewPaint) != 0 ? chrome.listView : UIListViewPaint{};
-            const UIListViewPaint& current = listViewStatesByNodeIndex[index].paint;
-            if (current != target)
-            {
-                stageThemePaintChange(index);
-                if (current.scrollBar.thickness != target.scrollBar.thickness ||
-                    current.scrollBar.minThumbExtent != target.scrollBar.minThumbExtent)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
-        }
-        if ((affectedBindings & ThemeBindingTreeViewPaint) != 0)
-        {
-            const UITreeViewPaint target =
-                (targetBindings & ThemeBindingTreeViewPaint) != 0 ? chrome.treeView : UITreeViewPaint{};
-            const UITreeViewPaint& current = treeViewStatesByNodeIndex[index].paint;
-            if (current != target)
-            {
-                stageThemePaintChange(index);
-                if (current.scrollBar.thickness != target.scrollBar.thickness ||
-                    current.scrollBar.minThumbExtent != target.scrollBar.minThumbExtent)
-                {
-                    themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
-                }
-            }
+            themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
         }
         return Core::success();
     }
@@ -5255,18 +5115,18 @@ struct UIContext::Impl final {
     void applyStagedProductChromeTransition(u32 index, UIStyleRoleId role, const UITheme& theme,
                                             u16 affectedBindings, u16 targetBindings) noexcept
     {
+        ProductChromeStorage storage = productChromeStorageFor(index);
+        const Detail::ProductChromeTransition transition = Detail::resolveProductChromeTransition(
+            storage, role, theme, affectedBindings, targetBindings);
         if ((affectedBindings & ThemeBindingTextStyle) != 0)
         {
-            const ProductChrome chrome = productChromeFor(role, theme);
-            const UITextStyle target =
-                (targetBindings & ThemeBindingTextStyle) != 0 ? chrome.text : UITextStyle{};
             WidgetTextState& textState = textStatesByIndex[index];
-            if (textState.hasContent && textMeasureInputsDiffer(textState.style, target))
+            if (textState.hasContent && Detail::textMeasureInputsDiffer(textState.style, transition.target.text))
             {
                 textState.metrics = themeTextMetricsScratchByNodeIndex[index];
             }
         }
-        applyProductChromeTransition(index, role, theme, affectedBindings, targetBindings);
+        Detail::applyProductChromeTransition(storage, transition, affectedBindings);
     }
 
     void propagateThemeLayoutDirtyToAncestors() noexcept
