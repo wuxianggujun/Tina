@@ -7,6 +7,7 @@ add_executable(tina_ui_tests
     UIButtonActionDefaultBehaviorTests.cpp
     UIButtonActionLifecycleTests.cpp
     UIButtonVisualTests.cpp
+    UICanvasCommandStorageTests.cpp
     UICheckboxTests.cpp
     UICommandPressLatchTests.cpp
     UIControlGeometryTests.cpp

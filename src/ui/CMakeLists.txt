@@ -42,6 +42,8 @@ add_library(tina_ui STATIC
     UIContextConfig.cpp
     detail/UIButtonActionRegistry.hpp
     detail/UIButtonActionRegistry.cpp
+    detail/UICanvasCommandStorage.hpp
+    detail/UICanvasCommandStorage.cpp
     detail/UICommandPressLatch.hpp
     detail/UIControlGeometry.hpp
     detail/UIControlGeometry.cpp

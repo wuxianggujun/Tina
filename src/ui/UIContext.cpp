@@ -10,6 +10,7 @@
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include "detail/UIButtonActionRegistry.hpp"
+#include "detail/UICanvasCommandStorage.hpp"
 #include "detail/UICommandPressLatch.hpp"
 #include "detail/UIControlGeometry.hpp"
 #include "detail/UIControlValuePrimitives.hpp"
@@ -219,18 +220,6 @@ struct SemanticsEntryBuildScratch final {
     bool hasNamePart = false;
 };
 
-inline constexpr u32 InvalidCanvasCommandIndex = (std::numeric_limits<u32>::max)();
-
-struct CanvasCommandSlot final {
-    UICanvasCommand command{};
-    u32 next = InvalidCanvasCommandIndex;
-};
-
-struct CanvasCommandState final {
-    u32 first = InvalidCanvasCommandIndex;
-    u32 count = 0;
-};
-
 static_assert(sizeof(NodeRecord) <= 48);
 static_assert(std::is_nothrow_destructible_v<NodeRecord>);
 
@@ -293,8 +282,7 @@ struct UIContext::Impl final {
     std::pmr::vector<SemanticsState> semanticsStatesByNodeIndex;
     std::pmr::vector<SemanticsNodeBuildScratch> semanticsNodeBuildScratchByIndex;
     std::pmr::vector<SemanticsEntryBuildScratch> semanticsEntryBuildScratch;
-    std::pmr::vector<CanvasCommandState> canvasCommandStatesByNodeIndex;
-    std::pmr::vector<CanvasCommandSlot> canvasCommandSlots;
+    Detail::UICanvasCommandStorage canvasCommandStorage;
     std::pmr::vector<TextEditState> textEditStatesByNodeIndex;
     std::pmr::vector<ProgressBarState> progressBarStatesByNodeIndex;
     std::pmr::vector<RadioButtonState> radioButtonStatesByNodeIndex;
@@ -398,9 +386,6 @@ struct UIContext::Impl final {
     usize lastHitRebuildCount = 0;
     usize lastPaintCacheRebuildCount = 0;
     usize lastPaintSnapshotRebuildCount = 0;
-    u32 freeCanvasCommandHead = InvalidCanvasCommandIndex;
-    usize activeCanvasCommandCount = 0;
-    usize canvasCommandHighWater = 0;
     usize routeDispatchDepth = 0;
     u64 buttonRouteSerial = 0;
     u64 accessibilityActionSequence = 0;
@@ -449,7 +434,7 @@ struct UIContext::Impl final {
           themeTextMetricsScratchByNodeIndex(&resource), localSolidFillCacheByIndex(&resource),
           localTextColorCacheByIndex(&resource), textStatesByIndex(&resource), semanticsStatesByNodeIndex(&resource),
           semanticsNodeBuildScratchByIndex(&resource), semanticsEntryBuildScratch(&resource),
-          canvasCommandStatesByNodeIndex(&resource), canvasCommandSlots(&resource),
+          canvasCommandStorage(capacities.nodeCapacity, capacities.canvasCommandCapacity, resource),
           textEditStatesByNodeIndex(&resource),
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
           scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
@@ -534,16 +519,6 @@ struct UIContext::Impl final {
         impl->semanticsStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->semanticsNodeBuildScratchByIndex.resize(normalized.nodeCapacity);
         impl->semanticsEntryBuildScratch.resize(normalized.paintSnapshotCapacity);
-        impl->canvasCommandStatesByNodeIndex.resize(normalized.nodeCapacity);
-        impl->canvasCommandSlots.resize(normalized.canvasCommandCapacity);
-        for (usize commandIndex = 0; commandIndex < normalized.canvasCommandCapacity; ++commandIndex)
-        {
-            impl->canvasCommandSlots[commandIndex].next =
-                commandIndex + 1U < normalized.canvasCommandCapacity ? static_cast<u32>(commandIndex + 1U)
-                                                                    : InvalidCanvasCommandIndex;
-        }
-        impl->freeCanvasCommandHead =
-            normalized.canvasCommandCapacity == 0 ? InvalidCanvasCommandIndex : 0U;
         impl->textEditStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->progressBarStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->radioButtonStatesByNodeIndex.resize(normalized.nodeCapacity);
@@ -2252,28 +2227,14 @@ struct UIContext::Impl final {
 
     [[nodiscard]] usize countCanvasPaintEntries(u32 nodeIndex) const noexcept
     {
-        if (nodeIndex >= canvasCommandStatesByNodeIndex.size())
-        {
-            return 0;
-        }
-        const CanvasCommandState& state = canvasCommandStatesByNodeIndex[nodeIndex];
-        u32 commandIndex = state.first;
         usize count = 0;
-        for (u32 visited = 0; commandIndex != InvalidCanvasCommandIndex && visited < state.count;
-             ++visited)
-        {
-            if (commandIndex >= canvasCommandSlots.size())
-            {
-                break;
-            }
-            const CanvasCommandSlot& slot = canvasCommandSlots[commandIndex];
-            if (slot.command.kind == UICanvasCommandKind::SolidRect && slot.command.color.alpha != 0 &&
-                slot.command.bounds.width > 0.0F && slot.command.bounds.height > 0.0F)
+        canvasCommandStorage.forEach(nodeIndex, [&count](const UICanvasCommand& command) noexcept {
+            if (command.kind == UICanvasCommandKind::SolidRect && command.color.alpha != 0 &&
+                command.bounds.width > 0.0F && command.bounds.height > 0.0F)
             {
                 ++count;
             }
-            commandIndex = slot.next;
-        }
+        });
         return count;
     }
 
@@ -2281,22 +2242,8 @@ struct UIContext::Impl final {
                             const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) noexcept
     {
         const u32 nodeIndex = layoutEntry.node.index();
-        if (nodeIndex >= canvasCommandStatesByNodeIndex.size())
-        {
-            return;
-        }
-        const CanvasCommandState& state = canvasCommandStatesByNodeIndex[nodeIndex];
         const UILogicalRect canvasClip = intersectRects(layoutEntry.effectiveClip, layoutEntry.worldRect);
-        u32 commandIndex = state.first;
-        for (u32 visited = 0; commandIndex != InvalidCanvasCommandIndex && visited < state.count;
-             ++visited)
-        {
-            if (commandIndex >= canvasCommandSlots.size())
-            {
-                return;
-            }
-            const CanvasCommandSlot& slot = canvasCommandSlots[commandIndex];
-            const UICanvasCommand& command = slot.command;
+        canvasCommandStorage.forEach(nodeIndex, [&](const UICanvasCommand& command) noexcept {
             if (command.kind == UICanvasCommandKind::SolidRect && command.color.alpha != 0 &&
                 command.bounds.width > 0.0F && command.bounds.height > 0.0F)
             {
@@ -2315,8 +2262,7 @@ struct UIContext::Impl final {
                 });
                 ++nextPaintOrdinal;
             }
-            commandIndex = slot.next;
-        }
+        });
     }
 
     [[nodiscard]] Core::Result<usize>
@@ -4224,83 +4170,6 @@ struct UIContext::Impl final {
         return state.useContentAsName ? textViewFor(index) : std::string_view{};
     }
 
-    void releaseCanvasCommands(u32 index) noexcept
-    {
-        if (index >= canvasCommandStatesByNodeIndex.size())
-        {
-            return;
-        }
-        CanvasCommandState& state = canvasCommandStatesByNodeIndex[index];
-        u32 commandIndex = state.first;
-        u32 releasedCount = 0;
-        while (commandIndex != InvalidCanvasCommandIndex && releasedCount < state.count &&
-               commandIndex < canvasCommandSlots.size())
-        {
-            CanvasCommandSlot& slot = canvasCommandSlots[commandIndex];
-            const u32 next = slot.next;
-            slot = {};
-            slot.next = freeCanvasCommandHead;
-            freeCanvasCommandHead = commandIndex;
-            commandIndex = next;
-            ++releasedCount;
-        }
-        activeCanvasCommandCount =
-            releasedCount <= activeCanvasCommandCount ? activeCanvasCommandCount - releasedCount : 0;
-        state = {};
-    }
-
-    [[nodiscard]] Core::Status assignCanvasCommands(u32 index, std::span<const UICanvasCommand> commands)
-    {
-        if (index >= canvasCommandStatesByNodeIndex.size())
-        {
-            return fail(Core::CoreErrorCode::Internal, "UI canvas state index is out of range");
-        }
-        if (activeCanvasCommandCount > canvasCommandSlots.size() ||
-            commands.size() > (std::numeric_limits<u32>::max)() ||
-            commands.size() > canvasCommandSlots.size() - activeCanvasCommandCount)
-        {
-            return fail(UIErrorCode::CapacityExceeded, "UI canvas command capacity has been exhausted");
-        }
-        for (const UICanvasCommand& command : commands)
-        {
-            if (command.kind != UICanvasCommandKind::SolidRect || !std::isfinite(command.bounds.x) ||
-                !std::isfinite(command.bounds.y) || !isFiniteNonNegative(command.bounds.width) ||
-                !isFiniteNonNegative(command.bounds.height))
-            {
-                return fail(UIErrorCode::InvalidElementDescriptor,
-                            "UI canvas commands require a supported kind and finite non-negative bounds");
-            }
-        }
-
-        CanvasCommandState nextState{};
-        u32 previous = InvalidCanvasCommandIndex;
-        for (const UICanvasCommand& command : commands)
-        {
-            const u32 commandIndex = freeCanvasCommandHead;
-            if (commandIndex == InvalidCanvasCommandIndex || commandIndex >= canvasCommandSlots.size())
-            {
-                return fail(Core::CoreErrorCode::Internal, "UI canvas free-list is inconsistent");
-            }
-            CanvasCommandSlot& slot = canvasCommandSlots[commandIndex];
-            freeCanvasCommandHead = slot.next;
-            slot.command = command;
-            slot.next = InvalidCanvasCommandIndex;
-            if (previous == InvalidCanvasCommandIndex)
-            {
-                nextState.first = commandIndex;
-            } else
-            {
-                canvasCommandSlots[previous].next = commandIndex;
-            }
-            previous = commandIndex;
-            ++nextState.count;
-        }
-        canvasCommandStatesByNodeIndex[index] = nextState;
-        activeCanvasCommandCount += commands.size();
-        canvasCommandHighWater = (std::max)(canvasCommandHighWater, activeCanvasCommandCount);
-        return Core::success();
-    }
-
     [[nodiscard]] std::string_view textViewFor(u32 index) const noexcept
     {
         if (index >= textStatesByIndex.size())
@@ -4446,7 +4315,7 @@ struct UIContext::Impl final {
         localTextColorCacheByIndex[index] = {};
         clearTextState(index);
         clearSemanticsState(index);
-        releaseCanvasCommands(index);
+        canvasCommandStorage.release(index);
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;
         if (index < dirtyReservedByIndex.size() && dirtyReservedByIndex[index] != 0)
@@ -5408,7 +5277,7 @@ struct UIContext::Impl final {
         {
             return semantics;
         }
-        if (Core::Status canvas = assignCanvasCommands(node.index(), descriptor.visual.canvas); !canvas)
+        if (Core::Status canvas = canvasCommandStorage.assign(node.index(), descriptor.visual.canvas); !canvas)
         {
             return canvas;
         }
@@ -14103,8 +13972,8 @@ struct UIContext::Impl final {
             .hitSnapshotCapacity = capacityConfig.hitSnapshotCapacity,
             .paintSnapshotCapacity = capacityConfig.paintSnapshotCapacity,
             .canvasCommandCapacity = capacityConfig.canvasCommandCapacity,
-            .activeCanvasCommandCount = activeCanvasCommandCount,
-            .canvasCommandHighWater = canvasCommandHighWater,
+            .activeCanvasCommandCount = canvasCommandStorage.activeCount(),
+            .canvasCommandHighWater = canvasCommandStorage.highWater(),
             .routePathCapacity = capacityConfig.routePathCapacity,
             .routedPointerListenerCapacity = capacityConfig.routedPointerListenerCapacity,
             .activeRoutedPointerListenerCount = routedPointerListenerRegistry.activeCount(),
