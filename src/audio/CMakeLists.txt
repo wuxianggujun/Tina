@@ -1,4 +1,5 @@
 set(TINA_AUDIO_PUBLIC_HEADERS
+    ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioClipView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioEngine.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioIds.hpp

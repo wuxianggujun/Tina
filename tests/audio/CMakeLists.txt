@@ -1,4 +1,5 @@
 set(TINA_AUDIO_HEADER_ISOLATION_SOURCES
+    header_isolation/AudioClipViewHeader.cpp
     header_isolation/AudioEngineHeader.cpp
     header_isolation/AudioErrorsHeader.cpp
     header_isolation/AudioIdsHeader.cpp

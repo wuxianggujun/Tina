@@ -2,6 +2,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UI.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIBehavior.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIButton.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UICheckbox.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDropdown.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIListView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITreeView.hpp
@@ -24,6 +25,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIElement.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIEventRouting.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIFocus.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
