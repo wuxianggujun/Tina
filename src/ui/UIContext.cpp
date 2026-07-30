@@ -26,6 +26,8 @@
 #include "detail/UILayoutPrimitives.hpp"
 #include "detail/UIPaintPrimitives.hpp"
 #include "detail/UIPaintSnapshotBuilder.hpp"
+#include "detail/UIPointerRouteInspection.hpp"
+#include "detail/UIPointerRoutePath.hpp"
 #include "detail/UIPropertyNormalization.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UIScrollViewLayout.hpp"
@@ -85,6 +87,7 @@ using Detail::FlexLineSummary;
 using Detail::hasLayoutWork;
 using Detail::horizontalMargin;
 using Detail::intersectRects;
+using Detail::inspectPointerRouteTargets;
 using Detail::isButtonChromeKind;
 using Detail::isDefaultActivatableKind;
 using Detail::isFiniteLayoutRect;
@@ -197,6 +200,7 @@ using Detail::ThemeBindingScrollViewPaint;
 using Detail::ThemeBindingSliderPaint;
 using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
+using Detail::UIPointerRouteInspectionError;
 using Detail::UIPointerRoutePathError;
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
@@ -10248,57 +10252,29 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::CapacityExceeded, "UI Button route serial is exhausted");
         }
 
-        UINodeId nearestButton{};
-        UINodeId nearestSlider{};
-        bool pointWithinArmedButton = false;
-        UINodeId physicalNearestButton{};
-        u32 physicalEntryIndex = result.pointQuery.target.hitEntryIndex;
-        usize physicalDepth = 0;
-        while (physicalEntryIndex < entries.size())
+        const auto routeInspection = inspectPointerRouteTargets(
+            result.pointQuery.target, routePathScratch, entries,
+            armedPrimaryButton,
+            [this](UINodeId node) noexcept { return isNodeEnabled(node); });
+        if (routeInspection.error ==
+            UIPointerRouteInspectionError::PhysicalAncestryCycle)
         {
-            const UICommittedHitEntry& physicalEntry = entries[physicalEntryIndex];
-            if (physicalEntry.node == armedPrimaryButton)
-            {
-                pointWithinArmedButton = true;
-            }
-            if (!physicalNearestButton.hasValue() && isNodeEnabled(physicalEntry.node) &&
-                hasBehavior(physicalEntry.behaviors, UIElementBehavior::Activate))
-            {
-                physicalNearestButton = physicalEntry.node;
-            }
-            if (physicalEntryIndex == result.pointQuery.target.rootEntryIndex)
-            {
-                break;
-            }
-            physicalEntryIndex = physicalEntry.parentEntryIndex;
-            if (++physicalDepth > entries.size())
-            {
-                return fail(Core::CoreErrorCode::Internal, "UI committed physical pointer ancestry contains a cycle");
-            }
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI committed physical pointer ancestry contains a cycle");
         }
-        for (const u32 routeEntryIndex : routePathScratch)
+        if (routeInspection.error ==
+            UIPointerRouteInspectionError::InvalidRouteEntryIndex)
         {
-            if (routeEntryIndex >= entries.size())
-            {
-                routePathScratch.clear();
-                return fail(Core::CoreErrorCode::Internal, "UI committed Button route entry index is invalid");
-            }
-            const UINodeId routeNode = entries[routeEntryIndex].node;
-            if (!nearestButton.hasValue() && isNodeEnabled(routeNode))
-            {
-                if (hasBehavior(entries[routeEntryIndex].behaviors, UIElementBehavior::Activate))
-                {
-                    nearestButton = routeNode;
-                }
-            }
-            if (!nearestSlider.hasValue() && isNodeEnabled(routeNode))
-            {
-                if (hasBehavior(entries[routeEntryIndex].behaviors, UIElementBehavior::RangeInput))
-                {
-                    nearestSlider = routeNode;
-                }
-            }
+            routePathScratch.clear();
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI committed Button route entry index is invalid");
         }
+        const UINodeId nearestButton = routeInspection.routedNearestActivatable;
+        const UINodeId nearestSlider = routeInspection.routedNearestRangeInput;
+        const bool pointWithinArmedButton =
+            routeInspection.pointWithinArmedActivatable;
+        const UINodeId physicalNearestButton =
+            routeInspection.physicalNearestActivatable;
 
         const NodeRecord* nearestButtonRecord =
             nearestButton.hasValue() && contains(nearestButton) ? nodes.tryGet(nearestButton.storageId()) : nullptr;
