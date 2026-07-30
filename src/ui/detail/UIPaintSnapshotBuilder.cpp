@@ -64,7 +64,11 @@ Core::Status UIPaintSnapshotBuilder::build(std::pmr::vector<UICommittedPaintEntr
     {
         if (layoutEntry.effectiveVisibility == UIVisibility::Visible)
         {
-            sourceAdapter.appendEntries(sourceContext, output, layoutEntry, nextPaintOrdinal);
+            if (Core::Status status = sourceAdapter.appendEntries(sourceContext, output, layoutEntry, nextPaintOrdinal);
+                !status)
+            {
+                return status;
+            }
         }
     }
     return Core::success();

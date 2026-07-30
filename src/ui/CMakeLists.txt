@@ -47,6 +47,8 @@ add_library(tina_ui STATIC
     detail/UICommandPressLatch.hpp
     detail/UIControlGeometry.hpp
     detail/UIControlGeometry.cpp
+    detail/UIControlPaintEmitter.hpp
+    detail/UIControlPaintEmitter.cpp
     detail/UIControlValuePrimitives.hpp
     detail/UIContextLifetimeControl.hpp
     detail/UIContextLifetimeControl.cpp

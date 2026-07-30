@@ -13,6 +13,7 @@
 #include "detail/UICanvasCommandStorage.hpp"
 #include "detail/UICommandPressLatch.hpp"
 #include "detail/UIControlGeometry.hpp"
+#include "detail/UIControlPaintEmitter.hpp"
 #include "detail/UIControlValuePrimitives.hpp"
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIElementContractResolver.hpp"
@@ -2238,6 +2239,222 @@ struct UIContext::Impl final {
         });
     }
 
+    [[nodiscard]] Core::Result<Detail::UIControlPaintBatch>
+    resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEntry, bool applyDisabledOpacity) const
+    {
+        Detail::UIControlPaintBatch batch;
+        bool batchCapacityExceeded = false;
+        const auto add = [&](UILogicalRect worldRect, UIPremultipliedRgba8Color color) noexcept {
+            batchCapacityExceeded = !batch.add(worldRect, color) || batchCapacityExceeded;
+        };
+        const auto controlColor = [&](UIStraightSrgba8Color color) noexcept {
+            const UIPremultipliedRgba8Color premultiplied = premultiply(color);
+            return applyDisabledOpacity ? widgetPaintColor(layoutEntry.node, premultiplied) : premultiplied;
+        };
+
+        const u32 nodeIndex = layoutEntry.node.index();
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        if (record != nullptr && record->kind == BuiltinElementKind::Checkbox &&
+            nodeIndex < checkboxCheckedByNodeIndex.size() && nodeIndex < checkboxPaintsByNodeIndex.size() &&
+            checkboxCheckedByNodeIndex[nodeIndex] != 0)
+        {
+            const UICheckboxPaint& paint = checkboxPaintsByNodeIndex[nodeIndex];
+            const float extent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
+            const float inset = paint.checkedIndicatorInset;
+            add(
+                UILogicalRect{
+                    .x = normalizeFloat(layoutEntry.worldRect.x + inset),
+                    .y = normalizeFloat(layoutEntry.worldRect.y + inset),
+                    .width = normalizeFloat(extent - inset * 2.0F),
+                    .height = normalizeFloat(extent - inset * 2.0F),
+                },
+                controlColor(paint.checkedIndicatorColor));
+        } else if (record != nullptr && record->kind == BuiltinElementKind::Slider &&
+                   nodeIndex < sliderStatesByNodeIndex.size())
+        {
+            const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
+            const SliderPaintGeometry geometry = sliderPaintGeometry(layoutEntry.worldRect, slider.minValue,
+                                                                     slider.maxValue, slider.value, slider.paint);
+            if (geometry.fraction > 0.0F)
+            {
+                add(geometry.filledTrack, controlColor(slider.paint.filledTrackColor));
+            }
+            const UIStraightSrgba8Color thumbColor =
+                armedSlider == layoutEntry.node && slider.paint.draggingThumbColor.alpha != 0
+                    ? slider.paint.draggingThumbColor
+                    : slider.paint.thumbColor;
+            add(geometry.thumb, controlColor(thumbColor));
+        } else if (record != nullptr && record->kind == BuiltinElementKind::ScrollView &&
+                   nodeIndex < scrollViewStatesByNodeIndex.size() &&
+                   nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
+        {
+            const ScrollViewState& scroll = scrollViewStatesByNodeIndex[nodeIndex];
+            const ScrollViewLayoutScratch& scrollLayout = scrollViewLayoutScratchByNodeIndex[nodeIndex];
+            const auto addBar = [&](UIScrollAxes axis) noexcept {
+                const ScrollBarGeometry geometry =
+                    makeScrollBarGeometry(scrollLayout.metrics, scrollLayout.viewportRect, scroll.paint, axis);
+                if (!geometry.visible)
+                {
+                    return;
+                }
+                add(geometry.track, controlColor(scroll.paint.trackColor));
+                const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
+                                                                 armedScrollAxis == axis &&
+                                                                 scroll.paint.draggingThumbColor.alpha != 0
+                                                             ? scroll.paint.draggingThumbColor
+                                                             : scroll.paint.thumbColor;
+                add(geometry.thumb, controlColor(thumbColor));
+            };
+            addBar(UIScrollAxes::Horizontal);
+            addBar(UIScrollAxes::Vertical);
+        } else if (record != nullptr && record->kind == BuiltinElementKind::ListView &&
+                   nodeIndex < listViewStatesByNodeIndex.size() && nodeIndex < listViewLayoutScratchByNodeIndex.size())
+        {
+            const ListViewState& list = listViewStatesByNodeIndex[nodeIndex];
+            const ListViewLayoutScratch& listLayout = listViewLayoutScratchByNodeIndex[nodeIndex];
+            const ScrollBarGeometry geometry =
+                makeListViewScrollBarGeometry(listLayout.metrics, listLayout.viewportRect, list.paint.scrollBar);
+            if (geometry.visible)
+            {
+                add(geometry.track, controlColor(list.paint.scrollBar.trackColor));
+                const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
+                                                                 list.paint.scrollBar.draggingThumbColor.alpha != 0
+                                                             ? list.paint.scrollBar.draggingThumbColor
+                                                             : list.paint.scrollBar.thumbColor;
+                add(geometry.thumb, controlColor(thumbColor));
+            }
+        } else if (record != nullptr && record->kind == BuiltinElementKind::TreeView &&
+                   nodeIndex < treeViewStatesByNodeIndex.size() && nodeIndex < treeViewLayoutScratchByNodeIndex.size())
+        {
+            const TreeViewState& tree = treeViewStatesByNodeIndex[nodeIndex];
+            const TreeViewLayoutScratch& treeLayout = treeViewLayoutScratchByNodeIndex[nodeIndex];
+            const ScrollBarGeometry geometry =
+                makeTreeViewScrollBarGeometry(treeLayout.metrics, treeLayout.viewportRect, tree.paint.scrollBar);
+            if (geometry.visible)
+            {
+                add(geometry.track, controlColor(tree.paint.scrollBar.trackColor));
+                const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
+                                                                 tree.paint.scrollBar.draggingThumbColor.alpha != 0
+                                                             ? tree.paint.scrollBar.draggingThumbColor
+                                                             : tree.paint.scrollBar.thumbColor;
+                add(geometry.thumb, controlColor(thumbColor));
+            }
+        } else if (record != nullptr && record->kind == BuiltinElementKind::Dropdown &&
+                   nodeIndex < dropdownStatesByNodeIndex.size())
+        {
+            const UIDropdownPaint& paint = dropdownStatesByNodeIndex[nodeIndex].paint;
+            if (paint.indicatorWidth > 0.0F && paint.indicatorHeight > 0.0F)
+            {
+                constexpr usize StripeCount = 3;
+                const float stripeHeight = paint.indicatorHeight / static_cast<float>(StripeCount);
+                const float centerX =
+                    layoutEntry.worldRect.right() - paint.indicatorInset - paint.indicatorWidth * 0.5F;
+                const float top =
+                    layoutEntry.worldRect.y + (layoutEntry.worldRect.height - paint.indicatorHeight) * 0.5F;
+                const UIPremultipliedRgba8Color color = controlColor(paint.indicatorColor);
+                for (usize stripe = 0; stripe < StripeCount; ++stripe)
+                {
+                    const float width = paint.indicatorWidth * static_cast<float>(StripeCount - stripe) /
+                                        static_cast<float>(StripeCount);
+                    add(
+                        UILogicalRect{
+                            .x = normalizeFloat(centerX - width * 0.5F),
+                            .y = normalizeFloat(top + stripeHeight * static_cast<float>(stripe)),
+                            .width = normalizeFloat(width),
+                            .height = normalizeFloat(stripeHeight),
+                        },
+                        color);
+                }
+            }
+        } else if (record != nullptr && record->kind == BuiltinElementKind::DropdownItem)
+        {
+            add(layoutEntry.worldRect, resolvedDropdownSelectionColor(layoutEntry.node));
+        } else if (record != nullptr && record->kind == BuiltinElementKind::ListViewItem)
+        {
+            add(layoutEntry.worldRect, resolvedListViewSelectionColor(layoutEntry.node));
+        } else if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem &&
+                   nodeIndex < treeViewItemStatesByNodeIndex.size())
+        {
+            add(layoutEntry.worldRect, resolvedTreeViewSelectionColor(layoutEntry.node));
+            const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
+            const UINodeId treeView = treeViewForItem(layoutEntry.node);
+            const UIPremultipliedRgba8Color disclosure = resolvedTreeViewDisclosureColor(layoutEntry.node);
+            if (treeView.hasValue() && !disclosure.isTransparent())
+            {
+                const UITreeViewStyle& style = treeViewStatesByNodeIndex[treeView.index()].style;
+                const UILogicalRect disclosureRect =
+                    makeTreeViewDisclosureRect(layoutEntry.worldRect, style, item.level);
+                const float stroke = normalizeFloat((std::max)(1.0F, disclosureRect.height / 6.0F));
+                add(
+                    UILogicalRect{
+                        .x = disclosureRect.x,
+                        .y = normalizeFloat(disclosureRect.y + (disclosureRect.height - stroke) * 0.5F),
+                        .width = disclosureRect.width,
+                        .height = stroke,
+                    },
+                    disclosure);
+                if (!item.expanded)
+                {
+                    add(
+                        UILogicalRect{
+                            .x = normalizeFloat(disclosureRect.x + (disclosureRect.width - stroke) * 0.5F),
+                            .y = disclosureRect.y,
+                            .width = stroke,
+                            .height = disclosureRect.height,
+                        },
+                        disclosure);
+                }
+            }
+        } else if (record != nullptr && record->kind == BuiltinElementKind::ProgressBar &&
+                   nodeIndex < progressBarStatesByNodeIndex.size())
+        {
+            const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
+            const float fraction = normalizedRangeFraction(progress.value, progress.minValue, progress.maxValue);
+            if (fraction > 0.0F)
+            {
+                add(
+                    UILogicalRect{
+                        .x = layoutEntry.worldRect.x,
+                        .y = layoutEntry.worldRect.y,
+                        .width = normalizeFloat(layoutEntry.worldRect.width * fraction),
+                        .height = layoutEntry.worldRect.height,
+                    },
+                    controlColor(progress.paint.fillColor));
+            }
+        } else if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
+                   nodeIndex < radioButtonStatesByNodeIndex.size())
+        {
+            const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
+            const float extent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
+            add(
+                UILogicalRect{
+                    .x = layoutEntry.worldRect.x,
+                    .y = layoutEntry.worldRect.y,
+                    .width = normalizeFloat(extent),
+                    .height = normalizeFloat(extent),
+                },
+                resolvedRadioIndicatorColor(layoutEntry.node, nodeIndex));
+            if (radio.selected)
+            {
+                const float inset = radio.paint.selectedIndicatorInset;
+                add(
+                    UILogicalRect{
+                        .x = normalizeFloat(layoutEntry.worldRect.x + inset),
+                        .y = normalizeFloat(layoutEntry.worldRect.y + inset),
+                        .width = normalizeFloat(extent - inset * 2.0F),
+                        .height = normalizeFloat(extent - inset * 2.0F),
+                    },
+                    controlColor(radio.paint.selectedIndicatorColor));
+            }
+        }
+
+        if (batchCapacityExceeded)
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI control paint primitive batch capacity has been exhausted");
+        }
+        return batch;
+    }
+
     [[nodiscard]] Core::Result<usize> countPaintEntries(const UICommittedLayoutEntry& layoutEntry) const
     {
         usize paintEntryCount = 0;
@@ -2257,174 +2474,13 @@ struct UIContext::Impl final {
         const UIPremultipliedRgba8Color resolvedFill = resolvedBoxFillColor(layoutEntry.node, nodeIndex, normalColor);
         paintEntryCount += countBoxChromePaintEntries(boxPaint, layoutEntry.worldRect, !resolvedFill.isTransparent());
         paintEntryCount += countCanvasPaintEntries(nodeIndex);
+        auto controlPaintBatch = resolveControlPaintBatch(layoutEntry, false);
+        if (!controlPaintBatch)
+        {
+            return Core::failure(controlPaintBatch.error());
+        }
+        paintEntryCount += controlPaintBatch->size();
         const NodeRecord* record = recordByIndex(nodeIndex);
-        if (record != nullptr && record->kind == BuiltinElementKind::Checkbox &&
-            nodeIndex < checkboxCheckedByNodeIndex.size() && nodeIndex < checkboxPaintsByNodeIndex.size() &&
-            checkboxCheckedByNodeIndex[nodeIndex] != 0)
-        {
-            const UICheckboxPaint& checkboxPaint = checkboxPaintsByNodeIndex[nodeIndex];
-            const float indicatorExtent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
-            if (checkboxPaint.checkedIndicatorColor.alpha != 0 &&
-                indicatorExtent > checkboxPaint.checkedIndicatorInset * 2.0F)
-            {
-                ++paintEntryCount;
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::Slider &&
-            nodeIndex < sliderStatesByNodeIndex.size())
-        {
-            const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
-            const SliderPaintGeometry geometry = sliderPaintGeometry(layoutEntry.worldRect, slider.minValue,
-                                                                     slider.maxValue, slider.value, slider.paint);
-            if (geometry.filledTrack.width > 0.0F && geometry.filledTrack.height > 0.0F && geometry.fraction > 0.0F &&
-                slider.paint.filledTrackColor.alpha != 0)
-            {
-                ++paintEntryCount;
-            }
-            const UIStraightSrgba8Color thumbColor =
-                armedSlider == layoutEntry.node && slider.paint.draggingThumbColor.alpha != 0
-                    ? slider.paint.draggingThumbColor
-                    : slider.paint.thumbColor;
-            if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && thumbColor.alpha != 0)
-            {
-                ++paintEntryCount;
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::ScrollView &&
-            nodeIndex < scrollViewStatesByNodeIndex.size() && nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
-        {
-            const ScrollViewState& scroll = scrollViewStatesByNodeIndex[nodeIndex];
-            const ScrollViewLayoutScratch& scrollLayout = scrollViewLayoutScratchByNodeIndex[nodeIndex];
-            const auto countBar = [&](UIScrollAxes axis) noexcept {
-                const ScrollBarGeometry geometry =
-                    makeScrollBarGeometry(scrollLayout.metrics, scrollLayout.viewportRect, scroll.paint, axis);
-                if (!geometry.visible)
-                {
-                    return;
-                }
-                if (geometry.track.width > 0.0F && geometry.track.height > 0.0F && scroll.paint.trackColor.alpha != 0)
-                {
-                    ++paintEntryCount;
-                }
-                const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
-                                                                 armedScrollAxis == axis &&
-                                                                 scroll.paint.draggingThumbColor.alpha != 0
-                                                             ? scroll.paint.draggingThumbColor
-                                                             : scroll.paint.thumbColor;
-                if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && thumbColor.alpha != 0)
-                {
-                    ++paintEntryCount;
-                }
-            };
-            countBar(UIScrollAxes::Horizontal);
-            countBar(UIScrollAxes::Vertical);
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::ListView &&
-            nodeIndex < listViewStatesByNodeIndex.size() && nodeIndex < listViewLayoutScratchByNodeIndex.size())
-        {
-            const ListViewState& list = listViewStatesByNodeIndex[nodeIndex];
-            const ListViewLayoutScratch& listLayout = listViewLayoutScratchByNodeIndex[nodeIndex];
-            const ScrollBarGeometry geometry =
-                makeListViewScrollBarGeometry(listLayout.metrics, listLayout.viewportRect, list.paint.scrollBar);
-            if (geometry.visible)
-            {
-                if (geometry.track.width > 0.0F && geometry.track.height > 0.0F &&
-                    list.paint.scrollBar.trackColor.alpha != 0)
-                {
-                    ++paintEntryCount;
-                }
-                const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
-                                                                 list.paint.scrollBar.draggingThumbColor.alpha != 0
-                                                             ? list.paint.scrollBar.draggingThumbColor
-                                                             : list.paint.scrollBar.thumbColor;
-                if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && thumbColor.alpha != 0)
-                {
-                    ++paintEntryCount;
-                }
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::TreeView &&
-            nodeIndex < treeViewStatesByNodeIndex.size() && nodeIndex < treeViewLayoutScratchByNodeIndex.size())
-        {
-            const TreeViewState& tree = treeViewStatesByNodeIndex[nodeIndex];
-            const TreeViewLayoutScratch& treeLayout = treeViewLayoutScratchByNodeIndex[nodeIndex];
-            const ScrollBarGeometry geometry =
-                makeTreeViewScrollBarGeometry(treeLayout.metrics, treeLayout.viewportRect, tree.paint.scrollBar);
-            if (geometry.visible)
-            {
-                if (geometry.track.width > 0.0F && geometry.track.height > 0.0F &&
-                    tree.paint.scrollBar.trackColor.alpha != 0)
-                {
-                    ++paintEntryCount;
-                }
-                const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
-                                                                 tree.paint.scrollBar.draggingThumbColor.alpha != 0
-                                                             ? tree.paint.scrollBar.draggingThumbColor
-                                                             : tree.paint.scrollBar.thumbColor;
-                if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && thumbColor.alpha != 0)
-                {
-                    ++paintEntryCount;
-                }
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::Dropdown &&
-            nodeIndex < dropdownStatesByNodeIndex.size())
-        {
-            const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[nodeIndex].paint;
-            if (dropdown.indicatorColor.alpha != 0 && dropdown.indicatorWidth > 0.0F && dropdown.indicatorHeight > 0.0F)
-            {
-                paintEntryCount += 3;
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::DropdownItem &&
-            !resolvedDropdownSelectionColor(layoutEntry.node).isTransparent())
-        {
-            ++paintEntryCount;
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::ListViewItem &&
-            !resolvedListViewSelectionColor(layoutEntry.node).isTransparent())
-        {
-            ++paintEntryCount;
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem)
-        {
-            if (!resolvedTreeViewSelectionColor(layoutEntry.node).isTransparent())
-            {
-                ++paintEntryCount;
-            }
-            const UIPremultipliedRgba8Color disclosure = resolvedTreeViewDisclosureColor(layoutEntry.node);
-            if (!disclosure.isTransparent())
-            {
-                const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
-                paintEntryCount += item.expanded ? 1U : 2U;
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::ProgressBar &&
-            nodeIndex < progressBarStatesByNodeIndex.size())
-        {
-            const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
-            const float fraction = normalizedRangeFraction(progress.value, progress.minValue, progress.maxValue);
-            if (fraction > 0.0F && progress.paint.fillColor.alpha != 0 && layoutEntry.worldRect.width > 0.0F &&
-                layoutEntry.worldRect.height > 0.0F)
-            {
-                ++paintEntryCount;
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
-            nodeIndex < radioButtonStatesByNodeIndex.size())
-        {
-            const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
-            const float indicatorExtent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
-            const float inset = radio.paint.selectedIndicatorInset;
-            if (!resolvedRadioIndicatorColor(layoutEntry.node, nodeIndex).isTransparent() && indicatorExtent > 0.0F)
-            {
-                ++paintEntryCount;
-            }
-            if (radio.selected && radio.paint.selectedIndicatorColor.alpha != 0 && indicatorExtent > inset * 2.0F)
-            {
-                ++paintEntryCount;
-            }
-        }
         const bool focusedTextEdit = record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
                                      isNodeEnabled(layoutEntry.node) && textInputFocus == layoutEntry.node &&
                                      isLiveTextEdit(textInputFocus);
@@ -2853,8 +2909,8 @@ struct UIContext::Impl final {
         }
     }
 
-    void appendPaintEntries(std::pmr::vector<UICommittedPaintEntry>& output, const UICommittedLayoutEntry& layoutEntry,
-                            u32& nextPaintOrdinal) noexcept
+    [[nodiscard]] Core::Status appendPaintEntries(std::pmr::vector<UICommittedPaintEntry>& output,
+                                                  const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal)
     {
         const u32 nodeIndex = layoutEntry.node.index();
         const UIBoxPaint boxPaint = resolvedBoxChrome(layoutEntry.node, nodeIndex);
@@ -2863,381 +2919,14 @@ struct UIContext::Impl final {
         appendBoxChromePaints(output, layoutEntry.node, layoutEntry.worldRect, layoutEntry.effectiveClip,
                               nextPaintOrdinal, boxPaint, fill);
         appendCanvasPaints(output, layoutEntry, nextPaintOrdinal);
-        const NodeRecord* record = recordByIndex(nodeIndex);
-        if (record != nullptr && record->kind == BuiltinElementKind::Checkbox &&
-            nodeIndex < checkboxCheckedByNodeIndex.size() && nodeIndex < checkboxPaintsByNodeIndex.size() &&
-            checkboxCheckedByNodeIndex[nodeIndex] != 0)
+        auto controlPaintBatch = resolveControlPaintBatch(layoutEntry, true);
+        if (!controlPaintBatch)
         {
-            const UICheckboxPaint& checkboxPaint = checkboxPaintsByNodeIndex[nodeIndex];
-            const float indicatorExtent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
-            const float inset = checkboxPaint.checkedIndicatorInset;
-            const UIPremultipliedRgba8Color indicator =
-                widgetPaintColor(layoutEntry.node, premultiply(checkboxPaint.checkedIndicatorColor));
-            if (!indicator.isTransparent() && indicatorExtent > inset * 2.0F)
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect =
-                        UILogicalRect{
-                            .x = normalizeFloat(layoutEntry.worldRect.x + inset),
-                            .y = normalizeFloat(layoutEntry.worldRect.y + inset),
-                            .width = normalizeFloat(indicatorExtent - inset * 2.0F),
-                            .height = normalizeFloat(indicatorExtent - inset * 2.0F),
-                        },
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal,
-                    .solidFill = indicator,
-                });
-                ++nextPaintOrdinal;
-            }
+            return Core::failure(controlPaintBatch.error());
         }
-        if (record != nullptr && record->kind == BuiltinElementKind::Slider &&
-            nodeIndex < sliderStatesByNodeIndex.size())
-        {
-            const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
-            const SliderPaintGeometry geometry = sliderPaintGeometry(layoutEntry.worldRect, slider.minValue,
-                                                                     slider.maxValue, slider.value, slider.paint);
-            const UIPremultipliedRgba8Color filledTrack =
-                widgetPaintColor(layoutEntry.node, premultiply(slider.paint.filledTrackColor));
-            if (geometry.filledTrack.width > 0.0F && geometry.filledTrack.height > 0.0F && geometry.fraction > 0.0F &&
-                !filledTrack.isTransparent())
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect = geometry.filledTrack,
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal,
-                    .solidFill = filledTrack,
-                });
-                ++nextPaintOrdinal;
-            }
-            const UIStraightSrgba8Color thumbSource =
-                armedSlider == layoutEntry.node && slider.paint.draggingThumbColor.alpha != 0
-                    ? slider.paint.draggingThumbColor
-                    : slider.paint.thumbColor;
-            const UIPremultipliedRgba8Color thumb = widgetPaintColor(layoutEntry.node, premultiply(thumbSource));
-            if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && !thumb.isTransparent())
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect = geometry.thumb,
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal,
-                    .solidFill = thumb,
-                });
-                ++nextPaintOrdinal;
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::ScrollView &&
-            nodeIndex < scrollViewStatesByNodeIndex.size() && nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
-        {
-            const ScrollViewState& scroll = scrollViewStatesByNodeIndex[nodeIndex];
-            const ScrollViewLayoutScratch& scrollLayout = scrollViewLayoutScratchByNodeIndex[nodeIndex];
-            const auto appendBar = [&](UIScrollAxes axis) noexcept {
-                const ScrollBarGeometry geometry =
-                    makeScrollBarGeometry(scrollLayout.metrics, scrollLayout.viewportRect, scroll.paint, axis);
-                if (!geometry.visible)
-                {
-                    return;
-                }
-                const UIPremultipliedRgba8Color track =
-                    widgetPaintColor(layoutEntry.node, premultiply(scroll.paint.trackColor));
-                if (geometry.track.width > 0.0F && geometry.track.height > 0.0F && !track.isTransparent())
-                {
-                    output.push_back(UICommittedPaintEntry{
-                        .node = layoutEntry.node,
-                        .worldRect = geometry.track,
-                        .effectiveClip = layoutEntry.effectiveClip,
-                        .paintOrdinal = nextPaintOrdinal++,
-                        .solidFill = track,
-                    });
-                }
-                const UIStraightSrgba8Color thumbSource =
-                    scrollThumbDragActive && armedScrollView == layoutEntry.node && armedScrollAxis == axis &&
-                            scroll.paint.draggingThumbColor.alpha != 0
-                        ? scroll.paint.draggingThumbColor
-                        : scroll.paint.thumbColor;
-                const UIPremultipliedRgba8Color thumbColor =
-                    widgetPaintColor(layoutEntry.node, premultiply(thumbSource));
-                if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && !thumbColor.isTransparent())
-                {
-                    output.push_back(UICommittedPaintEntry{
-                        .node = layoutEntry.node,
-                        .worldRect = geometry.thumb,
-                        .effectiveClip = layoutEntry.effectiveClip,
-                        .paintOrdinal = nextPaintOrdinal++,
-                        .solidFill = thumbColor,
-                    });
-                }
-            };
-            appendBar(UIScrollAxes::Horizontal);
-            appendBar(UIScrollAxes::Vertical);
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::ListView &&
-            nodeIndex < listViewStatesByNodeIndex.size() && nodeIndex < listViewLayoutScratchByNodeIndex.size())
-        {
-            const ListViewState& list = listViewStatesByNodeIndex[nodeIndex];
-            const ListViewLayoutScratch& listLayout = listViewLayoutScratchByNodeIndex[nodeIndex];
-            const ScrollBarGeometry geometry =
-                makeListViewScrollBarGeometry(listLayout.metrics, listLayout.viewportRect, list.paint.scrollBar);
-            if (geometry.visible)
-            {
-                const UIPremultipliedRgba8Color track =
-                    widgetPaintColor(layoutEntry.node, premultiply(list.paint.scrollBar.trackColor));
-                if (geometry.track.width > 0.0F && geometry.track.height > 0.0F && !track.isTransparent())
-                {
-                    output.push_back(UICommittedPaintEntry{
-                        .node = layoutEntry.node,
-                        .worldRect = geometry.track,
-                        .effectiveClip = layoutEntry.effectiveClip,
-                        .paintOrdinal = nextPaintOrdinal++,
-                        .solidFill = track,
-                    });
-                }
-                const UIStraightSrgba8Color thumbSource = scrollThumbDragActive &&
-                                                                  armedScrollView == layoutEntry.node &&
-                                                                  list.paint.scrollBar.draggingThumbColor.alpha != 0
-                                                              ? list.paint.scrollBar.draggingThumbColor
-                                                              : list.paint.scrollBar.thumbColor;
-                const UIPremultipliedRgba8Color thumb = widgetPaintColor(layoutEntry.node, premultiply(thumbSource));
-                if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && !thumb.isTransparent())
-                {
-                    output.push_back(UICommittedPaintEntry{
-                        .node = layoutEntry.node,
-                        .worldRect = geometry.thumb,
-                        .effectiveClip = layoutEntry.effectiveClip,
-                        .paintOrdinal = nextPaintOrdinal++,
-                        .solidFill = thumb,
-                    });
-                }
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::TreeView &&
-            nodeIndex < treeViewStatesByNodeIndex.size() && nodeIndex < treeViewLayoutScratchByNodeIndex.size())
-        {
-            const TreeViewState& tree = treeViewStatesByNodeIndex[nodeIndex];
-            const TreeViewLayoutScratch& treeLayout = treeViewLayoutScratchByNodeIndex[nodeIndex];
-            const ScrollBarGeometry geometry =
-                makeTreeViewScrollBarGeometry(treeLayout.metrics, treeLayout.viewportRect, tree.paint.scrollBar);
-            if (geometry.visible)
-            {
-                const UIPremultipliedRgba8Color track =
-                    widgetPaintColor(layoutEntry.node, premultiply(tree.paint.scrollBar.trackColor));
-                if (geometry.track.width > 0.0F && geometry.track.height > 0.0F && !track.isTransparent())
-                {
-                    output.push_back(UICommittedPaintEntry{
-                        .node = layoutEntry.node,
-                        .worldRect = geometry.track,
-                        .effectiveClip = layoutEntry.effectiveClip,
-                        .paintOrdinal = nextPaintOrdinal++,
-                        .solidFill = track,
-                    });
-                }
-                const UIStraightSrgba8Color thumbSource = scrollThumbDragActive &&
-                                                                  armedScrollView == layoutEntry.node &&
-                                                                  tree.paint.scrollBar.draggingThumbColor.alpha != 0
-                                                              ? tree.paint.scrollBar.draggingThumbColor
-                                                              : tree.paint.scrollBar.thumbColor;
-                const UIPremultipliedRgba8Color thumb = widgetPaintColor(layoutEntry.node, premultiply(thumbSource));
-                if (geometry.thumb.width > 0.0F && geometry.thumb.height > 0.0F && !thumb.isTransparent())
-                {
-                    output.push_back(UICommittedPaintEntry{
-                        .node = layoutEntry.node,
-                        .worldRect = geometry.thumb,
-                        .effectiveClip = layoutEntry.effectiveClip,
-                        .paintOrdinal = nextPaintOrdinal++,
-                        .solidFill = thumb,
-                    });
-                }
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::Dropdown &&
-            nodeIndex < dropdownStatesByNodeIndex.size())
-        {
-            const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[nodeIndex].paint;
-            const UIPremultipliedRgba8Color indicator =
-                widgetPaintColor(layoutEntry.node, premultiply(dropdown.indicatorColor));
-            if (!indicator.isTransparent() && dropdown.indicatorWidth > 0.0F && dropdown.indicatorHeight > 0.0F)
-            {
-                constexpr usize StripeCount = 3;
-                const float stripeHeight = dropdown.indicatorHeight / static_cast<float>(StripeCount);
-                const float centerX =
-                    layoutEntry.worldRect.right() - dropdown.indicatorInset - dropdown.indicatorWidth * 0.5F;
-                const float top =
-                    layoutEntry.worldRect.y + (layoutEntry.worldRect.height - dropdown.indicatorHeight) * 0.5F;
-                for (usize stripe = 0; stripe < StripeCount; ++stripe)
-                {
-                    const float width = dropdown.indicatorWidth * static_cast<float>(StripeCount - stripe) /
-                                        static_cast<float>(StripeCount);
-                    output.push_back(UICommittedPaintEntry{
-                        .node = layoutEntry.node,
-                        .worldRect =
-                            UILogicalRect{
-                                .x = normalizeFloat(centerX - width * 0.5F),
-                                .y = normalizeFloat(top + stripeHeight * static_cast<float>(stripe)),
-                                .width = normalizeFloat(width),
-                                .height = normalizeFloat(stripeHeight),
-                            },
-                        .effectiveClip = layoutEntry.effectiveClip,
-                        .paintOrdinal = nextPaintOrdinal++,
-                        .solidFill = indicator,
-                    });
-                }
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::DropdownItem)
-        {
-            const UIPremultipliedRgba8Color selection = resolvedDropdownSelectionColor(layoutEntry.node);
-            if (!selection.isTransparent())
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect = layoutEntry.worldRect,
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal++,
-                    .solidFill = selection,
-                });
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::ListViewItem)
-        {
-            const UIPremultipliedRgba8Color selection = resolvedListViewSelectionColor(layoutEntry.node);
-            if (!selection.isTransparent())
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect = layoutEntry.worldRect,
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal++,
-                    .solidFill = selection,
-                });
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem &&
-            nodeIndex < treeViewItemStatesByNodeIndex.size())
-        {
-            const UIPremultipliedRgba8Color selection = resolvedTreeViewSelectionColor(layoutEntry.node);
-            if (!selection.isTransparent())
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect = layoutEntry.worldRect,
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal++,
-                    .solidFill = selection,
-                });
-            }
-            const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
-            const UINodeId treeView = treeViewForItem(layoutEntry.node);
-            const UIPremultipliedRgba8Color disclosure = resolvedTreeViewDisclosureColor(layoutEntry.node);
-            if (treeView.hasValue() && !disclosure.isTransparent())
-            {
-                const UITreeViewStyle& style = treeViewStatesByNodeIndex[treeView.index()].style;
-                const UILogicalRect disclosureRect =
-                    makeTreeViewDisclosureRect(layoutEntry.worldRect, style, item.level);
-                const float stroke = normalizeFloat((std::max)(1.0F, disclosureRect.height / 6.0F));
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect =
-                        UILogicalRect{
-                            .x = disclosureRect.x,
-                            .y = normalizeFloat(disclosureRect.y + (disclosureRect.height - stroke) * 0.5F),
-                            .width = disclosureRect.width,
-                            .height = stroke,
-                        },
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal++,
-                    .solidFill = disclosure,
-                });
-                if (!item.expanded)
-                {
-                    output.push_back(UICommittedPaintEntry{
-                        .node = layoutEntry.node,
-                        .worldRect =
-                            UILogicalRect{
-                                .x = normalizeFloat(disclosureRect.x + (disclosureRect.width - stroke) * 0.5F),
-                                .y = disclosureRect.y,
-                                .width = stroke,
-                                .height = disclosureRect.height,
-                            },
-                        .effectiveClip = layoutEntry.effectiveClip,
-                        .paintOrdinal = nextPaintOrdinal++,
-                        .solidFill = disclosure,
-                    });
-                }
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::ProgressBar &&
-            nodeIndex < progressBarStatesByNodeIndex.size())
-        {
-            const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
-            const float fraction = normalizedRangeFraction(progress.value, progress.minValue, progress.maxValue);
-            const UIPremultipliedRgba8Color progressFill =
-                widgetPaintColor(layoutEntry.node, premultiply(progress.paint.fillColor));
-            if (fraction > 0.0F && !progressFill.isTransparent() && layoutEntry.worldRect.width > 0.0F &&
-                layoutEntry.worldRect.height > 0.0F)
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect =
-                        UILogicalRect{
-                            .x = layoutEntry.worldRect.x,
-                            .y = layoutEntry.worldRect.y,
-                            .width = normalizeFloat(layoutEntry.worldRect.width * fraction),
-                            .height = layoutEntry.worldRect.height,
-                        },
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal,
-                    .solidFill = progressFill,
-                });
-                ++nextPaintOrdinal;
-            }
-        }
-        if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
-            nodeIndex < radioButtonStatesByNodeIndex.size())
-        {
-            const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
-            const float indicatorExtent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
-            const float inset = radio.paint.selectedIndicatorInset;
-            const UIPremultipliedRgba8Color indicatorTrack = resolvedRadioIndicatorColor(layoutEntry.node, nodeIndex);
-            const UIPremultipliedRgba8Color indicator =
-                widgetPaintColor(layoutEntry.node, premultiply(radio.paint.selectedIndicatorColor));
-            if (!indicatorTrack.isTransparent() && indicatorExtent > 0.0F)
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect =
-                        UILogicalRect{
-                            .x = layoutEntry.worldRect.x,
-                            .y = layoutEntry.worldRect.y,
-                            .width = normalizeFloat(indicatorExtent),
-                            .height = normalizeFloat(indicatorExtent),
-                        },
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal,
-                    .solidFill = indicatorTrack,
-                });
-                ++nextPaintOrdinal;
-            }
-            if (radio.selected && !indicator.isTransparent() && indicatorExtent > inset * 2.0F)
-            {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect =
-                        UILogicalRect{
-                            .x = normalizeFloat(layoutEntry.worldRect.x + inset),
-                            .y = normalizeFloat(layoutEntry.worldRect.y + inset),
-                            .width = normalizeFloat(indicatorExtent - inset * 2.0F),
-                            .height = normalizeFloat(indicatorExtent - inset * 2.0F),
-                        },
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal,
-                    .solidFill = indicator,
-                });
-                ++nextPaintOrdinal;
-            }
-        }
+        controlPaintBatch->appendTo(output, layoutEntry.node, layoutEntry.effectiveClip, nextPaintOrdinal);
         appendTextGlyphPaints(output, layoutEntry, nextPaintOrdinal);
+        return Core::success();
     }
 
     [[nodiscard]] static constexpr Detail::UIPaintSnapshotSourceAdapter paintSnapshotSourceAdapter() noexcept
@@ -3246,11 +2935,10 @@ struct UIContext::Impl final {
             .countEntries = [](const void* context, const UICommittedLayoutEntry& layoutEntry) -> Core::Result<usize> {
                 return static_cast<const Impl*>(context)->countPaintEntries(layoutEntry);
             },
-            .appendEntries =
-                [](void* context, std::pmr::vector<UICommittedPaintEntry>& output,
-                   const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) noexcept {
-                    static_cast<Impl*>(context)->appendPaintEntries(output, layoutEntry, nextPaintOrdinal);
-                },
+            .appendEntries = [](void* context, std::pmr::vector<UICommittedPaintEntry>& output,
+                                const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) -> Core::Status {
+                return static_cast<Impl*>(context)->appendPaintEntries(output, layoutEntry, nextPaintOrdinal);
+            },
         };
     }
 

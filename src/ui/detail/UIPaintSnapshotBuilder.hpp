@@ -13,8 +13,8 @@ namespace Tina::UI::Detail {
 
 struct UIPaintSnapshotSourceAdapter final {
     using CountEntries = Core::Result<usize> (*)(const void* context, const UICommittedLayoutEntry& layoutEntry);
-    using AppendEntries = void (*)(void* context, std::pmr::vector<UICommittedPaintEntry>& output,
-                                   const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) noexcept;
+    using AppendEntries = Core::Status (*)(void* context, std::pmr::vector<UICommittedPaintEntry>& output,
+                                           const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal);
 
     CountEntries countEntries = nullptr;
     AppendEntries appendEntries = nullptr;

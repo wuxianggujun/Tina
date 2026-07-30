@@ -28,8 +28,8 @@ struct PaintSnapshotSource final {
     return static_cast<usize>(layoutEntry.worldRect.width);
 }
 
-void appendEntries(void* context, std::pmr::vector<UI::UICommittedPaintEntry>& output,
-                   const UI::UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) noexcept
+Core::Status appendEntries(void* context, std::pmr::vector<UI::UICommittedPaintEntry>& output,
+                           const UI::UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal)
 {
     auto& source = *static_cast<PaintSnapshotSource*>(context);
     ++source.appendCallCount;
@@ -43,6 +43,7 @@ void appendEntries(void* context, std::pmr::vector<UI::UICommittedPaintEntry>& o
             .paintOrdinal = nextPaintOrdinal++,
         });
     }
+    return Core::success();
 }
 
 constexpr UI::Detail::UIPaintSnapshotSourceAdapter PaintSourceAdapter{

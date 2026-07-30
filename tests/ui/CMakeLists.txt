@@ -11,6 +11,7 @@ add_executable(tina_ui_tests
     UICheckboxTests.cpp
     UICommandPressLatchTests.cpp
     UIControlGeometryTests.cpp
+    UIControlPaintEmitterTests.cpp
     UIControlValuePrimitivesTests.cpp
     UIContextLifetimeControlTests.cpp
     UIDefaultActionPressStateTests.cpp
