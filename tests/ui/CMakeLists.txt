@@ -47,6 +47,9 @@ add_executable(tina_ui_tests
     UIImeCompositionStateTests.cpp
     UITextTests.cpp
     UITextStorageTests.cpp
+    UITextEditTestSupport.hpp
+    UITextEditCapacityTests.cpp
+    UITextEditInteractionTests.cpp
     UITextEditTests.cpp
     UITextEditModelTests.cpp
     UITextRasterizerTests.cpp
