@@ -48,6 +48,8 @@ add_library(tina_ui STATIC
     detail/UIControlValuePrimitives.hpp
     detail/UIContextLifetimeControl.hpp
     detail/UIContextLifetimeControl.cpp
+    detail/UIElementContractResolver.hpp
+    detail/UIElementContractResolver.cpp
     detail/UIDefaultActionPressState.hpp
     detail/UIDefaultActionPressState.cpp
     detail/UIImeCompositionState.hpp

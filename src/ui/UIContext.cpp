@@ -14,6 +14,7 @@
 #include "detail/UIControlGeometry.hpp"
 #include "detail/UIControlValuePrimitives.hpp"
 #include "detail/UIContextLifetimeControl.hpp"
+#include "detail/UIElementContractResolver.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIImeCompositionState.hpp"
 #include "detail/UIInputPrimitives.hpp"
@@ -62,7 +63,10 @@ using Detail::containsLineBreak;
 using Detail::containsPointHalfOpen;
 using Detail::countBoxChromePaintEntries;
 using Detail::countDrawableTextCodepoints;
+using Detail::defaultBehaviorsForKind;
 using Detail::defaultContentAlignment;
+using Detail::defaultSemanticsForKind;
+using Detail::defaultStyleRoleForKind;
 using Detail::DropdownState;
 using Detail::flexBaseMainSize;
 using Detail::hasLayoutWork;
@@ -115,6 +119,7 @@ using Detail::quantizeSliderValue;
 using Detail::ResolvedLength;
 using Detail::resolveInset;
 using Detail::resolveContentPlacement;
+using Detail::resolveElementBuiltinKind;
 using Detail::resolvedItemAlignment;
 using Detail::resolveLength;
 using Detail::resolveLengthNoFallbackCount;
@@ -144,6 +149,7 @@ using Detail::TreeViewItemState;
 using Detail::TreeViewLayoutScratch;
 using Detail::TreeViewState;
 using Detail::utf8ByteOffsetForCodepoint;
+using Detail::validateSemanticsContract;
 using Detail::verticalMargin;
 using Detail::WidgetTextState;
 using Detail::findHitEntryIndex;
@@ -247,284 +253,6 @@ struct CommittedHitBuildResult final {
     return Core::failure(makeError(code, message, location));
 }
 
-[[nodiscard]] bool isValidSemanticsMode(UISemanticsMode mode) noexcept
-{
-    return mode >= UISemanticsMode::Automatic && mode <= UISemanticsMode::Exclude;
-}
-
-[[nodiscard]] bool isValidSemanticsRole(UISemanticsRole role) noexcept
-{
-    return role >= UISemanticsRole::Group && role <= UISemanticsRole::TreeItem;
-}
-
-[[nodiscard]] bool isValidSemanticsActions(UISemanticsAction actions) noexcept
-{
-    constexpr u8 AllActions = static_cast<u8>(UISemanticsAction::Focus) |
-                              static_cast<u8>(UISemanticsAction::Activate) |
-                              static_cast<u8>(UISemanticsAction::Toggle) |
-                              static_cast<u8>(UISemanticsAction::SetRangeValue) |
-                              static_cast<u8>(UISemanticsAction::SetTextValue);
-    return (static_cast<u8>(actions) & static_cast<u8>(~AllActions)) == 0;
-}
-
-[[nodiscard]] bool isValidElementBehaviors(UIElementBehavior behaviors) noexcept
-{
-    constexpr u32 AllBehaviors = (1U << 16U) - 1U;
-    return (static_cast<u32>(behaviors) & ~AllBehaviors) == 0;
-}
-
-[[nodiscard]] Core::Result<BuiltinElementKind> elementBuiltinKind(const UIElementDescriptor& descriptor)
-{
-    const bool hasText = descriptor.text.has_value();
-    const auto requireText = [hasText](BuiltinElementKind kind) -> Core::Result<BuiltinElementKind> {
-        if (!hasText)
-        {
-            return fail(UIErrorCode::InvalidElementDescriptor,
-                        "UI element behavior requires intrinsic text content");
-        }
-        return kind;
-    };
-    const auto rejectText = [hasText](BuiltinElementKind kind) -> Core::Result<BuiltinElementKind> {
-        if (hasText)
-        {
-            return fail(UIErrorCode::InvalidElementDescriptor,
-                        "UI element behavior does not accept intrinsic text content");
-        }
-        return kind;
-    };
-
-    if (!isValidElementBehaviors(descriptor.behaviors))
-    {
-        return fail(UIErrorCode::InvalidElementDescriptor, "UI element behaviors contain an unknown capability");
-    }
-
-    const auto specialized = static_cast<UIElementBehavior>(
-        static_cast<u32>(descriptor.behaviors) & ~static_cast<u32>(UIElementBehavior::Focusable));
-    if (specialized == UIElementBehavior::None)
-    {
-        return hasText ? BuiltinElementKind::Label : BuiltinElementKind::Panel;
-    }
-    if (specialized == UIElementBehavior::Activate)
-    {
-        return requireText(BuiltinElementKind::Button);
-    }
-    if (specialized == (UIElementBehavior::Activate | UIElementBehavior::Toggle))
-    {
-        return rejectText(BuiltinElementKind::Checkbox);
-    }
-    if (specialized == UIElementBehavior::RangeInput)
-    {
-        return rejectText(BuiltinElementKind::Slider);
-    }
-    if (specialized == UIElementBehavior::TextInput)
-    {
-        return requireText(BuiltinElementKind::TextEdit);
-    }
-    if (specialized == UIElementBehavior::ProgressValue)
-    {
-        return rejectText(BuiltinElementKind::ProgressBar);
-    }
-    if (specialized == (UIElementBehavior::Activate | UIElementBehavior::ExclusiveChoice))
-    {
-        return requireText(BuiltinElementKind::RadioButton);
-    }
-    if (specialized == UIElementBehavior::ModalBarrier)
-    {
-        return rejectText(BuiltinElementKind::Modal);
-    }
-    if (specialized == UIElementBehavior::Scroll)
-    {
-        return rejectText(BuiltinElementKind::ScrollView);
-    }
-    if (specialized == (UIElementBehavior::Activate | UIElementBehavior::Select))
-    {
-        return requireText(BuiltinElementKind::Dropdown);
-    }
-    if (specialized == UIElementBehavior::Popup)
-    {
-        if (descriptor.layout.placement != UILayoutPlacement::Overlay)
-        {
-            return fail(UIErrorCode::InvalidElementDescriptor,
-                        "UI Popup elements require Overlay placement");
-        }
-        return rejectText(BuiltinElementKind::Popup);
-    }
-    if (specialized == (UIElementBehavior::Activate | UIElementBehavior::SelectOption))
-    {
-        return requireText(BuiltinElementKind::DropdownItem);
-    }
-    if (specialized == UIElementBehavior::VirtualList)
-    {
-        return rejectText(BuiltinElementKind::ListView);
-    }
-    if (specialized == UIElementBehavior::VirtualTree)
-    {
-        return rejectText(BuiltinElementKind::TreeView);
-    }
-    return fail(UIErrorCode::InvalidElementDescriptor,
-                "UI element behavior composition has no retained built-in storage contract");
-}
-
-[[nodiscard]] constexpr UIElementBehavior defaultBehaviorsFor(BuiltinElementKind kind) noexcept
-{
-    switch (kind)
-    {
-    case BuiltinElementKind::Button:
-        return UIElementBehavior::Focusable | UIElementBehavior::Activate;
-    case BuiltinElementKind::Checkbox:
-        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::Toggle;
-    case BuiltinElementKind::Slider:
-        return UIElementBehavior::Focusable | UIElementBehavior::RangeInput;
-    case BuiltinElementKind::TextEdit:
-        return UIElementBehavior::Focusable | UIElementBehavior::TextInput;
-    case BuiltinElementKind::ProgressBar:
-        return UIElementBehavior::ProgressValue;
-    case BuiltinElementKind::RadioButton:
-        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::ExclusiveChoice;
-    case BuiltinElementKind::Modal:
-        return UIElementBehavior::ModalBarrier;
-    case BuiltinElementKind::ScrollView:
-        return UIElementBehavior::Scroll;
-    case BuiltinElementKind::Dropdown:
-        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::Select;
-    case BuiltinElementKind::Popup:
-        return UIElementBehavior::Popup;
-    case BuiltinElementKind::DropdownItem:
-        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::SelectOption;
-    case BuiltinElementKind::ListView:
-        return UIElementBehavior::Focusable | UIElementBehavior::VirtualList;
-    case BuiltinElementKind::ListViewItem:
-        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::VirtualListItem;
-    case BuiltinElementKind::TreeView:
-        return UIElementBehavior::Focusable | UIElementBehavior::VirtualTree;
-    case BuiltinElementKind::TreeViewItem:
-        return UIElementBehavior::Focusable | UIElementBehavior::Activate | UIElementBehavior::VirtualTreeItem;
-    case BuiltinElementKind::Root:
-    case BuiltinElementKind::Panel:
-    case BuiltinElementKind::Label:
-        return UIElementBehavior::None;
-    }
-    return UIElementBehavior::None;
-}
-
-[[nodiscard]] constexpr UIStyleRoleId defaultStyleRoleFor(BuiltinElementKind kind) noexcept
-{
-    switch (kind)
-    {
-    case BuiltinElementKind::Label:
-        return UIStyleRoleId::TextBody;
-    case BuiltinElementKind::Button:
-        return UIStyleRoleId::ButtonPrimary;
-    case BuiltinElementKind::Checkbox:
-        return UIStyleRoleId::Checkbox;
-    case BuiltinElementKind::Slider:
-        return UIStyleRoleId::Slider;
-    case BuiltinElementKind::TextEdit:
-        return UIStyleRoleId::TextInput;
-    case BuiltinElementKind::ProgressBar:
-        return UIStyleRoleId::ProgressBar;
-    case BuiltinElementKind::RadioButton:
-        return UIStyleRoleId::RadioButton;
-    case BuiltinElementKind::Modal:
-        return UIStyleRoleId::ModalSurface;
-    case BuiltinElementKind::ScrollView:
-        return UIStyleRoleId::ScrollView;
-    case BuiltinElementKind::Dropdown:
-        return UIStyleRoleId::Dropdown;
-    case BuiltinElementKind::Popup:
-        return UIStyleRoleId::PopupSurface;
-    case BuiltinElementKind::DropdownItem:
-    case BuiltinElementKind::ListViewItem:
-    case BuiltinElementKind::TreeViewItem:
-        return UIStyleRoleId::CollectionItem;
-    case BuiltinElementKind::ListView:
-        return UIStyleRoleId::ListView;
-    case BuiltinElementKind::TreeView:
-        return UIStyleRoleId::TreeView;
-    case BuiltinElementKind::Root:
-    case BuiltinElementKind::Panel:
-        return UIStyleRoleId::None;
-    }
-    return UIStyleRoleId::None;
-}
-
-[[nodiscard]] constexpr SemanticsState defaultSemanticsFor(BuiltinElementKind kind) noexcept
-{
-    SemanticsState state{};
-    state.mode = UISemanticsMode::Publish;
-    switch (kind)
-    {
-    case BuiltinElementKind::Root:
-    case BuiltinElementKind::Panel:
-        state.mode = UISemanticsMode::Automatic;
-        break;
-    case BuiltinElementKind::Label:
-        state.role = UISemanticsRole::Label;
-        state.useContentAsName = true;
-        state.readOnly = true;
-        break;
-    case BuiltinElementKind::Button:
-        state.role = UISemanticsRole::Button;
-        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
-        state.useContentAsName = true;
-        break;
-    case BuiltinElementKind::Checkbox:
-        state.role = UISemanticsRole::Checkbox;
-        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate | UISemanticsAction::Toggle;
-        break;
-    case BuiltinElementKind::Slider:
-        state.role = UISemanticsRole::Slider;
-        state.actions = UISemanticsAction::Focus | UISemanticsAction::SetRangeValue;
-        break;
-    case BuiltinElementKind::TextEdit:
-        state.role = UISemanticsRole::TextEdit;
-        state.actions = UISemanticsAction::Focus | UISemanticsAction::SetTextValue;
-        break;
-    case BuiltinElementKind::ProgressBar:
-        state.role = UISemanticsRole::ProgressBar;
-        state.readOnly = true;
-        break;
-    case BuiltinElementKind::RadioButton:
-        state.role = UISemanticsRole::RadioButton;
-        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate | UISemanticsAction::Toggle;
-        state.useContentAsName = true;
-        break;
-    case BuiltinElementKind::Modal:
-        state.role = UISemanticsRole::Dialog;
-        break;
-    case BuiltinElementKind::ScrollView:
-        state.role = UISemanticsRole::ScrollView;
-        break;
-    case BuiltinElementKind::Dropdown:
-        state.role = UISemanticsRole::ComboBox;
-        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
-        state.useContentAsName = true;
-        break;
-    case BuiltinElementKind::Popup:
-        state.role = UISemanticsRole::List;
-        break;
-    case BuiltinElementKind::DropdownItem:
-    case BuiltinElementKind::ListViewItem:
-        state.role = UISemanticsRole::ListItem;
-        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
-        state.useContentAsName = true;
-        break;
-    case BuiltinElementKind::ListView:
-        state.role = UISemanticsRole::List;
-        state.actions = UISemanticsAction::Focus;
-        break;
-    case BuiltinElementKind::TreeView:
-        state.role = UISemanticsRole::Tree;
-        state.actions = UISemanticsAction::Focus;
-        break;
-    case BuiltinElementKind::TreeViewItem:
-        state.role = UISemanticsRole::TreeItem;
-        state.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
-        state.useContentAsName = true;
-        break;
-    }
-    return state;
-}
 
 
 } // namespace
@@ -5700,11 +5428,18 @@ struct UIContext::Impl final {
         resetNodeSideData(node.index());
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
-        record->behaviors = defaultBehaviorsFor(kind);
+        record->behaviors = defaultBehaviorsForKind(kind);
         record->rootIndex = node.index();
-        const UIStyleRoleId styleRole = defaultStyleRoleFor(kind);
+        const UIStyleRoleId styleRole = defaultStyleRoleForKind(kind);
         styleRolesByNodeIndex[node.index()] = styleRole;
-        semanticsStatesByNodeIndex[node.index()] = defaultSemanticsFor(kind);
+        const auto semanticsDefaults = defaultSemanticsForKind(kind);
+        semanticsStatesByNodeIndex[node.index()] = SemanticsState{
+            .mode = semanticsDefaults.mode,
+            .role = semanticsDefaults.role,
+            .actions = semanticsDefaults.actions,
+            .useContentAsName = semanticsDefaults.useContentAsName,
+            .readOnly = semanticsDefaults.readOnly,
+        };
         textStatesByIndex[node.index()].alignment = defaultContentAlignment(kind);
         if (kind == BuiltinElementKind::Modal || kind == BuiltinElementKind::Popup)
         {
@@ -5736,26 +5471,11 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Status initializeSemantics(u32 index, const UISemanticsDescriptor& descriptor,
                                                    UIElementBehavior behaviors)
     {
-        if (!isValidSemanticsMode(descriptor.mode) || !isValidSemanticsRole(descriptor.role) ||
-            !isValidSemanticsActions(descriptor.actions))
+        if (Core::Status contract =
+                validateSemanticsContract(descriptor, behaviors);
+            !contract)
         {
-            return fail(UIErrorCode::InvalidElementDescriptor,
-                        "UI element semantics contain an unknown mode, role, or action");
-        }
-        if ((hasSemanticsAction(descriptor.actions, UISemanticsAction::Focus) &&
-             !hasBehavior(behaviors, UIElementBehavior::Focusable)) ||
-            (hasSemanticsAction(descriptor.actions, UISemanticsAction::Activate) &&
-             !hasBehavior(behaviors, UIElementBehavior::Activate)) ||
-            (hasSemanticsAction(descriptor.actions, UISemanticsAction::Toggle) &&
-             !hasBehavior(behaviors, UIElementBehavior::Toggle) &&
-             !hasBehavior(behaviors, UIElementBehavior::ExclusiveChoice)) ||
-            (hasSemanticsAction(descriptor.actions, UISemanticsAction::SetRangeValue) &&
-             !hasBehavior(behaviors, UIElementBehavior::RangeInput)) ||
-            (hasSemanticsAction(descriptor.actions, UISemanticsAction::SetTextValue) &&
-             !hasBehavior(behaviors, UIElementBehavior::TextInput)))
-        {
-            return fail(UIErrorCode::InvalidElementDescriptor,
-                        "UI element semantics actions require matching behavior capabilities");
+            return contract;
         }
 
         const std::string_view name = descriptor.name.value_or(std::string_view{});
@@ -5896,7 +5616,7 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Result<UINodeId> createElement(UINodeId parent,
                                                        const UIElementDescriptor& descriptor)
     {
-        auto kindResult = elementBuiltinKind(descriptor);
+        auto kindResult = resolveElementBuiltinKind(descriptor);
         if (!kindResult)
         {
             return Core::failure(kindResult.error());
@@ -6242,7 +5962,7 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Result<usize> requiredNodeCountForElement(const UIElementDescriptor& descriptor) const
     {
-        auto kind = elementBuiltinKind(descriptor);
+        auto kind = resolveElementBuiltinKind(descriptor);
         if (!kind)
         {
             return Core::failure(kind.error());

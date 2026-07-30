@@ -1,0 +1,135 @@
+#include <gtest/gtest.h>
+
+#include "detail/UIElementContractResolver.hpp"
+
+#include <array>
+#include <utility>
+
+namespace Tina::Tests {
+namespace {
+
+using UI::Detail::BuiltinElementKind;
+
+TEST(UIElementContractResolverTests, PublicRecipesResolveToTheirBuiltinContracts)
+{
+    const std::array cases{
+        std::pair{BuiltinElementKind::Panel, UI::makePanelElement()},
+        std::pair{BuiltinElementKind::Label, UI::makeLabelElement("Label")},
+        std::pair{BuiltinElementKind::Button, UI::makeButtonElement("Button")},
+        std::pair{BuiltinElementKind::Checkbox, UI::makeCheckboxElement()},
+        std::pair{BuiltinElementKind::Slider, UI::makeSliderElement()},
+        std::pair{BuiltinElementKind::TextEdit, UI::makeTextEditElement("Text")},
+        std::pair{BuiltinElementKind::ProgressBar, UI::makeProgressBarElement()},
+        std::pair{BuiltinElementKind::RadioButton,
+                  UI::makeRadioButtonElement("Radio")},
+        std::pair{BuiltinElementKind::Modal, UI::makeModalElement()},
+        std::pair{BuiltinElementKind::ScrollView, UI::makeScrollViewElement()},
+        std::pair{BuiltinElementKind::Dropdown,
+                  UI::makeDropdownElement("Dropdown")},
+        std::pair{BuiltinElementKind::Popup, UI::makePopupElement()},
+        std::pair{BuiltinElementKind::DropdownItem,
+                  UI::makeDropdownItemElement("Item")},
+        std::pair{BuiltinElementKind::ListView, UI::makeListViewElement()},
+        std::pair{BuiltinElementKind::TreeView, UI::makeTreeViewElement()},
+    };
+
+    for (const auto& [expectedKind, descriptor] : cases)
+    {
+        const auto kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+        ASSERT_TRUE(kind);
+        EXPECT_EQ(*kind, expectedKind);
+        EXPECT_EQ(UI::Detail::defaultBehaviorsForKind(expectedKind),
+                  descriptor.behaviors);
+        EXPECT_EQ(UI::Detail::defaultStyleRoleForKind(expectedKind),
+                  descriptor.visual.styleRole);
+
+        const auto semantics = UI::Detail::defaultSemanticsForKind(expectedKind);
+        EXPECT_EQ(semantics.mode, descriptor.semantics.mode);
+        EXPECT_EQ(semantics.role, descriptor.semantics.role);
+        EXPECT_EQ(semantics.actions, descriptor.semantics.actions);
+        EXPECT_EQ(semantics.useContentAsName,
+                  descriptor.semantics.useContentAsName);
+        EXPECT_EQ(semantics.readOnly, descriptor.semantics.readOnly);
+    }
+}
+
+TEST(UIElementContractResolverTests, InternalKindsPublishStableDefaults)
+{
+    const auto root =
+        UI::Detail::defaultSemanticsForKind(BuiltinElementKind::Root);
+    EXPECT_EQ(root.mode, UI::UISemanticsMode::Automatic);
+    EXPECT_EQ(UI::Detail::defaultBehaviorsForKind(BuiltinElementKind::Root),
+              UI::UIElementBehavior::None);
+    EXPECT_EQ(UI::Detail::defaultStyleRoleForKind(BuiltinElementKind::Root),
+              UI::UIStyleRoleId::None);
+
+    const std::array internalItems{
+        std::pair{BuiltinElementKind::ListViewItem,
+                  UI::UIElementBehavior::VirtualListItem},
+        std::pair{BuiltinElementKind::TreeViewItem,
+                  UI::UIElementBehavior::VirtualTreeItem},
+    };
+    for (const auto& [kind, virtualBehavior] : internalItems)
+    {
+        const auto semantics = UI::Detail::defaultSemanticsForKind(kind);
+        EXPECT_EQ(UI::Detail::defaultStyleRoleForKind(kind),
+                  UI::UIStyleRoleId::CollectionItem);
+        EXPECT_TRUE(UI::hasBehavior(
+            UI::Detail::defaultBehaviorsForKind(kind), virtualBehavior));
+        EXPECT_TRUE(semantics.useContentAsName);
+        EXPECT_TRUE(UI::hasSemanticsAction(
+            semantics.actions, UI::UISemanticsAction::Activate));
+    }
+}
+
+TEST(UIElementContractResolverTests, RejectsUnsupportedBehaviorAndContentContracts)
+{
+    UI::UIElementDescriptor descriptor{};
+    descriptor.behaviors = static_cast<UI::UIElementBehavior>(1U << 20U);
+    EXPECT_FALSE(UI::Detail::resolveElementBuiltinKind(descriptor));
+
+    descriptor = UI::makeButtonElement("Button");
+    descriptor.text.reset();
+    EXPECT_FALSE(UI::Detail::resolveElementBuiltinKind(descriptor));
+
+    descriptor = UI::makeSliderElement();
+    descriptor.text = "Slider";
+    EXPECT_FALSE(UI::Detail::resolveElementBuiltinKind(descriptor));
+
+    descriptor = UI::makePopupElement();
+    descriptor.layout.placement = UI::UILayoutPlacement::Flow;
+    EXPECT_FALSE(UI::Detail::resolveElementBuiltinKind(descriptor));
+
+    descriptor = UI::makeButtonElement("Mixed");
+    descriptor.behaviors |= UI::UIElementBehavior::RangeInput;
+    EXPECT_FALSE(UI::Detail::resolveElementBuiltinKind(descriptor));
+}
+
+TEST(UIElementContractResolverTests, SemanticsActionsRequireMatchingBehaviors)
+{
+    const UI::UIElementDescriptor checkbox = UI::makeCheckboxElement();
+    EXPECT_TRUE(UI::Detail::validateSemanticsContract(
+        checkbox.semantics, checkbox.behaviors));
+
+    UI::UISemanticsDescriptor invalid = checkbox.semantics;
+    invalid.role = static_cast<UI::UISemanticsRole>(255);
+    EXPECT_FALSE(UI::Detail::validateSemanticsContract(
+        invalid, checkbox.behaviors));
+
+    invalid = checkbox.semantics;
+    invalid.actions = static_cast<UI::UISemanticsAction>(1U << 7U);
+    EXPECT_FALSE(UI::Detail::validateSemanticsContract(
+        invalid, checkbox.behaviors));
+
+    invalid = {};
+    invalid.actions = UI::UISemanticsAction::SetTextValue;
+    EXPECT_FALSE(UI::Detail::validateSemanticsContract(
+        invalid, UI::UIElementBehavior::Focusable));
+
+    const UI::UIElementDescriptor radio = UI::makeRadioButtonElement("Radio");
+    EXPECT_TRUE(UI::Detail::validateSemanticsContract(
+        radio.semantics, radio.behaviors));
+}
+
+} // namespace
+} // namespace Tina::Tests
