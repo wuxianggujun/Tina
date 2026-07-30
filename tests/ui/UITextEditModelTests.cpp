@@ -2,6 +2,7 @@
 
 #include "detail/UITextEditModel.hpp"
 
+#include <array>
 #include <limits>
 
 namespace Tina::Tests {
@@ -23,6 +24,69 @@ TEST(UITextEditModelTests, MapsUtf8ScalarOffsetsToByteOffsetsAndClamps)
     EXPECT_EQ(UI::Detail::utf8ByteOffsetForCodepoint(Text, 2), 4U);
     EXPECT_EQ(UI::Detail::utf8ByteOffsetForCodepoint(Text, 3), 5U);
     EXPECT_EQ(UI::Detail::utf8ByteOffsetForCodepoint(Text, 100), 5U);
+}
+
+TEST(UITextEditModelTests, PointerCaretFallbackUsesScalarMidpointsAndClamps)
+{
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(-1.0F, 3, 10.0F), 0U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(5.0F, 0, 10.0F), 0U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(4.9F, 3, 10.0F), 0U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(5.0F, 3, 10.0F), 1U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(14.9F, 3, 10.0F), 1U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(15.0F, 3, 10.0F), 2U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(100.0F, 3, 10.0F), 3U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(0.5F, 3, 0.0F), 1U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
+                  (std::numeric_limits<float>::quiet_NaN)(), 3, 10.0F),
+              0U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
+                  (std::numeric_limits<float>::infinity)(), 3, 10.0F),
+              0U);
+}
+
+TEST(UITextEditModelTests, PointerCaretUsesGlyphAdvancesWithFallbackAndOverflowGuards)
+{
+    const std::array glyphs{
+        UI::UITextGlyphRaster{.advance = 10.0F},
+        UI::UITextGlyphRaster{.advance = 20.0F},
+        UI::UITextGlyphRaster{.advance = 5.0F},
+    };
+
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(4.9F, 3, 8.0F, glyphs), 0U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(5.0F, 3, 8.0F, glyphs), 1U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(19.9F, 3, 8.0F, glyphs), 1U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(20.0F, 3, 8.0F, glyphs), 2U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(32.4F, 3, 8.0F, glyphs), 2U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(32.5F, 3, 8.0F, glyphs), 3U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
+                  (std::numeric_limits<float>::infinity)(), 3, 8.0F, glyphs),
+              3U);
+
+    const std::array invalidAdvanceGlyphs{
+        UI::UITextGlyphRaster{.advance = 10.0F},
+        UI::UITextGlyphRaster{.advance = 0.0F},
+        UI::UITextGlyphRaster{.advance = 5.0F},
+    };
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
+                  13.9F, 3, 8.0F, invalidAdvanceGlyphs),
+              1U);
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
+                  14.0F, 3, 8.0F, invalidAdvanceGlyphs),
+              2U);
+
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
+                  5.0F, 3, 10.0F,
+                  std::span<const UI::UITextGlyphRaster>(glyphs).first(2)),
+              1U);
+
+    const float maximum = (std::numeric_limits<float>::max)();
+    const std::array overflowingGlyphs{
+        UI::UITextGlyphRaster{.advance = maximum},
+        UI::UITextGlyphRaster{.advance = maximum},
+    };
+    EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
+                  maximum, 2, 1.0F, overflowingGlyphs),
+              1U);
 }
 
 TEST(UITextEditModelTests, HorizontalMoveCollapsesOrExtendsSelection)

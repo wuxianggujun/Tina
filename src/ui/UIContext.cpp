@@ -129,6 +129,7 @@ using Detail::ThemeBindingSliderPaint;
 using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
 using Detail::TextEditState;
+using Detail::textEditCodepointFromHorizontalPosition;
 using Detail::TreeViewItemState;
 using Detail::TreeViewLayoutScratch;
 using Detail::TreeViewState;
@@ -6665,52 +6666,22 @@ struct UIContext::Impl final {
         {
             return 0;
         }
-        float advance = textState.style.logicalSize * textState.style.advanceScale;
-        if (!(std::isfinite(advance) && advance > 0.0F))
-        {
-            advance = 1.0F;
-        }
         const float textStartX = worldRect.x + layoutStylesByIndex[textEdit.index()].padding.left;
         const float relativeX = position.x - textStartX;
-        if (!(relativeX > 0.0F))
-        {
-            return 0;
-        }
+        const float fallbackAdvance =
+            textState.style.logicalSize * textState.style.advanceScale;
 
         if (textRasterizer && textFace.hasValue())
         {
             auto raster = textRasterizer->raster(textFace, textViewFor(textEdit.index()), textState.style);
-            if (raster && raster->glyphs.size() >= codepointCount)
+            if (raster)
             {
-                float cursorX = 0.0F;
-                for (u32 codepointIndex = 0; codepointIndex < codepointCount; ++codepointIndex)
-                {
-                    float glyphAdvance = raster->glyphs[codepointIndex].advance;
-                    if (!(std::isfinite(glyphAdvance) && glyphAdvance > 0.0F))
-                    {
-                        glyphAdvance = advance;
-                    }
-                    const float midpoint = cursorX + glyphAdvance * 0.5F;
-                    if (!std::isfinite(midpoint) || relativeX < midpoint)
-                    {
-                        return codepointIndex;
-                    }
-                    cursorX += glyphAdvance;
-                    if (!std::isfinite(cursorX))
-                    {
-                        return codepointIndex + 1U;
-                    }
-                }
-                return codepointCount;
+                return textEditCodepointFromHorizontalPosition(
+                    relativeX, codepointCount, fallbackAdvance, raster->glyphs);
             }
         }
-
-        const float approximate = std::floor(relativeX / advance + 0.5F);
-        if (!(std::isfinite(approximate) && approximate > 0.0F))
-        {
-            return 0;
-        }
-        return static_cast<u32>((std::min)(approximate, static_cast<float>(codepointCount)));
+        return textEditCodepointFromHorizontalPosition(
+            relativeX, codepointCount, fallbackAdvance);
     }
 
     [[nodiscard]] Core::Status updateTextEditSelectionFromPointer(UINodeId textEdit, UILogicalPoint position,

@@ -1,6 +1,7 @@
 #include "UITextEditModel.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace Tina::UI::Detail {
 
@@ -29,6 +30,54 @@ usize utf8ByteOffsetForCodepoint(std::string_view text,
         ++codepoint;
     }
     return (std::min)(byteOffset, text.size());
+}
+
+u32 textEditCodepointFromHorizontalPosition(
+    float relativeX, u32 codepointCount, float fallbackAdvance,
+    std::span<const UITextGlyphRaster> glyphs) noexcept
+{
+    if (codepointCount == 0 || !(relativeX > 0.0F))
+    {
+        return 0;
+    }
+    if (!(std::isfinite(fallbackAdvance) && fallbackAdvance > 0.0F))
+    {
+        fallbackAdvance = 1.0F;
+    }
+
+    if (glyphs.size() >= codepointCount)
+    {
+        float cursorX = 0.0F;
+        for (u32 codepointIndex = 0; codepointIndex < codepointCount;
+             ++codepointIndex)
+        {
+            float glyphAdvance = glyphs[codepointIndex].advance;
+            if (!(std::isfinite(glyphAdvance) && glyphAdvance > 0.0F))
+            {
+                glyphAdvance = fallbackAdvance;
+            }
+            const float midpoint = cursorX + glyphAdvance * 0.5F;
+            if (!std::isfinite(midpoint) || relativeX < midpoint)
+            {
+                return codepointIndex;
+            }
+            cursorX += glyphAdvance;
+            if (!std::isfinite(cursorX))
+            {
+                return codepointIndex + 1U;
+            }
+        }
+        return codepointCount;
+    }
+
+    const float approximate =
+        std::floor(relativeX / fallbackAdvance + 0.5F);
+    if (!(std::isfinite(approximate) && approximate > 0.0F))
+    {
+        return 0;
+    }
+    return static_cast<u32>((std::min)(
+        approximate, static_cast<float>(codepointCount)));
 }
 
 std::optional<UITextEditCommandPlan> planTextEditCommand(
