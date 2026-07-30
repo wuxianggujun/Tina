@@ -79,6 +79,7 @@ add_library(tina_ui STATIC
     detail/UIStyleRoleResolver.cpp
     detail/UIThemeTransitionResolver.hpp
     detail/UIThemeTransitionResolver.cpp
+    detail/UIVirtualCollectionLayout.hpp
     detail/UITextStorage.hpp
     detail/UITextStorage.cpp
     detail/UITextEditModel.hpp

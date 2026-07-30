@@ -31,6 +31,7 @@
 #include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UIStyleRoleResolver.hpp"
 #include "detail/UIThemeTransitionResolver.hpp"
+#include "detail/UIVirtualCollectionLayout.hpp"
 #include "detail/UITextEditModel.hpp"
 #include "detail/UITextEditPaintEmitter.hpp"
 #include "detail/UITextStorage.hpp"
@@ -140,6 +141,7 @@ using Detail::resolveScrollThumbOffset;
 using Detail::resolveScrollTrackPageOffset;
 using Detail::resolveScrollWheelOffset;
 using Detail::resolveSliderValueFromPointer;
+using Detail::resolveVirtualCollectionLayout;
 using Detail::resolveVirtualRowScrollOffset;
 using Detail::resolveVirtualScrollWheelOffset;
 using Detail::resolvedHeight;
@@ -162,6 +164,7 @@ using Detail::TreeViewState;
 using Detail::utf8ByteOffsetForCodepoint;
 using Detail::validateSemanticsContract;
 using Detail::verticalMargin;
+using Detail::VirtualCollectionLayoutError;
 using Detail::WidgetTextState;
 using Detail::findHitEntryIndex;
 using Detail::hitEntryAllowedByModal;
@@ -1105,76 +1108,50 @@ struct UIContext::Impl final {
     {
         ListViewState& state = listViewStatesByNodeIndex[listViewIndex];
         const u64 logicalItemCount = state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
-        const double contentHeight64 = static_cast<double>(logicalItemCount) * static_cast<double>(state.style.rowHeight);
-        if (!std::isfinite(contentHeight64) || contentHeight64 > (std::numeric_limits<float>::max)())
+        const auto collectionLayout = resolveVirtualCollectionLayout({
+            .logicalItemCount = logicalItemCount,
+            .materializedItemCapacity = state.materializedItemCapacity,
+            .rowHeight = state.style.rowHeight,
+            .overscanRows = state.style.overscanRows,
+            .scrollBarVisibility = state.style.scrollBarVisibility,
+            .scrollBarThickness = state.paint.scrollBar.thickness,
+            .requestedScrollOffset = state.requestedScrollOffset,
+            .availableRect = unscrolledContentRect,
+        });
+        if (!collectionLayout)
         {
-            return fail(UIErrorCode::InvalidControlValue, "UI ListView logical content height is not representable");
+            return collectionLayout.error() == VirtualCollectionLayoutError::ContentHeightNotRepresentable
+                       ? fail(UIErrorCode::InvalidControlValue,
+                              "UI ListView logical content height is not representable")
+                       : fail(UIErrorCode::CapacityExceeded,
+                              "UI ListView row pool cannot cover the viewport and configured overscan");
         }
-        const float logicalContentHeight = normalizeFloat(static_cast<float>(contentHeight64));
-        const bool barsHidden = state.style.scrollBarVisibility == UIScrollBarVisibility::Hidden;
-        const bool verticalBar =
-            !barsHidden && (state.style.scrollBarVisibility == UIScrollBarVisibility::Always ||
-                            logicalContentHeight > unscrolledContentRect.height);
-        const UILogicalRect viewportRect{
-            .x = unscrolledContentRect.x,
-            .y = unscrolledContentRect.y,
-            .width = normalizeFloat((std::max)(
-                0.0F, unscrolledContentRect.width - (verticalBar ? state.paint.scrollBar.thickness : 0.0F))),
-            .height = unscrolledContentRect.height,
-        };
-        const float contentHeight = normalizeFloat((std::max)(logicalContentHeight, viewportRect.height));
-        const float maximumOffset = normalizeFloat((std::max)(0.0F, contentHeight - viewportRect.height));
-        const float scrollOffset = normalizeFloat((std::clamp)(state.requestedScrollOffset, 0.0F, maximumOffset));
-
-        u64 firstVisibleIndex = 0;
-        u64 visibleItemCount64 = 0;
-        if (logicalItemCount != 0 && viewportRect.height > 0.0F)
-        {
-            firstVisibleIndex = (std::min)(logicalItemCount - 1,
-                                           static_cast<u64>(std::floor(static_cast<double>(scrollOffset) /
-                                                                       state.style.rowHeight)));
-            const double visibleEnd = std::ceil((static_cast<double>(scrollOffset) + viewportRect.height) /
-                                                state.style.rowHeight);
-            const u64 endIndex = (std::min)(logicalItemCount, static_cast<u64>((std::max)(0.0, visibleEnd)));
-            visibleItemCount64 = endIndex > firstVisibleIndex ? endIndex - firstVisibleIndex : 0;
-        }
-        const u64 firstMaterializedIndex =
-            firstVisibleIndex > state.style.overscanRows ? firstVisibleIndex - state.style.overscanRows : 0;
-        const u64 visibleEndIndex = firstVisibleIndex + visibleItemCount64;
-        const u64 materializedEndIndex =
-            (std::min)(logicalItemCount, visibleEndIndex + static_cast<u64>(state.style.overscanRows));
-        const u64 materializedItemCount64 =
-            materializedEndIndex > firstMaterializedIndex ? materializedEndIndex - firstMaterializedIndex : 0;
-        if (materializedItemCount64 > state.materializedItemCapacity)
-        {
-            return fail(UIErrorCode::CapacityExceeded,
-                        "UI ListView row pool cannot cover the viewport and configured overscan");
-        }
+        const auto& plan = *collectionLayout;
 
         ListViewLayoutScratch& listLayout = listViewLayoutScratchByNodeIndex[listViewIndex];
         listLayout = ListViewLayoutScratch{
             .metrics =
                 UIListViewMetrics{
                     .logicalItemCount = logicalItemCount,
-                    .firstVisibleIndex = firstVisibleIndex,
-                    .visibleItemCount = static_cast<u32>(visibleItemCount64),
-                    .firstMaterializedIndex = firstMaterializedIndex,
-                    .materializedItemCount = static_cast<u32>(materializedItemCount64),
+                    .firstVisibleIndex = plan.firstVisibleIndex,
+                    .visibleItemCount = static_cast<u32>(plan.visibleItemCount),
+                    .firstMaterializedIndex = plan.firstMaterializedIndex,
+                    .materializedItemCount = static_cast<u32>(plan.materializedItemCount),
                     .materializedItemCapacity = state.materializedItemCapacity,
-                    .scrollOffset = scrollOffset,
-                    .maxScrollOffset = maximumOffset,
-                    .viewportSize = viewportRect.size(),
-                    .contentSize = {.width = viewportRect.width, .height = contentHeight},
-                    .verticalScrollBarVisible = verticalBar,
+                    .scrollOffset = plan.scrollOffset,
+                    .maxScrollOffset = plan.maximumScrollOffset,
+                    .viewportSize = plan.viewportRect.size(),
+                    .contentSize = plan.contentSize,
+                    .verticalScrollBarVisible = plan.verticalScrollBarVisible,
                 },
-            .viewportRect = viewportRect,
+            .viewportRect = plan.viewportRect,
         };
 
         const NodeRecord* listRecord = recordByIndex(listViewIndex);
         u32 childIndex = listRecord == nullptr ? InvalidNodeIndex : listRecord->firstChildIndex;
         u64 materializedOrdinal = 0;
         const UIVisibility rowVisibility = layoutScratchByIndex[listViewIndex].effectiveVisibility;
-        const UILogicalRect rowClip = intersectRects(descendantClip, viewportRect);
+        const UILogicalRect rowClip = intersectRects(descendantClip, plan.viewportRect);
         while (childIndex != InvalidNodeIndex)
         {
             const NodeRecord* childRecord = recordByIndex(childIndex);
@@ -1184,7 +1161,7 @@ struct UIContext::Impl final {
             }
             const u32 currentChild = childIndex;
             childIndex = childRecord->nextSiblingIndex;
-            if (materializedOrdinal >= materializedItemCount64)
+            if (materializedOrdinal >= plan.materializedItemCount)
             {
                 ListViewItemState& item = listViewItemStatesByNodeIndex[currentChild];
                 item.key = InvalidUIListViewItemKey;
@@ -1192,11 +1169,11 @@ struct UIContext::Impl final {
                 item.bound = false;
                 item.enabled = true;
                 layoutScratchByIndex[currentChild].effectiveVisibility = UIVisibility::Collapsed;
-                assignLayoutRect(currentChild, viewportRect, parentWorldRect, rowClip);
+                assignLayoutRect(currentChild, plan.viewportRect, parentWorldRect, rowClip);
                 continue;
             }
 
-            const u64 logicalIndex = firstMaterializedIndex + materializedOrdinal;
+            const u64 logicalIndex = plan.firstMaterializedIndex + materializedOrdinal;
             auto descriptor = resolveListViewLogicalItem(idForIndex(listViewIndex), logicalIndex);
             if (!descriptor)
             {
@@ -1208,12 +1185,13 @@ struct UIContext::Impl final {
             }
             layoutScratchByIndex[currentChild].effectiveVisibility = rowVisibility;
             const double logicalY = static_cast<double>(logicalIndex) * state.style.rowHeight;
-            const float rowY = normalizeFloat(viewportRect.y + static_cast<float>(logicalY) - scrollOffset);
+            const float rowY = normalizeFloat(
+                plan.viewportRect.y + static_cast<float>(logicalY) - plan.scrollOffset);
             assignLayoutRect(currentChild,
                              UILogicalRect{
-                                 .x = viewportRect.x,
+                                 .x = plan.viewportRect.x,
                                  .y = rowY,
-                                 .width = viewportRect.width,
+                                 .width = plan.viewportRect.width,
                                  .height = state.style.rowHeight,
                              },
                              parentWorldRect, rowClip);
@@ -1317,78 +1295,50 @@ struct UIContext::Impl final {
         TreeViewState& state = treeViewStatesByNodeIndex[treeViewIndex];
         const u64 logicalItemCount =
             state.dataSource.hasValue() ? state.dataSource.itemCount(state.dataSource.state) : 0;
-        const double contentHeight64 =
-            static_cast<double>(logicalItemCount) * static_cast<double>(state.style.rowHeight);
-        if (!std::isfinite(contentHeight64) || contentHeight64 > (std::numeric_limits<float>::max)())
+        const auto collectionLayout = resolveVirtualCollectionLayout({
+            .logicalItemCount = logicalItemCount,
+            .materializedItemCapacity = state.materializedItemCapacity,
+            .rowHeight = state.style.rowHeight,
+            .overscanRows = state.style.overscanRows,
+            .scrollBarVisibility = state.style.scrollBarVisibility,
+            .scrollBarThickness = state.paint.scrollBar.thickness,
+            .requestedScrollOffset = state.requestedScrollOffset,
+            .availableRect = unscrolledContentRect,
+        });
+        if (!collectionLayout)
         {
-            return fail(UIErrorCode::InvalidControlValue, "UI TreeView logical content height is not representable");
+            return collectionLayout.error() == VirtualCollectionLayoutError::ContentHeightNotRepresentable
+                       ? fail(UIErrorCode::InvalidControlValue,
+                              "UI TreeView logical content height is not representable")
+                       : fail(UIErrorCode::CapacityExceeded,
+                              "UI TreeView row pool cannot cover the viewport and configured overscan");
         }
-        const float logicalContentHeight = normalizeFloat(static_cast<float>(contentHeight64));
-        const bool barsHidden = state.style.scrollBarVisibility == UIScrollBarVisibility::Hidden;
-        const bool verticalBar = !barsHidden && (state.style.scrollBarVisibility == UIScrollBarVisibility::Always ||
-                                                 logicalContentHeight > unscrolledContentRect.height);
-        const UILogicalRect viewportRect{
-            .x = unscrolledContentRect.x,
-            .y = unscrolledContentRect.y,
-            .width = normalizeFloat(
-                (std::max)(0.0F, unscrolledContentRect.width - (verticalBar ? state.paint.scrollBar.thickness : 0.0F))),
-            .height = unscrolledContentRect.height,
-        };
-        const float contentHeight = normalizeFloat((std::max)(logicalContentHeight, viewportRect.height));
-        const float maximumOffset = normalizeFloat((std::max)(0.0F, contentHeight - viewportRect.height));
-        const float scrollOffset = normalizeFloat((std::clamp)(state.requestedScrollOffset, 0.0F, maximumOffset));
-
-        u64 firstVisibleIndex = 0;
-        u64 visibleItemCount64 = 0;
-        if (logicalItemCount != 0 && viewportRect.height > 0.0F)
-        {
-            firstVisibleIndex =
-                (std::min)(logicalItemCount - 1,
-                           static_cast<u64>(std::floor(static_cast<double>(scrollOffset) / state.style.rowHeight)));
-            const double visibleEnd =
-                std::ceil((static_cast<double>(scrollOffset) + viewportRect.height) / state.style.rowHeight);
-            const u64 endIndex = visibleEnd >= static_cast<double>(logicalItemCount)
-                                     ? logicalItemCount
-                                     : static_cast<u64>((std::max)(0.0, visibleEnd));
-            visibleItemCount64 = endIndex > firstVisibleIndex ? endIndex - firstVisibleIndex : 0;
-        }
-        const u64 firstMaterializedIndex =
-            firstVisibleIndex > state.style.overscanRows ? firstVisibleIndex - state.style.overscanRows : 0;
-        const u64 visibleEndIndex = firstVisibleIndex + visibleItemCount64;
-        const u64 materializedEndIndex =
-            (std::min)(logicalItemCount, visibleEndIndex + static_cast<u64>(state.style.overscanRows));
-        const u64 materializedItemCount64 =
-            materializedEndIndex > firstMaterializedIndex ? materializedEndIndex - firstMaterializedIndex : 0;
-        if (materializedItemCount64 > state.materializedItemCapacity)
-        {
-            return fail(UIErrorCode::CapacityExceeded,
-                        "UI TreeView row pool cannot cover the viewport and configured overscan");
-        }
+        const auto& plan = *collectionLayout;
 
         TreeViewLayoutScratch& treeLayout = treeViewLayoutScratchByNodeIndex[treeViewIndex];
         treeLayout = TreeViewLayoutScratch{
             .metrics =
                 UITreeViewMetrics{
                     .logicalItemCount = logicalItemCount,
-                    .firstVisibleIndex = firstVisibleIndex,
-                    .visibleItemCount = static_cast<u32>(visibleItemCount64),
-                    .firstMaterializedIndex = firstMaterializedIndex,
-                    .materializedItemCount = static_cast<u32>(materializedItemCount64),
+                    .firstVisibleIndex = plan.firstVisibleIndex,
+                    .visibleItemCount = static_cast<u32>(plan.visibleItemCount),
+                    .firstMaterializedIndex = plan.firstMaterializedIndex,
+                    .materializedItemCount = static_cast<u32>(plan.materializedItemCount),
                     .materializedItemCapacity = state.materializedItemCapacity,
-                    .scrollOffset = scrollOffset,
-                    .maxScrollOffset = maximumOffset,
-                    .viewportSize = viewportRect.size(),
-                    .contentSize = {.width = viewportRect.width, .height = contentHeight},
-                    .verticalScrollBarVisible = verticalBar,
+                    .scrollOffset = plan.scrollOffset,
+                    .maxScrollOffset = plan.maximumScrollOffset,
+                    .viewportSize = plan.viewportRect.size(),
+                    .contentSize = plan.contentSize,
+                    .verticalScrollBarVisible = plan.verticalScrollBarVisible,
                 },
-            .viewportRect = viewportRect,
+            .viewportRect = plan.viewportRect,
         };
 
         const NodeRecord* treeRecord = recordByIndex(treeViewIndex);
         u32 childIndex = treeRecord == nullptr ? InvalidNodeIndex : treeRecord->firstChildIndex;
         u64 materializedOrdinal = 0;
         const UIVisibility rowVisibility = layoutScratchByIndex[treeViewIndex].effectiveVisibility;
-        const UILogicalRect rowClip = intersectRects(descendantClip, viewportRect);
+        const UILogicalRect rowClip = intersectRects(descendantClip, plan.viewportRect);
         while (childIndex != InvalidNodeIndex)
         {
             const NodeRecord* childRecord = recordByIndex(childIndex);
@@ -1398,15 +1348,15 @@ struct UIContext::Impl final {
             }
             const u32 currentChild = childIndex;
             childIndex = childRecord->nextSiblingIndex;
-            if (materializedOrdinal >= materializedItemCount64)
+            if (materializedOrdinal >= plan.materializedItemCount)
             {
                 treeViewItemStatesByNodeIndex[currentChild] = {};
                 layoutScratchByIndex[currentChild].effectiveVisibility = UIVisibility::Collapsed;
-                assignLayoutRect(currentChild, viewportRect, parentWorldRect, rowClip);
+                assignLayoutRect(currentChild, plan.viewportRect, parentWorldRect, rowClip);
                 continue;
             }
 
-            const u64 logicalIndex = firstMaterializedIndex + materializedOrdinal;
+            const u64 logicalIndex = plan.firstMaterializedIndex + materializedOrdinal;
             auto descriptor = resolveTreeViewLogicalItem(idForIndex(treeViewIndex), logicalIndex);
             if (!descriptor)
             {
@@ -1430,12 +1380,13 @@ struct UIContext::Impl final {
             rowStyle.padding.bottom = 4.0F;
             layoutScratchByIndex[currentChild].effectiveVisibility = rowVisibility;
             const double logicalY = static_cast<double>(logicalIndex) * state.style.rowHeight;
-            const float rowY = normalizeFloat(viewportRect.y + static_cast<float>(logicalY) - scrollOffset);
+            const float rowY = normalizeFloat(
+                plan.viewportRect.y + static_cast<float>(logicalY) - plan.scrollOffset);
             assignLayoutRect(currentChild,
                              UILogicalRect{
-                                 .x = viewportRect.x,
+                                 .x = plan.viewportRect.x,
                                  .y = rowY,
-                                 .width = viewportRect.width,
+                                 .width = plan.viewportRect.width,
                                  .height = state.style.rowHeight,
                              },
                              parentWorldRect, rowClip);
