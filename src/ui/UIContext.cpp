@@ -3758,8 +3758,8 @@ struct UIContext::Impl final {
             return false;
         }
         const u32 entryIndex = findHitEntryIndex(node, entries);
-        return entryIndex < entries.size() && entries[entryIndex].policy == UIPointerHitPolicy::Targetable &&
-               hitEntryAllowedByModal(entries[entryIndex], activeModalEntryIndex);
+        return Detail::hitEntryAllowsPointerInteraction(
+            entryIndex, entries, activeModalEntryIndex);
     }
 
     [[nodiscard]] bool isPointerCaptureCandidate(UINodeId node, std::span<const UICommittedHitEntry> entries,
@@ -3770,18 +3770,20 @@ struct UIContext::Impl final {
             return false;
         }
         const u32 entryIndex = findHitEntryIndex(node, entries);
-        return entryIndex < entries.size() && hitEntryAllowedByModal(entries[entryIndex], activeModalEntryIndex);
+        return Detail::hitEntryAllowsPointerCapture(
+            entryIndex, entries, activeModalEntryIndex);
     }
 
     [[nodiscard]] bool isKeyboardFocusCandidate(UINodeId node, std::span<const UICommittedHitEntry> entries,
                                                 u32 activeModalEntryIndex) const noexcept
     {
-        if (!isPointerInteractionCandidate(node, entries, activeModalEntryIndex))
+        if (!node.hasValue() || !isNodeEnabled(node))
         {
             return false;
         }
         const u32 entryIndex = findHitEntryIndex(node, entries);
-        return entryIndex < entries.size() && isKeyboardFocusableKind(entries[entryIndex].kind);
+        return Detail::hitEntryAllowsKeyboardFocus(
+            entryIndex, entries, activeModalEntryIndex);
     }
 
     [[nodiscard]] bool isCommittedKeyboardFocusCandidate(UINodeId node) const noexcept
@@ -10355,46 +10357,7 @@ struct UIContext::Impl final {
 
     [[nodiscard]] UIPointerHitQueryResult queryPointerHit(UILogicalPoint point) const noexcept
     {
-        const UICommittedHitView hit = committedHit();
-        UIPointerHitQueryResult result{
-            .structureRevision = hit.structureRevision(),
-            .layoutRevision = hit.layoutRevision(),
-            .paintOrderRevision = hit.paintOrderRevision(),
-            .hitRevision = hit.hitRevision(),
-            .modalBarrierActive = hit.activeModalEntryIndex() < hit.entries().size(),
-        };
-        if (!std::isfinite(point.x) || !std::isfinite(point.y))
-        {
-            return result;
-        }
-
-        const std::span<const UICommittedHitEntry> entries = hit.entries();
-        for (usize reverseIndex = entries.size(); reverseIndex > 0; --reverseIndex)
-        {
-            ++result.visitedEntryCount;
-            const usize entryIndex = reverseIndex - 1;
-            const UICommittedHitEntry& entry = entries[entryIndex];
-            if ((hit.activeModalEntryIndex() < entries.size() &&
-                 entry.modalScopeEntryIndex != hit.activeModalEntryIndex()) ||
-                entry.policy != UIPointerHitPolicy::Targetable || !containsPointHalfOpen(entry.worldRect, point) ||
-                !containsPointHalfOpen(entry.effectiveClip, point) || entry.rootEntryIndex >= entries.size())
-            {
-                continue;
-            }
-
-            const UICommittedHitEntry& root = entries[entry.rootEntryIndex];
-            result.target = UIPointerHitTarget{
-                .node = entry.node,
-                .rootNode = root.node,
-                .hitEntryIndex = static_cast<u32>(entryIndex),
-                .rootEntryIndex = entry.rootEntryIndex,
-                .worldRect = entry.worldRect,
-                .effectiveClip = entry.effectiveClip,
-                .paintOrdinal = entry.paintOrdinal,
-            };
-            return result;
-        }
-        return result;
+        return Detail::queryCommittedPointerHit(committedHit(), point);
     }
 
     [[nodiscard]] Core::Result<std::pair<u32, u32>> addRoutedPointerListener(UIRoutedPointerListenerDesc descriptor,

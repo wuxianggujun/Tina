@@ -4,6 +4,10 @@
 #include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIFocus.hpp>
 
+#include "UILayoutPrimitives.hpp"
+#include "UIWidgetTraits.hpp"
+
+#include <cmath>
 #include <span>
 
 namespace Tina::UI::Detail {
@@ -103,6 +107,78 @@ namespace Tina::UI::Detail {
 {
     return activeModalEntryIndex == InvalidUIHitEntryIndex ||
            entry.modalScopeEntryIndex == activeModalEntryIndex;
+}
+
+[[nodiscard]] constexpr bool hitEntryAllowsPointerInteraction(
+    u32 entryIndex, std::span<const UICommittedHitEntry> entries,
+    u32 activeModalEntryIndex) noexcept
+{
+    return entryIndex < entries.size() &&
+           entries[entryIndex].policy == UIPointerHitPolicy::Targetable &&
+           hitEntryAllowedByModal(entries[entryIndex], activeModalEntryIndex);
+}
+
+[[nodiscard]] constexpr bool hitEntryAllowsPointerCapture(
+    u32 entryIndex, std::span<const UICommittedHitEntry> entries,
+    u32 activeModalEntryIndex) noexcept
+{
+    return entryIndex < entries.size() &&
+           hitEntryAllowedByModal(entries[entryIndex], activeModalEntryIndex);
+}
+
+[[nodiscard]] constexpr bool hitEntryAllowsKeyboardFocus(
+    u32 entryIndex, std::span<const UICommittedHitEntry> entries,
+    u32 activeModalEntryIndex) noexcept
+{
+    return hitEntryAllowsPointerInteraction(
+               entryIndex, entries, activeModalEntryIndex) &&
+           isKeyboardFocusableKind(entries[entryIndex].kind);
+}
+
+[[nodiscard]] inline UIPointerHitQueryResult queryCommittedPointerHit(
+    UICommittedHitView hit, UILogicalPoint point) noexcept
+{
+    const std::span<const UICommittedHitEntry> entries = hit.entries();
+    UIPointerHitQueryResult result{
+        .structureRevision = hit.structureRevision(),
+        .layoutRevision = hit.layoutRevision(),
+        .paintOrderRevision = hit.paintOrderRevision(),
+        .hitRevision = hit.hitRevision(),
+        .modalBarrierActive = hit.activeModalEntryIndex() < entries.size(),
+    };
+    if (!std::isfinite(point.x) || !std::isfinite(point.y))
+    {
+        return result;
+    }
+
+    for (usize reverseIndex = entries.size(); reverseIndex > 0; --reverseIndex)
+    {
+        ++result.visitedEntryCount;
+        const usize entryIndex = reverseIndex - 1;
+        const UICommittedHitEntry& entry = entries[entryIndex];
+        if ((result.modalBarrierActive &&
+             !hitEntryAllowedByModal(entry, hit.activeModalEntryIndex())) ||
+            entry.policy != UIPointerHitPolicy::Targetable ||
+            !containsPointHalfOpen(entry.worldRect, point) ||
+            !containsPointHalfOpen(entry.effectiveClip, point) ||
+            entry.rootEntryIndex >= entries.size())
+        {
+            continue;
+        }
+
+        const UICommittedHitEntry& root = entries[entry.rootEntryIndex];
+        result.target = UIPointerHitTarget{
+            .node = entry.node,
+            .rootNode = root.node,
+            .hitEntryIndex = static_cast<u32>(entryIndex),
+            .rootEntryIndex = entry.rootEntryIndex,
+            .worldRect = entry.worldRect,
+            .effectiveClip = entry.effectiveClip,
+            .paintOrdinal = entry.paintOrdinal,
+        };
+        return result;
+    }
+    return result;
 }
 
 } // namespace Tina::UI::Detail
