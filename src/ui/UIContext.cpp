@@ -23,6 +23,7 @@
 #include "detail/UIPaintPrimitives.hpp"
 #include "detail/UIPropertyNormalization.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
+#include "detail/UISemanticsSnapshotBuilder.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UIStyleRoleResolver.hpp"
 #include "detail/UIThemeTransitionResolver.hpp"
@@ -206,20 +207,6 @@ struct SemanticsState final {
     bool readOnly = false;
 };
 
-struct SemanticsNodeBuildScratch final {
-    u32 nearestPublishedEntryIndex = InvalidUIHitEntryIndex;
-    u32 mergeEntryIndex = InvalidUIHitEntryIndex;
-    u32 nameTargetEntryIndex = InvalidUIHitEntryIndex;
-    bool excluded = false;
-};
-
-struct SemanticsEntryBuildScratch final {
-    usize nameByteCount = 0;
-    usize nameOffset = 0;
-    usize nameBytesWritten = 0;
-    bool hasNamePart = false;
-};
-
 static_assert(sizeof(NodeRecord) <= 48);
 static_assert(std::is_nothrow_destructible_v<NodeRecord>);
 
@@ -280,8 +267,7 @@ struct UIContext::Impl final {
     std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
     std::pmr::vector<WidgetTextState> textStatesByIndex;
     std::pmr::vector<SemanticsState> semanticsStatesByNodeIndex;
-    std::pmr::vector<SemanticsNodeBuildScratch> semanticsNodeBuildScratchByIndex;
-    std::pmr::vector<SemanticsEntryBuildScratch> semanticsEntryBuildScratch;
+    Detail::UISemanticsSnapshotBuilder semanticsSnapshotBuilder;
     Detail::UICanvasCommandStorage canvasCommandStorage;
     std::pmr::vector<TextEditState> textEditStatesByNodeIndex;
     std::pmr::vector<ProgressBarState> progressBarStatesByNodeIndex;
@@ -433,7 +419,7 @@ struct UIContext::Impl final {
           themeBindingsByNodeIndex(&resource), styleOverridesByNodeIndex(&resource), themeDirtyScratchByNodeIndex(&resource),
           themeTextMetricsScratchByNodeIndex(&resource), localSolidFillCacheByIndex(&resource),
           localTextColorCacheByIndex(&resource), textStatesByIndex(&resource), semanticsStatesByNodeIndex(&resource),
-          semanticsNodeBuildScratchByIndex(&resource), semanticsEntryBuildScratch(&resource),
+          semanticsSnapshotBuilder(capacities.nodeCapacity, capacities.paintSnapshotCapacity, resource),
           canvasCommandStorage(capacities.nodeCapacity, capacities.canvasCommandCapacity, resource),
           textEditStatesByNodeIndex(&resource),
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
@@ -517,8 +503,6 @@ struct UIContext::Impl final {
         impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
         impl->textStatesByIndex.resize(normalized.nodeCapacity);
         impl->semanticsStatesByNodeIndex.resize(normalized.nodeCapacity);
-        impl->semanticsNodeBuildScratchByIndex.resize(normalized.nodeCapacity);
-        impl->semanticsEntryBuildScratch.resize(normalized.paintSnapshotCapacity);
         impl->textEditStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->progressBarStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->radioButtonStatesByNodeIndex.resize(normalized.nodeCapacity);
@@ -3293,272 +3277,133 @@ struct UIContext::Impl final {
         }
     }
 
-    // Semantics uses two fixed-capacity linear passes. The first resolves the
-    // published parent and merge target for every node; the second writes merged
-    // names into stable contiguous ranges in the inactive snapshot buffer.
+    [[nodiscard]] bool resolveSemanticsSnapshotSource(
+        UINodeId node, Detail::UISemanticsSnapshotSource& source) noexcept
+    {
+        const u32 nodeIndex = node.index();
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        if (record == nullptr || nodeIndex >= semanticsStatesByNodeIndex.size())
+        {
+            return false;
+        }
+
+        const SemanticsState& state = semanticsStatesByNodeIndex[nodeIndex];
+        source = {};
+        source.parentNodeIndex = record->parentIndex;
+        source.mode = state.mode;
+        source.entry = UISemanticsEntry{
+            .node = node,
+            .role = state.role,
+            .actions = state.actions,
+            .enabled = isCandidateNodeEnabled(node),
+            .readOnly = state.readOnly,
+        };
+        UISemanticsEntry& entry = source.entry;
+        const bool enabled = entry.enabled;
+        entry.focused = enabled && defaultActionFocusButton == node;
+        if (record->kind == BuiltinElementKind::Checkbox && nodeIndex < checkboxCheckedByNodeIndex.size())
+        {
+            entry.checked = checkboxCheckedByNodeIndex[nodeIndex] != 0;
+        } else if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
+        {
+            entry.focused = enabled && defaultActionFocusButton == node;
+        } else if (record->kind == BuiltinElementKind::DropdownItem)
+        {
+            entry.selected = isSelectedDropdownItem(node);
+        } else if (record->kind == BuiltinElementKind::TextEdit)
+        {
+            entry.focused = enabled && textInputFocus == node;
+        } else if (record->kind == BuiltinElementKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
+        {
+            const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
+            entry.focused = enabled && armedSlider == node;
+            entry.hasRange = true;
+            entry.minValue = slider.minValue;
+            entry.maxValue = slider.maxValue;
+            entry.value = slider.value;
+        } else if (record->kind == BuiltinElementKind::ProgressBar &&
+                   nodeIndex < progressBarStatesByNodeIndex.size())
+        {
+            const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
+            entry.hasRange = true;
+            entry.minValue = progress.minValue;
+            entry.maxValue = progress.maxValue;
+            entry.value = progress.value;
+        } else if (record->kind == BuiltinElementKind::RadioButton &&
+                   nodeIndex < radioButtonStatesByNodeIndex.size())
+        {
+            entry.checked = radioButtonStatesByNodeIndex[nodeIndex].selected;
+        } else if (record->kind == BuiltinElementKind::ScrollView &&
+                   nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
+        {
+            const UIScrollViewMetrics& metrics = scrollViewLayoutScratchByNodeIndex[nodeIndex].metrics;
+            const bool vertical = hasScrollAxis(scrollViewStatesByNodeIndex[nodeIndex].style.axes,
+                                                UIScrollAxes::Vertical);
+            entry.focused = enabled && scrollThumbDragActive && armedScrollView == node;
+            entry.hasRange = true;
+            entry.maxValue = vertical ? metrics.maxOffsetY() : metrics.maxOffsetX();
+            entry.value = vertical ? metrics.offset.y : metrics.offset.x;
+        } else if (record->kind == BuiltinElementKind::ListView &&
+                   nodeIndex < listViewLayoutScratchByNodeIndex.size())
+        {
+            const UIListViewMetrics& metrics = listViewLayoutScratchByNodeIndex[nodeIndex].metrics;
+            entry.hasRange = true;
+            entry.maxValue = metrics.maxScrollOffset;
+            entry.value = metrics.scrollOffset;
+        } else if (record->kind == BuiltinElementKind::ListViewItem &&
+                   nodeIndex < listViewItemStatesByNodeIndex.size())
+        {
+            const ListViewItemState& item = listViewItemStatesByNodeIndex[nodeIndex];
+            entry.virtualItemKey = item.key;
+            entry.virtualItemIndex = item.logicalIndex;
+            entry.selected = item.bound && isSelectedListViewItem(node);
+            entry.focused = entry.enabled && entry.selected && defaultActionFocusButton == listViewForItem(node);
+        } else if (record->kind == BuiltinElementKind::TreeView &&
+                   nodeIndex < treeViewLayoutScratchByNodeIndex.size())
+        {
+            const UITreeViewMetrics& metrics = treeViewLayoutScratchByNodeIndex[nodeIndex].metrics;
+            entry.hasRange = true;
+            entry.maxValue = metrics.maxScrollOffset;
+            entry.value = metrics.scrollOffset;
+        } else if (record->kind == BuiltinElementKind::TreeViewItem &&
+                   nodeIndex < treeViewItemStatesByNodeIndex.size())
+        {
+            const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
+            entry.virtualItemKey = item.key;
+            entry.virtualItemIndex = item.logicalIndex;
+            entry.level = item.level;
+            entry.expandable = item.bound && item.expandable;
+            entry.expanded = item.bound && item.expanded;
+            entry.selected = item.bound && isSelectedTreeViewItem(node);
+            entry.focused = entry.enabled && entry.selected && defaultActionFocusButton == treeViewForItem(node);
+        }
+
+        source.name = semanticsNameSourceFor(nodeIndex);
+        source.description = semanticsDescriptionViewFor(nodeIndex);
+        if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
+        {
+            const UINodeId selected = dropdownStatesByNodeIndex[nodeIndex].selectedItem;
+            source.valueText = contains(selected) ? textViewFor(selected.index()) : std::string_view{};
+        } else if (record->kind == BuiltinElementKind::TextEdit)
+        {
+            source.valueText = textViewFor(nodeIndex);
+        }
+        return true;
+    }
+
     [[nodiscard]] Core::Status buildCommittedSemantics(std::pmr::vector<UISemanticsEntry>& output,
                                                        std::pmr::vector<char>& textOutput,
                                                        std::span<const UICommittedLayoutEntry> layoutEntries)
     {
-        output.clear();
-        std::fill(semanticsEntryBuildScratch.begin(), semanticsEntryBuildScratch.end(),
-                  SemanticsEntryBuildScratch{});
-
-        const auto fillControlState = [&](UISemanticsEntry& entry, u32 nodeIndex,
-                                          const NodeRecord& record) noexcept {
-            const UINodeId node = entry.node;
-            const bool enabled = entry.enabled;
-            entry.focused = enabled && defaultActionFocusButton == node;
-            if (record.kind == BuiltinElementKind::Checkbox && nodeIndex < checkboxCheckedByNodeIndex.size())
-            {
-                entry.checked = checkboxCheckedByNodeIndex[nodeIndex] != 0;
-            } else if (record.kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
-            {
-                entry.focused = enabled && defaultActionFocusButton == node;
-            } else if (record.kind == BuiltinElementKind::DropdownItem)
-            {
-                entry.selected = isSelectedDropdownItem(node);
-            } else if (record.kind == BuiltinElementKind::TextEdit)
-            {
-                entry.focused = enabled && textInputFocus == node;
-            } else if (record.kind == BuiltinElementKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
-            {
-                const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
-                entry.focused = enabled && armedSlider == node;
-                entry.hasRange = true;
-                entry.minValue = slider.minValue;
-                entry.maxValue = slider.maxValue;
-                entry.value = slider.value;
-            } else if (record.kind == BuiltinElementKind::ProgressBar &&
-                       nodeIndex < progressBarStatesByNodeIndex.size())
-            {
-                const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
-                entry.hasRange = true;
-                entry.minValue = progress.minValue;
-                entry.maxValue = progress.maxValue;
-                entry.value = progress.value;
-            } else if (record.kind == BuiltinElementKind::RadioButton &&
-                       nodeIndex < radioButtonStatesByNodeIndex.size())
-            {
-                entry.checked = radioButtonStatesByNodeIndex[nodeIndex].selected;
-            } else if (record.kind == BuiltinElementKind::ScrollView &&
-                       nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
-            {
-                const UIScrollViewMetrics& metrics = scrollViewLayoutScratchByNodeIndex[nodeIndex].metrics;
-                const bool vertical = hasScrollAxis(scrollViewStatesByNodeIndex[nodeIndex].style.axes,
-                                                    UIScrollAxes::Vertical);
-                entry.focused = enabled && scrollThumbDragActive && armedScrollView == node;
-                entry.hasRange = true;
-                entry.maxValue = vertical ? metrics.maxOffsetY() : metrics.maxOffsetX();
-                entry.value = vertical ? metrics.offset.y : metrics.offset.x;
-            } else if (record.kind == BuiltinElementKind::ListView &&
-                       nodeIndex < listViewLayoutScratchByNodeIndex.size())
-            {
-                const UIListViewMetrics& metrics = listViewLayoutScratchByNodeIndex[nodeIndex].metrics;
-                entry.hasRange = true;
-                entry.maxValue = metrics.maxScrollOffset;
-                entry.value = metrics.scrollOffset;
-            } else if (record.kind == BuiltinElementKind::ListViewItem &&
-                       nodeIndex < listViewItemStatesByNodeIndex.size())
-            {
-                const ListViewItemState& item = listViewItemStatesByNodeIndex[nodeIndex];
-                entry.virtualItemKey = item.key;
-                entry.virtualItemIndex = item.logicalIndex;
-                entry.selected = item.bound && isSelectedListViewItem(node);
-                entry.focused = entry.enabled && entry.selected && defaultActionFocusButton == listViewForItem(node);
-            } else if (record.kind == BuiltinElementKind::TreeView &&
-                       nodeIndex < treeViewLayoutScratchByNodeIndex.size())
-            {
-                const UITreeViewMetrics& metrics = treeViewLayoutScratchByNodeIndex[nodeIndex].metrics;
-                entry.hasRange = true;
-                entry.maxValue = metrics.maxScrollOffset;
-                entry.value = metrics.scrollOffset;
-            } else if (record.kind == BuiltinElementKind::TreeViewItem &&
-                       nodeIndex < treeViewItemStatesByNodeIndex.size())
-            {
-                const TreeViewItemState& item = treeViewItemStatesByNodeIndex[nodeIndex];
-                entry.virtualItemKey = item.key;
-                entry.virtualItemIndex = item.logicalIndex;
-                entry.level = item.level;
-                entry.expandable = item.bound && item.expandable;
-                entry.expanded = item.bound && item.expanded;
-                entry.selected = item.bound && isSelectedTreeViewItem(node);
-                entry.focused = entry.enabled && entry.selected && defaultActionFocusButton == treeViewForItem(node);
-            }
-        };
-
-        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries)
-        {
-            const u32 nodeIndex = layoutEntry.node.index();
-            if (nodeIndex >= semanticsNodeBuildScratchByIndex.size() ||
-                nodeIndex >= semanticsStatesByNodeIndex.size())
-            {
-                return fail(Core::CoreErrorCode::Internal, "UI semantics node scratch index is out of range");
-            }
-            SemanticsNodeBuildScratch& scratch = semanticsNodeBuildScratchByIndex[nodeIndex];
-            scratch = {};
-            const NodeRecord* record = recordByIndex(nodeIndex);
-            if (record == nullptr)
-            {
-                return fail(UIErrorCode::InvalidNode, "UI semantics layout references a stale node");
-            }
-            const SemanticsState& state = semanticsStatesByNodeIndex[nodeIndex];
-            const SemanticsNodeBuildScratch* parentScratch =
-                record->parentIndex != InvalidNodeIndex && record->parentIndex < semanticsNodeBuildScratchByIndex.size()
-                    ? &semanticsNodeBuildScratchByIndex[record->parentIndex]
-                    : nullptr;
-            scratch.nearestPublishedEntryIndex =
-                parentScratch == nullptr ? InvalidUIHitEntryIndex : parentScratch->nearestPublishedEntryIndex;
-            scratch.mergeEntryIndex =
-                parentScratch == nullptr ? InvalidUIHitEntryIndex : parentScratch->mergeEntryIndex;
-            scratch.excluded = layoutEntry.effectiveVisibility != UIVisibility::Visible ||
-                               state.mode == UISemanticsMode::Exclude ||
-                               (parentScratch != nullptr && parentScratch->excluded);
-            if (scratch.excluded)
-            {
-                continue;
-            }
-
-            const bool inheritedMerge = scratch.mergeEntryIndex != InvalidUIHitEntryIndex;
-            const bool publishes = !inheritedMerge &&
-                                   (state.mode == UISemanticsMode::Publish ||
-                                    state.mode == UISemanticsMode::MergeDescendants);
-            if (publishes)
-            {
-                if (output.size() >= capacityConfig.paintSnapshotCapacity ||
-                    output.size() >= semanticsEntryBuildScratch.size())
-                {
-                    return fail(UIErrorCode::CapacityExceeded,
-                                "UI committed semantics snapshot capacity has been exhausted");
-                }
-                const u32 entryIndex = static_cast<u32>(output.size());
-                const UINodeId semanticParent =
-                    scratch.nearestPublishedEntryIndex < output.size()
-                        ? output[scratch.nearestPublishedEntryIndex].node
-                        : UINodeId{};
-                UISemanticsEntry entry{
-                    .node = layoutEntry.node,
-                    .parent = semanticParent,
-                    .role = state.role,
-                    .actions = state.actions,
-                    .worldRect = layoutEntry.worldRect,
-                    .enabled = isCandidateNodeEnabled(layoutEntry.node),
-                    .readOnly = state.readOnly,
-                };
-                fillControlState(entry, nodeIndex, *record);
-                output.push_back(entry);
-                scratch.nearestPublishedEntryIndex = entryIndex;
-                if (state.mode == UISemanticsMode::MergeDescendants)
-                {
-                    scratch.mergeEntryIndex = entryIndex;
-                }
-                scratch.nameTargetEntryIndex = entryIndex;
-            } else if (inheritedMerge)
-            {
-                scratch.nameTargetEntryIndex = scratch.mergeEntryIndex;
-            }
-
-            const std::string_view nameSource = semanticsNameSourceFor(nodeIndex);
-            if (!nameSource.empty() && scratch.nameTargetEntryIndex < semanticsEntryBuildScratch.size())
-            {
-                SemanticsEntryBuildScratch& entryScratch =
-                    semanticsEntryBuildScratch[scratch.nameTargetEntryIndex];
-                const usize separatorBytes = entryScratch.hasNamePart ? 1U : 0U;
-                if (entryScratch.nameByteCount > (std::numeric_limits<usize>::max)() - separatorBytes ||
-                    entryScratch.nameByteCount + separatorBytes >
-                        (std::numeric_limits<usize>::max)() - nameSource.size())
-                {
-                    return fail(UIErrorCode::CapacityExceeded, "UI merged semantics name size overflowed");
-                }
-                entryScratch.nameByteCount += separatorBytes + nameSource.size();
-                entryScratch.hasNamePart = true;
-            }
-        }
-
-        usize textOutputSize = 0;
-        for (usize entryIndex = 0; entryIndex < output.size(); ++entryIndex)
-        {
-            SemanticsEntryBuildScratch& scratch = semanticsEntryBuildScratch[entryIndex];
-            if (scratch.nameByteCount > textOutput.size() - textOutputSize)
-            {
-                return fail(UIErrorCode::CapacityExceeded,
-                            "UI committed semantics text snapshot capacity has been exhausted");
-            }
-            scratch.nameOffset = textOutputSize;
-            scratch.nameBytesWritten = 0;
-            if (scratch.nameByteCount != 0)
-            {
-                output[entryIndex].name =
-                    std::string_view(textOutput.data() + textOutputSize, scratch.nameByteCount);
-                textOutputSize += scratch.nameByteCount;
-            }
-        }
-
-        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries)
-        {
-            const u32 nodeIndex = layoutEntry.node.index();
-            const SemanticsNodeBuildScratch& nodeScratch = semanticsNodeBuildScratchByIndex[nodeIndex];
-            const std::string_view source = semanticsNameSourceFor(nodeIndex);
-            if (source.empty() || nodeScratch.nameTargetEntryIndex >= output.size())
-            {
-                continue;
-            }
-            SemanticsEntryBuildScratch& entryScratch =
-                semanticsEntryBuildScratch[nodeScratch.nameTargetEntryIndex];
-            char* destination = textOutput.data() + entryScratch.nameOffset + entryScratch.nameBytesWritten;
-            if (entryScratch.nameBytesWritten != 0)
-            {
-                *destination++ = ' ';
-                ++entryScratch.nameBytesWritten;
-            }
-            std::memcpy(destination, source.data(), source.size());
-            entryScratch.nameBytesWritten += source.size();
-        }
-
-        const auto copyText = [&](std::string_view source, std::string_view& destination) -> Core::Status {
-            destination = {};
-            if (source.empty())
-            {
-                return Core::success();
-            }
-            if (textOutputSize > textOutput.size() || source.size() > textOutput.size() - textOutputSize)
-            {
-                return fail(UIErrorCode::CapacityExceeded,
-                            "UI committed semantics text snapshot capacity has been exhausted");
-            }
-            char* const destinationBytes = textOutput.data() + textOutputSize;
-            std::memcpy(destinationBytes, source.data(), source.size());
-            destination = std::string_view(destinationBytes, source.size());
-            textOutputSize += source.size();
-            return Core::success();
-        };
-        for (UISemanticsEntry& entry : output)
-        {
-            const u32 nodeIndex = entry.node.index();
-            const NodeRecord* record = recordByIndex(nodeIndex);
-            if (record == nullptr)
-            {
-                return fail(UIErrorCode::InvalidNode, "UI semantics entry references a stale node");
-            }
-            if (Core::Status status = copyText(semanticsDescriptionViewFor(nodeIndex), entry.description); !status)
-            {
-                return status;
-            }
-            std::string_view valueSource{};
-            if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
-            {
-                const UINodeId selected = dropdownStatesByNodeIndex[nodeIndex].selectedItem;
-                valueSource = contains(selected) ? textViewFor(selected.index()) : std::string_view{};
-            } else if (record->kind == BuiltinElementKind::TextEdit)
-            {
-                valueSource = textViewFor(nodeIndex);
-            }
-            if (Core::Status status = copyText(valueSource, entry.valueText); !status)
-            {
-                return status;
-            }
-        }
-        return Core::success();
+        return semanticsSnapshotBuilder.build(
+            output, textOutput, layoutEntries,
+            Detail::UISemanticsSnapshotSourceAdapter{
+                .context = this,
+                .resolve = [](void* context, UINodeId node,
+                              Detail::UISemanticsSnapshotSource& source) noexcept {
+                    return static_cast<Impl*>(context)->resolveSemanticsSnapshotSource(node, source);
+                },
+            });
     }
 
     [[nodiscard]] Core::Status validateLayoutCandidate(const std::pmr::vector<u32>& order) const
