@@ -27,6 +27,7 @@
 #include "detail/UIPaintSnapshotBuilder.hpp"
 #include "detail/UIPropertyNormalization.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
+#include "detail/UIScrollViewLayout.hpp"
 #include "detail/UISemanticsSnapshotBuilder.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UIStyleRoleResolver.hpp"
@@ -137,6 +138,7 @@ using Detail::resolveLengthNoFallbackCount;
 using Detail::resolveMeasuredLayoutSize;
 using Detail::resolveOverlayRect;
 using Detail::resolvePopupPlacement;
+using Detail::resolveScrollViewLayout;
 using Detail::resolveScrollThumbOffset;
 using Detail::resolveScrollTrackPageOffset;
 using Detail::resolveScrollWheelOffset;
@@ -151,6 +153,7 @@ using Detail::scrollAxisOffset;
 using Detail::ScrollBarGeometry;
 using Detail::ScrollBarPointerHit;
 using Detail::ScrollViewLayoutScratch;
+using Detail::ScrollViewLayoutInput;
 using Detail::ScrollViewState;
 using Detail::SliderState;
 using Detail::SliderPaintGeometry;
@@ -1521,75 +1524,22 @@ struct UIContext::Impl final {
             parentIndex < scrollViewLayoutScratchByNodeIndex.size())
         {
             ScrollViewState& state = scrollViewStatesByNodeIndex[parentIndex];
-            const bool horizontalEnabled = hasScrollAxis(state.style.axes, UIScrollAxes::Horizontal);
-            const bool verticalEnabled = hasScrollAxis(state.style.axes, UIScrollAxes::Vertical);
-            const float rawContentWidth = row ? totalMain : totalCross;
-            const float rawContentHeight = row ? totalCross : totalMain;
-            const bool barsHidden = state.style.scrollBarVisibility == UIScrollBarVisibility::Hidden;
-            bool horizontalBar = !barsHidden && horizontalEnabled &&
-                                 state.style.scrollBarVisibility == UIScrollBarVisibility::Always;
-            bool verticalBar = !barsHidden && verticalEnabled &&
-                               state.style.scrollBarVisibility == UIScrollBarVisibility::Always;
-
-            // Auto bars can cause one another by reducing the opposite axis.
-            // Two updates reach the fixed point for a rectangular viewport.
-            for (usize passIndex = 0; passIndex < 2; ++passIndex)
-            {
-                const float viewportWidth =
-                    (std::max)(0.0F, unscrolledContentRect.width - (verticalBar ? state.paint.thickness : 0.0F));
-                const float viewportHeight =
-                    (std::max)(0.0F, unscrolledContentRect.height - (horizontalBar ? state.paint.thickness : 0.0F));
-                if (!barsHidden && state.style.scrollBarVisibility == UIScrollBarVisibility::Auto)
-                {
-                    horizontalBar = horizontalEnabled && rawContentWidth > viewportWidth;
-                    verticalBar = verticalEnabled && rawContentHeight > viewportHeight;
-                }
-            }
-
-            const UILogicalRect scrollViewportRect{
-                .x = unscrolledContentRect.x,
-                .y = unscrolledContentRect.y,
-                .width = normalizeFloat((std::max)(
-                    0.0F, unscrolledContentRect.width - (verticalBar ? state.paint.thickness : 0.0F))),
-                .height = normalizeFloat((std::max)(
-                    0.0F, unscrolledContentRect.height - (horizontalBar ? state.paint.thickness : 0.0F))),
-            };
-            const UILogicalSize contentSize{
-                .width = normalizeFloat(horizontalEnabled
-                                            ? (std::max)(rawContentWidth, scrollViewportRect.width)
-                                            : scrollViewportRect.width),
-                .height = normalizeFloat(verticalEnabled
-                                             ? (std::max)(rawContentHeight, scrollViewportRect.height)
-                                             : scrollViewportRect.height),
-            };
-            const UIScrollOffset clampedOffset{
-                .x = horizontalEnabled
-                         ? normalizeFloat((std::clamp)(state.requestedOffset.x, 0.0F,
-                                                       (std::max)(0.0F, contentSize.width - scrollViewportRect.width)))
-                         : 0.0F,
-                .y = verticalEnabled
-                         ? normalizeFloat((std::clamp)(state.requestedOffset.y, 0.0F,
-                                                       (std::max)(0.0F, contentSize.height - scrollViewportRect.height)))
-                         : 0.0F,
-            };
+            const auto plan = resolveScrollViewLayout(ScrollViewLayoutInput{
+                .availableRect = unscrolledContentRect,
+                .rawContentSize = {
+                    .width = row ? totalMain : totalCross,
+                    .height = row ? totalCross : totalMain,
+                },
+                .style = state.style,
+                .scrollBarThickness = state.paint.thickness,
+                .requestedOffset = state.requestedOffset,
+            });
             scrollViewLayoutScratchByNodeIndex[parentIndex] = ScrollViewLayoutScratch{
-                .metrics =
-                    UIScrollViewMetrics{
-                        .offset = clampedOffset,
-                        .viewportSize = scrollViewportRect.size(),
-                        .contentSize = contentSize,
-                        .horizontalScrollBarVisible = horizontalBar,
-                        .verticalScrollBarVisible = verticalBar,
-                    },
-                .viewportRect = scrollViewportRect,
+                .metrics = plan.metrics,
+                .viewportRect = plan.viewportRect,
             };
-            layoutContentRect = UILogicalRect{
-                .x = normalizeFloat(scrollViewportRect.x - clampedOffset.x),
-                .y = normalizeFloat(scrollViewportRect.y - clampedOffset.y),
-                .width = contentSize.width,
-                .height = contentSize.height,
-            };
-            descendantClip = intersectRects(parentScratch.descendantClip, scrollViewportRect);
+            layoutContentRect = plan.contentRect;
+            descendantClip = intersectRects(parentScratch.descendantClip, plan.viewportRect);
         }
 
         const float contentMain = row ? layoutContentRect.width : layoutContentRect.height;

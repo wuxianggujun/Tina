@@ -23,6 +23,7 @@ add_executable(tina_ui_tests
     UISliderChangeCallbackRegistryTests.cpp
     UISliderTests.cpp
     UIScrollViewTests.cpp
+    UIScrollViewLayoutTests.cpp
     UIListViewTests.cpp
     UITreeViewTests.cpp
     UIPopupDropdownTests.cpp

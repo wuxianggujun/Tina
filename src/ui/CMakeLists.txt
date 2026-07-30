@@ -71,6 +71,7 @@ add_library(tina_ui STATIC
     detail/UIPaintSnapshotBuilder.cpp
     detail/UIRoutedPointerListenerRegistry.hpp
     detail/UIRoutedPointerListenerRegistry.cpp
+    detail/UIScrollViewLayout.hpp
     detail/UISliderChangeCallbackRegistry.hpp
     detail/UISliderChangeCallbackRegistry.cpp
     detail/UISemanticsSnapshotBuilder.hpp
