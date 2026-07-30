@@ -64,6 +64,8 @@ add_library(tina_ui STATIC
     detail/UIPropertyNormalization.cpp
     detail/UIPaintPrimitives.hpp
     detail/UIPaintPrimitives.cpp
+    detail/UIPaintSnapshotBuilder.hpp
+    detail/UIPaintSnapshotBuilder.cpp
     detail/UIRoutedPointerListenerRegistry.hpp
     detail/UIRoutedPointerListenerRegistry.cpp
     detail/UISliderChangeCallbackRegistry.hpp
