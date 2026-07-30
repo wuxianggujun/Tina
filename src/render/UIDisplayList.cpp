@@ -3,6 +3,8 @@
 #include <tina/render/RenderErrors.hpp>
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <new>
@@ -184,6 +186,15 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
         ++m_statistics.invalidInputFailureCount;
         return failBuild(RenderErrorCode::InvalidPremultipliedColor, "UI colors must use premultiplied RGBA8 channels");
     }
+    const float maximumCornerRadius =
+        static_cast<float>((std::min)(input.bounds.width, input.bounds.height)) * 0.5F;
+    if (!std::isfinite(input.cornerRadius) || input.cornerRadius < 0.0F ||
+        input.cornerRadius > maximumCornerRadius)
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand,
+                         "UI solid quad corner radius must be finite and fit within its bounds");
+    }
     if (input.bounds.empty())
     {
         ++m_candidateStatistics.prunedEmptyBoundsCount;
@@ -238,6 +249,7 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
                                                        .paintOrdinal = input.paintOrdinal,
                                                        .bounds = input.bounds,
                                                        .color = input.color,
+                                                       .cornerRadius = input.cornerRadius,
                                                        .clip = clip,
                                                    });
     ++m_commandCount;
@@ -450,6 +462,7 @@ u64 UIDisplayListBuilder::calculatePaintOrderChecksum(std::span<const UIDrawComm
         hashByte(checksum, command.color.green);
         hashByte(checksum, command.color.blue);
         hashByte(checksum, command.color.alpha);
+        hashU32(checksum, std::bit_cast<u32>(command.cornerRadius));
         hashByte(checksum, static_cast<u8>(command.clip.hasClip()));
         hashU32(checksum, command.clip.m_value);
         if (command.clip.hasClip())

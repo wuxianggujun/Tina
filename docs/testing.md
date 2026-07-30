@@ -100,7 +100,7 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 `--auto-demo` 与显式 `--frames` 同用时至少 120 帧。
 
 Visual/interaction 验收另跑不带 `--auto-demo` 的窗口：确认 Dark/Light 切换后既有控件同步换肤，
-Primary/Destructive/Disabled Button 层次清楚，pointer press 会压低阴影并反转双边框，Tab focus 可辨，
+Primary/Destructive/Disabled Button 层次清楚，pointer press 会压低阴影并切换圆角 border ring 颜色，Tab focus 可辨，
 Slider 与 ProgressBar 联动，Dropdown、List、Tree、Scroll 可操作，TextEdit 中文可读且左右 padding 与
 pointer caret 一致。普通
 `windows-msvc-vnext-bgfx` 图未启用 FreeType，placeholder text 不能计为字体或 CJK 视觉通过。

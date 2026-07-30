@@ -16,6 +16,11 @@ struct BgfxUIDisplayVertex final {
     u32 abgr = 0;
     float u = 0.0F;
     float v = 0.0F;
+    // Constant across a quad; interpolated to the fragment shader so rounded
+    // solid shapes remain batchable without per-command uniforms.
+    float shapeWidth = 0.0F;
+    float shapeHeight = 0.0F;
+    float cornerRadius = 0.0F;
 };
 
 struct BgfxUIDisplayGeometryRequirements final {

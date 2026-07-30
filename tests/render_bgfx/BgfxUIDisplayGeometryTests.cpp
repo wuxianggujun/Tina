@@ -45,6 +45,7 @@ buildDisplayList(UIDisplayListBuilder& builder, std::span<const UISolidQuadInput
             .paintOrdinal = 3,
             .bounds = {10, 20, 30, 40},
             .color = {.red = 128, .green = 64, .blue = 1, .alpha = 128},
+            .cornerRadius = 6.0F,
         },
         UISolidQuadInput{
             .paintOrdinal = 9,
@@ -112,12 +113,21 @@ TEST(BgfxUIDisplayGeometryTest, ExpandsTwoSolidQuadsInPaintOrderWithAbsoluteIndi
     expectVertex(vertices[1], 40.0F, 20.0F, FirstAbgr, 1.0F, 0.0F);
     expectVertex(vertices[2], 40.0F, 60.0F, FirstAbgr, 1.0F, 1.0F);
     expectVertex(vertices[3], 10.0F, 60.0F, FirstAbgr, 0.0F, 1.0F);
+    for (usize index = 0; index < 4; ++index)
+    {
+        EXPECT_FLOAT_EQ(vertices[index].shapeWidth, 30.0F);
+        EXPECT_FLOAT_EQ(vertices[index].shapeHeight, 40.0F);
+        EXPECT_FLOAT_EQ(vertices[index].cornerRadius, 6.0F);
+    }
 
     constexpr u32 SecondAbgr = 0xFF1E140AU;
     expectVertex(vertices[4], -5.0F, -7.0F, SecondAbgr, 0.0F, 0.0F);
     expectVertex(vertices[5], -3.0F, -7.0F, SecondAbgr, 1.0F, 0.0F);
     expectVertex(vertices[6], -3.0F, -4.0F, SecondAbgr, 1.0F, 1.0F);
     expectVertex(vertices[7], -5.0F, -4.0F, SecondAbgr, 0.0F, 1.0F);
+    EXPECT_FLOAT_EQ(vertices[4].shapeWidth, 2.0F);
+    EXPECT_FLOAT_EQ(vertices[4].shapeHeight, 3.0F);
+    EXPECT_FLOAT_EQ(vertices[4].cornerRadius, 0.0F);
     expectVertex(vertices[8], VertexSentinel.x, VertexSentinel.y, VertexSentinel.abgr,
                  VertexSentinel.u, VertexSentinel.v);
 

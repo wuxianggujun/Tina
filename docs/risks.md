@@ -11,7 +11,7 @@
 | R-UI-01 | P0 | dirty 传播或 paint batching 导致全树工作、每帧分配或透明顺序错误 | committed snapshot、固定 PMR、相邻合批、checksum；50,000 节点深树 structure/layout/hit/paint 非递归回归，Popup publication 为线性步骤 | 完整 dirty-range pruning、目标规模零稳态分配和视觉/paint checksum 同时通过 | UI-003, PERF-002 |
 | R-A11Y-01 | P1 | Windows UIA 自动 HWND 接线/patterns 已有，但 Narrator/Inspect 金标与 AT-SPI 未关 | generation ID、action seam、HostBridge、EngineHost 自动 publish、Invoke/Toggle/RangeValue/Value patterns、跨进程 HWND client gate | Narrator/Inspect 人工金标 + Linux AT-SPI 真机验收 | UI-002 / UI-002-LINUX |
 | R-TEXT-01 | P1 | CJK 缺字、IME composition/selection 跨平台差异 | UTF-8 校验、可选 FreeType、Windows TextInput/IME 首切片 | Windows/Linux 支持矩阵与候选窗、shaping 测试明确 | TEXT-001 |
-| R-VIS-01 | P1 | GPU、driver、DPI、字体变化造成截图误报 | 结构化逻辑测试优先；初始化白帧过滤 | 固定 profile、字体 fingerprint、区域/感知阈值噪声校准 | UI-003 |
+| R-VIS-01 | P1 | GPU、driver、DPI、字体或 SDF 圆角边缘变化造成截图误报 | 结构化逻辑测试优先；初始化白帧过滤；圆角半径先投影/夹紧并由同一 shader 计算 coverage | 固定 profile、字体 fingerprint、区域/感知阈值噪声校准 | UI-003 |
 | R-PERF-01 | P0 | benchmark 跨 build/host/workload 比较或 MAD 过高 | ADR 0018 + `tina_bench` schema v1/fingerprint；共享机结论只标 provisional | 固定机 hard gate 与多进程 MAD 协议落地 | PERF-002 |
 
 ## Mitigated

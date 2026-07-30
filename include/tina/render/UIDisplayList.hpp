@@ -82,6 +82,9 @@ struct UISolidQuadInput final {
     u32 paintOrdinal = 0;
     UIPixelRect bounds{};
     UIPremultipliedRgba8 color{};
+    // Radius in framebuffer pixels. Must be finite, non-negative, and no
+    // greater than half the smallest bounds extent.
+    float cornerRadius = 0.0F;
     std::optional<UIPixelRect> effectiveClip{};
 };
 
@@ -101,6 +104,7 @@ struct UIDrawCommand final {
     u32 paintOrdinal = 0;
     UIPixelRect bounds{};
     UIPremultipliedRgba8 color{};
+    float cornerRadius = 0.0F;
     UIClipId clip{};
     UIPixelRect atlasUv{};
     u32 atlasPage = 0;

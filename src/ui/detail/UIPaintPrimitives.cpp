@@ -10,22 +10,47 @@ namespace {
     return value == 0.0F ? 0.0F : value;
 }
 
+[[nodiscard]] bool hasDrawableShadow(const UIBoxPaint& paint,
+                                     const UILogicalRect& worldRect) noexcept
+{
+    return paint.shadow.alpha != 0 &&
+           (paint.shadowOffsetX != 0.0F || paint.shadowOffsetY != 0.0F) &&
+           worldRect.width > 0.0F && worldRect.height > 0.0F;
+}
+
+[[nodiscard]] bool hasDrawableBorder(const UIBoxPaint& paint,
+                                     const UILogicalRect& worldRect) noexcept
+{
+    return paint.borderWidth > 0.0F &&
+           (paint.borderLight.alpha != 0 || paint.borderDark.alpha != 0) &&
+           worldRect.width > paint.borderWidth * 2.0F &&
+           worldRect.height > paint.borderWidth * 2.0F;
+}
+
+[[nodiscard]] UIStraightSrgba8Color roundedBorderColor(const UIBoxPaint& paint) noexcept
+{
+    // Rounded chrome uses one outer ring. Prefer the bottom/right tone so
+    // swapping light/dark on press still produces a visible depth response.
+    return paint.borderDark.alpha != 0 ? paint.borderDark : paint.borderLight;
+}
+
 } // namespace
 
 usize countBoxChromePaintEntries(const UIBoxPaint& paint,
                                  const UILogicalRect& worldRect,
                                  bool hasResolvedFill) noexcept
 {
-    usize count = hasResolvedFill ? 1U : 0U;
-    if (paint.shadow.alpha != 0 &&
-        (paint.shadowOffsetX != 0.0F || paint.shadowOffsetY != 0.0F) &&
-        worldRect.width > 0.0F && worldRect.height > 0.0F)
+    usize count = hasDrawableShadow(paint, worldRect) ? 1U : 0U;
+    const bool hasBorder = hasDrawableBorder(paint, worldRect);
+    if (paint.cornerRadius > 0.0F && hasResolvedFill && hasBorder)
+    {
+        return count + 2U;
+    }
+    if (hasResolvedFill)
     {
         ++count;
     }
-    if (paint.borderWidth > 0.0F &&
-        worldRect.width > paint.borderWidth * 2.0F &&
-        worldRect.height > paint.borderWidth * 2.0F)
+    if (hasBorder)
     {
         if (paint.borderLight.alpha != 0)
         {
@@ -45,9 +70,7 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output,
                            u32& nextPaintOrdinal, const UIBoxPaint& paint,
                            UIPremultipliedRgba8Color resolvedFill) noexcept
 {
-    if (paint.shadow.alpha != 0 &&
-        (paint.shadowOffsetX != 0.0F || paint.shadowOffsetY != 0.0F) &&
-        worldRect.width > 0.0F && worldRect.height > 0.0F)
+    if (hasDrawableShadow(paint, worldRect))
     {
         output.push_back(UICommittedPaintEntry{
             .node = node,
@@ -61,9 +84,43 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output,
             .effectiveClip = effectiveClip,
             .paintOrdinal = nextPaintOrdinal,
             .solidFill = premultiply(paint.shadow),
+            .cornerRadius = paint.cornerRadius,
         });
         ++nextPaintOrdinal;
     }
+
+    const bool hasBorder = hasDrawableBorder(paint, worldRect);
+    if (paint.cornerRadius > 0.0F && !resolvedFill.isTransparent() && hasBorder)
+    {
+        output.push_back(UICommittedPaintEntry{
+            .node = node,
+            .worldRect = worldRect,
+            .effectiveClip = effectiveClip,
+            .paintOrdinal = nextPaintOrdinal,
+            .solidFill = premultiply(roundedBorderColor(paint)),
+            .cornerRadius = paint.cornerRadius,
+        });
+        ++nextPaintOrdinal;
+
+        const float inset = paint.borderWidth;
+        output.push_back(UICommittedPaintEntry{
+            .node = node,
+            .worldRect =
+                UILogicalRect{
+                    .x = normalizeFloat(worldRect.x + inset),
+                    .y = normalizeFloat(worldRect.y + inset),
+                    .width = normalizeFloat(worldRect.width - inset * 2.0F),
+                    .height = normalizeFloat(worldRect.height - inset * 2.0F),
+                },
+            .effectiveClip = effectiveClip,
+            .paintOrdinal = nextPaintOrdinal,
+            .solidFill = resolvedFill,
+            .cornerRadius = (std::max)(0.0F, paint.cornerRadius - inset),
+        });
+        ++nextPaintOrdinal;
+        return;
+    }
+
     if (!resolvedFill.isTransparent())
     {
         output.push_back(UICommittedPaintEntry{
@@ -72,12 +129,11 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output,
             .effectiveClip = effectiveClip,
             .paintOrdinal = nextPaintOrdinal,
             .solidFill = resolvedFill,
+            .cornerRadius = paint.cornerRadius,
         });
         ++nextPaintOrdinal;
     }
-    if (!(paint.borderWidth > 0.0F) ||
-        worldRect.width <= paint.borderWidth * 2.0F ||
-        worldRect.height <= paint.borderWidth * 2.0F)
+    if (!hasBorder)
     {
         return;
     }

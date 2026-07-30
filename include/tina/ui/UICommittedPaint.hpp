@@ -16,6 +16,9 @@ struct UICommittedPaintEntry final {
     u32 paintOrdinal = 0;
     // Premultiplied vertex/tint color for both SolidFill and Glyph.
     UIPremultipliedRgba8Color solidFill{};
+    // Logical-pixel radius for non-glyph paint. Integration projects and clamps
+    // it before publishing the backend-neutral DisplayList command.
+    float cornerRadius = 0.0F;
     // When true, solidFill is the glyph tint and atlas* describe an R8 glyph
     // placement in the context-owned CPU atlas (page 0). Integration emits a
     // DisplayList Glyph command; when false, emits SolidQuad.

@@ -651,6 +651,7 @@ TEST_F(UIElementTest, CanvasCommandsAreCopiedAndPaintAfterTheElementBoxInLocalOr
         UI::UICanvasCommand{
             .bounds = {.x = 2.0F, .y = 3.0F, .width = 5.0F, .height = 6.0F},
             .color = UI::rgb(0xFF0000),
+            .cornerRadius = 2.5F,
         },
         UI::UICanvasCommand{
             .bounds = {.x = 35.0F, .y = 25.0F, .width = 10.0F, .height = 10.0F},
@@ -692,6 +693,7 @@ TEST_F(UIElementTest, CanvasCommandsAreCopiedAndPaintAfterTheElementBoxInLocalOr
         elementPaints[1]->worldRect,
         (UI::UILogicalRect{.x = 12.0F, .y = 18.0F, .width = 5.0F, .height = 6.0F}));
     EXPECT_EQ(elementPaints[1]->solidFill, UI::premultiply(UI::rgb(0xFF0000)));
+    EXPECT_FLOAT_EQ(elementPaints[1]->cornerRadius, 2.5F);
     EXPECT_EQ(
         elementPaints[2]->worldRect,
         (UI::UILogicalRect{.x = 45.0F, .y = 40.0F, .width = 10.0F, .height = 10.0F}));
@@ -733,6 +735,18 @@ TEST_F(UIElementTest, CanvasCapacityValidationDestroyAndTransactionRollbackRecyc
     ASSERT_FALSE(exhausted.has_value());
     EXPECT_EQ(exhausted.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->liveNodeCount(), 1U);
+    EXPECT_EQ(context->statistics().activeCanvasCommandCount, 0U);
+
+    const UI::UICanvasCommand invalidRadiusCommand{
+        .bounds = {.width = 1.0F, .height = 1.0F},
+        .color = UI::rgb(0xFFFFFF),
+        .cornerRadius = (std::numeric_limits<float>::quiet_NaN)(),
+    };
+    UI::UIElementDescriptor invalidRadius = UI::makePanelElement();
+    invalidRadius.visual.canvas = std::span<const UI::UICanvasCommand>(&invalidRadiusCommand, 1);
+    const auto invalidRadiusResult = updater.createElement(root.rootNodeId(), invalidRadius);
+    ASSERT_FALSE(invalidRadiusResult.has_value());
+    EXPECT_EQ(invalidRadiusResult.error().code, UI::UIErrorCode::InvalidElementDescriptor);
     EXPECT_EQ(context->statistics().activeCanvasCommandCount, 0U);
 
     const UI::UICanvasCommand unsupportedCommand{

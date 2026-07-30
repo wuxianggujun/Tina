@@ -1996,6 +1996,7 @@ struct UIContext::Impl final {
                     .effectiveClip = canvasClip,
                     .paintOrdinal = nextPaintOrdinal,
                     .solidFill = premultiply(command.color),
+                    .cornerRadius = command.cornerRadius,
                 });
                 ++nextPaintOrdinal;
             }

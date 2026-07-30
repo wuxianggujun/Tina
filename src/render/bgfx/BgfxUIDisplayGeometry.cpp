@@ -1,5 +1,7 @@
 #include "BgfxUIDisplayGeometry.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -81,6 +83,15 @@ checkedGeometryRequirements(UIDisplayListView displayList)
             return Core::failure(Core::CoreErrorCode::Unsupported,
                                  "The UI DisplayList contains an unsupported draw command kind");
         }
+        const float maximumCornerRadius =
+            static_cast<float>((std::min)(command.bounds.width, command.bounds.height)) * 0.5F;
+        if (!std::isfinite(command.cornerRadius) || command.cornerRadius < 0.0F ||
+            command.cornerRadius > maximumCornerRadius ||
+            (command.kind == UIDrawCommandKind::Glyph && command.cornerRadius != 0.0F))
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The UI DisplayList contains an invalid corner radius");
+        }
     }
 
     return BgfxUIDisplayGeometryRequirements{
@@ -133,6 +144,8 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
         const i64 right = left + static_cast<i64>(command.bounds.width);
         const i64 bottom = top + static_cast<i64>(command.bounds.height);
         const u32 color = packAbgr(command.color);
+        const float shapeWidth = static_cast<float>(command.bounds.width);
+        const float shapeHeight = static_cast<float>(command.bounds.height);
 
         float u0 = 0.0F;
         float v0 = 0.0F;
@@ -159,6 +172,9 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .abgr = color,
             .u = u0,
             .v = v0,
+            .shapeWidth = shapeWidth,
+            .shapeHeight = shapeHeight,
+            .cornerRadius = command.cornerRadius,
         };
         vertices[vertexOffset + 1U] = {
             .x = static_cast<float>(right),
@@ -166,6 +182,9 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .abgr = color,
             .u = u1,
             .v = v0,
+            .shapeWidth = shapeWidth,
+            .shapeHeight = shapeHeight,
+            .cornerRadius = command.cornerRadius,
         };
         vertices[vertexOffset + 2U] = {
             .x = static_cast<float>(right),
@@ -173,6 +192,9 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .abgr = color,
             .u = u1,
             .v = v1,
+            .shapeWidth = shapeWidth,
+            .shapeHeight = shapeHeight,
+            .cornerRadius = command.cornerRadius,
         };
         vertices[vertexOffset + 3U] = {
             .x = static_cast<float>(left),
@@ -180,6 +202,9 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .abgr = color,
             .u = u0,
             .v = v1,
+            .shapeWidth = shapeWidth,
+            .shapeHeight = shapeHeight,
+            .cornerRadius = command.cornerRadius,
         };
 
         const u32 absoluteVertex = static_cast<u32>(vertexOffset);

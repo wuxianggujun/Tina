@@ -70,6 +70,12 @@ struct PixelProjection final {
             return invalidInput(
                 "Committed UI paint colors must use premultiplied RGBA8 channels");
         }
+        if (!std::isfinite(entry.cornerRadius) || entry.cornerRadius < 0.0F ||
+            (entry.isGlyph && entry.cornerRadius != 0.0F))
+        {
+            return invalidInput(
+                "Committed UI paint corner radius must be finite, non-negative, and zero for glyphs");
+        }
     }
     return Core::success();
 }
@@ -231,6 +237,21 @@ struct ProjectedAxis final {
            outerRight >= innerRight && outerBottom >= innerBottom;
 }
 
+[[nodiscard]] float projectCornerRadius(
+    float logicalRadius,
+    const PixelProjection& projection,
+    const Render::UIPixelRect& bounds) noexcept
+{
+    if (!(logicalRadius > 0.0F) || bounds.empty())
+    {
+        return 0.0F;
+    }
+    const double projected = static_cast<double>(logicalRadius) *
+                             (std::min)(projection.scaleX, projection.scaleY);
+    const float maximum = static_cast<float>((std::min)(bounds.width, bounds.height)) * 0.5F;
+    return (std::min)(static_cast<float>(projected), maximum);
+}
+
 } // namespace
 
 Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
@@ -339,6 +360,7 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                 .paintOrdinal = entry.paintOrdinal,
                 .bounds = *bounds,
                 .color = color,
+                .cornerRadius = projectCornerRadius(entry.cornerRadius, *projection, *bounds),
                 .effectiveClip = submittedClip,
             });
             if (!addStatus)

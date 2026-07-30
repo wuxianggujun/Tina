@@ -80,8 +80,9 @@ struct UISolidFill final {
     auto operator<=>(const UISolidFill&) const = default;
 };
 
-// Box paint: optional fill, dual-tone border (Phase A), optional shadow (Phase B).
-// Default and explicitly cleared paint emit nothing. Border/shadow use SolidQuad only.
+// Box paint: optional fill, dual-tone border (Phase A), optional shadow (Phase B),
+// and a uniform corner radius (Phase C1). Rounded chrome affects this box only;
+// descendant clipping remains axis-aligned until rounded clip is implemented.
 struct UIBoxPaint final {
     std::optional<UISolidFill> solidFill{};
     // Top/left edge color when borderWidth > 0 and alpha != 0.
@@ -93,6 +94,7 @@ struct UIBoxPaint final {
     UIStraightSrgba8Color shadow{};
     float shadowOffsetX = 0.0F;
     float shadowOffsetY = 0.0F;
+    float cornerRadius = 0.0F;
 
     auto operator<=>(const UIBoxPaint&) const = default;
 };
@@ -109,6 +111,9 @@ struct UICanvasCommand final {
     UICanvasCommandKind kind = UICanvasCommandKind::SolidRect;
     UILogicalRect bounds{};
     UIStraightSrgba8Color color{};
+    // Rounded SolidRect radius in logical pixels. Rendering clamps it to half
+    // the smallest projected extent; it does not establish a rounded clip.
+    float cornerRadius = 0.0F;
 
     auto operator<=>(const UICanvasCommand&) const = default;
 };

@@ -37,10 +37,13 @@ Core::Status UICanvasCommandStorage::assign(u32 nodeIndex, std::span<const UICan
         const bool hasValidBounds = std::isfinite(command.bounds.x) && std::isfinite(command.bounds.y) &&
                                     std::isfinite(command.bounds.width) && command.bounds.width >= 0.0F &&
                                     std::isfinite(command.bounds.height) && command.bounds.height >= 0.0F;
-        if (command.kind != UICanvasCommandKind::SolidRect || !hasValidBounds)
+        const bool hasValidCornerRadius = std::isfinite(command.cornerRadius) &&
+                                          command.cornerRadius >= 0.0F;
+        if (command.kind != UICanvasCommandKind::SolidRect || !hasValidBounds ||
+            !hasValidCornerRadius)
         {
             return Core::failure(UIErrorCode::InvalidElementDescriptor,
-                                 "UI canvas commands require a supported kind and finite non-negative bounds");
+                                 "UI canvas commands require a supported kind, finite non-negative bounds, and a finite non-negative corner radius");
         }
     }
 

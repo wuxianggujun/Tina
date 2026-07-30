@@ -272,6 +272,28 @@ TEST_F(UIRenderDisplayListTest, UsesOutwardFractionalRoundingAndClampsToFramebuf
         (Render::UIPixelRect{10, 20, 3, 3}));
 }
 
+TEST_F(UIRenderDisplayListTest, ProjectsAndClampsLogicalCornerRadiusWithAnisotropicScale)
+{
+    auto rounded = solidEntry(
+        1,
+        {.x = 10.0F, .y = 10.0F, .width = 10.0F, .height = 8.0F},
+        {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F});
+    rounded.cornerRadius = 20.0F;
+    const std::array entries{rounded};
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {100.0F, 100.0F}),
+        {.framebufferViewport = {0, 0, 200, 100}});
+
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    const Render::UIDrawCommand& command = result->displayList.commands().front();
+    EXPECT_EQ(command.bounds, (Render::UIPixelRect{20, 10, 20, 8}));
+    EXPECT_FLOAT_EQ(command.cornerRadius, 4.0F);
+}
+
 TEST_F(UIRenderDisplayListTest, ElidesAClipThatCoversTheProjectedCommand)
 {
     const std::array entries{

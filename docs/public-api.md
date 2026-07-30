@@ -211,7 +211,8 @@ wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与
 commit 后返回 borrowed view。`RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
 `FrameResourceRef`；`RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
 backend 在同步 submit 中分别按 `Sprite2DTexture`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
-`UIDisplayList` 支持 SolidQuad/Glyph 与 axis-aligned clip。
+`UIDisplayList` 支持 SolidQuad/Glyph、SolidQuad 像素 corner radius 与 axis-aligned clip；corner radius 计入
+paint-order checksum，并由 backend 验证不超过最小边的一半。
 
 ## UI
 
@@ -243,10 +244,11 @@ phase facade 同样暴露 role/query/reset。`UIElementBuildTransaction` 为直�
 node budget，多节点创建失败/析构回滚整棵子树并阻止中途 snapshot commit；它不作为可逃逸的 Runtime
 phase facade 对象。
 
-`UIElementVisual::canvas` 当前接受 borrowed、backend-neutral `SolidRect` command span；命令在
+`UIElementVisual::canvas` 当前接受 borrowed、backend-neutral `SolidRect` command span，并可为每条命令设置
+统一 logical-pixel `cornerRadius`；命令在
 `createElement()` 返回前复制到 Context 固定容量 pool，destroy/transaction rollback 回收 slot。公开
-`UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。RoundedRect/Image/NineSlice 与
-stylesheet 仍是后续扩展。
+`UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。`UIBoxPaint::cornerRadius` 同样只
+圆化自身 chrome，不建立子树 clip。Image/NineSlice、逐角半径、rounded clip 与 stylesheet 仍是后续扩展。
 
 UI-004 的 committed Focus Scope、显式 focus、Modal barrier/焦点恢复和持久 Primary Pointer Capture 已实现；
 `UIFocusNavigationDirection`/`routeFocusNavigation()` 基于 committed 几何提供不 wrap 的空间焦点选择，

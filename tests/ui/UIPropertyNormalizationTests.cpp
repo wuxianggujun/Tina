@@ -20,6 +20,7 @@ TEST(UIPropertyNormalizationTests, BoxPaintDropsInvisibleChrome)
         .shadow = UI::rgb(0x000000, 0),
         .shadowOffsetX = 3.0F,
         .shadowOffsetY = 5.0F,
+        .cornerRadius = (std::numeric_limits<float>::quiet_NaN)(),
     };
 
     const UI::UIBoxPaint normalized =
@@ -31,6 +32,7 @@ TEST(UIPropertyNormalizationTests, BoxPaintDropsInvisibleChrome)
     EXPECT_EQ(normalized.shadow, UI::UIStraightSrgba8Color{});
     EXPECT_EQ(normalized.shadowOffsetX, 0.0F);
     EXPECT_EQ(normalized.shadowOffsetY, 0.0F);
+    EXPECT_EQ(normalized.cornerRadius, 0.0F);
 }
 
 TEST(UIPropertyNormalizationTests, ContextCapacitiesDeriveFromNodeCapacity)

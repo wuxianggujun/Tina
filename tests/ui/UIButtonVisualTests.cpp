@@ -385,7 +385,7 @@ TEST(UIButtonVisualTest, ProductChromeFocusesWithBorderAndPressCollapsesShadow)
     publishLayout(*context);
 
     const UI::UIButtonChrome chrome = UI::makeButtonChrome(context->productTheme());
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 6U);
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 3U);
     EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
 
     const UI::UIPointerRouteResult downRoute = route(
@@ -397,9 +397,8 @@ TEST(UIButtonVisualTest, ProductChromeFocusesWithBorderAndPressCollapsesShadow)
             {.x = 10.0F, .y = 10.0F}));
     EXPECT_TRUE(downRoute.consumed);
     publishLayout(*context);
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 5U);
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 2U);
     EXPECT_FALSE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
-    EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.borderDark));
     EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.borderLight));
 
     const UI::UIPointerRouteResult upRoute = route(
@@ -411,7 +410,7 @@ TEST(UIButtonVisualTest, ProductChromeFocusesWithBorderAndPressCollapsesShadow)
             {.x = 10.0F, .y = 10.0F}));
     EXPECT_TRUE(upRoute.consumed);
     publishLayout(*context);
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 6U);
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 3U);
     EXPECT_TRUE(hasSolidColor(
         context->committedPaint(),
         button,

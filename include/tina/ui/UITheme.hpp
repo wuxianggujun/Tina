@@ -18,7 +18,7 @@
 
 namespace Tina::UI {
 
-// Minimal visual elevation for Phase B fake shadow (SolidQuad only).
+// Minimal visual elevation for Phase B fake shadow.
 enum class UIElevation : u8 {
     None = 0,
     Low = 1,
@@ -49,6 +49,8 @@ struct UITheme final {
     UIStraightSrgba8Color scrollBarThumbActive = rgb(0xFFD250, 250);
 
     float panelBorderWidth = 1.0F;
+    float panelCornerRadius = 6.0F;
+    float controlCornerRadius = 4.0F;
     float panelShadowOffsetX = 3.0F;
     float panelShadowOffsetY = 4.0F;
     float checkboxIndicatorInset = 6.0F;
@@ -92,9 +94,13 @@ struct UITheme final {
     return theme;
 }
 
-[[nodiscard]] constexpr UIBoxPaint makeSolidBox(UIStraightSrgba8Color color) noexcept
+[[nodiscard]] constexpr UIBoxPaint makeSolidBox(
+    UIStraightSrgba8Color color,
+    float cornerRadius = 0.0F) noexcept
 {
-    return UIBoxPaint{.solidFill = UISolidFill{.color = color}};
+    UIBoxPaint paint{.solidFill = UISolidFill{.color = color}};
+    paint.cornerRadius = cornerRadius;
+    return paint;
 }
 
 [[nodiscard]] constexpr UIStraightSrgba8Color scaleColorAlpha(
@@ -126,7 +132,7 @@ struct UITheme final {
     return rgba8(lighten(color.red), lighten(color.green), lighten(color.blue), color.alpha);
 }
 
-// Phase A/B panel chrome: fill + optional 1px dual-tone border + optional shadow.
+// Product panel chrome: fill + border + optional shadow + rounded outer shape.
 [[nodiscard]] constexpr UIBoxPaint makePanelBoxPaint(
     const UITheme& theme,
     UIStraightSrgba8Color fill,
@@ -138,6 +144,7 @@ struct UITheme final {
         .borderDark = theme.borderDark,
         .borderWidth = theme.panelBorderWidth,
     };
+    paint.cornerRadius = theme.panelCornerRadius;
     if (elevation == UIElevation::Low) {
         paint.shadow = theme.shadow;
         paint.shadowOffsetX = theme.panelShadowOffsetX;
@@ -206,8 +213,10 @@ struct UIButtonChrome final {
 {
     const UIStraightSrgba8Color fill =
         normalFill.alpha != 0 ? normalFill : scaleColorAlpha(theme.buttonNormal, 230);
+    UIBoxPaint box = makePanelBoxPaint(theme, fill, UIElevation::Low);
+    box.cornerRadius = theme.controlCornerRadius;
     return UIButtonChrome{
-        .box = makePanelBoxPaint(theme, fill, UIElevation::Low),
+        .box = box,
         .states =
             UIButtonPaint{
                 .hoveredBackgroundColor = scaleColorAlpha(lightenChannel(fill, 28), 240),
@@ -238,7 +247,7 @@ struct UICheckboxChrome final {
     const UIStraightSrgba8Color fill =
         boxFill.alpha != 0 ? boxFill : scaleColorAlpha(theme.surface2, 230);
     return UICheckboxChrome{
-        .box = makeSolidBox(fill),
+        .box = makeSolidBox(fill, theme.controlCornerRadius),
         .indicator =
             UICheckboxPaint{
                 .checkedIndicatorColor = theme.textPrimary,
@@ -313,7 +322,7 @@ struct UITextEditChrome final {
 [[nodiscard]] constexpr UITextEditChrome makeTextEditChrome(const UITheme& theme) noexcept
 {
     return UITextEditChrome{
-        .box = makeSolidBox(scaleColorAlpha(theme.surface2, 245)),
+        .box = makeSolidBox(scaleColorAlpha(theme.surface2, 245), theme.controlCornerRadius),
         .text = makeBodyTextStyle(theme, 22.0F),
     };
 }

@@ -42,6 +42,8 @@ TEST(UIThemeTest, DefaultTokensAreDistinctSurfacesAndTextTiers)
     EXPECT_NE(theme.textPrimary, theme.textSecondary);
     EXPECT_NE(theme.textTitle, theme.textAccent);
     EXPECT_GT(theme.panelBorderWidth, 0.0F);
+    EXPECT_GT(theme.panelCornerRadius, 0.0F);
+    EXPECT_GT(theme.controlCornerRadius, 0.0F);
 }
 
 TEST(UIThemeTest, PanelBoxPaintIncludesBorderAndOptionalShadow)
@@ -54,6 +56,7 @@ TEST(UIThemeTest, PanelBoxPaintIncludesBorderAndOptionalShadow)
     EXPECT_EQ(flat.borderLight, theme.borderLight);
     EXPECT_EQ(flat.borderDark, theme.borderDark);
     EXPECT_EQ(flat.borderWidth, theme.panelBorderWidth);
+    EXPECT_EQ(flat.cornerRadius, theme.panelCornerRadius);
     EXPECT_EQ(flat.shadow.alpha, 0);
 
     constexpr UI::UIBoxPaint elevated =
@@ -95,6 +98,7 @@ TEST(UIThemeTest, ButtonChromeUsesThemeTokens)
     EXPECT_EQ(chrome.label.color, theme.textPrimary);
     EXPECT_EQ(chrome.box.shadow, theme.shadow);
     EXPECT_GT(chrome.box.borderWidth, 0.0F);
+    EXPECT_EQ(chrome.box.cornerRadius, theme.controlCornerRadius);
 }
 
 TEST(UIThemeTest, LightThemeDiffersFromDefault)

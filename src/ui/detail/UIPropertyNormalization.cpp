@@ -192,6 +192,10 @@ UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept
         paint.shadowOffsetX = 0.0F;
         paint.shadowOffsetY = 0.0F;
     }
+    if (!(std::isfinite(paint.cornerRadius) && paint.cornerRadius > 0.0F))
+    {
+        paint.cornerRadius = 0.0F;
+    }
     return paint;
 }
 
@@ -386,6 +390,8 @@ normalizeDropdownPaint(UIDropdownPaint paint)
 Core::Status validateProductTheme(const UITheme& theme)
 {
     if (!isFiniteNonNegative(theme.panelBorderWidth) ||
+        !isFiniteNonNegative(theme.panelCornerRadius) ||
+        !isFiniteNonNegative(theme.controlCornerRadius) ||
         !std::isfinite(theme.panelShadowOffsetX) ||
         !std::isfinite(theme.panelShadowOffsetY) ||
         !isFiniteNonNegative(theme.checkboxIndicatorInset) ||

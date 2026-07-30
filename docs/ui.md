@@ -14,8 +14,8 @@
 | Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView，固定容量 mutation |
 | Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、committed content placement、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
-| Paint | box/text/control paint、固定容量 backend-neutral `SolidRect` Canvas、clip、PaintCache、committed paint snapshot |
-| Theme（A/B） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset：surface 色阶、1px 亮/暗边、可选 Low elevation 假影；**无**圆角/毛玻璃/CSS Theme（C） |
+| Paint | box/text/control paint、固定容量 backend-neutral `SolidRect` Canvas（含圆角半径）、axis-aligned clip、PaintCache、committed paint snapshot |
+| Theme（A/B/C1） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset：surface 色阶、边框、圆角、可选 Low elevation 假影；**无**圆角子树 clip/毛玻璃/CSS stylesheet |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |
@@ -85,7 +85,8 @@ Runtime phase facade 同样可切换/query role 和 reset override。
 创建失败、reset 或析构会回滚整棵组件及 text/canvas storage，active transaction 期间 structure/layout commit
 返回 `BuildTransactionInProgress`。事务对象只属于直接 `UITreeUpdater` authoring，不允许作为 Runtime phase
 facade 对象逃逸回调。公开 `UIWidgetKind` 已删除；私有 `BuiltinElementKind` 只服务成熟控件 storage/行为分派。
-Canvas 当前只冻结 `SolidRect` 首切片，RoundedRect/Image/NineSlice 与 stylesheet 仍属后续扩展。
+Canvas 的 `SolidRect` 支持统一 `cornerRadius`；命令仍复制到固定容量 storage。Image/NineSlice、逐角半径、
+圆角子树 clip 与 stylesheet 仍属后续扩展。
 
 ## Tree 与事务提交
 
@@ -231,10 +232,10 @@ UI 不调用 bgfx。`tina_ui_render_integration` 把 committed paint 转为固�
 在 `RenderFrame` 中只借用 DisplayList 和可选 R8 atlas page。backend 必须在 `submitFrame()` 内同步
 消费。
 
-当前支持 solid/glyph quad、Element Canvas `SolidRect` 与 axis-aligned scissor。Runtime
+当前支持 solid/glyph quad、带统一圆角半径的 Box/Element Canvas `SolidRect` 与 axis-aligned scissor。Runtime
 `RenderFramePacket`/FramePin 的
 present-return CPU completion 已落地
-（Null 同步 complete）。rounded/stencil clip、Image widget 与跨 GPU/DPI golden（UI-003）尚未完成。
+（Null 同步 complete）。rounded/stencil 子树 clip、Image widget 与跨 GPU/DPI golden（UI-003）尚未完成。
 
 ## 实际绘制链路
 
@@ -256,14 +257,17 @@ IGameState::onEnter / updateUI
   -> RenderDevice::submitFrame 后显示
 ```
 
-`UIContext::buildCommittedPaint()` 按 paint order 遍历可见节点。普通 `UIBoxPaint` 生成矩形 entry；
-Canvas `SolidRect` 从 Element local 坐标转换到 world，并在 box chrome 后按 descriptor 命令顺序追加；
+`UIContext::buildCommittedPaint()` 按 paint order 遍历可见节点。普通 `UIBoxPaint` 生成矩形 entry；圆角且
+同时有 fill/border 时以外层统一 border + inset fill 两条 entry 表达，shadow 继承外层半径。Canvas
+`SolidRect` 从 Element local 坐标转换到 world，并在 box chrome 后按 descriptor 命令顺序追加；
 文字生成 Glyph entry；ProgressBar 追加按 value 缩短的 foreground，RadioButton 追加 indicator 和
 选中内块，TextEdit 在焦点状态下追加 selection highlight、IME preedit 和 caret。Integration 再把
 逻辑坐标投影为像素矩形，并丢弃空/透明/完全在 clip 外的 entry。
 
 Solid 和 Glyph 共用一套带 UV 的 UI shader：SolidQuad 绑定 1×1 白色 R8 纹理，采样值恒为 1；Glyph
-绑定 UIContext 持有的 R8 atlas，采样灰度作为 coverage。片元颜色是顶点 premultiplied 颜色乘 coverage，
+绑定 UIContext 持有的 R8 atlas，采样灰度作为 coverage。圆角 SolidQuad 额外由每顶点携带的像素
+width/height/radius 计算 SDF coverage，保持相邻 batch 无 per-command uniform。片元颜色是顶点
+premultiplied 颜色乘 coverage，
 backend 对每个 clip batch 设置 bgfx scissor，并使用 `ONE, INV_SRC_ALPHA` 混合。UI 模块本身不依赖
 bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx backend。
 
@@ -307,12 +311,13 @@ retained 状态并标记必要的 dirty 类别。
   Panel/Modal/Popup surface 与全部现有控件 role 均有 recipe；
 - Runtime 游戏通过 phase-scoped `PrimaryWindowUITreeUpdater::productTheme()` / `setProductTheme()` 换肤，
   不取得裸 `UIContext`；
-- 默认 Button chrome 使用 Low elevation 双边框与阴影；pressed 状态收拢阴影并反转双边框，focus 使用
-  独立边框色，因此 hover / pressed / focused / disabled 具有可辨识层次；
+- 默认 panel/button 分别使用 6px/4px 统一圆角；圆角 border 使用单一外层 ring，pressed 状态收拢阴影
+  并通过 light/dark 交换改变 ring 色，focus 使用独立边框色，因此 hover / pressed / focused / disabled
+  具有可辨识层次；
 - 另提供 `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome` 等）。
 
-`UIBoxPaint` 仍是 escape hatch，并可携带 borderLight/borderDark/borderWidth 与 shadow（假 elevation）。
-rounded rectangle、Image widget、毛玻璃与 CSS 式 stylesheet 仍未实现（Phase C）。
+`UIBoxPaint` 仍是 escape hatch，并可携带 borderLight/borderDark/borderWidth、shadow（假 elevation）与
+统一 `cornerRadius`。Image/NineSlice、逐角半径、圆角子树 clip、毛玻璃与 CSS 式 stylesheet 仍未实现。
 
 ## 产品接入与证据
 
@@ -322,7 +327,7 @@ rounded rectangle、Image widget、毛玻璃与 CSS 式 stylesheet 仍未实现�
 - Checkbox、Slider→ProgressBar 联动、UTF-8 TextEdit；
 - Performance/Balanced/Quality 与 Dark/Light 两组 RadioButton；
 - Dropdown、虚拟化 ListView/TreeView 与 ScrollView；
-- Panel elevation、双边框/阴影、状态栏与主题色板。
+- Panel elevation、圆角/边框/阴影、状态栏与主题色板。
 
 Showcase 的普通页面树使用 Flow/Flex：`Root -> Background -> Header/Main`，`Main -> Navigation/Cards`，
 Cards 再按三行双列组织；控件均挂在对应 Card/Row/Column 下。只有 Dropdown Popup 使用 Overlay，普通
@@ -434,7 +439,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-002` | Windows UIA 产品验收：真实 HWND 跨进程属性/action gate 已有，待固化证据并完成 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
-| `UI-THEME-C` | RoundedRect/Image/NineSlice 等 Canvas 扩展、圆角 clip、backdrop blur 与完整 stylesheet resolver |
+| `UI-THEME-C` | **已完成** Box/Canvas `SolidRect` 统一圆角半径、像素投影与 bgfx SDF；**待** Image/NineSlice、逐角半径、圆角 clip、backdrop blur 与完整 stylesheet resolver |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
