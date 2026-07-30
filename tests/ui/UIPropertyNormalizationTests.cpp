@@ -33,6 +33,65 @@ TEST(UIPropertyNormalizationTests, BoxPaintDropsInvisibleChrome)
     EXPECT_EQ(normalized.shadowOffsetY, 0.0F);
 }
 
+TEST(UIPropertyNormalizationTests, ContextCapacitiesDeriveFromNodeCapacity)
+{
+    UI::UIContextCapacityConfig config{
+        .nodeCapacity = 32,
+        .rootCapacity = 4,
+        .textByteCapacity = 0,
+        .applyDefaultProductChrome = false,
+    };
+
+    auto normalized = UI::Detail::normalizeUIContextCapacityConfig(config);
+
+    ASSERT_TRUE(normalized.has_value());
+    EXPECT_EQ(normalized->nodeCapacity, 32U);
+    EXPECT_EQ(normalized->rootCapacity, 4U);
+    EXPECT_EQ(normalized->dirtyQueueCapacity, 32U);
+    EXPECT_EQ(normalized->layoutSnapshotCapacity, 32U);
+    EXPECT_EQ(normalized->hitSnapshotCapacity, 32U);
+    EXPECT_EQ(normalized->paintSnapshotCapacity, 32U);
+    EXPECT_EQ(normalized->routePathCapacity, 32U);
+    EXPECT_EQ(normalized->routedPointerListenerCapacity, 32U);
+    EXPECT_EQ(normalized->buttonActionCapacity, 32U);
+    EXPECT_EQ(normalized->textByteCapacity,
+              UI::UIContextCapacityConfig::DefaultTextByteCapacity);
+    EXPECT_FALSE(normalized->applyDefaultProductChrome);
+}
+
+TEST(UIPropertyNormalizationTests, ContextCapacitiesPreserveOverridesAndRejectInvalidInput)
+{
+    UI::UIContextCapacityConfig config{
+        .nodeCapacity = 32,
+        .rootCapacity = 4,
+        .dirtyQueueCapacity = 8,
+        .layoutSnapshotCapacity = 9,
+        .hitSnapshotCapacity = 10,
+        .paintSnapshotCapacity = 11,
+        .routePathCapacity = 12,
+        .routedPointerListenerCapacity = 64,
+        .buttonActionCapacity = 13,
+        .textByteCapacity = 1024,
+    };
+
+    auto normalized = UI::Detail::normalizeUIContextCapacityConfig(config);
+
+    ASSERT_TRUE(normalized.has_value());
+    EXPECT_EQ(normalized->dirtyQueueCapacity, 8U);
+    EXPECT_EQ(normalized->layoutSnapshotCapacity, 9U);
+    EXPECT_EQ(normalized->hitSnapshotCapacity, 10U);
+    EXPECT_EQ(normalized->paintSnapshotCapacity, 11U);
+    EXPECT_EQ(normalized->routePathCapacity, 12U);
+    EXPECT_EQ(normalized->routedPointerListenerCapacity, 64U);
+    EXPECT_EQ(normalized->buttonActionCapacity, 13U);
+    EXPECT_EQ(normalized->textByteCapacity, 1024U);
+
+    config.rootCapacity = 33;
+    auto rejected = UI::Detail::normalizeUIContextCapacityConfig(config);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidContextConfig);
+}
+
 TEST(UIPropertyNormalizationTests, LayoutCanonicalizesNegativeZeroAndRejectsInvalidEnum)
 {
     UI::UILayoutStyle style{};

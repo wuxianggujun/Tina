@@ -14,6 +14,45 @@ struct LayoutPassStatistics final {
     usize percentMeasureFallbackCount = 0;
 };
 
+struct LayoutPreparedInputs final {
+    UIVisibility effectiveVisibility = UIVisibility::Visible;
+    bool parentContentWidthDefinite = false;
+    bool parentContentHeightDefinite = false;
+    float parentContentWidth = 0.0F;
+    float parentContentHeight = 0.0F;
+    bool contentWidthDefinite = false;
+    bool contentHeightDefinite = false;
+    float contentWidth = 0.0F;
+    float contentHeight = 0.0F;
+
+    bool operator==(const LayoutPreparedInputs&) const = default;
+};
+
+struct LayoutScratchState final {
+    UILogicalSize measuredSize{};
+    UILogicalRect localRect{};
+    UILogicalRect worldRect{};
+    UILogicalRect effectiveClip{};
+    // Clip inherited from the nearest clipping container. Ordinary containers
+    // pass it through; ScrollView replaces it with its content viewport.
+    UILogicalRect descendantClip{};
+    UIVisibility effectiveVisibility = UIVisibility::Visible;
+    bool inPopupSubtree = false;
+    bool parentContentWidthDefinite = false;
+    bool parentContentHeightDefinite = false;
+    float parentContentWidth = 0.0F;
+    float parentContentHeight = 0.0F;
+    bool contentWidthDefinite = false;
+    bool contentHeightDefinite = false;
+    float contentWidth = 0.0F;
+    float contentHeight = 0.0F;
+    u32 layoutOrdinal = 0;
+    u32 paintOrdinal = 0;
+    // Prepare inputs remain stable after Arrange. The corresponding working
+    // fields above are intentionally updated to final geometry during Arrange.
+    LayoutPreparedInputs preparedInputs{};
+};
+
 inline constexpr u8 LayoutWorkMeasure = 1U << 0U;
 inline constexpr u8 LayoutWorkArrange = 1U << 1U;
 inline constexpr u8 LayoutWorkMeasureComplete = 1U << 2U;
@@ -122,6 +161,61 @@ struct ResolvedLength final {
         value = (std::max)(value, minValue.value);
     }
     return normalizeFloat((std::max)(0.0F, value));
+}
+
+[[nodiscard]] inline float resolvedWidth(
+    const UILayoutStyle& style, const LayoutScratchState& scratch,
+    LayoutPassStatistics& statistics) noexcept
+{
+    const ResolvedLength value = resolveLength(
+        style.size.width, scratch.parentContentWidthDefinite,
+        scratch.parentContentWidth, statistics);
+    return value.hasValue ? value.value : -1.0F;
+}
+
+[[nodiscard]] inline float resolvedHeight(
+    const UILayoutStyle& style, const LayoutScratchState& scratch,
+    LayoutPassStatistics& statistics) noexcept
+{
+    const ResolvedLength value = resolveLength(
+        style.size.height, scratch.parentContentHeightDefinite,
+        scratch.parentContentHeight, statistics);
+    return value.hasValue ? value.value : -1.0F;
+}
+
+[[nodiscard]] inline float clampWidth(
+    float value, const UILayoutStyle& style, const LayoutScratchState& scratch,
+    LayoutPassStatistics& statistics) noexcept
+{
+    return clampWithMinMax(
+        value, style.minMax.minWidth, style.minMax.maxWidth,
+        scratch.parentContentWidthDefinite, scratch.parentContentWidth,
+        statistics);
+}
+
+[[nodiscard]] inline float clampHeight(
+    float value, const UILayoutStyle& style, const LayoutScratchState& scratch,
+    LayoutPassStatistics& statistics) noexcept
+{
+    return clampWithMinMax(
+        value, style.minMax.minHeight, style.minMax.maxHeight,
+        scratch.parentContentHeightDefinite, scratch.parentContentHeight,
+        statistics);
+}
+
+[[nodiscard]] constexpr bool isCrossAxisAuto(
+    const UILayoutStyle& style, UIFlexDirection direction) noexcept
+{
+    return direction == UIFlexDirection::Row ? style.size.height.isAuto()
+                                             : style.size.width.isAuto();
+}
+
+[[nodiscard]] inline float resolveInset(
+    UILayoutLength length, float basis,
+    LayoutPassStatistics& statistics) noexcept
+{
+    const ResolvedLength resolved = resolveLength(length, true, basis, statistics);
+    return resolved.hasValue ? resolved.value : -1.0F;
 }
 
 [[nodiscard]] constexpr float horizontalMargin(

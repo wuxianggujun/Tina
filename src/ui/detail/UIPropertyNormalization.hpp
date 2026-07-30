@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/error/Result.hpp>
+#include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
@@ -11,6 +12,23 @@
 #include <tina/ui/UITreeView.hpp>
 
 namespace Tina::UI::Detail {
+
+struct NormalizedUIContextCapacityConfig final {
+    usize nodeCapacity = 0;
+    usize rootCapacity = 0;
+    usize dirtyQueueCapacity = 0;
+    usize layoutSnapshotCapacity = 0;
+    usize hitSnapshotCapacity = 0;
+    usize paintSnapshotCapacity = 0;
+    usize routePathCapacity = 0;
+    usize routedPointerListenerCapacity = 0;
+    usize buttonActionCapacity = 0;
+    usize textByteCapacity = 0;
+    bool applyDefaultProductChrome = true;
+};
+
+[[nodiscard]] Core::Result<NormalizedUIContextCapacityConfig>
+normalizeUIContextCapacityConfig(UIContextCapacityConfig config);
 
 [[nodiscard]] UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept;
 

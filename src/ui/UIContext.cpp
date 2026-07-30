@@ -51,24 +51,11 @@ using NodeStorageId = Core::GenerationId<Detail::UINodeRegistryTag>;
 
 inline constexpr u32 InvalidNodeIndex = NodeStorageId::InvalidIndex;
 
-struct NormalizedCapacityConfig final {
-    usize nodeCapacity = 0;
-    usize rootCapacity = 0;
-    usize dirtyQueueCapacity = 0;
-    usize layoutSnapshotCapacity = 0;
-    usize hitSnapshotCapacity = 0;
-    usize paintSnapshotCapacity = 0;
-    usize routePathCapacity = 0;
-    usize routedPointerListenerCapacity = 0;
-    usize buttonActionCapacity = 0;
-    usize textByteCapacity = 0;
-    bool applyDefaultProductChrome = true;
-};
-
 using TextByteAllocation = Detail::UITextStorage::Allocation;
 using Detail::appendBoxChromePaints;
 using Detail::applyOpacity;
-using Detail::clampWithMinMax;
+using Detail::clampHeight;
+using Detail::clampWidth;
 using Detail::combineVisibility;
 using Detail::containsLineBreak;
 using Detail::containsPointHalfOpen;
@@ -79,6 +66,7 @@ using Detail::hasLayoutWork;
 using Detail::horizontalMargin;
 using Detail::intersectRects;
 using Detail::isButtonChromeKind;
+using Detail::isCrossAxisAuto;
 using Detail::isDefaultActivatableKind;
 using Detail::isFiniteLayoutRect;
 using Detail::isFiniteNonNegative;
@@ -89,6 +77,8 @@ using Detail::isValidPointerHitPolicy;
 using Detail::isValidRoutedPointerEventKind;
 using Detail::layoutSubtreeCompletionMask;
 using Detail::LayoutPassStatistics;
+using Detail::LayoutPreparedInputs;
+using Detail::LayoutScratchState;
 using Detail::LayoutWorkArrange;
 using Detail::LayoutWorkArrangeComplete;
 using Detail::LayoutWorkMeasure;
@@ -102,11 +92,15 @@ using Detail::makeTreeViewDisclosureRect;
 using Detail::makeTreeViewScrollBarGeometry;
 using Detail::normalizedRangeFraction;
 using Detail::normalizeFloat;
+using Detail::NormalizedUIContextCapacityConfig;
 using Detail::planTextEditCommand;
 using Detail::quantizeSliderValue;
 using Detail::ResolvedLength;
+using Detail::resolveInset;
 using Detail::resolveLength;
 using Detail::resolveLengthNoFallbackCount;
+using Detail::resolvedHeight;
+using Detail::resolvedWidth;
 using Detail::scrollAxisMaxOffset;
 using Detail::scrollAxisOffset;
 using Detail::ScrollBarGeometry;
@@ -167,45 +161,6 @@ static_assert(std::is_nothrow_destructible_v<NodeRecord>);
 
 using NodePool = Core::GenerationPool<NodeRecord, Detail::UINodeRegistryTag>;
 
-struct LayoutPreparedInputs final {
-    UIVisibility effectiveVisibility = UIVisibility::Visible;
-    bool parentContentWidthDefinite = false;
-    bool parentContentHeightDefinite = false;
-    float parentContentWidth = 0.0F;
-    float parentContentHeight = 0.0F;
-    bool contentWidthDefinite = false;
-    bool contentHeightDefinite = false;
-    float contentWidth = 0.0F;
-    float contentHeight = 0.0F;
-
-    auto operator<=>(const LayoutPreparedInputs&) const = default;
-};
-
-struct LayoutScratchState final {
-    UILogicalSize measuredSize{};
-    UILogicalRect localRect{};
-    UILogicalRect worldRect{};
-    UILogicalRect effectiveClip{};
-    // Clip inherited from the nearest clipping container. Ordinary containers
-    // pass it through; ScrollView replaces it with its content viewport.
-    UILogicalRect descendantClip{};
-    UIVisibility effectiveVisibility = UIVisibility::Visible;
-    bool inPopupSubtree = false;
-    bool parentContentWidthDefinite = false;
-    bool parentContentHeightDefinite = false;
-    float parentContentWidth = 0.0F;
-    float parentContentHeight = 0.0F;
-    bool contentWidthDefinite = false;
-    bool contentHeightDefinite = false;
-    float contentWidth = 0.0F;
-    float contentHeight = 0.0F;
-    u32 layoutOrdinal = 0;
-    u32 paintOrdinal = 0;
-    // Prepare inputs remain stable after Arrange. The corresponding working
-    // fields above are intentionally updated to final geometry during Arrange.
-    LayoutPreparedInputs preparedInputs{};
-};
-
 struct CommittedHitBuildResult final {
     usize targetCount = 0;
     u32 activeModalEntryIndex = InvalidUIHitEntryIndex;
@@ -221,41 +176,6 @@ struct CommittedHitBuildResult final {
                                                 Core::SourceLocation location = Core::SourceLocation::current())
 {
     return Core::failure(makeError(code, message, location));
-}
-
-[[nodiscard]] Core::Result<NormalizedCapacityConfig> normalizeCapacity(UIContextCapacityConfig config)
-{
-    if (Core::Status status = validateUIContextCapacityConfig(config); !status)
-    {
-        return Core::failure(status.error());
-    }
-    const usize dirtyQueueCapacity = config.dirtyQueueCapacity == 0 ? config.nodeCapacity : config.dirtyQueueCapacity;
-    const usize layoutSnapshotCapacity =
-        config.layoutSnapshotCapacity == 0 ? config.nodeCapacity : config.layoutSnapshotCapacity;
-    const usize hitSnapshotCapacity =
-        config.hitSnapshotCapacity == 0 ? config.nodeCapacity : config.hitSnapshotCapacity;
-    const usize paintSnapshotCapacity =
-        config.paintSnapshotCapacity == 0 ? config.nodeCapacity : config.paintSnapshotCapacity;
-    const usize routePathCapacity = config.routePathCapacity == 0 ? config.nodeCapacity : config.routePathCapacity;
-    const usize routedPointerListenerCapacity =
-        config.routedPointerListenerCapacity == 0 ? config.nodeCapacity : config.routedPointerListenerCapacity;
-    const usize buttonActionCapacity =
-        config.buttonActionCapacity == 0 ? config.nodeCapacity : config.buttonActionCapacity;
-    const usize textByteCapacity =
-        config.textByteCapacity == 0 ? UIContextCapacityConfig::DefaultTextByteCapacity : config.textByteCapacity;
-    return NormalizedCapacityConfig{
-        .nodeCapacity = config.nodeCapacity,
-        .rootCapacity = config.rootCapacity,
-        .dirtyQueueCapacity = dirtyQueueCapacity,
-        .layoutSnapshotCapacity = layoutSnapshotCapacity,
-        .hitSnapshotCapacity = hitSnapshotCapacity,
-        .paintSnapshotCapacity = paintSnapshotCapacity,
-        .routePathCapacity = routePathCapacity,
-        .routedPointerListenerCapacity = routedPointerListenerCapacity,
-        .buttonActionCapacity = buttonActionCapacity,
-        .textByteCapacity = textByteCapacity,
-        .applyDefaultProductChrome = config.applyDefaultProductChrome,
-    };
 }
 
 } // namespace
@@ -472,7 +392,7 @@ struct UIContext::Impl final {
     }
 
     [[nodiscard]] static Core::Result<std::unique_ptr<Impl>>
-    Create(Platform::WindowId ownerWindow, NormalizedCapacityConfig normalized,
+    Create(Platform::WindowId ownerWindow, NormalizedUIContextCapacityConfig normalized,
            std::shared_ptr<Detail::UIContextLifetimeControl> lifetimeControl, std::pmr::memory_resource& resource)
     {
         auto poolResult = NodePool::Create(normalized.nodeCapacity, resource);
@@ -826,36 +746,6 @@ struct UIContext::Impl final {
         }
     }
 
-    [[nodiscard]] float resolvedWidth(const UILayoutStyle& style, const LayoutScratchState& scratch,
-                                      LayoutPassStatistics& statistics) const noexcept
-    {
-        const ResolvedLength value =
-            resolveLength(style.size.width, scratch.parentContentWidthDefinite, scratch.parentContentWidth, statistics);
-        return value.hasValue ? value.value : -1.0F;
-    }
-
-    [[nodiscard]] float resolvedHeight(const UILayoutStyle& style, const LayoutScratchState& scratch,
-                                       LayoutPassStatistics& statistics) const noexcept
-    {
-        const ResolvedLength value = resolveLength(style.size.height, scratch.parentContentHeightDefinite,
-                                                   scratch.parentContentHeight, statistics);
-        return value.hasValue ? value.value : -1.0F;
-    }
-
-    [[nodiscard]] float clampWidth(float value, const UILayoutStyle& style, const LayoutScratchState& scratch,
-                                   LayoutPassStatistics& statistics) const noexcept
-    {
-        return clampWithMinMax(value, style.minMax.minWidth, style.minMax.maxWidth, scratch.parentContentWidthDefinite,
-                               scratch.parentContentWidth, statistics);
-    }
-
-    [[nodiscard]] float clampHeight(float value, const UILayoutStyle& style, const LayoutScratchState& scratch,
-                                    LayoutPassStatistics& statistics) const noexcept
-    {
-        return clampWithMinMax(value, style.minMax.minHeight, style.minMax.maxHeight,
-                               scratch.parentContentHeightDefinite, scratch.parentContentHeight, statistics);
-    }
-
     void measureLayout(UILogicalSize viewportSize, const std::pmr::vector<u32>& order,
                        LayoutPassStatistics& statistics) noexcept
     {
@@ -1004,11 +894,6 @@ struct UIContext::Impl final {
         }
     }
 
-    [[nodiscard]] bool isCrossAxisAuto(const UILayoutStyle& style, UIFlexDirection direction) const noexcept
-    {
-        return direction == UIFlexDirection::Row ? style.size.height.isAuto() : style.size.width.isAuto();
-    }
-
     void assignLayoutRect(u32 index, UILogicalRect worldRect, UILogicalRect parentWorldRect,
                           UILogicalRect descendantClip) noexcept
     {
@@ -1071,13 +956,6 @@ struct UIContext::Impl final {
         {
             ensureLayoutSubtreeWork(childIndex, LayoutWorkArrange);
         }
-    }
-
-    [[nodiscard]] float resolveInset(UILayoutLength length, float basis,
-                                     LayoutPassStatistics& statistics) const noexcept
-    {
-        const ResolvedLength resolved = resolveLength(length, true, basis, statistics);
-        return resolved.hasValue ? resolved.value : -1.0F;
     }
 
     void arrangeAbsoluteChild(u32 childIndex, UILogicalRect parentContentRect, UILogicalRect parentWorldRect,
@@ -14763,7 +14641,7 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(Platform::WindowId ow
         return fail(UIErrorCode::InvalidFont, "UI context text rasterizer is null");
     }
 
-    auto normalizedResult = normalizeCapacity(capacityConfig);
+    auto normalizedResult = Detail::normalizeUIContextCapacityConfig(capacityConfig);
     if (!normalizedResult)
     {
         return Core::failure(normalizedResult.error());

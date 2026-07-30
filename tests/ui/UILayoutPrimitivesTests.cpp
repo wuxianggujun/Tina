@@ -38,6 +38,48 @@ TEST(UILayoutPrimitivesTests, LayoutRectRequiresFiniteOriginExtentAndEdges)
          .height = 4.0F}));
 }
 
+TEST(UILayoutPrimitivesTests, LayoutStateModelsStartStableAndComparePreparedInputs)
+{
+    const UI::Detail::LayoutScratchState scratch{};
+    const UI::Detail::LayoutPreparedInputs initial{};
+    UI::Detail::LayoutPreparedInputs changed{};
+    changed.contentWidthDefinite = true;
+
+    EXPECT_EQ(scratch.effectiveVisibility, UI::UIVisibility::Visible);
+    EXPECT_FALSE(scratch.inPopupSubtree);
+    EXPECT_EQ(scratch.preparedInputs, initial);
+    EXPECT_NE(initial, changed);
+}
+
+TEST(UILayoutPrimitivesTests, ResolvesAndClampsAxisSpecificOuterSizes)
+{
+    UI::UILayoutStyle style{};
+    style.size.width = UI::UILayoutLength::Percent(50.0F);
+    style.size.height = UI::UILayoutLength::Px(24.0F);
+    style.minMax.minWidth = UI::UILayoutLength::Px(60.0F);
+    style.minMax.maxHeight = UI::UILayoutLength::Px(20.0F);
+    UI::Detail::LayoutScratchState scratch{};
+    scratch.parentContentWidthDefinite = true;
+    scratch.parentContentHeightDefinite = true;
+    scratch.parentContentWidth = 100.0F;
+    scratch.parentContentHeight = 80.0F;
+    UI::Detail::LayoutPassStatistics statistics{};
+
+    EXPECT_FLOAT_EQ(UI::Detail::resolvedWidth(style, scratch, statistics), 50.0F);
+    EXPECT_FLOAT_EQ(UI::Detail::resolvedHeight(style, scratch, statistics), 24.0F);
+    EXPECT_FLOAT_EQ(UI::Detail::clampWidth(50.0F, style, scratch, statistics), 60.0F);
+    EXPECT_FLOAT_EQ(UI::Detail::clampHeight(24.0F, style, scratch, statistics), 20.0F);
+    EXPECT_FLOAT_EQ(UI::Detail::resolveInset(
+                        UI::UILayoutLength::Percent(25.0F), 80.0F, statistics),
+                    20.0F);
+    EXPECT_FALSE(UI::Detail::isCrossAxisAuto(style, UI::UIFlexDirection::Column));
+    EXPECT_FALSE(UI::Detail::isCrossAxisAuto(style, UI::UIFlexDirection::Row));
+    const UI::UILayoutStyle autoStyle{};
+    EXPECT_TRUE(UI::Detail::isCrossAxisAuto(autoStyle, UI::UIFlexDirection::Column));
+    EXPECT_TRUE(UI::Detail::isCrossAxisAuto(autoStyle, UI::UIFlexDirection::Row));
+    EXPECT_EQ(statistics.percentMeasureFallbackCount, 0U);
+}
+
 TEST(UILayoutPrimitivesTests, ResolvesPixelsAndPercentWithExplicitFallbackCount)
 {
     UI::Detail::LayoutPassStatistics statistics{};

@@ -131,6 +131,36 @@ namespace {
 
 } // namespace
 
+Core::Result<NormalizedUIContextCapacityConfig>
+normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
+{
+    if (Core::Status status = validateUIContextCapacityConfig(config); !status)
+    {
+        return Core::failure(status.error());
+    }
+
+    const auto deriveFromNodeCapacity = [nodeCapacity = config.nodeCapacity](
+                                            usize configuredCapacity) noexcept {
+        return configuredCapacity == 0 ? nodeCapacity : configuredCapacity;
+    };
+    return NormalizedUIContextCapacityConfig{
+        .nodeCapacity = config.nodeCapacity,
+        .rootCapacity = config.rootCapacity,
+        .dirtyQueueCapacity = deriveFromNodeCapacity(config.dirtyQueueCapacity),
+        .layoutSnapshotCapacity = deriveFromNodeCapacity(config.layoutSnapshotCapacity),
+        .hitSnapshotCapacity = deriveFromNodeCapacity(config.hitSnapshotCapacity),
+        .paintSnapshotCapacity = deriveFromNodeCapacity(config.paintSnapshotCapacity),
+        .routePathCapacity = deriveFromNodeCapacity(config.routePathCapacity),
+        .routedPointerListenerCapacity =
+            deriveFromNodeCapacity(config.routedPointerListenerCapacity),
+        .buttonActionCapacity = deriveFromNodeCapacity(config.buttonActionCapacity),
+        .textByteCapacity = config.textByteCapacity == 0
+                                ? UIContextCapacityConfig::DefaultTextByteCapacity
+                                : config.textByteCapacity,
+        .applyDefaultProductChrome = config.applyDefaultProductChrome,
+    };
+}
+
 UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept
 {
     if (paint.solidFill.has_value() && paint.solidFill->color.alpha == 0)
