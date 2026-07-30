@@ -33,6 +33,8 @@ add_executable(tina_ui_tests
     UIRadioButtonTests.cpp
     UISemanticsTests.cpp
     UIAccessibilityTests.cpp
+    UIInputRouteTestSupport.hpp
+    UIInputRouteLifecycleTests.cpp
     UIInputRouteTests.cpp
     UIFocusModalTests.cpp
     UIPointerCaptureTests.cpp
