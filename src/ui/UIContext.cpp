@@ -64,6 +64,7 @@ using Detail::countBoxChromePaintEntries;
 using Detail::countDrawableTextCodepoints;
 using Detail::defaultContentAlignment;
 using Detail::DropdownState;
+using Detail::flexBaseMainSize;
 using Detail::hasLayoutWork;
 using Detail::horizontalMargin;
 using Detail::intersectRects;
@@ -113,9 +114,12 @@ using Detail::planTextEditCommand;
 using Detail::quantizeSliderValue;
 using Detail::ResolvedLength;
 using Detail::resolveInset;
+using Detail::resolveContentPlacement;
 using Detail::resolvedItemAlignment;
 using Detail::resolveLength;
 using Detail::resolveLengthNoFallbackCount;
+using Detail::resolveOverlayRect;
+using Detail::resolvePopupPlacement;
 using Detail::resolveScrollThumbOffset;
 using Detail::resolveScrollTrackPageOffset;
 using Detail::resolveScrollWheelOffset;
@@ -1270,19 +1274,6 @@ struct UIContext::Impl final {
         }
     }
 
-    [[nodiscard]] float flexBaseMainSize(const UILayoutStyle& style, const LayoutScratchState& scratch,
-                                         bool row, float contentMain,
-                                         LayoutPassStatistics& statistics) const noexcept
-    {
-        float base = row ? scratch.measuredSize.width : scratch.measuredSize.height;
-        const ResolvedLength basis = resolveLength(style.flexItem.basis, true, contentMain, statistics);
-        if (basis.hasValue)
-        {
-            base = basis.value;
-        }
-        return row ? clampWidth(base, style, scratch, statistics)
-                   : clampHeight(base, style, scratch, statistics);
-    }
     void assignLayoutRect(u32 index, UILogicalRect worldRect, UILogicalRect parentWorldRect,
                           UILogicalRect descendantClip) noexcept
     {
@@ -1350,67 +1341,11 @@ struct UIContext::Impl final {
     void arrangeOverlayChild(u32 childIndex, UILogicalRect parentContentRect, UILogicalRect parentWorldRect,
                              UILogicalRect descendantClip, LayoutPassStatistics& statistics) noexcept
     {
-        const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
-        LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
         refreshMeasuredSizeForParentContent(childIndex, parentContentRect, statistics);
-        float width = childScratch.measuredSize.width;
-        float height = childScratch.measuredSize.height;
-
-        if (childStyle.overlay.horizontal == UIAxisAlignment::Stretch)
-        {
-            width = (std::max)(0.0F, parentContentRect.width - horizontalMargin(childStyle.margin));
-        }
-        if (childStyle.overlay.vertical == UIAxisAlignment::Stretch)
-        {
-            height = (std::max)(0.0F, parentContentRect.height - verticalMargin(childStyle.margin));
-        }
-        width = clampWidth(width, childStyle, childScratch, statistics);
-        height = clampHeight(height, childStyle, childScratch, statistics);
-
-        const float availableWidth =
-            (std::max)(0.0F, parentContentRect.width - horizontalMargin(childStyle.margin));
-        const float availableHeight =
-            (std::max)(0.0F, parentContentRect.height - verticalMargin(childStyle.margin));
-        const ResolvedLength horizontalOffset =
-            resolveLength(childStyle.overlay.offset.x, true, parentContentRect.width, statistics);
-        const ResolvedLength verticalOffset =
-            resolveLength(childStyle.overlay.offset.y, true, parentContentRect.height, statistics);
-        float x = parentContentRect.x + childStyle.margin.left;
-        float y = parentContentRect.y + childStyle.margin.top;
-        switch (childStyle.overlay.horizontal)
-        {
-        case UIAxisAlignment::Center:
-            x += (availableWidth - width) * 0.5F;
-            break;
-        case UIAxisAlignment::End:
-            x += availableWidth - width;
-            break;
-        case UIAxisAlignment::Start:
-        case UIAxisAlignment::Stretch:
-            break;
-        }
-        switch (childStyle.overlay.vertical)
-        {
-        case UIAxisAlignment::Center:
-            y += (availableHeight - height) * 0.5F;
-            break;
-        case UIAxisAlignment::End:
-            y += availableHeight - height;
-            break;
-        case UIAxisAlignment::Start:
-        case UIAxisAlignment::Stretch:
-            break;
-        }
-        x += horizontalOffset.hasValue ? horizontalOffset.value : 0.0F;
-        y += verticalOffset.hasValue ? verticalOffset.value : 0.0F;
-
         assignLayoutRect(childIndex,
-                         UILogicalRect{
-                             .x = normalizeFloat(x),
-                             .y = normalizeFloat(y),
-                             .width = normalizeFloat((std::max)(0.0F, width)),
-                             .height = normalizeFloat((std::max)(0.0F, height)),
-                         },
+                         resolveOverlayRect(layoutStylesByIndex[childIndex],
+                                            layoutScratchByIndex[childIndex],
+                                            parentContentRect, statistics),
                          parentWorldRect, descendantClip);
     }
 
@@ -1421,52 +1356,14 @@ struct UIContext::Impl final {
         LayoutScratchState& popupScratch = layoutScratchByIndex[popupIndex];
         PopupState& popup = popupStatesByNodeIndex[popupIndex];
         refreshMeasuredSizeForParentContent(popupIndex, viewportRect, statistics);
-
-        float width = popupScratch.measuredSize.width;
-        float height = popupScratch.measuredSize.height;
-        if (popup.style.matchAnchorWidth)
-        {
-            width = anchorRect.width;
-        }
-        width = (std::min)(clampWidth(width, popupLayoutStyle, popupScratch, statistics), viewportRect.width);
-        height = (std::min)(clampHeight(height, popupLayoutStyle, popupScratch, statistics), viewportRect.height);
-
-        const float belowY = anchorRect.bottom() + popup.style.anchorGap;
-        const float aboveY = anchorRect.y - popup.style.anchorGap - height;
-        const bool fitsBelow = belowY + height <= viewportRect.bottom();
-        const bool fitsAbove = aboveY >= viewportRect.y;
-        const float availableBelow = (std::max)(0.0F, viewportRect.bottom() - belowY);
-        const float availableAbove = (std::max)(0.0F, anchorRect.y - popup.style.anchorGap - viewportRect.y);
-
-        UIPopupPlacement resolved = popup.style.placement;
-        if (resolved == UIPopupPlacement::Auto)
-        {
-            resolved = fitsBelow || (!fitsAbove && availableBelow >= availableAbove) ? UIPopupPlacement::Below
-                                                                                     : UIPopupPlacement::Above;
-        } else if (resolved == UIPopupPlacement::Below && !fitsBelow && fitsAbove)
-        {
-            resolved = UIPopupPlacement::Above;
-        } else if (resolved == UIPopupPlacement::Above && !fitsAbove && fitsBelow)
-        {
-            resolved = UIPopupPlacement::Below;
-        }
-
-        const float maximumX = (std::max)(viewportRect.x, viewportRect.right() - width);
-        const float maximumY = (std::max)(viewportRect.y, viewportRect.bottom() - height);
-        const float x = (std::clamp)(anchorRect.x, viewportRect.x, maximumX);
-        const float requestedY = resolved == UIPopupPlacement::Above ? aboveY : belowY;
-        const float y = (std::clamp)(requestedY, viewportRect.y, maximumY);
-        const UILogicalRect popupRect{
-            .x = normalizeFloat(x),
-            .y = normalizeFloat(y),
-            .width = normalizeFloat((std::max)(0.0F, width)),
-            .height = normalizeFloat((std::max)(0.0F, height)),
-        };
-        assignLayoutRect(popupIndex, popupRect, anchorRect, viewportRect);
+        const auto resolved = resolvePopupPlacement(
+            popupLayoutStyle, popupScratch, popup.style, anchorRect,
+            viewportRect, statistics);
+        assignLayoutRect(popupIndex, resolved.rect, anchorRect, viewportRect);
         popupLayoutScratchByNodeIndex[popupIndex].metrics = UIPopupMetrics{
             .anchorRect = anchorRect,
-            .popupRect = popupRect,
-            .resolvedPlacement = resolved,
+            .popupRect = resolved.rect,
+            .resolvedPlacement = resolved.placement,
             .open = popupScratch.effectiveVisibility == UIVisibility::Visible,
         };
     }
@@ -2308,66 +2205,34 @@ struct UIContext::Impl final {
         const LayoutScratchState& scratch = layoutScratchByIndex[index];
         const UILayoutStyle& layout = layoutStylesByIndex[index];
         const NodeRecord* record = recordByIndex(index);
-        UILogicalRect contentBox{
-            .x = normalizeFloat(scratch.worldRect.x + layout.padding.left),
-            .y = normalizeFloat(scratch.worldRect.y + layout.padding.top),
-            .width = normalizeFloat((std::max)(0.0F, scratch.worldRect.width - horizontalMargin(layout.padding))),
-            .height = normalizeFloat((std::max)(0.0F, scratch.worldRect.height - verticalMargin(layout.padding))),
-        };
-
+        float leadingReservedWidth = 0.0F;
+        float trailingReservedWidth = 0.0F;
         if (record != nullptr && record->kind == BuiltinElementKind::Dropdown &&
             index < dropdownStatesByNodeIndex.size())
         {
             const UIDropdownPaint& dropdown = dropdownStatesByNodeIndex[index].paint;
-            const float reservedWidth = dropdown.indicatorWidth + dropdown.indicatorInset * 2.0F;
-            contentBox.width = normalizeFloat((std::max)(0.0F, contentBox.width - reservedWidth));
+            trailingReservedWidth =
+                dropdown.indicatorWidth + dropdown.indicatorInset * 2.0F;
         }
         if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
             index < radioButtonStatesByNodeIndex.size())
         {
             const float indicatorExtent = (std::min)(scratch.worldRect.width, scratch.worldRect.height);
-            const float reservedWidth = indicatorExtent + radioButtonStatesByNodeIndex[index].paint.labelGap;
-            contentBox.x = normalizeFloat(contentBox.x + reservedWidth);
-            contentBox.width = normalizeFloat((std::max)(0.0F, contentBox.width - reservedWidth));
+            leadingReservedWidth =
+                indicatorExtent + radioButtonStatesByNodeIndex[index].paint.labelGap;
         }
 
-        UICommittedContentPlacement placement{
-            .contentBox = contentBox,
-            .origin = contentBox.origin(),
-        };
-        if (index >= textStatesByIndex.size())
-        {
-            return placement;
-        }
-        const UITextMetrics* metrics = presentationTextMetricsFor(index);
-        if (metrics == nullptr)
-        {
-            return placement;
-        }
-
-        const UIContentAlignment alignment = textStatesByIndex[index].alignment;
-        const float horizontalFree = (std::max)(0.0F, contentBox.width - metrics->measuredSize.width);
-        const float verticalFree = (std::max)(0.0F, contentBox.height - metrics->measuredSize.height);
-        const auto alignedOffset = [](UIAxisAlignment axis, float freeSpace) noexcept {
-            switch (axis)
-            {
-            case UIAxisAlignment::Center:
-                return freeSpace * 0.5F;
-            case UIAxisAlignment::End:
-                return freeSpace;
-            case UIAxisAlignment::Start:
-            case UIAxisAlignment::Stretch:
-                return 0.0F;
-            }
-            return 0.0F;
-        };
-        placement.origin = UILogicalPoint{
-            .x = normalizeFloat(contentBox.x + alignedOffset(alignment.horizontal, horizontalFree)),
-            .y = normalizeFloat(contentBox.y + alignedOffset(alignment.vertical, verticalFree)),
-        };
-        placement.intrinsicSize = metrics->measuredSize;
-        placement.hasIntrinsicContent = true;
-        return placement;
+        const UITextMetrics* metrics =
+            index < textStatesByIndex.size() ? presentationTextMetricsFor(index)
+                                             : nullptr;
+        const UIContentAlignment alignment =
+            metrics != nullptr ? textStatesByIndex[index].alignment
+                               : UIContentAlignment{};
+        const UILogicalSize* intrinsicSize =
+            metrics != nullptr ? &metrics->measuredSize : nullptr;
+        return resolveContentPlacement(
+            scratch.worldRect, layout.padding, leadingReservedWidth,
+            trailingReservedWidth, alignment, intrinsicSize);
     }
 
     void buildCommittedLayout(std::pmr::vector<UICommittedLayoutEntry>& output,

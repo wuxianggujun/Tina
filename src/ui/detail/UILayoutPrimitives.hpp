@@ -1,6 +1,8 @@
 #pragma once
 
+#include <tina/ui/UIContent.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIPopup.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -203,6 +205,23 @@ struct ResolvedLength final {
         statistics);
 }
 
+
+[[nodiscard]] inline float flexBaseMainSize(
+    const UILayoutStyle& style, const LayoutScratchState& scratch,
+    bool row, float contentMain,
+    LayoutPassStatistics& statistics) noexcept
+{
+    float base = row ? scratch.measuredSize.width : scratch.measuredSize.height;
+    const ResolvedLength basis =
+        resolveLength(style.flexItem.basis, true, contentMain, statistics);
+    if (basis.hasValue)
+    {
+        base = basis.value;
+    }
+    return row ? clampWidth(base, style, scratch, statistics)
+               : clampHeight(base, style, scratch, statistics);
+}
+
 [[nodiscard]] constexpr bool isCrossAxisAuto(
     const UILayoutStyle& style, UIFlexDirection direction) noexcept
 {
@@ -247,6 +266,199 @@ struct ResolvedLength final {
     const UIEdgeSpacing& margin) noexcept
 {
     return margin.top + margin.bottom;
+}
+
+
+[[nodiscard]] inline UILogicalRect resolveOverlayRect(
+    const UILayoutStyle& style, const LayoutScratchState& scratch,
+    UILogicalRect parentContentRect,
+    LayoutPassStatistics& statistics) noexcept
+{
+    float width = scratch.measuredSize.width;
+    float height = scratch.measuredSize.height;
+
+    if (style.overlay.horizontal == UIAxisAlignment::Stretch)
+    {
+        width = (std::max)(0.0F, parentContentRect.width -
+                                    horizontalMargin(style.margin));
+    }
+    if (style.overlay.vertical == UIAxisAlignment::Stretch)
+    {
+        height = (std::max)(0.0F, parentContentRect.height -
+                                     verticalMargin(style.margin));
+    }
+    width = clampWidth(width, style, scratch, statistics);
+    height = clampHeight(height, style, scratch, statistics);
+
+    const float availableWidth =
+        (std::max)(0.0F, parentContentRect.width - horizontalMargin(style.margin));
+    const float availableHeight =
+        (std::max)(0.0F, parentContentRect.height - verticalMargin(style.margin));
+    const ResolvedLength horizontalOffset =
+        resolveLength(style.overlay.offset.x, true, parentContentRect.width,
+                      statistics);
+    const ResolvedLength verticalOffset =
+        resolveLength(style.overlay.offset.y, true, parentContentRect.height,
+                      statistics);
+    float x = parentContentRect.x + style.margin.left;
+    float y = parentContentRect.y + style.margin.top;
+    switch (style.overlay.horizontal)
+    {
+    case UIAxisAlignment::Center:
+        x += (availableWidth - width) * 0.5F;
+        break;
+    case UIAxisAlignment::End:
+        x += availableWidth - width;
+        break;
+    case UIAxisAlignment::Start:
+    case UIAxisAlignment::Stretch:
+        break;
+    }
+    switch (style.overlay.vertical)
+    {
+    case UIAxisAlignment::Center:
+        y += (availableHeight - height) * 0.5F;
+        break;
+    case UIAxisAlignment::End:
+        y += availableHeight - height;
+        break;
+    case UIAxisAlignment::Start:
+    case UIAxisAlignment::Stretch:
+        break;
+    }
+    x += horizontalOffset.hasValue ? horizontalOffset.value : 0.0F;
+    y += verticalOffset.hasValue ? verticalOffset.value : 0.0F;
+
+    return UILogicalRect{
+        .x = normalizeFloat(x),
+        .y = normalizeFloat(y),
+        .width = normalizeFloat((std::max)(0.0F, width)),
+        .height = normalizeFloat((std::max)(0.0F, height)),
+    };
+}
+
+struct ResolvedPopupPlacement final {
+    UILogicalRect rect{};
+    UIPopupPlacement placement = UIPopupPlacement::Below;
+};
+
+[[nodiscard]] inline ResolvedPopupPlacement resolvePopupPlacement(
+    const UILayoutStyle& layoutStyle, const LayoutScratchState& scratch,
+    const UIPopupStyle& popupStyle, UILogicalRect anchorRect,
+    UILogicalRect viewportRect,
+    LayoutPassStatistics& statistics) noexcept
+{
+    float width = scratch.measuredSize.width;
+    float height = scratch.measuredSize.height;
+    if (popupStyle.matchAnchorWidth)
+    {
+        width = anchorRect.width;
+    }
+    width = (std::min)(clampWidth(width, layoutStyle, scratch, statistics),
+                       viewportRect.width);
+    height = (std::min)(clampHeight(height, layoutStyle, scratch, statistics),
+                        viewportRect.height);
+
+    const float belowY = anchorRect.bottom() + popupStyle.anchorGap;
+    const float aboveY = anchorRect.y - popupStyle.anchorGap - height;
+    const bool fitsBelow = belowY + height <= viewportRect.bottom();
+    const bool fitsAbove = aboveY >= viewportRect.y;
+    const float availableBelow =
+        (std::max)(0.0F, viewportRect.bottom() - belowY);
+    const float availableAbove =
+        (std::max)(0.0F, anchorRect.y - popupStyle.anchorGap - viewportRect.y);
+
+    UIPopupPlacement resolved = popupStyle.placement;
+    if (resolved == UIPopupPlacement::Auto)
+    {
+        resolved = fitsBelow || (!fitsAbove && availableBelow >= availableAbove)
+                       ? UIPopupPlacement::Below
+                       : UIPopupPlacement::Above;
+    } else if (resolved == UIPopupPlacement::Below && !fitsBelow && fitsAbove)
+    {
+        resolved = UIPopupPlacement::Above;
+    } else if (resolved == UIPopupPlacement::Above && !fitsAbove && fitsBelow)
+    {
+        resolved = UIPopupPlacement::Below;
+    }
+
+    const float maximumX =
+        (std::max)(viewportRect.x, viewportRect.right() - width);
+    const float maximumY =
+        (std::max)(viewportRect.y, viewportRect.bottom() - height);
+    const float x = (std::clamp)(anchorRect.x, viewportRect.x, maximumX);
+    const float requestedY =
+        resolved == UIPopupPlacement::Above ? aboveY : belowY;
+    const float y = (std::clamp)(requestedY, viewportRect.y, maximumY);
+
+    return ResolvedPopupPlacement{
+        .rect = UILogicalRect{
+            .x = normalizeFloat(x),
+            .y = normalizeFloat(y),
+            .width = normalizeFloat((std::max)(0.0F, width)),
+            .height = normalizeFloat((std::max)(0.0F, height)),
+        },
+        .placement = resolved,
+    };
+}
+
+[[nodiscard]] inline UICommittedContentPlacement resolveContentPlacement(
+    UILogicalRect worldRect, const UIEdgeSpacing& padding,
+    float leadingReservedWidth, float trailingReservedWidth,
+    UIContentAlignment alignment,
+    const UILogicalSize* intrinsicSize) noexcept
+{
+    UILogicalRect contentBox{
+        .x = normalizeFloat(worldRect.x + padding.left),
+        .y = normalizeFloat(worldRect.y + padding.top),
+        .width = normalizeFloat((std::max)(
+            0.0F, worldRect.width - horizontalMargin(padding))),
+        .height = normalizeFloat((std::max)(
+            0.0F, worldRect.height - verticalMargin(padding))),
+    };
+
+    contentBox.width = normalizeFloat((std::max)(
+        0.0F, contentBox.width - trailingReservedWidth));
+    contentBox.x = normalizeFloat(contentBox.x + leadingReservedWidth);
+    contentBox.width = normalizeFloat((std::max)(
+        0.0F, contentBox.width - leadingReservedWidth));
+
+    UICommittedContentPlacement placement{
+        .contentBox = contentBox,
+        .origin = contentBox.origin(),
+    };
+    if (intrinsicSize == nullptr)
+    {
+        return placement;
+    }
+
+    const float horizontalFree =
+        (std::max)(0.0F, contentBox.width - intrinsicSize->width);
+    const float verticalFree =
+        (std::max)(0.0F, contentBox.height - intrinsicSize->height);
+    const auto alignedOffset = [](UIAxisAlignment axis,
+                                  float freeSpace) noexcept {
+        switch (axis)
+        {
+        case UIAxisAlignment::Center:
+            return freeSpace * 0.5F;
+        case UIAxisAlignment::End:
+            return freeSpace;
+        case UIAxisAlignment::Start:
+        case UIAxisAlignment::Stretch:
+            return 0.0F;
+        }
+        return 0.0F;
+    };
+    placement.origin = UILogicalPoint{
+        .x = normalizeFloat(contentBox.x +
+                            alignedOffset(alignment.horizontal, horizontalFree)),
+        .y = normalizeFloat(contentBox.y +
+                            alignedOffset(alignment.vertical, verticalFree)),
+    };
+    placement.intrinsicSize = *intrinsicSize;
+    placement.hasIntrinsicContent = true;
+    return placement;
 }
 
 [[nodiscard]] constexpr UILogicalRect intersectRects(
