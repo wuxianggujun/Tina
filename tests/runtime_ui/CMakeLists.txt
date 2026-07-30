@@ -7,6 +7,7 @@ add_executable(tina_runtime_ui_tests
     UIInputRouteProducerTextAndPopupTests.cpp
     UIInputRouteProducerCollectionTests.cpp
     UIInputRouteProducerButtonTests.cpp
+    UIInputRouteProducerFocusNavigationTests.cpp
     UIInputRouteProducerPointerTests.cpp
     UIInputRouteProducerContractTests.cpp
     UIInputRouteProducerActionMappingTests.cpp

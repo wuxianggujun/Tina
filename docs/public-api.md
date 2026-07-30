@@ -249,6 +249,8 @@ phase facade 对象。
 stylesheet 仍是后续扩展。
 
 UI-004 的 committed Focus Scope、显式 focus、Modal barrier/焦点恢复和持久 Primary Pointer Capture 已实现；
+`UIFocusNavigationDirection`/`routeFocusNavigation()` 基于 committed 几何提供不 wrap 的空间焦点选择，
+Keyboard Arrow 与 Gamepad D-pad 通过 Runtime 复用该路由，复合控件方向命令保持优先；
 UI-005 的 ScrollView、Dropdown/Popup 与固定 row pool ListView/TreeView 已实现。集合控件支持 100k logical
 item 的虚拟化，但完整通用 dirty-range pruning 仍未完成。当前回归覆盖 50,000 节点深树的非递归
 structure commit/destroy、layout、hit 与 paint publication；Popup membership 在 layout traversal 中缓存，

@@ -18,6 +18,7 @@
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIElementContractResolver.hpp"
 #include "detail/UIFlexLayout.hpp"
+#include "detail/UIFocusNavigation.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIDirtyQueueStorage.hpp"
 #include "detail/UIImeCompositionState.hpp"
@@ -177,8 +178,10 @@ using Detail::verticalMargin;
 using Detail::VirtualCollectionLayoutError;
 using Detail::WidgetTextState;
 using Detail::findHitEntryIndex;
+using Detail::findFocusNavigationCandidate;
 using Detail::hitEntryAllowedByModal;
 using Detail::hitEntryIsWithinScope;
+using Detail::isValidFocusNavigationDirection;
 using Detail::phaseMaskFor;
 using Detail::pointerHitTargetForEntry;
 using Detail::PopupLayoutScratch;
@@ -206,6 +209,18 @@ using Detail::UIPointerRoutePathError;
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
 inline constexpr u8 ThemeDirtyLayoutAncestor = 1U << 2U;
+
+[[nodiscard]] constexpr bool ownsDirectionalNavigation(BuiltinElementKind kind) noexcept
+{
+    return kind == BuiltinElementKind::TextEdit || kind == BuiltinElementKind::Dropdown ||
+           kind == BuiltinElementKind::ListView || kind == BuiltinElementKind::TreeView;
+}
+
+[[nodiscard]] constexpr bool isCompositeFocusItem(BuiltinElementKind kind) noexcept
+{
+    return kind == BuiltinElementKind::DropdownItem || kind == BuiltinElementKind::ListViewItem ||
+           kind == BuiltinElementKind::TreeViewItem;
+}
 
 struct NodeRecord final {
     u32 parentIndex = InvalidNodeIndex;
@@ -414,6 +429,8 @@ struct UIContext::Impl final {
         listViewCommandPressLatch;
     Detail::UICommandPressLatch<UITreeViewCommand, UITreeViewCommand::Activate>
         treeViewCommandPressLatch;
+    Detail::UICommandPressLatch<UIFocusNavigationDirection, UIFocusNavigationDirection::Down>
+        focusNavigationPressLatch;
     bool armedTreeDisclosure = false;
     bool popupDismissPointerBarrierActive = false;
     UINodeId pendingDestroyedModalRestoreFocus{};
@@ -11089,6 +11106,7 @@ struct UIContext::Impl final {
         dropdownCommandPressLatch.clear();
         listViewCommandPressLatch.clear();
         treeViewCommandPressLatch.clear();
+        focusNavigationPressLatch.clear();
         defaultActionPressState.clearAll();
         clearImeFocus();
         clearDefaultActionFocus();
@@ -11127,6 +11145,7 @@ struct UIContext::Impl final {
         dropdownCommandPressLatch.clear();
         listViewCommandPressLatch.clear();
         treeViewCommandPressLatch.clear();
+        focusNavigationPressLatch.clear();
 
         if (gamepad.has_value())
         {
@@ -12327,6 +12346,49 @@ struct UIContext::Impl final {
         };
     }
 
+    [[nodiscard]] Core::Status applyNavigationFocus(UINodeId nextFocus)
+    {
+        const UINodeId previousFocus = defaultActionFocusButton;
+        const UINodeId dirtyPreviousFocus =
+            previousFocus.hasValue() && previousFocus != nextFocus && contains(previousFocus) ? previousFocus
+                                                                                              : UINodeId{};
+        const UINodeId dirtyTextFocus =
+            textInputFocus.hasValue() && textInputFocus != nextFocus && contains(textInputFocus) ? textInputFocus
+                                                                                                 : UINodeId{};
+        const UINodeId dirtyArmedSlider =
+            armedSlider.hasValue() && armedSlider != nextFocus && contains(armedSlider) ? armedSlider : UINodeId{};
+        if (Core::Status dirty = markPaintDirtyBatch({
+                dirtyPreviousFocus,
+                dirtyTextFocus,
+                dirtyArmedSlider,
+                nextFocus,
+            });
+            !dirty)
+        {
+            return dirty;
+        }
+
+        defaultActionPressState.clearAll();
+        defaultActionFocusButton = nextFocus;
+        clearArmedPrimaryButton();
+        clearArmedSlider();
+        clearArmedTextEdit();
+        capturedPointerNode = {};
+        const NodeRecord* nextRecord = nodes.tryGet(nextFocus.storageId());
+        if (nextRecord != nullptr && nextRecord->kind == BuiltinElementKind::TextEdit)
+        {
+            if (textInputFocus != nextFocus)
+            {
+                clearImeFocus();
+                textInputFocus = nextFocus;
+            }
+        } else
+        {
+            clearImeFocus();
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(bool reverse)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
@@ -12401,45 +12463,103 @@ struct UIContext::Impl final {
                                                                                 : firstCandidateEntryIndex))
                 : (reverse ? lastCandidateEntryIndex : firstCandidateEntryIndex);
         const UINodeId nextFocus = entries[nextEntryIndex].node;
-        const UINodeId previousFocus = defaultActionFocusButton;
         const bool moved = !defaultActionFocusButton.hasValue() || defaultActionFocusButton != nextFocus;
-        const UINodeId dirtyPreviousFocus =
-            previousFocus.hasValue() && previousFocus != nextFocus && contains(previousFocus) ? previousFocus
-                                                                                              : UINodeId{};
-        const UINodeId dirtyTextFocus =
-            textInputFocus.hasValue() && textInputFocus != nextFocus && contains(textInputFocus) ? textInputFocus
-                                                                                                 : UINodeId{};
-        const UINodeId dirtyArmedSlider =
-            armedSlider.hasValue() && armedSlider != nextFocus && contains(armedSlider) ? armedSlider : UINodeId{};
-        if (Core::Status dirty = markPaintDirtyBatch({
-                dirtyPreviousFocus,
-                dirtyTextFocus,
-                dirtyArmedSlider,
-                nextFocus,
-            });
-            !dirty)
+        if (Core::Status focused = applyNavigationFocus(nextFocus); !focused)
         {
-            return Core::failure(dirty.error());
+            return Core::failure(focused.error());
         }
-        defaultActionPressState.clearAll();
-        defaultActionFocusButton = nextFocus;
-        // Tab navigation does not keep a live pointer arm.
-        clearArmedPrimaryButton();
-        clearArmedSlider();
-        clearArmedTextEdit();
-        capturedPointerNode = {};
-        const NodeRecord* nextRecord = nodes.tryGet(nextFocus.storageId());
-        if (nextRecord != nullptr && nextRecord->kind == BuiltinElementKind::TextEdit)
+        return UIDefaultFocusStepResult{
+            .consumed = true,
+            .moved = moved,
+            .focus = nextFocus,
+        };
+    }
+
+    [[nodiscard]] Core::Result<UIDefaultFocusStepResult>
+    routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
-            if (textInputFocus != nextFocus)
-            {
-                clearImeFocus();
-                textInputFocus = nextFocus;
-            }
-        } else
-        {
-            clearImeFocus();
+            return Core::failure(ownerThread.error());
         }
+        if (!isValidFocusNavigationDirection(direction))
+        {
+            return fail(UIErrorCode::InvalidFocusTarget, "UI focus navigation direction is not recognized");
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI focus navigation cannot run during pointer routing");
+        }
+        drainDeferredRootDestroys();
+
+        const UINodeId currentFocus = defaultActionFocus();
+        if (!pressed)
+        {
+            return UIDefaultFocusStepResult{
+                .consumed = focusNavigationPressLatch.release(direction),
+                .moved = false,
+                .focus = currentFocus,
+            };
+        }
+        if (focusNavigationPressLatch.isLatched(direction))
+        {
+            return UIDefaultFocusStepResult{
+                .consumed = true,
+                .moved = false,
+                .focus = currentFocus,
+            };
+        }
+        if (!currentFocus.hasValue())
+        {
+            return UIDefaultFocusStepResult{};
+        }
+        const NodeRecord* currentRecord = nodes.tryGet(currentFocus.storageId());
+        if (currentRecord == nullptr || ownsDirectionalNavigation(currentRecord->kind))
+        {
+            return UIDefaultFocusStepResult{
+                .consumed = false,
+                .moved = false,
+                .focus = currentFocus,
+            };
+        }
+
+        const auto& entries = committedHitBuffers[publishedHitBufferIndex];
+        u32 scopeEntryIndex = committedActiveModalEntryIndex;
+        const u32 currentFocusEntryIndex = findHitEntryIndex(currentFocus, entries);
+        if (currentFocusEntryIndex < entries.size() &&
+            entries[currentFocusEntryIndex].focusScopeEntryIndex < entries.size())
+        {
+            scopeEntryIndex = entries[currentFocusEntryIndex].focusScopeEntryIndex;
+        }
+        const auto isCandidate = [&](u32 entryIndex) noexcept {
+            const UICommittedHitEntry& entry = entries[entryIndex];
+            const NodeRecord* record = nodes.tryGet(entry.node.storageId());
+            return contains(entry.node) && isNodeEnabled(entry.node) &&
+                   record != nullptr && !isCompositeFocusItem(record->kind) &&
+                   entry.policy == UIPointerHitPolicy::Targetable &&
+                   hasBehavior(entry.behaviors, UIElementBehavior::Focusable) &&
+                   hitEntryAllowedByModal(entry, committedActiveModalEntryIndex) &&
+                   hitEntryIsWithinScope(entryIndex, scopeEntryIndex, entries);
+        };
+        const u32 nextEntryIndex =
+            findFocusNavigationCandidate(entries, currentFocusEntryIndex, direction, isCandidate);
+        if (nextEntryIndex == InvalidUIHitEntryIndex)
+        {
+            return UIDefaultFocusStepResult{
+                .consumed = false,
+                .moved = false,
+                .focus = currentFocus,
+            };
+        }
+
+        const UINodeId nextFocus = entries[nextEntryIndex].node;
+        const bool moved = nextFocus != currentFocus;
+        if (Core::Status focused = applyNavigationFocus(nextFocus); !focused)
+        {
+            return Core::failure(focused.error());
+        }
+        focusNavigationPressLatch.latch(direction);
         return UIDefaultFocusStepResult{
             .consumed = true,
             .moved = moved,
@@ -14316,6 +14436,12 @@ UIContext::routeDefaultActionRelease(Platform::PlatformFrameId platformFrame, u6
 Core::Result<UIContext::UIDefaultFocusStepResult> UIContext::routeDefaultActionFocusStep(bool reverse)
 {
     return m_impl->routeDefaultActionFocusStep(reverse);
+}
+
+Core::Result<UIContext::UIDefaultFocusStepResult>
+UIContext::routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed)
+{
+    return m_impl->routeFocusNavigation(direction, pressed);
 }
 
 Core::Result<UIDropdownCommandResult> UIContext::routeDropdownCommand(UIDropdownCommand command, bool pressed)

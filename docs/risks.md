@@ -19,7 +19,7 @@
 | ID | 等级 | 风险 | 已有门禁 | 残余风险 |
 | --- | --- | --- | --- | --- |
 | R-DEP-01 | P0 | bgfx/GLFW/miniaudio/FreeType/cgltf/xxHash 类型泄漏公共 API | adapter PRIVATE link、header-isolation 与 token scan | 新模块/安装树需持续扫描 |
-| R-INPUT-01 | P1 | UI 点击穿透 Gameplay 或 held input 卡住 | consumption + continuous claims 在 ActionMapper 前；Modal barrier、持久 Capture、reset/cancel 与 Gamepad default-action 测试 | 空间/方向 focus navigation 与更广的多 Pointer/设备矩阵仍后置 |
+| R-INPUT-01 | P1 | UI 点击穿透 Gameplay 或 held input 卡住 | consumption + continuous claims 在 ActionMapper 前；Modal barrier、持久 Capture、空间方向 focus release latch、reset/cancel 与 Gamepad default-action 测试 | 更广的多 Pointer/设备矩阵仍后置 |
 | R-FIXED-01 | P1 | 0/多 substep 丢失或重复输入边沿 | ordered transition + simulation latch + world pick、State stack policy tests | 完整 replay 与多 World orchestration 仍需扩展 |
 | R-ASSET-01 | P0 | Catalog cycle、损坏或半发布 | borrowed parser、owning snapshot、迭代 DAG、transaction rollback、外部 URI containment/size policy | hot reload、增量 Cooker 与多文件增量 publish 原子性仍后置 |
 | R-AUDIO-01 | P0 | logical cancel 后 PCM/staging UAF 或 callback 违反实时约束 | command/completion 队列、Lease、null-device tests | 真设备 callback p99 与 shutdown race 证据不足 |

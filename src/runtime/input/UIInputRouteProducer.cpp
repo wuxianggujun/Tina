@@ -65,6 +65,42 @@ constexpr usize BitsPerConsumptionWord = sizeof(u64) * 8U;
     }
 }
 
+[[nodiscard]] std::optional<UI::UIFocusNavigationDirection> focusNavigationDirectionForKey(
+    Platform::Key key) noexcept
+{
+    switch (key)
+    {
+    case Platform::Key::Left:
+        return UI::UIFocusNavigationDirection::Left;
+    case Platform::Key::Right:
+        return UI::UIFocusNavigationDirection::Right;
+    case Platform::Key::Up:
+        return UI::UIFocusNavigationDirection::Up;
+    case Platform::Key::Down:
+        return UI::UIFocusNavigationDirection::Down;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UIFocusNavigationDirection> focusNavigationDirectionForGamepadButton(
+    Platform::GamepadButton button) noexcept
+{
+    switch (button)
+    {
+    case Platform::GamepadButton::DpadLeft:
+        return UI::UIFocusNavigationDirection::Left;
+    case Platform::GamepadButton::DpadRight:
+        return UI::UIFocusNavigationDirection::Right;
+    case Platform::GamepadButton::DpadUp:
+        return UI::UIFocusNavigationDirection::Up;
+    case Platform::GamepadButton::DpadDown:
+        return UI::UIFocusNavigationDirection::Down;
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] std::optional<UI::UIDropdownCommand> dropdownCommandForKey(Platform::Key key,
                                                                         bool shiftHeld) noexcept
 {
@@ -696,6 +732,33 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
         }
 
+        // Generic spatial focus runs only after controls with directional state
+        // (Dropdown/ListView/TreeView/TextEdit) have declined the transition.
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
+            gamepad != nullptr && gamepad->routedWindow == context->ownerWindow())
+        {
+            if (const auto direction = focusNavigationDirectionForGamepadButton(gamepad->button);
+                direction.has_value())
+            {
+                auto routed = context->routeFocusNavigation(
+                    *direction, gamepad->state == Platform::DigitalTransition::Down);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(gamepad-focus-navigation)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+        }
+
         // A focused TextEdit owns keyboard transitions so physical gameplay
         // bindings cannot fire while text/IME input is active. TextInput still
         // carries printable UTF-8; key commands only mutate caret/selection.
@@ -738,6 +801,30 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 u64{1} << (ordinal % BitsPerConsumptionWord);
             anyConsumed = true;
             continue;
+        }
+
+        if (const auto* key =
+                std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr && key->window == context->ownerWindow())
+        {
+            if (const auto direction = focusNavigationDirectionForKey(key->key); direction.has_value())
+            {
+                auto routed =
+                    context->routeFocusNavigation(*direction, key->state == Platform::DigitalTransition::Down);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(keyboard-focus-navigation)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
         }
 
         // Tab cycles keyboard focus. Shift is read from the

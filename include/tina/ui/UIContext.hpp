@@ -477,6 +477,11 @@ class UIContext final {
         UINodeId focus{};
     };
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(bool reverse);
+    // Moves an existing focus geometrically among enabled committed candidates.
+    // Navigation never wraps. A successful move claims its matching release;
+    // no focus or no candidate leaves gameplay input unconsumed.
+    [[nodiscard]] Core::Result<UIDefaultFocusStepResult>
+    routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed = true);
     // Routes retained Dropdown navigation. pressed=false releases a command
     // previously claimed on key-down without repeating its state transition.
     [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command, bool pressed);

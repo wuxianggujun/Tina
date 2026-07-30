@@ -11,4 +11,13 @@ enum class UIFocusScopeMode : u8 {
     Contain,
 };
 
+// Logical direction used by committed spatial focus navigation. Selection is
+// based on the last published focusable geometry and never wraps at an edge.
+enum class UIFocusNavigationDirection : u8 {
+    Left,
+    Right,
+    Up,
+    Down,
+};
+
 } // namespace Tina::UI

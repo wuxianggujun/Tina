@@ -17,7 +17,7 @@
 | Paint | box/text/control paint、固定容量 backend-neutral `SolidRect` Canvas、clip、PaintCache、committed paint snapshot |
 | Theme（A/B） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset：surface 色阶、1px 亮/暗边、可选 Low elevation 假影；**无**圆角/毛玻璃/CSS Theme（C） |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab focus、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |
 | Runtime | startup root builder、phase-scoped tree updater（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
 | Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
@@ -130,6 +130,10 @@ callback 副作用。
 
 当前默认行为：
 
+- 通用空间焦点：已有普通控件焦点时，Keyboard Arrow 与 Gamepad D-pad 复用
+  `UIFocusNavigationDirection`，按 committed `worldRect` 在 Left/Right/Up/Down 半平面内选择候选；优先
+  同轴 beam，再比较主轴间距、次轴间距和稳定 paint ordinal。无焦点、无方向候选或边缘不 wrap 时不消费
+  Gameplay input；成功移动后以固定容量 latch 消费匹配 release；
 - Button：primary pointer pressed/action，Enter/Space/KeypadEnter/Gamepad South activation；
 - Checkbox：Pointer/Keyboard/Gamepad toggle；
 - Slider：Pointer drag、range/value clamp；
@@ -147,8 +151,9 @@ callback 副作用。
 `requestFocus()` 拒绝未提交、隐藏、disabled、非 Targetable、非键盘控件及 active Modal 外节点。
 最后绘制的 committed visible Modal 是 active Modal，屏蔽下层 hit/Tab 并消费 backdrop 输入；嵌套 Modal
 逐层保存/恢复 focus，跨 root Modal 释放后也恢复原 root 的有效焦点。commit 的 Modal/focus/capture
-变化与 paint/semantics 一起事务发布，失败提交不发送 `PointerCancel`、不释放旧 capture。空间/方向导航
-仍未实现。
+变化与 paint/semantics 一起事务发布，失败提交不发送 `PointerCancel`、不释放旧 capture。空间方向导航
+沿用相同 committed Modal/Contain scope；disabled、非 Targetable 与复合控件内部 Dropdown/List/Tree item
+不会成为通用候选。Dropdown、ListView、TreeView 与 TextEdit 始终优先执行各自的方向命令。
 
 ## Text、UTF-8 与 IME
 
@@ -398,6 +403,10 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_render_integration_tests.exe
 ```
 
 完整 showcase：
+
+`tina_sample_ui_showcase` 的多列控件布局直接展示该能力：Pointer 或 Tab 建立焦点后，Arrow/D-pad 可在
+Button、Checkbox、RadioButton、Dropdown、ListView 与 TreeView 等控件本体之间按屏幕几何移动，焦点
+边框继续使用当前 Dark/Light Theme；进入复合控件后由控件自身接管方向命令。
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx-ui-freetype

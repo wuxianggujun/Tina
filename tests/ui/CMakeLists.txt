@@ -44,6 +44,7 @@ add_executable(tina_ui_tests
     UIInputRouteLifecycleTests.cpp
     UIInputRouteTests.cpp
     UIFocusModalTests.cpp
+    UIFocusNavigationTests.cpp
     UIPointerRouteInspectionTests.cpp
     UIPointerRoutePathTests.cpp
     UIPointerCaptureTests.cpp

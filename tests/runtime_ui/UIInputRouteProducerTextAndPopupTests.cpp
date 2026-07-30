@@ -232,7 +232,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
         << (escapeReleaseOutput ? "" : escapeReleaseOutput.error().message);
     EXPECT_TRUE(escapeReleaseOutput->consumption.isConsumed(0));
 }
-TEST_F(UIInputRouteProducerTest, DropdownConsumesShiftTabAndGamepadNavigationWithoutStealingClosedKeys)
+TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUsesSpatialNavigation)
 {
     auto producer = createProducer();
     DropdownRouteTree tree = createDropdownRouteTree(window);
@@ -364,7 +364,8 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesShiftTabAndGamepadNavigationWit
     auto closedArrowOutput = producer->produce(tree.context.get(), *closedArrow);
     ASSERT_TRUE(closedArrowOutput.has_value())
         << (closedArrowOutput ? "" : closedArrowOutput.error().message);
-    EXPECT_FALSE(closedArrowOutput->consumption.isConsumed(0));
+    EXPECT_TRUE(closedArrowOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.dropdown);
 }
 
 } // namespace
