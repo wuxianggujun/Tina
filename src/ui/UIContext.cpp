@@ -17,6 +17,7 @@
 #include "detail/UIControlValuePrimitives.hpp"
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIElementContractResolver.hpp"
+#include "detail/UIFlexLayout.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIDirtyQueueStorage.hpp"
 #include "detail/UIImeCompositionState.hpp"
@@ -64,6 +65,7 @@ inline constexpr u32 InvalidNodeIndex = NodeStorageId::InvalidIndex;
 
 using TextByteAllocation = Detail::UITextStorage::Allocation;
 using Detail::appendBoxChromePaints;
+using Detail::appendFlexLineItem;
 using Detail::appendFlowMeasuredChild;
 using Detail::applyOpacity;
 using Detail::BuiltinElementKind;
@@ -78,15 +80,15 @@ using Detail::defaultContentAlignment;
 using Detail::defaultSemanticsForKind;
 using Detail::defaultStyleRoleForKind;
 using Detail::DropdownState;
-using Detail::flexBaseMainSize;
+using Detail::FlexLineSummary;
 using Detail::hasLayoutWork;
 using Detail::horizontalMargin;
 using Detail::intersectRects;
 using Detail::isButtonChromeKind;
-using Detail::isCrossAxisAuto;
 using Detail::isDefaultActivatableKind;
 using Detail::isFiniteLayoutRect;
 using Detail::isFiniteNonNegative;
+using Detail::isValidFlexLineSummary;
 using Detail::isValidContentAlignment;
 using Detail::isKeyboardFocusableKind;
 using Detail::isValidEventPhaseMask;
@@ -132,7 +134,8 @@ using Detail::ResolvedLength;
 using Detail::resolveInset;
 using Detail::resolveContentPlacement;
 using Detail::resolveElementBuiltinKind;
-using Detail::resolvedItemAlignment;
+using Detail::resolveFlexItemRect;
+using Detail::resolveFlexLinePlan;
 using Detail::resolveLength;
 using Detail::resolveLengthNoFallbackCount;
 using Detail::resolveMeasuredLayoutSize;
@@ -1475,11 +1478,7 @@ struct UIContext::Impl final {
         const bool row = parentStyle.flexContainer.direction == UIFlexDirection::Row;
         const float configuredGap = row ? parentStyle.flexContainer.gap.column : parentStyle.flexContainer.gap.row;
 
-        usize flowChildCount = 0;
-        float totalMain = 0.0F;
-        float totalCross = 0.0F;
-        double totalGrow = 0.0;
-        double totalShrinkWeight = 0.0;
+        FlexLineSummary flexSummary{};
         const float initialContentMain = row ? unscrolledContentRect.width : unscrolledContentRect.height;
         u32 childIndex = parentRecord->firstChildIndex;
         while (childIndex != InvalidNodeIndex)
@@ -1495,27 +1494,19 @@ struct UIContext::Impl final {
                 childStyle.placement == UILayoutPlacement::Flow)
             {
                 refreshMeasuredSizeForParentContent(childIndex, unscrolledContentRect, statistics);
-                if (flowChildCount > 0)
-                {
-                    totalMain += configuredGap;
-                }
-                const float baseMain = flexBaseMainSize(childStyle, childScratch, row, initialContentMain, statistics);
-                const float childOuterWidth =
-                    (row ? baseMain : childScratch.measuredSize.width) + horizontalMargin(childStyle.margin);
-                const float childOuterHeight =
-                    (row ? childScratch.measuredSize.height : baseMain) + verticalMargin(childStyle.margin);
-                totalMain += row ? childOuterWidth : childOuterHeight;
-                totalCross = (std::max)(totalCross, row ? childOuterHeight : childOuterWidth);
-                totalGrow += static_cast<double>(childStyle.flexItem.grow);
-                totalShrinkWeight += static_cast<double>(childStyle.flexItem.shrink) *
-                                     static_cast<double>((std::max)(0.0F, baseMain));
-                ++flowChildCount;
+                appendFlexLineItem(
+                    flexSummary,
+                    parentStyle.flexContainer.direction,
+                    configuredGap,
+                    initialContentMain,
+                    childStyle,
+                    childScratch,
+                    statistics);
             }
             childIndex = childRecord->nextSiblingIndex;
         }
 
-        if (!isFiniteNonNegative(totalMain) || !isFiniteNonNegative(totalCross) || !std::isfinite(totalGrow) ||
-            totalGrow < 0.0 || !std::isfinite(totalShrinkWeight) || totalShrinkWeight < 0.0)
+        if (!isValidFlexLineSummary(flexSummary))
         {
             return fail(UIErrorCode::InvalidLayout, "UI flex layout accumulation produced a non-finite value");
         }
@@ -1526,10 +1517,7 @@ struct UIContext::Impl final {
             ScrollViewState& state = scrollViewStatesByNodeIndex[parentIndex];
             const auto plan = resolveScrollViewLayout(ScrollViewLayoutInput{
                 .availableRect = unscrolledContentRect,
-                .rawContentSize = {
-                    .width = row ? totalMain : totalCross,
-                    .height = row ? totalCross : totalMain,
-                },
+                .rawContentSize = flexSummary.contentSize(parentStyle.flexContainer.direction),
                 .style = state.style,
                 .scrollBarThickness = state.paint.thickness,
                 .requestedOffset = state.requestedOffset,
@@ -1542,34 +1530,7 @@ struct UIContext::Impl final {
             descendantClip = intersectRects(parentScratch.descendantClip, plan.viewportRect);
         }
 
-        const float contentMain = row ? layoutContentRect.width : layoutContentRect.height;
-        const float contentCross = row ? layoutContentRect.height : layoutContentRect.width;
-
-        const float freeSpace = contentMain - totalMain;
-        const float growSpace = totalGrow > 0.0 ? (std::max)(0.0F, freeSpace) : 0.0F;
-        const float shrinkSpace = totalShrinkWeight > 0.0 ? (std::max)(0.0F, -freeSpace) : 0.0F;
-        float mainOffset = 0.0F;
-        float gap = configuredGap;
-        if (totalGrow == 0.0 && freeSpace > 0.0F)
-        {
-            switch (parentStyle.flexContainer.justifyContent)
-            {
-            case UIJustifyContent::Center:
-                mainOffset = freeSpace * 0.5F;
-                break;
-            case UIJustifyContent::End:
-                mainOffset = freeSpace;
-                break;
-            case UIJustifyContent::SpaceBetween:
-                if (flowChildCount > 1)
-                {
-                    gap += freeSpace / static_cast<float>(flowChildCount - 1);
-                }
-                break;
-            case UIJustifyContent::Start:
-                break;
-            }
-        }
+        auto flexPlan = resolveFlexLinePlan(parentStyle, layoutContentRect, flexSummary);
 
         childIndex = parentRecord->firstChildIndex;
         while (childIndex != InvalidNodeIndex)
@@ -1602,99 +1563,9 @@ struct UIContext::Impl final {
                 continue;
             }
 
-            float width = childScratch.measuredSize.width;
-            float height = childScratch.measuredSize.height;
-            const float baseMain = flexBaseMainSize(childStyle, childScratch, row, contentMain, statistics);
-            if (row)
-            {
-                width = baseMain;
-            } else
-            {
-                height = baseMain;
-            }
-            if (growSpace > 0.0F && childStyle.flexItem.grow > 0.0F)
-            {
-                const double growRatio = static_cast<double>(childStyle.flexItem.grow) / totalGrow;
-                const float share = growSpace * static_cast<float>(growRatio);
-                if (row)
-                {
-                    width += share;
-                } else
-                {
-                    height += share;
-                }
-            } else if (shrinkSpace > 0.0F && childStyle.flexItem.shrink > 0.0F)
-            {
-                const double childWeight = static_cast<double>(childStyle.flexItem.shrink) *
-                                           static_cast<double>((std::max)(0.0F, baseMain));
-                const float reduction =
-                    shrinkSpace * static_cast<float>(childWeight / totalShrinkWeight);
-                if (row)
-                {
-                    width = (std::max)(0.0F, width - reduction);
-                } else
-                {
-                    height = (std::max)(0.0F, height - reduction);
-                }
-            }
-
-            const float crossAvailable = (std::max)(0.0F, contentCross - (row ? verticalMargin(childStyle.margin)
-                                                                              : horizontalMargin(childStyle.margin)));
-            const UIAxisAlignment crossAlignment =
-                resolvedItemAlignment(parentStyle.flexContainer.alignItems, childStyle.flexItem.alignSelf);
-            if (crossAlignment == UIAxisAlignment::Stretch &&
-                isCrossAxisAuto(childStyle, parentStyle.flexContainer.direction))
-            {
-                if (row)
-                {
-                    height = crossAvailable;
-                } else
-                {
-                    width = crossAvailable;
-                }
-            }
-            width = clampWidth(width, childStyle, childScratch, statistics);
-            height = clampHeight(height, childStyle, childScratch, statistics);
-
-            const float childMainSize = row ? width : height;
-            const float childCrossSize = row ? height : width;
-            const float mainBefore = row ? childStyle.margin.left : childStyle.margin.top;
-            const float mainAfter = row ? childStyle.margin.right : childStyle.margin.bottom;
-            const float crossBefore = row ? childStyle.margin.top : childStyle.margin.left;
-            const float crossAfter = row ? childStyle.margin.bottom : childStyle.margin.right;
-
-            float crossOffset = crossBefore;
-            const float crossFree = contentCross - childCrossSize - crossBefore - crossAfter;
-            if (crossFree > 0.0F)
-            {
-                switch (crossAlignment)
-                {
-                case UIAxisAlignment::Center:
-                    crossOffset = crossBefore + crossFree * 0.5F;
-                    break;
-                case UIAxisAlignment::End:
-                    crossOffset = crossBefore + crossFree;
-                    break;
-                case UIAxisAlignment::Stretch:
-                case UIAxisAlignment::Start:
-                    break;
-                }
-            }
-
-            const float x =
-                row ? layoutContentRect.x + mainOffset + mainBefore : layoutContentRect.x + crossOffset;
-            const float y =
-                row ? layoutContentRect.y + crossOffset : layoutContentRect.y + mainOffset + mainBefore;
             assignLayoutRect(currentChild,
-                             UILogicalRect{
-                                 .x = normalizeFloat(x),
-                                 .y = normalizeFloat(y),
-                                 .width = normalizeFloat((std::max)(0.0F, width)),
-                                 .height = normalizeFloat((std::max)(0.0F, height)),
-                             },
+                             resolveFlexItemRect(flexPlan, childStyle, childScratch, statistics),
                              parentWorldRect, descendantClip);
-
-            mainOffset += childMainSize + mainBefore + mainAfter + gap;
         }
         return Core::success();
     }

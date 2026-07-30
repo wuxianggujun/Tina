@@ -18,6 +18,7 @@ add_executable(tina_ui_tests
     UIElementContractResolverTests.cpp
     UIElementTests.cpp
     UIEnabledStateTests.cpp
+    UIFlexLayoutTests.cpp
     UIInputPrimitivesTests.cpp
     UIRoutedPointerListenerRegistryTests.cpp
     UISliderChangeCallbackRegistryTests.cpp

@@ -54,6 +54,7 @@ add_library(tina_ui STATIC
     detail/UIContextLifetimeControl.cpp
     detail/UIElementContractResolver.hpp
     detail/UIElementContractResolver.cpp
+    detail/UIFlexLayout.hpp
     detail/UIDefaultActionPressState.hpp
     detail/UIDefaultActionPressState.cpp
     detail/UIDirtyQueueStorage.hpp
