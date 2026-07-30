@@ -221,7 +221,7 @@ Write-Host ("fontFingerprint identity={0} source={1} freeTypeLikelyOn={2}" -f `
 
 if (-not $SkipBuild) {
     Invoke-Checked 'build tina_sample_2d' {
-        cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d -- /m:2 /v:m
+        cmake --build --preset windows-vnext-bgfx-debug --parallel 2 --target tina_sample_2d -- /nr:false
     }
 }
 

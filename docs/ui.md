@@ -391,7 +391,7 @@ dirty queue 容量不足时状态与 callback 原子不变，同文本替换 sel
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests -- /m:2 /v:m
+  --target tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=yes
@@ -403,7 +403,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_render_integration_tests.exe
 cmake --preset windows-msvc-vnext-bgfx-ui-freetype
 cmake --build --preset windows-vnext-bgfx-ui-freetype-debug `
   --target tina_sample_ui_showcase tina_ui_tests tina_runtime_ui_tests `
-           tina_ui_render_integration_tests tina_ui_freetype_tests -- /m:2 /v:m
+           tina_ui_render_integration_tests tina_ui_freetype_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
   --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
 ```

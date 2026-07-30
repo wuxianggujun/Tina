@@ -53,6 +53,33 @@ powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 `TINA_BUILD_PLATFORM_GLFW` 和 `TINA_BUILD_RENDER_BGFX` 必须与相应 manifest feature 同时启用；
 CMake 会拒绝不匹配组合。
 
+## Windows 日常 UI 增量构建
+
+日常 UI 开发优先使用固定脚本，不手写 MSBuild native 参数：
+
+```powershell
+# 自动复用已有 build tree；缺少 CMakeCache.txt 时才 configure。
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunMsvcUiTests.ps1
+
+# 只跑本次相关用例；仍会先增量构建 tina_ui_tests。
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunMsvcUiTests.ps1 `
+  -GTestFilter 'UITextPaintEmitterTests.*'
+```
+
+脚本固定使用 MSVC preset、CMake `--parallel 2` 和 MSBuild `/nr:false`，构建结束后验证本轮新建的
+`cmake/MSBuild/cl/link` 进程已退出；不执行 `--clean-first`。切换 build graph 时同时传
+`-ConfigurePreset`、`-BuildPreset`、`-BuildTree`，切换输出配置时传 `-Configuration Release`。
+
+必须手工构建时，统一使用以下参数顺序：
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug `
+  --parallel 2 --target tina_ui_tests -- /nr:false
+```
+
+并发度由 CMake `--parallel` 管理；不要再向 MSBuild 重复传 `/m` 或 `/v`。这可避免 Git Bash/MSYS
+对斜杠参数做路径转换，也确保 MSBuild node reuse 不残留编译进程。
+
 ## Windows Null 基础图
 
 ```powershell
@@ -62,7 +89,7 @@ cmake --build --preset windows-vnext-debug `
            tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests `
            tina_audio_tests `
            tina_sample_null tina_sample_asset tina_sample_2d_infrastructure tina_sample_2d_tilemap `
-           tina_sample_3d_extraction tina_assetc tina_catalog_validate -- /m:2 /v:m
+           tina_sample_3d_extraction tina_assetc tina_catalog_validate --parallel 2 -- /nr:false
 ```
 
 多配置输出位于 `out/build/windows-msvc-vnext/bin/Debug` 或 `bin/Release`。对应 executable 必须使用
@@ -73,7 +100,7 @@ cmake --build --preset windows-vnext-debug `
 ```powershell
 cmake --preset windows-msvc-vnext-platform
 cmake --build --preset windows-vnext-platform-debug `
-  --target tina_tests tina_platform_glfw_tests tina_sample_platform -- /m:2 /v:m
+  --target tina_tests tina_platform_glfw_tests tina_sample_platform --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_platform_glfw_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe --frames=300 --frame-delay-ms=0
@@ -82,7 +109,7 @@ cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug `
   --target tina_tests tina_runtime_ui_tests tina_platform_glfw_tests tina_render_bgfx_tests `
            tina_sample_desktop tina_sample_2d_infrastructure_bgfx tina_sample_3d_infrastructure `
-           tina_sample_ui_showcase tina_sample_3d tina_sample_2d -- /m:2 /v:m
+           tina_sample_ui_showcase tina_sample_3d tina_sample_2d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d_infrastructure_bgfx.exe --frames=300 --frame-delay-ms=0
@@ -101,7 +128,7 @@ GLFW/GLFW sample 在 Linux X11/Wayland 图中应通过 `xvfb-run` 或受控 comp
 cmake --preset windows-msvc-vnext-bgfx-ui-freetype
 cmake --build --preset windows-vnext-bgfx-ui-freetype-debug `
   --target tina_sample_ui_showcase tina_ui_tests tina_runtime_ui_tests `
-           tina_ui_render_integration_tests tina_ui_freetype_tests -- /m:2 /v:m
+           tina_ui_render_integration_tests tina_ui_freetype_tests --parallel 2 -- /nr:false
 
 out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe
 out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
@@ -120,7 +147,7 @@ cmake --preset windows-msvc-vnext-bgfx-product-2d
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_sample_2d tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
            tina_ui_freetype_tests tina_physics2d_tests tina_audio_tests tina_audio_miniaudio_tests `
-           tina_asset_tests -- /m:2 /v:m
+           tina_asset_tests --parallel 2 -- /nr:false
 ```
 
 字体可通过 `-DTINA_UI_FONT_PATH=C:/path/font.otf` 或环境变量 `TINA_UI_FONT_PATH` 注入。没有字体时
@@ -156,7 +183,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1
 先构建工具，再运行工具；工具不读取未构建的旧 binary：
 
 ```powershell
-cmake --build --preset windows-vnext-debug --target tina_assetc tina_catalog_validate -- /m:2 /v:m
+cmake --build --preset windows-vnext-debug --target tina_assetc tina_catalog_validate --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot>
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>

@@ -39,7 +39,7 @@ Tina 是 C++23 游戏 Runtime。产品路径为 vNext Desktop + samples；Legacy
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx
-cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_tests -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```

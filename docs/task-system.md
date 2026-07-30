@@ -127,7 +127,7 @@ TaskSystem timeout 后 `EngineHost` 先通过仍存活的 Diagnostics 写入 `ru
 Runtime/Asset tests 继续覆盖 IO completion、generation 迟到结果和 retirement。至少直接运行：
 
 ```powershell
-cmake --build --preset windows-vnext-debug --target tina_tests tina_asset_tests -- /m:1 /v:m
+cmake --build --preset windows-vnext-debug --target tina_tests tina_asset_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 ```

@@ -131,7 +131,7 @@ pattern。`cancel()` 同时允许取消 `Capturing` 和 `Queued` transaction。�
 ```powershell
 cmake --preset windows-msvc-vnext-platform
 cmake --build --preset windows-vnext-platform-debug `
-  --target tina_tests tina_platform_glfw_tests tina_sample_platform -- /m:1 /v:m
+  --target tina_tests tina_platform_glfw_tests tina_sample_platform --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_platform_glfw_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe --frames=300

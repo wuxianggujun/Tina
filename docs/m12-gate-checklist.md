@@ -85,7 +85,7 @@ AT-SPI 已拆为 Later 的 `UI-002-LINUX`，`RENDER-FENCE` 已完成，`RENDER-0
 ```powershell
 # Base bgfx product samples
 cmake --preset windows-msvc-vnext-bgfx
-cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_asset_tests -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_asset_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 --ui-theme=dark --ui-theme-demo
@@ -103,7 +103,7 @@ cmake --preset windows-msvc-vnext-bgfx-product-2d
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
            tina_ui_freetype_tests tina_physics2d_tests tina_audio_tests `
-           tina_audio_miniaudio_tests tina_sample_2d -- /m:2 /v:m
+           tina_audio_miniaudio_tests tina_sample_2d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=yes

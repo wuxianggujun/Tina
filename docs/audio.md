@@ -167,7 +167,7 @@ callback 线程或用提前析构制造 UAF。
 ```powershell
 cmake --preset windows-msvc-vnext-audio-miniaudio
 cmake --build --preset windows-vnext-audio-miniaudio-debug `
-  --target tina_audio_tests tina_audio_miniaudio_tests -- /m:1 /v:m
+  --target tina_audio_tests tina_audio_miniaudio_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
 ```

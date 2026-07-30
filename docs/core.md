@@ -96,7 +96,7 @@ shutdown 后 channel 写入为 no-op。
 Core 修改至少运行：
 
 ```powershell
-cmake --build --preset windows-vnext-debug --target tina_tests tina_sample_null -- /m:1 /v:m
+cmake --build --preset windows-vnext-debug --target tina_tests tina_sample_null --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 ```

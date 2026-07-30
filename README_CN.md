@@ -32,7 +32,7 @@ Windows 构建通过 `/utf-8` 保证中文源码、日志和 UI 文案不乱码�
 
 ```powershell
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null -- /m:2 /v:m
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
@@ -43,7 +43,7 @@ Windows bgfx 产品图：
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx
-cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_tests -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 --ui-theme=dark --ui-theme-demo
 ```
@@ -52,7 +52,7 @@ UI 控件与换肤工作台（完整文字使用 FreeType 图）：
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx-ui-freetype
-cmake --build --preset windows-vnext-bgfx-ui-freetype-debug --target tina_sample_ui_showcase -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-ui-freetype-debug --target tina_sample_ui_showcase --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
 ```
 
@@ -60,7 +60,7 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx-product-2d
-cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d tina_physics2d_tests tina_ui_freetype_tests tina_audio_tests tina_audio_miniaudio_tests -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d tina_physics2d_tests tina_ui_freetype_tests tina_audio_tests tina_audio_miniaudio_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
 ```
 

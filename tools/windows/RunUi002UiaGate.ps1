@@ -158,7 +158,7 @@ if (-not $SkipConfigure) {
     Add-Step -Name 'configure' -ExitCode $LASTEXITCODE
 }
 if (-not $SkipBuild) {
-    & cmake --build --preset $BuildPreset --target tina_ui_uia_tests tina_sample_ui_showcase -- /m:2 /v:m
+    & cmake --build --preset $BuildPreset --parallel 2 --target tina_ui_uia_tests tina_sample_ui_showcase -- /nr:false
     Add-Step -Name 'build' -ExitCode $LASTEXITCODE
 }
 

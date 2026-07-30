@@ -89,7 +89,7 @@ checksum、frame-time p50/p95/p99。首个 workload 为 `null_runtime_frames`（
 median/MAD 与 baseline 仓库审核仍为后续扩展；在此之前不得把本机毫秒数写成跨机器回归通过。
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_bench -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_bench --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --warmup=60 --samples=600 --seed=1
 ```
 

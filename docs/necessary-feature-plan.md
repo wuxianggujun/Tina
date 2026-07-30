@@ -83,7 +83,7 @@ token；payload writer/parser 继续执行 strict UTF-8/NUL/长度校验。
 ### 验收
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_sample_2d -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_sample_2d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_filter="TileMap*:CatalogCook*:TileChunk*:CharacterController*:TileMapPhysics*"
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 ```
@@ -124,9 +124,9 @@ migration、自动从任意 object layer 生成完整 gameplay、2D 光照或导
 
 ```powershell
 cmake --build --preset windows-vnext-physics2d-debug `
-  --target tina_physics2d_tests tina_physics2d_bench -- /m:2 /v:m
+  --target tina_physics2d_tests tina_physics2d_bench --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-physics2d\bin\Debug\tina_physics2d_tests.exe --gtest_color=yes
-cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 ```
 
@@ -166,7 +166,7 @@ N2 明确不包含 polygon/chain shape、revolute/prismatic joint、Jolt、3D ph
 ### 验收命令（本轮结果以最终验证记录为准）
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_sample_2d -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_sample_2d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_filter="ActionMapper*:Input*:UI*Input*"
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 ```
@@ -207,7 +207,7 @@ skin/animation 与通用 pass scheduler 仍不在本切片内。
 ### 验收
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_sample_3d -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_sample_3d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_filter="*Opaque3D*:*Material*:*StaticMesh*"
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```
@@ -241,7 +241,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 ### 验收
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_asset_tests tina_render_bgfx_tests tina_sample_2d_catalog tina_sample_2d tina_sample_3d -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_asset_tests tina_render_bgfx_tests tina_sample_2d_catalog tina_sample_2d tina_sample_3d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_filter="*FramePin*:*Retire*:*Fence*"
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_filter="*Retirement*"
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_filter="*Retirement*"
@@ -284,7 +284,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_asset_format_tests tina_asset_tests tina_sample_2d_catalog tina_sample_2d tina_tests -- /m:2 /v:m
+  --target tina_asset_format_tests tina_asset_tests tina_sample_2d_catalog tina_sample_2d tina_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
@@ -331,12 +331,12 @@ gameplay 生成；当前 LRU 只管理 `TileMapStream` optional retained slot，
 
 ```powershell
 cmake --build --preset windows-vnext-audio-miniaudio-debug `
-  --target tina_audio_tests tina_audio_miniaudio_tests -- /m:2 /v:m
+  --target tina_audio_tests tina_audio_miniaudio_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
 
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_tests tina_audio_tests tina_audio_miniaudio_tests tina_sample_2d -- /m:1 /v:m
+  --target tina_tests tina_audio_tests tina_audio_miniaudio_tests tina_sample_2d --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
 
@@ -380,7 +380,7 @@ DSP graph、正式 codec 产品策略或 callback benchmark；这些保持为后
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_scene_tests tina_sample_2d -- /m:1 /v:m
+  --target tina_scene_tests tina_sample_2d --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
@@ -421,7 +421,7 @@ N8 不包含 Cooked FX asset schema、effect graph/editor、GPU particle simulat
 ### 验收
 
 ```powershell
-cmake --build --preset windows-vnext-debug --target tina_tests -- /m:1 /v:m
+cmake --build --preset windows-vnext-debug --target tina_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes `
   --gtest_filter="DisabledTaskSystemTest.ShutdownDeadline*:BoundedTaskSystemTest.ShutdownDeadline*:EngineHostCreationTest.PassesConfiguredShutdownDeadlineToTaskSystem:EngineHostShutdownDeadlineDeathTest.*"
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
@@ -457,7 +457,7 @@ dump 协议；这些能力需要独立契约和门禁。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_scene_tests tina_sample_2d -- /m:1 /v:m
+  --target tina_scene_tests tina_sample_2d --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
@@ -502,7 +502,7 @@ TileMap Tileset Handle 化，N14 已完成 3D component/Prefab Handle 化，N15 
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_asset_tests tina_scene_tests tina_sample_2d -- /m:1 /v:m
+  --target tina_asset_tests tina_scene_tests tina_sample_2d --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
@@ -545,7 +545,7 @@ AssetHandle。N12 已迁移 FX，N13 已迁移 TileMap，N14 已迁移 3D compon
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_scene_tests tina_sample_2d -- /m:1 /v:m
+  --target tina_scene_tests tina_sample_2d --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
@@ -588,7 +588,7 @@ ownership 与 `FrameResourceRef` 仍需后续切片。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_asset_tests tina_scene_tests tina_sample_2d tina_sample_2d_tilemap -- /m:1 /v:m
+  --target tina_asset_tests tina_scene_tests tina_sample_2d tina_sample_2d_tilemap --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_tilemap.exe --frames=300
@@ -630,7 +630,7 @@ registry。统一 retirement ownership 与 `FrameResourceRef` 仍需后续切片
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_scene_tests tina_sample_3d_infrastructure tina_sample_3d -- /m:2 /v:m
+  --target tina_scene_tests tina_sample_3d_infrastructure tina_sample_3d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
@@ -675,7 +675,7 @@ retirement ownership 与 `FrameResourceRef` 仍需后续切片。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_tests tina_render_bgfx_tests tina_asset_format_tests tina_asset_tests tina_sample_2d tina_sample_3d -- /m:2 /v:m
+  --target tina_tests tina_render_bgfx_tests tina_asset_format_tests tina_asset_tests tina_sample_2d tina_sample_3d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
@@ -774,7 +774,7 @@ ownership 与 packet-local `FrameResourceRef` 必须作为独立后续切片完�
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_tests tina_asset_tests tina_render_bgfx_tests -- /m:2 /v:m
+  --target tina_tests tina_asset_tests tina_render_bgfx_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes

@@ -30,7 +30,7 @@ Requirements: CMake 3.25+, Visual Studio 2026/MSVC 19.50, and `VCPKG_ROOT`.
 
 ```powershell
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null -- /m:2 /v:m
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
@@ -39,7 +39,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx
-cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```
@@ -48,7 +48,7 @@ Use the FreeType graph for the complete UI control and theme showcase:
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx-ui-freetype
-cmake --build --preset windows-vnext-bgfx-ui-freetype-debug --target tina_sample_ui_showcase -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-ui-freetype-debug --target tina_sample_ui_showcase --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
 ```
 

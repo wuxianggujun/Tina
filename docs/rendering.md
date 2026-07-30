@@ -196,7 +196,7 @@ present。
 cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug `
   --target tina_tests tina_render_scene_tests tina_render_bgfx_tests `
-           tina_ui_render_integration_tests tina_sample_2d tina_sample_3d -- /m:1 /v:m
+           tina_ui_render_integration_tests tina_sample_2d tina_sample_3d --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0

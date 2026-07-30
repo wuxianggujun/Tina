@@ -235,7 +235,7 @@ cmake --preset windows-msvc-vnext-bgfx-product-2d
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_sample_2d tina_scene_tests tina_physics2d_tests tina_ui_tests tina_runtime_ui_tests `
            tina_ui_render_integration_tests tina_ui_freetype_tests tina_audio_tests `
-           tina_audio_miniaudio_tests -- /m:1 /v:m
+           tina_audio_miniaudio_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo

@@ -112,7 +112,7 @@ if (-not $SkipConfigure) {
 }
 
 if (-not $SkipBuild) {
-    $targetArgs = @('--preset', $BuildPreset, '--target') + $targets + @('--', '/m:2', '/v:m')
+    $targetArgs = @('--preset', $BuildPreset, '--parallel', '2', '--target') + $targets + @('--', '/nr:false')
     & cmake --build @targetArgs
     Add-Step -Name 'build' -ExitCode $LASTEXITCODE
 }

@@ -96,7 +96,7 @@ Asset error，而不是退回第0层；`IGridCollisionProvider::materialFlagsAt(
 
 ```powershell
 cmake --preset windows-msvc-vnext-physics2d
-cmake --build --preset windows-vnext-physics2d-debug --target tina_physics2d_tests tina_physics2d_bench -- /m:1 /v:m
+cmake --build --preset windows-vnext-physics2d-debug --target tina_physics2d_tests tina_physics2d_bench --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-physics2d\bin\Debug\tina_physics2d_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-physics2d\bin\Debug\tina_physics2d_bench.exe --bodies=64 --warmup=60 --steps=300 --rays=4
 ```

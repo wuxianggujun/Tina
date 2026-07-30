@@ -13,7 +13,7 @@
 ## 2D 产品
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 ```
 
@@ -38,7 +38,7 @@ cmake --preset windows-msvc-vnext-bgfx-product-2d
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_sample_2d tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
            tina_ui_freetype_tests tina_physics2d_tests tina_audio_tests tina_audio_miniaudio_tests `
-           tina_asset_tests -- /m:2 /v:m
+           tina_asset_tests --parallel 2 -- /nr:false
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 -SkipConfigure -SkipBuild
 ```
 
@@ -70,7 +70,7 @@ sample 关键字段：`productGate=bgfx-physics-freetype-audio`、`physicsEnable
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests -- /m:2 /v:m
+  --target tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_tests.exe --gtest_color=no
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=no
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=no

@@ -52,7 +52,7 @@ if (-not (Test-Path -LiteralPath $gateScript)) {
 
 if (-not $SkipBuild) {
     Write-Host '=== build tina_sample_2d ==='
-    cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d -- /m:2 /v:m
+    cmake --build --preset windows-vnext-bgfx-debug --parallel 2 --target tina_sample_2d -- /nr:false
     if ($LASTEXITCODE -ne 0) { throw "build failed exit=$LASTEXITCODE" }
 }
 
