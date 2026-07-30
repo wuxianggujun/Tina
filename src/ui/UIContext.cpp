@@ -22,6 +22,7 @@
 #include "detail/UIPropertyNormalization.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
+#include "detail/UIStyleRoleResolver.hpp"
 #include "detail/UITextEditModel.hpp"
 #include "detail/UITextStorage.hpp"
 #include "detail/UIWidgetStateModels.hpp"
@@ -150,31 +151,21 @@ using Detail::PopupState;
 using Detail::ProgressBarState;
 using Detail::RadioButtonState;
 using Detail::supportsWidgetText;
-inline constexpr u16 ThemeBindingBoxPaint = 1U << 0U;
-inline constexpr u16 ThemeBindingTextStyle = 1U << 1U;
-inline constexpr u16 ThemeBindingButtonPaint = 1U << 2U;
-inline constexpr u16 ThemeBindingCheckboxPaint = 1U << 3U;
-inline constexpr u16 ThemeBindingSliderPaint = 1U << 4U;
-inline constexpr u16 ThemeBindingProgressBarPaint = 1U << 5U;
-inline constexpr u16 ThemeBindingRadioButtonPaint = 1U << 6U;
-inline constexpr u16 ThemeBindingScrollViewPaint = 1U << 7U;
-inline constexpr u16 ThemeBindingDropdownPaint = 1U << 8U;
-inline constexpr u16 ThemeBindingListViewPaint = 1U << 9U;
-inline constexpr u16 ThemeBindingTreeViewPaint = 1U << 10U;
-
-struct ProductChrome final {
-    UIBoxPaint box{};
-    UITextStyle text{};
-    UIButtonPaint button{};
-    UICheckboxPaint checkbox{};
-    UISliderPaint slider{};
-    UIProgressBarPaint progressBar{};
-    UIRadioButtonPaint radioButton{};
-    UIScrollViewPaint scrollView{};
-    UIDropdownPaint dropdown{};
-    UIListViewPaint listView{};
-    UITreeViewPaint treeView{};
-};
+using Detail::defaultThemeBindingsFor;
+using Detail::isValidStyleRole;
+using Detail::productChromeFor;
+using Detail::ProductChrome;
+using Detail::ThemeBindingBoxPaint;
+using Detail::ThemeBindingButtonPaint;
+using Detail::ThemeBindingCheckboxPaint;
+using Detail::ThemeBindingDropdownPaint;
+using Detail::ThemeBindingListViewPaint;
+using Detail::ThemeBindingProgressBarPaint;
+using Detail::ThemeBindingRadioButtonPaint;
+using Detail::ThemeBindingScrollViewPaint;
+using Detail::ThemeBindingSliderPaint;
+using Detail::ThemeBindingTextStyle;
+using Detail::ThemeBindingTreeViewPaint;
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -250,11 +241,6 @@ struct CommittedHitBuildResult final {
                                                 Core::SourceLocation location = Core::SourceLocation::current())
 {
     return Core::failure(makeError(code, message, location));
-}
-
-[[nodiscard]] bool isValidStyleRole(UIStyleRoleId role) noexcept
-{
-    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::TreeView;
 }
 
 [[nodiscard]] bool isValidSemanticsMode(UISemanticsMode mode) noexcept
@@ -5418,149 +5404,6 @@ struct UIContext::Impl final {
             currentIndex = current->parentIndex;
         }
         return false;
-    }
-
-    [[nodiscard]] static constexpr u16 defaultThemeBindingsFor(UIStyleRoleId role) noexcept
-    {
-        switch (role)
-        {
-        case UIStyleRoleId::None:
-            return 0;
-        case UIStyleRoleId::PanelSurface:
-        case UIStyleRoleId::PanelElevated:
-        case UIStyleRoleId::ModalSurface:
-        case UIStyleRoleId::PopupSurface:
-            return ThemeBindingBoxPaint;
-        case UIStyleRoleId::TextBody:
-        case UIStyleRoleId::TextTitle:
-        case UIStyleRoleId::TextSecondary:
-        case UIStyleRoleId::TextAccent:
-            return ThemeBindingTextStyle;
-        case UIStyleRoleId::ButtonPrimary:
-        case UIStyleRoleId::ButtonDanger:
-        case UIStyleRoleId::CollectionItem:
-            return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
-        case UIStyleRoleId::Checkbox:
-            return ThemeBindingBoxPaint | ThemeBindingCheckboxPaint;
-        case UIStyleRoleId::Slider:
-            return ThemeBindingBoxPaint | ThemeBindingSliderPaint;
-        case UIStyleRoleId::TextInput:
-            return ThemeBindingBoxPaint | ThemeBindingTextStyle;
-        case UIStyleRoleId::ProgressBar:
-            return ThemeBindingBoxPaint | ThemeBindingProgressBarPaint;
-        case UIStyleRoleId::RadioButton:
-            return ThemeBindingRadioButtonPaint | ThemeBindingTextStyle;
-        case UIStyleRoleId::ScrollView:
-            return ThemeBindingScrollViewPaint;
-        case UIStyleRoleId::Dropdown:
-            return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle |
-                   ThemeBindingDropdownPaint;
-        case UIStyleRoleId::ListView:
-            return ThemeBindingBoxPaint | ThemeBindingListViewPaint;
-        case UIStyleRoleId::TreeView:
-            return ThemeBindingBoxPaint | ThemeBindingTreeViewPaint;
-        }
-        return 0;
-    }
-
-    [[nodiscard]] static ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcept
-    {
-        ProductChrome chrome{};
-        switch (role)
-        {
-        case UIStyleRoleId::None:
-            break;
-        case UIStyleRoleId::PanelSurface:
-            chrome.box = makePanelBoxPaint(theme, theme.surface1);
-            break;
-        case UIStyleRoleId::PanelElevated:
-            chrome.box = makePanelBoxPaint(theme, theme.surface1, UIElevation::Low);
-            break;
-        case UIStyleRoleId::ModalSurface:
-            chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 248), UIElevation::Low);
-            break;
-        case UIStyleRoleId::PopupSurface:
-            chrome.box = makePopupBoxPaint(theme);
-            break;
-        case UIStyleRoleId::TextBody:
-            chrome.text = makeBodyTextStyle(theme);
-            break;
-        case UIStyleRoleId::TextTitle:
-            chrome.text = makeTitleTextStyle(theme);
-            break;
-        case UIStyleRoleId::TextSecondary:
-            chrome.text = makeSecondaryTextStyle(theme);
-            break;
-        case UIStyleRoleId::TextAccent:
-            chrome.text = makeAccentTextStyle(theme);
-            break;
-        case UIStyleRoleId::ButtonPrimary:
-        case UIStyleRoleId::ButtonDanger: {
-            const UIButtonChrome button =
-                makeButtonChrome(theme, role == UIStyleRoleId::ButtonDanger ? theme.danger : UIStraightSrgba8Color{});
-            chrome.box = button.box;
-            chrome.button = button.states;
-            chrome.text = button.label;
-            break;
-        }
-        case UIStyleRoleId::Checkbox: {
-            const UICheckboxChrome checkbox = makeCheckboxChrome(theme);
-            chrome.box = checkbox.box;
-            chrome.checkbox = checkbox.indicator;
-            break;
-        }
-        case UIStyleRoleId::Slider: {
-            const UISliderChrome slider = makeSliderChrome(theme);
-            chrome.box = slider.track;
-            chrome.slider = slider.slider;
-            break;
-        }
-        case UIStyleRoleId::TextInput: {
-            const UITextEditChrome textInput = makeTextEditChrome(theme);
-            chrome.box = textInput.box;
-            chrome.text = textInput.text;
-            break;
-        }
-        case UIStyleRoleId::ProgressBar: {
-            const UIProgressBarChrome progressBar = makeProgressBarChrome(theme);
-            chrome.box = progressBar.track;
-            chrome.progressBar = progressBar.bar;
-            break;
-        }
-        case UIStyleRoleId::RadioButton: {
-            const UIRadioButtonChrome radioButton = makeRadioButtonChrome(theme);
-            chrome.radioButton = radioButton.radio;
-            chrome.text = radioButton.label;
-            break;
-        }
-        case UIStyleRoleId::ScrollView:
-            chrome.scrollView = makeScrollViewPaint(theme);
-            break;
-        case UIStyleRoleId::Dropdown: {
-            const UIDropdownChrome dropdown = makeDropdownChrome(theme);
-            chrome.box = dropdown.box;
-            chrome.button = dropdown.states;
-            chrome.text = dropdown.label;
-            chrome.dropdown = dropdown.dropdown;
-            break;
-        }
-        case UIStyleRoleId::CollectionItem: {
-            const UIButtonChrome item = makeDropdownItemChrome(theme);
-            chrome.box = item.box;
-            chrome.button = item.states;
-            chrome.text = item.label;
-            break;
-        }
-        case UIStyleRoleId::ListView:
-            chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
-            chrome.listView = makeListViewPaint(theme);
-            break;
-        case UIStyleRoleId::TreeView:
-            chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
-            chrome.treeView = makeTreeViewPaint(theme);
-            break;
-        }
-        return chrome;
     }
 
     void applyProductChromeTransition(u32 index, UIStyleRoleId role, const UITheme& theme,
