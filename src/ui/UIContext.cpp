@@ -99,6 +99,12 @@ using Detail::ResolvedLength;
 using Detail::resolveInset;
 using Detail::resolveLength;
 using Detail::resolveLengthNoFallbackCount;
+using Detail::resolveScrollThumbOffset;
+using Detail::resolveScrollTrackPageOffset;
+using Detail::resolveScrollWheelOffset;
+using Detail::resolveSliderValueFromPointer;
+using Detail::resolveVirtualRowScrollOffset;
+using Detail::resolveVirtualScrollWheelOffset;
 using Detail::resolvedHeight;
 using Detail::resolvedWidth;
 using Detail::scrollAxisMaxOffset;
@@ -109,9 +115,7 @@ using Detail::ScrollViewLayoutScratch;
 using Detail::ScrollViewState;
 using Detail::SliderState;
 using Detail::SliderPaintGeometry;
-using Detail::SliderTrackGeometry;
 using Detail::sliderPaintGeometry;
-using Detail::sliderTrackGeometry;
 using Detail::setScrollAxisOffset;
 using Detail::ThemeBindingBoxPaint;
 using Detail::ThemeBindingButtonPaint;
@@ -6617,19 +6621,10 @@ struct UIContext::Impl final {
             return false;
         }
 
-        const SliderTrackGeometry track = sliderTrackGeometry(worldRect, state.paint);
-        const float centerSpan = track.endCenterX - track.startCenterX;
-        if (!(centerSpan > 0.0F))
-        {
-            return false;
-        }
-        const double t = std::clamp((static_cast<double>(position.x) - static_cast<double>(track.startCenterX)) /
-                                        static_cast<double>(centerSpan),
-                                    0.0, 1.0);
-        const double raw = static_cast<double>(state.minValue) +
-                           t * (static_cast<double>(state.maxValue) - static_cast<double>(state.minValue));
-        const float next = quantizeSliderValue(raw, state.minValue, state.maxValue, state.step);
-        if (next == state.value)
+        const auto next = resolveSliderValueFromPointer(
+            worldRect, state.paint, position.x, state.minValue, state.maxValue,
+            state.step);
+        if (!next || *next == state.value)
         {
             return false;
         }
@@ -6637,7 +6632,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(dirty.error());
         }
-        state.value = next;
+        state.value = *next;
         invokeSliderChangeCallback(captureSliderChangeCallback(slider), UISliderChangeEvent{
                                                                             .sliderNode = slider,
                                                                             .value = state.value,
@@ -7210,49 +7205,28 @@ struct UIContext::Impl final {
         if (isLiveListView(scrollView))
         {
             const ListViewState& state = listViewStatesByNodeIndex[scrollView.index()];
-            const float wheelDelta = delta.y != 0.0F ? delta.y : delta.x;
             return UIScrollOffset{
                 .x = 0.0F,
-                .y = normalizeFloat((std::clamp)(state.requestedScrollOffset - wheelDelta * state.style.wheelStep, 0.0F,
-                                                 state.committedMetrics.maxScrollOffset)),
+                .y = resolveVirtualScrollWheelOffset(
+                    state.requestedScrollOffset,
+                    state.committedMetrics.maxScrollOffset,
+                    state.style.wheelStep, delta),
             };
         }
         if (isLiveTreeView(scrollView))
         {
             const TreeViewState& state = treeViewStatesByNodeIndex[scrollView.index()];
-            const float wheelDelta = delta.y != 0.0F ? delta.y : delta.x;
             return UIScrollOffset{
                 .x = 0.0F,
-                .y = normalizeFloat((std::clamp)(state.requestedScrollOffset - wheelDelta * state.style.wheelStep, 0.0F,
-                                                 state.committedMetrics.maxScrollOffset)),
+                .y = resolveVirtualScrollWheelOffset(
+                    state.requestedScrollOffset,
+                    state.committedMetrics.maxScrollOffset,
+                    state.style.wheelStep, delta),
             };
         }
         const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
-        const bool horizontal = hasScrollAxis(state.style.axes, UIScrollAxes::Horizontal);
-        const bool vertical = hasScrollAxis(state.style.axes, UIScrollAxes::Vertical);
-        float horizontalDelta = delta.x;
-        float verticalDelta = delta.y;
-        if (horizontal && !vertical && horizontalDelta == 0.0F)
-        {
-            horizontalDelta = verticalDelta;
-        }
-        if (vertical && !horizontal && verticalDelta == 0.0F)
-        {
-            verticalDelta = horizontalDelta;
-        }
-
-        UIScrollOffset next = state.requestedOffset;
-        if (horizontal)
-        {
-            next.x = normalizeFloat(next.x - horizontalDelta * state.style.wheelStep);
-        }
-        if (vertical)
-        {
-            next.y = normalizeFloat(next.y - verticalDelta * state.style.wheelStep);
-        }
-        next.x = horizontal ? normalizeFloat((std::clamp)(next.x, 0.0F, state.committedMetrics.maxOffsetX())) : 0.0F;
-        next.y = vertical ? normalizeFloat((std::clamp)(next.y, 0.0F, state.committedMetrics.maxOffsetY())) : 0.0F;
-        return next;
+        return resolveScrollWheelOffset(
+            state.requestedOffset, state.style, state.committedMetrics, delta);
     }
 
     [[nodiscard]] bool scrollWheelWouldChange(UINodeId scrollView, UILogicalPoint delta) const noexcept
@@ -7297,24 +7271,19 @@ struct UIContext::Impl final {
             : isLiveTreeView(scrollView)
                 ? treeViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
                 : scrollAxisMaxOffset(scrollViewStatesByNodeIndex[scrollView.index()].committedMetrics, axis);
-        const float trackStart = axis == UIScrollAxes::Horizontal ? geometry.track.x : geometry.track.y;
-        const float trackExtent = axis == UIScrollAxes::Horizontal ? geometry.track.width : geometry.track.height;
-        const float thumbExtent = axis == UIScrollAxes::Horizontal ? geometry.thumb.width : geometry.thumb.height;
-        const float pointer = axis == UIScrollAxes::Horizontal ? position.x : position.y;
-        const float travel = (std::max)(0.0F, trackExtent - thumbExtent);
-        if (!geometry.visible || !(maxOffset > 0.0F) || !(travel > 0.0F))
+        const auto axisOffset = resolveScrollThumbOffset(
+            geometry, axis, position, grabOffset, maxOffset);
+        if (!axisOffset)
         {
             return false;
         }
-
-        const float thumbStart = (std::clamp)(pointer - grabOffset - trackStart, 0.0F, travel);
         UIScrollOffset next =
             isLiveListView(scrollView)
                 ? UIScrollOffset{.x = 0.0F, .y = listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
             : isLiveTreeView(scrollView)
                 ? UIScrollOffset{.x = 0.0F, .y = treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
                                   : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
-        setScrollAxisOffset(next, axis, normalizeFloat(maxOffset * (thumbStart / travel)));
+        setScrollAxisOffset(next, axis, *axisOffset);
         return applyScrollOffsetFromInput(scrollView, next);
     }
 
@@ -7331,8 +7300,6 @@ struct UIContext::Impl final {
         {
             return false;
         }
-        const float pointer = axis == UIScrollAxes::Horizontal ? position.x : position.y;
-        const float thumbStart = axis == UIScrollAxes::Horizontal ? geometry.thumb.x : geometry.thumb.y;
         const float pageExtent = isLiveListView(scrollView)
                                      ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.viewportSize.height
             : isLiveTreeView(scrollView)
@@ -7342,15 +7309,19 @@ struct UIContext::Impl final {
                                                   .committedMetrics.viewportSize.width
                                             : scrollViewStatesByNodeIndex[scrollView.index()]
                                                   .committedMetrics.viewportSize.height);
-        const float direction = pointer < thumbStart ? -1.0F : 1.0F;
         UIScrollOffset next =
             isLiveListView(scrollView)
                 ? UIScrollOffset{.x = 0.0F, .y = listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
             : isLiveTreeView(scrollView)
                 ? UIScrollOffset{.x = 0.0F, .y = treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
                                   : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
-        setScrollAxisOffset(next, axis,
-                            normalizeFloat(scrollAxisOffset(next, axis) + direction * pageExtent));
+        const auto axisOffset = resolveScrollTrackPageOffset(
+            geometry, axis, position, scrollAxisOffset(next, axis), pageExtent);
+        if (!axisOffset)
+        {
+            return false;
+        }
+        setScrollAxisOffset(next, axis, *axisOffset);
         return applyScrollOffsetFromInput(scrollView, next);
     }
 
@@ -8593,41 +8564,17 @@ struct UIContext::Impl final {
             return Core::failure(descriptor.error());
         }
         ListViewState& state = listViewStatesByNodeIndex[listView.index()];
-        const float rowStart = static_cast<float>(static_cast<double>(logicalIndex) * state.style.rowHeight);
-        const float rowEnd = rowStart + state.style.rowHeight;
-        const float viewportHeight = state.committedMetrics.viewportSize.height;
         const u64 logicalItemCount = state.dataSource.itemCount(state.dataSource.state);
-        const double contentHeight64 = static_cast<double>(logicalItemCount) * state.style.rowHeight;
-        if (!std::isfinite(contentHeight64) || contentHeight64 > (std::numeric_limits<float>::max)())
+        const auto nextOffset = resolveVirtualRowScrollOffset(
+            logicalIndex, logicalItemCount, state.style.rowHeight,
+            state.committedMetrics.viewportSize.height,
+            state.requestedScrollOffset,
+            Detail::toVirtualRowScrollAlignment(alignment));
+        if (!nextOffset)
         {
             return fail(UIErrorCode::InvalidControlValue, "UI ListView logical content height is not representable");
         }
-        const float maximumOffset =
-            normalizeFloat((std::max)(0.0F, static_cast<float>(contentHeight64) - viewportHeight));
-        float nextOffset = state.requestedScrollOffset;
-        switch (alignment)
-        {
-        case UIListViewScrollAlignment::Start:
-            nextOffset = rowStart;
-            break;
-        case UIListViewScrollAlignment::Center:
-            nextOffset = rowStart - (viewportHeight - state.style.rowHeight) * 0.5F;
-            break;
-        case UIListViewScrollAlignment::End:
-            nextOffset = rowEnd - viewportHeight;
-            break;
-        case UIListViewScrollAlignment::Nearest:
-            if (rowStart < nextOffset)
-            {
-                nextOffset = rowStart;
-            } else if (rowEnd > nextOffset + viewportHeight)
-            {
-                nextOffset = rowEnd - viewportHeight;
-            }
-            break;
-        }
-        nextOffset = normalizeFloat((std::clamp)(nextOffset, 0.0F, maximumOffset));
-        if (nextOffset == state.requestedScrollOffset)
+        if (*nextOffset == state.requestedScrollOffset)
         {
             return Core::success();
         }
@@ -8635,7 +8582,7 @@ struct UIContext::Impl final {
         {
             return dirty;
         }
-        state.requestedScrollOffset = nextOffset;
+        state.requestedScrollOffset = *nextOffset;
         return Core::success();
     }
 
@@ -9010,41 +8957,17 @@ struct UIContext::Impl final {
             return Core::failure(descriptor.error());
         }
         TreeViewState& state = treeViewStatesByNodeIndex[treeView.index()];
-        const float rowStart = static_cast<float>(static_cast<double>(logicalIndex) * state.style.rowHeight);
-        const float rowEnd = rowStart + state.style.rowHeight;
-        const float viewportHeight = state.committedMetrics.viewportSize.height;
         const u64 logicalItemCount = state.dataSource.itemCount(state.dataSource.state);
-        const double contentHeight64 = static_cast<double>(logicalItemCount) * state.style.rowHeight;
-        if (!std::isfinite(contentHeight64) || contentHeight64 > (std::numeric_limits<float>::max)())
+        const auto nextOffset = resolveVirtualRowScrollOffset(
+            logicalIndex, logicalItemCount, state.style.rowHeight,
+            state.committedMetrics.viewportSize.height,
+            state.requestedScrollOffset,
+            Detail::toVirtualRowScrollAlignment(alignment));
+        if (!nextOffset)
         {
             return fail(UIErrorCode::InvalidControlValue, "UI TreeView logical content height is not representable");
         }
-        const float maximumOffset =
-            normalizeFloat((std::max)(0.0F, static_cast<float>(contentHeight64) - viewportHeight));
-        float nextOffset = state.requestedScrollOffset;
-        switch (alignment)
-        {
-        case UITreeViewScrollAlignment::Start:
-            nextOffset = rowStart;
-            break;
-        case UITreeViewScrollAlignment::Center:
-            nextOffset = rowStart - (viewportHeight - state.style.rowHeight) * 0.5F;
-            break;
-        case UITreeViewScrollAlignment::End:
-            nextOffset = rowEnd - viewportHeight;
-            break;
-        case UITreeViewScrollAlignment::Nearest:
-            if (rowStart < nextOffset)
-            {
-                nextOffset = rowStart;
-            } else if (rowEnd > nextOffset + viewportHeight)
-            {
-                nextOffset = rowEnd - viewportHeight;
-            }
-            break;
-        }
-        nextOffset = normalizeFloat((std::clamp)(nextOffset, 0.0F, maximumOffset));
-        if (nextOffset == state.requestedScrollOffset)
+        if (*nextOffset == state.requestedScrollOffset)
         {
             return Core::success();
         }
@@ -9052,7 +8975,7 @@ struct UIContext::Impl final {
         {
             return dirty;
         }
-        state.requestedScrollOffset = nextOffset;
+        state.requestedScrollOffset = *nextOffset;
         return Core::success();
     }
 
