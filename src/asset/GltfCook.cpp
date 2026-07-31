@@ -5,6 +5,8 @@
 #define STBI_NO_THREAD_LOCALS
 #include "stb_image.h"
 
+#include "GltfFileSnapshot.hpp"
+
 #include <tina/asset/GltfCook.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
@@ -12,13 +14,19 @@
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
+#include <memory>
+#include <new>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -37,6 +45,17 @@ namespace {
     }
     bytes[0] = static_cast<std::byte>(tag);
     return *Core::AssetId::fromBytes(bytes);
+}
+
+[[nodiscard]] std::filesystem::path pathFromStrictUtf8(std::string_view text)
+{
+    std::u8string utf8Path;
+    utf8Path.reserve(text.size());
+    for (const char byte : text)
+    {
+        utf8Path.push_back(static_cast<char8_t>(static_cast<unsigned char>(byte)));
+    }
+    return std::filesystem::path{utf8Path};
 }
 
 // Sequential suffix keeps multi-mesh Prefab deps strictly AssetId-sorted while
@@ -245,102 +264,371 @@ struct CookedMeshPieces final {
     return out;
 }
 
-// ASSET-001: external glTF file URIs must stay under the glTF parent directory.
-// Reject absolute paths, URI schemes, and ".." escape. Max encoded file size 64 MiB.
-inline constexpr std::uint64_t kMaxGltfExternalFileBytes = 64ULL * 1024ULL * 1024ULL;
+inline constexpr std::uint64_t kMebibyte = 1024ULL * 1024ULL;
+inline constexpr std::uint64_t kMaxGltfSourceFileBytes = 64ULL * kMebibyte;
+inline constexpr std::uint64_t kMaxGltfExternalFileBytes = 64ULL * kMebibyte;
+inline constexpr std::uint64_t kMaxGltfTotalBufferBytes = 256ULL * kMebibyte;
+inline constexpr std::uint64_t kMaxGltfAccessorLogicalBytes = 256ULL * kMebibyte;
+inline constexpr std::uint64_t kMaxGltfDecodedImageBytes = 64ULL * kMebibyte;
+inline constexpr std::uint64_t kMaxGltfTotalDecodedImageBytes = 256ULL * kMebibyte;
+inline constexpr std::size_t kMaxCgltfLiveBytes = 384ULL * 1024ULL * 1024ULL;
+inline constexpr cgltf_size kMaxGltfBuffers = 256;
+inline constexpr cgltf_size kMaxGltfBufferViews = 16'384;
+inline constexpr cgltf_size kMaxGltfAccessors = 16'384;
+inline constexpr cgltf_size kMaxGltfMeshes = 2'048;
+inline constexpr cgltf_size kMaxGltfPrimitives = 2'048;
+inline constexpr cgltf_size kMaxGltfMaterials = 4'096;
+inline constexpr cgltf_size kMaxGltfImages = 4'096;
+inline constexpr cgltf_size kMaxGltfTextures = 4'096;
+inline constexpr cgltf_size kMaxGltfScenes = 256;
+
+[[nodiscard]] bool checkedAdd(std::uint64_t left, std::uint64_t right,
+                              std::uint64_t& result) noexcept
+{
+    if (right > (std::numeric_limits<std::uint64_t>::max)() - left)
+    {
+        return false;
+    }
+    result = left + right;
+    return true;
+}
+
+[[nodiscard]] bool checkedMultiply(std::uint64_t left, std::uint64_t right,
+                                   std::uint64_t& result) noexcept
+{
+    if (left != 0 && right > (std::numeric_limits<std::uint64_t>::max)() / left)
+    {
+        return false;
+    }
+    result = left * right;
+    return true;
+}
+
+struct alignas(std::max_align_t) CgltfAllocationHeader final {
+    std::size_t bytes = 0;
+};
+
+struct CgltfMemoryBudget final {
+    std::size_t liveBytes = 0;
+    bool limitExceeded = false;
+};
+
+[[nodiscard]] void* allocateCgltfMemory(void* user, cgltf_size size) noexcept
+{
+    auto* budget = static_cast<CgltfMemoryBudget*>(user);
+    if (budget == nullptr || size == 0 || budget->liveBytes > kMaxCgltfLiveBytes ||
+        size > kMaxCgltfLiveBytes - budget->liveBytes ||
+        size > (std::numeric_limits<std::size_t>::max)() - sizeof(CgltfAllocationHeader))
+    {
+        if (budget != nullptr)
+        {
+            budget->limitExceeded = true;
+        }
+        return nullptr;
+    }
+    void* allocation = std::malloc(sizeof(CgltfAllocationHeader) + size);
+    if (allocation == nullptr)
+    {
+        return nullptr;
+    }
+    auto* header = static_cast<CgltfAllocationHeader*>(allocation);
+    header->bytes = size;
+    budget->liveBytes += size;
+    return header + 1;
+}
+
+void freeCgltfMemory(void* user, void* pointer) noexcept
+{
+    if (pointer == nullptr)
+    {
+        return;
+    }
+    auto* budget = static_cast<CgltfMemoryBudget*>(user);
+    auto* header = static_cast<CgltfAllocationHeader*>(pointer) - 1;
+    if (budget != nullptr && header->bytes <= budget->liveBytes)
+    {
+        budget->liveBytes -= header->bytes;
+    }
+    std::free(header);
+}
+
+[[nodiscard]] Core::Status validateGltfResourceStructure(const cgltf_data* data) noexcept
+{
+    if (data == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF document is null");
+    }
+    if (data->buffers_count > kMaxGltfBuffers || data->buffer_views_count > kMaxGltfBufferViews ||
+        data->accessors_count > kMaxGltfAccessors || data->meshes_count > kMaxGltfMeshes ||
+        data->materials_count > kMaxGltfMaterials || data->images_count > kMaxGltfImages ||
+        data->textures_count > kMaxGltfTextures || data->scenes_count > kMaxGltfScenes ||
+        data->nodes_count > AssetFormat::PrefabWire::MaxNodes)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF top-level object count exceeds product limit");
+    }
+
+    std::uint64_t nodeReferenceCount = 0;
+    for (cgltf_size i = 0; i < data->nodes_count; ++i)
+    {
+        if (!checkedAdd(nodeReferenceCount, data->nodes[i].children_count, nodeReferenceCount) ||
+            nodeReferenceCount > AssetFormat::PrefabWire::MaxNodes)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF node child-reference count exceeds product limit");
+        }
+    }
+    for (cgltf_size i = 0; i < data->scenes_count; ++i)
+    {
+        if (data->scenes[i].nodes_count > AssetFormat::PrefabWire::MaxNodes)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF scene root count exceeds product limit");
+        }
+    }
+
+    std::uint64_t totalBufferBytes = 0;
+    for (cgltf_size i = 0; i < data->buffers_count; ++i)
+    {
+        const std::uint64_t size = data->buffers[i].size;
+        if (size == 0 || size > kMaxGltfExternalFileBytes ||
+            !checkedAdd(totalBufferBytes, size, totalBufferBytes) ||
+            totalBufferBytes > kMaxGltfTotalBufferBytes)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF buffer byte budget exceeded");
+        }
+    }
+
+    for (cgltf_size i = 0; i < data->buffer_views_count; ++i)
+    {
+        const cgltf_buffer_view& view = data->buffer_views[i];
+        std::uint64_t end = 0;
+        if (view.buffer == nullptr || view.size == 0 || view.size > kMaxGltfExternalFileBytes ||
+            view.has_meshopt_compression || !checkedAdd(view.offset, view.size, end) ||
+            end > view.buffer->size || view.stride > 252U)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF bufferView offset/size/stride is invalid");
+        }
+    }
+
+    std::uint64_t totalAccessorBytes = 0;
+    for (cgltf_size i = 0; i < data->accessors_count; ++i)
+    {
+        const cgltf_accessor& accessor = data->accessors[i];
+        const std::uint64_t elementBytes = cgltf_calc_size(accessor.type, accessor.component_type);
+        if (accessor.is_sparse || accessor.buffer_view == nullptr || accessor.count == 0 ||
+            accessor.count > AssetFormat::StaticMeshWire::MaxIndexCount || elementBytes == 0 ||
+            accessor.stride < elementBytes || accessor.stride > 252U)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF accessor count/type/stride is invalid");
+        }
+
+        std::uint64_t stridedBytes = 0;
+        std::uint64_t requiredBytes = 0;
+        std::uint64_t logicalBytes = 0;
+        if (!checkedMultiply(accessor.count - 1U, accessor.stride, stridedBytes) ||
+            !checkedAdd(stridedBytes, elementBytes, requiredBytes) ||
+            !checkedAdd(accessor.offset, requiredBytes, requiredBytes) ||
+            requiredBytes > accessor.buffer_view->size ||
+            !checkedMultiply(accessor.count, elementBytes, logicalBytes) ||
+            !checkedAdd(totalAccessorBytes, logicalBytes, totalAccessorBytes) ||
+            totalAccessorBytes > kMaxGltfAccessorLogicalBytes)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF accessor range or logical byte budget exceeded");
+        }
+    }
+
+    std::uint64_t primitiveCount = 0;
+    std::uint64_t vertexCount = 0;
+    std::uint64_t indexCount = 0;
+    for (cgltf_size meshIndex = 0; meshIndex < data->meshes_count; ++meshIndex)
+    {
+        const cgltf_mesh& mesh = data->meshes[meshIndex];
+        if (mesh.primitives_count == 0 || mesh.primitives_count > AssetFormat::StaticMeshWire::MaxSubmeshes ||
+            !checkedAdd(primitiveCount, mesh.primitives_count, primitiveCount) ||
+            primitiveCount > kMaxGltfPrimitives)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF primitive count exceeds product limit");
+        }
+        for (cgltf_size primIndex = 0; primIndex < mesh.primitives_count; ++primIndex)
+        {
+            const cgltf_primitive& prim = mesh.primitives[primIndex];
+            const cgltf_accessor* positions = findAttribute(prim, cgltf_attribute_type_position);
+            const cgltf_accessor* normals = findAttribute(prim, cgltf_attribute_type_normal);
+            const cgltf_accessor* texcoords = findAttribute(prim, cgltf_attribute_type_texcoord);
+            if (prim.type != cgltf_primitive_type_triangles)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "only TRIANGLES primitives are supported");
+            }
+            if (prim.targets_count != 0 || positions == nullptr || positions->type != cgltf_type_vec3 ||
+                positions->component_type != cgltf_component_type_r_32f || positions->count == 0 ||
+                positions->count > 65'535U ||
+                (normals != nullptr && (normals->type != cgltf_type_vec3 ||
+                                        normals->count != positions->count)) ||
+                (texcoords != nullptr && (texcoords->type != cgltf_type_vec2 ||
+                                          texcoords->count != positions->count)))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF primitive attribute contract is invalid");
+            }
+            const std::uint64_t primitiveIndices =
+                prim.indices != nullptr ? prim.indices->count : positions->count;
+            if (primitiveIndices == 0 || primitiveIndices > AssetFormat::StaticMeshWire::MaxIndexCount ||
+                (primitiveIndices % 3U) != 0 ||
+                !checkedAdd(vertexCount, positions->count, vertexCount) ||
+                vertexCount > AssetFormat::StaticMeshWire::MaxVertexCount ||
+                !checkedAdd(indexCount, primitiveIndices, indexCount) ||
+                indexCount > AssetFormat::StaticMeshWire::MaxIndexCount)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF primitive vertex/index budget exceeded");
+            }
+        }
+    }
+    return Core::success();
+}
 
 [[nodiscard]] Core::Result<std::filesystem::path> resolveContainedGltfExternalPath(
     const std::filesystem::path& gltfFilePath,
-    std::string_view uri) noexcept
+    std::string_view uri)
 {
     if (uri.empty())
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF external URI is empty");
     }
-    if (uri.find(':') != std::string_view::npos)
+
+    std::string decoded{uri};
+    const cgltf_size decodedSize = cgltf_decode_uri(decoded.data());
+    if (decodedSize == 0 || std::find(decoded.begin(), decoded.begin() + decodedSize, '\0') !=
+                                decoded.begin() + decodedSize)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF external URI decoding is invalid");
+    }
+    decoded.resize(decodedSize);
+    if (!Core::isStrictUtf8WithoutNul(decoded))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF external URI is not strict UTF-8");
+    }
+    if (decoded.find(':') != std::string::npos)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF external URI schemes are not supported (use relative paths under glTF root)");
     }
-    if (uri.find("..") != std::string_view::npos)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "glTF external URI must not contain path traversal");
-    }
-    const std::filesystem::path relative{std::string{uri}};
-    if (relative.is_absolute())
+    const std::filesystem::path relative = pathFromStrictUtf8(decoded);
+    if (relative.is_absolute() || relative.has_root_path())
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF external URI must be relative to the glTF file");
     }
-    std::error_code ec;
-    const auto root = std::filesystem::weakly_canonical(gltfFilePath.parent_path(), ec);
-    if (ec)
+    for (const std::filesystem::path& component : relative)
     {
-        return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "failed to resolve glTF parent directory");
+        if (component == "..")
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF external URI must not contain path traversal");
+        }
     }
-    const auto joined = std::filesystem::weakly_canonical(root / relative, ec);
-    if (ec)
-    {
-        return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "failed to resolve glTF external path");
-    }
-    const auto rootText = root.generic_string();
-    const auto joinedText = joined.generic_string();
-    if (joinedText.size() < rootText.size() ||
-        joinedText.compare(0, rootText.size(), rootText) != 0 ||
-        (joinedText.size() > rootText.size() && joinedText[rootText.size()] != '/'))
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "glTF external path escapes catalog root containment");
-    }
-    return joined;
+    return (gltfFilePath.parent_path() / relative).lexically_normal();
 }
 
-[[nodiscard]] Core::Status validateGltfExternalBuffersContained(
-    const cgltf_data* data,
-    const std::filesystem::path& gltfFilePath) noexcept
+[[nodiscard]] Core::Status loadGltfBuffersFromSnapshots(const cgltf_options& options,
+                                                        cgltf_data* data,
+                                                        const std::filesystem::path& gltfFilePath)
 {
-    if (data == nullptr)
+    if (data->buffers_count > 0 && data->buffers[0].data == nullptr &&
+        data->buffers[0].uri == nullptr && data->bin != nullptr)
     {
-        return Core::success();
+        if (data->bin_size < data->buffers[0].size)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "GLB binary chunk is shorter than declared buffer");
+        }
+        data->buffers[0].data = const_cast<void*>(data->bin);
+        data->buffers[0].data_free_method = cgltf_data_free_method_none;
     }
+
+    std::uint64_t externalFileBytes = 0;
+    const std::filesystem::path containmentRoot = gltfFilePath.parent_path();
     for (cgltf_size i = 0; i < data->buffers_count; ++i)
     {
-        const cgltf_buffer& buffer = data->buffers[i];
-        if (buffer.uri == nullptr || buffer.uri[0] == '\0')
+        cgltf_buffer& buffer = data->buffers[i];
+        if (buffer.data != nullptr)
         {
             continue;
+        }
+        if (buffer.uri == nullptr || buffer.uri[0] == '\0')
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF buffer has no binary source");
         }
         if (std::strncmp(buffer.uri, "data:", 5) == 0)
         {
+            const char* comma = std::strchr(buffer.uri, ',');
+            if (comma == nullptr || comma - buffer.uri < 7 || std::strncmp(comma - 7, ";base64", 7) != 0)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF buffer data URI must use base64");
+            }
+            const cgltf_result result =
+                cgltf_load_buffer_base64(&options, buffer.size, comma + 1, &buffer.data);
+            if (result != cgltf_result_success)
+            {
+                return mapCgltfResult(result);
+            }
+            buffer.data_free_method = cgltf_data_free_method_memory_free;
             continue;
         }
-        auto path = resolveContainedGltfExternalPath(gltfFilePath, buffer.uri);
-        if (!path)
+
+        auto externalPath = resolveContainedGltfExternalPath(gltfFilePath, buffer.uri);
+        if (!externalPath)
         {
-            return Core::failure(std::move(path.error()));
+            return Core::failure(std::move(externalPath.error()));
         }
-        std::error_code ec;
-        if (!std::filesystem::is_regular_file(*path, ec))
+        auto snapshot = GltfDetail::readFileSnapshot(*externalPath, &containmentRoot,
+                                                     kMaxGltfExternalFileBytes, buffer.size);
+        if (!snapshot)
         {
-            return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "glTF external buffer file not found");
+            return Core::failure(std::move(snapshot.error()));
         }
-        const auto fileSize = std::filesystem::file_size(*path, ec);
-        if (ec || fileSize == 0 || fileSize > kMaxGltfExternalFileBytes)
+        if (!checkedAdd(externalFileBytes, snapshot->fileSize, externalFileBytes) ||
+            externalFileBytes > kMaxGltfTotalBufferBytes)
         {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF external buffer size invalid");
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF external buffer file budget exceeded");
         }
+        void* memory = options.memory.alloc_func(options.memory.user_data, buffer.size);
+        if (memory == nullptr)
+        {
+            return Core::failure(AssetErrorCode::AllocationFailed,
+                                 "glTF external buffer allocation failed");
+        }
+        std::memcpy(memory, snapshot->bytes.data(), snapshot->bytes.size());
+        buffer.data = memory;
+        buffer.data_free_method = cgltf_data_free_method_memory_free;
     }
     return Core::success();
 }
 
 // Decode PNG/JPEG (or other stb_image formats) to RGBA8 for Texture2D cook.
 // Supports buffer-view embedded images and relative file URIs next to the glTF.
+struct GltfImageDecodeBudget final {
+    std::uint64_t externalFileBytes = 0;
+    std::uint64_t decodedBytes = 0;
+};
+
 [[nodiscard]] Core::Result<std::pair<int, int>> decodeImageRgba8(
-    const cgltf_data* data,
     const cgltf_image* image,
     const std::filesystem::path& gltfFilePath,
-    std::vector<std::byte>& outRgba)
+    std::vector<std::byte>& outRgba,
+    GltfImageDecodeBudget& budget)
 {
     if (image == nullptr)
     {
@@ -348,7 +636,7 @@ inline constexpr std::uint64_t kMaxGltfExternalFileBytes = 64ULL * 1024ULL * 102
     }
     const stbi_uc* encoded = nullptr;
     int encodedSize = 0;
-    std::vector<unsigned char> fileBytes;
+    std::vector<std::byte> fileBytes;
 
     if (image->buffer_view != nullptr)
     {
@@ -378,29 +666,20 @@ inline constexpr std::uint64_t kMaxGltfExternalFileBytes = 64ULL * 1024ULL * 102
         {
             return Core::failure(std::move(imagePath.error()));
         }
-        std::error_code ec;
-        if (!std::filesystem::is_regular_file(*imagePath, ec))
+        const std::filesystem::path root = gltfFilePath.parent_path();
+        auto snapshot = GltfDetail::readFileSnapshot(*imagePath, &root, kMaxGltfExternalFileBytes);
+        if (!snapshot)
         {
-            return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "glTF image file not found");
+            return Core::failure(std::move(snapshot.error()));
         }
-        const auto fileSize = std::filesystem::file_size(*imagePath, ec);
-        if (ec || fileSize == 0 || fileSize > kMaxGltfExternalFileBytes)
+        if (!checkedAdd(budget.externalFileBytes, snapshot->fileSize, budget.externalFileBytes) ||
+            budget.externalFileBytes > kMaxGltfTotalBufferBytes)
         {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image file size invalid");
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF external image file budget exceeded");
         }
-        fileBytes.resize(static_cast<std::size_t>(fileSize));
-        std::FILE* file = std::fopen(imagePath->string().c_str(), "rb");
-        if (file == nullptr)
-        {
-            return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "failed to open glTF image file");
-        }
-        const auto read = std::fread(fileBytes.data(), 1, fileBytes.size(), file);
-        std::fclose(file);
-        if (read != fileBytes.size())
-        {
-            return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "failed to read glTF image file");
-        }
-        encoded = fileBytes.data();
+        fileBytes = std::move(snapshot->bytes);
+        encoded = reinterpret_cast<const stbi_uc*>(fileBytes.data());
         encodedSize = static_cast<int>(fileBytes.size());
     }
     else
@@ -408,23 +687,41 @@ inline constexpr std::uint64_t kMaxGltfExternalFileBytes = 64ULL * 1024ULL * 102
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image has neither bufferView nor uri");
     }
 
+    int headerWidth = 0;
+    int headerHeight = 0;
+    int headerComponents = 0;
+    if (stbi_info_from_memory(encoded, encodedSize, &headerWidth, &headerHeight, &headerComponents) == 0 ||
+        headerWidth <= 0 || headerHeight <= 0 ||
+        static_cast<Core::u32>(headerWidth) > AssetFormat::Texture2DWire::MaxDimension ||
+        static_cast<Core::u32>(headerHeight) > AssetFormat::Texture2DWire::MaxDimension)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF image header dimensions are invalid");
+    }
+    std::uint64_t pixelCount = 0;
+    std::uint64_t byteCount = 0;
+    if (!checkedMultiply(static_cast<std::uint64_t>(headerWidth),
+                         static_cast<std::uint64_t>(headerHeight), pixelCount) ||
+        !checkedMultiply(pixelCount, 4U, byteCount) || byteCount > kMaxGltfDecodedImageBytes ||
+        !checkedAdd(budget.decodedBytes, byteCount, budget.decodedBytes) ||
+        budget.decodedBytes > kMaxGltfTotalDecodedImageBytes)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF decoded image byte budget exceeded");
+    }
+
     int width = 0;
     int height = 0;
     int components = 0;
     stbi_uc* pixels = stbi_load_from_memory(encoded, encodedSize, &width, &height, &components, 4);
-    if (pixels == nullptr || width <= 0 || height <= 0)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "stb_image failed to decode glTF image");
-    }
-    if (static_cast<Core::u32>(width) > AssetFormat::Texture2DWire::MaxDimension ||
-        static_cast<Core::u32>(height) > AssetFormat::Texture2DWire::MaxDimension)
+    if (pixels == nullptr || width != headerWidth || height != headerHeight)
     {
         stbi_image_free(pixels);
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image exceeds max dimension");
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "stb_image failed to decode validated glTF image");
     }
-    const std::size_t byteCount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
-    outRgba.resize(byteCount);
-    std::memcpy(outRgba.data(), pixels, byteCount);
+    outRgba.resize(static_cast<std::size_t>(byteCount));
+    std::memcpy(outRgba.data(), pixels, static_cast<std::size_t>(byteCount));
     stbi_image_free(pixels);
     return std::pair<int, int>{width, height};
 }
@@ -463,41 +760,62 @@ inline constexpr std::uint64_t kMaxGltfExternalFileBytes = 64ULL * 1024ULL * 102
 
 } // namespace
 
-Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view gltfUtf8Path,
-                                                              GltfCookIds ids) noexcept
+namespace {
+
+[[nodiscard]] Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequestImpl(
+    std::string_view gltfUtf8Path,
+    GltfCookIds ids)
 {
-    if (gltfUtf8Path.empty())
+    if (gltfUtf8Path.empty() || !Core::isStrictUtf8WithoutNul(gltfUtf8Path))
     {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF path is empty");
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF path must be strict UTF-8 without NUL");
     }
 
-    const std::string path{gltfUtf8Path};
+    const std::filesystem::path requestedPath = pathFromStrictUtf8(gltfUtf8Path);
+    auto source = GltfDetail::readFileSnapshot(requestedPath, nullptr, kMaxGltfSourceFileBytes);
+    if (!source)
+    {
+        return Core::failure(std::move(source.error()));
+    }
+    const std::filesystem::path gltfFilePath = source->finalPath;
+
+    CgltfMemoryBudget memoryBudget{};
     cgltf_options options{};
-    cgltf_data* data = nullptr;
-    if (const auto status = mapCgltfResult(cgltf_parse_file(&options, path.c_str(), &data)); !status)
+    options.memory.alloc_func = &allocateCgltfMemory;
+    options.memory.free_func = &freeCgltfMemory;
+    options.memory.user_data = &memoryBudget;
+
+    cgltf_data* rawData = nullptr;
+    const cgltf_result parseResult =
+        cgltf_parse(&options, source->bytes.data(), source->bytes.size(), &rawData);
+    if (parseResult != cgltf_result_success)
     {
-        return Core::failure(status.error());
+        if (parseResult == cgltf_result_out_of_memory && memoryBudget.limitExceeded)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF parser memory budget exceeded");
+        }
+        return Core::failure(mapCgltfResult(parseResult).error());
     }
-    // Reject path traversal / absolute external buffer URIs before cgltf loads them.
-    if (const auto status = validateGltfExternalBuffersContained(data, std::filesystem::path{path}); !status)
+    std::unique_ptr<cgltf_data, decltype(&cgltf_free)> dataOwner{rawData, &cgltf_free};
+    cgltf_data* data = dataOwner.get();
+
+    if (const auto status = validateGltfResourceStructure(data); !status)
     {
-        cgltf_free(data);
-        return Core::failure(status.error());
-    }
-    if (const auto status = mapCgltfResult(cgltf_load_buffers(&options, data, path.c_str())); !status)
-    {
-        cgltf_free(data);
         return Core::failure(status.error());
     }
     if (const auto status = mapCgltfResult(cgltf_validate(data)); !status)
     {
-        cgltf_free(data);
+        return Core::failure(status.error());
+    }
+    if (const auto status = loadGltfBuffersFromSnapshots(options, data, gltfFilePath); !status)
+    {
         return Core::failure(status.error());
     }
 
     if (data->meshes_count == 0)
     {
-        cgltf_free(data);
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF has no meshes");
     }
 
@@ -529,7 +847,6 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
     std::vector<TextureEntry> textures;
     // pointer equality for cgltf_mesh* → contiguous MeshEntry range
     std::unordered_map<const cgltf_mesh*, MeshPrimRange> meshRangeByPtr;
-    const std::filesystem::path gltfFilePath{path};
     // Per-channel sequence so first baseColor is always < first MR < first normal (CatalogCook).
     Core::u32 nextTextureSeqBase = 0;
     Core::u32 nextTextureSeqMr = 0;
@@ -555,6 +872,14 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         }
     };
     std::unordered_map<ImageChannelKey, Core::AssetId, ImageChannelKeyHash> imageChannelToTextureId;
+    struct DecodedImage final {
+        int width = 0;
+        int height = 0;
+        std::vector<std::byte> rgba{};
+    };
+    std::unordered_map<const cgltf_image*, DecodedImage> decodedImages;
+    GltfImageDecodeBudget imageBudget{};
+    std::uint64_t emittedTexturePixelBytes = 0;
 
     auto ensureTextureId = [&](const cgltf_image* image,
                                GltfTextureChannel channel) -> Core::Result<Core::AssetId> {
@@ -568,11 +893,18 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         {
             return existing->second;
         }
-        std::vector<std::byte> rgba;
-        auto dims = decodeImageRgba8(data, image, gltfFilePath, rgba);
-        if (!dims)
+        auto decoded = decodedImages.find(image);
+        if (decoded == decodedImages.end())
         {
-            return Core::failure(std::move(dims.error()));
+            DecodedImage candidate{};
+            auto dims = decodeImageRgba8(image, gltfFilePath, candidate.rgba, imageBudget);
+            if (!dims)
+            {
+                return Core::failure(std::move(dims.error()));
+            }
+            candidate.width = dims->first;
+            candidate.height = dims->second;
+            decoded = decodedImages.emplace(image, std::move(candidate)).first;
         }
         Core::u32 sequence = 0;
         switch (channel)
@@ -587,12 +919,20 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             sequence = nextTextureSeqNormal++;
             break;
         }
+        if (textures.size() >= kMaxGltfTextures ||
+            !checkedAdd(emittedTexturePixelBytes, decoded->second.rgba.size(),
+                        emittedTexturePixelBytes) ||
+            emittedTexturePixelBytes > kMaxGltfTotalDecodedImageBytes)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF cooked texture output budget exceeded");
+        }
         const Core::AssetId textureId = deriveTextureChannelId(gltfUtf8Path, channel, sequence);
         auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
-            .width = static_cast<Core::u16>(dims->first),
-            .height = static_cast<Core::u16>(dims->second),
+            .width = static_cast<Core::u16>(decoded->second.width),
+            .height = static_cast<Core::u16>(decoded->second.height),
             .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
-            .pixels = rgba,
+            .pixels = decoded->second.rgba,
         });
         if (!texPayload)
         {
@@ -611,12 +951,10 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         const cgltf_mesh& mesh = data->meshes[meshIndex];
         if (mesh.primitives_count == 0)
         {
-            cgltf_free(data);
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF mesh has no primitives");
         }
         if (mesh.primitives_count > AssetFormat::StaticMeshWire::MaxSubmeshes)
         {
-            cgltf_free(data);
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "glTF mesh primitive count exceeds product limit");
         }
@@ -628,7 +966,6 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             auto pieces = extractTriangleMesh(prim);
             if (!pieces)
             {
-                cgltf_free(data);
                 return Core::failure(std::move(pieces.error()));
             }
 
@@ -641,7 +978,6 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             {
                 if (!(ids.meshId < ids.materialId))
                 {
-                    cgltf_free(data);
                     return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                          "fixed mesh AssetId must be strictly less than material AssetId");
                 }
@@ -672,21 +1008,18 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
                 ensureTextureId(baseColorImage(material), GltfTextureChannel::BaseColor);
             if (!baseColorTextureId)
             {
-                cgltf_free(data);
                 return Core::failure(std::move(baseColorTextureId.error()));
             }
             auto metallicRoughnessTextureId =
                 ensureTextureId(metallicRoughnessImage(material), GltfTextureChannel::MetallicRoughness);
             if (!metallicRoughnessTextureId)
             {
-                cgltf_free(data);
                 return Core::failure(std::move(metallicRoughnessTextureId.error()));
             }
             auto normalTextureId =
                 ensureTextureId(normalImage(material), GltfTextureChannel::Normal);
             if (!normalTextureId)
             {
-                cgltf_free(data);
                 return Core::failure(std::move(normalTextureId.error()));
             }
 
@@ -708,13 +1041,11 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             auto meshPayload = AssetFormat::writeStaticMeshPayloadBytes(meshDesc);
             if (!meshPayload)
             {
-                cgltf_free(data);
                 return Core::failure(std::move(meshPayload.error()));
             }
             auto materialPayload = AssetFormat::writeMaterialPayloadBytes(materialDesc);
             if (!materialPayload)
             {
-                cgltf_free(data);
                 return Core::failure(std::move(materialPayload.error()));
             }
 
@@ -733,61 +1064,103 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
                                MeshPrimRange{.firstEntry = rangeFirst, .entryCount = meshes.size() - rangeFirst});
     }
 
+    struct PendingNode final {
+        const cgltf_node* node = nullptr;
+        int parentIndex = -1;
+    };
     std::vector<AssetFormat::PrefabNodeDesc> prefabNodes;
-    auto pushNode = [&](auto&& self, const cgltf_node* node, int parentIndex) -> void {
-        if (node == nullptr)
+    prefabNodes.reserve(data->nodes_count);
+    std::vector<PendingNode> pendingNodes;
+    pendingNodes.reserve(data->nodes_count);
+    if (data->scenes_count > 0)
+    {
+        for (cgltf_size i = data->scenes[0].nodes_count; i > 0; --i)
         {
-            return;
+            pendingNodes.push_back(PendingNode{.node = data->scenes[0].nodes[i - 1U]});
         }
-        const int selfIndex = static_cast<int>(prefabNodes.size());
-        AssetFormat::PrefabNodeDesc desc{};
-        desc.stableNodeId = static_cast<Core::u32>(prefabNodes.size() + 1U);
-        desc.parentIndex = parentIndex;
-        if (node->has_translation)
+    }
+    else
+    {
+        for (cgltf_size i = data->nodes_count; i > 0; --i)
         {
-            desc.positionX = node->translation[0];
-            desc.positionY = node->translation[1];
-            desc.positionZ = node->translation[2];
+            if (data->nodes[i - 1U].parent == nullptr)
+            {
+                pendingNodes.push_back(PendingNode{.node = &data->nodes[i - 1U]});
+            }
         }
-        if (node->has_rotation)
+    }
+
+    std::vector<bool> visitedNodes(data->nodes_count, false);
+    while (!pendingNodes.empty())
+    {
+        const PendingNode pending = pendingNodes.back();
+        pendingNodes.pop_back();
+        if (pending.node == nullptr)
         {
-            desc.rotationX = node->rotation[0];
-            desc.rotationY = node->rotation[1];
-            desc.rotationZ = node->rotation[2];
-            desc.rotationW = node->rotation[3];
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF scene contains a null node");
         }
-        if (node->has_scale)
+        const cgltf_size nodeIndex = cgltf_node_index(data, pending.node);
+        if (nodeIndex >= data->nodes_count || &data->nodes[nodeIndex] != pending.node ||
+            visitedNodes[nodeIndex])
         {
-            desc.scaleX = node->scale[0];
-            desc.scaleY = node->scale[1];
-            desc.scaleZ = node->scale[2];
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF scene node hierarchy is invalid or repeated");
         }
+        visitedNodes[nodeIndex] = true;
 
         MeshPrimRange range{};
         bool hasMeshRange = false;
-        if (node->mesh != nullptr)
+        if (pending.node->mesh != nullptr)
         {
-            const auto found = meshRangeByPtr.find(node->mesh);
+            const auto found = meshRangeByPtr.find(pending.node->mesh);
             if (found != meshRangeByPtr.end())
             {
                 range = found->second;
                 hasMeshRange = range.entryCount > 0;
             }
         }
+        const std::size_t addedNodes =
+            hasMeshRange && range.entryCount > 1U ? 1U + range.entryCount : 1U;
+        if (addedNodes > AssetFormat::PrefabWire::MaxNodes - prefabNodes.size())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF expanded Prefab node count exceeds product limit");
+        }
+
+        const int selfIndex = static_cast<int>(prefabNodes.size());
+        AssetFormat::PrefabNodeDesc desc{};
+        desc.stableNodeId = static_cast<Core::u32>(prefabNodes.size() + 1U);
+        desc.parentIndex = pending.parentIndex;
+        if (pending.node->has_translation)
+        {
+            desc.positionX = pending.node->translation[0];
+            desc.positionY = pending.node->translation[1];
+            desc.positionZ = pending.node->translation[2];
+        }
+        if (pending.node->has_rotation)
+        {
+            desc.rotationX = pending.node->rotation[0];
+            desc.rotationY = pending.node->rotation[1];
+            desc.rotationZ = pending.node->rotation[2];
+            desc.rotationW = pending.node->rotation[3];
+        }
+        if (pending.node->has_scale)
+        {
+            desc.scaleX = pending.node->scale[0];
+            desc.scaleY = pending.node->scale[1];
+            desc.scaleZ = pending.node->scale[2];
+        }
 
         if (hasMeshRange && range.entryCount == 1U)
         {
-            // Single-prim path: mesh/material stay on the transform node (unchanged).
             const MeshEntry& entry = meshes[range.firstEntry];
             desc.meshId = entry.meshId;
             desc.materialId = entry.materialId;
-            prefabNodes.push_back(desc);
         }
-        else if (hasMeshRange && range.entryCount > 1U)
+        prefabNodes.push_back(desc);
+        if (hasMeshRange && range.entryCount > 1U)
         {
-            // Multi-prim SPLIT: transform parent (no draw) + identity children (one draw each).
-            // Preserves per-prim materials and Prefab's 1 mesh / 1 material per node contract.
-            prefabNodes.push_back(desc);
             for (std::size_t i = 0; i < range.entryCount; ++i)
             {
                 const MeshEntry& entry = meshes[range.firstEntry + i];
@@ -799,31 +1172,13 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
                 });
             }
         }
-        else
-        {
-            prefabNodes.push_back(desc);
-        }
 
-        for (cgltf_size c = 0; c < node->children_count; ++c)
+        for (cgltf_size child = pending.node->children_count; child > 0; --child)
         {
-            self(self, node->children[c], selfIndex);
-        }
-    };
-    if (data->scenes_count > 0)
-    {
-        for (cgltf_size i = 0; i < data->scenes[0].nodes_count; ++i)
-        {
-            pushNode(pushNode, data->scenes[0].nodes[i], -1);
-        }
-    }
-    else
-    {
-        for (cgltf_size i = 0; i < data->nodes_count; ++i)
-        {
-            if (data->nodes[i].parent == nullptr)
-            {
-                pushNode(pushNode, &data->nodes[i], -1);
-            }
+            pendingNodes.push_back(PendingNode{
+                .node = pending.node->children[child - 1U],
+                .parentIndex = selfIndex,
+            });
         }
     }
     if (prefabNodes.empty() && !meshes.empty())
@@ -838,7 +1193,6 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
 
     auto prefabPayload =
         AssetFormat::writePrefabPayloadBytes(AssetFormat::PrefabPayloadDesc{.nodes = prefabNodes});
-    cgltf_free(data);
     if (!prefabPayload)
     {
         return Core::failure(std::move(prefabPayload.error()));
@@ -923,6 +1277,32 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
                                   prefabSpec.dependencies.end());
     request.assets.push_back(std::move(prefabSpec));
     return request;
+}
+
+} // namespace
+
+Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view gltfUtf8Path,
+                                                              GltfCookIds ids) noexcept
+{
+    try
+    {
+        return cookGltfFileToCatalogRequestImpl(gltfUtf8Path, ids);
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "glTF cook allocation failed within bounded input policy");
+    }
+    catch (const std::filesystem::filesystem_error&)
+    {
+        return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
+                             "glTF cook filesystem operation failed");
+    }
+    catch (...)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "unexpected glTF cook failure");
+    }
 }
 
 } // namespace Tina::Asset

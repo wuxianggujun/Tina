@@ -104,6 +104,16 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 
 | `tina_ui_render_integration_tests` | **15/15** |
 | `tina_sample_null --frames=300` | exit 0 |
 
+## 2026-07-31 工作树 — GCC13 glTF 输入门禁
+
+环境为 WSL Ubuntu 22.04、`g++-13 13.4.0` 与既有 `linux-gcc13-vnext` build tree。增量生成
+`src/asset/libtina_asset.a`，重新编译 `GltfCookTests.cpp.o`，再用仓库 build tree 的 Tina/gtest/xxHash
+静态库链接定向 test binary；两个受影响 TU 均由 GCC13 无告警编译。
+
+`GltfCookTests.*` 24/24、exit 0，无 skip；root 内 symlink 正向与 buffer/image 逃逸拒绝均实际运行，
+其余 file/count/range/decode/output budget 与既有 PBR/multi-primitive 回归同时通过。临时 test binary 已删除。
+本记录不宣称完整 Linux `tina_asset_tests` executable 已运行。
+
 ## 不证明
 
 - 真实物理显示器 / GPU / Wayland

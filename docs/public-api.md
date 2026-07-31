@@ -348,6 +348,13 @@ Scene target 使用。
 TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源 glTF/WAV/image；cgltf/stb_image 与源文件解析只在
 Cooker/tool。
 
+`cookGltfFileToCatalogRequest(gltfUtf8Path, ids)` 是 `noexcept` Cooker 边界，输入路径必须是 strict UTF-8
+without NUL。它从已打开主文件的有界快照解析 JSON/GLB；relative external buffer/image 先 percent-decode，
+拒绝 scheme、rooted path 与 `..`，再打开并以最终 handle/fd 路径验证 authoring-root containment。root 内
+symlink/junction 保持可用，逃逸、读取期间身份/size/time 变化或任一 file/count/range/parser/decode/output
+预算失败都返回 `Core::Error`，不返回部分 `CatalogCookRequest`。调用方随后仍须经 `cookCatalogPackage` 与
+原子 publish；该 API 不让 Runtime 直接消费 source URI，也不暴露 cgltf/stb/native handle。
+
 TileMap 的唯一当前 root wire contract 是 schema v3。`TileMapPayloadView` 按 authoring 顺序通过
 `layerAt()/findLayer(TileMapLayerId)` 暴露 tile/object layer；稳定 layer/object ID 都是 map-wide 非零唯一
 `u32`。layer 与 object 都有独立 visibility；name/properties 是 strict UTF-8 borrowed views；object kind

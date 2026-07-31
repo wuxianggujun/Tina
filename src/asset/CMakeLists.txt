@@ -53,6 +53,7 @@ set(TINA_ASSET_SOURCES
     TileChunkDirtyCache.cpp
     CharacterController2D.cpp
     CatalogCook.cpp
+    GltfFileSnapshot.cpp
     GltfCook.cpp
     CatalogFile.cpp
     CatalogLoadOrder.cpp

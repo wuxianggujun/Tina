@@ -190,9 +190,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 ```
 
 成功为 exit 0；验证失败为 exit 1；参数错误为 exit 2。Catalog manifest 相对路径和派生 object path 已校验
-UTF-8，并拒绝绝对路径与 `..` 逃逸。glTF Cooker 已能读取 relative-file/bufferView baseColorTexture，
-relative URI 的 root containment 与 size 上限已由 ASSET-001 落地；仍应只处理可信源资产（symlink
-逃逸等更严策略可后置）。
+UTF-8，并拒绝绝对路径与 `..` 逃逸。glTF Cooker 把 authoring 输入视为不可信：主路径与 percent-decoded
+外部 URI 要求 strict UTF-8 without NUL；主文件及 relative buffer/image 均从一次打开的 handle/fd 快照
+读取，外部最终路径必须位于主文件最终 authoring root 下。root 内 symlink/junction 可用，逃逸链接、
+读取期间替换、超出 file/count/range/parser/decode/output 预算均结构化失败，不产生可发布的半包。
 
 ## Linux Null 与 sanitizer
 

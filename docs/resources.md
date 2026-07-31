@@ -241,16 +241,21 @@ component/culling 与通用 pass scheduler 仍属 `RENDER-001`。glTF importer �
 - Manifest entry 按 AssetId 严格升序，依赖范围必须完整、无 gap/overlap，依赖 kind 必须匹配；
 - full package validation 每次最多持有一个 Cooked file，并强制 parse、ContentHash 与 Catalog 对齐；
 - publish 先在 staging 写入并重新验证，最后原子替换 Manifest，失败不发布半个 Catalog；
-- glTF Cooker 已拒绝 scheme/绝对路径/`..`，使用 canonical containment，并限制外部单文件最大 64MiB；
-  symlink/junction/reparse、文件替换竞态及更完整 count/dimension 资源炸弹矩阵仍由 `ASSET-SEC-001`
-  闭合。Runtime 仍不得直接打开任意源 URI。
+- glTF/GLB 主路径与 percent-decoded 外部 URI 必须是 strict UTF-8 且不含 NUL；外部 URI 拒绝 scheme、
+  绝对/rooted path 与 `..`；
+- 主文件、外部 buffer/image 均只从一次打开的 handle/fd 读取内存快照。外部文件以打开后的最终路径
+  校验必须严格位于主文件最终 authoring root 下；root 内 symlink/junction 可用，逃逸链接失败；读取前后
+  还校验文件 identity、size 与 write/change time，Windows 打开期间不共享 write/delete；
+- glTF 当前 hard limits 包括主文件和每个外部文件 64MiB、外部 buffer 总量 256MiB、外部 image 文件
+  总量 256MiB、cgltf live memory 384MiB、accessor logical bytes 256MiB、单图/全部 decoded RGBA8
+  64MiB/256MiB，以及 buffer/view/accessor/mesh/primitive/material/image/texture/scene/node 上限；所有
+  range、count、乘加与 Prefab/Texture 输出扩展在分配或访问前检查，失败不生成可发布的半份 request；
+- Runtime 仍不得直接打开任意源 URI，只消费验证并原子发布的 Cooked Catalog。
 
 ## 当前限制与下一步
 
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
-- glTF 外部 buffer/texture 的基础 containment、URI/size policy 与产品接入已由 `ASSET-001` 完成；
-  跨平台 symlink/reparse 与更完整资源炸弹 corpus 由 `ASSET-SEC-001` 跟踪；
 - hot reload、增量 Cooker、通用 Asset cache/LRU、Bundle/Patch 与 network Asset 尚未实现，见
   `ASSET-002`；
 - TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；

@@ -219,6 +219,24 @@ blankLike 仍由 `CaptureSampleWindow` 排除。2026-07-29 的独立 compare 报
 本文尚未记录该 gate 在当前 tip 的带日期结果，也没有 Narrator/Inspect 人工金标；二者仍属于 UI-002 Now
 的验收，不从脚本存在本身推导为已通过。
 
+## ASSET-SEC-001 glTF 输入门禁（2026-07-31）
+
+在 Windows 11、Visual Studio 2026 / MSVC 19.50 的现有
+`windows-msvc-vnext-bgfx-product-2d` build tree 增量执行，未使用 `--clean-first`：
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_asset_tests --parallel 1 -- /nr:false
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe `
+  --gtest_filter=GltfCookTests.* --gtest_color=no
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe --gtest_color=no
+```
+
+构建 exit 0；`GltfCookTests` 24/24，完整 `tina_asset_tests` 218/218。Windows contained/escaping
+junction fixture 均实际运行，无 skip；覆盖 strict UTF-8/percent-decode、主/外部文件 64MiB、短 buffer、
+bufferView/accessor/count/overflow、PNG dimension/decoded bytes、multi-primitive 与完整 PBR 回归。
+测试数量只描述本次工作树，不是永久基线。
+
 ## 未关闭
 
 - OS 级多 DPI 截图矩阵与跨 GPU 像素金标（UI-003 尾巴；字体 identity fingerprint 已进 gate/baseline）、Narrator/Inspect 人工金标（UI-002）、Linux AT-SPI（UI-002-LINUX）、PBR（RENDER-001）；

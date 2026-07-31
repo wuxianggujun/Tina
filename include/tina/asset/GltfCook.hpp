@@ -10,7 +10,9 @@ namespace Tina::Asset {
 
 // M11-E7/E10 glTF cook (cgltf PRIVATE to the cook TU / assetc).
 // Supported:
-// - glTF 2.0 JSON or GLB via cgltf_parse_file
+// - strict UTF-8 glTF 2.0 JSON or GLB path, read from one bounded opened-file snapshot
+// - relative external buffers/images, percent-decoded as UTF-8 and read from opened-file
+//   snapshots only after their final paths are contained by the glTF authoring root
 // - every primitive: TRIANGLES with POSITION(float3) + optional NORMAL/TEXCOORD_0
 // - multi-mesh files produce StaticMesh + Material assets (multi-prim SPLIT below)
 // - multi-primitive meshes: SPLIT (not merge) — one StaticMesh + Material per prim;

@@ -493,6 +493,17 @@ binding 可验证。Opaque3D 已做
 baseColor/MR/normal 贴图 **采样**、material factors 与有界0..4 directional lights；完整 PBR/IBL/shadow
 仍后置。
 
+`ASSET-SEC-001` 的定向门禁是 `GltfCookTests.*`：覆盖主/外部文件 64MiB 上限、短 buffer、strict UTF-8
+与 percent-decoded traversal、root 内和逃逸 symlink/junction、bufferView/accessor/count/overflow、PNG
+dimension/decoded-byte budget、multi-primitive 与完整 PBR fixture 回归。Windows 还直接运行完整
+`tina_asset_tests`；Linux 至少用 GCC13 重新编译 `tina_asset` 与该测试 TU，并从仓库 build tree 链接同一
+测试后端运行 filter。不得用只编译 TU 或临时 probe 代替测试结果。
+
+```powershell
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe `
+  --gtest_filter=GltfCookTests.* --gtest_color=no
+```
+
 `SpriteAnimationClip` 覆盖 payload/schema、Catalog typed view、dependency contract 与
 `SpriteAnimator2D` 的 Once/Loop/PingPong、暂停、倍速和大 delta；`tina_sample_2d` 再提供
 `Idle -> Walk -> HitWall` 的产品状态证据。

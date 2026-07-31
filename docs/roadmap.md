@@ -16,11 +16,9 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
-| ASSET-SEC-001 | 闭合 glTF 外部文件 symlink/reparse escape 与资源炸弹矩阵 | Cooker 接收不可信 authoring 输入；现有 canonical containment/单文件上限尚缺专门跨平台逃逸与 count/dimension corpus，P0 证据优先于新增功能 |
 | UI-002 | 收口 Windows UIA 产品验收：固化真实 HWND 跨进程 action gate 证据，并完成 Narrator/Inspect 人工金标 | action seam、UIA control patterns 与自动 gate 已落地；现在补齐外部验收，避免实现继续领先于产品证据 |
 
-Now 的退出条件：ASSET-SEC-001 的 Windows/Linux escape/oversize/count corpus 明确且失败不发布半包；
-UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
+Now 的退出条件：UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
 人工记录明确；没有未解释的 Accepted ADR/实现冲突。Linux AT-SPI 作为独立后置项，不阻塞 Windows
 UI-002 关闭。
 

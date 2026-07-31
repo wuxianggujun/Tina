@@ -10,10 +10,38 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#include <winioctl.h>
+
+struct MountPointReparseData final {
+    DWORD reparseTag = 0;
+    WORD reparseDataLength = 0;
+    WORD reserved = 0;
+    WORD substituteNameOffset = 0;
+    WORD substituteNameLength = 0;
+    WORD printNameOffset = 0;
+    WORD printNameLength = 0;
+    WCHAR pathBuffer[1]{};
+};
+#endif
 
 namespace Tina::Asset {
 namespace {
@@ -66,6 +94,132 @@ namespace {
     "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAA"
   }]
 })json";
+}
+
+[[nodiscard]] std::string externalBufferTriangleGltfJson(std::string_view uri)
+{
+    return std::string{R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "mode": 4}]}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
+  ],
+  "buffers": [{"byteLength": 44, "uri": ")json"} + std::string{uri} + R"json("}]
+})json";
+}
+
+[[nodiscard]] std::array<unsigned char, 44> externalTriangleBufferBytes()
+{
+    std::array<unsigned char, 44> bytes{};
+    bytes[38] = 1;
+    bytes[40] = 2;
+    return bytes;
+}
+
+void writeTextFile(const std::filesystem::path& path, std::string_view text)
+{
+    std::ofstream output(path, std::ios::binary);
+    ASSERT_TRUE(output.good());
+    output.write(text.data(), static_cast<std::streamsize>(text.size()));
+    ASSERT_TRUE(output.good());
+}
+
+template <typename Container>
+void writeBinaryFile(const std::filesystem::path& path, const Container& bytes)
+{
+    std::ofstream output(path, std::ios::binary);
+    ASSERT_TRUE(output.good());
+    output.write(reinterpret_cast<const char*>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+    ASSERT_TRUE(output.good());
+}
+
+[[nodiscard]] bool createDirectoryLink(const std::filesystem::path& target,
+                                       const std::filesystem::path& link,
+                                       std::error_code& error)
+{
+#if defined(_WIN32)
+    std::filesystem::create_directory(link, error);
+    if (error)
+    {
+        return false;
+    }
+
+    const std::wstring printName = std::filesystem::absolute(target, error).native();
+    if (error)
+    {
+        return false;
+    }
+    const std::wstring substituteName = L"\\??\\" + printName;
+    const std::size_t substituteBytes = substituteName.size() * sizeof(wchar_t);
+    const std::size_t printBytes = printName.size() * sizeof(wchar_t);
+    constexpr std::size_t reparseHeaderBytes = offsetof(MountPointReparseData, substituteNameOffset);
+    constexpr std::size_t pathBufferOffset = offsetof(MountPointReparseData, pathBuffer);
+    const std::size_t pathBufferBytes = substituteBytes + sizeof(wchar_t) + printBytes + sizeof(wchar_t);
+    if (pathBufferOffset + pathBufferBytes > MAXIMUM_REPARSE_DATA_BUFFER_SIZE ||
+        pathBufferOffset - reparseHeaderBytes + pathBufferBytes >
+            (std::numeric_limits<USHORT>::max)())
+    {
+        error = std::make_error_code(std::errc::filename_too_long);
+        return false;
+    }
+
+    std::vector<unsigned char> storage(pathBufferOffset + pathBufferBytes, 0);
+    auto* reparse = reinterpret_cast<MountPointReparseData*>(storage.data());
+    reparse->reparseTag = IO_REPARSE_TAG_MOUNT_POINT;
+    reparse->reparseDataLength = static_cast<USHORT>(
+        pathBufferOffset - reparseHeaderBytes + pathBufferBytes);
+    reparse->substituteNameOffset = 0;
+    reparse->substituteNameLength = static_cast<USHORT>(substituteBytes);
+    reparse->printNameOffset = static_cast<USHORT>(substituteBytes + sizeof(wchar_t));
+    reparse->printNameLength = static_cast<USHORT>(printBytes);
+    std::memcpy(reparse->pathBuffer, substituteName.data(), substituteBytes);
+    std::memcpy(reinterpret_cast<unsigned char*>(reparse->pathBuffer) + reparse->printNameOffset,
+                printName.data(), printBytes);
+
+    const HANDLE directory = CreateFileW(
+        link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (directory == INVALID_HANDLE_VALUE)
+    {
+        error = std::error_code(static_cast<int>(GetLastError()), std::system_category());
+        return false;
+    }
+    DWORD returned = 0;
+    const BOOL result = DeviceIoControl(
+        directory, FSCTL_SET_REPARSE_POINT, reparse,
+        static_cast<DWORD>(reparseHeaderBytes + reparse->reparseDataLength),
+        nullptr, 0, &returned, nullptr);
+    const DWORD nativeError = result ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(directory);
+    if (!result)
+    {
+        error = std::error_code(static_cast<int>(nativeError), std::system_category());
+        return false;
+    }
+    error.clear();
+    return true;
+#else
+    std::filesystem::create_directory_symlink(target, link, error);
+    return !error;
+#endif
+}
+
+void writeBigEndianU32(std::vector<unsigned char>& bytes, std::size_t offset,
+                       std::uint32_t value)
+{
+    ASSERT_LE(offset + 4U, bytes.size());
+    bytes[offset + 0U] = static_cast<unsigned char>((value >> 24U) & 0xFFU);
+    bytes[offset + 1U] = static_cast<unsigned char>((value >> 16U) & 0xFFU);
+    bytes[offset + 2U] = static_cast<unsigned char>((value >> 8U) & 0xFFU);
+    bytes[offset + 3U] = static_cast<unsigned char>(value & 0xFFU);
 }
 
 TEST(GltfCookTests, CooksMinimalTriangleToMeshMaterialPrefab)
@@ -514,6 +668,314 @@ TEST(GltfCookTests, RejectsAbsoluteExternalImageUri)
     auto request = cookGltfFileToCatalogRequest(gltfPath.string());
     ASSERT_FALSE(request.has_value());
     EXPECT_FALSE(request.error().message.empty());
+}
+
+TEST(GltfCookTests, AllowsExternalBufferThroughContainedSymlinkOrJunction)
+{
+    const auto base = std::filesystem::temp_directory_path() / "tina_gltf_buffer_contained_link";
+    const auto root = base / "root";
+    const auto actual = root / "actual";
+    const auto link = root / "linked";
+    std::error_code ec;
+    std::filesystem::remove_all(base, ec);
+    std::filesystem::create_directories(actual, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    writeBinaryFile(actual / "mesh.bin", externalTriangleBufferBytes());
+    if (!createDirectoryLink(actual, link, ec))
+    {
+        std::filesystem::remove_all(base, ec);
+        GTEST_SKIP() << "directory symlink/junction creation unavailable: " << ec.message();
+    }
+
+    const auto gltfPath = root / "scene.gltf";
+    writeTextFile(gltfPath, externalBufferTriangleGltfJson("linked/mesh.bin"));
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    EXPECT_EQ(request->assets.size(), 3U);
+
+    std::filesystem::remove(link, ec);
+    std::filesystem::remove_all(base, ec);
+}
+
+TEST(GltfCookTests, AllowsPercentEncodedUtf8ExternalBufferPath)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_utf8_external_buffer";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    ASSERT_FALSE(ec) << ec.message();
+
+    const std::u8string utf8Name = u8"\u8D44\u6E90.bin";
+    writeBinaryFile(dir / std::filesystem::path{utf8Name}, externalTriangleBufferBytes());
+    const auto gltfPath = dir / "scene.gltf";
+    writeTextFile(gltfPath,
+                  externalBufferTriangleGltfJson("%E8%B5%84%E6%BA%90.bin"));
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    EXPECT_EQ(request->assets.size(), 3U);
+}
+
+TEST(GltfCookTests, RejectsPercentEncodedExternalBufferTraversal)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_encoded_traversal";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    const auto gltfPath = dir / "scene.gltf";
+    writeTextFile(gltfPath, externalBufferTriangleGltfJson("%2e%2e/secret.bin"));
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("traversal"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsPrimaryPathWithEmbeddedNul)
+{
+    std::string path = "scene.gltf";
+    path.push_back('\0');
+    path += "ignored.gltf";
+
+    auto request = cookGltfFileToCatalogRequest(path);
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("strict UTF-8"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsExternalBufferThroughEscapingSymlinkOrJunction)
+{
+    const auto base = std::filesystem::temp_directory_path() / "tina_gltf_buffer_reparse_escape";
+    const auto root = base / "root";
+    const auto outside = base / "outside";
+    const auto link = root / "linked";
+    std::error_code ec;
+    std::filesystem::remove_all(base, ec);
+    std::filesystem::create_directories(root, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    std::filesystem::create_directories(outside, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    writeBinaryFile(outside / "mesh.bin", externalTriangleBufferBytes());
+    if (!createDirectoryLink(outside, link, ec))
+    {
+        std::filesystem::remove_all(base, ec);
+        GTEST_SKIP() << "directory symlink/junction creation unavailable: " << ec.message();
+    }
+
+    const auto gltfPath = root / "scene.gltf";
+    writeTextFile(gltfPath, externalBufferTriangleGltfJson("linked/mesh.bin"));
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("escapes"), std::string::npos)
+        << request.error().message;
+
+    std::filesystem::remove(link, ec);
+    std::filesystem::remove_all(base, ec);
+}
+
+TEST(GltfCookTests, RejectsExternalImageThroughEscapingSymlinkOrJunction)
+{
+    const auto base = std::filesystem::temp_directory_path() / "tina_gltf_image_reparse_escape";
+    const auto root = base / "root";
+    const auto outside = base / "outside";
+    const auto link = root / "linked";
+    std::error_code ec;
+    std::filesystem::remove_all(base, ec);
+    std::filesystem::create_directories(root, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    std::filesystem::create_directories(outside, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    writeBinaryFile(outside / "tex.png", tinyRedPngBytes());
+    if (!createDirectoryLink(outside, link, ec))
+    {
+        std::filesystem::remove_all(base, ec);
+        GTEST_SKIP() << "directory symlink/junction creation unavailable: " << ec.message();
+    }
+
+    std::string json = texturedTriangleGltfJson();
+    const std::size_t imageUri = json.find("tex.png");
+    ASSERT_NE(imageUri, std::string::npos);
+    json.replace(imageUri, std::strlen("tex.png"), "linked/tex.png");
+    const auto gltfPath = root / "scene.gltf";
+    writeTextFile(gltfPath, json);
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("escapes"), std::string::npos)
+        << request.error().message;
+
+    std::filesystem::remove(link, ec);
+    std::filesystem::remove_all(base, ec);
+}
+
+TEST(GltfCookTests, RejectsExternalBufferShorterThanDeclaredSnapshot)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_short_buffer";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    std::array<unsigned char, 43> shortBuffer{};
+    writeBinaryFile(dir / "mesh.bin", shortBuffer);
+    const auto gltfPath = dir / "scene.gltf";
+    writeTextFile(gltfPath, externalBufferTriangleGltfJson("mesh.bin"));
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("size"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsSparseExternalBufferLargerThan64MiB)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_oversize_buffer";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    {
+        std::ofstream output(dir / "mesh.bin", std::ios::binary);
+        ASSERT_TRUE(output.good());
+        output.seekp(static_cast<std::streamoff>(64ULL * 1024ULL * 1024ULL));
+        output.put('\0');
+        ASSERT_TRUE(output.good());
+    }
+    const auto gltfPath = dir / "scene.gltf";
+    writeTextFile(gltfPath, externalBufferTriangleGltfJson("mesh.bin"));
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("size"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsSparsePrimaryGltfLargerThan64MiBBeforeParse)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_oversize_primary";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    const auto gltfPath = dir / "scene.gltf";
+    {
+        std::ofstream output(gltfPath, std::ios::binary);
+        ASSERT_TRUE(output.good());
+        output << minimalTriangleGltfJson();
+        output.seekp(static_cast<std::streamoff>(64ULL * 1024ULL * 1024ULL));
+        output.put('\0');
+        ASSERT_TRUE(output.good());
+    }
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("size"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsBufferViewOffsetOverflowBeforeBufferLoad)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_buffer_view_overflow";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    std::string json = minimalTriangleGltfJson();
+    const std::string original = "\"byteOffset\": 0, \"byteLength\": 36";
+    const std::size_t view = json.find(original);
+    ASSERT_NE(view, std::string::npos);
+    json.replace(view, original.size(),
+                 "\"byteOffset\": 18446744073709551600, \"byteLength\": 36");
+    const auto gltfPath = dir / "overflow.gltf";
+    writeTextFile(gltfPath, json);
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("bufferView"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsAccessorCountBombBeforeBufferLoad)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_accessor_count_bomb";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    std::string json = minimalTriangleGltfJson();
+    const std::string original = "\"count\": 3";
+    const std::size_t accessor = json.find(original);
+    ASSERT_NE(accessor, std::string::npos);
+    json.replace(accessor, original.size(), "\"count\": 4294967296");
+    const auto gltfPath = dir / "count.gltf";
+    writeTextFile(gltfPath, json);
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("accessor"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsImageCountBombBeforeBufferLoad)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_image_count_bomb";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    std::string imageArray = "\n  \"images\": [";
+    for (std::size_t i = 0; i < 4'097U; ++i)
+    {
+        if (i != 0)
+        {
+            imageArray.push_back(',');
+        }
+        imageArray += "{}";
+    }
+    imageArray += "],";
+    std::string json = minimalTriangleGltfJson();
+    json.insert(json.find('{') + 1U, imageArray);
+    const auto gltfPath = dir / "count.gltf";
+    writeTextFile(gltfPath, json);
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("object count"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsImageDimensionBombFromHeaderBeforeDecode)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_image_dimension_bomb";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    auto png = tinyRedPngBytes();
+    writeBigEndianU32(png, 16U, 16'385U);
+    writeBinaryFile(dir / "tex.png", png);
+    const auto gltfPath = dir / "scene.gltf";
+    writeTextFile(gltfPath, texturedTriangleGltfJson());
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("dimensions"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsDecodedImageByteBombFromHeaderBeforeDecode)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_image_decoded_bomb";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    auto png = tinyRedPngBytes();
+    writeBigEndianU32(png, 16U, 5'000U);
+    writeBigEndianU32(png, 20U, 5'000U);
+    writeBinaryFile(dir / "tex.png", png);
+    const auto gltfPath = dir / "scene.gltf";
+    writeTextFile(gltfPath, texturedTriangleGltfJson());
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("decoded image byte budget"), std::string::npos)
+        << request.error().message;
 }
 
 // One mesh, two TRIANGLES prims with distinct materials (external multi-prim models).

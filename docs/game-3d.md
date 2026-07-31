@@ -202,8 +202,10 @@ Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwi
 - Cooked Material v2 写入 metallic/roughness factor 与可选 MR/normal Texture2D deps；Runtime/bgfx
   产品着色为 **experimental MR hybrid**（有界0..4 directional lights + ambient + baseColor/可选 MR/normal
   贴图），不是完整 PBR；无 light component/culling、Shadow、transparent、IBL 或 post；
-- glTF Cooker 读取完整 `pbrMetallicRoughness` 与可选 `normalTexture`；外部相对 URI 强制 root
-  containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；
+- glTF Cooker 读取完整 `pbrMetallicRoughness` 与可选 `normalTexture`；主/外部文件使用单 handle/fd
+  bounded snapshot，外部相对 URI 在 percent-decode 与 strict UTF-8 校验后按最终路径强制 authoring-root
+  containment，拒绝 `..`/scheme/rooted path、逃逸 symlink/junction、读取期间替换以及 file/count/range/
+  parser/decode/output budget 超限；
 - Scene component 保存 mesh/material weak `AssetHandle`；RenderScene 只保存 packet-local geometry/material
   `FrameResourceRef`，Null/bgfx 在任何提交副作用前验证 stale/cross-packet/wrong-kind/range。device binding
   key 只存在于 registry/backend 私有实现；
