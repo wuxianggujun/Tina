@@ -1994,17 +1994,20 @@ struct UIContext::Impl final {
                 color = premultiply(overrideColor);
             }
         };
-        if (defaultActionFocusButton == collection)
+        if (isCandidateNodeEnabled(collection) && isCandidateNodeEnabled(item))
         {
-            applyOverride(focusedColor);
-        }
-        if (hoveredPrimaryControl == item)
-        {
-            applyOverride(hoveredColor);
-        }
-        if (isButtonPressed(item))
-        {
-            applyOverride(pressedColor);
+            if (defaultActionFocusButton == collection)
+            {
+                applyOverride(focusedColor);
+            }
+            if (hoveredPrimaryControl == item)
+            {
+                applyOverride(hoveredColor);
+            }
+            if (isButtonPressed(item))
+            {
+                applyOverride(pressedColor);
+            }
         }
         return widgetPaintColor(item, color);
     }
@@ -2795,13 +2798,15 @@ struct UIContext::Impl final {
             node.index() < listViewItemStatesByNodeIndex.size())
         {
             const ListViewItemState& item = listViewItemStatesByNodeIndex[node.index()];
-            return item.committedBound && item.committedEnabled;
+            return item.committedBound && item.committedEnabled &&
+                   record->parentIndex != InvalidNodeIndex && isNodeEnabled(idForIndex(record->parentIndex));
         }
         if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem &&
             node.index() < treeViewItemStatesByNodeIndex.size())
         {
             const TreeViewItemState& item = treeViewItemStatesByNodeIndex[node.index()];
-            return item.committedBound && item.committedEnabled;
+            return item.committedBound && item.committedEnabled &&
+                   record->parentIndex != InvalidNodeIndex && isNodeEnabled(idForIndex(record->parentIndex));
         }
         return true;
     }
@@ -2817,13 +2822,15 @@ struct UIContext::Impl final {
             node.index() < listViewItemStatesByNodeIndex.size())
         {
             const ListViewItemState& item = listViewItemStatesByNodeIndex[node.index()];
-            return item.bound && item.enabled;
+            return item.bound && item.enabled && record->parentIndex != InvalidNodeIndex &&
+                   isCandidateNodeEnabled(idForIndex(record->parentIndex));
         }
         if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem &&
             node.index() < treeViewItemStatesByNodeIndex.size())
         {
             const TreeViewItemState& item = treeViewItemStatesByNodeIndex[node.index()];
-            return item.bound && item.enabled;
+            return item.bound && item.enabled && record->parentIndex != InvalidNodeIndex &&
+                   isCandidateNodeEnabled(idForIndex(record->parentIndex));
         }
         return true;
     }
