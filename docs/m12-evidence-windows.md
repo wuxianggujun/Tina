@@ -98,8 +98,8 @@ FreeType/Physics2D/Audio/miniaudio/Asset 直接测试与300帧 sample 均 exit 0
 
 该归档 sample 的 `evidenceSchema=14` 验证 Dark→Light→Dark 与 Scene Explorer TreeView：13个 logical
 item、12个 materialized slot、两次 stable-key selection、最终 key `402`/index `12`、滚动、Theme paint
-和 Tree/TreeItem selected semantics。当前 sample/gate 已升级到 schema 15，并增加两盏 `PointLight2D`
-与 `sceneLightingFrames=renderExtractions`；旧报告不反向改写。动态 glyph atlas 修复后的 Dark/Light
+和 Tree/TreeItem selected semantics。当前 sample/gate 已升级到 schema 16，并增加两盏 `PointLight2D`、
+两条 `ShadowOccluder2D` 与 `sceneLightingFrames=renderExtractions`；旧报告不反向改写。动态 glyph atlas 修复后的 Dark/Light
 FreeType client capture 位于
 `artifacts/screenshots/2d-scene-explorer-freetype-dark-fixed/20260729-001845/frame-03.png` 与
 `artifacts/screenshots/2d-scene-explorer-freetype-light-fixed/20260729-002407/frame-03.png`；对应

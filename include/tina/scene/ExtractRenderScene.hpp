@@ -44,8 +44,8 @@ struct ExtractRenderSceneParams final {
 //   resolver empty result returns UnresolvedMesh. Hidden meshes are not resolved.
 // - Active DirectionalLight3D components are sorted by stable entity identity,
 //   transformed to world direction, and published as one bounded lighting snapshot.
-// - Active PointLight2D components are sorted by stable entity identity and publish
-//   world position/radius/color as one bounded, unshadowed Sprite2D lighting snapshot.
+// - Active PointLight2D and ShadowOccluder2D components are independently sorted by
+//   stable entity identity and publish one bounded Sprite2D lighting snapshot.
 // - Optional SpriteOverrideFlags::UvRect copies uvRectOverride into
 //   RenderSprite2DInput; otherwise UV defaults to full texture [0,1].
 // - Does not require Runtime Phase Context World capability.

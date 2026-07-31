@@ -101,11 +101,20 @@ struct Sprite2DPointLight final {
     float colorB = 1.0F;
 };
 
+struct Sprite2DShadowSegment final {
+    float startX = -0.5F;
+    float startY = 0.0F;
+    float endX = 0.5F;
+    float endY = 0.0F;
+};
+
 struct Sprite2DLightingDesc final {
     static constexpr std::size_t MaximumPointLightCount = 8;
+    static constexpr std::size_t MaximumShadowSegmentCount = 32;
 
     // Consumed synchronously by the receiving writer; no span is retained.
     std::span<const Sprite2DPointLight> pointLights{};
+    std::span<const Sprite2DShadowSegment> shadowSegments{};
     float ambientScale = 0.2F;
 };
 
@@ -125,16 +134,28 @@ class RenderSprite2DLighting final {
         return m_ambientScale;
     }
 
+    [[nodiscard]] constexpr std::span<const Sprite2DShadowSegment> shadowSegments() const noexcept
+    {
+        return {m_shadowSegments.data(), m_shadowSegmentCount};
+    }
+
     [[nodiscard]] constexpr Sprite2DLightingDesc descriptor() const noexcept
     {
-        return {.pointLights = pointLights(), .ambientScale = m_ambientScale};
+        return {
+            .pointLights = pointLights(),
+            .shadowSegments = shadowSegments(),
+            .ambientScale = m_ambientScale,
+        };
     }
 
   private:
     friend class RenderSceneBuilder;
 
     std::array<Sprite2DPointLight, Sprite2DLightingDesc::MaximumPointLightCount> m_pointLights{};
+    std::array<Sprite2DShadowSegment, Sprite2DLightingDesc::MaximumShadowSegmentCount>
+        m_shadowSegments{};
     u32 m_pointLightCount = 0;
+    u32 m_shadowSegmentCount = 0;
     float m_ambientScale = 0.2F;
 };
 
@@ -337,6 +358,7 @@ struct RenderSceneStatistics final {
     u64 sortOrderChecksum = 0;
     bool sprite2DLightingConfigured = false;
     u32 pointLight2DCount = 0;
+    u32 shadowOccluder2DCount = 0;
     u32 submittedMesh3DCount = 0;
     u32 visibleMesh3DCount = 0;
     u32 culledMesh3DCount = 0;

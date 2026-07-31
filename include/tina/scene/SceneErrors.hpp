@@ -24,6 +24,7 @@ inline constexpr Core::ErrorCode UnresolvedMesh{Core::ErrorDomain::Scene, 15};
 inline constexpr Core::ErrorCode InvalidAnimation{Core::ErrorDomain::Scene, 16};
 inline constexpr Core::ErrorCode TooManyActiveDirectionalLights{Core::ErrorDomain::Scene, 17};
 inline constexpr Core::ErrorCode TooManyActivePointLights2D{Core::ErrorDomain::Scene, 18};
+inline constexpr Core::ErrorCode TooManyActiveShadowOccluders2D{Core::ErrorDomain::Scene, 19};
 
 } // namespace SceneErrorCode
 

@@ -139,9 +139,10 @@ if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
 $requiredProductEvidence = @(
-    'evidenceSchema\":15',
+    'evidenceSchema\":16',
     'sprite2DLightingConfigured\":true',
     'pointLight2DCount\":2',
+    'shadowOccluder2DCount\":2',
     'sceneLightingFrames\":[1-9][0-9]*',
     'uiThemeDemoRequested\":true',
     'uiThemeSwitches\":2',

@@ -32,12 +32,32 @@ class DeviceCapture final {
     {
         return hasLastCapture_ ? &lastCapture_ : nullptr;
     }
+    void noteSubmittedWorldScene(const Render::RenderSceneView& scene) noexcept
+    {
+        lastSubmittedWorldSceneStatistics_ = scene.statistics();
+        hasLastSubmittedWorldSceneStatistics_ = true;
+        if (lastSubmittedWorldSceneStatistics_.sprite2DLightingConfigured)
+        {
+            ++sprite2DLightingFrameCount_;
+        }
+    }
+    [[nodiscard]] const Render::RenderSceneStatistics* lastSubmittedWorldSceneStatistics() const noexcept
+    {
+        return hasLastSubmittedWorldSceneStatistics_ ? &lastSubmittedWorldSceneStatistics_ : nullptr;
+    }
+    [[nodiscard]] Core::u64 sprite2DLightingFrameCount() const noexcept
+    {
+        return sprite2DLightingFrameCount_;
+    }
 
   private:
     Render::IRenderDevice* device_ = nullptr;
     bool captureNextPresent_ = false;
     bool hasLastCapture_ = false;
     Render::Rgba8FrameCapture lastCapture_{};
+    bool hasLastSubmittedWorldSceneStatistics_ = false;
+    Render::RenderSceneStatistics lastSubmittedWorldSceneStatistics_{};
+    Core::u64 sprite2DLightingFrameCount_ = 0;
 };
 
 class CapturingRenderDevice final : public Render::IRenderDevice {
@@ -58,7 +78,12 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
 
     [[nodiscard]] Core::Result<Render::RenderFrameSubmission> submitFrame(const Render::RenderFrame& frame) override
     {
-        return inner_->submitFrame(frame);
+        auto submission = inner_->submitFrame(frame);
+        if (submission && submission->requiresPresent() && capture_ != nullptr)
+        {
+            capture_->noteSubmittedWorldScene(frame.primaryWorldScene);
+        }
+        return submission;
     }
     [[nodiscard]] Core::Status present() override
     {

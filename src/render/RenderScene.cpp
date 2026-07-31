@@ -805,11 +805,14 @@ Core::Status RenderSceneBuilder::setSprite2DLighting(const Sprite2DLightingDesc&
 
     RenderSprite2DLighting snapshot;
     snapshot.m_pointLightCount = static_cast<u32>(lighting.pointLights.size());
+    snapshot.m_shadowSegmentCount = static_cast<u32>(lighting.shadowSegments.size());
     snapshot.m_ambientScale = lighting.ambientScale;
     std::ranges::copy(lighting.pointLights, snapshot.m_pointLights.begin());
+    std::ranges::copy(lighting.shadowSegments, snapshot.m_shadowSegments.begin());
     m_sprite2DLighting = snapshot;
     m_candidateStatistics.sprite2DLightingConfigured = true;
     m_candidateStatistics.pointLight2DCount = snapshot.m_pointLightCount;
+    m_candidateStatistics.shadowOccluder2DCount = snapshot.m_shadowSegmentCount;
     return Core::success();
 }
 

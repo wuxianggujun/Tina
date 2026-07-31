@@ -433,11 +433,17 @@ TEST(RenderSceneBuilderTest, Sprite2DLightingCopiesIntoTheCommittedFrameSnapshot
             .colorB = 0.4F,
         },
     };
+    std::array shadowSegments{
+        Sprite2DShadowSegment{.startX = -1.0F, .startY = 2.0F, .endX = 3.0F, .endY = 4.0F},
+        Sprite2DShadowSegment{.startX = 5.0F, .startY = 6.0F, .endX = 7.0F, .endY = 8.0F},
+    };
     ASSERT_TRUE(builder.writer().setSprite2DLighting({
         .pointLights = lights,
+        .shadowSegments = shadowSegments,
         .ambientScale = 0.25F,
     }));
     lights[0].colorR = 9.0F;
+    shadowSegments[0].startX = 9.0F;
 
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value());
@@ -446,9 +452,13 @@ TEST(RenderSceneBuilderTest, Sprite2DLightingCopiesIntoTheCommittedFrameSnapshot
     ASSERT_EQ(lighting.pointLights().size(), 2U);
     EXPECT_FLOAT_EQ(lighting.pointLights()[0].colorR, 0.5F);
     EXPECT_FLOAT_EQ(lighting.pointLights()[1].positionX, -4.0F);
+    ASSERT_EQ(lighting.shadowSegments().size(), 2U);
+    EXPECT_FLOAT_EQ(lighting.shadowSegments()[0].startX, -1.0F);
+    EXPECT_FLOAT_EQ(lighting.shadowSegments()[1].endY, 8.0F);
     EXPECT_FLOAT_EQ(lighting.ambientScale(), 0.25F);
     EXPECT_TRUE(committed->statistics().sprite2DLightingConfigured);
     EXPECT_EQ(committed->statistics().pointLight2DCount, 2U);
+    EXPECT_EQ(committed->statistics().shadowOccluder2DCount, 2U);
     EXPECT_FALSE(committed->empty());
 }
 
@@ -462,6 +472,41 @@ TEST(RenderSceneBuilderTest, InvalidOrDuplicateSprite2DLightingFailsTheBuildAtom
     auto invalid = builder.writer().setSprite2DLighting({.pointLights = invalidLights});
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, RenderErrorCode::InvalidSprite2DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array invalidSegments{
+        Sprite2DShadowSegment{.startX = 1.0F, .startY = 2.0F, .endX = 1.0F, .endY = 2.0F},
+    };
+    auto invalidSegment =
+        builder.writer().setSprite2DLighting({.shadowSegments = invalidSegments});
+    ASSERT_FALSE(invalidSegment);
+    EXPECT_EQ(invalidSegment.error().code, RenderErrorCode::InvalidSprite2DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array nonFiniteSegments{
+        Sprite2DShadowSegment{
+            .startX = std::numeric_limits<float>::quiet_NaN(),
+            .startY = 0.0F,
+            .endX = 1.0F,
+            .endY = 0.0F,
+        },
+    };
+    auto nonFiniteSegment =
+        builder.writer().setSprite2DLighting({.shadowSegments = nonFiniteSegments});
+    ASSERT_FALSE(nonFiniteSegment);
+    EXPECT_EQ(nonFiniteSegment.error().code, RenderErrorCode::InvalidSprite2DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array<Sprite2DShadowSegment,
+                     Sprite2DLightingDesc::MaximumShadowSegmentCount + 1U>
+        tooManySegments{};
+    auto tooManyOccluders =
+        builder.writer().setSprite2DLighting({.shadowSegments = tooManySegments});
+    ASSERT_FALSE(tooManyOccluders);
+    EXPECT_EQ(tooManyOccluders.error().code, RenderErrorCode::InvalidSprite2DLighting);
     EXPECT_FALSE(builder.commit().has_value());
 
     ASSERT_TRUE(builder.beginFrame());

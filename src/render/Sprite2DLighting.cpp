@@ -12,6 +12,11 @@ Core::Status validateSprite2DLightingDesc(const Sprite2DLightingDesc& lighting) 
         return Core::failure(RenderErrorCode::InvalidSprite2DLighting,
                              "Sprite2D point light count exceeds the fixed frame limit");
     }
+    if (lighting.shadowSegments.size() > Sprite2DLightingDesc::MaximumShadowSegmentCount)
+    {
+        return Core::failure(RenderErrorCode::InvalidSprite2DLighting,
+                             "Sprite2D shadow segment count exceeds the fixed frame limit");
+    }
     if (!std::isfinite(lighting.ambientScale) || lighting.ambientScale < 0.0F)
     {
         return Core::failure(RenderErrorCode::InvalidSprite2DLighting,
@@ -29,6 +34,18 @@ Core::Status validateSprite2DLightingDesc(const Sprite2DLightingDesc& lighting) 
             return Core::failure(
                 RenderErrorCode::InvalidSprite2DLighting,
                 "Sprite2D point light position/radius must be finite with positive radius and non-negative RGB");
+        }
+    }
+
+    for (const Sprite2DShadowSegment& segment : lighting.shadowSegments)
+    {
+        if (!std::isfinite(segment.startX) || !std::isfinite(segment.startY) ||
+            !std::isfinite(segment.endX) || !std::isfinite(segment.endY) ||
+            (segment.startX == segment.endX && segment.startY == segment.endY))
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidSprite2DLighting,
+                "Sprite2D shadow segment endpoints must be finite and non-degenerate");
         }
     }
 

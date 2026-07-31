@@ -6,7 +6,7 @@
 
 namespace Tina::Scene {
 
-// Scene-owned unshadowed point light. WorldTransform position supplies the
+// Scene-owned point light. WorldTransform position supplies the
 // light center; radiusMeters is an explicit world-space radius and ignores scale.
 struct PointLight2D final {
     Render::RenderLinearColor color{};

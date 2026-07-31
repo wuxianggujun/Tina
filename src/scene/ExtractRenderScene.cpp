@@ -6,6 +6,7 @@
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PointLight2D.hpp>
 #include <tina/scene/SceneErrors.hpp>
+#include <tina/scene/ShadowOccluder2D.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
 
@@ -64,6 +65,11 @@ struct DirectionalLightCandidate final {
 struct PointLight2DCandidate final {
     u64 stableKey = 0;
     Render::Sprite2DPointLight light{};
+};
+
+struct ShadowOccluder2DCandidate final {
+    u64 stableKey = 0;
+    Render::Sprite2DShadowSegment segment{};
 };
 
 [[nodiscard]] Core::Status publishPointLights2D(
@@ -133,6 +139,59 @@ struct PointLight2DCandidate final {
         return Core::success();
     }
 
+    std::array<ShadowOccluder2DCandidate,
+               Render::Sprite2DLightingDesc::MaximumShadowSegmentCount>
+        occluderCandidates{};
+    usize occluderCount = 0;
+    for (const EntityId entity : world.liveEntities()) {
+        const ShadowOccluder2D* component = world.shadowOccluder2D(entity);
+        if (component == nullptr || !component->active) {
+            continue;
+        }
+        if (occluderCount >= occluderCandidates.size()) {
+            return Core::failure(
+                SceneErrorCode::TooManyActiveShadowOccluders2D,
+                "Scene extract exceeded the fixed active ShadowOccluder2D limit");
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        if (!isValid(*component) || transform == nullptr || !isValid(*transform)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene active ShadowOccluder2D or its WorldTransform is invalid");
+        }
+
+        const Vec3 scaledStart{
+            component->localStartX * transform->scale.x,
+            component->localStartY * transform->scale.y,
+            0.0F,
+        };
+        const Vec3 scaledEnd{
+            component->localEndX * transform->scale.x,
+            component->localEndY * transform->scale.y,
+            0.0F,
+        };
+        const Vec3 worldStart = transform->position + rotate(transform->rotation, scaledStart);
+        const Vec3 worldEnd = transform->position + rotate(transform->rotation, scaledEnd);
+        if (!isFinite(worldStart) || !isFinite(worldEnd) ||
+            (worldStart.x == worldEnd.x && worldStart.y == worldEnd.y)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene ShadowOccluder2D extraction produced an invalid projected segment");
+        }
+
+        occluderCandidates[occluderCount] = ShadowOccluder2DCandidate{
+            .stableKey = stableEntityKey(entity),
+            .segment =
+                Render::Sprite2DShadowSegment{
+                    .startX = worldStart.x,
+                    .startY = worldStart.y,
+                    .endX = worldEnd.x,
+                    .endY = worldEnd.y,
+                },
+        };
+        ++occluderCount;
+    }
+
     std::sort(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(lightCount),
               [](const PointLight2DCandidate& left,
                  const PointLight2DCandidate& right) noexcept {
@@ -143,8 +202,23 @@ struct PointLight2DCandidate final {
     for (usize index = 0; index < lightCount; ++index) {
         lights[index] = candidates[index].light;
     }
+    std::sort(
+        occluderCandidates.begin(),
+        occluderCandidates.begin() + static_cast<std::ptrdiff_t>(occluderCount),
+        [](const ShadowOccluder2DCandidate& left,
+           const ShadowOccluder2DCandidate& right) noexcept {
+            return left.stableKey < right.stableKey;
+        });
+    std::array<Render::Sprite2DShadowSegment,
+               Render::Sprite2DLightingDesc::MaximumShadowSegmentCount>
+        shadowSegments{};
+    for (usize index = 0; index < occluderCount; ++index) {
+        shadowSegments[index] = occluderCandidates[index].segment;
+    }
     return writer.setSprite2DLighting(Render::Sprite2DLightingDesc{
         .pointLights = std::span<const Render::Sprite2DPointLight>{lights.data(), lightCount},
+        .shadowSegments =
+            std::span<const Render::Sprite2DShadowSegment>{shadowSegments.data(), occluderCount},
         .ambientScale = ambientLightScale,
     });
 }

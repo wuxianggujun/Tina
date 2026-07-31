@@ -869,11 +869,37 @@ TEST(ScenePointLight2DTest, SetsClearsQueriesAndRejectsInvalidComponent)
     EXPECT_EQ(world.pointLight2D(entity), nullptr);
 }
 
+TEST(SceneShadowOccluder2DTest, SetsClearsQueriesAndRejectsInvalidComponent)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ShadowOccluder2D occluder{
+        .localStartX = -2.0F,
+        .localStartY = 1.0F,
+        .localEndX = 3.0F,
+        .localEndY = 1.0F,
+    };
+    ASSERT_TRUE(world.setShadowOccluder2D(entity, occluder));
+    ASSERT_NE(world.shadowOccluder2D(entity), nullptr);
+    EXPECT_EQ(*world.shadowOccluder2D(entity), occluder);
+
+    occluder.localEndX = occluder.localStartX;
+    occluder.localEndY = occluder.localStartY;
+    auto invalid = world.setShadowOccluder2D(entity, occluder);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_FLOAT_EQ(world.shadowOccluder2D(entity)->localEndX, 3.0F);
+
+    ASSERT_TRUE(world.clearShadowOccluder2D(entity));
+    EXPECT_EQ(world.shadowOccluder2D(entity), nullptr);
+}
+
 TEST(ScenePointLight2DTest, DestroyedEntityDoesNotLeakLightIntoReusedSlot)
 {
     World world = makeWorld(1);
     const EntityId original = world.createEntity().value();
     ASSERT_TRUE(world.setPointLight2D(original, PointLight2D{}));
+    ASSERT_TRUE(world.setShadowOccluder2D(original, ShadowOccluder2D{}));
     ASSERT_TRUE(world.destroyEntity(original));
 
     const EntityId replacement = world.createEntity().value();
@@ -881,6 +907,8 @@ TEST(ScenePointLight2DTest, DestroyedEntityDoesNotLeakLightIntoReusedSlot)
     EXPECT_NE(replacement.generation(), original.generation());
     EXPECT_EQ(world.pointLight2D(original), nullptr);
     EXPECT_EQ(world.pointLight2D(replacement), nullptr);
+    EXPECT_EQ(world.shadowOccluder2D(original), nullptr);
+    EXPECT_EQ(world.shadowOccluder2D(replacement), nullptr);
 }
 
 TEST(ScenePointLight2DTest, ExtractsStableWorldPositionsColorsRadiusAndAmbientIntoRenderScene)
@@ -900,6 +928,26 @@ TEST(ScenePointLight2DTest, ExtractsStableWorldPositionsColorsRadiusAndAmbientIn
         .radiusMeters = 7.0F,
     }));
     ASSERT_TRUE(world.setPointLight2D(inactive, PointLight2D{.active = false}));
+    LocalTransform shadowTransform = translated(4.0F, 5.0F);
+    shadowTransform.scale = {2.0F, 3.0F, 1.0F};
+    const float halfAngle = std::numbers::pi_v<float> * 0.25F;
+    shadowTransform.rotation = {0.0F, 0.0F, std::sin(halfAngle), std::cos(halfAngle)};
+    const EntityId shadow = world.createEntity(shadowTransform).value();
+    const EntityId secondShadow = world.createEntity(translated(-2.0F, -1.0F)).value();
+    const EntityId inactiveShadow = world.createEntity().value();
+    ASSERT_TRUE(world.setShadowOccluder2D(shadow, ShadowOccluder2D{
+        .localStartX = -1.0F,
+        .localEndX = 1.0F,
+    }));
+    ASSERT_TRUE(world.setShadowOccluder2D(secondShadow, ShadowOccluder2D{
+        .localStartX = 0.0F,
+        .localStartY = -1.0F,
+        .localEndX = 0.0F,
+        .localEndY = 1.0F,
+    }));
+    ASSERT_TRUE(world.setShadowOccluder2D(
+        inactiveShadow,
+        ShadowOccluder2D{.active = false}));
 
     auto builder = Render::RenderSceneBuilder::Create();
     ASSERT_TRUE(builder.has_value());
@@ -930,6 +978,17 @@ TEST(ScenePointLight2DTest, ExtractsStableWorldPositionsColorsRadiusAndAmbientIn
     EXPECT_FLOAT_EQ(lights[1].colorR, 0.3F);
     EXPECT_FLOAT_EQ(lights[1].colorG, 0.6F);
     EXPECT_FLOAT_EQ(lights[1].colorB, 0.9F);
+    const auto shadowSegments = view->sprite2DLighting()->shadowSegments();
+    ASSERT_EQ(shadowSegments.size(), 2U);
+    EXPECT_NEAR(shadowSegments[0].startX, 4.0F, 0.0001F);
+    EXPECT_NEAR(shadowSegments[0].startY, 3.0F, 0.0001F);
+    EXPECT_NEAR(shadowSegments[0].endX, 4.0F, 0.0001F);
+    EXPECT_NEAR(shadowSegments[0].endY, 7.0F, 0.0001F);
+    EXPECT_FLOAT_EQ(shadowSegments[1].startX, -2.0F);
+    EXPECT_FLOAT_EQ(shadowSegments[1].startY, -2.0F);
+    EXPECT_FLOAT_EQ(shadowSegments[1].endX, -2.0F);
+    EXPECT_FLOAT_EQ(shadowSegments[1].endY, 0.0F);
+    EXPECT_EQ(view->statistics().shadowOccluder2DCount, 2U);
     EXPECT_FLOAT_EQ(view->sprite2DLighting()->ambientScale(), 0.3F);
 }
 
@@ -980,6 +1039,51 @@ TEST(ScenePointLight2DTest, EnforcesCapacityAndPublishesInactiveAmbientOnly)
     ASSERT_FALSE(invalidAmbient);
     EXPECT_EQ(invalidAmbient.error().code, SceneErrorCode::InvalidComponent);
     builder->rollback();
+}
+
+TEST(SceneShadowOccluder2DTest, EnforcesFixedActiveSegmentCapacity)
+{
+    World world = makeWorld(Render::Sprite2DLightingDesc::MaximumShadowSegmentCount + 2U);
+    const EntityId light = world.createEntity().value();
+    ASSERT_TRUE(world.setPointLight2D(light, PointLight2D{}));
+    for (usize index = 0;
+         index < Render::Sprite2DLightingDesc::MaximumShadowSegmentCount + 1U;
+         ++index) {
+        const EntityId entity = world.createEntity().value();
+        ASSERT_TRUE(world.setShadowOccluder2D(entity, ShadowOccluder2D{}));
+    }
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    auto tooMany = extractRenderSceneFromWorld(world, writer, packet.resourceSink());
+    ASSERT_FALSE(tooMany);
+    EXPECT_EQ(tooMany.error().code, SceneErrorCode::TooManyActiveShadowOccluders2D);
+    builder->rollback();
+}
+
+TEST(SceneShadowOccluder2DTest, OccluderWithoutPointLightPreservesUnlitScene)
+{
+    World world = makeWorld();
+    const EntityId occluder = world.createEntity().value();
+    ASSERT_TRUE(world.setShadowOccluder2D(occluder, ShadowOccluder2D{}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    ASSERT_TRUE(extractRenderSceneFromWorld(world, writer, packet.resourceSink()));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    EXPECT_FALSE(view->sprite2DLighting().has_value());
+    EXPECT_FALSE(view->statistics().sprite2DLightingConfigured);
+    EXPECT_EQ(view->statistics().shadowOccluder2DCount, 0U);
 }
 
 TEST(SceneDirectionalLightTest, SetsClearsQueriesAndRejectsInvalidComponent)

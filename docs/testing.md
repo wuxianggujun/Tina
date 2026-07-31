@@ -199,7 +199,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   missing/multiple dependency、unbound/stale texture 都返回0；
 - Registry 是 Sprite2D Lease/GPU/binding 唯一 owner；产品 State 不再保存裸 GPU owner，退出只通过
   `retireAllTextureBindings()` handoff；
-- N16.3 当时的 product evidence schema 14 已由当前 schema 15 继承：`spriteBindingTextures=2`、
+- N16.3 当时的 product evidence schema 14 已由当前 schema 16 继承：`spriteBindingTextures=2`、
   `spriteTextureLeasesAcquired=2`、
   `spriteTextureRetirementsAccepted=2`、`spriteBindingRegistryReleased=true`、
   `spriteTextureHandlesInvalidated=2`、`spriteTextureRetirementRecords=2`、
@@ -440,6 +440,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 `tina_render_scene_tests` 39/39、`tina_render_bgfx_tests` 61/61；两个 infrastructure sample 与 product sample
 均完成300帧。FreeType 同轮产品门禁结果见下文 TEST-003。
 
+## Scene ShadowOccluder2D
+
+`2D-LIGHT-N2` 的最小门禁覆盖：
+
+- World `set/clear/queryShadowOccluder2D()`、非法 component 零替换与 entity slot reuse；
+- active segment 的已发布 XY scale/rotation/position、稳定 Entity identity 排序与 inactive 过滤；
+- 超过固定32段上限显式 `TooManyActiveShadowOccluders2D`，occluder-only 保持 unlit；
+- `RenderSceneWriter::setSprite2DLighting()` 深拷贝 segment span，非 finite、退化、超容量或重复描述使
+  build 原子失败；
+- Null/bgfx submit preflight；bgfx fragment→light 相交仅清零对应点光贡献；
+- product-2d schema 16 从成功提交的 committed snapshot 观测 `pointLight2DCount=2`、
+  `shadowOccluder2DCount=2` 与逐帧 lighting count。
+
+直接验证入口为 `tina_scene_tests`、`tina_render_scene_tests`、`tina_render_bgfx_tests` 与
+`tina_sample_2d --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo`。公开新头还由
+`ShadowOccluder2DHeader.cpp` header-isolation TU 覆盖。
+
 ## 产品样例的证据边界
 
 | Sample | 证明 | 不证明 |
@@ -450,7 +467,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；全部 Sprite2D extraction 使用 packet-local `FrameResourceRef`；schema 15 增加两盏 `PointLight2D` 与 `sceneLightingFrames=renderExtractions`，并保留 Dark→Light→Dark、Tree stable-key selection/scroll/semantics、两份 Registry Lease/GPU/binding owner handoff、两次 retirement、weak texture handle 失效、ledger Released、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、2D occluder/shadow/light culling、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；全部 Sprite2D extraction 使用 packet-local `FrameResourceRef`；schema 16 增加两盏 `PointLight2D`、两条 `ShadowOccluder2D` 与 `sceneLightingFrames=renderExtractions`，并保留 Dark→Light→Dark、Tree stable-key selection/scroll/semantics、两份 Registry Lease/GPU/binding owner handoff、两次 retirement、weak texture handle 失效、ledger Released、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、2D light culling/soft shadow/normal map、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双 mesh glTF→Cooked→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx；evidence schema 4、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、唯一0..4 directional-light 提交（产品3灯）、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、完整 PBR/IBL/shadow/light component、跨 GPU golden |
@@ -514,13 +531,14 @@ cmake --build --preset windows-vnext-debug --target tina_scene_tests --parallel 
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 ```
 
-product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=15`。通用结构化
+product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=16`。通用结构化
 字段包括 `spriteBindingTextures=2`、`spriteTextureLeasesAcquired=2`、
 `spriteTextureRetirementsAccepted=2`、`spriteBindingRegistryReleased=true`、
 `spriteTextureHandlesInvalidated=2`、`spriteTextureRetirementRecords=2`、
 `spriteTextureRetirementReleased=2`、`spriteTextureRetirementLive=0`、
 `spriteBindingResolverHits>0`、`tileMapSpriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
 `trailSpriteBindingResolverHits>0`、`sprite2DLightingConfigured=true`、`pointLight2DCount=2`、
+`shadowOccluder2DCount=2`、
 `sceneLightingFrames=renderExtractions`、
 `particleCapacity=12`、`particleRandomSeed=1414090305`、`particleEmitted=10`、
 `trailCapacity=8`、`trailSegmentsCreated=3`、`trailBreaks=1`，以及32字符小写 hex
@@ -604,7 +622,7 @@ wrong-owner/bounded shutdown、active callback reader quiescence、terminal abso
 
 `MiniaudioDeviceTest.NullBackendConsumesBoundedStreamEofAndCancel` 验证 adapter 作为 realtime consumer 的
 EOF/Cancel 路径。产品 300帧还要求 `audioStreamQueued/submitted/eof/mixed/drained/stopped/retired=true`、
-submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为15。
+submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为16。
 
 Physics2D N2 的模块门禁覆盖：`createBody/createShape` 独立 generation、多 Box/Circle/Capsule shape/body、
 shape 单独销毁、sensor enter/exit、Distance joint create/query/destroy、body 级联退休 shape/joint、
@@ -614,8 +632,9 @@ wrong-world/stale/capacity/PMR rollback，以及 TileMap bridge/CharacterControl
 
 Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化（TEST-002）：包含
 `tina_scene_tests` 的上述测试 executable 全部 exit 0 后，再跑 sample 300 帧并校验
-`productGate=bgfx-physics-freetype-audio` 与 schema 15 Theme、TreeView、Sprite owner/retirement、
-TileMap/Particle/Trail Handle resolver，以及两盏 `PointLight2D` 和逐帧 lighting extraction 字段。
+`productGate=bgfx-physics-freetype-audio` 与 schema 16 Theme、TreeView、Sprite owner/retirement、
+TileMap/Particle/Trail Handle resolver，以及两盏 `PointLight2D`、两条 `ShadowOccluder2D` 和逐帧 lighting
+extraction 字段。
 
 Windows 同轮 product-3d 拓扑由 `tools/windows/RunProduct3dGate.ps1` 固化（TEST-003）：默认使用
 `windows-msvc-vnext-bgfx-ui-freetype`，直接构建并运行 Core、Scene、AssetFormat、Asset、bgfx Render、

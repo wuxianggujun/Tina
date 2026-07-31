@@ -209,8 +209,8 @@ wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
 并可把一次 `setSprite2DLighting()` 深拷贝为 self-contained 的 committed frame snapshot；重复设置或
-非法描述使当前 build 原子失败。Sprite2D snapshot 最多保存8个 world-space point light 与 ambient，且
-不改变透明 Sprite 的既有排序。commit 后返回 borrowed view。
+非法描述使当前 build 原子失败。Sprite2D snapshot 最多保存8个 world-space point light、32个
+world-space shadow segment 与 ambient，且不改变透明 Sprite 的既有排序。commit 后返回 borrowed view。
 `RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
 `FrameResourceRef`；`RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
 backend 在同步 submit 中分别按 `Sprite2DTexture`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
@@ -312,7 +312,10 @@ world position 是光源中心，transform scale 不缩放半径。extraction �
 active light，把 world position、radius、color×intensity 与
 `ExtractRenderSceneParams::ambientLight2DScale` 写入 Sprite2D frame snapshot。超容量返回
 `TooManyActivePointLights2D`；未声明组件保留既有 unlit path，全部 inactive 则发布 ambient-only snapshot。
-本切片没有 occluder、shadow 或第二套 Sprite 排序。
+`ShadowOccluder2D` 保存一条非退化 local-space 线段与 active 标志。extraction 对端点应用已发布 transform
+的 XY scale、rotation、position，按稳定 Entity identity 收集最多32条 world-space segment；超容量返回
+`TooManyActiveShadowOccluders2D`，非法/投影退化结果返回 `InvalidComponent`。遮挡只清零相交点光贡献，
+不改变 ambient、premultiplied alpha 或 Sprite 排序；没有 PointLight2D 时不单独发布 occluder snapshot。
 
 `ParticleSystem2D` 与 `Trail2D` 是独立 Scene owners，不属于 World/ECS，也不依赖完整 AssetSystem 或
 bgfx。二者复制 copyable weak Sprite `AssetHandle`，不持有 `AssetLease`、Cooked payload、GPU owner 或

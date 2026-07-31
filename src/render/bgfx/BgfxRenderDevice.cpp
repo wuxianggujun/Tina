@@ -243,6 +243,8 @@ using Mesh3DLightUniformStorage =
     std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U>;
 using Sprite2DLightUniformStorage =
     std::array<float, Sprite2DLightingDesc::MaximumPointLightCount * 4U>;
+using Sprite2DShadowUniformStorage =
+    std::array<float, Sprite2DLightingDesc::MaximumShadowSegmentCount * 4U>;
 
 void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
                           Mesh3DLightUniformStorage& directions,
@@ -274,10 +276,12 @@ void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
 void encodeSprite2DLighting(const Sprite2DLightingDesc& lighting,
                             Sprite2DLightUniformStorage& positionsAndRadii,
                             Sprite2DLightUniformStorage& colors,
+                            Sprite2DShadowUniformStorage& shadowSegments,
                             std::array<float, 4>& params) noexcept
 {
     positionsAndRadii.fill(0.0F);
     colors.fill(0.0F);
+    shadowSegments.fill(0.0F);
     for (std::size_t lightIndex = 0; lightIndex < lighting.pointLights.size(); ++lightIndex)
     {
         const Sprite2DPointLight& source = lighting.pointLights[lightIndex];
@@ -290,10 +294,19 @@ void encodeSprite2DLighting(const Sprite2DLightingDesc& lighting,
         colors[base + 1U] = source.colorG;
         colors[base + 2U] = source.colorB;
     }
+    for (std::size_t segmentIndex = 0; segmentIndex < lighting.shadowSegments.size(); ++segmentIndex)
+    {
+        const Sprite2DShadowSegment& source = lighting.shadowSegments[segmentIndex];
+        const std::size_t base = segmentIndex * 4U;
+        shadowSegments[base + 0U] = source.startX;
+        shadowSegments[base + 1U] = source.startY;
+        shadowSegments[base + 2U] = source.endX;
+        shadowSegments[base + 3U] = source.endY;
+    }
     params = {
         lighting.ambientScale,
         static_cast<float>(lighting.pointLights.size()),
-        0.0F,
+        static_cast<float>(lighting.shadowSegments.size()),
         0.0F,
     };
 }
@@ -835,6 +848,16 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        sprite2DShadowSegmentsUniform_ = bgfx::createUniform(
+            "u_spriteShadowSegments", bgfx::UniformType::Vec4,
+            static_cast<u16>(Sprite2DLightingDesc::MaximumShadowSegmentCount));
+        if (!bgfx::isValid(sprite2DShadowSegmentsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Sprite2D shadow-segment array uniform");
+        }
+        ++statistics_.liveResources;
+
         // Default 1x1 white RGBA8 so vertex color remains visible until product textures bind.
         constexpr std::array<u8, 4> WhitePixel{255, 255, 255, 255};
         const bgfx::Memory* whiteMemory = bgfx::copy(WhitePixel.data(), static_cast<u32>(WhitePixel.size()));
@@ -1328,6 +1351,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(sprite2DLightParamsUniform_);
                 sprite2DLightParamsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(sprite2DShadowSegmentsUniform_))
+            {
+                bgfx::destroy(sprite2DShadowSegmentsUniform_);
+                sprite2DShadowSegmentsUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             for (TextureSlot& slot : textures_)
@@ -1887,11 +1916,12 @@ class BgfxRenderDevice final : public IRenderDevice {
         const auto sprites = scene.sprites2D();
         Sprite2DLightUniformStorage lightPositionsAndRadii{};
         Sprite2DLightUniformStorage lightColors{};
+        Sprite2DShadowUniformStorage shadowSegments{};
         std::array<float, 4> lightParams{1.0F, 0.0F, 0.0F, 0.0F};
         if (scene.sprite2DLighting().has_value())
         {
             encodeSprite2DLighting(scene.sprite2DLighting()->descriptor(), lightPositionsAndRadii,
-                                   lightColors, lightParams);
+                                   lightColors, shadowSegments, lightParams);
         }
         u32 batchBegin = 0;
         while (batchBegin < prepared.requirements.spriteCount)
@@ -1932,6 +1962,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setUniform(sprite2DLightColorsUniform_, lightColors.data(),
                              static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
             bgfx::setUniform(sprite2DLightParamsUniform_, lightParams.data());
+            bgfx::setUniform(sprite2DShadowSegmentsUniform_, shadowSegments.data(),
+                             static_cast<u16>(Sprite2DLightingDesc::MaximumShadowSegmentCount));
             const u32 firstIndex = batchBegin * 6U;
             const u32 indexCount = (batchEnd - batchBegin) * 6U;
             bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
@@ -2748,6 +2780,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle sprite2DLightPositionsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DLightColorsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DLightParamsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle sprite2DShadowSegmentsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle uiSolidWhiteTexture_ = BGFX_INVALID_HANDLE;

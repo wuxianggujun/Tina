@@ -6,6 +6,7 @@
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PointLight2D.hpp>
+#include <tina/scene/ShadowOccluder2D.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/SpriteAnimator2D.hpp>

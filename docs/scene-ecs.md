@@ -10,7 +10,7 @@
 - 固定容量、PMR-backed `World`；
 - generation/owner-aware `EntityId`；
 - Local/World Transform 层级与显式 publication barrier；
-- Camera2D、SpriteRenderer2D、PointLight2D、PerspectiveCamera3D、MeshRenderer3D 组件；
+- Camera2D、SpriteRenderer2D、PointLight2D、ShadowOccluder2D、PerspectiveCamera3D、MeshRenderer3D 组件；
 - standalone fixed-capacity `ParticleSystem2D` 与 `Trail2D`；
 - World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；
 - Cooked Prefab node 到 World entity hierarchy 的事务式实例化。
@@ -59,6 +59,7 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 | `Camera2D` | FixedWorldHeight/PixelPerfect 投影、viewport、pixel snap | 每帧最多一个 active 2D camera；surface 0x0 时跳过 |
 | `SpriteRenderer2D` | weak Sprite `AssetHandle`、尺寸/pivot/UV override、颜色与排序 | World 只校验结构；visible extract 必须解析为当前 packet texture ref；UV finite 且严格递增 |
 | `PointLight2D` | linear RGB color、非负 intensity、正 world-space radius、active 标志 | Entity world position 是灯光中心；每帧最多8个 active light，按稳定 Entity identity 发布 |
+| `ShadowOccluder2D` | 一条 local-space 线段与 active 标志 | 应用已发布 XY scale/rotation/position；每帧最多32个 active segment，按稳定 Entity identity 发布 |
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
 | `MeshRenderer3D` | weak mesh/material `AssetHandle`、bounds、base color、可见性 | World 只校验结构；visible extract 通过两个 kind-specific resolver 解析非0 key |
 
@@ -106,7 +107,7 @@ updateWorldTransforms
   -> resolve active Camera2D and/or PerspectiveCamera3D
   -> borrowed resolver asks Asset registry to intern current Sprite texture binding
   -> emit visible SpriteRenderer2D items
-  -> collect active PointLight2D and deep-copy the Sprite2D lighting snapshot
+  -> collect active PointLight2D + ShadowOccluder2D and deep-copy the Sprite2D lighting snapshot
   -> borrowed kind-specific resolvers ask Mesh3D registry to intern current mesh/material bindings
   -> emit visible MeshRenderer3D items
   -> caller commits RenderSceneBuilder
@@ -122,8 +123,11 @@ borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/gene
 handle/resolver/binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden mesh
 不解析。`PointLight2D` 使用已发布 world position、显式 world-space radius 与 color×intensity，按稳定
 Entity identity 排序后写入固定8槽 Sprite2D snapshot；没有灯组件时保留 unlit path，inactive-only 发布
-ambient-only。超过上限返回 `TooManyActivePointLights2D`。该 snapshot 不改变 Sprite 透明排序，N1 不包含
-occluder/shadow。Scene 不保存 resolver、FrameResourceSink/ref、AssetLease、Cooked payload 或 GPU handle。
+ambient-only。超过上限返回 `TooManyActivePointLights2D`。`ShadowOccluder2D` 的 local 端点应用已发布
+XY scale、rotation、position 后，按稳定 Entity identity 写入固定32槽 world-space segment；超容量返回
+`TooManyActiveShadowOccluders2D`，非法或投影退化返回 `InvalidComponent`。遮挡只影响相交点光贡献，
+不改变 ambient 或 Sprite 透明排序；没有 PointLight2D 时不单独发布 occluder snapshot。Scene 不保存
+resolver、FrameResourceSink/ref、AssetLease、Cooked payload 或 GPU handle。
 
 A2 提供的产品 resolver 最初把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，由 Asset 层沿
 Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。A3 让 Particle/Trail 保存 Handle；
@@ -182,7 +186,8 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
 ## 验证
 
 - `tina_scene_tests`：entity generation、owner、destroy/reparent、Transform propagation、2D/3D component、
-  extraction、PointLight2D set/query/clear、world position/radius/color/intensity/ambient、inactive/超容量、
+  extraction、PointLight2D/ShadowOccluder2D set/query/clear、world position/segment/radius/color/intensity/ambient、
+  stable identity 排序、inactive/超容量、
   Prefab rollback/AssetId→Handle resolver、3D kind-specific resolver fail-closed，以及
   Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle 保留、resolver fail-closed/解析次数与
   writer capacity；
@@ -190,7 +195,7 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
   register/unbind transaction、key
   non-reuse、Texture/Sprite/Tileset/StaticMesh/Material Handle 与 cooked dependency fail-closed，以及 TileMap
   解析次数/失败清空；
-- `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking、Sprite2D lighting snapshot 深拷贝与事务失败；
+- `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking、Sprite2D lighting/shadow snapshot 深拷贝与事务失败；
 - `tina_sample_2d` / `tina_sample_3d`：产品 Asset → Scene → Render 路径；
 - header-isolation：公开头不得泄漏 EnTT、GLM、bgfx 或 cgltf。
 

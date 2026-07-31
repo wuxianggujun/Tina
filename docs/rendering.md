@@ -64,12 +64,13 @@ SPI。submit 时分别绑定 `s_texColor`、`s_texMR`（glTF 打包：G=roughnes
 1×1 白；未绑定 MR 图时 metallic=0、roughness=1；未绑定 normal 图时只用几何法线。诚实限制：无通用
 light component/culling、无 IBL、无 shadow。
 
-Sprite2D lighting（`2D-LIGHT-N1`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 world-space point
-light、正半径、非负 RGB 与 ambient。`setSprite2DLighting()` 深拷贝调用方 span，重复/非法描述使 build
+Sprite2D lighting（`2D-LIGHT-N2`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 world-space point
+light、0..32个 world-space shadow segment、正半径、非负 RGB 与 ambient；shadow endpoint 必须 finite，
+且 segment 不得退化为同一点。`setSprite2DLighting()` 深拷贝调用方 span，重复/非法描述使 build
 原子失败；未配置 snapshot 时 bgfx 使用 ambient=1 的既有 unlit 输出。配置后 fragment shader 以 world
-position 计算线性径向衰减，并在每个连续 texture batch 重新提交完整 uniform arrays。灯光不重排 Sprite，
-sorting layer → order → ordinal 与 premultiplied-alpha 合成保持不变。当前没有 occluder、shadow、normal
-map、light culling 或 HDR/tone mapping。
+position 计算线性径向衰减，并以 fragment→light 与 segment 相交测试清零被遮挡的点光贡献；每个连续
+texture batch 都重新提交完整 uniform arrays。ambient、sorting layer → order → ordinal 与
+premultiplied-alpha 合成保持不变。当前没有 soft shadow、normal map、light culling 或 HDR/tone mapping。
 
 ## RenderScene
 
@@ -88,7 +89,7 @@ beginFrame(surface facts)
 
 - Camera2D projection、viewport、pixel snap 与 world picking；
 - Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻兼容 batch；
-- optional self-contained Sprite2D lighting snapshot、最多8个 point light 与 ambient；
+- optional self-contained Sprite2D lighting snapshot、最多8个 point light、32个 shadow segment 与 ambient；
 - PerspectiveCamera3D、frustum culling、Opaque3D depth/state 与 stable batch；
 - framebuffer 0x0 suspended 路径；
 - 容量/非法数值/非法 resource ref 失败时不发布半份 scene。

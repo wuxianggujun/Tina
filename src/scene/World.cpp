@@ -26,6 +26,8 @@ struct World::EntityRecord final {
     SpriteRenderer2D spriteRenderer2D{};
     bool hasPointLight2D = false;
     PointLight2D pointLight2D{};
+    bool hasShadowOccluder2D = false;
+    ShadowOccluder2D shadowOccluder2D{};
     bool hasPerspectiveCamera3D = false;
     PerspectiveCamera3D perspectiveCamera3D{};
     bool hasMeshRenderer3D = false;
@@ -1091,6 +1093,65 @@ Core::Status World::clearPointLight2D(EntityId entity) noexcept
     return Core::success();
 }
 
+Core::Status World::setShadowOccluder2D(
+    EntityId entity,
+    ShadowOccluder2D occluder) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(occluder)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene ShadowOccluder2D endpoints must be finite and non-degenerate");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for ShadowOccluder2D");
+    }
+    entityRecord->shadowOccluder2D = occluder;
+    entityRecord->hasShadowOccluder2D = true;
+    return Core::success();
+}
+
+Core::Status World::clearShadowOccluder2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for ShadowOccluder2D clear");
+    }
+    entityRecord->hasShadowOccluder2D = false;
+    entityRecord->shadowOccluder2D = {};
+    return Core::success();
+}
+
 const Camera2D* World::camera2D(EntityId entity) const noexcept
 {
     if (m_impl == nullptr || !m_impl->isOwnerThread()) {
@@ -1125,6 +1186,18 @@ const PointLight2D* World::pointLight2D(EntityId entity) const noexcept
         return nullptr;
     }
     return &entityRecord->pointLight2D;
+}
+
+const ShadowOccluder2D* World::shadowOccluder2D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasShadowOccluder2D) {
+        return nullptr;
+    }
+    return &entityRecord->shadowOccluder2D;
 }
 
 Core::Status World::setPerspectiveCamera3D(EntityId entity, PerspectiveCamera3D camera) noexcept

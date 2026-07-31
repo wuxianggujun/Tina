@@ -42,6 +42,7 @@
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/ParticleSystem2D.hpp>
 #include <tina/scene/PointLight2D.hpp>
+#include <tina/scene/ShadowOccluder2D.hpp>
 #include <tina/scene/SpriteAnimator2D.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Trail2D.hpp>
@@ -126,6 +127,7 @@ inline constexpr u32 ProductTrailCapacity = 8;
 inline constexpr u32 ProductTrailSegments = 3;
 inline constexpr u64 ProductTrailStableKeyBase = 0x200000000ULL;
 inline constexpr u32 ProductPointLight2DCount = 2;
+inline constexpr u32 ProductShadowOccluder2DCount = 2;
 inline constexpr float ProductAmbientLight2DScale = 0.28F;
 inline constexpr Tina::InputActionId MoveLeftAction{1};
 inline constexpr Tina::InputActionId MoveRightAction{2};
@@ -340,6 +342,7 @@ struct LifecycleCounters final {
     std::string fxInitialFingerprint{};
     bool sprite2DLightingConfigured = false;
     u32 pointLight2DCount = 0;
+    u32 shadowOccluder2DCount = 0;
     u64 sceneLightingFrames = 0;
     // M11-B0: surface-driven Camera2D projection (FixedWorldHeight).
     u32 surfacePixelWidth = 960;
@@ -1409,6 +1412,42 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                 .color = {.red = 1.0F, .green = 0.48F, .blue = 0.18F},
                 .intensity = 0.9F,
                 .radiusMeters = 5.0F,
+            });
+        !status)
+    {
+        return status;
+    }
+
+    auto wallShadowEntity = world->createEntity(sceneTranslation(4.0F, 2.0F));
+    if (!wallShadowEntity)
+    {
+        return Tina::Core::failure(std::move(wallShadowEntity.error()));
+    }
+    if (const auto status = world->setShadowOccluder2D(
+            *wallShadowEntity,
+            Tina::Scene::ShadowOccluder2D{
+                .localStartX = 0.0F,
+                .localStartY = -1.5F,
+                .localEndX = 0.0F,
+                .localEndY = 1.5F,
+            });
+        !status)
+    {
+        return status;
+    }
+
+    auto ledgeShadowEntity = world->createEntity(sceneTranslation(6.0F, 1.5F));
+    if (!ledgeShadowEntity)
+    {
+        return Tina::Core::failure(std::move(ledgeShadowEntity.error()));
+    }
+    if (const auto status = world->setShadowOccluder2D(
+            *ledgeShadowEntity,
+            Tina::Scene::ShadowOccluder2D{
+                .localStartX = -1.0F,
+                .localStartY = 0.0F,
+                .localEndX = 1.0F,
+                .localEndY = 0.0F,
             });
         !status)
     {
@@ -3289,10 +3328,6 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             return status;
         }
-        counters_->sprite2DLightingConfigured = true;
-        counters_->pointLight2DCount = ProductPointLight2DCount;
-        ++counters_->sceneLightingFrames;
-
         // Gate counters from resolved camera fields after Scene extract.
         const Tina::Render::Camera2DProjectionQuery projectionQuery{
             .stableCameraKey = 1,
@@ -4167,6 +4202,14 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (const auto* statistics = capture.lastSubmittedWorldSceneStatistics(); statistics != nullptr)
+    {
+        counters.sprite2DLightingConfigured = statistics->sprite2DLightingConfigured;
+        counters.pointLight2DCount = statistics->pointLight2DCount;
+        counters.shadowOccluder2DCount = statistics->shadowOccluder2DCount;
+        counters.sceneLightingFrames = capture.sprite2DLightingFrameCount();
+    }
+
     // M11-D1: prefer capture taken on the final present; fall back to post-run capture.
     counters.pixelCaptureAttempted = true;
     if (capture.hasLastCapture() && capture.lastCapture() != nullptr && !capture.lastCapture()->empty())
@@ -4305,6 +4348,7 @@ int main(int argc, char** argv)
     const bool lighting2DValid =
         counters.sprite2DLightingConfigured &&
         counters.pointLight2DCount == ProductPointLight2DCount &&
+        counters.shadowOccluder2DCount == ProductShadowOccluder2DCount &&
         counters.sceneLightingFrames == counters.renderExtractions;
 
     const bool audioValid =
@@ -4429,7 +4473,7 @@ int main(int argc, char** argv)
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
     evidenceBytes.reserve(512);
-    appendLeU32(evidenceBytes, 15U); // schema
+    appendLeU32(evidenceBytes, 16U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
@@ -4465,6 +4509,7 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, ProductTrailSegments);
     appendLeU64(evidenceBytes, ProductTrailStableKeyBase);
     appendLeU32(evidenceBytes, ProductPointLight2DCount);
+    appendLeU32(evidenceBytes, ProductShadowOccluder2DCount);
     appendF32Bits(evidenceBytes, ProductAmbientLight2DScale);
     appendLeU32(evidenceBytes, counters.sprite2DLightingConfigured ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.sceneLightingFrames);
@@ -4585,6 +4630,7 @@ int main(int argc, char** argv)
                   << ",\"sprite2DLightingConfigured\":"
                   << (counters.sprite2DLightingConfigured ? "true" : "false")
                   << ",\"pointLight2DCount\":" << counters.pointLight2DCount
+                  << ",\"shadowOccluder2DCount\":" << counters.shadowOccluder2DCount
                   << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
                   << ",\"particleCapacity\":" << ProductParticleCapacity
                   << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
@@ -4771,6 +4817,7 @@ int main(int argc, char** argv)
               << ",\"sprite2DLightingConfigured\":"
               << (counters.sprite2DLightingConfigured ? "true" : "false")
               << ",\"pointLight2DCount\":" << counters.pointLight2DCount
+              << ",\"shadowOccluder2DCount\":" << counters.shadowOccluder2DCount
               << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
               << ",\"particleCapacity\":" << ProductParticleCapacity
               << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
@@ -4993,7 +5040,7 @@ int main(int argc, char** argv)
               << ",\"accessibilityTreeSelectionVerified\":"
               << (counters.accessibilityTreeSelectionVerified ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":15"
+              << ",\"evidenceSchema\":16"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
