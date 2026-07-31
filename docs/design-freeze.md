@@ -39,10 +39,13 @@
 | Handle | 强类型 generation + owner 边界 | [0019](adr/0019-generation-handles.md) | Implemented across current modules |
 | WindowSurface | move-only native lease 与主窗口交接 | [0020](adr/0020-window-surface-handoff.md) | Implemented |
 | Runtime UI | startup transaction + root/phase-scoped capability | [0021](adr/0021-runtime-ui-startup-capability.md) | Implemented |
+| UI Authoring | Element 组合 authoring、父/子布局分离与统一 committed 内容放置 | [0022](adr/0022-ui-element-authoring-and-layout.md) | Implemented：descriptor/recipe、Flow/Flex、Semantics、StyleRole/reset、bounded build transaction、`SolidRect` Canvas 与统一 RoundedRect 已落地 |
+| UI 扩展 | 可组合标准 Behavior、bounded Component、node-local StyleSheet、Image/Icon/NineSlice 与 paint-only Motion | [0023](adr/0023-ui-extensibility-style-paint-motion.md) | Partial：首个 UI benchmark protocol 已落地；Component/Image/Style/Motion 继续按垂直切片实现 |
 
 ## Proposed
 
-当前无 Proposed ADR。固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-002），不单独占 Proposed 行。
+当前无 Proposed ADR。固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-002），
+不单独占 Proposed 行。
 
 ## Deferred
 
@@ -50,7 +53,7 @@
 | --- | --- | --- |
 | Render | 完整 PBR/IBL/shadow、通用 pass scheduler、自研 RHI | experimental MR 产品路径稳定且有 profile/视觉需求 |
 | Physics | Jolt 3D adapter | 有明确 3D gameplay 场景与性能预算 |
-| UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；圆角/Image/stylesheet 等 Phase C 视觉能力 | 当前控件、产品与 accessibility 门禁稳定，并有明确文本/视觉需求 |
+| UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；逐角半径/圆角子树 clip/backdrop；Activatable Screen/Layer Stack；startup-only 自定义 Behavior SPI | 分别由 `TEXT-001`、`UI-PAINT-002`、`UI-FLOW-001`、`UI-BEHAVIOR-SPI-001` 跟踪；只有真实产品或插件需求并先冻结容量、失败与性能边界后才重新开启 |
 | Asset | 热重载、增量 Cooker、在线编辑 | Cooked schema、Lease/retirement 与产品打包稳定 |
 | Task | work stealing、fiber、lock-free 重写 | profile 证明共享有界队列是瓶颈，并新增 ADR |
 | Runtime | 多 World/editor orchestration | 有明确产品/editor 场景，并先冻结 World owner、State TaskGroup barrier 与跨 World 提交/关闭语义 |

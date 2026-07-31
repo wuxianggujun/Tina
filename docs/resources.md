@@ -258,6 +258,10 @@ component/culling 与通用 pass scheduler 仍属 `RENDER-001`。glTF importer �
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - hot reload、增量 Cooker、通用 Asset cache/LRU、Bundle/Patch 与 network Asset 尚未实现，见
   `ASSET-002`；
+- UI Image/Icon/NineSlice 尚未接入资源链。Planned `UI-IMAGE-001` 只保存 AssetId/图片元数据，并在当前
+  frame packet 中由 root-scoped resolver resolve/pin；目标是把现名 `Sprite2DTexture` frame kind/binding
+  泛化为 Sprite/UI 共用 Texture2D，不新增 `UITexture`、IconAsset 或第二套 atlas owner。该路线见
+  [UI 框架设计](ui-framework.md)与 Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)；
 - TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；
   优先级 IO 调度、editor authoring/undo/redo、自动 gameplay 生成、navigation 与旧 schema migration
   仍须独立验收；

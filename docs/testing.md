@@ -77,6 +77,23 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 测试数量随功能增长，不作为永久契约；本轮必须直接运行对应 GoogleTest executable，并以最终 gate
 JSON 与退出码记录结果。
 
+## UI performance quick run
+
+`tina_bench` 的 UI workload 使用真实 `UIContext`、committed snapshots、pointer route、虚拟集合与
+backend-neutral DisplayList。共享开发机只记录 `conclusion=provisional`；checksum、固定工作量、容量和
+warmup 后 UI PMR allocation delta 属于确定性不变量。
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug --target tina_bench --parallel 2 -- /nr:false
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_static_commit_v1 --warmup=60 --samples=600 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_paint_dirty_v1 --warmup=60 --samples=600 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_route_v1 --warmup=60 --samples=600 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_virtual_collection_v1 --warmup=60 --samples=600 --seed=1
+```
+
+正式采样规模、fingerprint 与固定机规则见[性能与内存](performance-memory.md)和
+[ADR 0018](adr/0018-benchmark-protocol.md)。
+
 ## UI showcase 门禁
 
 完整控件、中文与主题视觉验收使用 bgfx + FreeType 图：

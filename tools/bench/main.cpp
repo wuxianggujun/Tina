@@ -1,3 +1,5 @@
+#include "UIBenchmarkWorkloads.hpp"
+
 #include <tina/core/error/Error.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
@@ -16,6 +18,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -35,6 +38,7 @@ struct Options final {
     u64 warmUpFrames = 60;
     u64 measureFrames = 600;
     u64 seed = 1;
+    std::string_view workload = kWorkloadId;
     bool help = false;
 };
 
@@ -93,14 +97,22 @@ struct Counters final {
         }
         if (argument.starts_with(workloadPrefix)) {
             const auto id = argument.substr(workloadPrefix.size());
-            if (id != kWorkloadId) {
-                error = "unknown workload (supported: null_runtime_frames)";
+            if (id != kWorkloadId && !Tina::Bench::isUIBenchmarkWorkload(id)) {
+                error = "unknown workload (see --help for supported workload ids)";
                 return false;
             }
+            options.workload = id;
             continue;
         }
         error = "unknown argument: ";
         error.append(argument);
+        return false;
+    }
+
+    if (options.measureFrames == 0
+        || options.measureFrames > static_cast<u64>((std::numeric_limits<std::size_t>::max)())
+        || options.warmUpFrames > (std::numeric_limits<u64>::max)() - options.measureFrames) {
+        error = "invalid frame count";
         return false;
     }
     return true;
@@ -221,8 +233,9 @@ void printHelp()
         << "  --warmup=N                      frames excluded from quantiles (default 60)\n"
         << "  --samples=N                     measured frames after warmup (default 600)\n"
         << "  --seed=N                        workload seed mixed into per-frame work (default 1)\n"
-        << "  -h, --help\n"
-        << "Note: shared CI/dev machines produce provisional conclusions only.\n";
+        << "  -h, --help\n";
+    Tina::Bench::printUIBenchmarkHelp(std::cout);
+    std::cout << "Note: shared CI/dev machines produce provisional conclusions only.\n";
 }
 
 } // namespace
@@ -239,6 +252,17 @@ int main(int argc, char** argv)
     if (options.help) {
         printHelp();
         return 0;
+    }
+    if (Tina::Bench::isUIBenchmarkWorkload(options.workload)) {
+        return Tina::Bench::runUIBenchmark(
+            options.workload,
+            Tina::Bench::UIBenchmarkOptions{
+                .warmUpIterations = options.warmUpFrames,
+                .measureIterations = options.measureFrames,
+                .seed = options.seed,
+            },
+            std::cout,
+            std::cerr);
     }
 
     const u64 totalFrames = options.warmUpFrames + options.measureFrames;

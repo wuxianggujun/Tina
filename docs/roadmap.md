@@ -20,7 +20,7 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 Now 的退出条件：UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
 人工记录明确；没有未解释的 Accepted ADR/实现冲突。Linux AT-SPI 作为独立后置项，不阻塞 Windows
-UI-002 关闭。
+UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；即时反馈与 Motion 的文档边界保持明确。
 
 ## Next：产品验收、性能基线与对外可用
 
@@ -28,13 +28,51 @@ UI-002 关闭。
 | --- | --- |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
+| UI-RANGE-INPUT-KEYBOARD | Slider/RangeInput 独立键盘/手柄调值 command 与 Down/Up consumption latch，不复用空间焦点导航 |
+| UI-PERF-001 | InProgress；UI 静态、单节点 dirty、route、虚拟集合首个 milestone 已落地，后续扩展 Component build、Motion、Image/Icon/NineSlice workload/counter/checksum |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
+| UI-COMPONENT-001 | 标准 Behavior 独立 side store 与 phase-scoped bounded component transaction，让第三方通过组合扩展业务控件 |
+| UI-IMAGE-001 | Image/Icon/NineSlice 从第一类 content/Canvas、root-scoped AssetId resolver、FramePin、committed paint、RGBA ImageQuad 到 backend 的完整垂直切片；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
+| UI-STYLE-001 | 强类型 StyleClass/token、node-local pseudo-state 与预编译有界 stylesheet |
+| UI-MOTION-001 | color/opacity/corner radius/visual offset 的 fixed-capacity transition 与 reduced-motion |
+
+UI 框架主线按以下顺序推进；这是 UI lane 的依赖顺序，不阻塞 Asset、Render、UIA 等其他 lane 并行：
+
+```text
+UI-RANGE-INPUT-KEYBOARD
+  (independent interaction lane; uses completed Slider focus + Runtime route; no ADR 0023 dependency)
+
+UI-STATE-FEEDBACK Done (Windows Dark/Light visual gate 22/22)
+  -> ADR 0023 Accepted (capacity/failure/performance contract)
+  -> UI-PERF-001 initial milestone Done / task InProgress
+       |-> UI-IMAGE-001 A: Image/Icon + resolver/pin + RGBA ImageQuad + semantics
+       |     -> B: NineSlice 1..9 quad atomic expansion
+       |     -> C: product adoption + visual/performance evidence
+       `-> UI-COMPONENT-001
+UI-IMAGE-001 C + UI-COMPONENT-001
+  -> UI-STYLE-001 (waits for both property surfaces)
+  -> UI-MOTION-001
+
+UI-FLOW-001 (Later; starts only for a real page-stack requirement)
+SDK-001 (independent packaging lane; does not wait for UI-FLOW-001)
+```
+
+`UI-IMAGE-001` 与 `UI-COMPONENT-001` 没有直接依赖，可由两条 lane 并行推进；若只有一条 UI lane，先做
+Image/Icon，因为现有 Element 已能承载 leaf image，而 HUD/Inventory/Settings 立即需要真实纹理与图标。
+`UI-RANGE-INPUT-KEYBOARD` 的架构依赖不包含 ADR 0023；该独立 lane 继续按 Next/P1 收口。
+`UI-PERF-001` 首个 milestone 已完成，任务为 `InProgress`，Image/Component 已解锁；它不是只执行一次，
+Component、Image、Style、Motion 每个垂直切片都必须扩展同一
+counter/checksum 协议。固定机绝对时间阈值仍由 `PERF-002` 冻结；在此之前 clean-frame rebuild、容量、
+分配和 checksum 等确定性不变量可以阻断，开发机墙钟只报告 `provisional`。`SDK-001` 先证明当前公开
+SDK 可安装；以后每个新增公共 UI 切片同步扩展 consumer gate，不等待 Deferred 的 UI Flow。
 
 ## Later：扩展能力
 
 - PBR Material、lighting 与通用 pass scheduling；
 - Jolt 3D physics adapter；
-- Image widget、rounded rectangle、可组合 stylesheet 与更完整的视觉效果；
+- 逐角半径、圆角子树 clip、backdrop 与更完整的视觉效果；
+- Activatable Screen/Layer Stack/Action Router 和输入设备提示；
+- 仅在标准 Behavior 不足时评估 startup-only 自定义 Behavior SPI；
 - 多行 TextEdit、grapheme/shaping 与完整 IME 候选窗；
 - Linux AT-SPI adapter 与真实辅助技术验收；
 - Asset 热重载与增量 Cooker；
@@ -93,7 +131,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | --- | --- | --- |
 | 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle 已完成；全部 Sprite2D item 使用 packet-local `FrameResourceRef`，fixed-capacity registry 唯一拥有 resident Lease/GPU/binding；schema 16 增加两盏 `PointLight2D`、两条 `ShadowOccluder2D` 与逐次 Render extraction snapshot，并保留 Dark→Light→Dark、Scene Explorer TreeView stable-key selection/scroll/theme/semantics、2份 owner/retirement handoff、weak handle 失效、ledger Released 与四类 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | 2D light culling/soft shadow/normal map/独立视觉金标、TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 均为独立后续项 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
-| UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 层次、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction 与 Canvas `SolidRect` 组合面已关闭 | OS 级 DPI 与跨 GPU 金标；RoundedRect/Image/NineSlice 等更宽视觉能力由 `UI-THEME-C` 跟踪 |
+| UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 即时反馈、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction、Canvas `SolidRect` 与统一 RoundedRect 已关闭；ADR 0023 与 UI-PERF 首个 milestone 已关闭 | RangeInput command 是独立交互 lane；Image/Icon 与 Component 可并行，单 lane 优先 Image/Icon，再汇合到 Style、Motion；OS 级 DPI 与跨 GPU 金标由 `UI-003` 跟踪 |
 | UI accessibility | 平台中立 action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns 与真实 showcase HWND 跨进程自动 gate 已落地；gate 可输出属性/fragment、action 结果和正常关闭的 schema 1 JSON | 固化当前 tip 的带日期 gate 结果并完成 Windows Narrator/Inspect 人工金标；Linux AT-SPI 由 `UI-002-LINUX` 独立跟踪 |
 | 3D product | 双 mesh + Resources-owned AssetSystem + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material resolver、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、有界0..4 directional lights 已有证据（产品提交3灯）；schema 4 进一步证明2 Mesh/2 Material/3 Texture handoff、weak handle 失效、ledger Released、成熟 retained controls、Asset ListView/Scene TreeView 与 Dark→Light→Dark | RENDER-001 的完整 PBR/IBL/shadow/light component/pass scheduling |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion、独立 Texture/Mesh AssetLease readback retirement，以及 Task timeout/retry + Host-enforced TaskSystem worker-exit/join deadline 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |

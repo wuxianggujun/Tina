@@ -28,7 +28,7 @@ consumer 门禁。调用方按需链接现有模块 target；正式 SDK packagin
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、standalone Particle/Trail |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
-| `Tina::UI` | retained UI、Widget、text、semantics |
+| `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
 | `Tina::Physics2D` | optional Box2D-backed Tina API |
 
@@ -251,7 +251,20 @@ phase facade 对象。
 统一 logical-pixel `cornerRadius`；命令在
 `createElement()` 返回前复制到 Context 固定容量 pool，destroy/transaction rollback 回收 slot。公开
 `UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。`UIBoxPaint::cornerRadius` 同样只
-圆化自身 chrome，不建立子树 clip。Image/NineSlice、逐角半径、rounded clip 与 stylesheet 仍是后续扩展。
+圆化自身 chrome，不建立子树 clip。Image/Icon/NineSlice、逐角半径、rounded clip 与 stylesheet 仍是后续扩展。
+
+第三方当前可以组合现有 Element、布局、Semantics、StyleRole/局部 paint、routed listener 与官方控件
+callback，直接 `UITreeUpdater` 还可用固定预算 transaction 构建多节点业务组件。当前**不支持**注册
+Widget subclass、新 Behavior/state machine、用户 StyleClass/selector、Image/Icon/NineSlice、Motion/timeline 或
+GPU paint callback。虽然 `UIElementBehavior` 是公开 flags，私有 resolver 仍要求其组合匹配现有
+`BuiltinElementKind` storage contract；未知组合返回 `InvalidElementDescriptor`。因此“可组合业务 UI”
+不等于“已有开放控件插件 ABI”。目标边界见 [UI 框架设计](ui-framework.md)和 Accepted
+[ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。正式外部使用仍以 `SDK-001` 的安装 package 与
+consumer gate 为准。
+
+已接受的目标图片边界中，Icon 只会是 Image 的 atlas source/tint/default-layout recipe，Image/Icon 均落到同一
+RGBA ImageQuad；NineSlice 也复用同一图片源并在 DisplayList 前展开。当前公开头尚无这些 recipe、Image
+semantics role 或纹理 command，本文件不提前刊登未实现签名。
 
 UI-004 的 committed Focus Scope、显式 focus、Modal barrier/焦点恢复和持久 Primary Pointer Capture 已实现；
 `UIFocusNavigationDirection`/`routeFocusNavigation()` 基于 committed 几何提供不 wrap 的空间焦点选择，

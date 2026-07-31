@@ -3,7 +3,8 @@
 当前产品 UI 位于 `include/tina/ui` 与 `src/ui`。旧 Legacy UI 产品图已删除，但这两个目录是 vNext
 正式实现，不得作为 Legacy 残留移除。架构决策见 [ADR 0011](adr/0011-retained-ui.md)、
 [ADR 0021](adr/0021-runtime-ui-startup-capability.md)和
-[ADR 0022](adr/0022-ui-element-authoring-and-layout.md)。
+[ADR 0022](adr/0022-ui-element-authoring-and-layout.md)。当前实现与下一阶段框架演进的分界见
+[UI 框架设计](ui-framework.md)和 Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。
 
 ## 当前能力
 
@@ -14,12 +15,14 @@
 | Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView，固定容量 mutation |
 | Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、committed content placement、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
-| Paint | box/text/control paint、固定容量 backend-neutral `SolidRect` Canvas（含圆角半径）、axis-aligned clip、PaintCache、committed paint snapshot |
+| Paint | box/text/control paint、固定容量 backend-neutral `SolidRect` Canvas（含圆角半径）、axis-aligned clip、PaintCache、committed paint snapshot；**尚无 Image/Icon/NineSlice** |
 | Theme（A/B/C1） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset：surface 色阶、边框、圆角、可选 Low elevation 假影；**无**圆角子树 clip/毛玻璃/CSS stylesheet |
+| Motion | **尚未实现** duration/easing/tween/timeline；hover/pressed/focused/disabled 等状态当前直接切换目标 paint，不做时间插值 |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |
 | Runtime | startup root builder、phase-scoped tree updater（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
+| Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture 与 100k virtual collection 四条 schema-v1 provisional workload |
 | Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
 ## 所有权与句柄
@@ -81,12 +84,38 @@ Merge 按 tree 顺序合并 eligible descendant name，Exclude 删除完整语�
 semantics 独立，属性 setter 只 detach 对应 theme binding，`clearOverride()` 从当前 role/theme 恢复；
 Runtime phase facade 同样可切换/query role 和 reset override。
 
+当前 `UISemanticsRole` 尚无 Image role。未来 Image/Icon 切片中，装饰图标默认 `Exclude`；icon-only Button
+必须由 Button root 提供显式 name；只有独立表达信息的图片才发布 Image role，并要求显式 name，不能从
+AssetId 或资源文件名推导可访问名称。该约束来自 Accepted ADR 0023，不表示 Image semantics 已经实现。
+
 多节点业务组件可通过 `UIElementBuildTransaction` 固定 node budget 构建；集合内部 row pool 计入预算，
 创建失败、reset 或析构会回滚整棵组件及 text/canvas storage，active transaction 期间 structure/layout commit
 返回 `BuildTransactionInProgress`。事务对象只属于直接 `UITreeUpdater` authoring，不允许作为 Runtime phase
 facade 对象逃逸回调。公开 `UIWidgetKind` 已删除；私有 `BuiltinElementKind` 只服务成熟控件 storage/行为分派。
-Canvas 的 `SolidRect` 支持统一 `cornerRadius`；命令仍复制到固定容量 storage。Image/NineSlice、逐角半径、
+Canvas 的 `SolidRect` 支持统一 `cornerRadius`；命令仍复制到固定容量 storage。Image/Icon/NineSlice、逐角半径、
 圆角子树 clip 与 stylesheet 仍属后续扩展。
+
+### 第三方扩展边界
+
+当前第三方可以使用 Tina 的公开 Element authoring 组合业务 UI，但“组合业务组件”和“注册全新控件原语”
+不是同一能力：
+
+| 扩展方式 | 当前状态 | 边界 |
+| --- | --- | --- |
+| 组合 Panel/Label/Button/List 等 retained 子树 | 可用 | 通过统一 `createElement()` 与官方 `make*Element()` recipe |
+| 自定义布局、Semantics、命中策略、局部 box/text paint | 可用 | 仍受 fixed-capacity、owner-thread 与 phase 生命周期约束 |
+| 多节点业务组件 | 直接 `UITreeUpdater` 可用 | `UIElementBuildTransaction` 固定 node budget、失败整棵回滚；Runtime phase facade 尚无等价 component transaction |
+| 自定义 Canvas | 部分可用 | 仅 backend-neutral `SolidRect`；不能提交纹理、shader、GPU handle 或任意 paint callback |
+| 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override；没有用户 StyleClass/selector/pseudo-state rule |
+| 自定义交互 | 部分可用 | 可挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
+| 安装后作为外部 SDK 使用 | 尚未闭合 | 当前能在源码树内链接 `Tina::UI`，但尚无 `install(EXPORT)`、`Tina::GameSDK` package 与外部 consumer gate |
+
+`UIElementBehavior` 在公开头中表现为正交 flags，但当前私有 `UIElementContractResolver` 仍把 flags 的精确组合
+映射为一个 `BuiltinElementKind`；没有内建 storage contract 的组合会返回
+`InvalidElementDescriptor`。因此今天可以写 Inventory/Settings/HUD 等“组件 recipe”，不能仅靠新增 flags 得到
+任意 Switch、Knob 或自定义 drag state machine。目标设计是把标准 Activate/Toggle/Range/Text/Scroll/Select
+状态拆为独立固定容量 side store，让第三方优先通过标准 Behavior + 组合表达控件；更高阶的自定义 Behavior
+SPI 继续后置，不能绕过 committed snapshot 或 Render 边界。
 
 ## Tree 与事务提交
 
@@ -105,6 +134,14 @@ WindowId 不重建 Context。clean-subtree measure/arrange reuse 已实现；Lis
 Tree structure publication、subtree destroy 以及 layout/hit/paint snapshot 构建不依赖 C++ 调用栈递归；
 专项 stress gate 使用 50,000 层 retained tree 覆盖这些路径。Popup 最终绘制顺序所需的
 `inPopupSubtree` 在 layout preorder 中一次传播，publication 不再为每个节点重复回溯祖先链。
+
+当前性能边界需要如实区分：无 dirty 且 viewport 不变的 `commitLayout()` 会直接返回，
+`lastLayoutPassCount/lastHitRebuildCount/lastPaintSnapshotRebuildCount` 均为零；paint-only 状态变化不会使
+Layout/Hit dirty，dirty paint cache 只重算变化节点。但是当前 paint candidate 的容量校验与 committed
+snapshot 组装仍会线性遍历 layout/paint 数据，因此不能把一次局部 hover/pressed 更新描述为完整
+publication `O(1)`。Style/Motion/Image 扩展必须沿用现有 counter/high-water，并由 `UI-PERF-001` 分别测量
+clean commit、局部 dirty、active Motion 与 DisplayList 构建；口径见[性能与内存](performance-memory.md)和
+[UI 框架设计](ui-framework.md#性能模型与合入门槛)。
 
 `UILayoutStyle::padding` 同时参与 measure/auto-size 与 committed content box。所有 intrinsic-text
 element（Label、Button、TextEdit、RadioButton、Dropdown/DropdownItem 及虚拟 List/Tree row）的文字
@@ -157,10 +194,30 @@ callback 副作用。
 沿用相同 committed Modal/Contain scope；disabled、非 Targetable 与复合控件内部 Dropdown/List/Tree item
 不会成为通用候选。Dropdown、ListView、TreeView 与 TextEdit 始终优先执行各自的方向命令。
 
-TextEdit 通过独立 `UITextEditPaint` 复用唯一 `hoveredPrimaryControl`、`armedTextEdit` 与 committed text focus，
-背景按 disabled > pressed > hover > focus > normal 解析；selection/caret 颜色也由同一 paint 提供。
-Primary Up/cancel、disable、Hidden/Collapsed、destroy 与 Modal scope change 均沿既有状态清理和原子 commit
-路径移除 stale focus/pressed feedback，没有新增输入状态或 GPU callback。
+### 状态反馈与 Motion
+
+Button 已有真实点击反馈，但它当前是**即时状态切换**，不是动画：
+
+- hover/focus/pressed/disabled 选择各自背景色，pressed 优先于 hover/focus；
+- pressed 时交换亮/暗边框并把 shadow offset 收为零，形成按下深度；
+- Pointer、Keyboard、Gamepad 与 UIA 最终复用默认 action/callback，不等待视觉效果结束；
+- 状态改变只使后续 paint snapshot 采用新值，没有 animation clock、duration、easing、tween 或 timeline。
+
+现有控件的状态视觉还没有统一成通用 VisualState，各控件仍由既有输入状态直接解析 paint。Checkbox 的
+外 indicator 与 RadioButton indicator 已使用同一 hover tracking，采用 pressed > hover > focus > normal
+优先级；disabled 继续使用共享 widget opacity，checked/selected 前景不建立第二份状态。Slider 已对齐
+`Focusable` 契约：私有 trait、显式/Tab/空间焦点与 Primary drag 使用同一 committed focus，semantics
+发布真实 focus；其 thumb 的状态优先级为 drag > focus > normal，产品主题用 `focusRing` 提供 focus 色。
+ListView/TreeView 的 selected overlay 也复用既有 row hover/press 与 collection focus，采用 pressed > hover >
+focus > selected；虚拟 row 不保存第二份状态。TextEdit 通过独立 `UITextEditPaint` 复用唯一
+`hoveredPrimaryControl`、`armedTextEdit` 与 committed text focus，背景按 disabled > pressed > hover > focus >
+normal 解析；selection/caret 颜色也由同一 paint 提供。Primary Up/cancel、disable、Hidden/Collapsed、destroy
+与 Modal scope change 均沿既有状态清理和原子 commit 路径移除 stale focus/pressed feedback。
+
+首版 Motion 应保持 fixed-capacity 且只覆盖 paint-only 属性：背景/边框/文字颜色、opacity、统一圆角和
+visual offset。建议 Button hover 80-120ms、press 40-60ms、release 80-120ms，支持 reduced-motion；
+动画不得延迟 callback、改变真实 hit rect、隐式延期 `destroy()`，也不得为 active Motion 建立第二套游戏
+update loop。完整 keyframe timeline、spring/inertia 与 layout animation 不属于首版。
 
 ## Text、UTF-8 与 IME
 
@@ -241,7 +298,7 @@ UI 不调用 bgfx。`tina_ui_render_integration` 把 committed paint 转为固�
 当前支持 solid/glyph quad、带统一圆角半径的 Box/Element Canvas `SolidRect` 与 axis-aligned scissor。Runtime
 `RenderFramePacket`/FramePin 的
 present-return CPU completion 已落地
-（Null 同步 complete）。rounded/stencil 子树 clip、Image widget 与跨 GPU/DPI golden（UI-003）尚未完成。
+（Null 同步 complete）。rounded/stencil 子树 clip、Image/Icon/NineSlice 与跨 GPU/DPI golden（UI-003）尚未完成。
 
 ## 实际绘制链路
 
@@ -276,6 +333,11 @@ width/height/radius 计算 SDF coverage，保持相邻 batch 无 per-command uni
 premultiplied 颜色乘 coverage，
 backend 对每个 clip batch 设置 bgfx scissor，并使用 `ONE, INV_SRC_ALPHA` 混合。UI 模块本身不依赖
 bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx backend。
+
+这套现有 shader 只读取采样纹理的 `.r`，因此不能直接用于 RGBA Image/Icon。`UI-IMAGE-001` 必须增加
+RGBA `ImageQuad` shader mode/program，并让相邻 batch key 包含 packet-local Texture2D ref、clip、sampling
+和 shader mode；sampled straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继续遵守
+`ONE, INV_SRC_ALPHA` 混合；NineSlice 在 DisplayList 前展开为同一种 ImageQuad，不建立专用 backend primitive。
 
 ## 控件绘制矩阵
 
@@ -323,7 +385,7 @@ retained 状态并标记必要的 dirty 类别。
 - 另提供 `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome` 等）。
 
 `UIBoxPaint` 仍是 escape hatch，并可携带 borderLight/borderDark/borderWidth、shadow（假 elevation）与
-统一 `cornerRadius`。Image/NineSlice、逐角半径、圆角子树 clip、毛玻璃与 CSS 式 stylesheet 仍未实现。
+统一 `cornerRadius`。Image/Icon/NineSlice、逐角半径、圆角子树 clip、毛玻璃与 CSS 式 stylesheet 仍未实现。
 
 ## 产品接入与证据
 
@@ -443,21 +505,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构建说明](building.md)与
 [测试说明](testing.md)。
 
-## 后续任务
+## 相关后续任务（状态以 Backlog 为准）
 
 | ID | 范围 |
 | --- | --- |
 | `UI-002` | Windows UIA 产品验收：真实 HWND 跨进程属性/action gate 已有，待固化证据并完成 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
-| `UI-STATE-FEEDBACK` | Slider、Checkbox/RadioButton 与 List/Tree 状态子切片已完成；继续收敛 TextEdit 并补 Dark/Light 视觉证据 |
 | `UI-RANGE-INPUT-KEYBOARD` | 独立设计键盘/手柄调值 command、Down/Up latch、Gameplay suppression 与 min/max/step 行为；不得与空间焦点导航混用 |
-| `UI-THEME-C` | **已完成** Box/Canvas `SolidRect` 统一圆角半径、像素投影与 bgfx SDF；**待** Image/NineSlice、逐角半径、圆角 clip、backdrop blur 与完整 stylesheet resolver |
+| `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route 与 100k 虚拟集合首个 milestone 已落地并解锁 Image/Component；后续补 Component build、Style、Motion、Image/Icon/NineSlice workload，图片同时输出 quad `Q`、unique resource `U` 与 image batch `B`；固定机前时间结论只报 provisional |
+| `UI-COMPONENT-001` | 标准 Behavior 独立 side store、capability 校验与 Runtime phase-scoped bounded component transaction |
+| `UI-IMAGE-001` | A：Image/Icon content、atlas/tint/fit/sampling、root-scoped AssetId resolve/FramePin、RGBA ImageQuad 与 Image semantics；B：NineSlice 1..9 quad 原子展开；C：图标按钮/Inventory/NineSlice 产品与性能门禁。Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
+| `UI-STYLE-001` | 开放强类型 StyleClass/token ID、node-local pseudo-state selector 与预编译有界 stylesheet；不做完整 CSS |
+| `UI-MOTION-001` | fixed-capacity paint-only transition、monotonic clock、retarget 与 reduced-motion；action/hit/layout 契约保持不变 |
+| `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |
+| `UI-FLOW-001` | Deferred：有真实页面栈需求后再增加 Activatable Screen、Layer Stack、Action Router 与输入设备提示 |
+| `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
+| `SDK-001` | 独立交付可安装 CMake package 与外部 `find_package` consumer gate，不依赖 `UI-FLOW-001`；新增公共 UI 切片后同步扩展 consumer 覆盖 |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
 Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；UI-002-SPI 与
 可选 `tina_ui_uia` 属性、fragment、control pattern 与 action 切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture 与 UI-005 的
 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView 已完成。外部 Narrator 真机门禁与 UI-003
-跨 GPU/DPI 金标仍不能标成 Done。ADR 0022 的 Element composition 主体已完成，后续只保留更宽
-Theme/Paint 能力，不再重复列已删除的 `UIWidgetKind` 迁移。
+跨 GPU/DPI 金标仍不能标成 Done。ADR 0022 的 Element composition 主体已完成；下一阶段按
+`UI-PERF-001` 后 Image/Icon 与 Component/Behavior 可作为两个独立分支并行推进；只有一条 UI lane 时
+先做 Image/Icon，随后两条分支汇合到 StyleClass/pseudo-state，再做 paint-only Motion。不再重复列已删除的
+`UIWidgetKind` 迁移，也不把尚未实现的目标 API 写成当前能力。
