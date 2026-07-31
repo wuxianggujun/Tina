@@ -82,7 +82,7 @@ flowchart TD
 | `tina_asset_types` | `AssetHandle` 弱 generation identity、borrowed frame-resource resolver | header-only；只传递 Core/Render，不传递完整 Asset/Task/Physics |
 | `tina_scene` | generation entity、Transform、2D/3D component 与 extraction | 仅通过 AssetTypes 引用弱 Handle；当前不链接 EnTT/GLM |
 | `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；两类 registry 都借用 AssetSystem/device，并唯一拥有各自 resident Lease/GPU/binding |
-| `tina_ui` | retained tree、layout/hit/route/paint/semantics、Widget、文本/Glyph、accessibility action | 当前产品 UI 位于 `src/ui`；UI-004/UI-005 已完成 |
+| `tina_ui` | retained Element tree、layout/hit/route/paint/semantics、文本/Glyph、accessibility action | 当前产品 UI 位于 `src/ui`；UI-004/UI-005 已完成，框架演进见 [UI 框架设计](ui-framework.md) |
 | `tina_physics2d` | Box2D 3.x 的 Tina-owned 生命周期与查询边界 | 可选，Box2D PRIVATE |
 
 ### 私有 adapter 与组合
@@ -193,8 +193,9 @@ Prefab 依赖 AssetId（多 prim 展开父+子节点）。`tina_sample_3d` 把 C
 覆盖 multi-mesh cook -> upload/bind -> Prefab resolve -> extract/draw 的产品 E2E。相对文件或
 bufferView 的 baseColor/MR/normal 贴图可 cook 为 RGBA8 Texture2D 并成为 Material dependency；产品路径
 完成外部 URI/size policy、GPU binding 与 experimental metallic-roughness 采样（material factors、
-`Mesh3DLightingDesc` 单次提交0..4 directional lights）。完整 PBR、IBL/shadow、light component/culling、
-通用 pass system 与通用 GPU submission fence 仍未完成。Frame packet 的 FramePin 只覆盖同步
+`Mesh3DLightingDesc` 有界0..4 directional lights）。`DirectionalLight3D` 由 World 拥有，并在每帧 Scene
+extraction 中按稳定 Entity identity 复制为 self-contained RenderScene snapshot。完整 PBR、IBL/shadow、
+point/spot light、light culling、通用 pass system 与通用 GPU submission fence 仍未完成。Frame packet 的 FramePin 只覆盖同步
 submit/present 的 CPU 借用期；Texture/Mesh 则使用独立 readback completion marker，并已把 AssetLease
 合并到 backend retirement，二者不能互相作为完成证据。
 
@@ -222,10 +223,18 @@ cleanup 账簿都已删除。`ASSET-HANDLE-SCENE` 的 A1-A6 与 N16.1-N16.4 已�
 
 ## 当前 UI 边界
 
-当前 Widget 包括 `Root`、`Panel`、`Modal`、`Label`、`Button`、`Checkbox`、`Slider`、`ProgressBar`、
+当前内建 Element kind 包括 `Root`、`Panel`、`Modal`、`Label`、`Button`、`Checkbox`、`Slider`、`ProgressBar`、
 `RadioButton`、单行 `TextEdit`、`ScrollView`、`Dropdown`/`Popup`/`DropdownItem`，以及虚拟化
 `ListView`/`TreeView`。UI-004 的 Focus Scope、显式 focus、Modal barrier/焦点恢复与持久 Pointer Capture
 已经完成；UI-005 的滚动、弹出组合控件与固定 row pool 集合控件也已经完成。
+
+业务扩展当前以 Element 组合为主：第三方可组合 retained 子树、布局、Semantics、StyleRole/局部 paint 与
+现有 callback，但不能注册 Widget subclass、新 Behavior、stylesheet、Image/Icon/NineSlice、Motion 或 GPU paint
+callback。Button 已有即时 hover/pressed/focus/disabled 反馈，尚无时间插值动画；`makeSliderElement()` 的
+Focusable/Focus semantics 已与私有 keyboard-focus trait 对齐，Slider 可参与 Tab/空间导航与显式焦点；
+`UI-STATE-FEEDBACK` 的 Dark/Light 产品视觉证据已完成。RangeInput 通过独立 capability command 在 focused
+Slider 上消费 Arrow/D-pad 调值，不复用通用空间焦点状态机。后续 Component、
+Image/Icon/NineSlice、StyleClass/pseudo-state 与 paint-only Motion 的具体取舍见 [UI 框架设计](ui-framework.md)。
 
 文本使用严格 UTF-8；MSVC target 强制 `/utf-8`。可选 FreeType 负责 rasterization，UI/Render 通过 R8
 Glyph atlas 与后端无关 DisplayList 连接。ProgressBar 是非交互的 determinate range/value 控件；

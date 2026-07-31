@@ -193,7 +193,8 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
   `createMesh3DBinding()` allocator；
 - 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
   `set/clearMesh3DMaterialBinding()` texture/factor bundle；细粒度 material setter 是低层 direct SPI；
-- experimental Opaque3D `Mesh3DLightingDesc`（同步提交0..4 directional lights + 非负 ambient）；
+- experimental Opaque3D `Mesh3DLightingDesc`（同步消费0..4 directional lights + 非负 ambient）；
+  `IRenderDevice::setMesh3DLighting()` 是低层 fallback/direct SPI；
 - primary framebuffer RGBA8 capture。
 
 `validateTexture2D()` 成功只证明该 handle 的 owner/index/generation 当前能在目标 device 的 Texture2D
@@ -208,9 +209,10 @@ wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与
 `retire*` + backend marker，不能把两类 completion 混用。
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
-并可把一次 `setSprite2DLighting()` 深拷贝为 self-contained 的 committed frame snapshot；重复设置或
-非法描述使当前 build 原子失败。Sprite2D snapshot 最多保存8个 world-space point light、32个
-world-space shadow segment 与 ambient，且不改变透明 Sprite 的既有排序。commit 后返回 borrowed view。
+并可把一次 `setSprite2DLighting()` / `setMesh3DLighting()` 深拷贝为 self-contained 的 committed frame
+snapshot；同类 lighting 重复设置或非法描述使当前 build 原子失败。Sprite2D snapshot 最多保存8个
+world-space point light、32个 world-space shadow segment 与 ambient，且不改变透明 Sprite 的既有排序。
+commit 后返回 borrowed view。
 `RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
 `FrameResourceRef`；`RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
 backend 在同步 submit 中分别按 `Sprite2DTexture`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
@@ -272,8 +274,16 @@ Keyboard Arrow 与 Gamepad D-pad 通过 Runtime 复用该路由，复合控件�
 `makeSliderElement()` 声明的 `Focusable | RangeInput` 与 Focus semantics 已由 runtime trait 对齐：Slider 可由
 `requestFocus()`、Tab、空间导航和 Primary drag 获得同一 committed focus，并遵守 Modal/Contain scope；
 disabled、Hidden/Collapsed、destroy 与 Modal change 会清除或迁移焦点。`UISliderPaint::focusedThumbColor`
-只表达该焦点的 paint feedback，dragging 仍优先。当前 Arrow/D-pad 不修改 Slider value；键盘/手柄调值由
-独立 `UI-RANGE-INPUT-KEYBOARD` 任务定义，不属于现有 RangeInput 公共契约。
+只表达该焦点的 paint feedback，dragging 仍优先。
+
+`UIRangeInputCommand::{Decrease,Increase}` 与 `UIContext::routeRangeInputCommand()` 提供独立于空间焦点的
+capability-level 调值契约。Runtime 将 Keyboard Left/Down 与 D-pad Left/Down 映射为 Decrease，将
+Right/Up 映射为 Increase；路由优先级位于 Dropdown/ListView/TreeView/TextEdit 等复合方向控件之后、
+通用空间焦点之前。focused Slider 复用 Pointer/UIA 已有的 min/max/step/clamp、量化、value storage 与 callback
+路径；`step == 0` 时使用 range 的 1%。`UIRangeInputCommandResult` 分开报告 `consumed`、`changed` 与
+`targeted`：只有成功改变 value 的 Down 才建立 fixed-capacity exact-control latch，匹配 Up 即使焦点或
+enabled 状态已变化仍成对消费；read-only 或边界值目标不修改、不 latch，也不被重新解释为空间焦点，
+未消费 transition 仍可交给 Gameplay。
 `UICheckboxPaint` 与 `UIRadioButtonPaint` 提供 hover/focus/pressed indicator override；零 alpha 回退到下一
 状态，非零颜色按 pressed > hover > focus > normal 解析。disabled 仍统一应用 widget opacity，Checkbox
 checked 前景与 RadioButton selected 前景继续读取各自既有字段。默认 Dark/Light recipe 均提供可辨识状态色。
@@ -302,7 +312,7 @@ Narrator/Inspect 人工金标仍由 UI-002 跟踪，Linux AT-SPI adapter/真机�
 ## Scene
 
 `Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Camera2D/
-SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3D。
+SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3D/DirectionalLight3D。
 `extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material weak `AssetHandle`。
@@ -319,6 +329,11 @@ sprite 不解析。Scene 不保存 resolver、sink、ref 或任何 Asset owner�
 由两者按当前 Store owner/generation、预期 StaticMesh/Material kind 与 binding 状态 intern 为非空
 packet-local ref。任一 resolver/handle/binding 无效返回 `UnresolvedMesh`；mesh 解析失败时不调用 material
 resolver，hidden mesh 不解析。`PrefabMeshBinding` 只完成 AssetId→Handle，不保存或分配 Render key。
+
+`DirectionalLight3D` 保存 linear color、非负 intensity 与 active 标志；Entity 的 world local `+Z` 指向
+光源。extraction 按稳定 Entity identity 收集最多4个 active light，把 world direction、color×intensity 与
+`ExtractRenderSceneParams::ambientLightScale` 写入当前帧 RenderScene lighting snapshot。超容量显式返回
+`TooManyActiveDirectionalLights`，不做静默裁剪；Scene 不持有 device lighting 状态。
 
 `PointLight2D` 保存 linear color、非负 intensity、正 world-space `radiusMeters` 与 active 标志；Entity 的
 world position 是光源中心，transform scale 不缩放半径。extraction 按稳定 Entity identity 收集最多8个
@@ -454,8 +469,8 @@ multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
 metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtime Opaque3D 为 experimental
 MR hybrid；engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors，
-direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional lights。完整 light component/IBL/
-shadow 尚未完成。
+direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional lights，World directional
+component 每帧提取到 RenderScene。point/spot light、light culling、IBL/shadow 尚未完成。
 
 ## Audio 与 Physics
 
@@ -525,9 +540,12 @@ Invoke/Toggle/RangeValue/Value patterns。
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh retirement）；
-- 完整 PBR/IBL/shadow、light component/culling 与通用 pass scheduler；
+- 完整 PBR/IBL/shadow、point/spot light、light culling 与通用 pass scheduler；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
+- Runtime phase-scoped bounded component transaction 与可自由组合的标准 Behavior side store；
+- Image/Icon/NineSlice、用户 StyleClass/node-local pseudo-state stylesheet 与 paint-only Motion；
+- Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
 - 正式 `Tina::GameSDK` install/export/package ABI。

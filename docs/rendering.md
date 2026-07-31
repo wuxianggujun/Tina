@@ -3,8 +3,9 @@
 Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在于 `tina_render_bgfx` 私有
 实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，以及 EngineHost 侧
 `RenderFramePacket` + FramePin + packet-local `FrameResourceRef` table + present-return CPU completion。Opaque3D 产品着色为 **experimental
-metallic-roughness hybrid**：`setMesh3DLighting()` 一次提交0..4个 directional lights + 常量 ambient；
-无 IBL/阴影/light component/culling。当前没有通用 pass scheduler 或通用 GPU submission fence；
+metallic-roughness hybrid**：Scene extraction 每帧提交0..4个 directional lights + ambient 的自包含
+`RenderScene` snapshot；`setMesh3DLighting()` 仍是低层 device fallback/direct SPI。当前无 point/spot light、
+light culling、IBL 或阴影，也没有通用 pass scheduler 或通用 GPU submission fence；
 Texture2D/StaticMesh 已有独立、backend-proven 的 GPU resource retirement completion。
 
 ## Target 边界
@@ -58,11 +59,14 @@ CPU ticket，也不把普通 frame number 描述为 fence。
 Opaque3D（experimental MR hybrid）：产品 registry 通过单次 `setMesh3DMaterialBinding()` 原子提交
 baseColor/MR/normal 与 Cooked Material v2 metallic/roughness factor；细粒度 setter 仅保留为低层 direct
 SPI。submit 时分别绑定 `s_texColor`、`s_texMR`（glTF 打包：G=roughness、B=metallic）与
-`s_texNormal`。`Mesh3DLightingDesc` 是唯一 lighting 提交模型：同步消费
-0..4个 backend-neutral directional light 与 ambient；超容量、零方向、负 RGB/ambient 或非有限值失败。
+`s_texNormal`。`Mesh3DLightingDesc` 是唯一 lighting 描述模型：writer/device 均同步消费0..4个
+backend-neutral directional light 与 ambient；超容量、零方向、负 RGB/ambient 或非有限值失败。
+`RenderSceneWriter::setMesh3DLighting()` 将调用方 span 深拷贝进固定4槽的 committed frame snapshot；
+bgfx 只在当前 submit 中临时覆盖持久 device fallback，不污染后续帧。World 未声明灯组件时不发布 snapshot；
+已声明但全部 inactive 时发布0灯 + ambient snapshot，显式覆盖 fallback。
 着色 = baseColor × 贴图 ×（bounded directional Lambert + Blinn-Phong 近似 specular + ambient）；未绑定 baseColor 用
-1×1 白；未绑定 MR 图时 metallic=0、roughness=1；未绑定 normal 图时只用几何法线。诚实限制：无通用
-light component/culling、无 IBL、无 shadow。
+1×1 白；未绑定 MR 图时 metallic=0、roughness=1；未绑定 normal 图时只用几何法线。诚实限制：当前
+只有 directional Scene component；无 point/spot light、light culling、IBL 或 shadow。
 
 Sprite2D lighting（`2D-LIGHT-N2`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 world-space point
 light、0..32个 world-space shadow segment、正半径、非负 RGB 与 ambient；shadow endpoint 必须 finite，
@@ -81,6 +85,7 @@ beginFrame(surface facts)
   -> phase-local writer
   -> add Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D
   -> optional setSprite2DLighting (deep-copy fixed frame snapshot)
+  -> optional setMesh3DLighting (deep-copy fixed frame snapshot)
   -> validate, cull, stable sort and batch
   -> commit borrowed view
 ```
@@ -91,6 +96,7 @@ beginFrame(surface facts)
 - Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻兼容 batch；
 - optional self-contained Sprite2D lighting snapshot、最多8个 point light、32个 shadow segment 与 ambient；
 - PerspectiveCamera3D、frustum culling、Opaque3D depth/state 与 stable batch；
+- optional self-contained Mesh3D lighting snapshot、重复设置/非法描述的事务失败与统计；
 - framebuffer 0x0 suspended 路径；
 - 容量/非法数值/非法 resource ref 失败时不发布半份 scene。
 
@@ -112,7 +118,14 @@ UI paint 通过 integration 转为固定容量 DisplayList。当前 command/batc
 - bgfx R8 atlas create/update、solid white texture 与 glyph texture binding；
 - UI → Render integration tests 与 bgfx geometry tests。
 
-rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未完成。
+rounded/stencil 子树 clip、Image/Icon/NineSlice、复杂 material 与跨 GPU golden 仍未完成；统一
+RoundedRect/SolidQuad corner radius 已实现，不再列作缺口。
+
+Proposed `UI-IMAGE-001` 将增加 RGBA `ImageQuad`，Image/Icon 各发一个 command，NineSlice 在 UI committed
+paint 中展开为 1..9 个相同 command。batch 持有 packet-local 通用 Texture2D ref 与 sampling，command
+持有 bounds/UV/tint/clip；现有只采样 R8 `.r` coverage 的 Solid/Glyph shader 继续保留，RGBA 图片选择独立
+shader mode/program，并在采样后 premultiply。具体资源 owner、失败策略和性能门禁见
+[UI 框架设计](ui-framework.md)，这里不把 Proposed 路线写成当前能力。
 
 ## GPU 资源
 
@@ -134,7 +147,7 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 | `set/clearMesh3DMaterialBinding` | 原子替换/整组清除三张纹理与 factors | 原子替换/整组清除三张纹理与 factors |
 | `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D MR submit **采样** `s_texColor`（默认 1×1 白） |
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
-| `setMesh3DLighting` | 同步校验/复制有界描述 | 0..4 directional lights + ambient；shader 使用两个4×vec4 uniform array |
+| `setMesh3DLighting` | 同步校验/复制低层 fallback | 未提供 frame-scoped Scene lighting 时使用；0..4 directional lights + ambient |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径 |
 
 `createSprite2DTextureBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
@@ -179,7 +192,7 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - native WindowSurface 初始化、resize/suspend、submit/present/shutdown；
 - transient frame budget 与容量失败；
 - Sprite2D textured quad pass + frame-scoped 0..8 point lights；
-- Opaque3D experimental metallic-roughness hybrid mesh/depth pass（单次有界0..4 directional lights）；
+- Opaque3D experimental metallic-roughness hybrid mesh/depth pass（优先消费 frame-scoped 0..4 directional lights；每帧只编码一次 uniform arrays）；
 - UI solid/glyph pass；
 - Texture2D/StaticMesh generation storage 与 key binding；
 - Texture2D/StaticMesh backend-proven retirement marker、suspend flush 与 shutdown hard drain；
@@ -189,7 +202,8 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 `tina_sample_2d` 已使用 Cooked Texture2D 与产品 sprite binding；`tina_sample_3d` 已使用 Cooked
 StaticMesh/Material/Prefab 的 **双 mesh** engine-provided、State-owned registry binding（3D-001 / N15），
 N16.4 再统一其 Lease/GPU/binding owner 与 packet-local resource ref；Material 通过原子 bundle 提交
-baseColor/MR/normal/factors，再调用 lighting API；bgfx Opaque3D 以 experimental MR hybrid 着色。
+baseColor/MR/normal/factors；当前 Scene `DirectionalLight3D` 每帧提取到 RenderScene snapshot，bgfx
+Opaque3D 以 experimental MR hybrid 着色。
 
 ## Surface 与线程
 
@@ -213,6 +227,6 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 ```
 
 测试映射与 Visual 证据规则见 [测试说明](testing.md)。`RENDER-001` 已落地 experimental MR +
-MR/normal/factors，以及唯一 `Mesh3DLightingDesc` 有界4 directional-light 提交；产品 sample 一次提交3灯。
-完整 PBR / IBL / shadow / light component / pass scheduling、通用 GPU submission fence 与跨 DPI/GPU
+MR/normal/factors、有界4 directional-light 描述，以及 Scene component 到逐帧 RenderScene snapshot；产品
+sample 的3个 light entity 连续300帧发布。完整 PBR / IBL / shadow、point/spot light、light culling、pass scheduling、通用 GPU submission fence 与跨 DPI/GPU
 visual gate（`UI-003`）仍后置；Texture/Mesh resource retirement 已不属于这些后置项。

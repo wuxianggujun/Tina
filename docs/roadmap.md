@@ -28,7 +28,6 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | --- | --- |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
-| UI-RANGE-INPUT-KEYBOARD | Slider/RangeInput 独立键盘/手柄调值 command 与 Down/Up consumption latch，不复用空间焦点导航 |
 | UI-PERF-001 | InProgress；UI 静态、单节点 dirty、route、虚拟集合首个 milestone 已落地，后续扩展 Component build、Motion、Image/Icon/NineSlice workload/counter/checksum |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-COMPONENT-001 | 标准 Behavior 独立 side store 与 phase-scoped bounded component transaction，让第三方通过组合扩展业务控件 |
@@ -39,8 +38,8 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 UI 框架主线按以下顺序推进；这是 UI lane 的依赖顺序，不阻塞 Asset、Render、UIA 等其他 lane 并行：
 
 ```text
-UI-RANGE-INPUT-KEYBOARD
-  (independent interaction lane; uses completed Slider focus + Runtime route; no ADR 0023 dependency)
+UI-RANGE-INPUT-KEYBOARD Done
+  (independent capability command + exact-control Down/Up latch; no spatial-focus state reuse)
 
 UI-STATE-FEEDBACK Done (Windows Dark/Light visual gate 22/22)
   -> ADR 0023 Accepted (capacity/failure/performance contract)
@@ -59,7 +58,7 @@ SDK-001 (independent packaging lane; does not wait for UI-FLOW-001)
 
 `UI-IMAGE-001` 与 `UI-COMPONENT-001` 没有直接依赖，可由两条 lane 并行推进；若只有一条 UI lane，先做
 Image/Icon，因为现有 Element 已能承载 leaf image，而 HUD/Inventory/Settings 立即需要真实纹理与图标。
-`UI-RANGE-INPUT-KEYBOARD` 的架构依赖不包含 ADR 0023；该独立 lane 继续按 Next/P1 收口。
+`UI-RANGE-INPUT-KEYBOARD` 已独立关闭且不依赖 ADR 0023；后续 Image/Component 不复制其输入状态。
 `UI-PERF-001` 首个 milestone 已完成，任务为 `InProgress`，Image/Component 已解锁；它不是只执行一次，
 Component、Image、Style、Motion 每个垂直切片都必须扩展同一
 counter/checksum 协议。固定机绝对时间阈值仍由 `PERF-002` 冻结；在此之前 clean-frame rebuild、容量、
@@ -84,6 +83,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 阶段/任务 | 完成结果 |
 | --- | --- |
+| UI-RANGE-INPUT-KEYBOARD | capability-shaped Decrease/Increase command、Keyboard Arrow/Gamepad D-pad Runtime 映射与 fixed-capacity exact-control Down/Up latch 已落地；Slider 调值复用 Pointer/UIA 的量化 mutation/callback，read-only/边界值不修改、不误触发空间焦点且 Gameplay transition 保持可见 |
 | UI-STATE-FEEDBACK | Slider、Checkbox/RadioButton、List/Tree 与 TextEdit 复用唯一交互/焦点状态源并完成 stale-state 清理；Windows MSVC/bgfx/FreeType Dark/Light 产品门禁22项差分检查全部通过，证据见 [UI-STATE-FEEDBACK Windows Evidence](ui-state-feedback-evidence-windows.md) |
 | UI-ELEMENT-AUTHORING / ADR 0022 | authoring 统一为 descriptor/recipe `createElement()`；Flex/Overlay、committed content placement、显式 Semantics/Merge/Exclude、Theme role/override reset、固定容量 build transaction 与 bounded Canvas `SolidRect` 已落地；公开 `UIWidgetKind`/create-by-kind surface 删除；UI/Runtime UI/UI-Render/FreeType/UIA/bgfx 直接测试、Showcase Dark/Light smoke/capture、2D/3D smoke 与 UI-003 baseline gate 通过 |
 | M0～M5 | C++23 构建基线、设计审计、ADR 与依赖方向建立 |
@@ -98,6 +98,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | 2D-TILEMAP-LAYERS / N1 | TileMap schema v2 有序 tile/object layers、非零唯一稳定 ID、visibility/UTF-8 properties、point/rectangle；recipe 单一显式 block 语法；runtime render/chunk/collision 显式 layer ID；sample 消费 layer 30 的 object 101/102；发布前验证 Tileset dependency/localId |
 | 2D-PHYSICS-EXPAND / N2 | Body/Shape/Joint 独立 generation；Box/Circle/Capsule 与多 shape/body；sensor enter/exit；Distance joint；body 级联 retirement；TileMap bridge 与产品 sample 迁移；29/29 模块测试及 300 帧 sensor/joint 证据 |
 | RENDER-001-NLIGHT / N4 | Opaque3D lighting 收敛为唯一 `Mesh3DLightingDesc`，有界0..4 directional lights；Null/bgfx/shader/sample/test 同步；产品一次提交3灯 |
+| RENDER-001-SCENE-LIGHTS | `DirectionalLight3D` 进入 World；最多4个 active component 按稳定 Entity identity 转换 world direction/color×intensity，逐帧深拷贝为 RenderScene snapshot；Null/bgfx 与 product-3d schema 5 证明3灯连续300帧消费 |
 | 2D-INPUT-ADV / N3 | Runtime 单一 unified binding 覆盖 digital/analog value、deadzone/scale、两种合成、多手柄、UI suppression 与 next-frame transactional rebind；本轮测试执行结果以最终验证记录为准 |
 | 2D-TILEMAP-STREAM | TileMap v3 stream root + 独立 deferred TileMapChunk；固定容量 Camera/layer demand、request budget、cancel/unload、lease 与 transactional capacity；resident generation 贯通 dirty cache；产品 sample 每帧推进 visual/collision residency |
 | 2D-TILEMAP-LRU | retain window 作为 optional cache；按成功 demand update 时位于 load window 的 recency 自动淘汰，读取不 touch；desired 强需求超 capacity 仍 transactional |
@@ -120,7 +121,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | UI-002-ACTION | 平台中立 `UIAccessibilityAction` seam 完成 Focus/Invoke/Toggle/SetRangeValue/SetTextValue；owner-thread dispatch 保留正常控件 callback，并对 stale、disabled 与 kind 不兼容目标 fail closed（`7d84ae67`） |
 | UI-002-CONTROL-PATTERNS | Windows UIA 完成 Invoke/Toggle/RangeValue/Value pattern、跨线程 HWND action dispatch 与 provider snapshot 生命周期门禁；对应 UI/UIA 单测落地（`e82f1aaf`） |
 | UI-002-EXTERNAL-HWND-GATE | `RunUi002UiaGate.ps1` 由独立 Windows UI Automation client 连接真实 showcase HWND，自动验证属性/fragment、四类 control pattern action 与 `WM_CLOSE` 正常退出，并输出 schema 1 JSON；不声称 Narrator 合规（`e82f1aaf`） |
-| TEST-003 | bgfx + FreeType 图同轮运行 Core/Scene/Asset/Render/UI 模块测试和 300 帧 product-3d；schema 4 同时验证 glTF/PBR/3-light、Mesh/Material/共享 Texture owner retirement、packet-local resolver、Asset ListView/Scene TreeView 与 Dark→Light→Dark retained UI |
+| TEST-003 | bgfx + FreeType 图同轮运行 Core/Scene/Asset/Render/UI 模块测试和 300 帧 product-3d；当前 schema 5 同时验证 glTF/PBR、3个 World light 的逐帧 snapshot、Mesh/Material/共享 Texture owner retirement、packet-local resolver、Asset ListView/Scene TreeView 与 Dark→Light→Dark retained UI |
 
 “M12 Done”只表示产品删除完成，不自动证明后续 Linux、PBR、accessibility 或 benchmark 门禁；
 其中 Linux tip 已由 TEST-001 另行关闭，其他剩余工作继续由 Backlog 跟踪，不再扩写 M12 历史清单。
@@ -133,7 +134,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
 | UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 即时反馈、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction、Canvas `SolidRect` 与统一 RoundedRect 已关闭；ADR 0023 与 UI-PERF 首个 milestone 已关闭 | RangeInput command 是独立交互 lane；Image/Icon 与 Component 可并行，单 lane 优先 Image/Icon，再汇合到 Style、Motion；OS 级 DPI 与跨 GPU 金标由 `UI-003` 跟踪 |
 | UI accessibility | 平台中立 action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns 与真实 showcase HWND 跨进程自动 gate 已落地；gate 可输出属性/fragment、action 结果和正常关闭的 schema 1 JSON | 固化当前 tip 的带日期 gate 结果并完成 Windows Narrator/Inspect 人工金标；Linux AT-SPI 由 `UI-002-LINUX` 独立跟踪 |
-| 3D product | 双 mesh + Resources-owned AssetSystem + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material resolver、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、有界0..4 directional lights 已有证据（产品提交3灯）；schema 4 进一步证明2 Mesh/2 Material/3 Texture handoff、weak handle 失效、ledger Released、成熟 retained controls、Asset ListView/Scene TreeView 与 Dark→Light→Dark | RENDER-001 的完整 PBR/IBL/shadow/light component/pass scheduling |
+| 3D product | 双 mesh + Resources-owned AssetSystem + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material resolver、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、World DirectionalLight3D→逐帧 RenderScene snapshot 已有证据；schema 5 证明3灯连续300帧发布，并保留2 Mesh/2 Material/3 Texture handoff、weak handle 失效、ledger Released、成熟 retained controls、Asset ListView/Scene TreeView 与 Dark→Light→Dark | RENDER-001 的完整 PBR/IBL/shadow、point/spot light + culling、pass scheduling |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion、独立 Texture/Mesh AssetLease readback retirement，以及 Task timeout/retry + Host-enforced TaskSystem worker-exit/join deadline 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |
 | Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v3 root/TileMapChunk v1 + eager Tileset/deferred chunk dependency/localId 发布前验证及 retain-window LRU 已完成 | 更完整资源炸弹矩阵、TileMap priority IO/editor、热重载与增量 Cooker |
 | Audio | `2D-AUDIO-ADV / N7` 已完成；Windows product-2d 以 owner-thread deterministic mix 验证 bounded stream，miniaudio callback/mixer 与 lifecycle 由 adapter tests 验证 | Linux、真实设备质量/延迟/切换与 callback benchmark |

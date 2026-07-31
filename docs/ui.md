@@ -175,7 +175,8 @@ callback 副作用。
 - Button：primary pointer pressed/action，Enter/Space/KeypadEnter/Gamepad South activation；
 - Checkbox：Pointer/Keyboard/Gamepad toggle；
 - Slider：Pointer drag、range/value clamp；`requestFocus()`、Tab、空间焦点与 Primary drag 都收敛到同一
-  committed keyboard focus；Keyboard Arrow/Gamepad D-pad 当前只参与空间焦点导航，不修改 value；
+  committed keyboard focus；focused Slider 将 Left/Down Arrow 与 D-pad 映射为 Decrease，将 Right/Up
+  映射为 Increase，复用 Pointer/UIA 的 min/max/step/clamp、量化、value storage 与 callback 路径；
 - RadioButton：同一直接父节点互斥，Pointer/Keyboard/Gamepad selection；
 - ScrollView：wheel、thumb drag、轴向 clamp 与持久 pointer capture；
 - Dropdown/Popup：Pointer/Keyboard/Gamepad 开关与选择，Up/Down/D-pad 导航，Escape/Gamepad East dismiss，
@@ -185,6 +186,11 @@ callback 副作用。
 - TextEdit：Pointer focus/selection，Tab traversal，Left/Right/Home/End、Backspace/Delete、Shift selection、
   Ctrl+A、committed text 与 IME；
 - ProgressBar：非交互 determinate range/value，hit policy 为 Ignore。
+
+RangeInput 调值在 Dropdown/ListView/TreeView/TextEdit 等复合方向控件之后、通用空间焦点之前路由。
+只有成功改变 value 的 Down 才用 fixed-capacity exact-control latch 消费匹配 Up；焦点或 enabled 状态在
+Down/Up 之间变化不会泄漏半个 transition。read-only 或边界值目标不修改、不 latch、不误触发空间焦点，
+未消费 transition 继续对 Gameplay 可见。
 
 `UI-004` 已完成：`UIFocusScopeMode::Contain` 将 Tab/Shift+Tab 限制在 committed scope；显式
 `requestFocus()` 拒绝未提交、隐藏、disabled、非 Targetable、非键盘控件及 active Modal 外节点。
@@ -450,9 +456,9 @@ Win32 pointer route，对 Dark/Light 的 normal、hover、focus、pressed/drag�
 `tina_sample_3d` 的 `Product3DUI` 使用同一产品 Theme 契约提供 Theme Button、Auto Rotate Checkbox、
 Rotation Speed Slider、Frame ProgressBar、Asset ListView、Scene TreeView 与标题/Inspector/状态层级。
 Checkbox 与 Slider 控制实际模型旋转；callback 只提交 intent，`updateUI()` 统一处理控件状态、ProgressBar
-与 `setProductTheme()`。schema 4 的自动门禁要求 Dark→Light→Dark、2次 collection step、7 Panel、
+与 `setProductTheme()`。当前 schema 5 的自动门禁要求 Dark→Light→Dark、2次 collection step、7 Panel、
 13 Label、ListView/TreeView 各1个、Tree expansion changes `2`、最终 stable keys `2003/4`、进度100%
-与 root 释放。动态 glyph atlas 修复后的 FreeType 暗/亮截图分别在
+与 root 释放，并继续在同一300帧产品门禁中验证3D Scene lighting。动态 glyph atlas 修复后的 FreeType 暗/亮截图分别在
 `artifacts/screenshots/3d-product-ui-freetype-dark-fixed/20260729-003922/frame-02.png` 和
 `artifacts/screenshots/3d-product-ui-freetype-light-fixed/20260729-004012/frame-01.png`；实际双 mesh、
 集合控件、主题层级及动态 `10%`/`1%` 进度均清晰可见，没有裁剪或重叠。
@@ -512,7 +518,6 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-002` | Windows UIA 产品验收：真实 HWND 跨进程属性/action gate 已有，待固化证据并完成 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
-| `UI-RANGE-INPUT-KEYBOARD` | 独立设计键盘/手柄调值 command、Down/Up latch、Gameplay suppression 与 min/max/step 行为；不得与空间焦点导航混用 |
 | `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route 与 100k 虚拟集合首个 milestone 已落地并解锁 Image/Component；后续补 Component build、Style、Motion、Image/Icon/NineSlice workload，图片同时输出 quad `Q`、unique resource `U` 与 image batch `B`；固定机前时间结论只报 provisional |
 | `UI-COMPONENT-001` | 标准 Behavior 独立 side store、capability 校验与 Runtime phase-scoped bounded component transaction |
 | `UI-IMAGE-001` | A：Image/Icon content、atlas/tint/fit/sampling、root-scoped AssetId resolve/FramePin、RGBA ImageQuad 与 Image semantics；B：NineSlice 1..9 quad 原子展开；C：图标按钮/Inventory/NineSlice 产品与性能门禁。Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |

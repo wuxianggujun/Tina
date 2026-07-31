@@ -457,6 +457,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 `tina_render_scene_tests` 39/39、`tina_render_bgfx_tests` 61/61；两个 infrastructure sample 与 product sample
 均完成300帧。FreeType 同轮产品门禁结果见下文 TEST-003。
 
+## Scene DirectionalLight3D
+
+`RENDER-001-SCENE-LIGHTS` 的最小门禁覆盖：
+
+- World `set/clear/queryDirectionalLight3D()`、非法 component 零替换与 entity 生命周期；
+- active light 的 world local `+Z` 方向、color×intensity、ambient、稳定 Entity identity 排序；
+- 超过固定4灯上限显式 `TooManyActiveDirectionalLights`；inactive-only 发布 ambient-only snapshot；
+- `RenderSceneWriter::setMesh3DLighting()` 深拷贝调用方 span，重复/非法描述使 build 原子失败；
+- Null/bgfx submit preflight；bgfx frame snapshot 临时覆盖 device fallback，且每帧只编码一次 uniform arrays；
+- product-3d schema 5 要求 `directionalLightCount=3`、`sceneLightingFrames=300`。
+
+直接验证入口为 `tina_scene_tests`、`tina_render_scene_tests`、`tina_render_bgfx_tests` 与
+`tina_sample_3d --frames=300 --frame-delay-ms=0 --ui-theme=dark --ui-theme-demo`。公开新头还由
+`DirectionalLight3DHeader.cpp` header-isolation TU 覆盖。
+
 ## Scene ShadowOccluder2D
 
 `2D-LIGHT-N2` 的最小门禁覆盖：
@@ -487,7 +502,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；全部 Sprite2D extraction 使用 packet-local `FrameResourceRef`；schema 16 增加两盏 `PointLight2D`、两条 `ShadowOccluder2D` 与 `sceneLightingFrames=renderExtractions`，并保留 Dark→Light→Dark、Tree stable-key selection/scroll/semantics、两份 Registry Lease/GPU/binding owner handoff、两次 retirement、weak texture handle 失效、ledger Released、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、2D light culling/soft shadow/normal map、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx；evidence schema 4、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、唯一0..4 directional-light 提交（产品3灯）、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、完整 PBR/IBL/shadow/light component、跨 GPU golden |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx；evidence schema 5、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、完整 PBR/IBL/shadow、point/spot light + culling、跨 GPU golden |
 
 `tina_sample_2d` 是唯一产品 2D target；中间迁移名 `tina_sample_2d_tilemap_bgfx` 已删除。
 
@@ -507,8 +522,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct
 mesh/material AssetId、Prefab dependency、AssetId→Handle→registry-owned binding→packet-local ref 与双 mesh
 binding 可验证。Opaque3D 已做
-baseColor/MR/normal 贴图 **采样**、material factors 与有界0..4 directional lights；完整 PBR/IBL/shadow
-仍后置。
+baseColor/MR/normal 贴图 **采样**、material factors 与 World directional lights 的逐帧 snapshot；完整
+PBR/IBL/shadow、point/spot light 与 culling 仍后置。
 
 `ASSET-SEC-001` 的定向门禁是 `GltfCookTests.*`：覆盖主/外部文件 64MiB 上限、短 buffer、strict UTF-8
 与 percent-decoded traversal、root 内和逃逸 symlink/junction、bufferView/accessor/count/overflow、PNG
@@ -667,8 +682,8 @@ extraction 字段。
 Windows 同轮 product-3d 拓扑由 `tools/windows/RunProduct3dGate.ps1` 固化（TEST-003）：默认使用
 `windows-msvc-vnext-bgfx-ui-freetype`，直接构建并运行 Core、Scene、AssetFormat、Asset、bgfx Render、
 UI、Runtime UI、UI Render bridge 与 FreeType 测试，再执行300帧 `--ui-theme=dark --ui-theme-demo`。
-schema 4 同时断言双 mesh、3个跨 Material 共享 PBR Texture、packet-local resolver 600/600、Mesh/Texture
-retirement records Released、3-light/registry 生命周期、7 Panel/13 Label、Button/Checkbox/Slider/ProgressBar/
+schema 5 同时断言双 mesh、3个跨 Material 共享 PBR Texture、packet-local resolver 600/600、Mesh/Texture
+retirement records Released、3个 World light/`sceneLightingFrames=300`/registry 生命周期、7 Panel/13 Label、Button/Checkbox/Slider/ProgressBar/
 ListView/TreeView 创建、2次 collection step、stable keys、继承 chrome、Dark→Light→Dark、100% progress、
 final-present capture 与 ledger 归零：
 
@@ -688,6 +703,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 `tina_ui_tests` 282/282、`tina_runtime_ui_tests` 85/85、`tina_ui_render_integration_tests` 15/15、
 `tina_ui_freetype_tests` 3/3；`tina_sample_3d` 300帧 exit 0，schema 4 校验通过。
 无重建复验写出 `artifacts/gates/product-3d.json`，报告 `ok=true`。
+
+2026-07-30 当前 DirectionalLight3D 提交候选使用 MSVC 14.50 `cl.exe` 和上述第一条命令完成同轮
+build、测试与300帧 sample。`tina_tests` 336/336、`tina_scene_tests` 96/96、
+`tina_asset_format_tests` 59/59、`tina_asset_tests` 204/204、`tina_render_scene_tests` 41/41、
+`tina_render_bgfx_tests` 63/63、`tina_ui_tests` 488/488、`tina_runtime_ui_tests` 97/97、
+`tina_ui_render_integration_tests` 16/16、`tina_ui_freetype_tests` 3/3、`tina_ui_uia_tests` 12/12；
+`tina_sample_3d` 300帧 exit 0，最终输出
+`product-3d gate ok schema=5 frames=300 theme=dark-light-dark collections=list-tree`。
 
 文档扫描（DOC-002）：
 

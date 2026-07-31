@@ -13,7 +13,7 @@
 | G0 | 非 clean 构建可复现 | Verified | Windows 现有 build tree 可增量 configure/build；日常门禁禁止 wipe |
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
 | G2 | UI 产品 | Partial | 20控件 showcase、虚拟 List/Tree、2D/3D 产品集合、Text/Glyph 与主题/交互层次均有结构化和视觉证据；Windows UIA action/control patterns 与跨进程外部 HWND gate 已有，剩余为 Narrator/Inspect 人工金标、Linux AT-SPI（UI-002-LINUX）与跨 DPI/GPU golden |
-| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、base/MR/normal 贴图采样、单次有界3-light、Texture/Mesh backend retirement marker 与 stale-safe teardown 已落地；仅完整 PBR/IBL/shadow/light system 后置 |
+| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、base/MR/normal 贴图采样、World 逐帧有界 directional-light snapshot（sample 3灯）、Texture/Mesh backend retirement marker 与 stale-safe teardown 已落地；仅完整 PBR/IBL/shadow/light system 后置 |
 | G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency 已完成；不可信 glTF 输入的单 handle/fd 快照、最终路径 containment 与资源预算矩阵已通过 Windows/Linux 门禁；完整 PBR 属于独立 Render 后置项 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
 | G6 | 平台矩阵 | Strong | tip Docker：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 sanitizer 均 exit 0（见 [Linux 证据](m12-evidence-linux.md)） |
@@ -34,7 +34,8 @@ Physics2D、Audio 与 Asset GoogleTest executable；测试数量随功能增长�
   `RunUi002UiaGate.ps1` 可从独立进程连接真实 showcase HWND；
 - product-2d schema 16：两盏 `PointLight2D` 与两条 `ShadowOccluder2D` 逐次随 Render extraction 发布，并保留 Scene Explorer
   13个 logical item/12个 materialized slot、最终 key `402`、滚动、Theme 与 Tree/TreeItem selected semantics；
-- product-3d schema 4：Asset ListView/Scene TreeView、2次 collection step、最终 keys `2003/4`；
+- product-3d schema 5：3个 World DirectionalLight3D 连续逐帧发布、Asset ListView/Scene TreeView、
+  2次 collection step、最终 keys `2003/4`；
 - product-2d 300帧：profile-name TextEdit、ProgressBar value=65、Radio selection 与 `pixelCaptureOk=true`。
 
 2026-07-23 的历史报告 `artifacts/screenshots/sample-2d-product/20260723-013100/report.json` 记录：

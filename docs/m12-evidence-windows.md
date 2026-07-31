@@ -108,7 +108,7 @@ FreeType client capture 位于
 
 独立 showcase 当前验证20个控件、集合导航/滚动、交互层次和 Dark/Light 事务换肤；FreeType client
 capture 位于 `artifacts/screenshots/ui-showcase-dark/20260728-155526/frame-03.png` 与
-`artifacts/screenshots/ui-showcase-light/20260728-155914/frame-03.png`。product-3d 当前 schema 4 验证
+`artifacts/screenshots/ui-showcase-light/20260728-155914/frame-03.png`。2026-07-28 的 product-3d schema 4 验证
 7 Panel/13 Label、Asset ListView/Scene TreeView、两次 collection step、最终 stable keys `2003/4` 与
 Dark→Light→Dark；对应截图位于
 `artifacts/screenshots/3d-product-ui-freetype-dark-fixed/20260729-003922/frame-02.png` 与

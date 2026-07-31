@@ -229,8 +229,8 @@ StaticMesh v1 为 P3N3UV2 + UInt16 index；Material v2（40B）为 Opaque `Unlit
 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`，以及可选 Texture2D dependency 标志
 （baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab 保存 node
 hierarchy 与 Mesh/Material AssetId。当前 Opaque3D 是 experimental MR hybrid，已采样 baseColor/MR/normal、
-应用 material factors 和唯一有界0..4 directional-light 提交；这不是完整 PBR，IBL/shadow、light
-component/culling 与通用 pass scheduler 仍属 `RENDER-001`。glTF importer 的实际限制见
+应用 material factors，并从 World DirectionalLight3D 发布逐帧有界0..4灯 snapshot；这不是完整 PBR，
+IBL/shadow、point/spot light、light culling 与通用 pass scheduler 仍属 `RENDER-001`。glTF importer 的实际限制见
 [3D 产品架构](game-3d.md)。
 
 ## 文件与安全边界

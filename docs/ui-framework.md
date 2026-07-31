@@ -641,7 +641,7 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 
 主 UI 扩展链：
 
-1. `UI-STATE-FEEDBACK`：源码/测试切片已完成，补齐 Dark/Light 产品视觉证据后关闭；
+1. `UI-STATE-FEEDBACK`：源码、测试与 Dark/Light 产品视觉证据已关闭；
 2. ADR 0023 已接受，容量单位、失败语义和性能 workload 已冻结；
 3. `UI-PERF-001`：static/paint-dirty/route/virtual-collection 与通用 counter/checksum 首个 milestone
    已完成，任务转为 `InProgress` 并解锁 Image/Component；后续每个垂直切片继续扩展同一协议；
@@ -657,9 +657,8 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 
 独立或后置 lane：
 
-- `UI-RANGE-INPUT-KEYBOARD` 只依赖已完成的 Slider Focusable 子切片与 Runtime input route，不依赖 ADR 0023；
-  它冻结 capability-shaped 调值 command 与成对 consumption，不与空间焦点导航混用。作为 Next/P1，排期仍
-  不抢占 `UI-STATE-FEEDBACK` 的 Now/P0 视觉收口；
+- `UI-RANGE-INPUT-KEYBOARD` 已关闭：它只依赖 Slider Focusable 子切片与 Runtime input route，不依赖
+  ADR 0023；capability-shaped 调值 command 与 fixed-capacity exact-control Down/Up latch 不复用空间焦点状态；
 - `SDK-001` 独立交付安装 package 与当前 API 的外部 consumer gate，不等待 `UI-FLOW-001`；此后每个新增
   公共 UI 切片同步增加 consumer 覆盖；
 - `UI-FLOW-001` 只有真实页面栈需求后才增加 Activatable Screen/Layer Stack/Action Router；
