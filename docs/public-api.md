@@ -208,7 +208,10 @@ wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与
 `retire*` + backend marker，不能把两类 completion 混用。
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
-commit 后返回 borrowed view。`RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
+并可把一次 `setSprite2DLighting()` 深拷贝为 self-contained 的 committed frame snapshot；重复设置或
+非法描述使当前 build 原子失败。Sprite2D snapshot 最多保存8个 world-space point light 与 ambient，且
+不改变透明 Sprite 的既有排序。commit 后返回 borrowed view。
+`RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
 `FrameResourceRef`；`RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
 backend 在同步 submit 中分别按 `Sprite2DTexture`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
 `UIDisplayList` 支持 SolidQuad/Glyph、SolidQuad 像素 corner radius 与 axis-aligned clip；corner radius 计入
@@ -286,7 +289,8 @@ Narrator/Inspect 人工金标仍由 UI-002 跟踪，Linux AT-SPI adapter/真机�
 ## Scene
 
 `Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Camera2D/
-SpriteRenderer2D/PerspectiveCamera3D/MeshRenderer3D。`extractRenderSceneFromWorld()` 写调用方的
+SpriteRenderer2D/PointLight2D/PerspectiveCamera3D/MeshRenderer3D。
+`extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material weak `AssetHandle`。
 
@@ -302,6 +306,13 @@ sprite 不解析。Scene 不保存 resolver、sink、ref 或任何 Asset owner�
 由两者按当前 Store owner/generation、预期 StaticMesh/Material kind 与 binding 状态 intern 为非空
 packet-local ref。任一 resolver/handle/binding 无效返回 `UnresolvedMesh`；mesh 解析失败时不调用 material
 resolver，hidden mesh 不解析。`PrefabMeshBinding` 只完成 AssetId→Handle，不保存或分配 Render key。
+
+`PointLight2D` 保存 linear color、非负 intensity、正 world-space `radiusMeters` 与 active 标志；Entity 的
+world position 是光源中心，transform scale 不缩放半径。extraction 按稳定 Entity identity 收集最多8个
+active light，把 world position、radius、color×intensity 与
+`ExtractRenderSceneParams::ambientLight2DScale` 写入 Sprite2D frame snapshot。超容量返回
+`TooManyActivePointLights2D`；未声明组件保留既有 unlit path，全部 inactive 则发布 ambient-only snapshot。
+本切片没有 occluder、shadow 或第二套 Sprite 排序。
 
 `ParticleSystem2D` 与 `Trail2D` 是独立 Scene owners，不属于 World/ECS，也不依赖完整 AssetSystem 或
 bgfx。二者复制 copyable weak Sprite `AssetHandle`，不持有 `AssetLease`、Cooked payload、GPU owner 或

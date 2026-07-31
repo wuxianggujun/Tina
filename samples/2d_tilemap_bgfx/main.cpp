@@ -41,6 +41,7 @@
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/ParticleSystem2D.hpp>
+#include <tina/scene/PointLight2D.hpp>
 #include <tina/scene/SpriteAnimator2D.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Trail2D.hpp>
@@ -124,6 +125,8 @@ inline constexpr u64 ProductParticleStableKeyBase = 0x100000000ULL;
 inline constexpr u32 ProductTrailCapacity = 8;
 inline constexpr u32 ProductTrailSegments = 3;
 inline constexpr u64 ProductTrailStableKeyBase = 0x200000000ULL;
+inline constexpr u32 ProductPointLight2DCount = 2;
+inline constexpr float ProductAmbientLight2DScale = 0.28F;
 inline constexpr Tina::InputActionId MoveLeftAction{1};
 inline constexpr Tina::InputActionId MoveRightAction{2};
 inline constexpr Tina::InputActionId SelectTileAction{3};
@@ -335,6 +338,9 @@ struct LifecycleCounters final {
     u64 trailExtracted = 0;
     u64 trailBreaks = 0;
     std::string fxInitialFingerprint{};
+    bool sprite2DLightingConfigured = false;
+    u32 pointLight2DCount = 0;
+    u64 sceneLightingFrames = 0;
     // M11-B0: surface-driven Camera2D projection (FixedWorldHeight).
     u32 surfacePixelWidth = 960;
     u32 surfacePixelHeight = 540;
@@ -1388,6 +1394,40 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                                    "character animator has no initial Sprite frame");
     }
     if (const auto status = world->setSpriteRenderer2D(*characterEntity, *characterSprite); !status)
+    {
+        return status;
+    }
+
+    auto warmLightEntity = world->createEntity(sceneTranslation(2.0F, 2.5F));
+    if (!warmLightEntity)
+    {
+        return Tina::Core::failure(std::move(warmLightEntity.error()));
+    }
+    if (const auto status = world->setPointLight2D(
+            *warmLightEntity,
+            Tina::Scene::PointLight2D{
+                .color = {.red = 1.0F, .green = 0.48F, .blue = 0.18F},
+                .intensity = 0.9F,
+                .radiusMeters = 5.0F,
+            });
+        !status)
+    {
+        return status;
+    }
+
+    auto coolLightEntity = world->createEntity(sceneTranslation(6.5F, 2.75F));
+    if (!coolLightEntity)
+    {
+        return Tina::Core::failure(std::move(coolLightEntity.error()));
+    }
+    if (const auto status = world->setPointLight2D(
+            *coolLightEntity,
+            Tina::Scene::PointLight2D{
+                .color = {.red = 0.16F, .green = 0.52F, .blue = 1.0F},
+                .intensity = 0.85F,
+                .radiusMeters = 5.5F,
+            });
+        !status)
     {
         return status;
     }
@@ -3243,11 +3283,15 @@ class TileMapBgfxState final : public Tina::IGameState {
                         .userData = &worldSpriteBindingResolverContext_,
                         .resolve = &TileMapBgfxState::resolveSpriteBinding,
                     },
+                    .ambientLight2DScale = ProductAmbientLight2DScale,
                 });
             !status)
         {
             return status;
         }
+        counters_->sprite2DLightingConfigured = true;
+        counters_->pointLight2DCount = ProductPointLight2DCount;
+        ++counters_->sceneLightingFrames;
 
         // Gate counters from resolved camera fields after Scene extract.
         const Tina::Render::Camera2DProjectionQuery projectionQuery{
@@ -4258,6 +4302,10 @@ int main(int argc, char** argv)
         counters.trailActive == resources.trail->segmentCount() &&
         counters.trailExtracted == counters.trailActive && counters.fxInitialFingerprint.size() == 32U &&
         product300EffectsValid;
+    const bool lighting2DValid =
+        counters.sprite2DLightingConfigured &&
+        counters.pointLight2DCount == ProductPointLight2DCount &&
+        counters.sceneLightingFrames == counters.renderExtractions;
 
     const bool audioValid =
         counters.audioEnginePresent && counters.audioOneShotQueued && counters.audioStartedObserved &&
@@ -4318,7 +4366,8 @@ int main(int argc, char** argv)
 #endif
 
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
-              cameraFollowValid && chunkDirtyValid && tileMapStreamValid && effectsValid && audioValid && audioDeviceValid &&
+              cameraFollowValid && chunkDirtyValid && tileMapStreamValid && effectsValid && lighting2DValid &&
+              audioValid && audioDeviceValid &&
               characterAnimationValid && spriteBindingsValid && treeViewValid &&
               counters.catalogFromRecipeFile &&
               counters.catalogRecipeAssets == ExpectedCatalogRecipeAssets &&
@@ -4380,7 +4429,7 @@ int main(int argc, char** argv)
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
     evidenceBytes.reserve(512);
-    appendLeU32(evidenceBytes, 14U); // schema
+    appendLeU32(evidenceBytes, 15U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
@@ -4415,6 +4464,10 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, ProductTrailCapacity);
     appendLeU64(evidenceBytes, ProductTrailSegments);
     appendLeU64(evidenceBytes, ProductTrailStableKeyBase);
+    appendLeU32(evidenceBytes, ProductPointLight2DCount);
+    appendF32Bits(evidenceBytes, ProductAmbientLight2DScale);
+    appendLeU32(evidenceBytes, counters.sprite2DLightingConfigured ? 1U : 0U);
+    appendLeU64(evidenceBytes, counters.sceneLightingFrames);
     for (const char byte : counters.fxInitialFingerprint)
     {
         evidenceBytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(byte)));
@@ -4529,6 +4582,10 @@ int main(int argc, char** argv)
                   << ",\"requestedFrameDelayMs\":" << options->frameDelayMilliseconds
                   << ",\"minimumWindowVisibilityMs\":" << minimumWindowVisibilityMilliseconds(*options)
                   << ",\"totalSprites\":" << counters.lastTotalSprites
+                  << ",\"sprite2DLightingConfigured\":"
+                  << (counters.sprite2DLightingConfigured ? "true" : "false")
+                  << ",\"pointLight2DCount\":" << counters.pointLight2DCount
+                  << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
                   << ",\"particleCapacity\":" << ProductParticleCapacity
                   << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
                   << ",\"particleEmitted\":" << counters.particleEmitted
@@ -4711,6 +4768,10 @@ int main(int argc, char** argv)
               << ",\"trailSpriteBindingResolverHits\":" << counters.trailSpriteBindingResolverHits
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
               << ",\"spritesPerFrame\":" << expectedTotalSprites
+              << ",\"sprite2DLightingConfigured\":"
+              << (counters.sprite2DLightingConfigured ? "true" : "false")
+              << ",\"pointLight2DCount\":" << counters.pointLight2DCount
+              << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
               << ",\"particleCapacity\":" << ProductParticleCapacity
               << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
               << ",\"particleEmitted\":" << counters.particleEmitted
@@ -4932,7 +4993,7 @@ int main(int argc, char** argv)
               << ",\"accessibilityTreeSelectionVerified\":"
               << (counters.accessibilityTreeSelectionVerified ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":14"
+              << ",\"evidenceSchema\":15"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")

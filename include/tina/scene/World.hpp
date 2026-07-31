@@ -7,6 +7,7 @@
 #include <tina/scene/Entity.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
+#include <tina/scene/PointLight2D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
@@ -75,6 +76,8 @@ public:
         EntityId entity,
         SpriteRenderer2D sprite) noexcept;
     [[nodiscard]] Core::Status clearSpriteRenderer2D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status setPointLight2D(EntityId entity, PointLight2D light) noexcept;
+    [[nodiscard]] Core::Status clearPointLight2D(EntityId entity) noexcept;
     [[nodiscard]] Core::Status setPerspectiveCamera3D(
         EntityId entity,
         PerspectiveCamera3D camera) noexcept;
@@ -94,6 +97,7 @@ public:
     [[nodiscard]] const WorldTransform* worldTransform(EntityId entity) const noexcept;
     [[nodiscard]] const Camera2D* camera2D(EntityId entity) const noexcept;
     [[nodiscard]] const SpriteRenderer2D* spriteRenderer2D(EntityId entity) const noexcept;
+    [[nodiscard]] const PointLight2D* pointLight2D(EntityId entity) const noexcept;
     [[nodiscard]] const PerspectiveCamera3D* perspectiveCamera3D(EntityId entity) const noexcept;
     [[nodiscard]] const MeshRenderer3D* meshRenderer3D(EntityId entity) const noexcept;
     [[nodiscard]] const DirectionalLight3D* directionalLight3D(EntityId entity) const noexcept;

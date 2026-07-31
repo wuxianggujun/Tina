@@ -302,6 +302,7 @@ RenderSceneBuilder::RenderSceneBuilder(RenderSceneBuilder&& other) noexcept
       m_mesh3DBatches(std::exchange(other.m_mesh3DBatches, nullptr)),
       m_spriteCount(std::exchange(other.m_spriteCount, 0)), m_mesh3DCount(std::exchange(other.m_mesh3DCount, 0)),
       m_mesh3DBatchCount(std::exchange(other.m_mesh3DBatchCount, 0)), m_camera(std::move(other.m_camera)),
+      m_sprite2DLighting(std::move(other.m_sprite2DLighting)),
       m_perspectiveCamera(std::move(other.m_perspectiveCamera)),
       m_mesh3DLighting(std::move(other.m_mesh3DLighting)), m_frameParameters(other.m_frameParameters),
       m_candidateStatistics(other.m_candidateStatistics), m_publishedStatistics(other.m_publishedStatistics),
@@ -309,6 +310,7 @@ RenderSceneBuilder::RenderSceneBuilder(RenderSceneBuilder&& other) noexcept
 {
     other.m_capacity = {};
     other.m_camera.reset();
+    other.m_sprite2DLighting.reset();
     other.m_perspectiveCamera.reset();
     other.m_mesh3DLighting.reset();
     other.m_frameParameters = {};
@@ -370,6 +372,16 @@ Core::Status RenderSceneWriter::addSprite2D(const RenderSprite2DInput& sprite)
                              "The RenderScene writer is no longer attached to a builder");
     }
     return m_builder->addSprite2D(sprite);
+}
+
+Core::Status RenderSceneWriter::setSprite2DLighting(const Sprite2DLightingDesc& lighting)
+{
+    if (m_builder == nullptr)
+    {
+        return Core::failure(RenderErrorCode::RenderSceneBuildNotOpen,
+                             "The RenderScene writer is no longer attached to a builder");
+    }
+    return m_builder->setSprite2DLighting(lighting);
 }
 
 Core::Status RenderSceneWriter::setPerspectiveCamera(const RenderPerspectiveCameraInput& camera)
@@ -769,6 +781,38 @@ Core::Status RenderSceneBuilder::setMesh3DLighting(const Mesh3DLightingDesc& lig
     return Core::success();
 }
 
+Core::Status RenderSceneBuilder::setSprite2DLighting(const Sprite2DLightingDesc& lighting)
+{
+    if (m_state != State::Building)
+    {
+        return buildStateFailure(RenderErrorCode::RenderSceneBuildNotOpen,
+                                 "A RenderScene build must be open before setting 2D lighting");
+    }
+    if (m_stickyBuildError.has_value())
+    {
+        return Core::failure(Core::Error{m_stickyBuildError->code, m_stickyBuildError->message,
+                                         m_stickyBuildError->origin});
+    }
+    if (m_sprite2DLighting.has_value())
+    {
+        return failBuild(RenderErrorCode::RenderSceneLightingConflict,
+                         "A RenderScene may contain only one Sprite2D lighting snapshot");
+    }
+    if (auto status = validateSprite2DLightingDesc(lighting); !status)
+    {
+        return failBuild(status.error().code, status.error().message.c_str());
+    }
+
+    RenderSprite2DLighting snapshot;
+    snapshot.m_pointLightCount = static_cast<u32>(lighting.pointLights.size());
+    snapshot.m_ambientScale = lighting.ambientScale;
+    std::ranges::copy(lighting.pointLights, snapshot.m_pointLights.begin());
+    m_sprite2DLighting = snapshot;
+    m_candidateStatistics.sprite2DLightingConfigured = true;
+    m_candidateStatistics.pointLight2DCount = snapshot.m_pointLightCount;
+    return Core::success();
+}
+
 bool RenderSceneBuilder::intersectsCamera(const RenderSprite2DItem& sprite,
                                           const RenderCamera2D& camera) const noexcept
 {
@@ -1065,6 +1109,7 @@ void RenderSceneBuilder::clearCandidate() noexcept
         m_spriteCount = 0;
     }
     m_camera.reset();
+    m_sprite2DLighting.reset();
     m_perspectiveCamera.reset();
     m_mesh3DLighting.reset();
     m_frameParameters = {};
@@ -1111,6 +1156,7 @@ RenderSceneView RenderSceneBuilder::makePublishedView() const noexcept
     return RenderSceneView{
         m_camera,
         std::span<const RenderSprite2DItem>{m_sprites, m_spriteCount},
+        m_sprite2DLighting,
         m_perspectiveCamera,
         std::span<const RenderMesh3DItem>{m_meshes3D, m_mesh3DCount},
         std::span<const RenderMesh3DBatch>{m_mesh3DBatches, m_mesh3DBatchCount},

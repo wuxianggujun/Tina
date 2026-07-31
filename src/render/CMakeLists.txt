@@ -20,6 +20,7 @@ add_library(tina_render STATIC
     RenderSurfaceStateTracker.cpp
     RenderSurfaceStateTracker.hpp
     RenderScene.cpp
+    Sprite2DLighting.cpp
     UIDisplayList.cpp
     UploadTicket.cpp
     null/NullRenderDevice.cpp

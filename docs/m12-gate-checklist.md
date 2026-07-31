@@ -26,14 +26,14 @@
 
 ## UI 证据
 
-当前 Windows gate 直接运行 UI、Runtime UI、Render bridge、FreeType、Scene、Physics2D、Audio 与 Asset
-GoogleTest executable；测试数量随功能增长，不作永久契约。产品证据包括：
+当前 Windows gate 直接运行 UI、Runtime UI、Render bridge、FreeType、Scene、RenderScene、bgfx、
+Physics2D、Audio 与 Asset GoogleTest executable；测试数量随功能增长，不作永久契约。产品证据包括：
 
 - 20控件 showcase：Dropdown/List/Tree/Scroll 自动交互、Dark/Light 换肤与 root 生命周期；
 - Windows UIA：Invoke/Toggle/RangeValue/Value control patterns 已经通过 owner-thread action seam 接入，
   `RunUi002UiaGate.ps1` 可从独立进程连接真实 showcase HWND；
-- product-2d schema 14：Scene Explorer 13个 logical item/12个 materialized slot、最终 key `402`、滚动、
-  Theme 与 Tree/TreeItem selected semantics；
+- product-2d schema 15：两盏 `PointLight2D` 逐次随 Render extraction 发布，并保留 Scene Explorer
+  13个 logical item/12个 materialized slot、最终 key `402`、滚动、Theme 与 Tree/TreeItem selected semantics；
 - product-3d schema 4：Asset ListView/Scene TreeView、2次 collection step、最终 keys `2003/4`；
 - product-2d 300帧：profile-name TextEdit、ProgressBar value=65、Radio selection 与 `pixelCaptureOk=true`。
 

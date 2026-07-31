@@ -411,6 +411,76 @@ TEST(RenderSceneBuilderTest, ReplacementBuildInvalidatesOldPublicationAndFailure
     EXPECT_TRUE(builder.publishedView().empty());
 }
 
+TEST(RenderSceneBuilderTest, Sprite2DLightingCopiesIntoTheCommittedFrameSnapshot)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    std::array lights{
+        Sprite2DPointLight{
+            .positionX = 1.0F,
+            .positionY = 2.0F,
+            .radiusMeters = 3.0F,
+            .colorR = 0.5F,
+            .colorG = 0.6F,
+            .colorB = 0.7F,
+        },
+        Sprite2DPointLight{
+            .positionX = -4.0F,
+            .positionY = 5.0F,
+            .radiusMeters = 6.0F,
+            .colorR = 0.2F,
+            .colorG = 0.3F,
+            .colorB = 0.4F,
+        },
+    };
+    ASSERT_TRUE(builder.writer().setSprite2DLighting({
+        .pointLights = lights,
+        .ambientScale = 0.25F,
+    }));
+    lights[0].colorR = 9.0F;
+
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value());
+    ASSERT_TRUE(committed->sprite2DLighting().has_value());
+    const RenderSprite2DLighting& lighting = *committed->sprite2DLighting();
+    ASSERT_EQ(lighting.pointLights().size(), 2U);
+    EXPECT_FLOAT_EQ(lighting.pointLights()[0].colorR, 0.5F);
+    EXPECT_FLOAT_EQ(lighting.pointLights()[1].positionX, -4.0F);
+    EXPECT_FLOAT_EQ(lighting.ambientScale(), 0.25F);
+    EXPECT_TRUE(committed->statistics().sprite2DLightingConfigured);
+    EXPECT_EQ(committed->statistics().pointLight2DCount, 2U);
+    EXPECT_FALSE(committed->empty());
+}
+
+TEST(RenderSceneBuilderTest, InvalidOrDuplicateSprite2DLightingFailsTheBuildAtomically)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array invalidLights{
+        Sprite2DPointLight{.radiusMeters = 0.0F},
+    };
+    auto invalid = builder.writer().setSprite2DLighting({.pointLights = invalidLights});
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, RenderErrorCode::InvalidSprite2DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array<Sprite2DPointLight, Sprite2DLightingDesc::MaximumPointLightCount + 1U>
+        tooManyLights{};
+    auto tooMany = builder.writer().setSprite2DLighting({.pointLights = tooManyLights});
+    ASSERT_FALSE(tooMany);
+    EXPECT_EQ(tooMany.error().code, RenderErrorCode::InvalidSprite2DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array validLights{Sprite2DPointLight{}};
+    ASSERT_TRUE(builder.writer().setSprite2DLighting({.pointLights = validLights}));
+    auto duplicate = builder.writer().setSprite2DLighting({.pointLights = validLights});
+    ASSERT_FALSE(duplicate);
+    EXPECT_EQ(duplicate.error().code, RenderErrorCode::RenderSceneLightingConflict);
+    EXPECT_FALSE(builder.commit().has_value());
+}
+
 TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
 {
     RenderSceneBuilder builder = makeBuilder();

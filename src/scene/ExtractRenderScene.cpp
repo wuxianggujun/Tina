@@ -4,6 +4,7 @@
 #include <tina/scene/DirectionalLight3D.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
+#include <tina/scene/PointLight2D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
@@ -59,6 +60,94 @@ struct DirectionalLightCandidate final {
     u64 stableKey = 0;
     Render::Mesh3DDirectionalLight light{};
 };
+
+struct PointLight2DCandidate final {
+    u64 stableKey = 0;
+    Render::Sprite2DPointLight light{};
+};
+
+[[nodiscard]] Core::Status publishPointLights2D(
+    World& world,
+    Render::RenderSceneWriter& writer,
+    float ambientLightScale) noexcept
+{
+    if (!std::isfinite(ambientLightScale) || ambientLightScale < 0.0F) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene 2D ambient light scale must be finite and non-negative");
+    }
+
+    std::array<PointLight2DCandidate, Render::Sprite2DLightingDesc::MaximumPointLightCount>
+        candidates{};
+    usize lightCount = 0;
+    bool hasPointLight = false;
+
+    for (const EntityId entity : world.liveEntities()) {
+        const PointLight2D* component = world.pointLight2D(entity);
+        if (component == nullptr) {
+            continue;
+        }
+        hasPointLight = true;
+        if (!component->active) {
+            continue;
+        }
+        if (lightCount >= candidates.size()) {
+            return Core::failure(
+                SceneErrorCode::TooManyActivePointLights2D,
+                "Scene extract exceeded the fixed active PointLight2D limit");
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        if (!isValid(*component) || transform == nullptr || !isValid(*transform)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene active PointLight2D or its WorldTransform is invalid");
+        }
+
+        const float colorR = component->color.red * component->intensity;
+        const float colorG = component->color.green * component->intensity;
+        const float colorB = component->color.blue * component->intensity;
+        if (!std::isfinite(colorR) || !std::isfinite(colorG) || !std::isfinite(colorB)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene PointLight2D extraction overflowed");
+        }
+
+        candidates[lightCount] = PointLight2DCandidate{
+            .stableKey = stableEntityKey(entity),
+            .light =
+                Render::Sprite2DPointLight{
+                    .positionX = transform->position.x,
+                    .positionY = transform->position.y,
+                    .radiusMeters = component->radiusMeters,
+                    .colorR = colorR,
+                    .colorG = colorG,
+                    .colorB = colorB,
+                },
+        };
+        ++lightCount;
+    }
+
+    // No authored component preserves the existing unlit Sprite2D path. An
+    // authored but fully inactive set publishes ambient-only lighting.
+    if (!hasPointLight) {
+        return Core::success();
+    }
+
+    std::sort(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(lightCount),
+              [](const PointLight2DCandidate& left,
+                 const PointLight2DCandidate& right) noexcept {
+                  return left.stableKey < right.stableKey;
+              });
+    std::array<Render::Sprite2DPointLight, Render::Sprite2DLightingDesc::MaximumPointLightCount>
+        lights{};
+    for (usize index = 0; index < lightCount; ++index) {
+        lights[index] = candidates[index].light;
+    }
+    return writer.setSprite2DLighting(Render::Sprite2DLightingDesc{
+        .pointLights = std::span<const Render::Sprite2DPointLight>{lights.data(), lightCount},
+        .ambientScale = ambientLightScale,
+    });
+}
 
 [[nodiscard]] Core::Status publishDirectionalLights(
     World& world,
@@ -384,6 +473,12 @@ Core::Status extractRenderSceneFromWorld(
 
     if (const Core::Status status =
             publishDirectionalLights(world, writer, params.ambientLightScale);
+        !status) {
+        return status;
+    }
+
+    if (const Core::Status status =
+            publishPointLights2D(world, writer, params.ambientLight2DScale);
         !status) {
         return status;
     }

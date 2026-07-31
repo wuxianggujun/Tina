@@ -10,7 +10,7 @@ Game2DState
   -> Catalog / AssetSystem / typed Cooked payload
   -> TileMapStream -> resident TileMapInstance + CharacterController2D
   -> optional PhysicsWorld2D
-  -> Scene::World (Camera2D + SpriteRenderer2D)
+  -> Scene::World (Camera2D + SpriteRenderer2D + PointLight2D)
   -> Scene::ParticleSystem2D + Trail2D
   -> RenderScene extraction
   -> RenderDevice Texture2D binding + bgfx Sprite2D pass
@@ -71,6 +71,12 @@ Sprite 顺序为 sorting layer → order in layer → stable source ordinal。�
 被重排；bgfx 按最终顺序扫描相邻且 texture ref 相同的 Sprite，按连续区间解析 binding、绑定纹理并
 submit。例如 ref 序列 A/A/B/A 会形成3个 batch，而不会重排成 A/A/A/B。空、cross-packet、stale、
 wrong-kind 或 binding 超范围 ref 在提交产生副作用前失败。UI 使用独立 pass，始终不混入 World Sprite batch。
+
+`2D-LIGHT-N1` 在同一 World 中提供最多8个 unshadowed `PointLight2D`。Scene 按稳定 Entity identity 把
+world position、显式 radius 与 color×intensity 深拷贝进当前 RenderScene snapshot；bgfx 对每个 fragment
+计算线性径向衰减并保持上述透明排序/连续 texture batch 不变。没有 PointLight2D 组件时维持原 unlit
+输出，inactive-only 可显式发布 ambient-only。产品 sample 固定创建暖/冷两灯并逐帧发布；本切片不包含
+occluder、shadow、normal map 或 light culling。
 
 产品 sample 当前上传两张 Cooked Texture2D，并把每张 `GpuTextureId` 连同一份 resident `AssetLease`
 转移给 State-owned `Sprite2DBindingRegistry`；registry 借用 `TileMapResources` 中的 `AssetSystem` 与
@@ -245,7 +251,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=14`（含2个 cooked chunk）、`texturesUploaded=2`；
-- `evidenceSchema=14`，`uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
+- `evidenceSchema=15`，`sprite2DLightingConfigured=true`、`pointLight2DCount=2`、
+  `sceneLightingFrames=300`，并保留 `uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
   `uiThemeButtonActivations=0`、`uiThemeFinalLight=false`，证明自动 Dark→Light→Dark 在 UI phase 完成；
 - `uiTreeDemoRequested=true`、`uiTreeViewsCreated=1`、`uiTreeLogicalItems=13`、
   `uiTreeMaterializedCapacity=12`、`uiTreeSelectionChanges=2`、最终 stable key `402`/index `12`、
@@ -302,7 +309,7 @@ exit 0。2026-07-29 动态 glyph atlas 修复后的 Dark/Light FreeType 截图�
 
 - 当前 streaming 是固定容量 Camera/layer demand owner，已有 retain-window demand-recency LRU，但不包含
   优先级 IO 调度、通用 Tile/Scene 编辑器、自动把任意 object layer 转成完整 gameplay、旧 schema
-  migration、2D lighting、navigation 或网络 rollback；
+  migration、2D shadow/occluder、navigation 或网络 rollback；
 - Cooked SpriteAsset 的完整 atlas/PPU metadata resolve 仍可扩展，当前产品使用 Texture2D + 显式 UV/key；
 - GPU chunk mesh cache、复杂透明材质与多 camera/letterbox policy 尚未产品化；
 - 当前 2D-FX 是 CPU fixed-capacity Sprite2D extraction，不包含 Cooked FX asset schema、effect graph/editor、

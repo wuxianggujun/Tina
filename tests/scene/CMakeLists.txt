@@ -11,6 +11,7 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/MeshRenderer3DHeader.cpp
     header_isolation/ParticleSystem2DHeader.cpp
     header_isolation/PerspectiveCamera3DHeader.cpp
+    header_isolation/PointLight2DHeader.cpp
     header_isolation/PrefabInstantiateHeader.cpp
     header_isolation/SceneErrorsHeader.cpp
     header_isolation/SceneHeader.cpp

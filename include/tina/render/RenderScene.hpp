@@ -92,6 +92,52 @@ struct RenderSprite2DInput final {
     bool visible = true;
 };
 
+struct Sprite2DPointLight final {
+    float positionX = 0.0F;
+    float positionY = 0.0F;
+    float radiusMeters = 1.0F;
+    float colorR = 1.0F;
+    float colorG = 1.0F;
+    float colorB = 1.0F;
+};
+
+struct Sprite2DLightingDesc final {
+    static constexpr std::size_t MaximumPointLightCount = 8;
+
+    // Consumed synchronously by the receiving writer; no span is retained.
+    std::span<const Sprite2DPointLight> pointLights{};
+    float ambientScale = 0.2F;
+};
+
+[[nodiscard]] Core::Status validateSprite2DLightingDesc(const Sprite2DLightingDesc& lighting) noexcept;
+
+// Self-contained committed frame snapshot. Sprite ordering remains governed by
+// RenderSprite2DItem sorting; lighting never reorders or splits transparent items.
+class RenderSprite2DLighting final {
+  public:
+    [[nodiscard]] constexpr std::span<const Sprite2DPointLight> pointLights() const noexcept
+    {
+        return {m_pointLights.data(), m_pointLightCount};
+    }
+
+    [[nodiscard]] constexpr float ambientScale() const noexcept
+    {
+        return m_ambientScale;
+    }
+
+    [[nodiscard]] constexpr Sprite2DLightingDesc descriptor() const noexcept
+    {
+        return {.pointLights = pointLights(), .ambientScale = m_ambientScale};
+    }
+
+  private:
+    friend class RenderSceneBuilder;
+
+    std::array<Sprite2DPointLight, Sprite2DLightingDesc::MaximumPointLightCount> m_pointLights{};
+    u32 m_pointLightCount = 0;
+    float m_ambientScale = 0.2F;
+};
+
 struct RenderPose3DInput final {
     float positionX = 0.0F;
     float positionY = 0.0F;
@@ -289,6 +335,8 @@ struct RenderSceneStatistics final {
     u32 prunedInvisibleCount = 0;
     u32 prunedTransparentCount = 0;
     u64 sortOrderChecksum = 0;
+    bool sprite2DLightingConfigured = false;
+    u32 pointLight2DCount = 0;
     u32 submittedMesh3DCount = 0;
     u32 visibleMesh3DCount = 0;
     u32 culledMesh3DCount = 0;
@@ -324,6 +372,11 @@ class RenderSceneView final {
         return m_sprites;
     }
 
+    [[nodiscard]] constexpr const std::optional<RenderSprite2DLighting>& sprite2DLighting() const noexcept
+    {
+        return m_sprite2DLighting;
+    }
+
     [[nodiscard]] constexpr const std::optional<RenderPerspectiveCamera>& perspectiveCamera() const noexcept
     {
         return m_perspectiveCamera;
@@ -351,8 +404,8 @@ class RenderSceneView final {
 
     [[nodiscard]] constexpr bool empty() const noexcept
     {
-        return !m_camera.has_value() && m_sprites.empty() && !m_perspectiveCamera.has_value() &&
-               m_meshes3D.empty() && !m_mesh3DLighting.has_value();
+        return !m_camera.has_value() && m_sprites.empty() && !m_sprite2DLighting.has_value() &&
+               !m_perspectiveCamera.has_value() && m_meshes3D.empty() && !m_mesh3DLighting.has_value();
     }
 
   private:
@@ -360,12 +413,13 @@ class RenderSceneView final {
 
     constexpr RenderSceneView(std::optional<RenderCamera2D> camera,
                               std::span<const RenderSprite2DItem> sprites,
+                              std::optional<RenderSprite2DLighting> sprite2DLighting,
                               std::optional<RenderPerspectiveCamera> perspectiveCamera,
                               std::span<const RenderMesh3DItem> meshes3D,
                               std::span<const RenderMesh3DBatch> mesh3DBatches,
                               std::optional<RenderMesh3DLighting> mesh3DLighting,
                               RenderSceneStatistics statistics) noexcept
-        : m_camera(std::move(camera)), m_sprites(sprites),
+        : m_camera(std::move(camera)), m_sprites(sprites), m_sprite2DLighting(std::move(sprite2DLighting)),
           m_perspectiveCamera(std::move(perspectiveCamera)), m_meshes3D(meshes3D),
           m_mesh3DBatches(mesh3DBatches), m_mesh3DLighting(std::move(mesh3DLighting)),
           m_statistics(statistics)
@@ -374,6 +428,7 @@ class RenderSceneView final {
 
     std::optional<RenderCamera2D> m_camera{};
     std::span<const RenderSprite2DItem> m_sprites{};
+    std::optional<RenderSprite2DLighting> m_sprite2DLighting{};
     std::optional<RenderPerspectiveCamera> m_perspectiveCamera{};
     std::span<const RenderMesh3DItem> m_meshes3D{};
     std::span<const RenderMesh3DBatch> m_mesh3DBatches{};
@@ -391,6 +446,7 @@ class RenderSceneWriter final {
 
     [[nodiscard]] Core::Status setCamera2D(const RenderCamera2DInput& camera);
     [[nodiscard]] Core::Status addSprite2D(const RenderSprite2DInput& sprite);
+    [[nodiscard]] Core::Status setSprite2DLighting(const Sprite2DLightingDesc& lighting);
     [[nodiscard]] Core::Status setPerspectiveCamera(const RenderPerspectiveCameraInput& camera);
     [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
     [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting);
@@ -441,6 +497,7 @@ class RenderSceneBuilder final {
 
     [[nodiscard]] Core::Status setCamera2D(const RenderCamera2DInput& camera);
     [[nodiscard]] Core::Status addSprite2D(const RenderSprite2DInput& sprite);
+    [[nodiscard]] Core::Status setSprite2DLighting(const Sprite2DLightingDesc& lighting);
     [[nodiscard]] Core::Status setPerspectiveCamera(const RenderPerspectiveCameraInput& camera);
     [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
     [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting);
@@ -469,6 +526,7 @@ class RenderSceneBuilder final {
     u32 m_mesh3DCount = 0;
     u32 m_mesh3DBatchCount = 0;
     std::optional<RenderCamera2D> m_camera{};
+    std::optional<RenderSprite2DLighting> m_sprite2DLighting{};
     std::optional<RenderPerspectiveCamera> m_perspectiveCamera{};
     std::optional<RenderMesh3DLighting> m_mesh3DLighting{};
     RenderSceneFrameParameters m_frameParameters{};

@@ -90,15 +90,17 @@ Windowed/Fullscreen RadioButton 可见，中文无乱码，控件无裁剪或重
 
 ### Retained UI 产品化补证（2026-07-28/29）
 
-当前工作树的完整 product-2d 同轮报告位于
+2026-07-29 的 product-2d 同轮归档报告位于
 `artifacts/reports/product-2d-treeview-gate.json`；configure、build、Scene/UI/Runtime UI/Render bridge/
 FreeType/Physics2D/Audio/miniaudio/Asset 直接测试与300帧 sample 均 exit 0。直接运行结果包括
 `tina_ui_tests` 313/313、`tina_runtime_ui_tests` 95/95、`tina_scene_tests` 91/91 与
 `tina_asset_tests` 193/193；测试数量只描述本次工作树，不是永久基线。
 
-sample 的当前 `evidenceSchema=14` 同时验证 Dark→Light→Dark 与 Scene Explorer TreeView：13个 logical
+该归档 sample 的 `evidenceSchema=14` 验证 Dark→Light→Dark 与 Scene Explorer TreeView：13个 logical
 item、12个 materialized slot、两次 stable-key selection、最终 key `402`/index `12`、滚动、Theme paint
-和 Tree/TreeItem selected semantics。动态 glyph atlas 修复后的 Dark/Light FreeType client capture 位于
+和 Tree/TreeItem selected semantics。当前 sample/gate 已升级到 schema 15，并增加两盏 `PointLight2D`
+与 `sceneLightingFrames=renderExtractions`；旧报告不反向改写。动态 glyph atlas 修复后的 Dark/Light
+FreeType client capture 位于
 `artifacts/screenshots/2d-scene-explorer-freetype-dark-fixed/20260729-001845/frame-03.png` 与
 `artifacts/screenshots/2d-scene-explorer-freetype-light-fixed/20260729-002407/frame-03.png`；对应
 `report.json` 均为 `ok=true`、exit 0，Scene Explorer、选中行、设置控件和 playfield 均可见，

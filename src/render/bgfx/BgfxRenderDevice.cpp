@@ -241,6 +241,8 @@ struct PreparedUIDisplayList final {
 
 using Mesh3DLightUniformStorage =
     std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U>;
+using Sprite2DLightUniformStorage =
+    std::array<float, Sprite2DLightingDesc::MaximumPointLightCount * 4U>;
 
 void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
                           Mesh3DLightUniformStorage& directions,
@@ -267,6 +269,33 @@ void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
         colors[base + 3U] = 1.0F;
     }
     ambientScale = lighting.ambientScale;
+}
+
+void encodeSprite2DLighting(const Sprite2DLightingDesc& lighting,
+                            Sprite2DLightUniformStorage& positionsAndRadii,
+                            Sprite2DLightUniformStorage& colors,
+                            std::array<float, 4>& params) noexcept
+{
+    positionsAndRadii.fill(0.0F);
+    colors.fill(0.0F);
+    for (std::size_t lightIndex = 0; lightIndex < lighting.pointLights.size(); ++lightIndex)
+    {
+        const Sprite2DPointLight& source = lighting.pointLights[lightIndex];
+        const std::size_t base = lightIndex * 4U;
+        positionsAndRadii[base + 0U] = source.positionX;
+        positionsAndRadii[base + 1U] = source.positionY;
+        positionsAndRadii[base + 2U] = source.radiusMeters;
+        positionsAndRadii[base + 3U] = 1.0F;
+        colors[base + 0U] = source.colorR;
+        colors[base + 1U] = source.colorG;
+        colors[base + 2U] = source.colorB;
+    }
+    params = {
+        lighting.ambientScale,
+        static_cast<float>(lighting.pointLights.size()),
+        0.0F,
+        0.0F,
+    };
 }
 
 struct BgfxScissorRect final {
@@ -778,6 +807,34 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        sprite2DLightPositionsUniform_ = bgfx::createUniform(
+            "u_spriteLightPosRadius", bgfx::UniformType::Vec4,
+            static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
+        if (!bgfx::isValid(sprite2DLightPositionsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Sprite2D point-light position array uniform");
+        }
+        ++statistics_.liveResources;
+
+        sprite2DLightColorsUniform_ = bgfx::createUniform(
+            "u_spriteLightColors", bgfx::UniformType::Vec4,
+            static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
+        if (!bgfx::isValid(sprite2DLightColorsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Sprite2D point-light color array uniform");
+        }
+        ++statistics_.liveResources;
+
+        sprite2DLightParamsUniform_ = bgfx::createUniform("u_spriteLightParams", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(sprite2DLightParamsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Sprite2D lighting params uniform");
+        }
+        ++statistics_.liveResources;
+
         // Default 1x1 white RGBA8 so vertex color remains visible until product textures bind.
         constexpr std::array<u8, 4> WhitePixel{255, 255, 255, 255};
         const bgfx::Memory* whiteMemory = bgfx::copy(WhitePixel.data(), static_cast<u32>(WhitePixel.size()));
@@ -944,6 +1001,15 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (auto status = validateSprite2DFrameResources(frame.primaryWorldScene, frame.resources); !status)
         {
             return Core::failure(std::move(status.error()));
+        }
+        if (frame.primaryWorldScene.sprite2DLighting().has_value())
+        {
+            if (auto status = validateSprite2DLightingDesc(
+                    frame.primaryWorldScene.sprite2DLighting()->descriptor());
+                !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
         }
         if (auto status = validateOpaque3DFrameResources(frame.primaryWorldScene, frame.resources); !status)
         {
@@ -1244,6 +1310,24 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(sprite2DSampler_);
                 sprite2DSampler_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(sprite2DLightPositionsUniform_))
+            {
+                bgfx::destroy(sprite2DLightPositionsUniform_);
+                sprite2DLightPositionsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(sprite2DLightColorsUniform_))
+            {
+                bgfx::destroy(sprite2DLightColorsUniform_);
+                sprite2DLightColorsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(sprite2DLightParamsUniform_))
+            {
+                bgfx::destroy(sprite2DLightParamsUniform_);
+                sprite2DLightParamsUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             for (TextureSlot& slot : textures_)
@@ -1801,6 +1885,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         // bgfx::submit() discards draw state by default, so every batch must
         // publish the complete state required by the following submit.
         const auto sprites = scene.sprites2D();
+        Sprite2DLightUniformStorage lightPositionsAndRadii{};
+        Sprite2DLightUniformStorage lightColors{};
+        std::array<float, 4> lightParams{1.0F, 0.0F, 0.0F, 0.0F};
+        if (scene.sprite2DLighting().has_value())
+        {
+            encodeSprite2DLighting(scene.sprite2DLighting()->descriptor(), lightPositionsAndRadii,
+                                   lightColors, lightParams);
+        }
         u32 batchBegin = 0;
         while (batchBegin < prepared.requirements.spriteCount)
         {
@@ -1835,6 +1927,11 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setState(kSprite2DPremultipliedAlphaState);
             bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.requirements.vertexCount);
             bgfx::setTexture(0, sprite2DSampler_, texture);
+            bgfx::setUniform(sprite2DLightPositionsUniform_, lightPositionsAndRadii.data(),
+                             static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
+            bgfx::setUniform(sprite2DLightColorsUniform_, lightColors.data(),
+                             static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
+            bgfx::setUniform(sprite2DLightParamsUniform_, lightParams.data());
             const u32 firstIndex = batchBegin * 6U;
             const u32 indexCount = (batchEnd - batchBegin) * 6U;
             bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
@@ -2648,6 +2745,9 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle sprite2DLightPositionsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle sprite2DLightColorsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle sprite2DLightParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle uiSolidWhiteTexture_ = BGFX_INVALID_HANDLE;

@@ -18,6 +18,7 @@ struct ExtractRenderSceneParams final {
     Asset::AssetFrameResourceResolver mesh3DBindingResolver{};
     Asset::AssetFrameResourceResolver material3DBindingResolver{};
     float ambientLightScale = 0.18F;
+    float ambientLight2DScale = 0.2F;
 };
 
 // Reads published World components into an existing phase-local
@@ -43,6 +44,8 @@ struct ExtractRenderSceneParams final {
 //   resolver empty result returns UnresolvedMesh. Hidden meshes are not resolved.
 // - Active DirectionalLight3D components are sorted by stable entity identity,
 //   transformed to world direction, and published as one bounded lighting snapshot.
+// - Active PointLight2D components are sorted by stable entity identity and publish
+//   world position/radius/color as one bounded, unshadowed Sprite2D lighting snapshot.
 // - Optional SpriteOverrideFlags::UvRect copies uvRectOverride into
 //   RenderSprite2DInput; otherwise UV defaults to full texture [0,1].
 // - Does not require Runtime Phase Context World capability.

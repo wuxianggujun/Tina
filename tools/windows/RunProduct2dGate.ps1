@@ -48,6 +48,8 @@ $expectedGate = 'bgfx-physics-freetype-audio'
 $targets = @(
     'tina_sample_2d',
     'tina_scene_tests',
+    'tina_render_scene_tests',
+    'tina_render_bgfx_tests',
     'tina_ui_tests',
     'tina_runtime_ui_tests',
     'tina_ui_render_integration_tests',
@@ -60,6 +62,8 @@ $targets = @(
 )
 $testExes = @(
     'tina_scene_tests.exe',
+    'tina_render_scene_tests.exe',
+    'tina_render_bgfx_tests.exe',
     'tina_ui_tests.exe',
     'tina_runtime_ui_tests.exe',
     'tina_ui_render_integration_tests.exe',
@@ -135,7 +139,10 @@ if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
 $requiredProductEvidence = @(
-    'evidenceSchema\":14',
+    'evidenceSchema\":15',
+    'sprite2DLightingConfigured\":true',
+    'pointLight2DCount\":2',
+    'sceneLightingFrames\":[1-9][0-9]*',
     'uiThemeDemoRequested\":true',
     'uiThemeSwitches\":2',
     'uiThemeButtonActivations\":0',
@@ -202,6 +209,15 @@ foreach ($pattern in $requiredProductEvidence) {
     if ($sampleOut -notmatch $pattern) {
         Add-Step -Name 'productEvidence' -ExitCode 1 -Detail "missing $pattern; output=$($sampleOut.Trim())"
     }
+}
+$renderExtractionsMatch =
+    [regex]::Match($sampleOut, 'renderExtractions\":(?<value>[1-9][0-9]*)')
+$sceneLightingFramesMatch =
+    [regex]::Match($sampleOut, 'sceneLightingFrames\":(?<value>[1-9][0-9]*)')
+if (-not $renderExtractionsMatch.Success -or -not $sceneLightingFramesMatch.Success -or
+    $renderExtractionsMatch.Groups['value'].Value -ne
+        $sceneLightingFramesMatch.Groups['value'].Value) {
+    Add-Step -Name 'sceneLightingFrames' -ExitCode 1 -Detail 'sceneLightingFrames must equal renderExtractions'
 }
 Add-Step -Name 'tina_sample_2d' -ExitCode 0 -Detail "productGate=$expectedGate frames=$SampleFrames"
 

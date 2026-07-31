@@ -24,6 +24,8 @@ struct World::EntityRecord final {
     Camera2D camera2D{};
     bool hasSpriteRenderer2D = false;
     SpriteRenderer2D spriteRenderer2D{};
+    bool hasPointLight2D = false;
+    PointLight2D pointLight2D{};
     bool hasPerspectiveCamera3D = false;
     PerspectiveCamera3D perspectiveCamera3D{};
     bool hasMeshRenderer3D = false;
@@ -1032,6 +1034,63 @@ Core::Status World::clearSpriteRenderer2D(EntityId entity) noexcept
     return Core::success();
 }
 
+Core::Status World::setPointLight2D(EntityId entity, PointLight2D light) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(light)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene PointLight2D has invalid color, intensity, or radius");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for PointLight2D");
+    }
+    entityRecord->pointLight2D = light;
+    entityRecord->hasPointLight2D = true;
+    return Core::success();
+}
+
+Core::Status World::clearPointLight2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for PointLight2D clear");
+    }
+    entityRecord->hasPointLight2D = false;
+    entityRecord->pointLight2D = {};
+    return Core::success();
+}
+
 const Camera2D* World::camera2D(EntityId entity) const noexcept
 {
     if (m_impl == nullptr || !m_impl->isOwnerThread()) {
@@ -1054,6 +1113,18 @@ const SpriteRenderer2D* World::spriteRenderer2D(EntityId entity) const noexcept
         return nullptr;
     }
     return &entityRecord->spriteRenderer2D;
+}
+
+const PointLight2D* World::pointLight2D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasPointLight2D) {
+        return nullptr;
+    }
+    return &entityRecord->pointLight2D;
 }
 
 Core::Status World::setPerspectiveCamera3D(EntityId entity, PerspectiveCamera3D camera) noexcept

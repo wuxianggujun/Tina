@@ -84,6 +84,15 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(status.error()));
         }
+        if (frame.primaryWorldScene.sprite2DLighting().has_value())
+        {
+            if (auto status = validateSprite2DLightingDesc(
+                    frame.primaryWorldScene.sprite2DLighting()->descriptor());
+                !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
+        }
         if (frame.primaryWorldScene.mesh3DLighting().has_value())
         {
             if (auto status = validateMesh3DLightingDesc(

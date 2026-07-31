@@ -58,5 +58,6 @@ inline constexpr Core::ErrorCode InvalidFrameResource{Core::ErrorDomain::Render,
 inline constexpr Core::ErrorCode FrameResourceCapacityExceeded{Core::ErrorDomain::Render, 50};
 inline constexpr Core::ErrorCode FrameResourceIdentityExhausted{Core::ErrorDomain::Render, 51};
 inline constexpr Core::ErrorCode RenderSceneLightingConflict{Core::ErrorDomain::Render, 52};
+inline constexpr Core::ErrorCode InvalidSprite2DLighting{Core::ErrorDomain::Render, 53};
 
 } // namespace Tina::Render::RenderErrorCode

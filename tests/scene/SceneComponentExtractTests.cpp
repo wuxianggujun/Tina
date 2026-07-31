@@ -846,6 +846,142 @@ TEST_F(SceneMeshAssetTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
     EXPECT_EQ(world.meshRenderer3D(entity), nullptr);
 }
 
+TEST(ScenePointLight2DTest, SetsClearsQueriesAndRejectsInvalidComponent)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    PointLight2D light{
+        .color = {.red = 0.25F, .green = 0.5F, .blue = 0.75F},
+        .intensity = 2.0F,
+        .radiusMeters = 6.0F,
+    };
+    ASSERT_TRUE(world.setPointLight2D(entity, light));
+    ASSERT_NE(world.pointLight2D(entity), nullptr);
+    EXPECT_EQ(*world.pointLight2D(entity), light);
+
+    light.radiusMeters = 0.0F;
+    auto invalid = world.setPointLight2D(entity, light);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_FLOAT_EQ(world.pointLight2D(entity)->radiusMeters, 6.0F);
+
+    ASSERT_TRUE(world.clearPointLight2D(entity));
+    EXPECT_EQ(world.pointLight2D(entity), nullptr);
+}
+
+TEST(ScenePointLight2DTest, DestroyedEntityDoesNotLeakLightIntoReusedSlot)
+{
+    World world = makeWorld(1);
+    const EntityId original = world.createEntity().value();
+    ASSERT_TRUE(world.setPointLight2D(original, PointLight2D{}));
+    ASSERT_TRUE(world.destroyEntity(original));
+
+    const EntityId replacement = world.createEntity().value();
+    EXPECT_EQ(replacement.index(), original.index());
+    EXPECT_NE(replacement.generation(), original.generation());
+    EXPECT_EQ(world.pointLight2D(original), nullptr);
+    EXPECT_EQ(world.pointLight2D(replacement), nullptr);
+}
+
+TEST(ScenePointLight2DTest, ExtractsStableWorldPositionsColorsRadiusAndAmbientIntoRenderScene)
+{
+    World world = makeWorld();
+    const EntityId first = world.createEntity(translated(1.0F, 2.0F)).value();
+    const EntityId second = world.createEntity(translated(-3.0F, 4.0F)).value();
+    const EntityId inactive = world.createEntity().value();
+    ASSERT_TRUE(world.setPointLight2D(first, PointLight2D{
+        .color = {.red = 0.5F, .green = 0.25F, .blue = 0.125F},
+        .intensity = 2.0F,
+        .radiusMeters = 5.0F,
+    }));
+    ASSERT_TRUE(world.setPointLight2D(second, PointLight2D{
+        .color = {.red = 0.1F, .green = 0.2F, .blue = 0.3F},
+        .intensity = 3.0F,
+        .radiusMeters = 7.0F,
+    }));
+    ASSERT_TRUE(world.setPointLight2D(inactive, PointLight2D{.active = false}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{.ambientLight2DScale = 0.3F}));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_TRUE(view->sprite2DLighting().has_value());
+    const auto lights = view->sprite2DLighting()->pointLights();
+    ASSERT_EQ(lights.size(), 2U);
+    EXPECT_FLOAT_EQ(lights[0].positionX, 1.0F);
+    EXPECT_FLOAT_EQ(lights[0].positionY, 2.0F);
+    EXPECT_FLOAT_EQ(lights[0].radiusMeters, 5.0F);
+    EXPECT_FLOAT_EQ(lights[0].colorR, 1.0F);
+    EXPECT_FLOAT_EQ(lights[0].colorG, 0.5F);
+    EXPECT_FLOAT_EQ(lights[0].colorB, 0.25F);
+    EXPECT_FLOAT_EQ(lights[1].positionX, -3.0F);
+    EXPECT_FLOAT_EQ(lights[1].positionY, 4.0F);
+    EXPECT_FLOAT_EQ(lights[1].radiusMeters, 7.0F);
+    EXPECT_FLOAT_EQ(lights[1].colorR, 0.3F);
+    EXPECT_FLOAT_EQ(lights[1].colorG, 0.6F);
+    EXPECT_FLOAT_EQ(lights[1].colorB, 0.9F);
+    EXPECT_FLOAT_EQ(view->sprite2DLighting()->ambientScale(), 0.3F);
+}
+
+TEST(ScenePointLight2DTest, EnforcesCapacityAndPublishesInactiveAmbientOnly)
+{
+    World world = makeWorld(Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U);
+    for (usize index = 0; index < Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U; ++index) {
+        const EntityId entity = world.createEntity().value();
+        ASSERT_TRUE(world.setPointLight2D(entity, PointLight2D{}));
+    }
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    auto tooMany = extractRenderSceneFromWorld(world, writer, packet.resourceSink());
+    ASSERT_FALSE(tooMany);
+    EXPECT_EQ(tooMany.error().code, SceneErrorCode::TooManyActivePointLights2D);
+    builder->rollback();
+
+    World inactiveWorld = makeWorld();
+    const EntityId inactive = inactiveWorld.createEntity().value();
+    ASSERT_TRUE(inactiveWorld.setPointLight2D(inactive, PointLight2D{.active = false}));
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter inactiveWriter = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        inactiveWorld,
+        inactiveWriter,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{.ambientLight2DScale = 0.4F}));
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_TRUE(view->sprite2DLighting().has_value());
+    EXPECT_TRUE(view->sprite2DLighting()->pointLights().empty());
+    EXPECT_FLOAT_EQ(view->sprite2DLighting()->ambientScale(), 0.4F);
+
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter invalidWriter = builder->writer();
+    auto invalidAmbient = extractRenderSceneFromWorld(
+        inactiveWorld,
+        invalidWriter,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .ambientLight2DScale = std::numeric_limits<float>::quiet_NaN(),
+        });
+    ASSERT_FALSE(invalidAmbient);
+    EXPECT_EQ(invalidAmbient.error().code, SceneErrorCode::InvalidComponent);
+    builder->rollback();
+}
+
 TEST(SceneDirectionalLightTest, SetsClearsQueriesAndRejectsInvalidComponent)
 {
     World world = makeWorld();

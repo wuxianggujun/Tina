@@ -64,6 +64,13 @@ SPI。submit 时分别绑定 `s_texColor`、`s_texMR`（glTF 打包：G=roughnes
 1×1 白；未绑定 MR 图时 metallic=0、roughness=1；未绑定 normal 图时只用几何法线。诚实限制：无通用
 light component/culling、无 IBL、无 shadow。
 
+Sprite2D lighting（`2D-LIGHT-N1`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 world-space point
+light、正半径、非负 RGB 与 ambient。`setSprite2DLighting()` 深拷贝调用方 span，重复/非法描述使 build
+原子失败；未配置 snapshot 时 bgfx 使用 ambient=1 的既有 unlit 输出。配置后 fragment shader 以 world
+position 计算线性径向衰减，并在每个连续 texture batch 重新提交完整 uniform arrays。灯光不重排 Sprite，
+sorting layer → order → ordinal 与 premultiplied-alpha 合成保持不变。当前没有 occluder、shadow、normal
+map、light culling 或 HDR/tone mapping。
+
 ## RenderScene
 
 `RenderSceneBuilder` 在固定容量 storage 中事务式构建 Camera/Sprite/Mesh：
@@ -72,6 +79,7 @@ light component/culling、无 IBL、无 shadow。
 beginFrame(surface facts)
   -> phase-local writer
   -> add Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D
+  -> optional setSprite2DLighting (deep-copy fixed frame snapshot)
   -> validate, cull, stable sort and batch
   -> commit borrowed view
 ```
@@ -80,6 +88,7 @@ beginFrame(surface facts)
 
 - Camera2D projection、viewport、pixel snap 与 world picking；
 - Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻兼容 batch；
+- optional self-contained Sprite2D lighting snapshot、最多8个 point light 与 ambient；
 - PerspectiveCamera3D、frustum culling、Opaque3D depth/state 与 stable batch；
 - framebuffer 0x0 suspended 路径；
 - 容量/非法数值/非法 resource ref 失败时不发布半份 scene。
@@ -168,7 +177,7 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 
 - native WindowSurface 初始化、resize/suspend、submit/present/shutdown；
 - transient frame budget 与容量失败；
-- Sprite2D textured quad pass；
+- Sprite2D textured quad pass + frame-scoped 0..8 point lights；
 - Opaque3D experimental metallic-roughness hybrid mesh/depth pass（单次有界0..4 directional lights）；
 - UI solid/glyph pass；
 - Texture2D/StaticMesh generation storage 与 key binding；
