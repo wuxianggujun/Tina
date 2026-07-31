@@ -46,6 +46,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 阶段/任务 | 完成结果 |
 | --- | --- |
+| UI-STATE-FEEDBACK | Slider、Checkbox/RadioButton、List/Tree 与 TextEdit 复用唯一交互/焦点状态源并完成 stale-state 清理；Windows MSVC/bgfx/FreeType Dark/Light 产品门禁22项差分检查全部通过，证据见 [UI-STATE-FEEDBACK Windows Evidence](ui-state-feedback-evidence-windows.md) |
 | UI-ELEMENT-AUTHORING / ADR 0022 | authoring 统一为 descriptor/recipe `createElement()`；Flex/Overlay、committed content placement、显式 Semantics/Merge/Exclude、Theme role/override reset、固定容量 build transaction 与 bounded Canvas `SolidRect` 已落地；公开 `UIWidgetKind`/create-by-kind surface 删除；UI/Runtime UI/UI-Render/FreeType/UIA/bgfx 直接测试、Showcase Dark/Light smoke/capture、2D/3D smoke 与 UI-003 baseline gate 通过 |
 | M0～M5 | C++23 构建基线、设计审计、ADR 与依赖方向建立 |
 | M6 | Headless Runtime、`EngineHost`、`IGameApplication`/`IGameState` 生命周期 |

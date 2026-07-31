@@ -350,6 +350,11 @@ bgfx + FreeType preset；普通 bgfx preset 的 placeholder text 只用于确定
 `artifacts/screenshots/ui-showcase-light/20260728-155914/frame-03.png`；两张 1280×980 画面完整呈现
 20个控件、集合区、滚动区及主题差异，没有裁剪或重叠。
 
+2026-07-31 的 `RunUiStateFeedbackVisualGate.ps1` 通过 Windows MSVC/bgfx/FreeType 产品路径驱动真实
+Win32 pointer route，对 Dark/Light 的 normal、hover、focus、pressed/drag、selected 与 disabled 状态执行
+22项差分检查并全部通过。可复现环境、可执行文件与截图哈希记录在
+[UI-STATE-FEEDBACK Windows Evidence](ui-state-feedback-evidence-windows.md)；生成截图已按约定回收。
+
 `tina_sample_2d` 当前 UI 包含：
 
 - HUD Label/Theme Button；

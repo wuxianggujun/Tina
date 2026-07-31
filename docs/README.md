@@ -86,6 +86,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 - [M12 门禁清单](m12-gate-checklist.md)：产品删除已完成，剩余复验与扫尾状态。
 - [M12 Windows 证据](m12-evidence-windows.md)：带日期的本机运行摘录，不代替当前测试。
 - [M12 Linux 证据](m12-evidence-linux.md)：Linux tip 复验摘录。
+- [UI 状态反馈 Windows 证据](ui-state-feedback-evidence-windows.md)：Dark/Light 交互状态产品差分门禁。
 
 当前产品 UI 是 `include/tina/ui` + `src/ui`。旧 UI 产品图已删除，但不能据此删除或称退役当前
 `src/ui`。产品入口是 `Tina::Desktop` 与 `tina_sample_*`，不再存在 Legacy `Tina.exe`。
