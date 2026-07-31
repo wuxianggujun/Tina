@@ -289,7 +289,7 @@ Narrator/Inspect 人工金标仍由 UI-002 跟踪，Linux AT-SPI adapter/真机�
 ## Scene
 
 `Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Camera2D/
-SpriteRenderer2D/PointLight2D/PerspectiveCamera3D/MeshRenderer3D。
+SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3D。
 `extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material weak `AssetHandle`。
