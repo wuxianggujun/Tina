@@ -19,6 +19,7 @@ param(
     [string]$BuildPreset = 'windows-vnext-bgfx-product-2d-debug',
     [string]$ConfigurePreset = 'windows-msvc-vnext-bgfx-product-2d',
     [int]$SampleFrames = 300,
+    [int]$ShadowVisualFrames = 300,
     [switch]$SkipConfigure,
     [switch]$SkipBuild,
     [string]$OutJson = '',
@@ -221,6 +222,20 @@ if (-not $renderExtractionsMatch.Success -or -not $sceneLightingFramesMatch.Succ
     Add-Step -Name 'sceneLightingFrames' -ExitCode 1 -Detail 'sceneLightingFrames must equal renderExtractions'
 }
 Add-Step -Name 'tina_sample_2d' -ExitCode 0 -Detail "productGate=$expectedGate frames=$SampleFrames"
+
+$shadowVisualScript = Join-Path $SourceRoot 'tools\windows\RunProduct2dShadowVisualGate.ps1'
+if (-not (Test-Path -LiteralPath $shadowVisualScript -PathType Leaf)) {
+    Add-Step -Name 'shadowVisual' -ExitCode 1 -Detail "missing script: $shadowVisualScript"
+}
+$shadowVisualOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $shadowVisualScript `
+    -SourceRoot $SourceRoot `
+    -BinDir $BinDir `
+    -SampleFrames $ShadowVisualFrames 2>&1 | Out-String
+$shadowVisualExit = $LASTEXITCODE
+if ($shadowVisualExit -ne 0) {
+    Add-Step -Name 'shadowVisual' -ExitCode $shadowVisualExit -Detail $shadowVisualOut.Trim()
+}
+Add-Step -Name 'shadowVisual' -ExitCode 0 -Detail $shadowVisualOut.Trim()
 
 $report.finishedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 $report.sampleStdout = $sampleOut.Trim()

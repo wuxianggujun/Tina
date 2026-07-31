@@ -203,6 +203,8 @@ struct SampleOptions final {
     bool uiThemeDemo = false;
     // Product gate only: exercise Scene Explorer selection and virtualized scrolling.
     bool uiTreeDemo = false;
+    // Differential GPU visual gate: keep the same World topology but disable shadow contribution.
+    bool disableShadowOccluders = false;
     // Optional controlled product gate: seed one map cell selection after enter
     // without synthesizing OS pointer events (GLFW smoke stays hermetic).
     bool seedTileSelection = false;
@@ -627,6 +629,11 @@ void writeError(const Tina::Core::Error& error)
         if (argument == "--ui-tree-demo")
         {
             options.uiTreeDemo = true;
+            continue;
+        }
+        if (argument == "--disable-shadow-occluders")
+        {
+            options.disableShadowOccluders = true;
             continue;
         }
         if (argument.starts_with("--seed-tile-selection="))
@@ -1355,7 +1362,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
 
 // Bootstrap Scene World for product extract (camera + character [+ crate]).
 // Called once after controller (and optional physics) are ready in prepareCatalog.
-[[nodiscard]] Tina::Core::Status prepareSceneWorld(TileMapResources& resources)
+[[nodiscard]] Tina::Core::Status prepareSceneWorld(TileMapResources& resources, bool disableShadowOccluders)
 {
     if (!resources.controller || !resources.characterAnimator)
     {
@@ -1430,6 +1437,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                 .localStartY = -1.5F,
                 .localEndX = 0.0F,
                 .localEndY = 1.5F,
+                .active = !disableShadowOccluders,
             });
         !status)
     {
@@ -1448,6 +1456,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                 .localStartY = 0.0F,
                 .localEndX = 1.0F,
                 .localEndY = 0.0F,
+                .active = !disableShadowOccluders,
             });
         !status)
     {
@@ -1502,7 +1511,8 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     return Tina::Core::success();
 }
 
-[[nodiscard]] Tina::Core::Status prepareCatalog(TileMapResources& resources, LifecycleCounters& counters)
+[[nodiscard]] Tina::Core::Status prepareCatalog(TileMapResources& resources, LifecycleCounters& counters,
+                                                 bool disableShadowOccluders)
 {
     // Stable product ids must match samples/2d_tilemap_bgfx/catalog/sample_2d.recipe.
     const auto tileTextureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
@@ -1825,7 +1835,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     counters.audioFromCatalogLease = true;
 
     // M8-C1: Scene World for camera/character/(crate) extract path.
-    if (const auto status = prepareSceneWorld(resources); !status)
+    if (const auto status = prepareSceneWorld(resources, disableShadowOccluders); !status)
     {
         return status;
     }
@@ -4170,7 +4180,7 @@ int main(int argc, char** argv)
     counters.uiThemeDemoRequested = options->uiThemeDemo;
     counters.uiTreeDemoRequested = options->uiTreeDemo;
     TileMapResources resources{};
-    if (const auto status = prepareCatalog(resources, counters); !status)
+    if (const auto status = prepareCatalog(resources, counters, options->disableShadowOccluders); !status)
     {
         writeError(status.error());
         return 1;
@@ -4345,10 +4355,12 @@ int main(int argc, char** argv)
         counters.trailActive == resources.trail->segmentCount() &&
         counters.trailExtracted == counters.trailActive && counters.fxInitialFingerprint.size() == 32U &&
         product300EffectsValid;
+    const u32 expectedShadowOccluder2DCount =
+        options->disableShadowOccluders ? 0U : ProductShadowOccluder2DCount;
     const bool lighting2DValid =
         counters.sprite2DLightingConfigured &&
         counters.pointLight2DCount == ProductPointLight2DCount &&
-        counters.shadowOccluder2DCount == ProductShadowOccluder2DCount &&
+        counters.shadowOccluder2DCount == expectedShadowOccluder2DCount &&
         counters.sceneLightingFrames == counters.renderExtractions;
 
     const bool audioValid =
@@ -4509,7 +4521,7 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, ProductTrailSegments);
     appendLeU64(evidenceBytes, ProductTrailStableKeyBase);
     appendLeU32(evidenceBytes, ProductPointLight2DCount);
-    appendLeU32(evidenceBytes, ProductShadowOccluder2DCount);
+    appendLeU32(evidenceBytes, counters.shadowOccluder2DCount);
     appendF32Bits(evidenceBytes, ProductAmbientLight2DScale);
     appendLeU32(evidenceBytes, counters.sprite2DLightingConfigured ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.sceneLightingFrames);
