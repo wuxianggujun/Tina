@@ -258,6 +258,9 @@ Keyboard Arrow 与 Gamepad D-pad 通过 Runtime 复用该路由，复合控件�
 disabled、Hidden/Collapsed、destroy 与 Modal change 会清除或迁移焦点。`UISliderPaint::focusedThumbColor`
 只表达该焦点的 paint feedback，dragging 仍优先。当前 Arrow/D-pad 不修改 Slider value；键盘/手柄调值由
 独立 `UI-RANGE-INPUT-KEYBOARD` 任务定义，不属于现有 RangeInput 公共契约。
+`UICheckboxPaint` 与 `UIRadioButtonPaint` 提供 hover/focus/pressed indicator override；零 alpha 回退到下一
+状态，非零颜色按 pressed > hover > focus > normal 解析。disabled 仍统一应用 widget opacity，Checkbox
+checked 前景与 RadioButton selected 前景继续读取各自既有字段。默认 Dark/Light recipe 均提供可辨识状态色。
 UI-005 的 ScrollView、Dropdown/Popup 与固定 row pool ListView/TreeView 已实现。集合控件支持 100k logical
 item 的虚拟化，但完整通用 dirty-range pruning 仍未完成。当前回归覆盖 50,000 节点深树的非递归
 structure commit/destroy、layout、hit 与 paint publication；Popup membership 在 layout traversal 中缓存，

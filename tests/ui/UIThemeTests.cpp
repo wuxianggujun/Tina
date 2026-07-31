@@ -101,6 +101,20 @@ TEST(UIThemeTest, ButtonChromeUsesThemeTokens)
     EXPECT_EQ(chrome.box.cornerRadius, theme.controlCornerRadius);
 }
 
+TEST(UIThemeTest, SelectionControlsUseThemeInteractionStateTokens)
+{
+    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
+    constexpr UI::UICheckboxChrome checkbox = UI::makeCheckboxChrome(theme);
+    constexpr UI::UIRadioButtonChrome radio = UI::makeRadioButtonChrome(theme);
+
+    EXPECT_NE(checkbox.indicator.hoveredIndicatorColor.alpha, 0);
+    EXPECT_EQ(checkbox.indicator.focusedIndicatorColor, theme.focusRing);
+    EXPECT_NE(checkbox.indicator.pressedIndicatorColor.alpha, 0);
+    EXPECT_NE(radio.radio.hoveredIndicatorColor.alpha, 0);
+    EXPECT_EQ(radio.radio.focusedIndicatorColor, theme.focusRing);
+    EXPECT_NE(radio.radio.pressedIndicatorColor.alpha, 0);
+}
+
 TEST(UIThemeTest, LightThemeDiffersFromDefault)
 {
     constexpr UI::UITheme dark = UI::makeDefaultProductTheme();

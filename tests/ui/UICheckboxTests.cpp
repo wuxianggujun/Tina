@@ -164,7 +164,7 @@ TEST(UICheckboxTest, CapabilitiesAreTargetableAndDefaultUnchecked)
     EXPECT_TRUE(UI::hasBehavior(entry->behaviors, UI::UIElementBehavior::Toggle));
 }
 
-TEST(UICheckboxTest, UnarmedMoveDoesNotReserveButtonHoverCapacity)
+TEST(UICheckboxTest, HoverDirtyCapacityFailurePreservesStateAtomically)
 {
     auto windows = WindowPool::Create(1);
     ASSERT_TRUE(windows.has_value());
@@ -185,7 +185,17 @@ TEST(UICheckboxTest, UnarmedMoveDoesNotReserveButtonHoverCapacity)
     ASSERT_TRUE(blocker.has_value());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(checkbox, fixedSize(40.0F, 40.0F)));
+    assertOk(updater.setBoxPaint(checkbox, solidFill(10, 20, 30)));
+    assertOk(updater.setCheckboxPaint(
+        checkbox,
+        {
+            .hoveredIndicatorColor = {.red = 40, .green = 50, .blue = 60, .alpha = 255},
+        }));
     publishLayout(*context);
+    ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
     assertOk(updater.setBoxPaint(root.rootNodeId(), solidFill(1, 2, 3)));
     assertOk(updater.setBoxPaint(*blocker, solidFill(4, 5, 6)));
@@ -195,9 +205,112 @@ TEST(UICheckboxTest, UnarmedMoveDoesNotReserveButtonHoverCapacity)
         window,
         UI::UIRoutedPointerEventKind::Move,
         1));
-    ASSERT_TRUE(moved.has_value()) << (moved ? "" : moved.error().message);
-    EXPECT_FALSE(moved->consumed);
+    ASSERT_FALSE(moved.has_value());
+    EXPECT_EQ(moved.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 2U);
+
+    publishLayout(*context);
+    ASSERT_EQ(context->committedPaint().size(), 3U);
+    const UI::UICommittedPaintView committedPaint = context->committedPaint();
+    const auto checkboxPaint = std::ranges::find_if(
+        committedPaint.entries(),
+        [checkbox](const UI::UICommittedPaintEntry& entry) { return entry.node == checkbox; });
+    ASSERT_NE(checkboxPaint, committedPaint.entries().end());
+    EXPECT_EQ(
+        checkboxPaint->solidFill,
+        (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
+}
+
+TEST(UICheckboxTest, HoveredFocusedPressedAndDisabledStatesResolveCommittedOuterIndicatorPaint)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    const UI::UINodeId checkbox = createCheckbox(*context, root.rootNodeId());
+    ASSERT_TRUE(checkbox.hasValue());
+
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    assertOk(updater.setLayoutStyle(checkbox, fixedSize(40.0F, 40.0F)));
+    assertOk(updater.setBoxPaint(checkbox, solidFill(10, 20, 30)));
+    assertOk(updater.setCheckboxPaint(
+        checkbox,
+        {
+            .checkedIndicatorColor = {},
+            .checkedIndicatorInset = 6.0F,
+            .hoveredIndicatorColor = {.red = 40, .green = 50, .blue = 60, .alpha = 255},
+            .focusedIndicatorColor = {.red = 70, .green = 80, .blue = 90, .alpha = 255},
+            .pressedIndicatorColor = {.red = 100, .green = 110, .blue = 120, .alpha = 255},
+        }));
+
+    publishLayout(*context);
+    ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
+
+    assertOk(context->requestFocus(checkbox));
+    publishLayout(*context);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{70, 80, 90, 255}));
+
+    auto movedInside = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::Move,
+        1,
+        {.x = 10.0F, .y = 10.0F}));
+    ASSERT_TRUE(movedInside.has_value()) << (movedInside ? "" : movedInside.error().message);
+    publishLayout(*context);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{40, 50, 60, 255}));
+
+    auto down = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::ButtonDown,
+        2,
+        {.x = 10.0F, .y = 10.0F}));
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    publishLayout(*context);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{100, 110, 120, 255}));
+
+    auto up = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::ButtonUp,
+        3,
+        {.x = 10.0F, .y = 10.0F}));
+    ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+    publishLayout(*context);
+    ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{40, 50, 60, 255}));
+
+    auto movedOutside = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::Move,
+        4,
+        {.x = 80.0F, .y = 80.0F}));
+    ASSERT_TRUE(movedOutside.has_value()) << (movedOutside ? "" : movedOutside.error().message);
+    publishLayout(*context);
+    EXPECT_EQ(context->defaultActionFocus(), checkbox);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{70, 80, 90, 255}));
+
+    assertOk(updater.setEnabled(checkbox, false));
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    publishLayout(*context);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{5, 11, 16, 140}));
 }
 
 TEST(UICheckboxTest, PrimaryClickTogglesAndFiresAction)

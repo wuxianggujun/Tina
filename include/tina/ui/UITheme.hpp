@@ -252,6 +252,9 @@ struct UICheckboxChrome final {
             UICheckboxPaint{
                 .checkedIndicatorColor = theme.textPrimary,
                 .checkedIndicatorInset = theme.checkboxIndicatorInset,
+                .hoveredIndicatorColor = lightenChannel(fill, 28),
+                .focusedIndicatorColor = theme.focusRing,
+                .pressedIndicatorColor = darkenChannel(fill, 36),
             },
     };
 }
@@ -308,6 +311,7 @@ struct UIRadioButtonChrome final {
                 .selectedIndicatorColor = theme.textAccent,
                 .selectedIndicatorInset = theme.radioSelectedInset,
                 .labelGap = theme.radioLabelGap,
+                .hoveredIndicatorColor = lightenChannel(theme.surface2, 28),
                 .focusedIndicatorColor = theme.focusRing,
                 .pressedIndicatorColor = darkenChannel(theme.accent, 40),
             },

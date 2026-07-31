@@ -409,7 +409,7 @@ struct UIContext::Impl final {
     u64 accessibilityActionSequence = 0;
     UINodeId armedPrimaryButton{};
     bool armedPrimaryButtonPressed = false;
-    UINodeId hoveredPrimaryButton{};
+    UINodeId hoveredPrimaryControl{};
     // M11-C1: exclusive Primary drag capture for Slider (clears Button arm).
     UINodeId armedSlider{};
     UINodeId armedScrollView{};
@@ -1822,6 +1822,30 @@ struct UIContext::Impl final {
     {
         UIPremultipliedRgba8Color color = normalColor;
         const NodeRecord* record = recordByIndex(nodeIndex);
+        if (record != nullptr && record->kind == BuiltinElementKind::Checkbox &&
+            nodeIndex < checkboxPaintsByNodeIndex.size())
+        {
+            const UICheckboxPaint& paint = checkboxPaintsByNodeIndex[nodeIndex];
+            const auto applyOverride = [&color](UIStraightSrgba8Color overrideColor) noexcept {
+                if (overrideColor.alpha != 0)
+                {
+                    color = premultiply(overrideColor);
+                }
+            };
+            if (defaultActionFocusButton == node)
+            {
+                applyOverride(paint.focusedIndicatorColor);
+            }
+            if (hoveredPrimaryControl == node)
+            {
+                applyOverride(paint.hoveredIndicatorColor);
+            }
+            if (isButtonPressed(node))
+            {
+                applyOverride(paint.pressedIndicatorColor);
+            }
+            return widgetPaintColor(node, color);
+        }
         if (record == nullptr || !isButtonChromeKind(record->kind) || nodeIndex >= buttonPaintsByNodeIndex.size())
         {
             return widgetPaintColor(node, color);
@@ -1838,7 +1862,7 @@ struct UIContext::Impl final {
         {
             applyOverride(paint.focusedBackgroundColor);
         }
-        if (hoveredPrimaryButton == node)
+        if (hoveredPrimaryControl == node)
         {
             applyOverride(paint.hoveredBackgroundColor);
         }
@@ -1902,6 +1926,10 @@ struct UIContext::Impl final {
         if (defaultActionFocusButton == node)
         {
             applyOverride(paint.focusedIndicatorColor);
+        }
+        if (hoveredPrimaryControl == node)
+        {
+            applyOverride(paint.hoveredIndicatorColor);
         }
         if (isButtonPressed(node))
         {
@@ -2762,17 +2790,19 @@ struct UIContext::Impl final {
         armedTreeDisclosure = false;
     }
 
-    void clearHoveredPrimaryButton() noexcept
+    void clearHoveredPrimaryControl() noexcept
     {
-        hoveredPrimaryButton = {};
+        hoveredPrimaryControl = {};
     }
 
-    [[nodiscard]] UINodeId resolvedHoveredPrimaryButton(UINodeId candidate) const noexcept
+    [[nodiscard]] UINodeId resolvedHoveredPrimaryControl(UINodeId candidate) const noexcept
     {
         if (candidate.hasValue() && isNodeEnabled(candidate))
         {
             const NodeRecord* record = nodes.tryGet(candidate.storageId());
-            if (record != nullptr && isButtonChromeKind(record->kind))
+            if (record != nullptr &&
+                (isButtonChromeKind(record->kind) || record->kind == BuiltinElementKind::Checkbox ||
+                 record->kind == BuiltinElementKind::RadioButton))
             {
                 return candidate;
             }
@@ -2780,32 +2810,20 @@ struct UIContext::Impl final {
         return {};
     }
 
-    [[nodiscard]] Core::Status preflightHoveredPrimaryButton(UINodeId candidate) const
+    [[nodiscard]] Core::Status updateHoveredPrimaryControl(UINodeId candidate)
     {
-        const UINodeId nextHover = resolvedHoveredPrimaryButton(candidate);
-        if (nextHover == hoveredPrimaryButton)
+        const UINodeId nextHover = resolvedHoveredPrimaryControl(candidate);
+        if (nextHover == hoveredPrimaryControl)
         {
             return Core::success();
         }
         const UINodeId previousHover =
-            hoveredPrimaryButton.hasValue() && contains(hoveredPrimaryButton) ? hoveredPrimaryButton : UINodeId{};
-        return preflightPaintDirtyBatch({previousHover, nextHover});
-    }
-
-    [[nodiscard]] Core::Status updateHoveredPrimaryButton(UINodeId candidate)
-    {
-        const UINodeId nextHover = resolvedHoveredPrimaryButton(candidate);
-        if (nextHover == hoveredPrimaryButton)
-        {
-            return Core::success();
-        }
-        const UINodeId previousHover =
-            hoveredPrimaryButton.hasValue() && contains(hoveredPrimaryButton) ? hoveredPrimaryButton : UINodeId{};
+            hoveredPrimaryControl.hasValue() && contains(hoveredPrimaryControl) ? hoveredPrimaryControl : UINodeId{};
         if (Core::Status dirty = markPaintDirtyBatch({previousHover, nextHover}); !dirty)
         {
             return dirty;
         }
-        hoveredPrimaryButton = nextHover;
+        hoveredPrimaryControl = nextHover;
         return Core::success();
     }
 
@@ -2950,9 +2968,9 @@ struct UIContext::Impl final {
         // Node destruction makes every matching control identity stale; no
         // synthetic Up is emitted for the destroyed target.
         defaultActionPressState.clearNode(node);
-        if (hoveredPrimaryButton == node)
+        if (hoveredPrimaryControl == node)
         {
-            hoveredPrimaryButton = {};
+            hoveredPrimaryControl = {};
         }
         if (armedPrimaryButton == node)
         {
@@ -5013,7 +5031,7 @@ struct UIContext::Impl final {
         {
             return Core::success();
         }
-        const bool clearHover = hoveredPrimaryButton == node && policy != UIPointerHitPolicy::Targetable;
+        const bool clearHover = hoveredPrimaryControl == node && policy != UIPointerHitPolicy::Targetable;
         if (clearHover)
         {
             if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus)
@@ -5028,7 +5046,7 @@ struct UIContext::Impl final {
         currentPolicy = policy;
         if (clearHover)
         {
-            clearHoveredPrimaryButton();
+            clearHoveredPrimaryControl();
         }
         return Core::success();
     }
@@ -5124,9 +5142,9 @@ struct UIContext::Impl final {
         if (!enabled)
         {
             defaultActionPressState.clearNode(node);
-            if (hoveredPrimaryButton == node)
+            if (hoveredPrimaryControl == node)
             {
-                hoveredPrimaryButton = {};
+                hoveredPrimaryControl = {};
             }
             if (armedPrimaryButton == node)
             {
@@ -9485,7 +9503,7 @@ struct UIContext::Impl final {
         const UINodeId previousTextInputFocus = textInputFocus;
         const UINodeId previousArmedPrimaryButton = armedPrimaryButton;
         const bool previousArmedPrimaryButtonPressed = armedPrimaryButtonPressed;
-        const UINodeId previousHoveredPrimaryButton = hoveredPrimaryButton;
+        const UINodeId previousHoveredPrimaryControl = hoveredPrimaryControl;
         const Detail::UIDefaultActionPressState previousDefaultActionPressState =
             defaultActionPressState;
         const UINodeId previousArmedSlider = armedSlider;
@@ -9527,7 +9545,7 @@ struct UIContext::Impl final {
             textInputFocus = previousTextInputFocus;
             armedPrimaryButton = previousArmedPrimaryButton;
             armedPrimaryButtonPressed = previousArmedPrimaryButtonPressed;
-            hoveredPrimaryButton = previousHoveredPrimaryButton;
+            hoveredPrimaryControl = previousHoveredPrimaryControl;
             defaultActionPressState = previousDefaultActionPressState;
             armedSlider = previousArmedSlider;
             armedScrollView = previousArmedScrollView;
@@ -9649,9 +9667,9 @@ struct UIContext::Impl final {
         const bool clearScrollViewArm =
             armedScrollView.hasValue() &&
             !isPointerInteractionCandidate(armedScrollView, candidateHitEntries, candidateActiveModalEntryIndex);
-        const bool clearButtonHover =
-            hoveredPrimaryButton.hasValue() &&
-            !isPointerInteractionCandidate(hoveredPrimaryButton, candidateHitEntries, candidateActiveModalEntryIndex);
+        const bool clearControlHover =
+            hoveredPrimaryControl.hasValue() &&
+            !isPointerInteractionCandidate(hoveredPrimaryControl, candidateHitEntries, candidateActiveModalEntryIndex);
         const bool clearPointerCapture =
             capturedPointerNode.hasValue() &&
             !isPointerCaptureCandidate(capturedPointerNode, candidateHitEntries, candidateActiveModalEntryIndex);
@@ -9660,7 +9678,7 @@ struct UIContext::Impl final {
             armedTextEdit = {};
             paintNeedsCommit = true;
         }
-        if (clearPrimaryButtonArm || clearSliderArm || clearScrollViewArm || clearButtonHover)
+        if (clearPrimaryButtonArm || clearSliderArm || clearScrollViewArm || clearControlHover)
         {
             if (clearPrimaryButtonArm)
             {
@@ -9674,9 +9692,9 @@ struct UIContext::Impl final {
             {
                 clearArmedScrollView();
             }
-            if (clearButtonHover)
+            if (clearControlHover)
             {
-                clearHoveredPrimaryButton();
+                clearHoveredPrimaryControl();
             }
             paintNeedsCommit = true;
         }
@@ -10359,13 +10377,13 @@ struct UIContext::Impl final {
             addRouteLayoutDirtyReservationCandidates(popupAtRouteStart);
             addRouteLayoutDirtyReservationCandidates(popupDropdownAtRouteStart);
         }
-        const UINodeId nextHoveredButton = resolvedHoveredPrimaryButton(physicalNearestButton);
-        if (nextHoveredButton != hoveredPrimaryButton)
+        const UINodeId nextHoveredControl = resolvedHoveredPrimaryControl(physicalNearestButton);
+        if (nextHoveredControl != hoveredPrimaryControl)
         {
             const UINodeId previousHover =
-                hoveredPrimaryButton.hasValue() && contains(hoveredPrimaryButton) ? hoveredPrimaryButton : UINodeId{};
+                hoveredPrimaryControl.hasValue() && contains(hoveredPrimaryControl) ? hoveredPrimaryControl : UINodeId{};
             addRouteDirtyReservationCandidate(previousHover);
-            addRouteDirtyReservationCandidate(nextHoveredButton);
+            addRouteDirtyReservationCandidate(nextHoveredControl);
         }
 
         if (primaryButtonDown)
@@ -10614,7 +10632,7 @@ struct UIContext::Impl final {
             preserveFocusForPopupBarrier = true;
         }
 
-        Core::Status hoverPaintStatus = updateHoveredPrimaryButton(physicalNearestButton);
+        Core::Status hoverPaintStatus = updateHoveredPrimaryControl(physicalNearestButton);
         const bool deferHoverFailureForRelease =
             primaryButtonUp && (hadArmedInteraction || hadArmedSlider || hadArmedScrollView || hadArmedTextEdit);
         if (!hoverPaintStatus && !deferHoverFailureForRelease)
@@ -11101,7 +11119,7 @@ struct UIContext::Impl final {
         const UINodeId cancelledSlider = armedSlider;
         const UINodeId cancelledScrollView = armedScrollView;
         const UINodeId cancelledFocus = defaultActionFocusButton;
-        const UINodeId cancelledHover = hoveredPrimaryButton;
+        const UINodeId cancelledHover = hoveredPrimaryControl;
         clearArmedPrimaryButton();
         clearArmedSlider();
         clearArmedScrollView();
@@ -11115,7 +11133,7 @@ struct UIContext::Impl final {
         defaultActionPressState.clearAll();
         clearImeFocus();
         clearDefaultActionFocus();
-        clearHoveredPrimaryButton();
+        clearHoveredPrimaryControl();
         // Cancellation is a state barrier: a full dirty queue must not leave
         // any pointer interaction armed. Existing dirty work will rebuild the
         // paint/semantics snapshot; otherwise this best-effort mark schedules

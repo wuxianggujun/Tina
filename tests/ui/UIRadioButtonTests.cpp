@@ -364,7 +364,7 @@ TEST_F(UIRadioButtonTest, IndicatorPaintPublishesDeterministicGeometry)
         }));
 }
 
-TEST_F(UIRadioButtonTest, PressedFocusedAndDisabledStatesResolveCommittedIndicatorPaint)
+TEST_F(UIRadioButtonTest, HoveredFocusedPressedAndDisabledStatesResolveCommittedIndicatorPaint)
 {
     const UI::UINodeId radioButton = createRadioButton(40.0F, 24.0F);
     ASSERT_TRUE(radioButton.hasValue());
@@ -375,6 +375,7 @@ TEST_F(UIRadioButtonTest, PressedFocusedAndDisabledStatesResolveCommittedIndicat
             .selectedIndicatorColor = {},
             .selectedIndicatorInset = 4.0F,
             .labelGap = 8.0F,
+            .hoveredIndicatorColor = {.red = 100, .green = 110, .blue = 120, .alpha = 255},
             .focusedIndicatorColor = {.red = 40, .green = 50, .blue = 60, .alpha = 255},
             .pressedIndicatorColor = {.red = 70, .green = 80, .blue = 90, .alpha = 255},
         }));
@@ -385,10 +386,27 @@ TEST_F(UIRadioButtonTest, PressedFocusedAndDisabledStatesResolveCommittedIndicat
         context->committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
+    assertOk(context->requestFocus(radioButton));
+    publishLayout();
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{40, 50, 60, 255}));
+
+    auto movedInside = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::Move,
+        1,
+        {.x = 10.0F, .y = 10.0F}));
+    ASSERT_TRUE(movedInside.has_value()) << (movedInside ? "" : movedInside.error().message);
+    publishLayout();
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{100, 110, 120, 255}));
+
     auto down = context->routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
-        1,
+        2,
         {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
@@ -403,7 +421,7 @@ TEST_F(UIRadioButtonTest, PressedFocusedAndDisabledStatesResolveCommittedIndicat
     auto up = context->routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
-        2,
+        3,
         {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
@@ -411,6 +429,17 @@ TEST_F(UIRadioButtonTest, PressedFocusedAndDisabledStatesResolveCommittedIndicat
     EXPECT_EQ(context->defaultActionFocus(), radioButton);
     publishLayout();
     ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{100, 110, 120, 255}));
+
+    auto movedOutside = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::Move,
+        4,
+        {.x = 80.0F, .y = 80.0F}));
+    ASSERT_TRUE(movedOutside.has_value()) << (movedOutside ? "" : movedOutside.error().message);
+    publishLayout();
     EXPECT_EQ(
         context->committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{40, 50, 60, 255}));

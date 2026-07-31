@@ -25,7 +25,7 @@
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
 | ASSET-SEC-001 | Planned | P0 | 闭合 glTF 外部文件的 symlink/reparse escape 与资源炸弹矩阵 | 现有 `ASSET-001` lexical/canonical containment + 64MiB 单文件上限 | Windows/Linux fixture 覆盖 symlink/junction/reparse escape、外部 buffer/image 替换边界、超限文件与 accessor/bufferView/image dimension/count/overflow；失败不读取 root 外文件、不发布半包 | Unit + Platform |
-| UI-STATE-FEEDBACK | InProgress | P0 | 对齐控件交互状态、焦点契约与可辨识反馈；Slider Focusable 子切片已完成 | 现有 routed input/Focus/Theme/paint | **Slider 已完成：** `makeSliderElement()` 的 Focusable/Focus semantics 与 runtime keyboard-focusable 判定一致，显式/Tab/空间/Primary drag 共用 committed focus，disabled/hidden/destroy/Modal change 无 stale focus，thumb 为 drag > focus > normal。**剩余：** Button/Checkbox/RadioButton/TextEdit/List/Tree 的 hovered/pressed/focused/disabled/checked/selected 状态矩阵收敛到单一来源，并补 Dark/Light 视觉证据；即时反馈不得误称为动画 | Unit + Integration + Visual |
+| UI-STATE-FEEDBACK | InProgress | P0 | 对齐控件交互状态、焦点契约与可辨识反馈；Slider 与选择控件子切片已完成 | 现有 routed input/Focus/Theme/paint | **已完成：** Slider 的 Focusable/Focus semantics 与 runtime trait 对齐，显式/Tab/空间/Primary drag 共用 committed focus且无 stale focus，thumb 为 drag > focus > normal；Checkbox/RadioButton 共用单一 hover tracking，indicator 为 pressed > hover > focus > normal，disabled 复用共享 opacity，checked/selected 保持既有状态源。**剩余：** TextEdit/List/Tree 状态矩阵与 Dark/Light 视觉证据；即时反馈不得误称为动画 | Unit + Integration + Visual |
 | UI-002 | InProgress | P1 | Windows UIA 产品验收收口 | UI-002-SPI / UI-002-UIA-MAP / UI-002-HWND / UI-002-HOST | 属性/fragment、Invoke/Toggle/RangeValue/Value action 与真实 HWND 跨进程 gate 可复现；补 Narrator/Inspect 人工金标。Linux AT-SPI 已拆为 `UI-002-LINUX`，不阻塞 Windows 收口 | Unit + Integration + Platform + Manual |
 
 ## Next
