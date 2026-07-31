@@ -30,6 +30,7 @@
 #include "detail/UIPointerRouteInspection.hpp"
 #include "detail/UIPointerRoutePath.hpp"
 #include "detail/UIPropertyNormalization.hpp"
+#include "detail/UIRangeInputPressLatch.hpp"
 #include "detail/UIRoutedPointerListenerRegistry.hpp"
 #include "detail/UIScrollViewLayout.hpp"
 #include "detail/UISemanticsSnapshotBuilder.hpp"
@@ -343,6 +344,7 @@ struct UIContext::Impl final {
     std::pmr::vector<u32> pointerCancelRoutePathScratch;
     Detail::UIButtonActionRegistry buttonActionRegistry;
     Detail::UIDefaultActionPressState defaultActionPressState;
+    Detail::UIRangeInputPressLatch rangeInputPressLatch;
     // M11-C0: Checkbox checked bit (index-aligned with nodes; false for non-Checkbox).
     std::pmr::vector<u8> checkboxCheckedByNodeIndex;
     std::pmr::vector<UICheckboxPaint> checkboxPaintsByNodeIndex;
@@ -472,7 +474,7 @@ struct UIContext::Impl final {
           routedPointerListenerRegistry(capacities.nodeCapacity, capacities.routedPointerListenerCapacity, resource),
           routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
           buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, resource),
-          defaultActionPressState(owner),
+          defaultActionPressState(owner), rangeInputPressLatch(owner),
           checkboxCheckedByNodeIndex(&resource), checkboxPaintsByNodeIndex(&resource),
           sliderStatesByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
           committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&resource),
@@ -6389,6 +6391,62 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
+    [[nodiscard]] bool isInteractiveRangeInput(UINodeId node) const noexcept
+    {
+        if (!node.hasValue() || node.index() >= sliderStatesByNodeIndex.size() ||
+            node.index() >= semanticsStatesByNodeIndex.size() || !isNodeEnabled(node))
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        return record != nullptr && record->kind == BuiltinElementKind::Slider &&
+               hasBehavior(record->behaviors, UIElementBehavior::RangeInput) &&
+               !semanticsStatesByNodeIndex[node.index()].readOnly;
+    }
+
+    [[nodiscard]] Core::Result<bool> applySliderValue(UINodeId slider, double requestedValue,
+                                                       Platform::PlatformFrameId platformFrame,
+                                                       u64 sourceSequence, bool requireInteractive)
+    {
+        if (!slider.hasValue() || slider.index() >= sliderStatesByNodeIndex.size())
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(slider.storageId());
+        if (record == nullptr || record->kind != BuiltinElementKind::Slider ||
+            !hasBehavior(record->behaviors, UIElementBehavior::RangeInput))
+        {
+            return false;
+        }
+        if (requireInteractive && !isInteractiveRangeInput(slider))
+        {
+            return false;
+        }
+        SliderState& state = sliderStatesByNodeIndex[slider.index()];
+        if (!std::isfinite(requestedValue) || !std::isfinite(state.minValue) || !std::isfinite(state.maxValue) ||
+            !(state.maxValue > state.minValue))
+        {
+            return fail(UIErrorCode::InvalidButtonAction, "UI Slider value update requires a finite range and value");
+        }
+        const float next = quantizeSliderValue(requestedValue, state.minValue, state.maxValue, state.step);
+        if (next == state.value)
+        {
+            return false;
+        }
+        if (Core::Status dirty = markPaintDirty(slider); !dirty)
+        {
+            return Core::failure(dirty.error());
+        }
+        state.value = next;
+        invokeSliderChangeCallback(captureSliderChangeCallback(slider), UISliderChangeEvent{
+                                                                         .sliderNode = slider,
+                                                                         .value = next,
+                                                                         .platformFrame = platformFrame,
+                                                                         .sourceSequence = sourceSequence,
+                                                                     });
+        return true;
+    }
+
     // Map pointer X into [min,max] using last committed hit worldRect for the slider.
     [[nodiscard]] Core::Result<bool> applySliderValueFromPointer(UINodeId slider, UILogicalPoint position,
                                                                  Platform::PlatformFrameId platformFrame,
@@ -6399,7 +6457,7 @@ struct UIContext::Impl final {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(slider.storageId());
-        if (record == nullptr || record->kind != BuiltinElementKind::Slider)
+        if (record == nullptr || record->kind != BuiltinElementKind::Slider || !isInteractiveRangeInput(slider))
         {
             return false;
         }
@@ -6429,22 +6487,11 @@ struct UIContext::Impl final {
         const auto next = resolveSliderValueFromPointer(
             worldRect, state.paint, position.x, state.minValue, state.maxValue,
             state.step);
-        if (!next || *next == state.value)
+        if (!next)
         {
             return false;
         }
-        if (Core::Status dirty = markPaintDirty(slider); !dirty)
-        {
-            return Core::failure(dirty.error());
-        }
-        state.value = *next;
-        invokeSliderChangeCallback(captureSliderChangeCallback(slider), UISliderChangeEvent{
-                                                                            .sliderNode = slider,
-                                                                            .value = state.value,
-                                                                            .platformFrame = platformFrame,
-                                                                            .sourceSequence = sourceSequence,
-                                                                        });
-        return true;
+        return applySliderValue(slider, *next, platformFrame, sourceSequence, true);
     }
 
     [[nodiscard]] u32 textEditCodepointFromPointer(UINodeId textEdit, UILogicalPoint position) const noexcept
@@ -6594,23 +6641,11 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidButtonAction, "UI Slider value must be finite");
         }
-        SliderState& state = sliderStatesByNodeIndex[slider.index()];
-        const float next = quantizeSliderValue(value, state.minValue, state.maxValue, state.step);
-        if (next == state.value)
+        auto applied = applySliderValue(slider, value, {}, 0, false);
+        if (!applied)
         {
-            return Core::success();
+            return Core::failure(applied.error());
         }
-        if (Core::Status dirty = markPaintDirty(slider); !dirty)
-        {
-            return dirty;
-        }
-        state.value = next;
-        invokeSliderChangeCallback(captureSliderChangeCallback(slider), UISliderChangeEvent{
-                                                                            .sliderNode = slider,
-                                                                            .value = state.value,
-                                                                            .platformFrame = {},
-                                                                            .sourceSequence = 0,
-                                                                        });
         return Core::success();
     }
 
@@ -10797,7 +10832,7 @@ struct UIContext::Impl final {
             const bool willFocusTextEdit = allowsDefaultAction && !willUseScrollBar && targetsTextEdit;
             const bool willArmSlider =
                 allowsDefaultAction && !willUseScrollBar && !willFocusTextEdit && nearestSlider.hasValue() &&
-                isNodeEnabled(nearestSlider);
+                isInteractiveRangeInput(nearestSlider);
             UINodeId nextKeyboardFocus = preserveFocusForModalBarrier || preserveFocusForPopupBarrier
                                              ? previousKeyboardFocus
                                              : UINodeId{};
@@ -11276,6 +11311,7 @@ struct UIContext::Impl final {
         listViewCommandPressLatch.clear();
         treeViewCommandPressLatch.clear();
         focusNavigationPressLatch.clear();
+        rangeInputPressLatch.clear();
         defaultActionPressState.clearAll();
         clearImeFocus();
         clearDefaultActionFocus();
@@ -11319,6 +11355,7 @@ struct UIContext::Impl final {
 
         if (gamepad.has_value())
         {
+            rangeInputPressLatch.clearGamepad(*gamepad);
             const UINodeId cancelledTarget = defaultActionPressState.pressedTarget(*gamepad);
             defaultActionPressState.clearGamepad(*gamepad);
             if (cancelledTarget.hasValue() && contains(cancelledTarget) && !isButtonPressed(cancelledTarget))
@@ -11329,6 +11366,7 @@ struct UIContext::Impl final {
         }
 
         const UINodeId cancelledTarget = defaultActionFocusButton;
+        rangeInputPressLatch.clear();
         defaultActionPressState.clearAll();
         if (cancelledTarget.hasValue() && contains(cancelledTarget))
         {
@@ -11601,17 +11639,23 @@ struct UIContext::Impl final {
             break;
         case UIAccessibilityActionKind::SetRangeValue: {
             if (!hasBehavior(record->behaviors, UIElementBehavior::RangeInput) ||
-                record->kind != BuiltinElementKind::Slider || !std::isfinite(action.rangeValue) ||
+                record->kind != BuiltinElementKind::Slider ||
+                action.node.index() >= semanticsStatesByNodeIndex.size() ||
+                semanticsStatesByNodeIndex[action.node.index()].readOnly || !std::isfinite(action.rangeValue) ||
                 action.rangeValue < static_cast<double>(sliderStatesByNodeIndex[action.node.index()].minValue) ||
                 action.rangeValue > static_cast<double>(sliderStatesByNodeIndex[action.node.index()].maxValue) ||
                 action.rangeValue < static_cast<double>((std::numeric_limits<float>::lowest)()) ||
                 action.rangeValue > static_cast<double>((std::numeric_limits<float>::max)()))
             {
                 return fail(UIErrorCode::InvalidAccessibilityAction,
-                            "UI accessibility range value is invalid for the target Slider");
+                            "UI accessibility range value is invalid or read-only for the target RangeInput");
             }
-            const UINodeId root = idForIndex(record->rootIndex);
-            return setSliderValueFromUpdater(root, action.node, static_cast<float>(action.rangeValue));
+            auto applied = applySliderValue(action.node, action.rangeValue, {}, 0, true);
+            if (!applied)
+            {
+                return Core::failure(applied.error());
+            }
+            return Core::success();
         }
         case UIAccessibilityActionKind::SetTextValue: {
             if (!hasBehavior(record->behaviors, UIElementBehavior::TextInput) ||
@@ -12643,6 +12687,81 @@ struct UIContext::Impl final {
             .moved = moved,
             .focus = nextFocus,
         };
+    }
+
+    [[nodiscard]] Core::Result<UIRangeInputCommandResult>
+    routeRangeInputCommand(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                           UIRangeInputCommand command, bool pressed,
+                           const Platform::DigitalControlIdentity& control)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI RangeInput command cannot run during pointer routing");
+        }
+        if (!platformFrame.hasValue() || sourceSequence == 0)
+        {
+            return fail(UIErrorCode::InvalidPointerInput,
+                        "UI RangeInput command requires a platform frame and sequence");
+        }
+        if (command != UIRangeInputCommand::Decrease && command != UIRangeInputCommand::Increase)
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI RangeInput command is not recognized");
+        }
+        if (Core::Status validControl = rangeInputPressLatch.validateControl(control); !validControl)
+        {
+            return Core::failure(validControl.error());
+        }
+        drainDeferredRootDestroys();
+
+        if (!pressed)
+        {
+            return UIRangeInputCommandResult{
+                .consumed = rangeInputPressLatch.release(control, command),
+                .changed = false,
+            };
+        }
+        if (rangeInputPressLatch.isLatched(control, command))
+        {
+            return UIRangeInputCommandResult{.consumed = true, .changed = false, .targeted = true};
+        }
+
+        const UINodeId target = defaultActionFocus();
+        const NodeRecord* targetRecord = target.hasValue() ? nodes.tryGet(target.storageId()) : nullptr;
+        const bool targeted = targetRecord != nullptr && targetRecord->kind == BuiltinElementKind::Slider &&
+                              hasBehavior(targetRecord->behaviors, UIElementBehavior::RangeInput);
+        if (!targeted)
+        {
+            return UIRangeInputCommandResult{};
+        }
+        if (!isInteractiveRangeInput(target))
+        {
+            return UIRangeInputCommandResult{.targeted = true};
+        }
+        const SliderState& state = sliderStatesByNodeIndex[target.index()];
+        const double span = static_cast<double>(state.maxValue) - static_cast<double>(state.minValue);
+        const double increment = state.step > 0.0F ? static_cast<double>(state.step) : span * 0.01;
+        if (!(increment > 0.0) || !std::isfinite(increment))
+        {
+            return UIRangeInputCommandResult{.targeted = true};
+        }
+        const double requestedValue = static_cast<double>(state.value) +
+                                      (command == UIRangeInputCommand::Increase ? increment : -increment);
+        auto applied = applySliderValue(target, requestedValue, platformFrame, sourceSequence, true);
+        if (!applied)
+        {
+            return Core::failure(applied.error());
+        }
+        if (!*applied)
+        {
+            return UIRangeInputCommandResult{.targeted = true};
+        }
+        rangeInputPressLatch.latch(control, command);
+        return UIRangeInputCommandResult{.consumed = true, .changed = true, .targeted = true};
     }
 
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult>
@@ -14630,6 +14749,14 @@ Core::Result<UIContext::UIDefaultFocusStepResult>
 UIContext::routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed)
 {
     return m_impl->routeFocusNavigation(direction, pressed);
+}
+
+Core::Result<UIRangeInputCommandResult>
+UIContext::routeRangeInputCommand(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                                  UIRangeInputCommand command, bool pressed,
+                                  const Platform::DigitalControlIdentity& control)
+{
+    return m_impl->routeRangeInputCommand(platformFrame, sourceSequence, command, pressed, control);
 }
 
 Core::Result<UIDropdownCommandResult> UIContext::routeDropdownCommand(UIDropdownCommand command, bool pressed)
