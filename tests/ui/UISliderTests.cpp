@@ -443,6 +443,44 @@ TEST(UISliderTest, ExplicitFocusPublishesFocusSemanticsAndFocusedThumb)
     EXPECT_TRUE(sawFocusedSlider);
 }
 
+TEST(UISliderTest, HiddenAndDestroyClearFocusWithoutLeavingStaleState)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    const UI::UINodeId slider = createSlider(*context, root.rootNodeId());
+    ASSERT_TRUE(slider.hasValue());
+
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 40.0F)));
+    assertOk(updater.setLayoutStyle(slider, fixedSize(100.0F, 20.0F)));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->requestFocus(slider));
+    EXPECT_EQ(context->defaultActionFocus(), slider);
+
+    UI::UILayoutStyle hidden = fixedSize(100.0F, 20.0F);
+    hidden.visibility = UI::UIVisibility::Hidden;
+    assertOk(updater.setLayoutStyle(slider, hidden));
+    EXPECT_EQ(context->defaultActionFocus(), slider);
+    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+
+    assertOk(updater.setLayoutStyle(slider, fixedSize(100.0F, 20.0F)));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->requestFocus(slider));
+    EXPECT_EQ(context->defaultActionFocus(), slider);
+
+    assertOk(updater.destroy(slider));
+    EXPECT_FALSE(context->contains(slider));
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+}
+
 TEST(UISliderTest, PaintCapacityFailurePreservesPublishedSnapshotAtomically)
 {
     auto windows = WindowPool::Create(1);

@@ -253,6 +253,11 @@ phase facade 对象。
 UI-004 的 committed Focus Scope、显式 focus、Modal barrier/焦点恢复和持久 Primary Pointer Capture 已实现；
 `UIFocusNavigationDirection`/`routeFocusNavigation()` 基于 committed 几何提供不 wrap 的空间焦点选择，
 Keyboard Arrow 与 Gamepad D-pad 通过 Runtime 复用该路由，复合控件方向命令保持优先；
+`makeSliderElement()` 声明的 `Focusable | RangeInput` 与 Focus semantics 已由 runtime trait 对齐：Slider 可由
+`requestFocus()`、Tab、空间导航和 Primary drag 获得同一 committed focus，并遵守 Modal/Contain scope；
+disabled、Hidden/Collapsed、destroy 与 Modal change 会清除或迁移焦点。`UISliderPaint::focusedThumbColor`
+只表达该焦点的 paint feedback，dragging 仍优先。当前 Arrow/D-pad 不修改 Slider value；键盘/手柄调值由
+独立 `UI-RANGE-INPUT-KEYBOARD` 任务定义，不属于现有 RangeInput 公共契约。
 UI-005 的 ScrollView、Dropdown/Popup 与固定 row pool ListView/TreeView 已实现。集合控件支持 100k logical
 item 的虚拟化，但完整通用 dirty-range pruning 仍未完成。当前回归覆盖 50,000 节点深树的非递归
 structure commit/destroy、layout、hit 与 paint publication；Popup membership 在 layout traversal 中缓存，

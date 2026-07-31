@@ -25,6 +25,7 @@
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
 | ASSET-SEC-001 | Planned | P0 | 闭合 glTF 外部文件的 symlink/reparse escape 与资源炸弹矩阵 | 现有 `ASSET-001` lexical/canonical containment + 64MiB 单文件上限 | Windows/Linux fixture 覆盖 symlink/junction/reparse escape、外部 buffer/image 替换边界、超限文件与 accessor/bufferView/image dimension/count/overflow；失败不读取 root 外文件、不发布半包 | Unit + Platform |
+| UI-STATE-FEEDBACK | InProgress | P0 | 对齐控件交互状态、焦点契约与可辨识反馈；Slider Focusable 子切片已完成 | 现有 routed input/Focus/Theme/paint | **Slider 已完成：** `makeSliderElement()` 的 Focusable/Focus semantics 与 runtime keyboard-focusable 判定一致，显式/Tab/空间/Primary drag 共用 committed focus，disabled/hidden/destroy/Modal change 无 stale focus，thumb 为 drag > focus > normal。**剩余：** Button/Checkbox/RadioButton/TextEdit/List/Tree 的 hovered/pressed/focused/disabled/checked/selected 状态矩阵收敛到单一来源，并补 Dark/Light 视觉证据；即时反馈不得误称为动画 | Unit + Integration + Visual |
 | UI-002 | InProgress | P1 | Windows UIA 产品验收收口 | UI-002-SPI / UI-002-UIA-MAP / UI-002-HWND / UI-002-HOST | 属性/fragment、Invoke/Toggle/RangeValue/Value action 与真实 HWND 跨进程 gate 可复现；补 Narrator/Inspect 人工金标。Linux AT-SPI 已拆为 `UI-002-LINUX`，不阻塞 Windows 收口 | Unit + Integration + Platform + Manual |
 
 ## Next
@@ -34,6 +35,7 @@
 | UI-003 | InProgress | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性 + **字体 identity fingerprint**（`fontFingerprint`：path/sha256/env `TINA_UI_FONT_PATH`/FreeType-on；baseline schema 3；mismatch 默认 fail）；**待** OS 级 100/150/200% DPI 真机矩阵、跨 GPU 像素金标 | Unit + Visual |
 | PERF-002 | Planned | P1 | 建立固定机 hard gate 与多进程 median/MAD 协议 | PERF-001 `tina_bench` schema v1/fingerprint | 固定 workload 与兼容 fingerprint 可选中受审 baseline；多进程 median/MAD、噪声拒绝和回归阈值规则版本化；非门禁机继续只输出 `provisional` | Benchmark + Platform |
 | SDK-001 | Planned | P1 | 建立可安装的 Tina Game SDK 与外部 consumer gate | 当前 Public API/target 边界稳定 | 提供版本化 `TinaConfig.cmake`/export、明确的 Game SDK target 集合和一个只通过安装前缀 `find_package(Tina CONFIG REQUIRED)` 的外部最小游戏；Windows/Linux consumer 编译且安装公开头无第三方 token 泄漏 | Consumer + Platform |
+| UI-RANGE-INPUT-KEYBOARD | Planned | P1 | 为 RangeInput 单独增加键盘/手柄调值，不复用空间焦点导航 | Slider Focusable 子切片 + Runtime input route | 冻结独立 command；Down/Up 固定容量 latch 成对消费；Gameplay suppression 不泄漏半个 transition；明确 Arrow/D-pad 与调值模式的冲突策略；min/max/step/clamp、disabled/read-only、callback 与 UIA SetRangeValue 保持单一路径；当前 Arrow/D-pad 默认行为继续只做空间焦点导航 | Unit + Integration |
 
 ## Later
 

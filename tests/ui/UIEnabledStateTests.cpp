@@ -672,7 +672,12 @@ TEST_F(UIEnabledStateTest, DisabledSliderDoesNotDragChangeOrInvokeCallback)
             [&changes](const UI::UISliderChangeEvent&) noexcept {
                 ++changes;
             }}));
+    publishLayout();
+    assertOk(context->requestFocus(slider));
+    EXPECT_EQ(context->defaultActionFocus(), slider);
+
     assertOk(updater.setEnabled(slider, false));
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
     publishLayout();
 
     for (const auto [kind, sequence, x] : {

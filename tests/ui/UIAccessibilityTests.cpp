@@ -267,6 +267,8 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
 
     u32 buttonActivations = 0;
     u32 checkboxActivations = 0;
+    u32 sliderChanges = 0;
+    UI::UISliderChangeEvent lastSliderChange{};
     u32 unpublishedActivations = 0;
     UI::UIButtonActivationSource lastSource = UI::UIButtonActivationSource::PrimaryPointer;
     assertOk(updater.setButtonAction(
@@ -280,6 +282,12 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
         UI::UIButtonActionCallback([&](const UI::UIButtonActionEvent& event) noexcept {
             ++checkboxActivations;
             lastSource = event.source;
+        })));
+    assertOk(updater.setSliderChangeCallback(
+        *slider,
+        UI::UISliderChangeCallback([&](const UI::UISliderChangeEvent& event) noexcept {
+            ++sliderChanges;
+            lastSliderChange = event;
         })));
     assertOk(updater.setButtonAction(
         *unpublishedInvoke,
@@ -313,6 +321,9 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
     auto sliderValue = updater.sliderValue(*slider);
     ASSERT_TRUE(sliderValue.has_value());
     EXPECT_FLOAT_EQ(*sliderValue, 72.0F);
+    EXPECT_EQ(sliderChanges, 1U);
+    EXPECT_EQ(lastSliderChange.sliderNode, *slider);
+    EXPECT_FLOAT_EQ(lastSliderChange.value, 72.0F);
 
     assertOk(context->performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::SetTextValue,

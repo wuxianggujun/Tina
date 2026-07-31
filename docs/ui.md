@@ -137,7 +137,8 @@ callback 副作用。
   Gameplay input；成功移动后以固定容量 latch 消费匹配 release；
 - Button：primary pointer pressed/action，Enter/Space/KeypadEnter/Gamepad South activation；
 - Checkbox：Pointer/Keyboard/Gamepad toggle；
-- Slider：Pointer drag、range/value clamp；
+- Slider：Pointer drag、range/value clamp；`requestFocus()`、Tab、空间焦点与 Primary drag 都收敛到同一
+  committed keyboard focus；Keyboard Arrow/Gamepad D-pad 当前只参与空间焦点导航，不修改 value；
 - RadioButton：同一直接父节点互斥，Pointer/Keyboard/Gamepad selection；
 - ScrollView：wheel、thumb drag、轴向 clamp 与持久 pointer capture；
 - Dropdown/Popup：Pointer/Keyboard/Gamepad 开关与选择，Up/Down/D-pad 导航，Escape/Gamepad East dismiss，
@@ -281,7 +282,7 @@ bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx back
 | `Label` | 只读 UTF-8 文本 | Glyph quads；没有可用字体时为确定性的 placeholder SolidQuad |
 | `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | `UIBoxPaint` 背景 + 可选 `UIButtonPaint` 状态色 + 文本 |
 | `Checkbox` | checked 切换，复用 Button action/焦点路径 | 背景 SolidQuad + `UICheckboxPaint` 勾选指示块；标签由相邻 Label 组合 |
-| `Slider` | Pointer 横向拖动，min/max/value/step | 背景 track + `UISliderPaint` filled track/thumb（拖动 thumb 色） |
+| `Slider` | Pointer 横向拖动、Tab/空间导航/显式焦点，min/max/value/step | 背景 track + `UISliderPaint` filled track/thumb；状态优先级为 drag > focus > normal |
 | `TextEdit` | 单行编辑、选择、光标、IME | 文本 Glyph/placeholder + selection highlight + caret SolidQuad |
 | `ProgressBar` | 非交互 determinate range/value | track SolidQuad + 按比例缩短的 foreground SolidQuad |
 | `RadioButton` | 同直接父节点互斥选择 | indicator SolidQuad + 选中内块 + 文本 Glyph |
@@ -439,6 +440,8 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-002` | Windows UIA 产品验收：真实 HWND 跨进程属性/action gate 已有，待固化证据并完成 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
+| `UI-STATE-FEEDBACK` | Slider Focusable 子切片已完成；继续统一交互控件的 hover/pressed/focus/disabled 状态矩阵与可辨识视觉 |
+| `UI-RANGE-INPUT-KEYBOARD` | 独立设计键盘/手柄调值 command、Down/Up latch、Gameplay suppression 与 min/max/step 行为；不得与空间焦点导航混用 |
 | `UI-THEME-C` | **已完成** Box/Canvas `SolidRect` 统一圆角半径、像素投影与 bgfx SDF；**待** Image/NineSlice、逐角半径、圆角 clip、backdrop blur 与完整 stylesheet resolver |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
 

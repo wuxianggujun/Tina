@@ -75,6 +75,19 @@ class UIFocusNavigationTest : public testing::Test {
         return *button;
     }
 
+    [[nodiscard]] UI::UINodeId addSlider(UI::UINodeId parent, float x, float y, float width = 80.0F,
+                                         float height = 24.0F)
+    {
+        auto slider = updater.createElement(parent, UI::makeSliderElement());
+        EXPECT_TRUE(slider.has_value()) << (slider ? "" : slider.error().message);
+        if (!slider)
+        {
+            return {};
+        }
+        expectOk(updater.setLayoutStyle(*slider, overlay(x, y, width, height)));
+        return *slider;
+    }
+
     void commit()
     {
         expectOk(context->commitLayout({.width = 240.0F, .height = 180.0F}));
@@ -157,6 +170,31 @@ TEST_F(UIFocusNavigationTest, PrefersAlignedCandidateAndSkipsDisabledControl)
     EXPECT_EQ(right->focus, aligned);
 }
 
+TEST_F(UIFocusNavigationTest, SliderParticipatesInSpatialNavigation)
+{
+    const UI::UINodeId origin = addButton(root.rootNodeId(), 10.0F, 10.0F);
+    const UI::UINodeId slider = addSlider(root.rootNodeId(), 110.0F, 10.0F);
+    ASSERT_TRUE(origin.hasValue() && slider.hasValue());
+    commit();
+    expectOk(context->requestFocus(origin));
+
+    auto right = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
+    ASSERT_TRUE(right.has_value()) << (right ? "" : right.error().message);
+    EXPECT_TRUE(right->consumed);
+    EXPECT_TRUE(right->moved);
+    EXPECT_EQ(right->focus, slider);
+    EXPECT_EQ(context->defaultActionFocus(), slider);
+
+    auto release = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right, false);
+    ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
+    EXPECT_TRUE(release->consumed);
+
+    auto left = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Left);
+    ASSERT_TRUE(left.has_value()) << (left ? "" : left.error().message);
+    EXPECT_TRUE(left->moved);
+    EXPECT_EQ(left->focus, origin);
+}
+
 TEST_F(UIFocusNavigationTest, ContainScopeRejectsGeometricallyCloserOutsideCandidate)
 {
     auto scopeResult = updater.createElement(root.rootNodeId(), UI::makePanelElement());
@@ -165,7 +203,7 @@ TEST_F(UIFocusNavigationTest, ContainScopeRejectsGeometricallyCloserOutsideCandi
     expectOk(updater.setLayoutStyle(scope, overlay(20.0F, 20.0F, 180.0F, 80.0F)));
     expectOk(updater.setFocusScopeMode(scope, UI::UIFocusScopeMode::Contain));
 
-    const UI::UINodeId insideLeft = addButton(scope, 0.0F, 10.0F);
+    const UI::UINodeId insideLeft = addSlider(scope, 0.0F, 10.0F);
     const UI::UINodeId insideRight = addButton(scope, 120.0F, 10.0F);
     const UI::UINodeId outside = addButton(root.rootNodeId(), 80.0F, 30.0F);
     ASSERT_TRUE(insideLeft.hasValue() && insideRight.hasValue() && outside.hasValue());

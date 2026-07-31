@@ -21,9 +21,11 @@ TEST_F(UIInputRouteProducerTest, KeyboardArrowsMoveSpatialFocusAndConsumeMatchin
 {
     auto tree = createRouteTree(window, focusNavigationCapacities());
     ASSERT_NE(tree.context, nullptr);
-    auto second = tree.updater.createElement(tree.panel, UI::makeButtonElement());
+    auto second = tree.updater.createElement(tree.panel, UI::makeSliderElement());
     ASSERT_TRUE(second.has_value()) << (second ? "" : second.error().message);
     expectOk(tree.updater.setLayoutStyle(*second, fixedSize(40.0F, 40.0F)));
+    expectOk(tree.updater.setSliderRange(*second, 0.0F, 100.0F, 1.0F));
+    expectOk(tree.updater.setSliderValue(*second, 25.0F));
     expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
     expectOk(tree.context->requestFocus(tree.target));
 
@@ -49,15 +51,20 @@ TEST_F(UIInputRouteProducerTest, KeyboardArrowsMoveSpatialFocusAndConsumeMatchin
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     EXPECT_TRUE(upOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->defaultActionFocus(), *second);
+    auto sliderValue = tree.updater.sliderValue(*second);
+    ASSERT_TRUE(sliderValue.has_value()) << (sliderValue ? "" : sliderValue.error().message);
+    EXPECT_FLOAT_EQ(*sliderValue, 25.0F);
 }
 
 TEST_F(UIInputRouteProducerTest, GamepadDpadUsesTheSameSpatialFocusRoute)
 {
     auto tree = createRouteTree(window, focusNavigationCapacities());
     ASSERT_NE(tree.context, nullptr);
-    auto second = tree.updater.createElement(tree.panel, UI::makeButtonElement());
+    auto second = tree.updater.createElement(tree.panel, UI::makeSliderElement());
     ASSERT_TRUE(second.has_value()) << (second ? "" : second.error().message);
     expectOk(tree.updater.setLayoutStyle(*second, fixedSize(40.0F, 40.0F)));
+    expectOk(tree.updater.setSliderRange(*second, 0.0F, 100.0F, 1.0F));
+    expectOk(tree.updater.setSliderValue(*second, 25.0F));
     expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
     expectOk(tree.context->requestFocus(tree.target));
 
@@ -82,6 +89,9 @@ TEST_F(UIInputRouteProducerTest, GamepadDpadUsesTheSameSpatialFocusRoute)
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_TRUE(output->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->defaultActionFocus(), *second);
+    auto sliderValue = tree.updater.sliderValue(*second);
+    ASSERT_TRUE(sliderValue.has_value()) << (sliderValue ? "" : sliderValue.error().message);
+    EXPECT_FLOAT_EQ(*sliderValue, 25.0F);
 }
 
 } // namespace

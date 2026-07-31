@@ -82,6 +82,13 @@ void expectOk(Core::Status status)
     return result ? *result : UI::UINodeId{};
 }
 
+[[nodiscard]] UI::UINodeId createSlider(UI::UITreeUpdater& updater, UI::UINodeId parent)
+{
+    auto result = updater.createElement(parent, UI::makeSliderElement());
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? *result : UI::UINodeId{};
+}
+
 [[nodiscard]] UI::UINodeId createPanel(UI::UITreeUpdater& updater, UI::UINodeId parent)
 {
     auto result = updater.createElement(parent, UI::makePanelElement());
@@ -165,10 +172,10 @@ TEST_F(UIFocusModalTest, ModalPublishesAtomicallyBlocksOutsideAndPreservesFocus)
     auto modalResult = context->rootBuilder().createElement(rootNode, UI::makeModalElement());
     ASSERT_TRUE(modalResult.has_value()) << (modalResult ? "" : modalResult.error().message);
     const UI::UINodeId modal = *modalResult;
-    const UI::UINodeId modalButton = createButton(updater, modal);
-    ASSERT_TRUE(modal.hasValue() && modalButton.hasValue());
+    const UI::UINodeId modalSlider = createSlider(updater, modal);
+    ASSERT_TRUE(modal.hasValue() && modalSlider.hasValue());
     expectOk(updater.setLayoutStyle(modal, overlay(80.0F, 80.0F, 100.0F, 100.0F)));
-    expectOk(updater.setLayoutStyle(modalButton, fixedSize(60.0F, 24.0F)));
+    expectOk(updater.setLayoutStyle(modalSlider, fixedSize(60.0F, 24.0F)));
 
     EXPECT_FALSE(context->activeModal().hasValue());
     EXPECT_EQ(context->defaultActionFocus(), background);
@@ -177,7 +184,7 @@ TEST_F(UIFocusModalTest, ModalPublishesAtomicallyBlocksOutsideAndPreservesFocus)
     expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
     EXPECT_EQ(context->activeModal(), modal);
     EXPECT_EQ(context->committedHit().activeModalNode(), modal);
-    EXPECT_EQ(context->defaultActionFocus(), modalButton);
+    EXPECT_EQ(context->defaultActionFocus(), modalSlider);
     EXPECT_EQ(context->activeFocusScope(), modal);
     auto modalScopeMode = updater.focusScopeMode(modal);
     ASSERT_TRUE(modalScopeMode.has_value());
@@ -193,7 +200,7 @@ TEST_F(UIFocusModalTest, ModalPublishesAtomicallyBlocksOutsideAndPreservesFocus)
     EXPECT_TRUE(blockedRoute->consumed);
     EXPECT_FALSE(blockedRoute->hasRoutedTarget());
     EXPECT_TRUE(blockedRoute->claimedPointerButtons.test(static_cast<usize>(Platform::PointerButton::Primary)));
-    EXPECT_EQ(context->defaultActionFocus(), modalButton);
+    EXPECT_EQ(context->defaultActionFocus(), modalSlider);
 
     const UI::UISemanticsEntry* modalSemantics = findSemanticsEntry(context->committedSemantics(), modal);
     ASSERT_NE(modalSemantics, nullptr);
