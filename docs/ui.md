@@ -440,7 +440,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-002` | Windows UIA 产品验收：真实 HWND 跨进程属性/action gate 已有，待固化证据并完成 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
-| `UI-STATE-FEEDBACK` | Slider Focusable 与 Checkbox/RadioButton 状态矩阵子切片已完成；继续收敛 TextEdit/List/Tree 并补 Dark/Light 视觉证据 |
+| `UI-STATE-FEEDBACK` | Slider、Checkbox/RadioButton 与 List/Tree 状态子切片已完成；继续收敛 TextEdit 并补 Dark/Light 视觉证据 |
 | `UI-RANGE-INPUT-KEYBOARD` | 独立设计键盘/手柄调值 command、Down/Up latch、Gameplay suppression 与 min/max/step 行为；不得与空间焦点导航混用 |
 | `UI-THEME-C` | **已完成** Box/Canvas `SolidRect` 统一圆角半径、像素投影与 bgfx SDF；**待** Image/NineSlice、逐角半径、圆角 clip、backdrop blur 与完整 stylesheet resolver |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |

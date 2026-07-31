@@ -115,6 +115,22 @@ TEST(UIThemeTest, SelectionControlsUseThemeInteractionStateTokens)
     EXPECT_NE(radio.radio.pressedIndicatorColor.alpha, 0);
 }
 
+TEST(UIThemeTest, CollectionPaintUsesThemeSelectionStateTokens)
+{
+    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
+    constexpr UI::UIListViewPaint list = UI::makeListViewPaint(theme);
+    constexpr UI::UITreeViewPaint tree = UI::makeTreeViewPaint(theme);
+
+    EXPECT_NE(list.selectedItemBackgroundColor.alpha, 0);
+    EXPECT_NE(list.hoveredSelectedItemBackgroundColor.alpha, 0);
+    EXPECT_NE(list.focusedSelectedItemBackgroundColor.alpha, 0);
+    EXPECT_NE(list.pressedSelectedItemBackgroundColor.alpha, 0);
+    EXPECT_NE(tree.selectedItemBackgroundColor.alpha, 0);
+    EXPECT_NE(tree.hoveredSelectedItemBackgroundColor.alpha, 0);
+    EXPECT_NE(tree.focusedSelectedItemBackgroundColor.alpha, 0);
+    EXPECT_NE(tree.pressedSelectedItemBackgroundColor.alpha, 0);
+}
+
 TEST(UIThemeTest, LightThemeDiffersFromDefault)
 {
     constexpr UI::UITheme dark = UI::makeDefaultProductTheme();

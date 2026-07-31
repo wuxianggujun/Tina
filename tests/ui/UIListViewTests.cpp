@@ -246,7 +246,10 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
                                                         .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
                                                         .wheelStep = 20.0F,
                                                     }));
-    const UI::UIStraightSrgba8Color selectionColor{.red = 40, .green = 120, .blue = 220, .alpha = 192};
+    const UI::UIStraightSrgba8Color selectionColor{.red = 10, .green = 20, .blue = 30, .alpha = 255};
+    const UI::UIStraightSrgba8Color hoveredSelectionColor{.red = 40, .green = 50, .blue = 60, .alpha = 255};
+    const UI::UIStraightSrgba8Color focusedSelectionColor{.red = 70, .green = 80, .blue = 90, .alpha = 255};
+    const UI::UIStraightSrgba8Color pressedSelectionColor{.red = 100, .green = 110, .blue = 120, .alpha = 255};
     assertOk(updater.setListViewPaint(listView, {
                                                         .scrollBar =
                                                             {
@@ -255,8 +258,11 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
                                                                 .draggingThumbColor = UI::rgb(0xE0A030),
                                                                 .thickness = 10.0F,
                                                                 .minThumbExtent = 24.0F,
-                                                            },
+                                                        },
                                                         .selectedItemBackgroundColor = selectionColor,
+                                                        .hoveredSelectedItemBackgroundColor = hoveredSelectionColor,
+                                                        .focusedSelectedItemBackgroundColor = focusedSelectionColor,
+                                                        .pressedSelectedItemBackgroundColor = pressedSelectionColor,
                                                     }));
     assertOk(updater.setListViewDataSource(listView, source.view()));
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
@@ -284,14 +290,58 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
     ASSERT_NE(selectedRow, nullptr);
     EXPECT_TRUE(selectedRow->selected);
     EXPECT_TRUE(selectedRow->focused);
-    bool foundSelectionPaint = false;
+    const UI::UINodeId selectedRowNode = selectedRow->node;
+    const auto expectSelectedRowColor = [&](UI::UIStraightSrgba8Color expected) {
+        bool found = false;
+        for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries())
+        {
+            found = found || (entry.node == selectedRowNode && entry.solidFill == UI::premultiply(expected));
+        }
+        EXPECT_TRUE(found);
+    };
+    expectSelectedRowColor(hoveredSelectionColor);
+
+    auto movedOutside = context->routePointerInput(pointerInput(
+        window, UI::UIRoutedPointerEventKind::Move, 3, {.x = 120.0F, .y = 50.0F}));
+    ASSERT_TRUE(movedOutside.has_value()) << (movedOutside ? "" : movedOutside.error().message);
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectSelectedRowColor(focusedSelectionColor);
+
+    assertOk(context->clearFocus());
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectSelectedRowColor(selectionColor);
+
+    auto movedInside = context->routePointerInput(pointerInput(
+        window, UI::UIRoutedPointerEventKind::Move, 4, rowCenter));
+    ASSERT_TRUE(movedInside.has_value()) << (movedInside ? "" : movedInside.error().message);
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectSelectedRowColor(hoveredSelectionColor);
+
+    auto selectedDown = context->routePointerInput(pointerInput(
+        window, UI::UIRoutedPointerEventKind::ButtonDown, 5, rowCenter));
+    ASSERT_TRUE(selectedDown.has_value()) << (selectedDown ? "" : selectedDown.error().message);
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectSelectedRowColor(pressedSelectionColor);
+    auto selectedUp = context->routePointerInput(pointerInput(
+        window, UI::UIRoutedPointerEventKind::ButtonUp, 6, rowCenter));
+    ASSERT_TRUE(selectedUp.has_value()) << (selectedUp ? "" : selectedUp.error().message);
+
+    assertOk(updater.setEnabled(listView, false));
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    bool foundDisabledSelection = false;
     for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries())
     {
-        foundSelectionPaint = foundSelectionPaint || entry.solidFill == UI::premultiply(selectionColor);
+        foundDisabledSelection =
+            foundDisabledSelection ||
+            (entry.node == selectedRowNode &&
+             entry.solidFill == (UI::UIPremultipliedRgba8Color{5, 11, 16, 140}));
     }
-    EXPECT_TRUE(foundSelectionPaint);
+    EXPECT_TRUE(foundDisabledSelection);
+    assertOk(updater.setEnabled(listView, true));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    auto wheel = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 3,
+    auto wheel = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 7,
                                                          {.x = 50.0F, .y = 50.0F}, {.x = 0.0F, .y = -1.0F}));
     ASSERT_TRUE(wheel.has_value()) << (wheel ? "" : wheel.error().message);
     EXPECT_TRUE(wheel->consumed);
@@ -300,16 +350,16 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
 
     assertOk(updater.scrollListViewToIndex(listView, 0, UI::UIListViewScrollAlignment::Start));
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    auto thumbDown = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 4,
+    auto thumbDown = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 8,
                                                              {.x = 95.0F, .y = 12.0F}));
     ASSERT_TRUE(thumbDown.has_value()) << (thumbDown ? "" : thumbDown.error().message);
     EXPECT_TRUE(thumbDown->consumed);
     EXPECT_EQ(context->pointerCapture(), listView);
     auto thumbMove = context->routePointerInput(
-        pointerInput(window, UI::UIRoutedPointerEventKind::Move, 5, {.x = 95.0F, .y = 80.0F}));
+        pointerInput(window, UI::UIRoutedPointerEventKind::Move, 9, {.x = 95.0F, .y = 80.0F}));
     ASSERT_TRUE(thumbMove.has_value()) << (thumbMove ? "" : thumbMove.error().message);
     auto thumbUp = context->routePointerInput(
-        pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 6, {.x = 95.0F, .y = 80.0F}));
+        pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 10, {.x = 95.0F, .y = 80.0F}));
     ASSERT_TRUE(thumbUp.has_value()) << (thumbUp ? "" : thumbUp.error().message);
     EXPECT_FALSE(context->pointerCapture().hasValue());
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));

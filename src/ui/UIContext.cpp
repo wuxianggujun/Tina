@@ -1951,6 +1951,33 @@ struct UIContext::Impl final {
                                                 .selectedItemBackgroundColor));
     }
 
+    [[nodiscard]] UIPremultipliedRgba8Color resolvedCollectionSelectionColor(
+        UINodeId item, UINodeId collection, UIStraightSrgba8Color normalColor,
+        UIStraightSrgba8Color hoveredColor, UIStraightSrgba8Color focusedColor,
+        UIStraightSrgba8Color pressedColor) const noexcept
+    {
+        UIPremultipliedRgba8Color color = premultiply(normalColor);
+        const auto applyOverride = [&color](UIStraightSrgba8Color overrideColor) noexcept {
+            if (overrideColor.alpha != 0)
+            {
+                color = premultiply(overrideColor);
+            }
+        };
+        if (defaultActionFocusButton == collection)
+        {
+            applyOverride(focusedColor);
+        }
+        if (hoveredPrimaryControl == item)
+        {
+            applyOverride(hoveredColor);
+        }
+        if (isButtonPressed(item))
+        {
+            applyOverride(pressedColor);
+        }
+        return widgetPaintColor(item, color);
+    }
+
     [[nodiscard]] UIPremultipliedRgba8Color resolvedListViewSelectionColor(UINodeId item) const noexcept
     {
         const UINodeId listView = listViewForItem(item);
@@ -1959,8 +1986,10 @@ struct UIContext::Impl final {
         {
             return {};
         }
-        return widgetPaintColor(
-            item, premultiply(listViewStatesByNodeIndex[listView.index()].paint.selectedItemBackgroundColor));
+        const UIListViewPaint& paint = listViewStatesByNodeIndex[listView.index()].paint;
+        return resolvedCollectionSelectionColor(
+            item, listView, paint.selectedItemBackgroundColor, paint.hoveredSelectedItemBackgroundColor,
+            paint.focusedSelectedItemBackgroundColor, paint.pressedSelectedItemBackgroundColor);
     }
 
     [[nodiscard]] UIPremultipliedRgba8Color resolvedTreeViewSelectionColor(UINodeId item) const noexcept
@@ -1971,8 +2000,10 @@ struct UIContext::Impl final {
         {
             return {};
         }
-        return widgetPaintColor(
-            item, premultiply(treeViewStatesByNodeIndex[treeView.index()].paint.selectedItemBackgroundColor));
+        const UITreeViewPaint& paint = treeViewStatesByNodeIndex[treeView.index()].paint;
+        return resolvedCollectionSelectionColor(
+            item, treeView, paint.selectedItemBackgroundColor, paint.hoveredSelectedItemBackgroundColor,
+            paint.focusedSelectedItemBackgroundColor, paint.pressedSelectedItemBackgroundColor);
     }
 
     [[nodiscard]] UIPremultipliedRgba8Color resolvedTreeViewDisclosureColor(UINodeId item) const noexcept

@@ -349,17 +349,25 @@ struct UISettingsPanelChrome final {
 
 [[nodiscard]] constexpr UIListViewPaint makeListViewPaint(const UITheme& theme) noexcept
 {
+    const UIStraightSrgba8Color selected = scaleColorAlpha(theme.accent, 150);
     return UIListViewPaint{
         .scrollBar = makeScrollViewPaint(theme),
-        .selectedItemBackgroundColor = scaleColorAlpha(theme.accent, 150),
+        .selectedItemBackgroundColor = selected,
+        .hoveredSelectedItemBackgroundColor = lightenChannel(selected, 28),
+        .focusedSelectedItemBackgroundColor = scaleColorAlpha(theme.focusRing, 180),
+        .pressedSelectedItemBackgroundColor = darkenChannel(selected, 36),
     };
 }
 
 [[nodiscard]] constexpr UITreeViewPaint makeTreeViewPaint(const UITheme& theme) noexcept
 {
+    const UIStraightSrgba8Color selected = scaleColorAlpha(theme.accent, 150);
     return UITreeViewPaint{
         .scrollBar = makeScrollViewPaint(theme),
-        .selectedItemBackgroundColor = scaleColorAlpha(theme.accent, 150),
+        .selectedItemBackgroundColor = selected,
+        .hoveredSelectedItemBackgroundColor = lightenChannel(selected, 28),
+        .focusedSelectedItemBackgroundColor = scaleColorAlpha(theme.focusRing, 180),
+        .pressedSelectedItemBackgroundColor = darkenChannel(selected, 36),
         .disclosureColor = theme.textSecondary,
     };
 }

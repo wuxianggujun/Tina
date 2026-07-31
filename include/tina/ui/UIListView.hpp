@@ -56,9 +56,16 @@ struct UIListViewStyle final {
     auto operator<=>(const UIListViewStyle&) const = default;
 };
 
+// Selected-row overlay colors. Zero-alpha state overrides fall back with
+// pressed > hovered > focused > selected precedence. Focus belongs to the
+// ListView owner while hover/press belong to its committed materialized row;
+// disabled rows keep the shared widget-opacity contract.
 struct UIListViewPaint final {
     UIScrollViewPaint scrollBar{};
     UIStraightSrgba8Color selectedItemBackgroundColor{};
+    UIStraightSrgba8Color hoveredSelectedItemBackgroundColor{};
+    UIStraightSrgba8Color focusedSelectedItemBackgroundColor{};
+    UIStraightSrgba8Color pressedSelectedItemBackgroundColor{};
 
     auto operator<=>(const UIListViewPaint&) const = default;
 };

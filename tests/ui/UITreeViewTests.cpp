@@ -363,8 +363,10 @@ TEST_F(UITreeViewTest, PointerSelectsRowsAndDisclosureTogglesCommittedStableKey)
                                                     .disclosureGap = 6.0F,
                                                 }));
     const UI::UIStraightSrgba8Color selectionColor{.red = 40, .green = 120, .blue = 220, .alpha = 192};
+    const UI::UIStraightSrgba8Color hoveredSelectionColor{.red = 70, .green = 150, .blue = 240, .alpha = 224};
     assertOk(updater.setTreeViewPaint(treeView, {
                                                     .selectedItemBackgroundColor = selectionColor,
+                                                    .hoveredSelectedItemBackgroundColor = hoveredSelectionColor,
                                                     .disclosureColor = UI::rgb(0xE0A030),
                                                 }));
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
@@ -428,7 +430,9 @@ TEST_F(UITreeViewTest, PointerSelectsRowsAndDisclosureTogglesCommittedStableKey)
     bool foundSelectionPaint = false;
     for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries())
     {
-        foundSelectionPaint = foundSelectionPaint || entry.solidFill == UI::premultiply(selectionColor);
+        foundSelectionPaint = foundSelectionPaint ||
+                              (entry.node == selected->node &&
+                               entry.solidFill == UI::premultiply(hoveredSelectionColor));
     }
     EXPECT_TRUE(foundSelectionPaint);
 
