@@ -282,6 +282,25 @@ Core::Result<UI::UITextSelection> PrimaryWindowUITreeUpdater::textSelection(UI::
     return m_state->textSelection(m_epoch, m_phase, m_updater, textEdit);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setTextEditPaint(UI::UINodeId textEdit,
+                                                          const UI::UITextEditPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTextEditPaint");
+    }
+    return m_state->setTextEditPaint(m_epoch, m_phase, m_updater, textEdit, paint);
+}
+
+Core::Result<UI::UITextEditPaint> PrimaryWindowUITreeUpdater::textEditPaint(UI::UINodeId textEdit) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITextEditPaint>("PrimaryWindowUITreeUpdater::textEditPaint");
+    }
+    return m_state->textEditPaint(m_epoch, m_phase, m_updater, textEdit);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback)
 {
     if (m_state == nullptr)

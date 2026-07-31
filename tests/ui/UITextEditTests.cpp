@@ -16,6 +16,12 @@ TEST_F(UITextEditTest, DefaultsTargetableWhileLabelRemainsReadOnly)
     ASSERT_TRUE(labelResult.has_value());
     const UI::UINodeId label = *labelResult;
     assertOk(updater.setLayoutStyle(label, fixedSize(100.0F, 24.0F)));
+    const Core::Status wrongPaint = updater.setTextEditPaint(label, {});
+    ASSERT_FALSE(wrongPaint.has_value());
+    EXPECT_EQ(wrongPaint.error().code, UI::UIErrorCode::InvalidControlValue);
+    auto wrongPaintQuery = updater.textEditPaint(label);
+    ASSERT_FALSE(wrongPaintQuery.has_value());
+    EXPECT_EQ(wrongPaintQuery.error().code, UI::UIErrorCode::InvalidControlValue);
 
     const UI::UINodeId textEdit = createTextEdit();
     ASSERT_TRUE(textEdit.hasValue());
@@ -46,6 +52,83 @@ TEST_F(UITextEditTest, DefaultsTargetableWhileLabelRemainsReadOnly)
     auto selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value()) << (selection ? "" : selection.error().message);
     EXPECT_EQ(*selection, (UI::UITextSelection{}));
+}
+
+TEST_F(UITextEditTest, PaintStatesReuseHoverArmAndFocusWithoutStalePressedFeedback)
+{
+    constexpr UI::UIStraightSrgba8Color Normal = UI::rgb(0x203040);
+    constexpr UI::UITextEditPaint Paint{
+        .hoveredBackgroundColor = UI::rgb(0x315170),
+        .pressedBackgroundColor = UI::rgb(0x102030),
+        .focusedBackgroundColor = UI::rgb(0x406080),
+        .disabledBackgroundColor = UI::rgb(0x000000),
+    };
+    const UI::UINodeId textEdit = createTextEdit();
+    ASSERT_TRUE(textEdit.hasValue());
+    assertOk(updater.setBoxPaint(textEdit, UI::makeSolidBox(Normal)));
+    assertOk(updater.setTextEditPaint(textEdit, Paint));
+    auto currentPaint = updater.textEditPaint(textEdit);
+    ASSERT_TRUE(currentPaint.has_value()) << (currentPaint ? "" : currentPaint.error().message);
+    EXPECT_EQ(*currentPaint, Paint);
+
+    const auto expectBackground = [&](UI::UIPremultipliedRgba8Color expected) {
+        const UI::UICommittedPaintEntry* background = nullptr;
+        for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries()) {
+            if (entry.node == textEdit && !entry.isGlyph && entry.worldRect.width == 240.0F &&
+                entry.worldRect.height == 32.0F) {
+                background = &entry;
+                break;
+            }
+        }
+        ASSERT_NE(background, nullptr);
+        EXPECT_EQ(background->solidFill, expected);
+    };
+
+    publishLayout();
+    expectBackground(UI::premultiply(Normal));
+
+    auto hovered = context->routePointerInput(makePrimaryPointerInput(
+        window, UI::UIRoutedPointerEventKind::Move, 1));
+    ASSERT_TRUE(hovered.has_value()) << (hovered ? "" : hovered.error().message);
+    publishLayout();
+    expectBackground(UI::premultiply(Paint.hoveredBackgroundColor));
+
+    auto down = context->routePointerInput(makePrimaryPointerInput(
+        window, UI::UIRoutedPointerEventKind::ButtonDown, 2));
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    publishLayout();
+    expectBackground(UI::premultiply(Paint.pressedBackgroundColor));
+
+    assertOk(context->cancelPointerInteraction(window));
+    publishLayout();
+    expectBackground(UI::premultiply(Normal));
+
+    hovered = context->routePointerInput(makePrimaryPointerInput(
+        window, UI::UIRoutedPointerEventKind::Move, 3));
+    ASSERT_TRUE(hovered.has_value()) << (hovered ? "" : hovered.error().message);
+    down = context->routePointerInput(makePrimaryPointerInput(
+        window, UI::UIRoutedPointerEventKind::ButtonDown, 4));
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    publishLayout();
+    expectBackground(UI::premultiply(Paint.pressedBackgroundColor));
+
+    auto up = context->routePointerInput(makePrimaryPointerInput(
+        window, UI::UIRoutedPointerEventKind::ButtonUp, 5));
+    ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+    publishLayout();
+    expectBackground(UI::premultiply(Paint.hoveredBackgroundColor));
+
+    auto outside = context->routePointerInput(makePrimaryPointerInput(
+        window, UI::UIRoutedPointerEventKind::Move, 6, 300.0F, 10.0F));
+    ASSERT_TRUE(outside.has_value()) << (outside ? "" : outside.error().message);
+    publishLayout();
+    expectBackground(UI::premultiply(Paint.focusedBackgroundColor));
+
+    assertOk(updater.setEnabled(textEdit, false));
+    publishLayout();
+    expectBackground(UI::UIPremultipliedRgba8Color{.alpha = 140});
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->imeFocus().hasValue());
 }
 
 TEST_F(UITextEditTest, EnforcesSingleLineUtf8AndCodepointSelectionBounds)
@@ -441,8 +524,15 @@ TEST_F(UITextEditTest, CommandsNavigateSelectAndDeleteUnicodeScalars)
 
 TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
 {
+    constexpr UI::UITextEditPaint Paint{
+        .selectionBackgroundColor = {.red = 18, .green = 102, .blue = 170, .alpha = 210},
+        .caretColor = UI::rgb(0xF2C94C),
+    };
+    const UI::UIPremultipliedRgba8Color expectedSelection = UI::premultiply(Paint.selectionBackgroundColor);
+    const UI::UIPremultipliedRgba8Color expectedCaret = UI::premultiply(Paint.caretColor);
     const UI::UINodeId textEdit = createTextEdit();
     ASSERT_TRUE(textEdit.hasValue());
+    assertOk(updater.setTextEditPaint(textEdit, Paint));
     assertOk(updater.setText(textEdit, "ABC"));
     focusWithTab(textEdit);
     assertOk(updater.setTextSelection(
@@ -456,11 +546,10 @@ TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
     const UI::UICommittedPaintEntry* selectedCaret = nullptr;
     for (const UI::UICommittedPaintEntry& entry : selectedPaint.entries()) {
         EXPECT_EQ(entry.node, textEdit);
-        if (!entry.isGlyph && entry.solidFill.alpha == 190) {
+        if (!entry.isGlyph && entry.solidFill == expectedSelection) {
             selectionPaint = &entry;
         }
-        if (!entry.isGlyph && entry.solidFill.red == 255
-            && entry.solidFill.green == 255 && entry.solidFill.blue == 255) {
+        if (!entry.isGlyph && entry.solidFill == expectedCaret) {
             selectedCaret = &entry;
         }
     }
@@ -496,11 +585,10 @@ TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
             }
             ++preeditGlyphCount;
         }
-        if (!entry.isGlyph && entry.solidFill.red == 255
-            && entry.solidFill.green == 255 && entry.solidFill.blue == 255) {
+        if (!entry.isGlyph && entry.solidFill == expectedCaret) {
             preeditCaret = &entry;
         }
-        EXPECT_FALSE(!entry.isGlyph && entry.solidFill.alpha == 190);
+        EXPECT_FALSE(!entry.isGlyph && entry.solidFill == expectedSelection);
     }
     EXPECT_EQ(preeditGlyphCount, 2U);
     EXPECT_GT(secondPreeditX, firstPreeditX);

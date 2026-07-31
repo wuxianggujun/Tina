@@ -157,6 +157,11 @@ callback 副作用。
 沿用相同 committed Modal/Contain scope；disabled、非 Targetable 与复合控件内部 Dropdown/List/Tree item
 不会成为通用候选。Dropdown、ListView、TreeView 与 TextEdit 始终优先执行各自的方向命令。
 
+TextEdit 通过独立 `UITextEditPaint` 复用唯一 `hoveredPrimaryControl`、`armedTextEdit` 与 committed text focus，
+背景按 disabled > pressed > hover > focus > normal 解析；selection/caret 颜色也由同一 paint 提供。
+Primary Up/cancel、disable、Hidden/Collapsed、destroy 与 Modal scope change 均沿既有状态清理和原子 commit
+路径移除 stale focus/pressed feedback，没有新增输入状态或 GPU callback。
+
 ## Text、UTF-8 与 IME
 
 所有 UI 文本是 strict UTF-8，无 embedded NUL；MSVC target 使用 `/utf-8`。TextEdit 当前为单行，拒绝
@@ -283,7 +288,7 @@ bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx back
 | `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | `UIBoxPaint` 背景 + 可选 `UIButtonPaint` 状态色 + 文本 |
 | `Checkbox` | checked 切换，复用 Button action/焦点路径 | 背景 SolidQuad + `UICheckboxPaint` 勾选指示块；标签由相邻 Label 组合 |
 | `Slider` | Pointer 横向拖动、Tab/空间导航/显式焦点，min/max/value/step | 背景 track + `UISliderPaint` filled track/thumb；状态优先级为 drag > focus > normal |
-| `TextEdit` | 单行编辑、选择、光标、IME | 文本 Glyph/placeholder + selection highlight + caret SolidQuad |
+| `TextEdit` | 单行编辑、选择、光标、IME | `UIBoxPaint` 背景 + `UITextEditPaint` hover/press/focus/disabled、selection highlight 与 caret + 文本 Glyph/placeholder |
 | `ProgressBar` | 非交互 determinate range/value | track SolidQuad + 按比例缩短的 foreground SolidQuad |
 | `RadioButton` | 同直接父节点互斥选择 | indicator SolidQuad + 选中内块 + 文本 Glyph |
 | `ScrollView` | wheel/thumb drag 与 viewport clip | 内容沿 offset 平移并裁剪，追加 track/thumb SolidQuad |

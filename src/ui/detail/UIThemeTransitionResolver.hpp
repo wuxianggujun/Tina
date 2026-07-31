@@ -16,6 +16,7 @@ struct ProductChromeStorage final {
     UIDropdownPaint& dropdown;
     UIListViewPaint& listView;
     UITreeViewPaint& treeView;
+    UITextEditPaint& textEdit;
 };
 
 struct ProductChromeTransition final {

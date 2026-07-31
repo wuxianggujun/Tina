@@ -270,6 +270,8 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UIContentAlignment> contentAlignment(UINodeId node) const;
     [[nodiscard]] Core::Status setTextSelection(UINodeId textEdit, UITextSelection selection);
     [[nodiscard]] Core::Result<UITextSelection> textSelection(UINodeId textEdit) const;
+    [[nodiscard]] Core::Status setTextEditPaint(UINodeId textEdit, const UITextEditPaint& paint);
+    [[nodiscard]] Core::Result<UITextEditPaint> textEditPaint(UINodeId textEdit) const;
     [[nodiscard]] Core::Status setButtonAction(UINodeId button, UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UINodeId button) const;
@@ -598,6 +600,10 @@ class UIContext final {
     [[nodiscard]] Core::Status setTextSelectionFromUpdater(UINodeId updaterRoot, UINodeId textEdit,
                                                            UITextSelection selection);
     [[nodiscard]] Core::Result<UITextSelection> textSelectionFromUpdater(UINodeId updaterRoot, UINodeId textEdit) const;
+    [[nodiscard]] Core::Status setTextEditPaintFromUpdater(UINodeId updaterRoot, UINodeId textEdit,
+                                                           const UITextEditPaint& paint);
+    [[nodiscard]] Core::Result<UITextEditPaint> textEditPaintFromUpdater(UINodeId updaterRoot,
+                                                                         UINodeId textEdit) const;
     [[nodiscard]] Core::Status setButtonActionFromUpdater(UINodeId updaterRoot, UINodeId button,
                                                           UIButtonActionCallback&& callback);
     [[nodiscard]] Core::Status clearButtonActionFromUpdater(UINodeId updaterRoot, UINodeId button);

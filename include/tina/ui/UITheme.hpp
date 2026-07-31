@@ -11,6 +11,7 @@
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITreeView.hpp>
 
 #include <compare>
@@ -321,13 +322,24 @@ struct UIRadioButtonChrome final {
 
 struct UITextEditChrome final {
     UIBoxPaint box{};
+    UITextEditPaint paint{};
     UITextStyle text{};
 };
 
 [[nodiscard]] constexpr UITextEditChrome makeTextEditChrome(const UITheme& theme) noexcept
 {
+    const UIStraightSrgba8Color fill = scaleColorAlpha(theme.surface2, 245);
     return UITextEditChrome{
-        .box = makeSolidBox(scaleColorAlpha(theme.surface2, 245), theme.controlCornerRadius),
+        .box = makeSolidBox(fill, theme.controlCornerRadius),
+        .paint =
+            UITextEditPaint{
+                .hoveredBackgroundColor = lightenChannel(fill, 28),
+                .pressedBackgroundColor = darkenChannel(fill, 36),
+                .focusedBackgroundColor = lightenChannel(fill, 12),
+                .disabledBackgroundColor = theme.buttonDisabled,
+                .selectionBackgroundColor = scaleColorAlpha(theme.focusRing, 190),
+                .caretColor = theme.textPrimary,
+            },
         .text = makeBodyTextStyle(theme, 22.0F),
     };
 }

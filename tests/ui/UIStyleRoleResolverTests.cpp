@@ -26,6 +26,8 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingCheckboxPaint)},
         std::pair{UI::UIStyleRoleId::Slider,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingSliderPaint)},
+        std::pair{UI::UIStyleRoleId::TextInput,
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingTextStyle | ThemeBindingTextEditPaint)},
         std::pair{UI::UIStyleRoleId::ProgressBar,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingProgressBarPaint)},
         std::pair{UI::UIStyleRoleId::RadioButton,
@@ -62,6 +64,12 @@ TEST(UIStyleRoleResolverTests, ResolvesControlChromeFromTheRequestedTheme)
     EXPECT_EQ(dropdown.text, expectedDropdown.label);
     EXPECT_EQ(dropdown.dropdown, expectedDropdown.dropdown);
 
+    const auto textEdit = UI::Detail::productChromeFor(UI::UIStyleRoleId::TextInput, theme);
+    const UI::UITextEditChrome expectedTextEdit = UI::makeTextEditChrome(theme);
+    EXPECT_EQ(textEdit.box, expectedTextEdit.box);
+    EXPECT_EQ(textEdit.textEdit, expectedTextEdit.paint);
+    EXPECT_EQ(textEdit.text, expectedTextEdit.text);
+
     const auto tree = UI::Detail::productChromeFor(UI::UIStyleRoleId::TreeView, theme);
     EXPECT_EQ(tree.box, UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.surface1, 245)));
     EXPECT_EQ(tree.treeView, UI::makeTreeViewPaint(theme));
@@ -81,6 +89,7 @@ TEST(UIStyleRoleResolverTests, NoneAndInvalidRolesResolveEmptyChrome)
     EXPECT_EQ(invalid.box, empty.box);
     EXPECT_EQ(invalid.text, empty.text);
     EXPECT_EQ(invalid.treeView, empty.treeView);
+    EXPECT_EQ(invalid.textEdit, empty.textEdit);
 }
 
 } // namespace

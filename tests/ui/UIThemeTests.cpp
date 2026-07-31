@@ -115,6 +115,19 @@ TEST(UIThemeTest, SelectionControlsUseThemeInteractionStateTokens)
     EXPECT_NE(radio.radio.pressedIndicatorColor.alpha, 0);
 }
 
+TEST(UIThemeTest, TextEditChromeUsesThemeInteractionAndEditingTokens)
+{
+    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
+    constexpr UI::UITextEditChrome textEdit = UI::makeTextEditChrome(theme);
+
+    EXPECT_NE(textEdit.paint.hoveredBackgroundColor.alpha, 0);
+    EXPECT_NE(textEdit.paint.pressedBackgroundColor.alpha, 0);
+    EXPECT_NE(textEdit.paint.focusedBackgroundColor.alpha, 0);
+    EXPECT_EQ(textEdit.paint.disabledBackgroundColor, theme.buttonDisabled);
+    EXPECT_EQ(textEdit.paint.selectionBackgroundColor, UI::scaleColorAlpha(theme.focusRing, 190));
+    EXPECT_EQ(textEdit.paint.caretColor, theme.textPrimary);
+}
+
 TEST(UIThemeTest, CollectionPaintUsesThemeSelectionStateTokens)
 {
     constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
@@ -268,6 +281,33 @@ TEST(UIThemeTest, ExplicitSameValueSetterStillDetachesThatProperty)
     EXPECT_EQ(updater->buttonPaint(*button).value(), darkStates);
 }
 
+TEST(UIThemeTest, TextEditPaintOverrideDetachesOnlyPaintAndCanRestoreThemeRecipe)
+{
+    const Platform::WindowId window = makeTestWindow();
+    auto context = createProductContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = context->rootBuilder().createRoot();
+    ASSERT_TRUE(root.has_value());
+    auto textEdit = context->rootBuilder().createElement(root->rootNodeId(), UI::makeTextEditElement());
+    ASSERT_TRUE(textEdit.has_value());
+    auto updater = context->treeUpdater(*root);
+    ASSERT_TRUE(updater.has_value());
+
+    UI::UITextEditPaint localPaint = updater->textEditPaint(*textEdit).value();
+    localPaint.hoveredBackgroundColor = UI::rgb(0xAA2200);
+    ASSERT_TRUE(updater->setTextEditPaint(*textEdit, localPaint).has_value());
+
+    const UI::UITheme light = UI::makeLightProductTheme();
+    ASSERT_TRUE(context->setProductTheme(light).has_value());
+    const UI::UITextEditChrome lightChrome = UI::makeTextEditChrome(light);
+    EXPECT_EQ(updater->textEditPaint(*textEdit).value(), localPaint);
+    EXPECT_EQ(updater->boxPaint(*textEdit).value(), lightChrome.box);
+    EXPECT_EQ(updater->textStyle(*textEdit).value(), lightChrome.text);
+
+    ASSERT_TRUE(updater->clearOverride(*textEdit, UI::UIStyleOverride::TextEditPaint).has_value());
+    EXPECT_EQ(updater->textEditPaint(*textEdit).value(), lightChrome.paint);
+}
+
 TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
 {
     const Platform::WindowId window = makeTestWindow();
@@ -291,6 +331,7 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     EXPECT_EQ(updater->textStyle(*label).value(), UI::makeBodyTextStyle(light));
     EXPECT_EQ(updater->checkboxPaint(*checkbox).value(), UI::makeCheckboxChrome(light).indicator);
     EXPECT_EQ(updater->sliderPaint(*slider).value(), UI::makeSliderChrome(light).slider);
+    EXPECT_EQ(updater->textEditPaint(*textEdit).value(), UI::makeTextEditChrome(light).paint);
     EXPECT_EQ(updater->textStyle(*textEdit).value(), UI::makeTextEditChrome(light).text);
     EXPECT_EQ(updater->progressBarPaint(*progress).value(), UI::makeProgressBarChrome(light).bar);
     EXPECT_EQ(updater->radioButtonPaint(*radio).value(), UI::makeRadioButtonChrome(light).radio);

@@ -57,6 +57,7 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
     case UIStyleRoleId::TextInput: {
         const UITextEditChrome textInput = makeTextEditChrome(theme);
         chrome.box = textInput.box;
+        chrome.textEdit = textInput.paint;
         chrome.text = textInput.text;
         break;
     }

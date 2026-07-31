@@ -19,7 +19,25 @@ namespace {
         .dropdown = chrome.dropdown,
         .listView = chrome.listView,
         .treeView = chrome.treeView,
+        .textEdit = chrome.textEdit,
     };
+}
+
+TEST(UIThemeTransitionResolverTests, TracksTextEditPaintAsPaintOnlyBinding)
+{
+    using namespace UI::Detail;
+
+    const UI::UITheme theme = UI::makeLightProductTheme();
+    ProductChrome current = productChromeFor(UI::UIStyleRoleId::TextInput, UI::makeDefaultProductTheme());
+
+    const ProductChromeTransition transition = resolveProductChromeTransition(
+        storageFor(current), UI::UIStyleRoleId::TextInput, theme, ThemeBindingTextEditPaint,
+        ThemeBindingTextEditPaint);
+
+    EXPECT_EQ(transition.changedBindings, ThemeBindingTextEditPaint);
+    EXPECT_EQ(transition.layoutAffectingBindings, 0U);
+    applyProductChromeTransition(storageFor(current), transition, ThemeBindingTextEditPaint);
+    EXPECT_EQ(current.textEdit, UI::makeTextEditChrome(theme).paint);
 }
 
 TEST(UIThemeTransitionResolverTests, IdenticalChromeHasNoChanges)

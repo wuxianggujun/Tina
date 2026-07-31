@@ -234,6 +234,15 @@ TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpire
     ASSERT_TRUE(tree->setContentAlignment(*textEdit, Alignment).has_value());
     constexpr UI::UITextSelection Selection{.anchorCodepoint = 1, .caretCodepoint = 3};
     ASSERT_TRUE(tree->setTextSelection(*textEdit, Selection).has_value());
+    constexpr UI::UITextEditPaint Paint{
+        .hoveredBackgroundColor = UI::rgb(0x315170),
+        .pressedBackgroundColor = UI::rgb(0x102030),
+        .focusedBackgroundColor = UI::rgb(0x406080),
+        .disabledBackgroundColor = UI::rgb(0x202020),
+        .selectionBackgroundColor = UI::rgb(0x1266AA, 210),
+        .caretColor = UI::rgb(0xF2C94C),
+    };
+    ASSERT_TRUE(tree->setTextEditPaint(*textEdit, Paint).has_value());
     const PrimaryWindowUITreeUpdater& treeView = *tree;
     auto currentAlignment = treeView.contentAlignment(*textEdit);
     ASSERT_TRUE(currentAlignment.has_value()) << currentAlignment.error().message;
@@ -241,6 +250,9 @@ TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpire
     auto currentSelection = treeView.textSelection(*textEdit);
     ASSERT_TRUE(currentSelection.has_value()) << currentSelection.error().message;
     EXPECT_EQ(*currentSelection, Selection);
+    auto currentPaint = treeView.textEditPaint(*textEdit);
+    ASSERT_TRUE(currentPaint.has_value()) << currentPaint.error().message;
+    EXPECT_EQ(*currentPaint, Paint);
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
 
     auto expiredCreate = tree->createElement(root->rootNodeId(), UI::makeTextEditElement());
@@ -249,6 +261,9 @@ TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpire
     Core::Status expiredSet = tree->setTextSelection(*textEdit, {});
     ASSERT_FALSE(expiredSet.has_value());
     EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredPaintSet = tree->setTextEditPaint(*textEdit, {});
+    ASSERT_FALSE(expiredPaintSet.has_value());
+    EXPECT_EQ(expiredPaintSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     Core::Status expiredAlignmentSet = tree->setContentAlignment(*textEdit, {});
     ASSERT_FALSE(expiredAlignmentSet.has_value());
     EXPECT_EQ(expiredAlignmentSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
@@ -258,6 +273,9 @@ TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpire
     auto expiredQuery = treeView.textSelection(*textEdit);
     ASSERT_FALSE(expiredQuery.has_value());
     EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredPaintQuery = treeView.textEditPaint(*textEdit);
+    ASSERT_FALSE(expiredPaintQuery.has_value());
+    EXPECT_EQ(expiredPaintQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, EnabledFacadeRoundTripsAndExpiresWithPhase)

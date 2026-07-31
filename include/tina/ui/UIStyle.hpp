@@ -45,7 +45,8 @@ enum class UIStyleOverride : u16 {
     DropdownPaint = 1U << 8U,
     ListViewPaint = 1U << 9U,
     TreeViewPaint = 1U << 10U,
-    All = (1U << 11U) - 1U,
+    TextEditPaint = 1U << 11U,
+    All = (1U << 12U) - 1U,
 };
 
 [[nodiscard]] constexpr UIStyleOverride operator|(UIStyleOverride left, UIStyleOverride right) noexcept

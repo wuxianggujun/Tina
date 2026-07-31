@@ -61,12 +61,16 @@ TEST(UITextEditPaintEmitterTests, CountsAndEmitsUnfocusedCommittedText)
 
 TEST(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesReverseCaretAtSelectionStart)
 {
+    const UI::UIPremultipliedRgba8Color selectionColor = UI::premultiply(UI::rgb(0x1266AA));
+    const UI::UIPremultipliedRgba8Color caretColor = UI::premultiply(UI::rgb(0xF2C94C));
     const UI::Detail::UITextEditPaintState state{
         .focused = true,
         .committedText = "ABC",
         .selection = {.anchorCodepoint = 2, .caretCodepoint = 1},
         .style = testStyle(),
         .textColor = textColor(),
+        .selectionColor = selectionColor,
+        .caretColor = caretColor,
     };
     EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(state), 5U);
 
@@ -78,6 +82,7 @@ TEST(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesRever
     ASSERT_EQ(output.size(), 5U);
     EXPECT_EQ(output[0].solidFill, textColor());
     EXPECT_FALSE(output[1].isGlyph);
+    EXPECT_EQ(output[1].solidFill, selectionColor);
     EXPECT_FLOAT_EQ(output[1].worldRect.x, 15.0F);
     EXPECT_FLOAT_EQ(output[1].worldRect.y, 12.0F);
     EXPECT_FLOAT_EQ(output[1].worldRect.width, 5.0F);
@@ -87,6 +92,7 @@ TEST(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesRever
     EXPECT_EQ(output[3].paintOrdinal, 3U);
     EXPECT_FLOAT_EQ(output[4].worldRect.x, 15.0F);
     EXPECT_FLOAT_EQ(output[4].worldRect.width, 2.0F);
+    EXPECT_EQ(output[4].solidFill, caretColor);
     EXPECT_EQ(output[4].paintOrdinal, 4U);
     EXPECT_EQ(nextPaintOrdinal, 5U);
 }

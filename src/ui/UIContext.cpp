@@ -201,6 +201,7 @@ using Detail::ThemeBindingProgressBarPaint;
 using Detail::ThemeBindingRadioButtonPaint;
 using Detail::ThemeBindingScrollViewPaint;
 using Detail::ThemeBindingSliderPaint;
+using Detail::ThemeBindingTextEditPaint;
 using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
 using Detail::UIPointerRouteInspectionError;
@@ -1846,6 +1847,34 @@ struct UIContext::Impl final {
             }
             return widgetPaintColor(node, color);
         }
+        if (record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
+            nodeIndex < textEditStatesByNodeIndex.size())
+        {
+            const UITextEditPaint& paint = textEditStatesByNodeIndex[nodeIndex].paint;
+            const auto applyOverride = [&color](UIStraightSrgba8Color overrideColor) noexcept {
+                if (overrideColor.alpha != 0)
+                {
+                    color = premultiply(overrideColor);
+                }
+            };
+            if (textInputFocus == node && isLiveTextEdit(node))
+            {
+                applyOverride(paint.focusedBackgroundColor);
+            }
+            if (hoveredPrimaryControl == node)
+            {
+                applyOverride(paint.hoveredBackgroundColor);
+            }
+            if (armedTextEdit == node)
+            {
+                applyOverride(paint.pressedBackgroundColor);
+            }
+            if (!isNodeEnabled(node))
+            {
+                applyOverride(paint.disabledBackgroundColor);
+            }
+            return widgetPaintColor(node, color);
+        }
         if (record == nullptr || !isButtonChromeKind(record->kind) || nodeIndex >= buttonPaintsByNodeIndex.size())
         {
             return widgetPaintColor(node, color);
@@ -2295,6 +2324,9 @@ struct UIContext::Impl final {
                 ? widgetPaintColor(node, localTextColorCacheByIndex[nodeIndex])
                 : (textState != nullptr ? premultiply(style.color) : UIPremultipliedRgba8Color{});
         const bool preeditActive = focused && imeComposition.active();
+        const UITextEditPaint paint =
+            nodeIndex < textEditStatesByNodeIndex.size() ? textEditStatesByNodeIndex[nodeIndex].paint
+                                                         : UITextEditPaint{};
         return Detail::UITextEditPaintState{
             .focused = focused,
             .preeditActive = preeditActive,
@@ -2306,6 +2338,8 @@ struct UIContext::Impl final {
             .preeditCursorCodepoint = preeditActive ? imeComposition.cursorCodepoint() : 0,
             .style = style,
             .textColor = textColor,
+            .selectionColor = premultiply(paint.selectionBackgroundColor),
+            .caretColor = premultiply(paint.caretColor),
             .rasterSource =
                 Detail::UITextPaintRasterSource{
                     .rasterizer = textRasterizer.get(),
@@ -2833,7 +2867,7 @@ struct UIContext::Impl final {
             const NodeRecord* record = nodes.tryGet(candidate.storageId());
             if (record != nullptr &&
                 (isButtonChromeKind(record->kind) || record->kind == BuiltinElementKind::Checkbox ||
-                 record->kind == BuiltinElementKind::RadioButton))
+                 record->kind == BuiltinElementKind::RadioButton || record->kind == BuiltinElementKind::TextEdit))
             {
                 return candidate;
             }
@@ -3806,6 +3840,7 @@ struct UIContext::Impl final {
             .dropdown = dropdownStatesByNodeIndex[index].paint,
             .listView = listViewStatesByNodeIndex[index].paint,
             .treeView = treeViewStatesByNodeIndex[index].paint,
+            .textEdit = textEditStatesByNodeIndex[index].paint,
         };
     }
 
@@ -5962,6 +5997,75 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidNode, "UI TextEdit is not owned by the updater root");
         }
         return textEditStatesByNodeIndex[textEdit.index()].selection;
+    }
+
+    [[nodiscard]] Core::Status setTextEditPaintFromUpdater(UINodeId updaterRoot, UINodeId textEdit,
+                                                           const UITextEditPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(textEdit);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        const NodeRecord* record = nodes.tryGet(textEdit.storageId());
+        if (record == nullptr || record->kind != BuiltinElementKind::TextEdit)
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TextEdit paint requires a TextEdit node");
+        }
+        if (!isNodeWithinRoot(updaterRoot, textEdit))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI TextEdit is not owned by the updater root");
+        }
+        TextEditState& state = textEditStatesByNodeIndex[textEdit.index()];
+        if (state.paint == paint)
+        {
+            detachThemeBinding(textEdit.index(), ThemeBindingTextEditPaint);
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(textEdit); !dirty)
+        {
+            return dirty;
+        }
+        state.paint = paint;
+        detachThemeBinding(textEdit.index(), ThemeBindingTextEditPaint);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UITextEditPaint> textEditPaintFromUpdater(UINodeId updaterRoot,
+                                                                         UINodeId textEdit) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = const_cast<Impl*>(this)->resolveNode(textEdit);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        const NodeRecord* record = nodes.tryGet(textEdit.storageId());
+        if (record == nullptr || record->kind != BuiltinElementKind::TextEdit)
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI TextEdit paint requires a TextEdit node");
+        }
+        if (!isNodeWithinRoot(updaterRoot, textEdit))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI TextEdit is not owned by the updater root");
+        }
+        return textEditStatesByNodeIndex[textEdit.index()].paint;
     }
 
     [[nodiscard]] Core::Status setButtonActionFromUpdater(UINodeId updaterRoot, UINodeId button,
@@ -10408,7 +10512,8 @@ struct UIContext::Impl final {
             addRouteLayoutDirtyReservationCandidates(popupAtRouteStart);
             addRouteLayoutDirtyReservationCandidates(popupDropdownAtRouteStart);
         }
-        const UINodeId nextHoveredControl = resolvedHoveredPrimaryControl(physicalNearestButton);
+        const UINodeId hoverCandidate = physicalNearestButton.hasValue() ? physicalNearestButton : physicalTarget;
+        const UINodeId nextHoveredControl = resolvedHoveredPrimaryControl(hoverCandidate);
         if (nextHoveredControl != hoveredPrimaryControl)
         {
             const UINodeId previousHover =
@@ -10663,7 +10768,7 @@ struct UIContext::Impl final {
             preserveFocusForPopupBarrier = true;
         }
 
-        Core::Status hoverPaintStatus = updateHoveredPrimaryControl(physicalNearestButton);
+        Core::Status hoverPaintStatus = updateHoveredPrimaryControl(hoverCandidate);
         const bool deferHoverFailureForRelease =
             primaryButtonUp && (hadArmedInteraction || hadArmedSlider || hadArmedScrollView || hadArmedTextEdit);
         if (!hoverPaintStatus && !deferHoverFailureForRelease)
@@ -11004,10 +11109,19 @@ struct UIContext::Impl final {
         } else if (primaryButtonUp && hadArmedTextEdit)
         {
             const bool textEditStillArmed = armedTextEdit == armedTextEditAtRouteStart;
+            Core::Status releasePaint = Core::success();
+            if (textEditStillArmed && contains(armedTextEditAtRouteStart))
+            {
+                releasePaint = markPaintDirty(armedTextEditAtRouteStart);
+            }
             clearArmedTextEdit();
             if (!hoverPaintStatus)
             {
                 return Core::failure(hoverPaintStatus.error());
+            }
+            if (!releasePaint)
+            {
+                return Core::failure(releasePaint.error());
             }
             routedEvent.consumeInputTransition();
             if (textEditStillArmed && isNodeEnabled(armedTextEditAtRouteStart))
@@ -11149,6 +11263,7 @@ struct UIContext::Impl final {
         const UINodeId cancelledButton = armedPrimaryButton;
         const UINodeId cancelledSlider = armedSlider;
         const UINodeId cancelledScrollView = armedScrollView;
+        const UINodeId cancelledTextEdit = armedTextEdit;
         const UINodeId cancelledFocus = defaultActionFocusButton;
         const UINodeId cancelledHover = hoveredPrimaryControl;
         clearArmedPrimaryButton();
@@ -11173,6 +11288,7 @@ struct UIContext::Impl final {
             cancelledButton,
             cancelledSlider,
             cancelledScrollView,
+            cancelledTextEdit,
             cancelledFocus,
             cancelledHover,
         }));
@@ -13547,6 +13663,24 @@ Core::Result<UITextSelection> UITreeUpdater::textSelection(UINodeId textEdit) co
     return m_context->textSelectionFromUpdater(m_root, textEdit);
 }
 
+Core::Status UITreeUpdater::setTextEditPaint(UINodeId textEdit, const UITextEditPaint& paint)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTextEditPaintFromUpdater(m_root, textEdit, paint);
+}
+
+Core::Result<UITextEditPaint> UITreeUpdater::textEditPaint(UINodeId textEdit) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->textEditPaintFromUpdater(m_root, textEdit);
+}
+
 Core::Status UITreeUpdater::setButtonAction(UINodeId button, UIButtonActionCallback callback)
 {
     if (m_context == nullptr)
@@ -14794,6 +14928,17 @@ Core::Status UIContext::setTextSelectionFromUpdater(UINodeId updaterRoot, UINode
 Core::Result<UITextSelection> UIContext::textSelectionFromUpdater(UINodeId updaterRoot, UINodeId textEdit) const
 {
     return m_impl->textSelectionFromUpdater(updaterRoot, textEdit);
+}
+
+Core::Status UIContext::setTextEditPaintFromUpdater(UINodeId updaterRoot, UINodeId textEdit,
+                                                    const UITextEditPaint& paint)
+{
+    return m_impl->setTextEditPaintFromUpdater(updaterRoot, textEdit, paint);
+}
+
+Core::Result<UITextEditPaint> UIContext::textEditPaintFromUpdater(UINodeId updaterRoot, UINodeId textEdit) const
+{
+    return m_impl->textEditPaintFromUpdater(updaterRoot, textEdit);
 }
 
 Core::Status UIContext::setButtonActionFromUpdater(UINodeId updaterRoot, UINodeId button,

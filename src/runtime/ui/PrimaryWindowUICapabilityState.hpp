@@ -92,6 +92,10 @@ class PrimaryWindowUICapabilityState final {
                                                 UI::UINodeId textEdit, UI::UITextSelection selection);
     [[nodiscard]] Core::Result<UI::UITextSelection>
     textSelection(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId textEdit);
+    [[nodiscard]] Core::Status setTextEditPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                UI::UINodeId textEdit, const UI::UITextEditPaint& paint);
+    [[nodiscard]] Core::Result<UI::UITextEditPaint>
+    textEditPaint(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId textEdit);
     [[nodiscard]] Core::Status setButtonAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                UI::UINodeId button, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,

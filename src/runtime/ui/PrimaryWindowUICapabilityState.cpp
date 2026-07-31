@@ -615,6 +615,40 @@ Core::Result<UI::UITextSelection> PrimaryWindowUICapabilityState::textSelection(
     return *result;
 }
 
+Core::Status PrimaryWindowUICapabilityState::setTextEditPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                              UI::UITreeUpdater& updater, UI::UINodeId textEdit,
+                                                              const UI::UITextEditPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTextEditPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTextEditPaint(textEdit, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITextEditPaint>
+PrimaryWindowUICapabilityState::textEditPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                              const UI::UITreeUpdater& updater, UI::UINodeId textEdit)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::textEditPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = updater.textEditPaint(textEdit);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setButtonAction(u64 epoch, PrimaryWindowUIPhase phase,
                                                              UI::UITreeUpdater& updater, UI::UINodeId button,
                                                              UI::UIButtonActionCallback callback)

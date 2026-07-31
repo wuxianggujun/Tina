@@ -26,6 +26,7 @@ struct WidgetTextState final {
 };
 
 struct TextEditState final {
+    UITextEditPaint paint{};
     UITextSelection selection{};
 };
 

@@ -20,26 +20,6 @@ namespace {
     });
 }
 
-[[nodiscard]] UIPremultipliedRgba8Color selectionColor() noexcept
-{
-    return premultiply(UIStraightSrgba8Color{
-        .red = 42,
-        .green = 112,
-        .blue = 190,
-        .alpha = 190,
-    });
-}
-
-[[nodiscard]] UIPremultipliedRgba8Color caretColor() noexcept
-{
-    return premultiply(UIStraightSrgba8Color{
-        .red = 255,
-        .green = 255,
-        .blue = 255,
-        .alpha = 255,
-    });
-}
-
 } // namespace
 
 usize UITextEditPaintEmitter::countEntries(const UITextEditPaintState& state) noexcept
@@ -127,7 +107,7 @@ void UITextEditPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& out
                 .worldRect = {},
                 .effectiveClip = textLayoutEntry.effectiveClip,
                 .paintOrdinal = nextPaintOrdinal,
-                .solidFill = selectionColor(),
+                .solidFill = state.selectionColor,
                 .isGlyph = false,
             });
             ++nextPaintOrdinal;
@@ -170,7 +150,7 @@ void UITextEditPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& out
             },
         .effectiveClip = textLayoutEntry.effectiveClip,
         .paintOrdinal = nextPaintOrdinal,
-        .solidFill = caretColor(),
+        .solidFill = state.caretColor,
         .isGlyph = false,
     });
     ++nextPaintOrdinal;

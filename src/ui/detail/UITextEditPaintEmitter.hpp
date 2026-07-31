@@ -23,6 +23,8 @@ struct UITextEditPaintState final {
     u32 preeditCursorCodepoint = 0;
     UITextStyle style{};
     UIPremultipliedRgba8Color textColor{};
+    UIPremultipliedRgba8Color selectionColor = premultiply(UITextEditPaint{}.selectionBackgroundColor);
+    UIPremultipliedRgba8Color caretColor = premultiply(UITextEditPaint{}.caretColor);
     UITextPaintRasterSource rasterSource{};
 };
 

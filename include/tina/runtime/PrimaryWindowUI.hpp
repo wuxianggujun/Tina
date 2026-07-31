@@ -73,6 +73,8 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UIContentAlignment> contentAlignment(UI::UINodeId node) const;
     [[nodiscard]] Core::Status setTextSelection(UI::UINodeId textEdit, UI::UITextSelection selection);
     [[nodiscard]] Core::Result<UI::UITextSelection> textSelection(UI::UINodeId textEdit) const;
+    [[nodiscard]] Core::Status setTextEditPaint(UI::UINodeId textEdit, const UI::UITextEditPaint& paint);
+    [[nodiscard]] Core::Result<UI::UITextEditPaint> textEditPaint(UI::UINodeId textEdit) const;
     [[nodiscard]] Core::Status setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UI::UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;
