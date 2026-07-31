@@ -93,7 +93,7 @@ struct Counters final {
         }
         if (argument.starts_with(workloadPrefix)) {
             const auto id = argument.substr(workloadPrefix.size());
-            if (id != kWorkloadId && id != "null_runtime") {
+            if (id != kWorkloadId) {
                 error = "unknown workload (supported: null_runtime_frames)";
                 return false;
             }
