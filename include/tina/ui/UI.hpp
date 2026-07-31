@@ -26,6 +26,7 @@
 #include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
+#include <tina/ui/UIRangeInput.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>

@@ -9,6 +9,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIProgressBar.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPopup.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRadioButton.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRangeInput.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIScrollView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISlider.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIStyle.hpp
@@ -70,6 +71,8 @@ add_library(tina_ui STATIC
     detail/UILayoutPrimitives.hpp
     detail/UIPropertyNormalization.hpp
     detail/UIPropertyNormalization.cpp
+    detail/UIRangeInputPressLatch.hpp
+    detail/UIRangeInputPressLatch.cpp
     detail/UIPaintPrimitives.hpp
     detail/UIPaintPrimitives.cpp
     detail/UIPaintSnapshotBuilder.hpp

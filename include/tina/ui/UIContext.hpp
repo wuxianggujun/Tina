@@ -25,6 +25,7 @@
 #include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
+#include <tina/ui/UIRangeInput.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
@@ -484,6 +485,14 @@ class UIContext final {
     // no focus or no candidate leaves gameplay input unconsumed.
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult>
     routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed = true);
+    // Adjusts the focused RangeInput without reusing spatial focus commands.
+    // A successful Down latches its exact physical control so the matching Up
+    // remains consumed after focus or retained-state changes. step=0 uses one
+    // percent of the finite range as the command increment.
+    [[nodiscard]] Core::Result<UIRangeInputCommandResult>
+    routeRangeInputCommand(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                           UIRangeInputCommand command, bool pressed,
+                           const Platform::DigitalControlIdentity& control);
     // Routes retained Dropdown navigation. pressed=false releases a command
     // previously claimed on key-down without repeating its state transition.
     [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command, bool pressed);

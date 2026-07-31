@@ -38,6 +38,7 @@ add_executable(tina_ui_tests
     UIWidgetStateModelsTests.cpp
     UIVirtualCollectionLayoutTests.cpp
     UIRadioButtonTests.cpp
+    UIRangeInputTests.cpp
     UISemanticsTests.cpp
     UIAccessibilityTests.cpp
     UIInputRouteTestSupport.hpp
@@ -76,6 +77,7 @@ add_executable(tina_ui_tests
     header_isolation/UICheckboxHeader.cpp
     header_isolation/UIProgressBarHeader.cpp
     header_isolation/UIRadioButtonHeader.cpp
+    header_isolation/UIRangeInputHeader.cpp
     header_isolation/UIScrollViewHeader.cpp
     header_isolation/UIListViewHeader.cpp
     header_isolation/UITreeViewHeader.cpp

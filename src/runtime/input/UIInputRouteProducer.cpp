@@ -101,6 +101,37 @@ constexpr usize BitsPerConsumptionWord = sizeof(u64) * 8U;
     }
 }
 
+[[nodiscard]] std::optional<UI::UIRangeInputCommand> rangeInputCommandForKey(Platform::Key key) noexcept
+{
+    switch (key)
+    {
+    case Platform::Key::Left:
+    case Platform::Key::Down:
+        return UI::UIRangeInputCommand::Decrease;
+    case Platform::Key::Right:
+    case Platform::Key::Up:
+        return UI::UIRangeInputCommand::Increase;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UIRangeInputCommand>
+rangeInputCommandForGamepadButton(Platform::GamepadButton button) noexcept
+{
+    switch (button)
+    {
+    case Platform::GamepadButton::DpadLeft:
+    case Platform::GamepadButton::DpadDown:
+        return UI::UIRangeInputCommand::Decrease;
+    case Platform::GamepadButton::DpadRight:
+    case Platform::GamepadButton::DpadUp:
+        return UI::UIRangeInputCommand::Increase;
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] std::optional<UI::UIDropdownCommand> dropdownCommandForKey(Platform::Key key,
                                                                         bool shiftHeld) noexcept
 {
@@ -732,8 +763,77 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
         }
 
+        // Focused RangeInput adjustment owns Arrow/D-pad after open dropdowns
+        // and collection controls, but before generic spatial focus. The
+        // capability route declines without latching when no value changes, so
+        // disabled/read-only/edge input remains visible to gameplay.
+        if (const auto* key = std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr && key->window == context->ownerWindow())
+        {
+            if (const auto command = rangeInputCommandForKey(key->key); command.has_value())
+            {
+                const Platform::DigitalControlIdentity control = Platform::KeyControlIdentity{
+                    .window = key->window,
+                    .key = key->key,
+                };
+                auto routed = context->routeRangeInputCommand(
+                    platformFrame.id(), transitions[ordinal].sequence, *command,
+                    key->state == Platform::DigitalTransition::Down, control);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(keyboard-range-input)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+                if (routed->targeted)
+                {
+                    continue;
+                }
+            }
+        }
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
+            gamepad != nullptr && gamepad->routedWindow == context->ownerWindow())
+        {
+            if (const auto command = rangeInputCommandForGamepadButton(gamepad->button); command.has_value())
+            {
+                const Platform::DigitalControlIdentity control = Platform::GamepadButtonControlIdentity{
+                    .routedWindow = gamepad->routedWindow,
+                    .gamepad = gamepad->gamepad,
+                    .button = gamepad->button,
+                };
+                auto routed = context->routeRangeInputCommand(
+                    platformFrame.id(), transitions[ordinal].sequence, *command,
+                    gamepad->state == Platform::DigitalTransition::Down, control);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(gamepad-range-input)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+                if (routed->targeted)
+                {
+                    continue;
+                }
+            }
+        }
+
         // Generic spatial focus runs only after controls with directional state
-        // (Dropdown/ListView/TreeView/TextEdit) have declined the transition.
+        // (Dropdown/ListView/TreeView/TextEdit/RangeInput) have declined the transition.
         if (const auto* gamepad =
                 std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
             gamepad != nullptr && gamepad->routedWindow == context->ownerWindow())

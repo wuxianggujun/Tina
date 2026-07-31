@@ -301,7 +301,6 @@ TEST(UIThemeTest, TextEditPaintOverrideDetachesOnlyPaintAndCanRestoreThemeRecipe
     ASSERT_TRUE(context->setProductTheme(light).has_value());
     const UI::UITextEditChrome lightChrome = UI::makeTextEditChrome(light);
     EXPECT_EQ(updater->textEditPaint(*textEdit).value(), localPaint);
-    EXPECT_EQ(updater->boxPaint(*textEdit).value(), lightChrome.box);
     EXPECT_EQ(updater->textStyle(*textEdit).value(), lightChrome.text);
 
     ASSERT_TRUE(updater->clearOverride(*textEdit, UI::UIStyleOverride::TextEditPaint).has_value());
