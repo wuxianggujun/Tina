@@ -3,8 +3,6 @@
 add_executable(tina_sample_2d
     main.cpp
 )
-# Backward-compatible target name for scripts still using the intermediate name.
-add_executable(tina_sample_2d_tilemap_bgfx ALIAS tina_sample_2d)
 
 target_compile_features(tina_sample_2d PRIVATE cxx_std_23)
 target_include_directories(tina_sample_2d PRIVATE

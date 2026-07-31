@@ -223,7 +223,7 @@ A2 保留 A1 resolver ABI；A3 随后完成 Particle/Trail Handle 化，A4 完�
 
 `ASSET-HANDLE-SCENE-2D-A3` 的模块门禁归属 `tina_scene_tests`，产品闭环归属 2D product gate：
 
-- `Sprite2DBindingResolver.hpp`、`ParticleSystem2D.hpp`、`Trail2D.hpp` header isolation 编译；
+- `AssetFrameResourceResolver.hpp`、`ParticleSystem2D.hpp`、`Trail2D.hpp` header isolation 编译；
 - Particle burst 与 live particle、Trail config 保存 weak Sprite `AssetHandle`，无旧 key overload/双轨，
   且不持有 resolver、Lease、Cooked payload 或 GPU owner；
 - 空 Particle burst/Trail config 在发布前返回 `InvalidComponent`；Particle 失败保持 live set、stable key 与
@@ -472,7 +472,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双 mesh glTF→Cooked→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx；evidence schema 4、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、唯一0..4 directional-light 提交（产品3灯）、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、完整 PBR/IBL/shadow/light component、跨 GPU golden |
 
-`tina_sample_2d_tilemap_bgfx` 是 `tina_sample_2d` 的兼容 ALIAS；新脚本使用正式 target 名。
+`tina_sample_2d` 是唯一产品 2D target；中间迁移名 `tina_sample_2d_tilemap_bgfx` 已删除。
 
 ## Asset/Cooker E2E
 
@@ -701,8 +701,8 @@ Clang preset 通过 chainload 固定 libstdc++15；Ubuntu 默认旧工具链不�
 见 [m12-evidence-linux.md](m12-evidence-linux.md)。快捷：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxGcc13NullGate.ps1 `
-  -OutJson artifacts\gates\test-001-linux-gcc13-null.json
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 `
+  -Gate gcc13-null -OutJson artifacts\gates\test-001-linux-gcc13-null.json
 ```
 
 2026-07-23 tip `e0d94faa`：GCC13 Null exit 0。  

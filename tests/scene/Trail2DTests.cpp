@@ -136,9 +136,9 @@ class CountingMemoryResource final : public std::pmr::memory_resource {
 }
 
 struct CountingSpriteResolver final {
-    [[nodiscard]] Sprite2DBindingResolver resolver() noexcept
+    [[nodiscard]] Asset::AssetFrameResourceResolver resolver() noexcept
     {
-        return Sprite2DBindingResolver{.userData = this, .resolve = &resolve};
+        return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolve};
     }
 
     [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolve(
@@ -200,7 +200,7 @@ class Trail2DAssetTest : public testing::Test {
         };
     }
 
-    [[nodiscard]] Sprite2DBindingResolver resolver() noexcept
+    [[nodiscard]] Asset::AssetFrameResourceResolver resolver() noexcept
     {
         return spriteResolver_.resolver();
     }

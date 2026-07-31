@@ -1,10 +1,10 @@
 #pragma once
 
+#include <tina/asset/AssetFrameResourceResolver.hpp>
 #include <tina/asset/AssetHandle.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/render/RenderScene.hpp>
-#include <tina/scene/Sprite2DBindingResolver.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 
 #include <memory_resource>
@@ -102,7 +102,7 @@ public:
     // particles require a resolver and valid packet-local texture ref.
     [[nodiscard]] Core::Result<ParticleSystem2DExtractStats>
     extract(Render::RenderSceneWriter& writer, Render::FrameResourceSink& frameResources,
-            Sprite2DBindingResolver spriteBindingResolver) const;
+            Asset::AssetFrameResourceResolver spriteBindingResolver) const;
 
     void clear() noexcept { m_liveCount = 0; }
 

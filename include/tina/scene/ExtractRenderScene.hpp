@@ -4,7 +4,6 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/render/Camera2DProjection.hpp>
 #include <tina/render/RenderScene.hpp>
-#include <tina/scene/Sprite2DBindingResolver.hpp>
 #include <tina/scene/World.hpp>
 
 namespace Tina::Scene {
@@ -14,7 +13,7 @@ namespace Tina::Scene {
 // component configuration error (callers may still emit sprites or pure UI).
 struct ExtractRenderSceneParams final {
     Render::Camera2DSurfaceViewport surfaceViewport{};
-    Sprite2DBindingResolver spriteBindingResolver{};
+    Asset::AssetFrameResourceResolver spriteBindingResolver{};
     Asset::AssetFrameResourceResolver mesh3DBindingResolver{};
     Asset::AssetFrameResourceResolver material3DBindingResolver{};
     float ambientLightScale = 0.18F;

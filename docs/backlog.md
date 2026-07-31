@@ -96,6 +96,7 @@
 | CLEAN-001 | 删除 vcpkg `legacy` feature 及 EnTT/GLM/spdlog/utfcpp 死依赖声明；preset 无引用 | [dependencies](dependencies.md) |
 | CLEAN-002 | 删除无消费者 `StringUtils.hpp`（EASTL/utfcpp）与 Clock/FrameTimer/FixedStepTicker compatibility；`SteadyMonotonicClock` 实现迁到 `MonotonicClock.cpp` | [core](core.md) |
 | CLEAN-003 | miniaudio 实现 TU 与 CMake FATAL 文案不再暗示 Legacy ON 可运行 | [dependencies](dependencies.md) |
+| CLEAN-004 | 删除 A1 Scene resolver/2D sample target alias、Core 私有转发头、assetc 旧参数、重复 GCC13 host wrapper 与无人使用的 Opaque3D unlit fallback；保留正式 CMake namespace、Legacy FATAL 以及跨设备/平台/backend 适配 | [架构](architecture.md) · [公开 API](public-api.md) · [构建](building.md) |
 | TEST-002 | product-2d 同轮：UI/RuntimeUI/bridge/FreeType/Physics2D/Audio/miniaudio/Asset 测试 + sample 300 帧；`productGate=bgfx-physics-freetype-audio`；schema 16 增加双 PointLight2D + 双 ShadowOccluder2D 逐帧 snapshot，并保留 Dark→Light→Dark、Scene Explorer TreeView 与 Sprite owner/retirement handoff；脚本 `tools/windows/RunProduct2dGate.ps1` | [building](building.md) · [Windows 证据](m12-evidence-windows.md) |
 | TEST-003 | product-3d 同轮：Core/Scene/AssetFormat/Asset/bgfx Render/UI/RuntimeUI/bridge/FreeType 测试 + sample 300 帧；schema 4 同时验证 glTF/PBR/3-light、Mesh/Material/共享 Texture owner retirement、packet-local resolver、Asset ListView/Scene TreeView 与自动 Dark→Light→Dark；脚本 `tools/windows/RunProduct3dGate.ps1` | [3D](game-3d.md) · [测试](testing.md) |
 | ASSET-001 | glTF 外部 URI root containment/`..`/scheme 拒绝 + 64MiB 上限；`tina_sample_3d` 上传/绑定 Cooked Texture2D 到 materialKey；路径逃逸单测 | [3D](game-3d.md) · GltfCookTests |

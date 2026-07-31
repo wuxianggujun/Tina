@@ -117,9 +117,9 @@ private:
 }
 
 struct TestSpriteBindings final {
-    [[nodiscard]] Sprite2DBindingResolver resolver() noexcept
+    [[nodiscard]] Asset::AssetFrameResourceResolver resolver() noexcept
     {
-        return Sprite2DBindingResolver{.userData = this, .resolve = &resolve};
+        return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolve};
     }
 
     [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolve(
@@ -566,7 +566,7 @@ TEST_F(ParticleSystem2DTests, ExtractWithLiveParticleRequiresResolver)
     auto builder = makeRenderBuilder(1);
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
-    auto extracted = system.extract(writer, beginTestFrameResources(), Sprite2DBindingResolver{});
+    auto extracted = system.extract(writer, beginTestFrameResources(), Asset::AssetFrameResourceResolver{});
     ASSERT_FALSE(extracted.has_value());
     EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
 }
@@ -631,7 +631,7 @@ TEST_F(ParticleSystem2DTests, ExtractWithNoLiveParticlesDoesNotRequireOrInvokeRe
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
 
-    auto withoutResolver = system.extract(writer, beginTestFrameResources(), Sprite2DBindingResolver{});
+    auto withoutResolver = system.extract(writer, beginTestFrameResources(), Asset::AssetFrameResourceResolver{});
     ASSERT_TRUE(withoutResolver.has_value())
         << (withoutResolver ? "" : withoutResolver.error().message);
     EXPECT_EQ(withoutResolver->submitted, 0U);

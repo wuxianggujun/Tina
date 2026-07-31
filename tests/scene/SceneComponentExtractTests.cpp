@@ -158,9 +158,9 @@ struct TestSpriteBindings final {
         u32 key = 0;
     };
 
-    [[nodiscard]] Sprite2DBindingResolver resolver() noexcept
+    [[nodiscard]] Asset::AssetFrameResourceResolver resolver() noexcept
     {
-        return Sprite2DBindingResolver{.userData = this, .resolve = &resolve};
+        return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolve};
     }
 
     void bind(Asset::AssetHandle sprite, u32 key) noexcept
@@ -233,7 +233,7 @@ class SceneSpriteAssetTest : public testing::Test {
 
 [[nodiscard]] Core::Status extractSingleSprite(
     Asset::AssetHandle sprite,
-    Sprite2DBindingResolver resolver = {},
+    Asset::AssetFrameResourceResolver resolver = {},
     bool visible = true)
 {
     World world = makeWorld();
@@ -469,7 +469,7 @@ TEST_F(SceneSpriteAssetTest, ResolverReturningEmptyRefIsUnresolved)
 {
     const Core::Status status = extractSingleSprite(
         firstSprite_,
-        Sprite2DBindingResolver{.resolve = &resolveToEmpty});
+        Asset::AssetFrameResourceResolver{.resolve = &resolveToEmpty});
     ASSERT_FALSE(status);
     EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
 }

@@ -162,7 +162,7 @@ TaskGroup barrier、Runtime-owned Asset/Audio lease drain 与通用 GPU completi
 | `UI-004` / `UI-005` | **Done**：Focus Scope/Modal/Pointer Capture，以及 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView |
 | `TEXT-001` | 多行编辑、grapheme/shaping 与完整 IME 候选窗仍开放 |
 | `PERF-001` / `PERF-002` | schema v1 **Done**；固定机 hard gate / 多进程 MAD 由 PERF-002 继续跟踪 |
-| `CLEAN-001`～`CLEAN-003` | **Done**（扫尾记录） |
+| `CLEAN-001`～`CLEAN-004` | **Done**（依赖、转发头、旧 alias/参数与死 fallback 扫尾记录） |
 | `TEST-001` / `TEST-002` | **Done**：Linux tip GCC13/Clang22（含 sanitizer）复验与 product-2d 同轮门禁 |
 
 实现目标差距时，若反转 Accepted 决策必须新增 ADR 并 supersede 旧 ADR；不能只修改本文。

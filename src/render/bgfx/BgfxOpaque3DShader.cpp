@@ -6,52 +6,18 @@
 
 #include "fs_tina_opaque3d_mr_glsl.bin.h"
 #include "fs_tina_opaque3d_mr_spv.bin.h"
-#include "fs_tina_opaque3d_unlit_glsl.bin.h"
-#include "fs_tina_opaque3d_unlit_spv.bin.h"
 #include "vs_tina_opaque3d_mr_glsl.bin.h"
 #include "vs_tina_opaque3d_mr_spv.bin.h"
-#include "vs_tina_opaque3d_unlit_glsl.bin.h"
-#include "vs_tina_opaque3d_unlit_spv.bin.h"
 
 #if BX_PLATFORM_WINDOWS
 #include "fs_tina_opaque3d_mr_dxbc.bin.h"
-#include "fs_tina_opaque3d_unlit_dxbc.bin.h"
 #include "vs_tina_opaque3d_mr_dxbc.bin.h"
-#include "vs_tina_opaque3d_unlit_dxbc.bin.h"
 #endif
 
 namespace Tina::Render::Bgfx::ShaderDetail {
 namespace {
 
 constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
-    {
-        "vs_tina_opaque3d_unlit",
-        {
-#if BX_PLATFORM_WINDOWS
-            {bgfx::RendererType::Direct3D11, vs_tina_opaque3d_unlit_dxbc,
-             sizeof(vs_tina_opaque3d_unlit_dxbc)},
-#endif
-            {bgfx::RendererType::OpenGL, vs_tina_opaque3d_unlit_glsl,
-             sizeof(vs_tina_opaque3d_unlit_glsl)},
-            {bgfx::RendererType::Vulkan, vs_tina_opaque3d_unlit_spv,
-             sizeof(vs_tina_opaque3d_unlit_spv)},
-            {bgfx::RendererType::Count, nullptr, 0},
-        },
-    },
-    {
-        "fs_tina_opaque3d_unlit",
-        {
-#if BX_PLATFORM_WINDOWS
-            {bgfx::RendererType::Direct3D11, fs_tina_opaque3d_unlit_dxbc,
-             sizeof(fs_tina_opaque3d_unlit_dxbc)},
-#endif
-            {bgfx::RendererType::OpenGL, fs_tina_opaque3d_unlit_glsl,
-             sizeof(fs_tina_opaque3d_unlit_glsl)},
-            {bgfx::RendererType::Vulkan, fs_tina_opaque3d_unlit_spv,
-             sizeof(fs_tina_opaque3d_unlit_spv)},
-            {bgfx::RendererType::Count, nullptr, 0},
-        },
-    },
     {
         "vs_tina_opaque3d_mr",
         {
@@ -121,12 +87,6 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 }
 
 } // namespace
-
-Core::Result<bgfx::ProgramHandle> createOpaque3DUnlitProgram()
-{
-    return createEmbeddedProgram("vs_tina_opaque3d_unlit", "fs_tina_opaque3d_unlit",
-                                 "createOpaque3DUnlitProgram");
-}
 
 Core::Result<bgfx::ProgramHandle> createOpaque3DMrProgram()
 {

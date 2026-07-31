@@ -3328,7 +3328,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                             .pixelWidth = counters_->surfacePixelWidth,
                             .pixelHeight = counters_->surfacePixelHeight,
                         },
-                    .spriteBindingResolver = Tina::Scene::Sprite2DBindingResolver{
+                    .spriteBindingResolver = Tina::Asset::AssetFrameResourceResolver{
                         .userData = &worldSpriteBindingResolverContext_,
                         .resolve = &TileMapBgfxState::resolveSpriteBinding,
                     },
@@ -3473,7 +3473,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         auto particleExtract = resources_->particles->extract(
             writer,
             frameResources,
-            Tina::Scene::Sprite2DBindingResolver{
+            Tina::Asset::AssetFrameResourceResolver{
                 .userData = &particleSpriteBindingResolverContext_,
                 .resolve = &TileMapBgfxState::resolveSpriteBinding,
             });
@@ -3484,7 +3484,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         if (const auto status = resources_->trail->extract(
                 writer,
                 frameResources,
-                Tina::Scene::Sprite2DBindingResolver{
+                Tina::Asset::AssetFrameResourceResolver{
                     .userData = &trailSpriteBindingResolverContext_,
                     .resolve = &TileMapBgfxState::resolveSpriteBinding,
                 });

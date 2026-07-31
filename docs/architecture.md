@@ -201,8 +201,8 @@ submit/present 的 CPU 借用期；Texture/Mesh 则使用独立 readback complet
 2D World 的 `SpriteRenderer2D` 与 standalone `ParticleSystem2D`/`Trail2D` 已只保存 copyable weak Sprite
 `AssetHandle`；TileMap emit 保存 weak Tileset `AssetHandle`；3D `MeshRenderer3D` 保存 weak StaticMesh/
 Material handle。通用 allocation-free `AssetFrameResourceResolver` 位于窄 `AssetTypes` 边界；2D Scene
-保留语义 alias `Sprite2DBindingResolver`，3D mesh/material 直接使用通用类型；所有路径都只在当前调用
-借用 resolver 与 `FrameResourceSink`。
+与3D mesh/material extraction 都直接使用该通用类型；所有路径都只在当前调用借用 resolver 与
+`FrameResourceSink`，不再保留按渲染用途重命名的迁移 alias。
 产品 2D resolver 薄调用 `Sprite2DBindingRegistry::internSpriteFrameResource()/internTilesetFrameResource()`，
 3D resolver 调用 `Mesh3DBindingRegistry::internMeshFrameResource()/internMaterialFrameResource()`。registry
 在 Asset owner thread 验证 Handle kind、CPU payload、Cooked Texture2D dependency 与 live binding，再把
@@ -244,11 +244,13 @@ Popup 子树归属在 layout traversal 中缓存，避免 publication 逐节点�
 
 ## Legacy 与剩余扫尾
 
-产品级 Legacy 删除与 CLEAN-001～003 扫尾已完成：
+产品级 Legacy 删除与 CLEAN-001～004 扫尾已完成：
 
 - vcpkg `legacy` feature 已移除；
 - 无消费者 EASTL `StringUtils` 与 Clock/FrameTimer compatibility 已删除；
 - miniaudio 实现注释与 FATAL 文案不再暗示 Legacy ON 可运行；
+- A1 Sprite resolver/2D sample target alias、Core 私有转发头、assetc 旧参数、重复 GCC13 host wrapper 与
+  Opaque3D unlit 死 fallback 已删除；
 - `TINA_BUILD_LEGACY=ON` 仍为永久 FATAL 拒绝开关。
 
 剩余跨平台证据与扩展能力见 [Backlog](backlog.md)（如 UI-002 的外部读屏证据、UI-002-LINUX 的

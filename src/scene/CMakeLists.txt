@@ -12,7 +12,6 @@ set(TINA_SCENE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SceneErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ShadowOccluder2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SpriteAnimator2D.hpp
-    ${PROJECT_SOURCE_DIR}/include/tina/scene/Sprite2DBindingResolver.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SpriteRenderer2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Trail2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Transform.hpp

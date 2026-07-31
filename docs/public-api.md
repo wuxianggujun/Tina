@@ -324,7 +324,7 @@ extract 不增长 storage。它们直接复用调用方 phase-local `RenderScene
 
 `ParticleBurst2D::sprite` 在 `emitBurst()` 时复制到每个粒子，空 handle 属于 `InvalidComponent`；
 `Trail2DConfig::sprite` 在 `Create()` 时校验，空 handle 同样失败。两种显式
-`extract(writer, frameResources, resolver)` 只在本次调用借用共享 `Sprite2DBindingResolver` 与 sink；缺
+`extract(writer, frameResources, resolver)` 只在本次调用借用共享 `AssetFrameResourceResolver` 与 sink；缺
 resolver 或 handle 被解析为空 ref 统一返回
 `SceneErrorCode::UnresolvedSprite`。stale/cross-store/wrong-kind/unbound 的识别由 resolver/registry 负责。
 空 system 不解析；Trail 每次非空 extract 解析一次并供所有 segment 复用，Particle 按 live item 解析。
@@ -402,8 +402,8 @@ fail closed 返回当前低层 key；产品 extraction 使用 `internSpriteFrame
 `internTilesetFrameResource()` 将 binding 登记到当前 sink。同帧重复 descriptor 返回同一 ref，首次 pin
 阻止 retirement，直到 packet complete/skip/abandon。registry 是 Sprite2D resident Lease/GPU/binding
 的唯一 owner，但不是 Scene owner；通用 `AssetFrameResourceResolver` 位于窄 `AssetTypes` target，A1 的
-`Sprite2DBindingResolver` 是 Scene extraction 的语义 alias；3D mesh/material resolver 也使用同一个通用
-frame-resource seam。
+Scene 语义 alias 已删除；2D Sprite 与3D mesh/material resolver 都直接使用同一个通用 frame-resource
+seam。
 
 `GpuTextureId`/`GpuMeshId` 携带非零 RenderDevice owner + index + generation；Null/bgfx 的 bind、validate、
 destroy/retire 都校验 owner，因此即使两个 live device 恰好具有相同 index/generation，cross-device handle

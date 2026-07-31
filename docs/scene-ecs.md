@@ -89,7 +89,7 @@ next key 与 live particles 不变。emit 把 burst 的 weak handle 值复制到
 capacity 或稳定 key exhaustion 失败均不修改 anchor、segment set 或 next key；过期 key 不复用。
 `Trail2D::Create()` 对 config 的空 Sprite handle 做结构校验并拒绝。
 
-两个 system 的 `extract()` 都显式借用共享 `Sprite2DBindingResolver`、当前 packet
+两个 system 的 `extract()` 都显式借用共享 `AssetFrameResourceResolver`、当前 packet
 `FrameResourceSink` 与调用方 phase-local `RenderSceneWriter`，把粒子或 segment 转为 backend-neutral
 Sprite2D item。resolver/userData/sink 只在当前调用内有效，system 不保留。缺 resolver，或
 stale/cross-store/wrong-kind/unbound handle 使 resolver 返回空 ref，

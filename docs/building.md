@@ -208,13 +208,6 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 
   -Gate gcc13-platform -OutJson artifacts\gates\test-001-linux-gcc13-platform.json
 ```
 
-兼容旧入口：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxGcc13NullGate.ps1 `
-  -SkipImageBuild -OutJson artifacts\gates\test-001-linux-gcc13-null.json
-```
-
 容器内等价命令（`tools/linux/run-gcc13-null-gate.sh`）：
 
 ```bash

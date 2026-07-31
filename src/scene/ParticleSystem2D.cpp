@@ -289,7 +289,7 @@ Core::Result<ParticleSystem2DExtractStats>
 ParticleSystem2D::extract(
     Render::RenderSceneWriter& writer,
     Render::FrameResourceSink& frameResources,
-    Sprite2DBindingResolver spriteBindingResolver) const
+    Asset::AssetFrameResourceResolver spriteBindingResolver) const
 {
     ParticleSystem2DExtractStats stats{};
     for (const Particle2D& particle : particles()) {

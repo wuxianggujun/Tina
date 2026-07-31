@@ -1,4 +1,4 @@
-#include "Assert.hpp"
+#include <tina/core/diagnostics/Assert.hpp>
 
 #include <atomic>
 #include <cstdio>

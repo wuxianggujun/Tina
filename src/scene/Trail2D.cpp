@@ -236,7 +236,7 @@ Core::Status Trail2D::update(Core::Duration delta) noexcept
 Core::Status Trail2D::extract(
     Render::RenderSceneWriter& writer,
     Render::FrameResourceSink& frameResources,
-    Sprite2DBindingResolver spriteBindingResolver) const noexcept
+    Asset::AssetFrameResourceResolver spriteBindingResolver) const noexcept
 {
     if (m_segments.empty()) {
         return Core::success();

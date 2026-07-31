@@ -20,8 +20,6 @@ struct Options final {
     std::string outRoot;
     std::string recipePath;
     std::string gltfPath;
-    // When no recipe: emit Texture2D(2x2 checker) + Sprite depending on it.
-    bool useTyped2dFixture = true;
 };
 
 void printUsage()
@@ -31,7 +29,6 @@ void printUsage()
         << "  Fixture/recipe cooker for Catalog packages.\n"
         << "  --recipe <path>   cook from line recipe\n"
         << "  --gltf <path>     cook minimal glTF/GLB (cgltf) -> StaticMesh+Material+Prefab\n"
-        << "  --legacy-text     default fixture uses raw text Material payloads (compat)\n"
         << "  --help\n"
         << "\n"
         << "Default fixture (no --recipe): Texture2D 2x2 RGBA + Sprite full-UV.\n"
@@ -94,17 +91,6 @@ void printUsage()
                 return 2;
             }
             options.gltfPath.assign(value);
-            continue;
-        }
-        if (arg == "--legacy-text")
-        {
-            options.useTyped2dFixture = false;
-            continue;
-        }
-        // Keep old flags as no-ops for CI scripts that still pass payloads (ignored in typed mode).
-        if (arg == "--texture-payload" || arg == "--material-payload")
-        {
-            (void)requireValue(arg);
             continue;
         }
         std::cerr << "unknown argument: " << arg << '\n';
@@ -195,40 +181,6 @@ void printError(const Tina::Core::Error& error)
     return request;
 }
 
-[[nodiscard]] Tina::Core::Result<Tina::Asset::CatalogCookRequest> buildLegacyTextRequest()
-{
-    const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
-    const auto materialId = *Tina::Core::AssetId::fromBytes(idBytes(2U));
-    auto asBytes = [](std::string_view text) {
-        std::vector<std::byte> bytes(text.size());
-        for (std::size_t i = 0; i < text.size(); ++i)
-        {
-            bytes[i] = static_cast<std::byte>(static_cast<unsigned char>(text[i]));
-        }
-        return bytes;
-    };
-    Tina::Asset::CatalogCookRequest request{.targetPlatform = Tina::AssetFormat::TargetPlatform::WindowsX64};
-    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
-        .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
-        .assetId = textureId,
-        .payload = asBytes("tex-payload"),
-    });
-    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
-        .assetKind = Tina::AssetFormat::AssetKind::Material,
-        .assetId = materialId,
-        .payload = asBytes("mat-payload"),
-        .dependencies =
-            {
-                Tina::AssetFormat::CookedAssetWriteDependency{
-                    .assetId = textureId,
-                    .expectedKind = Tina::AssetFormat::AssetKind::Texture2D,
-                    .flags = Tina::AssetFormat::DependencyFlags::Required,
-                },
-            },
-    });
-    return request;
-}
-
 } // namespace
 
 int main(int argc, char** argv)
@@ -250,13 +202,9 @@ int main(int argc, char** argv)
     {
         request = Tina::Asset::loadCatalogCookRecipeFile(options.recipePath);
         mode = "recipe";
-    } else if (options.useTyped2dFixture)
-    {
-        request = buildTyped2dRequest();
     } else
     {
-        request = buildLegacyTextRequest();
-        mode = "legacy_text";
+        request = buildTyped2dRequest();
     }
     if (!request)
     {
@@ -287,7 +235,7 @@ int main(int argc, char** argv)
             Tina::Asset::CatalogPackageValidationConfig{
                 .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memory},
                 .verifyContent = true,
-                .verifyTypedPayload = options.useTyped2dFixture && options.recipePath.empty(),
+                .verifyTypedPayload = options.recipePath.empty(),
             },
     };
     auto catalog = Tina::Asset::openCatalogPackage(options.outRoot, openConfig);

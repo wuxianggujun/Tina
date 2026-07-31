@@ -29,26 +29,14 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/MonotonicClock.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/Utf8.hpp
     diagnostics/Assert.cpp
-    diagnostics/Assert.hpp
     diagnostics/Diagnostics.cpp
-    error/Error.hpp
-    error/Result.hpp
     hash/ContentHashDigest.cpp
     io/ReadFile.cpp
     io/WriteFile.cpp
     id/GenerationId.cpp
-
-    id/GenerationId.hpp
-    id/GenerationPool.hpp
     memory/CountingMemoryResource.cpp
     memory/FrameArena.cpp
     memory/MemoryTracker.cpp
-    base/Compiler.hpp
-    base/EnumFlags.hpp
-    base/Platform.hpp
-    base/ScopeExit.hpp
-    base/SourceLocation.hpp
-    base/Types.hpp
     time/FixedStepAccumulator.cpp
     time/MonotonicClock.cpp
 )

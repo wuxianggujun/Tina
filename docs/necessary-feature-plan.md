@@ -518,8 +518,9 @@ AssetHandle。N12 已迁移 FX，N13 已迁移 TileMap，N14 已迁移 3D compon
 
 ### 已完成契约
 
-- `Sprite2DBindingResolver` 拆为 Scene 轻量公开头，继续使用借用的 function pointer + user data；World、
-  Particle 和 Trail 只在各自 extraction 调用内借用，不保存 resolver 或其上下文。
+- N12 当时把 `Sprite2DBindingResolver` 拆为 Scene 轻量公开头，继续使用借用的 function pointer + user data；
+  World、Particle 和 Trail 只在各自 extraction 调用内借用，不保存 resolver 或其上下文。N16.2 统一为
+  `AssetFrameResourceResolver` 后，CLEAN-004 已删除该迁移 alias 头。
 - `ParticleBurst2D::sprite`、`Particle2D::sprite` 与 `Trail2DConfig::sprite` 保存 copyable weak Sprite
   `AssetHandle`，不保存 render key，也不持有 `AssetLease`、Cooked payload、GPU owner 或 retirement record；
   不保留旧 key overload 或兼容双轨。
@@ -537,7 +538,7 @@ AssetHandle。N12 已迁移 FX，N13 已迁移 TileMap，N14 已迁移 3D compon
 
 | 阶段 | 完成结果 |
 | --- | --- |
-| N12.1 | Scene 共享 resolver 头；Particle/Trail 公共契约一次性迁移到 weak Sprite AssetHandle，无 key 双轨 |
+| N12.1 | 当时的 Scene 共享 resolver 头；Particle/Trail 公共契约一次性迁移到 weak Sprite AssetHandle，无 key 双轨；该迁移头后由 CLEAN-004 删除 |
 | N12.2 | Particle 18/18、Trail 13/13，完整 `tina_scene_tests` 83/83；覆盖空/stale/wrong-kind/missing/zero resolver、空集合不解析、Trail 单次解析、handle 保留、PMR 稳态与 writer capacity |
 | N12.3 | product-2d World/Particle/Trail 分别借用 registry resolver；schema 11、FX fingerprint schema 2 与两个独立 resolver hit 字段进入 300 帧 gate |
 
@@ -563,8 +564,8 @@ ownership 与 `FrameResourceRef` 仍需后续切片。
 ### 已完成契约
 
 - N13 当时的通用 `AssetBindingResolver` 位于窄 `Tina::AssetTypes` target，保持 borrowed function pointer +
-  user data；N16.2 已用 `AssetFrameResourceResolver` 替代它，Scene 的 `Sprite2DBindingResolver` 继续作为语义
-  alias，不形成 Asset→Scene 依赖。
+  user data；N16.2 已用 `AssetFrameResourceResolver` 替代它，CLEAN-004 再删除 Scene 语义 alias，所有
+  extraction 直接使用通用类型且不形成 Asset→Scene 依赖。
 - `TileChunkSpriteEmitParams` 保存 copyable weak Tileset `AssetHandle` 与 resolver，不再保存 `spriteKey`，也不
   持有 `AssetLease`、Cooked payload、GPU owner 或 resolver context。
 - `Sprite2DBindingRegistry::resolveTileset()` 与 Sprite 路径共用单 Texture2D dependency 校验：live handle、
