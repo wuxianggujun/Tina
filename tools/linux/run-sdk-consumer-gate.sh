@@ -9,7 +9,27 @@ cd "${ROOT}"
 
 : "${VCPKG_ROOT:?VCPKG_ROOT must be set}"
 
-CONFIGURE_PRESET="${TINA_SDK_CONFIGURE_PRESET:-linux-gcc13-vnext}"
+CONSUMER="${TINA_SDK_CONSUMER:-GameSDK}"
+case "${CONSUMER}" in
+  GameSDK)
+    DEFAULT_CONFIGURE_PRESET="linux-gcc13-vnext"
+    CONSUMER_DIRECTORY_NAME="sdk-consumer"
+    CONSUMER_SOURCE_DIRECTORY="${ROOT}/tests/sdk_consumer"
+    CONSUMER_TARGET="tina_sdk_consumer"
+    ;;
+  PlatformGlfw)
+    DEFAULT_CONFIGURE_PRESET="linux-gcc13-vnext-platform"
+    CONSUMER_DIRECTORY_NAME="sdk-platform-glfw-consumer"
+    CONSUMER_SOURCE_DIRECTORY="${ROOT}/tests/sdk_consumer_platform_glfw"
+    CONSUMER_TARGET="tina_sdk_platform_glfw_consumer"
+    ;;
+  *)
+    echo "TINA_SDK_CONSUMER must be GameSDK or PlatformGlfw, got '${CONSUMER}'" >&2
+    exit 2
+    ;;
+esac
+
+CONFIGURE_PRESET="${TINA_SDK_CONFIGURE_PRESET:-${DEFAULT_CONFIGURE_PRESET}}"
 BUILD_DIRECTORY_INPUT="${TINA_SDK_BUILD_DIRECTORY:-${ROOT}/out/build/${CONFIGURE_PRESET}}"
 CONFIGURATION="${TINA_SDK_CONFIGURATION:-Debug}"
 BUILD_JOBS="${TINA_SDK_BUILD_JOBS:-2}"
@@ -26,6 +46,7 @@ echo "uname=$(uname -a)"
 echo "cmake=$(cmake --version | head -n1)"
 echo "preset=${CONFIGURE_PRESET}"
 echo "configuration=${CONFIGURATION}"
+echo "consumer=${CONSUMER}"
 echo "VCPKG_ROOT=${VCPKG_ROOT}"
 echo "HEAD=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 
@@ -37,9 +58,9 @@ if [[ ! -f "${BUILD_DIRECTORY_INPUT}/CMakeCache.txt" ]]; then
 fi
 
 BUILD_DIRECTORY="$(cd "${BUILD_DIRECTORY_INPUT}" && pwd -P)"
-INSTALL_PREFIX="${BUILD_DIRECTORY}/sdk-consumer-prefix"
-CONSUMER_BUILD_DIRECTORY="${BUILD_DIRECTORY}/sdk-consumer-build"
-CONSUMER_SOURCE_DIRECTORY="${ROOT}/tests/sdk_consumer"
+INSTALL_PREFIX="${BUILD_DIRECTORY}/${CONSUMER_DIRECTORY_NAME}-prefix"
+CONSUMER_BUILD_DIRECTORY="${BUILD_DIRECTORY}/${CONSUMER_DIRECTORY_NAME}-build"
+MISSING_COMPONENT_BUILD_DIRECTORY="${BUILD_DIRECTORY}/${CONSUMER_DIRECTORY_NAME}-missing-component-build"
 VERIFICATION_SCRIPT="${ROOT}/cmake/VerifyInstalledTinaSdkHeaders.cmake"
 CACHE_PATH="${BUILD_DIRECTORY}/CMakeCache.txt"
 
@@ -75,21 +96,21 @@ if [[ -z "${GENERATOR}" ]]; then
   exit 1
 fi
 
-rm -rf -- "${INSTALL_PREFIX}" "${CONSUMER_BUILD_DIRECTORY}"
+rm -rf -- "${INSTALL_PREFIX}" "${CONSUMER_BUILD_DIRECTORY}" "${MISSING_COMPONENT_BUILD_DIRECTORY}"
 
+sdk_build_targets=(tina_runtime tina_scene tina_asset)
+if [[ "${CONSUMER}" == "PlatformGlfw" ]]; then
+  sdk_build_targets+=(tina_platform_glfw)
+fi
 cmake --build "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" \
-  --target tina_runtime tina_scene tina_asset --parallel "${BUILD_JOBS}"
+  --target "${sdk_build_targets[@]}" --parallel "${BUILD_JOBS}"
 cmake --install "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" --prefix "${INSTALL_PREFIX}"
 cmake "-DTINA_SDK_INCLUDE_DIR=${INSTALL_PREFIX}/include" -P "${VERIFICATION_SCRIPT}"
 
-configure_arguments=(
-  -S "${CONSUMER_SOURCE_DIRECTORY}"
-  -B "${CONSUMER_BUILD_DIRECTORY}"
+common_configure_arguments=(
   -G "${GENERATOR}"
   "-DCMAKE_BUILD_TYPE=${CONFIGURATION}"
   "-DCMAKE_PREFIX_PATH=${INSTALL_PREFIX}"
-  "-DTINA_EXPECTED_INSTALL_PREFIX=${INSTALL_PREFIX}"
-  "-DTINA_FORBIDDEN_SOURCE_DIR=${ROOT}/include"
 )
 
 for cache_key in \
@@ -101,20 +122,38 @@ for cache_key in \
   VCPKG_HOST_TRIPLET; do
   cache_entry="$(cache_value "${cache_key}")"
   if [[ -n "${cache_entry}" ]]; then
-    configure_arguments+=("-D${cache_key}=${cache_entry}")
+    common_configure_arguments+=("-D${cache_key}=${cache_entry}")
   fi
 done
 
+configure_arguments=(
+  -S "${CONSUMER_SOURCE_DIRECTORY}"
+  -B "${CONSUMER_BUILD_DIRECTORY}"
+  "-DTINA_EXPECTED_INSTALL_PREFIX=${INSTALL_PREFIX}"
+  "-DTINA_FORBIDDEN_SOURCE_DIR=${ROOT}/include"
+  "${common_configure_arguments[@]}"
+)
 cmake "${configure_arguments[@]}"
+
+missing_components="DefinitelyMissing"
+if [[ "${CONSUMER}" == "GameSDK" ]]; then
+  missing_components="PlatformGlfw;${missing_components}"
+fi
+cmake \
+  -S "${ROOT}/tests/sdk_consumer_missing_component" \
+  -B "${MISSING_COMPONENT_BUILD_DIRECTORY}" \
+  "-DTINA_EXPECT_MISSING_COMPONENTS=${missing_components}" \
+  "${common_configure_arguments[@]}"
+
 cmake --build "${CONSUMER_BUILD_DIRECTORY}" --config "${CONFIGURATION}" \
-  --target tina_sdk_consumer --parallel "${BUILD_JOBS}"
+  --target "${CONSUMER_TARGET}" --parallel "${BUILD_JOBS}"
 
 consumer_executable=""
 for candidate in \
-  "${CONSUMER_BUILD_DIRECTORY}/tina_sdk_consumer" \
-  "${CONSUMER_BUILD_DIRECTORY}/bin/tina_sdk_consumer" \
-  "${CONSUMER_BUILD_DIRECTORY}/bin/${CONFIGURATION}/tina_sdk_consumer" \
-  "${CONSUMER_BUILD_DIRECTORY}/${CONFIGURATION}/tina_sdk_consumer"; do
+  "${CONSUMER_BUILD_DIRECTORY}/${CONSUMER_TARGET}" \
+  "${CONSUMER_BUILD_DIRECTORY}/bin/${CONSUMER_TARGET}" \
+  "${CONSUMER_BUILD_DIRECTORY}/bin/${CONFIGURATION}/${CONSUMER_TARGET}" \
+  "${CONSUMER_BUILD_DIRECTORY}/${CONFIGURATION}/${CONSUMER_TARGET}"; do
   if [[ -x "${candidate}" ]]; then
     consumer_executable="${candidate}"
     break
@@ -125,5 +164,16 @@ if [[ -z "${consumer_executable}" ]]; then
   exit 1
 fi
 
-"${consumer_executable}"
+if [[ "${CONSUMER}" == "PlatformGlfw" ]]; then
+  if command -v xvfb-run >/dev/null 2>&1; then
+    xvfb-run -a "${consumer_executable}"
+  elif [[ -n "${DISPLAY:-}" ]]; then
+    "${consumer_executable}"
+  else
+    echo "PlatformGlfw consumer requires xvfb-run or DISPLAY" >&2
+    exit 1
+  fi
+else
+  "${consumer_executable}"
+fi
 echo "SDK-001 Linux installed-prefix consumer gate OK"

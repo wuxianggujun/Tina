@@ -19,11 +19,20 @@ find_package(Tina CONFIG REQUIRED)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
+启用 GLFW 的安装图还可显式请求 adapter component：
+
+```cmake
+find_package(Tina CONFIG REQUIRED COMPONENTS PlatformGlfw)
+target_link_libraries(platform_tool PRIVATE Tina::PlatformGlfw)
+```
+
 `Tina::GameSDK` 聚合下表中的 backend-neutral Runtime、Scene、Asset、UI、Audio 等稳定模块；安装 package
 声明 `xxHash`（以及启用 Physics2D 时的 `box2d`）依赖，不复制第三方库。Windows 与 Linux 外部 headless
-consumer 已经只通过安装前缀完成 configure/build/run，并复用同一安装头第三方 token 扫描。
-`Tina::DesktopBootstrap` 与 GLFW/bgfx/FreeType/miniaudio adapter 尚未进入安装 export，正式发布 ABI 政策仍属于
-`SDK-001` 后续工作。
+consumer 已经只通过安装前缀完成 configure/build/run，并复用同一安装头第三方 token 扫描。`PlatformGlfw`
+component 通过 `find_dependency(glfw3 3.4 CONFIG)` 解析实现闭包并加载独立 adapter export；未请求该
+component 时不会加载 GLFW 依赖或定义 `Tina::PlatformGlfw`。Windows 与 Linux/Xvfb consumer 会创建隐藏窗口、
+读取初始 metrics 并 poll 一帧；它不进入 `Tina::GameSDK` 聚合。`Tina::DesktopBootstrap` 与
+RenderBgfx/FreeType/miniaudio adapter 安装闭包、正式发布 ABI 政策仍属于 `SDK-001` 后续工作。
 
 ## CMake targets
 
@@ -32,6 +41,7 @@ consumer 已经只通过安装前缀完成 configure/build/run，并复用同一
 | `Tina::GameSDK` | backend-neutral Game SDK 聚合 target；不包含 Desktop/backend adapter |
 | `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、diagnostics |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
+| `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
 | `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
@@ -44,7 +54,8 @@ consumer 已经只通过安装前缀完成 configure/build/run，并复用同一
 | `Tina::Physics2D` | optional Box2D-backed Tina API |
 
 Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
-`Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方。
+`Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；当前安装 package
+条件导出 `Tina::PlatformGlfw`，其余 adapter 仍只在 build tree 使用。
 
 ## Core 约定
 
@@ -578,7 +589,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
-- 可安装的 `Tina::DesktopBootstrap`/backend adapter 闭包与正式发布 ABI/兼容策略。
+- 可安装的 `Tina::DesktopBootstrap`、RenderBgfx/FreeType/miniaudio adapter 闭包与正式发布 ABI/兼容策略。
 
 任务状态见 [Backlog](backlog.md)。修改公开头后必须构建 header-isolation/consumer、扫描第三方 token，
 并按 [测试说明](testing.md) 运行受影响 executable 与 sample。

@@ -111,25 +111,41 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 build tree。consumer 的 CMake 入口只有 `find_package(Tina CONFIG REQUIRED)` 和 `Tina::GameSDK`，并拒绝
 源码树 `include` 路径或安装 prefix 外的 Tina include。Debug/Release package 必须与 consumer 配置一致。
 
+PlatformGlfw 安装 consumer 使用独立 prefix/build tree，不污染 Null gate：
+
+```powershell
+cmake --preset windows-msvc-vnext-platform
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer PlatformGlfw -Configuration Debug
+```
+
+consumer 通过 `find_package(Tina CONFIG REQUIRED COMPONENTS PlatformGlfw)`，只链接
+`Tina::PlatformGlfw`，创建隐藏窗口、读取初始 metrics、poll 一帧并 shutdown。
+
 Linux GCC13 Null 图使用同一安装头扫描和同一个仓库外 consumer：
 
 ```bash
 export VCPKG_ROOT=/opt/vcpkg
 tools/linux/run-sdk-consumer-gate.sh
+tools/linux/run-sdk-platform-glfw-consumer-gate.sh
 ```
 
-脚本默认增量配置 `linux-gcc13-vnext`；可用 `TINA_SDK_CONFIGURE_PRESET`、
-`TINA_SDK_BUILD_DIRECTORY`、`TINA_SDK_CONFIGURATION` 与 `TINA_SDK_BUILD_JOBS` 覆盖工具链和 build tree。
+基础脚本默认增量配置 `linux-gcc13-vnext`，PlatformGlfw wrapper 默认使用
+`linux-gcc13-vnext-platform` 并通过 `xvfb-run` 执行；可用 `TINA_SDK_CONFIGURE_PRESET`、
+`TINA_SDK_BUILD_DIRECTORY`、`TINA_SDK_CONFIGURATION`、`TINA_SDK_BUILD_JOBS` 与
+`TINA_SDK_CONSUMER` 覆盖工具链、build tree 和 consumer。
 Windows 主机可通过现有 GCC13 Docker 镜像运行相同门禁：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-consumer
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-platform-glfw-consumer
 ```
 
-两套门禁证明 Windows/Linux headless/Null SDK；不等价于已安装 DesktopBootstrap 或
-GLFW/bgfx/FreeType/miniaudio backend adapter。package 继续通过 vcpkg toolchain 解析 `xxHash` 等声明的
-外部依赖，不把第三方复制进 Tina SDK。
+这些门禁证明 Windows/Linux headless/Null SDK 与独立 PlatformGlfw adapter；不等价于已安装
+DesktopBootstrap 或 bgfx/FreeType/miniaudio adapter。package 继续通过 vcpkg toolchain 解析 `xxHash`、
+`glfw3` 等声明的外部依赖，不把第三方复制进 Tina SDK。
 
 ## Windows Platform/Desktop/bgfx
 

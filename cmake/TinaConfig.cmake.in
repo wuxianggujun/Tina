@@ -11,6 +11,8 @@ endif()
 include("${CMAKE_CURRENT_LIST_DIR}/TinaTargets.cmake")
 
 set_and_check(Tina_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set(Tina_GameSDK_FOUND TRUE)
+set(Tina_PlatformGlfw_FOUND FALSE)
 set(Tina_GAME_SDK_TARGETS
     Tina::GameSDK
     Tina::Core
@@ -26,6 +28,32 @@ set(Tina_GAME_SDK_TARGETS
 )
 if(@TINA_PACKAGE_WITH_PHYSICS2D@)
     list(APPEND Tina_GAME_SDK_TARGETS Tina::Physics2D)
+endif()
+set(Tina_PACKAGE_TARGETS
+    ${Tina_GAME_SDK_TARGETS}
+    Tina::AssetTypes
+    Tina::WindowSurfaceIntegration
+    Tina::UIRenderIntegration
+)
+if(@TINA_PACKAGE_WITH_UI_UIA@)
+    list(APPEND Tina_PACKAGE_TARGETS Tina::UIUia)
+endif()
+
+set(Tina_ADAPTER_TARGETS)
+if(@TINA_PACKAGE_WITH_PLATFORM_GLFW@ AND "PlatformGlfw" IN_LIST Tina_FIND_COMPONENTS)
+    if(Tina_FIND_REQUIRED_PlatformGlfw)
+        find_dependency(glfw3 3.4 CONFIG)
+    else()
+        find_package(glfw3 3.4 CONFIG QUIET)
+    endif()
+    if(glfw3_FOUND)
+        include("${CMAKE_CURRENT_LIST_DIR}/TinaPlatformGlfwTargets.cmake")
+        set(Tina_PlatformGlfw_FOUND TRUE)
+    endif()
+endif()
+if(TARGET Tina::PlatformGlfw)
+    list(APPEND Tina_ADAPTER_TARGETS Tina::PlatformGlfw)
+    list(APPEND Tina_PACKAGE_TARGETS Tina::PlatformGlfw)
 endif()
 
 check_required_components(Tina)

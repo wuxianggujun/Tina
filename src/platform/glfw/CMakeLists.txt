@@ -44,7 +44,7 @@ target_link_libraries(tina_platform_glfw
         Tina::Platform
         Tina::WindowSurfaceIntegration
     PRIVATE
-        Tina::ProjectOptions
+        $<BUILD_INTERFACE:Tina::ProjectOptions>
         glfw
 )
 if(WIN32)

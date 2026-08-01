@@ -67,9 +67,17 @@ function(tina_configure_game_sdk_package)
         set(TINA_PACKAGE_WITH_PHYSICS2D ON)
     endif()
 
+    set(TINA_PACKAGE_WITH_UI_UIA OFF)
     if(TARGET tina_ui_uia)
         list(APPEND tina_sdk_export_targets tina_ui_uia)
         tina_configure_game_sdk_target(tina_ui_uia UIUia)
+        set(TINA_PACKAGE_WITH_UI_UIA ON)
+    endif()
+
+    set(TINA_PACKAGE_WITH_PLATFORM_GLFW OFF)
+    if(TARGET tina_platform_glfw)
+        tina_configure_game_sdk_target(tina_platform_glfw PlatformGlfw)
+        set(TINA_PACKAGE_WITH_PLATFORM_GLFW ON)
     endif()
 
     install(TARGETS ${tina_sdk_export_targets}
@@ -78,6 +86,14 @@ function(tina_configure_game_sdk_package)
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
+    if(TARGET tina_platform_glfw)
+        install(TARGETS tina_platform_glfw
+            EXPORT TinaPlatformGlfwTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
     install(DIRECTORY
         "${PROJECT_SOURCE_DIR}/include/tina/core"
         "${PROJECT_SOURCE_DIR}/include/tina/platform"
@@ -113,6 +129,11 @@ function(tina_configure_game_sdk_package)
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui"
         )
     endif()
+    if(TARGET tina_platform_glfw)
+        install(FILES "${PROJECT_SOURCE_DIR}/include/tina/platform/glfw/GlfwPlatformFactory.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform/glfw"
+        )
+    endif()
 
     set(tina_package_directory "${CMAKE_INSTALL_LIBDIR}/cmake/Tina")
     configure_package_config_file(
@@ -132,6 +153,13 @@ function(tina_configure_game_sdk_package)
         NAMESPACE Tina::
         DESTINATION "${tina_package_directory}"
     )
+    if(TARGET tina_platform_glfw)
+        install(EXPORT TinaPlatformGlfwTargets
+            FILE TinaPlatformGlfwTargets.cmake
+            NAMESPACE Tina::
+            DESTINATION "${tina_package_directory}"
+        )
+    endif()
     install(FILES
         "${PROJECT_BINARY_DIR}/TinaConfig.cmake"
         "${PROJECT_BINARY_DIR}/TinaConfigVersion.cmake"
