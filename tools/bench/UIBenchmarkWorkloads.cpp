@@ -3,6 +3,7 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/integration/UIRenderDisplayList.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/UIDisplayList.hpp>
 #include <tina/ui/UI.hpp>
 
@@ -36,12 +37,24 @@ inline constexpr std::string_view kStaticCommitWorkload = "ui_static_commit_v1";
 inline constexpr std::string_view kPaintDirtyWorkload = "ui_paint_dirty_v1";
 inline constexpr std::string_view kRouteWorkload = "ui_route_v1";
 inline constexpr std::string_view kVirtualCollectionWorkload = "ui_virtual_collection_v1";
+inline constexpr std::string_view kImageNineSliceWorkload = "ui_image_nineslice_v1";
 
 inline constexpr usize kLargeNodeCount = 4096;
 inline constexpr usize kFlatLeafCount = kLargeNodeCount - 1;
 inline constexpr usize kRouteDepth = 64;
 inline constexpr u64 kLogicalItemCount = 100'000;
 inline constexpr u32 kMaterializedRowCapacity = 64;
+inline constexpr usize kImageElementCount = 256;
+inline constexpr usize kIconElementCount = 232;
+inline constexpr usize kNineSliceElementCount = 512;
+inline constexpr usize kUniqueImageResourceCount = 64;
+inline constexpr usize kImageBenchmarkElementCount =
+    kImageElementCount + kIconElementCount + kNineSliceElementCount;
+inline constexpr usize kImageBenchmarkNodeCount = kImageBenchmarkElementCount + 1;
+inline constexpr usize kImageBenchmarkQuadCount =
+    kImageElementCount + kIconElementCount + (kNineSliceElementCount * 9);
+inline constexpr usize kImageBenchmarkBatchCount = kImageBenchmarkElementCount;
+inline constexpr float kImageElementExtent = 16.0F;
 
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
@@ -145,6 +158,10 @@ struct UIBenchmarkReport final {
     usize configuredRouteDepth = 0;
     u64 configuredLogicalItemCount = 0;
     u32 configuredMaterializedRowCapacity = 0;
+    usize configuredImageCount = 0;
+    usize configuredIconCount = 0;
+    usize configuredNineSliceCount = 0;
+    usize configuredUniqueImageResourceCount = 0;
 
     u64 workN = 0;
     u64 workP = 0;
@@ -167,8 +184,23 @@ struct UIBenchmarkReport final {
     u64 displayListSourceEntries = 0;
     u64 displayListSolidQuads = 0;
     u64 displayListGlyphs = 0;
+    u64 displayListImageQuads = 0;
     u64 displayListBatches = 0;
     u64 displayListChecksum = 0;
+
+    u64 imageResolverCalls = 0;
+    u64 imageResolverHits = 0;
+    u64 imageResolverMisses = 0;
+    u64 imageResolverNotReady = 0;
+    u64 imageExtentMismatches = 0;
+    u64 imageResolutionCacheDedupe = 0;
+    u64 imagePinAcquisitions = 0;
+    u64 imagePinReleases = 0;
+    u64 imageResourceInternDedupe = 0;
+    u64 imagePinHighWater = 0;
+    u64 imageResourceHighWater = 0;
+    u64 imageCommandHighWater = 0;
+    u64 imageBatchHighWater = 0;
 
     u64 routeDispatches = 0;
     u64 hitEntriesVisited = 0;
@@ -216,6 +248,83 @@ struct UIFixture final {
 struct ListDataSourceState final {
     u64 itemCount = kLogicalItemCount;
 };
+
+struct ImageResolverState final {
+    UI::UINodeId root{};
+    Render::Texture2DFrameResourceResolver resolver{};
+    u64 resolverCalls = 0;
+    u64 resolverHits = 0;
+    u64 pinAcquisitions = 0;
+    u64 pinReleases = 0;
+    u64 resourceInternDedupe = 0;
+    u64 activePins = 0;
+    u64 pinHighWater = 0;
+
+    static void releasePin(void* userData) noexcept
+    {
+        auto& state = *static_cast<ImageResolverState*>(userData);
+        ++state.pinReleases;
+        if (state.activePins != 0) {
+            --state.activePins;
+        }
+    }
+
+    static Core::Result<std::optional<Render::Texture2DFrameResourceResolution>>
+    resolve(void* userData, Core::AssetId asset, Render::FrameResourceSink& sink) noexcept
+    {
+        auto& state = *static_cast<ImageResolverState*>(userData);
+        ++state.resolverCalls;
+
+        const auto& bytes = asset.bytes();
+        const u32 resourceOrdinal = std::to_integer<u32>(bytes[1]);
+        if (bytes[0] != std::byte{0x49} || resourceOrdinal == 0 ||
+            resourceOrdinal > kUniqueImageResourceCount) {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "UI image benchmark resolver received an unknown AssetId");
+        }
+
+        const u64 bindingKey = 0x55490000ULL + resourceOrdinal;
+        ++state.pinAcquisitions;
+        ++state.activePins;
+        state.pinHighWater = (std::max)(state.pinHighWater, state.activePins);
+        const u32 resourcesBefore = sink.resourceCount();
+        auto interned = sink.intern(
+            {
+                .kind = Render::FrameResourceKind::Texture2D,
+                .deviceBindingKey = bindingKey,
+            },
+            Render::FramePin{Render::FramePinKind::Custom, bindingKey, &state, &releasePin});
+        if (!interned) {
+            return Core::failure(std::move(interned.error()));
+        }
+        if (sink.resourceCount() == resourcesBefore) {
+            ++state.resourceInternDedupe;
+        }
+        ++state.resolverHits;
+        return std::optional<Render::Texture2DFrameResourceResolution>{
+            Render::Texture2DFrameResourceResolution{
+                .resource = *interned,
+                .pixelWidth = 16,
+                .pixelHeight = 16,
+            }};
+    }
+
+    void initialize(UI::UINodeId benchmarkRoot) noexcept
+    {
+        root = benchmarkRoot;
+        resolver = {
+            .userData = this,
+            .resolve = &resolve,
+        };
+    }
+};
+
+[[nodiscard]] const Render::Texture2DFrameResourceResolver*
+findImageBenchmarkResolver(const void* userData, UI::UINodeId root) noexcept
+{
+    const auto& state = *static_cast<const ImageResolverState*>(userData);
+    return root == state.root ? &state.resolver : nullptr;
+}
 
 [[nodiscard]] u64 listItemCount(const void* state) noexcept
 {
@@ -374,6 +483,99 @@ void writeTimingSummary(std::ostream& output, const TimingSummary& summary,
     return capacity;
 }
 
+[[nodiscard]] Core::AssetId imageBenchmarkAsset(usize resourceIndex) noexcept
+{
+    Core::AssetId::Bytes bytes{};
+    bytes[0] = std::byte{0x49};
+    bytes[1] = static_cast<std::byte>(resourceIndex + 1U);
+    const auto asset = Core::AssetId::fromBytes(bytes);
+    return asset.value_or(Core::AssetId{});
+}
+
+[[nodiscard]] UI::UIImageSource imageBenchmarkSource(usize resourceIndex) noexcept
+{
+    return UI::UIImageSource{
+        .texture = imageBenchmarkAsset(resourceIndex),
+        .sourcePixels = {.width = 16, .height = 16},
+        .texturePixelExtent = {.width = 16, .height = 16},
+        .intrinsicLogicalSize = {.width = kImageElementExtent, .height = kImageElementExtent},
+    };
+}
+
+[[nodiscard]] UI::UIImageContent imageBenchmarkContent(usize resourceIndex) noexcept
+{
+    return UI::UIImageContent{
+        .source = imageBenchmarkSource(resourceIndex),
+        .fit = UI::UIImageFit::Fill,
+        .tint = UI::rgba8(255, 255, 255),
+        .sampling = UI::UIImageSampling::Nearest,
+    };
+}
+
+[[nodiscard]] UI::UIContextCapacityConfig imageBenchmarkContextCapacity() noexcept
+{
+    UI::UIContextCapacityConfig capacity{};
+    capacity.nodeCapacity = kImageBenchmarkNodeCount;
+    capacity.rootCapacity = 1;
+    capacity.dirtyQueueCapacity = kImageBenchmarkNodeCount;
+    capacity.layoutSnapshotCapacity = kImageBenchmarkNodeCount;
+    capacity.hitSnapshotCapacity = kImageBenchmarkNodeCount;
+    capacity.paintSnapshotCapacity = kImageBenchmarkQuadCount;
+    capacity.canvasCommandCapacity = kNineSliceElementCount;
+    capacity.imageContentCapacity = kImageElementCount + kIconElementCount;
+    capacity.routePathCapacity = kImageBenchmarkNodeCount;
+    capacity.applyDefaultProductChrome = false;
+    return capacity;
+}
+
+[[nodiscard]] bool populateImageBenchmarkTree(UIFixture& fixture, std::string& error)
+{
+    usize resourceCursor = 0;
+    const auto nextResource = [&resourceCursor]() noexcept {
+        const usize resourceIndex = resourceCursor % kUniqueImageResourceCount;
+        ++resourceCursor;
+        return resourceIndex;
+    };
+    const UI::UILayoutStyle layout = fixedLayout(kImageElementExtent, kImageElementExtent);
+
+    for (usize index = 0; index < kImageElementCount; ++index) {
+        auto node = fixture.updater.createElement(
+            fixture.root.rootNodeId(),
+            UI::makeImageElement(imageBenchmarkContent(nextResource()), "Benchmark image", layout));
+        if (!node) {
+            error = node.error().message;
+            return false;
+        }
+    }
+    for (usize index = 0; index < kIconElementCount; ++index) {
+        auto node = fixture.updater.createElement(
+            fixture.root.rootNodeId(), UI::makeIconElement(imageBenchmarkContent(nextResource()), layout));
+        if (!node) {
+            error = node.error().message;
+            return false;
+        }
+    }
+    for (usize index = 0; index < kNineSliceElementCount; ++index) {
+        const UI::UICanvasCommand command{
+            .kind = UI::UICanvasCommandKind::NineSlice,
+            .bounds = {.width = kImageElementExtent, .height = kImageElementExtent},
+            .color = UI::rgba8(255, 255, 255),
+            .imageSource = imageBenchmarkSource(nextResource()),
+            .imageSourceInsets = {.left = 4, .top = 4, .right = 4, .bottom = 4},
+            .imageDestinationInsets = UI::UIEdgeSpacing::All(4.0F),
+            .imageSampling = UI::UIImageSampling::Nearest,
+        };
+        UI::UIElementDescriptor descriptor = UI::makePanelElement(layout);
+        descriptor.visual.canvas = std::span(&command, 1);
+        auto node = fixture.updater.createElement(fixture.root.rootNodeId(), descriptor);
+        if (!node) {
+            error = node.error().message;
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] std::optional<UIFixture> createFixture(UI::UIContextCapacityConfig capacity,
                                                      CountingMemoryResource& memory,
                                                      std::string& error)
@@ -483,8 +685,96 @@ void accumulateCommitStatistics(const UI::UIContextStatistics& statistics,
         report->displayListSourceEntries += build->statistics.sourcePaintEntryCount;
         report->displayListSolidQuads += build->statistics.submittedSolidQuadCount;
         report->displayListGlyphs += build->statistics.submittedGlyphCount;
+        report->displayListImageQuads += build->statistics.submittedImageQuadCount;
         report->displayListBatches += build->displayList.statistics().batchCount;
         report->displayListChecksum = build->displayList.paintOrderChecksum();
+    }
+    return true;
+}
+
+[[nodiscard]] bool buildImageBenchmarkDisplayList(
+    UIFixture& fixture, Render::UIDisplayListBuilder& builder,
+    Render::RenderFramePacket& packet, ImageResolverState& resolverState,
+    std::span<Integration::UIRenderImageResolutionCacheEntry> cache, u64 frameIndex,
+    Render::UIPixelRect framebufferViewport, std::optional<u64>& expectedChecksum,
+    UIBenchmarkReport* report, std::string& error)
+{
+    const u64 resolverCallsBefore = resolverState.resolverCalls;
+    const u64 resolverHitsBefore = resolverState.resolverHits;
+    const u64 pinAcquisitionsBefore = resolverState.pinAcquisitions;
+    const u64 pinReleasesBefore = resolverState.pinReleases;
+    const u64 resourceInternDedupeBefore = resolverState.resourceInternDedupe;
+
+    if (Core::Status status = packet.beginFrame(frameIndex); !status) {
+        error = status.error().message;
+        return false;
+    }
+    auto build = Integration::buildUIDisplayList(
+        builder, fixture.context->committedPaint(),
+        Integration::UIRenderViewportMapping{.framebufferViewport = framebufferViewport},
+        {
+            .resourceSink = &packet.resourceSink(),
+            .resolverLookup = {.userData = &resolverState, .find = &findImageBenchmarkResolver},
+            .cache = cache,
+        });
+    if (!build) {
+        (void)packet.abandon();
+        error = build.error().message;
+        return false;
+    }
+
+    const u64 displayListChecksum = build->displayList.paintOrderChecksum();
+    const u64 frameResourceCount = packet.resourceCount();
+    const u64 resolverCalls = resolverState.resolverCalls - resolverCallsBefore;
+    const u64 resolverHits = resolverState.resolverHits - resolverHitsBefore;
+    const u64 pinAcquisitions = resolverState.pinAcquisitions - pinAcquisitionsBefore;
+    const u64 resourceInternDedupe =
+        resolverState.resourceInternDedupe - resourceInternDedupeBefore;
+    if (Core::Status status = packet.completeSkipped(); !status) {
+        error = status.error().message;
+        return false;
+    }
+    const u64 pinReleases = resolverState.pinReleases - pinReleasesBefore;
+    if (resolverState.activePins != 0 || packet.resourceCount() != 0) {
+        error = "UI image benchmark frame resources were not fully released";
+        return false;
+    }
+    if (expectedChecksum.has_value() && *expectedChecksum != displayListChecksum) {
+        error = "UI image benchmark DisplayList checksum changed between clean builds";
+        return false;
+    }
+    expectedChecksum = displayListChecksum;
+
+    if (report != nullptr) {
+        ++report->displayListBuilds;
+        report->displayListSourceEntries += build->statistics.sourcePaintEntryCount;
+        report->displayListSolidQuads += build->statistics.submittedSolidQuadCount;
+        report->displayListGlyphs += build->statistics.submittedGlyphCount;
+        report->displayListImageQuads += build->statistics.submittedImageQuadCount;
+        report->displayListBatches += build->displayList.statistics().batchCount;
+        report->displayListChecksum = displayListChecksum;
+
+        report->imageResolverCalls += resolverCalls;
+        report->imageResolverHits += resolverHits;
+        report->imageResolverMisses += build->statistics.skippedImageMissingResolverCount;
+        report->imageResolverNotReady += build->statistics.skippedImageUnavailableCount;
+        report->imageExtentMismatches += build->statistics.skippedImageExtentMismatchCount;
+        report->imageResolutionCacheDedupe +=
+            build->statistics.submittedImageQuadCount - build->statistics.resolvedImageResourceCount;
+        report->imagePinAcquisitions += pinAcquisitions;
+        report->imagePinReleases += pinReleases;
+        report->imageResourceInternDedupe += resourceInternDedupe;
+        report->imagePinHighWater = (std::max)(report->imagePinHighWater, resolverState.pinHighWater);
+        report->imageResourceHighWater = (std::max)(report->imageResourceHighWater, frameResourceCount);
+        report->imageCommandHighWater =
+            (std::max)(report->imageCommandHighWater,
+                       static_cast<u64>(build->statistics.submittedImageQuadCount));
+        report->imageBatchHighWater =
+            (std::max)(report->imageBatchHighWater,
+                       static_cast<u64>(build->displayList.statistics().batchCount));
+        report->workQ = build->statistics.submittedImageQuadCount;
+        report->workU = build->statistics.resolvedImageResourceCount;
+        report->workB = build->displayList.statistics().batchCount;
     }
     return true;
 }
@@ -1180,6 +1470,153 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
     return true;
 }
 
+[[nodiscard]] bool runImageNineSlice(const UIBenchmarkOptions& options,
+                                     UIBenchmarkReport& report, std::string& error)
+{
+    CountingMemoryResource memory{};
+    auto fixtureResult = createFixture(imageBenchmarkContextCapacity(), memory, error);
+    if (!fixtureResult) {
+        return false;
+    }
+    UIFixture fixture = std::move(*fixtureResult);
+    if (!populateImageBenchmarkTree(fixture, error)) {
+        return false;
+    }
+    auto builderResult =
+        createDisplayListBuilder(static_cast<u32>(kImageBenchmarkQuadCount), memory, error);
+    if (!builderResult) {
+        return false;
+    }
+    Render::UIDisplayListBuilder builder = std::move(*builderResult);
+    Render::RenderFramePacket packet{};
+    ImageResolverState resolverState{};
+    resolverState.initialize(fixture.root.rootNodeId());
+    std::array<Integration::UIRenderImageResolutionCacheEntry, kUniqueImageResourceCount> cache{};
+    constexpr UI::UILogicalSize Viewport{
+        .width = kImageElementExtent,
+        .height = kImageElementExtent * static_cast<float>(kImageBenchmarkElementCount),
+    };
+    constexpr Render::UIPixelRect Framebuffer{
+        .x = 0,
+        .y = 0,
+        .width = static_cast<u32>(kImageElementExtent),
+        .height = static_cast<u32>(kImageElementExtent *
+                                   static_cast<float>(kImageBenchmarkElementCount)),
+    };
+
+    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        error = status.error().message;
+        return false;
+    }
+    std::optional<u64> expectedDisplayListChecksum{};
+    if (!buildImageBenchmarkDisplayList(
+            fixture, builder, packet, resolverState, cache, 1, Framebuffer,
+            expectedDisplayListChecksum, nullptr, error)) {
+        return false;
+    }
+
+    Core::SteadyMonotonicClock clock{};
+    const auto wallBegin = clock.now();
+    const u64 totalIterations = options.warmUpIterations + options.measureIterations;
+    if (options.warmUpIterations == 0) {
+        captureAllocationBaseline(memory, report);
+    }
+    for (u64 iteration = 0; iteration < totalIterations; ++iteration) {
+        const bool measured = iteration >= options.warmUpIterations;
+        const auto totalBegin = clock.now();
+        const auto commitBegin = clock.now();
+        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+            error = status.error().message;
+            return false;
+        }
+        const auto commitEnd = clock.now();
+        const auto displayBegin = clock.now();
+        if (!buildImageBenchmarkDisplayList(
+                fixture, builder, packet, resolverState, cache, iteration + 2U, Framebuffer,
+                expectedDisplayListChecksum, measured ? &report : nullptr, error)) {
+            return false;
+        }
+        const auto displayEnd = clock.now();
+        if (measured) {
+            report.commitSamples.push_back(elapsedNs(commitBegin, commitEnd));
+            report.displayListSamples.push_back(elapsedNs(displayBegin, displayEnd));
+            report.totalSamples.push_back(elapsedNs(totalBegin, displayEnd));
+            accumulateCommitStatistics(fixture.context->statistics(), report);
+        }
+        if (iteration + 1 == options.warmUpIterations) {
+            captureAllocationBaseline(memory, report);
+        }
+    }
+    report.wallNs = elapsedNs(wallBegin, clock.now());
+    captureFinalState(memory, report, fixture);
+
+    report.configuredNodeCount = kImageBenchmarkNodeCount;
+    report.configuredImageCount = kImageElementCount;
+    report.configuredIconCount = kIconElementCount;
+    report.configuredNineSliceCount = kNineSliceElementCount;
+    report.configuredUniqueImageResourceCount = kUniqueImageResourceCount;
+    report.layoutSnapshotHighWater = report.workN;
+    report.hitSnapshotHighWater = report.workH;
+    report.paintSnapshotHighWater = report.workP;
+    const u64 expectedResolveCount = kUniqueImageResourceCount * options.measureIterations;
+    const u64 expectedImageQuadCount = kImageBenchmarkQuadCount * options.measureIterations;
+    const u64 expectedBatchCount = kImageBenchmarkBatchCount * options.measureIterations;
+    const u64 expectedCacheDedupe =
+        (kImageBenchmarkQuadCount - kUniqueImageResourceCount) * options.measureIterations;
+    if (report.pmrAllocationsAfter != report.pmrAllocationsBefore || report.layoutPasses != 0 ||
+        report.measuredNodes != 0 || report.arrangedNodes != 0 || report.hitRebuilds != 0 ||
+        report.paintCacheRebuilds != 0 || report.paintSnapshotRebuilds != 0 ||
+        report.workN != kImageBenchmarkNodeCount || report.workH != kImageBenchmarkNodeCount ||
+        report.workP != kImageBenchmarkQuadCount || report.workQ != kImageBenchmarkQuadCount ||
+        report.workU != kUniqueImageResourceCount || report.workB != kImageBenchmarkBatchCount ||
+        report.displayListBuilds != options.measureIterations ||
+        report.displayListSourceEntries != expectedImageQuadCount ||
+        report.displayListImageQuads != expectedImageQuadCount || report.displayListSolidQuads != 0 ||
+        report.displayListGlyphs != 0 || report.displayListBatches != expectedBatchCount ||
+        report.imageResolverCalls != expectedResolveCount ||
+        report.imageResolverHits != expectedResolveCount || report.imageResolverMisses != 0 ||
+        report.imageResolverNotReady != 0 || report.imageExtentMismatches != 0 ||
+        report.imageResolutionCacheDedupe != expectedCacheDedupe ||
+        report.imagePinAcquisitions != expectedResolveCount ||
+        report.imagePinReleases != expectedResolveCount || report.imageResourceInternDedupe != 0 ||
+        report.imagePinHighWater != kUniqueImageResourceCount ||
+        report.imageResourceHighWater != kUniqueImageResourceCount ||
+        report.imageCommandHighWater != kImageBenchmarkQuadCount ||
+        report.imageBatchHighWater != kImageBenchmarkBatchCount ||
+        report.statistics.activeCanvasCommandCount != kNineSliceElementCount ||
+        report.statistics.canvasCommandHighWater != kNineSliceElementCount ||
+        report.statistics.activeImageContentCount != kImageElementCount + kIconElementCount ||
+        report.statistics.imageContentHighWater != kImageElementCount + kIconElementCount ||
+        resolverState.activePins != 0 || packet.resourceCount() != 0 ||
+        !expectedDisplayListChecksum.has_value() || report.displayListChecksum == 0) {
+        error = "ui_image_nineslice_v1 invariant failed";
+        return false;
+    }
+
+    DeterministicHash hash{};
+    hashStatistics(hash, report);
+    hash.addU64(report.configuredImageCount);
+    hash.addU64(report.configuredIconCount);
+    hash.addU64(report.configuredNineSliceCount);
+    hash.addU64(report.configuredUniqueImageResourceCount);
+    hash.addU64(report.displayListImageQuads);
+    hash.addU64(report.imageResolverCalls);
+    hash.addU64(report.imageResolverHits);
+    hash.addU64(report.imageResolverMisses);
+    hash.addU64(report.imageResolverNotReady);
+    hash.addU64(report.imageExtentMismatches);
+    hash.addU64(report.imageResolutionCacheDedupe);
+    hash.addU64(report.imagePinAcquisitions);
+    hash.addU64(report.imagePinReleases);
+    hash.addU64(report.imageResourceInternDedupe);
+    hash.addU64(report.imagePinHighWater);
+    hash.addU64(report.imageResourceHighWater);
+    hash.addU64(report.imageCommandHighWater);
+    hash.addU64(report.imageBatchHighWater);
+    report.checksum = hash.value();
+    return true;
+}
+
 [[nodiscard]] bool reserveReportSamples(const UIBenchmarkOptions& options,
                                         UIBenchmarkReport& report, std::string& error)
 {
@@ -1229,7 +1666,12 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"node_count\":" << report.configuredNodeCount
            << ",\"route_depth\":" << report.configuredRouteDepth
            << ",\"logical_item_count\":" << report.configuredLogicalItemCount
-           << ",\"materialized_row_capacity\":" << report.configuredMaterializedRowCapacity << "}}";
+           << ",\"materialized_row_capacity\":" << report.configuredMaterializedRowCapacity
+           << ",\"image_count\":" << report.configuredImageCount
+           << ",\"icon_count\":" << report.configuredIconCount
+           << ",\"nine_slice_count\":" << report.configuredNineSliceCount
+           << ",\"unique_image_resources\":" << report.configuredUniqueImageResourceCount
+           << "}}";
     output << ",\"fingerprint\":{\"buildType\":";
     writeJsonString(output, BuildType);
     output << ",\"hostOs\":";
@@ -1262,7 +1704,18 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"source_entries\":" << report.displayListSourceEntries
            << ",\"solid_quads\":" << report.displayListSolidQuads
            << ",\"glyphs\":" << report.displayListGlyphs
+           << ",\"image_quads\":" << report.displayListImageQuads
            << ",\"batches\":" << report.displayListBatches << '}';
+    output << ",\"image_resources\":{\"resolver_calls\":" << report.imageResolverCalls
+           << ",\"resolver_hits\":" << report.imageResolverHits
+           << ",\"resolver_misses\":" << report.imageResolverMisses
+           << ",\"resolver_not_ready\":" << report.imageResolverNotReady
+           << ",\"extent_mismatches\":" << report.imageExtentMismatches
+           << ",\"cache_deduplicated_entries\":" << report.imageResolutionCacheDedupe
+           << ",\"pin_acquisitions\":" << report.imagePinAcquisitions
+           << ",\"pin_releases\":" << report.imagePinReleases
+           << ",\"resource_intern_deduplications\":" << report.imageResourceInternDedupe
+           << '}';
     output << ",\"route\":{\"dispatches\":" << report.routeDispatches
            << ",\"visited_hit_entries\":" << report.hitEntriesVisited
            << ",\"path_nodes\":" << report.routePathNodes
@@ -1280,6 +1733,8 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"layout_snapshot\":" << report.statistics.layoutSnapshotCapacity
            << ",\"hit_snapshot\":" << report.statistics.hitSnapshotCapacity
            << ",\"paint_snapshot\":" << report.statistics.paintSnapshotCapacity
+           << ",\"canvas_commands\":" << report.statistics.canvasCommandCapacity
+           << ",\"image_content\":" << report.statistics.imageContentCapacity
            << ",\"route_path\":" << report.statistics.routePathCapacity
            << ",\"listeners\":" << report.statistics.routedPointerListenerCapacity
            << ",\"text_bytes\":" << report.statistics.textByteCapacity << '}';
@@ -1290,6 +1745,11 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"paint_snapshot\":" << report.paintSnapshotHighWater
            << ",\"listeners\":" << report.statistics.routedPointerListenerHighWater
            << ",\"canvas_commands\":" << report.statistics.canvasCommandHighWater
+           << ",\"image_content\":" << report.statistics.imageContentHighWater
+           << ",\"image_commands\":" << report.imageCommandHighWater
+           << ",\"image_batches\":" << report.imageBatchHighWater
+           << ",\"image_resources\":" << report.imageResourceHighWater
+           << ",\"image_pins\":" << report.imagePinHighWater
            << ",\"text_bytes\":" << report.statistics.textByteHighWater << '}';
     output << ",\"allocation\":{\"domain\":\"ui_pmr\",\"before\":"
            << report.pmrAllocationsBefore << ",\"after\":" << report.pmrAllocationsAfter
@@ -1312,7 +1772,8 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
 bool isUIBenchmarkWorkload(std::string_view workload) noexcept
 {
     return workload == kStaticCommitWorkload || workload == kPaintDirtyWorkload ||
-           workload == kRouteWorkload || workload == kVirtualCollectionWorkload;
+           workload == kRouteWorkload || workload == kVirtualCollectionWorkload ||
+           workload == kImageNineSliceWorkload;
 }
 
 void printUIBenchmarkHelp(std::ostream& output)
@@ -1320,7 +1781,8 @@ void printUIBenchmarkHelp(std::ostream& output)
     output << "  --workload=ui_static_commit_v1       4096-node clean commit + DisplayList\n"
            << "  --workload=ui_paint_dirty_v1         one paint-only leaf mutation per iteration\n"
            << "  --workload=ui_route_v1               4096 hit entries, depth-64 route sequence\n"
-           << "  --workload=ui_virtual_collection_v1  100k items through a fixed 64-row pool\n";
+           << "  --workload=ui_virtual_collection_v1  100k items through a fixed 64-row pool\n"
+           << "  --workload=ui_image_nineslice_v1     5096 image quads, 64 unique resources\n";
 }
 
 int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
@@ -1342,6 +1804,8 @@ int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
             (void)runRoute(options, report, error);
         } else if (workload == kVirtualCollectionWorkload) {
             (void)runVirtualCollection(options, report, error);
+        } else if (workload == kImageNineSliceWorkload) {
+            (void)runImageNineSlice(options, report, error);
         } else {
             error = "unknown UI benchmark workload";
         }

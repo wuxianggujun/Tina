@@ -307,8 +307,8 @@ UI 不调用 bgfx。`tina_ui_render_integration` 把 committed paint 转为固�
 当前支持 SolidQuad/Glyph/ImageQuad、带统一圆角半径的 Box/Element Canvas `SolidRect`、Image/Icon content、
 Canvas Image/NineSlice 与 axis-aligned scissor。Runtime `RenderFramePacket`/FramePin 的 present-return CPU
 completion 已落地（Null 同步 complete）；root-scoped resolver 在 frame packet 构建时按
-`(root scope, AssetId)` 去重并 pin Texture2D。rounded/stencil 子树 clip、图片产品/性能证据与跨 GPU/DPI
-golden（UI-003）尚未完成。
+`(root scope, AssetId)` 去重并 pin Texture2D。图片产品/失效/尺寸矩阵与固定性能 workload 已关闭；
+rounded/stencil 子树 clip 和跨 GPU/DPI golden（UI-003）尚未完成。
 
 ## 实际绘制链路
 
@@ -398,7 +398,7 @@ retained 状态并标记必要的 dirty 类别。
 - 另提供 `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome` 等）。
 
 `UIBoxPaint` 仍是 escape hatch，并可携带 borderLight/borderDark/borderWidth、shadow（假 elevation）与
-统一 `cornerRadius`。Image/Icon/NineSlice 基础绘制已实现；其产品采用仍由 `UI-IMAGE-001 C` 跟踪。
+统一 `cornerRadius`。Image/Icon/NineSlice 基础绘制、产品采用、失效/尺寸矩阵与性能 workload 已关闭。
 逐角半径、圆角子树 clip、毛玻璃与 CSS 式 stylesheet 仍未实现。
 
 ## 产品接入与证据
@@ -526,9 +526,8 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-002` | Windows UIA 产品验收：真实 HWND 跨进程属性/action gate 已有，待固化证据并完成 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
-| `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route 与 100k 虚拟集合首个 milestone 已落地并解锁 Image/Component；后续补 Component build、Style、Motion、Image/Icon/NineSlice workload，图片同时输出 quad `Q`、unique resource `U` 与 image batch `B`；固定机前时间结论只报 provisional |
+| `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone 与 `ui_image_nineslice_v1` 已落地；后续补 Component build、Style、Motion workload；固定机前时间结论只报 provisional |
 | `UI-COMPONENT-001` | 标准 Behavior 独立 side store、capability 校验与 Runtime phase-scoped bounded component transaction |
-| `UI-IMAGE-001` | InProgress；A Image/Icon 与 B Stretch-only NineSlice 已完成，包括 root-scoped resolve/FramePin、RGBA ImageQuad、1..9 quad 原子展开和 fractional-DPI 共享边界；下一步 C 为图标按钮/Inventory/NineSlice 产品采用、视觉矩阵与 `ui_image_nineslice_v1` 性能门禁 |
 | `UI-STYLE-001` | 开放强类型 StyleClass/token ID、node-local pseudo-state selector 与预编译有界 stylesheet；不做完整 CSS |
 | `UI-MOTION-001` | fixed-capacity paint-only transition、monotonic clock、retarget 与 reduced-motion；action/hit/layout 契约保持不变 |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |

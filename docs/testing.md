@@ -79,9 +79,10 @@ JSON 与退出码记录结果。
 
 ## UI performance quick run
 
-`tina_bench` 的 UI workload 使用真实 `UIContext`、committed snapshots、pointer route、虚拟集合与
-backend-neutral DisplayList。共享开发机只记录 `conclusion=provisional`；checksum、固定工作量、容量和
-warmup 后 UI PMR allocation delta 属于确定性不变量。
+`tina_bench` 的 UI workload 使用真实 `UIContext`、committed snapshots、pointer route、虚拟集合、
+packet-local image resolve/pin 与 backend-neutral DisplayList。共享开发机只记录
+`conclusion=provisional`；checksum、固定工作量、容量、资源归零和 warmup 后 UI PMR allocation delta
+属于确定性不变量。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-debug --target tina_bench --parallel 2 -- /nr:false
@@ -89,7 +90,13 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_static_
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_paint_dirty_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_route_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_virtual_collection_v1 --warmup=60 --samples=600 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_image_nineslice_v1 --warmup=60 --samples=600 --seed=1
 ```
+
+图片 workload 每个 measured build 固定为 256 Image + 232 Icon + 512 full NineSlice，必须得到
+`Q=5096/U=64/B=1000`、64 次 resolver hit、5032 次 cache dedupe、64 次 pin acquire/release、零
+missing/not-ready/extent mismatch、零 resource-intern dedupe、pin/resource 最终归零、稳定非零
+DisplayList checksum 与 `allocation.delta=0`。
 
 正式采样规模、fingerprint 与固定机规则见[性能与内存](performance-memory.md)和
 [ADR 0018](adr/0018-benchmark-protocol.md)。

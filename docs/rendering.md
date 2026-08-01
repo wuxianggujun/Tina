@@ -123,14 +123,14 @@ Texture2D ref、normalized UV、tint 与 Linear/Nearest sampling，并选择独�
 - bgfx RGBA ImageQuad program、Texture2D binding preflight 与 straight-alpha-to-premultiplied sampling；
 - UI → Render integration tests 与 bgfx geometry tests。
 
-rounded/stencil 子树 clip、复杂 material、图片产品/性能证据与跨 GPU golden 仍未完成；统一
-RoundedRect/SolidQuad corner radius 和 Image/Icon/NineSlice A/B 已实现，不再列作缺口。
+rounded/stencil 子树 clip、复杂 material 与跨 GPU golden 仍未完成；统一 RoundedRect/SolidQuad corner
+radius 和 Image/Icon/NineSlice 的产品、失效、尺寸矩阵及性能证据已实现，不再列作缺口。
 
-`UI-IMAGE-001` A/B 当前让 Image/Icon 各发一个 Image entry，NineSlice 在 UI committed paint 中展开为
+`UI-IMAGE-001` 让 Image/Icon 各发一个 Image entry，NineSlice 在 UI committed paint 中展开为
 1..9个相同 entry。batch 持有 packet-local 通用 Texture2D ref 与 sampling，command 持有
 bounds/UV/tint/clip；只采样 R8 `.r` coverage 的 Solid/Glyph shader 继续保留，RGBA 图片选择独立
 shader mode/program，并在采样后 premultiply。DisplayList/frame resource 容量不足在 backend 副作用前
-整次 rollback；C 的产品采用、资源失效矩阵与性能门禁见 [UI 框架设计](ui-framework.md)。
+整次 rollback；C 的产品采用、资源失效矩阵与 `Q/U/B` 性能证据见 [UI 框架设计](ui-framework.md)。
 
 ## GPU 资源
 

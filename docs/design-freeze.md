@@ -40,7 +40,7 @@
 | WindowSurface | move-only native lease 与主窗口交接 | [0020](adr/0020-window-surface-handoff.md) | Implemented |
 | Runtime UI | startup transaction + root/phase-scoped capability | [0021](adr/0021-runtime-ui-startup-capability.md) | Implemented |
 | UI Authoring | Element 组合 authoring、父/子布局分离与统一 committed 内容放置 | [0022](adr/0022-ui-element-authoring-and-layout.md) | Implemented：descriptor/recipe、Flow/Flex、Semantics、StyleRole/reset、bounded build transaction、`SolidRect` Canvas 与统一 RoundedRect 已落地 |
-| UI 扩展 | 可组合标准 Behavior、bounded Component、node-local StyleSheet、Image/Icon/NineSlice 与 paint-only Motion | [0023](adr/0023-ui-extensibility-style-paint-motion.md) | Partial：首个 UI benchmark protocol 与 UI-IMAGE-001 A/B 已落地；Image C 产品/性能证据及 Component/Style/Motion 继续按垂直切片实现 |
+| UI 扩展 | 可组合标准 Behavior、bounded Component、node-local StyleSheet、Image/Icon/NineSlice 与 paint-only Motion | [0023](adr/0023-ui-extensibility-style-paint-motion.md) | Partial：首个 UI benchmark protocol 与 UI-IMAGE-001 A/B/C 已落地；Component/Style/Motion 继续按垂直切片实现 |
 
 ## Proposed
 

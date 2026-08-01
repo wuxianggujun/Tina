@@ -559,7 +559,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - Runtime phase-scoped bounded component transaction 与可自由组合的标准 Behavior side store；
-- Image/Icon/NineSlice 的产品采用、视觉矩阵与 `ui_image_nineslice_v1` 性能证据；用户 StyleClass/node-local pseudo-state stylesheet 与 paint-only Motion；
+- 用户 StyleClass/node-local pseudo-state stylesheet 与 paint-only Motion；
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；

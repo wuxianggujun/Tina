@@ -22,9 +22,9 @@ Tina 当前最接近：
 
 其中 Image/Icon/NineSlice 不是装饰性补充，而是 HUD、Inventory、装备栏、技能栏、对话框和设置页的
 基础视觉能力。它不依赖 Behavior side store 或 Component transaction 才能成立：`UI-PERF-001` 建立首份
-计数协议后，Image 主线可与 Component 主线并行。当前 Image/Icon、NineSlice A/B 与 C 产品/失效/尺寸采用已交付；下一关闭点是
-`ui_image_nineslice_v1` benchmark。Icon 不另建一套控件或渲染协议，而是 Image 的 atlas-source、tint 和
-默认布局 profile。
+计数协议后，Image 主线可与 Component 主线并行。当前 Image/Icon、NineSlice A/B 与 C 产品采用、失效、
+尺寸矩阵及 `ui_image_nineslice_v1` benchmark 已全部交付，`UI-IMAGE-001` 已关闭。Icon 不另建一套控件或
+渲染协议，而是 Image 的 atlas-source、tint 和默认布局 profile。
 
 ## 当前框架
 
@@ -522,9 +522,8 @@ material/shader callback 和任意纹理 wrap 契约；这些能力必须有独�
 
 #### `UI-IMAGE-001` 验收矩阵
 
-A/B 的 authoring、committed paint、root-scoped resolver/pin、DisplayList/backend 与 semantics 自动化证据已
-落地；下表继续作为整个任务的关闭矩阵，其中 Product/visual 与 Performance 两行属于 C，不能因 A/B
-测试通过而提前标记整个 `UI-IMAGE-001` Done。
+A/B 的 authoring、committed paint、root-scoped resolver/pin、DisplayList/backend 与 semantics 自动化证据，
+以及 C 的 Product/visual 与 Performance 证据均已落地；下表保留为整个任务的关闭矩阵。
 
 | 边界 | 必须留下的证据 |
 | --- | --- |
@@ -534,7 +533,7 @@ A/B 的 authoring、committed paint、root-scoped resolver/pin、DisplayList/bac
 | Display/backend | ImageQuad UV/tint/clip/checksum；高对比相邻 atlas cell 的 source-edge/1px gutter 无串色；相邻同 texture/clip/sampling/shader 批合并且不跨 paint order；Linear/Nearest；Null preflight；bgfx RGBA straight-to-premultiplied shader；D3D11/OpenGL/Vulkan cooked program |
 | Input/semantics | decorative Icon 默认 `UIPointerHitPolicy::Ignore` 且语义排除；icon-only Button root 是点击/焦点/显式 name owner；有意义 Image role/name；Windows UIA Image ControlType；图片本身不发布无关 action |
 | Product/visual | icon-only Button、图文 Button、Inventory thumbnail、NineSlice panel；Dark/Light、atlas subrect、Linear/Nearest、missing/unavailable skip 与 DPI-like size matrix 均有结构化状态和视觉证据 |
-| Performance | `ui_image_nineslice_v1` 固定 `Q=5096/U=64` 输入；输出 `Q/U/B`、resolve hit/miss/not-ready、pin/dedupe、command/batch/high-water、allocation delta、checksum 与 provisional CPU 时间 |
+| Performance | `ui_image_nineslice_v1` 每 build 固定 `Q=5096/U=64/B=1000`；64 resolve hit、5032 cache dedupe、64 pin acquire/release，missing/not-ready/extent mismatch/resource-intern dedupe 与 allocation delta 为 0；输出稳定 command/batch/resource/pin high-water、checksum 与 provisional CPU 时间 |
 
 ### Motion
 
@@ -629,7 +628,7 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 | `ui_virtual_collection_v1` | 100k logical items、固定 64-row pool 与 scroll sequence | materialized row/high-water 稳定、warmup 后 storage 不增长、selection/semantics checksum |
 | `ui_component_build_v1` | 256 个四节点 Component；固定 text/canvas payload 与 Activate/Toggle/Range/TextInput/Scroll/Selection slot mix | build/commit 时间、node/text-byte/canvas/behavior 的 reserved/published counter、各 pool high-water、allocation delta 与 tree checksum；commit 后无 retained wrapper，后续 clean commit rebuild 为 0 |
 | `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved nodes、candidate rules、bucket high-water；单节点 state change 不 layout/hit/全树 resolve |
-| `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | `Q=5096`；输出 `U/B`、resolve hit/miss/not-ready、pin/dedupe、command/batch/high-water、allocation delta 与 DisplayList checksum |
+| `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | 每 build `Q=5096/U=64/B=1000`；64 resolve hit、5032 cache dedupe、64 pin acquire/release；错误计数与 allocation delta 为 0，high-water/checksum 稳定 |
 | `ui_motion_v1` | 4096 nodes、active tracks 分别为 0/64/1024、固定 clock | sampled=`M`、active/high-water；0 active 时 motion work/额外 dirty 为 0；layout/hit rebuild 为 0 |
 
 绝对毫秒阈值、median/MAD 与受审机器 baseline 仍由 `PERF-002` 冻结；开发机和共享 CI 不得用一次墙钟
@@ -659,7 +658,7 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 4. `UI-IMAGE-001` 与 `UI-COMPONENT-001` 是两个可并行分支；前者不依赖 Behavior side store：
    - A Done：Image/Icon content、atlas/tint/fit/sampling、root-scoped resolve/pin、RGBA ImageQuad 和 Image semantics；
    - B Done：同源 NineSlice、1..9 quad 原子展开、小 destination/inset/clip/fractional-DPI 规则；
-   - C InProgress：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling、missing/unavailable/resource invalidation 与 6-case DPI-like size matrix 产品证据 Done；`ui_image_nineslice_v1` benchmark Next；
+   - C Done：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling、missing/unavailable/resource invalidation、6-case DPI-like size matrix 与 `ui_image_nineslice_v1` benchmark 全部关闭；
 5. `UI-COMPONENT-001`：拆标准 Behavior side store，补 Runtime bounded component transaction；可与上一步并行；
 6. `UI-STYLE-001`：等待 Image 与 Component 两条目标属性面稳定后，开放强类型 StyleClass/token 与
    node-local pseudo-state stylesheet，并把 image tint/opacity 纳入 dirty metadata；

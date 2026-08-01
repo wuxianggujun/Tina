@@ -42,7 +42,9 @@ Scene、UI、RenderScene、Asset、Task、Audio、Physics2D 等模块也使用�
 - RenderScene 的 culling/sort/batch、UI dirty/layout/DisplayList、Tile chunk dirty cache；
 - UI 50,000 层 retained tree 的非递归 structure/layout/hit/paint stress gate；
 - Asset queue/upload/retirement 与资源归零；
-- `tina_physics2d_bench` 的单线程 step/ray p50/p95/p99 JSON。
+- `tina_physics2d_bench` 的单线程 step/ray p50/p95/p99 JSON；
+- `tina_bench` 的 UI clean/dirty/route/virtual collection，以及 Image/Icon/NineSlice 的
+  `Q/U/B`、resolve/pin/dedupe、allocation 与 checksum 证据。
 
 `tina_bench` 当前提供版本化 schema v1 与 `null_runtime_frames` workload；`tina_physics2d_bench` 仍是独立
 模块 bench，不能冒充统一 schema。共享 CI 上的墙钟差异默认 informational；确定性失败（checksum、容量、
@@ -67,7 +69,8 @@ Image/Icon/NineSlice 和 Motion 必须扩展现有统计模型，而不是另建
   `FrameResourceRef/FramePin` 不能跨帧复用；Render bridge 每帧仍按 `O(Q + U + B)` 构建 image commands、
   resolve/pin 唯一资源并合并相邻 batch。该成本必须单列，不能错误归入 UI commit rebuild。
 
-`UI-PERF-001` 的首个 milestone 已建立以下前四条版本化 workload；其余 workload 随对应垂直切片补齐。
+`UI-PERF-001` 的首个 milestone 已建立前四条版本化 workload，Image 垂直切片已补齐第五条；其余
+workload 随对应垂直切片补齐。
 在 `PERF-002` 固定门禁机完成前，时间结论保持 `conclusion=provisional`：
 
 | Workload | 固定规模 | 确定性输出/门禁 |
@@ -78,7 +81,7 @@ Image/Icon/NineSlice 和 Motion 必须扩展现有统计模型，而不是另建
 | `ui_virtual_collection_v1` | 100k logical items、固定 64-row pool/scroll sequence | materialized row/high-water，warmup 后 Tina-routed storage 不增长，selection/semantics checksum |
 | `ui_component_build_v1` | 256 个四节点 Component；固定 text/canvas payload 与 Activate/Toggle/Range/TextInput/Scroll/Selection slot mix | build/commit 时间、node/text-byte/canvas/behavior 的 reserved/published counter、各 pool high-water、allocation delta 与 tree checksum；commit 后无 retained wrapper，后续 clean commit rebuild 为 0 |
 | `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved/inspected nodes、candidate rules、bucket/dependency high-water；单节点 state change 不全树 resolve |
-| `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | `Q=5096`；输出 unique resource `U`、image batch `B`、resolve hit/miss/not-ready、pin/dedupe、command/batch/high-water、allocation delta 与 DisplayList checksum |
+| `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | 每 build `Q=5096/U=64/B=1000`、64 resolve hit、5032 cache dedupe、64 pin acquire/release；missing/not-ready/extent mismatch/resource-intern dedupe 与 allocation delta 为 0；command/batch/resource/pin high-water 和 DisplayList checksum 稳定 |
 | `ui_motion_v1` | 4096 nodes、active track 分别为 0/64/1024、固定 clock | sampled/active/high-water=`M`；0 active 时 motion work/额外 dirty 为 0；layout/hit rebuild 为 0，记录 paint publication |
 
 每项分别记录 UI commit、route、DisplayList build 的 active CPU 时间和工作量，不能只给混合 frame time；
@@ -127,7 +130,8 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
 `tina_bench`（`tools/bench`，随 `TINA_BUILD_EXAMPLES` 或 `TINA_BUILD_BENCHMARKS` 构建）输出
 版本化 JSON：`schema`、workload id/version/seed/parameters、build/host fingerprint、counters
 checksum、p50/p95/p99。当前包含 `null_runtime_frames`（Headless+Null+DisabledTask）以及
-`ui_static_commit_v1`、`ui_paint_dirty_v1`、`ui_route_v1`、`ui_virtual_collection_v1`。
+`ui_static_commit_v1`、`ui_paint_dirty_v1`、`ui_route_v1`、`ui_virtual_collection_v1` 与
+`ui_image_nineslice_v1`。
 
 共享开发机/CI 结论固定为 `conclusion=provisional`，**不是** hard gate。固定门禁机、多进程
 median/MAD 与 baseline 仓库审核仍为后续扩展；在此之前不得把本机毫秒数写成跨机器回归通过。
@@ -141,11 +145,12 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_static_
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_paint_dirty_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_route_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_virtual_collection_v1 --warmup=60 --samples=600 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_image_nineslice_v1 --warmup=60 --samples=600 --seed=1
 ```
 
 正式候选采样遵循 ADR 0018：每进程 warm-up 600、普通样本至少 2,000；p99/泄漏结论使用 10,000，且需
 多进程 median/MAD 和固定 machine profile。当前 UI workload 是 `UI-PERF-001` 首个 milestone，不能把
-上面的现有命令描述成已经覆盖 Component/Style/Motion/Image。
+上面的现有命令描述成已经覆盖 Component/Style/Motion。
 
 ## 验证工具
 
