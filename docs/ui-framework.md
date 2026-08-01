@@ -663,7 +663,8 @@ counter、容量/分配不变量可以立即作为确定性门禁：
    - B Done：同源 NineSlice、1..9 quad 原子展开、小 destination/inset/clip/fractional-DPI 规则；
    - C Done：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling、missing/unavailable/resource invalidation、6-case DPI-like size matrix 与 `ui_image_nineslice_v1` benchmark 全部关闭；
 5. `UI-COMPONENT-001`：Runtime bounded component transaction 与 Activate/Toggle side store 首切片已完成；
-   后续迁移 Range/TextInput/Scroll/Select，并补统一 reservation/counter 与 `ui_component_build_v1`；
+   `ui_component_build_activate_toggle_v1` 已为这部分提供诚实的 256×4 前置 benchmark；后续迁移
+   Range/TextInput/Scroll/Select，并补统一 reservation/counter 后才发布冻结的 `ui_component_build_v1`；
 6. `UI-STYLE-001`：等待 Image 与 Component 两条目标属性面稳定后，开放强类型 StyleClass/token 与
    node-local pseudo-state stylesheet，并把 image tint/opacity 纳入 dirty metadata；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。

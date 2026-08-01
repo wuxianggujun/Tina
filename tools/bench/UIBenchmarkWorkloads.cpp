@@ -38,6 +38,8 @@ inline constexpr std::string_view kPaintDirtyWorkload = "ui_paint_dirty_v1";
 inline constexpr std::string_view kRouteWorkload = "ui_route_v1";
 inline constexpr std::string_view kVirtualCollectionWorkload = "ui_virtual_collection_v1";
 inline constexpr std::string_view kImageNineSliceWorkload = "ui_image_nineslice_v1";
+inline constexpr std::string_view kComponentActivateToggleWorkload =
+    "ui_component_build_activate_toggle_v1";
 
 inline constexpr usize kLargeNodeCount = 4096;
 inline constexpr usize kFlatLeafCount = kLargeNodeCount - 1;
@@ -55,6 +57,25 @@ inline constexpr usize kImageBenchmarkQuadCount =
     kImageElementCount + kIconElementCount + (kNineSliceElementCount * 9);
 inline constexpr usize kImageBenchmarkBatchCount = kImageBenchmarkElementCount;
 inline constexpr float kImageElementExtent = 16.0F;
+inline constexpr usize kComponentCount = 256;
+inline constexpr usize kComponentNodesPerTransaction = 4;
+inline constexpr usize kComponentNodeCount = kComponentCount * kComponentNodesPerTransaction;
+inline constexpr usize kComponentContextNodeCount = kComponentNodeCount + 1;
+inline constexpr usize kComponentCanvasCommandsPerTransaction = 2;
+inline constexpr usize kComponentCanvasCommandCount =
+    kComponentCount * kComponentCanvasCommandsPerTransaction;
+inline constexpr std::string_view kComponentActivateText = "Apply";
+inline constexpr std::string_view kComponentToggleText = "Switch";
+inline constexpr usize kComponentTextBytesPerTransaction =
+    kComponentActivateText.size() + kComponentToggleText.size();
+inline constexpr usize kComponentTextByteCount =
+    kComponentCount * kComponentTextBytesPerTransaction;
+inline constexpr usize kComponentActivateSlotsPerTransaction = 2;
+inline constexpr usize kComponentToggleSlotsPerTransaction = 2;
+inline constexpr usize kComponentActivateSlotCount =
+    kComponentCount * kComponentActivateSlotsPerTransaction;
+inline constexpr usize kComponentToggleSlotCount =
+    kComponentCount * kComponentToggleSlotsPerTransaction;
 
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
@@ -148,7 +169,9 @@ struct UIBenchmarkReport final {
     std::string_view workload{};
     UIBenchmarkOptions options{};
     std::vector<u64> totalSamples{};
+    std::vector<u64> buildSamples{};
     std::vector<u64> commitSamples{};
+    std::vector<u64> cleanCommitSamples{};
     std::vector<u64> displayListSamples{};
     std::vector<u64> routeSamples{};
     u64 wallNs = 0;
@@ -162,6 +185,10 @@ struct UIBenchmarkReport final {
     usize configuredIconCount = 0;
     usize configuredNineSliceCount = 0;
     usize configuredUniqueImageResourceCount = 0;
+    usize configuredComponentCount = 0;
+    usize configuredComponentNodesPerTransaction = 0;
+    usize configuredComponentTextBytesPerTransaction = 0;
+    usize configuredComponentCanvasCommandsPerTransaction = 0;
 
     u64 workN = 0;
     u64 workP = 0;
@@ -220,6 +247,22 @@ struct UIBenchmarkReport final {
     u64 selectionIndex = 0;
     u64 semanticsEntryCount = 0;
     u64 semanticsChecksum = 0;
+
+    u64 componentTransactionsStarted = 0;
+    u64 componentTransactionsCommitted = 0;
+    u64 componentNodesRequested = 0;
+    u64 componentNodesPublished = 0;
+    u64 componentTextBytesRequested = 0;
+    u64 componentTextBytesPublished = 0;
+    u64 componentCanvasCommandsRequested = 0;
+    u64 componentCanvasCommandsPublished = 0;
+    u64 componentActivateSlotsRequested = 0;
+    u64 componentActivateSlotsPublished = 0;
+    u64 componentToggleSlotsRequested = 0;
+    u64 componentToggleSlotsPublished = 0;
+    u64 componentCleanCommitCount = 0;
+    u64 componentCleanCommitRebuildCount = 0;
+    u64 componentTreeChecksum = 0;
 
     usize pmrAllocationsBefore = 0;
     usize pmrAllocationsAfter = 0;
@@ -528,6 +571,67 @@ void writeTimingSummary(std::ostream& output, const TimingSummary& summary,
     return capacity;
 }
 
+[[nodiscard]] UI::UIContextCapacityConfig componentBenchmarkContextCapacity() noexcept
+{
+    UI::UIContextCapacityConfig capacity{};
+    capacity.nodeCapacity = kComponentContextNodeCount;
+    capacity.rootCapacity = 1;
+    capacity.dirtyQueueCapacity = kComponentContextNodeCount;
+    capacity.layoutSnapshotCapacity = kComponentContextNodeCount;
+    capacity.hitSnapshotCapacity = kComponentContextNodeCount;
+    capacity.paintSnapshotCapacity = 4'096;
+    capacity.canvasCommandCapacity = kComponentCanvasCommandCount;
+    capacity.routePathCapacity = kComponentContextNodeCount;
+    capacity.textByteCapacity = kComponentTextByteCount;
+    capacity.applyDefaultProductChrome = false;
+    return capacity;
+}
+
+[[nodiscard]] std::array<UI::UICanvasCommand, kComponentCanvasCommandsPerTransaction>
+componentCanvasCommands() noexcept
+{
+    return {
+        UI::UICanvasCommand{
+            .bounds = {.x = 0.0F, .y = 0.0F, .width = 8.0F, .height = 8.0F},
+            .color = UI::rgba8(24, 96, 176),
+            .cornerRadius = 1.0F,
+        },
+        UI::UICanvasCommand{
+            .bounds = {.x = 2.0F, .y = 2.0F, .width = 4.0F, .height = 4.0F},
+            .color = UI::rgba8(232, 200, 72),
+        },
+    };
+}
+
+[[nodiscard]] UI::UIElementDescriptor componentToggleOnlyDescriptor() noexcept
+{
+    UI::UIElementDescriptor descriptor = UI::makePanelElement(fixedLayout(8.0F, 8.0F));
+    descriptor.behaviors = UI::UIElementBehavior::Toggle;
+    descriptor.semantics = {
+        .mode = UI::UISemanticsMode::Publish,
+        .role = UI::UISemanticsRole::Checkbox,
+        .actions = UI::UISemanticsAction::Toggle,
+    };
+    return descriptor;
+}
+
+[[nodiscard]] UI::UIElementDescriptor componentActivateToggleDescriptor() noexcept
+{
+    UI::UIElementDescriptor descriptor =
+        UI::makeLabelElement(kComponentToggleText, fixedLayout(32.0F, 8.0F));
+    descriptor.behaviors = UI::UIElementBehavior::Focusable |
+                           UI::UIElementBehavior::Activate |
+                           UI::UIElementBehavior::Toggle;
+    descriptor.semantics = {
+        .mode = UI::UISemanticsMode::Publish,
+        .role = UI::UISemanticsRole::Checkbox,
+        .actions = UI::UISemanticsAction::Focus | UI::UISemanticsAction::Activate |
+                   UI::UISemanticsAction::Toggle,
+        .useContentAsName = true,
+    };
+    return descriptor;
+}
+
 [[nodiscard]] bool populateImageBenchmarkTree(UIFixture& fixture, std::string& error)
 {
     usize resourceCursor = 0;
@@ -817,6 +921,10 @@ void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) no
     hash.addU64(report.configuredRouteDepth);
     hash.addU64(report.configuredLogicalItemCount);
     hash.addU32(report.configuredMaterializedRowCapacity);
+    hash.addU64(report.configuredComponentCount);
+    hash.addU64(report.configuredComponentNodesPerTransaction);
+    hash.addU64(report.configuredComponentTextBytesPerTransaction);
+    hash.addU64(report.configuredComponentCanvasCommandsPerTransaction);
     hash.addU64(report.workN);
     hash.addU64(report.workP);
     hash.addU64(report.workH);
@@ -855,6 +963,21 @@ void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) no
     hash.addU64(report.selectionIndex);
     hash.addU64(report.semanticsEntryCount);
     hash.addU64(report.semanticsChecksum);
+    hash.addU64(report.componentTransactionsStarted);
+    hash.addU64(report.componentTransactionsCommitted);
+    hash.addU64(report.componentNodesRequested);
+    hash.addU64(report.componentNodesPublished);
+    hash.addU64(report.componentTextBytesRequested);
+    hash.addU64(report.componentTextBytesPublished);
+    hash.addU64(report.componentCanvasCommandsRequested);
+    hash.addU64(report.componentCanvasCommandsPublished);
+    hash.addU64(report.componentActivateSlotsRequested);
+    hash.addU64(report.componentActivateSlotsPublished);
+    hash.addU64(report.componentToggleSlotsRequested);
+    hash.addU64(report.componentToggleSlotsPublished);
+    hash.addU64(report.componentCleanCommitCount);
+    hash.addU64(report.componentCleanCommitRebuildCount);
+    hash.addU64(report.componentTreeChecksum);
 }
 
 [[nodiscard]] u64 hashSemantics(UI::UICommittedSemanticsView semantics) noexcept
@@ -889,6 +1012,91 @@ void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) no
         hash.addBool(entry.expandable);
         hash.addBool(entry.expanded);
     }
+    return hash.value();
+}
+
+void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noexcept
+{
+    hash.addFloat(rect.x);
+    hash.addFloat(rect.y);
+    hash.addFloat(rect.width);
+    hash.addFloat(rect.height);
+}
+
+[[nodiscard]] u64 hashStableSemantics(UI::UICommittedSemanticsView semantics) noexcept
+{
+    DeterministicHash hash{};
+    hash.addU64(semantics.size());
+    for (const UI::UISemanticsEntry& entry : semantics) {
+        hash.addU8(static_cast<u8>(entry.role));
+        hash.addU8(static_cast<u8>(entry.actions));
+        hashLogicalRect(hash, entry.worldRect);
+        hash.addString(entry.name);
+        hash.addString(entry.description);
+        hash.addString(entry.valueText);
+        hash.addFloat(entry.value);
+        hash.addFloat(entry.minValue);
+        hash.addFloat(entry.maxValue);
+        hash.addBool(entry.hasRange);
+        hash.addBool(entry.checked);
+        hash.addBool(entry.selected);
+        hash.addBool(entry.enabled);
+        hash.addBool(entry.focused);
+        hash.addBool(entry.readOnly);
+    }
+    return hash.value();
+}
+
+[[nodiscard]] u64 hashComponentTree(const UIFixture& fixture) noexcept
+{
+    DeterministicHash hash{};
+    const UI::UICommittedStructureView structure = fixture.context->committedStructure();
+    hash.addU64(structure.size());
+    for (const UI::UICommittedNodeEntry& entry : structure) {
+        hash.addU32(entry.depth);
+        hash.addU32(entry.preorder);
+        hash.addU32(entry.paintOrdinal);
+        hash.addBool(entry.parent.hasValue());
+    }
+
+    const UI::UICommittedLayoutView layout = fixture.context->committedLayout();
+    hash.addU64(layout.size());
+    for (const UI::UICommittedLayoutEntry& entry : layout) {
+        hashLogicalRect(hash, entry.localRect);
+        hashLogicalRect(hash, entry.worldRect);
+        hashLogicalRect(hash, entry.effectiveClip);
+        hash.addU8(static_cast<u8>(entry.effectiveVisibility));
+        hash.addU32(entry.layoutOrdinal);
+        hash.addU32(entry.paintOrdinal);
+    }
+
+    const UI::UICommittedPaintView paint = fixture.context->committedPaint();
+    hash.addU64(paint.size());
+    for (const UI::UICommittedPaintEntry& entry : paint) {
+        hashLogicalRect(hash, entry.worldRect);
+        hashLogicalRect(hash, entry.effectiveClip);
+        hash.addU32(entry.paintOrdinal);
+        hash.addU8(entry.solidFill.red);
+        hash.addU8(entry.solidFill.green);
+        hash.addU8(entry.solidFill.blue);
+        hash.addU8(entry.solidFill.alpha);
+        hash.addFloat(entry.cornerRadius);
+        hash.addU8(static_cast<u8>(entry.kind));
+        hash.addU32(entry.atlasX);
+        hash.addU32(entry.atlasY);
+        hash.addU32(entry.atlasWidth);
+        hash.addU32(entry.atlasHeight);
+        hash.addU32(entry.atlasPage);
+    }
+
+    hash.addU64(hashStableSemantics(fixture.context->committedSemantics()));
+
+    const UI::UIContextStatistics statistics = fixture.context->statistics();
+    hash.addU64(statistics.liveNodeCount);
+    hash.addU64(statistics.textByteUsed);
+    hash.addU64(statistics.activeCanvasCommandCount);
+    hash.addU64(statistics.activeActivateBehaviorCount);
+    hash.addU64(statistics.activeToggleBehaviorCount);
     return hash.value();
 }
 
@@ -1617,6 +1825,272 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
     return true;
 }
 
+using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
+
+[[nodiscard]] bool buildActivateToggleComponents(UIFixture& fixture,
+                                                 ComponentRootArray& componentRoots,
+                                                 UIBenchmarkReport* report,
+                                                 std::string& error)
+{
+    const auto canvasCommands = componentCanvasCommands();
+    UI::UIElementDescriptor rootDescriptor =
+        UI::makePanelElement(fixedLayout(64.0F, 32.0F));
+    rootDescriptor.visual.canvas = canvasCommands;
+    const UI::UIElementDescriptor activateDescriptor =
+        UI::makeButtonElement(kComponentActivateText, fixedLayout(32.0F, 8.0F));
+    const UI::UIElementDescriptor toggleDescriptor = componentToggleOnlyDescriptor();
+    const UI::UIElementDescriptor activateToggleDescriptor =
+        componentActivateToggleDescriptor();
+
+    for (usize index = 0; index < componentRoots.size(); ++index) {
+        auto transactionResult = fixture.updater.beginBuildTransaction(
+            fixture.root.rootNodeId(), rootDescriptor, kComponentNodesPerTransaction);
+        if (!transactionResult) {
+            error = transactionResult.error().message;
+            return false;
+        }
+        UI::UIElementBuildTransaction transaction = std::move(*transactionResult);
+        if (report != nullptr) {
+            ++report->componentTransactionsStarted;
+            report->componentNodesRequested += kComponentNodesPerTransaction;
+            report->componentTextBytesRequested += kComponentTextBytesPerTransaction;
+            report->componentCanvasCommandsRequested += kComponentCanvasCommandsPerTransaction;
+            report->componentActivateSlotsRequested += kComponentActivateSlotsPerTransaction;
+            report->componentToggleSlotsRequested += kComponentToggleSlotsPerTransaction;
+        }
+
+        const UI::UINodeId componentRoot = transaction.rootNodeId();
+        auto activate = transaction.createElement(componentRoot, activateDescriptor);
+        if (!activate) {
+            error = activate.error().message;
+            return false;
+        }
+        auto toggle = transaction.createElement(componentRoot, toggleDescriptor);
+        if (!toggle) {
+            error = toggle.error().message;
+            return false;
+        }
+        auto activateToggle = transaction.createElement(componentRoot, activateToggleDescriptor);
+        if (!activateToggle) {
+            error = activateToggle.error().message;
+            return false;
+        }
+        auto committedRoot = transaction.commit();
+        if (!committedRoot) {
+            error = committedRoot.error().message;
+            return false;
+        }
+        componentRoots[index] = *committedRoot;
+        if (report != nullptr) {
+            ++report->componentTransactionsCommitted;
+            report->componentNodesPublished += kComponentNodesPerTransaction;
+            report->componentTextBytesPublished += kComponentTextBytesPerTransaction;
+            report->componentCanvasCommandsPublished += kComponentCanvasCommandsPerTransaction;
+            report->componentActivateSlotsPublished += kComponentActivateSlotsPerTransaction;
+            report->componentToggleSlotsPublished += kComponentToggleSlotsPerTransaction;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool destroyActivateToggleComponents(UIFixture& fixture,
+                                                   const ComponentRootArray& componentRoots,
+                                                   std::string& error)
+{
+    for (const UI::UINodeId componentRoot : componentRoots) {
+        if (Core::Status status = fixture.updater.destroy(componentRoot); !status) {
+            error = status.error().message;
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool runComponentActivateToggle(const UIBenchmarkOptions& options,
+                                              UIBenchmarkReport& report,
+                                              std::string& error)
+{
+    if (options.measureIterations >
+        (std::numeric_limits<u64>::max)() / kComponentTextByteCount) {
+        error = "UI component benchmark measured counter range is invalid";
+        return false;
+    }
+
+    CountingMemoryResource memory{};
+    auto fixtureResult = createFixture(componentBenchmarkContextCapacity(), memory, error);
+    if (!fixtureResult) {
+        return false;
+    }
+    UIFixture fixture = std::move(*fixtureResult);
+    ComponentRootArray componentRoots{};
+    constexpr UI::UILogicalSize Viewport{.width = 64.0F, .height = 8'192.0F};
+
+    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        error = status.error().message;
+        return false;
+    }
+
+    Core::SteadyMonotonicClock clock{};
+    const auto wallBegin = clock.now();
+    const u64 totalIterations = options.warmUpIterations + options.measureIterations;
+    std::optional<u64> expectedTreeChecksum{};
+    if (options.warmUpIterations == 0) {
+        captureAllocationBaseline(memory, report);
+    }
+
+    for (u64 iteration = 0; iteration < totalIterations; ++iteration) {
+        const bool measured = iteration >= options.warmUpIterations;
+        const auto totalBegin = clock.now();
+        const auto buildBegin = clock.now();
+        if (!buildActivateToggleComponents(fixture, componentRoots,
+                                           measured ? &report : nullptr, error)) {
+            return false;
+        }
+        const auto buildEnd = clock.now();
+
+        const UI::UIContextStatistics authoredStatistics = fixture.context->statistics();
+        if (authoredStatistics.liveNodeCount != kComponentContextNodeCount ||
+            authoredStatistics.textByteUsed != kComponentTextByteCount ||
+            authoredStatistics.activeCanvasCommandCount != kComponentCanvasCommandCount ||
+            authoredStatistics.activeActivateBehaviorCount != kComponentActivateSlotCount ||
+            authoredStatistics.activeToggleBehaviorCount != kComponentToggleSlotCount) {
+            error = "UI component benchmark authored-state invariant failed";
+            return false;
+        }
+
+        const auto commitBegin = clock.now();
+        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+            error = status.error().message;
+            return false;
+        }
+        const auto commitEnd = clock.now();
+        const UI::UIContextStatistics committedStatistics = fixture.context->statistics();
+        const u64 treeChecksum = hashComponentTree(fixture);
+        if (expectedTreeChecksum.has_value() && *expectedTreeChecksum != treeChecksum) {
+            error = "UI component benchmark tree checksum changed between rebuilds";
+            return false;
+        }
+        expectedTreeChecksum = treeChecksum;
+
+        const auto cleanCommitBegin = clock.now();
+        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+            error = status.error().message;
+            return false;
+        }
+        const auto cleanCommitEnd = clock.now();
+        const UI::UIContextStatistics cleanStatistics = fixture.context->statistics();
+        const u64 cleanRebuildCount = cleanStatistics.lastLayoutPassCount +
+                                      cleanStatistics.lastHitRebuildCount +
+                                      cleanStatistics.lastPaintCacheRebuildCount +
+                                      cleanStatistics.lastPaintSnapshotRebuildCount;
+        if (cleanRebuildCount != 0 || cleanStatistics.structureDirty ||
+            cleanStatistics.layoutDirty || cleanStatistics.hitDirty ||
+            cleanStatistics.paintDirty || cleanStatistics.semanticsDirty) {
+            error = "UI component benchmark clean commit rebuilt a snapshot";
+            return false;
+        }
+
+        if (measured) {
+            report.buildSamples.push_back(elapsedNs(buildBegin, buildEnd));
+            report.commitSamples.push_back(elapsedNs(commitBegin, commitEnd));
+            report.cleanCommitSamples.push_back(elapsedNs(cleanCommitBegin, cleanCommitEnd));
+            report.totalSamples.push_back(elapsedNs(totalBegin, cleanCommitEnd));
+            accumulateCommitStatistics(committedStatistics, report);
+            ++report.componentCleanCommitCount;
+            report.componentCleanCommitRebuildCount += cleanRebuildCount;
+            report.componentTreeChecksum = treeChecksum;
+            report.semanticsEntryCount = committedStatistics.committedSemanticsNodeCount;
+            report.semanticsChecksum =
+                hashStableSemantics(fixture.context->committedSemantics());
+            report.liveNodeHighWater =
+                (std::max)(report.liveNodeHighWater,
+                           static_cast<u64>(committedStatistics.liveNodeCount));
+            report.layoutSnapshotHighWater =
+                (std::max)(report.layoutSnapshotHighWater,
+                           static_cast<u64>(committedStatistics.committedLayoutNodeCount));
+            report.hitSnapshotHighWater =
+                (std::max)(report.hitSnapshotHighWater,
+                           static_cast<u64>(committedStatistics.committedHitNodeCount));
+            report.paintSnapshotHighWater =
+                (std::max)(report.paintSnapshotHighWater,
+                           static_cast<u64>(committedStatistics.committedPaintNodeCount));
+            report.workN = committedStatistics.committedLayoutNodeCount;
+            report.workP = committedStatistics.committedPaintNodeCount;
+            report.workH = committedStatistics.committedHitNodeCount;
+        }
+
+        if (!destroyActivateToggleComponents(fixture, componentRoots, error)) {
+            return false;
+        }
+        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+            error = status.error().message;
+            return false;
+        }
+        const UI::UIContextStatistics releasedStatistics = fixture.context->statistics();
+        if (releasedStatistics.liveNodeCount != 1 || releasedStatistics.textByteUsed != 0 ||
+            releasedStatistics.activeCanvasCommandCount != 0 ||
+            releasedStatistics.activeActivateBehaviorCount != 0 ||
+            releasedStatistics.activeToggleBehaviorCount != 0) {
+            error = "UI component benchmark retained state was not fully released";
+            return false;
+        }
+        if (iteration + 1 == options.warmUpIterations) {
+            captureAllocationBaseline(memory, report);
+        }
+    }
+
+    report.wallNs = elapsedNs(wallBegin, clock.now());
+    const u64 builtWorkN = report.workN;
+    const u64 builtWorkP = report.workP;
+    const u64 builtWorkH = report.workH;
+    captureFinalState(memory, report, fixture);
+    report.workN = builtWorkN;
+    report.workP = builtWorkP;
+    report.workH = builtWorkH;
+    report.configuredNodeCount = kComponentContextNodeCount;
+    report.configuredComponentCount = kComponentCount;
+    report.configuredComponentNodesPerTransaction = kComponentNodesPerTransaction;
+    report.configuredComponentTextBytesPerTransaction = kComponentTextBytesPerTransaction;
+    report.configuredComponentCanvasCommandsPerTransaction =
+        kComponentCanvasCommandsPerTransaction;
+
+    const u64 measuredTransactions = options.measureIterations * kComponentCount;
+    if (report.pmrAllocationsAfter != report.pmrAllocationsBefore ||
+        report.componentTransactionsStarted != measuredTransactions ||
+        report.componentTransactionsCommitted != measuredTransactions ||
+        report.componentNodesRequested != options.measureIterations * kComponentNodeCount ||
+        report.componentNodesPublished != report.componentNodesRequested ||
+        report.componentTextBytesRequested != options.measureIterations * kComponentTextByteCount ||
+        report.componentTextBytesPublished != report.componentTextBytesRequested ||
+        report.componentCanvasCommandsRequested !=
+            options.measureIterations * kComponentCanvasCommandCount ||
+        report.componentCanvasCommandsPublished != report.componentCanvasCommandsRequested ||
+        report.componentActivateSlotsRequested !=
+            options.measureIterations * kComponentActivateSlotCount ||
+        report.componentActivateSlotsPublished != report.componentActivateSlotsRequested ||
+        report.componentToggleSlotsRequested !=
+            options.measureIterations * kComponentToggleSlotCount ||
+        report.componentToggleSlotsPublished != report.componentToggleSlotsRequested ||
+        report.componentCleanCommitCount != options.measureIterations ||
+        report.componentCleanCommitRebuildCount != 0 || report.componentTreeChecksum == 0 ||
+        report.statistics.liveNodeCount != 1 || report.statistics.textByteUsed != 0 ||
+        report.statistics.activeCanvasCommandCount != 0 ||
+        report.statistics.activeActivateBehaviorCount != 0 ||
+        report.statistics.activeToggleBehaviorCount != 0 ||
+        report.statistics.canvasCommandHighWater != kComponentCanvasCommandCount ||
+        report.statistics.textByteHighWater != kComponentTextByteCount ||
+        report.statistics.activateBehaviorHighWater != kComponentActivateSlotCount ||
+        report.statistics.toggleBehaviorHighWater != kComponentToggleSlotCount) {
+        error = "ui_component_build_activate_toggle_v1 invariant failed";
+        return false;
+    }
+
+    DeterministicHash hash{};
+    hashStatistics(hash, report);
+    report.checksum = hash.value();
+    return true;
+}
+
 [[nodiscard]] bool reserveReportSamples(const UIBenchmarkOptions& options,
                                         UIBenchmarkReport& report, std::string& error)
 {
@@ -1628,7 +2102,9 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
     }
     const usize count = static_cast<usize>(options.measureIterations);
     report.totalSamples.reserve(count);
+    report.buildSamples.reserve(count);
     report.commitSamples.reserve(count);
+    report.cleanCommitSamples.reserve(count);
     report.displayListSamples.reserve(count);
     report.routeSamples.reserve(count);
     return true;
@@ -1651,7 +2127,9 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
 #endif
 
     const TimingSummary total = summarize(report.totalSamples);
+    const TimingSummary build = summarize(report.buildSamples);
     const TimingSummary commit = summarize(report.commitSamples);
+    const TimingSummary cleanCommit = summarize(report.cleanCommitSamples);
     const TimingSummary displayList = summarize(report.displayListSamples);
     const TimingSummary route = summarize(report.routeSamples);
     const usize allocationDelta = report.pmrAllocationsAfter - report.pmrAllocationsBefore;
@@ -1671,6 +2149,13 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"icon_count\":" << report.configuredIconCount
            << ",\"nine_slice_count\":" << report.configuredNineSliceCount
            << ",\"unique_image_resources\":" << report.configuredUniqueImageResourceCount
+           << ",\"component_count\":" << report.configuredComponentCount
+           << ",\"component_nodes_per_transaction\":"
+           << report.configuredComponentNodesPerTransaction
+           << ",\"component_text_bytes_per_transaction\":"
+           << report.configuredComponentTextBytesPerTransaction
+           << ",\"component_canvas_commands_per_transaction\":"
+           << report.configuredComponentCanvasCommandsPerTransaction
            << "}}";
     output << ",\"fingerprint\":{\"buildType\":";
     writeJsonString(output, BuildType);
@@ -1680,8 +2165,12 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
               "\"render\":\"BackendNeutralDisplayList\",\"ui\":\"Tina::UI\"}";
     output << ",\"timing_ns\":";
     writeTimingSummary(output, total, report.wallNs);
-    output << ",\"stage_timing_ns\":{\"commit\":";
+    output << ",\"stage_timing_ns\":{\"build\":";
+    writeTimingSummary(output, build);
+    output << ",\"commit\":";
     writeTimingSummary(output, commit);
+    output << ",\"clean_commit\":";
+    writeTimingSummary(output, cleanCommit);
     output << ",\"display_list\":";
     writeTimingSummary(output, displayList);
     output << ",\"route\":";
@@ -1728,6 +2217,33 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"selection_key\":" << report.selectionKey
            << ",\"selection_index\":" << report.selectionIndex
            << ",\"semantics_entries\":" << report.semanticsEntryCount << '}';
+    if (report.workload == kComponentActivateToggleWorkload) {
+        output << ",\"component_build\":{\"coverage\":\"activate_toggle_only\""
+                  ",\"transaction_scope\":\"UIElementBuildTransaction\""
+                  ",\"frozen_workload_complete\":false"
+                  ",\"reservation_counters_available\":false"
+                  ",\"transactions_started\":"
+               << report.componentTransactionsStarted
+               << ",\"transactions_committed\":" << report.componentTransactionsCommitted
+               << ",\"nodes_requested\":" << report.componentNodesRequested
+               << ",\"nodes_published\":" << report.componentNodesPublished
+               << ",\"text_bytes_requested\":" << report.componentTextBytesRequested
+               << ",\"text_bytes_published\":" << report.componentTextBytesPublished
+               << ",\"canvas_commands_requested\":"
+               << report.componentCanvasCommandsRequested
+               << ",\"canvas_commands_published\":"
+               << report.componentCanvasCommandsPublished
+               << ",\"clean_commits\":" << report.componentCleanCommitCount
+               << ",\"clean_commit_rebuilds\":" << report.componentCleanCommitRebuildCount
+               << ",\"behaviors\":{\"activate\":{\"supported\":true,\"requested\":"
+               << report.componentActivateSlotsRequested << ",\"published\":"
+               << report.componentActivateSlotsPublished
+               << "},\"toggle\":{\"supported\":true,\"requested\":"
+               << report.componentToggleSlotsRequested << ",\"published\":"
+               << report.componentToggleSlotsPublished
+               << "},\"range\":{\"supported\":false},\"text_input\":{\"supported\":false},"
+                  "\"scroll\":{\"supported\":false},\"selection\":{\"supported\":false}}}";
+    }
     output << ",\"capacity\":{\"nodes\":" << report.statistics.nodeCapacity
            << ",\"dirty_queue\":" << report.statistics.dirtyQueueCapacity
            << ",\"layout_snapshot\":" << report.statistics.layoutSnapshotCapacity
@@ -1737,6 +2253,8 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"image_content\":" << report.statistics.imageContentCapacity
            << ",\"route_path\":" << report.statistics.routePathCapacity
            << ",\"listeners\":" << report.statistics.routedPointerListenerCapacity
+           << ",\"activate_behavior\":" << report.statistics.activateBehaviorCapacity
+           << ",\"toggle_behavior\":" << report.statistics.toggleBehaviorCapacity
            << ",\"text_bytes\":" << report.statistics.textByteCapacity << '}';
     output << ",\"high_water\":{\"live_nodes\":" << report.liveNodeHighWater
            << ",\"dirty_queue\":" << report.statistics.dirtyQueueHighWater
@@ -1750,6 +2268,8 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"image_batches\":" << report.imageBatchHighWater
            << ",\"image_resources\":" << report.imageResourceHighWater
            << ",\"image_pins\":" << report.imagePinHighWater
+           << ",\"activate_behavior\":" << report.statistics.activateBehaviorHighWater
+           << ",\"toggle_behavior\":" << report.statistics.toggleBehaviorHighWater
            << ",\"text_bytes\":" << report.statistics.textByteHighWater << '}';
     output << ",\"allocation\":{\"domain\":\"ui_pmr\",\"before\":"
            << report.pmrAllocationsBefore << ",\"after\":" << report.pmrAllocationsAfter
@@ -1760,11 +2280,17 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"peak_bytes\":" << report.pmrPeakBytes << '}';
     output << ",\"checksums\":{\"display_list\":\"" << hex64(report.displayListChecksum)
            << "\",\"semantics\":\"" << hex64(report.semanticsChecksum)
+           << "\",\"component_tree\":\"" << hex64(report.componentTreeChecksum)
            << "\"},\"checksum\":\"" << hex64(report.checksum)
            << "\",\"exit\":\"Completed\",\"notes\":["
               "\"shared_dev_or_ci_is_provisional_not_hard_gate\","
               "\"tracy_disabled\",\"single_process_run\","
-              "\"allocation_delta_counts_tina_routed_ui_pmr_only\"]}\n";
+              "\"allocation_delta_counts_tina_routed_ui_pmr_only\"";
+    if (report.workload == kComponentActivateToggleWorkload) {
+        output << ",\"component_cleanup_excluded_from_stage_timing\""
+                  ",\"ui_component_build_v1_waits_for_all_behavior_reservations\"";
+    }
+    output << "]}\n";
 }
 
 } // namespace
@@ -1773,7 +2299,8 @@ bool isUIBenchmarkWorkload(std::string_view workload) noexcept
 {
     return workload == kStaticCommitWorkload || workload == kPaintDirtyWorkload ||
            workload == kRouteWorkload || workload == kVirtualCollectionWorkload ||
-           workload == kImageNineSliceWorkload;
+           workload == kImageNineSliceWorkload ||
+           workload == kComponentActivateToggleWorkload;
 }
 
 void printUIBenchmarkHelp(std::ostream& output)
@@ -1782,7 +2309,9 @@ void printUIBenchmarkHelp(std::ostream& output)
            << "  --workload=ui_paint_dirty_v1         one paint-only leaf mutation per iteration\n"
            << "  --workload=ui_route_v1               4096 hit entries, depth-64 route sequence\n"
            << "  --workload=ui_virtual_collection_v1  100k items through a fixed 64-row pool\n"
-           << "  --workload=ui_image_nineslice_v1     5096 image quads, 64 unique resources\n";
+           << "  --workload=ui_image_nineslice_v1     5096 image quads, 64 unique resources\n"
+           << "  --workload=ui_component_build_activate_toggle_v1\n"
+              "                                         256 bounded four-node Activate/Toggle components\n";
 }
 
 int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
@@ -1806,6 +2335,8 @@ int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
             (void)runVirtualCollection(options, report, error);
         } else if (workload == kImageNineSliceWorkload) {
             (void)runImageNineSlice(options, report, error);
+        } else if (workload == kComponentActivateToggleWorkload) {
+            (void)runComponentActivateToggle(options, report, error);
         } else {
             error = "unknown UI benchmark workload";
         }
