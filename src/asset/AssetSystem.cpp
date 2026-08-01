@@ -480,7 +480,7 @@ AssetSystem::load(std::span<const Core::AssetId> requestedAssetIds)
                 rollback();
                 return Core::failure(std::move(handle.error()).withContext("AssetSystem::load", "publish"));
             }
-            if (const auto status = insertIndex(row.assetId, *handle); !status)
+            if (auto status = insertIndex(row.assetId, *handle); !status)
             {
                 (void)m_store.unload(*handle);
                 rollback();
@@ -578,7 +578,7 @@ Core::Result<AssetHandle> AssetSystem::ensureQueued(const CatalogLoadPlanEntry& 
     {
         return Core::failure(std::move(handle.error()).withContext("AssetSystem::request", "beginQueued"));
     }
-    if (const auto status = insertIndex(row.assetId, *handle); !status)
+    if (auto status = insertIndex(row.assetId, *handle); !status)
     {
         (void)m_store.unload(*handle);
         return Core::failure(std::move(status.error()));
@@ -747,7 +747,7 @@ Core::Result<AssetPumpStats> AssetSystem::pumpSync(Core::u32 limit)
         noteReadyCpu(item.handle);
         ++stats.becameReady;
     }
-    if (const auto status = mergeGpuStats(stats); !status)
+    if (auto status = mergeGpuStats(stats); !status)
     {
         return Core::failure(std::move(status.error()));
     }
@@ -900,7 +900,7 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
         stats.mainCompletions += commitAsyncCompletions(limit - consumedWork, stats);
     }
 
-    if (const auto status = mergeGpuStats(stats); !status)
+    if (auto status = mergeGpuStats(stats); !status)
     {
         return Core::failure(std::move(status.error()));
     }

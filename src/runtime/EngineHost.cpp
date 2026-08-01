@@ -959,7 +959,7 @@ class EngineHostImplementation final {
             }
 
             // State Transition Commit (ADR 0014): after Frame Update, before extractRenderScene.
-            auto transitionResult = commitPendingGameStateCommands(gameApplication, *uiContextResult);
+            auto transitionResult = commitPendingGameStateCommands(*uiContextResult);
             if (!transitionResult)
             {
                 m_pendingCommands.clearAll();
@@ -1363,9 +1363,7 @@ class EngineHostImplementation final {
     }
 
     // Returns true when a structural transition changed the stack (including emptying it).
-    [[nodiscard]] Core::Result<bool> commitPendingGameStateCommands(
-        IGameApplication& gameApplication,
-        UI::UIContext* uiContext)
+    [[nodiscard]] Core::Result<bool> commitPendingGameStateCommands(UI::UIContext* uiContext)
     {
         bool structuralChanged = false;
         if (m_pendingCommands.policyChangeRequested)

@@ -18,11 +18,6 @@ namespace {
     return Core::failure(UIErrorCode::InvalidContextConfig, message);
 }
 
-[[nodiscard]] Core::Status invalidText(const char* message)
-{
-    return Core::failure(UIErrorCode::InvalidText, message);
-}
-
 [[nodiscard]] Core::Status invalidFont(const char* message)
 {
     return Core::failure(UIErrorCode::InvalidFont, message);

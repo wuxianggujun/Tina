@@ -547,7 +547,7 @@ Core::Status World::setParent(
             }
         }
         childRecord = record(child);
-        const auto localResult = deriveLocalTransform(
+        auto localResult = deriveLocalTransform(
             childRecord->world,
             newParentRecord == nullptr ? nullptr : &newParentRecord->world);
         if (!localResult) {

@@ -19,16 +19,6 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
         }
         return kind;
     };
-    const auto rejectText = [hasText](BuiltinElementKind kind)
-        -> Core::Result<BuiltinElementKind> {
-        if (hasText)
-        {
-            return Core::failure(
-                UIErrorCode::InvalidElementDescriptor,
-                "UI element behavior does not accept intrinsic text content");
-        }
-        return kind;
-    };
     const auto rejectIntrinsicContent = [hasText, hasImage](BuiltinElementKind kind)
         -> Core::Result<BuiltinElementKind> {
         if (hasText || hasImage)
