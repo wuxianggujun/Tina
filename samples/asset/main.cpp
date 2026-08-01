@@ -6,6 +6,7 @@
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/render/UploadTicket.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
@@ -156,10 +157,12 @@ int main(int argc, char** argv)
     const auto spriteId = *Tina::Core::AssetId::fromBytes(idBytes(3U));
 
     std::filesystem::path root;
+    std::string catalogRootUtf8;
     std::error_code ec;
     if (options.catalogRoot.empty())
     {
         root = std::filesystem::temp_directory_path() / "tina_sample_asset_catalog";
+        catalogRootUtf8 = toUtf8(root);
         std::filesystem::remove_all(root, ec);
         if (const auto status = synthesizeCatalog(root, textureId, spriteId); !status)
         {
@@ -168,7 +171,7 @@ int main(int argc, char** argv)
         }
     } else
     {
-        root = std::filesystem::u8path(options.catalogRoot);
+        catalogRootUtf8 = options.catalogRoot;
     }
 
     auto taskSystem = Tina::Task::createBoundedTaskSystem(Tina::Task::TaskSystemCreateParams{
@@ -211,7 +214,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (const auto status = system->openAndBindCatalog(toUtf8(root)); !status)
+    if (const auto status = system->openAndBindCatalog(catalogRootUtf8); !status)
     {
         writeError(status.error());
         return 1;
@@ -324,18 +327,32 @@ int main(int argc, char** argv)
                     }
                 }
             }
-            if (auto render = Tina::Asset::makeSpriteRenderInput(*file, texFile,
-                                                                 Tina::Asset::SpriteRenderParams{
-                                                                     .stableEntityKey = 1,
-                                                                     .centerX = 0.0f,
-                                                                     .centerY = 0.0f,
-                                                                 }))
+            Tina::Render::RenderFramePacket renderPacket;
+            if (const auto status = renderPacket.beginFrame(frames); status)
             {
-                renderInputOk = true;
-                renderW = render->widthMeters;
-                renderH = render->heightMeters;
-                renderU0 = render->u0;
-                renderU1 = render->u1;
+                auto textureResource = renderPacket.intern(
+                    Tina::Render::FrameResourceDescriptor{
+                        .kind = Tina::Render::FrameResourceKind::Texture2D,
+                        .deviceBindingKey = 1,
+                    },
+                    Tina::Render::FramePin{Tina::Render::FramePinKind::Custom, 1, nullptr, nullptr});
+                if (textureResource)
+                {
+                    if (auto render = Tina::Asset::makeSpriteRenderInput(*file, texFile, *textureResource,
+                                                                         Tina::Asset::SpriteRenderParams{
+                                                                             .stableEntityKey = 1,
+                                                                             .centerX = 0.0f,
+                                                                             .centerY = 0.0f,
+                                                                         }))
+                    {
+                        renderInputOk = true;
+                        renderW = render->widthMeters;
+                        renderH = render->heightMeters;
+                        renderU0 = render->u0;
+                        renderU1 = render->u1;
+                    }
+                }
+                (void)renderPacket.completeSkipped();
             }
         } else if (file->header().assetKind == Tina::AssetFormat::AssetKind::Texture2D)
         {
