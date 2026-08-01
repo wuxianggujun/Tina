@@ -6748,7 +6748,8 @@ struct UIContext::Impl final {
         }
         UICommittedContentPlacement placement{};
         bool foundPlacement = false;
-        for (const UICommittedLayoutEntry& entry : committedLayout().entries())
+        const UICommittedLayoutView layout = committedLayout();
+        for (const UICommittedLayoutEntry& entry : layout.entries())
         {
             if (entry.node == textEdit)
             {
