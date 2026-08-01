@@ -31,7 +31,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | UI-PERF-001 | InProgress；UI 静态、单节点 dirty、route、虚拟集合首个 milestone 已落地，后续扩展 Component build、Motion、Image/Icon/NineSlice workload/counter/checksum |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-COMPONENT-001 | 标准 Behavior 独立 side store 与 phase-scoped bounded component transaction，让第三方通过组合扩展业务控件 |
-| UI-IMAGE-001 | InProgress；A Image/Icon、B NineSlice 与 C 产品/失效采用已完成，下一步关闭 DPI-like 矩阵和 `ui_image_nineslice_v1` 性能证据；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
+| UI-IMAGE-001 | InProgress；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸采用已完成，下一步关闭 `ui_image_nineslice_v1` 性能证据；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
 | UI-STYLE-001 | 强类型 StyleClass/token、node-local pseudo-state 与预编译有界 stylesheet |
 | UI-MOTION-001 | color/opacity/corner radius/visual offset 的 fixed-capacity transition 与 reduced-motion |
 
@@ -46,7 +46,7 @@ UI-STATE-FEEDBACK Done (Windows Dark/Light visual gate 22/22)
   -> UI-PERF-001 initial milestone Done / task InProgress
        |-> UI-IMAGE-001 A Done: Image/Icon + resolver/pin + RGBA ImageQuad + semantics
        |     -> B Done: NineSlice 1..9 quad atomic expansion
-       |     -> C InProgress: product/failure adoption Done; size/performance evidence Next
+       |     -> C InProgress: product/failure/size adoption Done; performance evidence Next
        `-> UI-COMPONENT-001
 UI-IMAGE-001 C + UI-COMPONENT-001
   -> UI-STYLE-001 (waits for both property surfaces)
@@ -57,7 +57,7 @@ SDK-001 (independent packaging lane; does not wait for UI-FLOW-001)
 ```
 
 `UI-IMAGE-001` 与 `UI-COMPONENT-001` 没有直接依赖，可由两条 lane 并行推进。Image/Icon 与 NineSlice
-基础链路和 C 的 HUD/Inventory/NineSlice 产品采用及资源失效证据已经落地；当前单 UI lane 继续关闭尺寸矩阵和性能证据，之后与
+基础链路和 C 的 HUD/Inventory/NineSlice 产品采用、资源失效与尺寸矩阵证据已经落地；当前单 UI lane 继续关闭性能证据，之后与
 `UI-COMPONENT-001` 汇合。
 `UI-RANGE-INPUT-KEYBOARD` 已独立关闭且不依赖 ADR 0023；后续 Image/Component 不复制其输入状态。
 `UI-PERF-001` 首个 milestone 已完成，任务为 `InProgress`，Image/Component 已解锁；它不是只执行一次，
@@ -133,7 +133,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | --- | --- | --- |
 | 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle 已完成；全部 Sprite2D item 使用 packet-local `FrameResourceRef`，fixed-capacity registry 唯一拥有 resident Lease/GPU/binding；schema 16 增加两盏 `PointLight2D`、两条 `ShadowOccluder2D` 与逐次 Render extraction snapshot，并保留 Dark→Light→Dark、Scene Explorer TreeView stable-key selection/scroll/theme/semantics、2份 owner/retirement handoff、weak handle 失效、ledger Released 与四类 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | 2D light culling/soft shadow/normal map/独立视觉金标、TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 均为独立后续项 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
-| UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 即时反馈、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction、Canvas `SolidRect` 与统一 RoundedRect 已关闭；Image/Icon 的 root-scoped resolve/pin/RGBA ImageQuad 链路与 Canvas NineSlice 原子展开已完成；Showcase 已接入 icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light atlas/sampling 视觉和逐帧结构化证据，并以 lifecycle mode 覆盖 atlas invalidation、unavailable 与 missing resolver 连续 skip | `UI-IMAGE-001 C` 仍需关闭 DPI-like 尺寸矩阵和 `ui_image_nineslice_v1`；之后与 Component 汇合到 Style、Motion；OS 级 DPI 与跨 GPU 金标由 `UI-003` 跟踪 |
+| UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 即时反馈、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction、Canvas `SolidRect` 与统一 RoundedRect 已关闭；Image/Icon 的 root-scoped resolve/pin/RGBA ImageQuad 链路与 Canvas NineSlice 原子展开已完成；Showcase 已接入 icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light atlas/sampling 视觉和逐帧结构化证据，以 lifecycle mode 覆盖 atlas invalidation、unavailable 与 missing resolver 连续 skip，并以 6-case size matrix 覆盖 Dark/Light × 1x/1.25x/1.5x client footprint | `UI-IMAGE-001 C` 仍需关闭 `ui_image_nineslice_v1`；之后与 Component 汇合到 Style、Motion；OS 级 DPI 与跨 GPU 金标由 `UI-003` 跟踪 |
 | UI accessibility | 平台中立 action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns 与真实 showcase HWND 跨进程自动 gate 已落地；gate 可输出属性/fragment、action 结果和正常关闭的 schema 1 JSON | 固化当前 tip 的带日期 gate 结果并完成 Windows Narrator/Inspect 人工金标；Linux AT-SPI 由 `UI-002-LINUX` 独立跟踪 |
 | 3D product | 双 mesh + Resources-owned AssetSystem + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material resolver、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、World DirectionalLight3D→逐帧 RenderScene snapshot 已有证据；schema 5 证明3灯连续300帧发布，并保留2 Mesh/2 Material/3 Texture handoff、weak handle 失效、ledger Released、成熟 retained controls、Asset ListView/Scene TreeView 与 Dark→Light→Dark | RENDER-001 的完整 PBR/IBL/shadow、point/spot light + culling、pass scheduling |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion、独立 Texture/Mesh AssetLease readback retirement，以及 Task timeout/retry + Host-enforced TaskSystem worker-exit/join deadline 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |

@@ -133,6 +133,21 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 `paintOrderChecksum`。这证明 unavailable
 阶段连续 skip、missing resolver 阶段不再调用 resolver，且非图片 UI 仍持续提交。
 
+Image 产品的 Dark/Light content-scale-like 尺寸矩阵复用通用窗口捕获器：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunUiImageSizeMatrix.ps1 -SkipBuild
+```
+
+脚本运行 1280×980、1600×1225、1920×1470 三种 logical client footprint × Dark/Light 共 6 个
+case。每个 case 必须有连续两张相同 SHA-256 的非空 PNG，sample JSON 必须保持 4 个 image product、
+每帧 resolver hit、12 个 ImageQuad、4 个 image batch、单资源去重、Linear/Nearest、atlas 失效释放、
+pin 归零、非零 checksum，并接受 GLFW 的 `framebuffer≈logical×contentScale` 或
+`framebuffer≈logical` 两种既有 Windows metrics 模式。汇总写入
+`artifacts/gates/ui-image-size-matrix-<stamp>.json`；这只是 content-scale-like client footprint，
+不冒充 OS Settings 100/150/200% 真 DPI、多显示器混 DPI 或跨 GPU 金标。
+
 Visual/interaction 验收另跑不带 `--auto-demo` 的窗口：确认 Dark/Light 切换后既有控件同步换肤，
 Primary/Destructive/Disabled Button 层次清楚，pointer press 会压低阴影并切换圆角 border ring 颜色，Tab focus 可辨，
 Slider 与 ProgressBar 联动，Dropdown、List、Tree、Scroll 可操作，TextEdit 中文可读且左右 padding 与

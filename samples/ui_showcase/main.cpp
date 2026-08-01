@@ -25,6 +25,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <variant>
 
 namespace {
 
@@ -33,10 +34,14 @@ using Tina::Core::u64;
 
 inline constexpr u64 ImageAtlasInvalidationFrame = 10;
 inline constexpr u64 ImageResolverUnbindFrame = 20;
+inline constexpr u32 ShowcaseLogicalWidth = 1280;
+inline constexpr u32 ShowcaseLogicalHeight = 980;
 
 struct SampleOptions final {
     u64 targetFrameCount = 0;
     u32 frameDelayMilliseconds = 0;
+    u32 windowLogicalWidth = ShowcaseLogicalWidth;
+    u32 windowLogicalHeight = ShowcaseLogicalHeight;
     Tina::SampleUI::ShowcaseTheme initialTheme = Tina::SampleUI::ShowcaseTheme::Dark;
     bool autoDemo = false;
     bool imageLifecycleDemo = false;
@@ -53,6 +58,13 @@ struct LifecycleCounters final {
     u64 imageResolverHits = 0;
     u64 imageResolverUnavailable = 0;
     u64 imageResolverCallsAtUnbind = 0;
+    u64 windowMetricsEvents = 0;
+    u32 logicalPixelWidth = ShowcaseLogicalWidth;
+    u32 logicalPixelHeight = ShowcaseLogicalHeight;
+    u32 framebufferPixelWidth = ShowcaseLogicalWidth;
+    u32 framebufferPixelHeight = ShowcaseLogicalHeight;
+    float contentScaleX = 1.0F;
+    float contentScaleY = 1.0F;
     u32 imageFrameBorrowsAtRelease = 0;
     bool imageAtlasUploaded = false;
     bool imageAtlasReleased = false;
@@ -120,11 +132,15 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     constexpr std::string_view FramesPrefix = "--frames=";
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
     constexpr std::string_view ThemePrefix = "--theme=";
+    constexpr std::string_view WidthPrefix = "--width=";
+    constexpr std::string_view HeightPrefix = "--height=";
 
     SampleOptions options{};
     bool hasFrames = false;
     bool hasDelay = false;
     bool hasTheme = false;
+    bool hasWidth = false;
+    bool hasHeight = false;
     for (int index = 1; index < argumentCount; ++index) {
         const std::string_view argument{arguments[index]};
         if (argument.starts_with(FramesPrefix)) {
@@ -175,6 +191,32 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             options.autoDemo = true;
             continue;
         }
+        if (argument.starts_with(WidthPrefix)) {
+            if (hasWidth) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "Duplicate --width argument");
+            }
+            const std::string_view value = argument.substr(WidthPrefix.size());
+            if (!parseUnsigned(value, options.windowLogicalWidth) || options.windowLogicalWidth < ShowcaseLogicalWidth ||
+                options.windowLogicalWidth > 3840U) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--width must be in the range 1280..3840");
+            }
+            hasWidth = true;
+            continue;
+        }
+        if (argument.starts_with(HeightPrefix)) {
+            if (hasHeight) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "Duplicate --height argument");
+            }
+            const std::string_view value = argument.substr(HeightPrefix.size());
+            if (!parseUnsigned(value, options.windowLogicalHeight) ||
+                options.windowLogicalHeight < ShowcaseLogicalHeight || options.windowLogicalHeight > 2160U) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--height must be in the range 980..2160");
+            }
+            hasHeight = true;
+            continue;
+        }
         if (argument == "--image-lifecycle-demo") {
             if (options.imageLifecycleDemo) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -198,6 +240,10 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     if (options.imageLifecycleDemo && options.targetFrameCount < 30) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "--image-lifecycle-demo requires --frames of at least 30");
+    }
+    if (hasWidth != hasHeight) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "--width and --height must be supplied together");
     }
     return options;
 }
@@ -430,8 +476,34 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     {
     }
 
-    Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext&) override
+    Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext& context) override
     {
+        const auto& window = context.engineConfig().primaryWindow;
+        counters_.logicalPixelWidth = window.initialLogicalExtent.width;
+        counters_.logicalPixelHeight = window.initialLogicalExtent.height;
+        counters_.framebufferPixelWidth = window.initialLogicalExtent.width;
+        counters_.framebufferPixelHeight = window.initialLogicalExtent.height;
+        counters_.contentScaleX = 1.0F;
+        counters_.contentScaleY = 1.0F;
+        auto subscription = context.platformEventSubscriptions().subscribe(
+            [this](const Tina::PlatformEventNotification& notification) {
+                if (!std::holds_alternative<Tina::Platform::WindowMetricsChangedEvent>(notification.event().payload)) {
+                    return;
+                }
+                ++counters_.windowMetricsEvents;
+                if (const auto* metrics = notification.primaryWindowMetrics(); metrics != nullptr) {
+                    counters_.logicalPixelWidth = metrics->logicalExtent.width;
+                    counters_.logicalPixelHeight = metrics->logicalExtent.height;
+                    counters_.framebufferPixelWidth = metrics->framebufferExtent.width;
+                    counters_.framebufferPixelHeight = metrics->framebufferExtent.height;
+                    counters_.contentScaleX = metrics->contentScale.x;
+                    counters_.contentScaleY = metrics->contentScale.y;
+                }
+            });
+        if (!subscription) {
+            return Tina::Core::failure(std::move(subscription.error()));
+        }
+        platformEvents_.emplace(std::move(*subscription));
         std::unique_ptr<Tina::IGameState> state =
             std::make_unique<ShowcaseState>(options_, counters_, deviceAccess_);
         return state;
@@ -439,6 +511,7 @@ class ShowcaseApplication final : public Tina::IGameApplication {
 
     void onShutdown(Tina::GameShutdownContext&) noexcept override
     {
+        platformEvents_.reset();
         ++counters_.applicationShutdowns;
     }
 
@@ -446,14 +519,15 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     SampleOptions options_{};
     LifecycleCounters& counters_;
     Tina::SampleUI::ShowcaseRenderDeviceAccess& deviceAccess_;
+    std::optional<Tina::PlatformEventSubscription> platformEvents_{};
 };
 
-[[nodiscard]] Tina::EngineConfig createEngineConfig()
+[[nodiscard]] Tina::EngineConfig createEngineConfig(const SampleOptions& options)
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
     config.applicationName = "Tina UI Showcase";
     config.primaryWindow.title = "Tina UI Showcase - Complete Retained Controls";
-    config.primaryWindow.initialLogicalExtent = {1280, 980};
+    config.primaryWindow.initialLogicalExtent = {options.windowLogicalWidth, options.windowLogicalHeight};
     config.primaryWindow.resizable = false;
     config.primaryWindow.initiallyVisible = true;
 
@@ -482,11 +556,34 @@ class ShowcaseApplication final : public Tina::IGameApplication {
                                            const LifecycleCounters& counters,
                                            const Tina::SampleUI::ShowcaseRenderEvidence& renderEvidence)
 {
+    const auto surfaceAxisMatches = [](u32 logicalPixels, u32 framebufferPixels, float contentScale) noexcept {
+        if (!std::isfinite(contentScale) || contentScale <= 0.0F || framebufferPixels == 0) {
+            return false;
+        }
+        const double logical = static_cast<double>(logicalPixels);
+        const double framebuffer = static_cast<double>(framebufferPixels);
+        return std::abs(framebuffer - logical * static_cast<double>(contentScale)) <= 2.0 ||
+               std::abs(framebuffer - logical) <= 2.0;
+    };
     if (counters.stateEnters != 1 || counters.stateExits != 1 || counters.applicationShutdowns != 1 ||
         counters.uiRootsCreated != 1 || counters.uiRootsReleased != 1 || counters.finalUI.rootAlive ||
         counters.finalUI.controlCount != 20 || counters.finalUI.imageProductCount != 4) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "UI showcase lifecycle or control inventory verification failed");
+    }
+    if (counters.logicalPixelWidth != options.windowLogicalWidth ||
+        counters.logicalPixelHeight != options.windowLogicalHeight ||
+        !surfaceAxisMatches(counters.logicalPixelWidth, counters.framebufferPixelWidth, counters.contentScaleX) ||
+        !surfaceAxisMatches(counters.logicalPixelHeight, counters.framebufferPixelHeight, counters.contentScaleY)) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "UI showcase logical/framebuffer/content-scale verification failed: logical=" +
+                std::to_string(counters.logicalPixelWidth) + "x" + std::to_string(counters.logicalPixelHeight) +
+                " framebuffer=" + std::to_string(counters.framebufferPixelWidth) + "x" +
+                std::to_string(counters.framebufferPixelHeight) + " scale=" +
+                std::to_string(counters.contentScaleX) + "x" + std::to_string(counters.contentScaleY) +
+                " requested=" + std::to_string(options.windowLogicalWidth) + "x" +
+                std::to_string(options.windowLogicalHeight));
     }
     if (!counters.imageAtlasUploaded || !counters.imageAtlasReleased ||
         !counters.imageAtlasValidatedBeforeRelease || !counters.imageAtlasInvalidatedAfterRelease ||
@@ -561,7 +658,7 @@ class ShowcaseApplication final : public Tina::IGameApplication {
             -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
             return Tina::SampleUI::wrapShowcaseRenderDevice(std::move(device), deviceAccess);
         };
-    auto host = Tina::Desktop::CreateEngine(createEngineConfig(), std::move(desktopOptions));
+    auto host = Tina::Desktop::CreateEngine(createEngineConfig(*options), std::move(desktopOptions));
     if (!host) {
         writeError(host.error());
         return 1;
@@ -614,6 +711,13 @@ class ShowcaseApplication final : public Tina::IGameApplication {
               << ",\"imageLinear\":" << (renderEvidence.sawLinearSampling ? "true" : "false")
               << ",\"imageNearest\":" << (renderEvidence.sawNearestSampling ? "true" : "false")
               << ",\"paintOrderChecksum\":" << renderEvidence.lastPaintOrderChecksum
+              << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth
+              << ",\"logicalPixelHeight\":" << counters.logicalPixelHeight
+              << ",\"framebufferPixelWidth\":" << counters.framebufferPixelWidth
+              << ",\"framebufferPixelHeight\":" << counters.framebufferPixelHeight
+              << ",\"contentScaleX\":" << counters.contentScaleX
+              << ",\"contentScaleY\":" << counters.contentScaleY
+              << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents
               << ",\"quality\":";
     writeJsonString(std::cout, qualityName(counters.finalUI.quality));
     std::cout << ",\"notificationsEnabled\":" << (counters.finalUI.notificationsEnabled ? "true" : "false")
