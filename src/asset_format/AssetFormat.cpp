@@ -319,6 +319,8 @@ Core::Result<CookedAssetView> parseCookedAssetView(std::span<const std::byte> by
         .assetTypeVersion = readU16(bytes, 18U),
         .targetPlatform = static_cast<TargetPlatform>(readU16(bytes, 20U)),
         .hashAlgorithm = static_cast<HashAlgorithm>(readU8(bytes, 23U)),
+        .assetId = {},
+        .contentHash = {},
         .dependencyOffset = readU64(bytes, 64U),
         .dependencyCount = readU32(bytes, 72U),
         .payloadOffset = readU64(bytes, 80U),
