@@ -220,7 +220,7 @@ Core::Result<CookedAssetFile> loadCookedAssetFromCatalog(std::string_view catalo
     }
     if (const auto status = alignWithCatalogEntry(*asset, *entry); !status)
     {
-        return Core::failure(std::move(status.error()));
+        return Core::failure(status.error());
     }
     return std::move(*asset);
 }

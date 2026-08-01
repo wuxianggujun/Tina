@@ -156,7 +156,7 @@ namespace {
                         std::span<const std::byte>(fontBytes->data(), fontBytes->size()));
                     if (!open)
                     {
-                        return Core::failure(std::move(open.error()));
+                        return Core::failure(open.error());
                     }
                     return std::move(*context);
                 };

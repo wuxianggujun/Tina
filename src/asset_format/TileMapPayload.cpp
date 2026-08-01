@@ -441,11 +441,11 @@ struct ParsedProperties final {
         }
         if (const auto status = validateText(*key, true, "tilemap property key invalid"); !status)
         {
-            return Core::failure(std::move(status.error()));
+            return Core::failure(status.error());
         }
         if (const auto status = validateText(*value, false, "tilemap property value invalid"); !status)
         {
-            return Core::failure(std::move(status.error()));
+            return Core::failure(status.error());
         }
         for (u16 prior = 0; prior < index; ++prior)
         {
@@ -499,7 +499,7 @@ struct ParsedProperties final {
     }
     if (const auto status = validateText(*name, false, "tilemap object name invalid"); !status)
     {
-        return Core::failure(std::move(status.error()));
+        return Core::failure(status.error());
     }
     auto properties = parseProperties(bytes, offset, propertyCount);
     if (!properties)
@@ -573,7 +573,7 @@ struct ParsedProperties final {
     }
     if (const auto status = validateText(*name, false, "tilemap layer name invalid"); !status)
     {
-        return Core::failure(std::move(status.error()));
+        return Core::failure(status.error());
     }
     auto properties = parseProperties(bytes, offset, propertyCount);
     if (!properties)
@@ -622,7 +622,7 @@ struct ParsedProperties final {
                     widthCells, heightCells, chunkSizeCells);
                 !status)
             {
-                return Core::failure(std::move(status.error()));
+                return Core::failure(status.error());
             }
             if (previous && (chunk->chunkY < previous->chunkY ||
                              (chunk->chunkY == previous->chunkY && chunk->chunkX <= previous->chunkX)))
@@ -880,7 +880,7 @@ Core::Result<std::vector<std::byte>> writeTileMapPayloadBytes(const TileMapPaylo
 {
     if (const auto status = validateDesc(desc); !status)
     {
-        return Core::failure(std::move(status.error()));
+        return Core::failure(status.error());
     }
     try
     {

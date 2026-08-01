@@ -80,7 +80,7 @@ computeCatalogLoadOrder(const CatalogSnapshot& catalog, std::span<const Core::As
             }
             if (const auto status = pushIfNeeded(*found); !status)
             {
-                return Core::failure(std::move(status.error()));
+                return Core::failure(status.error());
             }
 
             while (!stack.empty())
@@ -108,7 +108,7 @@ computeCatalogLoadOrder(const CatalogSnapshot& catalog, std::span<const Core::As
                     }
                     if (const auto status = pushIfNeeded(dependency->targetEntryIndex); !status)
                     {
-                        return Core::failure(std::move(status.error()));
+                        return Core::failure(status.error());
                     }
                     continue;
                 }

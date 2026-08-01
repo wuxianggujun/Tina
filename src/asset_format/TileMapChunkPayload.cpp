@@ -127,7 +127,7 @@ Core::Result<std::vector<std::byte>> writeTileMapChunkPayloadBytes(const TileMap
 {
     if (const auto status = validateDesc(desc); !status)
     {
-        return Core::failure(std::move(status.error()));
+        return Core::failure(status.error());
     }
 
     try

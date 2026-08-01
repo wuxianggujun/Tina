@@ -604,7 +604,7 @@ Core::Status verifyCookedAssetContentHash(const CookedAssetView& asset)
     const auto digest = Core::digestContentHashV1(asset.payload());
     if (!digest)
     {
-        return Core::failure(std::move(digest.error()));
+        return Core::failure(digest.error());
     }
     if (*digest != asset.header().contentHash)
     {

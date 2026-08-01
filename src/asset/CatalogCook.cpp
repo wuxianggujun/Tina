@@ -1373,7 +1373,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
                 }
                 if (const auto status = flushTileMap(); !status)
                 {
-                    return Core::failure(std::move(status.error()));
+                    return Core::failure(status.error());
                 }
                 continue;
             }
@@ -1538,7 +1538,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         // Starting a new top-level directive flushes any open multi-line block.
         if (const auto flushStatus = flushMulti(); !flushStatus)
         {
-            return Core::failure(std::move(flushStatus.error()));
+            return Core::failure(flushStatus.error());
         }
 
         if (tokens[0] == "platform")
@@ -1901,7 +1901,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
     }
     if (const auto flushStatus = flushMulti(); !flushStatus)
     {
-        return Core::failure(std::move(flushStatus.error()));
+        return Core::failure(flushStatus.error());
     }
     if (request.assets.empty())
     {
