@@ -31,11 +31,15 @@ namespace {
 using Tina::Core::u32;
 using Tina::Core::u64;
 
+inline constexpr u64 ImageAtlasInvalidationFrame = 10;
+inline constexpr u64 ImageResolverUnbindFrame = 20;
+
 struct SampleOptions final {
     u64 targetFrameCount = 0;
     u32 frameDelayMilliseconds = 0;
     Tina::SampleUI::ShowcaseTheme initialTheme = Tina::SampleUI::ShowcaseTheme::Dark;
     bool autoDemo = false;
+    bool imageLifecycleDemo = false;
 };
 
 struct LifecycleCounters final {
@@ -48,9 +52,13 @@ struct LifecycleCounters final {
     u64 imageResolverCalls = 0;
     u64 imageResolverHits = 0;
     u64 imageResolverUnavailable = 0;
+    u64 imageResolverCallsAtUnbind = 0;
     u32 imageFrameBorrowsAtRelease = 0;
     bool imageAtlasUploaded = false;
     bool imageAtlasReleased = false;
+    bool imageAtlasValidatedBeforeRelease = false;
+    bool imageAtlasInvalidatedAfterRelease = false;
+    bool imageResolverUnbound = false;
     Tina::SampleUI::ShowcaseUISnapshot finalUI{};
 };
 
@@ -167,6 +175,14 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             options.autoDemo = true;
             continue;
         }
+        if (argument == "--image-lifecycle-demo") {
+            if (options.imageLifecycleDemo) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "Duplicate --image-lifecycle-demo argument");
+            }
+            options.imageLifecycleDemo = true;
+            continue;
+        }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "Unsupported UI showcase command-line argument");
     }
@@ -174,6 +190,14 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     if (options.autoDemo && options.targetFrameCount != 0 && options.targetFrameCount < 120) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "--auto-demo requires at least 120 frames when --frames is supplied");
+    }
+    if (options.imageLifecycleDemo && options.autoDemo) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "--image-lifecycle-demo cannot be combined with --auto-demo");
+    }
+    if (options.imageLifecycleDemo && options.targetFrameCount < 30) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "--image-lifecycle-demo requires --frames of at least 30");
     }
     return options;
 }
@@ -278,7 +302,13 @@ class ShowcaseImageResources final {
         counters_->imageFrameBorrowsAtRelease = frameResource_.frameBorrowCount();
         Tina::Render::IRenderDevice* device = deviceAccess_->get();
         if (texture_ && device != nullptr) {
+            counters_->imageAtlasValidatedBeforeRelease =
+                static_cast<bool>(device->validateTexture2D(texture_));
             counters_->imageAtlasReleased = static_cast<bool>(device->destroyTexture2D(texture_));
+            if (counters_->imageAtlasReleased) {
+                counters_->imageAtlasInvalidatedAfterRelease =
+                    !device->validateTexture2D(texture_);
+            }
         }
         texture_ = {};
         bindingKey_ = 0;
@@ -363,6 +393,13 @@ class ShowcaseState final : public Tina::IGameState {
         ++counters_.frameUpdates;
         if (options_.autoDemo) {
             ui_.requestAutomatedStep(counters_.frameUpdates);
+        }
+        if (options_.imageLifecycleDemo && counters_.frameUpdates == ImageAtlasInvalidationFrame) {
+            imageResources_.release();
+        }
+        if (options_.imageLifecycleDemo && counters_.frameUpdates == ImageResolverUnbindFrame) {
+            counters_.imageResolverCallsAtUnbind = counters_.imageResolverCalls;
+            counters_.imageResolverUnbound = ui_.unbindImageResolver();
         }
         if (options_.targetFrameCount != 0 && counters_.frameUpdates >= options_.targetFrameCount) {
             context.requestExitAfterFrame();
@@ -452,14 +489,36 @@ class ShowcaseApplication final : public Tina::IGameApplication {
                                    "UI showcase lifecycle or control inventory verification failed");
     }
     if (!counters.imageAtlasUploaded || !counters.imageAtlasReleased ||
+        !counters.imageAtlasValidatedBeforeRelease || !counters.imageAtlasInvalidatedAfterRelease ||
         counters.imageFrameBorrowsAtRelease != 0 || counters.imageResolverCalls == 0 ||
-        counters.imageResolverHits != counters.imageResolverCalls || counters.imageResolverUnavailable != 0 ||
-        renderEvidence.submittedImageFrames == 0 || renderEvidence.maxImageQuadCommands < 12 ||
+        renderEvidence.submittedFrames == 0 || renderEvidence.submittedImageFrames == 0 ||
+        renderEvidence.maxImageQuadCommands < 12 ||
         renderEvidence.maxImageBatches < 3 || renderEvidence.maxUniqueImageResources != 1 ||
         renderEvidence.lastPaintOrderChecksum == 0 || !renderEvidence.sawLinearSampling ||
         !renderEvidence.sawNearestSampling) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "UI showcase image product or render evidence verification failed");
+    }
+    if (options.imageLifecycleDemo) {
+        constexpr u64 ExpectedImageFrames = ImageAtlasInvalidationFrame - 1;
+        constexpr u64 ExpectedUnavailableFrames = ImageResolverUnbindFrame - ImageAtlasInvalidationFrame;
+        constexpr u64 ExpectedResolverCalls = ImageResolverUnbindFrame - 1;
+        if (!counters.imageResolverUnbound || counters.imageResolverCallsAtUnbind != ExpectedResolverCalls ||
+            counters.imageResolverCalls != ExpectedResolverCalls || counters.imageResolverHits != ExpectedImageFrames ||
+            counters.imageResolverUnavailable != ExpectedUnavailableFrames ||
+            renderEvidence.submittedFrames != counters.frameUpdates ||
+            renderEvidence.submittedImageFrames != ExpectedImageFrames ||
+            renderEvidence.submittedImageFreeFrames != counters.frameUpdates - ExpectedImageFrames) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "UI showcase image lifecycle verification failed");
+        }
+    } else if (counters.imageResolverHits != counters.imageResolverCalls ||
+               counters.imageResolverUnavailable != 0 || counters.imageResolverUnbound ||
+               (options.targetFrameCount != 0 && renderEvidence.submittedFrames != counters.frameUpdates) ||
+               (options.targetFrameCount != 0 && renderEvidence.submittedImageFrames != counters.frameUpdates) ||
+               renderEvidence.submittedImageFreeFrames != 0) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "UI showcase steady image verification failed");
     }
     if (options.targetFrameCount != 0) {
         if (reason != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame ||
@@ -540,10 +599,15 @@ class ShowcaseApplication final : public Tina::IGameApplication {
               << ",\"imageProducts\":" << counters.finalUI.imageProductCount
               << ",\"imageAtlasUploaded\":" << (counters.imageAtlasUploaded ? "true" : "false")
               << ",\"imageAtlasReleased\":" << (counters.imageAtlasReleased ? "true" : "false")
+              << ",\"imageAtlasInvalidated\":" << (counters.imageAtlasInvalidatedAfterRelease ? "true" : "false")
+              << ",\"imageFrameBorrowsAtRelease\":" << counters.imageFrameBorrowsAtRelease
+              << ",\"imageLifecycleDemo\":" << (options->imageLifecycleDemo ? "true" : "false")
               << ",\"imageResolverCalls\":" << counters.imageResolverCalls
               << ",\"imageResolverHits\":" << counters.imageResolverHits
               << ",\"imageResolverUnavailable\":" << counters.imageResolverUnavailable
+              << ",\"imageResolverUnbound\":" << (counters.imageResolverUnbound ? "true" : "false")
               << ",\"imageFrames\":" << renderEvidence.submittedImageFrames
+              << ",\"imageFreeFrames\":" << renderEvidence.submittedImageFreeFrames
               << ",\"maxImageQuads\":" << renderEvidence.maxImageQuadCommands
               << ",\"maxImageBatches\":" << renderEvidence.maxImageBatches
               << ",\"maxUniqueImageResources\":" << renderEvidence.maxUniqueImageResources

@@ -116,8 +116,22 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 `initialTheme`。图片产品证据还必须满足 `imageAtlasUploaded=true`、`imageAtlasReleased=true`、
 `imageResolverCalls=imageResolverHits>0`、`imageResolverUnavailable=0`、`maxImageQuads=12`、
 `maxImageBatches=4`、`maxUniqueImageResources=1`、`imageLinear=true`、`imageNearest=true` 与非零
-`paintOrderChecksum`。
+`paintOrderChecksum`；退出阶段还须有 `imageAtlasInvalidated=true`。
 `--auto-demo` 与显式 `--frames` 同用时至少 120 帧。
+
+资源失效与 missing/unavailable 产品 smoke 使用独立模式，不能与 `--auto-demo` 同用：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
+  --frames=30 --frame-delay-ms=0 --image-lifecycle-demo
+```
+
+该模式第 10 帧销毁 atlas，第 20 帧释放 root-scoped resolver registration；必须 exit 0，并输出
+`imageAtlasInvalidated=true`、`imageResolverCalls=19`、`imageResolverHits=9`、
+`imageResolverUnavailable=10`、`imageResolverUnbound=true`、`imageFrames=9`、
+`imageFreeFrames=21`、`maxImageQuads=12`、`imageFrameBorrowsAtRelease=0` 及非零
+`paintOrderChecksum`。这证明 unavailable
+阶段连续 skip、missing resolver 阶段不再调用 resolver，且非图片 UI 仍持续提交。
 
 Visual/interaction 验收另跑不带 `--auto-demo` 的窗口：确认 Dark/Light 切换后既有控件同步换肤，
 Primary/Destructive/Disabled Button 层次清楚，pointer press 会压低阴影并切换圆角 border ring 颜色，Tab focus 可辨，

@@ -22,8 +22,8 @@ Tina 当前最接近：
 
 其中 Image/Icon/NineSlice 不是装饰性补充，而是 HUD、Inventory、装备栏、技能栏、对话框和设置页的
 基础视觉能力。它不依赖 Behavior side store 或 Component transaction 才能成立：`UI-PERF-001` 建立首份
-计数协议后，Image 主线可与 Component 主线并行。当前 Image/Icon、NineSlice A/B 与 C 产品采用已交付；下一关闭点是
-missing/unavailable、DPI-like 矩阵与 benchmark。Icon 不另建一套控件或渲染协议，而是 Image 的 atlas-source、tint 和
+计数协议后，Image 主线可与 Component 主线并行。当前 Image/Icon、NineSlice A/B 与 C 产品/失效采用已交付；下一关闭点是
+DPI-like 矩阵与 benchmark。Icon 不另建一套控件或渲染协议，而是 Image 的 atlas-source、tint 和
 默认布局 profile。
 
 ## 当前框架
@@ -659,7 +659,7 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 4. `UI-IMAGE-001` 与 `UI-COMPONENT-001` 是两个可并行分支；前者不依赖 Behavior side store：
    - A Done：Image/Icon content、atlas/tint/fit/sampling、root-scoped resolve/pin、RGBA ImageQuad 和 Image semantics；
    - B Done：同源 NineSlice、1..9 quad 原子展开、小 destination/inset/clip/fractional-DPI 规则；
-   - C InProgress：icon-only/图文 Button、Inventory thumbnail、NineSlice panel 与 Dark/Light/atlas/sampling 产品证据 Done；missing/unavailable、DPI-like 矩阵与 benchmark Next；
+   - C InProgress：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling 及 missing/unavailable/resource invalidation 产品证据 Done；DPI-like 矩阵与 benchmark Next；
 5. `UI-COMPONENT-001`：拆标准 Behavior side store，补 Runtime bounded component transaction；可与上一步并行；
 6. `UI-STYLE-001`：等待 Image 与 Component 两条目标属性面稳定后，开放强类型 StyleClass/token 与
    node-local pseudo-state stylesheet，并把 image tint/opacity 纳入 dirty metadata；

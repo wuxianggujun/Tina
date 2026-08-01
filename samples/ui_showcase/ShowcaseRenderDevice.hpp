@@ -10,7 +10,9 @@
 namespace Tina::SampleUI {
 
 struct ShowcaseRenderEvidence final {
+    Core::u64 submittedFrames = 0;
     Core::u64 submittedImageFrames = 0;
+    Core::u64 submittedImageFreeFrames = 0;
     Core::u32 lastImageQuadCommands = 0;
     Core::u32 maxImageQuadCommands = 0;
     Core::u32 lastImageBatches = 0;
@@ -40,6 +42,7 @@ class ShowcaseRenderDeviceAccess final {
     {
         const Render::UIDisplayListView displayList = frame.primaryWindowUIDisplayList;
         const auto& statistics = displayList.statistics();
+        ++evidence_.submittedFrames;
         evidence_.lastImageQuadCommands = statistics.imageQuadCommandCount;
         evidence_.maxImageQuadCommands = (std::max)(evidence_.maxImageQuadCommands, statistics.imageQuadCommandCount);
         evidence_.lastPaintOrderChecksum = displayList.paintOrderChecksum();
@@ -75,6 +78,8 @@ class ShowcaseRenderDeviceAccess final {
         evidence_.maxUniqueImageResources = (std::max)(evidence_.maxUniqueImageResources, uniqueResourceCount);
         if (statistics.imageQuadCommandCount != 0) {
             ++evidence_.submittedImageFrames;
+        } else {
+            ++evidence_.submittedImageFreeFrames;
         }
     }
 

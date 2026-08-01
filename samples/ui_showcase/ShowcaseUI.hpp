@@ -54,6 +54,7 @@ class ShowcaseUI final {
     [[nodiscard]] Core::Status update(UIUpdateContext& context);
 
     void requestAutomatedStep(Core::u64 frameIndex) noexcept;
+    [[nodiscard]] bool unbindImageResolver() noexcept;
     void release() noexcept;
 
     [[nodiscard]] ShowcaseUISnapshot snapshot() const noexcept;

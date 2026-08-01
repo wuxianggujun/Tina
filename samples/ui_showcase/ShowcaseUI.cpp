@@ -1727,9 +1727,18 @@ void ShowcaseUI::requestAutomatedStep(Core::u64 frameIndex) noexcept
     }
 }
 
+bool ShowcaseUI::unbindImageResolver() noexcept
+{
+    if (!imageResolver_) {
+        return false;
+    }
+    imageResolver_.reset();
+    return true;
+}
+
 void ShowcaseUI::release() noexcept
 {
-    imageResolver_.reset();
+    static_cast<void>(unbindImageResolver());
     root_.reset();
 }
 
