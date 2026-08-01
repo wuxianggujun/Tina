@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <optional>
+#include <span>
 #include <thread>
 #include <utility>
 
@@ -224,6 +225,227 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     auto expiredBuilder = builder->createRoot();
     ASSERT_FALSE(expiredBuilder.has_value());
     EXPECT_EQ(expiredBuilder.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionCommitsBoundedComponentDuringEnterPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    auto transactionResult =
+        tree->beginBuildTransaction(root->rootNodeId(), UI::makePanelElement(), 4);
+    ASSERT_TRUE(transactionResult.has_value()) << transactionResult.error().message;
+    PrimaryWindowUIBuildTransaction transaction = std::move(*transactionResult);
+    const UI::UINodeId componentRoot = transaction.rootNodeId();
+    ASSERT_TRUE(componentRoot.hasValue());
+    EXPECT_EQ(transaction.remainingNodeBudget(), 3U);
+
+    auto label = transaction.createElement(componentRoot, UI::makeLabelElement("Runtime component"));
+    auto button = transaction.createElement(componentRoot, UI::makeButtonElement("Apply"));
+    ASSERT_TRUE(label.has_value()) << label.error().message;
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+    const UI::UICanvasCommand canvasCommand{
+        .bounds = {.width = 8.0F, .height = 8.0F},
+        .color = UI::rgb(0x2C7A7B),
+    };
+    UI::UIElementDescriptor canvasDescriptor = UI::makePanelElement();
+    canvasDescriptor.visual.canvas = std::span(&canvasCommand, 1);
+    auto canvas = transaction.createElement(componentRoot, canvasDescriptor);
+    ASSERT_TRUE(canvas.has_value()) << canvas.error().message;
+    EXPECT_EQ(transaction.remainingNodeBudget(), 0U);
+
+    auto committed = transaction.commit();
+    ASSERT_TRUE(committed.has_value()) << committed.error().message;
+    EXPECT_EQ(*committed, componentRoot);
+    EXPECT_FALSE(transaction.isActive());
+    EXPECT_EQ(context->liveNodeCount(), 5U);
+    EXPECT_GT(context->statistics().textByteUsed, 0U);
+    EXPECT_EQ(context->statistics().activeCanvasCommandCount, 1U);
+    EXPECT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    EXPECT_EQ(context->liveNodeCount(), 5U);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionCommitsDuringUIUpdatePhase)
+{
+    CapabilityState state;
+    auto enterEpoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(enterEpoch.has_value()) << enterEpoch.error().message;
+    auto builder = state.rootBuilder(*enterEpoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    ASSERT_TRUE(state.finishPhase(*enterEpoch, CapabilityPhase::GameStateEnter).has_value());
+
+    auto updateEpoch = state.beginUIUpdatePhase(context.get());
+    ASSERT_TRUE(updateEpoch.has_value()) << updateEpoch.error().message;
+    auto tree = state.treeUpdater(*updateEpoch, CapabilityPhase::UIUpdate, *root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto transaction = tree->beginBuildTransaction(
+        root->rootNodeId(), UI::makePanelElement(), 2);
+    ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
+    auto label = transaction->createElement(transaction->rootNodeId(), UI::makeLabelElement("Frame"));
+    ASSERT_TRUE(label.has_value()) << label.error().message;
+    ASSERT_TRUE(transaction->commit().has_value());
+    EXPECT_TRUE(state.finishPhase(*updateEpoch, CapabilityPhase::UIUpdate).has_value());
+    EXPECT_EQ(context->liveNodeCount(), 3U);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionBudgetFailureRollsBackRetainedStorage)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    const UI::UICanvasCommand canvasCommand{
+        .bounds = {.width = 4.0F, .height = 4.0F},
+        .color = UI::rgb(0x336699),
+    };
+    UI::UIElementDescriptor componentDescriptor = UI::makePanelElement();
+    componentDescriptor.visual.canvas = std::span(&canvasCommand, 1);
+    auto transaction = tree->beginBuildTransaction(root->rootNodeId(), componentDescriptor, 2);
+    ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
+    auto label = transaction->createElement(transaction->rootNodeId(), UI::makeLabelElement("Temporary"));
+    ASSERT_TRUE(label.has_value()) << label.error().message;
+    EXPECT_GT(context->statistics().textByteUsed, 0U);
+    EXPECT_EQ(context->statistics().activeCanvasCommandCount, 1U);
+
+    auto exhausted = transaction->createElement(transaction->rootNodeId(), UI::makePanelElement());
+    ASSERT_FALSE(exhausted.has_value());
+    EXPECT_EQ(exhausted.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_FALSE(transaction->isActive());
+    EXPECT_EQ(context->liveNodeCount(), 1U);
+    EXPECT_EQ(context->statistics().textByteUsed, 0U);
+    EXPECT_EQ(context->statistics().activeCanvasCommandCount, 0U);
+
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::CapacityExceeded);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, PhaseFinishRollsBackEscapedBuildTransaction)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto transaction = tree->beginBuildTransaction(
+        root->rootNodeId(), UI::makePanelElement(), 2);
+    ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
+    ASSERT_TRUE(transaction->createElement(
+        transaction->rootNodeId(), UI::makeLabelElement("Escaped")).has_value());
+    EXPECT_EQ(context->liveNodeCount(), 3U);
+
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::BuildTransactionInProgress);
+    EXPECT_EQ(context->liveNodeCount(), 1U);
+    EXPECT_EQ(context->statistics().textByteUsed, 0U);
+    EXPECT_FALSE(transaction->isActive());
+    auto expired = transaction->commit();
+    ASSERT_FALSE(expired.has_value());
+    EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+
+    auto updateEpoch = state.beginUIUpdatePhase(context.get());
+    ASSERT_TRUE(updateEpoch.has_value()) << updateEpoch.error().message;
+    EXPECT_TRUE(state.finishPhase(*updateEpoch, CapabilityPhase::UIUpdate).has_value());
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, MovedBuildTransactionResetRollsBackExactlyOnce)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto transactionResult = tree->beginBuildTransaction(
+        root->rootNodeId(), UI::makePanelElement(), 1);
+    ASSERT_TRUE(transactionResult.has_value()) << transactionResult.error().message;
+    PrimaryWindowUIBuildTransaction transaction = std::move(*transactionResult);
+    PrimaryWindowUIBuildTransaction moved = std::move(transaction);
+    EXPECT_FALSE(transaction.isActive());
+    EXPECT_TRUE(moved.isActive());
+    EXPECT_EQ(context->liveNodeCount(), 2U);
+
+    transaction.reset();
+    EXPECT_EQ(context->liveNodeCount(), 2U);
+    moved.reset();
+    EXPECT_EQ(context->liveNodeCount(), 1U);
+    moved.reset();
+    EXPECT_EQ(context->liveNodeCount(), 1U);
+    EXPECT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, AbandonedBuildTransactionDestructorRollsBackWithoutPoisoningPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    {
+        auto transaction = tree->beginBuildTransaction(
+            root->rootNodeId(), UI::makePanelElement(), 2);
+        ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
+        ASSERT_TRUE(transaction->createElement(
+            transaction->rootNodeId(), UI::makeLabelElement("Abandoned")).has_value());
+        EXPECT_EQ(context->liveNodeCount(), 3U);
+    }
+
+    EXPECT_EQ(context->liveNodeCount(), 1U);
+    EXPECT_EQ(context->statistics().textByteUsed, 0U);
+    EXPECT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionRejectsForeignParentBeforeMutation)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto firstRoot = builder->createRoot();
+    auto secondRoot = builder->createRoot();
+    ASSERT_TRUE(firstRoot.has_value()) << firstRoot.error().message;
+    ASSERT_TRUE(secondRoot.has_value()) << secondRoot.error().message;
+    auto firstTree = builder->treeUpdater(*firstRoot);
+    ASSERT_TRUE(firstTree.has_value()) << firstTree.error().message;
+    const usize liveNodesBefore = context->liveNodeCount();
+
+    auto foreignParent = firstTree->beginBuildTransaction(
+        secondRoot->rootNodeId(), UI::makePanelElement(), 1);
+    ASSERT_FALSE(foreignParent.has_value());
+    EXPECT_EQ(foreignParent.error().code, UI::UIErrorCode::InvalidNode);
+    EXPECT_EQ(context->liveNodeCount(), liveNodesBefore);
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::InvalidNode);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, ImageResolverRegistrationIsRootScopedMoveOnlyAndGenerationSafe)
@@ -1258,9 +1480,22 @@ TEST_F(PrimaryWindowUICapabilityTest, AbortPhaseInvalidatesFacadesAndAllowsTheNe
     ASSERT_TRUE(enterEpoch.has_value()) << enterEpoch.error().message;
     auto builder = state.rootBuilder(*enterEpoch);
     ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto transaction = tree->beginBuildTransaction(
+        root->rootNodeId(), UI::makePanelElement(), 2);
+    ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
+    ASSERT_TRUE(transaction->createElement(
+        transaction->rootNodeId(), UI::makeLabelElement("Abort")).has_value());
+    EXPECT_EQ(context->liveNodeCount(), 3U);
 
     state.abortPhase(*enterEpoch, CapabilityPhase::GameStateEnter);
     EXPECT_FALSE(state.hasPrimaryWindowUI(*enterEpoch, CapabilityPhase::GameStateEnter));
+    EXPECT_EQ(context->liveNodeCount(), 1U);
+    EXPECT_EQ(context->statistics().textByteUsed, 0U);
+    EXPECT_FALSE(transaction->isActive());
     auto expired = builder->createRoot();
     ASSERT_FALSE(expired.has_value());
     EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);

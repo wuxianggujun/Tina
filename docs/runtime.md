@@ -57,6 +57,11 @@ IGameApplication::createInitialState
   -> publish the committed stack
 ```
 
+`PrimaryWindowUITreeUpdater::beginBuildTransaction()` 在 `onEnter()` 与 `updateUI()` 当前 epoch 内提供固定 node
+budget 的 move-only component transaction。底层事务由 Runtime capability state 持有，因此事务失败、reset、
+析构或 phase abort 都会回滚完整 retained subtree；活动事务逃逸 callback 时，phase finish 先回滚，再返回
+`BuildTransactionInProgress`。成功 commit 后只保留普通 retained nodes，不存在跨帧 component wrapper。
+
 候选 State 在提交前失败时直接销毁，不调用其 `onExit()`，也不调用 Application `onShutdown()`。
 提交后，无论正常退出还是 Runtime 失败，State `onExit()` 与 Application `onShutdown()` 各执行一次。
 

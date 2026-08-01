@@ -1,6 +1,7 @@
 #include "PrimaryWindowUICapabilityState.hpp"
 
 #include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/ui/UIErrors.hpp>
 
 #include <limits>
 #include <exception>
@@ -77,6 +78,17 @@ Core::Status PrimaryWindowUICapabilityState::finishPhase(u64 epoch, PrimaryWindo
                                              Operation));
     }
 
+    if (buildTransaction_.has_value())
+    {
+        buildTransaction_.reset();
+        buildTransactionEpoch_ = 0;
+        buildTransactionPhase_ = PrimaryWindowUIPhase::None;
+        static_cast<void>(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "A primary-window UI build transaction escaped its Runtime phase"},
+            Operation));
+    }
+
     std::optional<Core::Error> firstError = std::move(firstError_);
     firstError_.reset();
     context_ = nullptr;
@@ -96,6 +108,9 @@ void PrimaryWindowUICapabilityState::abortPhase(u64 epoch, PrimaryWindowUIPhase 
         return;
     }
 
+    buildTransaction_.reset();
+    buildTransactionEpoch_ = 0;
+    buildTransactionPhase_ = PrimaryWindowUIPhase::None;
     firstError_.reset();
     context_ = nullptr;
     phase_ = PrimaryWindowUIPhase::None;
@@ -327,6 +342,128 @@ PrimaryWindowUICapabilityState::createElement(u64 epoch, PrimaryWindowUIPhase ph
         return Core::failure(rememberFirstError(std::move(child.error()), Operation));
     }
     return *child;
+}
+
+Core::Result<PrimaryWindowUIBuildTransaction>
+PrimaryWindowUICapabilityState::beginBuildTransaction(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
+    const UI::UIElementDescriptor& rootDescriptor, usize nodeBudget)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::beginBuildTransaction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (buildTransaction_.has_value())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "Only one primary-window UI build transaction may be active per Runtime phase"},
+            Operation));
+    }
+
+    auto transaction = updater.beginBuildTransaction(parent, rootDescriptor, nodeBudget);
+    if (!transaction)
+    {
+        return Core::failure(rememberFirstError(std::move(transaction.error()), Operation));
+    }
+    buildTransaction_.emplace(std::move(*transaction));
+    buildTransactionEpoch_ = epoch;
+    buildTransactionPhase_ = phase;
+    return PrimaryWindowUIBuildTransaction{*this, epoch, phase};
+}
+
+Core::Result<UI::UINodeId>
+PrimaryWindowUICapabilityState::createElementFromBuildTransaction(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId parent,
+    const UI::UIElementDescriptor& descriptor)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUIBuildTransaction::createElement";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (!isBuildTransactionActive(epoch, phase))
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::InvalidNode,
+                        "The primary-window UI build transaction is not active"},
+            Operation));
+    }
+
+    auto child = buildTransaction_->createElement(parent, descriptor);
+    if (!child)
+    {
+        Core::Error error = rememberFirstError(std::move(child.error()), Operation);
+        buildTransaction_.reset();
+        buildTransactionEpoch_ = 0;
+        buildTransactionPhase_ = PrimaryWindowUIPhase::None;
+        return Core::failure(std::move(error));
+    }
+    return *child;
+}
+
+Core::Result<UI::UINodeId>
+PrimaryWindowUICapabilityState::commitBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUIBuildTransaction::commit";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (!isBuildTransactionActive(epoch, phase))
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::InvalidNode,
+                        "The primary-window UI build transaction is not active"},
+            Operation));
+    }
+
+    auto componentRoot = buildTransaction_->commit();
+    if (!componentRoot)
+    {
+        Core::Error error = rememberFirstError(std::move(componentRoot.error()), Operation);
+        buildTransaction_.reset();
+        buildTransactionEpoch_ = 0;
+        buildTransactionPhase_ = PrimaryWindowUIPhase::None;
+        return Core::failure(std::move(error));
+    }
+    buildTransaction_.reset();
+    buildTransactionEpoch_ = 0;
+    buildTransactionPhase_ = PrimaryWindowUIPhase::None;
+    return *componentRoot;
+}
+
+void PrimaryWindowUICapabilityState::resetBuildTransaction(u64 epoch,
+                                                            PrimaryWindowUIPhase phase) noexcept
+{
+    if (!isBuildTransactionActive(epoch, phase))
+    {
+        return;
+    }
+    buildTransaction_.reset();
+    buildTransactionEpoch_ = 0;
+    buildTransactionPhase_ = PrimaryWindowUIPhase::None;
+}
+
+UI::UINodeId PrimaryWindowUICapabilityState::buildTransactionRootNodeId(
+    u64 epoch, PrimaryWindowUIPhase phase) const noexcept
+{
+    return isBuildTransactionActive(epoch, phase) ? buildTransaction_->rootNodeId() : UI::UINodeId{};
+}
+
+usize PrimaryWindowUICapabilityState::buildTransactionRemainingNodeBudget(
+    u64 epoch, PrimaryWindowUIPhase phase) const noexcept
+{
+    return isBuildTransactionActive(epoch, phase) ? buildTransaction_->remainingNodeBudget() : 0;
+}
+
+bool PrimaryWindowUICapabilityState::isBuildTransactionActive(
+    u64 epoch, PrimaryWindowUIPhase phase) const noexcept
+{
+    return std::this_thread::get_id() == ownerThreadId_ && epoch != 0 && epoch == epoch_ &&
+           epoch == buildTransactionEpoch_ && phase != PrimaryWindowUIPhase::None && phase == phase_ &&
+           phase == buildTransactionPhase_ && buildTransaction_.has_value() && buildTransaction_->isActive();
 }
 
 Core::Status PrimaryWindowUICapabilityState::setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase,

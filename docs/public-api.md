@@ -253,8 +253,10 @@ registration；frame build 按 `(root, AssetId)` 去重 resolve/pin，不在 UI 
 committed semantics 使用最近 published ancestor，显式空 name 不回退 content。`UIStyleRoleId` 与 behavior/
 semantics 分离，`setStyleRole()` 切换 recipe，`clearOverride()` 从当前 product theme 恢复选定属性；Runtime
 phase facade 同样暴露 role/query/reset。`UIElementBuildTransaction` 为直接 `UITreeUpdater` authoring 提供固定
-node budget，多节点创建失败/析构回滚整棵子树并阻止中途 snapshot commit；它不作为可逃逸的 Runtime
-phase facade 对象。
+node budget；Runtime 对应的 move-only `PrimaryWindowUIBuildTransaction` 由
+`PrimaryWindowUITreeUpdater::beginBuildTransaction()` 创建。二者都在多节点创建失败/析构时回滚整棵子树并
+阻止中途 snapshot commit。Runtime transaction 的每次操作校验 phase epoch，不得跨 callback 保存；活动事务
+逃逸时 phase finish 强制回滚并返回 `BuildTransactionInProgress`，成功 commit 后只留下普通 retained subtree。
 
 `UIElementVisual::canvas` 接受 borrowed、backend-neutral `SolidRect`/`Image`/`NineSlice` command span。
 `SolidRect` 可设置统一 logical-pixel `cornerRadius`；Image/NineSlice 复用 `UIImageSource`，NineSlice 另带
@@ -558,7 +560,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - 完整 PBR/IBL/shadow、point/spot light、light culling 与通用 pass scheduler；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
-- Runtime phase-scoped bounded component transaction 与可自由组合的标准 Behavior side store；
+- 可自由组合的标准 Behavior side store，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
 - 用户 StyleClass/node-local pseudo-state stylesheet 与 paint-only Motion；
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；

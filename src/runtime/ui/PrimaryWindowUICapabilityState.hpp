@@ -52,6 +52,22 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<UI::UINodeId>
     createElement(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
                   const UI::UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<PrimaryWindowUIBuildTransaction>
+    beginBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                          UI::UINodeId parent, const UI::UIElementDescriptor& rootDescriptor,
+                          usize nodeBudget);
+    [[nodiscard]] Core::Result<UI::UINodeId>
+    createElementFromBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId parent,
+                                      const UI::UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<UI::UINodeId>
+    commitBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase);
+    void resetBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase) noexcept;
+    [[nodiscard]] UI::UINodeId buildTransactionRootNodeId(u64 epoch,
+                                                          PrimaryWindowUIPhase phase) const noexcept;
+    [[nodiscard]] usize buildTransactionRemainingNodeBudget(
+        u64 epoch, PrimaryWindowUIPhase phase) const noexcept;
+    [[nodiscard]] bool isBuildTransactionActive(u64 epoch,
+                                                PrimaryWindowUIPhase phase) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -298,9 +314,13 @@ class PrimaryWindowUICapabilityState final {
     u64 epoch_ = 0;
     PrimaryWindowUIPhase phase_ = PrimaryWindowUIPhase::None;
     std::optional<Core::Error> firstError_;
+    std::optional<UI::UIElementBuildTransaction> buildTransaction_;
+    u64 buildTransactionEpoch_ = 0;
+    PrimaryWindowUIPhase buildTransactionPhase_ = PrimaryWindowUIPhase::None;
     std::vector<ImageResolverSlot> imageResolverSlots_{};
 
     friend class ::Tina::PrimaryWindowUIImageResolverRegistration;
+    friend class ::Tina::PrimaryWindowUIBuildTransaction;
 };
 
 } // namespace Tina::Runtime::Detail

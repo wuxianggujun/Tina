@@ -21,7 +21,7 @@
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |
-| Runtime | startup root builder、phase-scoped tree updater（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
+| Runtime | startup root builder、phase-scoped tree updater 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
 | Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture 与 100k virtual collection 四条 schema-v1 provisional workload |
 | Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
@@ -52,8 +52,10 @@ Runtime 私有持有主窗口 UIContext；普通游戏不取得裸 `UIContext*`�
 
 - `GameStateEnterContext::primaryWindowUIRootBuilder()` 只在 `onEnter()` 当前 epoch 有效；
 - `UIUpdateContext::primaryWindowUITreeUpdater(root)` 只在 `updateUI()` 当前 epoch 对该 root 有效；
+- `PrimaryWindowUITreeUpdater::beginBuildTransaction()` 返回的 move-only transaction 只在当前 epoch 有效；
 - facade 的第一次失败成为 phase sticky error，回调结束后统一返回；
-- builder/updater、span 和 committed view 不得跨 phase 保存。
+- builder/updater/transaction、span 和 committed view 不得跨 phase 保存；活动 transaction 若逃逸 callback，
+  phase finish 会先回滚整棵组件，再返回 `BuildTransactionInProgress`。
 
 `PrimaryWindowUITreeUpdater` 通过统一 `createElement()` 创建 ListView/TreeView，并暴露其 DataSource、
 style/paint、metrics、selection、scroll，以及 Tree expansion 操作；这些 facade 与其他 mutation 一样受 phase epoch 和
@@ -90,10 +92,11 @@ Runtime phase facade 同样可切换/query role 和 reset override。
 必须由 Button root 提供显式 name。`makeImageElement()` 只为独立表达信息的图片发布 Image role，并要求
 调用方显式给出 name，不能从 AssetId 或资源文件名推导可访问名称。
 
-多节点业务组件可通过 `UIElementBuildTransaction` 固定 node budget 构建；集合内部 row pool 计入预算，
-创建失败、reset 或析构会回滚整棵组件及 text/canvas storage，active transaction 期间 structure/layout commit
-返回 `BuildTransactionInProgress`。事务对象只属于直接 `UITreeUpdater` authoring，不允许作为 Runtime phase
-facade 对象逃逸回调。公开 `UIWidgetKind` 已删除；私有 `BuiltinElementKind` 只服务成熟控件 storage/行为分派。
+多节点业务组件可通过 `UIElementBuildTransaction` 或 Runtime 的 `PrimaryWindowUIBuildTransaction` 固定 node
+budget 构建；集合内部 row pool 计入预算，创建失败、reset 或析构会回滚整棵组件及 text/canvas storage，
+active transaction 期间 structure/layout commit 返回 `BuildTransactionInProgress`。Runtime facade 由 capability
+state 持有底层事务并逐操作校验 epoch/phase；成功 commit 后只留下普通 retained subtree，不保留 component
+wrapper。公开 `UIWidgetKind` 已删除；私有 `BuiltinElementKind` 只服务成熟控件 storage/行为分派。
 Canvas 命令复制到固定容量 storage：`SolidRect` 支持统一 `cornerRadius`，`Image` 复用 `UIImageSource`，
 `NineSlice` 使用 source-pixel/destination-logical insets 且首版仅 Stretch。逐角半径、圆角子树 clip 与
 stylesheet 仍属后续扩展。
@@ -107,7 +110,7 @@ stylesheet 仍属后续扩展。
 | --- | --- | --- |
 | 组合 Panel/Label/Button/List 等 retained 子树 | 可用 | 通过统一 `createElement()` 与官方 `make*Element()` recipe |
 | 自定义布局、Semantics、命中策略、局部 box/text paint | 可用 | 仍受 fixed-capacity、owner-thread 与 phase 生命周期约束 |
-| 多节点业务组件 | 直接 `UITreeUpdater` 可用 | `UIElementBuildTransaction` 固定 node budget、失败整棵回滚；Runtime phase facade 尚无等价 component transaction |
+| 多节点业务组件 | 直接与 Runtime phase facade 均可用 | `UIElementBuildTransaction` / `PrimaryWindowUIBuildTransaction` 固定 node budget、失败整棵回滚；Runtime transaction 不得跨 callback 保存 |
 | 自定义 Canvas | 可用首版 | backend-neutral `SolidRect`、`Image`、Stretch-only `NineSlice`；只保存 AssetId/图片元数据，不能提交 shader、GPU handle 或任意 paint callback |
 | 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override；没有用户 StyleClass/selector/pseudo-state rule |
 | 自定义交互 | 部分可用 | 可挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
@@ -527,7 +530,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone 与 `ui_image_nineslice_v1` 已落地；后续补 Component build、Style、Motion workload；固定机前时间结论只报 provisional |
-| `UI-COMPONENT-001` | 标准 Behavior 独立 side store、capability 校验与 Runtime phase-scoped bounded component transaction |
+| `UI-COMPONENT-001` | InProgress；Runtime phase-scoped node-bounded component transaction 已落地；待标准 Behavior 独立 side store、各 pool 统一 reservation/counter 与 `ui_component_build_v1` |
 | `UI-STYLE-001` | 开放强类型 StyleClass/token ID、node-local pseudo-state selector 与预编译有界 stylesheet；不做完整 CSS |
 | `UI-MOTION-001` | fixed-capacity paint-only transition、monotonic clock、retarget 与 reduced-motion；action/hit/layout 契约保持不变 |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |

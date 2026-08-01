@@ -7,6 +7,8 @@ static_assert(!std::is_copy_constructible_v<Tina::PrimaryWindowUIRootBuilder>);
 static_assert(std::is_move_constructible_v<Tina::PrimaryWindowUIRootBuilder>);
 static_assert(!std::is_copy_constructible_v<Tina::PrimaryWindowUITreeUpdater>);
 static_assert(std::is_move_constructible_v<Tina::PrimaryWindowUITreeUpdater>);
+static_assert(!std::is_copy_constructible_v<Tina::PrimaryWindowUIBuildTransaction>);
+static_assert(std::is_move_constructible_v<Tina::PrimaryWindowUIBuildTransaction>);
 
 using PrimaryWindowListenerResult = decltype(std::declval<Tina::PrimaryWindowUITreeUpdater&>().addRoutedPointerListener(
     std::declval<Tina::UI::UIRoutedPointerListenerDesc>(), std::declval<Tina::UI::UIRoutedPointerCallback>()));

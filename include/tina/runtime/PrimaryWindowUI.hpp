@@ -32,6 +32,42 @@ class PrimaryWindowUICapabilityState;
 
 namespace Tina {
 
+// Move-only, phase-scoped bounded construction of one retained component
+// subtree. The transaction must be committed or destroyed before its Runtime
+// callback returns. An escaped active transaction is rolled back when the
+// phase finishes, and later operations fail the epoch check.
+class PrimaryWindowUIBuildTransaction final {
+  public:
+    ~PrimaryWindowUIBuildTransaction() noexcept;
+
+    PrimaryWindowUIBuildTransaction(const PrimaryWindowUIBuildTransaction&) = delete;
+    PrimaryWindowUIBuildTransaction& operator=(const PrimaryWindowUIBuildTransaction&) = delete;
+
+    PrimaryWindowUIBuildTransaction(PrimaryWindowUIBuildTransaction&& other) noexcept;
+    PrimaryWindowUIBuildTransaction& operator=(PrimaryWindowUIBuildTransaction&& other) noexcept;
+
+    [[nodiscard]] Core::Result<UI::UINodeId> createElement(
+        UI::UINodeId parent, const UI::UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<UI::UINodeId> commit();
+    void reset() noexcept;
+
+    [[nodiscard]] UI::UINodeId rootNodeId() const noexcept;
+    [[nodiscard]] usize remainingNodeBudget() const noexcept;
+    [[nodiscard]] bool isActive() const noexcept;
+    explicit operator bool() const noexcept;
+
+  private:
+    PrimaryWindowUIBuildTransaction(Runtime::Detail::PrimaryWindowUICapabilityState& state,
+                                    u64 epoch,
+                                    Runtime::Detail::PrimaryWindowUIPhase phase) noexcept;
+
+    Runtime::Detail::PrimaryWindowUICapabilityState* m_state = nullptr;
+    u64 m_epoch = 0;
+    Runtime::Detail::PrimaryWindowUIPhase m_phase{};
+
+    friend class Runtime::Detail::PrimaryWindowUICapabilityState;
+};
+
 // Move-only ownership of one root-scoped image resolver registration. The
 // registration and its resolver userData must outlive every frame that can
 // paint the root, and must be reset on the Runtime owner thread before the
@@ -77,6 +113,10 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<bool> isAlive(UI::UINodeId node) const;
     [[nodiscard]] Core::Result<UI::UINodeId> createElement(UI::UINodeId parent,
                                                           const UI::UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<PrimaryWindowUIBuildTransaction>
+    beginBuildTransaction(UI::UINodeId parent,
+                          const UI::UIElementDescriptor& rootDescriptor,
+                          usize nodeBudget);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);

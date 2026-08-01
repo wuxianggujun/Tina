@@ -19,6 +19,96 @@ template <typename Value> [[nodiscard]] Core::Result<Value> expiredFacade(std::s
 
 } // namespace
 
+PrimaryWindowUIBuildTransaction::PrimaryWindowUIBuildTransaction(
+    Runtime::Detail::PrimaryWindowUICapabilityState& state, u64 epoch,
+    Runtime::Detail::PrimaryWindowUIPhase phase) noexcept
+    : m_state(&state), m_epoch(epoch), m_phase(phase)
+{
+}
+
+PrimaryWindowUIBuildTransaction::~PrimaryWindowUIBuildTransaction() noexcept
+{
+    reset();
+}
+
+PrimaryWindowUIBuildTransaction::PrimaryWindowUIBuildTransaction(
+    PrimaryWindowUIBuildTransaction&& other) noexcept
+    : m_state(std::exchange(other.m_state, nullptr)), m_epoch(std::exchange(other.m_epoch, 0)),
+      m_phase(std::exchange(other.m_phase, Runtime::Detail::PrimaryWindowUIPhase::None))
+{
+}
+
+PrimaryWindowUIBuildTransaction& PrimaryWindowUIBuildTransaction::operator=(
+    PrimaryWindowUIBuildTransaction&& other) noexcept
+{
+    if (this == &other)
+    {
+        return *this;
+    }
+    reset();
+    m_state = std::exchange(other.m_state, nullptr);
+    m_epoch = std::exchange(other.m_epoch, 0);
+    m_phase = std::exchange(other.m_phase, Runtime::Detail::PrimaryWindowUIPhase::None);
+    return *this;
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUIBuildTransaction::createElement(
+    UI::UINodeId parent, const UI::UIElementDescriptor& descriptor)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUIBuildTransaction::createElement");
+    }
+    return m_state->createElementFromBuildTransaction(m_epoch, m_phase, parent, descriptor);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUIBuildTransaction::commit()
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUIBuildTransaction::commit");
+    }
+    auto componentRoot = m_state->commitBuildTransaction(m_epoch, m_phase);
+    if (componentRoot)
+    {
+        m_state = nullptr;
+        m_epoch = 0;
+        m_phase = Runtime::Detail::PrimaryWindowUIPhase::None;
+    }
+    return componentRoot;
+}
+
+void PrimaryWindowUIBuildTransaction::reset() noexcept
+{
+    if (m_state != nullptr)
+    {
+        m_state->resetBuildTransaction(m_epoch, m_phase);
+    }
+    m_state = nullptr;
+    m_epoch = 0;
+    m_phase = Runtime::Detail::PrimaryWindowUIPhase::None;
+}
+
+UI::UINodeId PrimaryWindowUIBuildTransaction::rootNodeId() const noexcept
+{
+    return m_state != nullptr ? m_state->buildTransactionRootNodeId(m_epoch, m_phase) : UI::UINodeId{};
+}
+
+usize PrimaryWindowUIBuildTransaction::remainingNodeBudget() const noexcept
+{
+    return m_state != nullptr ? m_state->buildTransactionRemainingNodeBudget(m_epoch, m_phase) : 0;
+}
+
+bool PrimaryWindowUIBuildTransaction::isActive() const noexcept
+{
+    return m_state != nullptr && m_state->isBuildTransactionActive(m_epoch, m_phase);
+}
+
+PrimaryWindowUIBuildTransaction::operator bool() const noexcept
+{
+    return isActive();
+}
+
 PrimaryWindowUIImageResolverRegistration::PrimaryWindowUIImageResolverRegistration(
     Runtime::Detail::PrimaryWindowUICapabilityState& state, u32 slot, u32 generation) noexcept
     : m_state(&state), m_slot(slot), m_generation(generation)
@@ -118,6 +208,19 @@ PrimaryWindowUITreeUpdater::createElement(UI::UINodeId parent, const UI::UIEleme
         return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createElement");
     }
     return m_state->createElement(m_epoch, m_phase, m_updater, parent, descriptor);
+}
+
+Core::Result<PrimaryWindowUIBuildTransaction>
+PrimaryWindowUITreeUpdater::beginBuildTransaction(
+    UI::UINodeId parent, const UI::UIElementDescriptor& rootDescriptor, usize nodeBudget)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<PrimaryWindowUIBuildTransaction>(
+            "PrimaryWindowUITreeUpdater::beginBuildTransaction");
+    }
+    return m_state->beginBuildTransaction(
+        m_epoch, m_phase, m_updater, parent, rootDescriptor, nodeBudget);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style)
