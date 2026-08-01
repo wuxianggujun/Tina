@@ -3,6 +3,8 @@
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 
+#include "support/Utf8Path.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -177,7 +179,7 @@ TEST(CatalogPackageTests, OpensValidPackageWithValidation)
     const auto assetId = *Core::AssetId::fromBytes(idBytes(Seed));
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_open_package_ok";
     writeBytes(catalogRoot / "manifest.tmnft", makeSingleSpriteManifest(Seed, cooked.size(), *digest));
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId)->view()),
                cooked);
 

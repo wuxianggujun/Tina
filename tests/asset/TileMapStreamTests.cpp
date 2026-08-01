@@ -7,6 +7,7 @@
 #include <tina/asset_format/TilesetPayload.hpp>
 
 #include "support/CatalogPackageTestSupport.hpp"
+#include "support/Utf8Path.hpp"
 
 #include <gtest/gtest.h>
 
@@ -60,7 +61,7 @@ void writeCookedObject(const std::filesystem::path& root, AssetFormat::AssetKind
 {
     auto relative = AssetFormat::makeCookedArtifactPath(kind, id);
     ASSERT_TRUE(relative.has_value()) << relative.error().message;
-    writeBytes(root / std::filesystem::u8path(relative->view()), bytes);
+    writeBytes(root / Tina::TestSupport::pathFromUtf8Bytes(relative->view()), bytes);
 }
 
 [[nodiscard]] TileMapStreamPackage writeTileMapStreamPackage(std::string_view name)

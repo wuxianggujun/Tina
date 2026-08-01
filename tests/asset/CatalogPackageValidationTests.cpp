@@ -8,6 +8,8 @@
 #include <tina/asset_format/TileMapChunkPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 
+#include "support/Utf8Path.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -205,7 +207,7 @@ TEST(CatalogPackageValidationTests, AcceptsCompletePackage)
     const auto assetId = *Core::AssetId::fromBytes(idBytes(Seed));
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_valid";
     resetDirectory(catalogRoot);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId)->view()),
                cooked);
 
@@ -271,7 +273,7 @@ TEST(CatalogPackageValidationTests, RejectsSizeMismatchWithoutContentVerify)
     const auto assetId = *Core::AssetId::fromBytes(idBytes(Seed));
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_size";
     resetDirectory(catalogRoot);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId)->view()),
                cooked);
 
@@ -303,7 +305,7 @@ TEST(CatalogPackageValidationTests, MetadataOnlyAcceptsButFullValidationRejectsS
     const auto assetId = *Core::AssetId::fromBytes(idBytes(Seed));
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_content";
     resetDirectory(catalogRoot);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId)->view()),
                cooked);
 
@@ -390,9 +392,9 @@ TEST(CatalogPackageValidationTests, TypedValidationRejectsSelfConsistentMalforme
 
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_typed_tilemap_chunk";
     resetDirectory(catalogRoot);
-    writeBytes(catalogRoot / std::filesystem::u8path(DefaultCatalogManifestRelativePath),
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(DefaultCatalogManifestRelativePath),
                *manifestBytes);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::TileMapChunk,
                                                        *chunkAssetId)
                        ->view()),

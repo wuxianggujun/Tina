@@ -5,6 +5,8 @@
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 
+#include "support/Utf8Path.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -226,7 +228,7 @@ TEST(CookedAssetFileTests, LoadsFromCatalogRootUsingDeterministicPath)
 
     const auto artifact = AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId);
     ASSERT_TRUE(artifact.has_value());
-    writeBytes(catalogRoot / std::filesystem::u8path(artifact->view()), cookedBytes);
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(artifact->view()), cookedBytes);
 
     const auto manifestBytes = makeManifestForSprite(Seed, cookedBytes.size(), *digest);
     auto manifest = AssetFormat::parseCookedManifestView(manifestBytes);

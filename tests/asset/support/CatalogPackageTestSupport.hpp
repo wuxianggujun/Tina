@@ -5,6 +5,8 @@
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
 
+#include "support/Utf8Path.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -237,15 +239,17 @@ struct TextureMaterialPackage final {
 
     writeBytes(package.root / "manifest.tmnft",
                makeTextureMaterialManifest(package.textureBytes.size(), digest, package.materialBytes.size(), digest));
-    writeBytes(package.root / std::filesystem::u8path(AssetFormat::makeCookedArtifactPath(
-                                                             AssetFormat::AssetKind::Texture2D, package.textureId)
-                                                             ->view()),
+    writeBytes(package.root / Tina::TestSupport::pathFromUtf8Bytes(
+                                  AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D,
+                                                                      package.textureId)
+                                      ->view()),
                package.textureBytes);
     if (writeMaterialObject)
     {
-        writeBytes(package.root / std::filesystem::u8path(AssetFormat::makeCookedArtifactPath(
-                                                                 AssetFormat::AssetKind::Material, package.materialId)
-                                                                 ->view()),
+        writeBytes(package.root / Tina::TestSupport::pathFromUtf8Bytes(
+                                      AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material,
+                                                                          package.materialId)
+                                          ->view()),
                    package.materialBytes);
     }
     return package;

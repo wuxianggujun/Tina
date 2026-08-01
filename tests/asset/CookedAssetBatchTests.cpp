@@ -5,6 +5,8 @@
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 
+#include "support/Utf8Path.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -201,10 +203,10 @@ TEST(CookedAssetBatchTests, LoadsDependencyChainInOrder)
 
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_batch_catalog";
     std::filesystem::create_directories(catalogRoot);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
                textureBytes);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
                materialBytes);
 
@@ -252,7 +254,7 @@ TEST(CookedAssetBatchTests, FailureRollsBackAlreadyLoadedFiles)
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_batch_catalog_fail";
     std::filesystem::create_directories(catalogRoot);
     // Only write texture; material missing on disk.
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
                textureBytes);
     (void)materialBytes;
@@ -295,10 +297,10 @@ TEST(CookedAssetBatchTests, LoadsFromPrecomputedPlan)
 
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_batch_plan_catalog";
     std::filesystem::create_directories(catalogRoot);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
                textureBytes);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
                materialBytes);
 
@@ -346,10 +348,10 @@ TEST(CookedAssetBatchTests, RejectsPlanRowMismatchWithoutPublish)
 
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_batch_plan_mismatch";
     std::filesystem::create_directories(catalogRoot);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
                textureBytes);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
                materialBytes);
 
@@ -399,10 +401,10 @@ TEST(CookedAssetBatchTests, RejectsPlanExceedingTotalCookedFileBytesBudget)
 
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_batch_budget";
     std::filesystem::create_directories(catalogRoot);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
                textureBytes);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
                materialBytes);
 
@@ -453,10 +455,10 @@ TEST(CookedAssetBatchTests, AcceptsPlanWithinTotalCookedFileBytesBudget)
 
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_batch_budget_ok";
     std::filesystem::create_directories(catalogRoot);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
                textureBytes);
-    writeBytes(catalogRoot / std::filesystem::u8path(
+    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
                    AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
                materialBytes);
 

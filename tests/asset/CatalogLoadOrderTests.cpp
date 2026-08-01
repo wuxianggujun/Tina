@@ -25,7 +25,7 @@ struct DependencySpec final {
 struct ManifestEntrySpec final {
     Core::u8 idSeed = 0;
     AssetFormat::AssetKind kind = AssetFormat::AssetKind::Invalid;
-    std::vector<DependencySpec> dependencies;
+    std::vector<DependencySpec> dependencies{};
 };
 
 class TrackingMemoryResource final : public std::pmr::memory_resource {
