@@ -14,15 +14,19 @@ include("${CMAKE_CURRENT_LIST_DIR}/VerifyInstalledTargets.cmake")
 tina_verify_installed_targets(${Tina_PACKAGE_TARGETS})
 tina_verify_backend_neutral_game_sdk()
 
-if(Tina_PlatformGlfw_FOUND OR TARGET Tina::PlatformGlfw OR Tina_ADAPTER_TARGETS)
-    message(FATAL_ERROR "The Null Tina package unexpectedly exposes PlatformGlfw adapter state")
+if(Tina_PlatformGlfw_FOUND OR Tina_RenderBgfx_FOUND OR Tina_UIFreetype_FOUND OR
+   Tina_DesktopBootstrap_FOUND OR Tina_ADAPTER_TARGETS OR Tina_DESKTOP_BOOTSTRAP_TARGETS)
+    message(FATAL_ERROR "The Null Tina package unexpectedly exposes Desktop adapter state")
 endif()
 if(DEFINED TINA_EXPECTED_INSTALL_PREFIX AND NOT TINA_EXPECTED_INSTALL_PREFIX STREQUAL "")
-    set(tina_glfw_factory_header
-        "${TINA_EXPECTED_INSTALL_PREFIX}/include/tina/platform/glfw/GlfwPlatformFactory.hpp")
-    if(EXISTS "${tina_glfw_factory_header}")
-        message(FATAL_ERROR "The Null Tina package unexpectedly installs ${tina_glfw_factory_header}")
-    endif()
+    foreach(tina_adapter_header IN ITEMS
+            "include/tina/platform/glfw/GlfwPlatformFactory.hpp"
+            "include/tina/ui/text/FreeTypeTextRasterizerFactory.hpp"
+            "include/tina/desktop/DesktopEngine.hpp")
+        if(EXISTS "${TINA_EXPECTED_INSTALL_PREFIX}/${tina_adapter_header}")
+            message(FATAL_ERROR "The Null Tina package unexpectedly installs ${tina_adapter_header}")
+        endif()
+    endforeach()
 endif()
 
 add_executable(tina_sdk_consumer main.cpp)

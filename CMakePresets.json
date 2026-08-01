@@ -215,6 +215,15 @@
       }
     },
     {
+      "name": "linux-gcc13-vnext-bgfx",
+      "displayName": "Linux vNext bgfx (GCC 13 + GLFW + C++23)",
+      "inherits": "linux-gcc13-vnext-platform",
+      "binaryDir": "${sourceDir}/out/build/linux-gcc13-vnext-bgfx",
+      "cacheVariables": {
+        "TINA_BUILD_RENDER_BGFX": "ON"
+      }
+    },
+    {
       "name": "linux-gcc13-vnext-platform-wayland",
       "displayName": "Linux vNext Platform (GCC 13 + GLFW X11/Wayland + C++23)",
       "inherits": "linux-gcc13-vnext-platform",
@@ -415,6 +424,11 @@
     {
       "name": "linux-gcc13-vnext-platform-debug",
       "configurePreset": "linux-gcc13-vnext-platform",
+      "jobs": 2
+    },
+    {
+      "name": "linux-gcc13-vnext-bgfx-debug",
+      "configurePreset": "linux-gcc13-vnext-bgfx",
       "jobs": 2
     },
     {

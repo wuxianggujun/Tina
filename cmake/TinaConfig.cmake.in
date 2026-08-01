@@ -13,6 +13,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/TinaTargets.cmake")
 set_and_check(Tina_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set(Tina_GameSDK_FOUND TRUE)
 set(Tina_PlatformGlfw_FOUND FALSE)
+set(Tina_RenderBgfx_FOUND FALSE)
+set(Tina_UIFreetype_FOUND FALSE)
+set(Tina_DesktopBootstrap_FOUND FALSE)
 set(Tina_GAME_SDK_TARGETS
     Tina::GameSDK
     Tina::Core
@@ -40,8 +43,16 @@ if(@TINA_PACKAGE_WITH_UI_UIA@)
 endif()
 
 set(Tina_ADAPTER_TARGETS)
-if(@TINA_PACKAGE_WITH_PLATFORM_GLFW@ AND "PlatformGlfw" IN_LIST Tina_FIND_COMPONENTS)
-    if(Tina_FIND_REQUIRED_PlatformGlfw)
+set(Tina_DESKTOP_BOOTSTRAP_TARGETS)
+
+set(tina_load_desktop_bootstrap FALSE)
+if("DesktopBootstrap" IN_LIST Tina_FIND_COMPONENTS)
+    set(tina_load_desktop_bootstrap TRUE)
+endif()
+
+if(@TINA_PACKAGE_WITH_PLATFORM_GLFW@ AND
+   ("PlatformGlfw" IN_LIST Tina_FIND_COMPONENTS OR tina_load_desktop_bootstrap))
+    if(Tina_FIND_REQUIRED_PlatformGlfw OR Tina_FIND_REQUIRED_DesktopBootstrap)
         find_dependency(glfw3 3.4 CONFIG)
     else()
         find_package(glfw3 3.4 CONFIG QUIET)
@@ -51,9 +62,62 @@ if(@TINA_PACKAGE_WITH_PLATFORM_GLFW@ AND "PlatformGlfw" IN_LIST Tina_FIND_COMPON
         set(Tina_PlatformGlfw_FOUND TRUE)
     endif()
 endif()
+
+if(@TINA_PACKAGE_WITH_RENDER_BGFX@ AND
+   ("RenderBgfx" IN_LIST Tina_FIND_COMPONENTS OR tina_load_desktop_bootstrap))
+    include("${CMAKE_CURRENT_LIST_DIR}/TinaBgfxRuntimeTargets.cmake")
+    if(TARGET TinaBgfxRuntime::bgfx AND
+       TARGET TinaBgfxRuntime::bx AND
+       TARGET TinaBgfxRuntime::bimg)
+        include("${CMAKE_CURRENT_LIST_DIR}/TinaRenderBgfxTargets.cmake")
+        set(Tina_RenderBgfx_FOUND TRUE)
+    endif()
+endif()
+
+if(@TINA_PACKAGE_WITH_UI_FREETYPE@ AND
+   ("UIFreetype" IN_LIST Tina_FIND_COMPONENTS OR tina_load_desktop_bootstrap))
+    if(Tina_FIND_REQUIRED_UIFreetype OR Tina_FIND_REQUIRED_DesktopBootstrap)
+        find_dependency(Freetype)
+    else()
+        find_package(Freetype QUIET)
+    endif()
+    if(Freetype_FOUND)
+        include("${CMAKE_CURRENT_LIST_DIR}/TinaUIFreetypeTargets.cmake")
+        set(Tina_UIFreetype_FOUND TRUE)
+    endif()
+endif()
+
+if(@TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP@ AND tina_load_desktop_bootstrap AND
+   TARGET Tina::PlatformGlfw AND TARGET Tina::RenderBgfx AND
+   (NOT @TINA_PACKAGE_WITH_UI_FREETYPE@ OR TARGET Tina::UIFreetype))
+    include("${CMAKE_CURRENT_LIST_DIR}/TinaDesktopBootstrapTargets.cmake")
+    set(Tina_DesktopBootstrap_FOUND TRUE)
+endif()
+
 if(TARGET Tina::PlatformGlfw)
     list(APPEND Tina_ADAPTER_TARGETS Tina::PlatformGlfw)
     list(APPEND Tina_PACKAGE_TARGETS Tina::PlatformGlfw)
 endif()
+if(TARGET Tina::RenderBgfx)
+    list(APPEND Tina_ADAPTER_TARGETS Tina::RenderBgfx)
+    list(APPEND Tina_PACKAGE_TARGETS Tina::RenderBgfx)
+endif()
+if(TARGET Tina::UIFreetype)
+    list(APPEND Tina_ADAPTER_TARGETS Tina::UIFreetype)
+    list(APPEND Tina_PACKAGE_TARGETS Tina::UIFreetype)
+endif()
+if(TARGET Tina::DesktopBootstrap)
+    set(Tina_DESKTOP_BOOTSTRAP_TARGETS
+        Tina::DesktopBootstrap
+        Tina::PlatformGlfw
+        Tina::RenderBgfx
+    )
+    if(TARGET Tina::UIFreetype)
+        list(APPEND Tina_DESKTOP_BOOTSTRAP_TARGETS Tina::UIFreetype)
+    endif()
+    list(APPEND Tina_PACKAGE_TARGETS Tina::DesktopBootstrap)
+endif()
+
+unset(tina_load_desktop_bootstrap)
 
 check_required_components(Tina)

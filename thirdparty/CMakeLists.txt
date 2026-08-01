@@ -5,6 +5,8 @@ if(TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
     set(TINA_NEEDS_BGFX_SHADERC ON)
     set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BGFX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    # Tina installs only the bgfx runtime closure required by RenderBgfx. The
+    # upstream install graph also exports shader tools and image codecs.
     set(BGFX_INSTALL OFF CACHE BOOL "" FORCE)
     set(BGFX_CUSTOM_TARGETS OFF CACHE BOOL "" FORCE)
     set(BGFX_BUILD_TOOLS ${TINA_NEEDS_BGFX_SHADERC} CACHE BOOL "" FORCE)
@@ -15,6 +17,12 @@ if(TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
     set(BGFX_CONFIG_VIDEO OFF CACHE BOOL "" FORCE)
     set(BGFX_WITH_WAYLAND ${TINA_BUILD_WAYLAND} CACHE BOOL "" FORCE)
     add_subdirectory(bgfx.cmake)
+
+    # Keep Tina's bundled runtime closure distinct from any bgfx package that
+    # the consumer may already use.
+    add_library(TinaBgfxRuntime::bgfx ALIAS bgfx)
+    add_library(TinaBgfxRuntime::bx ALIAS bx)
+    add_library(TinaBgfxRuntime::bimg ALIAS bimg)
 
     if(TINA_NEEDS_BGFX_SHADERC AND MSVC AND TARGET shaderc)
         target_compile_options(shaderc PRIVATE /MP4)

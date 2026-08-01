@@ -136,7 +136,7 @@ if(TINA_BUILD_UI_FREETYPE)
         PUBLIC
             Tina::UI
         PRIVATE
-            Tina::ProjectOptions
+            "$<BUILD_INTERFACE:Tina::ProjectOptions>"
             Freetype::Freetype
     )
     set_target_properties(tina_ui_freetype PROPERTIES

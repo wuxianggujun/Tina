@@ -4,13 +4,14 @@
   Generic Windows host launcher for Tina Linux Docker gates.
 
 .PARAMETER Gate
-  gcc13-null | gcc13-platform | clang22-null | clang22-sanitize | sdk-consumer | sdk-platform-glfw-consumer
+  gcc13-null | gcc13-platform | clang22-null | clang22-sanitize | sdk-consumer | sdk-platform-glfw-consumer |
+  sdk-desktop-bootstrap-consumer
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('gcc13-null', 'gcc13-platform', 'clang22-null', 'clang22-sanitize', 'sdk-consumer',
-        'sdk-platform-glfw-consumer')]
+        'sdk-platform-glfw-consumer', 'sdk-desktop-bootstrap-consumer')]
     [string]$Gate,
     [string]$SourceRoot = '',
     [switch]$SkipImageBuild,
@@ -71,6 +72,13 @@ $map = @{
         Container = 'tina-sdk-001-gcc13-platform-glfw-consumer'
         GateId = 'SDK-001-linux-gcc13-platform-glfw-consumer'
     }
+    'sdk-desktop-bootstrap-consumer' = @{
+        Image = 'tina-linux-gcc13-platform:test-001'
+        Dockerfile = 'docker/linux-gcc13-platform/Dockerfile'
+        Script = 'tools/linux/run-sdk-desktop-bootstrap-consumer-gate.sh'
+        Container = 'tina-sdk-001-gcc13-desktop-bootstrap-consumer'
+        GateId = 'SDK-001-linux-gcc13-desktop-bootstrap-consumer'
+    }
 }
 
 $cfg = $map[$Gate]
@@ -120,6 +128,7 @@ $ErrorActionPreference = $prevEap
 
 $dockerArgs = @(
     'run', '--name', $ContainerName, '--rm',
+    '--cpus=2', '--memory=8g',
     '-e', 'VCPKG_ROOT=/opt/vcpkg',
     '-e', 'VCPKG_FORCE_SYSTEM_BINARIES=1',
     '-e', 'VCPKG_DISABLE_METRICS=1',

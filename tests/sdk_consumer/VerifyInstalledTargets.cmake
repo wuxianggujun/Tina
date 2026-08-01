@@ -35,7 +35,16 @@ function(tina_verify_backend_neutral_game_sdk)
     endif()
 
     get_target_property(tina_game_sdk_links Tina::GameSDK INTERFACE_LINK_LIBRARIES)
-    foreach(tina_adapter IN LISTS Tina_ADAPTER_TARGETS)
+    set(tina_forbidden_game_sdk_targets
+        Tina::PlatformGlfw
+        Tina::RenderBgfx
+        Tina::UIFreetype
+        Tina::AudioMiniaudio
+        Tina::DesktopBootstrap
+        ${Tina_ADAPTER_TARGETS}
+    )
+    list(REMOVE_DUPLICATES tina_forbidden_game_sdk_targets)
+    foreach(tina_adapter IN LISTS tina_forbidden_game_sdk_targets)
         if(tina_adapter IN_LIST tina_game_sdk_links)
             message(FATAL_ERROR "Tina::GameSDK unexpectedly links backend adapter ${tina_adapter}")
         endif()

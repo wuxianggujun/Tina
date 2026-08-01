@@ -80,6 +80,24 @@ function(tina_configure_game_sdk_package)
         set(TINA_PACKAGE_WITH_PLATFORM_GLFW ON)
     endif()
 
+    set(TINA_PACKAGE_WITH_RENDER_BGFX OFF)
+    if(TARGET tina_render_bgfx)
+        tina_configure_game_sdk_target(tina_render_bgfx RenderBgfx)
+        set(TINA_PACKAGE_WITH_RENDER_BGFX ON)
+    endif()
+
+    set(TINA_PACKAGE_WITH_UI_FREETYPE OFF)
+    if(TARGET tina_ui_freetype)
+        tina_configure_game_sdk_target(tina_ui_freetype UIFreetype)
+        set(TINA_PACKAGE_WITH_UI_FREETYPE ON)
+    endif()
+
+    set(TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP OFF)
+    if(TARGET tina_bootstrap_desktop)
+        tina_configure_game_sdk_target(tina_bootstrap_desktop DesktopBootstrap)
+        set(TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP ON)
+    endif()
+
     install(TARGETS ${tina_sdk_export_targets}
         EXPORT TinaTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -89,6 +107,93 @@ function(tina_configure_game_sdk_package)
     if(TARGET tina_platform_glfw)
         install(TARGETS tina_platform_glfw
             EXPORT TinaPlatformGlfwTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+    if(TARGET tina_render_bgfx)
+        if(NOT TARGET bgfx OR NOT TARGET bx OR NOT TARGET bimg)
+            message(FATAL_ERROR "RenderBgfx packaging requires bgfx, bx, and bimg targets")
+        endif()
+
+        install(TARGETS tina_render_bgfx
+            EXPORT TinaRenderBgfxTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+
+        # Export only the libraries required by the installed RenderBgfx
+        # target. Upstream BGFX_INSTALL also installs offline shader and image
+        # tools that are not part of Tina's runtime SDK.
+        install(TARGETS bgfx bx bimg
+            EXPORT TinaBgfxTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        )
+
+        if(MINGW)
+            set(tina_bx_compat_platform mingw)
+        elseif(WIN32)
+            set(tina_bx_compat_platform msvc)
+        elseif(APPLE)
+            set(tina_bx_compat_platform osx)
+        elseif(UNIX)
+            set(tina_bx_compat_platform linux)
+        else()
+            message(FATAL_ERROR "Unsupported bx compatibility header platform")
+        endif()
+
+        install(DIRECTORY "${BGFX_DIR}/include/bgfx"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        )
+        install(DIRECTORY "${BX_DIR}/include/bx"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        )
+        install(DIRECTORY "${BX_DIR}/include/compat/${tina_bx_compat_platform}"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/bx/compat"
+        )
+        install(DIRECTORY "${BX_DIR}/include/tinystl"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/bx"
+        )
+        install(DIRECTORY "${BIMG_DIR}/include/bimg"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        )
+        install(FILES
+            "${BGFX_DIR}/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/bgfx"
+        )
+        install(FILES
+            "${BX_DIR}/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/bx"
+        )
+        install(FILES
+            "${BIMG_DIR}/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/bimg"
+        )
+        install(FILES
+            "${BIMG_DIR}/3rdparty/astc-encoder/LICENSE.txt"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/astc-encoder"
+        )
+        install(FILES
+            "${BIMG_DIR}/3rdparty/tinyexr/deps/miniz/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/miniz"
+        )
+    endif()
+    if(TARGET tina_ui_freetype)
+        install(TARGETS tina_ui_freetype
+            EXPORT TinaUIFreetypeTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+    if(TARGET tina_bootstrap_desktop)
+        install(TARGETS tina_bootstrap_desktop
+            EXPORT TinaDesktopBootstrapTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -134,6 +239,17 @@ function(tina_configure_game_sdk_package)
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform/glfw"
         )
     endif()
+    if(TARGET tina_ui_freetype)
+        install(FILES "${PROJECT_SOURCE_DIR}/include/tina/ui/text/FreeTypeTextRasterizerFactory.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui/text"
+        )
+    endif()
+    if(TARGET tina_bootstrap_desktop)
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/desktop"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina"
+            FILES_MATCHING PATTERN "*.hpp"
+        )
+    endif()
 
     set(tina_package_directory "${CMAKE_INSTALL_LIBDIR}/cmake/Tina")
     configure_package_config_file(
@@ -156,6 +272,32 @@ function(tina_configure_game_sdk_package)
     if(TARGET tina_platform_glfw)
         install(EXPORT TinaPlatformGlfwTargets
             FILE TinaPlatformGlfwTargets.cmake
+            NAMESPACE Tina::
+            DESTINATION "${tina_package_directory}"
+        )
+    endif()
+    if(TARGET tina_render_bgfx)
+        install(EXPORT TinaRenderBgfxTargets
+            FILE TinaRenderBgfxTargets.cmake
+            NAMESPACE Tina::
+            DESTINATION "${tina_package_directory}"
+        )
+        install(EXPORT TinaBgfxTargets
+            FILE TinaBgfxRuntimeTargets.cmake
+            NAMESPACE TinaBgfxRuntime::
+            DESTINATION "${tina_package_directory}"
+        )
+    endif()
+    if(TARGET tina_ui_freetype)
+        install(EXPORT TinaUIFreetypeTargets
+            FILE TinaUIFreetypeTargets.cmake
+            NAMESPACE Tina::
+            DESTINATION "${tina_package_directory}"
+        )
+    endif()
+    if(TARGET tina_bootstrap_desktop)
+        install(EXPORT TinaDesktopBootstrapTargets
+            FILE TinaDesktopBootstrapTargets.cmake
             NAMESPACE Tina::
             DESTINATION "${tina_package_directory}"
         )

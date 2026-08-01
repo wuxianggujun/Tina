@@ -3,7 +3,7 @@ param(
     [string]$BuildDirectory = "",
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Debug",
-    [ValidateSet("GameSDK", "PlatformGlfw")]
+    [ValidateSet("GameSDK", "PlatformGlfw", "DesktopBootstrap")]
     [string]$Consumer = "GameSDK"
 )
 
@@ -11,8 +11,11 @@ $ErrorActionPreference = "Stop"
 
 $sourceDirectory = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $isPlatformGlfwConsumer = $Consumer -eq "PlatformGlfw"
+$isDesktopBootstrapConsumer = $Consumer -eq "DesktopBootstrap"
 if([string]::IsNullOrWhiteSpace($BuildDirectory)) {
-    $BuildDirectory = if($isPlatformGlfwConsumer) {
+    $BuildDirectory = if($isDesktopBootstrapConsumer) {
+        "out/build/windows-msvc-vnext-bgfx"
+    } elseif($isPlatformGlfwConsumer) {
         "out/build/windows-msvc-vnext-platform"
     } else {
         "out/build/windows-msvc-vnext"
@@ -37,16 +40,31 @@ function Get-CMakeCacheValue([string]$Name) {
     return $entry.Matches[0].Groups[1].Value
 }
 
-$consumerDirectoryName = if($isPlatformGlfwConsumer) { "sdk-platform-glfw-consumer" } else { "sdk-consumer" }
+$consumerDirectoryName = if($isDesktopBootstrapConsumer) {
+    "sdk-desktop-bootstrap-consumer"
+} elseif($isPlatformGlfwConsumer) {
+    "sdk-platform-glfw-consumer"
+} else {
+    "sdk-consumer"
+}
 $installPrefix = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-prefix"
 $consumerBuildDirectory = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-build"
 $missingComponentBuildDirectory = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-missing-component-build"
-$consumerSourceDirectory = if($isPlatformGlfwConsumer) {
+$componentIsolationBuildDirectory = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-component-isolation-build"
+$consumerSourceDirectory = if($isDesktopBootstrapConsumer) {
+    Join-Path $sourceDirectory "tests/sdk_consumer_desktop"
+} elseif($isPlatformGlfwConsumer) {
     Join-Path $sourceDirectory "tests/sdk_consumer_platform_glfw"
 } else {
     Join-Path $sourceDirectory "tests/sdk_consumer"
 }
-$consumerTarget = if($isPlatformGlfwConsumer) { "tina_sdk_platform_glfw_consumer" } else { "tina_sdk_consumer" }
+$consumerTarget = if($isDesktopBootstrapConsumer) {
+    "tina_sdk_desktop_bootstrap_consumer"
+} elseif($isPlatformGlfwConsumer) {
+    "tina_sdk_platform_glfw_consumer"
+} else {
+    "tina_sdk_consumer"
+}
 $consumerExecutableName = "$consumerTarget.exe"
 $verificationScript = Join-Path $sourceDirectory "cmake/VerifyInstalledTinaSdkHeaders.cmake"
 $generator = Get-CMakeCacheValue "CMAKE_GENERATOR"
@@ -57,16 +75,22 @@ $vcpkgTargetTriplet = Get-CMakeCacheValue "VCPKG_TARGET_TRIPLET"
 
 $buildDirectoryPrefix = $resolvedBuildDirectory.TrimEnd([System.IO.Path]::DirectorySeparatorChar) +
     [System.IO.Path]::DirectorySeparatorChar
-if(-not $installPrefix.StartsWith($buildDirectoryPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refusing to refresh SDK prefix outside the Tina build tree: $installPrefix"
-}
-if(Test-Path -LiteralPath $installPrefix) {
-    Remove-Item -LiteralPath $installPrefix -Recurse -Force
+foreach($managedDirectory in @($installPrefix, $consumerBuildDirectory, $missingComponentBuildDirectory,
+        $componentIsolationBuildDirectory)) {
+    if(-not $managedDirectory.StartsWith($buildDirectoryPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to refresh SDK gate directory outside the Tina build tree: $managedDirectory"
+    }
+    if(Test-Path -LiteralPath $managedDirectory) {
+        Remove-Item -LiteralPath $managedDirectory -Recurse -Force
+    }
 }
 
 $sdkBuildTargets = @("tina_runtime", "tina_scene", "tina_asset")
 if($isPlatformGlfwConsumer) {
     $sdkBuildTargets += "tina_platform_glfw"
+}
+if($isDesktopBootstrapConsumer) {
+    $sdkBuildTargets += "tina_bootstrap_desktop"
 }
 $sdkBuildArguments = @(
     "--build", $resolvedBuildDirectory,
@@ -109,7 +133,13 @@ $configureArguments = @(
 & cmake @configureArguments
 if($LASTEXITCODE -ne 0) { throw "Installed SDK consumer configure failed with exit code $LASTEXITCODE" }
 
-$missingComponents = if($isPlatformGlfwConsumer) { "DefinitelyMissing" } else { "PlatformGlfw;DefinitelyMissing" }
+$missingComponents = if($isDesktopBootstrapConsumer) {
+    "DefinitelyMissing"
+} elseif($isPlatformGlfwConsumer) {
+    "RenderBgfx;UIFreetype;DefinitelyMissing"
+} else {
+    "PlatformGlfw;RenderBgfx;UIFreetype;DesktopBootstrap;DefinitelyMissing"
+}
 $missingComponentConfigureArguments = @(
     "-S", (Join-Path $sourceDirectory "tests/sdk_consumer_missing_component"),
     "-B", $missingComponentBuildDirectory,
@@ -117,6 +147,16 @@ $missingComponentConfigureArguments = @(
 ) + $commonConfigureArguments
 & cmake @missingComponentConfigureArguments
 if($LASTEXITCODE -ne 0) { throw "Installed SDK missing-component probe failed with exit code $LASTEXITCODE" }
+
+$componentIsolationConfigureArguments = @(
+    "-S", (Join-Path $sourceDirectory "tests/sdk_consumer_component_isolation"),
+    "-B", $componentIsolationBuildDirectory,
+    "-DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE",
+    "-DCMAKE_DISABLE_FIND_PACKAGE_bgfx=TRUE",
+    "-DCMAKE_DISABLE_FIND_PACKAGE_Freetype=TRUE"
+) + $commonConfigureArguments
+& cmake @componentIsolationConfigureArguments
+if($LASTEXITCODE -ne 0) { throw "Installed SDK component-isolation probe failed with exit code $LASTEXITCODE" }
 
 & cmake --build $consumerBuildDirectory --config $Configuration --target $consumerTarget --parallel 1 -- /nr:false
 if($LASTEXITCODE -ne 0) { throw "Installed SDK consumer build failed with exit code $LASTEXITCODE" }

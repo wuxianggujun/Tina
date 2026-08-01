@@ -85,12 +85,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -BuildDirectory out\build\windows-msvc-vnext -Configuration Debug
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 -Consumer PlatformGlfw -Configuration Debug
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer DesktopBootstrap -Configuration Debug
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 `
+  -BuildDirectory out\build\windows-msvc-vnext-bgfx-ui-freetype `
+  -Consumer DesktopBootstrap -Configuration Debug
 ```
 
 ```bash
 export VCPKG_ROOT=/opt/vcpkg
 tools/linux/run-sdk-consumer-gate.sh
 tools/linux/run-sdk-platform-glfw-consumer-gate.sh
+tools/linux/run-sdk-desktop-bootstrap-consumer-gate.sh
 ```
 
 Windows Docker 入口为：
@@ -100,6 +107,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-consumer
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-platform-glfw-consumer
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-desktop-bootstrap-consumer
 ```
 
 成功条件是：版本化 package 和声明的 `Tina_GAME_SDK_TARGETS` 全部可发现；实际安装头通过第三方
@@ -108,8 +117,12 @@ include/type token 扫描；所有 Tina imported target 的 include 都来自安
 `{"status":"ok","consumer":"installed-tina-sdk"}`。PlatformGlfw consumer 只链接
 `Tina::PlatformGlfw`，必须创建隐藏窗口、读取 metrics、poll 一帧并输出
 `"consumer":"installed-tina-platform-glfw"`。Null package 请求 `PlatformGlfw` 与所有 package 请求未知
-component 必须被拒绝；未请求 `PlatformGlfw` 时不得加载 GLFW dependency/target。门禁仍不替代 DesktopBootstrap、
-bgfx/FreeType/miniaudio adapter 安装闭包或 ABI 兼容性验证。
+component 必须被拒绝；未请求 `PlatformGlfw` 时不得加载 GLFW dependency/target。Desktop consumer 只链接
+`Tina::DesktopBootstrap`，必须发现 `Tina::PlatformGlfw` 与 `Tina::RenderBgfx`；FreeType 图还必须发现
+`Tina::UIFreetype`。隐藏窗口运行一帧后必须输出
+`{"status":"ok","consumer":"installed-tina-desktop-bootstrap"}`。GameSDK-only isolation probe 禁用
+GLFW/bgfx/FreeType 查找后仍须配置成功，且不得出现任何 adapter target。门禁仍不替代 AudioMiniaudio
+安装闭包、跨发行版 relocatability 或正式 ABI 兼容性验证。
 
 ## UI performance quick run
 
@@ -246,7 +259,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunUi002UiaG
 | Audio | `tina_audio_tests` | miniaudio tests、product-2d |
 | Physics2D | `tina_physics2d_tests`（body/shape/joint、sensor、query、grid bridge） | Release bench、product-2d |
 | CMake/preset/dependency | 所有受影响 configure 图 | 最小 executable + product smoke |
-| install/export/Game SDK | `RunSdkConsumerGate.ps1`、`run-sdk-consumer-gate.sh`、PlatformGlfw wrapper | Desktop/其余 backend package 闭包；ABI/兼容策略 |
+| install/export/Game SDK | `RunSdkConsumerGate.ps1`、`run-sdk-consumer-gate.sh`、PlatformGlfw/DesktopBootstrap wrapper | AudioMiniaudio package 闭包；跨发行版 relocatability；ABI/兼容策略 |
 
 公共 API 变化还必须编译 header-isolation/consumer 测试，并扫描公开头是否出现第三方 token。
 

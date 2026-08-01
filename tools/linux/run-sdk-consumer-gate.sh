@@ -23,8 +23,14 @@ case "${CONSUMER}" in
     CONSUMER_SOURCE_DIRECTORY="${ROOT}/tests/sdk_consumer_platform_glfw"
     CONSUMER_TARGET="tina_sdk_platform_glfw_consumer"
     ;;
+  DesktopBootstrap)
+    DEFAULT_CONFIGURE_PRESET="linux-gcc13-vnext-bgfx"
+    CONSUMER_DIRECTORY_NAME="sdk-desktop-bootstrap-consumer"
+    CONSUMER_SOURCE_DIRECTORY="${ROOT}/tests/sdk_consumer_desktop"
+    CONSUMER_TARGET="tina_sdk_desktop_bootstrap_consumer"
+    ;;
   *)
-    echo "TINA_SDK_CONSUMER must be GameSDK or PlatformGlfw, got '${CONSUMER}'" >&2
+    echo "TINA_SDK_CONSUMER must be GameSDK, PlatformGlfw, or DesktopBootstrap; got '${CONSUMER}'" >&2
     exit 2
     ;;
 esac
@@ -61,23 +67,23 @@ BUILD_DIRECTORY="$(cd "${BUILD_DIRECTORY_INPUT}" && pwd -P)"
 INSTALL_PREFIX="${BUILD_DIRECTORY}/${CONSUMER_DIRECTORY_NAME}-prefix"
 CONSUMER_BUILD_DIRECTORY="${BUILD_DIRECTORY}/${CONSUMER_DIRECTORY_NAME}-build"
 MISSING_COMPONENT_BUILD_DIRECTORY="${BUILD_DIRECTORY}/${CONSUMER_DIRECTORY_NAME}-missing-component-build"
+COMPONENT_ISOLATION_BUILD_DIRECTORY="${BUILD_DIRECTORY}/${CONSUMER_DIRECTORY_NAME}-component-isolation-build"
 VERIFICATION_SCRIPT="${ROOT}/cmake/VerifyInstalledTinaSdkHeaders.cmake"
 CACHE_PATH="${BUILD_DIRECTORY}/CMakeCache.txt"
 
-case "${INSTALL_PREFIX}" in
-  "${BUILD_DIRECTORY}"/*) ;;
-  *)
-    echo "Refusing to refresh SDK prefix outside the Tina build tree: ${INSTALL_PREFIX}" >&2
-    exit 1
-    ;;
-esac
-case "${CONSUMER_BUILD_DIRECTORY}" in
-  "${BUILD_DIRECTORY}"/*) ;;
-  *)
-    echo "Refusing to refresh consumer build outside the Tina build tree: ${CONSUMER_BUILD_DIRECTORY}" >&2
-    exit 1
-    ;;
-esac
+for managed_directory in \
+  "${INSTALL_PREFIX}" \
+  "${CONSUMER_BUILD_DIRECTORY}" \
+  "${MISSING_COMPONENT_BUILD_DIRECTORY}" \
+  "${COMPONENT_ISOLATION_BUILD_DIRECTORY}"; do
+  case "${managed_directory}" in
+    "${BUILD_DIRECTORY}"/*) ;;
+    *)
+      echo "Refusing to refresh SDK gate directory outside the Tina build tree: ${managed_directory}" >&2
+      exit 1
+      ;;
+  esac
+done
 
 cache_value() {
   local key="$1"
@@ -96,11 +102,15 @@ if [[ -z "${GENERATOR}" ]]; then
   exit 1
 fi
 
-rm -rf -- "${INSTALL_PREFIX}" "${CONSUMER_BUILD_DIRECTORY}" "${MISSING_COMPONENT_BUILD_DIRECTORY}"
+rm -rf -- "${INSTALL_PREFIX}" "${CONSUMER_BUILD_DIRECTORY}" \
+  "${MISSING_COMPONENT_BUILD_DIRECTORY}" "${COMPONENT_ISOLATION_BUILD_DIRECTORY}"
 
 sdk_build_targets=(tina_runtime tina_scene tina_asset)
 if [[ "${CONSUMER}" == "PlatformGlfw" ]]; then
   sdk_build_targets+=(tina_platform_glfw)
+fi
+if [[ "${CONSUMER}" == "DesktopBootstrap" ]]; then
+  sdk_build_targets+=(tina_bootstrap_desktop)
 fi
 cmake --build "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" \
   --target "${sdk_build_targets[@]}" --parallel "${BUILD_JOBS}"
@@ -135,14 +145,29 @@ configure_arguments=(
 )
 cmake "${configure_arguments[@]}"
 
-missing_components="DefinitelyMissing"
-if [[ "${CONSUMER}" == "GameSDK" ]]; then
-  missing_components="PlatformGlfw;${missing_components}"
-fi
+case "${CONSUMER}" in
+  GameSDK)
+    missing_components="PlatformGlfw;RenderBgfx;UIFreetype;DesktopBootstrap;DefinitelyMissing"
+    ;;
+  PlatformGlfw)
+    missing_components="RenderBgfx;UIFreetype;DefinitelyMissing"
+    ;;
+  DesktopBootstrap)
+    missing_components="DefinitelyMissing"
+    ;;
+esac
 cmake \
   -S "${ROOT}/tests/sdk_consumer_missing_component" \
   -B "${MISSING_COMPONENT_BUILD_DIRECTORY}" \
   "-DTINA_EXPECT_MISSING_COMPONENTS=${missing_components}" \
+  "${common_configure_arguments[@]}"
+
+cmake \
+  -S "${ROOT}/tests/sdk_consumer_component_isolation" \
+  -B "${COMPONENT_ISOLATION_BUILD_DIRECTORY}" \
+  -DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE \
+  -DCMAKE_DISABLE_FIND_PACKAGE_bgfx=TRUE \
+  -DCMAKE_DISABLE_FIND_PACKAGE_Freetype=TRUE \
   "${common_configure_arguments[@]}"
 
 cmake --build "${CONSUMER_BUILD_DIRECTORY}" --config "${CONFIGURATION}" \
@@ -164,7 +189,7 @@ if [[ -z "${consumer_executable}" ]]; then
   exit 1
 fi
 
-if [[ "${CONSUMER}" == "PlatformGlfw" ]]; then
+if [[ "${CONSUMER}" == "PlatformGlfw" || "${CONSUMER}" == "DesktopBootstrap" ]]; then
   if command -v xvfb-run >/dev/null 2>&1; then
     xvfb-run -a "${consumer_executable}"
   elif [[ -n "${DISPLAY:-}" ]]; then

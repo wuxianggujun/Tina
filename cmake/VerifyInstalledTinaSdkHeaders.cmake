@@ -13,7 +13,7 @@ if(NOT tina_sdk_headers)
 endif()
 
 set(tina_forbidden_patterns
-    "#[ \t]*include[ \t]*[<\"](bgfx|GLFW|entt|box2d|miniaudio|freetype|ft2build|xxhash|cgltf|stb|X11|wayland|xcb)[/\.>\"]"
+    "#[ \t]*include[ \t]*[<\"](bgfx|GLFW|entt|box2d|miniaudio|freetype|ft2build|xxhash|cgltf|stb|X11|wayland|xcb)[/.>\"]"
     "bgfx::"
     "GLFWwindow"
     "entt::"

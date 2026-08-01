@@ -26,13 +26,21 @@ find_package(Tina CONFIG REQUIRED COMPONENTS PlatformGlfw)
 target_link_libraries(platform_tool PRIVATE Tina::PlatformGlfw)
 ```
 
+Desktop 游戏只请求组合 component：
+
+```cmake
+find_package(Tina CONFIG REQUIRED COMPONENTS DesktopBootstrap)
+target_link_libraries(game PRIVATE Tina::DesktopBootstrap)
+```
+
 `Tina::GameSDK` 聚合下表中的 backend-neutral Runtime、Scene、Asset、UI、Audio 等稳定模块；安装 package
-声明 `xxHash`（以及启用 Physics2D 时的 `box2d`）依赖，不复制第三方库。Windows 与 Linux 外部 headless
+声明 `xxHash`（以及启用 Physics2D 时的 `box2d`）依赖。Windows 与 Linux 外部 headless
 consumer 已经只通过安装前缀完成 configure/build/run，并复用同一安装头第三方 token 扫描。`PlatformGlfw`
 component 通过 `find_dependency(glfw3 3.4 CONFIG)` 解析实现闭包并加载独立 adapter export；未请求该
 component 时不会加载 GLFW 依赖或定义 `Tina::PlatformGlfw`。Windows 与 Linux/Xvfb consumer 会创建隐藏窗口、
-读取初始 metrics 并 poll 一帧；它不进入 `Tina::GameSDK` 聚合。`Tina::DesktopBootstrap` 与
-RenderBgfx/FreeType/miniaudio adapter 安装闭包、正式发布 ABI 政策仍属于 `SDK-001` 后续工作。
+读取初始 metrics 并 poll 一帧；它不进入 `Tina::GameSDK` 聚合。`DesktopBootstrap` 自动加载
+`PlatformGlfw`、`RenderBgfx`，并在安装图启用 FreeType 时加载可选 `UIFreetype`。RenderBgfx 的同一 prefix
+只携带 `bgfx`/`bx`/`bimg` runtime targets、archives 与 headers，不安装 shaderc、图片 codec 或离线工具。
 
 ## CMake targets
 
@@ -44,18 +52,21 @@ RenderBgfx/FreeType/miniaudio adapter 安装闭包、正式发布 ABI 政策仍�
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
 | `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs |
+| `Tina::RenderBgfx` | optional installed bgfx Render adapter；需 `COMPONENTS RenderBgfx` |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
-| `Tina::DesktopBootstrap` | 普通 Windows/Linux Desktop 组合入口 |
+| `Tina::DesktopBootstrap` | optional installed Windows/Linux Desktop 组合入口；需 `COMPONENTS DesktopBootstrap` |
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、standalone Particle/Trail |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
+| `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
+| `Tina::AudioMiniaudio` | miniaudio device adapter；当前仍仅 build tree 使用 |
 | `Tina::Physics2D` | optional Box2D-backed Tina API |
 
 Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
 `Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；当前安装 package
-条件导出 `Tina::PlatformGlfw`，其余 adapter 仍只在 build tree 使用。
+条件导出前三者和 `Tina::DesktopBootstrap`，`Tina::AudioMiniaudio` 仍只在 build tree 使用。
 
 ## Core 约定
 
@@ -589,7 +600,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
-- 可安装的 `Tina::DesktopBootstrap`、RenderBgfx/FreeType/miniaudio adapter 闭包与正式发布 ABI/兼容策略。
+- 可安装的 `Tina::AudioMiniaudio` 闭包、跨发行版 relocatability 与正式发布 ABI/兼容策略。
 
 任务状态见 [Backlog](backlog.md)。修改公开头后必须构建 header-isolation/consumer、扫描第三方 token，
 并按 [测试说明](testing.md) 运行受影响 executable 与 sample。

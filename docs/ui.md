@@ -114,7 +114,7 @@ stylesheet 仍属后续扩展。
 | 自定义 Canvas | 可用首版 | backend-neutral `SolidRect`、`Image`、Stretch-only `NineSlice`；只保存 AssetId/图片元数据，不能提交 shader、GPU handle 或任意 paint callback |
 | 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override；没有用户 StyleClass/selector/pseudo-state rule |
 | 自定义交互 | 部分可用 | 可组合标准 Activate/Toggle/RangeInput capability、挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
-| 安装后作为外部 SDK 使用 | 首切片可用 | backend-neutral `Tina::GameSDK` 与独立 `Tina::PlatformGlfw` component 已提供 `install(EXPORT)` 和 Windows/Linux consumer gate；DesktopBootstrap、RenderBgfx/FreeType/miniaudio 闭包与正式 ABI 策略仍待完成 |
+| 安装后作为外部 SDK 使用 | 主要切片可用 | backend-neutral `Tina::GameSDK`、独立 `Tina::PlatformGlfw`、DesktopBootstrap/RenderBgfx 已提供 Windows/Linux consumer gate；可选 UIFreetype 已由 Windows FreeType 图验证；GameSDK-only 不加载 Desktop adapter；AudioMiniaudio、跨发行版 relocatability 与正式 ABI 策略仍待完成 |
 
 `UIElementBehavior` 在公开头中表现为正交 flags。Activate/Toggle/RangeInput 已迁移到私有固定容量 side store：
 创建时按 capability 对三个 pool 原子预检并发布 slot，destroy/事务回滚会释放并复用 slot，Activate action、
@@ -539,7 +539,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-FLOW-001` | Deferred：有真实页面栈需求后再增加 Activatable Screen、Layer Stack、Action Router 与输入设备提示 |
 | `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
-| `SDK-001` | 独立交付可安装 CMake package 与外部 `find_package` consumer gate，不依赖 `UI-FLOW-001`；新增公共 UI 切片后同步扩展 consumer 覆盖 |
+| `SDK-001` | GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx 与可选 UIFreetype 安装切片已落地；待 AudioMiniaudio、跨发行版 relocatability 与正式 ABI/兼容策略；新增公共 UI 切片后同步扩展 consumer 覆盖 |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
 Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；UI-002-SPI 与

@@ -18,7 +18,7 @@ target_link_libraries(tina_bootstrap_desktop
         Tina::PlatformGlfw
         Tina::RenderBgfx
         Tina::Task
-        Tina::ProjectOptions
+        "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 if(TINA_BUILD_UI_FREETYPE)
     target_compile_definitions(tina_bootstrap_desktop PRIVATE TINA_HAS_UI_FREETYPE=1)

@@ -73,16 +73,15 @@ if(TINA_BUILD_RENDER_BGFX)
         PUBLIC
             Tina::Render
         PRIVATE
-            Tina::ProjectOptions
+            "$<BUILD_INTERFACE:Tina::ProjectOptions>"
             Tina::WindowSurfaceIntegration
-            bgfx
-            bx
+            TinaBgfxRuntime::bgfx
+            TinaBgfxRuntime::bx
     )
     set_target_properties(tina_render_bgfx PROPERTIES
         CXX_EXTENSIONS OFF
         EXPORT_NAME RenderBgfx
     )
-
     include(TinaBgfxEmbeddedShaders)
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx
