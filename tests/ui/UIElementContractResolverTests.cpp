@@ -90,7 +90,9 @@ TEST(UIElementContractResolverTests, RejectsUnsupportedBehaviorAndContentContrac
 
     descriptor = UI::makeButtonElement("Button");
     descriptor.text.reset();
-    EXPECT_FALSE(UI::Detail::resolveElementBuiltinKind(descriptor));
+    auto kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind);
+    EXPECT_EQ(*kind, BuiltinElementKind::Panel);
 
     descriptor = UI::makeSliderElement();
     descriptor.text = "Slider";
@@ -103,6 +105,28 @@ TEST(UIElementContractResolverTests, RejectsUnsupportedBehaviorAndContentContrac
     descriptor = UI::makeButtonElement("Mixed");
     descriptor.behaviors |= UI::UIElementBehavior::RangeInput;
     EXPECT_FALSE(UI::Detail::resolveElementBuiltinKind(descriptor));
+}
+
+TEST(UIElementContractResolverTests, ActivateAndToggleComposeOnGenericPanelAndLabelKinds)
+{
+    UI::UIElementDescriptor descriptor = UI::makePanelElement();
+    descriptor.behaviors = UI::UIElementBehavior::Activate;
+    auto kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind);
+    EXPECT_EQ(*kind, BuiltinElementKind::Panel);
+
+    descriptor.behaviors = UI::UIElementBehavior::Toggle;
+    kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind);
+    EXPECT_EQ(*kind, BuiltinElementKind::Panel);
+
+    descriptor = UI::makeLabelElement("Toggle label");
+    descriptor.behaviors = UI::UIElementBehavior::Focusable |
+                           UI::UIElementBehavior::Activate |
+                           UI::UIElementBehavior::Toggle;
+    kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind);
+    EXPECT_EQ(*kind, BuiltinElementKind::Label);
 }
 
 TEST(UIElementContractResolverTests, SemanticsActionsRequireMatchingBehaviors)

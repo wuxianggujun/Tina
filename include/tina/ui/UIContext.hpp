@@ -72,6 +72,12 @@ struct UIContextStatistics final {
     usize buttonActionCapacity = 0;
     usize activeButtonActionCount = 0;
     usize buttonActionHighWater = 0;
+    usize activateBehaviorCapacity = 0;
+    usize activeActivateBehaviorCount = 0;
+    usize activateBehaviorHighWater = 0;
+    usize toggleBehaviorCapacity = 0;
+    usize activeToggleBehaviorCount = 0;
+    usize toggleBehaviorHighWater = 0;
     usize textByteCapacity = 0;
     usize textByteUsed = 0;
     usize textByteHighWater = 0;
@@ -276,6 +282,8 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UITextSelection> textSelection(UINodeId textEdit) const;
     [[nodiscard]] Core::Status setTextEditPaint(UINodeId textEdit, const UITextEditPaint& paint);
     [[nodiscard]] Core::Result<UITextEditPaint> textEditPaint(UINodeId textEdit) const;
+    // Activate-capable Elements own action/pressed state. Virtual collection
+    // items keep their dedicated datasource action path.
     [[nodiscard]] Core::Status setButtonAction(UINodeId button, UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UINodeId button) const;
@@ -284,6 +292,8 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status clearCheckboxAction(UINodeId checkbox);
     [[nodiscard]] Core::Status setCheckboxPaint(UINodeId checkbox, const UICheckboxPaint& paint);
     [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaint(UINodeId checkbox) const;
+    // Toggle-capable Elements own checked state. Checkbox-specific paint APIs
+    // remain restricted to the official Checkbox recipe.
     [[nodiscard]] Core::Status setChecked(UINodeId checkbox, bool checked);
     [[nodiscard]] Core::Result<bool> isChecked(UINodeId checkbox) const;
     [[nodiscard]] Core::Result<bool> isCheckboxPressed(UINodeId checkbox) const;

@@ -173,7 +173,7 @@ TEST_F(UIElementTest, DescriptorInitializesLayoutTextStyleAndAlignmentBeforeFirs
     EXPECT_GT(entry->contentPlacement.origin.y, entry->contentPlacement.contentBox.y);
 }
 
-TEST_F(UIElementTest, RejectsInvalidBehaviorContentAndPopupPlacementCombinations)
+TEST_F(UIElementTest, AcceptsComposableToggleAndRejectsInvalidPopupAndConfigContracts)
 {
     auto context = createContext(window, {.nodeCapacity = 4, .rootCapacity = 1});
     ASSERT_NE(context, nullptr);
@@ -182,13 +182,12 @@ TEST_F(UIElementTest, RejectsInvalidBehaviorContentAndPopupPlacementCombinations
     auto updater = createUpdater(*context, root);
 
     UI::UIElementDescriptor toggleWithText{
-        .text = "not supported",
+        .text = "supported",
         .behaviors = UI::UIElementBehavior::Focusable | UI::UIElementBehavior::Activate |
                      UI::UIElementBehavior::Toggle,
     };
-    const auto invalidToggle = updater.createElement(root.rootNodeId(), toggleWithText);
-    ASSERT_FALSE(invalidToggle.has_value());
-    EXPECT_EQ(invalidToggle.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+    const auto toggle = updater.createElement(root.rootNodeId(), toggleWithText);
+    ASSERT_TRUE(toggle.has_value()) << toggle.error().message;
 
     UI::UIElementDescriptor flowPopup{
         .behaviors = UI::UIElementBehavior::Popup,
@@ -221,7 +220,7 @@ TEST_F(UIElementTest, RejectsInvalidBehaviorContentAndPopupPlacementCombinations
     ASSERT_FALSE(invalidTreeConfig.has_value());
     EXPECT_EQ(invalidTreeConfig.error().code, UI::UIErrorCode::InvalidElementDescriptor);
 
-    EXPECT_EQ(context->liveNodeCount(), 1U);
+    EXPECT_EQ(context->liveNodeCount(), 2U);
 }
 
 TEST_F(UIElementTest, TextCapacityFailureRollsBackNodeAndTextStorage)
@@ -573,7 +572,7 @@ TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtr
     UI::UIElementDescriptor invalidToggle{
         .text = "invalid",
         .behaviors = UI::UIElementBehavior::Focusable | UI::UIElementBehavior::Activate |
-                     UI::UIElementBehavior::Toggle,
+                     UI::UIElementBehavior::Toggle | UI::UIElementBehavior::RangeInput,
     };
     const auto invalidCreate = invalidChild.createElement(invalidChild.rootNodeId(), invalidToggle);
     ASSERT_FALSE(invalidCreate.has_value());

@@ -62,12 +62,17 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     }
     if (specialized == UIElementBehavior::Activate)
     {
-        return requireText(BuiltinElementKind::Button);
+        return hasText ? BuiltinElementKind::Button : BuiltinElementKind::Panel;
     }
     if (specialized ==
         (UIElementBehavior::Activate | UIElementBehavior::Toggle))
     {
-        return rejectIntrinsicContent(BuiltinElementKind::Checkbox);
+        return hasText ? BuiltinElementKind::Label
+                       : rejectIntrinsicContent(BuiltinElementKind::Checkbox);
+    }
+    if (specialized == UIElementBehavior::Toggle)
+    {
+        return hasText ? BuiltinElementKind::Label : BuiltinElementKind::Panel;
     }
     if (specialized == UIElementBehavior::RangeInput)
     {

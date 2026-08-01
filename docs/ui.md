@@ -113,14 +113,15 @@ stylesheet 仍属后续扩展。
 | 多节点业务组件 | 直接与 Runtime phase facade 均可用 | `UIElementBuildTransaction` / `PrimaryWindowUIBuildTransaction` 固定 node budget、失败整棵回滚；Runtime transaction 不得跨 callback 保存 |
 | 自定义 Canvas | 可用首版 | backend-neutral `SolidRect`、`Image`、Stretch-only `NineSlice`；只保存 AssetId/图片元数据，不能提交 shader、GPU handle 或任意 paint callback |
 | 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override；没有用户 StyleClass/selector/pseudo-state rule |
-| 自定义交互 | 部分可用 | 可挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
+| 自定义交互 | 部分可用 | 可组合标准 Activate/Toggle capability、挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
 | 安装后作为外部 SDK 使用 | 尚未闭合 | 当前能在源码树内链接 `Tina::UI`，但尚无 `install(EXPORT)`、`Tina::GameSDK` package 与外部 consumer gate |
 
-`UIElementBehavior` 在公开头中表现为正交 flags，但当前私有 `UIElementContractResolver` 仍把 flags 的精确组合
-映射为一个 `BuiltinElementKind`；没有内建 storage contract 的组合会返回
-`InvalidElementDescriptor`。因此今天可以写 Inventory/Settings/HUD 等“组件 recipe”，不能仅靠新增 flags 得到
-任意 Switch、Knob 或自定义 drag state machine。目标设计是把标准 Activate/Toggle/Range/Text/Scroll/Select
-状态拆为独立固定容量 side store，让第三方优先通过标准 Behavior + 组合表达控件；更高阶的自定义 Behavior
+`UIElementBehavior` 在公开头中表现为正交 flags。Activate/Toggle 首个切片已迁移到私有固定容量 side store：
+创建时按 capability 原子预检并发布 slot，destroy/事务回滚会释放并复用 slot，Activate action setter、
+Toggle state setter、Pointer、Keyboard 与 accessibility 默认行为按 capability 校验；`UIContextStatistics` 同时公开两个 pool 的 capacity、active 与
+high-water。Range/TextInput/Scroll/Select 仍依赖 `BuiltinElementKind` storage contract，不受支持的混合组合
+继续返回 `InvalidElementDescriptor`。因此当前可以组合标准 Activate/Toggle 和 Inventory/Settings/HUD 等
+组件 recipe，但不能仅靠新增 flags 得到任意 Knob、自定义 drag state machine 或新的 Behavior SPI；更高阶
 SPI 继续后置，不能绕过 committed snapshot 或 Render 边界。
 
 ## Tree 与事务提交
@@ -530,7 +531,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone 与 `ui_image_nineslice_v1` 已落地；后续补 Component build、Style、Motion workload；固定机前时间结论只报 provisional |
-| `UI-COMPONENT-001` | InProgress；Runtime phase-scoped node-bounded component transaction 已落地；待标准 Behavior 独立 side store、各 pool 统一 reservation/counter 与 `ui_component_build_v1` |
+| `UI-COMPONENT-001` | InProgress；Runtime phase-scoped node-bounded component transaction 与 Activate/Toggle fixed-capacity side store 首切片已落地；待 Range/TextInput/Scroll/Select、各 pool 统一 reservation/counter 与 `ui_component_build_v1` |
 | `UI-STYLE-001` | 开放强类型 StyleClass/token ID、node-local pseudo-state selector 与预编译有界 stylesheet；不做完整 CSS |
 | `UI-MOTION-001` | fixed-capacity paint-only transition、monotonic clock、retarget 与 reduced-motion；action/hit/layout 契约保持不变 |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |

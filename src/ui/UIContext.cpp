@@ -10,6 +10,7 @@
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include "detail/UIButtonActionRegistry.hpp"
+#include "detail/UIBehaviorStateStorage.hpp"
 #include "detail/UICanvasCommandStorage.hpp"
 #include "detail/UICommandPressLatch.hpp"
 #include "detail/UIControlGeometry.hpp"
@@ -93,12 +94,10 @@ using Detail::horizontalMargin;
 using Detail::intersectRects;
 using Detail::inspectPointerRouteTargets;
 using Detail::isButtonChromeKind;
-using Detail::isDefaultActivatableKind;
 using Detail::isFiniteLayoutRect;
 using Detail::isFiniteNonNegative;
 using Detail::isValidFlexLineSummary;
 using Detail::isValidContentAlignment;
-using Detail::isKeyboardFocusableKind;
 using Detail::isValidEventPhaseMask;
 using Detail::isValidFocusScopeMode;
 using Detail::isValidPointerHitPolicy;
@@ -348,10 +347,9 @@ struct UIContext::Impl final {
     // routed callback, so it cannot reuse the outer dispatch ancestry scratch.
     std::pmr::vector<u32> pointerCancelRoutePathScratch;
     Detail::UIButtonActionRegistry buttonActionRegistry;
+    Detail::UIBehaviorStateStorage behaviorStateStorage;
     Detail::UIDefaultActionPressState defaultActionPressState;
     Detail::UIRangeInputPressLatch rangeInputPressLatch;
-    // M11-C0: Checkbox checked bit (index-aligned with nodes; false for non-Checkbox).
-    std::pmr::vector<u8> checkboxCheckedByNodeIndex;
     std::pmr::vector<UICheckboxPaint> checkboxPaintsByNodeIndex;
     // M11-C1: Slider range/value/callback (index-aligned; default 0..1).
     std::pmr::vector<SliderState> sliderStatesByNodeIndex;
@@ -480,8 +478,10 @@ struct UIContext::Impl final {
           routedPointerListenerRegistry(capacities.nodeCapacity, capacities.routedPointerListenerCapacity, resource),
           routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
           buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, resource),
+          behaviorStateStorage(capacities.nodeCapacity, capacities.nodeCapacity,
+                               capacities.nodeCapacity, resource),
           defaultActionPressState(owner), rangeInputPressLatch(owner),
-          checkboxCheckedByNodeIndex(&resource), checkboxPaintsByNodeIndex(&resource),
+          checkboxPaintsByNodeIndex(&resource),
           sliderStatesByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
           committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&resource),
                                                                    std::pmr::vector<UICommittedNodeEntry>(&resource)},
@@ -567,7 +567,6 @@ struct UIContext::Impl final {
         impl->hitEntryIndexByNodeIndex.resize(normalized.nodeCapacity, InvalidUIHitEntryIndex);
         impl->routePathScratch.reserve(normalized.routePathCapacity);
         impl->pointerCancelRoutePathScratch.reserve(normalized.routePathCapacity);
-        impl->checkboxCheckedByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->checkboxPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->sliderStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->committedBuffers[0].reserve(normalized.nodeCapacity);
@@ -2180,9 +2179,10 @@ struct UIContext::Impl final {
 
         const u32 nodeIndex = layoutEntry.node.index();
         const NodeRecord* record = recordByIndex(nodeIndex);
+        const u8* toggleValue = behaviorStateStorage.tryToggleValue(nodeIndex);
         if (record != nullptr && record->kind == BuiltinElementKind::Checkbox &&
-            nodeIndex < checkboxCheckedByNodeIndex.size() && nodeIndex < checkboxPaintsByNodeIndex.size() &&
-            checkboxCheckedByNodeIndex[nodeIndex] != 0)
+            nodeIndex < checkboxPaintsByNodeIndex.size() && toggleValue != nullptr &&
+            *toggleValue != 0)
         {
             const UICheckboxPaint& paint = checkboxPaintsByNodeIndex[nodeIndex];
             const float extent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
@@ -2641,9 +2641,10 @@ struct UIContext::Impl final {
         UISemanticsEntry& entry = source.entry;
         const bool enabled = entry.enabled;
         entry.focused = enabled && defaultActionFocusButton == node;
-        if (record->kind == BuiltinElementKind::Checkbox && nodeIndex < checkboxCheckedByNodeIndex.size())
+        if (const u8* toggleValue = behaviorStateStorage.tryToggleValue(nodeIndex);
+            toggleValue != nullptr)
         {
-            entry.checked = checkboxCheckedByNodeIndex[nodeIndex] != 0;
+            entry.checked = *toggleValue != 0;
         } else if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
         {
             entry.focused = enabled && defaultActionFocusButton == node;
@@ -2996,11 +2997,12 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if (!isDefaultActivatableKind((*nodeResult)->kind) || (*nodeResult)->kind == BuiltinElementKind::ListViewItem ||
+        if (!behaviorStateStorage.hasActivate(button.index()) ||
+            (*nodeResult)->kind == BuiltinElementKind::ListViewItem ||
             (*nodeResult)->kind == BuiltinElementKind::TreeViewItem)
         {
             return fail(UIErrorCode::InvalidButtonAction,
-                        "UI Button action requires a Button, Checkbox, RadioButton, Dropdown, or DropdownItem node");
+                        "UI action requires an Activate-capable non-virtual Element");
         }
         return *nodeResult;
     }
@@ -3173,7 +3175,8 @@ struct UIContext::Impl final {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(node.storageId());
-        if (record == nullptr || !isKeyboardFocusableKind(record->kind))
+        if (record == nullptr ||
+            !hasBehavior(record->behaviors, UIElementBehavior::Focusable))
         {
             return false;
         }
@@ -3251,7 +3254,8 @@ struct UIContext::Impl final {
             return;
         }
         const NodeRecord* buttonRecord = nodes.tryGet(candidate.button.storageId());
-        if (buttonRecord == nullptr || !isDefaultActivatableKind(buttonRecord->kind))
+        if (buttonRecord == nullptr ||
+            !behaviorStateStorage.hasActivate(candidate.button.index()))
         {
             return;
         }
@@ -3496,14 +3500,11 @@ struct UIContext::Impl final {
         clearSemanticsState(index);
         canvasCommandStorage.release(index);
         imageContentStorage.release(index);
+        behaviorStateStorage.release(index);
         dirtyQueueStorage.resetNode(index);
         layoutScratchByIndex[index] = {};
         layoutWorkByIndex[index] = 0;
         routedPointerListenerRegistry.resetNodeSlot(index);
-        if (index < checkboxCheckedByNodeIndex.size())
-        {
-            checkboxCheckedByNodeIndex[index] = 0;
-        }
         if (index < checkboxPaintsByNodeIndex.size())
         {
             checkboxPaintsByNodeIndex[index] = {};
@@ -4259,7 +4260,8 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createNode(BuiltinElementKind kind)
+    [[nodiscard]] Core::Result<UINodeId> createNode(BuiltinElementKind kind,
+                                                    UIElementBehavior behaviors)
     {
         auto idResult = nodes.tryEmplace();
         if (!idResult)
@@ -4277,8 +4279,15 @@ struct UIContext::Impl final {
         resetNodeSideData(node.index());
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
-        record->behaviors = defaultBehaviorsForKind(kind);
+        record->behaviors = behaviors;
         record->rootIndex = node.index();
+        if (Core::Status published = behaviorStateStorage.publish(node.index(), behaviors); !published)
+        {
+            idsByIndex[node.index()] = {};
+            static_cast<void>(nodes.erase(node.storageId()));
+            resetNodeSideData(node.index());
+            return Core::failure(published.error());
+        }
         const UIStyleRoleId styleRole = defaultStyleRoleForKind(kind);
         styleRolesByNodeIndex[node.index()] = styleRole;
         const auto semanticsDefaults = defaultSemanticsForKind(kind);
@@ -4300,7 +4309,6 @@ struct UIContext::Impl final {
         }
         // Interactive controls are targetable. Label remains read-only and
         // decorative unless the caller explicitly changes its hit policy.
-        const UIElementBehavior behaviors = record->behaviors;
         pointerHitPoliciesByIndex[node.index()] =
             (hasBehavior(behaviors, UIElementBehavior::Focusable) ||
              hasBehavior(behaviors, UIElementBehavior::Activate) ||
@@ -4381,7 +4389,11 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI element initialization references a stale node");
         }
-        record->behaviors = descriptor.behaviors;
+        if (record->behaviors != descriptor.behaviors)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI element behavior state does not match its descriptor");
+        }
         layoutStylesByIndex[node.index()] = normalizedLayout;
         enabledByNodeIndex[node.index()] = descriptor.enabled ? 1 : 0;
         const u16 previousBindings = themeBindingsByNodeIndex[node.index()];
@@ -4568,7 +4580,7 @@ struct UIContext::Impl final {
             kind == BuiltinElementKind::ListView
                 ? createListViewComposite(parent, descriptor.listView)
                 : kind == BuiltinElementKind::TreeView ? createTreeViewComposite(parent, descriptor.treeView)
-                                                 : createChild(parent, kind);
+                                                 : createChild(parent, kind, descriptor.behaviors);
         if (!nodeResult)
         {
             return Core::failure(nodeResult.error());
@@ -4601,7 +4613,8 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::CapacityExceeded, "UI root capacity has been exhausted");
         }
 
-        auto nodeResult = createNode(BuiltinElementKind::Root);
+        auto nodeResult = createNode(BuiltinElementKind::Root,
+                                     defaultBehaviorsForKind(BuiltinElementKind::Root));
         if (!nodeResult)
         {
             return Core::failure(nodeResult.error());
@@ -4627,7 +4640,9 @@ struct UIContext::Impl final {
         return UIRootOwner(context.m_impl->lifetime, root);
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createChild(UINodeId parent, BuiltinElementKind kind)
+    [[nodiscard]] Core::Result<UINodeId>
+    createChild(UINodeId parent, BuiltinElementKind kind,
+                std::optional<UIElementBehavior> authoredBehaviors = std::nullopt)
     {
         if (kind == BuiltinElementKind::Root)
         {
@@ -4693,7 +4708,8 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidParent, "UI parent depth cannot be represented");
         }
 
-        auto nodeResult = createNode(kind);
+        auto nodeResult = createNode(kind,
+                                     authoredBehaviors.value_or(defaultBehaviorsForKind(kind)));
         if (!nodeResult)
         {
             return Core::failure(nodeResult.error());
@@ -6395,6 +6411,21 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveToggle(UINodeId node)
+    {
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!behaviorStateStorage.hasToggle(node.index()))
+        {
+            return fail(UIErrorCode::InvalidButtonAction,
+                        "UI checked state requires a Toggle-capable Element");
+        }
+        return *nodeResult;
+    }
+
     [[nodiscard]] Core::Status setCheckboxActionFromUpdater(UINodeId updaterRoot, UINodeId checkbox,
                                                             UIButtonActionCallback&& callback)
     {
@@ -6505,27 +6536,28 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        auto checkboxResult = resolveCheckbox(checkbox);
-        if (!checkboxResult)
+        auto toggleResult = resolveToggle(checkbox);
+        if (!toggleResult)
         {
-            return Core::failure(checkboxResult.error());
+            return Core::failure(toggleResult.error());
         }
         if (!isNodeWithinRoot(updaterRoot, checkbox))
         {
-            return fail(UIErrorCode::InvalidNode, "UI Checkbox is not owned by the updater root");
+            return fail(UIErrorCode::InvalidNode, "UI Toggle element is not owned by the updater root");
         }
-        if (checkbox.index() >= checkboxCheckedByNodeIndex.size())
+        u8* currentValue = behaviorStateStorage.tryToggleValue(checkbox.index());
+        if (currentValue == nullptr)
         {
-            return fail(Core::CoreErrorCode::Internal, "UI Checkbox index out of range");
+            return fail(Core::CoreErrorCode::Internal, "UI Toggle state index is out of range");
         }
         const u8 next = checked ? 1 : 0;
-        if (checkboxCheckedByNodeIndex[checkbox.index()] != next)
+        if (*currentValue != next)
         {
             if (Core::Status dirty = markPaintDirty(checkbox); !dirty)
             {
                 return dirty;
             }
-            checkboxCheckedByNodeIndex[checkbox.index()] = next;
+            *currentValue = next;
         }
         return Core::success();
     }
@@ -6540,21 +6572,22 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        // const_cast: resolveCheckbox is non-const only for API reuse of resolveNode.
-        auto checkboxResult = const_cast<Impl*>(this)->resolveCheckbox(checkbox);
-        if (!checkboxResult)
+        // const_cast: resolveToggle is non-const only for API reuse of resolveNode.
+        auto toggleResult = const_cast<Impl*>(this)->resolveToggle(checkbox);
+        if (!toggleResult)
         {
-            return Core::failure(checkboxResult.error());
+            return Core::failure(toggleResult.error());
         }
         if (!isNodeWithinRoot(updaterRoot, checkbox))
         {
             return fail(UIErrorCode::InvalidNode, "UI Checkbox is not owned by the updater root");
         }
-        if (checkbox.index() >= checkboxCheckedByNodeIndex.size())
+        const u8* currentValue = behaviorStateStorage.tryToggleValue(checkbox.index());
+        if (currentValue == nullptr)
         {
-            return fail(Core::CoreErrorCode::Internal, "UI Checkbox index out of range");
+            return fail(Core::CoreErrorCode::Internal, "UI Toggle state index is out of range");
         }
-        return checkboxCheckedByNodeIndex[checkbox.index()] != 0;
+        return *currentValue != 0;
     }
 
     [[nodiscard]] Core::Result<bool> isCheckboxPressedFromUpdater(UINodeId updaterRoot, UINodeId checkbox)
@@ -9283,7 +9316,7 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Status preflightDefaultActionActivationDirty(UINodeId target, bool pressedStateChanges) const
     {
         const NodeRecord* targetRecord = nodes.tryGet(target.storageId());
-        if (targetRecord == nullptr || !isDefaultActivatableKind(targetRecord->kind))
+        if (targetRecord == nullptr || !behaviorStateStorage.hasActivate(target.index()))
         {
             return fail(UIErrorCode::InvalidNode, "UI default-action target is stale");
         }
@@ -9296,7 +9329,8 @@ struct UIContext::Impl final {
                 ++requiredQueueEntries;
             }
         };
-        const bool targetStateChanges = pressedStateChanges || targetRecord->kind == BuiltinElementKind::Checkbox;
+        const bool targetStateChanges =
+            pressedStateChanges || behaviorStateStorage.hasToggle(target.index());
         if (targetStateChanges)
         {
             countNode(target);
@@ -11030,6 +11064,7 @@ struct UIContext::Impl final {
             UINodeId nextKeyboardFocus = preserveFocusForModalBarrier || preserveFocusForPopupBarrier
                                              ? previousKeyboardFocus
                                              : UINodeId{};
+            UINodeId nextActivationTarget{};
             UINodeId interactionPaintNode{};
             if (willUseScrollBar)
             {
@@ -11046,11 +11081,18 @@ struct UIContext::Impl final {
             } else if (allowsDefaultAction && nearestButton.hasValue() && isNodeEnabled(nearestButton))
             {
                 const NodeRecord* nextButtonRecord = nodes.tryGet(nearestButton.storageId());
-                if (nextButtonRecord != nullptr && isDefaultActivatableKind(nextButtonRecord->kind))
+                if (nextButtonRecord != nullptr &&
+                    behaviorStateStorage.hasActivate(nearestButton.index()))
                 {
-                    nextKeyboardFocus = nextButtonRecord->kind == BuiltinElementKind::ListViewItem ? nearestListView
-                                        : nextButtonRecord->kind == BuiltinElementKind::TreeViewItem ? nearestTreeView
-                                                                                              : nearestButton;
+                    nextActivationTarget = nearestButton;
+                    if (hasBehavior(nextButtonRecord->behaviors,
+                                    UIElementBehavior::Focusable))
+                    {
+                        nextKeyboardFocus =
+                            nextButtonRecord->kind == BuiltinElementKind::ListViewItem ? nearestListView
+                            : nextButtonRecord->kind == BuiltinElementKind::TreeViewItem ? nearestTreeView
+                                                                                       : nearestButton;
+                    }
                     interactionPaintNode = nearestButton;
                 }
             }
@@ -11164,16 +11206,17 @@ struct UIContext::Impl final {
                 {
                     return Core::failure(applied.error());
                 }
-            } else if (nextKeyboardFocus.hasValue())
+            } else if (nextActivationTarget.hasValue())
             {
-                const NodeRecord* buttonRecord = nodes.tryGet(nearestButton.storageId());
-                if (buttonRecord != nullptr && isDefaultActivatableKind(buttonRecord->kind))
+                const NodeRecord* buttonRecord = nodes.tryGet(nextActivationTarget.storageId());
+                if (buttonRecord != nullptr &&
+                    behaviorStateStorage.hasActivate(nextActivationTarget.index()))
                 {
-                    armedPrimaryButton = nearestButton;
+                    armedPrimaryButton = nextActivationTarget;
                     armedPrimaryButtonPressed = true;
                     armedTreeDisclosure = nearestTreeDisclosureAtRouteStart;
                     defaultActionFocusButton = nextKeyboardFocus;
-                    capturedPointerNode = nearestButton;
+                    capturedPointerNode = nextActivationTarget;
                     clearImeFocus();
                     routedEvent.consumeInputTransition();
                     static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
@@ -11383,16 +11426,15 @@ struct UIContext::Impl final {
             if (!routedEvent.isDefaultActionPrevented() && interactionStillArmed && pointWithinArmedButton &&
                 isNodeEnabled(armedButtonAtRouteStart))
             {
-                if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
-                    armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::Checkbox &&
-                    armedButtonAtRouteStart.index() < checkboxCheckedByNodeIndex.size())
+                if (u8* toggleValue =
+                        behaviorStateStorage.tryToggleValue(armedButtonAtRouteStart.index());
+                    toggleValue != nullptr)
                 {
                     if (Core::Status dirty = markPaintDirty(armedButtonAtRouteStart); !dirty)
                     {
                         return Core::failure(dirty.error());
                     }
-                    checkboxCheckedByNodeIndex[armedButtonAtRouteStart.index()] =
-                        checkboxCheckedByNodeIndex[armedButtonAtRouteStart.index()] == 0 ? 1 : 0;
+                    *toggleValue = *toggleValue == 0 ? 1 : 0;
                 }
                 if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
                     armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::RadioButton)
@@ -11571,7 +11613,9 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Result<UIDefaultActionResult>
     routeDefaultActionActivate(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
-                               UIButtonActivationSource source, std::optional<Platform::DigitalControlIdentity> control)
+                               UIButtonActivationSource source,
+                               std::optional<Platform::DigitalControlIdentity> control,
+                               UINodeId explicitAccessibilityTarget = {})
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
@@ -11593,6 +11637,12 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidButtonAction,
                         "UI default-action activation source must be Keyboard, Gamepad, or Accessibility");
+        }
+        if (explicitAccessibilityTarget.hasValue() &&
+            (source != UIButtonActivationSource::Accessibility || control.has_value()))
+        {
+            return fail(UIErrorCode::InvalidButtonAction,
+                        "UI explicit activation targets are reserved for accessibility actions");
         }
         if (control.has_value())
         {
@@ -11620,7 +11670,9 @@ struct UIContext::Impl final {
                 defaultActionPressState.clearPressedTarget(*control);
             }
         }
-        if (!isCommittedKeyboardFocusCandidate(defaultActionFocusButton))
+        UINodeId activationTarget = explicitAccessibilityTarget;
+        if (!activationTarget.hasValue() &&
+            !isCommittedKeyboardFocusCandidate(defaultActionFocusButton))
         {
             if (textInputFocus == defaultActionFocusButton)
             {
@@ -11631,18 +11683,31 @@ struct UIContext::Impl final {
             }
             return UIDefaultActionResult{};
         }
-        const NodeRecord* record = nodes.tryGet(defaultActionFocusButton.storageId());
-        if (record != nullptr && record->kind == BuiltinElementKind::TextEdit)
+        if (!activationTarget.hasValue())
         {
-            if (textInputFocus != defaultActionFocusButton)
+            activationTarget = defaultActionFocusButton;
+        }
+        const NodeRecord* record = contains(activationTarget)
+                                       ? nodes.tryGet(activationTarget.storageId())
+                                       : nullptr;
+        if (!explicitAccessibilityTarget.hasValue() && record != nullptr &&
+            record->kind == BuiltinElementKind::TextEdit)
+        {
+            if (textInputFocus != activationTarget)
             {
                 clearDefaultActionFocus();
                 return UIDefaultActionResult{};
             }
             return UIDefaultActionResult{.consumed = true, .activated = false};
         }
-        if (record == nullptr || !isDefaultActivatableKind(record->kind))
+        if (record == nullptr || !isNodeEnabled(activationTarget) ||
+            !behaviorStateStorage.hasActivate(activationTarget.index()))
         {
+            if (explicitAccessibilityTarget.hasValue())
+            {
+                return fail(UIErrorCode::InvalidButtonAction,
+                            "UI accessibility activation target is not Activate-capable");
+            }
             clearDefaultActionFocus();
             return UIDefaultActionResult{};
         }
@@ -11651,11 +11716,10 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::CapacityExceeded, "UI Button route serial is exhausted");
         }
-        const UINodeId activationTarget = defaultActionFocusButton;
         const bool pressedStateChanges = control.has_value() && !isButtonPressed(activationTarget);
         releaseRouteDirtyQueueReservations();
         auto reservationCleanup = Core::makeScopeExit([this]() noexcept { releaseRouteDirtyQueueReservations(); });
-        if (pressedStateChanges || record->kind == BuiltinElementKind::Checkbox)
+        if (pressedStateChanges || behaviorStateStorage.hasToggle(activationTarget.index()))
         {
             addRouteDirtyReservationCandidate(activationTarget);
         }
@@ -11698,14 +11762,14 @@ struct UIContext::Impl final {
                 return Core::failure(dirty.error());
             }
         }
-        if (record->kind == BuiltinElementKind::Checkbox && activationTarget.index() < checkboxCheckedByNodeIndex.size())
+        if (u8* toggleValue = behaviorStateStorage.tryToggleValue(activationTarget.index());
+            toggleValue != nullptr)
         {
             if (Core::Status dirty = markPaintDirty(activationTarget); !dirty)
             {
                 return Core::failure(dirty.error());
             }
-            checkboxCheckedByNodeIndex[activationTarget.index()] =
-                checkboxCheckedByNodeIndex[activationTarget.index()] == 0 ? 1 : 0;
+            *toggleValue = *toggleValue == 0 ? 1 : 0;
         }
         if (record->kind == BuiltinElementKind::RadioButton)
         {
@@ -11736,8 +11800,9 @@ struct UIContext::Impl final {
             // Focused control without a registered action still consumes Accept
             // so gameplay does not also fire. Selection controls already
             // changed state above; a bare Button without a callback did not.
-            const bool activated = record->kind == BuiltinElementKind::Checkbox || record->kind == BuiltinElementKind::RadioButton ||
-                                   dropdownActivated;
+            const bool activated =
+                behaviorStateStorage.hasToggle(activationTarget.index()) ||
+                record->kind == BuiltinElementKind::RadioButton || dropdownActivated;
             return UIDefaultActionResult{.consumed = true, .activated = activated};
         }
         const u64 currentButtonRouteSerial = ++buttonRouteSerial;
@@ -11817,14 +11882,14 @@ struct UIContext::Impl final {
         case UIAccessibilityActionKind::Focus:
             return requestFocus(action.node);
         case UIAccessibilityActionKind::Invoke:
-            if (!hasBehavior(record->behaviors, UIElementBehavior::Activate))
+            if (!behaviorStateStorage.hasActivate(action.node.index()))
             {
                 return fail(UIErrorCode::InvalidAccessibilityAction,
                             "UI accessibility Invoke requires Activate behavior");
             }
             break;
         case UIAccessibilityActionKind::Toggle:
-            if (!hasBehavior(record->behaviors, UIElementBehavior::Toggle) &&
+            if (!behaviorStateStorage.hasToggle(action.node.index()) &&
                 !hasBehavior(record->behaviors, UIElementBehavior::ExclusiveChoice))
             {
                 return fail(UIErrorCode::InvalidAccessibilityAction,
@@ -11867,12 +11932,34 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::CapacityExceeded, "UI accessibility action sequence is exhausted");
         }
-        if (Core::Status focus = requestFocus(action.node); !focus)
+        if (hasBehavior(record->behaviors, UIElementBehavior::Focusable))
         {
-            return focus;
+            if (Core::Status focus = requestFocus(action.node); !focus)
+            {
+                return focus;
+            }
         }
-        auto activated = routeDefaultActionActivate(Platform::PlatformFrameId{1}, ++accessibilityActionSequence,
-                                                    UIButtonActivationSource::Accessibility, std::nullopt);
+        const u64 actionSequence = ++accessibilityActionSequence;
+        if (action.kind == UIAccessibilityActionKind::Toggle &&
+            behaviorStateStorage.hasToggle(action.node.index()) &&
+            !behaviorStateStorage.hasActivate(action.node.index()))
+        {
+            u8* toggleValue = behaviorStateStorage.tryToggleValue(action.node.index());
+            if (toggleValue == nullptr)
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI accessibility Toggle state is unavailable");
+            }
+            if (Core::Status dirty = markPaintDirty(action.node); !dirty)
+            {
+                return dirty;
+            }
+            *toggleValue = *toggleValue == 0 ? 1 : 0;
+            return Core::success();
+        }
+        auto activated = routeDefaultActionActivate(
+            Platform::PlatformFrameId{1}, actionSequence,
+            UIButtonActivationSource::Accessibility, std::nullopt, action.node);
         if (!activated)
         {
             return Core::failure(activated.error());
@@ -13382,6 +13469,12 @@ struct UIContext::Impl final {
             .buttonActionCapacity = capacityConfig.buttonActionCapacity,
             .activeButtonActionCount = buttonActionRegistry.activeCount(),
             .buttonActionHighWater = buttonActionRegistry.highWater(),
+            .activateBehaviorCapacity = behaviorStateStorage.activateCapacity(),
+            .activeActivateBehaviorCount = behaviorStateStorage.activeActivateCount(),
+            .activateBehaviorHighWater = behaviorStateStorage.activateHighWater(),
+            .toggleBehaviorCapacity = behaviorStateStorage.toggleCapacity(),
+            .activeToggleBehaviorCount = behaviorStateStorage.activeToggleCount(),
+            .toggleBehaviorHighWater = behaviorStateStorage.toggleHighWater(),
             .textByteCapacity = textStorage.capacity(),
             .textByteUsed = textStorage.used(),
             .textByteHighWater = textStorage.highWater(),

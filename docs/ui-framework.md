@@ -69,7 +69,7 @@ private Render backend, currently bgfx
 | --- | --- |
 | Element 描述 | `include/tina/ui/UIElement.hpp` 的 `UIElementDescriptor` 与 `make*Element()` |
 | Tree/事务/快照 | `include/tina/ui/UIContext.hpp` 的 builder、updater、`UIElementBuildTransaction` 与 committed views |
-| Behavior | `include/tina/ui/UIBehavior.hpp`；当前由 `src/ui/detail/UIElementContractResolver.cpp` 解析到私有 kind |
+| Behavior | `include/tina/ui/UIBehavior.hpp`；Activate/Toggle 使用私有 fixed-capacity side store，其余标准 capability 当前仍由 resolver 约束到私有 kind |
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
 | Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp` 与 `UIPaint.hpp`；Image content 和 Canvas `SolidRect`/`Image`/`NineSlice` |
 | Render bridge | `include/tina/integration/UIRenderDisplayList.hpp` |
@@ -187,8 +187,9 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 - 声明 transition、tween、timeline 或 keyframe animation；
 - 传入任意 GPU/paint callback。
 
-当前限制的根因是 `UIElementBehavior` 虽然是 flags，私有 resolver 仍只接受能精确映射为现有
-`BuiltinElementKind` 的组合。第三方组件的推荐方式是**组合 Element 子树**，不是继承 Widget。
+Activate/Toggle 已从 concrete kind 拆到独立 fixed-capacity side store；Range/TextInput/Scroll/Select 仍只接受
+能映射为现有 `BuiltinElementKind` storage contract 的组合。第三方组件的推荐方式是**组合 Element 子树**，
+不是继承 Widget。
 
 ### 当前业务组件写法
 
@@ -208,8 +209,8 @@ buildInventorySlot(Runtime::PrimaryWindowUITreeUpdater& tree,
 ```
 
 实现应由 Button root 负责 input/focus/semantics，子 Element 负责 icon/count 的表现，不为每个业务控件
-增加新的继承层。当前 Runtime facade 还缺少公开的 bounded component transaction，因此完整原子 build
-由 `UI-COMPONENT-001` 补齐。
+增加新的继承层。Runtime facade 已提供 phase-scoped、node-bounded component transaction 并保证失败时整棵
+回滚；text/canvas/各 Behavior pool 的统一预留仍由 `UI-COMPONENT-001` 后续切片补齐。
 
 ## 成熟 UI 系统怎样设计
 
@@ -309,8 +310,10 @@ NodeRecord
 ```
 
 创建 Element 时按 capability 从对应固定池取得 slot，setter 按 capability 校验，而不是按 concrete kind
-校验。官方 `make*Element()` 保持为稳定 recipe。只有标准 Behavior + routed listener 无法表达真实需求时，
-才考虑 startup-only custom Behavior SPI。
+校验。Activate/Toggle 首切片已实现双池原子预检、publish/release/reuse、capacity/active/high-water 统计，以及
+Pointer、Keyboard、accessibility 默认行为的 capability 路由；Range/TextInput/Scroll/Select 尚未迁移。官方
+`make*Element()` 保持为稳定 recipe。只有标准 Behavior + routed listener 无法表达真实需求时，才考虑
+startup-only custom Behavior SPI。
 
 ### StyleSheet
 
@@ -659,7 +662,8 @@ counter、容量/分配不变量可以立即作为确定性门禁：
    - A Done：Image/Icon content、atlas/tint/fit/sampling、root-scoped resolve/pin、RGBA ImageQuad 和 Image semantics；
    - B Done：同源 NineSlice、1..9 quad 原子展开、小 destination/inset/clip/fractional-DPI 规则；
    - C Done：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling、missing/unavailable/resource invalidation、6-case DPI-like size matrix 与 `ui_image_nineslice_v1` benchmark 全部关闭；
-5. `UI-COMPONENT-001`：拆标准 Behavior side store，补 Runtime bounded component transaction；可与上一步并行；
+5. `UI-COMPONENT-001`：Runtime bounded component transaction 与 Activate/Toggle side store 首切片已完成；
+   后续迁移 Range/TextInput/Scroll/Select，并补统一 reservation/counter 与 `ui_component_build_v1`；
 6. `UI-STYLE-001`：等待 Image 与 Component 两条目标属性面稳定后，开放强类型 StyleClass/token 与
    node-local pseudo-state stylesheet，并把 image tint/opacity 纳入 dirty metadata；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。

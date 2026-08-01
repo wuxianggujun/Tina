@@ -45,6 +45,8 @@ add_library(tina_ui STATIC
     ${TINA_UI_PUBLIC_HEADERS}
     UIContext.cpp
     UIContextConfig.cpp
+    detail/UIBehaviorStateStorage.hpp
+    detail/UIBehaviorStateStorage.cpp
     detail/UIButtonActionRegistry.hpp
     detail/UIButtonActionRegistry.cpp
     detail/UICanvasCommandStorage.hpp
