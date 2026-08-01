@@ -15,7 +15,7 @@
 | Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView，固定容量 mutation |
 | Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、committed content placement、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
-| Paint | box/text/control paint、固定容量 backend-neutral `SolidRect` Canvas（含圆角半径）、axis-aligned clip、PaintCache、committed paint snapshot；**尚无 Image/Icon/NineSlice** |
+| Paint | box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme（A/B/C1） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset：surface 色阶、边框、圆角、可选 Low elevation 假影；**无**圆角子树 clip/毛玻璃/CSS stylesheet |
 | Motion | **尚未实现** duration/easing/tween/timeline；hover/pressed/focused/disabled 等状态当前直接切换目标 paint，不做时间插值 |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
@@ -28,7 +28,9 @@
 ## 所有权与句柄
 
 `UIContext::Create(window, capacities, resource)` 在创建时固定 node/root/listener/layout/paint/text/semantics
-等 storage 容量。`UINodeId` 同时校验语义 owner WindowId、registry owner、slot 与 generation；stale、
+等 storage 容量。`paintSnapshotCapacity` 为0时从 node 数派生，非0时可独立提高到8,388,608，以容纳
+单节点的 glyph/control/Canvas/NineSlice 多 entry 展开；Semantics entry/scratch 仍严格按 node 数分配。
+`UINodeId` 同时校验语义 owner WindowId、registry owner、slot 与 generation；stale、
 cross-context、cross-window ID 必须失败。
 
 `UIRootOwner` 是 root 的唯一 RAII owner。销毁 root 会使其子树 ID 失效；listener token 不保活 Context/
@@ -84,16 +86,17 @@ Merge 按 tree 顺序合并 eligible descendant name，Exclude 删除完整语�
 semantics 独立，属性 setter 只 detach 对应 theme binding，`clearOverride()` 从当前 role/theme 恢复；
 Runtime phase facade 同样可切换/query role 和 reset override。
 
-当前 `UISemanticsRole` 尚无 Image role。未来 Image/Icon 切片中，装饰图标默认 `Exclude`；icon-only Button
-必须由 Button root 提供显式 name；只有独立表达信息的图片才发布 Image role，并要求显式 name，不能从
-AssetId 或资源文件名推导可访问名称。该约束来自 Accepted ADR 0023，不表示 Image semantics 已经实现。
+当前 `UISemanticsRole::Image` 已实现。`makeIconElement()` 默认作为装饰内容使用 `Exclude`；icon-only Button
+必须由 Button root 提供显式 name。`makeImageElement()` 只为独立表达信息的图片发布 Image role，并要求
+调用方显式给出 name，不能从 AssetId 或资源文件名推导可访问名称。
 
 多节点业务组件可通过 `UIElementBuildTransaction` 固定 node budget 构建；集合内部 row pool 计入预算，
 创建失败、reset 或析构会回滚整棵组件及 text/canvas storage，active transaction 期间 structure/layout commit
 返回 `BuildTransactionInProgress`。事务对象只属于直接 `UITreeUpdater` authoring，不允许作为 Runtime phase
 facade 对象逃逸回调。公开 `UIWidgetKind` 已删除；私有 `BuiltinElementKind` 只服务成熟控件 storage/行为分派。
-Canvas 的 `SolidRect` 支持统一 `cornerRadius`；命令仍复制到固定容量 storage。Image/Icon/NineSlice、逐角半径、
-圆角子树 clip 与 stylesheet 仍属后续扩展。
+Canvas 命令复制到固定容量 storage：`SolidRect` 支持统一 `cornerRadius`，`Image` 复用 `UIImageSource`，
+`NineSlice` 使用 source-pixel/destination-logical insets 且首版仅 Stretch。逐角半径、圆角子树 clip 与
+stylesheet 仍属后续扩展。
 
 ### 第三方扩展边界
 
@@ -105,7 +108,7 @@ Canvas 的 `SolidRect` 支持统一 `cornerRadius`；命令仍复制到固定容
 | 组合 Panel/Label/Button/List 等 retained 子树 | 可用 | 通过统一 `createElement()` 与官方 `make*Element()` recipe |
 | 自定义布局、Semantics、命中策略、局部 box/text paint | 可用 | 仍受 fixed-capacity、owner-thread 与 phase 生命周期约束 |
 | 多节点业务组件 | 直接 `UITreeUpdater` 可用 | `UIElementBuildTransaction` 固定 node budget、失败整棵回滚；Runtime phase facade 尚无等价 component transaction |
-| 自定义 Canvas | 部分可用 | 仅 backend-neutral `SolidRect`；不能提交纹理、shader、GPU handle 或任意 paint callback |
+| 自定义 Canvas | 可用首版 | backend-neutral `SolidRect`、`Image`、Stretch-only `NineSlice`；只保存 AssetId/图片元数据，不能提交 shader、GPU handle 或任意 paint callback |
 | 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override；没有用户 StyleClass/selector/pseudo-state rule |
 | 自定义交互 | 部分可用 | 可挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
 | 安装后作为外部 SDK 使用 | 尚未闭合 | 当前能在源码树内链接 `Tina::UI`，但尚无 `install(EXPORT)`、`Tina::GameSDK` package 与外部 consumer gate |
@@ -301,10 +304,11 @@ UI 不调用 bgfx。`tina_ui_render_integration` 把 committed paint 转为固�
 在 `RenderFrame` 中只借用 DisplayList 和可选 R8 atlas page。backend 必须在 `submitFrame()` 内同步
 消费。
 
-当前支持 solid/glyph quad、带统一圆角半径的 Box/Element Canvas `SolidRect` 与 axis-aligned scissor。Runtime
-`RenderFramePacket`/FramePin 的
-present-return CPU completion 已落地
-（Null 同步 complete）。rounded/stencil 子树 clip、Image/Icon/NineSlice 与跨 GPU/DPI golden（UI-003）尚未完成。
+当前支持 SolidQuad/Glyph/ImageQuad、带统一圆角半径的 Box/Element Canvas `SolidRect`、Image/Icon content、
+Canvas Image/NineSlice 与 axis-aligned scissor。Runtime `RenderFramePacket`/FramePin 的 present-return CPU
+completion 已落地（Null 同步 complete）；root-scoped resolver 在 frame packet 构建时按
+`(root scope, AssetId)` 去重并 pin Texture2D。rounded/stencil 子树 clip、图片产品/性能证据与跨 GPU/DPI
+golden（UI-003）尚未完成。
 
 ## 实际绘制链路
 
@@ -320,7 +324,7 @@ IGameState::onEnter / updateUI
   -> UICommittedPaintView
   -> tina_ui_render_integration::buildUIDisplayList
   -> logical pixels 映射到 framebuffer pixels、裁剪、相邻 batch 合并
-  -> UIDisplayList SolidQuad / Glyph commands
+  -> UIDisplayList SolidQuad / Glyph / ImageQuad commands
   -> bgfx transient vertex/index buffer
   -> UI textured shader + scissor + premultiplied alpha
   -> RenderDevice::submitFrame 后显示
@@ -328,7 +332,8 @@ IGameState::onEnter / updateUI
 
 `UIContext::buildCommittedPaint()` 按 paint order 遍历可见节点。普通 `UIBoxPaint` 生成矩形 entry；圆角且
 同时有 fill/border 时以外层统一 border + inset fill 两条 entry 表达，shadow 继承外层半径。Canvas
-`SolidRect` 从 Element local 坐标转换到 world，并在 box chrome 后按 descriptor 命令顺序追加；
+`SolidRect`/`Image` 从 Element local 坐标转换到 world，并在 box chrome 后按 descriptor 命令顺序追加；
+NineSlice 先精确计算有效 source/destination patch，再按 row-major 展开为1..9个 Image entry；
 文字生成 Glyph entry；ProgressBar 追加按 value 缩短的 foreground，RadioButton 追加 indicator 和
 选中内块，TextEdit 在焦点状态下追加 selection highlight、IME preedit 和 caret。Integration 再把
 逻辑坐标投影为像素矩形，并丢弃空/透明/完全在 clip 外的 entry。
@@ -340,10 +345,12 @@ premultiplied 颜色乘 coverage，
 backend 对每个 clip batch 设置 bgfx scissor，并使用 `ONE, INV_SRC_ALPHA` 混合。UI 模块本身不依赖
 bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx backend。
 
-这套现有 shader 只读取采样纹理的 `.r`，因此不能直接用于 RGBA Image/Icon。`UI-IMAGE-001` 必须增加
-RGBA `ImageQuad` shader mode/program，并让相邻 batch key 包含 packet-local Texture2D ref、clip、sampling
-和 shader mode；sampled straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继续遵守
-`ONE, INV_SRC_ALPHA` 混合；NineSlice 在 DisplayList 前展开为同一种 ImageQuad，不建立专用 backend primitive。
+Solid/Glyph shader 继续只读取纹理 `.r` coverage；RGBA Image/Icon 使用独立 `ImageQuad` shader
+mode/program。相邻 image batch key 包含 packet-local Texture2D ref、clip、sampling 和 shader mode；sampled
+straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继续遵守 `ONE, INV_SRC_ALPHA`
+混合。NineSlice 在 DisplayList 前展开为同一种 ImageQuad，不建立专用 backend primitive；committed patch
+显式保存共享 logical right/bottom cut，fractional-DPI 投影不从 float width 反推端点，避免相邻 quad 出现
+缝隙或重叠。
 
 ## 控件绘制矩阵
 
@@ -391,7 +398,8 @@ retained 状态并标记必要的 dirty 类别。
 - 另提供 `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome` 等）。
 
 `UIBoxPaint` 仍是 escape hatch，并可携带 borderLight/borderDark/borderWidth、shadow（假 elevation）与
-统一 `cornerRadius`。Image/Icon/NineSlice、逐角半径、圆角子树 clip、毛玻璃与 CSS 式 stylesheet 仍未实现。
+统一 `cornerRadius`。Image/Icon/NineSlice 基础绘制已实现；其产品采用仍由 `UI-IMAGE-001 C` 跟踪。
+逐角半径、圆角子树 clip、毛玻璃与 CSS 式 stylesheet 仍未实现。
 
 ## 产品接入与证据
 
@@ -520,7 +528,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route 与 100k 虚拟集合首个 milestone 已落地并解锁 Image/Component；后续补 Component build、Style、Motion、Image/Icon/NineSlice workload，图片同时输出 quad `Q`、unique resource `U` 与 image batch `B`；固定机前时间结论只报 provisional |
 | `UI-COMPONENT-001` | 标准 Behavior 独立 side store、capability 校验与 Runtime phase-scoped bounded component transaction |
-| `UI-IMAGE-001` | A：Image/Icon content、atlas/tint/fit/sampling、root-scoped AssetId resolve/FramePin、RGBA ImageQuad 与 Image semantics；B：NineSlice 1..9 quad 原子展开；C：图标按钮/Inventory/NineSlice 产品与性能门禁。Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
+| `UI-IMAGE-001` | InProgress；A Image/Icon 与 B Stretch-only NineSlice 已完成，包括 root-scoped resolve/FramePin、RGBA ImageQuad、1..9 quad 原子展开和 fractional-DPI 共享边界；下一步 C 为图标按钮/Inventory/NineSlice 产品采用、视觉矩阵与 `ui_image_nineslice_v1` 性能门禁 |
 | `UI-STYLE-001` | 开放强类型 StyleClass/token ID、node-local pseudo-state selector 与预编译有界 stylesheet；不做完整 CSS |
 | `UI-MOTION-001` | fixed-capacity paint-only transition、monotonic clock、retarget 与 reduced-motion；action/hit/layout 契约保持不变 |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |

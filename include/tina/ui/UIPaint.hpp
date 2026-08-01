@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/ui/UIImageSource.hpp>
 #include <tina/ui/UILayout.hpp>
 
 #include <compare>
@@ -100,20 +101,30 @@ struct UIBoxPaint final {
 };
 
 // Backend-neutral bounded canvas command. Bounds are local to the Element's
-// border box and are clipped by the Element's committed effective clip. The
-// first command slice intentionally supports solid rectangles, which map to the
-// existing backend-neutral SolidQuad display-list command.
+// border box and are clipped by the Element's committed effective clip. Image
+// and NineSlice reuse the same retained source and eventually emit ImageQuad;
+// NineSlice is expanded before the DisplayList boundary.
 enum class UICanvasCommandKind : u8 {
     SolidRect = 0,
+    Image,
+    NineSlice,
 };
 
 struct UICanvasCommand final {
     UICanvasCommandKind kind = UICanvasCommandKind::SolidRect;
     UILogicalRect bounds{};
+    // SolidRect fill or Image/NineSlice tint.
     UIStraightSrgba8Color color{};
     // Rounded SolidRect radius in logical pixels. Rendering clamps it to half
     // the smallest projected extent; it does not establish a rounded clip.
     float cornerRadius = 0.0F;
+    // Image metadata is ignored for SolidRect. Image requires zero insets;
+    // NineSlice interprets source insets in pixels and destination insets in
+    // logical pixels. The first NineSlice slice supports Stretch only.
+    UIImageSource imageSource{};
+    UIImagePixelInsets imageSourceInsets{};
+    UIEdgeSpacing imageDestinationInsets{};
+    UIImageSampling imageSampling = UIImageSampling::Linear;
 
     auto operator<=>(const UICanvasCommand&) const = default;
 };

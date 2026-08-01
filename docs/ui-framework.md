@@ -22,8 +22,9 @@ Tina 当前最接近：
 
 其中 Image/Icon/NineSlice 不是装饰性补充，而是 HUD、Inventory、装备栏、技能栏、对话框和设置页的
 基础视觉能力。它不依赖 Behavior side store 或 Component transaction 才能成立：`UI-PERF-001` 建立首份
-计数协议后，Image 主线可与 Component 主线并行；若只有一条 UI 开发 lane，则先交付 Image/Icon，再交付
-Component。Icon 不另建一套控件或渲染协议，而是 Image 的 atlas-source、tint 和默认布局 profile。
+计数协议后，Image 主线可与 Component 主线并行。当前 Image/Icon 与 NineSlice A/B 已交付；下一关闭点是
+产品采用、视觉矩阵与 benchmark C。Icon 不另建一套控件或渲染协议，而是 Image 的 atlas-source、tint 和
+默认布局 profile。
 
 ## 当前框架
 
@@ -56,7 +57,7 @@ Committed snapshots, atomic publication
         v
 tina_ui_render_integration
   logical coordinates -> framebuffer coordinates
-  UIDisplayList SolidQuad/Glyph + glyph atlas
+  UIDisplayList SolidQuad/Glyph/ImageQuad + glyph atlas + packet-local Texture2D refs
         |
         v
 private Render backend, currently bgfx
@@ -70,9 +71,9 @@ private Render backend, currently bgfx
 | Tree/事务/快照 | `include/tina/ui/UIContext.hpp` 的 builder、updater、`UIElementBuildTransaction` 与 committed views |
 | Behavior | `include/tina/ui/UIBehavior.hpp`；当前由 `src/ui/detail/UIElementContractResolver.cpp` 解析到私有 kind |
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
-| Paint | `include/tina/ui/UIPaint.hpp`；Canvas 当前只有 `SolidRect` |
+| Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp` 与 `UIPaint.hpp`；Image content 和 Canvas `SolidRect`/`Image`/`NineSlice` |
 | Render bridge | `include/tina/integration/UIRenderDisplayList.hpp` |
-| DisplayList | `include/tina/render/UIDisplayList.hpp`；当前只有 `SolidQuad` 与 `Glyph` |
+| DisplayList | `include/tina/render/UIDisplayList.hpp`；当前有 `SolidQuad`、`Glyph` 与 `ImageQuad` |
 | Runtime 帧序 | `src/runtime/EngineHost.cpp`；`updateUI()` 后统一 `commitForFrame()` |
 
 ### Element 不是传统 Widget 对象
@@ -175,14 +176,14 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 - 定义组件函数并返回一组 `UINodeId`，例如 Inventory slot 的 root/icon/count label；
 - 设置布局、文本、Semantics、命中策略、StyleRole、局部 box/text/control paint；
 - 注册 routed pointer listener，使用 Button/Slider/selection 等已有 callback；
-- 使用 `SolidRect` Canvas 组合 backend-neutral 的简单图形。
+- 使用 Image/Icon content，以及 `SolidRect`/`Image`/Stretch-only `NineSlice` Canvas 组合 backend-neutral 图形。
 
 ### 还不可以
 
 - 通过安装目录和 `find_package(Tina)` 使用正式 Game SDK，`SDK-001` 尚未完成；
 - 注册任意新 Widget class 或 Behavior state machine；
 - 定义用户 StyleClass、selector、pseudo-state stylesheet；
-- 绘制 Image/Icon/NineSlice，或从 UI 持有 texture/bgfx handle；
+- 从 UI 持有 AssetHandle/Lease、FrameResourceRef 或 texture/bgfx handle；
 - 声明 transition、tween、timeline 或 keyframe animation；
 - 传入任意 GPU/paint callback。
 
@@ -198,8 +199,8 @@ struct InventorySlotNodes final {
     UI::UINodeId countLabel{};
 };
 
-// 这是普通 C++ recipe。当前可用 Element 和 SolidRect 能完成结构，
-// 真实 icon 要等 UI-IMAGE-001。
+// 这是普通 C++ recipe。Icon child 可直接使用 makeIconElement()；Button root
+// 负责 input/focus/accessible name，count label 负责文本表现。
 Core::Result<InventorySlotNodes>
 buildInventorySlot(Runtime::PrimaryWindowUITreeUpdater& tree,
                    UI::UINodeId parent,
@@ -400,16 +401,20 @@ struct UIImagePixelInsets final {
     u32 bottom{};
 };
 
-struct UINineSlicePaint final {
-    UIImageSource source{};
-    UIImagePixelInsets sourceInsets{};
-    UIEdgeSpacing destinationInsets{};
-    UIStraightSrgba8Color tint = rgba8(255, 255, 255);
-    UIImageSampling sampling = UIImageSampling::Linear;
+struct UICanvasCommand final {
+    UICanvasCommandKind kind = UICanvasCommandKind::SolidRect;
+    UILogicalRect bounds{};
+    UIStraightSrgba8Color color{}; // Solid fill or image tint.
+    float cornerRadius = 0.0F;     // SolidRect only.
+    UIImageSource imageSource{};
+    UIImagePixelInsets imageSourceInsets{};
+    UIEdgeSpacing imageDestinationInsets{};
+    UIImageSampling imageSampling = UIImageSampling::Linear;
 };
 ```
 
-以上名称只表达已接受的目标契约形状，不是已发布签名。`UIImageContent` 是第一类 Element content：
+以上是当前公开契约的简化摘录，精确签名以 `UIImageSource.hpp`、`UIImage.hpp`、`UIPaint.hpp` 和
+`UIElement.hpp` 为准。`UIImageContent` 是第一类 Element content：
 
 - `Fill/Contain/Cover/None`、alignment、tint/opacity 和 `Linear/Nearest` 都是 authoring metadata；
 - `Fill` 拉伸到 content box；`Contain` 保持比例完整显示；`Cover` 保持比例并按 alignment 裁 source；`None`
@@ -420,8 +425,8 @@ struct UINineSlicePaint final {
 - source 必须使用有效 AssetId、非零 texture extent、显式非空且位于 extent 内的 integer pixel rect，以及
   finite/positive intrinsic logical size；空 source rect 不作为“整张纹理”哨兵，整图必须显式写
   `{0, 0, textureWidth, textureHeight}`；
-- atlas UV 按 texel center 生成；Linear atlas fixture 在 source rect 外保留至少 1px edge-extruded gutter，
-  并用高对比相邻 cell 验证不串色；首版 UI 图片不使用 mipmap 或 wrap；
+- atlas UV 按显式 source pixel edge 归一化；Linear atlas 的 edge-extruded gutter 与高对比相邻 cell
+  不串色证据仍由产品/视觉 C 关闭；首版 UI 图片不建立 mipmap 或 wrap 契约；
 - tint/opacity、sampling、AssetId/source rect、fit/alignment 只使 Paint/DisplayList 失效；只有
   `intrinsicLogicalSize` 在节点使用 Auto/intrinsic sizing 时使 Measure/Arrange 失效，均不改变 Hit；
 - Image content 与 text content 首版互斥；“图标 + 文字”用两个子 Element 组合，而不是在一个 content 字段中
@@ -434,7 +439,7 @@ size、`UIPointerHitPolicy::Ignore` 和 decorative semantics，但它仍创建�
 现有命中契约。不新增 Icon Widget、
 Icon Behavior、`IconAsset`、`UITexture` 或第二套 atlas manager。icon atlas 直接使用 `sourcePixels`；
 icon-only Button 由 Button root + Icon child 组成，Button root 必须提供显式 accessible name，装饰 Icon child
-默认 `Exclude`。独立表达信息的图片才发布目标 `UISemanticsRole::Image`，并要求显式 name；不得从
+默认 `Exclude`。独立表达信息的图片才发布 `UISemanticsRole::Image`，并要求显式 name；不得从
 资源文件名猜测可访问名称。Image role 默认没有 action；Windows adapter 映射到既有私有
 `kControlTypeImage`，其他平台 adapter 使用对应 image role，不建立图片专用 action seam。
 
@@ -442,13 +447,15 @@ NineSlice 是 Canvas/Visual paint primitive，不是新的 Widget 或 DisplayLis
 `UIImageSource` 上增加 source-pixel insets 与 destination-logical insets；首版只支持 Stretch，不支持 Tile。
 source inset 必须位于 source rect 内；当 destination 小于固定边之和时按确定比例压缩两侧，零面积 patch
 不发命令。一个 NineSlice 因此展开为 1..9 个 `ImageQuad`，必须先计算精确数量并一次预留 retained paint、
-DisplayList command 和 batch 容量，不能截断半个控件。Integration 对四条共享 logical cut line 各投影一次，
-相邻 patch 复用同一 pixel boundary，避免 DPI 缩放时各自 round 产生缝隙或重叠。
+DisplayList command 和 batch 容量，不能截断半个控件。每个 committed patch 显式携带 authored half-open
+right/bottom cut；Integration 直接 round 该端点，而不是假定 float `start + (end - start) == end`。相邻 patch
+因此把同一 logical cut 映射到同一 pixel boundary，避免 DPI 缩放时产生缝隙或重叠。
 
-Context capacity 需要新增可配置、可统计的 image-content/image-command 与 root resolver-scope 单位；Icon
-消耗普通 Image slot，不增加 icon 专用 pool。NineSlice 在 retained Canvas 中只占一个 command slot，但每次
-paint candidate 按实际非空 patch 消耗 1..9 个 paint-entry slot；descriptor 创建、component transaction 和
-paint publication 都必须在 mutation/publication 前完成对应 reservation，并分别报告 failure/high-water。
+Context 已提供可配置、可统计的 `imageContentCapacity`、`canvasCommandCapacity` 与 root resolver slot；Icon
+消耗普通 Image slot，不增加 icon 专用 pool。`paintSnapshotCapacity` 不再受 node capacity 上限约束，独立
+上限为8,388,608。NineSlice 在 retained Canvas 中只占一个 command slot，但每次 paint candidate 按实际非空
+patch 消耗1..9个 paint-entry slot；descriptor 创建、build transaction rollback 和 paint publication 均保持
+固定容量与失败原子性。
 
 资源与渲染链路固定为：
 
@@ -464,7 +471,7 @@ UIImageContent / Canvas Image / Canvas NineSlice
 
 模块职责不能混在一个 `UIImage` 类里：
 
-| 模块 | 目标职责 |
+| 模块 | 当前 A/B 职责 |
 | --- | --- |
 | `Tina::UI` | `UIImageSource/Content/NineSlice` authoring、intrinsic layout、fit/crop 与 NineSlice logical patch 展开、committed Image paint；root 只携带 opaque resolver-scope id，只依赖 Core AssetId，不认识 AssetSystem/Render/backend |
 | Runtime root capability | 将 root 绑定到 generation-checked resolver scope；root destroy/unbind 先于 State-owned AssetSystem/registry teardown，stale scope fail closed |
@@ -478,9 +485,9 @@ resolver 是窄的 frame-build SPI：输入 `AssetId + FrameResourceSink`，返�
 Integration/Render 边界而不是 `Tina::UI` 公共头；root registration 使用 move-only/generation-checked owner，
 不保存无生命周期证明的裸全局 callback。
 
-当前 `EngineHost` 已在 RenderExtract、UI update 和 DisplayList build 之前打开唯一 `RenderFramePacket`。
-实现时把该 packet 的 `resourceSink()` 与 root-scope resolver registry 传给
-`PrimaryWindowUIDisplayCoordinator::buildForFrame()` 即可；不得为 UI 再开第二个 packet、第二张 pin 表或在
+`EngineHost` 在 RenderExtract、UI update 和 DisplayList build 之前打开唯一 `RenderFramePacket`，并把该
+packet 的 `resourceSink()` 与 root-scope resolver registry 传给
+`PrimaryWindowUIDisplayCoordinator::buildForFrame()`；UI 不再开第二个 packet、第二张 pin 表，也不在
 `submitUI()` 中临时解析 Asset。
 
 retained UI 只保存 `AssetId + source rect/texture extent + tint + layout/paint metadata`，不能保存
@@ -488,18 +495,17 @@ retained UI 只保存 `AssetId + source rect/texture extent + tint + layout/pain
 `Tina::UI` 直接依赖 `Tina::Asset`。AssetSystem 是 Game State-owned，因此 resolver 绑定 owning root 的
 生命周期和 resolver scope；多个 State/root 可以解析相同 AssetId 到不同资源域，不使用全局 resolver。
 frame packet 构建阶段才做有界 lookup、去重和 pin；同一 `(resolver scope, AssetId)` 每帧只解析一次，
-随后复用现有 Texture2D frame resource，不增加 UI 专属纹理类型。`UI-IMAGE-001 A` 的前置切片已将
-`FrameResourceKind::Texture2D` 及其 binding SPI 泛化完成，让 Sprite2D 与 UI 共同消费同一
-kind/binding table，且未保留 Sprite 专属 kind、`UITexture` 或 compatibility alias。root-scoped resolver、
-packet pin 与 `ImageQuad` 仍由 A 的后续垂直切片实现。
+随后复用现有 Texture2D frame resource，不增加 UI 专属纹理类型。`FrameResourceKind::Texture2D` 及其
+binding SPI 已泛化为 Sprite2D/UI 共用同一 kind/binding table，且未保留 Sprite 专属 kind、`UITexture` 或
+compatibility alias；root-scoped resolver、packet pin 与 `ImageQuad` 也已在 A 中落地。
 
-authoring metadata 非法时 descriptor/paint candidate 失败且旧 committed snapshot 继续有效。运行时资源
-missing/not-ready/wrong-kind 或实际 extent 不匹配时使用 root policy：默认 `Skip + counter`，产品可配置
-fallback，严格门禁可选择 `FailFrame`；三种策略都不得同步 I/O、发布未 pin handle 或留下半个 NineSlice。
-DisplayList/frame-resource/pin 容量不足一律在 backend 副作用前让本帧构建原子失败。
+authoring metadata 非法时 descriptor/paint candidate 失败且旧 committed snapshot 继续有效。当前运行时
+缺 resolver、missing/not-ready 或实际 extent 不匹配使用 `Skip + counter`；resolver/sink 结构错误与
+DisplayList/frame-resource/pin 容量不足在 backend 副作用前让本帧构建原子失败。产品 fallback/strict policy
+尚未开放，不能把它写成现有 root API。
 
-当前 bgfx UI fragment shader 只采样 R8 `.r` 作为 Solid/Glyph coverage，不能正确输出 RGBA 图片。
-`ImageQuad` 必须选择 RGBA sampling 的 shader mode/program；command 保存 bounds/UV/tint/clip，batch 保存
+bgfx 的 Solid/Glyph fragment shader 只采样 R8 `.r` coverage，`ImageQuad` 已选择独立 RGBA sampling
+shader mode/program；command 保存 bounds/UV/tint/clip，batch 保存
 packet-local Texture2D ref 与 sampling。batch key 至少包含 `shader mode + texture ref + clip + sampling`，只合并
 paint-order 中相邻兼容命令，不为减少 draw call 全局重排 UI。cooked RGBA8 仍按 straight alpha 采样，
 fragment 必须先将 sampled RGB 乘 sampled alpha，再乘 committed premultiplied tint，保持现有
@@ -516,14 +522,18 @@ material/shader callback 和任意纹理 wrap 契约；这些能力必须有独�
 
 #### `UI-IMAGE-001` 验收矩阵
 
+A/B 的 authoring、committed paint、root-scoped resolver/pin、DisplayList/backend 与 semantics 自动化证据已
+落地；下表继续作为整个任务的关闭矩阵，其中 Product/visual 与 Performance 两行属于 C，不能因 A/B
+测试通过而提前标记整个 `UI-IMAGE-001` Done。
+
 | 边界 | 必须留下的证据 |
 | --- | --- |
 | Authoring/layout | full texture 与 atlas subrect；Fill/Contain/Cover/None + alignment；intrinsic auto-size；text/image 互斥；invalid extent/source/inset 零 mutation；destroy/build rollback 回收 image slot |
 | Committed paint | 显式 `UICommittedPaintKind` 替代 `isGlyph` 布尔扩张；Image/Icon 各 1 entry；NineSlice 1..9 entry；小 destination、零面积 patch、paint capacity failure 保留旧 snapshot |
 | Resource lifetime | 两个 root/两个 resolver scope、相同 AssetId 不串域；同 scope 同资源只 resolve/pin 一次；missing/not-ready/wrong-kind/extent mismatch policy；packet complete/abandon 后 pin exactly-once 释放；stale scope fail closed |
-| Display/backend | ImageQuad UV/tint/clip/checksum；高对比相邻 atlas cell 的 texel-center/1px gutter 无串色；相邻同 texture/clip/sampling/shader 批合并且不跨 paint order；Linear/Nearest；Null preflight；bgfx RGBA straight-to-premultiplied shader；D3D11/OpenGL/Vulkan cooked program |
+| Display/backend | ImageQuad UV/tint/clip/checksum；高对比相邻 atlas cell 的 source-edge/1px gutter 无串色；相邻同 texture/clip/sampling/shader 批合并且不跨 paint order；Linear/Nearest；Null preflight；bgfx RGBA straight-to-premultiplied shader；D3D11/OpenGL/Vulkan cooked program |
 | Input/semantics | decorative Icon 默认 `UIPointerHitPolicy::Ignore` 且语义排除；icon-only Button root 是点击/焦点/显式 name owner；有意义 Image role/name；Windows UIA Image ControlType；图片本身不发布无关 action |
-| Product/visual | icon-only Button、图文 Button、Inventory thumbnail、NineSlice panel；Dark/Light、atlas subrect、Linear/Nearest、missing fallback 与 DPI-like size matrix 均有结构化状态和视觉证据 |
+| Product/visual | icon-only Button、图文 Button、Inventory thumbnail、NineSlice panel；Dark/Light、atlas subrect、Linear/Nearest、missing/unavailable skip 与 DPI-like size matrix 均有结构化状态和视觉证据 |
 | Performance | `ui_image_nineslice_v1` 固定 `Q=5096/U=64` 输入；输出 `Q/U/B`、resolve hit/miss/not-ready、pin/dedupe、command/batch/high-water、allocation delta、checksum 与 provisional CPU 时间 |
 
 ### Motion
@@ -603,7 +613,7 @@ paint 的事实一致，不会把 clean `UIContext` commit 变成 Layout/Paint r
    fallback；
 8. Image resolve 发生在 frame packet 构建阶段，只做 root-scoped 有界 lookup/dedupe/pin，不在 UI commit 内
    等待磁盘或网络；Image/Icon/NineSlice 复用同一 Texture2D frame-resource 与 RGBA ImageQuad 路径；
-9. `UICommittedPaintEntry` 扩展图片时改用显式 kind，不在现有 `isGlyph` 上继续叠加 `isImage/isNineSlice`
+9. `UICommittedPaintEntry` 的图片路径使用显式 kind，没有在旧 `isGlyph` 上叠加 `isImage/isNineSlice`
    布尔组合；NineSlice 在进入 DisplayList 前展开，DisplayList 不保留 NineSlice 专用 command。
 
 ### `UI-PERF-001` workload
@@ -646,11 +656,10 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 2. ADR 0023 已接受，容量单位、失败语义和性能 workload 已冻结；
 3. `UI-PERF-001`：static/paint-dirty/route/virtual-collection 与通用 counter/checksum 首个 milestone
    已完成，任务转为 `InProgress` 并解锁 Image/Component；后续每个垂直切片继续扩展同一协议；
-4. `UI-IMAGE-001` 与 `UI-COMPONENT-001` 进入两个可并行分支；前者不依赖 Behavior side store，只有一条
-   UI lane 时优先 Image/Icon：
-   - A：Image/Icon content、atlas/tint/fit/sampling、root-scoped resolve/pin、RGBA ImageQuad 和 Image semantics；
-   - B：同源 NineSlice、1..9 quad 原子展开、小 destination/inset/clip/DPI 规则；
-   - C：icon-only/图文 Button、Inventory thumbnail、NineSlice panel 及 Dark/Light/atlas/sampling 产品矩阵；
+4. `UI-IMAGE-001` 与 `UI-COMPONENT-001` 是两个可并行分支；前者不依赖 Behavior side store：
+   - A Done：Image/Icon content、atlas/tint/fit/sampling、root-scoped resolve/pin、RGBA ImageQuad 和 Image semantics；
+   - B Done：同源 NineSlice、1..9 quad 原子展开、小 destination/inset/clip/fractional-DPI 规则；
+   - C Next：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling 产品矩阵与 benchmark；
 5. `UI-COMPONENT-001`：拆标准 Behavior side store，补 Runtime bounded component transaction；可与上一步并行；
 6. `UI-STYLE-001`：等待 Image 与 Component 两条目标属性面稳定后，开放强类型 StyleClass/token 与
    node-local pseudo-state stylesheet，并把 image tint/opacity 纳入 dirty metadata；

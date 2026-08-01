@@ -185,15 +185,15 @@ TEST_F(UIPaintSnapshotTest, IntegerColorPremultiplicationAndDerivedCapacityAreDe
     EXPECT_EQ(empty.paintOrderRevision(), 0U);
     EXPECT_EQ(empty.paintRevision(), 0U);
 
-    const auto invalid = UI::UIContext::Create(
+    const auto expanded = UI::UIContext::Create(
         window,
         UI::UIContextCapacityConfig{
             .nodeCapacity = 4,
             .rootCapacity = 1,
             .paintSnapshotCapacity = 5,
         });
-    ASSERT_FALSE(invalid.has_value());
-    EXPECT_EQ(invalid.error().code, UI::UIErrorCode::InvalidContextConfig);
+    ASSERT_TRUE(expanded.has_value()) << (expanded ? "" : expanded.error().message);
+    EXPECT_EQ((*expanded)->statistics().paintSnapshotCapacity, 5U);
 }
 
 TEST_F(UIPaintSnapshotTest, PublishesOnlyVisibleNonTransparentSolidFillsInPaintOrder)

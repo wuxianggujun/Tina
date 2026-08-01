@@ -56,8 +56,22 @@ struct PixelProjection final {
                                     source.intrinsicLogicalSize.height > 0.0F;
     const bool validSampling = entry.imageSampling == UI::UIImageSampling::Linear ||
                                entry.imageSampling == UI::UIImageSampling::Nearest;
+    const bool validProjection = [&entry]() noexcept {
+        if (entry.imageBoundsProjection == UI::UICommittedImageBoundsProjection::Cover)
+        {
+            return entry.imageProjectionEnd.x == 0.0F && entry.imageProjectionEnd.y == 0.0F;
+        }
+        if (entry.imageBoundsProjection != UI::UICommittedImageBoundsProjection::SharedBoundary ||
+            !std::isfinite(entry.imageProjectionEnd.x) || !std::isfinite(entry.imageProjectionEnd.y) ||
+            entry.imageProjectionEnd.x < entry.worldRect.x || entry.imageProjectionEnd.y < entry.worldRect.y)
+        {
+            return false;
+        }
+        return entry.worldRect.width == entry.imageProjectionEnd.x - entry.worldRect.x &&
+               entry.worldRect.height == entry.imageProjectionEnd.y - entry.worldRect.y;
+    }();
     return entry.root.hasValue() && source.texture.hasValue() && validSourceRect &&
-           validIntrinsicSize && validSampling;
+           validIntrinsicSize && validSampling && validProjection;
 }
 
 [[nodiscard]] Core::Status validatePaintView(UI::UICommittedPaintView paintView)
@@ -103,7 +117,7 @@ struct PixelProjection final {
         if (entry.kind == UI::UICommittedPaintKind::Image && !validImagePaint(entry))
         {
             return invalidInput(
-                "Committed UI image paint requires valid root, source geometry, intrinsic size, and sampling");
+                "Committed UI image paint requires valid root, source geometry, intrinsic size, sampling, and bounds projection");
         }
     }
     return Core::success();
@@ -166,10 +180,15 @@ struct ProjectedAxis final {
     float logicalExtent,
     double scale,
     double pixelViewportStart,
-    double pixelViewportEnd)
+    double pixelViewportEnd,
+    std::optional<float> sharedLogicalEnd = std::nullopt)
 {
     const double logicalStart = static_cast<double>(logicalOrigin);
-    const double logicalEnd = logicalStart + static_cast<double>(logicalExtent);
+    // NineSlice patches carry their authored half-open end explicitly because
+    // float(end - start) cannot always be reversed exactly by start + extent.
+    const double logicalEnd = sharedLogicalEnd.has_value()
+                                ? static_cast<double>(*sharedLogicalEnd)
+                                : logicalStart + static_cast<double>(logicalExtent);
     const double projectedStart = pixelViewportStart + logicalStart * scale;
     const double projectedEnd = pixelViewportStart + logicalEnd * scale;
     if (!std::isfinite(projectedStart) || !std::isfinite(projectedEnd))
@@ -179,10 +198,14 @@ struct ProjectedAxis final {
             "A committed UI rectangle cannot be represented in framebuffer coordinates");
     }
 
-    double roundedStart = std::floor(projectedStart);
+    double roundedStart = sharedLogicalEnd.has_value()
+                            ? std::round(projectedStart)
+                            : std::floor(projectedStart);
     double roundedEnd = logicalExtent == 0.0F
                             ? roundedStart
-                            : std::ceil(projectedEnd);
+                            : sharedLogicalEnd.has_value()
+                                ? std::round(projectedEnd)
+                                : std::ceil(projectedEnd);
     roundedStart = std::clamp(
         roundedStart, pixelViewportStart, pixelViewportEnd);
     roundedEnd = std::clamp(
@@ -224,14 +247,16 @@ struct ProjectedAxis final {
 
 [[nodiscard]] Core::Result<Render::UIPixelRect> projectRect(
     const UI::UILogicalRect& logicalRect,
-    const PixelProjection& projection)
+    const PixelProjection& projection,
+    std::optional<UI::UILogicalPoint> sharedLogicalEnd = std::nullopt)
 {
     auto horizontal = projectAxis(
         logicalRect.x,
         logicalRect.width,
         projection.scaleX,
         projection.viewportLeft,
-        projection.viewportRight);
+        projection.viewportRight,
+        sharedLogicalEnd.has_value() ? std::optional<float>{sharedLogicalEnd->x} : std::nullopt);
     if (!horizontal)
     {
         return Core::failure(std::move(horizontal.error()));
@@ -241,7 +266,8 @@ struct ProjectedAxis final {
         logicalRect.height,
         projection.scaleY,
         projection.viewportTop,
-        projection.viewportBottom);
+        projection.viewportBottom,
+        sharedLogicalEnd.has_value() ? std::optional<float>{sharedLogicalEnd->y} : std::nullopt);
     if (!vertical)
     {
         return Core::failure(std::move(vertical.error()));
@@ -441,7 +467,12 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
 
     for (const UI::UICommittedPaintEntry& entry : paintView.entries())
     {
-        auto bounds = projectRect(entry.worldRect, *projection);
+        const std::optional<UI::UILogicalPoint> sharedBoundsEnd =
+            entry.kind == UI::UICommittedPaintKind::Image &&
+                    entry.imageBoundsProjection == UI::UICommittedImageBoundsProjection::SharedBoundary
+                ? std::optional<UI::UILogicalPoint>{entry.imageProjectionEnd}
+                : std::nullopt;
+        auto bounds = projectRect(entry.worldRect, *projection, sharedBoundsEnd);
         if (!bounds)
         {
             return Core::failure(std::move(bounds.error()));

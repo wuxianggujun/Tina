@@ -807,6 +807,156 @@ TEST_F(UIRenderDisplayListTest, ResolvesAndDeduplicatesImageResourcesWithExactUv
     EXPECT_EQ(result->displayList.batches().front().commandCount, 2U);
 }
 
+TEST_F(UIRenderDisplayListTest, IndependentFractionalImageRetainsCoverProjection)
+{
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    const Render::FrameResourceRef texture = internTexture(packet, 83);
+    ASSERT_TRUE(texture.hasValue());
+    ImageResolverState resolverState{
+        .root = root.rootNodeId(),
+        .texture = texture,
+    };
+    resolverState.initializeResolver();
+
+    UI::UICommittedPaintEntry image = imageEntry(1, root.rootNodeId(), imageAsset());
+    image.worldRect = {.x = 0.6F, .y = 0.6F, .width = 0.2F, .height = 0.2F};
+    image.effectiveClip = {.width = 1.0F, .height = 1.0F};
+    const std::array entries{image};
+    std::array<Integration::UIRenderImageResolutionCacheEntry, 1> cache{};
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+
+    auto result = Integration::buildUIDisplayList(
+        builder, paintView(entries, {1.0F, 1.0F}), {.framebufferViewport = {0, 0, 1, 1}},
+        {
+            .resourceSink = &packet.resourceSink(),
+            .resolverLookup = {.userData = &resolverState, .find = &findImageResolver},
+            .cache = cache,
+        });
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    EXPECT_EQ(result->displayList.commands().front().bounds, (Render::UIPixelRect{0, 0, 1, 1}));
+}
+
+TEST_F(UIRenderDisplayListTest, NineSliceUsesSharedFractionalBoundariesOneResolveAndOneBatch)
+{
+    auto contextResult = UI::UIContext::Create(
+        window,
+        {
+            .nodeCapacity = 2,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 9,
+            .canvasCommandCapacity = 1,
+            .applyDefaultProductChrome = false,
+        });
+    ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
+    auto context = std::move(*contextResult);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
+
+    UI::UILayoutStyle layout{};
+    layout.size = {
+        .width = UI::UILayoutLength::Px(10.0F),
+        .height = UI::UILayoutLength::Px(10.0F),
+    };
+    const UI::UICanvasCommand nineSlice{
+        .kind = UI::UICanvasCommandKind::NineSlice,
+        .bounds = {.width = 10.0F, .height = 10.0F},
+        .color = UI::rgba8(255, 255, 255),
+        .imageSource = {
+            .texture = imageAsset(),
+            .sourcePixels = {.x = 1, .y = 1, .width = 9, .height = 9},
+            .texturePixelExtent = {.width = 32, .height = 16},
+            .intrinsicLogicalSize = {.width = 9.0F, .height = 9.0F},
+        },
+        .imageSourceInsets = {.left = 1, .top = 1, .right = 1, .bottom = 1},
+        .imageDestinationInsets = UI::UIEdgeSpacing::All(1.0F),
+        .imageSampling = UI::UIImageSampling::Nearest,
+    };
+    UI::UIElementDescriptor descriptor = UI::makePanelElement(layout);
+    descriptor.visual.canvas = std::span(&nineSlice, 1);
+    auto element = updaterResult->createElement(root.rootNodeId(), descriptor);
+    ASSERT_TRUE(element.has_value()) << element.error().message;
+    ASSERT_TRUE(context->commitLayout({100.0F, 100.0F}).has_value());
+    ASSERT_EQ(context->committedPaint().size(), 9U);
+    for (const UI::UICommittedPaintEntry& entry : context->committedPaint())
+    {
+        EXPECT_EQ(entry.imageBoundsProjection, UI::UICommittedImageBoundsProjection::SharedBoundary);
+    }
+
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    const Render::FrameResourceRef texture = internTexture(packet, 84);
+    ASSERT_TRUE(texture.hasValue());
+    ImageResolverState resolverState{
+        .root = root.rootNodeId(),
+        .texture = texture,
+    };
+    resolverState.initializeResolver();
+    std::array<Integration::UIRenderImageResolutionCacheEntry, 1> cache{};
+    auto builder = createBuilder({.commandCount = 9, .clipCount = 0, .batchCount = 1});
+
+    auto result = Integration::buildUIDisplayList(
+        builder, context->committedPaint(), {.framebufferViewport = {0, 0, 150, 150}},
+        {
+            .resourceSink = &packet.resourceSink(),
+            .resolverLookup = {.userData = &resolverState, .find = &findImageResolver},
+            .cache = cache,
+        });
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    EXPECT_EQ(resolverState.callCount, 1U);
+    EXPECT_EQ(packet.resourceCount(), 1U);
+    EXPECT_EQ(result->statistics.resolvedImageResourceCount, 1U);
+    EXPECT_EQ(result->statistics.submittedImageQuadCount, 9U);
+    const auto commands = result->displayList.commands();
+    ASSERT_EQ(commands.size(), 9U);
+    for (usize row = 0; row < 3; ++row)
+    {
+        for (usize column = 0; column < 3; ++column)
+        {
+            const usize index = row * 3 + column;
+            EXPECT_EQ(commands[index].kind, Render::UIDrawCommandKind::ImageQuad);
+            if (column > 0)
+            {
+                const Render::UIPixelRect& previous = commands[index - 1].bounds;
+                EXPECT_EQ(static_cast<i64>(previous.x) + previous.width, commands[index].bounds.x);
+            }
+            if (row > 0)
+            {
+                const Render::UIPixelRect& previous = commands[index - 3].bounds;
+                EXPECT_EQ(static_cast<i64>(previous.y) + previous.height, commands[index].bounds.y);
+            }
+        }
+    }
+    ASSERT_EQ(result->displayList.batches().size(), 1U);
+    EXPECT_EQ(result->displayList.batches().front().kind, Render::UIDrawCommandKind::ImageQuad);
+    EXPECT_EQ(result->displayList.batches().front().commandCount, 9U);
+    EXPECT_EQ(commands.front().bounds.x, 0);
+    EXPECT_EQ(commands.front().bounds.y, 0);
+    EXPECT_EQ(static_cast<i64>(commands.back().bounds.x) + commands.back().bounds.width, 15);
+    EXPECT_EQ(static_cast<i64>(commands.back().bounds.y) + commands.back().bounds.height, 15);
+
+    auto limitedBuilder = createBuilder({.commandCount = 8, .clipCount = 0, .batchCount = 1});
+    auto rejected = Integration::buildUIDisplayList(
+        limitedBuilder, context->committedPaint(), {.framebufferViewport = {0, 0, 150, 150}},
+        {
+            .resourceSink = &packet.resourceSink(),
+            .resolverLookup = {.userData = &resolverState, .find = &findImageResolver},
+            .cache = cache,
+        });
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::DisplayListCapacityExceeded);
+    EXPECT_TRUE(limitedBuilder.publishedView().empty());
+    EXPECT_EQ(limitedBuilder.statistics().rolledBackBuildCount, 1U);
+}
+
 TEST_F(UIRenderDisplayListTest, SkipsImagesWithoutAResolverWhenUnavailableOrWithMismatchedExtent)
 {
     auto context = createContext(window);
@@ -936,12 +1086,17 @@ TEST_F(UIRenderDisplayListTest, RejectsMalformedImageMetadataBeforeResolverInvoc
         imageEntry(1, root.rootNodeId(), asset),
         imageEntry(1, root.rootNodeId(), asset),
         imageEntry(1, root.rootNodeId(), asset),
+        imageEntry(1, root.rootNodeId(), asset),
+        imageEntry(1, root.rootNodeId(), asset),
     };
     malformedEntries[0].imageSource.sourcePixels.width = 64;
     malformedEntries[1].imageSource.texturePixelExtent.width = 0;
     malformedEntries[2].imageSource.intrinsicLogicalSize.width =
         (std::numeric_limits<float>::quiet_NaN)();
     malformedEntries[3].imageSampling = static_cast<UI::UIImageSampling>(255);
+    malformedEntries[4].imageBoundsProjection = static_cast<UI::UICommittedImageBoundsProjection>(255);
+    malformedEntries[5].imageBoundsProjection = UI::UICommittedImageBoundsProjection::SharedBoundary;
+    malformedEntries[5].imageProjectionEnd = {.x = 49.0F, .y = 25.0F};
 
     for (const UI::UICommittedPaintEntry& malformed : malformedEntries)
     {

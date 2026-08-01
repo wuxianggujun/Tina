@@ -1,4 +1,5 @@
 #include "UICanvasCommandStorage.hpp"
+#include "UIPropertyNormalization.hpp"
 
 #include <tina/ui/UIErrors.hpp>
 
@@ -6,6 +7,64 @@
 #include <cmath>
 
 namespace Tina::UI::Detail {
+namespace {
+
+[[nodiscard]] bool hasValidBounds(const UILogicalRect& bounds) noexcept
+{
+    return std::isfinite(bounds.x) && std::isfinite(bounds.y) &&
+           std::isfinite(bounds.width) && bounds.width >= 0.0F &&
+           std::isfinite(bounds.height) && bounds.height >= 0.0F;
+}
+
+[[nodiscard]] bool hasValidDestinationInsets(const UIEdgeSpacing& insets) noexcept
+{
+    return std::isfinite(insets.left) && insets.left >= 0.0F &&
+           std::isfinite(insets.top) && insets.top >= 0.0F &&
+           std::isfinite(insets.right) && insets.right >= 0.0F &&
+           std::isfinite(insets.bottom) && insets.bottom >= 0.0F;
+}
+
+[[nodiscard]] bool hasValidSourceInsets(const UIImageSource& source,
+                                        const UIImagePixelInsets& insets) noexcept
+{
+    return insets.left <= source.sourcePixels.width &&
+           insets.right <= source.sourcePixels.width - insets.left &&
+           insets.top <= source.sourcePixels.height &&
+           insets.bottom <= source.sourcePixels.height - insets.top;
+}
+
+[[nodiscard]] bool hasZeroInsets(const UIImagePixelInsets& sourceInsets,
+                                 const UIEdgeSpacing& destinationInsets) noexcept
+{
+    return sourceInsets == UIImagePixelInsets{} && destinationInsets == UIEdgeSpacing{};
+}
+
+[[nodiscard]] bool isValidCanvasCommand(const UICanvasCommand& command) noexcept
+{
+    if (!hasValidBounds(command.bounds) || !std::isfinite(command.cornerRadius) ||
+        command.cornerRadius < 0.0F)
+    {
+        return false;
+    }
+
+    switch (command.kind)
+    {
+    case UICanvasCommandKind::SolidRect:
+        return true;
+    case UICanvasCommandKind::Image:
+        return command.cornerRadius == 0.0F && isValidImageSource(command.imageSource) &&
+               isValidImageSampling(command.imageSampling) &&
+               hasZeroInsets(command.imageSourceInsets, command.imageDestinationInsets);
+    case UICanvasCommandKind::NineSlice:
+        return command.cornerRadius == 0.0F && isValidImageSource(command.imageSource) &&
+               isValidImageSampling(command.imageSampling) &&
+               hasValidSourceInsets(command.imageSource, command.imageSourceInsets) &&
+               hasValidDestinationInsets(command.imageDestinationInsets);
+    }
+    return false;
+}
+
+} // namespace
 
 UICanvasCommandStorage::UICanvasCommandStorage(usize nodeCapacity, usize commandCapacity,
                                                std::pmr::memory_resource& resource)
@@ -34,16 +93,10 @@ Core::Status UICanvasCommandStorage::assign(u32 nodeIndex, std::span<const UICan
     }
     for (const UICanvasCommand& command : commands)
     {
-        const bool hasValidBounds = std::isfinite(command.bounds.x) && std::isfinite(command.bounds.y) &&
-                                    std::isfinite(command.bounds.width) && command.bounds.width >= 0.0F &&
-                                    std::isfinite(command.bounds.height) && command.bounds.height >= 0.0F;
-        const bool hasValidCornerRadius = std::isfinite(command.cornerRadius) &&
-                                          command.cornerRadius >= 0.0F;
-        if (command.kind != UICanvasCommandKind::SolidRect || !hasValidBounds ||
-            !hasValidCornerRadius)
+        if (!isValidCanvasCommand(command))
         {
             return Core::failure(UIErrorCode::InvalidElementDescriptor,
-                                 "UI canvas commands require a supported kind, finite non-negative bounds, and a finite non-negative corner radius");
+                                 "UI canvas command kind, geometry, image source, sampling, and insets must be valid");
         }
     }
 

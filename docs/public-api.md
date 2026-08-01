@@ -216,13 +216,14 @@ commit 后返回 borrowed view。
 `RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
 `FrameResourceRef`；`RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
 backend 在同步 submit 中分别按 `Texture2D`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
-`UIDisplayList` 支持 SolidQuad/Glyph、SolidQuad 像素 corner radius 与 axis-aligned clip；corner radius 计入
-paint-order checksum，并由 backend 验证不超过最小边的一半。
+`UIDisplayList` 支持 SolidQuad/Glyph/ImageQuad、SolidQuad 像素 corner radius 与 axis-aligned clip；
+ImageQuad 携带 normalized UV、premultiplied tint、packet-local Texture2D ref 与 Linear/Nearest sampling，
+相邻兼容 command 才合并 batch。corner radius 计入 paint-order checksum，并由 backend 验证不超过最小边的一半。
 
 ## UI
 
 `UIContext`、`UINodeId`、`UIRootOwner` 与 builder/updater 提供 retained tree。公开 authoring 统一为
-`createElement(parent, descriptor)`；`UIElementDescriptor` 一次给出 layout、behavior、content、visual
+`createElement(parent, descriptor)`；`UIElementDescriptor` 一次给出 layout、behavior、text/image content、visual
 StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配置，`makeButtonElement()`、
 `makeListViewElement()` 等是内建控件的官方 recipes。旧 `createPanel/createButton/createListView/...`
 成员入口已删除，不提供 compatibility alias。当前内建行为覆盖 Root、Panel、Modal、Label、Button、
@@ -242,6 +243,12 @@ mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree
 paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
 错误或 dirty queue 容量不足均零发布。
 
+`UIImageSource` 只保存 Texture2D `AssetId`、source pixel rect、texture pixel extent 与 intrinsic logical size；
+`UIImageContent` 增加 Fill/Contain/Cover/None、alignment、tint 和 Linear/Nearest sampling。
+`makeImageElement(image, accessibleName)` 发布 `UISemanticsRole::Image`，`makeIconElement(image)` 是 decorative
+Image profile，不增加 Widget/Behavior/Asset kind。Runtime 的 `bindImageResolver()` 返回 move-only root-scoped
+registration；frame build 按 `(root, AssetId)` 去重 resolve/pin，不在 UI commit 中同步 I/O。
+
 `UISemanticsDescriptor` 支持 Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions；
 committed semantics 使用最近 published ancestor，显式空 name 不回退 content。`UIStyleRoleId` 与 behavior/
 semantics 分离，`setStyleRole()` 切换 recipe，`clearOverride()` 从当前 product theme 恢复选定属性；Runtime
@@ -249,24 +256,32 @@ phase facade 同样暴露 role/query/reset。`UIElementBuildTransaction` 为直�
 node budget，多节点创建失败/析构回滚整棵子树并阻止中途 snapshot commit；它不作为可逃逸的 Runtime
 phase facade 对象。
 
-`UIElementVisual::canvas` 当前接受 borrowed、backend-neutral `SolidRect` command span，并可为每条命令设置
-统一 logical-pixel `cornerRadius`；命令在
+`UIElementVisual::canvas` 接受 borrowed、backend-neutral `SolidRect`/`Image`/`NineSlice` command span。
+`SolidRect` 可设置统一 logical-pixel `cornerRadius`；Image/NineSlice 复用 `UIImageSource`，NineSlice 另带
+source-pixel 与 destination-logical insets，首版只支持 Stretch。命令在
 `createElement()` 返回前复制到 Context 固定容量 pool，destroy/transaction rollback 回收 slot。公开
 `UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。`UIBoxPaint::cornerRadius` 同样只
-圆化自身 chrome，不建立子树 clip。Image/Icon/NineSlice、逐角半径、rounded clip 与 stylesheet 仍是后续扩展。
+圆化自身 chrome，不建立子树 clip。NineSlice 在 committed paint 中按 row-major 精确展开1..9个 Image
+entry，小目标按两侧 destination inset 比例压缩并消除零面积 patch；paint/DisplayList 容量不足不截断。
+逐角半径、rounded clip 与 stylesheet 仍是后续扩展。
 
-第三方当前可以组合现有 Element、布局、Semantics、StyleRole/局部 paint、routed listener 与官方控件
+`paintSnapshotCapacity` 为0时从 `nodeCapacity` 派生，非0时独立上限为8,388,608，因为一个节点可生成多个
+glyph/control/Canvas/NineSlice entry；Semantics entry/scratch 仍严格按 node 数分配。
+
+第三方当前可以组合现有 Element、布局、Semantics、StyleRole/局部 paint、Image/Icon/NineSlice、routed listener 与官方控件
 callback，直接 `UITreeUpdater` 还可用固定预算 transaction 构建多节点业务组件。当前**不支持**注册
-Widget subclass、新 Behavior/state machine、用户 StyleClass/selector、Image/Icon/NineSlice、Motion/timeline 或
+Widget subclass、新 Behavior/state machine、用户 StyleClass/selector、Motion/timeline 或
 GPU paint callback。虽然 `UIElementBehavior` 是公开 flags，私有 resolver 仍要求其组合匹配现有
 `BuiltinElementKind` storage contract；未知组合返回 `InvalidElementDescriptor`。因此“可组合业务 UI”
 不等于“已有开放控件插件 ABI”。目标边界见 [UI 框架设计](ui-framework.md)和 Accepted
 [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。正式外部使用仍以 `SDK-001` 的安装 package 与
 consumer gate 为准。
 
-已接受的目标图片边界中，Icon 只会是 Image 的 atlas source/tint/default-layout recipe，Image/Icon 均落到同一
-RGBA ImageQuad；NineSlice 也复用同一图片源并在 DisplayList 前展开。当前公开头尚无这些 recipe、Image
-semantics role 或纹理 command，本文件不提前刊登未实现签名。
+当前图片边界已按 ADR 0023 落地：Icon 是 Image 的 atlas source/tint/default-layout recipe，Image/Icon 均
+落到同一 RGBA ImageQuad；NineSlice 复用同一图片源并在 DisplayList 前展开，没有专用 backend command。
+普通 Image bounds 保持 cover 投影；NineSlice committed patch 使用
+`UICommittedImageBoundsProjection::SharedBoundary` 并显式携带 authored half-open right/bottom cut，Integration
+无需从 float width 反推端点，相邻 patch 不产生 fractional-DPI round gap/overlap。
 
 UI-004 的 committed Focus Scope、显式 focus、Modal barrier/焦点恢复和持久 Primary Pointer Capture 已实现；
 `UIFocusNavigationDirection`/`routeFocusNavigation()` 基于 committed 几何提供不 wrap 的空间焦点选择，
@@ -544,7 +559,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - Runtime phase-scoped bounded component transaction 与可自由组合的标准 Behavior side store；
-- Image/Icon/NineSlice、用户 StyleClass/node-local pseudo-state stylesheet 与 paint-only Motion；
+- Image/Icon/NineSlice 的产品采用、视觉矩阵与 `ui_image_nineslice_v1` 性能证据；用户 StyleClass/node-local pseudo-state stylesheet 与 paint-only Motion；
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；

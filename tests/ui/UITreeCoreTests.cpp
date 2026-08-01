@@ -136,7 +136,11 @@ TEST_F(UITreeCoreTest, RejectsInvalidWindowAndInvalidCapacityWithoutUsingUiMemor
     expectInvalidCapacity({.nodeCapacity = 4, .rootCapacity = 1, .dirtyQueueCapacity = 5});
     expectInvalidCapacity({.nodeCapacity = 4, .rootCapacity = 1, .layoutSnapshotCapacity = 5});
     expectInvalidCapacity({.nodeCapacity = 4, .rootCapacity = 1, .hitSnapshotCapacity = 5});
-    expectInvalidCapacity({.nodeCapacity = 4, .rootCapacity = 1, .paintSnapshotCapacity = 5});
+    expectInvalidCapacity({
+        .nodeCapacity = 4,
+        .rootCapacity = 1,
+        .paintSnapshotCapacity = UI::UIContextCapacityConfig::MaxPaintSnapshotCapacity + 1U,
+    });
     expectInvalidCapacity({.nodeCapacity = 4, .rootCapacity = 1, .routePathCapacity = 5});
     expectInvalidCapacity({
         .nodeCapacity = 4,

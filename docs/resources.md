@@ -258,10 +258,12 @@ IBL/shadow、point/spot light、light culling 与通用 pass scheduler 仍属 `R
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - hot reload、增量 Cooker、通用 Asset cache/LRU、Bundle/Patch 与 network Asset 尚未实现，见
   `ASSET-002`；
-- UI Image/Icon/NineSlice 尚未接入资源链。`UI-IMAGE-001` 的前置切片已将 frame kind/binding SPI 泛化为
-  Sprite/UI 共用 `Texture2D`；后续 A 切片仍需让 retained tree 只保存 AssetId/图片元数据，并在当前
-  frame packet 中由 root-scoped resolver resolve/pin，不新增 `UITexture`、IconAsset 或第二套 atlas owner。该路线见
-  [UI 框架设计](ui-framework.md)与 Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)；
+- UI Image/Icon/NineSlice A/B 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
+  move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重
+  resolve/pin，并复用 Sprite/UI 共用 `Texture2D` kind/binding；Canvas NineSlice 展开后的1..9个 quad
+  继续命中同一 resolve/pin cache，不新增 `UITexture`、IconAsset 或第二套 atlas owner。`UI-IMAGE-001 C`
+  仍需产品资源失效矩阵、视觉采用与 benchmark 证据，见 [UI 框架设计](ui-framework.md)与 Accepted
+  [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)；
 - TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；
   优先级 IO 调度、editor authoring/undo/redo、自动 gameplay 生成、navigation 与旧 schema migration
   仍须独立验收；

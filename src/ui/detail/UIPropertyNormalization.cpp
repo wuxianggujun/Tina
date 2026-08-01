@@ -169,9 +169,8 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
     };
 }
 
-Core::Result<UIImageContent> normalizeImageContent(UIImageContent content)
+bool isValidImageSource(const UIImageSource& source) noexcept
 {
-    const UIImageSource& source = content.source;
     const bool validExtent = source.texturePixelExtent.width != 0 &&
                              source.texturePixelExtent.height != 0;
     const bool validSourceRect = source.sourcePixels.width != 0 &&
@@ -186,11 +185,19 @@ Core::Result<UIImageContent> normalizeImageContent(UIImageContent content)
                                 std::isfinite(source.intrinsicLogicalSize.height) &&
                                 source.intrinsicLogicalSize.width > 0.0F &&
                                 source.intrinsicLogicalSize.height > 0.0F;
+    return source.texture.hasValue() && validExtent && validSourceRect && validIntrinsic;
+}
+
+bool isValidImageSampling(UIImageSampling sampling) noexcept
+{
+    return sampling >= UIImageSampling::Linear && sampling <= UIImageSampling::Nearest;
+}
+
+Core::Result<UIImageContent> normalizeImageContent(UIImageContent content)
+{
     const bool validFit = content.fit >= UIImageFit::Fill && content.fit <= UIImageFit::None;
-    const bool validSampling = content.sampling >= UIImageSampling::Linear &&
-                               content.sampling <= UIImageSampling::Nearest;
-    if (!source.texture.hasValue() || !validExtent || !validSourceRect || !validIntrinsic ||
-        !validFit || !validSampling || !isValidContentAlignment(content.alignment))
+    if (!isValidImageSource(content.source) || !validFit || !isValidImageSampling(content.sampling) ||
+        !isValidContentAlignment(content.alignment))
     {
         return Core::failure(UIErrorCode::InvalidElementDescriptor,
                              "UI image source, geometry, fit, sampling, and alignment must be valid");

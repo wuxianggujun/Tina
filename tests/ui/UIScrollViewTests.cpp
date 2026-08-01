@@ -576,27 +576,44 @@ TEST_F(UIScrollViewTest, PaintCapacityFailurePreservesPublishedMetricsAtomically
               (UI::UIScrollOffset{.x = 0.0F, .y = 50.0F}));
 }
 
-TEST_F(UIScrollViewTest, SemanticsCapacityFailurePreservesPublishedMetricsAtomically)
+TEST_F(UIScrollViewTest, SemanticsTextCapacityFailurePreservesPublishedMetricsAtomically)
 {
     auto limitedContext = createContext(window, {
                                                     .nodeCapacity = 4,
                                                     .rootCapacity = 1,
                                                     .paintSnapshotCapacity = 1,
+                                                    .textByteCapacity = 2,
                                                 });
     ASSERT_NE(limitedContext, nullptr);
     auto limitedRoot = createRoot(*limitedContext);
     ASSERT_TRUE(limitedRoot.hasValue());
     auto limitedUpdater = createUpdater(*limitedContext, limitedRoot);
     assertOk(limitedUpdater.setLayoutStyle(limitedRoot.rootNodeId(), fixedSize(100.0F, 100.0F)));
-    const VerticalScrollTree tree =
-        createVerticalScrollTree(limitedUpdater, limitedRoot.rootNodeId(), UI::UIScrollBarVisibility::Hidden);
-    ASSERT_TRUE(tree.scrollView.hasValue());
+
+    auto scrollResult = limitedUpdater.createElement(limitedRoot.rootNodeId(), UI::makeScrollViewElement());
+    ASSERT_TRUE(scrollResult.has_value()) << scrollResult.error().message;
+    UI::UIElementDescriptor contentDescriptor = UI::makePanelElement();
+    contentDescriptor.semantics = {
+        .mode = UI::UISemanticsMode::MergeDescendants,
+        .role = UI::UISemanticsRole::Group,
+        .name = "a",
+    };
+    auto contentResult = limitedUpdater.createElement(*scrollResult, contentDescriptor);
+    ASSERT_TRUE(contentResult.has_value()) << contentResult.error().message;
+    const VerticalScrollTree tree{.scrollView = *scrollResult, .content = *contentResult};
+    assertOk(limitedUpdater.setLayoutStyle(tree.scrollView, fixedSize(100.0F, 100.0F)));
+    assertOk(limitedUpdater.setLayoutStyle(tree.content, fixedSize(100.0F, 200.0F)));
+    assertOk(limitedUpdater.setScrollViewStyle(tree.scrollView, {
+                                                                    .axes = UI::UIScrollAxes::Vertical,
+                                                                    .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+                                                                    .wheelStep = 20.0F,
+                                                                }));
     assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 100.0F}));
     const UI::UIScrollViewMetrics oldMetrics = limitedUpdater.scrollViewMetrics(tree.scrollView).value();
     const u64 oldSemanticsRevision = limitedContext->committedSemantics().semanticsRevision();
 
     assertOk(limitedUpdater.setScrollViewOffset(tree.scrollView, {.x = 0.0F, .y = 50.0F}));
-    auto labelResult = limitedUpdater.createElement(tree.scrollView, UI::makeLabelElement());
+    auto labelResult = limitedUpdater.createElement(tree.content, UI::makeLabelElement("b"));
     ASSERT_TRUE(labelResult.has_value()) << labelResult.error().message;
     assertOk(limitedUpdater.setLayoutStyle(*labelResult, fixedSize(10.0F, 10.0F)));
     const Core::Status overflow = limitedContext->commitLayout({.width = 100.0F, .height = 100.0F});

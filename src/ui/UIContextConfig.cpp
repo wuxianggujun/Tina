@@ -34,10 +34,14 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
         return configuredCapacity != 0 && configuredCapacity > config.nodeCapacity;
     };
     if (exceedsNodeCapacity(config.dirtyQueueCapacity) || exceedsNodeCapacity(config.layoutSnapshotCapacity) ||
-        exceedsNodeCapacity(config.hitSnapshotCapacity) || exceedsNodeCapacity(config.paintSnapshotCapacity) ||
-        exceedsNodeCapacity(config.routePathCapacity) || exceedsNodeCapacity(config.imageContentCapacity))
+        exceedsNodeCapacity(config.hitSnapshotCapacity) || exceedsNodeCapacity(config.routePathCapacity) ||
+        exceedsNodeCapacity(config.imageContentCapacity))
     {
         return invalidContextConfig("UI derived capacities cannot exceed node capacity");
+    }
+    if (config.paintSnapshotCapacity > UIContextCapacityConfig::MaxPaintSnapshotCapacity)
+    {
+        return invalidContextConfig("UI paint snapshot capacity exceeds the configured maximum");
     }
     if (config.routedPointerListenerCapacity > UIContextCapacityConfig::MaxRoutedPointerListenerCapacity)
     {

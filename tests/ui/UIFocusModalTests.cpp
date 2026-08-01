@@ -502,6 +502,7 @@ TEST_F(UIFocusModalTest, FailedSemanticsCommitDoesNotPublishModalFocusOrCapture)
                                              .paintSnapshotCapacity = 2,
                                              .routePathCapacity = 6,
                                              .buttonActionCapacity = 4,
+                                             .textByteCapacity = 2,
                                          });
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
@@ -531,8 +532,14 @@ TEST_F(UIFocusModalTest, FailedSemanticsCommitDoesNotPublishModalFocusOrCapture)
     ASSERT_TRUE(pointerCancelToken);
     const u64 semanticsRevision = context->committedSemantics().semanticsRevision();
 
-    const UI::UINodeId modal = createModal(updater, rootNode);
+    UI::UIElementDescriptor modalDescriptor = UI::makeModalElement();
+    modalDescriptor.semantics.mode = UI::UISemanticsMode::MergeDescendants;
+    modalDescriptor.semantics.name = "a";
+    auto modalResult = updater.createElement(rootNode, modalDescriptor);
+    ASSERT_TRUE(modalResult.has_value()) << modalResult.error().message;
+    const UI::UINodeId modal = *modalResult;
     const UI::UINodeId modalButton = createButton(updater, modal);
+    expectOk(updater.setText(modalButton, "b"));
     expectOk(updater.setLayoutStyle(modal, overlay(70.0F, 70.0F, 100.0F, 80.0F)));
     expectOk(updater.setLayoutStyle(modalButton, fixedSize(50.0F, 20.0F)));
 
@@ -545,9 +552,7 @@ TEST_F(UIFocusModalTest, FailedSemanticsCommitDoesNotPublishModalFocusOrCapture)
     EXPECT_EQ(context->pointerCapture(), background);
     EXPECT_EQ(pointerCancelCount, 0);
 
-    UI::UILayoutStyle hiddenBackground = overlay(0.0F, 0.0F, 40.0F, 40.0F);
-    hiddenBackground.visibility = UI::UIVisibility::Hidden;
-    expectOk(updater.setLayoutStyle(background, hiddenBackground));
+    expectOk(updater.setText(modalButton, ""));
     expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
     EXPECT_EQ(context->activeModal(), modal);
     EXPECT_EQ(context->defaultActionFocus(), modalButton);

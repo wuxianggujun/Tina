@@ -295,12 +295,14 @@ DisplayList command、text run/glyph ref 与 frame pin 容量。运行期禁止�
 固定分配 tree/id、style/pointer-policy/dirty side array、dirty queue、layout/route-ancestry scratch、route path
 scratch、listener slots、local SolidFill cache 与 committed structure/layout/hit/paint 双缓冲；
 `dirtyQueueCapacity`、`layoutSnapshotCapacity`、`hitSnapshotCapacity`、`paintSnapshotCapacity` 和
-`routePathCapacity` 为0时从 node capacity 派生，非0时不得超过 node capacity。
+`routePathCapacity` 为0时从 node capacity 派生。dirty/layout/hit/route-path 的非0值不得超过 node
+capacity；paint entry 可由一个 node 的 glyph/control/Canvas/NineSlice 展开为多个，因此
+`paintSnapshotCapacity` 独立上限为8,388,608。Semantics entry/scratch 严格按 node capacity 分配。
 `routedPointerListenerCapacity` 为0时也从 node capacity 派生，可单独配置且最大为1,048,576。small
 control-plane 对象、token state、off-thread `UIRootOwner`/listener release 队列仍在 Create 期间使用默认 heap 预分配。
 M7-C1c-b3d1 把该配置移入 focused `UIContextConfig.hpp` 并公开 shared validator：node/root 必须非0且
-不超过各自上限，root 不超过 node，非0的 dirty/layout/hit/paint/route-path 不超过 node，listener 不超过
-其最大值。`EngineConfig::validate()` 在任何 factory 前复用该函数并把失败包装为
+不超过各自上限，root 不超过 node，非0的 dirty/layout/hit/route-path 不超过 node，paint/listener 不超过
+各自最大值。`EngineConfig::validate()` 在任何 factory 前复用该函数并把失败包装为
 `InvalidEngineConfig`；Runtime 不维护一份可能漂移的平行规则。
 owner thread 析构 `UIRootOwner` 立即回收；非 owner thread 只入队 root id，由下一次 owner-thread
 UI mutation/commit drain 并物理回收。`UIRoutedPointerListenerToken` owner-thread reset 立即生效；

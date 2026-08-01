@@ -16,6 +16,14 @@ enum class UICommittedPaintKind : u8 {
     Image,
 };
 
+// Independent images retain cover projection. Adjacent image patches can
+// carry their authored half-open end so the Render bridge projects a shared
+// logical cut to one pixel boundary without reconstructing it from x + width.
+enum class UICommittedImageBoundsProjection : u8 {
+    Cover = 0,
+    SharedBoundary,
+};
+
 struct UICommittedPaintEntry final {
     UINodeId node{};
     UINodeId root{};
@@ -38,6 +46,11 @@ struct UICommittedPaintEntry final {
     // resolution and frame pinning occur at the Runtime/Render boundary.
     UIImageSource imageSource{};
     UIImageSampling imageSampling = UIImageSampling::Linear;
+    UICommittedImageBoundsProjection imageBoundsProjection = UICommittedImageBoundsProjection::Cover;
+    // Used only by SharedBoundary. worldRect width/height remain the logical
+    // extents exposed to inspection; this point preserves their authored end
+    // when float subtraction cannot be reversed exactly by addition.
+    UILogicalPoint imageProjectionEnd{};
 };
 
 // Owner-thread borrowed paint/composite snapshot. It is invalidated by the

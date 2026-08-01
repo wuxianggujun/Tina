@@ -23,6 +23,7 @@
 #include "detail/UIDirtyQueueStorage.hpp"
 #include "detail/UIImeCompositionState.hpp"
 #include "detail/UIImageContentStorage.hpp"
+#include "detail/UINineSlicePaintEmitter.hpp"
 #include "detail/UIInputPrimitives.hpp"
 #include "detail/UILayoutMeasurement.hpp"
 #include "detail/UILayoutPrimitives.hpp"
@@ -136,6 +137,7 @@ using Detail::normalizeTreeViewCreateConfig;
 using Detail::normalizeTreeViewPaint;
 using Detail::normalizeTreeViewStyle;
 using Detail::NormalizedUIContextCapacityConfig;
+using Detail::makeNineSlicePatches;
 using Detail::planTextEditCommand;
 using Detail::quantizeSliderValue;
 using Detail::ResolvedLength;
@@ -209,6 +211,8 @@ using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
 using Detail::UIPointerRouteInspectionError;
 using Detail::UIPointerRoutePathError;
+using Detail::UINineSlicePatch;
+using Detail::UINineSlicePatchBatch;
 
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
@@ -271,8 +275,6 @@ struct CommittedHitBuildResult final {
 {
     return Core::failure(makeError(code, message, location));
 }
-
-
 
 } // namespace
 
@@ -460,7 +462,7 @@ struct UIContext::Impl final {
           themeTextMetricsScratchByNodeIndex(&resource), localSolidFillCacheByIndex(&resource),
           localTextColorCacheByIndex(&resource), textStatesByIndex(&resource), semanticsStatesByNodeIndex(&resource),
           paintSnapshotBuilder(capacities.paintSnapshotCapacity),
-          semanticsSnapshotBuilder(capacities.nodeCapacity, capacities.paintSnapshotCapacity, resource),
+          semanticsSnapshotBuilder(capacities.nodeCapacity, capacities.nodeCapacity, resource),
           canvasCommandStorage(capacities.nodeCapacity, capacities.canvasCommandCapacity, resource),
           imageContentStorage(capacities.nodeCapacity, capacities.imageContentCapacity, resource),
           textEditStatesByNodeIndex(&resource),
@@ -576,9 +578,8 @@ struct UIContext::Impl final {
         impl->committedHitBuffers[1].reserve(normalized.hitSnapshotCapacity);
         impl->committedPaintBuffers[0].reserve(normalized.paintSnapshotCapacity);
         impl->committedPaintBuffers[1].reserve(normalized.paintSnapshotCapacity);
-        // Semantics publishes interactive kinds only; reuse paint snapshot capacity bound.
-        impl->committedSemanticsBuffers[0].reserve(normalized.paintSnapshotCapacity);
-        impl->committedSemanticsBuffers[1].reserve(normalized.paintSnapshotCapacity);
+        impl->committedSemanticsBuffers[0].reserve(normalized.nodeCapacity);
+        impl->committedSemanticsBuffers[1].reserve(normalized.nodeCapacity);
         impl->committedSemanticsTextBuffers[0].resize(normalized.textByteCapacity, '\0');
         impl->committedSemanticsTextBuffers[1].resize(normalized.textByteCapacity, '\0');
         impl->deferredRootDestroyBuffer.reserve(normalized.rootCapacity);
@@ -2069,12 +2070,18 @@ struct UIContext::Impl final {
         return widgetPaintColor(item, premultiply(treeViewStatesByNodeIndex[treeView.index()].paint.disclosureColor));
     }
 
-    [[nodiscard]] usize countCanvasPaintEntries(u32 nodeIndex) const noexcept
+    [[nodiscard]] usize countCanvasPaintEntries(const UICommittedLayoutEntry& layoutEntry) const noexcept
     {
         usize count = 0;
-        canvasCommandStorage.forEach(nodeIndex, [&count](const UICanvasCommand& command) noexcept {
-            if (command.kind == UICanvasCommandKind::SolidRect && command.color.alpha != 0 &&
-                command.bounds.width > 0.0F && command.bounds.height > 0.0F)
+        canvasCommandStorage.forEach(layoutEntry.node.index(), [&](const UICanvasCommand& command) noexcept {
+            if (command.color.alpha == 0 || command.bounds.width <= 0.0F || command.bounds.height <= 0.0F)
+            {
+                return;
+            }
+            if (command.kind == UICanvasCommandKind::NineSlice)
+            {
+                count += makeNineSlicePatches(layoutEntry.worldRect, command).count;
+            } else
             {
                 ++count;
             }
@@ -2087,9 +2094,35 @@ struct UIContext::Impl final {
     {
         const u32 nodeIndex = layoutEntry.node.index();
         const UILogicalRect canvasClip = intersectRects(layoutEntry.effectiveClip, layoutEntry.worldRect);
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        const UINodeId root = record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+        const auto appendImage = [&](const UICanvasCommand& command, UILogicalRect worldRect,
+                                     UIImagePixelRect sourcePixels,
+                                     UICommittedImageBoundsProjection boundsProjection,
+                                     UILogicalPoint projectionEnd) noexcept {
+            UIImageSource source = command.imageSource;
+            source.sourcePixels = sourcePixels;
+            output.push_back(UICommittedPaintEntry{
+                .node = layoutEntry.node,
+                .root = root,
+                .worldRect = worldRect,
+                .effectiveClip = canvasClip,
+                .paintOrdinal = nextPaintOrdinal,
+                .solidFill = premultiply(command.color),
+                .kind = UICommittedPaintKind::Image,
+                .imageSource = source,
+                .imageSampling = command.imageSampling,
+                .imageBoundsProjection = boundsProjection,
+                .imageProjectionEnd = projectionEnd,
+            });
+            ++nextPaintOrdinal;
+        };
         canvasCommandStorage.forEach(nodeIndex, [&](const UICanvasCommand& command) noexcept {
-            if (command.kind == UICanvasCommandKind::SolidRect && command.color.alpha != 0 &&
-                command.bounds.width > 0.0F && command.bounds.height > 0.0F)
+            if (command.color.alpha == 0 || command.bounds.width <= 0.0F || command.bounds.height <= 0.0F)
+            {
+                return;
+            }
+            if (command.kind == UICanvasCommandKind::SolidRect)
             {
                 output.push_back(UICommittedPaintEntry{
                     .node = layoutEntry.node,
@@ -2106,6 +2139,28 @@ struct UIContext::Impl final {
                     .cornerRadius = command.cornerRadius,
                 });
                 ++nextPaintOrdinal;
+            } else if (command.kind == UICanvasCommandKind::Image)
+            {
+                appendImage(
+                    command,
+                    UILogicalRect{
+                        .x = normalizeFloat(layoutEntry.worldRect.x + command.bounds.x),
+                        .y = normalizeFloat(layoutEntry.worldRect.y + command.bounds.y),
+                        .width = command.bounds.width,
+                        .height = command.bounds.height,
+                    },
+                    command.imageSource.sourcePixels,
+                    UICommittedImageBoundsProjection::Cover,
+                    {});
+            } else if (command.kind == UICanvasCommandKind::NineSlice)
+            {
+                const UINineSlicePatchBatch patches = makeNineSlicePatches(layoutEntry.worldRect, command);
+                for (usize patchIndex = 0; patchIndex < patches.count; ++patchIndex)
+                {
+                    const UINineSlicePatch& patch = patches.patches[patchIndex];
+                    appendImage(command, patch.worldRect, patch.sourcePixels,
+                                UICommittedImageBoundsProjection::SharedBoundary, patch.worldEnd);
+                }
             }
         });
     }
@@ -2386,7 +2441,7 @@ struct UIContext::Impl final {
             boxPaint.solidFill.has_value() ? premultiply(boxPaint.solidFill->color) : UIPremultipliedRgba8Color{};
         const UIPremultipliedRgba8Color resolvedFill = resolvedBoxFillColor(layoutEntry.node, nodeIndex, normalColor);
         paintEntryCount += countBoxChromePaintEntries(boxPaint, layoutEntry.worldRect, !resolvedFill.isTransparent());
-        paintEntryCount += countCanvasPaintEntries(nodeIndex);
+        paintEntryCount += countCanvasPaintEntries(layoutEntry);
         if (const UIImageContent* image = imageContentStorage.get(nodeIndex);
             image != nullptr && image->tint.alpha != 0 &&
             layoutEntry.contentPlacement.contentBox.width > 0.0F &&

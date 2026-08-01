@@ -35,6 +35,8 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config);
 
 [[nodiscard]] Core::Result<UIImageContent>
 normalizeImageContent(UIImageContent content);
+[[nodiscard]] bool isValidImageSource(const UIImageSource& source) noexcept;
+[[nodiscard]] bool isValidImageSampling(UIImageSampling sampling) noexcept;
 
 [[nodiscard]] UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept;
 

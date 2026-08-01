@@ -29,6 +29,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIFocus.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIImage.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIImageSource.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITheme.hpp
@@ -67,6 +68,8 @@ add_library(tina_ui STATIC
     detail/UIDirtyQueueStorage.cpp
     detail/UIImeCompositionState.hpp
     detail/UIImeCompositionState.cpp
+    detail/UINineSlicePaintEmitter.hpp
+    detail/UINineSlicePaintEmitter.cpp
     detail/UIInputPrimitives.hpp
     detail/UIPointerRouteInspection.hpp
     detail/UIPointerRoutePath.hpp

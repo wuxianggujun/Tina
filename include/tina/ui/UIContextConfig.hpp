@@ -13,6 +13,7 @@ struct UIContextCapacityConfig final {
     static constexpr usize MaxRoutedPointerListenerCapacity = 1'048'576;
     static constexpr usize MaxButtonActionCapacity = 1'048'576;
     static constexpr usize MaxCanvasCommandCapacity = 8'388'608;
+    static constexpr usize MaxPaintSnapshotCapacity = 8'388'608;
     static constexpr usize MaxImageContentCapacity = MaxNodeCapacity;
     static constexpr usize MaxTextByteCapacity = 64U * 1024U * 1024U;
     static constexpr usize DefaultTextByteCapacity = 64U * 1024U;
@@ -26,8 +27,9 @@ struct UIContextCapacityConfig final {
     // Counts every effectively visible route-ancestry entry, including nodes
     // whose pointer policy is Ignore; it is not a targetable-node capacity.
     usize hitSnapshotCapacity = 0;
-    // Counts emitted paint entries, not all layout nodes. Zero derives from
-    // nodeCapacity; a non-zero value remains fixed for the context lifetime.
+    // Counts emitted paint entries, not layout nodes. Zero derives from
+    // nodeCapacity; a non-zero value is independently bounded because one node
+    // can emit multiple glyph, control, Canvas, or NineSlice entries.
     usize paintSnapshotCapacity = 0;
     // Total retained backend-neutral canvas commands across all Elements. Zero
     // derives from nodeCapacity; commands are copied during createElement().

@@ -5,6 +5,10 @@
 - Accepted：2026-07-31（固定容量/失败模型、首个 UI benchmark protocol 与一次性迁移策略）
 - 决策者：Tina maintainers
 
+实现注记（2026-08-01）：`UI-IMAGE-001` A Image/Icon 与 B Stretch-only NineSlice 已落地，任务保持
+`InProgress`，C 产品采用、视觉矩阵与 `ui_image_nineslice_v1` 性能证据仍待关闭。下文保留 Accepted 时的
+背景和迁移顺序，不把历史措辞改写成当前完成度。
+
 ## 背景
 
 ADR 0011 已决定使用自研 Retained UI 和 backend-neutral DisplayList；ADR 0021 已决定 Game SDK 只取得

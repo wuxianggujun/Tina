@@ -10,6 +10,40 @@
 namespace Tina::Tests {
 namespace {
 
+[[nodiscard]] Core::AssetId canvasImageAsset()
+{
+    Core::AssetId::Bytes bytes{};
+    bytes[0] = std::byte{0x31};
+    return *Core::AssetId::fromBytes(bytes);
+}
+
+[[nodiscard]] UI::UIImageSource canvasImageSource()
+{
+    return UI::UIImageSource{
+        .texture = canvasImageAsset(),
+        .sourcePixels = {.x = 4, .y = 6, .width = 20, .height = 18},
+        .texturePixelExtent = {.width = 64, .height = 64},
+        .intrinsicLogicalSize = {.width = 20.0F, .height = 18.0F},
+    };
+}
+
+[[nodiscard]] UI::UICanvasCommand canvasImageCommand(UI::UICanvasCommandKind kind)
+{
+    return UI::UICanvasCommand{
+        .kind = kind,
+        .bounds = {.x = 1.0F, .y = 2.0F, .width = 30.0F, .height = 24.0F},
+        .color = UI::rgba8(255, 200, 100, 192),
+        .imageSource = canvasImageSource(),
+        .imageSourceInsets = kind == UI::UICanvasCommandKind::NineSlice
+                                 ? UI::UIImagePixelInsets{.left = 3, .top = 4, .right = 5, .bottom = 6}
+                                 : UI::UIImagePixelInsets{},
+        .imageDestinationInsets = kind == UI::UICanvasCommandKind::NineSlice
+                                      ? UI::UIEdgeSpacing{.left = 5.0F, .top = 6.0F, .right = 7.0F, .bottom = 8.0F}
+                                      : UI::UIEdgeSpacing{},
+        .imageSampling = UI::UIImageSampling::Nearest,
+    };
+}
+
 TEST(UICanvasCommandStorageTests, CopiesAndVisitsCommandsInAssignmentOrder)
 {
     UI::Detail::UICanvasCommandStorage storage(2, 3, *std::pmr::get_default_resource());
@@ -39,6 +73,54 @@ TEST(UICanvasCommandStorageTests, CopiesAndVisitsCommandsInAssignmentOrder)
     EXPECT_EQ(storage.capacity(), 3U);
     EXPECT_EQ(storage.activeCount(), 2U);
     EXPECT_EQ(storage.highWater(), 2U);
+}
+
+TEST(UICanvasCommandStorageTests, CopiesImageAndNineSliceMetadataWithoutBorrowingAuthoringMemory)
+{
+    UI::Detail::UICanvasCommandStorage storage(1, 2, *std::pmr::get_default_resource());
+    std::array commands{
+        canvasImageCommand(UI::UICanvasCommandKind::Image),
+        canvasImageCommand(UI::UICanvasCommandKind::NineSlice),
+    };
+    const std::array expected = commands;
+
+    ASSERT_TRUE(storage.assign(0, commands).has_value());
+    commands = {};
+
+    std::array<UI::UICanvasCommand, 2> visited{};
+    usize visitedCount = 0;
+    storage.forEach(0, [&](const UI::UICanvasCommand& command) noexcept {
+        visited[visitedCount++] = command;
+    });
+    ASSERT_EQ(visitedCount, expected.size());
+    EXPECT_EQ(visited, expected);
+}
+
+TEST(UICanvasCommandStorageTests, RejectsMalformedImageAndNineSliceMetadataAtomically)
+{
+    UI::Detail::UICanvasCommandStorage storage(1, 1, *std::pmr::get_default_resource());
+    std::array malformed{
+        canvasImageCommand(UI::UICanvasCommandKind::Image),
+        canvasImageCommand(UI::UICanvasCommandKind::Image),
+        canvasImageCommand(UI::UICanvasCommandKind::NineSlice),
+        canvasImageCommand(UI::UICanvasCommandKind::NineSlice),
+        canvasImageCommand(UI::UICanvasCommandKind::NineSlice),
+    };
+    malformed[0].imageSource.sourcePixels.width = 128;
+    malformed[1].imageSourceInsets.left = 1;
+    malformed[2].imageSourceInsets.left = 16;
+    malformed[2].imageSourceInsets.right = 8;
+    malformed[3].imageDestinationInsets.bottom = (std::numeric_limits<float>::quiet_NaN)();
+    malformed[4].cornerRadius = 1.0F;
+
+    for (const UI::UICanvasCommand& command : malformed)
+    {
+        const Core::Status result = storage.assign(0, std::span(&command, 1));
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+        EXPECT_EQ(storage.activeCount(), 0U);
+        EXPECT_EQ(storage.highWater(), 0U);
+    }
 }
 
 TEST(UICanvasCommandStorageTests, RejectsInvalidIndexCapacityAndDescriptorAtomically)

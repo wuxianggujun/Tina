@@ -106,26 +106,31 @@ Scene/Runtime writer 不能创建 GPU resource。产品 State 在安全阶段上
 
 ## UI DisplayList 与 Glyph
 
-UI paint 通过 integration 转为固定容量 DisplayList。当前 command/batch 支持 SolidQuad 与 Glyph，clip
-为 axis-aligned scissor。Glyph 使用 UIContext-owned R8 atlas page：Runtime 在 submit 时借用像素，bgfx
-创建或更新私有 atlas texture，并用 textured UI shader 绘制。
+UI paint 通过 integration 转为固定容量 DisplayList。当前 command/batch 支持 SolidQuad、Glyph 与
+ImageQuad，clip 为 axis-aligned scissor。Glyph 使用 UIContext-owned R8 atlas page：Runtime 在 submit 时
+借用像素，bgfx 创建或更新私有 atlas texture，并用 coverage UI shader 绘制；ImageQuad 使用 packet-local
+Texture2D ref、normalized UV、tint 与 Linear/Nearest sampling，并选择独立 RGBA shader。
 
 已实现的路径包括：
 
 - Text/Glyph placement → `UIDrawCommandKind::Glyph`；
 - atlas UV 与 page 校验；
 - solid/glyph 按 clip、kind、atlas page batching；
+- Image/Icon content 与 Canvas Image/NineSlice → `UIDrawCommandKind::ImageQuad`；
+- root-scoped `(root, AssetId)` resolve/pin 去重、source rect UV、image texture/clip/sampling 相邻 batching；
+- NineSlice row-major 1..9 quad 原子展开及 fractional-DPI 共享边界投影；
 - bgfx R8 atlas create/update、solid white texture 与 glyph texture binding；
+- bgfx RGBA ImageQuad program、Texture2D binding preflight 与 straight-alpha-to-premultiplied sampling；
 - UI → Render integration tests 与 bgfx geometry tests。
 
-rounded/stencil 子树 clip、Image/Icon/NineSlice、复杂 material 与跨 GPU golden 仍未完成；统一
-RoundedRect/SolidQuad corner radius 已实现，不再列作缺口。
+rounded/stencil 子树 clip、复杂 material、图片产品/性能证据与跨 GPU golden 仍未完成；统一
+RoundedRect/SolidQuad corner radius 和 Image/Icon/NineSlice A/B 已实现，不再列作缺口。
 
-Proposed `UI-IMAGE-001` 将增加 RGBA `ImageQuad`，Image/Icon 各发一个 command，NineSlice 在 UI committed
-paint 中展开为 1..9 个相同 command。batch 持有 packet-local 通用 Texture2D ref 与 sampling，command
-持有 bounds/UV/tint/clip；现有只采样 R8 `.r` coverage 的 Solid/Glyph shader 继续保留，RGBA 图片选择独立
-shader mode/program，并在采样后 premultiply。具体资源 owner、失败策略和性能门禁见
-[UI 框架设计](ui-framework.md)，这里不把 Proposed 路线写成当前能力。
+`UI-IMAGE-001` A/B 当前让 Image/Icon 各发一个 Image entry，NineSlice 在 UI committed paint 中展开为
+1..9个相同 entry。batch 持有 packet-local 通用 Texture2D ref 与 sampling，command 持有
+bounds/UV/tint/clip；只采样 R8 `.r` coverage 的 Solid/Glyph shader 继续保留，RGBA 图片选择独立
+shader mode/program，并在采样后 premultiply。DisplayList/frame resource 容量不足在 backend 副作用前
+整次 rollback；C 的产品采用、资源失效矩阵与性能门禁见 [UI 框架设计](ui-framework.md)。
 
 ## GPU 资源
 
