@@ -42,14 +42,6 @@ struct RadioButtonState final {
     bool selected = false;
 };
 
-struct SliderState final {
-    float minValue = 0.0F;
-    float maxValue = 1.0F;
-    float step = 0.0F;
-    float value = 0.0F;
-    UISliderPaint paint{};
-};
-
 struct ScrollViewState final {
     UIScrollViewStyle style{};
     UIScrollViewPaint paint{};

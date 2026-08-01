@@ -60,6 +60,17 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
             UIErrorCode::InvalidElementDescriptor,
             "UI image content requires a behavior-neutral Element");
     }
+    constexpr auto ComposableBehaviors = static_cast<UIElementBehavior>(
+        static_cast<u32>(UIElementBehavior::Activate) |
+        static_cast<u32>(UIElementBehavior::Toggle) |
+        static_cast<u32>(UIElementBehavior::RangeInput));
+    const auto nonComposable = static_cast<UIElementBehavior>(
+        static_cast<u32>(specialized) & ~static_cast<u32>(ComposableBehaviors));
+    if (nonComposable == UIElementBehavior::None &&
+        hasBehavior(specialized, UIElementBehavior::RangeInput))
+    {
+        return hasText ? BuiltinElementKind::Label : BuiltinElementKind::Slider;
+    }
     if (specialized == UIElementBehavior::Activate)
     {
         return hasText ? BuiltinElementKind::Button : BuiltinElementKind::Panel;
@@ -73,10 +84,6 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     if (specialized == UIElementBehavior::Toggle)
     {
         return hasText ? BuiltinElementKind::Label : BuiltinElementKind::Panel;
-    }
-    if (specialized == UIElementBehavior::RangeInput)
-    {
-        return rejectIntrinsicContent(BuiltinElementKind::Slider);
     }
     if (specialized == UIElementBehavior::TextInput)
     {

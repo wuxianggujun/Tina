@@ -96,7 +96,9 @@ TEST(UIElementContractResolverTests, RejectsUnsupportedBehaviorAndContentContrac
 
     descriptor = UI::makeSliderElement();
     descriptor.text = "Slider";
-    EXPECT_FALSE(UI::Detail::resolveElementBuiltinKind(descriptor));
+    kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind);
+    EXPECT_EQ(*kind, BuiltinElementKind::Label);
 
     descriptor = UI::makePopupElement();
     descriptor.layout.placement = UI::UILayoutPlacement::Flow;
@@ -104,7 +106,9 @@ TEST(UIElementContractResolverTests, RejectsUnsupportedBehaviorAndContentContrac
 
     descriptor = UI::makeButtonElement("Mixed");
     descriptor.behaviors |= UI::UIElementBehavior::RangeInput;
-    EXPECT_FALSE(UI::Detail::resolveElementBuiltinKind(descriptor));
+    kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind);
+    EXPECT_EQ(*kind, BuiltinElementKind::Label);
 }
 
 TEST(UIElementContractResolverTests, ActivateAndToggleComposeOnGenericPanelAndLabelKinds)
@@ -124,6 +128,27 @@ TEST(UIElementContractResolverTests, ActivateAndToggleComposeOnGenericPanelAndLa
     descriptor.behaviors = UI::UIElementBehavior::Focusable |
                            UI::UIElementBehavior::Activate |
                            UI::UIElementBehavior::Toggle;
+    kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind);
+    EXPECT_EQ(*kind, BuiltinElementKind::Label);
+}
+
+TEST(UIElementContractResolverTests, RangeInputComposesWithActivateAndToggleWithoutConcreteKindEquality)
+{
+    UI::UIElementDescriptor descriptor = UI::makePanelElement();
+    descriptor.behaviors = UI::UIElementBehavior::RangeInput;
+    auto kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind);
+    EXPECT_EQ(*kind, BuiltinElementKind::Slider);
+
+    descriptor.behaviors = UI::UIElementBehavior::Activate | UI::UIElementBehavior::Toggle |
+                           UI::UIElementBehavior::RangeInput;
+    kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind);
+    EXPECT_EQ(*kind, BuiltinElementKind::Slider);
+
+    descriptor = UI::makeLabelElement("Range label");
+    descriptor.behaviors = UI::UIElementBehavior::Focusable | UI::UIElementBehavior::RangeInput;
     kind = UI::Detail::resolveElementBuiltinKind(descriptor);
     ASSERT_TRUE(kind);
     EXPECT_EQ(*kind, BuiltinElementKind::Label);

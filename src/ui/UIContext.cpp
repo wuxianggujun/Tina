@@ -167,7 +167,6 @@ using Detail::ScrollBarPointerHit;
 using Detail::ScrollViewLayoutScratch;
 using Detail::ScrollViewLayoutInput;
 using Detail::ScrollViewState;
-using Detail::SliderState;
 using Detail::SliderPaintGeometry;
 using Detail::sliderPaintGeometry;
 using Detail::setScrollAxisOffset;
@@ -351,8 +350,8 @@ struct UIContext::Impl final {
     Detail::UIDefaultActionPressState defaultActionPressState;
     Detail::UIRangeInputPressLatch rangeInputPressLatch;
     std::pmr::vector<UICheckboxPaint> checkboxPaintsByNodeIndex;
-    // M11-C1: Slider range/value/callback (index-aligned; default 0..1).
-    std::pmr::vector<SliderState> sliderStatesByNodeIndex;
+    // Slider-specific visuals remain kind-owned; RangeInput values live in the behavior side store.
+    std::pmr::vector<UISliderPaint> sliderPaintsByNodeIndex;
     Detail::UISliderChangeCallbackRegistry sliderChangeCallbackRegistry;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
     std::array<std::pmr::vector<UICommittedLayoutEntry>, 2> committedLayoutBuffers;
@@ -479,10 +478,10 @@ struct UIContext::Impl final {
           routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
           buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, resource),
           behaviorStateStorage(capacities.nodeCapacity, capacities.nodeCapacity,
-                               capacities.nodeCapacity, resource),
+                               capacities.nodeCapacity, capacities.nodeCapacity, resource),
           defaultActionPressState(owner), rangeInputPressLatch(owner),
           checkboxPaintsByNodeIndex(&resource),
-          sliderStatesByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
+          sliderPaintsByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
           committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&resource),
                                                                    std::pmr::vector<UICommittedNodeEntry>(&resource)},
           committedLayoutBuffers{std::pmr::vector<UICommittedLayoutEntry>(&resource),
@@ -568,7 +567,7 @@ struct UIContext::Impl final {
         impl->routePathScratch.reserve(normalized.routePathCapacity);
         impl->pointerCancelRoutePathScratch.reserve(normalized.routePathCapacity);
         impl->checkboxPaintsByNodeIndex.resize(normalized.nodeCapacity);
-        impl->sliderStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->sliderPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->committedBuffers[0].reserve(normalized.nodeCapacity);
         impl->committedBuffers[1].reserve(normalized.nodeCapacity);
         impl->committedLayoutBuffers[0].reserve(normalized.layoutSnapshotCapacity);
@@ -2196,21 +2195,26 @@ struct UIContext::Impl final {
                 },
                 controlColor(paint.checkedIndicatorColor));
         } else if (record != nullptr && record->kind == BuiltinElementKind::Slider &&
-                   nodeIndex < sliderStatesByNodeIndex.size())
+                   nodeIndex < sliderPaintsByNodeIndex.size())
         {
-            const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
-            const SliderPaintGeometry geometry = sliderPaintGeometry(layoutEntry.worldRect, slider.minValue,
-                                                                     slider.maxValue, slider.value, slider.paint);
+            const Detail::UIRangeInputState* range = behaviorStateStorage.tryRangeInputState(nodeIndex);
+            if (range == nullptr)
+            {
+                return fail(Core::CoreErrorCode::Internal, "UI Slider is missing RangeInput behavior state");
+            }
+            const UISliderPaint& paint = sliderPaintsByNodeIndex[nodeIndex];
+            const SliderPaintGeometry geometry = sliderPaintGeometry(layoutEntry.worldRect, range->minValue,
+                                                                     range->maxValue, range->value, paint);
             if (geometry.fraction > 0.0F)
             {
-                add(geometry.filledTrack, controlColor(slider.paint.filledTrackColor));
+                add(geometry.filledTrack, controlColor(paint.filledTrackColor));
             }
             const UIStraightSrgba8Color thumbColor =
-                armedSlider == layoutEntry.node && slider.paint.draggingThumbColor.alpha != 0
-                    ? slider.paint.draggingThumbColor
-                    : defaultActionFocusButton == layoutEntry.node && slider.paint.focusedThumbColor.alpha != 0
-                        ? slider.paint.focusedThumbColor
-                        : slider.paint.thumbColor;
+                armedSlider == layoutEntry.node && paint.draggingThumbColor.alpha != 0
+                    ? paint.draggingThumbColor
+                    : defaultActionFocusButton == layoutEntry.node && paint.focusedThumbColor.alpha != 0
+                        ? paint.focusedThumbColor
+                        : paint.thumbColor;
             add(geometry.thumb, controlColor(thumbColor));
         } else if (record != nullptr && record->kind == BuiltinElementKind::ScrollView &&
                    nodeIndex < scrollViewStatesByNodeIndex.size() &&
@@ -2645,7 +2649,16 @@ struct UIContext::Impl final {
             toggleValue != nullptr)
         {
             entry.checked = *toggleValue != 0;
-        } else if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
+        }
+        if (const Detail::UIRangeInputState* range = behaviorStateStorage.tryRangeInputState(nodeIndex);
+            range != nullptr)
+        {
+            entry.hasRange = true;
+            entry.minValue = range->minValue;
+            entry.maxValue = range->maxValue;
+            entry.value = range->value;
+        }
+        if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
         {
             entry.focused = enabled && defaultActionFocusButton == node;
         } else if (record->kind == BuiltinElementKind::DropdownItem)
@@ -2654,14 +2667,6 @@ struct UIContext::Impl final {
         } else if (record->kind == BuiltinElementKind::TextEdit)
         {
             entry.focused = enabled && textInputFocus == node;
-        } else if (record->kind == BuiltinElementKind::Slider && nodeIndex < sliderStatesByNodeIndex.size())
-        {
-            const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
-            entry.focused = enabled && defaultActionFocusButton == node;
-            entry.hasRange = true;
-            entry.minValue = slider.minValue;
-            entry.maxValue = slider.maxValue;
-            entry.value = slider.value;
         } else if (record->kind == BuiltinElementKind::ProgressBar &&
                    nodeIndex < progressBarStatesByNodeIndex.size())
         {
@@ -3509,9 +3514,9 @@ struct UIContext::Impl final {
         {
             checkboxPaintsByNodeIndex[index] = {};
         }
-        if (index < sliderStatesByNodeIndex.size())
+        if (index < sliderPaintsByNodeIndex.size())
         {
-            sliderStatesByNodeIndex[index] = {};
+            sliderPaintsByNodeIndex[index] = {};
         }
         if (index < textEditStatesByNodeIndex.size())
         {
@@ -3998,7 +4003,7 @@ struct UIContext::Impl final {
             .text = textStatesByIndex[index].style,
             .button = buttonPaintsByNodeIndex[index],
             .checkbox = checkboxPaintsByNodeIndex[index],
-            .slider = sliderStatesByNodeIndex[index].paint,
+            .slider = sliderPaintsByNodeIndex[index],
             .progressBar = progressBarStatesByNodeIndex[index].paint,
             .radioButton = radioButtonStatesByNodeIndex[index].paint,
             .scrollView = scrollViewStatesByNodeIndex[index].paint,
@@ -6618,16 +6623,30 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveRangeInput(UINodeId node)
+    {
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!hasBehavior((*nodeResult)->behaviors, UIElementBehavior::RangeInput) ||
+            behaviorStateStorage.tryRangeInputState(node.index()) == nullptr)
+        {
+            return fail(UIErrorCode::InvalidButtonAction, "UI RangeInput API requires a RangeInput-capable node");
+        }
+        return *nodeResult;
+    }
+
     [[nodiscard]] bool isInteractiveRangeInput(UINodeId node) const noexcept
     {
-        if (!node.hasValue() || node.index() >= sliderStatesByNodeIndex.size() ||
-            node.index() >= semanticsStatesByNodeIndex.size() || !isNodeEnabled(node))
+        if (!node.hasValue() || node.index() >= semanticsStatesByNodeIndex.size() || !isNodeEnabled(node) ||
+            behaviorStateStorage.tryRangeInputState(node.index()) == nullptr)
         {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(node.storageId());
-        return record != nullptr && record->kind == BuiltinElementKind::Slider &&
-               hasBehavior(record->behaviors, UIElementBehavior::RangeInput) &&
+        return record != nullptr && hasBehavior(record->behaviors, UIElementBehavior::RangeInput) &&
                !semanticsStatesByNodeIndex[node.index()].readOnly;
     }
 
@@ -6635,13 +6654,13 @@ struct UIContext::Impl final {
                                                        Platform::PlatformFrameId platformFrame,
                                                        u64 sourceSequence, bool requireInteractive)
     {
-        if (!slider.hasValue() || slider.index() >= sliderStatesByNodeIndex.size())
+        if (!slider.hasValue())
         {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(slider.storageId());
-        if (record == nullptr || record->kind != BuiltinElementKind::Slider ||
-            !hasBehavior(record->behaviors, UIElementBehavior::RangeInput))
+        Detail::UIRangeInputState* state = behaviorStateStorage.tryRangeInputState(slider.index());
+        if (record == nullptr || !hasBehavior(record->behaviors, UIElementBehavior::RangeInput) || state == nullptr)
         {
             return false;
         }
@@ -6649,14 +6668,13 @@ struct UIContext::Impl final {
         {
             return false;
         }
-        SliderState& state = sliderStatesByNodeIndex[slider.index()];
-        if (!std::isfinite(requestedValue) || !std::isfinite(state.minValue) || !std::isfinite(state.maxValue) ||
-            !(state.maxValue > state.minValue))
+        if (!std::isfinite(requestedValue) || !std::isfinite(state->minValue) || !std::isfinite(state->maxValue) ||
+            !(state->maxValue > state->minValue))
         {
             return fail(UIErrorCode::InvalidButtonAction, "UI Slider value update requires a finite range and value");
         }
-        const float next = quantizeSliderValue(requestedValue, state.minValue, state.maxValue, state.step);
-        if (next == state.value)
+        const float next = quantizeSliderValue(requestedValue, state->minValue, state->maxValue, state->step);
+        if (next == state->value)
         {
             return false;
         }
@@ -6664,7 +6682,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(dirty.error());
         }
-        state.value = next;
+        state->value = next;
         invokeSliderChangeCallback(captureSliderChangeCallback(slider), UISliderChangeEvent{
                                                                          .sliderNode = slider,
                                                                          .value = next,
@@ -6679,7 +6697,7 @@ struct UIContext::Impl final {
                                                                  Platform::PlatformFrameId platformFrame,
                                                                  u64 sourceSequence)
     {
-        if (!slider.hasValue() || slider.index() >= sliderStatesByNodeIndex.size())
+        if (!slider.hasValue() || slider.index() >= sliderPaintsByNodeIndex.size())
         {
             return false;
         }
@@ -6688,8 +6706,9 @@ struct UIContext::Impl final {
         {
             return false;
         }
-        SliderState& state = sliderStatesByNodeIndex[slider.index()];
-        if (!(state.maxValue > state.minValue) || !std::isfinite(state.minValue) || !std::isfinite(state.maxValue))
+        Detail::UIRangeInputState* state = behaviorStateStorage.tryRangeInputState(slider.index());
+        if (state == nullptr || !(state->maxValue > state->minValue) || !std::isfinite(state->minValue) ||
+            !std::isfinite(state->maxValue))
         {
             return false;
         }
@@ -6712,8 +6731,8 @@ struct UIContext::Impl final {
         }
 
         const auto next = resolveSliderValueFromPointer(
-            worldRect, state.paint, position.x, state.minValue, state.maxValue,
-            state.step);
+            worldRect, sliderPaintsByNodeIndex[slider.index()], position.x, state->minValue, state->maxValue,
+            state->step);
         if (!next)
         {
             return false;
@@ -6803,7 +6822,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        auto sliderResult = resolveSlider(slider);
+        auto sliderResult = resolveRangeInput(slider);
         if (!sliderResult)
         {
             return Core::failure(sliderResult.error());
@@ -6817,7 +6836,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidButtonAction, "UI Slider range/step is invalid");
         }
-        SliderState& state = sliderStatesByNodeIndex[slider.index()];
+        Detail::UIRangeInputState& state = *behaviorStateStorage.tryRangeInputState(slider.index());
         const float nextValue = quantizeSliderValue(state.value, minValue, maxValue, step);
         if (state.minValue == minValue && state.maxValue == maxValue && state.step == step && state.value == nextValue)
         {
@@ -6855,7 +6874,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        auto sliderResult = resolveSlider(slider);
+        auto sliderResult = resolveRangeInput(slider);
         if (!sliderResult)
         {
             return Core::failure(sliderResult.error());
@@ -6886,7 +6905,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        auto sliderResult = const_cast<Impl*>(this)->resolveSlider(slider);
+        auto sliderResult = const_cast<Impl*>(this)->resolveRangeInput(slider);
         if (!sliderResult)
         {
             return Core::failure(sliderResult.error());
@@ -6895,7 +6914,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
         }
-        return sliderStatesByNodeIndex[slider.index()].value;
+        return behaviorStateStorage.tryRangeInputState(slider.index())->value;
     }
 
     [[nodiscard]] Core::Status setSliderPaintFromUpdater(UINodeId updaterRoot, UINodeId slider,
@@ -6924,8 +6943,8 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidControlValue, "UI Slider paint metrics must be finite and non-negative");
         }
-        SliderState& state = sliderStatesByNodeIndex[slider.index()];
-        if (state.paint == paint)
+        UISliderPaint& state = sliderPaintsByNodeIndex[slider.index()];
+        if (state == paint)
         {
             detachThemeBinding(slider.index(), ThemeBindingSliderPaint);
             return Core::success();
@@ -6934,7 +6953,7 @@ struct UIContext::Impl final {
         {
             return dirty;
         }
-        state.paint = paint;
+        state = paint;
         detachThemeBinding(slider.index(), ThemeBindingSliderPaint);
         return Core::success();
     }
@@ -6958,7 +6977,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
         }
-        return sliderStatesByNodeIndex[slider.index()].paint;
+        return sliderPaintsByNodeIndex[slider.index()];
     }
 
     [[nodiscard]] Core::Status setSliderChangeCallbackFromUpdater(UINodeId updaterRoot, UINodeId slider,
@@ -10793,14 +10812,17 @@ struct UIContext::Impl final {
             addRouteDirtyReservationCandidate(armedScrollViewAtRouteStart);
             const NodeRecord* targetRecord =
                 targetNode.hasValue() && contains(targetNode) ? nodes.tryGet(targetNode.storageId()) : nullptr;
+            const NodeRecord* nearestSliderRecord =
+                nearestSlider.hasValue() && contains(nearestSlider) ? nodes.tryGet(nearestSlider.storageId()) : nullptr;
             if (scrollBarHitAtRouteStart.hasValue())
             {
                 addRouteDirtyReservationCandidate(scrollBarHitAtRouteStart.scrollView);
             } else if (targetRecord != nullptr && targetRecord->kind == BuiltinElementKind::TextEdit &&
-                targetNodeEnabledAtRouteStart)
+                       targetNodeEnabledAtRouteStart)
             {
                 addRouteDirtyReservationCandidate(targetNode);
-            } else if (nearestSlider.hasValue() && isNodeEnabled(nearestSlider))
+            } else if (nearestSliderRecord != nullptr && nearestSliderRecord->kind == BuiltinElementKind::Slider &&
+                       isInteractiveRangeInput(nearestSlider))
             {
                 addRouteDirtyReservationCandidate(nearestSlider);
             } else if (nearestButton.hasValue() && isNodeEnabled(nearestButton))
@@ -11058,12 +11080,14 @@ struct UIContext::Impl final {
                                           isLiveScrollable(scrollBarHitAtRouteStart.scrollView) &&
                                           isNodeEnabled(scrollBarHitAtRouteStart.scrollView);
             const bool willFocusTextEdit = allowsDefaultAction && !willUseScrollBar && targetsTextEdit;
-            const bool willArmSlider =
-                allowsDefaultAction && !willUseScrollBar && !willFocusTextEdit && nearestSlider.hasValue() &&
-                isInteractiveRangeInput(nearestSlider);
-            UINodeId nextKeyboardFocus = preserveFocusForModalBarrier || preserveFocusForPopupBarrier
-                                             ? previousKeyboardFocus
-                                             : UINodeId{};
+            const NodeRecord* nearestSliderRecord =
+                nearestSlider.hasValue() && contains(nearestSlider) ? nodes.tryGet(nearestSlider.storageId()) : nullptr;
+            const bool willArmSlider = allowsDefaultAction && !willUseScrollBar && !willFocusTextEdit &&
+                                       nearestSlider.hasValue() && nearestSliderRecord != nullptr &&
+                                       nearestSliderRecord->kind == BuiltinElementKind::Slider &&
+                                       isInteractiveRangeInput(nearestSlider);
+            UINodeId nextKeyboardFocus =
+                preserveFocusForModalBarrier || preserveFocusForPopupBarrier ? previousKeyboardFocus : UINodeId{};
             UINodeId nextActivationTarget{};
             UINodeId interactionPaintNode{};
             if (willUseScrollBar)
@@ -11897,12 +11921,13 @@ struct UIContext::Impl final {
             }
             break;
         case UIAccessibilityActionKind::SetRangeValue: {
+            const Detail::UIRangeInputState* range = behaviorStateStorage.tryRangeInputState(action.node.index());
             if (!hasBehavior(record->behaviors, UIElementBehavior::RangeInput) ||
-                record->kind != BuiltinElementKind::Slider ||
+                range == nullptr ||
                 action.node.index() >= semanticsStatesByNodeIndex.size() ||
                 semanticsStatesByNodeIndex[action.node.index()].readOnly || !std::isfinite(action.rangeValue) ||
-                action.rangeValue < static_cast<double>(sliderStatesByNodeIndex[action.node.index()].minValue) ||
-                action.rangeValue > static_cast<double>(sliderStatesByNodeIndex[action.node.index()].maxValue) ||
+                action.rangeValue < static_cast<double>(range->minValue) ||
+                action.rangeValue > static_cast<double>(range->maxValue) ||
                 action.rangeValue < static_cast<double>((std::numeric_limits<float>::lowest)()) ||
                 action.rangeValue > static_cast<double>((std::numeric_limits<float>::max)()))
             {
@@ -13013,7 +13038,9 @@ struct UIContext::Impl final {
 
         const UINodeId target = defaultActionFocus();
         const NodeRecord* targetRecord = target.hasValue() ? nodes.tryGet(target.storageId()) : nullptr;
-        const bool targeted = targetRecord != nullptr && targetRecord->kind == BuiltinElementKind::Slider &&
+        const Detail::UIRangeInputState* state =
+            target.hasValue() ? behaviorStateStorage.tryRangeInputState(target.index()) : nullptr;
+        const bool targeted = targetRecord != nullptr && state != nullptr &&
                               hasBehavior(targetRecord->behaviors, UIElementBehavior::RangeInput);
         if (!targeted)
         {
@@ -13023,14 +13050,13 @@ struct UIContext::Impl final {
         {
             return UIRangeInputCommandResult{.targeted = true};
         }
-        const SliderState& state = sliderStatesByNodeIndex[target.index()];
-        const double span = static_cast<double>(state.maxValue) - static_cast<double>(state.minValue);
-        const double increment = state.step > 0.0F ? static_cast<double>(state.step) : span * 0.01;
+        const double span = static_cast<double>(state->maxValue) - static_cast<double>(state->minValue);
+        const double increment = state->step > 0.0F ? static_cast<double>(state->step) : span * 0.01;
         if (!(increment > 0.0) || !std::isfinite(increment))
         {
             return UIRangeInputCommandResult{.targeted = true};
         }
-        const double requestedValue = static_cast<double>(state.value) +
+        const double requestedValue = static_cast<double>(state->value) +
                                       (command == UIRangeInputCommand::Increase ? increment : -increment);
         auto applied = applySliderValue(target, requestedValue, platformFrame, sourceSequence, true);
         if (!applied)
@@ -13475,6 +13501,9 @@ struct UIContext::Impl final {
             .toggleBehaviorCapacity = behaviorStateStorage.toggleCapacity(),
             .activeToggleBehaviorCount = behaviorStateStorage.activeToggleCount(),
             .toggleBehaviorHighWater = behaviorStateStorage.toggleHighWater(),
+            .rangeInputBehaviorCapacity = behaviorStateStorage.rangeInputCapacity(),
+            .activeRangeInputBehaviorCount = behaviorStateStorage.activeRangeInputCount(),
+            .rangeInputBehaviorHighWater = behaviorStateStorage.rangeInputHighWater(),
             .textByteCapacity = textStorage.capacity(),
             .textByteUsed = textStorage.used(),
             .textByteHighWater = textStorage.highWater(),

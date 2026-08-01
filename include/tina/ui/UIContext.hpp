@@ -78,6 +78,9 @@ struct UIContextStatistics final {
     usize toggleBehaviorCapacity = 0;
     usize activeToggleBehaviorCount = 0;
     usize toggleBehaviorHighWater = 0;
+    usize rangeInputBehaviorCapacity = 0;
+    usize activeRangeInputBehaviorCount = 0;
+    usize rangeInputBehaviorHighWater = 0;
     usize textByteCapacity = 0;
     usize textByteUsed = 0;
     usize textByteHighWater = 0;
@@ -297,7 +300,9 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setChecked(UINodeId checkbox, bool checked);
     [[nodiscard]] Core::Result<bool> isChecked(UINodeId checkbox) const;
     [[nodiscard]] Core::Result<bool> isCheckboxPressed(UINodeId checkbox) const;
-    // M11-C1 Slider: finite min/max/value/step; drag maps pointer X into range.
+    // RangeInput-capable Elements own finite min/max/value/step state. Slider
+    // paint, callback, and drag geometry remain restricted to private
+    // Slider-resolved nodes.
     [[nodiscard]] Core::Status setSliderRange(UINodeId slider, float minValue, float maxValue, float step = 0.0F);
     [[nodiscard]] Core::Status setSliderValue(UINodeId slider, float value);
     [[nodiscard]] Core::Result<float> sliderValue(UINodeId slider) const;

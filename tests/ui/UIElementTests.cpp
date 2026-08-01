@@ -552,16 +552,20 @@ TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtr
     ASSERT_TRUE(root.hasValue());
     auto updater = createUpdater(*context, root);
     const usize baselineNodes = context->liveNodeCount();
+    UI::UIElementDescriptor rangeDescriptor = UI::makeLabelElement("Range");
+    rangeDescriptor.behaviors = UI::UIElementBehavior::RangeInput;
 
     auto exhaustedResult = updater.beginBuildTransaction(root.rootNodeId(), UI::makePanelElement(), 2);
     ASSERT_TRUE(exhaustedResult.has_value()) << exhaustedResult.error().message;
     UI::UIElementBuildTransaction exhausted = std::move(*exhaustedResult);
-    ASSERT_TRUE(exhausted.createElement(exhausted.rootNodeId(), UI::makePanelElement()).has_value());
+    ASSERT_TRUE(exhausted.createElement(exhausted.rootNodeId(), rangeDescriptor).has_value());
+    EXPECT_EQ(context->statistics().activeRangeInputBehaviorCount, 1U);
     const auto overBudget = exhausted.createElement(exhausted.rootNodeId(), UI::makePanelElement());
     ASSERT_FALSE(overBudget.has_value());
     EXPECT_EQ(overBudget.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_FALSE(exhausted.isActive());
     EXPECT_EQ(context->liveNodeCount(), baselineNodes);
+    EXPECT_EQ(context->statistics().activeRangeInputBehaviorCount, 0U);
     const auto poisonedCommit = exhausted.commit();
     ASSERT_FALSE(poisonedCommit.has_value());
     EXPECT_EQ(poisonedCommit.error().code, UI::UIErrorCode::CapacityExceeded);
@@ -572,7 +576,8 @@ TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtr
     UI::UIElementDescriptor invalidToggle{
         .text = "invalid",
         .behaviors = UI::UIElementBehavior::Focusable | UI::UIElementBehavior::Activate |
-                     UI::UIElementBehavior::Toggle | UI::UIElementBehavior::RangeInput,
+                     UI::UIElementBehavior::Toggle | UI::UIElementBehavior::RangeInput |
+                     UI::UIElementBehavior::TextInput,
     };
     const auto invalidCreate = invalidChild.createElement(invalidChild.rootNodeId(), invalidToggle);
     ASSERT_FALSE(invalidCreate.has_value());
@@ -583,10 +588,25 @@ TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtr
         auto abandonedResult = updater.beginBuildTransaction(root.rootNodeId(), UI::makePanelElement(), 2);
         ASSERT_TRUE(abandonedResult.has_value()) << abandonedResult.error().message;
         UI::UIElementBuildTransaction abandoned = std::move(*abandonedResult);
-        ASSERT_TRUE(abandoned.createElement(abandoned.rootNodeId(), UI::makePanelElement()).has_value());
+        ASSERT_TRUE(abandoned.createElement(abandoned.rootNodeId(), rangeDescriptor).has_value());
         EXPECT_EQ(context->liveNodeCount(), baselineNodes + 2U);
+        EXPECT_EQ(context->statistics().activeRangeInputBehaviorCount, 1U);
     }
     EXPECT_EQ(context->liveNodeCount(), baselineNodes);
+    EXPECT_EQ(context->statistics().activeRangeInputBehaviorCount, 0U);
+
+    auto reusedResult = updater.beginBuildTransaction(root.rootNodeId(), rangeDescriptor, 1);
+    ASSERT_TRUE(reusedResult.has_value()) << reusedResult.error().message;
+    UI::UIElementBuildTransaction reused = std::move(*reusedResult);
+    const UI::UINodeId reusedRange = reused.rootNodeId();
+    ASSERT_TRUE(reused.commit().has_value());
+    auto reusedValue = updater.sliderValue(reusedRange);
+    ASSERT_TRUE(reusedValue.has_value()) << reusedValue.error().message;
+    EXPECT_FLOAT_EQ(*reusedValue, 0.0F);
+    EXPECT_EQ(context->statistics().activeRangeInputBehaviorCount, 1U);
+    EXPECT_EQ(context->statistics().rangeInputBehaviorHighWater, 1U);
+    assertOk(updater.destroy(reusedRange));
+    EXPECT_EQ(context->statistics().activeRangeInputBehaviorCount, 0U);
     assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
     EXPECT_EQ(context->committedStructure().size(), baselineNodes);
 }

@@ -5,12 +5,11 @@
 namespace Tina::Tests {
 namespace {
 
-TEST(UIWidgetStateModelsTests, TextAndRangeControlsStartFromStableDefaults)
+TEST(UIWidgetStateModelsTests, TextAndProgressControlsStartFromStableDefaults)
 {
     const UI::Detail::WidgetTextState text{};
     const UI::Detail::ProgressBarState progressBar{};
     const UI::Detail::RadioButtonState radioButton{};
-    const UI::Detail::SliderState slider{};
 
     EXPECT_EQ(text.allocation.offset, 0U);
     EXPECT_EQ(text.allocation.capacity, 0U);
@@ -20,10 +19,6 @@ TEST(UIWidgetStateModelsTests, TextAndRangeControlsStartFromStableDefaults)
     EXPECT_FLOAT_EQ(progressBar.maxValue, 1.0F);
     EXPECT_FLOAT_EQ(progressBar.value, 0.0F);
     EXPECT_FALSE(radioButton.selected);
-    EXPECT_FLOAT_EQ(slider.minValue, 0.0F);
-    EXPECT_FLOAT_EQ(slider.maxValue, 1.0F);
-    EXPECT_FLOAT_EQ(slider.step, 0.0F);
-    EXPECT_FLOAT_EQ(slider.value, 0.0F);
 }
 
 TEST(UIWidgetStateModelsTests, ContainersStartClosedUnboundAndAtOrigin)

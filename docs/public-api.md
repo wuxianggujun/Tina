@@ -281,8 +281,9 @@ entry，小目标按两侧 destination inset 比例压缩并消除零面积 patc
 glyph/control/Canvas/NineSlice entry；Semantics entry/scratch 仍严格按 node 数分配。
 
 第三方当前可以组合现有 Element、布局、Semantics、StyleRole/局部 paint、Image/Icon/NineSlice、routed listener 与官方控件
-callback，直接 `UITreeUpdater` 还可用固定预算 transaction 构建多节点业务组件。Activate/Toggle 已使用
-独立 fixed-capacity side store，Activate action setter、Toggle state setter 与默认行为按 capability 校验；Range/TextInput/Scroll/Select
+callback，直接 `UITreeUpdater` 还可用固定预算 transaction 构建多节点业务组件。Activate/Toggle/RangeInput 已使用
+独立 fixed-capacity side store，Activate action、Toggle state、Range value/range setter 与 Keyboard/accessibility
+默认行为按 capability 校验；Slider paint、change callback 与 Pointer drag geometry 仍是 kind-specific。TextInput/Scroll/Select
 仍要求私有 resolver 匹配现有 `BuiltinElementKind` storage contract，不受支持的混合组合返回
 `InvalidElementDescriptor`。当前**不支持**注册 Widget subclass、新 Behavior/state machine、用户
 StyleClass/selector、Motion/timeline 或 GPU paint callback。因此“可组合业务 UI”不等于“已有开放控件插件
@@ -571,7 +572,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - 完整 PBR/IBL/shadow、point/spot light、light culling 与通用 pass scheduler；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
-- Range/TextInput/Scroll/Select 标准 Behavior side store，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
+- TextInput/Scroll/Select 标准 Behavior side store，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
 - 用户 StyleClass/node-local pseudo-state stylesheet 与 paint-only Motion；
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；

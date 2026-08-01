@@ -374,6 +374,85 @@ TEST_F(UIInputRouteTest, ListenerCannotStealReservedPointerRouteDirtySlot)
     EXPECT_TRUE(*pressed);
 }
 
+TEST_F(UIInputRouteTest, GenericRangeInputReservesActivatableAncestorDirtySlot)
+{
+    auto context = createContext(window, {.nodeCapacity = 8,
+                                          .rootCapacity = 1,
+                                          .dirtyQueueCapacity = 4,
+                                          .routePathCapacity = 8,
+                                          .routedPointerListenerCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+
+    UI::UIElementDescriptor ancestorDescriptor = UI::makePanelElement();
+    ancestorDescriptor.behaviors = UI::UIElementBehavior::Focusable | UI::UIElementBehavior::Activate;
+    auto ancestorResult = context->rootBuilder().createElement(root.rootNodeId(), ancestorDescriptor);
+    ASSERT_TRUE(ancestorResult) << (ancestorResult ? "" : ancestorResult.error().message);
+    const UI::UINodeId ancestor = *ancestorResult;
+    UI::UIElementDescriptor rangeDescriptor = UI::makeLabelElement("Range");
+    rangeDescriptor.behaviors = UI::UIElementBehavior::RangeInput;
+    auto rangeResult = context->rootBuilder().createElement(ancestor, rangeDescriptor);
+    ASSERT_TRUE(rangeResult) << (rangeResult ? "" : rangeResult.error().message);
+    const UI::UINodeId range = *rangeResult;
+    const UI::UINodeId blocker = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId existingDirty = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId existingDirty2 = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId existingDirty3 = createPanel(*context, root.rootNodeId());
+    ASSERT_TRUE(blocker.hasValue());
+    ASSERT_TRUE(existingDirty.hasValue());
+    ASSERT_TRUE(existingDirty2.hasValue());
+    ASSERT_TRUE(existingDirty3.hasValue());
+
+    auto updater = createUpdater(*context, root);
+    expectOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    expectOk(updater.setLayoutStyle(ancestor, fixedSize(80.0F, 80.0F)));
+    expectOk(updater.setLayoutStyle(range, fixedSize(40.0F, 40.0F)));
+    expectOk(updater.setPointerHitPolicy(range, UI::UIPointerHitPolicy::Targetable));
+    expectOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    UI::UIPointerInputEvent hover = makePointerInput(window, 1);
+    hover.kind = UI::UIRoutedPointerEventKind::Move;
+    auto hovered = context->routePointerInput(hover);
+    ASSERT_TRUE(hovered) << (hovered ? "" : hovered.error().message);
+    expectOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    const auto fillDirtySlot = [&updater](UI::UINodeId node, UI::UIStraightSrgba8Color color) {
+        expectOk(updater.setBoxPaint(node, UI::UIBoxPaint{.solidFill = UI::UISolidFill{.color = color}}));
+    };
+    fillDirtySlot(existingDirty, {.red = 1, .green = 2, .blue = 3, .alpha = 255});
+    fillDirtySlot(existingDirty2, {.red = 4, .green = 5, .blue = 6, .alpha = 255});
+    fillDirtySlot(existingDirty3, {.red = 7, .green = 8, .blue = 9, .alpha = 255});
+    ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 3U);
+
+    bool listenerInvoked = false;
+    bool unrelatedMutationRejected = false;
+    auto token = addListener(
+        *context,
+        {.node = range, .kind = UI::UIRoutedPointerEventKind::ButtonDown, .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[&updater, blocker, &listenerInvoked,
+                                     &unrelatedMutationRejected](UI::UIRoutedPointerEvent&) noexcept {
+            listenerInvoked = true;
+            const Core::Status mutation =
+                updater.setBoxPaint(blocker, UI::UIBoxPaint{
+                                                 .solidFill =
+                                                     UI::UISolidFill{
+                                                         .color = {.red = 12, .green = 34, .blue = 56, .alpha = 255},
+                                                     },
+                                             });
+            unrelatedMutationRejected = !mutation && mutation.error().code == UI::UIErrorCode::CapacityExceeded;
+        }});
+    ASSERT_TRUE(token);
+
+    auto routed = context->routePointerInput(makePointerInput(window, 2));
+    ASSERT_TRUE(routed) << (routed ? "" : routed.error().message);
+    EXPECT_TRUE(listenerInvoked);
+    EXPECT_TRUE(unrelatedMutationRejected);
+    EXPECT_TRUE(routed->consumed);
+    EXPECT_EQ(context->defaultActionFocus(), ancestor);
+    EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 4U);
+}
+
 TEST_F(UIInputRouteTest, ListenerTokenMovesAndSurvivesContextDestroyedFirst)
 {
     RouteTree tree = createRouteTree(window);
