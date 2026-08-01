@@ -299,8 +299,8 @@ enabled/read-only/range 与 UTF-8，再复用控件默认行为。平台 adapter
    HWND registered message 同步 marshal 回 UI owner thread。
 
 `tina_ui_uia_tests` 覆盖映射、provider、control patterns 与 HostBridge attach/navigate；
-`RunUi002UiaGate.ps1` 从外部进程连接真实 showcase HWND，验证属性发现以及
-Invoke/Toggle/RangeValue/Value action。**Narrator/Inspect 人工金标仍是 Windows UI-002 的开放验收；
+`RunUi002UiaGate.ps1` 从外部进程连接真实 showcase HWND，验证 Tina Framework、唯一 RuntimeId/AutomationId、
+fragment 父链、动态属性 republish 以及 Invoke/Toggle/RangeValue/Value/Focus action。**Narrator/Inspect 人工金标仍是 Windows UI-002 的开放验收；
 Linux AT-SPI 已拆为独立后置项**。自动 gate 不等于真实 screen reader 合规金标。
 
 ## Render 边界

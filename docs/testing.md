@@ -198,8 +198,9 @@ pointer caret 一致。普通
 ## Windows UIA 产品门禁
 
 `RunUi002UiaGate.ps1` 使用 Windows UI Automation client API 从独立进程连接真实
-`tina_sample_ui_showcase` HWND，验证外部发现、属性、fragment 与
-Invoke/Toggle/RangeValue/Value action；脚本正常发送 `WM_CLOSE`，让 EngineHost/UI owner 按产品路径退出。
+`tina_sample_ui_showcase` HWND，验证外部发现、Tina Framework、唯一 RuntimeId/AutomationId、fragment
+父链与 Invoke/Toggle/RangeValue/Value/Focus action；Invoke 后先验证动态 Name republish，再执行其余会改变
+状态文案的 action。脚本正常发送 `WM_CLOSE`，让 EngineHost/UI owner 按产品路径退出。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunUi002UiaGate.ps1

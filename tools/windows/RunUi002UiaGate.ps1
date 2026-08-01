@@ -189,6 +189,13 @@ $elements = $null
 $tinaProviderCount = 0
 $positiveBoundsCount = 0
 $focusableCount = 0
+$rootElementCount = 0
+$frameworkElementCount = 0
+$runtimeIdCount = 0
+$uniqueRuntimeIdCount = 0
+$uniqueAutomationIdCount = 0
+$fragmentOrphanCount = 0
+$fragmentIntegrityVerified = $false
 $namedElements = New-Object System.Collections.Generic.List[string]
 $controlTypeCounts = @{}
 $textEditValue = ''
@@ -205,10 +212,15 @@ $checkboxAutomationId = ''
 $sliderAutomationId = ''
 $textEditAutomationId = ''
 $invokePatternSupported = $false
+$invokeActionIssued = $false
 $actionsIssued = $false
 $actionsVerified = $false
+$focusActionIssued = $false
+$focusVerified = $false
 $primaryActionObserved = $false
 $postTextEditValue = ''
+$postFocusedAutomationId = ''
+$postTextEditHasKeyboardFocus = $false
 $postSliderValue = $null
 $postCheckboxToggleState = $null
 $probeError = ''
@@ -223,7 +235,8 @@ try {
     }
     $windowTitle = Read-WindowTitle -Hwnd $hwnd
 
-    while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
+    $discoveryDeadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $discoveryDeadline -and -not $process.HasExited) {
         try {
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
             $elements = $root.FindAll(
@@ -232,6 +245,12 @@ try {
             $tinaProviderCount = 0
             $positiveBoundsCount = 0
             $focusableCount = 0
+            $rootElementCount = 0
+            $frameworkElementCount = 0
+            $runtimeIdCount = 0
+            $fragmentOrphanCount = 0
+            $runtimeIds = @{}
+            $automationIds = @{}
             $namedElements.Clear()
             $controlTypeCounts = @{}
             $textEditValue = ''
@@ -250,6 +269,30 @@ try {
                 $isTinaElement = $current.AutomationId -like 'tina-ui-node-*' -or $current.Name -eq 'Tina UI Root'
                 if ($isTinaElement) {
                     ++$tinaProviderCount
+                    if ($current.Name -eq 'Tina UI Root') {
+                        ++$rootElementCount
+                    } else {
+                        if (-not $automationIds.ContainsKey([string]$current.AutomationId)) {
+                            $automationIds[[string]$current.AutomationId] = $true
+                        }
+                        $parent = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($element)
+                        if ($null -eq $parent -or
+                            ($parent.Current.Name -ne 'Tina UI Root' -and
+                             $parent.Current.AutomationId -notlike 'tina-ui-node-*')) {
+                            ++$fragmentOrphanCount
+                        }
+                    }
+                    if ($current.FrameworkId -eq 'Tina') {
+                        ++$frameworkElementCount
+                    }
+                    $runtimeId = @($element.GetRuntimeId())
+                    if ($runtimeId.Count -gt 0) {
+                        ++$runtimeIdCount
+                        $runtimeIdKey = $runtimeId -join ':'
+                        if (-not $runtimeIds.ContainsKey($runtimeIdKey)) {
+                            $runtimeIds[$runtimeIdKey] = $true
+                        }
+                    }
                     $controlTypeKey = [string][int]$current.ControlType.Id
                     if ($controlTypeCounts.ContainsKey($controlTypeKey)) {
                         $controlTypeCounts[$controlTypeKey] = [int]$controlTypeCounts[$controlTypeKey] + 1
@@ -299,9 +342,19 @@ try {
                     }
                 }
             }
+            $uniqueRuntimeIdCount = $runtimeIds.Count
+            $uniqueAutomationIdCount = $automationIds.Count
+            $fragmentIntegrityVerified = $rootElementCount -eq 1 -and
+                $frameworkElementCount -eq $tinaProviderCount -and
+                $runtimeIdCount -eq $tinaProviderCount -and
+                $uniqueRuntimeIdCount -eq $tinaProviderCount -and
+                $uniqueAutomationIdCount -eq ($tinaProviderCount - 1) -and
+                $fragmentOrphanCount -eq 0
             if ($tinaProviderCount -gt 0 -and $null -ne $primaryButtonElement -and
                 $null -ne $checkboxElement -and $null -ne $sliderElement -and $null -ne $textEditElement -and
-                $textEditValueSupported -and $sliderValueSupported -and $checkboxToggleSupported) {
+                $textEditValueSupported -and $sliderValueSupported -and $checkboxToggleSupported -and
+                $fragmentIntegrityVerified) {
+                $probeError = ''
                 break
             }
         } catch {
@@ -328,7 +381,7 @@ try {
             [void]$missingTypes.Add("$($entry.Key):$actual/$($entry.Value)")
         }
     }
-    $requiredNames = @('Primary action', 'Destructive', 'Reset state', 'Profile name')
+    $requiredNames = @('Primary action', 'Destructive action', 'Reset state', 'Profile name')
     $missingNames = @($requiredNames | Where-Object { -not $namedElements.Contains($_) })
 
     $initialTextEditValue = $textEditValue
@@ -341,24 +394,72 @@ try {
 
     $invokePattern = [System.Windows.Automation.InvokePattern]($primaryButtonElement.GetCurrentPattern(
         [System.Windows.Automation.InvokePattern]::Pattern))
+    $invokePatternSupported = $null -ne $invokePattern
+    if (-not $invokePatternSupported) {
+        throw 'required UIA Invoke control pattern is unavailable'
+    }
+
+    $invokePattern.Invoke()
+    $invokeActionIssued = $true
+
+    # Verify the asynchronous Name republish before later actions replace the status text.
+    $invokeDeadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $invokeDeadline -and -not $process.HasExited) {
+        try {
+            $latestRoot = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+            $latestElements = $latestRoot.FindAll(
+                [System.Windows.Automation.TreeScope]::Subtree,
+                [System.Windows.Automation.Condition]::TrueCondition)
+            $checkboxElement = $null
+            $sliderElement = $null
+            $textEditElement = $null
+            for ($index = 0; $index -lt $latestElements.Count; ++$index) {
+                $element = $latestElements.Item($index)
+                $current = $element.Current
+                if ($current.Name -eq 'Primary action committed') {
+                    $primaryActionObserved = $true
+                }
+                if ($current.AutomationId -eq $checkboxAutomationId) {
+                    $checkboxElement = $element
+                } elseif ($current.AutomationId -eq $sliderAutomationId) {
+                    $sliderElement = $element
+                } elseif ($current.AutomationId -eq $textEditAutomationId) {
+                    $textEditElement = $element
+                }
+            }
+            if ($primaryActionObserved -and $null -ne $checkboxElement -and
+                $null -ne $sliderElement -and $null -ne $textEditElement) {
+                $probeError = ''
+                break
+            }
+        } catch {
+            $probeError = $_.Exception.Message
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $primaryActionObserved) {
+        throw 'Invoke action did not publish the expected dynamic Name'
+    }
+
     $togglePattern = [System.Windows.Automation.TogglePattern]($checkboxElement.GetCurrentPattern(
         [System.Windows.Automation.TogglePattern]::Pattern))
     $rangePattern = [System.Windows.Automation.RangeValuePattern]($sliderElement.GetCurrentPattern(
         [System.Windows.Automation.RangeValuePattern]::Pattern))
     $valuePattern = [System.Windows.Automation.ValuePattern]($textEditElement.GetCurrentPattern(
         [System.Windows.Automation.ValuePattern]::Pattern))
-    $invokePatternSupported = $null -ne $invokePattern
-    if (-not $invokePatternSupported -or $null -eq $togglePattern -or $null -eq $rangePattern -or $null -eq $valuePattern) {
-        throw 'one or more required UIA control patterns are unavailable'
+    if ($null -eq $togglePattern -or $null -eq $rangePattern -or $null -eq $valuePattern) {
+        throw 'one or more required UIA mutation control patterns are unavailable'
     }
 
-    $invokePattern.Invoke()
+    $textEditElement.SetFocus()
+    $focusActionIssued = $true
     $togglePattern.Toggle()
     $rangePattern.SetValue(64.0)
     $valuePattern.SetValue('UIA Player')
     $actionsIssued = $true
 
-    while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
+    $actionDeadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $actionDeadline -and -not $process.HasExited) {
         try {
             $latestRoot = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
             $latestElements = $latestRoot.FindAll(
@@ -367,10 +468,8 @@ try {
             for ($index = 0; $index -lt $latestElements.Count; ++$index) {
                 $element = $latestElements.Item($index)
                 $current = $element.Current
-                if ($current.Name -eq 'Primary action committed') {
-                    $primaryActionObserved = $true
-                }
                 if ($current.AutomationId -eq $textEditAutomationId) {
+                    $postTextEditHasKeyboardFocus = [bool]$current.HasKeyboardFocus
                     $pattern = [System.Windows.Automation.ValuePattern]($element.GetCurrentPattern(
                         [System.Windows.Automation.ValuePattern]::Pattern))
                     $postTextEditValue = [string]$pattern.Current.Value
@@ -384,10 +483,19 @@ try {
                     $postCheckboxToggleState = [int]$pattern.Current.ToggleState
                 }
             }
+            $focusedElement = [System.Windows.Automation.AutomationElement]::FocusedElement
+            $postFocusedAutomationId = if ($null -eq $focusedElement) {
+                ''
+            } else {
+                [string]$focusedElement.Current.AutomationId
+            }
+            $focusVerified = $postTextEditHasKeyboardFocus -and
+                $postFocusedAutomationId -eq $textEditAutomationId
             $actionsVerified = $postTextEditValue -eq 'UIA Player' -and
                 $null -ne $postSliderValue -and [Math]::Abs([double]$postSliderValue - 64.0) -lt 0.001 -and
                 $null -ne $postCheckboxToggleState -and $postCheckboxToggleState -eq 0
-            if ($actionsVerified) {
+            if ($actionsVerified -and $focusVerified) {
+                $probeError = ''
                 break
             }
         } catch {
@@ -398,18 +506,23 @@ try {
 
     $probeOk = $windowTitle -eq 'Tina UI Showcase - Complete Retained Controls' -and
         $tinaProviderCount -ge 20 -and $positiveBoundsCount -ge 20 -and $focusableCount -ge 8 -and
+        $fragmentIntegrityVerified -and
         $missingTypes.Count -eq 0 -and $missingNames.Count -eq 0 -and $initialTextEditValue -eq 'Tina Player' -and
         $textEditValueSupported -and $sliderValueSupported -and
         [Math]::Abs([double]$initialSliderValue - 72.0) -lt 0.001 -and
         $checkboxToggleSupported -and $initialCheckboxToggleState -eq 1 -and
-        $invokePatternSupported -and $actionsIssued -and $actionsVerified
+        $invokePatternSupported -and $invokeActionIssued -and $primaryActionObserved -and
+        $actionsIssued -and $actionsVerified -and $focusActionIssued -and $focusVerified
     if (-not $probeOk) {
         $detail = "providers=$tinaProviderCount bounds=$positiveBoundsCount focusable=$focusableCount " +
+            "roots=$rootElementCount framework=$frameworkElementCount runtimeIds=$runtimeIdCount/$uniqueRuntimeIdCount " +
+            "automationIds=$uniqueAutomationIdCount orphans=$fragmentOrphanCount fragment=$fragmentIntegrityVerified " +
             "missingTypes=$($missingTypes -join ',') missingNames=$($missingNames -join ',') " +
             "initialEdit=$initialTextEditValue/$textEditValueSupported initialSlider=$initialSliderValue/$sliderValueSupported " +
             "initialToggle=$initialCheckboxToggleState/$checkboxToggleSupported invoke=$invokePatternSupported " +
             "actions=$actionsIssued/$actionsVerified postEdit=$postTextEditValue postSlider=$postSliderValue " +
-            "postToggle=$postCheckboxToggleState primaryObserved=$primaryActionObserved error=$probeError"
+            "postToggle=$postCheckboxToggleState invokeIssued=$invokeActionIssued primaryObserved=$primaryActionObserved " +
+            "focus=$focusActionIssued/$focusVerified focusedId=$postFocusedAutomationId error=$probeError"
         Add-Step -Name 'external-uia-probe' -ExitCode 1 -Detail $detail
     }
     Add-Step -Name 'external-uia-probe' -ExitCode 0 -Detail "providers=$tinaProviderCount"
@@ -461,7 +574,8 @@ $normalShutdown = $closePosted -and -not $forcedTermination -and $exitCode -eq 0
     $null -ne $showcaseSummary -and $showcaseSummary.status -eq 'ok'
 $invokeVerifiedOnShutdown = $normalShutdown -and [int64]$showcaseSummary.buttonActivations -ge 1
 $ok = [string]::IsNullOrWhiteSpace($probeError) -and $tinaProviderCount -ge 20 -and
-    $actionsVerified -and $invokeVerifiedOnShutdown -and $normalShutdown
+    $fragmentIntegrityVerified -and $primaryActionObserved -and $actionsVerified -and
+    $focusVerified -and $invokeVerifiedOnShutdown -and $normalShutdown
 
 $report = [ordered]@{
     schema = 1
@@ -479,6 +593,13 @@ $report = [ordered]@{
     tinaProviderCount = [int]$tinaProviderCount
     positiveBoundsCount = [int]$positiveBoundsCount
     focusableCount = [int]$focusableCount
+    rootElementCount = [int]$rootElementCount
+    frameworkElementCount = [int]$frameworkElementCount
+    runtimeIdCount = [int]$runtimeIdCount
+    uniqueRuntimeIdCount = [int]$uniqueRuntimeIdCount
+    uniqueAutomationIdCount = [int]$uniqueAutomationIdCount
+    fragmentOrphanCount = [int]$fragmentOrphanCount
+    fragmentIntegrityVerified = [bool]$fragmentIntegrityVerified
     controlTypeCounts = $controlTypeCounts
     namedElements = $namedElements.ToArray()
     initialTextEditValue = $initialTextEditValue
@@ -488,8 +609,13 @@ $report = [ordered]@{
     initialCheckboxToggleState = $initialCheckboxToggleState
     checkboxToggleSupported = [bool]$checkboxToggleSupported
     invokePatternSupported = [bool]$invokePatternSupported
+    invokeActionIssued = [bool]$invokeActionIssued
     actionsIssued = [bool]$actionsIssued
     actionsVerified = [bool]$actionsVerified
+    focusActionIssued = [bool]$focusActionIssued
+    focusVerified = [bool]$focusVerified
+    postFocusedAutomationId = $postFocusedAutomationId
+    postTextEditHasKeyboardFocus = [bool]$postTextEditHasKeyboardFocus
     primaryActionObserved = [bool]$primaryActionObserved
     invokeVerifiedOnShutdown = [bool]$invokeVerifiedOnShutdown
     postTextEditValue = $postTextEditValue
