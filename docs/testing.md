@@ -77,6 +77,20 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 测试数量随功能增长，不作为永久契约；本轮必须直接运行对应 GoogleTest executable，并以最终 gate
 JSON 与退出码记录结果。
 
+## 安装 SDK consumer 门禁
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 `
+  -BuildDirectory out\build\windows-msvc-vnext -Configuration Debug
+```
+
+成功条件是：版本化 package 和声明的 `Tina_GAME_SDK_TARGETS` 全部可发现；实际安装头通过第三方
+include/type token 扫描；所有 Tina imported target 的 include 都来自安装 prefix 而非源码树；外部
+`tina_sdk_consumer` 只链接 `Tina::GameSDK` 并运行一帧后输出
+`{"status":"ok","consumer":"installed-tina-sdk"}`。此 Windows headless gate 不替代 Linux consumer、
+DesktopBootstrap/backend adapter 安装闭包或 ABI 兼容性验证。
+
 ## UI performance quick run
 
 `tina_bench` 的 UI workload 使用真实 `UIContext`、committed snapshots、pointer route、虚拟集合、
@@ -201,6 +215,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunUi002UiaG
 | Audio | `tina_audio_tests` | miniaudio tests、product-2d |
 | Physics2D | `tina_physics2d_tests`（body/shape/joint、sensor、query、grid bridge） | Release bench、product-2d |
 | CMake/preset/dependency | 所有受影响 configure 图 | 最小 executable + product smoke |
+| install/export/Game SDK | `RunSdkConsumerGate.ps1` | Linux consumer；Desktop/backend package 闭包 |
 
 公共 API 变化还必须编译 header-isolation/consumer 测试，并扫描公开头是否出现第三方 token。
 

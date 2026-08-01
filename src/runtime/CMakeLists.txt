@@ -56,7 +56,7 @@ target_link_libraries(tina_runtime
         Tina::UI
         Tina::Audio
     PRIVATE
-        Tina::ProjectOptions
+        "$<BUILD_INTERFACE:Tina::ProjectOptions>"
         Tina::UIRenderIntegration
 )
 if(TINA_BUILD_UI_UIA)

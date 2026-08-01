@@ -71,8 +71,8 @@ set(TINA_ASSET_SOURCES
 add_library(tina_asset_types INTERFACE)
 add_library(Tina::AssetTypes ALIAS tina_asset_types)
 target_sources(tina_asset_types INTERFACE
-    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetFrameResourceResolver.hpp
-    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetHandle.hpp
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include/tina/asset/AssetFrameResourceResolver.hpp>"
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include/tina/asset/AssetHandle.hpp>"
 )
 target_compile_features(tina_asset_types INTERFACE cxx_std_23)
 target_include_directories(tina_asset_types INTERFACE ${PROJECT_SOURCE_DIR}/include)
@@ -98,7 +98,7 @@ target_include_directories(tina_asset PRIVATE
 )
 target_link_libraries(tina_asset
     PUBLIC Tina::Core Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render
-    PRIVATE Tina::ProjectOptions
+    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 if (TINA_BUILD_PHYSICS2D)
     target_link_libraries(tina_asset PUBLIC Tina::Physics2D)

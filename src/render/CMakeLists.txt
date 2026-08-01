@@ -31,7 +31,7 @@ add_library(Tina::Render ALIAS tina_render)
 target_compile_features(tina_render PUBLIC cxx_std_23)
 target_include_directories(tina_render PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tina_render PUBLIC Tina::Core)
-target_link_libraries(tina_render PRIVATE Tina::ProjectOptions)
+target_link_libraries(tina_render PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>")
 set_target_properties(tina_render PROPERTIES CXX_EXTENSIONS OFF)
 
 if(TINA_BUILD_RENDER_BGFX)

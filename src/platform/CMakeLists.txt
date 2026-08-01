@@ -12,7 +12,7 @@ add_library(Tina::Platform ALIAS tina_platform)
 target_compile_features(tina_platform PUBLIC cxx_std_23)
 target_include_directories(tina_platform PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tina_platform PUBLIC Tina::Core)
-target_link_libraries(tina_platform PRIVATE Tina::ProjectOptions)
+target_link_libraries(tina_platform PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>")
 set_target_properties(tina_platform PROPERTIES CXX_EXTENSIONS OFF)
 
 if(TINA_BUILD_PLATFORM_GLFW)

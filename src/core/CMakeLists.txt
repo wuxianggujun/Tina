@@ -51,7 +51,7 @@ target_include_directories(tina_core
 )
 target_link_libraries(tina_core
     PRIVATE
-        Tina::ProjectOptions
+        "$<BUILD_INTERFACE:Tina::ProjectOptions>"
         xxHash::xxhash
 )
 target_compile_definitions(tina_core PRIVATE TINA_CORE_BUILDING)

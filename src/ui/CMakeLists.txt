@@ -120,7 +120,7 @@ target_link_libraries(tina_ui
         Tina::Core
         Tina::Platform
     PRIVATE
-        Tina::ProjectOptions
+        "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 set_target_properties(tina_ui PROPERTIES CXX_EXTENSIONS OFF)
 
@@ -173,7 +173,7 @@ if(TINA_BUILD_UI_UIA)
         PUBLIC
             Tina::UI
         PRIVATE
-            Tina::ProjectOptions
+            "$<BUILD_INTERFACE:Tina::ProjectOptions>"
             ole32
             oleaut32
             oleacc

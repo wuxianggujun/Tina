@@ -248,6 +248,9 @@ if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(src/desktop)
 endif()
 
+include(TinaGameSdkPackage)
+tina_configure_game_sdk_package()
+
 # Examples and small host tools (catalog validate CLI, samples).
 if (TINA_BUILD_EXAMPLES)
     add_subdirectory(samples)

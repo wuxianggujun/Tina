@@ -17,6 +17,6 @@ target_compile_features(tina_physics2d PUBLIC cxx_std_23)
 target_include_directories(tina_physics2d PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tina_physics2d
     PUBLIC Tina::Core
-    PRIVATE Tina::ProjectOptions box2d::box2d
+    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>" box2d::box2d
 )
 set_target_properties(tina_physics2d PROPERTIES CXX_EXTENSIONS OFF)

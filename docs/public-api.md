@@ -12,13 +12,23 @@ event queue、通用 GPU submission fence、完整 PBR 等）列在末尾。Stat
 | Module API/SPI | Tina 模块与高级集成 | `include/tina/<module>`、`runtime/spi`、`integration` | 只暴露 Tina-owned 类型和窄 factory |
 | Backend Private | GLFW/bgfx/FreeType/miniaudio/Box2D/cgltf/stb_image | `src/...` adapter 实现 | 第三方类型、宏、链接保持 PRIVATE |
 
-当前没有已安装的 `Tina::GameSDK` 聚合 target、`install(EXPORT ...)`、版本化 package config 或外部 SDK
-consumer 门禁。调用方按需链接现有模块 target；正式 SDK packaging 是后续工作。
+当前 backend-neutral/Null SDK 可通过安装前缀中的版本化 `TinaConfig.cmake` 使用：
+
+```cmake
+find_package(Tina CONFIG REQUIRED)
+target_link_libraries(game PRIVATE Tina::GameSDK)
+```
+
+`Tina::GameSDK` 聚合下表中的 backend-neutral Runtime、Scene、Asset、UI、Audio 等稳定模块；安装 package
+声明 `xxHash`（以及启用 Physics2D 时的 `box2d`）依赖，不复制第三方库。Windows 外部 headless consumer
+已经只通过安装前缀完成 configure/build/run。`Tina::DesktopBootstrap` 与 GLFW/bgfx/FreeType/miniaudio adapter
+尚未进入安装 export，Linux consumer 与正式发布 ABI 政策仍属于 `SDK-001` 后续工作。
 
 ## CMake targets
 
 | Target | 公共角色 |
 | --- | --- |
+| `Tina::GameSDK` | backend-neutral Game SDK 聚合 target；不包含 Desktop/backend adapter |
 | `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、diagnostics |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
@@ -566,7 +576,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
-- 正式 `Tina::GameSDK` install/export/package ABI。
+- 可安装的 `Tina::DesktopBootstrap`/backend adapter 闭包、Linux consumer gate 与正式发布 ABI/兼容策略。
 
 任务状态见 [Backlog](backlog.md)。修改公开头后必须构建 header-isolation/consumer、扫描第三方 token，
 并按 [测试说明](testing.md) 运行受影响 executable 与 sample。

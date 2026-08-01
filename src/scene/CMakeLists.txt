@@ -33,6 +33,6 @@ target_compile_features(tina_scene PUBLIC cxx_std_23)
 target_include_directories(tina_scene PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tina_scene
     PUBLIC Tina::Core Tina::Render Tina::AssetFormat Tina::AssetTypes
-    PRIVATE Tina::ProjectOptions
+    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 set_target_properties(tina_scene PROPERTIES CXX_EXTENSIONS OFF)

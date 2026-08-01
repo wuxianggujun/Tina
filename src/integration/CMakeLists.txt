@@ -17,7 +17,7 @@ target_link_libraries(tina_window_surface_integration
         Tina::Core
         Tina::Platform
     PRIVATE
-        Tina::ProjectOptions
+        "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 set_target_properties(tina_window_surface_integration PROPERTIES
     CXX_EXTENSIONS OFF
@@ -41,7 +41,7 @@ target_link_libraries(tina_ui_render_integration
         Tina::UI
         Tina::Render
     PRIVATE
-        Tina::ProjectOptions
+        "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 set_target_properties(tina_ui_render_integration PROPERTIES
     CXX_EXTENSIONS OFF

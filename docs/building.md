@@ -95,6 +95,25 @@ cmake --build --preset windows-vnext-debug `
 多配置输出位于 `out/build/windows-msvc-vnext/bin/Debug` 或 `bin/Release`。对应 executable 必须使用
 同一配置目录的 DLL；Debug/Release 不得混跑。
 
+## Windows 安装 SDK consumer
+
+先配置 Null 图，再运行安装 consumer 门禁：
+
+```powershell
+cmake --preset windows-msvc-vnext
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 `
+  -BuildDirectory out\build\windows-msvc-vnext -Configuration Debug
+```
+
+脚本以 `--parallel 1` 和 `/nr:false` 增量构建 backend-neutral SDK 闭包，将当前配置安装到 build tree
+内的独立 prefix，扫描实际安装头的第三方 include/type token，然后从 `tests/sdk_consumer` 建立独立
+build tree。consumer 的 CMake 入口只有 `find_package(Tina CONFIG REQUIRED)` 和 `Tina::GameSDK`，并拒绝
+源码树 `include` 路径或安装 prefix 外的 Tina include。Debug/Release package 必须与 consumer 配置一致。
+
+该门禁当前证明 Windows headless/Null SDK；不等价于已安装 DesktopBootstrap、GLFW/bgfx adapter 或 Linux
+consumer。package 继续通过 vcpkg toolchain 解析 `xxHash` 等声明的外部依赖，不把第三方复制进 Tina SDK。
+
 ## Windows Platform/Desktop/bgfx
 
 ```powershell
