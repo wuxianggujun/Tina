@@ -124,7 +124,7 @@ struct TestFrameResourceLifetime final {
     Render::FrameResourceSink& sink,
     u32 bindingKey) noexcept
 {
-    return internTestResource(sink, Render::FrameResourceKind::Sprite2DTexture, bindingKey);
+    return internTestResource(sink, Render::FrameResourceKind::Texture2D, bindingKey);
 }
 
 [[nodiscard]] u64 frameResourceBindingKey(
@@ -139,7 +139,7 @@ struct TestFrameResourceLifetime final {
 [[nodiscard]] u64 textureBindingKey(Render::FrameResourceRef texture) noexcept
 {
     const Render::FrameResourceDescriptor* descriptor = testFramePacket().resourceTableView().resolve(
-        texture, Render::FrameResourceKind::Sprite2DTexture);
+        texture, Render::FrameResourceKind::Texture2D);
     return descriptor == nullptr ? 0 : descriptor->deviceBindingKey;
 }
 

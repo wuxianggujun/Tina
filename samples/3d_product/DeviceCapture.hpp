@@ -95,10 +95,10 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->retireTexture2D(texture, completionPin);
     }
-    [[nodiscard]] Core::Status setSprite2DTextureBinding(Core::u32 spriteKey,
-                                                         Render::GpuTextureId texture) noexcept override
+    [[nodiscard]] Core::Status setTexture2DBinding(Core::u32 spriteKey,
+                                                   Render::GpuTextureId texture) noexcept override
     {
-        return inner_->setSprite2DTextureBinding(spriteKey, texture);
+        return inner_->setTexture2DBinding(spriteKey, texture);
     }
     [[nodiscard]] Core::Result<Render::Rgba8FrameCapture> capturePrimaryFrameRgba8() override
     {

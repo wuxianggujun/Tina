@@ -75,7 +75,7 @@ void releaseTestPin(void* userData) noexcept
     Render::RenderFramePacket& packet, u64 bindingKey, u32& releaseCount)
 {
     return internResource(
-        packet, Render::FrameResourceKind::Sprite2DTexture, bindingKey, releaseCount);
+        packet, Render::FrameResourceKind::Texture2D, bindingKey, releaseCount);
 }
 
 [[nodiscard]] Core::Result<Render::RenderSceneView> twoSpriteScene(

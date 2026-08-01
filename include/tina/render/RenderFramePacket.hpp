@@ -154,7 +154,7 @@ public:
                 RenderErrorCode::InvalidFrameResource,
                 "FrameResourceSink only accepts resources while the packet is Building");
         }
-        if ((descriptor.kind != FrameResourceKind::Sprite2DTexture
+        if ((descriptor.kind != FrameResourceKind::Texture2D
              && descriptor.kind != FrameResourceKind::Mesh3DGeometry
              && descriptor.kind != FrameResourceKind::Mesh3DMaterial)
             || descriptor.deviceBindingKey == 0)

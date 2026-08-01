@@ -63,7 +63,7 @@ struct TestFrameResourceLifetime final {
     };
     return sink.intern(
         Render::FrameResourceDescriptor{
-            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .kind = Render::FrameResourceKind::Texture2D,
             .deviceBindingKey = bindingKey,
         },
         std::move(pin));
@@ -72,7 +72,7 @@ struct TestFrameResourceLifetime final {
 [[nodiscard]] u64 textureBindingKey(Render::FrameResourceRef texture) noexcept
 {
     const Render::FrameResourceDescriptor* descriptor = testFramePacket().resourceTableView().resolve(
-        texture, Render::FrameResourceKind::Sprite2DTexture);
+        texture, Render::FrameResourceKind::Texture2D);
     return descriptor == nullptr ? 0 : descriptor->deviceBindingKey;
 }
 

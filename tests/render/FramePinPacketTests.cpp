@@ -38,7 +38,7 @@ void countingRelease(void* userData) noexcept
 
 [[nodiscard]] constexpr Render::FrameResourceDescriptor spriteTexture(Core::u64 bindingKey) noexcept
 {
-    return {Render::FrameResourceKind::Sprite2DTexture, bindingKey};
+    return {Render::FrameResourceKind::Texture2D, bindingKey};
 }
 
 TEST(FramePinTest, ReleaseRunsExactlyOnce)
@@ -102,7 +102,7 @@ TEST(FrameResourceTest, DefaultRefAndViewAreInvalid)
 
     static_assert(!ref.hasValue());
     EXPECT_TRUE(view.empty());
-    EXPECT_EQ(view.resolve(ref, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    EXPECT_EQ(view.resolve(ref, Render::FrameResourceKind::Texture2D), nullptr);
 }
 
 TEST(FrameResourceTest, InternDeduplicatesAndResolvesDescriptor)
@@ -127,20 +127,20 @@ TEST(FrameResourceTest, InternDeduplicatesAndResolvesDescriptor)
     const Render::FrameResourceTableView view = packet.resourceTableView();
     ASSERT_EQ(view.size(), 1U);
     const auto* descriptor =
-        view.resolve(*first, Render::FrameResourceKind::Sprite2DTexture);
+        view.resolve(*first, Render::FrameResourceKind::Texture2D);
     ASSERT_NE(descriptor, nullptr);
     EXPECT_EQ(descriptor->deviceBindingKey, 91U);
     EXPECT_EQ(view.resolve(*first, Render::FrameResourceKind::Invalid), nullptr);
 
     Render::RenderFrame frame{};
     frame.resources = view;
-    EXPECT_EQ(frame.resources.resolve(*first, Render::FrameResourceKind::Sprite2DTexture),
+    EXPECT_EQ(frame.resources.resolve(*first, Render::FrameResourceKind::Texture2D),
               descriptor);
 
     ASSERT_TRUE(packet.completeSkipped().has_value());
     EXPECT_EQ(g_releaseCount.load(), 2);
     EXPECT_TRUE(view.empty());
-    EXPECT_EQ(view.resolve(*first, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    EXPECT_EQ(view.resolve(*first, Render::FrameResourceKind::Texture2D), nullptr);
 }
 
 TEST(FrameResourceTest, CapacityCoversDefaultSpriteMeshAndMaterialWorkingSets)
@@ -161,7 +161,7 @@ TEST(FrameResourceTest, CapacityCoversDefaultSpriteMeshAndMaterialWorkingSets)
         Core::u32 count;
     };
     constexpr ResourceDomain domains[]{
-        {Render::FrameResourceKind::Sprite2DTexture, SpriteTextureCount},
+        {Render::FrameResourceKind::Texture2D, SpriteTextureCount},
         {Render::FrameResourceKind::Mesh3DGeometry, MeshGeometryCount},
         {Render::FrameResourceKind::Mesh3DMaterial, MeshMaterialCount},
     };
@@ -236,8 +236,8 @@ TEST(FrameResourceTest, OwnerGenerationAndKindValidationFailClosed)
     ASSERT_TRUE(secondRef.has_value());
 
     const auto firstView = firstPacket.resourceTableView();
-    EXPECT_NE(firstView.resolve(*firstRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
-    EXPECT_EQ(firstView.resolve(*secondRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    EXPECT_NE(firstView.resolve(*firstRef, Render::FrameResourceKind::Texture2D), nullptr);
+    EXPECT_EQ(firstView.resolve(*secondRef, Render::FrameResourceKind::Texture2D), nullptr);
     EXPECT_EQ(firstView.resolve(*firstRef, Render::FrameResourceKind::Invalid), nullptr);
 
     ASSERT_TRUE(firstPacket.beginFrame(5).has_value());
@@ -245,10 +245,10 @@ TEST(FrameResourceTest, OwnerGenerationAndKindValidationFailClosed)
     ASSERT_TRUE(replacementRef.has_value());
     const auto replacementView = firstPacket.resourceTableView();
     EXPECT_TRUE(firstView.empty());
-    EXPECT_EQ(firstView.resolve(*replacementRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
-    EXPECT_EQ(replacementView.resolve(*firstRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    EXPECT_EQ(firstView.resolve(*replacementRef, Render::FrameResourceKind::Texture2D), nullptr);
+    EXPECT_EQ(replacementView.resolve(*firstRef, Render::FrameResourceKind::Texture2D), nullptr);
     const auto* replacement =
-        replacementView.resolve(*replacementRef, Render::FrameResourceKind::Sprite2DTexture);
+        replacementView.resolve(*replacementRef, Render::FrameResourceKind::Texture2D);
     ASSERT_NE(replacement, nullptr);
     EXPECT_EQ(replacement->deviceBindingKey, 33U);
 
@@ -307,7 +307,7 @@ TEST(FrameResourceTest, CompleteAbandonAndDestructorInvalidateViewsAndReleaseExa
         ASSERT_TRUE(packet.attachSubmission(ledger, std::move(*ticket)).has_value());
         ASSERT_TRUE(packet.complete().has_value());
         EXPECT_TRUE(completedView.empty());
-        EXPECT_EQ(completedView.resolve(*ref, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+        EXPECT_EQ(completedView.resolve(*ref, Render::FrameResourceKind::Texture2D), nullptr);
     }
     EXPECT_EQ(g_releaseCount.load(), 1);
 
@@ -320,7 +320,7 @@ TEST(FrameResourceTest, CompleteAbandonAndDestructorInvalidateViewsAndReleaseExa
         abandonedView = packet.resourceTableView();
         ASSERT_TRUE(packet.abandon().has_value());
         EXPECT_TRUE(abandonedView.empty());
-        EXPECT_EQ(abandonedView.resolve(*ref, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+        EXPECT_EQ(abandonedView.resolve(*ref, Render::FrameResourceKind::Texture2D), nullptr);
     }
     EXPECT_EQ(g_releaseCount.load(), 2);
 
@@ -348,8 +348,8 @@ TEST(FrameResourceTest, ReconstructedPacketAtSameAddressCannotResolveOldRef)
     auto newRef = secondPacket->intern(spriteTexture(7), makeCountingPin(2));
     ASSERT_TRUE(newRef.has_value());
     const auto newView = secondPacket->resourceTableView();
-    EXPECT_EQ(newView.resolve(*oldRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
-    EXPECT_NE(newView.resolve(*newRef, Render::FrameResourceKind::Sprite2DTexture), nullptr);
+    EXPECT_EQ(newView.resolve(*oldRef, Render::FrameResourceKind::Texture2D), nullptr);
+    EXPECT_NE(newView.resolve(*newRef, Render::FrameResourceKind::Texture2D), nullptr);
     std::destroy_at(secondPacket);
 }
 

@@ -45,7 +45,7 @@ class SampleSpriteFrameResource final {
         };
         return sink.intern(
             Render::FrameResourceDescriptor{
-                .kind = Render::FrameResourceKind::Sprite2DTexture,
+                .kind = Render::FrameResourceKind::Texture2D,
                 .deviceBindingKey = deviceBindingKey,
             },
             std::move(pin));

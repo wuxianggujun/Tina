@@ -60,7 +60,7 @@ consume/claim 后 digital/analog source 均不会穿透。运行时改键只通�
 `GpuTextureId`，再由固定容量 owner-thread `Sprite2DBindingRegistry` 校验 Texture2D Handle，并调用
 RenderDevice 实例 allocator 事务绑定 GPU texture。返回 key 在该 device namespace 内唯一、单调且不复用；
 backend bind 失败不消费 key，同一 device 上的多个 registry 不会碰撞。allocator-managed registry 管理期间
-不得混用 caller-chosen `setSprite2DTextureBinding()` key。2D 通用 resolver 是 `Tina::AssetTypes` 中唯一的
+不得混用 caller-chosen `setTexture2DBinding()` key。2D 通用 resolver 是 `Tina::AssetTypes` 中唯一的
 `AssetFrameResourceResolver`；Scene extraction 每帧直接借用该 seam，产品实现薄调用 registry，沿 Sprite
 唯一 required Texture2D cooked dependency 校验
 Store owner/generation、kind、payload 与 live binding，再把 binding intern 到当前 packet，只写

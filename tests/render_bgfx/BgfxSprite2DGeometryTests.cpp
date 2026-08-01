@@ -38,7 +38,7 @@ public:
         FramePin pin{FramePinKind::Custom, deviceBindingKey, &releaseCount_, &countRelease};
         auto result = packet_.intern(
             FrameResourceDescriptor{
-                .kind = FrameResourceKind::Sprite2DTexture,
+                .kind = FrameResourceKind::Texture2D,
                 .deviceBindingKey = deviceBindingKey,
             },
             std::move(pin));

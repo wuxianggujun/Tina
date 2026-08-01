@@ -93,7 +93,7 @@ struct TestTilesetBinding final {
         }
         return sink.intern(
             Render::FrameResourceDescriptor{
-                .kind = Render::FrameResourceKind::Sprite2DTexture,
+                .kind = Render::FrameResourceKind::Texture2D,
                 .deviceBindingKey = 1U,
             },
             Render::FramePin{Render::FramePinKind::Custom, 1U, nullptr, &release});

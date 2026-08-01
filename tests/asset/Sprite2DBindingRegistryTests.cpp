@@ -119,8 +119,8 @@ class FixedBindingRenderDevice final : public Render::IRenderDevice {
     {
     }
 
-    [[nodiscard]] Core::Status setSprite2DTextureBinding(Core::u32 bindingKey,
-                                                         Render::GpuTextureId texture) noexcept override
+    [[nodiscard]] Core::Status setTexture2DBinding(Core::u32 bindingKey,
+                                                   Render::GpuTextureId texture) noexcept override
     {
         if (m_callCount >= m_calls.size())
         {
@@ -637,7 +637,7 @@ TEST(Sprite2DBindingRegistryTests, FrameResourcesDeduplicateAndBlockRetirementUn
     EXPECT_EQ(*sharedTileset, *firstSprite);
     EXPECT_EQ(packet.resourceCount(), 1U);
     const auto* descriptor = packet.resourceTableView().resolve(
-        *firstSprite, Render::FrameResourceKind::Sprite2DTexture);
+        *firstSprite, Render::FrameResourceKind::Texture2D);
     ASSERT_NE(descriptor, nullptr);
     EXPECT_EQ(descriptor->deviceBindingKey, *binding);
 

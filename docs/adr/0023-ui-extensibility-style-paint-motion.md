@@ -46,8 +46,9 @@ Tina UI 下一阶段采用以下单一演进方向：
 6. retained tree 只保存稳定 AssetId、source rect、texture extent、intrinsic logical size、fit/alignment、
    tint 与 sampling metadata，不保存 AssetHandle/Lease、FrameResourceRef 或 GPU/backend handle。资源由
    owning-root scoped resolver 在 frame packet 构建期间解析，经通用 Texture2D FrameResourceRef 和 owning
-   FramePin 保活；公共 UI 不依赖 Asset 模块。实现切片将现名 `FrameResourceKind::Sprite2DTexture` 与 binding
-   SPI 一次泛化为 Sprite/UI 共用 `Texture2D`，不新增 `UITexture` kind 或长期兼容别名；
+   FramePin 保活；公共 UI 不依赖 Asset 模块。前置切片已将 `FrameResourceKind::Texture2D` 与 binding SPI
+   泛化为 Sprite/UI 共用命名，未新增 `UITexture` kind 或长期兼容别名；root-scoped resolver、packet pin 与
+   `ImageQuad` 仍在 `UI-IMAGE-001 A` 后续垂直切片中交付；
 7. Motion 使用每窗口 monotonic clock 和 fixed-capacity active transition store。首版只插值颜色、opacity、
    统一圆角和 visual offset 等 paint-only 属性，支持 retarget 和 reduced-motion；
 8. Motion 不延迟 callback、不改变真实 hit rect、不隐式延期 destroy，也不建立第二套游戏 update loop；

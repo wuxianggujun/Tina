@@ -32,7 +32,7 @@ Core::Status uploadAndBindTexture2DForSpriteKey(Render::IRenderDevice& device, c
     {
         return Core::failure(std::move(texture.error()));
     }
-    return device.setSprite2DTextureBinding(spriteKey, *texture);
+    return device.setTexture2DBinding(spriteKey, *texture);
 }
 
 } // namespace Tina::Asset

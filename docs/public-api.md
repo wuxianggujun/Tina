@@ -186,9 +186,9 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 
 `IRenderDevice` 核心方法是 `submitFrame`、`present`、`statistics`、`shutdown`。可选资源 API包括：
 
-- RGBA8 Texture2D create/destroy、非消费式 `validateTexture2D()` live/generation 校验、Sprite2D 非0 key
+- RGBA8 Texture2D create/destroy、非消费式 `validateTexture2D()` live/generation 校验、通用 Texture2D 非0 key
   binding（invalid `GpuTextureId` 清除 binding），以及 device-instance
-  `createSprite2DTextureBinding()` allocator；
+  `createTexture2DBinding()` allocator；
 - P3N3UV2/U16 StaticMesh create/destroy、Mesh3D key binding 与独立 device-instance
   `createMesh3DBinding()` allocator；
 - 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
@@ -215,7 +215,7 @@ world-space point light、32个 world-space shadow segment 与 ambient，且不�
 commit 后返回 borrowed view。
 `RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
 `FrameResourceRef`；`RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
-backend 在同步 submit 中分别按 `Sprite2DTexture`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
+backend 在同步 submit 中分别按 `Texture2D`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
 `UIDisplayList` 支持 SolidQuad/Glyph、SolidQuad 像素 corner radius 与 axis-aligned clip；corner radius 计入
 paint-order checksum，并由 backend 验证不超过最小边的一半。
 
@@ -423,7 +423,7 @@ owner thread 调用；该线程成为固定容量 registry 的 owner，所有后
 AssetSystem 与 device 均为借用且必须保持最终地址，覆盖 registry 以及已经 handoff 的 GPU retirement
 pin 生命周期；非空自定义 `memoryResource` 只需覆盖 registry storage 生命周期。
 `registerTextureBinding(textureHandle, gpuTexture&)` 校验 live Texture2D Handle，取得一份 `AssetLease`，
-再通过借用 device 的 `createSprite2DTextureBinding()` 事务映射为非0 `u32` key。只有完整成功才把
+再通过借用 device 的 `createTexture2DBinding()` 事务映射为非0 `u32` key。只有完整成功才把
 Lease/GPU owner 发布到固定 Entry 并清空调用方 GPU handle；handle/kind/state、duplicate handle/AssetId/
 GPU owner conflict、capacity、lease acquire 或 backend bind 任一失败都保留调用方 GPU，且不留下
 Lease/Entry。拥有语义下 exact duplicate 也是 conflict；已有 key 通过 `bindingKey()` 查询。key 在该 RenderDevice 实例 namespace
@@ -444,7 +444,7 @@ seam。
 destroy/retire 都校验 owner，因此即使两个 live device 恰好具有相同 index/generation，cross-device handle
 也会 fail closed。handle 仍可复制，registry 的唯一 GPU owner 与 handoff 契约继续禁止 alias cleanup。
 
-`setSprite2DTextureBinding(callerKey, texture)` 仍保留 direct binding/clear SPI，但 caller-chosen key 与上述
+`setTexture2DBinding(callerKey, texture)` 提供 direct binding/clear SPI，但 caller-chosen key 与上述
 allocator 使用同一个 device namespace。allocator-managed registry 管理期间不得混用 direct caller key；
 device 不会为 direct setter 自动保留或跳过该 key。
 

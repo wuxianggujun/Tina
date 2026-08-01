@@ -488,9 +488,10 @@ retained UI 只保存 `AssetId + source rect/texture extent + tint + layout/pain
 `Tina::UI` 直接依赖 `Tina::Asset`。AssetSystem 是 Game State-owned，因此 resolver 绑定 owning root 的
 生命周期和 resolver scope；多个 State/root 可以解析相同 AssetId 到不同资源域，不使用全局 resolver。
 frame packet 构建阶段才做有界 lookup、去重和 pin；同一 `(resolver scope, AssetId)` 每帧只解析一次，
-随后复用/泛化现有 Texture2D frame resource，不增加 UI 专属纹理类型。`UI-IMAGE-001 A` 应将当前
-`FrameResourceKind::Sprite2DTexture` 及其 binding SPI 一次迁移为通用 `Texture2D` 命名，让 Sprite2D 与 UI
-共同消费同一 kind/binding table；不同时保留 `Sprite2DTexture`/`UITexture` 两个值或长期 compatibility alias。
+随后复用现有 Texture2D frame resource，不增加 UI 专属纹理类型。`UI-IMAGE-001 A` 的前置切片已将
+`FrameResourceKind::Texture2D` 及其 binding SPI 泛化完成，让 Sprite2D 与 UI 共同消费同一
+kind/binding table，且未保留 Sprite 专属 kind、`UITexture` 或 compatibility alias。root-scoped resolver、
+packet pin 与 `ImageQuad` 仍由 A 的后续垂直切片实现。
 
 authoring metadata 非法时 descriptor/paint candidate 失败且旧 committed snapshot 继续有效。运行时资源
 missing/not-ready/wrong-kind 或实际 extent 不匹配时使用 root policy：默认 `Skip + counter`，产品可配置

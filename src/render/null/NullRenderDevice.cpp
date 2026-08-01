@@ -21,7 +21,7 @@ namespace {
     for (const RenderSprite2DItem& sprite : frame.primaryWorldScene.sprites2D())
     {
         const FrameResourceDescriptor* descriptor =
-            frame.resources.resolve(sprite.texture, FrameResourceKind::Sprite2DTexture);
+            frame.resources.resolve(sprite.texture, FrameResourceKind::Texture2D);
         if (descriptor == nullptr
             || descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
         {
@@ -192,11 +192,11 @@ class NullRenderDevice final : public IRenderDevice {
         {
             --statistics_.liveResources;
         }
-        for (auto it = spriteBindings_.begin(); it != spriteBindings_.end();)
+        for (auto it = textureBindings_.begin(); it != textureBindings_.end();)
         {
             if (it->second == texture)
             {
-                it = spriteBindings_.erase(it);
+                it = textureBindings_.erase(it);
             } else
             {
                 ++it;
@@ -222,8 +222,8 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status setSprite2DTextureBinding(u32 deviceBindingKey,
-                                                         GpuTextureId texture) noexcept override
+    [[nodiscard]] Core::Status setTexture2DBinding(u32 deviceBindingKey,
+                                                   GpuTextureId texture) noexcept override
     {
         if (stopped_)
         {
@@ -232,11 +232,11 @@ class NullRenderDevice final : public IRenderDevice {
         if (deviceBindingKey == 0)
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload,
-                                 "Sprite2D device binding key must be non-zero");
+                                 "Texture2D device binding key must be non-zero");
         }
         if (!texture)
         {
-            spriteBindings_.erase(deviceBindingKey);
+            textureBindings_.erase(deviceBindingKey);
             return Core::success();
         }
         if (texture.owner != resourceOwnerId() || texture.index >= textures_.size() ||
@@ -245,7 +245,7 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
-        spriteBindings_[deviceBindingKey] = texture;
+        textureBindings_[deviceBindingKey] = texture;
         return Core::success();
     }
 
@@ -536,7 +536,7 @@ class NullRenderDevice final : public IRenderDevice {
     {
         stopped_ = true;
         frameOpen_ = false;
-        spriteBindings_.clear();
+        textureBindings_.clear();
         textures_.clear();
         meshBindings_.clear();
         materialBindings_.clear();
@@ -592,7 +592,7 @@ class NullRenderDevice final : public IRenderDevice {
     Detail::RenderSurfaceStateTracker surfaceStateTracker_;
     RenderStatistics statistics_{};
     std::vector<TextureSlot> textures_{};
-    std::unordered_map<u32, GpuTextureId> spriteBindings_{};
+    std::unordered_map<u32, GpuTextureId> textureBindings_{};
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> meshBindings_{};
     std::unordered_map<u32, Mesh3DMaterialBindingDesc> materialBindings_{};

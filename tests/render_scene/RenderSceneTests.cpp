@@ -71,7 +71,7 @@ class FrameResourceScope final {
 
     [[nodiscard]] FrameResourceRef texture(u64 deviceBindingKey)
     {
-        return resource(FrameResourceKind::Sprite2DTexture, deviceBindingKey);
+        return resource(FrameResourceKind::Texture2D, deviceBindingKey);
     }
 
     [[nodiscard]] FrameResourceRef mesh(u64 deviceBindingKey)
@@ -86,7 +86,7 @@ class FrameResourceScope final {
 
     [[nodiscard]] u64 bindingKey(
         FrameResourceRef ref,
-        FrameResourceKind kind = FrameResourceKind::Sprite2DTexture) const noexcept
+        FrameResourceKind kind = FrameResourceKind::Texture2D) const noexcept
     {
         const FrameResourceDescriptor* descriptor =
             packet_.resourceTableView().resolve(ref, kind);

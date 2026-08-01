@@ -201,10 +201,10 @@ class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
     {
         return inner_->drainGpuRetirements();
     }
-    [[nodiscard]] Tina::Core::Status setSprite2DTextureBinding(u32 spriteKey,
-                                                               Tina::Render::GpuTextureId texture) noexcept override
+    [[nodiscard]] Tina::Core::Status setTexture2DBinding(u32 spriteKey,
+                                                         Tina::Render::GpuTextureId texture) noexcept override
     {
-        return inner_->setSprite2DTextureBinding(spriteKey, texture);
+        return inner_->setTexture2DBinding(spriteKey, texture);
     }
 
   private:
@@ -361,7 +361,7 @@ class Catalog2DState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(texture.error()));
         }
-        if (const auto status = device->setSprite2DTextureBinding(ProductSpriteBindingKey, *texture); !status)
+        if (const auto status = device->setTexture2DBinding(ProductSpriteBindingKey, *texture); !status)
         {
             (void)device->destroyTexture2D(*texture);
             return status;
@@ -375,7 +375,7 @@ class Catalog2DState final : public Tina::IGameState {
     {
         if (auto* device = capture_->get(); device != nullptr && resources_->gpuTexture)
         {
-            (void)device->setSprite2DTextureBinding(ProductSpriteBindingKey, {});
+            (void)device->setTexture2DBinding(ProductSpriteBindingKey, {});
             const auto retirement = resources_->system->retireTexture2D(
                 *device, resources_->textureHandle, resources_->gpuTexture);
             if (!retirement)

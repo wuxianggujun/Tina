@@ -51,7 +51,7 @@ inline constexpr Core::ErrorCode InvalidSubmissionTicket{Core::ErrorDomain::Rend
 inline constexpr Core::ErrorCode InvalidMesh3DLighting{Core::ErrorDomain::Render, 43};
 inline constexpr Core::ErrorCode GpuRetirementUnsupported{Core::ErrorDomain::Render, 44};
 inline constexpr Core::ErrorCode GpuRetirementDrainFailed{Core::ErrorDomain::Render, 45};
-inline constexpr Core::ErrorCode SpriteBindingKeyExhausted{Core::ErrorDomain::Render, 46};
+inline constexpr Core::ErrorCode TextureBindingKeyExhausted{Core::ErrorDomain::Render, 46};
 inline constexpr Core::ErrorCode Mesh3DBindingKeyExhausted{Core::ErrorDomain::Render, 47};
 inline constexpr Core::ErrorCode Mesh3DMaterialBindingKeyExhausted{Core::ErrorDomain::Render, 48};
 inline constexpr Core::ErrorCode InvalidFrameResource{Core::ErrorDomain::Render, 49};

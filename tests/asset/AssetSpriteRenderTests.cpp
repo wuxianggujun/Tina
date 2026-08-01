@@ -68,7 +68,7 @@ TEST(AssetSpriteRenderTests, BuildsUvAndSizeFromTypedPayloads)
     Core::u32 releaseCount = 0;
     auto textureResource = packet.intern(
         Render::FrameResourceDescriptor{
-            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .kind = Render::FrameResourceKind::Texture2D,
             .deviceBindingKey = 7,
         },
         Render::FramePin{Render::FramePinKind::Custom, 7, &releaseCount, &countRelease});

@@ -123,7 +123,7 @@ TEST(AssetToRenderScenePipelineTests, CookLoadToRenderSceneCommitWithUv)
     Core::u32 releaseCount = 0;
     auto textureResource = packet.intern(
         Render::FrameResourceDescriptor{
-            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .kind = Render::FrameResourceKind::Texture2D,
             .deviceBindingKey = 1U,
         },
         Render::FramePin{Render::FramePinKind::Custom, 1U, &releaseCount, &countFrameResourceRelease});

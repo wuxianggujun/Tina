@@ -102,7 +102,7 @@ struct TestTilesetBinding final {
         Render::FramePin pin{Render::FramePinKind::Custom, self.bindingKey, &self, &releasePin};
         auto resource = sink.intern(
             Render::FrameResourceDescriptor{
-                .kind = Render::FrameResourceKind::Sprite2DTexture,
+                .kind = Render::FrameResourceKind::Texture2D,
                 .deviceBindingKey = self.bindingKey,
             },
             std::move(pin));

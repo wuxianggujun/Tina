@@ -45,15 +45,15 @@ TEST(NullRenderDeviceTextureTest, CreateBindDestroyLifecycle)
     auto foreignValidation = (*device)->validateTexture2D(*foreignTexture);
     ASSERT_FALSE(foreignValidation.has_value());
     EXPECT_EQ(foreignValidation.error().code, Render::RenderErrorCode::TextureNotFound);
-    auto foreignBinding = (*device)->setSprite2DTextureBinding(1U, *foreignTexture);
+    auto foreignBinding = (*device)->setTexture2DBinding(1U, *foreignTexture);
     ASSERT_FALSE(foreignBinding.has_value());
     EXPECT_EQ(foreignBinding.error().code, Render::RenderErrorCode::TextureNotFound);
     auto foreignDestroy = (*device)->destroyTexture2D(*foreignTexture);
     ASSERT_FALSE(foreignDestroy.has_value());
     EXPECT_EQ(foreignDestroy.error().code, Render::RenderErrorCode::TextureNotFound);
 
-    ASSERT_TRUE((*device)->setSprite2DTextureBinding(1U, *texture).has_value());
-    ASSERT_TRUE((*device)->setSprite2DTextureBinding(1U, {}).has_value());
+    ASSERT_TRUE((*device)->setTexture2DBinding(1U, *texture).has_value());
+    ASSERT_TRUE((*device)->setTexture2DBinding(1U, {}).has_value());
     ASSERT_TRUE((*device)->destroyTexture2D(*texture).has_value());
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
 

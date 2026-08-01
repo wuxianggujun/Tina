@@ -136,8 +136,8 @@ shader mode/program，并在采样后 premultiply。具体资源 owner、失败�
 | `create/destroyTexture2DRgba8` | 逻辑 generation storage；同步 retire | 私有 RGBA8 texture；逻辑失效后 marker 延迟销毁 |
 | `validateTexture2D` | 非消费式 owner/live/generation 校验；零突变 | owner-thread 非消费式 owner/live/generation 校验；零突变 |
 | `retireTexture2D(texture, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
-| `createSprite2DTextureBinding` | device-instance allocator；bind 成功才消费非0 key | device-instance allocator；bind 成功才消费非0 key |
-| `setSprite2DTextureBinding` | 校验/记录 binding | device binding key → texture |
+| `createTexture2DBinding` | device-instance allocator；bind 成功才消费非0 key | device-instance allocator；bind 成功才消费非0 key |
+| `setTexture2DBinding` | 校验/记录 binding | device binding key → texture |
 | `create/destroyStaticMeshP3N3UV2` | 逻辑 mesh storage；同步 retire | 私有 VB/IB；逻辑失效后 marker 延迟销毁 |
 | `retireStaticMesh(mesh, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
 | `drainGpuRetirements` | 已完成，无操作 | owner-thread completion-only flush；有界失败返回结构化错误 |
@@ -150,8 +150,8 @@ shader mode/program，并在采样后 premultiply。具体资源 owner、失败�
 | `setMesh3DLighting` | 同步校验/复制低层 fallback | 未提供 frame-scoped Scene lighting 时使用；0..4 directional lights + ambient |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径 |
 
-`createSprite2DTextureBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
-caller-chosen `setSprite2DTextureBinding()` key 与 allocator-managed key 共用 device namespace，registry
+`createTexture2DBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
+caller-chosen `setTexture2DBinding()` key 与 allocator-managed key 共用 device namespace，registry
 管理期间不得混用。
 
 Mesh3D mesh/material 分别使用独立的 device-instance allocator namespace。两类 key 都从2开始并分别保留

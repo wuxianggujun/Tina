@@ -159,10 +159,10 @@ Core::Result<Core::u32> Sprite2DBindingRegistry::registerTextureBinding(AssetHan
             std::move(lease.error()).withContext("Sprite2DBindingRegistry::registerTextureBinding", "lease"));
     }
 
-    auto bindingKey = m_device->createSprite2DTextureBinding(gpuTexture);
+    auto bindingKey = m_device->createTexture2DBinding(gpuTexture);
     if (!bindingKey)
     {
-        if (bindingKey.error().code == Render::RenderErrorCode::SpriteBindingKeyExhausted)
+        if (bindingKey.error().code == Render::RenderErrorCode::TextureBindingKeyExhausted)
         {
             return Core::failure(AssetErrorCode::SpriteBindingKeyExhausted,
                                  "Sprite2DBindingRegistry exhausted device binding keys");
@@ -341,7 +341,7 @@ Core::Result<Render::FrameResourceRef> Sprite2DBindingRegistry::internSingleText
                          &Sprite2DBindingRegistry::releaseFrameBorrow};
     auto resource = sink.intern(
         Render::FrameResourceDescriptor{
-            .kind = Render::FrameResourceKind::Sprite2DTexture,
+            .kind = Render::FrameResourceKind::Texture2D,
             .deviceBindingKey = entry->bindingKey,
         },
         std::move(pin));

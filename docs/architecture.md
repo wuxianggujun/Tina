@@ -178,7 +178,7 @@ source asset
   -> RenderDevice instance allocator binds and returns monotonic non-reused keys
   -> Scene World/Particle/Trail/TileMap/3D MeshRenderer weak AssetHandle
   -> borrowed resolver asks registry for the current binding
-       2D: intern packet-local Sprite2DTexture ref + owning entry borrow pin
+       2D: intern packet-local Texture2D ref + owning entry borrow pin
        3D: intern packet-local Mesh3DGeometry/Material refs + owning entry borrow pins
   -> RenderFrame submit + present-return CPU frame completion
   -> registry retirement

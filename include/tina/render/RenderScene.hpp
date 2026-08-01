@@ -62,7 +62,7 @@ struct RenderCamera2DInput final {
     RenderPixelSnapPolicy pixelSnap = RenderPixelSnapPolicy::Disabled;
 };
 
-// texture is a packet-local Sprite2D texture reference. The backend resolves it
+// texture is a packet-local Texture2D reference. The backend resolves it
 // through RenderFrame::resources during the synchronous submit call.
 // UV rect defaults to full texture [0,1]; typed Sprite payload extraction may
 // override it. The position is the resolved geometric center; Scene/Asset

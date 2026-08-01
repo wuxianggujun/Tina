@@ -132,7 +132,7 @@ TEST(Sample2DTileSelectionTest, SelectionHighlightSpriteCentersOnCellAndRejectsI
     };
     auto texture = packet.intern(
         Tina::Render::FrameResourceDescriptor{
-            .kind = Tina::Render::FrameResourceKind::Sprite2DTexture,
+            .kind = Tina::Render::FrameResourceKind::Texture2D,
             .deviceBindingKey = 1,
         },
         std::move(pin));

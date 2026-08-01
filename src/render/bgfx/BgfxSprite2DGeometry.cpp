@@ -176,7 +176,7 @@ Core::Status validateSprite2DFrameResources(
     for (const RenderSprite2DItem& sprite : scene.sprites2D())
     {
         const FrameResourceDescriptor* descriptor =
-            resources.resolve(sprite.texture, FrameResourceKind::Sprite2DTexture);
+            resources.resolve(sprite.texture, FrameResourceKind::Texture2D);
         if (descriptor == nullptr
             || descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
         {

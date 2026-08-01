@@ -103,7 +103,7 @@ submission 保留 CPU payload 时必须持有 Lease，而不是缓存 `tryGet()`
 该共享 owner thread 同时成为 registry owner；后续 register/retire/resolve 不增长 storage，全部在同一
 线程调用。注册输入是当前 Store 的 Texture2D `AssetHandle` 与同一借用 RenderDevice 的
 `GpuTextureId&`：registry 完成 handle/capacity preflight、取得 resident `AssetLease`，再调用
-`createSprite2DTextureBinding()`。任一 preflight/acquire/device failure 都保留调用方 GPU owner，临时 Lease
+`createTexture2DBinding()`。任一 preflight/acquire/device failure 都保留调用方 GPU owner，临时 Lease
 自动回滚且不发布 Entry；完整成功才把 Lease/GPU/binding 发布到 Entry 并清空调用方 handle。成功 key 在
 该 device 实例 namespace 内从1起单调增长，retirement 后不复用；多个 registry 共享 device 时仍获得
 distinct key。exact duplicate、同 AssetId 的另一 handle，以及同一 registry 已持有的 GPU texture 都是
@@ -111,7 +111,7 @@ ownership conflict；`GpuTextureId` 的 RenderDevice owner token 让 backend 确
 可复制 handle 的跨 registry alias cleanup 仍由调用方唯一 owner 契约禁止。普通 `bindingKey()`
 对 stale/unloaded Texture2D fail closed 返回0。
 
-direct `setSprite2DTextureBinding()` 的 caller-chosen key 与 allocator-managed key 共用 namespace；device
+direct `setTexture2DBinding()` 的 caller-chosen key 与 allocator-managed key 共用 namespace；device
 allocator 不追踪 direct key。registry 管理期间不得混用两种写入方式，否则 direct binding 可能被后续
 allocator candidate 覆盖。
 
@@ -258,9 +258,9 @@ IBL/shadow、point/spot light、light culling 与通用 pass scheduler 仍属 `R
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - hot reload、增量 Cooker、通用 Asset cache/LRU、Bundle/Patch 与 network Asset 尚未实现，见
   `ASSET-002`；
-- UI Image/Icon/NineSlice 尚未接入资源链。Planned `UI-IMAGE-001` 只保存 AssetId/图片元数据，并在当前
-  frame packet 中由 root-scoped resolver resolve/pin；目标是把现名 `Sprite2DTexture` frame kind/binding
-  泛化为 Sprite/UI 共用 Texture2D，不新增 `UITexture`、IconAsset 或第二套 atlas owner。该路线见
+- UI Image/Icon/NineSlice 尚未接入资源链。`UI-IMAGE-001` 的前置切片已将 frame kind/binding SPI 泛化为
+  Sprite/UI 共用 `Texture2D`；后续 A 切片仍需让 retained tree 只保存 AssetId/图片元数据，并在当前
+  frame packet 中由 root-scoped resolver resolve/pin，不新增 `UITexture`、IconAsset 或第二套 atlas owner。该路线见
   [UI 框架设计](ui-framework.md)与 Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)；
 - TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；
   优先级 IO 调度、editor authoring/undo/redo、自动 gameplay 生成、navigation 与旧 schema migration

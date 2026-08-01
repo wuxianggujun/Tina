@@ -1130,7 +1130,7 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
         for (const Render::RenderSprite2DItem& sprite : sprites)
         {
             const Render::FrameResourceDescriptor* descriptor = frame.resources.resolve(
-                sprite.texture, Render::FrameResourceKind::Sprite2DTexture);
+                sprite.texture, Render::FrameResourceKind::Texture2D);
             if (descriptor == nullptr)
             {
                 return Core::failure(Render::RenderErrorCode::InvalidFrameResource,
@@ -1813,7 +1813,7 @@ class ScriptedGameState final : public IGameState {
             };
             auto texture = context.frameResourceSink().intern(
                 Render::FrameResourceDescriptor{
-                    .kind = Render::FrameResourceKind::Sprite2DTexture,
+                    .kind = Render::FrameResourceKind::Texture2D,
                     .deviceBindingKey = scripted.deviceBindingKey,
                 },
                 std::move(pin));

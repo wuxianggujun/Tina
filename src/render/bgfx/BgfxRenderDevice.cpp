@@ -1374,7 +1374,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                     slot.identity.advanceAfterRelease();
                 }
             }
-            spriteTextureBindings_.clear();
+            texture2DBindings_.clear();
             if (bgfx::isValid(uiSolidQuadProgram_))
             {
                 bgfx::destroy(uiSolidQuadProgram_);
@@ -1928,7 +1928,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             const FrameResourceRef batchTexture = sprites[batchBegin].texture;
             const FrameResourceDescriptor* descriptor =
-                resources.resolve(batchTexture, FrameResourceKind::Sprite2DTexture);
+                resources.resolve(batchTexture, FrameResourceKind::Texture2D);
             if (descriptor == nullptr)
             {
                 std::terminate();
@@ -1941,7 +1941,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
 
             bgfx::TextureHandle texture = sprite2DDefaultTexture_;
-            if (const auto binding = spriteTextureBindings_.find(batchKey); binding != spriteTextureBindings_.end())
+            if (const auto binding = texture2DBindings_.find(batchKey); binding != texture2DBindings_.end())
             {
                 const GpuTextureId id = binding->second;
                 if (id.index < textures_.size())
@@ -2078,11 +2078,11 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         slot.live = false;
         slot.identity.advanceAfterRelease();
-        for (auto it = spriteTextureBindings_.begin(); it != spriteTextureBindings_.end();)
+        for (auto it = texture2DBindings_.begin(); it != texture2DBindings_.end();)
         {
             if (it->second == texture)
             {
-                it = spriteTextureBindings_.erase(it);
+                it = texture2DBindings_.erase(it);
             } else
             {
                 ++it;
@@ -2126,8 +2126,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status setSprite2DTextureBinding(u32 deviceBindingKey,
-                                                         GpuTextureId texture) noexcept override
+    [[nodiscard]] Core::Status setTexture2DBinding(u32 deviceBindingKey,
+                                                   GpuTextureId texture) noexcept override
     {
         if (std::this_thread::get_id() != ownerThread_)
         {
@@ -2144,14 +2144,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         if (!texture)
         {
-            spriteTextureBindings_.erase(deviceBindingKey);
+            texture2DBindings_.erase(deviceBindingKey);
             return Core::success();
         }
         if (!isLiveTexture(texture))
         {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
-        spriteTextureBindings_[deviceBindingKey] = texture;
+        texture2DBindings_[deviceBindingKey] = texture;
         return Core::success();
     }
 
@@ -2804,7 +2804,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         FramePin completionPin{};
     };
     std::vector<TextureSlot> textures_{};
-    std::unordered_map<u32, GpuTextureId> spriteTextureBindings_{};
+    std::unordered_map<u32, GpuTextureId> texture2DBindings_{};
 
     struct MeshSlot final {
         bgfx::VertexBufferHandle vertexBuffer = BGFX_INVALID_HANDLE;

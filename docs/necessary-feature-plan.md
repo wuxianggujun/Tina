@@ -477,10 +477,10 @@ TileMap Tileset Handle 化，N14 已完成 3D component/Prefab Handle 化，N15 
 - `Sprite2DBindingRegistry` 是固定容量 owner-thread owner，创建时通过调用方 PMR 建立唯一持久 storage；
   `AssetStore`、`IRenderDevice` 与非空自定义 `memory_resource` 都只被借用，必须覆盖 registry 生命周期。
 - `registerTextureBinding(Texture2D AssetHandle, GpuTextureId)` 先完整校验 Store/kind/state/payload、GPU
-  handle、重复/AssetId 冲突与 registry 容量，再调用 `IRenderDevice::createSprite2DTextureBinding()`；key 在
+  handle、重复/AssetId 冲突与 registry 容量，再调用 `IRenderDevice::createTexture2DBinding()`；key 在
   device 实例 namespace 内唯一、单调且解绑后不复用，backend bind 失败不消费候选 key，也不发布 registry
   记录。共享同一 device 的多个 registry 安全获得 distinct key。
-- caller-chosen `setSprite2DTextureBinding()` 与 allocator-managed binding 共享 device namespace；registry
+- caller-chosen `setTexture2DBinding()` 与 allocator-managed binding 共享 device namespace；registry
   管理期间不得混用，否则 direct key 可与 allocator 候选 key 冲突。
 - 当时独立的 device unbind 失败保留记录供重试，成功后才删除记录。
 - `resolveSprite()` fail closed：只接受当前 Store 中可读取的 Sprite，要求 cooked 文件恰有一个
@@ -717,7 +717,7 @@ ownership 与 packet-local `FrameResourceRef` 必须作为独立后续切片完�
   删除。World、TileMap、selection highlight、Particle、Trail 与所有 2D sample 都在 extraction 期间通过
   当前 packet sink 取得 ref。
 - `Sprite2DBindingRegistry` 沿 Sprite/Tileset 唯一 required Texture2D dependency 校验 live binding，再把
-  `{Sprite2DTexture, deviceBindingKey}` intern 到 packet。首次 intern 持有 entry borrow pin，同帧跨消费者
+  `{Texture2D, deviceBindingKey}` intern 到 packet。首次 intern 持有 entry borrow pin，同帧跨消费者
   重复 intern 立即释放重复 pin并返回同一 ref；active borrow 期间 retirement 明确失败，packet
   complete/skip/abandon 后可重试。
 - Null/bgfx backend 在提交产生任何 frame/statistics/surface/geometry 副作用前完整解析所有 Sprite ref；
