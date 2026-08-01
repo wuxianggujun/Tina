@@ -143,7 +143,7 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
                     .effectiveClip = layoutEntry.effectiveClip,
                     .paintOrdinal = nextPaintOrdinal,
                     .solidFill = color,
-                    .isGlyph = true,
+                    .kind = UICommittedPaintKind::Glyph,
                     .atlasX = placed->atlasX,
                     .atlasY = placed->atlasY,
                     .atlasWidth = placed->width,
@@ -202,7 +202,7 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
             .effectiveClip = layoutEntry.effectiveClip,
             .paintOrdinal = nextPaintOrdinal,
             .solidFill = color,
-            .isGlyph = false,
+            .kind = UICommittedPaintKind::SolidQuad,
         });
         ++nextPaintOrdinal;
         cursorX = normalizeFloat(cursorX + fallbackAdvance);

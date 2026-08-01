@@ -108,7 +108,7 @@ void UITextEditPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& out
                 .effectiveClip = textLayoutEntry.effectiveClip,
                 .paintOrdinal = nextPaintOrdinal,
                 .solidFill = state.selectionColor,
-                .isGlyph = false,
+                .kind = UICommittedPaintKind::SolidQuad,
             });
             ++nextPaintOrdinal;
         }
@@ -151,7 +151,7 @@ void UITextEditPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& out
         .effectiveClip = textLayoutEntry.effectiveClip,
         .paintOrdinal = nextPaintOrdinal,
         .solidFill = state.caretColor,
-        .isGlyph = false,
+        .kind = UICommittedPaintKind::SolidQuad,
     });
     ++nextPaintOrdinal;
 }

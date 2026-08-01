@@ -211,7 +211,7 @@ TEST(FreeTypeTextRasterizerTests, ContextSkipsZeroCoverageSpacePaintAndKeepsAtla
     ASSERT_EQ(paint.size(), 2U);
     for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
         EXPECT_EQ(entry.node, label);
-        EXPECT_TRUE(entry.isGlyph);
+        EXPECT_EQ(entry.kind, UI::UICommittedPaintKind::Glyph);
         EXPECT_GT(entry.atlasWidth, 0U);
         EXPECT_GT(entry.atlasHeight, 0U);
     }

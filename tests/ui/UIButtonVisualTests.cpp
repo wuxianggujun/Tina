@@ -161,7 +161,7 @@ void publishLayout(
     UI::UINodeId node) noexcept
 {
     for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
-        if (entry.node == node && !entry.isGlyph) {
+        if (entry.node == node && entry.kind != UI::UICommittedPaintKind::Glyph) {
             return &entry;
         }
     }
@@ -174,7 +174,7 @@ void publishLayout(
 {
     usize count = 0;
     for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
-        if (entry.node == node && !entry.isGlyph) {
+        if (entry.node == node && entry.kind != UI::UICommittedPaintKind::Glyph) {
             ++count;
         }
     }
@@ -188,7 +188,7 @@ void publishLayout(
 {
     const UI::UIPremultipliedRgba8Color expected = UI::premultiply(color);
     for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
-        if (entry.node == node && !entry.isGlyph && entry.solidFill == expected) {
+        if (entry.node == node && entry.kind != UI::UICommittedPaintKind::Glyph && entry.solidFill == expected) {
             return true;
         }
     }

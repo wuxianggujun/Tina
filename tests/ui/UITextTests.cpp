@@ -291,8 +291,8 @@ TEST(UITextTests, TextPlaceholderPaintEmitsPerCodepointSolidQuads)
     EXPECT_EQ(paint.entries()[1].node, label);
     EXPECT_LT(paint.entries()[0].paintOrdinal, paint.entries()[1].paintOrdinal);
     // D10: placeholder raster packs monospaced cells into the glyph atlas.
-    EXPECT_TRUE(paint.entries()[0].isGlyph);
-    EXPECT_TRUE(paint.entries()[1].isGlyph);
+    EXPECT_EQ(paint.entries()[0].kind, UI::UICommittedPaintKind::Glyph);
+    EXPECT_EQ(paint.entries()[1].kind, UI::UICommittedPaintKind::Glyph);
     EXPECT_GT(paint.entries()[0].atlasWidth, 0U);
     EXPECT_GT(paint.entries()[0].atlasHeight, 0U);
     // Cursor advances by raster advance (9.6); draw width is atlas cell pixels.
@@ -358,9 +358,9 @@ TEST(UITextTests, TextPaintUsesRasterizerAdvancesForMultiLine)
     EXPECT_FLOAT_EQ(paint.entries()[1].worldRect.x, paint.entries()[0].worldRect.x);
     EXPECT_FLOAT_EQ(paint.entries()[2].worldRect.x, 9.6F);
     EXPECT_FLOAT_EQ(paint.entries()[2].worldRect.y, paint.entries()[1].worldRect.y);
-    EXPECT_TRUE(paint.entries()[0].isGlyph);
-    EXPECT_TRUE(paint.entries()[1].isGlyph);
-    EXPECT_TRUE(paint.entries()[2].isGlyph);
+    EXPECT_EQ(paint.entries()[0].kind, UI::UICommittedPaintKind::Glyph);
+    EXPECT_EQ(paint.entries()[1].kind, UI::UICommittedPaintKind::Glyph);
+    EXPECT_EQ(paint.entries()[2].kind, UI::UICommittedPaintKind::Glyph);
 }
 
 TEST(UITextTests, TextPaintAndAutoSizeRespectLayoutPaddingAcrossLines)

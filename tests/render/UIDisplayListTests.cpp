@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <tina/render/FramePin.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/UIDisplayList.hpp>
 
@@ -51,6 +53,18 @@ createBuilder(Render::UIDisplayListCapacity capacity,
     auto result = Render::UIDisplayListBuilder::Create(capacity, storage);
     EXPECT_TRUE(result.has_value());
     return std::move(*result);
+}
+
+[[nodiscard]] Render::FrameResourceRef internTexture(Render::RenderFramePacket& packet, u64 bindingKey)
+{
+    auto result = packet.intern(
+        {
+            .kind = Render::FrameResourceKind::Texture2D,
+            .deviceBindingKey = bindingKey,
+        },
+        Render::FramePin{Render::FramePinKind::Custom, bindingKey, nullptr, nullptr});
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? *result : Render::FrameResourceRef{};
 }
 
 } // namespace
@@ -600,6 +614,137 @@ TEST(UIDisplayListTest, GlyphRequiresAtlasUvForNonEmptyBoundsAndSharesOrdinalStr
     });
     ASSERT_FALSE(nonIncreasing.has_value());
     EXPECT_EQ(nonIncreasing.error().code, Render::RenderErrorCode::InvalidDrawCommand);
+}
+
+TEST(UIDisplayListTest, ImageQuadsBatchByPacketLocalTextureAndSamplingWithoutChecksumBindingIdentity)
+{
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    const Render::FrameResourceRef texture = internTexture(packet, 71);
+    ASSERT_TRUE(texture.hasValue());
+
+    auto builder = createBuilder({.commandCount = 3, .clipCount = 0, .batchCount = 3});
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    ASSERT_TRUE(builder
+                    .addImageQuad({
+                        .paintOrdinal = 1,
+                        .bounds = {0, 0, 8, 4},
+                        .color = opaque(255, 255, 255),
+                        .texture = texture,
+                        .resourceOrdinal = 0,
+                        .uv = {.u0 = 0.125F, .v0 = 0.25F, .u1 = 0.5F, .v1 = 0.75F},
+                        .sampling = Render::UITextureSampling::Nearest,
+                    })
+                    .has_value());
+    ASSERT_TRUE(builder
+                    .addImageQuad({
+                        .paintOrdinal = 2,
+                        .bounds = {8, 0, 8, 4},
+                        .color = opaque(255, 255, 255),
+                        .texture = texture,
+                        .resourceOrdinal = 0,
+                        .uv = {.u0 = 0.125F, .v0 = 0.25F, .u1 = 0.5F, .v1 = 0.75F},
+                        .sampling = Render::UITextureSampling::Nearest,
+                    })
+                    .has_value());
+    ASSERT_TRUE(builder
+                    .addImageQuad({
+                        .paintOrdinal = 3,
+                        .bounds = {16, 0, 8, 4},
+                        .color = opaque(255, 255, 255),
+                        .texture = texture,
+                        .resourceOrdinal = 0,
+                        .uv = {.u0 = 0.125F, .v0 = 0.25F, .u1 = 0.5F, .v1 = 0.75F},
+                        .sampling = Render::UITextureSampling::Linear,
+                    })
+                    .has_value());
+    auto displayList = builder.commit();
+    ASSERT_TRUE(displayList.has_value());
+    EXPECT_EQ(displayList->statistics().imageQuadCommandCount, 3U);
+    ASSERT_EQ(displayList->batches().size(), 2U);
+    EXPECT_EQ(displayList->batches()[0].kind, Render::UIDrawCommandKind::ImageQuad);
+    EXPECT_EQ(displayList->batches()[0].texture, texture);
+    EXPECT_EQ(displayList->batches()[0].sampling, Render::UITextureSampling::Nearest);
+    EXPECT_EQ(displayList->batches()[0].commandCount, 2U);
+    EXPECT_EQ(displayList->batches()[1].sampling, Render::UITextureSampling::Linear);
+    EXPECT_EQ(displayList->commands()[0].uv,
+              (Render::UINormalizedUvRect{.u0 = 0.125F, .v0 = 0.25F, .u1 = 0.5F, .v1 = 0.75F}));
+
+    Render::RenderFramePacket otherPacket;
+    ASSERT_TRUE(otherPacket.beginFrame(1).has_value());
+    const Render::FrameResourceRef otherTexture = internTexture(otherPacket, 72);
+    ASSERT_TRUE(otherTexture.hasValue());
+    auto checksumBuilder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+    ASSERT_TRUE(checksumBuilder.beginFrame().has_value());
+    ASSERT_TRUE(checksumBuilder
+                    .addImageQuad({
+                        .paintOrdinal = 1,
+                        .bounds = {0, 0, 8, 4},
+                        .color = opaque(255, 255, 255),
+                        .texture = otherTexture,
+                        .resourceOrdinal = 0,
+                        .uv = {.u0 = 0.125F, .v0 = 0.25F, .u1 = 0.5F, .v1 = 0.75F},
+                        .sampling = Render::UITextureSampling::Nearest,
+                    })
+                    .has_value());
+    auto checksumList = checksumBuilder.commit();
+    ASSERT_TRUE(checksumList.has_value());
+
+    auto firstOnlyBuilder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+    ASSERT_TRUE(firstOnlyBuilder.beginFrame().has_value());
+    ASSERT_TRUE(firstOnlyBuilder
+                    .addImageQuad({
+                        .paintOrdinal = 1,
+                        .bounds = {0, 0, 8, 4},
+                        .color = opaque(255, 255, 255),
+                        .texture = texture,
+                        .resourceOrdinal = 0,
+                        .uv = {.u0 = 0.125F, .v0 = 0.25F, .u1 = 0.5F, .v1 = 0.75F},
+                        .sampling = Render::UITextureSampling::Nearest,
+                    })
+                    .has_value());
+    auto firstOnlyList = firstOnlyBuilder.commit();
+    ASSERT_TRUE(firstOnlyList.has_value());
+    EXPECT_NE(otherTexture, texture);
+    EXPECT_EQ(checksumList->paintOrderChecksum(), firstOnlyList->paintOrderChecksum());
+}
+
+TEST(UIDisplayListTest, ImageQuadRejectsInvalidPacketResourceUvAndSampling)
+{
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    const Render::FrameResourceRef texture = internTexture(packet, 73);
+    ASSERT_TRUE(texture.hasValue());
+
+    const auto expectRejected = [&](Render::UIImageQuadInput input) {
+        auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+        ASSERT_TRUE(builder.beginFrame().has_value());
+        auto status = builder.addImageQuad(input);
+        ASSERT_FALSE(status.has_value());
+        EXPECT_EQ(status.error().code, Render::RenderErrorCode::InvalidDrawCommand);
+        EXPECT_FALSE(builder.commit().has_value());
+        EXPECT_TRUE(builder.publishedView().empty());
+    };
+
+    const Render::UIImageQuadInput valid{
+        .paintOrdinal = 1,
+        .bounds = {0, 0, 8, 4},
+        .color = opaque(255, 255, 255),
+        .texture = texture,
+        .resourceOrdinal = 0,
+        .uv = {.u0 = 0.0F, .v0 = 0.0F, .u1 = 1.0F, .v1 = 1.0F},
+        .sampling = Render::UITextureSampling::Linear,
+    };
+
+    auto missingTexture = valid;
+    missingTexture.texture = {};
+    expectRejected(missingTexture);
+    auto invalidUv = valid;
+    invalidUv.uv.u1 = 1.5F;
+    expectRejected(invalidUv);
+    auto invalidSampling = valid;
+    invalidSampling.sampling = static_cast<Render::UITextureSampling>(0xFFU);
+    expectRejected(invalidSampling);
 }
 
 } // namespace Tina::Tests

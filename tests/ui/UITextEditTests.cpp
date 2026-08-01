@@ -74,7 +74,7 @@ TEST_F(UITextEditTest, PaintStatesReuseHoverArmAndFocusWithoutStalePressedFeedba
     const auto expectBackground = [&](UI::UIPremultipliedRgba8Color expected) {
         const UI::UICommittedPaintEntry* background = nullptr;
         for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries()) {
-            if (entry.node == textEdit && !entry.isGlyph && entry.worldRect.width == 240.0F &&
+            if (entry.node == textEdit && entry.kind != UI::UICommittedPaintKind::Glyph && entry.worldRect.width == 240.0F &&
                 entry.worldRect.height == 32.0F) {
                 background = &entry;
                 break;
@@ -390,10 +390,10 @@ TEST_F(UITextEditTest, SameTextReplacementCollapsesSelectionAndRepublishesPaint)
     const UI::UICommittedPaintEntry* selectionHighlight = nullptr;
     const UI::UICommittedPaintEntry* selectedCaret = nullptr;
     for (const UI::UICommittedPaintEntry& entry : selectedPaint.entries()) {
-        if (!entry.isGlyph && entry.solidFill.alpha == 190) {
+        if (entry.kind != UI::UICommittedPaintKind::Glyph && entry.solidFill.alpha == 190) {
             selectionHighlight = &entry;
         }
-        if (!entry.isGlyph && entry.solidFill.red == 255
+        if (entry.kind != UI::UICommittedPaintKind::Glyph && entry.solidFill.red == 255
             && entry.solidFill.green == 255 && entry.solidFill.blue == 255
             && entry.worldRect.width == 2.0F) {
             selectedCaret = &entry;
@@ -431,8 +431,8 @@ TEST_F(UITextEditTest, SameTextReplacementCollapsesSelectionAndRepublishesPaint)
     EXPECT_EQ(collapsedPaint.paintRevision(), selectedPaintRevision + 1U);
     const UI::UICommittedPaintEntry* collapsedCaret = nullptr;
     for (const UI::UICommittedPaintEntry& entry : collapsedPaint.entries()) {
-        EXPECT_FALSE(!entry.isGlyph && entry.solidFill.alpha == 190);
-        if (!entry.isGlyph && entry.solidFill.red == 255
+        EXPECT_FALSE(entry.kind != UI::UICommittedPaintKind::Glyph && entry.solidFill.alpha == 190);
+        if (entry.kind != UI::UICommittedPaintKind::Glyph && entry.solidFill.red == 255
             && entry.solidFill.green == 255 && entry.solidFill.blue == 255
             && entry.worldRect.width == 2.0F) {
             collapsedCaret = &entry;
@@ -546,10 +546,10 @@ TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
     const UI::UICommittedPaintEntry* selectedCaret = nullptr;
     for (const UI::UICommittedPaintEntry& entry : selectedPaint.entries()) {
         EXPECT_EQ(entry.node, textEdit);
-        if (!entry.isGlyph && entry.solidFill == expectedSelection) {
+        if (entry.kind != UI::UICommittedPaintKind::Glyph && entry.solidFill == expectedSelection) {
             selectionPaint = &entry;
         }
-        if (!entry.isGlyph && entry.solidFill == expectedCaret) {
+        if (entry.kind != UI::UICommittedPaintKind::Glyph && entry.solidFill == expectedCaret) {
             selectedCaret = &entry;
         }
     }
@@ -576,7 +576,7 @@ TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
     float secondPreeditX = 0.0F;
     const UI::UICommittedPaintEntry* preeditCaret = nullptr;
     for (const UI::UICommittedPaintEntry& entry : preeditPaint.entries()) {
-        if (entry.isGlyph && entry.solidFill.red == 0
+        if (entry.kind == UI::UICommittedPaintKind::Glyph && entry.solidFill.red == 0
             && entry.solidFill.green == 180 && entry.solidFill.blue == 255) {
             if (preeditGlyphCount == 0) {
                 firstPreeditX = entry.worldRect.x;
@@ -585,10 +585,10 @@ TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
             }
             ++preeditGlyphCount;
         }
-        if (!entry.isGlyph && entry.solidFill == expectedCaret) {
+        if (entry.kind != UI::UICommittedPaintKind::Glyph && entry.solidFill == expectedCaret) {
             preeditCaret = &entry;
         }
-        EXPECT_FALSE(!entry.isGlyph && entry.solidFill == expectedSelection);
+        EXPECT_FALSE(entry.kind != UI::UICommittedPaintKind::Glyph && entry.solidFill == expectedSelection);
     }
     EXPECT_EQ(preeditGlyphCount, 2U);
     EXPECT_GT(secondPreeditX, firstPreeditX);

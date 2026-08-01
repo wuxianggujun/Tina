@@ -84,6 +84,10 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(status.error()));
         }
+        if (auto status = validateUIResources(frame); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
         if (frame.primaryWorldScene.sprite2DLighting().has_value())
         {
             if (auto status = validateSprite2DLightingDesc(
@@ -545,6 +549,33 @@ class NullRenderDevice final : public IRenderDevice {
     }
 
   private:
+    [[nodiscard]] Core::Status validateUIResources(const RenderFrame& frame) const noexcept
+    {
+        for (const UIDrawCommand& command : frame.primaryWindowUIDisplayList.commands())
+        {
+            if (command.kind != UIDrawCommandKind::ImageQuad)
+            {
+                continue;
+            }
+            const FrameResourceDescriptor* descriptor =
+                frame.resources.resolve(command.texture, FrameResourceKind::Texture2D);
+            if (descriptor == nullptr ||
+                descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "NullRender UI image texture ref is stale, cross-packet, wrong-kind, or out of binding range");
+            }
+            const auto binding = textureBindings_.find(static_cast<u32>(descriptor->deviceBindingKey));
+            if (binding == textureBindings_.end() || !binding->second || !isLiveTexture(binding->second))
+            {
+                return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                     "NullRender UI image texture binding is missing or no longer live");
+            }
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] bool isLiveTexture(GpuTextureId texture) const noexcept
     {
         return !texture || (texture.owner == resourceOwnerId() && texture.index < textures_.size() &&

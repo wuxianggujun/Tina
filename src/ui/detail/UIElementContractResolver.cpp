@@ -8,6 +8,7 @@ Core::Result<BuiltinElementKind>
 resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
 {
     const bool hasText = descriptor.text.has_value();
+    const bool hasImage = descriptor.image.has_value();
     const auto requireText = [hasText](BuiltinElementKind kind)
         -> Core::Result<BuiltinElementKind> {
         if (!hasText)
@@ -28,6 +29,16 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
         }
         return kind;
     };
+    const auto rejectIntrinsicContent = [hasText, hasImage](BuiltinElementKind kind)
+        -> Core::Result<BuiltinElementKind> {
+        if (hasText || hasImage)
+        {
+            return Core::failure(
+                UIErrorCode::InvalidElementDescriptor,
+                "UI element behavior does not accept intrinsic content");
+        }
+        return kind;
+    };
 
     if (!isValidElementBehaviors(descriptor.behaviors))
     {
@@ -43,6 +54,12 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     {
         return hasText ? BuiltinElementKind::Label : BuiltinElementKind::Panel;
     }
+    if (hasImage)
+    {
+        return Core::failure(
+            UIErrorCode::InvalidElementDescriptor,
+            "UI image content requires a behavior-neutral Element");
+    }
     if (specialized == UIElementBehavior::Activate)
     {
         return requireText(BuiltinElementKind::Button);
@@ -50,11 +67,11 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     if (specialized ==
         (UIElementBehavior::Activate | UIElementBehavior::Toggle))
     {
-        return rejectText(BuiltinElementKind::Checkbox);
+        return rejectIntrinsicContent(BuiltinElementKind::Checkbox);
     }
     if (specialized == UIElementBehavior::RangeInput)
     {
-        return rejectText(BuiltinElementKind::Slider);
+        return rejectIntrinsicContent(BuiltinElementKind::Slider);
     }
     if (specialized == UIElementBehavior::TextInput)
     {
@@ -62,7 +79,7 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     }
     if (specialized == UIElementBehavior::ProgressValue)
     {
-        return rejectText(BuiltinElementKind::ProgressBar);
+        return rejectIntrinsicContent(BuiltinElementKind::ProgressBar);
     }
     if (specialized ==
         (UIElementBehavior::Activate | UIElementBehavior::ExclusiveChoice))
@@ -71,11 +88,11 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     }
     if (specialized == UIElementBehavior::ModalBarrier)
     {
-        return rejectText(BuiltinElementKind::Modal);
+        return rejectIntrinsicContent(BuiltinElementKind::Modal);
     }
     if (specialized == UIElementBehavior::Scroll)
     {
-        return rejectText(BuiltinElementKind::ScrollView);
+        return rejectIntrinsicContent(BuiltinElementKind::ScrollView);
     }
     if (specialized ==
         (UIElementBehavior::Activate | UIElementBehavior::Select))
@@ -89,7 +106,7 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
             return Core::failure(UIErrorCode::InvalidElementDescriptor,
                                  "UI Popup elements require Overlay placement");
         }
-        return rejectText(BuiltinElementKind::Popup);
+        return rejectIntrinsicContent(BuiltinElementKind::Popup);
     }
     if (specialized ==
         (UIElementBehavior::Activate | UIElementBehavior::SelectOption))
@@ -98,11 +115,11 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     }
     if (specialized == UIElementBehavior::VirtualList)
     {
-        return rejectText(BuiltinElementKind::ListView);
+        return rejectIntrinsicContent(BuiltinElementKind::ListView);
     }
     if (specialized == UIElementBehavior::VirtualTree)
     {
-        return rejectText(BuiltinElementKind::TreeView);
+        return rejectIntrinsicContent(BuiltinElementKind::TreeView);
     }
     return Core::failure(
         UIErrorCode::InvalidElementDescriptor,

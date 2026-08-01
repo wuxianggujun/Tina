@@ -30,6 +30,7 @@ enum class UISemanticsRole : u8 {
     ComboBox,
     Tree,
     TreeItem,
+    Image,
 };
 
 enum class UISemanticsMode : u8 {

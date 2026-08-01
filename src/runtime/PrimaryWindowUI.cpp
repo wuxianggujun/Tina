@@ -19,6 +19,61 @@ template <typename Value> [[nodiscard]] Core::Result<Value> expiredFacade(std::s
 
 } // namespace
 
+PrimaryWindowUIImageResolverRegistration::PrimaryWindowUIImageResolverRegistration(
+    Runtime::Detail::PrimaryWindowUICapabilityState& state, u32 slot, u32 generation) noexcept
+    : m_state(&state), m_slot(slot), m_generation(generation)
+{
+}
+
+PrimaryWindowUIImageResolverRegistration::~PrimaryWindowUIImageResolverRegistration() noexcept
+{
+    reset();
+}
+
+PrimaryWindowUIImageResolverRegistration::PrimaryWindowUIImageResolverRegistration(
+    PrimaryWindowUIImageResolverRegistration&& other) noexcept
+    : m_state(std::exchange(other.m_state, nullptr)), m_slot(std::exchange(other.m_slot, 0)),
+      m_generation(std::exchange(other.m_generation, 0))
+{
+}
+
+PrimaryWindowUIImageResolverRegistration&
+PrimaryWindowUIImageResolverRegistration::operator=(
+    PrimaryWindowUIImageResolverRegistration&& other) noexcept
+{
+    if (this == &other)
+    {
+        return *this;
+    }
+    reset();
+    m_state = std::exchange(other.m_state, nullptr);
+    m_slot = std::exchange(other.m_slot, 0);
+    m_generation = std::exchange(other.m_generation, 0);
+    return *this;
+}
+
+void PrimaryWindowUIImageResolverRegistration::reset() noexcept
+{
+    if (m_state != nullptr && m_generation != 0)
+    {
+        m_state->unbindImageResolver(m_slot, m_generation);
+    }
+    m_state = nullptr;
+    m_slot = 0;
+    m_generation = 0;
+}
+
+bool PrimaryWindowUIImageResolverRegistration::isActive() const noexcept
+{
+    return m_state != nullptr && m_generation != 0 &&
+           m_state->isImageResolverActive(m_slot, m_generation);
+}
+
+PrimaryWindowUIImageResolverRegistration::operator bool() const noexcept
+{
+    return isActive();
+}
+
 PrimaryWindowUITreeUpdater::PrimaryWindowUITreeUpdater(Runtime::Detail::PrimaryWindowUICapabilityState& state,
                                                        u64 epoch, Runtime::Detail::PrimaryWindowUIPhase phase,
                                                        UI::UITreeUpdater updater) noexcept
@@ -1050,6 +1105,18 @@ Core::Result<PrimaryWindowUITreeUpdater> PrimaryWindowUIRootBuilder::treeUpdater
         return expiredFacade<PrimaryWindowUITreeUpdater>("PrimaryWindowUIRootBuilder::treeUpdater");
     }
     return m_state->treeUpdater(m_epoch, Runtime::Detail::PrimaryWindowUIPhase::GameStateEnter, rootOwner);
+}
+
+Core::Result<PrimaryWindowUIImageResolverRegistration>
+PrimaryWindowUIRootBuilder::bindImageResolver(
+    UI::UIRootOwner& rootOwner, Render::Texture2DFrameResourceResolver resolver)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<PrimaryWindowUIImageResolverRegistration>(
+            "PrimaryWindowUIRootBuilder::bindImageResolver");
+    }
+    return m_state->bindImageResolver(m_epoch, rootOwner, resolver);
 }
 
 } // namespace Tina

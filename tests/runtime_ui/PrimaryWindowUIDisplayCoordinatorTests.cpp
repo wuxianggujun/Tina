@@ -2,11 +2,13 @@
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
 
 #include "../../src/runtime/ui/PrimaryWindowUIDisplayCoordinator.hpp"
+#include "../../src/runtime/ui/PrimaryWindowUICapabilityState.hpp"
 
 #include <memory>
 #include <memory_resource>
@@ -208,6 +210,8 @@ class PrimaryWindowUIDisplayCoordinatorTest : public testing::Test {
     std::unique_ptr<UI::UIContext> context;
     UI::UIRootOwner root{};
     UI::UINodeId panel{};
+    Runtime::Detail::PrimaryWindowUICapabilityState capability{1};
+    Render::RenderFramePacket packet{};
 };
 
 TEST_F(PrimaryWindowUIDisplayCoordinatorTest, PublishesMappedBorrowAndRejectsASecondBuildForTheSameFrame)
@@ -216,7 +220,7 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, PublishesMappedBorrowAndRejectsASe
     auto frame = buildFrame(*frameBuilder, 1, {.window = window});
     ASSERT_TRUE(frame.has_value());
 
-    auto build = coordinator.buildForFrame(context.get(), *frame, std::nullopt);
+    auto build = coordinator.buildForFrame(context.get(), *frame, std::nullopt, capability, packet.resourceSink());
     ASSERT_TRUE(build.has_value()) << (build ? "" : build.error().message);
     ASSERT_EQ(build->displayList.commands().size(), 1U);
     EXPECT_EQ(build->displayList.commands().front().bounds,
@@ -224,7 +228,7 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, PublishesMappedBorrowAndRejectsASe
     EXPECT_EQ(build->conversionStatistics.sourcePaintEntryCount, 1U);
     EXPECT_EQ(build->displayList.commands().data(), coordinator.publishedView().commands().data());
 
-    auto duplicate = coordinator.buildForFrame(context.get(), *frame, std::nullopt);
+    auto duplicate = coordinator.buildForFrame(context.get(), *frame, std::nullopt, capability, packet.resourceSink());
     ASSERT_FALSE(duplicate.has_value());
     EXPECT_EQ(duplicate.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
     EXPECT_TRUE(coordinator.publishedView().empty());
@@ -235,14 +239,14 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, CapacityFailureRollsBackWithoutOld
     auto coordinator = createCoordinator({.commandCount = 1, .clipCount = 1, .batchCount = 1});
     auto firstFrame = buildFrame(*frameBuilder, 1, {.window = window});
     ASSERT_TRUE(firstFrame.has_value());
-    auto firstBuild = coordinator.buildForFrame(context.get(), *firstFrame, std::nullopt);
+    auto firstBuild = coordinator.buildForFrame(context.get(), *firstFrame, std::nullopt, capability, packet.resourceSink());
     ASSERT_TRUE(firstBuild.has_value());
     ASSERT_EQ(firstBuild->displayList.commands().size(), 1U);
 
     ASSERT_TRUE(addSecondPaintedPanel().has_value());
     auto secondFrame = buildFrame(*frameBuilder, 2, {.window = window});
     ASSERT_TRUE(secondFrame.has_value());
-    auto failedBuild = coordinator.buildForFrame(context.get(), *secondFrame, std::nullopt);
+    auto failedBuild = coordinator.buildForFrame(context.get(), *secondFrame, std::nullopt, capability, packet.resourceSink());
 
     ASSERT_FALSE(failedBuild.has_value());
     EXPECT_EQ(failedBuild.error().code, Render::RenderErrorCode::DisplayListCapacityExceeded);
@@ -259,7 +263,7 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, HeadlessZeroFramebufferAndSuspende
 
     auto headless = buildFrame(*frameBuilder, 1);
     ASSERT_TRUE(headless.has_value());
-    auto headlessBuild = coordinator.buildForFrame(nullptr, *headless, std::nullopt);
+    auto headlessBuild = coordinator.buildForFrame(nullptr, *headless, std::nullopt, capability, packet.resourceSink());
     ASSERT_TRUE(headlessBuild.has_value());
     EXPECT_TRUE(headlessBuild->displayList.empty());
     EXPECT_TRUE(headlessBuild->displayList.clips().empty());
@@ -272,20 +276,20 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, HeadlessZeroFramebufferAndSuspende
                                                             .minimized = true,
                                                         });
     ASSERT_TRUE(zeroFramebuffer.has_value());
-    auto zeroBuild = coordinator.buildForFrame(context.get(), *zeroFramebuffer, std::nullopt);
+    auto zeroBuild = coordinator.buildForFrame(context.get(), *zeroFramebuffer, std::nullopt, capability, packet.resourceSink());
     ASSERT_TRUE(zeroBuild.has_value());
     EXPECT_TRUE(zeroBuild->displayList.empty());
 
     auto activeExtentFrame = buildFrame(*frameBuilder, 3, {.window = window});
     ASSERT_TRUE(activeExtentFrame.has_value());
     const auto suspended = surfaceFor(3, Render::RenderSurfaceAvailability::Suspended);
-    auto suspendedBuild = coordinator.buildForFrame(context.get(), *activeExtentFrame, suspended);
+    auto suspendedBuild = coordinator.buildForFrame(context.get(), *activeExtentFrame, suspended, capability, packet.resourceSink());
     ASSERT_TRUE(suspendedBuild.has_value());
     EXPECT_TRUE(suspendedBuild->displayList.empty());
 
     auto restoredFrame = buildFrame(*frameBuilder, 4, {.window = window});
     ASSERT_TRUE(restoredFrame.has_value());
-    auto restoredBuild = coordinator.buildForFrame(context.get(), *restoredFrame, surfaceFor(4));
+    auto restoredBuild = coordinator.buildForFrame(context.get(), *restoredFrame, surfaceFor(4), capability, packet.resourceSink());
     ASSERT_TRUE(restoredBuild.has_value());
     EXPECT_EQ(restoredBuild->displayList.commands().size(), 1U);
 }
@@ -295,13 +299,13 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, MetricsRevisionMismatchInvalidates
     auto coordinator = createCoordinator();
     auto firstFrame = buildFrame(*frameBuilder, 1, {.window = window});
     ASSERT_TRUE(firstFrame.has_value());
-    auto firstBuild = coordinator.buildForFrame(context.get(), *firstFrame, surfaceFor(1));
+    auto firstBuild = coordinator.buildForFrame(context.get(), *firstFrame, surfaceFor(1), capability, packet.resourceSink());
     ASSERT_TRUE(firstBuild.has_value());
     ASSERT_FALSE(firstBuild->displayList.empty());
 
     auto secondFrame = buildFrame(*frameBuilder, 2, {.window = window});
     ASSERT_TRUE(secondFrame.has_value());
-    auto mismatch = coordinator.buildForFrame(context.get(), *secondFrame, surfaceFor(1));
+    auto mismatch = coordinator.buildForFrame(context.get(), *secondFrame, surfaceFor(1), capability, packet.resourceSink());
 
     ASSERT_FALSE(mismatch.has_value());
     EXPECT_EQ(mismatch.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
@@ -313,7 +317,7 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, ReusesItsFixedStorageForThreeHundr
     TrackingMemoryResource storage;
     {
         auto coordinator = createCoordinator({.commandCount = 8, .clipCount = 8, .batchCount = 8}, storage);
-        ASSERT_EQ(storage.allocationCount, 3U);
+        ASSERT_EQ(storage.allocationCount, 9U);
         storage.rejectAllocations = true;
 
         const Render::UIDrawCommand* fixedCommands = nullptr;
@@ -321,7 +325,7 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, ReusesItsFixedStorageForThreeHundr
         {
             auto frame = buildFrame(*frameBuilder, frameId, {.window = window});
             ASSERT_TRUE(frame.has_value());
-            auto build = coordinator.buildForFrame(context.get(), *frame, std::nullopt);
+            auto build = coordinator.buildForFrame(context.get(), *frame, std::nullopt, capability, packet.resourceSink());
             ASSERT_TRUE(build.has_value()) << (build ? "" : build.error().message);
             ASSERT_EQ(build->displayList.commands().size(), 1U);
             if (fixedCommands == nullptr)
@@ -331,10 +335,10 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, ReusesItsFixedStorageForThreeHundr
             EXPECT_EQ(build->displayList.commands().data(), fixedCommands);
         }
 
-        EXPECT_EQ(storage.allocationCount, 3U);
+        EXPECT_EQ(storage.allocationCount, 9U);
         EXPECT_EQ(coordinator.builderStatistics().committedBuildCount, 300U);
     }
-    EXPECT_EQ(storage.deallocationCount, 3U);
+    EXPECT_EQ(storage.deallocationCount, 9U);
 }
 
 } // namespace

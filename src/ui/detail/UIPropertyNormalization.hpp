@@ -4,6 +4,7 @@
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIImage.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIPopup.hpp>
@@ -21,6 +22,7 @@ struct NormalizedUIContextCapacityConfig final {
     usize hitSnapshotCapacity = 0;
     usize paintSnapshotCapacity = 0;
     usize canvasCommandCapacity = 0;
+    usize imageContentCapacity = 0;
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     usize buttonActionCapacity = 0;
@@ -30,6 +32,9 @@ struct NormalizedUIContextCapacityConfig final {
 
 [[nodiscard]] Core::Result<NormalizedUIContextCapacityConfig>
 normalizeUIContextCapacityConfig(UIContextCapacityConfig config);
+
+[[nodiscard]] Core::Result<UIImageContent>
+normalizeImageContent(UIImageContent content);
 
 [[nodiscard]] UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept;
 

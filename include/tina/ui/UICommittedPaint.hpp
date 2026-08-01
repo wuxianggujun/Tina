@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIImage.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 
@@ -9,25 +10,34 @@
 
 namespace Tina::UI {
 
+enum class UICommittedPaintKind : u8 {
+    SolidQuad = 0,
+    Glyph,
+    Image,
+};
+
 struct UICommittedPaintEntry final {
     UINodeId node{};
+    UINodeId root{};
     UILogicalRect worldRect{};
     UILogicalRect effectiveClip{};
     u32 paintOrdinal = 0;
-    // Premultiplied vertex/tint color for both SolidFill and Glyph.
+    // Premultiplied vertex/tint color for SolidQuad, Glyph, and Image.
     UIPremultipliedRgba8Color solidFill{};
-    // Logical-pixel radius for non-glyph paint. Integration projects and clamps
+    // Logical-pixel radius for SolidQuad paint. Integration projects and clamps
     // it before publishing the backend-neutral DisplayList command.
     float cornerRadius = 0.0F;
-    // When true, solidFill is the glyph tint and atlas* describe an R8 glyph
-    // placement in the context-owned CPU atlas (page 0). Integration emits a
-    // DisplayList Glyph command; when false, emits SolidQuad.
-    bool isGlyph = false;
+    UICommittedPaintKind kind = UICommittedPaintKind::SolidQuad;
+    // Glyph entries describe an R8 placement in the context-owned CPU atlas.
     u32 atlasX = 0;
     u32 atlasY = 0;
     u32 atlasWidth = 0;
     u32 atlasHeight = 0;
     u32 atlasPage = 0;
+    // Image entries retain only authoring identity and source geometry. Asset
+    // resolution and frame pinning occur at the Runtime/Render boundary.
+    UIImageSource imageSource{};
+    UIImageSampling imageSampling = UIImageSampling::Linear;
 };
 
 // Owner-thread borrowed paint/composite snapshot. It is invalidated by the

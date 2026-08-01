@@ -45,7 +45,8 @@ geometryCapacityFailure(const char* message)
 
 [[nodiscard]] bool isSupportedCommandKind(UIDrawCommandKind kind) noexcept
 {
-    return kind == UIDrawCommandKind::SolidQuad || kind == UIDrawCommandKind::Glyph;
+    return kind == UIDrawCommandKind::SolidQuad || kind == UIDrawCommandKind::Glyph ||
+           kind == UIDrawCommandKind::ImageQuad;
 }
 
 } // namespace
@@ -87,7 +88,7 @@ checkedGeometryRequirements(UIDisplayListView displayList)
             static_cast<float>((std::min)(command.bounds.width, command.bounds.height)) * 0.5F;
         if (!std::isfinite(command.cornerRadius) || command.cornerRadius < 0.0F ||
             command.cornerRadius > maximumCornerRadius ||
-            (command.kind == UIDrawCommandKind::Glyph && command.cornerRadius != 0.0F))
+            (command.kind != UIDrawCommandKind::SolidQuad && command.cornerRadius != 0.0F))
         {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "The UI DisplayList contains an invalid corner radius");
@@ -122,6 +123,17 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
     {
         if (command.kind != UIDrawCommandKind::Glyph)
         {
+            if (command.kind == UIDrawCommandKind::ImageQuad)
+            {
+                const UINormalizedUvRect uv = command.uv;
+                if (!command.texture.hasValue() || !std::isfinite(uv.u0) || !std::isfinite(uv.v0) ||
+                    !std::isfinite(uv.u1) || !std::isfinite(uv.v1) || uv.u0 < 0.0F || uv.v0 < 0.0F ||
+                    uv.u1 > 1.0F || uv.v1 > 1.0F || uv.u0 >= uv.u1 || uv.v0 >= uv.v1)
+                {
+                    return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                         "UI ImageQuad command has an invalid texture or normalized UV");
+                }
+            }
             continue;
         }
         auto page = resolvePage(atlasPages, command.atlasPage);
@@ -163,6 +175,13 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
                 / pageW;
             v1 = static_cast<float>(command.atlasUv.y + static_cast<i32>(command.atlasUv.height))
                 / pageH;
+        }
+        else if (command.kind == UIDrawCommandKind::ImageQuad)
+        {
+            u0 = command.uv.u0;
+            v0 = command.uv.v0;
+            u1 = command.uv.u1;
+            v1 = command.uv.v1;
         }
 
         const usize vertexOffset = commandIndex * VerticesPerQuad;

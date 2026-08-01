@@ -24,7 +24,7 @@ struct BuiltinSemanticsDefaults final {
 
 [[nodiscard]] constexpr bool isValidSemanticsRole(UISemanticsRole role) noexcept
 {
-    return role >= UISemanticsRole::Group && role <= UISemanticsRole::TreeItem;
+    return role >= UISemanticsRole::Group && role <= UISemanticsRole::Image;
 }
 
 [[nodiscard]] constexpr bool isValidSemanticsActions(UISemanticsAction actions) noexcept

@@ -5,6 +5,7 @@
 #include <optional>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace Tina::Runtime::Detail {
 
@@ -19,7 +20,8 @@ enum class PrimaryWindowUIPhase : u8 {
 // enclosing callback finishes.
 class PrimaryWindowUICapabilityState final {
   public:
-    PrimaryWindowUICapabilityState() noexcept;
+    explicit PrimaryWindowUICapabilityState(
+        usize imageResolverCapacity = UI::UIContextCapacityConfig::DefaultRootCapacity);
 
     PrimaryWindowUICapabilityState(const PrimaryWindowUICapabilityState&) = delete;
     PrimaryWindowUICapabilityState& operator=(const PrimaryWindowUICapabilityState&) = delete;
@@ -38,6 +40,11 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<PrimaryWindowUIRootBuilder> rootBuilder(u64 epoch);
     [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater> treeUpdater(u64 epoch, PrimaryWindowUIPhase phase,
                                                                        UI::UIRootOwner& rootOwner);
+    [[nodiscard]] Core::Result<PrimaryWindowUIImageResolverRegistration>
+    bindImageResolver(u64 epoch, UI::UIRootOwner& rootOwner,
+                      Render::Texture2DFrameResourceResolver resolver);
+    [[nodiscard]] const Render::Texture2DFrameResourceResolver*
+    findImageResolver(UI::UINodeId root) const noexcept;
 
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot(u64 epoch);
     [[nodiscard]] Core::Result<bool> isAlive(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
@@ -271,16 +278,29 @@ class PrimaryWindowUICapabilityState final {
                                        UI::UINodeId node);
 
   private:
+    struct ImageResolverSlot final {
+        UI::UINodeId root{};
+        Render::Texture2DFrameResourceResolver resolver{};
+        u32 generation = 1;
+        bool active = false;
+        bool retired = false;
+    };
+
     [[nodiscard]] Core::Result<u64> beginPhase(PrimaryWindowUIPhase phase, UI::UIContext* context);
     [[nodiscard]] Core::Status validate(u64 epoch, PrimaryWindowUIPhase phase, bool requireContext,
                                         std::string_view operation);
     [[nodiscard]] Core::Error rememberFirstError(Core::Error error, std::string_view operation);
+    void unbindImageResolver(u32 slot, u32 generation) noexcept;
+    [[nodiscard]] bool isImageResolverActive(u32 slot, u32 generation) const noexcept;
 
     std::thread::id ownerThreadId_{};
     UI::UIContext* context_ = nullptr;
     u64 epoch_ = 0;
     PrimaryWindowUIPhase phase_ = PrimaryWindowUIPhase::None;
     std::optional<Core::Error> firstError_;
+    std::vector<ImageResolverSlot> imageResolverSlots_{};
+
+    friend class ::Tina::PrimaryWindowUIImageResolverRegistration;
 };
 
 } // namespace Tina::Runtime::Detail

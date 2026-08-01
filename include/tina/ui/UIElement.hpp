@@ -5,6 +5,7 @@
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIHitTest.hpp>
+#include <tina/ui/UIImage.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIPaint.hpp>
@@ -33,6 +34,7 @@ struct UIElementVisual final {
 struct UIElementDescriptor final {
     UILayoutStyle layout{};
     std::optional<std::string_view> text{};
+    std::optional<UIImageContent> image{};
     std::optional<UITextStyle> textStyle{};
     UIContentAlignment contentAlignment{};
     UIElementVisual visual{};
@@ -44,6 +46,38 @@ struct UIElementDescriptor final {
     UIListViewCreateConfig listView{};
     UITreeViewCreateConfig treeView{};
 };
+
+[[nodiscard]] constexpr UIElementDescriptor makeImageElement(
+    UIImageContent image, std::string_view accessibleName,
+    UILayoutStyle layout = {}) noexcept
+{
+    return UIElementDescriptor{
+        .layout = layout,
+        .image = image,
+        .contentAlignment = image.alignment,
+        .semantics = {
+            .mode = UISemanticsMode::Publish,
+            .role = UISemanticsRole::Image,
+            .name = accessibleName,
+            .readOnly = true,
+        },
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeIconElement(
+    UIImageContent image, UILayoutStyle layout = {}) noexcept
+{
+    image.fit = UIImageFit::Contain;
+    return UIElementDescriptor{
+        .layout = layout,
+        .image = image,
+        .contentAlignment = image.alignment,
+        .semantics = {
+            .mode = UISemanticsMode::Exclude,
+        },
+        .pointerHitPolicy = UIPointerHitPolicy::Ignore,
+    };
+}
 
 [[nodiscard]] constexpr UIElementDescriptor makePanelElement(UILayoutStyle layout = {}) noexcept
 {

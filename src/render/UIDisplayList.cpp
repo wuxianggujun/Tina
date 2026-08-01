@@ -384,6 +384,119 @@ Core::Status UIDisplayListBuilder::addGlyphQuad(const UIGlyphQuadInput& input)
     return Core::success();
 }
 
+Core::Status UIDisplayListBuilder::addImageQuad(const UIImageQuadInput& input)
+{
+    if (m_state != State::Building)
+    {
+        return displayListFailure(RenderErrorCode::DisplayListBuildNotOpen,
+                                  "A UI DisplayList build must be open before adding commands");
+    }
+    if (m_stickyBuildError.has_value())
+    {
+        return displayListFailure(*m_stickyBuildError, "The UI DisplayList build has already failed");
+    }
+    if (m_lastPaintOrdinal.has_value() && input.paintOrdinal <= *m_lastPaintOrdinal)
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand,
+                         "UI draw command paint ordinals must be strictly increasing");
+    }
+    m_lastPaintOrdinal = input.paintOrdinal;
+    const bool validUv = std::isfinite(input.uv.u0) && std::isfinite(input.uv.v0) &&
+                         std::isfinite(input.uv.u1) && std::isfinite(input.uv.v1) &&
+                         input.uv.u0 >= 0.0F && input.uv.v0 >= 0.0F &&
+                         input.uv.u1 <= 1.0F && input.uv.v1 <= 1.0F &&
+                         input.uv.u0 < input.uv.u1 && input.uv.v0 < input.uv.v1;
+    const bool validSampling = input.sampling == UITextureSampling::Linear ||
+                               input.sampling == UITextureSampling::Nearest;
+    if (!input.color.isValid() || !input.texture.hasValue() || !validUv || !validSampling)
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand,
+                         "UI image commands require a valid texture, premultiplied color, UV, and sampling mode");
+    }
+    if (input.bounds.empty())
+    {
+        ++m_candidateStatistics.prunedEmptyBoundsCount;
+        return Core::success();
+    }
+    if (input.color.transparent())
+    {
+        ++m_candidateStatistics.prunedTransparentCount;
+        return Core::success();
+    }
+    if (input.effectiveClip.has_value() && input.effectiveClip->empty())
+    {
+        ++m_candidateStatistics.prunedEmptyClipCount;
+        return Core::success();
+    }
+    if (input.effectiveClip.has_value() && !intersects(input.bounds, *input.effectiveClip))
+    {
+        ++m_candidateStatistics.prunedOutsideClipCount;
+        return Core::success();
+    }
+
+    UIClipId clip{};
+    bool needsClip = false;
+    if (input.effectiveClip.has_value())
+    {
+        clip = findClip(*input.effectiveClip);
+        needsClip = !clip.hasClip();
+        if (needsClip)
+        {
+            clip = UIClipId{m_clipCount + 1U};
+        }
+    }
+    const bool needsBatch =
+        m_batchCount == 0 || m_batches[m_batchCount - 1U].kind != UIDrawCommandKind::ImageQuad ||
+        m_batches[m_batchCount - 1U].clip != clip ||
+        m_batches[m_batchCount - 1U].texture != input.texture ||
+        m_batches[m_batchCount - 1U].sampling != input.sampling;
+    if (!hasCapacityFor(needsClip, needsBatch))
+    {
+        ++m_statistics.capacityFailureCount;
+        return failBuild(RenderErrorCode::DisplayListCapacityExceeded,
+                         "UI DisplayList fixed command, clip, or batch capacity was exceeded");
+    }
+    if (needsClip)
+    {
+        std::construct_at(&m_clips[m_clipCount], *input.effectiveClip);
+        ++m_clipCount;
+    }
+
+    const u32 commandIndex = m_commandCount;
+    std::construct_at(&m_commands[m_commandCount], UIDrawCommand{
+                                                       .kind = UIDrawCommandKind::ImageQuad,
+                                                       .paintOrdinal = input.paintOrdinal,
+                                                       .bounds = input.bounds,
+                                                       .color = input.color,
+                                                       .clip = clip,
+                                                       .texture = input.texture,
+                                                       .resourceOrdinal = input.resourceOrdinal,
+                                                       .uv = input.uv,
+                                                       .sampling = input.sampling,
+                                                   });
+    ++m_commandCount;
+    if (needsBatch)
+    {
+        std::construct_at(&m_batches[m_batchCount], UIDrawBatch{
+                                                        .kind = UIDrawCommandKind::ImageQuad,
+                                                        .clip = clip,
+                                                        .texture = input.texture,
+                                                        .sampling = input.sampling,
+                                                        .firstCommand = commandIndex,
+                                                        .commandCount = 1,
+                                                    });
+        ++m_batchCount;
+    }
+    else
+    {
+        ++m_batches[m_batchCount - 1U].commandCount;
+    }
+    ++m_candidateStatistics.imageQuadCommandCount;
+    return Core::success();
+}
+
 Core::Result<UIDisplayListView> UIDisplayListBuilder::commit()
 {
     if (m_state != State::Building)
@@ -480,6 +593,15 @@ u64 UIDisplayListBuilder::calculatePaintOrderChecksum(std::span<const UIDrawComm
             hashU32(checksum, command.atlasUv.width);
             hashU32(checksum, command.atlasUv.height);
             hashU32(checksum, command.atlasPage);
+        }
+        else if (command.kind == UIDrawCommandKind::ImageQuad)
+        {
+            hashU32(checksum, command.resourceOrdinal);
+            hashU32(checksum, std::bit_cast<u32>(command.uv.u0));
+            hashU32(checksum, std::bit_cast<u32>(command.uv.v0));
+            hashU32(checksum, std::bit_cast<u32>(command.uv.u1));
+            hashU32(checksum, std::bit_cast<u32>(command.uv.v1));
+            hashByte(checksum, static_cast<u8>(command.sampling));
         }
     }
     return checksum;

@@ -45,7 +45,7 @@ TEST(UITextPaintEmitterTests, EmitsDeterministicFallbackAndRestoresBaseXAcrossCh
                                            cursor.x, cursor.y, {}, &cursor);
 
     ASSERT_EQ(output.size(), 2U);
-    EXPECT_FALSE(output[0].isGlyph);
+    EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::SolidQuad);
     EXPECT_FLOAT_EQ(output[0].worldRect.x, 10.0F);
     EXPECT_FLOAT_EQ(output[0].worldRect.y, 20.0F);
     EXPECT_FLOAT_EQ(output[0].worldRect.width, 5.0F);
@@ -91,8 +91,8 @@ TEST(UITextPaintEmitterTests, EmitsAtlasGlyphsWhenRasterSourceIsAvailable)
         &cursor);
 
     ASSERT_EQ(output.size(), 2U);
-    EXPECT_TRUE(output[0].isGlyph);
-    EXPECT_TRUE(output[1].isGlyph);
+    EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::Glyph);
+    EXPECT_EQ(output[1].kind, UI::UICommittedPaintKind::Glyph);
     EXPECT_GT(output[0].atlasWidth, 0U);
     EXPECT_GT(output[0].atlasHeight, 0U);
     EXPECT_EQ(output[0].paintOrdinal, 7U);
@@ -131,8 +131,8 @@ TEST(UITextPaintEmitterTests, RollsBackPartialAtlasOutputAndOrdinalsBeforeFallba
         &cursor);
 
     ASSERT_EQ(output.size(), 2U);
-    EXPECT_FALSE(output[0].isGlyph);
-    EXPECT_FALSE(output[1].isGlyph);
+    EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::SolidQuad);
+    EXPECT_EQ(output[1].kind, UI::UICommittedPaintKind::SolidQuad);
     EXPECT_EQ(output[0].paintOrdinal, 11U);
     EXPECT_EQ(output[1].paintOrdinal, 12U);
     EXPECT_EQ(nextPaintOrdinal, 13U);

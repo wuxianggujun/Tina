@@ -9,6 +9,7 @@
 #include "BgfxTransientFrameBudget.hpp"
 #include "BgfxUIDisplayGeometry.hpp"
 #include "BgfxUIAtlasTexture.hpp"
+#include "BgfxUIImageShader.hpp"
 #include "BgfxUISolidQuadShader.hpp"
 #include "BgfxUITexturedShader.hpp"
 
@@ -451,8 +452,8 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
             return Core::failure(RenderErrorCode::InvalidDrawCommand,
                                  "A bgfx UI draw batch is empty");
         }
-        if (batch.kind != UIDrawCommandKind::SolidQuad
-            && batch.kind != UIDrawCommandKind::Glyph)
+        if (batch.kind != UIDrawCommandKind::SolidQuad && batch.kind != UIDrawCommandKind::Glyph &&
+            batch.kind != UIDrawCommandKind::ImageQuad)
         {
             return Core::failure(RenderErrorCode::InvalidDrawCommand,
                                  "A bgfx UI draw batch has an unsupported command kind");
@@ -462,6 +463,13 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
         {
             return Core::failure(RenderErrorCode::InvalidDrawCommand,
                                  "A bgfx UI Glyph batch references an out-of-range atlas page");
+        }
+        if (batch.kind == UIDrawCommandKind::ImageQuad &&
+            (!batch.texture.hasValue() ||
+             (batch.sampling != UITextureSampling::Linear && batch.sampling != UITextureSampling::Nearest)))
+        {
+            return Core::failure(RenderErrorCode::InvalidDrawCommand,
+                                 "A bgfx UI ImageQuad batch has an invalid texture or sampling mode");
         }
         if (static_cast<usize>(batch.firstCommand) != nextCommand)
         {
@@ -483,7 +491,9 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
         for (; nextCommand < batchEnd; ++nextCommand)
         {
             const UIDrawCommand& command = displayList.commands()[nextCommand];
-            if (command.kind != batch.kind || command.clip != batch.clip)
+            if (command.kind != batch.kind || command.clip != batch.clip ||
+                (batch.kind == UIDrawCommandKind::ImageQuad &&
+                 (command.texture != batch.texture || command.sampling != batch.sampling)))
             {
                 return Core::failure(RenderErrorCode::InvalidDrawCommand,
                                      "A UI draw batch does not match its command range");
@@ -499,7 +509,8 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
     return Core::success();
 }
 
-[[nodiscard]] Core::Result<PreparedUIDisplayList> preflightUIDisplayList(UIDisplayListView displayList)
+[[nodiscard]] Core::Result<PreparedUIDisplayList>
+preflightUIDisplayList(UIDisplayListView displayList, FrameResourceTableView resources)
 {
     auto requirements = checkedGeometryRequirements(displayList);
     if (!requirements)
@@ -514,6 +525,21 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
     if (auto status = validateDisplayListBatches(displayList); !status)
     {
         return Core::failure(std::move(status.error()));
+    }
+    for (const UIDrawCommand& command : displayList.commands())
+    {
+        if (command.kind != UIDrawCommandKind::ImageQuad)
+        {
+            continue;
+        }
+        const FrameResourceDescriptor* descriptor =
+            resources.resolve(command.texture, FrameResourceKind::Texture2D);
+        if (descriptor == nullptr ||
+            descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+        {
+            return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                 "A bgfx UI ImageQuad references an invalid Texture2D frame resource");
+        }
     }
 
     constexpr usize MaxBgfxElementCount = static_cast<usize>((std::numeric_limits<u32>::max)());
@@ -787,6 +813,14 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(std::move(uiProgram.error()));
         }
         uiSolidQuadProgram_ = *uiProgram;
+        ++statistics_.liveResources;
+
+        auto uiImageProgram = ShaderDetail::createUIImageQuadProgram();
+        if (!uiImageProgram)
+        {
+            return Core::failure(std::move(uiImageProgram.error()));
+        }
+        uiImageQuadProgram_ = *uiImageProgram;
         ++statistics_.liveResources;
 
         auto white = createUISolidWhiteTexture();
@@ -1078,12 +1112,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             preparedSprite2D = *sprite2DPreflight;
 
-            auto preflight = preflightUIDisplayList(frame.primaryWindowUIDisplayList);
+            auto preflight = preflightUIDisplayList(frame.primaryWindowUIDisplayList, frame.resources);
             if (!preflight)
             {
                 return Core::failure(std::move(preflight.error()));
             }
             preparedUI = *preflight;
+
+            if (auto status = preflightUIImageBindings(frame.primaryWindowUIDisplayList, frame.resources);
+                !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
 
             if (auto status =
                     preflightTransientVertexPool(preparedOpaque3D, preparedSprite2D, preparedUI, transientByteLayout_);
@@ -1379,6 +1419,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(uiSolidQuadProgram_);
                 uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(uiImageQuadProgram_))
+            {
+                bgfx::destroy(uiImageQuadProgram_);
+                uiImageQuadProgram_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(uiSolidWhiteTexture_))
@@ -2645,8 +2691,43 @@ class BgfxRenderDevice final : public IRenderDevice {
             uiGlyphAtlasTexture_, atlas->width, atlas->height, atlas->pixels);
     }
 
+    [[nodiscard]] Core::Status preflightUIImageBindings(
+        UIDisplayListView displayList, FrameResourceTableView resources) const noexcept
+    {
+        for (const UIDrawCommand& command : displayList.commands())
+        {
+            if (command.kind != UIDrawCommandKind::ImageQuad)
+            {
+                continue;
+            }
+            const FrameResourceDescriptor* descriptor =
+                resources.resolve(command.texture, FrameResourceKind::Texture2D);
+            if (descriptor == nullptr ||
+                descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                     "A bgfx UI ImageQuad references an invalid Texture2D frame resource");
+            }
+            const auto binding = texture2DBindings_.find(static_cast<u32>(descriptor->deviceBindingKey));
+            if (binding == texture2DBindings_.end() || !binding->second ||
+                binding->second.index >= textures_.size())
+            {
+                return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                     "A bgfx UI ImageQuad Texture2D binding is missing");
+            }
+            const TextureSlot& slot = textures_[binding->second.index];
+            if (!slot.live || slot.identity.value() != binding->second.generation ||
+                !bgfx::isValid(slot.handle))
+            {
+                return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                     "A bgfx UI ImageQuad Texture2D binding is not live");
+            }
+        }
+        return Core::success();
+    }
+
     void submitUI(const RenderSurfaceState& surface, UIDisplayListView displayList,
-                  PreparedUIDisplayList prepared) noexcept
+                  FrameResourceTableView resources, PreparedUIDisplayList prepared) noexcept
     {
         if (prepared.vertexCount == 0)
         {
@@ -2708,6 +2789,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
 
             bgfx::TextureHandle texture = uiSolidWhiteTexture_;
+            bgfx::ProgramHandle program = uiSolidQuadProgram_;
+            u32 samplerFlags = BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_MIP_POINT;
             if (batch.kind == UIDrawCommandKind::Glyph)
             {
                 if (batch.atlasPage == 0 && bgfx::isValid(uiGlyphAtlasTexture_))
@@ -2719,14 +2802,42 @@ class BgfxRenderDevice final : public IRenderDevice {
                     continue;
                 }
             }
+            else if (batch.kind == UIDrawCommandKind::ImageQuad)
+            {
+                const FrameResourceDescriptor* descriptor =
+                    resources.resolve(batch.texture, FrameResourceKind::Texture2D);
+                if (descriptor == nullptr ||
+                    descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+                {
+                    std::terminate();
+                }
+                const auto binding = texture2DBindings_.find(static_cast<u32>(descriptor->deviceBindingKey));
+                if (binding == texture2DBindings_.end() || !binding->second ||
+                    binding->second.index >= textures_.size())
+                {
+                    std::terminate();
+                }
+                const TextureSlot& slot = textures_[binding->second.index];
+                if (!slot.live || slot.identity.value() != binding->second.generation ||
+                    !bgfx::isValid(slot.handle))
+                {
+                    std::terminate();
+                }
+                texture = slot.handle;
+                program = uiImageQuadProgram_;
+                if (batch.sampling == UITextureSampling::Nearest)
+                {
+                    samplerFlags |= BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+                }
+            }
 
             const u32 firstIndex = batch.firstCommand * static_cast<u32>(kIndicesPerSolidQuad);
             const u32 indexCount = batch.commandCount * static_cast<u32>(kIndicesPerSolidQuad);
             bgfx::setState(kUIPremultipliedAlphaState);
-            bgfx::setTexture(0, uiTexColorUniform_, texture);
+            bgfx::setTexture(0, uiTexColorUniform_, texture, samplerFlags);
             bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.vertexCount);
             bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
-            bgfx::submit(kUIView, uiSolidQuadProgram_);
+            bgfx::submit(kUIView, program);
         }
     }
 
@@ -2747,7 +2858,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             submitSprite2D(scene, resources, preparedSprite2D);
         }
         configureUIView(surface);
-        submitUI(surface, displayList, preparedUI);
+        submitUI(surface, displayList, resources, preparedUI);
     }
 
     Detail::RenderSurfaceStateTracker surfaceStateTracker_;
@@ -2783,6 +2894,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle sprite2DShadowSegmentsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle uiImageQuadProgram_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle uiSolidWhiteTexture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;
     UIAtlasPageSize uiGlyphAtlasPageSize_{};

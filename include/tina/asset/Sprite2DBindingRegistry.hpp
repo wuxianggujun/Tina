@@ -8,6 +8,7 @@
 #include <tina/core/id/AssetId.hpp>
 #include <tina/render/FrameResource.hpp>
 #include <tina/render/RenderDevice.hpp>
+#include <tina/render/Texture2DFrameResourceResolver.hpp>
 
 #include <memory_resource>
 #include <thread>
@@ -83,6 +84,11 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] Core::Result<Render::FrameResourceRef>
     internTilesetFrameResource(AssetHandle tilesetAsset, Render::FrameResourceSink& sink) noexcept;
 
+    // Root-scoped UI and other backend-neutral consumers can bind this adapter
+    // without retaining AssetHandle values. The registry remains the sole
+    // binding/lifetime owner and must outlive the returned resolver.
+    [[nodiscard]] Render::Texture2DFrameResourceResolver texture2DFrameResourceResolver() noexcept;
+
   private:
     struct Entry final {
         AssetHandle textureAsset{};
@@ -113,6 +119,13 @@ class Sprite2DBindingRegistry final {
         AssetHandle asset,
         AssetFormat::AssetKind expectedKind,
         Render::FrameResourceSink& sink) noexcept;
+    [[nodiscard]] Core::Result<Render::FrameResourceRef>
+    internTextureEntry(Entry& entry, Render::FrameResourceSink& sink) noexcept;
+    [[nodiscard]] Core::Result<std::optional<Render::Texture2DFrameResourceResolution>>
+    resolveTexture2DFrameResource(Core::AssetId asset, Render::FrameResourceSink& sink) noexcept;
+    [[nodiscard]] static Core::Result<std::optional<Render::Texture2DFrameResourceResolution>>
+    resolveTexture2DFrameResourceCallback(
+        void* userData, Core::AssetId asset, Render::FrameResourceSink& sink) noexcept;
     static void releaseFrameBorrow(void* userData) noexcept;
 
     AssetSystem* m_assets = nullptr;

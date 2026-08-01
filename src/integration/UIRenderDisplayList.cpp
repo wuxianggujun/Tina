@@ -39,6 +39,27 @@ struct PixelProjection final {
            color.blue <= color.alpha;
 }
 
+[[nodiscard]] bool validImagePaint(const UI::UICommittedPaintEntry& entry) noexcept
+{
+    const UI::UIImageSource& source = entry.imageSource;
+    const UI::UIImagePixelRect& sourcePixels = source.sourcePixels;
+    const UI::UIImagePixelExtent& textureExtent = source.texturePixelExtent;
+    const bool validSourceRect = textureExtent.width != 0 && textureExtent.height != 0 &&
+                                 sourcePixels.width != 0 && sourcePixels.height != 0 &&
+                                 sourcePixels.x <= textureExtent.width &&
+                                 sourcePixels.y <= textureExtent.height &&
+                                 sourcePixels.width <= textureExtent.width - sourcePixels.x &&
+                                 sourcePixels.height <= textureExtent.height - sourcePixels.y;
+    const bool validIntrinsicSize = std::isfinite(source.intrinsicLogicalSize.width) &&
+                                    std::isfinite(source.intrinsicLogicalSize.height) &&
+                                    source.intrinsicLogicalSize.width > 0.0F &&
+                                    source.intrinsicLogicalSize.height > 0.0F;
+    const bool validSampling = entry.imageSampling == UI::UIImageSampling::Linear ||
+                               entry.imageSampling == UI::UIImageSampling::Nearest;
+    return entry.root.hasValue() && source.texture.hasValue() && validSourceRect &&
+           validIntrinsicSize && validSampling;
+}
+
 [[nodiscard]] Core::Status validatePaintView(UI::UICommittedPaintView paintView)
 {
     const UI::UILogicalSize viewport = paintView.viewportSize();
@@ -70,11 +91,19 @@ struct PixelProjection final {
             return invalidInput(
                 "Committed UI paint colors must use premultiplied RGBA8 channels");
         }
-        if (!std::isfinite(entry.cornerRadius) || entry.cornerRadius < 0.0F ||
-            (entry.isGlyph && entry.cornerRadius != 0.0F))
+        const bool validKind = entry.kind == UI::UICommittedPaintKind::SolidQuad ||
+                               entry.kind == UI::UICommittedPaintKind::Glyph ||
+                               entry.kind == UI::UICommittedPaintKind::Image;
+        if (!validKind || !std::isfinite(entry.cornerRadius) || entry.cornerRadius < 0.0F ||
+            (entry.kind != UI::UICommittedPaintKind::SolidQuad && entry.cornerRadius != 0.0F))
         {
             return invalidInput(
-                "Committed UI paint corner radius must be finite, non-negative, and zero for glyphs");
+                "Committed UI paint kind and corner radius must be valid");
+        }
+        if (entry.kind == UI::UICommittedPaintKind::Image && !validImagePaint(entry))
+        {
+            return invalidInput(
+                "Committed UI image paint requires valid root, source geometry, intrinsic size, and sampling");
         }
     }
     return Core::success();
@@ -237,6 +266,106 @@ struct ProjectedAxis final {
            outerRight >= innerRight && outerBottom >= innerBottom;
 }
 
+[[nodiscard]] u64 imageCacheHash(UI::UINodeId root, Core::AssetId asset) noexcept
+{
+    u64 hash = 14695981039346656037ULL;
+    const auto append = [&hash](u8 byte) noexcept {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    };
+    const auto appendU32 = [&append](u32 value) noexcept {
+        for (u32 shift = 0; shift < 32; shift += 8)
+        {
+            append(static_cast<u8>((value >> shift) & 0xFFU));
+        }
+    };
+    appendU32(root.ownerWindow().index());
+    appendU32(root.ownerWindow().generation());
+    appendU32(root.index());
+    appendU32(root.generation());
+    for (std::byte byte : asset.bytes())
+    {
+        append(std::to_integer<u8>(byte));
+    }
+    return hash;
+}
+
+[[nodiscard]] Core::Result<UIRenderImageResolutionCacheEntry*> resolveImageResource(
+    const UI::UICommittedPaintEntry& entry, UIRenderImageBuildContext& context,
+    u32& nextResourceOrdinal, UIRenderDisplayListBuildStatistics& statistics)
+{
+    if (!entry.root.hasValue() || !entry.imageSource.texture.hasValue())
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Committed UI image paint requires valid root and asset identities");
+    }
+    if (context.cache.empty())
+    {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "UI image resolution cache capacity has been exhausted");
+    }
+
+    const usize start = static_cast<usize>(imageCacheHash(entry.root, entry.imageSource.texture) % context.cache.size());
+    UIRenderImageResolutionCacheEntry* cacheEntry = nullptr;
+    for (usize probe = 0; probe < context.cache.size(); ++probe)
+    {
+        UIRenderImageResolutionCacheEntry& candidate = context.cache[(start + probe) % context.cache.size()];
+        if (candidate.state == UIRenderImageResolutionState::Empty)
+        {
+            cacheEntry = &candidate;
+            candidate.root = entry.root;
+            candidate.asset = entry.imageSource.texture;
+            candidate.resourceOrdinal = nextResourceOrdinal++;
+            break;
+        }
+        if (candidate.root == entry.root && candidate.asset == entry.imageSource.texture)
+        {
+            cacheEntry = &candidate;
+            break;
+        }
+    }
+    if (cacheEntry == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "UI image resolution cache capacity has been exhausted");
+    }
+    if (cacheEntry->state != UIRenderImageResolutionState::Empty)
+    {
+        return cacheEntry;
+    }
+
+    const Render::Texture2DFrameResourceResolver* resolver =
+        context.resolverLookup.find != nullptr
+            ? context.resolverLookup.find(context.resolverLookup.userData, entry.root)
+            : nullptr;
+    if (resolver == nullptr || !resolver->hasValue() || context.resourceSink == nullptr)
+    {
+        cacheEntry->state = UIRenderImageResolutionState::MissingResolver;
+        ++statistics.skippedImageMissingResolverCount;
+        return cacheEntry;
+    }
+    auto resolution = resolver->resolve(resolver->userData, entry.imageSource.texture, *context.resourceSink);
+    if (!resolution)
+    {
+        return Core::failure(std::move(resolution.error()));
+    }
+    if (!resolution->has_value())
+    {
+        cacheEntry->state = UIRenderImageResolutionState::Unavailable;
+        ++statistics.skippedImageUnavailableCount;
+        return cacheEntry;
+    }
+    if (!(**resolution).resource.hasValue() || (**resolution).pixelWidth == 0 || (**resolution).pixelHeight == 0)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "UI image resolver returned an invalid Texture2D frame resource");
+    }
+    cacheEntry->resolution = **resolution;
+    cacheEntry->state = UIRenderImageResolutionState::Ready;
+    ++statistics.resolvedImageResourceCount;
+    return cacheEntry;
+}
+
 [[nodiscard]] float projectCornerRadius(
     float logicalRadius,
     const PixelProjection& projection,
@@ -257,7 +386,8 @@ struct ProjectedAxis final {
 Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
     Render::UIDisplayListBuilder& builder,
     UI::UICommittedPaintView paintView,
-    UIRenderViewportMapping mapping)
+    UIRenderViewportMapping mapping,
+    UIRenderImageBuildContext imageContext)
 {
     Core::Status beginStatus = builder.beginFrame();
     if (!beginStatus)
@@ -282,6 +412,11 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
     UIRenderDisplayListBuildStatistics statistics{
         .sourcePaintEntryCount = paintView.size(),
     };
+    for (UIRenderImageResolutionCacheEntry& entry : imageContext.cache)
+    {
+        entry = {};
+    }
+    u32 nextImageResourceOrdinal = 0;
     const UI::UILogicalSize logicalViewport = paintView.viewportSize();
     if (logicalViewport.width == 0.0F || logicalViewport.height == 0.0F ||
         mapping.framebufferViewport.empty())
@@ -332,7 +467,7 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
             .blue = entry.solidFill.blue,
             .alpha = entry.solidFill.alpha,
         };
-        if (entry.isGlyph && entry.atlasWidth > 0 && entry.atlasHeight > 0)
+        if (entry.kind == UI::UICommittedPaintKind::Glyph && entry.atlasWidth > 0 && entry.atlasHeight > 0)
         {
             Core::Status addStatus = builder.addGlyphQuad({
                 .paintOrdinal = entry.paintOrdinal,
@@ -353,6 +488,50 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                 return Core::failure(std::move(addStatus.error()));
             }
             ++statistics.submittedGlyphCount;
+        }
+        else if (entry.kind == UI::UICommittedPaintKind::Image)
+        {
+            auto cached = resolveImageResource(entry, imageContext, nextImageResourceOrdinal, statistics);
+            if (!cached)
+            {
+                return Core::failure(std::move(cached.error()));
+            }
+            if ((*cached)->state != UIRenderImageResolutionState::Ready)
+            {
+                continue;
+            }
+            const auto& resolution = (*cached)->resolution;
+            if (resolution.pixelWidth != entry.imageSource.texturePixelExtent.width ||
+                resolution.pixelHeight != entry.imageSource.texturePixelExtent.height)
+            {
+                ++statistics.skippedImageExtentMismatchCount;
+                continue;
+            }
+            const float inverseWidth = 1.0F / static_cast<float>(resolution.pixelWidth);
+            const float inverseHeight = 1.0F / static_cast<float>(resolution.pixelHeight);
+            const UI::UIImagePixelRect source = entry.imageSource.sourcePixels;
+            Core::Status addStatus = builder.addImageQuad({
+                .paintOrdinal = entry.paintOrdinal,
+                .bounds = *bounds,
+                .color = color,
+                .texture = resolution.resource,
+                .resourceOrdinal = (*cached)->resourceOrdinal,
+                .uv = {
+                    .u0 = static_cast<float>(source.x) * inverseWidth,
+                    .v0 = static_cast<float>(source.y) * inverseHeight,
+                    .u1 = static_cast<float>(source.x + source.width) * inverseWidth,
+                    .v1 = static_cast<float>(source.y + source.height) * inverseHeight,
+                },
+                .sampling = entry.imageSampling == UI::UIImageSampling::Nearest
+                                ? Render::UITextureSampling::Nearest
+                                : Render::UITextureSampling::Linear,
+                .effectiveClip = submittedClip,
+            });
+            if (!addStatus)
+            {
+                return Core::failure(std::move(addStatus.error()));
+            }
+            ++statistics.submittedImageQuadCount;
         }
         else
         {

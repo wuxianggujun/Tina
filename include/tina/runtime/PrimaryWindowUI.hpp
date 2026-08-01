@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/render/Texture2DFrameResourceResolver.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UIContent.hpp>
@@ -30,6 +31,37 @@ class PrimaryWindowUICapabilityState;
 } // namespace Tina::Runtime::Detail
 
 namespace Tina {
+
+// Move-only ownership of one root-scoped image resolver registration. The
+// registration and its resolver userData must outlive every frame that can
+// paint the root, and must be reset on the Runtime owner thread before the
+// corresponding UIRootOwner or EngineHost is destroyed.
+class PrimaryWindowUIImageResolverRegistration final {
+  public:
+    PrimaryWindowUIImageResolverRegistration() noexcept = default;
+    ~PrimaryWindowUIImageResolverRegistration() noexcept;
+
+    PrimaryWindowUIImageResolverRegistration(const PrimaryWindowUIImageResolverRegistration&) = delete;
+    PrimaryWindowUIImageResolverRegistration& operator=(const PrimaryWindowUIImageResolverRegistration&) = delete;
+
+    PrimaryWindowUIImageResolverRegistration(PrimaryWindowUIImageResolverRegistration&& other) noexcept;
+    PrimaryWindowUIImageResolverRegistration&
+    operator=(PrimaryWindowUIImageResolverRegistration&& other) noexcept;
+
+    void reset() noexcept;
+    [[nodiscard]] bool isActive() const noexcept;
+    explicit operator bool() const noexcept;
+
+  private:
+    PrimaryWindowUIImageResolverRegistration(Runtime::Detail::PrimaryWindowUICapabilityState& state,
+                                              u32 slot, u32 generation) noexcept;
+
+    Runtime::Detail::PrimaryWindowUICapabilityState* m_state = nullptr;
+    u32 m_slot = 0;
+    u32 m_generation = 0;
+
+    friend class Runtime::Detail::PrimaryWindowUICapabilityState;
+};
 
 // Move-only, callback-scoped access to the retained tree owned by one primary-
 // window UI root. Every operation validates the Runtime phase epoch before it
@@ -183,6 +215,9 @@ class PrimaryWindowUIRootBuilder final {
 
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot();
     [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater> treeUpdater(UI::UIRootOwner& rootOwner);
+    [[nodiscard]] Core::Result<PrimaryWindowUIImageResolverRegistration>
+    bindImageResolver(UI::UIRootOwner& rootOwner,
+                      Render::Texture2DFrameResourceResolver resolver);
 
   private:
     PrimaryWindowUIRootBuilder(Runtime::Detail::PrimaryWindowUICapabilityState& state, u64 epoch) noexcept;

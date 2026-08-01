@@ -28,6 +28,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIEventRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIFocus.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIImage.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITheme.hpp
@@ -47,6 +48,8 @@ add_library(tina_ui STATIC
     detail/UIButtonActionRegistry.cpp
     detail/UICanvasCommandStorage.hpp
     detail/UICanvasCommandStorage.cpp
+    detail/UIImageContentStorage.hpp
+    detail/UIImageContentStorage.cpp
     detail/UICommandPressLatch.hpp
     detail/UIControlGeometry.hpp
     detail/UIControlGeometry.cpp

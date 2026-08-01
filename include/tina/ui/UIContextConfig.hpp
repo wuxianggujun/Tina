@@ -13,6 +13,7 @@ struct UIContextCapacityConfig final {
     static constexpr usize MaxRoutedPointerListenerCapacity = 1'048'576;
     static constexpr usize MaxButtonActionCapacity = 1'048'576;
     static constexpr usize MaxCanvasCommandCapacity = 8'388'608;
+    static constexpr usize MaxImageContentCapacity = MaxNodeCapacity;
     static constexpr usize MaxTextByteCapacity = 64U * 1024U * 1024U;
     static constexpr usize DefaultTextByteCapacity = 64U * 1024U;
 
@@ -31,6 +32,9 @@ struct UIContextCapacityConfig final {
     // Total retained backend-neutral canvas commands across all Elements. Zero
     // derives from nodeCapacity; commands are copied during createElement().
     usize canvasCommandCapacity = 0;
+    // Total Elements with retained image content. Zero derives from
+    // nodeCapacity and remains fixed for the context lifetime.
+    usize imageContentCapacity = 0;
     // Zero derives from nodeCapacity. The listener capacity may be configured
     // independently because one node can own listeners for several events.
     usize routePathCapacity = 0;

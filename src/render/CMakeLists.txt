@@ -5,6 +5,7 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/FramePin.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/FrameResource.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/Texture2DFrameResourceResolver.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrame.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrameCapture.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFramePacket.hpp
@@ -54,6 +55,8 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxUIAtlasTexture.hpp
         bgfx/BgfxUIDisplayGeometry.cpp
         bgfx/BgfxUIDisplayGeometry.hpp
+        bgfx/BgfxUIImageShader.cpp
+        bgfx/BgfxUIImageShader.hpp
         bgfx/BgfxUISolidQuadShader.cpp
         bgfx/BgfxUISolidQuadShader.hpp
         bgfx/BgfxUITexturedShader.cpp
@@ -94,6 +97,13 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_ui_textured_quad.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_ui_textured_quad.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_ui_textured_quad.def.sc"
+    )
+    tina_add_bgfx_embedded_shader(
+        tina_render_bgfx
+        tina_ui_image_quad
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_ui_image_quad.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_ui_image_quad.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_ui_image_quad.def.sc"
     )
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx

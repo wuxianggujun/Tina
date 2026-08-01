@@ -62,6 +62,9 @@ struct UIContextStatistics final {
     usize canvasCommandCapacity = 0;
     usize activeCanvasCommandCount = 0;
     usize canvasCommandHighWater = 0;
+    usize imageContentCapacity = 0;
+    usize activeImageContentCount = 0;
+    usize imageContentHighWater = 0;
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     usize activeRoutedPointerListenerCount = 0;

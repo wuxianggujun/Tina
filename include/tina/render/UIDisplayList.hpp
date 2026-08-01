@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/render/FrameResource.hpp>
 
 #include <compare>
 #include <memory_resource>
@@ -76,6 +77,21 @@ enum class UIDrawCommandKind : u8 {
     // textured UI pass remain a later slice; builder/batch/checksum support
     // Glyph now so UI can emit placements without forcing GPU support.
     Glyph,
+    ImageQuad,
+};
+
+enum class UITextureSampling : u8 {
+    Linear = 0,
+    Nearest,
+};
+
+struct UINormalizedUvRect final {
+    float u0 = 0.0F;
+    float v0 = 0.0F;
+    float u1 = 1.0F;
+    float v1 = 1.0F;
+
+    auto operator<=>(const UINormalizedUvRect&) const = default;
 };
 
 struct UISolidQuadInput final {
@@ -99,6 +115,17 @@ struct UIGlyphQuadInput final {
     std::optional<UIPixelRect> effectiveClip{};
 };
 
+struct UIImageQuadInput final {
+    u32 paintOrdinal = 0;
+    UIPixelRect bounds{};
+    UIPremultipliedRgba8 color{};
+    FrameResourceRef texture{};
+    u32 resourceOrdinal = 0;
+    UINormalizedUvRect uv{};
+    UITextureSampling sampling = UITextureSampling::Linear;
+    std::optional<UIPixelRect> effectiveClip{};
+};
+
 struct UIDrawCommand final {
     UIDrawCommandKind kind = UIDrawCommandKind::SolidQuad;
     u32 paintOrdinal = 0;
@@ -108,12 +135,18 @@ struct UIDrawCommand final {
     UIClipId clip{};
     UIPixelRect atlasUv{};
     u32 atlasPage = 0;
+    FrameResourceRef texture{};
+    u32 resourceOrdinal = 0;
+    UINormalizedUvRect uv{};
+    UITextureSampling sampling = UITextureSampling::Linear;
 };
 
 struct UIDrawBatch final {
     UIDrawCommandKind kind = UIDrawCommandKind::SolidQuad;
     UIClipId clip{};
     u32 atlasPage = 0;
+    FrameResourceRef texture{};
+    UITextureSampling sampling = UITextureSampling::Linear;
     u32 firstCommand = 0;
     u32 commandCount = 0;
 };
@@ -127,6 +160,7 @@ struct UIDisplayListCapacity final {
 struct UIDisplayListStatistics final {
     u32 solidQuadCommandCount = 0;
     u32 glyphCommandCount = 0;
+    u32 imageQuadCommandCount = 0;
     u32 clipCount = 0;
     u32 batchCount = 0;
     u32 prunedEmptyBoundsCount = 0;
@@ -216,6 +250,7 @@ class UIDisplayListBuilder final {
     [[nodiscard]] Core::Status addSolidQuad(const UISolidQuadInput& input);
     // Emits a Glyph command with atlas UV placement. Does not upload textures.
     [[nodiscard]] Core::Status addGlyphQuad(const UIGlyphQuadInput& input);
+    [[nodiscard]] Core::Status addImageQuad(const UIImageQuadInput& input);
     [[nodiscard]] Core::Result<UIDisplayListView> commit();
     void rollback() noexcept;
 

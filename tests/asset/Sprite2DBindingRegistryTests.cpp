@@ -651,6 +651,45 @@ TEST(Sprite2DBindingRegistryTests, FrameResourcesDeduplicateAndBlockRetirementUn
     EXPECT_EQ(registry->bindingCount(), 0U);
 }
 
+TEST(Sprite2DBindingRegistryTests, Texture2DResolverInternsBindingAndReportsCookedExtent)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value()) << assets.error().message;
+    const Core::AssetId textureId = assetId(1U);
+    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    ASSERT_TRUE(texture.has_value());
+
+    FixedBindingRenderDevice device;
+    auto registry = makeRegistry(*assets, device);
+    ASSERT_TRUE(registry.has_value()) << registry.error().message;
+    auto binding = registerTexture(*registry, *texture, Render::GpuTextureId{7U, 1U});
+    ASSERT_TRUE(binding.has_value()) << binding.error().message;
+    const Render::Texture2DFrameResourceResolver resolver = registry->texture2DFrameResourceResolver();
+    ASSERT_TRUE(resolver.hasValue());
+
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    auto resolved = resolver.resolve(resolver.userData, textureId, packet.resourceSink());
+    ASSERT_TRUE(resolved.has_value()) << resolved.error().message;
+    ASSERT_TRUE(resolved->has_value());
+    EXPECT_EQ((**resolved).pixelWidth, 1U);
+    EXPECT_EQ((**resolved).pixelHeight, 1U);
+    EXPECT_TRUE((**resolved).resource.hasValue());
+    const Render::FrameResourceDescriptor* descriptor = packet.resourceTableView().resolve(
+        (**resolved).resource, Render::FrameResourceKind::Texture2D);
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_EQ(descriptor->deviceBindingKey, *binding);
+
+    auto missing = resolver.resolve(resolver.userData, assetId(99U), packet.resourceSink());
+    ASSERT_TRUE(missing.has_value()) << missing.error().message;
+    EXPECT_FALSE(missing->has_value());
+    EXPECT_EQ(packet.resourceCount(), 1U);
+
+    ASSERT_TRUE(packet.abandon().has_value());
+    ASSERT_TRUE(registry->retireTextureBinding(*texture).has_value());
+}
+
 TEST(Sprite2DBindingRegistryTests, UnresolvedFrameResourcesReturnEmptyWithoutTouchingSink)
 {
     TrackingMemoryResource memory;
@@ -1298,6 +1337,7 @@ TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation
     std::optional<Core::ErrorCode> registerError;
     std::optional<Core::ErrorCode> retirementError;
     std::optional<Core::ErrorCode> internError;
+    std::optional<Core::ErrorCode> resolverError;
     Render::GpuTextureId foreignGpu{2U, 1U};
     Core::u32 foreignBindingKey = *binding;
     Core::u32 foreignSpriteKey = *binding;
@@ -1319,6 +1359,12 @@ TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation
         {
             internError = intern.error().code;
         }
+        const auto resolver = registry->texture2DFrameResourceResolver();
+        const auto resolved = resolver.resolve(resolver.userData, textureId, packet.resourceSink());
+        if (!resolved)
+        {
+            resolverError = resolved.error().code;
+        }
         foreignBindingKey = registry->bindingKey(*texture);
         foreignSpriteKey = registry->resolveSprite(*sprite);
     });
@@ -1330,6 +1376,8 @@ TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation
     EXPECT_EQ(*retirementError, Render::RenderErrorCode::WrongOwnerThread);
     ASSERT_TRUE(internError.has_value());
     EXPECT_EQ(*internError, Render::RenderErrorCode::WrongOwnerThread);
+    ASSERT_TRUE(resolverError.has_value());
+    EXPECT_EQ(*resolverError, Render::RenderErrorCode::WrongOwnerThread);
     EXPECT_EQ(packet.resourceCount(), 0U);
     EXPECT_EQ(foreignBindingKey, 0U);
     EXPECT_EQ(foreignSpriteKey, 0U);

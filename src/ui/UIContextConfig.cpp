@@ -35,7 +35,7 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     };
     if (exceedsNodeCapacity(config.dirtyQueueCapacity) || exceedsNodeCapacity(config.layoutSnapshotCapacity) ||
         exceedsNodeCapacity(config.hitSnapshotCapacity) || exceedsNodeCapacity(config.paintSnapshotCapacity) ||
-        exceedsNodeCapacity(config.routePathCapacity))
+        exceedsNodeCapacity(config.routePathCapacity) || exceedsNodeCapacity(config.imageContentCapacity))
     {
         return invalidContextConfig("UI derived capacities cannot exceed node capacity");
     }
@@ -51,6 +51,10 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     if (config.canvasCommandCapacity > UIContextCapacityConfig::MaxCanvasCommandCapacity)
     {
         return invalidContextConfig("UI canvas command capacity exceeds the configured maximum");
+    }
+    if (config.imageContentCapacity > UIContextCapacityConfig::MaxImageContentCapacity)
+    {
+        return invalidContextConfig("UI image content capacity exceeds the configured maximum");
     }
     if (config.textByteCapacity > UIContextCapacityConfig::MaxTextByteCapacity)
     {

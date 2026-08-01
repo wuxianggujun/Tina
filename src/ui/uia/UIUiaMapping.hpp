@@ -118,6 +118,8 @@ struct UIUiaMappedNode final {
         return kControlTypeTree;
     case UISemanticsRole::TreeItem:
         return kControlTypeTreeItem;
+    case UISemanticsRole::Image:
+        return kControlTypeImage;
     case UISemanticsRole::Group:
         return kControlTypeGroup;
     }

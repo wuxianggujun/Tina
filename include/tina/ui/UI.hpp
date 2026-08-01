@@ -19,6 +19,7 @@
 #include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIHitTest.hpp>
+#include <tina/ui/UIImage.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UINodeId.hpp>

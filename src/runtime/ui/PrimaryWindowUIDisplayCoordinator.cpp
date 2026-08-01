@@ -1,9 +1,12 @@
 #include "PrimaryWindowUIDisplayCoordinator.hpp"
 
+#include "PrimaryWindowUICapabilityState.hpp"
+
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
 
 #include <string_view>
+#include <new>
 #include <utility>
 
 namespace Tina::Runtime::Detail {
@@ -35,6 +38,14 @@ constexpr std::string_view BuildOperation = "PrimaryWindowUIDisplayCoordinator::
     };
 }
 
+[[nodiscard]] const Render::Texture2DFrameResourceResolver* findImageResolver(
+    const void* userData, UI::UINodeId root) noexcept
+{
+    return userData == nullptr
+               ? nullptr
+               : static_cast<const PrimaryWindowUICapabilityState*>(userData)->findImageResolver(root);
+}
+
 } // namespace
 
 Core::Result<PrimaryWindowUIDisplayCoordinator>
@@ -46,17 +57,33 @@ PrimaryWindowUIDisplayCoordinator::Create(Render::UIDisplayListCapacity capacity
     {
         return Core::failure(std::move(builder.error()));
     }
-    return PrimaryWindowUIDisplayCoordinator{std::move(*builder)};
+    try
+    {
+        std::pmr::vector<Integration::UIRenderImageResolutionCacheEntry> imageResolutionCache{&storage};
+        imageResolutionCache.resize(capacity.commandCount);
+        return PrimaryWindowUIDisplayCoordinator{
+            std::move(*builder), std::move(imageResolutionCache)};
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Primary-window UI image cache allocation failed");
+    }
 }
 
-PrimaryWindowUIDisplayCoordinator::PrimaryWindowUIDisplayCoordinator(Render::UIDisplayListBuilder builder) noexcept
-    : builder_(std::move(builder)), ownerThreadId_(std::this_thread::get_id())
+PrimaryWindowUIDisplayCoordinator::PrimaryWindowUIDisplayCoordinator(
+    Render::UIDisplayListBuilder builder,
+    std::pmr::vector<Integration::UIRenderImageResolutionCacheEntry> imageResolutionCache) noexcept
+    : builder_(std::move(builder)), imageResolutionCache_(std::move(imageResolutionCache)),
+      ownerThreadId_(std::this_thread::get_id())
 {
 }
 
 Core::Result<PrimaryWindowUIDisplayBuild> PrimaryWindowUIDisplayCoordinator::buildForFrame(
     UI::UIContext* context, const Platform::PlatformFrameView& platformFrame,
-    const std::optional<Render::RenderSurfaceState>& primaryWindowSurface)
+    const std::optional<Render::RenderSurfaceState>& primaryWindowSurface,
+    const PrimaryWindowUICapabilityState& capabilityState,
+    Render::FrameResourceSink& resourceSink)
 {
     if (std::this_thread::get_id() != ownerThreadId_)
     {
@@ -84,7 +111,11 @@ Core::Result<PrimaryWindowUIDisplayBuild> PrimaryWindowUIDisplayCoordinator::bui
                 "A headless Platform frame must not carry a primary-window render surface"));
         }
 
-        auto build = Integration::buildUIDisplayList(builder_, UI::UICommittedPaintView{}, {});
+        auto build = Integration::buildUIDisplayList(builder_, UI::UICommittedPaintView{}, {}, {
+            .resourceSink = &resourceSink,
+            .resolverLookup = {.userData = &capabilityState, .find = &findImageResolver},
+            .cache = imageResolutionCache_,
+        });
         if (!build)
         {
             auto error = std::move(build.error());
@@ -169,7 +200,11 @@ Core::Result<PrimaryWindowUIDisplayBuild> PrimaryWindowUIDisplayCoordinator::bui
     }
 
     auto build = Integration::buildUIDisplayList(
-        builder_, paintView, Integration::UIRenderViewportMapping{.framebufferViewport = viewport});
+        builder_, paintView, Integration::UIRenderViewportMapping{.framebufferViewport = viewport}, {
+            .resourceSink = &resourceSink,
+            .resolverLookup = {.userData = &capabilityState, .find = &findImageResolver},
+            .cache = imageResolutionCache_,
+        });
     if (!build)
     {
         auto error = std::move(build.error());

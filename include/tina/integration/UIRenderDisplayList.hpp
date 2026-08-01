@@ -2,6 +2,7 @@
 
 #include <tina/core/error/Result.hpp>
 #include <tina/render/UIDisplayList.hpp>
+#include <tina/render/Texture2DFrameResourceResolver.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
 
 namespace Tina::Integration {
@@ -17,7 +18,42 @@ struct UIRenderDisplayListBuildStatistics final {
     usize sourcePaintEntryCount = 0;
     usize submittedSolidQuadCount = 0;
     usize submittedGlyphCount = 0;
+    usize submittedImageQuadCount = 0;
+    usize resolvedImageResourceCount = 0;
+    usize skippedImageMissingResolverCount = 0;
+    usize skippedImageUnavailableCount = 0;
+    usize skippedImageExtentMismatchCount = 0;
     usize redundantClipElisionCount = 0;
+};
+
+enum class UIRenderImageResolutionState : u8 {
+    Empty = 0,
+    MissingResolver,
+    Unavailable,
+    Ready,
+};
+
+struct UIRenderImageResolutionCacheEntry final {
+    UI::UINodeId root{};
+    Core::AssetId asset{};
+    Render::Texture2DFrameResourceResolution resolution{};
+    u32 resourceOrdinal = 0;
+    UIRenderImageResolutionState state = UIRenderImageResolutionState::Empty;
+};
+
+struct UIRenderImageResolverLookup final {
+    using FindFn = const Render::Texture2DFrameResourceResolver* (*)(
+        const void* userData, UI::UINodeId root) noexcept;
+
+    const void* userData = nullptr;
+    FindFn find = nullptr;
+};
+
+struct UIRenderImageBuildContext final {
+    Render::FrameResourceSink* resourceSink = nullptr;
+    UIRenderImageResolverLookup resolverLookup{};
+    // Open-addressed fixed scratch. The caller owns and reuses this storage.
+    std::span<UIRenderImageResolutionCacheEntry> cache{};
 };
 
 // The DisplayList view borrows the builder's fixed storage and follows its
@@ -36,6 +72,7 @@ struct UIRenderDisplayListBuild final {
 [[nodiscard]] Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
     Render::UIDisplayListBuilder& builder,
     UI::UICommittedPaintView paintView,
-    UIRenderViewportMapping mapping);
+    UIRenderViewportMapping mapping,
+    UIRenderImageBuildContext imageContext = {});
 
 } // namespace Tina::Integration

@@ -2,6 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include <tina/render/FramePin.hpp>
+#include <tina/render/RenderFramePacket.hpp>
+
 #include <algorithm>
 #include <array>
 #include <span>
@@ -53,6 +56,18 @@ buildDisplayList(UIDisplayListBuilder& builder, std::span<const UISolidQuadInput
             .color = {.red = 10, .green = 20, .blue = 30, .alpha = 255},
         },
     };
+}
+
+[[nodiscard]] FrameResourceRef internTexture(RenderFramePacket& packet, u64 bindingKey)
+{
+    auto result = packet.intern(
+        {
+            .kind = FrameResourceKind::Texture2D,
+            .deviceBindingKey = bindingKey,
+        },
+        FramePin{FramePinKind::Custom, bindingKey, nullptr, nullptr});
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? *result : FrameResourceRef{};
 }
 
 void expectVertex(const BgfxUIDisplayVertex& vertex, float x, float y, u32 abgr, float u = 0.0F, float v = 0.0F)
@@ -262,6 +277,42 @@ TEST(BgfxUIDisplayGeometryTest, GlyphWithoutAtlasPageFailsWithoutWriting)
     EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxUIDisplayVertex& vertex) {
         return vertex.x == VertexSentinel.x && vertex.y == VertexSentinel.y;
     }));
+}
+
+TEST(BgfxUIDisplayGeometryTest, ExpandsImageCommandsWithTheirNormalizedUvWithoutAtlasState)
+{
+    RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    const FrameResourceRef texture = internTexture(packet, 91);
+    ASSERT_TRUE(texture.hasValue());
+
+    auto builder = createBuilder(1);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    ASSERT_TRUE(builder
+                    .addImageQuad({
+                        .paintOrdinal = 1,
+                        .bounds = {10, 20, 8, 16},
+                        .color = {.red = 64, .green = 32, .blue = 16, .alpha = 64},
+                        .texture = texture,
+                        .resourceOrdinal = 0,
+                        .uv = {.u0 = 0.125F, .v0 = 0.25F, .u1 = 0.625F, .v1 = 0.75F},
+                        .sampling = UITextureSampling::Nearest,
+                    })
+                    .has_value());
+    auto displayList = builder.commit();
+    ASSERT_TRUE(displayList.has_value());
+
+    std::array<BgfxUIDisplayVertex, 4> vertices{};
+    std::array<u32, 6> indices{};
+    auto written = writeGeometry(*displayList, vertices, indices);
+    ASSERT_TRUE(written.has_value());
+    EXPECT_EQ(written->vertexCount, 4U);
+    EXPECT_EQ(written->indexCount, 6U);
+    expectVertex(vertices[0], 10.0F, 20.0F, 0x40102040U, 0.125F, 0.25F);
+    expectVertex(vertices[1], 18.0F, 20.0F, 0x40102040U, 0.625F, 0.25F);
+    expectVertex(vertices[2], 18.0F, 36.0F, 0x40102040U, 0.625F, 0.75F);
+    expectVertex(vertices[3], 10.0F, 36.0F, 0x40102040U, 0.125F, 0.75F);
+    EXPECT_EQ(indices[5], 3U);
 }
 
 TEST(BgfxUIDisplayGeometryTest, ReusesCallerOwnedStorageForThreeHundredWrites)

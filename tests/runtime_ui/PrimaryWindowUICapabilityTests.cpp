@@ -69,6 +69,20 @@ class PrimaryWindowUICapabilityTest : public testing::Test {
         [&activationCount](const UI::UIButtonActionEvent&) noexcept { ++activationCount; }};
 }
 
+Core::Result<std::optional<Render::Texture2DFrameResourceResolution>>
+unavailableImageResolver(void*, Core::AssetId, Render::FrameResourceSink&) noexcept
+{
+    return std::optional<Render::Texture2DFrameResourceResolution>{};
+}
+
+[[nodiscard]] constexpr Render::Texture2DFrameResourceResolver imageResolver(void* userData = nullptr) noexcept
+{
+    return {
+        .userData = userData,
+        .resolve = &unavailableImageResolver,
+    };
+}
+
 struct ListFacadeDataSource final {
     u64 count = 0;
     UI::UIListViewItemKey keyBase = 1;
@@ -210,6 +224,83 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     auto expiredBuilder = builder->createRoot();
     ASSERT_FALSE(expiredBuilder.has_value());
     EXPECT_EQ(expiredBuilder.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ImageResolverRegistrationIsRootScopedMoveOnlyAndGenerationSafe)
+{
+    int firstUserData = 0;
+    int replacementUserData = 0;
+    CapabilityState state{2};
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto firstRoot = builder->createRoot();
+    ASSERT_TRUE(firstRoot.has_value()) << firstRoot.error().message;
+    auto otherRoot = builder->createRoot();
+    ASSERT_TRUE(otherRoot.has_value()) << otherRoot.error().message;
+
+    auto firstRegistration = builder->bindImageResolver(*firstRoot, imageResolver(&firstUserData));
+    ASSERT_TRUE(firstRegistration.has_value()) << firstRegistration.error().message;
+    ASSERT_TRUE(firstRegistration->isActive());
+    const auto* boundResolver = state.findImageResolver(firstRoot->rootNodeId());
+    ASSERT_NE(boundResolver, nullptr);
+    EXPECT_EQ(boundResolver->userData, &firstUserData);
+    EXPECT_EQ(boundResolver->resolve, &unavailableImageResolver);
+    EXPECT_EQ(state.findImageResolver(otherRoot->rootNodeId()), nullptr);
+
+    PrimaryWindowUIImageResolverRegistration movedRegistration = std::move(*firstRegistration);
+    EXPECT_FALSE(firstRegistration->isActive());
+    EXPECT_TRUE(movedRegistration.isActive());
+    movedRegistration.reset();
+    EXPECT_FALSE(movedRegistration.isActive());
+    EXPECT_EQ(state.findImageResolver(firstRoot->rootNodeId()), nullptr);
+
+    auto replacement = builder->bindImageResolver(*firstRoot, imageResolver(&replacementUserData));
+    ASSERT_TRUE(replacement.has_value()) << replacement.error().message;
+    firstRegistration->reset();
+    boundResolver = state.findImageResolver(firstRoot->rootNodeId());
+    ASSERT_NE(boundResolver, nullptr);
+    EXPECT_EQ(boundResolver->userData, &replacementUserData);
+
+    replacement->reset();
+    EXPECT_EQ(state.findImageResolver(firstRoot->rootNodeId()), nullptr);
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ImageResolverRegistrationRejectsDuplicateRootsAndCapacityOverflow)
+{
+    CapabilityState duplicateState{2};
+    auto duplicateEpoch = duplicateState.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(duplicateEpoch.has_value()) << duplicateEpoch.error().message;
+    auto duplicateBuilder = duplicateState.rootBuilder(*duplicateEpoch);
+    ASSERT_TRUE(duplicateBuilder.has_value()) << duplicateBuilder.error().message;
+    auto duplicateRoot = duplicateBuilder->createRoot();
+    ASSERT_TRUE(duplicateRoot.has_value()) << duplicateRoot.error().message;
+    auto registration = duplicateBuilder->bindImageResolver(*duplicateRoot, imageResolver());
+    ASSERT_TRUE(registration.has_value()) << registration.error().message;
+    auto duplicate = duplicateBuilder->bindImageResolver(*duplicateRoot, imageResolver());
+    ASSERT_FALSE(duplicate.has_value());
+    EXPECT_EQ(duplicate.error().code, Core::CoreErrorCode::InvalidArgument);
+    registration->reset();
+    duplicateState.abortPhase(*duplicateEpoch, CapabilityPhase::GameStateEnter);
+
+    CapabilityState limitedState{1};
+    auto limitedEpoch = limitedState.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(limitedEpoch.has_value()) << limitedEpoch.error().message;
+    auto limitedBuilder = limitedState.rootBuilder(*limitedEpoch);
+    ASSERT_TRUE(limitedBuilder.has_value()) << limitedBuilder.error().message;
+    auto firstRoot = limitedBuilder->createRoot();
+    ASSERT_TRUE(firstRoot.has_value()) << firstRoot.error().message;
+    auto secondRoot = limitedBuilder->createRoot();
+    ASSERT_TRUE(secondRoot.has_value()) << secondRoot.error().message;
+    auto firstRegistration = limitedBuilder->bindImageResolver(*firstRoot, imageResolver());
+    ASSERT_TRUE(firstRegistration.has_value()) << firstRegistration.error().message;
+    auto overflow = limitedBuilder->bindImageResolver(*secondRoot, imageResolver());
+    ASSERT_FALSE(overflow.has_value());
+    EXPECT_EQ(overflow.error().code, Core::CoreErrorCode::CapacityExceeded);
+    firstRegistration->reset();
+    limitedState.abortPhase(*limitedEpoch, CapabilityPhase::GameStateEnter);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpiresWithPhase)

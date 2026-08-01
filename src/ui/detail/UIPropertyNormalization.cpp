@@ -157,6 +157,7 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
         .hitSnapshotCapacity = deriveFromNodeCapacity(config.hitSnapshotCapacity),
         .paintSnapshotCapacity = deriveFromNodeCapacity(config.paintSnapshotCapacity),
         .canvasCommandCapacity = deriveFromNodeCapacity(config.canvasCommandCapacity),
+        .imageContentCapacity = deriveFromNodeCapacity(config.imageContentCapacity),
         .routePathCapacity = deriveFromNodeCapacity(config.routePathCapacity),
         .routedPointerListenerCapacity =
             deriveFromNodeCapacity(config.routedPointerListenerCapacity),
@@ -166,6 +167,37 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
                                 : config.textByteCapacity,
         .applyDefaultProductChrome = config.applyDefaultProductChrome,
     };
+}
+
+Core::Result<UIImageContent> normalizeImageContent(UIImageContent content)
+{
+    const UIImageSource& source = content.source;
+    const bool validExtent = source.texturePixelExtent.width != 0 &&
+                             source.texturePixelExtent.height != 0;
+    const bool validSourceRect = source.sourcePixels.width != 0 &&
+                                 source.sourcePixels.height != 0 &&
+                                 source.sourcePixels.x <= source.texturePixelExtent.width &&
+                                 source.sourcePixels.y <= source.texturePixelExtent.height &&
+                                 source.sourcePixels.width <=
+                                     source.texturePixelExtent.width - source.sourcePixels.x &&
+                                 source.sourcePixels.height <=
+                                     source.texturePixelExtent.height - source.sourcePixels.y;
+    const bool validIntrinsic = std::isfinite(source.intrinsicLogicalSize.width) &&
+                                std::isfinite(source.intrinsicLogicalSize.height) &&
+                                source.intrinsicLogicalSize.width > 0.0F &&
+                                source.intrinsicLogicalSize.height > 0.0F;
+    const bool validFit = content.fit >= UIImageFit::Fill && content.fit <= UIImageFit::None;
+    const bool validSampling = content.sampling >= UIImageSampling::Linear &&
+                               content.sampling <= UIImageSampling::Nearest;
+    if (!source.texture.hasValue() || !validExtent || !validSourceRect || !validIntrinsic ||
+        !validFit || !validSampling || !isValidContentAlignment(content.alignment))
+    {
+        return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                             "UI image source, geometry, fit, sampling, and alignment must be valid");
+    }
+    content.source.intrinsicLogicalSize.width = normalizeFloat(content.source.intrinsicLogicalSize.width);
+    content.source.intrinsicLogicalSize.height = normalizeFloat(content.source.intrinsicLogicalSize.height);
+    return content;
 }
 
 UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept

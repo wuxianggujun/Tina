@@ -3,6 +3,7 @@
 #include <tina/runtime/RuntimeErrors.hpp>
 
 #include <limits>
+#include <exception>
 #include <string_view>
 #include <utility>
 
@@ -18,7 +19,8 @@ namespace {
 
 } // namespace
 
-PrimaryWindowUICapabilityState::PrimaryWindowUICapabilityState() noexcept : ownerThreadId_(std::this_thread::get_id())
+PrimaryWindowUICapabilityState::PrimaryWindowUICapabilityState(usize imageResolverCapacity)
+    : ownerThreadId_(std::this_thread::get_id()), imageResolverSlots_(imageResolverCapacity)
 {
 }
 
@@ -176,6 +178,111 @@ PrimaryWindowUICapabilityState::treeUpdater(u64 epoch, PrimaryWindowUIPhase phas
         return Core::failure(rememberFirstError(std::move(updater.error()), Operation));
     }
     return PrimaryWindowUITreeUpdater{*this, epoch, phase, std::move(*updater)};
+}
+
+Core::Result<PrimaryWindowUIImageResolverRegistration>
+PrimaryWindowUICapabilityState::bindImageResolver(
+    u64 epoch, UI::UIRootOwner& rootOwner,
+    Render::Texture2DFrameResourceResolver resolver)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUIRootBuilder::bindImageResolver";
+    if (Core::Status status = validate(epoch, PrimaryWindowUIPhase::GameStateEnter, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (!resolver.hasValue())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{Core::CoreErrorCode::InvalidArgument,
+                        "A primary-window UI image resolver requires a callback"},
+            Operation));
+    }
+
+    auto updater = context_->treeUpdater(rootOwner);
+    if (!updater)
+    {
+        return Core::failure(rememberFirstError(std::move(updater.error()), Operation));
+    }
+    const UI::UINodeId root = rootOwner.rootNodeId();
+    for (const ImageResolverSlot& slot : imageResolverSlots_)
+    {
+        if (slot.active && slot.root == root)
+        {
+            return Core::failure(rememberFirstError(
+                Core::Error{Core::CoreErrorCode::InvalidArgument,
+                            "The primary-window UI root already has an image resolver"},
+                Operation));
+        }
+    }
+    for (usize index = 0; index < imageResolverSlots_.size(); ++index)
+    {
+        ImageResolverSlot& slot = imageResolverSlots_[index];
+        if (!slot.active && !slot.retired)
+        {
+            slot.root = root;
+            slot.resolver = resolver;
+            slot.active = true;
+            return PrimaryWindowUIImageResolverRegistration{
+                *this, static_cast<u32>(index), slot.generation};
+        }
+    }
+    return Core::failure(rememberFirstError(
+        Core::Error{Core::CoreErrorCode::CapacityExceeded,
+                    "Primary-window UI image resolver capacity has been exhausted"},
+        Operation));
+}
+
+const Render::Texture2DFrameResourceResolver*
+PrimaryWindowUICapabilityState::findImageResolver(UI::UINodeId root) const noexcept
+{
+    if (std::this_thread::get_id() != ownerThreadId_ || !root.hasValue())
+    {
+        return nullptr;
+    }
+    for (const ImageResolverSlot& slot : imageResolverSlots_)
+    {
+        if (slot.active && slot.root == root)
+        {
+            return &slot.resolver;
+        }
+    }
+    return nullptr;
+}
+
+void PrimaryWindowUICapabilityState::unbindImageResolver(u32 slotIndex, u32 generation) noexcept
+{
+    if (std::this_thread::get_id() != ownerThreadId_)
+    {
+        std::terminate();
+    }
+    if (slotIndex >= imageResolverSlots_.size())
+    {
+        return;
+    }
+    ImageResolverSlot& slot = imageResolverSlots_[slotIndex];
+    if (!slot.active || generation == 0 || slot.generation != generation)
+    {
+        return;
+    }
+    slot.root = {};
+    slot.resolver = {};
+    slot.active = false;
+    if (slot.generation == (std::numeric_limits<u32>::max)())
+    {
+        slot.retired = true;
+        return;
+    }
+    ++slot.generation;
+}
+
+bool PrimaryWindowUICapabilityState::isImageResolverActive(u32 slotIndex, u32 generation) const noexcept
+{
+    if (std::this_thread::get_id() != ownerThreadId_ || slotIndex >= imageResolverSlots_.size())
+    {
+        return false;
+    }
+    const ImageResolverSlot& slot = imageResolverSlots_[slotIndex];
+    return slot.active && generation != 0 && slot.generation == generation;
 }
 
 Core::Result<UI::UIRootOwner> PrimaryWindowUICapabilityState::createRoot(u64 epoch)

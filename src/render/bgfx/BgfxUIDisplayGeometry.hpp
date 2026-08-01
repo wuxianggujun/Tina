@@ -9,7 +9,8 @@
 namespace Tina::Render::Bgfx {
 
 // Unified UI vertex: SolidQuad uses UV (0,0)-(1,1) with white page; Glyph uses
-// atlas UV in normalized 0..1 space derived from atlasUv texels / page size.
+// atlas UV in normalized 0..1 space derived from atlasUv texels / page size;
+// ImageQuad uses its already-normalized command UV directly.
 struct BgfxUIDisplayVertex final {
     float x = 0.0F;
     float y = 0.0F;
@@ -52,7 +53,8 @@ checkedGeometryRequirements(UIDisplayListView displayList);
 // Allocation-free on success. Both output capacities and every input command
 // are validated before the first write, so failure never publishes partial
 // geometry or modifies either output span.
-// atlasPages is required when the list contains Glyph commands.
+// atlasPages is required when the list contains Glyph commands. ImageQuad UVs
+// are already normalized and do not require an atlas page.
 [[nodiscard]] Core::Result<BgfxUIDisplayGeometryRequirements>
 writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vertices,
               std::span<u32> indices, BgfxUIAtlasPageTable atlasPages = {});

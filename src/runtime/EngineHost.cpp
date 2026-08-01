@@ -548,12 +548,13 @@ class EngineHostImplementation final {
         std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface,
         PrimaryWindowUIContextFactory createPrimaryWindowUIContext = {},
         std::optional<std::uintptr_t> primaryWin32Hwnd = {},
-        std::unique_ptr<Render::ISubmissionCompletionLedger> submissionCompletionLedger = {}) noexcept
+        std::unique_ptr<Render::ISubmissionCompletionLedger> submissionCompletionLedger = {})
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
           m_uiInputRouteProducer(std::move(uiInputRouteProducer)), m_modules(std::move(modules)),
           m_primaryWindowUi(m_config.primaryWindowUICapacities, *std::pmr::get_default_resource(),
                             std::move(createPrimaryWindowUIContext)),
+          m_primaryWindowUICapability(m_config.primaryWindowUICapacities.rootCapacity),
           m_primaryWindowUIDisplay(std::move(primaryWindowUIDisplay)),
           m_renderSceneBuilder(std::move(renderSceneBuilder)), m_ownerThread(std::this_thread::get_id()),
           m_submissionCompletionLedger(submissionCompletionLedger != nullptr
@@ -1084,7 +1085,9 @@ class EngineHostImplementation final {
             }
 
             auto uiDisplayResult =
-                m_primaryWindowUIDisplay.buildForFrame(*uiContextResult, *platformFrame, primaryWindowSurface);
+                m_primaryWindowUIDisplay.buildForFrame(
+                    *uiContextResult, *platformFrame, primaryWindowSurface,
+                    m_primaryWindowUICapability, m_renderFramePacket.resourceSink());
             if (!uiDisplayResult)
             {
                 return failAfterStartupCommit(gameApplication, std::move(uiDisplayResult.error()), frameIndex,

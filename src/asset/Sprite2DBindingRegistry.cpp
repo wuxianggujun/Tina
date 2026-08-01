@@ -2,6 +2,7 @@
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetSystem.hpp>
+#include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
@@ -277,6 +278,15 @@ Sprite2DBindingRegistry::internTilesetFrameResource(AssetHandle tilesetAsset,
     return internSingleTextureDependency(tilesetAsset, AssetFormat::AssetKind::Tileset, sink);
 }
 
+Render::Texture2DFrameResourceResolver
+Sprite2DBindingRegistry::texture2DFrameResourceResolver() noexcept
+{
+    return {
+        .userData = this,
+        .resolve = &Sprite2DBindingRegistry::resolveTexture2DFrameResourceCallback,
+    };
+}
+
 const Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::resolveSingleTextureDependencyEntry(
     AssetHandle asset,
     AssetFormat::AssetKind expectedKind) const noexcept
@@ -330,19 +340,31 @@ Core::Result<Render::FrameResourceRef> Sprite2DBindingRegistry::internSingleText
         return Render::FrameResourceRef{};
     }
     Entry* entry = findExact(resolvedEntry->textureAsset);
-    if (entry == nullptr || entry->frameBorrowCount == (std::numeric_limits<Core::u32>::max)())
+    if (entry == nullptr)
     {
-        return Core::failure(AssetErrorCode::AssetNotReady,
-                             "Sprite2D binding cannot acquire another frame resource borrow");
+        return Render::FrameResourceRef{};
     }
 
-    ++entry->frameBorrowCount;
-    Render::FramePin pin{Render::FramePinKind::Custom, entry->bindingKey, entry,
+    return internTextureEntry(*entry, sink);
+}
+
+Core::Result<Render::FrameResourceRef>
+Sprite2DBindingRegistry::internTextureEntry(
+    Entry& entry, Render::FrameResourceSink& sink) noexcept
+{
+    if (entry.frameBorrowCount == (std::numeric_limits<Core::u32>::max)())
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "Texture2D binding cannot acquire another frame resource borrow");
+    }
+
+    ++entry.frameBorrowCount;
+    Render::FramePin pin{Render::FramePinKind::Custom, entry.bindingKey, &entry,
                          &Sprite2DBindingRegistry::releaseFrameBorrow};
     auto resource = sink.intern(
         Render::FrameResourceDescriptor{
             .kind = Render::FrameResourceKind::Texture2D,
-            .deviceBindingKey = entry->bindingKey,
+            .deviceBindingKey = entry.bindingKey,
         },
         std::move(pin));
     if (!resource)
@@ -351,6 +373,63 @@ Core::Result<Render::FrameResourceRef> Sprite2DBindingRegistry::internSingleText
             std::move(resource.error()).withContext("Sprite2DBindingRegistry::internFrameResource", "sink"));
     }
     return *resource;
+}
+
+Core::Result<std::optional<Render::Texture2DFrameResourceResolution>>
+Sprite2DBindingRegistry::resolveTexture2DFrameResource(
+    Core::AssetId asset, Render::FrameResourceSink& sink) noexcept
+{
+    if (!isOwnerThread())
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Texture2D frame resource resolution must run on the registry owner thread");
+    }
+    if (!asset.hasValue())
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Texture2D frame resource resolution requires a valid AssetId");
+    }
+
+    Entry* entry = findByAssetId(asset);
+    if (entry == nullptr || !isLiveTextureEntry(*entry))
+    {
+        return std::optional<Render::Texture2DFrameResourceResolution>{};
+    }
+    const CookedAssetFile* file = entry->lease.get();
+    if (file == nullptr)
+    {
+        return std::optional<Render::Texture2DFrameResourceResolution>{};
+    }
+    auto texture = parseTexture2DFromCooked(*file);
+    if (!texture)
+    {
+        return Core::failure(
+            std::move(texture.error()).withContext(
+                "Sprite2DBindingRegistry::resolveTexture2DFrameResource", "Texture2D payload"));
+    }
+    auto resource = internTextureEntry(*entry, sink);
+    if (!resource)
+    {
+        return Core::failure(std::move(resource.error()));
+    }
+    return std::optional<Render::Texture2DFrameResourceResolution>{
+        Render::Texture2DFrameResourceResolution{
+            .resource = *resource,
+            .pixelWidth = texture->width,
+            .pixelHeight = texture->height,
+        }};
+}
+
+Core::Result<std::optional<Render::Texture2DFrameResourceResolution>>
+Sprite2DBindingRegistry::resolveTexture2DFrameResourceCallback(
+    void* userData, Core::AssetId asset, Render::FrameResourceSink& sink) noexcept
+{
+    if (userData == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Texture2D frame resource resolver has no registry");
+    }
+    return static_cast<Sprite2DBindingRegistry*>(userData)->resolveTexture2DFrameResource(asset, sink);
 }
 
 void Sprite2DBindingRegistry::releaseFrameBorrow(void* userData) noexcept

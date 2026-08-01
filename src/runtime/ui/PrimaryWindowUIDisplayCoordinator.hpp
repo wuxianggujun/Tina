@@ -9,12 +9,15 @@
 #include <memory_resource>
 #include <optional>
 #include <thread>
+#include <vector>
 
 namespace Tina::UI {
 class UIContext;
 }
 
 namespace Tina::Runtime::Detail {
+
+class PrimaryWindowUICapabilityState;
 
 struct PrimaryWindowUIDisplayBuild final {
     Render::UIDisplayListView displayList{};
@@ -38,18 +41,23 @@ class PrimaryWindowUIDisplayCoordinator final {
 
     [[nodiscard]] Core::Result<PrimaryWindowUIDisplayBuild>
     buildForFrame(UI::UIContext* context, const Platform::PlatformFrameView& platformFrame,
-                  const std::optional<Render::RenderSurfaceState>& primaryWindowSurface);
+                  const std::optional<Render::RenderSurfaceState>& primaryWindowSurface,
+                  const PrimaryWindowUICapabilityState& capabilityState,
+                  Render::FrameResourceSink& resourceSink);
 
     [[nodiscard]] Render::UIDisplayListView publishedView() const noexcept;
     [[nodiscard]] Render::UIDisplayListBuilderStatistics builderStatistics() const noexcept;
 
   private:
-    explicit PrimaryWindowUIDisplayCoordinator(Render::UIDisplayListBuilder builder) noexcept;
+    PrimaryWindowUIDisplayCoordinator(
+        Render::UIDisplayListBuilder builder,
+        std::pmr::vector<Integration::UIRenderImageResolutionCacheEntry> imageResolutionCache) noexcept;
 
     [[nodiscard]] Core::Result<PrimaryWindowUIDisplayBuild> failAttempt(Core::Error error);
     void invalidatePublishedView() noexcept;
 
     Render::UIDisplayListBuilder builder_;
+    std::pmr::vector<Integration::UIRenderImageResolutionCacheEntry> imageResolutionCache_;
     std::thread::id ownerThreadId_{};
     Platform::PlatformFrameId lastAttemptedFrame_{};
     u64 lastMetricsRevision_ = 0;

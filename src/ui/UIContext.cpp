@@ -22,6 +22,7 @@
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIDirtyQueueStorage.hpp"
 #include "detail/UIImeCompositionState.hpp"
+#include "detail/UIImageContentStorage.hpp"
 #include "detail/UIInputPrimitives.hpp"
 #include "detail/UILayoutMeasurement.hpp"
 #include "detail/UILayoutPrimitives.hpp"
@@ -123,6 +124,7 @@ using Detail::normalizeBoxPaint;
 using Detail::normalizeDropdownPaint;
 using Detail::normalizeFloat;
 using Detail::normalizeLayoutStyle;
+using Detail::normalizeImageContent;
 using Detail::normalizeListViewCreateConfig;
 using Detail::normalizeListViewPaint;
 using Detail::normalizeListViewStyle;
@@ -311,6 +313,7 @@ struct UIContext::Impl final {
     Detail::UIPaintSnapshotBuilder paintSnapshotBuilder;
     Detail::UISemanticsSnapshotBuilder semanticsSnapshotBuilder;
     Detail::UICanvasCommandStorage canvasCommandStorage;
+    Detail::UIImageContentStorage imageContentStorage;
     std::pmr::vector<TextEditState> textEditStatesByNodeIndex;
     std::pmr::vector<ProgressBarState> progressBarStatesByNodeIndex;
     std::pmr::vector<RadioButtonState> radioButtonStatesByNodeIndex;
@@ -459,6 +462,7 @@ struct UIContext::Impl final {
           paintSnapshotBuilder(capacities.paintSnapshotCapacity),
           semanticsSnapshotBuilder(capacities.nodeCapacity, capacities.paintSnapshotCapacity, resource),
           canvasCommandStorage(capacities.nodeCapacity, capacities.canvasCommandCapacity, resource),
+          imageContentStorage(capacities.nodeCapacity, capacities.imageContentCapacity, resource),
           textEditStatesByNodeIndex(&resource),
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
           scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
@@ -514,6 +518,7 @@ struct UIContext::Impl final {
             .hitSnapshotCapacity = normalized.hitSnapshotCapacity,
             .paintSnapshotCapacity = normalized.paintSnapshotCapacity,
             .canvasCommandCapacity = normalized.canvasCommandCapacity,
+            .imageContentCapacity = normalized.imageContentCapacity,
             .routePathCapacity = normalized.routePathCapacity,
             .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
             .buttonActionCapacity = normalized.buttonActionCapacity,
@@ -903,6 +908,13 @@ struct UIContext::Impl final {
             }
 
             LayoutNodeMeasureContent content{.size = flowMeasurement.contentSize};
+            if (flowMeasurement.childCount == 0)
+            {
+                if (const UIImageContent* image = imageContentStorage.get(index); image != nullptr)
+                {
+                    content.size = image->source.intrinsicLogicalSize;
+                }
+            }
             if (flowMeasurement.childCount == 0 && supportsWidgetText(record->kind))
             {
                 if (const UITextMetrics* metrics = presentationTextMetricsFor(index); metrics != nullptr)
@@ -1665,14 +1677,16 @@ struct UIContext::Impl final {
                 indicatorExtent + radioButtonStatesByNodeIndex[index].paint.labelGap;
         }
 
+        const UIImageContent* image = imageContentStorage.get(index);
         const UITextMetrics* metrics =
             index < textStatesByIndex.size() ? presentationTextMetricsFor(index)
                                              : nullptr;
         const UIContentAlignment alignment =
             metrics != nullptr ? textStatesByIndex[index].alignment
-                               : UIContentAlignment{};
+                               : image != nullptr ? image->alignment : UIContentAlignment{};
         const UILogicalSize* intrinsicSize =
-            metrics != nullptr ? &metrics->measuredSize : nullptr;
+            metrics != nullptr ? &metrics->measuredSize
+                               : image != nullptr ? &image->source.intrinsicLogicalSize : nullptr;
         return resolveContentPlacement(
             scratch.worldRect, layout.padding, leadingReservedWidth,
             trailingReservedWidth, alignment, intrinsicSize);
@@ -2373,6 +2387,13 @@ struct UIContext::Impl final {
         const UIPremultipliedRgba8Color resolvedFill = resolvedBoxFillColor(layoutEntry.node, nodeIndex, normalColor);
         paintEntryCount += countBoxChromePaintEntries(boxPaint, layoutEntry.worldRect, !resolvedFill.isTransparent());
         paintEntryCount += countCanvasPaintEntries(nodeIndex);
+        if (const UIImageContent* image = imageContentStorage.get(nodeIndex);
+            image != nullptr && image->tint.alpha != 0 &&
+            layoutEntry.contentPlacement.contentBox.width > 0.0F &&
+            layoutEntry.contentPlacement.contentBox.height > 0.0F)
+        {
+            ++paintEntryCount;
+        }
         auto controlPaintBatch = resolveControlPaintBatch(layoutEntry, false);
         if (!controlPaintBatch)
         {
@@ -2419,6 +2440,83 @@ struct UIContext::Impl final {
                                                resolveTextEditPaintState(layoutEntry.node, true));
     }
 
+    [[nodiscard]] static UILogicalRect resolveImageDestination(
+        const UICommittedContentPlacement& placement, const UIImageContent& image) noexcept
+    {
+        const UILogicalRect box = placement.contentBox;
+        const UILogicalSize intrinsic = image.source.intrinsicLogicalSize;
+        if (box.width <= 0.0F || box.height <= 0.0F)
+        {
+            return {};
+        }
+        if (image.fit == UIImageFit::Fill)
+        {
+            return box;
+        }
+
+        float scale = 1.0F;
+        if (image.fit == UIImageFit::Contain || image.fit == UIImageFit::Cover)
+        {
+            const float horizontalScale = box.width / intrinsic.width;
+            const float verticalScale = box.height / intrinsic.height;
+            scale = image.fit == UIImageFit::Contain
+                        ? (std::min)(horizontalScale, verticalScale)
+                        : (std::max)(horizontalScale, verticalScale);
+        }
+        const float width = normalizeFloat(intrinsic.width * scale);
+        const float height = normalizeFloat(intrinsic.height * scale);
+        const auto alignedOffset = [](UIAxisAlignment axis, float freeSpace) noexcept {
+            switch (axis)
+            {
+            case UIAxisAlignment::Center:
+                return freeSpace * 0.5F;
+            case UIAxisAlignment::End:
+                return freeSpace;
+            case UIAxisAlignment::Start:
+            case UIAxisAlignment::Stretch:
+                return 0.0F;
+            }
+            return 0.0F;
+        };
+        return UILogicalRect{
+            .x = normalizeFloat(box.x + alignedOffset(image.alignment.horizontal, box.width - width)),
+            .y = normalizeFloat(box.y + alignedOffset(image.alignment.vertical, box.height - height)),
+            .width = width,
+            .height = height,
+        };
+    }
+
+    void appendImagePaint(std::pmr::vector<UICommittedPaintEntry>& output,
+                          const UICommittedLayoutEntry& layoutEntry,
+                          u32& nextPaintOrdinal) const noexcept
+    {
+        const u32 nodeIndex = layoutEntry.node.index();
+        const UIImageContent* image = imageContentStorage.get(nodeIndex);
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        if (image == nullptr || record == nullptr || image->tint.alpha == 0)
+        {
+            return;
+        }
+        const UILogicalRect destination = resolveImageDestination(layoutEntry.contentPlacement, *image);
+        if (destination.width <= 0.0F || destination.height <= 0.0F)
+        {
+            return;
+        }
+        output.push_back(UICommittedPaintEntry{
+            .node = layoutEntry.node,
+            .root = idForIndex(record->rootIndex),
+            .worldRect = destination,
+            .effectiveClip = intersectRects(layoutEntry.effectiveClip,
+                                            layoutEntry.contentPlacement.contentBox),
+            .paintOrdinal = nextPaintOrdinal,
+            .solidFill = premultiply(image->tint),
+            .kind = UICommittedPaintKind::Image,
+            .imageSource = image->source,
+            .imageSampling = image->sampling,
+        });
+        ++nextPaintOrdinal;
+    }
+
     [[nodiscard]] Core::Status appendPaintEntries(std::pmr::vector<UICommittedPaintEntry>& output,
                                                   const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal)
     {
@@ -2429,6 +2527,7 @@ struct UIContext::Impl final {
         appendBoxChromePaints(output, layoutEntry.node, layoutEntry.worldRect, layoutEntry.effectiveClip,
                               nextPaintOrdinal, boxPaint, fill);
         appendCanvasPaints(output, layoutEntry, nextPaintOrdinal);
+        appendImagePaint(output, layoutEntry, nextPaintOrdinal);
         auto controlPaintBatch = resolveControlPaintBatch(layoutEntry, true);
         if (!controlPaintBatch)
         {
@@ -3341,6 +3440,7 @@ struct UIContext::Impl final {
         clearTextState(index);
         clearSemanticsState(index);
         canvasCommandStorage.release(index);
+        imageContentStorage.release(index);
         dirtyQueueStorage.resetNode(index);
         layoutScratchByIndex[index] = {};
         layoutWorkByIndex[index] = 0;
@@ -4246,6 +4346,13 @@ struct UIContext::Impl final {
         {
             return canvas;
         }
+        if (descriptor.image.has_value())
+        {
+            if (Core::Status image = imageContentStorage.assign(node.index(), *descriptor.image); !image)
+            {
+                return image;
+            }
+        }
         if (descriptor.visual.boxPaint.has_value())
         {
             boxPaintsByIndex[node.index()] = normalizeBoxPaint(*descriptor.visual.boxPaint);
@@ -4354,6 +4461,31 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidElementDescriptor,
                         "UI element text style requires intrinsic text content");
         }
+        if (descriptor.text.has_value() && descriptor.image.has_value())
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI element intrinsic text and image content are mutually exclusive");
+        }
+        UIElementDescriptor normalizedDescriptor = descriptor;
+        if (descriptor.image.has_value())
+        {
+            auto image = normalizeImageContent(*descriptor.image);
+            if (!image)
+            {
+                return Core::failure(image.error());
+            }
+            normalizedDescriptor.image = *image;
+            normalizedDescriptor.contentAlignment = image->alignment;
+            const bool publishesAccessibleImage = descriptor.semantics.mode != UISemanticsMode::Exclude;
+            if (publishesAccessibleImage &&
+                (descriptor.semantics.role != UISemanticsRole::Image ||
+                 !descriptor.semantics.name.has_value() || descriptor.semantics.name->empty() ||
+                 descriptor.semantics.useContentAsName || descriptor.semantics.actions != UISemanticsAction::None))
+            {
+                return fail(UIErrorCode::InvalidElementDescriptor,
+                            "UI accessible images require the Image role, an explicit name, and no actions");
+            }
+        }
         if (descriptor.text.has_value())
         {
             if (!isValidContentAlignment(descriptor.contentAlignment))
@@ -4371,7 +4503,7 @@ struct UIContext::Impl final {
                 return fail(UIErrorCode::InvalidText,
                             "UI TextEdit and RadioButton accept one logical line without CR or LF");
             }
-        } else if (descriptor.contentAlignment != UIContentAlignment{})
+        } else if (!descriptor.image.has_value() && descriptor.contentAlignment != UIContentAlignment{})
         {
             return fail(UIErrorCode::InvalidElementDescriptor,
                         "UI element content alignment requires intrinsic text content");
@@ -4394,7 +4526,7 @@ struct UIContext::Impl final {
                 static_cast<void>(destroySubtree(node));
             }
         });
-        if (Core::Status initialized = initializeElement(node, kind, descriptor, *normalizedLayout); !initialized)
+        if (Core::Status initialized = initializeElement(node, kind, normalizedDescriptor, *normalizedLayout); !initialized)
         {
             return Core::failure(initialized.error());
         }
@@ -13185,6 +13317,9 @@ struct UIContext::Impl final {
             .canvasCommandCapacity = capacityConfig.canvasCommandCapacity,
             .activeCanvasCommandCount = canvasCommandStorage.activeCount(),
             .canvasCommandHighWater = canvasCommandStorage.highWater(),
+            .imageContentCapacity = imageContentStorage.capacity(),
+            .activeImageContentCount = imageContentStorage.activeCount(),
+            .imageContentHighWater = imageContentStorage.highWater(),
             .routePathCapacity = capacityConfig.routePathCapacity,
             .routedPointerListenerCapacity = capacityConfig.routedPointerListenerCapacity,
             .activeRoutedPointerListenerCount = routedPointerListenerRegistry.activeCount(),

@@ -81,7 +81,7 @@ TEST(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesRever
 
     ASSERT_EQ(output.size(), 5U);
     EXPECT_EQ(output[0].solidFill, textColor());
-    EXPECT_FALSE(output[1].isGlyph);
+    EXPECT_EQ(output[1].kind, UI::UICommittedPaintKind::SolidQuad);
     EXPECT_EQ(output[1].solidFill, selectionColor);
     EXPECT_FLOAT_EQ(output[1].worldRect.x, 15.0F);
     EXPECT_FLOAT_EQ(output[1].worldRect.y, 12.0F);

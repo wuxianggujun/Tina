@@ -20,6 +20,7 @@ add_executable(tina_ui_tests
     UIEnabledStateTests.cpp
     UIFlexLayoutTests.cpp
     UIInputPrimitivesTests.cpp
+    UIImageTests.cpp
     UIRoutedPointerListenerRegistryTests.cpp
     UISliderChangeCallbackRegistryTests.cpp
     UISliderTests.cpp
@@ -100,6 +101,7 @@ add_executable(tina_ui_tests
     header_isolation/UIEventRoutingHeader.cpp
     header_isolation/UIFocusHeader.cpp
     header_isolation/UIHitTestHeader.cpp
+    header_isolation/UIImageHeader.cpp
     header_isolation/UILayoutHeader.cpp
     header_isolation/UIPaintHeader.cpp
     header_isolation/UIThemeHeader.cpp
