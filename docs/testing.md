@@ -106,7 +106,17 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_route_v
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_virtual_collection_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_image_nineslice_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_component_build_activate_toggle_v1 --warmup=10 --samples=100 --seed=1
+py -3 tools\bench\run_benchmark_gate.py --processes 5 `
+  out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe -- `
+  --workload=ui_static_commit_v1 --warmup=60 --samples=600 --seed=1
+py -3 -m unittest tools/bench/test_run_benchmark_gate.py -v
 ```
+
+multi-process runner 顺序启动独立进程，要求所有子结果的 workload/fingerprint/checksum 完全一致，
+并输出 run-level p99 median/MAD。上面的 Debug quick run 必须仍为 `conclusion=provisional`。
+`--hard-gate` 仅接受 Release、正式采样规模、至少5个候选进程，以及匹配且 `approved` 的
+`tina_bench_machine_profile` / `tina_bench_baseline` schema v1；候选噪声超过受审 relative MAD
+阈值时直接拒绝。仓库当前没有受审 profile/baseline，所以不能在项目门禁中传 `--hard-gate`。
 
 图片 workload 每个 measured build 固定为 256 Image + 232 Icon + 512 full NineSlice，必须得到
 `Q=5096/U=64/B=1000`、64 次 resolver hit、5032 次 cache dedupe、64 次 pin acquire/release、零

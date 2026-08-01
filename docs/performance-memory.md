@@ -2,7 +2,7 @@
 
 本文区分“已有可验证机制”和“尚未建立的固定机 hard gate”。绝对毫秒预算只有在固定 workload、
 固定机器与兼容 fingerprint 上才有意义；当前已有 ADR 0018 接受的 `tina_bench` schema v1，
-但没有固定机 hard-gate baseline 或多进程 MAD 结论。
+以及 `tina_bench_multi_process` schema v1 runner，但没有受审固定机 hard-gate profile/baseline。
 
 ## 当前内存基础
 
@@ -136,8 +136,24 @@ checksum、p50/p95/p99。当前包含 `null_runtime_frames`（Headless+Null+Disa
 `ui_static_commit_v1`、`ui_paint_dirty_v1`、`ui_route_v1`、`ui_virtual_collection_v1`、
 `ui_image_nineslice_v1`，以及不替代冻结验收的 `ui_component_build_activate_toggle_v1` 前置 workload。
 
-共享开发机/CI 结论固定为 `conclusion=provisional`，**不是** hard gate。固定门禁机、多进程
-median/MAD 与 baseline 仓库审核仍为后续扩展；在此之前不得把本机毫秒数写成跨机器回归通过。
+`tools/bench/run_benchmark_gate.py` 顺序启动独立 `tina_bench` 进程，先要求全部子结果的 schema、
+workload/version/seed/parameters、fingerprint 和 checksum 完全兼容，再对 run-level p99 计算 median/MAD。
+默认开发机/CI 输出 `tina_bench_multi_process` schema v1 和 `conclusion=provisional`，**不是** hard gate。
+即使提供了本地 JSON，只有显式 `--hard-gate` 且以下条件全部满足时才允许 hard 结论：
+
+- Release benchmark、每进程至少 600 warm-up / 2,000 measured iterations、至少5个候选进程；
+- machine profile 与 baseline 都使用受支持 schema，并包含 `status=approved` 的审核记录；
+- machine profile 的 benchmark fingerprint 完全匹配；`machine` 固定 OS/CPU/GPU/driver/RAM/power/
+  affinity/worker，`build` 固定 clean commit/preset/compiler/linker/vcpkg 且 Release/Tracy-off；
+- runner 计算 benchmark executable SHA-256；hard gate 要求 profile `build.binarySha256` 精确匹配，
+  防止旧 build tree 中的 executable 冒充当前受审构建；
+- profile 记录至少10进程的 p99 observed median/MAD、relative MAD 上限和绝对 noise floor；
+- baseline 至少10进程且 `machineId` 匹配，workload/fingerprint/checksum 与候选完全一致；
+- candidate relative MAD 不超过受审机器阈值，否则结果为 `hard_gate_rejected_noise`；
+- 回归必须同时超过10%和绝对噪声阈值；绝对阈值取 profile noise floor、baseline MAD×3、candidate
+  MAD×3 的最大值。
+
+仓库当前没有上述受审 profile/baseline，因此仍不得把本机毫秒数写成跨机器回归通过。
 
 下面是开发机 quick provisional run，不是 ADR 0018 的正式采样规模：
 
@@ -149,11 +165,16 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_paint_d
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_route_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_virtual_collection_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_image_nineslice_v1 --warmup=60 --samples=600 --seed=1
+py -3 tools\bench\run_benchmark_gate.py --processes 5 `
+  out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe -- `
+  --workload=null_runtime_frames --warmup=60 --samples=600 --seed=1
+py -3 -m unittest tools/bench/test_run_benchmark_gate.py -v
 ```
 
 正式候选采样遵循 ADR 0018：每进程 warm-up 600、普通样本至少 2,000；p99/泄漏结论使用 10,000，且需
-多进程 median/MAD 和固定 machine profile。当前 UI workload 是 `UI-PERF-001` 首个 milestone，不能把
-上面的现有命令描述成已经覆盖 Component/Style/Motion。
+多进程 runner 可以验证统计与兼容协议，但只有受审固定 machine profile/baseline 才能启用 hard gate。
+当前 UI workload 是 `UI-PERF-001` 首个 milestone，不能把上面的现有命令描述成已经覆盖
+Component/Style/Motion。
 
 ## 验证工具
 

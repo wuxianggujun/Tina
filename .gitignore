@@ -91,6 +91,8 @@ fabric.properties
 /artifacts/
 /captures/
 *.log
+__pycache__/
+*.py[cod]
 CMakeUserPresets.json
 
 .arts

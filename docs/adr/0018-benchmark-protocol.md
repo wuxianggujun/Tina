@@ -5,6 +5,10 @@
 - Accepted：2026-07-24（`tina_bench` schema v1 + `null_runtime_frames` workload；
   hard-gate 固定机与多进程 MAD 仍后置）
 
+实现进度（2026-08-01）：`tools/bench/run_benchmark_gate.py` 已提供 schema v1 多进程采集、
+run-level p99 median/MAD、workload/fingerprint/checksum 兼容校验与噪声拒绝。仓库仍没有受审
+machine profile 和 baseline；因此默认结论继续为 `provisional`，尚未建立 fixed-machine hard gate。
+
 ## 背景
 
 平均 FPS、一次本地运行或带 Tracy 的 capture 都不能稳定判定性能回归。不同硬件、编译选项、
