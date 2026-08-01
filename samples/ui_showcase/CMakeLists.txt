@@ -1,10 +1,15 @@
 add_executable(tina_sample_ui_showcase
+    ShowcaseImageFixture.hpp
+    ShowcaseRenderDevice.hpp
     ShowcaseUI.cpp
     ShowcaseUI.hpp
     main.cpp
 )
 
 target_compile_features(tina_sample_ui_showcase PRIVATE cxx_std_23)
+target_include_directories(tina_sample_ui_showcase PRIVATE
+    "${PROJECT_SOURCE_DIR}/samples/common"
+)
 target_link_libraries(tina_sample_ui_showcase PRIVATE
     Tina::ProjectOptions
     Tina::DesktopBootstrap

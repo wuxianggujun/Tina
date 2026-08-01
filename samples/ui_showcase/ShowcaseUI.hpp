@@ -33,6 +33,7 @@ struct ShowcaseUISnapshot final {
     Core::usize dropdownSelection = 0;
     float scrollOffset = 0.0F;
     Core::usize controlCount = 0;
+    Core::usize imageProductCount = 0;
     ShowcaseQuality quality = ShowcaseQuality::Balanced;
     bool notificationsEnabled = false;
     bool rootAlive = false;
@@ -48,7 +49,8 @@ class ShowcaseUI final {
     ShowcaseUI(ShowcaseUI&&) = delete;
     ShowcaseUI& operator=(ShowcaseUI&&) = delete;
 
-    [[nodiscard]] Core::Status build(GameStateEnterContext& context, ShowcaseTheme initialTheme);
+    [[nodiscard]] Core::Status build(GameStateEnterContext& context, ShowcaseTheme initialTheme,
+                                     Render::Texture2DFrameResourceResolver imageResolver);
     [[nodiscard]] Core::Status update(UIUpdateContext& context);
 
     void requestAutomatedStep(Core::u64 frameIndex) noexcept;
@@ -84,7 +86,7 @@ class ShowcaseUI final {
         UI::UINodeId navigation{};
         std::array<UI::UINodeId, 6> cards{};
         std::array<UI::UINodeId, 5> navigationAccents{};
-        std::array<UI::UINodeId, 4> paletteSwatches{};
+        std::array<UI::UINodeId, 3> paletteSwatches{};
         UI::UINodeId statusPanel{};
         UI::UINodeId qualityGroup{};
         UI::UINodeId themeGroup{};
@@ -110,7 +112,10 @@ class ShowcaseUI final {
         std::array<UI::UINodeId, 6> scrollContentLabels{};
 
         UI::UINodeId primaryButton{};
+        UI::UINodeId primaryButtonIcon{};
+        UI::UINodeId primaryButtonLabel{};
         UI::UINodeId destructiveButton{};
+        UI::UINodeId destructiveButtonIcon{};
         UI::UINodeId disabledButton{};
         UI::UINodeId resetButton{};
         UI::UINodeId notificationsCheckbox{};
@@ -126,6 +131,7 @@ class ShowcaseUI final {
         UI::UINodeId treeView{};
         UI::UINodeId scrollView{};
         UI::UINodeId scrollContent{};
+        UI::UINodeId inventoryThumbnail{};
     };
 
     [[nodiscard]] Core::Status applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTheme theme, bool countSwitch);
@@ -144,6 +150,7 @@ class ShowcaseUI final {
     static bool setTreeItemExpanded(void* state, UI::UITreeViewItemKey key, bool expanded) noexcept;
 
     UI::UIRootOwner root_{};
+    PrimaryWindowUIImageResolverRegistration imageResolver_{};
     Nodes nodes_{};
     ShowcaseTheme initialTheme_ = ShowcaseTheme::Dark;
     ShowcaseTheme currentTheme_ = ShowcaseTheme::Dark;
@@ -169,6 +176,7 @@ class ShowcaseUI final {
     UI::UINodeId dropdownSelection_{};
     Core::usize dropdownSelectionIndex_ = 0;
     Core::usize controlCount_ = 0;
+    Core::usize imageProductCount_ = 0;
     bool progressDirty_ = false;
     bool notificationsDirty_ = false;
     bool notificationsEnabled_ = false;

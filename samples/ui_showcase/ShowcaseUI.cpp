@@ -1,4 +1,5 @@
 #include "ShowcaseUI.hpp"
+#include "ShowcaseImageFixture.hpp"
 
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/ui/UITheme.hpp>
@@ -296,7 +297,8 @@ bool ShowcaseUI::setTreeItemExpanded(void* state, UI::UITreeViewItemKey key, boo
     return true;
 }
 
-Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme initialTheme)
+Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme initialTheme,
+                               Render::Texture2DFrameResourceResolver imageResolver)
 {
     if (root_) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "UI showcase root is already built");
@@ -309,6 +311,10 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     auto root = rootBuilder->createRoot();
     if (!root) {
         return Core::failure(std::move(root.error()));
+    }
+    auto imageResolverRegistration = rootBuilder->bindImageResolver(*root, imageResolver);
+    if (!imageResolverRegistration) {
+        return Core::failure(std::move(imageResolverRegistration.error()));
     }
     auto tree = rootBuilder->treeUpdater(*root);
     if (!tree) {
@@ -565,13 +571,64 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
 
     UI::UILayoutStyle buttonLayout = sizedStyle(198.0F, 44.0F);
     buttonLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(14.0F, 8.0F);
-    if (Core::Status status = storeNode(
-            createButton(*tree, buttonRows[0], buttonLayout, "Primary action"), nodes_.primaryButton);
+    buttonLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    buttonLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    buttonLayout.flexContainer.justifyContent = UI::UIJustifyContent::Center;
+    buttonLayout.flexContainer.gap.column = 8.0F;
+    UI::UIElementDescriptor primaryButton = UI::makeButtonElement({}, buttonLayout);
+    primaryButton.semantics.name = "Primary action";
+    primaryButton.semantics.useContentAsName = false;
+    if (Core::Status status =
+            storeNode(tree->createElement(buttonRows[0], primaryButton), nodes_.primaryButton);
         !status) {
         return status;
     }
+    const UI::UIImageContent primaryIcon{
+        .source = showcaseAtlasSource({.x = 0, .y = 0, .width = 16, .height = 16},
+                                      {.width = 16.0F, .height = 16.0F}),
+        .fit = UI::UIImageFit::Contain,
+        .tint = UI::rgba8(255, 255, 255),
+        .sampling = UI::UIImageSampling::Nearest,
+    };
     if (Core::Status status = storeNode(
-            createButton(*tree, buttonRows[0], buttonLayout, "Destructive"), nodes_.destructiveButton);
+            tree->createElement(nodes_.primaryButton,
+                                UI::makeIconElement(primaryIcon, sizedStyle(20.0F, 20.0F))),
+            nodes_.primaryButtonIcon);
+        !status) {
+        return status;
+    }
+    UI::UIElementDescriptor primaryLabel =
+        UI::makeLabelElement("Primary action", sizedStyle(124.0F, 24.0F));
+    primaryLabel.semantics.mode = UI::UISemanticsMode::Exclude;
+    primaryLabel.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+    if (Core::Status status = storeNode(
+            tree->createElement(nodes_.primaryButton, primaryLabel), nodes_.primaryButtonLabel);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle destructiveLayout = sizedStyle(44.0F, 44.0F);
+    destructiveLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    destructiveLayout.flexContainer.justifyContent = UI::UIJustifyContent::Center;
+    UI::UIElementDescriptor destructiveButton = UI::makeButtonElement({}, destructiveLayout);
+    destructiveButton.semantics.name = "Destructive action";
+    destructiveButton.semantics.useContentAsName = false;
+    if (Core::Status status = storeNode(
+            tree->createElement(buttonRows[0], destructiveButton), nodes_.destructiveButton);
+        !status) {
+        return status;
+    }
+    const UI::UIImageContent destructiveIcon{
+        .source = showcaseAtlasSource({.x = 16, .y = 0, .width = 16, .height = 16},
+                                      {.width = 16.0F, .height = 16.0F}),
+        .fit = UI::UIImageFit::Contain,
+        .tint = UI::rgba8(255, 255, 255),
+        .sampling = UI::UIImageSampling::Nearest,
+    };
+    if (Core::Status status = storeNode(
+            tree->createElement(nodes_.destructiveButton,
+                                UI::makeIconElement(destructiveIcon, sizedStyle(20.0F, 20.0F))),
+            nodes_.destructiveButtonIcon);
         !status) {
         return status;
     }
@@ -740,9 +797,24 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     UI::UILayoutStyle paletteRowLayout = fillWidthStyle(44.0F);
     paletteRowLayout.margin.top = 32.0F;
     paletteRowLayout.flexContainer.direction = UI::UIFlexDirection::Row;
-    paletteRowLayout.flexContainer.gap.column = 28.0F;
+    paletteRowLayout.flexContainer.gap.column = 20.0F;
     if (Core::Status status =
             storeNode(createPanel(*tree, nodes_.cards[3], paletteRowLayout), paletteRow);
+        !status) {
+        return status;
+    }
+    const UI::UIImageContent inventoryThumbnail{
+        .source = showcaseAtlasSource({.x = 32, .y = 0, .width = 32, .height = 32},
+                                      {.width = 32.0F, .height = 32.0F}),
+        .fit = UI::UIImageFit::Cover,
+        .tint = UI::rgba8(255, 255, 255),
+        .sampling = UI::UIImageSampling::Linear,
+    };
+    if (Core::Status status = storeNode(
+            tree->createElement(paletteRow,
+                                UI::makeImageElement(inventoryThumbnail, "Inventory potion thumbnail",
+                                                     sizedStyle(44.0F, 44.0F))),
+            nodes_.inventoryThumbnail);
         !status) {
         return status;
     }
@@ -753,14 +825,28 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         }
     }
 
-    UI::UILayoutStyle statusPanelLayout = fillWidthStyle(48.0F);
+    UI::UILayoutStyle statusPanelLayout = sizedStyle(430.0F, 48.0F);
     statusPanelLayout.margin.top = 22.0F;
     statusPanelLayout.padding.left = 16.0F;
     statusPanelLayout.padding.right = 16.0F;
     statusPanelLayout.flexContainer.direction = UI::UIFlexDirection::Row;
     statusPanelLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    const std::array statusPanelCanvas{
+        UI::UICanvasCommand{
+            .kind = UI::UICanvasCommandKind::NineSlice,
+            .bounds = {.x = 0.0F, .y = 0.0F, .width = 430.0F, .height = 48.0F},
+            .color = UI::rgba8(255, 255, 255),
+            .imageSource = showcaseAtlasSource({.x = 0, .y = 32, .width = 32, .height = 32},
+                                               {.width = 32.0F, .height = 32.0F}),
+            .imageSourceInsets = {.left = 8, .top = 8, .right = 8, .bottom = 8},
+            .imageDestinationInsets = {.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F},
+            .imageSampling = UI::UIImageSampling::Linear,
+        },
+    };
+    UI::UIElementDescriptor statusPanel = UI::makePanelElement(statusPanelLayout);
+    statusPanel.visual.canvas = statusPanelCanvas;
     if (Core::Status status =
-            storeNode(createPanel(*tree, nodes_.cards[3], statusPanelLayout), nodes_.statusPanel);
+            storeNode(tree->createElement(nodes_.cards[3], statusPanel), nodes_.statusPanel);
         !status) {
         return status;
     }
@@ -1065,6 +1151,8 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     }
 
     controlCount_ = 20;
+    imageProductCount_ = 4;
+    imageResolver_ = std::move(*imageResolverRegistration);
     root_ = std::move(*root);
     return Core::success();
 }
@@ -1120,7 +1208,6 @@ Core::Status ShowcaseUI::applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTh
         theme.surface0,
         theme.surface2,
         theme.accent,
-        theme.danger,
     };
     for (Core::usize index = 0; index < nodes_.paletteSwatches.size(); ++index) {
         if (Core::Status status =
@@ -1219,6 +1306,10 @@ Core::Status ShowcaseUI::applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTh
         nodes_.notificationsLabel,
     };
     if (Core::Status status = setTextStyles(tree, bodyLabels, UI::makeBodyTextStyle(theme, 17.0F)); !status) {
+        return status;
+    }
+    const UI::UIButtonChrome primary = UI::makeButtonChrome(theme);
+    if (Core::Status status = setTextStyle(tree, nodes_.primaryButtonLabel, primary.label); !status) {
         return status;
     }
     const std::array secondaryLabels{
@@ -1638,6 +1729,7 @@ void ShowcaseUI::requestAutomatedStep(Core::u64 frameIndex) noexcept
 
 void ShowcaseUI::release() noexcept
 {
+    imageResolver_.reset();
     root_.reset();
 }
 
@@ -1655,6 +1747,7 @@ ShowcaseUISnapshot ShowcaseUI::snapshot() const noexcept
         .dropdownSelection = dropdownSelectionIndex_,
         .scrollOffset = scrollOffset_,
         .controlCount = controlCount_,
+        .imageProductCount = imageProductCount_,
         .quality = quality_,
         .notificationsEnabled = notificationsEnabled_,
         .rootAlive = static_cast<bool>(root_),

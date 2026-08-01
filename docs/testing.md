@@ -110,10 +110,13 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
   --frames=150 --frame-delay-ms=0 --theme=light --auto-demo
 ```
 
-两个自动 smoke 均须 exit 0，并输出 `controls=20`、`themeSwitches=2`、`sliderChanges>0`、
+两个自动 smoke 均须 exit 0，并输出 `controls=20`、`imageProducts=4`、`themeSwitches=2`、`sliderChanges>0`、
 `progressValue=84`、`dropdownSelection=1`、`listSelectionKey=1007`、`treeSelectionKey=4`、
 `treeExpansionChanges=2`、`scrollOffset=80`、`uiRootsCreated=1`、`uiRootsReleased=1`，最终主题回到
-`initialTheme`。
+`initialTheme`。图片产品证据还必须满足 `imageAtlasUploaded=true`、`imageAtlasReleased=true`、
+`imageResolverCalls=imageResolverHits>0`、`imageResolverUnavailable=0`、`maxImageQuads=12`、
+`maxImageBatches=4`、`maxUniqueImageResources=1`、`imageLinear=true`、`imageNearest=true` 与非零
+`paintOrderChecksum`。
 `--auto-demo` 与显式 `--frames` 同用时至少 120 帧。
 
 Visual/interaction 验收另跑不带 `--auto-demo` 的窗口：确认 Dark/Light 切换后既有控件同步换肤，
