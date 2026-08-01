@@ -1,5 +1,7 @@
 #include <tina/core/io/ReadFile.hpp>
 
+#include "Utf8Path.hpp"
+
 #include <tina/core/text/Utf8.hpp>
 
 #include <cerrno>
@@ -47,7 +49,7 @@ Result<std::pmr::vector<std::byte>> readFile(std::string_view utf8Path, ReadFile
     }
 
     std::error_code errorCode;
-    const std::filesystem::path path = std::filesystem::u8path(utf8Path);
+    const std::filesystem::path path = Detail::pathFromUtf8Bytes(utf8Path);
     const auto status = std::filesystem::status(path, errorCode);
     if (errorCode)
     {

@@ -1,5 +1,7 @@
 #include <tina/asset/CatalogPackagePublish.hpp>
 
+#include "Utf8Path.hpp"
+
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/io/WriteFile.hpp>
 
@@ -38,12 +40,12 @@ namespace {
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "relative path is invalid");
     }
-    const auto relative = std::filesystem::u8path(relativeUtf8);
+    const auto relative = Detail::pathFromUtf8Bytes(relativeUtf8);
     if (relative.is_absolute() || hasPathEscapeComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "relative path is not safe");
     }
-    const auto full = std::filesystem::u8path(catalogRootUtf8) / relative;
+    const auto full = Detail::pathFromUtf8Bytes(catalogRootUtf8) / relative;
     const auto generic = full.generic_u8string();
     return std::string(generic.begin(), generic.end());
 }

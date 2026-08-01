@@ -1,5 +1,7 @@
 #include <tina/asset/CatalogPackageValidation.hpp>
 
+#include "Utf8Path.hpp"
+
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
@@ -60,8 +62,8 @@ namespace {
             std::move(artifactPath.error()).withContext("validateCatalogPackageOnDisk", "makeCookedArtifactPath"));
     }
 
-    const auto root = std::filesystem::u8path(catalogRootUtf8);
-    const auto relative = std::filesystem::u8path(artifactPath->view());
+    const auto root = Detail::pathFromUtf8Bytes(catalogRootUtf8);
+    const auto relative = Detail::pathFromUtf8Bytes(artifactPath->view());
     if (relative.is_absolute() || hasPathEscapeComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "artifact relative path is not safe");
@@ -80,7 +82,7 @@ namespace {
     }
 
     std::error_code errorCode;
-    const auto path = std::filesystem::u8path(utf8Path);
+    const auto path = Detail::pathFromUtf8Bytes(utf8Path);
     const auto status = std::filesystem::status(path, errorCode);
     if (errorCode)
     {

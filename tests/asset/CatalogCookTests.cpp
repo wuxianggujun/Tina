@@ -665,7 +665,8 @@ TEST(CatalogCookTests, InvalidTileReferenceDoesNotPublishPartialCatalog)
 TEST(CatalogCookTests, RecipeFileRoundTrip)
 {
     std::pmr::unsynchronized_pool_resource memory;
-    const auto dir = std::filesystem::temp_directory_path() / "tina_catalog_cook_recipe";
+    const auto dir = std::filesystem::temp_directory_path()
+        / std::filesystem::path{u8"tina_catalog_cook_recipe_\u76ee\u5f55"};
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
     std::filesystem::create_directories(dir, ec);

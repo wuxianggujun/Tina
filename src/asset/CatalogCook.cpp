@@ -1,5 +1,7 @@
 #include <tina/asset/CatalogCook.hpp>
 
+#include "Utf8Path.hpp"
+
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackagePublish.hpp>
@@ -237,13 +239,13 @@ struct CookedPackage final {
 
 [[nodiscard]] Core::Result<std::string> joinPath(std::string_view baseUtf8, std::string_view relativeOrAbsolute)
 {
-    const auto path = std::filesystem::u8path(relativeOrAbsolute);
+    const auto path = Detail::pathFromUtf8Bytes(relativeOrAbsolute);
     if (path.is_absolute())
     {
         const auto generic = path.generic_u8string();
         return std::string(generic.begin(), generic.end());
     }
-    const auto full = std::filesystem::u8path(baseUtf8) / path;
+    const auto full = Detail::pathFromUtf8Bytes(baseUtf8) / path;
     const auto generic = full.generic_u8string();
     return std::string(generic.begin(), generic.end());
 }
@@ -1923,7 +1925,7 @@ Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view reci
     {
         text[index] = static_cast<char>(std::to_integer<unsigned char>((*bytes)[index]));
     }
-    const auto path = std::filesystem::u8path(recipeUtf8Path);
+    const auto path = Detail::pathFromUtf8Bytes(recipeUtf8Path);
     const auto base = path.parent_path();
     std::string baseUtf8 = ".";
     if (!base.empty())

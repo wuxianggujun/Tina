@@ -14,6 +14,7 @@
 #include <fstream>
 #include <memory_resource>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Tina::Asset::TestSupport {
@@ -222,12 +223,12 @@ struct TextureMaterialPackage final {
 };
 
 // Writes catalogRoot/manifest.tmnft + deterministic object paths for texture/material chain.
-[[nodiscard]] inline TextureMaterialPackage writeTextureMaterialPackage(std::string_view directoryName,
+[[nodiscard]] inline TextureMaterialPackage writeTextureMaterialPackage(std::filesystem::path directoryName,
                                                                         bool writeMaterialObject = true)
 {
     const auto digest = defaultPayloadHash();
     TextureMaterialPackage package{
-        .root = std::filesystem::temp_directory_path() / directoryName,
+        .root = std::filesystem::temp_directory_path() / std::move(directoryName),
         .textureId = assetId(1U),
         .materialId = assetId(2U),
         .textureBytes = makeCookedAsset(1U, AssetFormat::AssetKind::Texture2D),

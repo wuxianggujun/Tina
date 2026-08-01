@@ -1,5 +1,7 @@
 #include <tina/asset/AssetSystem.hpp>
 
+#include "Utf8Path.hpp"
+
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogLoadPlan.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
@@ -409,8 +411,8 @@ Core::Result<std::string> AssetSystem::resolveObjectPath(Core::AssetId assetId, 
     {
         return Core::failure(std::move(artifactPath.error()).withContext("AssetSystem", "artifactPath"));
     }
-    const auto root = std::filesystem::u8path(std::string_view(m_catalogRoot));
-    const auto relative = std::filesystem::u8path(artifactPath->view());
+    const auto root = Detail::pathFromUtf8Bytes(std::string_view(m_catalogRoot));
+    const auto relative = Detail::pathFromUtf8Bytes(artifactPath->view());
     if (relative.is_absolute() || hasPathEscapeComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "artifact relative path is not safe");

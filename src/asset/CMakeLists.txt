@@ -66,6 +66,7 @@ set(TINA_ASSET_SOURCES
     CatalogSnapshot.cpp
     CookedAssetBatch.cpp
     CookedAssetFile.cpp
+    Utf8Path.hpp
 )
 
 add_library(tina_asset_types INTERFACE)

@@ -46,7 +46,8 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
 TEST(WriteFileTests, AtomicWriteThenReadRoundTrip)
 {
     TrackingMemoryResource resource;
-    const auto path = std::filesystem::temp_directory_path() / "tina_writefile_tests" / "nested" / "blob.bin";
+    const auto path = std::filesystem::temp_directory_path() / "tina_writefile_tests"
+        / std::filesystem::path{u8"\u76ee\u5f55"} / std::filesystem::path{u8"\u6570\u636e.bin"};
     std::error_code ec;
     std::filesystem::remove_all(path.parent_path().parent_path(), ec);
 

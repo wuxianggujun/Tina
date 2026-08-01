@@ -32,6 +32,7 @@ add_library(tina_core STATIC
     diagnostics/Diagnostics.cpp
     hash/ContentHashDigest.cpp
     io/ReadFile.cpp
+    io/Utf8Path.hpp
     io/WriteFile.cpp
     id/GenerationId.cpp
     memory/CountingMemoryResource.cpp

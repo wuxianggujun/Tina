@@ -1,5 +1,7 @@
 #include <tina/asset/CookedAssetFile.hpp>
 
+#include "Utf8Path.hpp"
+
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/io/ReadFile.hpp>
 
@@ -199,8 +201,8 @@ Core::Result<CookedAssetFile> loadCookedAssetFromCatalog(std::string_view catalo
             std::move(artifactPath.error()).withContext("loadCookedAssetFromCatalog", "makeCookedArtifactPath"));
     }
 
-    const auto root = std::filesystem::u8path(catalogRootUtf8);
-    const auto relative = std::filesystem::u8path(artifactPath->view());
+    const auto root = Detail::pathFromUtf8Bytes(catalogRootUtf8);
+    const auto relative = Detail::pathFromUtf8Bytes(artifactPath->view());
     if (relative.is_absolute() || hasPathEscapeComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "artifact relative path is not safe");

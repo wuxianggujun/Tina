@@ -77,7 +77,8 @@ TEST(CatalogPackagePublishTests, PublishThenOpenValidates)
     });
     ASSERT_TRUE(manifest.has_value());
 
-    const auto root = std::filesystem::temp_directory_path() / "tina_publish_catalog";
+    const auto root = std::filesystem::temp_directory_path()
+        / std::filesystem::path{u8"tina_publish_catalog_\u76ee\u5f55"};
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
 

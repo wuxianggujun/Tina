@@ -1,5 +1,7 @@
 #include <tina/core/io/WriteFile.hpp>
 
+#include "Utf8Path.hpp"
+
 #include <tina/core/text/Utf8.hpp>
 
 #include <chrono>
@@ -59,7 +61,7 @@ Status createParentDirectories(std::string_view utf8Path)
         return status;
     }
     std::error_code errorCode;
-    const auto path = std::filesystem::u8path(utf8Path);
+    const auto path = Detail::pathFromUtf8Bytes(utf8Path);
     const auto parent = path.parent_path();
     if (parent.empty())
     {
@@ -81,7 +83,7 @@ Status writeFile(std::string_view utf8Path, std::span<const std::byte> bytes, Wr
     }
 
     std::error_code errorCode;
-    const auto finalPath = std::filesystem::u8path(utf8Path);
+    const auto finalPath = Detail::pathFromUtf8Bytes(utf8Path);
     if (config.createParents)
     {
         if (const auto status = createParentDirectories(utf8Path); !status)

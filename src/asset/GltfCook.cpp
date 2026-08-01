@@ -6,6 +6,7 @@
 #include "stb_image.h"
 
 #include "GltfFileSnapshot.hpp"
+#include "Utf8Path.hpp"
 
 #include <tina/asset/GltfCook.hpp>
 
@@ -45,17 +46,6 @@ namespace {
     }
     bytes[0] = static_cast<std::byte>(tag);
     return *Core::AssetId::fromBytes(bytes);
-}
-
-[[nodiscard]] std::filesystem::path pathFromStrictUtf8(std::string_view text)
-{
-    std::u8string utf8Path;
-    utf8Path.reserve(text.size());
-    for (const char byte : text)
-    {
-        utf8Path.push_back(static_cast<char8_t>(static_cast<unsigned char>(byte)));
-    }
-    return std::filesystem::path{utf8Path};
 }
 
 // Sequential suffix keeps multi-mesh Prefab deps strictly AssetId-sorted while
@@ -522,7 +512,7 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF external URI schemes are not supported (use relative paths under glTF root)");
     }
-    const std::filesystem::path relative = pathFromStrictUtf8(decoded);
+    const std::filesystem::path relative = Detail::pathFromUtf8Bytes(decoded);
     if (relative.is_absolute() || relative.has_root_path())
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -772,7 +762,7 @@ namespace {
                              "glTF path must be strict UTF-8 without NUL");
     }
 
-    const std::filesystem::path requestedPath = pathFromStrictUtf8(gltfUtf8Path);
+    const std::filesystem::path requestedPath = Detail::pathFromUtf8Bytes(gltfUtf8Path);
     auto source = GltfDetail::readFileSnapshot(requestedPath, nullptr, kMaxGltfSourceFileBytes);
     if (!source)
     {

@@ -1,5 +1,7 @@
 #include <tina/asset/CatalogPackage.hpp>
 
+#include "Utf8Path.hpp"
+
 #include <tina/asset/AssetErrors.hpp>
 
 #include <filesystem>
@@ -43,13 +45,13 @@ Core::Result<CatalogSnapshot> openCatalogPackage(std::string_view catalogRootUtf
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog package open requires memory resource");
     }
 
-    const auto relative = std::filesystem::u8path(config.manifestRelativePath);
+    const auto relative = Detail::pathFromUtf8Bytes(config.manifestRelativePath);
     if (relative.is_absolute() || hasPathEscapeComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "manifest relative path is not safe");
     }
 
-    const auto root = std::filesystem::u8path(catalogRootUtf8);
+    const auto root = Detail::pathFromUtf8Bytes(catalogRootUtf8);
     const auto fullPath = root / relative;
     const auto generic = fullPath.generic_u8string();
     const std::string utf8Path(generic.begin(), generic.end());

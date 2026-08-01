@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <filesystem>
 #include <memory_resource>
 #include <new>
 #include <thread>
@@ -215,7 +216,8 @@ class OwnerMemoryResource final : public std::pmr::memory_resource {
 TEST(AssetSystemAsyncPumpTests, RequestIoPumpMakesReady)
 {
     TrackingMemoryResource resource;
-    const auto package = writeTextureMaterialPackage("tina_asset_async_pump_ok");
+    const auto package = writeTextureMaterialPackage(
+        std::filesystem::path{u8"tina_asset_async_pump_\u76ee\u5f55"});
 
     auto taskSystem = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
         .ioWorkerCount = 1,
