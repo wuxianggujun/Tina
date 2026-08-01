@@ -100,11 +100,6 @@ using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
     return nullptr;
 }
 
-void expectOk(Core::Status status)
-{
-    EXPECT_TRUE(status.has_value()) << (status ? "" : status.error().message);
-}
-
 void assertOk(Core::Status status)
 {
     ASSERT_TRUE(status.has_value()) << (status ? "" : status.error().message);

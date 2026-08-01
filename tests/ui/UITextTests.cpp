@@ -409,7 +409,8 @@ TEST(UITextTests, TextPaintAndAutoSizeRespectLayoutPaddingAcrossLines)
         5.0F + 16.0F * 1.2F);
 
     bool foundLabel = false;
-    for (const UI::UICommittedLayoutEntry& entry : context->committedLayout().entries()) {
+    const UI::UICommittedLayoutView layout = context->committedLayout();
+    for (const UI::UICommittedLayoutEntry& entry : layout.entries()) {
         if (entry.node != label) {
             continue;
         }
@@ -457,7 +458,8 @@ TEST(UITextTests, SameTextIsNoOpAndClearingTextShrinksAutoSize)
     assertOk(updater.setText(label, ""));
     assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
     bool found = false;
-    for (const UI::UICommittedLayoutEntry& entry : context->committedLayout().entries()) {
+    const UI::UICommittedLayoutView layout = context->committedLayout();
+    for (const UI::UICommittedLayoutEntry& entry : layout.entries()) {
         if (entry.node != label) {
             continue;
         }

@@ -428,7 +428,8 @@ TEST_F(UITreeViewTest, PointerSelectsRowsAndDisclosureTogglesCommittedStableKey)
     EXPECT_TRUE(selected->selected);
     EXPECT_TRUE(selected->focused);
     bool foundSelectionPaint = false;
-    for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries())
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    for (const UI::UICommittedPaintEntry& entry : paint.entries())
     {
         foundSelectionPaint = foundSelectionPaint ||
                               (entry.node == selected->node &&

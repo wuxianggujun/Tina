@@ -3738,6 +3738,7 @@ TEST(EngineHostRunTest, RoutesConfiguredInputActionsIntoTheirRuntimePhaseContext
         .simulationAction = JumpAction,
         .frameAction = PauseAction,
         .enabled = true,
+        .capturedSimulationWorldPointerSample = std::nullopt,
     };
     ScriptedGameApplication application(game);
 
@@ -3877,6 +3878,7 @@ TEST(EngineHostRunTest, WorldPointerActionPayloadUsesLastPresentedCamera2D)
     game.actionWiring = ActionWiringProbe{
         .simulationAction = SelectAction,
         .enabled = true,
+        .capturedSimulationWorldPointerSample = std::nullopt,
     };
     game.scriptedRenderSceneCamerasByFrame = {
         cameraA,

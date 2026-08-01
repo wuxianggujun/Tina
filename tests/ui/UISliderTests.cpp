@@ -431,7 +431,8 @@ TEST(UISliderTest, ExplicitFocusPublishesFocusSemanticsAndFocusedThumb)
         (UI::UIPremultipliedRgba8Color{.red = 80, .green = 180, .blue = 250, .alpha = 255}));
 
     bool sawFocusedSlider = false;
-    for (const UI::UISemanticsEntry& entry : context->committedSemantics().entries())
+    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    for (const UI::UISemanticsEntry& entry : semantics.entries())
     {
         if (entry.node == slider)
         {

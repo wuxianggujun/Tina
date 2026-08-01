@@ -29,7 +29,8 @@ TEST_F(UITextEditTest, DefaultsTargetableWhileLabelRemainsReadOnly)
 
     bool sawLabelHit = false;
     bool sawTextEditHit = false;
-    for (const UI::UICommittedHitEntry& entry : context->committedHit().entries()) {
+    const UI::UICommittedHitView hit = context->committedHit();
+    for (const UI::UICommittedHitEntry& entry : hit.entries()) {
         if (entry.node == label) {
             sawLabelHit = true;
             EXPECT_EQ(entry.policy, UI::UIPointerHitPolicy::Ignore);
@@ -73,7 +74,8 @@ TEST_F(UITextEditTest, PaintStatesReuseHoverArmAndFocusWithoutStalePressedFeedba
 
     const auto expectBackground = [&](UI::UIPremultipliedRgba8Color expected) {
         const UI::UICommittedPaintEntry* background = nullptr;
-        for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries()) {
+        const UI::UICommittedPaintView paint = context->committedPaint();
+        for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
             if (entry.node == textEdit && entry.kind != UI::UICommittedPaintKind::Glyph && entry.worldRect.width == 240.0F &&
                 entry.worldRect.height == 32.0F) {
                 background = &entry;
@@ -235,7 +237,7 @@ TEST_F(UITextEditTest, InvalidTextInputAndCompositionLeaveActivePreeditUnchanged
         Platform::TextCompositionStage::Updated,
         UI::UIErrorCode::CapacityExceeded);
 
-    for (const auto [sequence, invalidInput] : {
+    for (const auto& [sequence, invalidInput] : {
              std::pair{6ULL, std::string_view{"\xE2\x82", 2}},
              std::pair{7ULL, std::string_view{"A\0B", 3}},
          }) {

@@ -680,7 +680,7 @@ TEST_F(UIEnabledStateTest, DisabledSliderDoesNotDragChangeOrInvokeCallback)
     EXPECT_FALSE(context->defaultActionFocus().hasValue());
     publishLayout();
 
-    for (const auto [kind, sequence, x] : {
+    for (const auto& [kind, sequence, x] : {
              std::tuple{UI::UIRoutedPointerEventKind::ButtonDown, u64{1}, 90.0F},
              std::tuple{UI::UIRoutedPointerEventKind::Move, u64{2}, 110.0F},
              std::tuple{UI::UIRoutedPointerEventKind::ButtonUp, u64{3}, 119.0F},

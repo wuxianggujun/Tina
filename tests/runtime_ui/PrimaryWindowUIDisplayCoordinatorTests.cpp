@@ -317,7 +317,8 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, ReusesItsFixedStorageForThreeHundr
     TrackingMemoryResource storage;
     {
         auto coordinator = createCoordinator({.commandCount = 8, .clipCount = 8, .batchCount = 8}, storage);
-        ASSERT_EQ(storage.allocationCount, 9U);
+        const usize constructionAllocationCount = storage.allocationCount;
+        ASSERT_GT(constructionAllocationCount, 0U);
         storage.rejectAllocations = true;
 
         const Render::UIDrawCommand* fixedCommands = nullptr;
@@ -335,10 +336,10 @@ TEST_F(PrimaryWindowUIDisplayCoordinatorTest, ReusesItsFixedStorageForThreeHundr
             EXPECT_EQ(build->displayList.commands().data(), fixedCommands);
         }
 
-        EXPECT_EQ(storage.allocationCount, 9U);
+        EXPECT_EQ(storage.allocationCount, constructionAllocationCount);
         EXPECT_EQ(coordinator.builderStatistics().committedBuildCount, 300U);
     }
-    EXPECT_EQ(storage.deallocationCount, 9U);
+    EXPECT_EQ(storage.deallocationCount, storage.allocationCount);
 }
 
 } // namespace

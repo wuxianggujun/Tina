@@ -293,7 +293,8 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
     const UI::UINodeId selectedRowNode = selectedRow->node;
     const auto expectSelectedRowColor = [&](UI::UIStraightSrgba8Color expected) {
         bool found = false;
-        for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries())
+        const UI::UICommittedPaintView paint = context->committedPaint();
+        for (const UI::UICommittedPaintEntry& entry : paint.entries())
         {
             found = found || (entry.node == selectedRowNode && entry.solidFill == UI::premultiply(expected));
         }
@@ -330,7 +331,8 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
     EXPECT_FALSE(context->defaultActionFocus().hasValue());
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
     bool foundDisabledSelection = false;
-    for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries())
+    const UI::UICommittedPaintView disabledPaint = context->committedPaint();
+    for (const UI::UICommittedPaintEntry& entry : disabledPaint.entries())
     {
         foundDisabledSelection =
             foundDisabledSelection ||
