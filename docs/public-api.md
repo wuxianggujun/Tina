@@ -20,9 +20,10 @@ target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
 `Tina::GameSDK` 聚合下表中的 backend-neutral Runtime、Scene、Asset、UI、Audio 等稳定模块；安装 package
-声明 `xxHash`（以及启用 Physics2D 时的 `box2d`）依赖，不复制第三方库。Windows 外部 headless consumer
-已经只通过安装前缀完成 configure/build/run。`Tina::DesktopBootstrap` 与 GLFW/bgfx/FreeType/miniaudio adapter
-尚未进入安装 export，Linux consumer 与正式发布 ABI 政策仍属于 `SDK-001` 后续工作。
+声明 `xxHash`（以及启用 Physics2D 时的 `box2d`）依赖，不复制第三方库。Windows 与 Linux 外部 headless
+consumer 已经只通过安装前缀完成 configure/build/run，并复用同一安装头第三方 token 扫描。
+`Tina::DesktopBootstrap` 与 GLFW/bgfx/FreeType/miniaudio adapter 尚未进入安装 export，正式发布 ABI 政策仍属于
+`SDK-001` 后续工作。
 
 ## CMake targets
 
@@ -577,7 +578,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
-- 可安装的 `Tina::DesktopBootstrap`/backend adapter 闭包、Linux consumer gate 与正式发布 ABI/兼容策略。
+- 可安装的 `Tina::DesktopBootstrap`/backend adapter 闭包与正式发布 ABI/兼容策略。
 
 任务状态见 [Backlog](backlog.md)。修改公开头后必须构建 header-isolation/consumer、扫描第三方 token，
 并按 [测试说明](testing.md) 运行受影响 executable 与 sample。

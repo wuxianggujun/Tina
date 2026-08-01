@@ -180,7 +180,8 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 
 ### 还不可以
 
-- 通过安装目录和 `find_package(Tina)` 使用正式 Game SDK，`SDK-001` 尚未完成；
+- 通过安装目录使用 `Tina::DesktopBootstrap`/backend adapter，或依赖正式 ABI/兼容策略；`SDK-001` 的
+  backend-neutral `find_package(Tina)` Windows/Linux consumer 首切片已完成；
 - 注册任意新 Widget class 或 Behavior state machine；
 - 定义用户 StyleClass、selector、pseudo-state stylesheet；
 - 从 UI 持有 AssetHandle/Lease、FrameResourceRef 或 texture/bgfx handle；

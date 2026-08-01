@@ -4,12 +4,12 @@
   Generic Windows host launcher for Tina Linux Docker gates.
 
 .PARAMETER Gate
-  gcc13-null | gcc13-platform | clang22-null | clang22-sanitize
+  gcc13-null | gcc13-platform | clang22-null | clang22-sanitize | sdk-consumer
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('gcc13-null', 'gcc13-platform', 'clang22-null', 'clang22-sanitize')]
+    [ValidateSet('gcc13-null', 'gcc13-platform', 'clang22-null', 'clang22-sanitize', 'sdk-consumer')]
     [string]$Gate,
     [string]$SourceRoot = '',
     [switch]$SkipImageBuild,
@@ -55,6 +55,13 @@ $map = @{
         Script = 'tools/linux/run-clang22-sanitize-gate.sh'
         Container = 'tina-test-001-clang22-sanitize'
         GateId = 'TEST-001-linux-clang22-sanitize'
+    }
+    'sdk-consumer' = @{
+        Image = 'tina-linux-gcc13:test-001'
+        Dockerfile = 'docker/linux-gcc13/Dockerfile'
+        Script = 'tools/linux/run-sdk-consumer-gate.sh'
+        Container = 'tina-sdk-001-gcc13-consumer'
+        GateId = 'SDK-001-linux-gcc13-consumer'
     }
 }
 

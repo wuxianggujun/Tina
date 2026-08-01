@@ -95,7 +95,7 @@ cmake --build --preset windows-vnext-debug `
 多配置输出位于 `out/build/windows-msvc-vnext/bin/Debug` 或 `bin/Release`。对应 executable 必须使用
 同一配置目录的 DLL；Debug/Release 不得混跑。
 
-## Windows 安装 SDK consumer
+## Windows / Linux 安装 SDK consumer
 
 先配置 Null 图，再运行安装 consumer 门禁：
 
@@ -111,8 +111,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 build tree。consumer 的 CMake 入口只有 `find_package(Tina CONFIG REQUIRED)` 和 `Tina::GameSDK`，并拒绝
 源码树 `include` 路径或安装 prefix 外的 Tina include。Debug/Release package 必须与 consumer 配置一致。
 
-该门禁当前证明 Windows headless/Null SDK；不等价于已安装 DesktopBootstrap、GLFW/bgfx adapter 或 Linux
-consumer。package 继续通过 vcpkg toolchain 解析 `xxHash` 等声明的外部依赖，不把第三方复制进 Tina SDK。
+Linux GCC13 Null 图使用同一安装头扫描和同一个仓库外 consumer：
+
+```bash
+export VCPKG_ROOT=/opt/vcpkg
+tools/linux/run-sdk-consumer-gate.sh
+```
+
+脚本默认增量配置 `linux-gcc13-vnext`；可用 `TINA_SDK_CONFIGURE_PRESET`、
+`TINA_SDK_BUILD_DIRECTORY`、`TINA_SDK_CONFIGURATION` 与 `TINA_SDK_BUILD_JOBS` 覆盖工具链和 build tree。
+Windows 主机可通过现有 GCC13 Docker 镜像运行相同门禁：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-consumer
+```
+
+两套门禁证明 Windows/Linux headless/Null SDK；不等价于已安装 DesktopBootstrap 或
+GLFW/bgfx/FreeType/miniaudio backend adapter。package 继续通过 vcpkg toolchain 解析 `xxHash` 等声明的
+外部依赖，不把第三方复制进 Tina SDK。
 
 ## Windows Platform/Desktop/bgfx
 
