@@ -170,6 +170,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_route_v
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_virtual_collection_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_image_nineslice_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_component_build_v1 --warmup=10 --samples=100 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_style_state_v1 --warmup=60 --samples=600 --seed=1
 py -3 tools\bench\run_benchmark_gate.py --processes 5 `
   out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe -- `
   --workload=ui_static_commit_v1 --warmup=60 --samples=600 --seed=1
@@ -193,6 +194,11 @@ root（Scroll + 2 Canvas commands）、RangeInput + Activate + Toggle、TextEdit
 Selection=1；JSON 必须报告各池 requested=reserved=published、capacity failure/outstanding=0、稳定非零 tree
 checksum、warmup 后 UI PMR allocation delta=0 与 clean commit rebuild=0。旧
 `ui_component_build_activate_toggle_v1` 只保留为 `coverage=activate_toggle_only` 的前置诊断 workload。
+
+`ui_style_state_v1` 固定 4096 nodes、64 classes、256 rules 与每个 styled node 4 个 class link；每个 sample
+只切换一个 retained `Disabled` state，必须得到 inspected/resolved nodes=1、candidate rules=16、layout/hit=0、
+clean commit style/rebuild=0、bucket/class-link high-water 稳定、非零 style/DisplayList checksum 与
+warmup 后 UI PMR allocation delta=0。
 
 正式采样规模、fingerprint 与固定机规则见[性能与内存](performance-memory.md)和
 [ADR 0018](adr/0018-benchmark-protocol.md)。

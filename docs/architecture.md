@@ -229,15 +229,17 @@ cleanup 账簿都已删除。`ASSET-HANDLE-SCENE` 的 A1-A6 与 N16.1-N16.4 已�
 已经完成；UI-005 的滚动、弹出组合控件与固定 row pool 集合控件也已经完成。
 
 业务扩展当前以 Element 组合为主：第三方可组合 retained 子树、布局、Semantics、StyleRole/局部 paint、
-Image/Icon content、Canvas Image/NineSlice 与现有 callback，但不能注册 Widget subclass、新 Behavior、
-stylesheet、Motion 或 GPU paint callback。图片 retained tree 只保存 AssetId/geometry/tint/sampling metadata；
+Image/Icon content、Canvas Image/NineSlice 与现有 callback，并可在首个 retained node 前注册 StyleClass、安装
+node-local literal BoxFill stylesheet；但不能注册 Widget subclass、新 Behavior、通用 selector/token declaration、
+Motion 或 GPU paint callback。图片 retained tree 只保存 AssetId/geometry/tint/sampling metadata；
 Runtime root-scoped resolver 在 frame packet 构建时按 `(root, AssetId)` 去重并通过通用 Texture2D ref + pin
 交付 RGBA ImageQuad，NineSlice 在 committed paint 中原子展开1..9个相同 command。Button 已有即时
 hover/pressed/focus/disabled 反馈，尚无时间插值动画；`makeSliderElement()` 的
 Focusable/Focus semantics 已与私有 keyboard-focus trait 对齐，Slider 可参与 Tab/空间导航与显式焦点；
 `UI-STATE-FEEDBACK` 的 Dark/Light 产品视觉证据已完成。RangeInput 通过独立 capability command 在 focused
-Slider 上消费 Arrow/D-pad 调值，不复用通用空间焦点状态机。后续先关闭 Image C 的产品/性能证据，再推进
-Component、StyleClass/pseudo-state 与 paint-only Motion；具体取舍见 [UI 框架设计](ui-framework.md)。
+Slider 上消费 Arrow/D-pad 调值，不复用通用空间焦点状态机。Image、Component 与
+StyleClass/pseudo-state 的产品/性能切片均已落地；后续补 Style token/declaration、Image tint/opacity 等属性面与
+paint-only Motion，具体取舍见 [UI 框架设计](ui-framework.md)。
 
 文本使用严格 UTF-8；MSVC target 强制 `/utf-8`。可选 FreeType 负责 rasterization，UI/Render 通过 R8
 Glyph atlas 与后端无关 DisplayList 连接。ProgressBar 是非交互的 determinate range/value 控件；

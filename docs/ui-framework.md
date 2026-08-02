@@ -175,7 +175,8 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 - 用 Panel、Label、Button、Checkbox、Slider、ListView、TreeView 等组合自己的业务组件；
 - 定义组件函数并返回一组 `UINodeId`，例如 Inventory slot 的 root/icon/count label；
 - 设置布局、文本、Semantics、命中策略、StyleRole、局部 box/text/control paint；
-- 在 `UIContext` 创建首个节点前注册 StyleClass、安装 literal BoxFill stylesheet；
+- 在 `UIContext` 创建首个节点前注册 StyleClass、安装 literal BoxFill stylesheet；游戏侧通过
+  `GameStateEnter` 的 `PrimaryWindowUIRootBuilder` 使用同一 startup-only 契约；
 - 注册 routed pointer listener，使用 Button/Slider/selection 等已有 callback；
 - 使用 Image/Icon content，以及 `SolidRect`/`Image`/Stretch-only `NineSlice` Canvas 组合 backend-neutral 图形。
 - 通过安装目录使用 backend-neutral `Tina::GameSDK`、独立 `PlatformGlfw`、DesktopBootstrap/RenderBgfx
@@ -186,7 +187,6 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 - 依赖跨发行版 artifact transfer 或正式 ABI/兼容策略；AudioMiniaudio 安装 adapter 与
   Windows/Linux moved-prefix consumer 已可用；
 - 注册任意新 Widget class 或 Behavior state machine；
-- 从 Runtime facade 注册 class/sheet；
 - 从 UI 持有 AssetHandle/Lease、FrameResourceRef 或 texture/bgfx handle；
 - 声明 transition、tween、timeline 或 keyframe animation；
 - 传入任意 GPU/paint callback。
@@ -366,8 +366,10 @@ cache，再由 committed paint 只读该 cache。优先级为 product chrome < s
 paint/state 更新不扫描全树或完整 rule table，并输出 inspected node、resolved node 与 candidate rule counter。
 ListView/TreeView owner 更新时仅额外刷新固定 materialized row pool，防止虚拟行复用残留 Selected 样式。
 
-下一步仍需补 Runtime facade、token registry/value/declaration 与 reverse dependency、Image tint/opacity 和
-其他属性 dirty metadata，以及 `ui_style_state_v1` benchmark 与产品视觉门禁。
+`PrimaryWindowUIRootBuilder` 已在 `GameStateEnter` 暴露同一 startup-only class 注册与 literal sheet 安装契约；
+`ui_style_state_v1` 已补齐 4096-node/256-rule 固定 workload、单节点 resolve counter、bucket/class-link
+high-water、clean commit 零工作与稳定 checksum。下一步仍需补 token registry/value/declaration 与 reverse
+dependency、Image tint/opacity、其他属性 dirty metadata 和产品视觉门禁。
 
 第一版 selector 只支持当前节点的 `role + class + state mask`，不支持 descendant、`nth-child`、运行时
 CSS parser 或任意 specificity。推荐优先级：
@@ -665,7 +667,7 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 | `ui_route_v1` | 4096 hit entries、route depth 64；固定 target/miss/capture 序列 | visited hit entries、route path depth、listener calls、consume/claim checksum；allocation delta 为 0 |
 | `ui_virtual_collection_v1` | 100k logical items、固定 64-row pool 与 scroll sequence | materialized row/high-water 稳定、warmup 后 storage 不增长、selection/semantics checksum |
 | `ui_component_build_v1` | 256 个四节点 Component；固定 text/canvas payload 与 Activate/Toggle/Range/TextInput/Scroll/Selection slot mix | build/commit 时间、node/text-byte/canvas/behavior 的 reserved/published counter、各 pool high-water、allocation delta 与 tree checksum；commit 后无 retained wrapper，后续 clean commit rebuild 为 0 |
-| `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved nodes、candidate rules、bucket high-water；单节点 state change 不 layout/hit/全树 resolve |
+| `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | inspected/resolved nodes、candidate rules、bucket/class-link high-water；单节点 state change 不 layout/hit/全树 resolve，clean commit 为零 |
 | `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | 每 build `Q=5096/U=64/B=1000`；64 resolve hit、5032 cache dedupe、64 pin acquire/release；错误计数与 allocation delta 为 0，high-water/checksum 稳定 |
 | `ui_motion_v1` | 4096 nodes、active tracks 分别为 0/64/1024、固定 clock | sampled=`M`、active/high-water；0 active 时 motion work/额外 dirty 为 0；layout/hit rebuild 为 0 |
 
@@ -700,8 +702,8 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 5. `UI-COMPONENT-001` Done：Runtime bounded transaction、六类 Behavior side store、node/text/canvas/Behavior
    统一 reservation/counter 与冻结的 `ui_component_build_v1` 已落地；
 6. `UI-STYLE-001` InProgress：fixed-capacity style kernel、Context capacity/startup install、每节点最多 4 个
-   class link，以及 retained state + resolved BoxFill paint cache 已落地；下一步补 Runtime facade、token
-   dependency、Image tint/opacity、其他属性 dirty metadata 与 `ui_style_state_v1`；
+   class link、retained state + resolved BoxFill paint cache、Runtime startup facade，以及 `ui_style_state_v1` 已落地；
+   下一步补 token dependency、Image tint/opacity 与其他属性 dirty metadata；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。
 
 独立或后置 lane：

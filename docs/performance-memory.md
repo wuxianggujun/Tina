@@ -72,7 +72,7 @@ Image/Icon/NineSlice 和 Motion 必须扩展现有统计模型，而不是另建
 `UI-PERF-001` 的首个 milestone 已建立前四条版本化 workload，Image 与 Component 垂直切片已分别补齐
 `ui_image_nineslice_v1` 和 `ui_component_build_v1`。旧
 `ui_component_build_activate_toggle_v1` 仅保留为 Activate/Toggle 前置诊断 workload，不替代完整验收。
-其余 workload 随 Style/Motion 垂直切片补齐。
+Style 垂直切片已补齐 `ui_style_state_v1`；其余 workload 随 Motion 垂直切片补齐。
 在 `PERF-002` 固定门禁机完成前，时间结论保持 `conclusion=provisional`：
 
 | Workload | 固定规模 | 确定性输出/门禁 |
@@ -83,7 +83,7 @@ Image/Icon/NineSlice 和 Motion 必须扩展现有统计模型，而不是另建
 | `ui_virtual_collection_v1` | 100k logical items、固定 64-row pool/scroll sequence | materialized row/high-water，warmup 后 Tina-routed storage 不增长，selection/semantics checksum |
 | `ui_component_build_v1` | 256 个四节点 Component；固定 text/canvas payload 与 Activate/Toggle/Range/TextInput/Scroll/Selection slot mix | build/commit 时间、node/text-byte/canvas/behavior 的 reserved/published counter、各 pool high-water、allocation delta 与 tree checksum；commit 后无 retained wrapper，后续 clean commit rebuild 为 0 |
 | `ui_component_build_activate_toggle_v1` | 256 个四节点 Component；每组件固定 11 text bytes、2 Canvas commands、2 Activate + 2 Toggle slots | **前置证据，非冻结 workload 验收：** 直接测 `UIElementBuildTransaction` 的 build/commit/clean-commit 时间、requested/published 与 side-store capacity/high-water、稳定 tree checksum、allocation delta/clean rebuild 为 0；schema 明示其余 Behavior 和 reservation counter 未覆盖 |
-| `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved/inspected nodes、candidate rules、bucket/dependency high-water；单节点 state change 不全树 resolve |
+| `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved/inspected nodes、candidate rules、bucket/class-link high-water；单节点 state change 不全树 resolve |
 | `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | 每 build `Q=5096/U=64/B=1000`、64 resolve hit、5032 cache dedupe、64 pin acquire/release；missing/not-ready/extent mismatch/resource-intern dedupe 与 allocation delta 为 0；command/batch/resource/pin high-water 和 DisplayList checksum 稳定 |
 | `ui_motion_v1` | 4096 nodes、active track 分别为 0/64/1024、固定 clock | sampled/active/high-water=`M`；0 active 时 motion work/额外 dirty 为 0；layout/hit rebuild 为 0，记录 paint publication |
 
@@ -175,8 +175,8 @@ py -3 -m unittest tools/bench/test_run_benchmark_gate.py -v
 
 正式候选采样遵循 ADR 0018：每进程 warm-up 600、普通样本至少 2,000；p99/泄漏结论使用 10,000，且需
 多进程 runner 可以验证统计与兼容协议，但只有受审固定 machine profile/baseline 才能启用 hard gate。
-当前命令已覆盖 `UI-PERF-001` 首个 milestone、Image/NineSlice 与完整 Component workload；尚未覆盖
-Style/Motion。
+当前命令已覆盖 `UI-PERF-001` 首个 milestone、Image/NineSlice、完整 Component 与 Style workload；尚未覆盖
+Motion。
 
 ## 验证工具
 

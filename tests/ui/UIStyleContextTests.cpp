@@ -24,9 +24,9 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 }
 
 [[nodiscard]] std::unique_ptr<UI::UIContext> createStyleContext(
-    UI::UIContextCapacityConfig config)
+    UI::UIContextCapacityConfig config, bool applyDefaultProductChrome = false)
 {
-    config.applyDefaultProductChrome = false;
+    config.applyDefaultProductChrome = applyDefaultProductChrome;
     auto context = UI::UIContext::Create(makeStyleTestWindow(), config);
     EXPECT_TRUE(context.has_value())
         << (context ? "" : context.error().message);
@@ -77,6 +77,20 @@ findPaintEntry(UI::UICommittedPaintView view, UI::UINodeId node) noexcept
         }
     }
     return nullptr;
+}
+
+[[nodiscard]] bool hasPaintFill(UI::UICommittedPaintView view, UI::UINodeId node,
+                                UI::UIPremultipliedRgba8Color color) noexcept
+{
+    for (const UI::UICommittedPaintEntry& entry : view.entries())
+    {
+        if (entry.node == node && entry.kind == UI::UICommittedPaintKind::SolidQuad &&
+            entry.solidFill == color)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 TEST(UIStyleContextTests, RegistersAndAtomicallyInstallsOnlyBeforeFirstNode)
@@ -245,6 +259,63 @@ TEST(UIStyleContextTests, ResolvesRetainedStateIntoCommittedBoxFillCache)
     EXPECT_EQ(cleanStatistics.lastStyleInspectedNodeCount, 0U);
     EXPECT_EQ(cleanStatistics.lastStyleResolvedNodeCount, 0U);
     EXPECT_EQ(cleanStatistics.lastStyleCandidateRuleCount, 0U);
+}
+
+TEST(UIStyleContextTests, StylesheetOverridesDefaultProductChromeForClasslessAndClassRules)
+{
+    auto context = createStyleContext(styleTestCapacity(), true);
+    ASSERT_NE(context, nullptr);
+    const UI::UIStyleClassId accent = *context->registerStyleClass();
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .color = UI::rgb(0x184E77),
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .styleClass = accent,
+            .color = UI::rgb(0xF4A261),
+        },
+    };
+    assertOk(context->installStyleSheet(rules));
+
+    auto root = createStyleRoot(*context);
+    ASSERT_TRUE(root);
+    UI::UIElementDescriptor classlessDescriptor =
+        UI::makeButtonElement({}, fixedSize(40.0F, 30.0F));
+    classlessDescriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
+    const auto classlessSurface = context->rootBuilder().createElement(
+        root.rootNodeId(), classlessDescriptor);
+    ASSERT_TRUE(classlessSurface.has_value()) << classlessSurface.error().message;
+
+    const std::array buttonClasses{accent};
+    UI::UIElementDescriptor buttonDescriptor =
+        UI::makeButtonElement({}, fixedSize(40.0F, 30.0F));
+    buttonDescriptor.visual.styleClasses = buttonClasses;
+    const auto button = context->rootBuilder().createElement(
+        root.rootNodeId(), buttonDescriptor);
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    assertOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *classlessSurface,
+                             UI::premultiply(UI::rgb(0x184E77))));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *button,
+                             UI::premultiply(UI::rgb(0xF4A261))));
+
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
+    auto updater = std::move(*updaterResult);
+    assertOk(updater.setEnabled(*classlessSurface, false));
+    assertOk(updater.setEnabled(*button, false));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *classlessSurface,
+                             UI::premultiply(UI::rgb(0x184E77))));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *button,
+                             UI::premultiply(UI::rgb(0xF4A261))));
+    const UI::UIContextStatistics statistics = context->statistics();
+    EXPECT_EQ(statistics.lastStyleInspectedNodeCount, 2U);
+    EXPECT_EQ(statistics.lastStyleResolvedNodeCount, 2U);
+    EXPECT_EQ(statistics.lastStyleCandidateRuleCount, 2U);
 }
 
 TEST(UIStyleContextTests, LocalBoxPaintOverrideWinsOverStylesheet)

@@ -21,6 +21,7 @@
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITreeView.hpp>
 
+#include <span>
 #include <string_view>
 
 namespace Tina::Runtime::Detail {
@@ -253,6 +254,13 @@ class PrimaryWindowUIRootBuilder final {
     PrimaryWindowUIRootBuilder(PrimaryWindowUIRootBuilder&& other) noexcept;
     PrimaryWindowUIRootBuilder& operator=(PrimaryWindowUIRootBuilder&& other) noexcept;
 
+    // Startup stylesheet authoring is available only during GameStateEnter and
+    // before createRoot() publishes the first retained node. The Context copies
+    // rules during installStyleSheet(), owns returned class ids, and atomically
+    // preserves the previous sheet when compilation fails.
+    [[nodiscard]] Core::Result<UI::UIStyleClassId> registerStyleClass();
+    [[nodiscard]] Core::Status installStyleSheet(
+        std::span<const UI::UIStyleBoxFillRule> rules);
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot();
     [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater> treeUpdater(UI::UIRootOwner& rootOwner);
     [[nodiscard]] Core::Result<PrimaryWindowUIImageResolverRegistration>

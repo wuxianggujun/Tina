@@ -1194,6 +1194,27 @@ PrimaryWindowUIRootBuilder& PrimaryWindowUIRootBuilder::operator=(PrimaryWindowU
     return *this;
 }
 
+Core::Result<UI::UIStyleClassId> PrimaryWindowUIRootBuilder::registerStyleClass()
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIStyleClassId>(
+            "PrimaryWindowUIRootBuilder::registerStyleClass");
+    }
+    return m_state->registerStyleClass(m_epoch);
+}
+
+Core::Status PrimaryWindowUIRootBuilder::installStyleSheet(
+    std::span<const UI::UIStyleBoxFillRule> rules)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>(
+            "PrimaryWindowUIRootBuilder::installStyleSheet");
+    }
+    return m_state->installStyleSheet(m_epoch, rules);
+}
+
 Core::Result<UI::UIRootOwner> PrimaryWindowUIRootBuilder::createRoot()
 {
     if (m_state == nullptr)

@@ -46,6 +46,9 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] const Render::Texture2DFrameResourceResolver*
     findImageResolver(UI::UINodeId root) const noexcept;
 
+    [[nodiscard]] Core::Result<UI::UIStyleClassId> registerStyleClass(u64 epoch);
+    [[nodiscard]] Core::Status installStyleSheet(
+        u64 epoch, std::span<const UI::UIStyleBoxFillRule> rules);
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot(u64 epoch);
     [[nodiscard]] Core::Result<bool> isAlive(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
                                              UI::UINodeId node);

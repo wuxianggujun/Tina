@@ -28,7 +28,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | --- | --- |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
-| UI-PERF-001 | InProgress；UI 静态、单节点 dirty、route、虚拟集合首个 milestone，以及 Image/Icon/NineSlice 与完整 Component workload 已落地，后续扩展 Style、Motion counter/checksum |
+| UI-PERF-001 | InProgress；UI 静态、单节点 dirty、route、虚拟集合首个 milestone，以及 Image/Icon/NineSlice、完整 Component 与 Style workload 已落地，后续扩展 Motion counter/checksum |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-COMPONENT-001 | Done；标准 Behavior 独立 side store、phase-scoped bounded transaction、全池 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | UI-IMAGE-001 | Done；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
@@ -61,8 +61,8 @@ SDK-001 (independent packaging lane; does not wait for UI-FLOW-001)
 已经汇合到 `UI-STYLE-001`。
 `UI-RANGE-INPUT-KEYBOARD` 已独立关闭且不依赖 ADR 0023；已完成的 Image/Component 均未复制其输入状态。
 `UI-PERF-001` 首个 milestone 已完成，任务为 `InProgress`，Image/Component 已解锁；它不是只执行一次，
-Component 与 Image 已扩展同一协议；Style、Motion 后续垂直切片仍必须继续扩展
-counter/checksum 协议。固定机绝对时间阈值仍由 `PERF-002` 冻结；在此之前 clean-frame rebuild、容量、
+Component、Image 与 Style 已扩展同一协议；Motion 后续垂直切片仍必须继续扩展 counter/checksum 协议。
+固定机绝对时间阈值仍由 `PERF-002` 冻结；在此之前 clean-frame rebuild、容量、
 分配和 checksum 等确定性不变量可以阻断，开发机墙钟只报告 `provisional`。`SDK-001` 先证明当前公开
 SDK 可安装；以后每个新增公共 UI 切片同步扩展 consumer gate，不等待 Deferred 的 UI Flow。
 

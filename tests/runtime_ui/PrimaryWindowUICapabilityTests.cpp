@@ -56,6 +56,20 @@ class PrimaryWindowUICapabilityTest : public testing::Test {
     return paint;
 }
 
+[[nodiscard]] bool hasPaintFill(UI::UICommittedPaintView view, UI::UINodeId node,
+                                UI::UIPremultipliedRgba8Color color) noexcept
+{
+    for (const UI::UICommittedPaintEntry& entry : view.entries())
+    {
+        if (entry.node == node && entry.kind == UI::UICommittedPaintKind::SolidQuad &&
+            entry.solidFill == color)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 [[nodiscard]] UI::UILayoutStyle fixedSize(float width, float height) noexcept
 {
     UI::UILayoutStyle style{};
@@ -225,6 +239,141 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     auto expiredBuilder = builder->createRoot();
     ASSERT_FALSE(expiredBuilder.has_value());
     EXPECT_EQ(expiredBuilder.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, StyleSheetFacadeRegistersClassAndInstallsLiteralSheetBeforeRootCreation)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+
+    std::optional<Core::Result<UI::UIStyleClassId>> crossThread;
+    std::thread worker([&] { crossThread.emplace(builder->registerStyleClass()); });
+    worker.join();
+    ASSERT_TRUE(crossThread.has_value());
+    ASSERT_FALSE(crossThread->has_value());
+    EXPECT_EQ(crossThread->error().code, RuntimeErrorCode::WrongOwnerThread);
+
+    auto styleClassResult = builder->registerStyleClass();
+    ASSERT_TRUE(styleClassResult.has_value()) << styleClassResult.error().message;
+    const UI::UIStyleClassId styleClass = *styleClassResult;
+    UI::UIStyleBoxFillRule rule{
+        .role = UI::UIStyleRoleId::PanelSurface,
+        .styleClass = styleClass,
+        .color = UI::rgb(0x2357A6),
+    };
+    ASSERT_TRUE(builder->installStyleSheet(std::span(&rule, 1)).has_value());
+    rule.color = UI::rgb(0xB42318);
+    const UI::UIStyleStatistics published = context->statistics().style;
+    EXPECT_EQ(published.registeredClassCount, 1U);
+    EXPECT_EQ(published.activeRuleCount, 1U);
+    EXPECT_EQ(published.activeBucketCount, 1U);
+    EXPECT_EQ(published.revision, 1U);
+
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    UI::UIElementDescriptor descriptor =
+        UI::makeButtonElement({}, fixedSize(80.0F, 40.0F));
+    descriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
+    descriptor.visual.styleClasses = std::span(&styleClass, 1);
+    auto panel = tree->createElement(root->rootNodeId(), descriptor);
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+    EXPECT_EQ(context->statistics().style.activeNodeClassLinkCount, 1U);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *panel,
+                             UI::premultiply(UI::rgb(0x2357A6))));
+    EXPECT_FALSE(hasPaintFill(context->committedPaint(), *panel,
+                              UI::premultiply(UI::rgb(0xB42318))));
+
+    auto expiredClass = builder->registerStyleClass();
+    ASSERT_FALSE(expiredClass.has_value());
+    EXPECT_EQ(expiredClass.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSheet =
+        builder->installStyleSheet(std::span<const UI::UIStyleBoxFillRule>{});
+    ASSERT_FALSE(expiredSheet.has_value());
+    EXPECT_EQ(expiredSheet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, StyleRegistrationAfterRootCreationIsSticky)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+
+    const usize registeredBefore = context->statistics().style.registeredClassCount;
+    auto lateClass = builder->registerStyleClass();
+    ASSERT_FALSE(lateClass.has_value());
+    EXPECT_EQ(lateClass.error().code, UI::UIErrorCode::InvalidStyle);
+    EXPECT_EQ(context->statistics().style.registeredClassCount, registeredBefore);
+
+    Core::Status otherwiseValid =
+        builder->installStyleSheet(std::span<const UI::UIStyleBoxFillRule>{});
+    ASSERT_FALSE(otherwiseValid.has_value());
+    EXPECT_EQ(otherwiseValid.error().code, lateClass.error().code);
+    EXPECT_EQ(otherwiseValid.error().message, lateClass.error().message);
+
+    Core::Status finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::InvalidStyle);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, FailedStyleSheetInstallPreservesActiveSheetAndSticksError)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto styleClass = builder->registerStyleClass();
+    ASSERT_TRUE(styleClass.has_value()) << styleClass.error().message;
+
+    const UI::UIStyleBoxFillRule validRule{
+        .role = UI::UIStyleRoleId::PanelSurface,
+        .styleClass = *styleClass,
+        .color = UI::rgb(0x136F63),
+    };
+    ASSERT_TRUE(builder->installStyleSheet(std::span(&validRule, 1)).has_value());
+    const UI::UIStyleStatistics published = context->statistics().style;
+    ASSERT_EQ(published.activeRuleCount, 1U);
+    ASSERT_EQ(published.revision, 1U);
+
+    const UI::UIStyleBoxFillRule invalidRule{
+        .role = UI::UIStyleRoleId::PanelSurface,
+        .styleClass = UI::UIStyleClassId{
+            static_cast<u32>(published.registeredClassCount + 1U)},
+        .color = UI::rgb(0xB42318),
+    };
+    Core::Status failedInstall =
+        builder->installStyleSheet(std::span(&invalidRule, 1));
+    ASSERT_FALSE(failedInstall.has_value());
+    EXPECT_EQ(failedInstall.error().code, UI::UIErrorCode::InvalidStyle);
+
+    const UI::UIStyleStatistics afterFailure = context->statistics().style;
+    EXPECT_EQ(afterFailure.registeredClassCount, published.registeredClassCount);
+    EXPECT_EQ(afterFailure.activeRuleCount, published.activeRuleCount);
+    EXPECT_EQ(afterFailure.activeBucketCount, published.activeBucketCount);
+    EXPECT_EQ(afterFailure.revision, published.revision);
+
+    auto otherwiseValid = builder->registerStyleClass();
+    ASSERT_FALSE(otherwiseValid.has_value());
+    EXPECT_EQ(otherwiseValid.error().code, failedInstall.error().code);
+    EXPECT_EQ(otherwiseValid.error().message, failedInstall.error().message);
+    EXPECT_EQ(context->statistics().style.registeredClassCount,
+              published.registeredClassCount);
+
+    Core::Status finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::InvalidStyle);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionCommitsBoundedComponentDuringEnterPhase)

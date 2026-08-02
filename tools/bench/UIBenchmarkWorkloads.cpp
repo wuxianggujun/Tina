@@ -41,6 +41,7 @@ inline constexpr std::string_view kImageNineSliceWorkload = "ui_image_nineslice_
 inline constexpr std::string_view kComponentActivateToggleWorkload =
     "ui_component_build_activate_toggle_v1";
 inline constexpr std::string_view kComponentBuildWorkload = "ui_component_build_v1";
+inline constexpr std::string_view kStyleStateWorkload = "ui_style_state_v1";
 
 inline constexpr usize kLargeNodeCount = 4096;
 inline constexpr usize kFlatLeafCount = kLargeNodeCount - 1;
@@ -99,6 +100,12 @@ inline constexpr UI::UIComponentBuildBudget kComponentBuildBudget{
         .selection = 1,
     },
 };
+inline constexpr usize kStyleClassCount = 64;
+inline constexpr usize kStyleRulesPerClass = 4;
+inline constexpr usize kStyleRuleCount = kStyleClassCount * kStyleRulesPerClass;
+inline constexpr usize kStyleClassesPerNode = 4;
+inline constexpr usize kStyledNodeCount = kLargeNodeCount - 1;
+inline constexpr usize kStyleNodeClassLinkCount = kStyledNodeCount * kStyleClassesPerNode;
 
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
@@ -213,6 +220,11 @@ struct UIBenchmarkReport final {
     usize configuredComponentTextBytesPerTransaction = 0;
     usize configuredComponentCanvasCommandsPerTransaction = 0;
     UI::UIBehaviorSlotBudget configuredComponentBehaviorSlotsPerTransaction{};
+    usize configuredStyledNodeCount = 0;
+    usize configuredStyleClassCount = 0;
+    usize configuredStyleRuleCount = 0;
+    usize configuredStyleClassesPerNode = 0;
+    usize configuredStyleRulesPerBucket = 0;
 
     u64 workN = 0;
     u64 workP = 0;
@@ -296,6 +308,18 @@ struct UIBenchmarkReport final {
     u64 componentCleanCommitRebuildCount = 0;
     u64 componentTreeChecksum = 0;
     UI::UIComponentBuildStatistics componentReservationStatistics{};
+
+    u64 styleStateChanges = 0;
+    u64 styleInspectedNodes = 0;
+    u64 styleResolvedNodes = 0;
+    u64 styleCandidateRules = 0;
+    u64 styleCleanCommitCount = 0;
+    u64 styleCleanInspectedNodes = 0;
+    u64 styleCleanResolvedNodes = 0;
+    u64 styleCleanCandidateRules = 0;
+    u64 styleEnabledDisplayListChecksum = 0;
+    u64 styleDisabledDisplayListChecksum = 0;
+    u64 styleStateChecksum = 0;
 
     usize pmrAllocationsBefore = 0;
     usize pmrAllocationsAfter = 0;
@@ -559,6 +583,17 @@ void writeTimingSummary(std::ostream& output, const TimingSummary& summary,
     return capacity;
 }
 
+[[nodiscard]] UI::UIContextCapacityConfig styleBenchmarkContextCapacity() noexcept
+{
+    UI::UIContextCapacityConfig capacity = largeContextCapacity();
+    capacity.styleClassCapacity = kStyleClassCount;
+    capacity.styleRuleCapacity = kStyleRuleCount;
+    capacity.styleBucketCapacity = kStyleClassCount;
+    capacity.styleRulesPerBucketCapacity = kStyleRulesPerClass;
+    capacity.nodeStyleClassLinkCapacity = kStyleNodeClassLinkCount;
+    return capacity;
+}
+
 [[nodiscard]] Core::AssetId imageBenchmarkAsset(usize resourceIndex) noexcept
 {
     Core::AssetId::Bytes bytes{};
@@ -720,9 +755,11 @@ componentCanvasCommands() noexcept
     return true;
 }
 
-[[nodiscard]] std::optional<UIFixture> createFixture(UI::UIContextCapacityConfig capacity,
-                                                     CountingMemoryResource& memory,
-                                                     std::string& error)
+using FixtureStartup = Core::Status (*)(UI::UIContext&, void* userData);
+
+[[nodiscard]] std::optional<UIFixture> createFixture(
+    UI::UIContextCapacityConfig capacity, CountingMemoryResource& memory,
+    std::string& error, FixtureStartup startup = nullptr, void* startupUserData = nullptr)
 {
     auto windows = WindowPool::Create(1, memory);
     if (!windows) {
@@ -746,6 +783,13 @@ componentCanvasCommands() noexcept
     }
     fixture.context = std::move(*context);
 
+    if (startup != nullptr) {
+        if (Core::Status status = startup(*fixture.context, startupUserData); !status) {
+            error = status.error().message;
+            return std::nullopt;
+        }
+    }
+
     auto root = fixture.context->rootBuilder().createRoot();
     if (!root) {
         error = root.error().message;
@@ -760,6 +804,75 @@ componentCanvasCommands() noexcept
     }
     fixture.updater = std::move(*updater);
     return fixture;
+}
+
+struct StyleFixtureStartup final {
+    std::array<UI::UIStyleClassId, kStyleClassCount> classes{};
+};
+
+[[nodiscard]] Core::Status initializeStyleFixture(UI::UIContext& context,
+                                                  void* userData)
+{
+    auto& startup = *static_cast<StyleFixtureStartup*>(userData);
+    for (UI::UIStyleClassId& styleClass : startup.classes) {
+        auto registered = context.registerStyleClass();
+        if (!registered) {
+            return Core::failure(registered.error());
+        }
+        styleClass = *registered;
+    }
+
+    constexpr std::array States{
+        UI::UIStyleState::None,
+        UI::UIStyleState::Hovered,
+        UI::UIStyleState::Disabled,
+        UI::UIStyleState::Hovered | UI::UIStyleState::Disabled,
+    };
+    std::array<UI::UIStyleBoxFillRule, kStyleRuleCount> rules{};
+    usize ruleIndex = 0;
+    for (usize classIndex = 0; classIndex < startup.classes.size(); ++classIndex) {
+        for (usize stateIndex = 0; stateIndex < States.size(); ++stateIndex) {
+            const u8 red = static_cast<u8>(32U + ((classIndex * 3U + stateIndex * 17U) % 192U));
+            const u8 green = static_cast<u8>(32U + ((classIndex * 5U + stateIndex * 29U) % 192U));
+            const u8 blue = static_cast<u8>(32U + ((classIndex * 7U + stateIndex * 43U) % 192U));
+            rules[ruleIndex++] = UI::UIStyleBoxFillRule{
+                .role = UI::UIStyleRoleId::PanelSurface,
+                .styleClass = startup.classes[classIndex],
+                .requiredStates = States[stateIndex],
+                .color = UI::rgba8(red, green, blue),
+            };
+        }
+    }
+    return context.installStyleSheet(rules);
+}
+
+[[nodiscard]] bool populateStyleTree(
+    UIFixture& fixture,
+    const std::array<UI::UIStyleClassId, kStyleClassCount>& registeredClasses,
+    std::vector<UI::UINodeId>& leaves, std::string& error)
+{
+    leaves.reserve(kStyledNodeCount);
+    for (usize nodeIndex = 0; nodeIndex < kStyledNodeCount; ++nodeIndex) {
+        std::array<UI::UIStyleClassId, kStyleClassesPerNode> classes{};
+        for (usize classIndex = 0; classIndex < classes.size(); ++classIndex) {
+            classes[classIndex] =
+                registeredClasses[(nodeIndex + classIndex * 17U) % registeredClasses.size()];
+        }
+        UI::UIElementDescriptor descriptor = UI::makePanelElement(fixedLayout(1.0F, 1.0F));
+        descriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
+        descriptor.visual.styleClasses = classes;
+        descriptor.semantics = {
+            .mode = UI::UISemanticsMode::Publish,
+            .role = UI::UISemanticsRole::Group,
+        };
+        auto node = fixture.updater.createElement(fixture.root.rootNodeId(), descriptor);
+        if (!node) {
+            error = node.error().message;
+            return false;
+        }
+        leaves.push_back(*node);
+    }
+    return true;
 }
 
 [[nodiscard]] bool populateFlatPaintTree(UIFixture& fixture, std::vector<UI::UINodeId>& leaves,
@@ -814,7 +927,7 @@ void accumulateCommitStatistics(const UI::UIContextStatistics& statistics,
 
 [[nodiscard]] bool buildDisplayList(UIFixture& fixture, Render::UIDisplayListBuilder& builder,
                                     Render::UIPixelRect framebufferViewport, UIBenchmarkReport* report,
-                                    std::string& error)
+                                    std::string& error, u64* checksum = nullptr)
 {
     auto build = Integration::buildUIDisplayList(
         builder,
@@ -824,6 +937,10 @@ void accumulateCommitStatistics(const UI::UIContextStatistics& statistics,
         error = build.error().message;
         return false;
     }
+    const u64 currentChecksum = build->displayList.paintOrderChecksum();
+    if (checksum != nullptr) {
+        *checksum = currentChecksum;
+    }
     if (report != nullptr) {
         ++report->displayListBuilds;
         report->displayListSourceEntries += build->statistics.sourcePaintEntryCount;
@@ -831,7 +948,7 @@ void accumulateCommitStatistics(const UI::UIContextStatistics& statistics,
         report->displayListGlyphs += build->statistics.submittedGlyphCount;
         report->displayListImageQuads += build->statistics.submittedImageQuadCount;
         report->displayListBatches += build->displayList.statistics().batchCount;
-        report->displayListChecksum = build->displayList.paintOrderChecksum();
+        report->displayListChecksum = currentChecksum;
     }
     return true;
 }
@@ -976,6 +1093,28 @@ void hashComponentBuildStatistics(DeterministicHash& hash,
     hash.addU64(statistics.transactionFailureCount);
 }
 
+void hashStyleStatistics(DeterministicHash& hash,
+                         const UI::UIStyleStatistics& statistics) noexcept
+{
+    hash.addU64(statistics.classCapacity);
+    hash.addU64(statistics.registeredClassCount);
+    hash.addU64(statistics.classHighWater);
+    hash.addU64(statistics.ruleCapacity);
+    hash.addU64(statistics.activeRuleCount);
+    hash.addU64(statistics.ruleHighWater);
+    hash.addU64(statistics.bucketCapacity);
+    hash.addU64(statistics.activeBucketCount);
+    hash.addU64(statistics.bucketHighWater);
+    hash.addU64(statistics.rulesPerBucketCapacity);
+    hash.addU64(statistics.bucketCandidateHighWater);
+    hash.addU64(statistics.nodeClassLinkCapacity);
+    hash.addU64(statistics.activeNodeClassLinkCount);
+    hash.addU64(statistics.nodeClassLinkHighWater);
+    hash.addU64(statistics.compileFailureCount);
+    hash.addU64(statistics.capacityFailureCount);
+    hash.addU64(statistics.revision);
+}
+
 void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) noexcept
 {
     hash.addString(report.workload);
@@ -1059,6 +1198,25 @@ void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) no
     hash.addU64(report.componentCleanCommitRebuildCount);
     hash.addU64(report.componentTreeChecksum);
     hashComponentBuildStatistics(hash, report.componentReservationStatistics);
+    if (report.workload == kStyleStateWorkload) {
+        hash.addU64(report.configuredStyledNodeCount);
+        hash.addU64(report.configuredStyleClassCount);
+        hash.addU64(report.configuredStyleRuleCount);
+        hash.addU64(report.configuredStyleClassesPerNode);
+        hash.addU64(report.configuredStyleRulesPerBucket);
+        hash.addU64(report.styleStateChanges);
+        hash.addU64(report.styleInspectedNodes);
+        hash.addU64(report.styleResolvedNodes);
+        hash.addU64(report.styleCandidateRules);
+        hash.addU64(report.styleCleanCommitCount);
+        hash.addU64(report.styleCleanInspectedNodes);
+        hash.addU64(report.styleCleanResolvedNodes);
+        hash.addU64(report.styleCleanCandidateRules);
+        hash.addU64(report.styleEnabledDisplayListChecksum);
+        hash.addU64(report.styleDisabledDisplayListChecksum);
+        hash.addU64(report.styleStateChecksum);
+        hashStyleStatistics(hash, report.statistics.style);
+    }
 }
 
 [[nodiscard]] u64 hashSemantics(UI::UICommittedSemanticsView semantics) noexcept
@@ -1347,6 +1505,208 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     DeterministicHash hash{};
     hashStatistics(hash, report);
     hash.addU32(dirtyLeaf.index());
+    report.checksum = hash.value();
+    return true;
+}
+
+[[nodiscard]] bool runStyleState(const UIBenchmarkOptions& options,
+                                 UIBenchmarkReport& report, std::string& error)
+{
+    constexpr u64 kCandidateRulesPerIteration =
+        static_cast<u64>(kStyleClassesPerNode) * kStyleRulesPerClass;
+    if (options.measureIterations >
+        (std::numeric_limits<u64>::max)() / kCandidateRulesPerIteration) {
+        error = "UI style benchmark measured counter range is invalid";
+        return false;
+    }
+
+    CountingMemoryResource memory{};
+    StyleFixtureStartup startup{};
+    auto fixtureResult = createFixture(styleBenchmarkContextCapacity(), memory, error,
+                                       &initializeStyleFixture, &startup);
+    if (!fixtureResult) {
+        return false;
+    }
+    UIFixture fixture = std::move(*fixtureResult);
+    std::vector<UI::UINodeId> leaves;
+    if (!populateStyleTree(fixture, startup.classes, leaves, error)) {
+        return false;
+    }
+    const UI::UINodeId stateLeaf = leaves[static_cast<usize>(options.seed % leaves.size())];
+    auto builderResult = createDisplayListBuilder(static_cast<u32>(kLargeNodeCount), memory, error);
+    if (!builderResult) {
+        return false;
+    }
+    Render::UIDisplayListBuilder builder = std::move(*builderResult);
+    constexpr UI::UILogicalSize Viewport{
+        .width = 1.0F,
+        .height = static_cast<float>(kLargeNodeCount),
+    };
+    constexpr Render::UIPixelRect Framebuffer{
+        .x = 0,
+        .y = 0,
+        .width = 1,
+        .height = kLargeNodeCount,
+    };
+
+    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        error = status.error().message;
+        return false;
+    }
+    u64 enabledDisplayListChecksum = 0;
+    if (!buildDisplayList(fixture, builder, Framebuffer, nullptr, error,
+                          &enabledDisplayListChecksum)) {
+        return false;
+    }
+    std::optional<u64> disabledDisplayListChecksum;
+
+    Core::SteadyMonotonicClock clock{};
+    DeterministicHash styleStateHash{};
+    const auto wallBegin = clock.now();
+    const u64 totalIterations = options.warmUpIterations + options.measureIterations;
+    if (options.warmUpIterations == 0) {
+        captureAllocationBaseline(memory, report);
+    }
+    for (u64 iteration = 0; iteration < totalIterations; ++iteration) {
+        const bool measured = iteration >= options.warmUpIterations;
+        const bool enabled = (iteration & 1U) != 0U;
+        const auto totalBegin = clock.now();
+        if (Core::Status status = fixture.updater.setEnabled(stateLeaf, enabled); !status) {
+            error = status.error().message;
+            return false;
+        }
+        const auto commitBegin = clock.now();
+        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+            error = status.error().message;
+            return false;
+        }
+        const auto commitEnd = clock.now();
+        const UI::UIContextStatistics mutationStatistics = fixture.context->statistics();
+        const auto displayBegin = clock.now();
+        u64 currentDisplayListChecksum = 0;
+        if (!buildDisplayList(fixture, builder, Framebuffer, measured ? &report : nullptr,
+                              error, &currentDisplayListChecksum)) {
+            return false;
+        }
+        const auto displayEnd = clock.now();
+        if (enabled) {
+            if (currentDisplayListChecksum != enabledDisplayListChecksum) {
+                error = "ui_style_state_v1 enabled DisplayList checksum changed";
+                return false;
+            }
+        } else if (!disabledDisplayListChecksum.has_value()) {
+            disabledDisplayListChecksum = currentDisplayListChecksum;
+        } else if (currentDisplayListChecksum != *disabledDisplayListChecksum) {
+            error = "ui_style_state_v1 disabled DisplayList checksum changed";
+            return false;
+        }
+        if (!enabled && currentDisplayListChecksum == enabledDisplayListChecksum) {
+            error = "ui_style_state_v1 state change did not change the DisplayList";
+            return false;
+        }
+        const auto cleanCommitBegin = clock.now();
+        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+            error = status.error().message;
+            return false;
+        }
+        const auto cleanCommitEnd = clock.now();
+        const UI::UIContextStatistics cleanStatistics = fixture.context->statistics();
+
+        if (mutationStatistics.lastStyleInspectedNodeCount != 1U ||
+            mutationStatistics.lastStyleResolvedNodeCount != 1U ||
+            mutationStatistics.lastStyleCandidateRuleCount !=
+                kStyleClassesPerNode * kStyleRulesPerClass ||
+            mutationStatistics.lastLayoutPassCount != 0U ||
+            mutationStatistics.lastHitRebuildCount != 0U ||
+            mutationStatistics.lastPaintCacheRebuildCount != 1U ||
+            mutationStatistics.lastPaintSnapshotRebuildCount != 1U) {
+            error = "ui_style_state_v1 single-node state invariant failed";
+            return false;
+        }
+        if (cleanStatistics.lastStyleInspectedNodeCount != 0U ||
+            cleanStatistics.lastStyleResolvedNodeCount != 0U ||
+            cleanStatistics.lastStyleCandidateRuleCount != 0U ||
+            cleanStatistics.lastLayoutPassCount != 0U ||
+            cleanStatistics.lastHitRebuildCount != 0U ||
+            cleanStatistics.lastPaintCacheRebuildCount != 0U ||
+            cleanStatistics.lastPaintSnapshotRebuildCount != 0U) {
+            error = "ui_style_state_v1 clean commit invariant failed";
+            return false;
+        }
+
+        if (measured) {
+            report.commitSamples.push_back(elapsedNs(commitBegin, commitEnd));
+            report.displayListSamples.push_back(elapsedNs(displayBegin, displayEnd));
+            report.cleanCommitSamples.push_back(elapsedNs(cleanCommitBegin, cleanCommitEnd));
+            report.totalSamples.push_back(elapsedNs(totalBegin, cleanCommitEnd));
+            accumulateCommitStatistics(mutationStatistics, report);
+            ++report.styleStateChanges;
+            report.styleInspectedNodes += mutationStatistics.lastStyleInspectedNodeCount;
+            report.styleResolvedNodes += mutationStatistics.lastStyleResolvedNodeCount;
+            report.styleCandidateRules += mutationStatistics.lastStyleCandidateRuleCount;
+            ++report.styleCleanCommitCount;
+            report.styleCleanInspectedNodes += cleanStatistics.lastStyleInspectedNodeCount;
+            report.styleCleanResolvedNodes += cleanStatistics.lastStyleResolvedNodeCount;
+            report.styleCleanCandidateRules += cleanStatistics.lastStyleCandidateRuleCount;
+            styleStateHash.addBool(enabled);
+            styleStateHash.addU64(currentDisplayListChecksum);
+            styleStateHash.addU64(mutationStatistics.lastStyleCandidateRuleCount);
+        }
+        if (iteration + 1U == options.warmUpIterations) {
+            captureAllocationBaseline(memory, report);
+        }
+    }
+    report.wallNs = elapsedNs(wallBegin, clock.now());
+    if (!disabledDisplayListChecksum.has_value()) {
+        error = "ui_style_state_v1 did not observe the disabled state";
+        return false;
+    }
+    report.styleEnabledDisplayListChecksum = enabledDisplayListChecksum;
+    report.styleDisabledDisplayListChecksum = *disabledDisplayListChecksum;
+    report.styleStateChecksum = styleStateHash.value();
+    captureFinalState(memory, report, fixture);
+
+    report.configuredNodeCount = kLargeNodeCount;
+    report.configuredStyledNodeCount = kStyledNodeCount;
+    report.configuredStyleClassCount = kStyleClassCount;
+    report.configuredStyleRuleCount = kStyleRuleCount;
+    report.configuredStyleClassesPerNode = kStyleClassesPerNode;
+    report.configuredStyleRulesPerBucket = kStyleRulesPerClass;
+
+    const u64 measuredCandidates = options.measureIterations * kCandidateRulesPerIteration;
+    const UI::UIStyleStatistics& style = report.statistics.style;
+    if (report.pmrAllocationsAfter != report.pmrAllocationsBefore ||
+        report.workN != kLargeNodeCount || report.workH != kLargeNodeCount ||
+        report.workP != kStyledNodeCount || report.layoutPasses != 0U ||
+        report.measuredNodes != 0U || report.arrangedNodes != 0U ||
+        report.hitRebuilds != 0U ||
+        report.paintCacheRebuilds != options.measureIterations ||
+        report.paintSnapshotRebuilds != options.measureIterations ||
+        report.styleStateChanges != options.measureIterations ||
+        report.styleInspectedNodes != options.measureIterations ||
+        report.styleResolvedNodes != options.measureIterations ||
+        report.styleCandidateRules != measuredCandidates ||
+        report.styleCleanCommitCount != options.measureIterations ||
+        report.styleCleanInspectedNodes != 0U || report.styleCleanResolvedNodes != 0U ||
+        report.styleCleanCandidateRules != 0U ||
+        style.registeredClassCount != kStyleClassCount ||
+        style.activeRuleCount != kStyleRuleCount || style.activeBucketCount != kStyleClassCount ||
+        style.bucketCandidateHighWater != kStyleRulesPerClass ||
+        style.activeNodeClassLinkCount != kStyleNodeClassLinkCount ||
+        style.nodeClassLinkHighWater != kStyleNodeClassLinkCount ||
+        style.compileFailureCount != 0U || style.capacityFailureCount != 0U ||
+        style.revision != 1U || report.displayListChecksum == 0U ||
+        report.styleEnabledDisplayListChecksum == 0U ||
+        report.styleDisabledDisplayListChecksum == 0U ||
+        report.styleEnabledDisplayListChecksum == report.styleDisabledDisplayListChecksum ||
+        report.styleStateChecksum == 0U) {
+        error = "ui_style_state_v1 invariant failed";
+        return false;
+    }
+
+    DeterministicHash hash{};
+    hashStatistics(hash, report);
+    hash.addU32(stateLeaf.index());
     report.checksum = hash.value();
     return true;
 }
@@ -2457,8 +2817,15 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"component_scroll_slots_per_transaction\":"
            << report.configuredComponentBehaviorSlotsPerTransaction.scroll
            << ",\"component_selection_slots_per_transaction\":"
-           << report.configuredComponentBehaviorSlotsPerTransaction.selection
-           << "}}";
+           << report.configuredComponentBehaviorSlotsPerTransaction.selection;
+    if (report.workload == kStyleStateWorkload) {
+        output << ",\"styled_node_count\":" << report.configuredStyledNodeCount
+               << ",\"style_class_count\":" << report.configuredStyleClassCount
+               << ",\"style_rule_count\":" << report.configuredStyleRuleCount
+               << ",\"style_classes_per_node\":" << report.configuredStyleClassesPerNode
+               << ",\"style_rules_per_bucket\":" << report.configuredStyleRulesPerBucket;
+    }
+    output << "}}";
     output << ",\"fingerprint\":{\"buildType\":";
     writeJsonString(output, BuildType);
     output << ",\"hostOs\":";
@@ -2580,6 +2947,27 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
         writeComponentBuildPool(output, statistics.behaviors.selection);
         output << "}}}";
     }
+    if (report.workload == kStyleStateWorkload) {
+        output << ",\"style_state\":{\"state_changes\":" << report.styleStateChanges
+               << ",\"inspected_nodes\":" << report.styleInspectedNodes
+               << ",\"resolved_nodes\":" << report.styleResolvedNodes
+               << ",\"candidate_rules\":" << report.styleCandidateRules
+               << ",\"clean_commits\":" << report.styleCleanCommitCount
+               << ",\"clean_inspected_nodes\":" << report.styleCleanInspectedNodes
+               << ",\"clean_resolved_nodes\":" << report.styleCleanResolvedNodes
+               << ",\"clean_candidate_rules\":" << report.styleCleanCandidateRules
+               << ",\"registered_classes\":"
+               << report.statistics.style.registeredClassCount
+               << ",\"active_rules\":" << report.statistics.style.activeRuleCount
+               << ",\"active_buckets\":" << report.statistics.style.activeBucketCount
+               << ",\"active_node_class_links\":"
+               << report.statistics.style.activeNodeClassLinkCount
+               << ",\"compile_failures\":"
+               << report.statistics.style.compileFailureCount
+               << ",\"capacity_failures\":"
+               << report.statistics.style.capacityFailureCount
+               << ",\"revision\":" << report.statistics.style.revision << '}';
+    }
     output << ",\"capacity\":{\"nodes\":" << report.statistics.nodeCapacity
            << ",\"dirty_queue\":" << report.statistics.dirtyQueueCapacity
            << ",\"layout_snapshot\":" << report.statistics.layoutSnapshotCapacity
@@ -2595,7 +2983,17 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"text_input_behavior\":" << report.statistics.textInputBehaviorCapacity
            << ",\"scroll_behavior\":" << report.statistics.scrollBehaviorCapacity
            << ",\"selection_behavior\":" << report.statistics.selectBehaviorCapacity
-           << ",\"text_bytes\":" << report.statistics.textByteCapacity << '}';
+           << ",\"text_bytes\":" << report.statistics.textByteCapacity;
+    if (report.workload == kStyleStateWorkload) {
+        output << ",\"style_classes\":" << report.statistics.style.classCapacity
+               << ",\"style_rules\":" << report.statistics.style.ruleCapacity
+               << ",\"style_buckets\":" << report.statistics.style.bucketCapacity
+               << ",\"style_rules_per_bucket\":"
+               << report.statistics.style.rulesPerBucketCapacity
+               << ",\"node_style_class_links\":"
+               << report.statistics.style.nodeClassLinkCapacity;
+    }
+    output << '}';
     output << ",\"high_water\":{\"live_nodes\":" << report.liveNodeHighWater
            << ",\"dirty_queue\":" << report.statistics.dirtyQueueHighWater
            << ",\"layout_snapshot\":" << report.layoutSnapshotHighWater
@@ -2614,7 +3012,17 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"text_input_behavior\":" << report.statistics.textInputBehaviorHighWater
            << ",\"scroll_behavior\":" << report.statistics.scrollBehaviorHighWater
            << ",\"selection_behavior\":" << report.statistics.selectBehaviorHighWater
-           << ",\"text_bytes\":" << report.statistics.textByteHighWater << '}';
+           << ",\"text_bytes\":" << report.statistics.textByteHighWater;
+    if (report.workload == kStyleStateWorkload) {
+        output << ",\"style_classes\":" << report.statistics.style.classHighWater
+               << ",\"style_rules\":" << report.statistics.style.ruleHighWater
+               << ",\"style_buckets\":" << report.statistics.style.bucketHighWater
+               << ",\"style_bucket_candidates\":"
+               << report.statistics.style.bucketCandidateHighWater
+               << ",\"node_style_class_links\":"
+               << report.statistics.style.nodeClassLinkHighWater;
+    }
+    output << '}';
     output << ",\"allocation\":{\"domain\":\"ui_pmr\",\"before\":"
            << report.pmrAllocationsBefore << ",\"after\":" << report.pmrAllocationsAfter
            << ",\"delta\":" << allocationDelta
@@ -2625,7 +3033,15 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
     output << ",\"checksums\":{\"display_list\":\"" << hex64(report.displayListChecksum)
            << "\",\"semantics\":\"" << hex64(report.semanticsChecksum)
            << "\",\"component_tree\":\"" << hex64(report.componentTreeChecksum)
-           << "\"},\"checksum\":\"" << hex64(report.checksum)
+           << '"';
+    if (report.workload == kStyleStateWorkload) {
+        output << ",\"style_state\":\"" << hex64(report.styleStateChecksum)
+               << "\",\"style_enabled_display_list\":\""
+               << hex64(report.styleEnabledDisplayListChecksum)
+               << "\",\"style_disabled_display_list\":\""
+               << hex64(report.styleDisabledDisplayListChecksum) << '"';
+    }
+    output << "},\"checksum\":\"" << hex64(report.checksum)
            << "\",\"exit\":\"Completed\",\"notes\":["
               "\"shared_dev_or_ci_is_provisional_not_hard_gate\","
               "\"tracy_disabled\",\"single_process_run\","
@@ -2636,6 +3052,9 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
     } else if (report.workload == kComponentBuildWorkload) {
         output << ",\"component_cleanup_excluded_from_stage_timing\""
                   ",\"component_reservation_counters_are_measurement_window_deltas\"";
+    } else if (report.workload == kStyleStateWorkload) {
+        output << ",\"style_rules_compiled_before_first_retained_node\""
+                  ",\"single_node_state_change_resolves_only_the_dirty_node\"";
     }
     output << "]}\n";
 }
@@ -2648,7 +3067,7 @@ bool isUIBenchmarkWorkload(std::string_view workload) noexcept
            workload == kRouteWorkload || workload == kVirtualCollectionWorkload ||
            workload == kImageNineSliceWorkload ||
            workload == kComponentActivateToggleWorkload ||
-           workload == kComponentBuildWorkload;
+           workload == kComponentBuildWorkload || workload == kStyleStateWorkload;
 }
 
 void printUIBenchmarkHelp(std::ostream& output)
@@ -2659,6 +3078,7 @@ void printUIBenchmarkHelp(std::ostream& output)
            << "  --workload=ui_virtual_collection_v1  100k items through a fixed 64-row pool\n"
            << "  --workload=ui_image_nineslice_v1     5096 image quads, 64 unique resources\n"
            << "  --workload=ui_component_build_v1     256 reserved four-node full-pool components\n"
+           << "  --workload=ui_style_state_v1         4096 nodes, 256 rules, one state change\n"
            << "  --workload=ui_component_build_activate_toggle_v1\n"
               "                                         legacy Activate/Toggle prerequisite\n";
 }
@@ -2690,6 +3110,8 @@ int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
         } else if (workload == kComponentBuildWorkload) {
             (void)runComponentBuild(options, report, kComponentBuildBudget,
                                     &buildReservedComponents, error);
+        } else if (workload == kStyleStateWorkload) {
+            (void)runStyleState(options, report, error);
         } else {
             error = "unknown UI benchmark workload";
         }

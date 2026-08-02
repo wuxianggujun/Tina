@@ -12,6 +12,7 @@ namespace {
 inline constexpr std::string_view ComponentPrerequisiteWorkload =
     "ui_component_build_activate_toggle_v1";
 inline constexpr std::string_view ComponentWorkload = "ui_component_build_v1";
+inline constexpr std::string_view StyleStateWorkload = "ui_style_state_v1";
 
 [[nodiscard]] std::string extractChecksum(std::string_view json)
 {
@@ -30,14 +31,31 @@ inline constexpr std::string_view ComponentWorkload = "ui_component_build_v1";
     return std::string(json.substr(valueBegin, valueEnd - valueBegin));
 }
 
-[[nodiscard]] std::string runComponentWorkload(std::string_view workload)
+[[nodiscard]] std::string extractQuotedField(std::string_view json,
+                                             std::string_view field)
+{
+    const std::string prefix = "\"" + std::string(field) + "\":\"";
+    const usize begin = json.find(prefix);
+    if (begin == std::string_view::npos)
+    {
+        return {};
+    }
+    const usize valueBegin = begin + prefix.size();
+    const usize valueEnd = json.find('"', valueBegin);
+    return valueEnd == std::string_view::npos
+               ? std::string{}
+               : std::string(json.substr(valueBegin, valueEnd - valueBegin));
+}
+
+[[nodiscard]] std::string runUIWorkload(std::string_view workload,
+                                        u64 measureIterations = 1)
 {
     std::ostringstream output;
     std::ostringstream errors;
     const int exitCode = runUIBenchmark(workload,
                                         {
                                             .warmUpIterations = 1,
-                                            .measureIterations = 1,
+                                            .measureIterations = measureIterations,
                                             .seed = 7,
                                         },
                                         output, errors);
@@ -50,17 +68,19 @@ TEST(UIBenchmarkWorkloadsTests, RegistersPrerequisiteAndFrozenComponentWorkloads
 {
     EXPECT_TRUE(isUIBenchmarkWorkload(ComponentPrerequisiteWorkload));
     EXPECT_TRUE(isUIBenchmarkWorkload(ComponentWorkload));
+    EXPECT_TRUE(isUIBenchmarkWorkload(StyleStateWorkload));
 
     std::ostringstream help;
     printUIBenchmarkHelp(help);
     EXPECT_NE(help.str().find(ComponentPrerequisiteWorkload), std::string::npos);
     EXPECT_NE(help.str().find(ComponentWorkload), std::string::npos);
+    EXPECT_NE(help.str().find(StyleStateWorkload), std::string::npos);
 }
 
 TEST(UIBenchmarkWorkloadsTests, ComponentPrerequisiteReportsStableHonestSchema)
 {
-    const std::string first = runComponentWorkload(ComponentPrerequisiteWorkload);
-    const std::string second = runComponentWorkload(ComponentPrerequisiteWorkload);
+    const std::string first = runUIWorkload(ComponentPrerequisiteWorkload);
+    const std::string second = runUIWorkload(ComponentPrerequisiteWorkload);
 
     EXPECT_NE(first.find("\"status\":\"ok\",\"schema\":1"), std::string::npos);
     EXPECT_NE(first.find("\"schemaName\":\"tina_bench\""), std::string::npos);
@@ -92,8 +112,8 @@ TEST(UIBenchmarkWorkloadsTests, ComponentPrerequisiteReportsStableHonestSchema)
 
 TEST(UIBenchmarkWorkloadsTests, FrozenComponentWorkloadReportsRealReservationCounters)
 {
-    const std::string first = runComponentWorkload(ComponentWorkload);
-    const std::string second = runComponentWorkload(ComponentWorkload);
+    const std::string first = runUIWorkload(ComponentWorkload);
+    const std::string second = runUIWorkload(ComponentWorkload);
 
     EXPECT_NE(first.find("\"status\":\"ok\",\"schema\":1"), std::string::npos);
     EXPECT_NE(first.find("\"schemaName\":\"tina_bench\""), std::string::npos);
@@ -145,6 +165,52 @@ TEST(UIBenchmarkWorkloadsTests, FrozenComponentWorkloadReportsRealReservationCou
     EXPECT_NE(first.find("\"selection_behavior\":256"), std::string::npos);
     EXPECT_NE(first.find("\"delta\":0"), std::string::npos);
     EXPECT_EQ(first.find("\"component_tree\":\"0000000000000000\""), std::string::npos);
+
+    const std::string firstChecksum = extractChecksum(first);
+    const std::string secondChecksum = extractChecksum(second);
+    ASSERT_EQ(firstChecksum.size(), 16U);
+    EXPECT_EQ(firstChecksum, secondChecksum);
+}
+
+TEST(UIBenchmarkWorkloadsTests, StyleStateReportsBoundedSingleNodeResolution)
+{
+    const std::string first = runUIWorkload(StyleStateWorkload, 2);
+    const std::string second = runUIWorkload(StyleStateWorkload, 2);
+
+    EXPECT_NE(first.find("\"status\":\"ok\",\"schema\":1"), std::string::npos);
+    EXPECT_NE(first.find("\"schemaName\":\"tina_bench\""), std::string::npos);
+    EXPECT_NE(first.find("\"id\":\"ui_style_state_v1\""), std::string::npos);
+    EXPECT_NE(first.find("\"node_count\":4096"), std::string::npos);
+    EXPECT_NE(first.find("\"styled_node_count\":4095"), std::string::npos);
+    EXPECT_NE(first.find("\"style_class_count\":64"), std::string::npos);
+    EXPECT_NE(first.find("\"style_rule_count\":256"), std::string::npos);
+    EXPECT_NE(first.find("\"style_classes_per_node\":4"), std::string::npos);
+    EXPECT_NE(first.find("\"style_rules_per_bucket\":4"), std::string::npos);
+    EXPECT_NE(first.find("\"style_state\":{\"state_changes\":2,"
+                         "\"inspected_nodes\":2,\"resolved_nodes\":2,"
+                         "\"candidate_rules\":32,\"clean_commits\":2,"
+                         "\"clean_inspected_nodes\":0,\"clean_resolved_nodes\":0,"
+                         "\"clean_candidate_rules\":0,\"registered_classes\":64,"
+                         "\"active_rules\":256,\"active_buckets\":64,"
+                         "\"active_node_class_links\":16380,\"compile_failures\":0,"
+                         "\"capacity_failures\":0,\"revision\":1}"),
+              std::string::npos);
+    EXPECT_NE(first.find("\"style_classes\":64"), std::string::npos);
+    EXPECT_NE(first.find("\"style_rules\":256"), std::string::npos);
+    EXPECT_NE(first.find("\"style_buckets\":64"), std::string::npos);
+    EXPECT_NE(first.find("\"style_rules_per_bucket\":4"), std::string::npos);
+    EXPECT_NE(first.find("\"node_style_class_links\":16380"), std::string::npos);
+    EXPECT_NE(first.find("\"style_bucket_candidates\":4"), std::string::npos);
+    EXPECT_NE(first.find("\"delta\":0"), std::string::npos);
+    EXPECT_EQ(first.find("\"style_state\":\"0000000000000000\""),
+              std::string::npos);
+    const std::string enabledChecksum =
+        extractQuotedField(first, "style_enabled_display_list");
+    const std::string disabledChecksum =
+        extractQuotedField(first, "style_disabled_display_list");
+    ASSERT_EQ(enabledChecksum.size(), 16U);
+    ASSERT_EQ(disabledChecksum.size(), 16U);
+    EXPECT_NE(enabledChecksum, disabledChecksum);
 
     const std::string firstChecksum = extractChecksum(first);
     const std::string secondChecksum = extractChecksum(second);

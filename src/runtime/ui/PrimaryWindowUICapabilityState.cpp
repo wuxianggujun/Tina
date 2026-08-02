@@ -300,6 +300,45 @@ bool PrimaryWindowUICapabilityState::isImageResolverActive(u32 slotIndex, u32 ge
     return slot.active && generation != 0 && slot.generation == generation;
 }
 
+Core::Result<UI::UIStyleClassId>
+PrimaryWindowUICapabilityState::registerStyleClass(u64 epoch)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUIRootBuilder::registerStyleClass";
+    if (Core::Status status =
+            validate(epoch, PrimaryWindowUIPhase::GameStateEnter, true, Operation);
+        !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto styleClass = context_->registerStyleClass();
+    if (!styleClass)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(styleClass.error()), Operation));
+    }
+    return *styleClass;
+}
+
+Core::Status PrimaryWindowUICapabilityState::installStyleSheet(
+    u64 epoch, std::span<const UI::UIStyleBoxFillRule> rules)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUIRootBuilder::installStyleSheet";
+    if (Core::Status status =
+            validate(epoch, PrimaryWindowUIPhase::GameStateEnter, true, Operation);
+        !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->installStyleSheet(rules);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Result<UI::UIRootOwner> PrimaryWindowUICapabilityState::createRoot(u64 epoch)
 {
     constexpr std::string_view Operation = "PrimaryWindowUIRootBuilder::createRoot";

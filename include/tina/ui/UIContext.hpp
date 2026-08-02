@@ -465,8 +465,9 @@ class UIContext final {
     [[nodiscard]] const UITheme& productTheme() const noexcept;
     [[nodiscard]] Core::Status setProductTheme(const UITheme& theme);
     // Startup-only stylesheet registration. Both operations require the owner
-    // thread and no live retained nodes. installStyleSheet copies all rules and
-    // atomically replaces the previous compiled sheet on success.
+    // thread and must run before the first retained node is created; destroying
+    // all nodes does not reopen registration. installStyleSheet copies all rules
+    // and atomically replaces the previous compiled sheet on success.
     [[nodiscard]] Core::Result<UIStyleClassId> registerStyleClass();
     [[nodiscard]] Core::Status installStyleSheet(
         std::span<const UIStyleBoxFillRule> rules);
