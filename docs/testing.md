@@ -235,12 +235,24 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 
 两个自动 smoke 均须 exit 0，并输出 `controls=20`、`imageProducts=4`、`themeSwitches=2`、`sliderChanges>0`、
 `progressValue=84`、`dropdownSelection=1`、`listSelectionKey=1007`、`treeSelectionKey=4`、
-`treeExpansionChanges=2`、`scrollOffset=80`、`uiRootsCreated=1`、`uiRootsReleased=1`，最终主题回到
-`initialTheme`。图片产品证据还必须满足 `imageAtlasUploaded=true`、`imageAtlasReleased=true`、
-`imageResolverCalls=imageResolverHits>0`、`imageResolverUnavailable=0`、`maxImageQuads=12`、
-`maxImageBatches=4`、`maxUniqueImageResources=1`、`imageLinear=true`、`imageNearest=true` 与非零
-`paintOrderChecksum`；退出阶段还须有 `imageAtlasInvalidated=true`。
-`--auto-demo` 与显式 `--frames` 同用时至少 120 帧。
+`treeExpansionChanges=2`、`scrollOffset=80`、`stylesheetInstalled=true`、`styleTokenUpdates>=3`（auto-demo）、
+`uiRootsCreated=1`、`uiRootsReleased=1`，最终主题回到 `initialTheme`。图片产品证据还必须满足
+`imageAtlasUploaded=true`、`imageAtlasReleased=true`、`imageResolverCalls=imageResolverHits>0`、
+`imageResolverUnavailable=0`、`maxImageQuads=12`、`maxImageBatches=4`、`maxUniqueImageResources=1`、
+`imageLinear=true`、`imageNearest=true` 与非零 `paintOrderChecksum`；退出阶段还须有
+`imageAtlasInvalidated=true`。`--auto-demo` 与显式 `--frames` 同用时至少 120 帧。
+
+UI-STYLE-001 产品 Visual（header accent ColorToken Dark/Light ROI 差分，同机同后端，非跨 GPU 金标）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunUiStyleVisualGate.ps1 -SkipBuild
+```
+
+脚本分别以 `--theme=dark` / `--theme=light` 捕获 showcase（无 auto-demo），比对设计坐标 header accent
+ROI 平均 RGB；`maxChannelDelta` 须 ≥ 默认 12。JSON 写入
+`artifacts/screenshots/ui-style/<stamp>/ui-style-visual-gate.json`。有 FreeType 图时可用
+`-BuildPreset windows-vnext-bgfx-ui-freetype-debug`。
 
 资源失效与 missing/unavailable 产品 smoke 使用独立模式，不能与 `--auto-demo` 同用：
 

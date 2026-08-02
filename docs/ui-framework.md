@@ -374,7 +374,8 @@ literal/token-backed sheet 安装契约；`UIContext` 与 phase-scoped `PrimaryW
 cache 在每节点记录 winning ColorToken，destroy/local override 时 unlink，token setter 只遍历依赖节点做
 dirty-queue 预检与 Paint dirty，不再对 live tree 做两遍 `O(N)` resolve。`ui_style_state_v1` 已补齐
 4096-node/256-rule 固定 workload、单节点 resolve counter、token/bucket/class-link high-water、clean commit
-  零工作与稳定 checksum。Image tint/opacity、属性 dirty metadata 与 showcase Integration 已落地；可选 Visual ROI 门禁仍后置。
+  零工作与稳定 checksum。Image tint/opacity、属性 dirty metadata、showcase Integration 与
+  `RunUiStyleVisualGate.ps1` Visual ROI 已落地。
 
 第一版 selector 只支持当前节点的 `role + class + state mask`，不支持 descendant、`nth-child`、运行时
 CSS parser 或任意 specificity。推荐优先级：
@@ -721,7 +722,8 @@ counter、容量/分配不变量可以立即作为确定性门禁：
     ColorToken registry/value 与运行期 reverse-dependency getter/setter、每节点最多 4 个 class link、retained
     state + literal/token-backed resolved BoxFill paint cache、Runtime facade，以及 `ui_style_state_v1` 已落地；
     Image tint/opacity、stylesheet imageTint token、showcase Integration、属性 dirty metadata
-    （`UIStylePropertyKind` + Context 分发）已落地；下一步可选 Visual ROI 门禁，随后 `UI-MOTION-001`；
+    （`UIStylePropertyKind` + Context 分发）、Visual ROI 门禁 `RunUiStyleVisualGate.ps1` 已落地；
+    下一主线 `UI-MOTION-001`；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。
 
 独立或后置 lane：
