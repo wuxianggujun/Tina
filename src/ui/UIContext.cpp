@@ -596,6 +596,11 @@ struct UIContext::Impl final {
             .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
             .buttonActionCapacity = normalized.buttonActionCapacity,
             .textByteCapacity = normalized.textByteCapacity,
+            .styleClassCapacity = normalized.styleClassCapacity,
+            .styleRuleCapacity = normalized.styleRuleCapacity,
+            .styleBucketCapacity = normalized.styleBucketCapacity,
+            .styleRulesPerBucketCapacity = normalized.styleRulesPerBucketCapacity,
+            .nodeStyleClassLinkCapacity = normalized.nodeStyleClassLinkCapacity,
             .applyDefaultProductChrome = normalized.applyDefaultProductChrome,
         };
 

@@ -64,6 +64,27 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     {
         return invalidContextConfig("UI text byte capacity exceeds the configured maximum");
     }
+    if (config.styleClassCapacity == 0 || config.styleRuleCapacity == 0 ||
+        config.styleBucketCapacity == 0 || config.styleRulesPerBucketCapacity == 0)
+    {
+        return invalidContextConfig("UI style capacities must be greater than zero");
+    }
+    if (config.styleClassCapacity > UIContextCapacityConfig::MaxStyleClassCapacity ||
+        config.styleRuleCapacity > UIContextCapacityConfig::MaxStyleRuleCapacity ||
+        config.styleBucketCapacity > UIContextCapacityConfig::MaxStyleBucketCapacity)
+    {
+        return invalidContextConfig("UI style capacity exceeds the configured maximum");
+    }
+    if (config.styleBucketCapacity > config.styleRuleCapacity ||
+        config.styleRulesPerBucketCapacity > config.styleRuleCapacity)
+    {
+        return invalidContextConfig("UI style bucket capacities cannot exceed rule capacity");
+    }
+    const usize maxNodeStyleClassLinks = config.nodeCapacity * 4U;
+    if (config.nodeStyleClassLinkCapacity > maxNodeStyleClassLinks)
+    {
+        return invalidContextConfig("UI node style class link capacity exceeds four links per node");
+    }
 
     return Core::success();
 }

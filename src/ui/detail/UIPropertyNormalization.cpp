@@ -165,6 +165,14 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
         .textByteCapacity = config.textByteCapacity == 0
                                 ? UIContextCapacityConfig::DefaultTextByteCapacity
                                 : config.textByteCapacity,
+        .styleClassCapacity = config.styleClassCapacity,
+        .styleRuleCapacity = config.styleRuleCapacity,
+        .styleBucketCapacity = config.styleBucketCapacity,
+        .styleRulesPerBucketCapacity = config.styleRulesPerBucketCapacity,
+        .nodeStyleClassLinkCapacity =
+            config.nodeStyleClassLinkCapacity == 0
+                ? config.nodeCapacity * 4U
+                : config.nodeStyleClassLinkCapacity,
         .applyDefaultProductChrome = config.applyDefaultProductChrome,
     };
 }

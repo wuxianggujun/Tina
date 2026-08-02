@@ -58,6 +58,15 @@ TEST(UIPropertyNormalizationTests, ContextCapacitiesDeriveFromNodeCapacity)
     EXPECT_EQ(normalized->buttonActionCapacity, 32U);
     EXPECT_EQ(normalized->textByteCapacity,
               UI::UIContextCapacityConfig::DefaultTextByteCapacity);
+    EXPECT_EQ(normalized->styleClassCapacity,
+              UI::UIContextCapacityConfig::DefaultStyleClassCapacity);
+    EXPECT_EQ(normalized->styleRuleCapacity,
+              UI::UIContextCapacityConfig::DefaultStyleRuleCapacity);
+    EXPECT_EQ(normalized->styleBucketCapacity,
+              UI::UIContextCapacityConfig::DefaultStyleBucketCapacity);
+    EXPECT_EQ(normalized->styleRulesPerBucketCapacity,
+              UI::UIContextCapacityConfig::DefaultStyleRulesPerBucketCapacity);
+    EXPECT_EQ(normalized->nodeStyleClassLinkCapacity, 128U);
     EXPECT_FALSE(normalized->applyDefaultProductChrome);
 }
 
@@ -74,6 +83,11 @@ TEST(UIPropertyNormalizationTests, ContextCapacitiesPreserveOverridesAndRejectIn
         .routedPointerListenerCapacity = 64,
         .buttonActionCapacity = 13,
         .textByteCapacity = 1024,
+        .styleClassCapacity = 12,
+        .styleRuleCapacity = 24,
+        .styleBucketCapacity = 16,
+        .styleRulesPerBucketCapacity = 6,
+        .nodeStyleClassLinkCapacity = 20,
     };
 
     auto normalized = UI::Detail::normalizeUIContextCapacityConfig(config);
@@ -87,9 +101,36 @@ TEST(UIPropertyNormalizationTests, ContextCapacitiesPreserveOverridesAndRejectIn
     EXPECT_EQ(normalized->routedPointerListenerCapacity, 64U);
     EXPECT_EQ(normalized->buttonActionCapacity, 13U);
     EXPECT_EQ(normalized->textByteCapacity, 1024U);
+    EXPECT_EQ(normalized->styleClassCapacity, 12U);
+    EXPECT_EQ(normalized->styleRuleCapacity, 24U);
+    EXPECT_EQ(normalized->styleBucketCapacity, 16U);
+    EXPECT_EQ(normalized->styleRulesPerBucketCapacity, 6U);
+    EXPECT_EQ(normalized->nodeStyleClassLinkCapacity, 20U);
 
     config.rootCapacity = 33;
     auto rejected = UI::Detail::normalizeUIContextCapacityConfig(config);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidContextConfig);
+}
+
+TEST(UIPropertyNormalizationTests, ContextRejectsInvalidStyleCapacities)
+{
+    UI::UIContextCapacityConfig config{.nodeCapacity = 8, .rootCapacity = 1};
+
+    config.styleClassCapacity = 0;
+    EXPECT_FALSE(UI::Detail::normalizeUIContextCapacityConfig(config).has_value());
+    config.styleClassCapacity = 4;
+
+    config.styleBucketCapacity = config.styleRuleCapacity + 1U;
+    EXPECT_FALSE(UI::Detail::normalizeUIContextCapacityConfig(config).has_value());
+    config.styleBucketCapacity = config.styleRuleCapacity;
+
+    config.styleRulesPerBucketCapacity = config.styleRuleCapacity + 1U;
+    EXPECT_FALSE(UI::Detail::normalizeUIContextCapacityConfig(config).has_value());
+    config.styleRulesPerBucketCapacity = config.styleRuleCapacity;
+
+    config.nodeStyleClassLinkCapacity = config.nodeCapacity * 4U + 1U;
+    const auto rejected = UI::Detail::normalizeUIContextCapacityConfig(config);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidContextConfig);
 }

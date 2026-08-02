@@ -27,6 +27,11 @@ struct NormalizedUIContextCapacityConfig final {
     usize routedPointerListenerCapacity = 0;
     usize buttonActionCapacity = 0;
     usize textByteCapacity = 0;
+    usize styleClassCapacity = 0;
+    usize styleRuleCapacity = 0;
+    usize styleBucketCapacity = 0;
+    usize styleRulesPerBucketCapacity = 0;
+    usize nodeStyleClassLinkCapacity = 0;
     bool applyDefaultProductChrome = true;
 };
 
