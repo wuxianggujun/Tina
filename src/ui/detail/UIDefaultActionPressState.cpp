@@ -179,6 +179,22 @@ bool UIDefaultActionPressState::isPressed(UINodeId node) const noexcept
     return false;
 }
 
+UIDefaultActionPressState::PressedTargets
+UIDefaultActionPressState::pressedTargets() const noexcept
+{
+    PressedTargets targets{};
+    usize targetIndex = 0;
+    for (const UINodeId target : keyPressedTargets_)
+    {
+        targets[targetIndex++] = target;
+    }
+    for (const GamepadPress& pressed : gamepadPressed_)
+    {
+        targets[targetIndex++] = pressed.target;
+    }
+    return targets;
+}
+
 std::optional<usize>
 UIDefaultActionPressState::keySlot(Platform::Key key) noexcept
 {

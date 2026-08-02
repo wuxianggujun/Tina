@@ -13,6 +13,10 @@ namespace Tina::UI::Detail {
 
 class UIDefaultActionPressState final {
 public:
+    static constexpr usize MaximumPressedTargetCount =
+        3U + Platform::PlatformFrameBuilder::MaximumGamepadSlots;
+    using PressedTargets = std::array<UINodeId, MaximumPressedTargetCount>;
+
     explicit UIDefaultActionPressState(Platform::WindowId ownerWindow) noexcept;
 
     [[nodiscard]] Core::Status
@@ -31,6 +35,7 @@ public:
     void clearGamepad(Platform::GamepadId gamepad) noexcept;
 
     [[nodiscard]] bool isPressed(UINodeId node) const noexcept;
+    [[nodiscard]] PressedTargets pressedTargets() const noexcept;
 
 private:
     struct GamepadPress final {

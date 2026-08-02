@@ -262,6 +262,13 @@ Core::Result<UIStyleBoxFillResolution> UIStyleSheetStorage::resolve(
         return Core::failure(valid.error());
     }
 
+    return resolveValidated(role, classes, states);
+}
+
+UIStyleBoxFillResolution UIStyleSheetStorage::resolveValidated(
+    UIStyleRoleId role, std::span<const UIStyleClassId> classes,
+    UIStyleState states) const noexcept
+{
     const Buffer& active = buffers_[activeBufferIndex_];
     UIStyleBoxFillResolution resolution{};
     usize winningRuleIndex = 0;

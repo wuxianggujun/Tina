@@ -145,6 +145,9 @@ struct UIContextStatistics final {
     usize lastHitRebuildCount = 0;
     usize lastPaintCacheRebuildCount = 0;
     usize lastPaintSnapshotRebuildCount = 0;
+    usize lastStyleInspectedNodeCount = 0;
+    usize lastStyleResolvedNodeCount = 0;
+    usize lastStyleCandidateRuleCount = 0;
     usize dirtyQueuePendingCount = 0;
     usize dirtyQueueHighWater = 0;
     UIStyleStatistics style{};

@@ -245,7 +245,9 @@ TEST_F(UIPaintSnapshotTest, PublishesOnlyVisibleNonTransparentSolidFillsInPaintO
     EXPECT_EQ(paint.structureRevision(), context->committedStructure().revision());
     EXPECT_EQ(paint.layoutRevision(), context->committedLayout().layoutRevision());
     EXPECT_EQ(paint.paintOrderRevision(), context->committedHit().paintOrderRevision());
-    EXPECT_EQ(context->statistics().lastPaintCacheRebuildCount, 3U);
+    // The explicit transparent paint still rebuilds once: it is a local
+    // override that must be able to suppress a stylesheet fill.
+    EXPECT_EQ(context->statistics().lastPaintCacheRebuildCount, 4U);
     EXPECT_EQ(context->statistics().lastPaintSnapshotRebuildCount, 1U);
     EXPECT_EQ(findPaintEntry(paint, root.rootNodeId()), nullptr);
     EXPECT_EQ(findPaintEntry(paint, transparent), nullptr);

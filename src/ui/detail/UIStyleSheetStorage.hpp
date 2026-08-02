@@ -57,6 +57,12 @@ class UIStyleSheetStorage final {
     [[nodiscard]] Core::Result<UIStyleBoxFillResolution>
     resolve(UIStyleRoleId role, std::span<const UIStyleClassId> classes,
             UIStyleState states) const;
+    // The Context validates roles/classes at stylesheet install and element
+    // creation. Paint-cache rebuilds use this non-failing path so invariant
+    // violations cannot be silently converted into an empty resolution.
+    [[nodiscard]] UIStyleBoxFillResolution
+    resolveValidated(UIStyleRoleId role, std::span<const UIStyleClassId> classes,
+                     UIStyleState states) const noexcept;
 
     [[nodiscard]] UIStyleSheetStorageStatistics statistics() const noexcept;
 

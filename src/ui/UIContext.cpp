@@ -341,6 +341,35 @@ struct UIComponentBuildReservation final {
 };
 
 struct UIContext::Impl final {
+    static constexpr usize StyleInteractionNodeCapacity =
+        2U * (7U + Detail::UIDefaultActionPressState::MaximumPressedTargetCount);
+
+    struct StyleInteractionNodeSet final {
+        std::array<UINodeId, StyleInteractionNodeCapacity> nodes{};
+        usize count = 0;
+
+        void add(UINodeId node) noexcept
+        {
+            if (!node.hasValue() ||
+                std::find(nodes.begin(), nodes.begin() + count, node) != nodes.begin() + count)
+            {
+                return;
+            }
+            if (count < nodes.size())
+            {
+                nodes[count++] = node;
+            }
+        }
+
+        void merge(const StyleInteractionNodeSet& other) noexcept
+        {
+            for (usize index = 0; index < other.count; ++index)
+            {
+                add(other.nodes[index]);
+            }
+        }
+    };
+
     Platform::WindowId ownerWindow{};
     UIContextCapacityConfig capacityConfig{};
     std::thread::id ownerThreadId{};
@@ -366,6 +395,8 @@ struct UIContext::Impl final {
     std::pmr::vector<std::array<UIStyleClassId, Detail::MaxStyleClassesPerNode>>
         styleClassesByNodeIndex;
     std::pmr::vector<u8> styleClassCountsByNodeIndex;
+    std::pmr::vector<UIStyleState> styleStatesByNodeIndex;
+    std::pmr::vector<UIPremultipliedRgba8Color> resolvedBoxFillCacheByNodeIndex;
     usize activeNodeStyleClassLinkCount = 0;
     usize nodeStyleClassLinkHighWater = 0;
     usize nodeStyleClassLinkCapacityFailureCount = 0;
@@ -423,6 +454,7 @@ struct UIContext::Impl final {
     Detail::UIButtonActionRegistry buttonActionRegistry;
     Detail::UIBehaviorStateStorage behaviorStateStorage;
     Detail::UIDefaultActionPressState defaultActionPressState;
+    StyleInteractionNodeSet committedStyleInteractionNodes{};
     Detail::UIRangeInputPressLatch rangeInputPressLatch;
     std::pmr::vector<UICheckboxPaint> checkboxPaintsByNodeIndex;
     // Slider-specific visuals remain kind-owned; RangeInput values live in the behavior side store.
@@ -488,6 +520,9 @@ struct UIContext::Impl final {
     usize lastHitRebuildCount = 0;
     usize lastPaintCacheRebuildCount = 0;
     usize lastPaintSnapshotRebuildCount = 0;
+    usize lastStyleInspectedNodeCount = 0;
+    usize lastStyleResolvedNodeCount = 0;
+    usize lastStyleCandidateRuleCount = 0;
     usize routeDispatchDepth = 0;
     u64 buttonRouteSerial = 0;
     u64 accessibilityActionSequence = 0;
@@ -541,6 +576,7 @@ struct UIContext::Impl final {
                             },
                             resource),
           styleClassesByNodeIndex(&resource), styleClassCountsByNodeIndex(&resource),
+          styleStatesByNodeIndex(&resource), resolvedBoxFillCacheByNodeIndex(&resource),
           boxPaintsByIndex(&resource),
           buttonPaintsByNodeIndex(&resource),
           themeBindingsByNodeIndex(&resource), styleOverridesByNodeIndex(&resource), themeDirtyScratchByNodeIndex(&resource),
@@ -633,6 +669,8 @@ struct UIContext::Impl final {
         impl->styleRolesByNodeIndex.resize(normalized.nodeCapacity, UIStyleRoleId::None);
         impl->styleClassesByNodeIndex.resize(normalized.nodeCapacity);
         impl->styleClassCountsByNodeIndex.resize(normalized.nodeCapacity, 0);
+        impl->styleStatesByNodeIndex.resize(normalized.nodeCapacity, UIStyleState::None);
+        impl->resolvedBoxFillCacheByNodeIndex.resize(normalized.nodeCapacity);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
         impl->buttonPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->themeBindingsByNodeIndex.resize(normalized.nodeCapacity, 0);
@@ -1936,8 +1974,9 @@ struct UIContext::Impl final {
         return isCandidateNodeEnabled(node) ? color : applyOpacity(color, DisabledOpacity);
     }
 
-    [[nodiscard]] UIPremultipliedRgba8Color resolvedBoxFillColor(UINodeId node, u32 nodeIndex,
-                                                                 UIPremultipliedRgba8Color normalColor) const noexcept
+    [[nodiscard]] UIPremultipliedRgba8Color resolveBuiltinBoxFillColor(
+        UINodeId node, u32 nodeIndex,
+        UIPremultipliedRgba8Color normalColor) const noexcept
     {
         UIPremultipliedRgba8Color color = normalColor;
         const NodeRecord* record = recordByIndex(nodeIndex);
@@ -2022,6 +2061,151 @@ struct UIContext::Impl final {
             applyOverride(paint.disabledBackgroundColor);
         }
         return widgetPaintColor(node, color);
+    }
+
+    [[nodiscard]] static u16 boxFillOverrideMask(const NodeRecord& record) noexcept
+    {
+        u16 relevantOverrides = static_cast<u16>(UIStyleOverride::BoxPaint);
+        if (record.kind == BuiltinElementKind::Checkbox)
+        {
+            relevantOverrides |= static_cast<u16>(UIStyleOverride::CheckboxPaint);
+        }
+        else if (record.kind == BuiltinElementKind::TextEdit)
+        {
+            relevantOverrides |= static_cast<u16>(UIStyleOverride::TextEditPaint);
+        }
+        else if (isButtonChromeKind(record.kind))
+        {
+            relevantOverrides |= static_cast<u16>(UIStyleOverride::ButtonPaint);
+        }
+        return relevantOverrides;
+    }
+
+    [[nodiscard]] bool hasLocalBoxFillOverride(u32 nodeIndex,
+                                                const NodeRecord& record) const noexcept
+    {
+        return nodeIndex < styleOverridesByNodeIndex.size() &&
+               (styleOverridesByNodeIndex[nodeIndex] & boxFillOverrideMask(record)) != 0;
+    }
+
+    [[nodiscard]] UIStyleState deriveStyleState(UINodeId node,
+                                                 u32 nodeIndex) const noexcept
+    {
+        UIStyleState states = UIStyleState::None;
+        if (hoveredPrimaryControl == node)
+        {
+            states |= UIStyleState::Hovered;
+        }
+        if (isButtonPressed(node) || armedTextEdit == node)
+        {
+            states |= UIStyleState::Pressed;
+        }
+        if (defaultActionFocusButton == node || textInputFocus == node)
+        {
+            states |= UIStyleState::Focused;
+        }
+        if (!isCandidateNodeEnabled(node))
+        {
+            states |= UIStyleState::Disabled;
+        }
+        if (const u8* toggleValue = behaviorStateStorage.tryToggleValue(nodeIndex);
+            toggleValue != nullptr && *toggleValue != 0)
+        {
+            states |= UIStyleState::Checked;
+        }
+
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        if (record == nullptr)
+        {
+            return states;
+        }
+        if ((record->kind == BuiltinElementKind::RadioButton &&
+             nodeIndex < radioButtonStatesByNodeIndex.size() &&
+             radioButtonStatesByNodeIndex[nodeIndex].selected) ||
+            (record->kind == BuiltinElementKind::DropdownItem &&
+             isSelectedDropdownItem(node)) ||
+            (record->kind == BuiltinElementKind::ListViewItem &&
+             isSelectedListViewItem(node)) ||
+            (record->kind == BuiltinElementKind::TreeViewItem &&
+             isSelectedTreeViewItem(node)))
+        {
+            states |= UIStyleState::Selected;
+        }
+        bool open = record->kind == BuiltinElementKind::Popup &&
+                    nodeIndex < popupStatesByNodeIndex.size() &&
+                    popupStatesByNodeIndex[nodeIndex].open;
+        if (record->kind == BuiltinElementKind::Dropdown)
+        {
+            const UINodeId popup = popupForDropdown(node);
+            open = popup.hasValue() && popup.index() < popupStatesByNodeIndex.size() &&
+                   popupStatesByNodeIndex[popup.index()].open;
+        }
+        if (open)
+        {
+            states |= UIStyleState::Open;
+        }
+        if (armedSlider == node || armedScrollView == node)
+        {
+            states |= UIStyleState::Dragging;
+        }
+        return states;
+    }
+
+    [[nodiscard]] StyleInteractionNodeSet currentStyleInteractionNodes() const noexcept
+    {
+        StyleInteractionNodeSet result{};
+        result.add(hoveredPrimaryControl);
+        result.add(armedPrimaryButton);
+        result.add(defaultActionFocusButton);
+        result.add(textInputFocus);
+        result.add(armedSlider);
+        result.add(armedScrollView);
+        result.add(armedTextEdit);
+        for (const UINodeId target : defaultActionPressState.pressedTargets())
+        {
+            result.add(target);
+        }
+        return result;
+    }
+
+    [[nodiscard]] usize refreshResolvedStyleCache(u32 nodeIndex,
+                                                   UIStyleState states) noexcept
+    {
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        if (record == nullptr || nodeIndex >= styleStatesByNodeIndex.size() ||
+            nodeIndex >= resolvedBoxFillCacheByNodeIndex.size())
+        {
+            return 0;
+        }
+
+        const UINodeId node = idForIndex(nodeIndex);
+        styleStatesByNodeIndex[nodeIndex] = states;
+        UIPremultipliedRgba8Color resolvedFill = resolveBuiltinBoxFillColor(
+            node, nodeIndex, localSolidFillCacheByIndex[nodeIndex]);
+        if (hasLocalBoxFillOverride(nodeIndex, *record))
+        {
+            resolvedBoxFillCacheByNodeIndex[nodeIndex] = resolvedFill;
+            return 0;
+        }
+
+        const usize classCount = styleClassCountsByNodeIndex[nodeIndex];
+        const auto classes = std::span<const UIStyleClassId>(
+            styleClassesByNodeIndex[nodeIndex].data(), classCount);
+        const Detail::UIStyleBoxFillResolution resolution =
+            styleSheetStorage.resolveValidated(styleRolesByNodeIndex[nodeIndex],
+                                               classes, states);
+        if (resolution.color.has_value())
+        {
+            resolvedFill = premultiply(*resolution.color);
+        }
+        resolvedBoxFillCacheByNodeIndex[nodeIndex] = resolvedFill;
+        return resolution.candidateRuleCount;
+    }
+
+    [[nodiscard]] usize refreshResolvedStyleCache(u32 nodeIndex) noexcept
+    {
+        return refreshResolvedStyleCache(nodeIndex,
+                                         deriveStyleState(idForIndex(nodeIndex), nodeIndex));
     }
 
     [[nodiscard]] UIBoxPaint resolvedBoxChrome(UINodeId node, u32 nodeIndex) const noexcept
@@ -2545,9 +2729,8 @@ struct UIContext::Impl final {
 
         const u32 nodeIndex = layoutEntry.node.index();
         const UIBoxPaint boxPaint = resolvedBoxChrome(layoutEntry.node, nodeIndex);
-        const UIPremultipliedRgba8Color normalColor =
-            boxPaint.solidFill.has_value() ? premultiply(boxPaint.solidFill->color) : UIPremultipliedRgba8Color{};
-        const UIPremultipliedRgba8Color resolvedFill = resolvedBoxFillColor(layoutEntry.node, nodeIndex, normalColor);
+        const UIPremultipliedRgba8Color resolvedFill =
+            resolvedBoxFillCacheByNodeIndex[nodeIndex];
         paintEntryCount += countBoxChromePaintEntries(boxPaint, layoutEntry.worldRect, !resolvedFill.isTransparent());
         paintEntryCount += countCanvasPaintEntries(layoutEntry);
         if (const UIImageContent* image = imageContentStorage.get(nodeIndex);
@@ -2579,21 +2762,94 @@ struct UIContext::Impl final {
                 : UIPremultipliedRgba8Color{};
     }
 
-    [[nodiscard]] usize rebuildDirtyPaintCaches(std::span<const UICommittedLayoutEntry> layoutEntries) noexcept
+    struct PaintCacheRebuildStatistics final {
+        usize paintCacheRebuildCount = 0;
+        usize styleInspectedNodeCount = 0;
+        usize styleResolvedNodeCount = 0;
+        usize styleCandidateRuleCount = 0;
+    };
+
+    [[nodiscard]] PaintCacheRebuildStatistics
+    rebuildDirtyPaintCaches(
+        std::span<const UICommittedLayoutEntry> layoutEntries,
+        StyleInteractionNodeSet& interactionCandidates) noexcept
     {
-        usize rebuildCount = 0;
+        PaintCacheRebuildStatistics statistics{};
+        interactionCandidates = committedStyleInteractionNodes;
+        interactionCandidates.merge(currentStyleInteractionNodes());
+        const auto rebuildNode = [this, &statistics](u32 nodeIndex) noexcept {
+            ++statistics.styleInspectedNodeCount;
+            refreshLocalPaintCache(nodeIndex);
+            statistics.styleCandidateRuleCount += refreshResolvedStyleCache(nodeIndex);
+            ++statistics.paintCacheRebuildCount;
+            ++statistics.styleResolvedNodeCount;
+        };
         for (const UICommittedLayoutEntry& layoutEntry : layoutEntries)
         {
             const u32 nodeIndex = layoutEntry.node.index();
-            if (nodeIndex >= dirtyQueueStorage.nodeCapacity() || !hasDirty(dirtyQueueStorage.flags(nodeIndex), UIDirty::Paint))
+            if (nodeIndex >= dirtyQueueStorage.nodeCapacity() ||
+                nodeIndex >= styleStatesByNodeIndex.size())
             {
                 continue;
             }
 
-            refreshLocalPaintCache(nodeIndex);
-            ++rebuildCount;
+            const NodeRecord* record = recordByIndex(nodeIndex);
+            const UIDirty dirty = dirtyQueueStorage.flags(nodeIndex);
+            const bool paintDirty = hasDirty(dirty, UIDirty::Paint);
+            const bool virtualCollectionOwner =
+                record != nullptr &&
+                (record->kind == BuiltinElementKind::ListView ||
+                 record->kind == BuiltinElementKind::TreeView);
+            if (paintDirty)
+            {
+                rebuildNode(nodeIndex);
+            }
+            if (!virtualCollectionOwner ||
+                !hasDirty(dirty, UIDirty::Style | UIDirty::Paint))
+            {
+                continue;
+            }
+
+            // Virtual collection selection and row rebinding dirty the owner.
+            // Refresh its bounded materialized row pool without turning every
+            // paint-only state update into a full-tree style scan.
+            for (u32 childIndex = record->firstChildIndex;
+                 childIndex != InvalidNodeIndex;)
+            {
+                const NodeRecord* child = recordByIndex(childIndex);
+                if (child == nullptr)
+                {
+                    break;
+                }
+                const u32 nextSiblingIndex = child->nextSiblingIndex;
+                const bool materializedRow =
+                    child->kind == BuiltinElementKind::ListViewItem ||
+                    child->kind == BuiltinElementKind::TreeViewItem;
+                const bool childAlreadyDirty =
+                    childIndex < dirtyQueueStorage.nodeCapacity() &&
+                    hasDirty(dirtyQueueStorage.flags(childIndex), UIDirty::Paint);
+                if (materializedRow && !childAlreadyDirty)
+                {
+                    rebuildNode(childIndex);
+                }
+                childIndex = nextSiblingIndex;
+            }
         }
-        return rebuildCount;
+
+        for (usize index = 0; index < interactionCandidates.count; ++index)
+        {
+            const UINodeId node = interactionCandidates.nodes[index];
+            if (!contains(node) || node.index() >= styleStatesByNodeIndex.size())
+            {
+                continue;
+            }
+            const UIStyleState states = deriveStyleState(node, node.index());
+            if (styleStatesByNodeIndex[node.index()] != states)
+            {
+                rebuildNode(node.index());
+            }
+        }
+        return statistics;
     }
 
     void appendTextGlyphPaints(std::pmr::vector<UICommittedPaintEntry>& output,
@@ -2686,7 +2942,7 @@ struct UIContext::Impl final {
         const u32 nodeIndex = layoutEntry.node.index();
         const UIBoxPaint boxPaint = resolvedBoxChrome(layoutEntry.node, nodeIndex);
         const UIPremultipliedRgba8Color fill =
-            resolvedBoxFillColor(layoutEntry.node, nodeIndex, localSolidFillCacheByIndex[nodeIndex]);
+            resolvedBoxFillCacheByNodeIndex[nodeIndex];
         appendBoxChromePaints(output, layoutEntry.node, layoutEntry.worldRect, layoutEntry.effectiveClip,
                               nextPaintOrdinal, boxPaint, fill);
         appendCanvasPaints(output, layoutEntry, nextPaintOrdinal);
@@ -3612,6 +3868,11 @@ struct UIContext::Impl final {
             activeNodeStyleClassLinkCount -= releasedCount;
             styleClassCountsByNodeIndex[index] = 0;
             styleClassesByNodeIndex[index] = {};
+        }
+        if (index < styleStatesByNodeIndex.size())
+        {
+            styleStatesByNodeIndex[index] = UIStyleState::None;
+            resolvedBoxFillCacheByNodeIndex[index] = {};
         }
         boxPaintsByIndex[index] = {};
         buttonPaintsByNodeIndex[index] = {};
@@ -4788,6 +5049,7 @@ struct UIContext::Impl final {
         if (!descriptor.text.has_value())
         {
             refreshLocalPaintCache(node.index());
+            static_cast<void>(refreshResolvedStyleCache(node.index()));
             return Core::success();
         }
 
@@ -4810,6 +5072,7 @@ struct UIContext::Impl final {
         {
             state.metrics = {};
             refreshLocalPaintCache(node.index());
+            static_cast<void>(refreshResolvedStyleCache(node.index()));
             return Core::success();
         }
 
@@ -4824,6 +5087,7 @@ struct UIContext::Impl final {
         state.metrics = *metrics;
         state.hasContent = true;
         refreshLocalPaintCache(node.index());
+        static_cast<void>(refreshResolvedStyleCache(node.index()));
         return Core::success();
     }
 
@@ -6108,6 +6372,7 @@ struct UIContext::Impl final {
         {
             return staged;
         }
+        stageThemePaintChange(index);
         propagateThemeLayoutDirtyToAncestors();
         if (Core::Status capacity = preflightThemeDirtyQueue(); !capacity)
         {
@@ -6194,6 +6459,10 @@ struct UIContext::Impl final {
         {
             return staged;
         }
+        if ((overridesToClear & boxFillOverrideMask(**nodeResult)) != 0)
+        {
+            stageThemePaintChange(index);
+        }
         propagateThemeLayoutDirtyToAncestors();
         if (Core::Status capacity = preflightThemeDirtyQueue(); !capacity)
         {
@@ -6236,6 +6505,15 @@ struct UIContext::Impl final {
         UIBoxPaint& currentPaint = boxPaintsByIndex[node.index()];
         if (currentPaint == normalizedPaint)
         {
+            if ((styleOverridesByNodeIndex[node.index()] &
+                 static_cast<u16>(UIStyleOverride::BoxPaint)) != 0)
+            {
+                return Core::success();
+            }
+            if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus)
+            {
+                return dirtyStatus;
+            }
             detachThemeBinding(node.index(), ThemeBindingBoxPaint);
             return Core::success();
         }
@@ -6276,6 +6554,15 @@ struct UIContext::Impl final {
         UIButtonPaint& currentPaint = buttonPaintsByNodeIndex[button.index()];
         if (currentPaint == paint)
         {
+            if ((styleOverridesByNodeIndex[button.index()] &
+                 static_cast<u16>(UIStyleOverride::ButtonPaint)) != 0)
+            {
+                return Core::success();
+            }
+            if (Core::Status dirty = markPaintDirty(button); !dirty)
+            {
+                return dirty;
+            }
             detachThemeBinding(button.index(), ThemeBindingButtonPaint);
             return Core::success();
         }
@@ -6754,6 +7041,15 @@ struct UIContext::Impl final {
         UITextEditPaint& currentPaint = textEditPaintsByNodeIndex[textEdit.index()];
         if (currentPaint == paint)
         {
+            if ((styleOverridesByNodeIndex[textEdit.index()] &
+                 static_cast<u16>(UIStyleOverride::TextEditPaint)) != 0)
+            {
+                return Core::success();
+            }
+            if (Core::Status dirty = markPaintDirty(textEdit); !dirty)
+            {
+                return dirty;
+            }
             detachThemeBinding(textEdit.index(), ThemeBindingTextEditPaint);
             return Core::success();
         }
@@ -7001,6 +7297,15 @@ struct UIContext::Impl final {
         UICheckboxPaint& currentPaint = checkboxPaintsByNodeIndex[checkbox.index()];
         if (currentPaint == paint)
         {
+            if ((styleOverridesByNodeIndex[checkbox.index()] &
+                 static_cast<u16>(UIStyleOverride::CheckboxPaint)) != 0)
+            {
+                return Core::success();
+            }
+            if (Core::Status dirty = markPaintDirty(checkbox); !dirty)
+            {
+                return dirty;
+            }
             detachThemeBinding(checkbox.index(), ThemeBindingCheckboxPaint);
             return Core::success();
         }
@@ -10429,6 +10734,9 @@ struct UIContext::Impl final {
             lastHitRebuildCount = 0;
             lastPaintCacheRebuildCount = 0;
             lastPaintSnapshotRebuildCount = 0;
+            lastStyleInspectedNodeCount = 0;
+            lastStyleResolvedNodeCount = 0;
+            lastStyleCandidateRuleCount = 0;
             return Core::success();
         }
         if (layoutNeedsCommit && nodes.activeCount() > capacityConfig.layoutSnapshotCapacity)
@@ -10520,6 +10828,8 @@ struct UIContext::Impl final {
         const UINodeId previousCapturedPointer = capturedPointerNode;
         const usize previousPublishedHitBufferIndex = publishedHitBufferIndex;
         const Detail::UIImeCompositionState previousImeComposition = imeComposition;
+        StyleInteractionNodeSet styleInteractionCandidates{};
+        bool styleInteractionCachesMayNeedRollback = false;
         struct FocusRestoreRollbackEntry final {
             u32 index = InvalidNodeIndex;
             UINodeId value{};
@@ -10566,6 +10876,17 @@ struct UIContext::Impl final {
                 if (entry.index < focusRestoreByNodeIndex.size())
                 {
                     focusRestoreByNodeIndex[entry.index] = entry.value;
+                }
+            }
+            if (styleInteractionCachesMayNeedRollback)
+            {
+                for (usize index = 0; index < styleInteractionCandidates.count; ++index)
+                {
+                    const UINodeId node = styleInteractionCandidates.nodes[index];
+                    if (contains(node))
+                    {
+                        static_cast<void>(refreshResolvedStyleCache(node.index()));
+                    }
                 }
             }
         });
@@ -10705,16 +11026,18 @@ struct UIContext::Impl final {
         }
 
         usize writePaintBufferIndex = publishedPaintBufferIndex;
-        usize candidatePaintCacheRebuildCount = 0;
+        PaintCacheRebuildStatistics candidatePaintCacheStatistics{};
         if (paintNeedsCommit)
         {
+            styleInteractionCachesMayNeedRollback = true;
+            candidatePaintCacheStatistics =
+                rebuildDirtyPaintCaches(candidateLayoutEntries, styleInteractionCandidates);
             auto paintCapacity = validatePaintCandidateCapacity(candidateLayoutEntries);
             if (!paintCapacity)
             {
                 return Core::failure(paintCapacity.error());
             }
             writePaintBufferIndex = 1 - publishedPaintBufferIndex;
-            candidatePaintCacheRebuildCount = rebuildDirtyPaintCaches(candidateLayoutEntries);
             if (Core::Status status =
                     buildCommittedPaint(committedPaintBuffers[writePaintBufferIndex], candidateLayoutEntries);
                 !status)
@@ -10768,6 +11091,7 @@ struct UIContext::Impl final {
             committedPaintLayoutRevision = candidateLayoutRevision;
             committedPaintOrderRevision = candidatePaintOrderRevision;
             committedPaintViewportSize = viewportSize;
+            committedStyleInteractionNodes = currentStyleInteractionNodes();
         }
         if (semanticsNeedsCommit)
         {
@@ -10779,8 +11103,11 @@ struct UIContext::Impl final {
         }
         lastLayoutPass = layoutNeedsCommit ? pass : LayoutPassStatistics{};
         lastHitRebuildCount = hitNeedsCommit ? 1 : 0;
-        lastPaintCacheRebuildCount = candidatePaintCacheRebuildCount;
+        lastPaintCacheRebuildCount = candidatePaintCacheStatistics.paintCacheRebuildCount;
         lastPaintSnapshotRebuildCount = paintNeedsCommit ? 1 : 0;
+        lastStyleInspectedNodeCount = candidatePaintCacheStatistics.styleInspectedNodeCount;
+        lastStyleResolvedNodeCount = candidatePaintCacheStatistics.styleResolvedNodeCount;
+        lastStyleCandidateRuleCount = candidatePaintCacheStatistics.styleCandidateRuleCount;
         if (layoutNeedsCommit)
         {
             publishControlLayoutState(layoutOrderScratch);
@@ -14152,6 +14479,9 @@ struct UIContext::Impl final {
             .lastHitRebuildCount = lastHitRebuildCount,
             .lastPaintCacheRebuildCount = lastPaintCacheRebuildCount,
             .lastPaintSnapshotRebuildCount = lastPaintSnapshotRebuildCount,
+            .lastStyleInspectedNodeCount = lastStyleInspectedNodeCount,
+            .lastStyleResolvedNodeCount = lastStyleResolvedNodeCount,
+            .lastStyleCandidateRuleCount = lastStyleCandidateRuleCount,
             .dirtyQueuePendingCount = validDirtyQueueCount(),
             .dirtyQueueHighWater = dirtyQueueStorage.highWater(),
             .style = {

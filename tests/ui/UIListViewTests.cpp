@@ -3,6 +3,8 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/ui/UI.hpp>
 
+#include <algorithm>
+#include <array>
 #include <limits>
 #include <memory>
 #include <memory_resource>
@@ -538,6 +540,59 @@ TEST_F(UIListViewTest, WheelAndCommitRemainAllocationFreeAfterWarmup)
         assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
     }
     EXPECT_EQ(resource.allocationCount(), allocationCount);
+}
+
+TEST_F(UIListViewTest, StylesheetSelectionCacheClearsWhenMaterializedRowIsRebound)
+{
+    constexpr u32 RowCapacity = 8;
+    auto context = createContext(window, ContextNodeCapacity);
+    ASSERT_NE(context, nullptr);
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::CollectionItem,
+            .requiredStates = UI::UIStyleState::Selected,
+            .color = UI::rgb(0x26C281),
+        },
+    };
+    assertOk(context->installStyleSheet(rules));
+
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    ListDataSource source{.count = 100};
+    const UI::UINodeId listView = *updater.createElement(
+        root.rootNodeId(),
+        UI::makeListViewElement({.materializedItemCapacity = RowCapacity}));
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 60.0F)));
+    assertOk(updater.setLayoutStyle(listView, fixedSize(100.0F, 60.0F)));
+    assertOk(updater.setListViewStyle(
+        listView,
+        {
+            .rowHeight = 20.0F,
+            .overscanRows = 1,
+            .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+        }));
+    assertOk(updater.setListViewDataSource(listView, source.view()));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+
+    assertOk(updater.setListViewSelectedIndex(listView, 0));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    const auto selectedColor = UI::premultiply(UI::rgb(0x26C281));
+    EXPECT_EQ(std::ranges::count_if(
+                  context->committedPaint().entries(),
+                  [&](const UI::UICommittedPaintEntry& entry) noexcept {
+                      return entry.solidFill == selectedColor;
+                  }),
+              1U);
+
+    assertOk(updater.scrollListViewToIndex(
+        listView, 20, UI::UIListViewScrollAlignment::Start));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    EXPECT_EQ(std::ranges::count_if(
+                  context->committedPaint().entries(),
+                  [&](const UI::UICommittedPaintEntry& entry) noexcept {
+                      return entry.solidFill == selectedColor;
+                  }),
+              0U);
 }
 
 } // namespace

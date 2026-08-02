@@ -175,6 +175,7 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 - 用 Panel、Label、Button、Checkbox、Slider、ListView、TreeView 等组合自己的业务组件；
 - 定义组件函数并返回一组 `UINodeId`，例如 Inventory slot 的 root/icon/count label；
 - 设置布局、文本、Semantics、命中策略、StyleRole、局部 box/text/control paint；
+- 在 `UIContext` 创建首个节点前注册 StyleClass、安装 literal BoxFill stylesheet；
 - 注册 routed pointer listener，使用 Button/Slider/selection 等已有 callback；
 - 使用 Image/Icon content，以及 `SolidRect`/`Image`/Stretch-only `NineSlice` Canvas 组合 backend-neutral 图形。
 - 通过安装目录使用 backend-neutral `Tina::GameSDK`、独立 `PlatformGlfw`、DesktopBootstrap/RenderBgfx
@@ -185,7 +186,7 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 - 依赖跨发行版 artifact transfer 或正式 ABI/兼容策略；AudioMiniaudio 安装 adapter 与
   Windows/Linux moved-prefix consumer 已可用；
 - 注册任意新 Widget class 或 Behavior state machine；
-- 定义用户 StyleClass、selector、pseudo-state stylesheet；
+- 从 Runtime facade 注册 class/sheet；
 - 从 UI 持有 AssetHandle/Lease、FrameResourceRef 或 texture/bgfx handle；
 - 声明 transition、tween、timeline 或 keyframe animation；
 - 传入任意 GPU/paint callback。
@@ -324,21 +325,49 @@ startup-only custom Behavior SPI。
 ### StyleSheet
 
 ```cpp
-struct UIStyleRoleId  { u32 value{}; };
+enum class UIStyleRoleId : u8 {
+    None = 0,
+    PanelSurface,
+    // Existing built-in product roles...
+    TreeView,
+};
+
 struct UIStyleClassId { u32 value{}; };
 struct UIStyleTokenId { u32 value{}; };
 
 enum class UIStyleState : u16 {
-    Hovered,
-    Pressed,
-    Focused,
-    Disabled,
-    Checked,
-    Selected,
-    Open,
-    Dragging,
+    None     = 0,
+    Hovered  = 1U << 0U,
+    Pressed  = 1U << 1U,
+    Focused  = 1U << 2U,
+    Disabled = 1U << 3U,
+    Checked  = 1U << 4U,
+    Selected = 1U << 5U,
+    Open     = 1U << 6U,
+    Dragging = 1U << 7U,
 };
 ```
+
+`UI-STYLE-001` 当前为 `InProgress`。已落地的 foundation/context 切片包括：强类型
+`UIStyleClassId`/`UIStyleTokenId` 与 node-local state mask、公开 literal `UIStyleBoxFillRule`，以及私有
+fixed-capacity 双缓冲 compiler。compiler 按 `(role,class)` 建 bucket、二分查找并做 required-state subset
+匹配；同一匹配链 later rule wins，compile 失败保留旧 sheet 与 revision，构造完成后 compile/resolve 不增长
+PMR storage。
+
+`UIContextCapacityConfig` 已固定 class/rule/bucket/rules-per-bucket/node-class-link 容量；
+`registerStyleClass()` 与 `installStyleSheet()` 仅允许首个节点创建前在 owner thread 调用，安装会复制规则并
+原子替换 compiled sheet。`UIElementVisual::styleClasses` 是 authoring borrowed span，创建时复制到每节点最多
+4 个 class slot；destroy、创建回滚与 slot reuse 都会释放 link。`UIContextStatistics::style` 已发布这些容量、
+active/high-water、failure 与 revision counter。
+
+首个 paint/state 垂直切片也已落地：Context 从既有 retained interaction/control storage 派生
+Hovered/Pressed/Focused/Disabled/Checked/Selected/Open/Dragging，按 dirty node 刷新 per-node resolved BoxFill
+cache，再由 committed paint 只读该 cache。优先级为 product chrome < stylesheet < local override；单节点
+paint/state 更新不扫描全树或完整 rule table，并输出 inspected node、resolved node 与 candidate rule counter。
+ListView/TreeView owner 更新时仅额外刷新固定 materialized row pool，防止虚拟行复用残留 Selected 样式。
+
+下一步仍需补 Runtime facade、token registry/value/declaration 与 reverse dependency、Image tint/opacity 和
+其他属性 dirty metadata，以及 `ui_style_state_v1` benchmark 与产品视觉门禁。
 
 第一版 selector 只支持当前节点的 `role + class + state mask`，不支持 descendant、`nth-child`、运行时
 CSS parser 或任意 specificity。推荐优先级：
@@ -670,8 +699,9 @@ counter、容量/分配不变量可以立即作为确定性门禁：
    - C Done：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling、missing/unavailable/resource invalidation、6-case DPI-like size matrix 与 `ui_image_nineslice_v1` benchmark 全部关闭；
 5. `UI-COMPONENT-001` Done：Runtime bounded transaction、六类 Behavior side store、node/text/canvas/Behavior
    统一 reservation/counter 与冻结的 `ui_component_build_v1` 已落地；
-6. `UI-STYLE-001`：Image 与 Component 两条目标属性面已稳定，下一步开放强类型 StyleClass/token 与
-   node-local pseudo-state stylesheet，并把 image tint/opacity 纳入 dirty metadata；
+6. `UI-STYLE-001` InProgress：fixed-capacity style kernel、Context capacity/startup install、每节点最多 4 个
+   class link，以及 retained state + resolved BoxFill paint cache 已落地；下一步补 Runtime facade、token
+   dependency、Image tint/opacity、其他属性 dirty metadata 与 `ui_style_state_v1`；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。
 
 独立或后置 lane：
