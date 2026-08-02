@@ -40,6 +40,7 @@ inline constexpr std::string_view kVirtualCollectionWorkload = "ui_virtual_colle
 inline constexpr std::string_view kImageNineSliceWorkload = "ui_image_nineslice_v1";
 inline constexpr std::string_view kComponentActivateToggleWorkload =
     "ui_component_build_activate_toggle_v1";
+inline constexpr std::string_view kComponentBuildWorkload = "ui_component_build_v1";
 
 inline constexpr usize kLargeNodeCount = 4096;
 inline constexpr usize kFlatLeafCount = kLargeNodeCount - 1;
@@ -66,16 +67,38 @@ inline constexpr usize kComponentCanvasCommandCount =
     kComponentCount * kComponentCanvasCommandsPerTransaction;
 inline constexpr std::string_view kComponentActivateText = "Apply";
 inline constexpr std::string_view kComponentToggleText = "Switch";
+inline constexpr std::string_view kComponentTextInputText = "Input";
+inline constexpr std::string_view kComponentDropdownText = "Select";
 inline constexpr usize kComponentTextBytesPerTransaction =
     kComponentActivateText.size() + kComponentToggleText.size();
+static_assert(kComponentTextInputText.size() + kComponentDropdownText.size() ==
+              kComponentTextBytesPerTransaction);
 inline constexpr usize kComponentTextByteCount =
     kComponentCount * kComponentTextBytesPerTransaction;
 inline constexpr usize kComponentActivateSlotsPerTransaction = 2;
 inline constexpr usize kComponentToggleSlotsPerTransaction = 2;
-inline constexpr usize kComponentActivateSlotCount =
-    kComponentCount * kComponentActivateSlotsPerTransaction;
-inline constexpr usize kComponentToggleSlotCount =
-    kComponentCount * kComponentToggleSlotsPerTransaction;
+inline constexpr UI::UIComponentBuildBudget kComponentActivateToggleBudget{
+    .nodes = kComponentNodesPerTransaction,
+    .textBytes = kComponentTextBytesPerTransaction,
+    .canvasCommands = kComponentCanvasCommandsPerTransaction,
+    .behaviors = {
+        .activate = kComponentActivateSlotsPerTransaction,
+        .toggle = kComponentToggleSlotsPerTransaction,
+    },
+};
+inline constexpr UI::UIComponentBuildBudget kComponentBuildBudget{
+    .nodes = kComponentNodesPerTransaction,
+    .textBytes = kComponentTextBytesPerTransaction,
+    .canvasCommands = kComponentCanvasCommandsPerTransaction,
+    .behaviors = {
+        .activate = 2,
+        .toggle = 1,
+        .range = 1,
+        .textInput = 1,
+        .scroll = 1,
+        .selection = 1,
+    },
+};
 
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
@@ -189,6 +212,7 @@ struct UIBenchmarkReport final {
     usize configuredComponentNodesPerTransaction = 0;
     usize configuredComponentTextBytesPerTransaction = 0;
     usize configuredComponentCanvasCommandsPerTransaction = 0;
+    UI::UIBehaviorSlotBudget configuredComponentBehaviorSlotsPerTransaction{};
 
     u64 workN = 0;
     u64 workP = 0;
@@ -260,9 +284,18 @@ struct UIBenchmarkReport final {
     u64 componentActivateSlotsPublished = 0;
     u64 componentToggleSlotsRequested = 0;
     u64 componentToggleSlotsPublished = 0;
+    u64 componentRangeSlotsRequested = 0;
+    u64 componentRangeSlotsPublished = 0;
+    u64 componentTextInputSlotsRequested = 0;
+    u64 componentTextInputSlotsPublished = 0;
+    u64 componentScrollSlotsRequested = 0;
+    u64 componentScrollSlotsPublished = 0;
+    u64 componentSelectionSlotsRequested = 0;
+    u64 componentSelectionSlotsPublished = 0;
     u64 componentCleanCommitCount = 0;
     u64 componentCleanCommitRebuildCount = 0;
     u64 componentTreeChecksum = 0;
+    UI::UIComponentBuildStatistics componentReservationStatistics{};
 
     usize pmrAllocationsBefore = 0;
     usize pmrAllocationsAfter = 0;
@@ -632,6 +665,13 @@ componentCanvasCommands() noexcept
     return descriptor;
 }
 
+[[nodiscard]] UI::UIElementDescriptor componentRangeActivateToggleDescriptor() noexcept
+{
+    UI::UIElementDescriptor descriptor = UI::makeSliderElement(fixedLayout(32.0F, 8.0F));
+    descriptor.behaviors |= UI::UIElementBehavior::Activate | UI::UIElementBehavior::Toggle;
+    return descriptor;
+}
+
 [[nodiscard]] bool populateImageBenchmarkTree(UIFixture& fixture, std::string& error)
 {
     usize resourceCursor = 0;
@@ -910,6 +950,32 @@ void captureFinalState(const CountingMemoryResource& memory, UIBenchmarkReport& 
                                                static_cast<u64>(report.statistics.committedPaintNodeCount));
 }
 
+void hashComponentBuildPool(DeterministicHash& hash,
+                            const UI::UIComponentBuildPoolStatistics& statistics) noexcept
+{
+    hash.addU64(statistics.requested);
+    hash.addU64(statistics.reserved);
+    hash.addU64(statistics.published);
+    hash.addU64(statistics.capacityFailures);
+    hash.addU64(statistics.outstandingReservations);
+}
+
+void hashComponentBuildStatistics(DeterministicHash& hash,
+                                  const UI::UIComponentBuildStatistics& statistics) noexcept
+{
+    hashComponentBuildPool(hash, statistics.nodes);
+    hashComponentBuildPool(hash, statistics.textBytes);
+    hashComponentBuildPool(hash, statistics.canvasCommands);
+    hashComponentBuildPool(hash, statistics.behaviors.activate);
+    hashComponentBuildPool(hash, statistics.behaviors.toggle);
+    hashComponentBuildPool(hash, statistics.behaviors.range);
+    hashComponentBuildPool(hash, statistics.behaviors.textInput);
+    hashComponentBuildPool(hash, statistics.behaviors.scroll);
+    hashComponentBuildPool(hash, statistics.behaviors.selection);
+    hash.addU64(statistics.activeTransactionCount);
+    hash.addU64(statistics.transactionFailureCount);
+}
+
 void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) noexcept
 {
     hash.addString(report.workload);
@@ -925,6 +991,12 @@ void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) no
     hash.addU64(report.configuredComponentNodesPerTransaction);
     hash.addU64(report.configuredComponentTextBytesPerTransaction);
     hash.addU64(report.configuredComponentCanvasCommandsPerTransaction);
+    hash.addU64(report.configuredComponentBehaviorSlotsPerTransaction.activate);
+    hash.addU64(report.configuredComponentBehaviorSlotsPerTransaction.toggle);
+    hash.addU64(report.configuredComponentBehaviorSlotsPerTransaction.range);
+    hash.addU64(report.configuredComponentBehaviorSlotsPerTransaction.textInput);
+    hash.addU64(report.configuredComponentBehaviorSlotsPerTransaction.scroll);
+    hash.addU64(report.configuredComponentBehaviorSlotsPerTransaction.selection);
     hash.addU64(report.workN);
     hash.addU64(report.workP);
     hash.addU64(report.workH);
@@ -975,9 +1047,18 @@ void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) no
     hash.addU64(report.componentActivateSlotsPublished);
     hash.addU64(report.componentToggleSlotsRequested);
     hash.addU64(report.componentToggleSlotsPublished);
+    hash.addU64(report.componentRangeSlotsRequested);
+    hash.addU64(report.componentRangeSlotsPublished);
+    hash.addU64(report.componentTextInputSlotsRequested);
+    hash.addU64(report.componentTextInputSlotsPublished);
+    hash.addU64(report.componentScrollSlotsRequested);
+    hash.addU64(report.componentScrollSlotsPublished);
+    hash.addU64(report.componentSelectionSlotsRequested);
+    hash.addU64(report.componentSelectionSlotsPublished);
     hash.addU64(report.componentCleanCommitCount);
     hash.addU64(report.componentCleanCommitRebuildCount);
     hash.addU64(report.componentTreeChecksum);
+    hashComponentBuildStatistics(hash, report.componentReservationStatistics);
 }
 
 [[nodiscard]] u64 hashSemantics(UI::UICommittedSemanticsView semantics) noexcept
@@ -1827,6 +1908,34 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
 
 using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
 
+void recordComponentBudgetRequested(UIBenchmarkReport& report,
+                                    const UI::UIComponentBuildBudget& budget) noexcept
+{
+    report.componentNodesRequested += budget.nodes;
+    report.componentTextBytesRequested += budget.textBytes;
+    report.componentCanvasCommandsRequested += budget.canvasCommands;
+    report.componentActivateSlotsRequested += budget.behaviors.activate;
+    report.componentToggleSlotsRequested += budget.behaviors.toggle;
+    report.componentRangeSlotsRequested += budget.behaviors.range;
+    report.componentTextInputSlotsRequested += budget.behaviors.textInput;
+    report.componentScrollSlotsRequested += budget.behaviors.scroll;
+    report.componentSelectionSlotsRequested += budget.behaviors.selection;
+}
+
+void recordComponentBudgetPublished(UIBenchmarkReport& report,
+                                    const UI::UIComponentBuildBudget& budget) noexcept
+{
+    report.componentNodesPublished += budget.nodes;
+    report.componentTextBytesPublished += budget.textBytes;
+    report.componentCanvasCommandsPublished += budget.canvasCommands;
+    report.componentActivateSlotsPublished += budget.behaviors.activate;
+    report.componentToggleSlotsPublished += budget.behaviors.toggle;
+    report.componentRangeSlotsPublished += budget.behaviors.range;
+    report.componentTextInputSlotsPublished += budget.behaviors.textInput;
+    report.componentScrollSlotsPublished += budget.behaviors.scroll;
+    report.componentSelectionSlotsPublished += budget.behaviors.selection;
+}
+
 [[nodiscard]] bool buildActivateToggleComponents(UIFixture& fixture,
                                                  ComponentRootArray& componentRoots,
                                                  UIBenchmarkReport* report,
@@ -1844,7 +1953,7 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
 
     for (usize index = 0; index < componentRoots.size(); ++index) {
         auto transactionResult = fixture.updater.beginBuildTransaction(
-            fixture.root.rootNodeId(), rootDescriptor, kComponentNodesPerTransaction);
+            fixture.root.rootNodeId(), rootDescriptor, kComponentActivateToggleBudget);
         if (!transactionResult) {
             error = transactionResult.error().message;
             return false;
@@ -1852,11 +1961,7 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
         UI::UIElementBuildTransaction transaction = std::move(*transactionResult);
         if (report != nullptr) {
             ++report->componentTransactionsStarted;
-            report->componentNodesRequested += kComponentNodesPerTransaction;
-            report->componentTextBytesRequested += kComponentTextBytesPerTransaction;
-            report->componentCanvasCommandsRequested += kComponentCanvasCommandsPerTransaction;
-            report->componentActivateSlotsRequested += kComponentActivateSlotsPerTransaction;
-            report->componentToggleSlotsRequested += kComponentToggleSlotsPerTransaction;
+            recordComponentBudgetRequested(*report, kComponentActivateToggleBudget);
         }
 
         const UI::UINodeId componentRoot = transaction.rootNodeId();
@@ -1883,19 +1988,74 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
         componentRoots[index] = *committedRoot;
         if (report != nullptr) {
             ++report->componentTransactionsCommitted;
-            report->componentNodesPublished += kComponentNodesPerTransaction;
-            report->componentTextBytesPublished += kComponentTextBytesPerTransaction;
-            report->componentCanvasCommandsPublished += kComponentCanvasCommandsPerTransaction;
-            report->componentActivateSlotsPublished += kComponentActivateSlotsPerTransaction;
-            report->componentToggleSlotsPublished += kComponentToggleSlotsPerTransaction;
+            recordComponentBudgetPublished(*report, kComponentActivateToggleBudget);
         }
     }
     return true;
 }
 
-[[nodiscard]] bool destroyActivateToggleComponents(UIFixture& fixture,
-                                                   const ComponentRootArray& componentRoots,
-                                                   std::string& error)
+[[nodiscard]] bool buildReservedComponents(UIFixture& fixture,
+                                           ComponentRootArray& componentRoots,
+                                           UIBenchmarkReport* report,
+                                           std::string& error)
+{
+    const auto canvasCommands = componentCanvasCommands();
+    UI::UIElementDescriptor rootDescriptor =
+        UI::makeScrollViewElement(fixedLayout(64.0F, 32.0F));
+    rootDescriptor.visual.canvas = canvasCommands;
+    const UI::UIElementDescriptor rangeDescriptor =
+        componentRangeActivateToggleDescriptor();
+    const UI::UIElementDescriptor textInputDescriptor =
+        UI::makeTextEditElement(kComponentTextInputText, fixedLayout(32.0F, 8.0F));
+    const UI::UIElementDescriptor dropdownDescriptor =
+        UI::makeDropdownElement(kComponentDropdownText, fixedLayout(32.0F, 8.0F));
+
+    for (usize index = 0; index < componentRoots.size(); ++index) {
+        auto transactionResult = fixture.updater.beginBuildTransaction(
+            fixture.root.rootNodeId(), rootDescriptor, kComponentBuildBudget);
+        if (!transactionResult) {
+            error = transactionResult.error().message;
+            return false;
+        }
+        UI::UIElementBuildTransaction transaction = std::move(*transactionResult);
+        if (report != nullptr) {
+            ++report->componentTransactionsStarted;
+            recordComponentBudgetRequested(*report, kComponentBuildBudget);
+        }
+
+        const UI::UINodeId componentRoot = transaction.rootNodeId();
+        auto range = transaction.createElement(componentRoot, rangeDescriptor);
+        if (!range) {
+            error = range.error().message;
+            return false;
+        }
+        auto textInput = transaction.createElement(componentRoot, textInputDescriptor);
+        if (!textInput) {
+            error = textInput.error().message;
+            return false;
+        }
+        auto dropdown = transaction.createElement(componentRoot, dropdownDescriptor);
+        if (!dropdown) {
+            error = dropdown.error().message;
+            return false;
+        }
+        auto committedRoot = transaction.commit();
+        if (!committedRoot) {
+            error = committedRoot.error().message;
+            return false;
+        }
+        componentRoots[index] = *committedRoot;
+        if (report != nullptr) {
+            ++report->componentTransactionsCommitted;
+            recordComponentBudgetPublished(*report, kComponentBuildBudget);
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool destroyComponents(UIFixture& fixture,
+                                     const ComponentRootArray& componentRoots,
+                                     std::string& error)
 {
     for (const UI::UINodeId componentRoot : componentRoots) {
         if (Core::Status status = fixture.updater.destroy(componentRoot); !status) {
@@ -1906,9 +2066,63 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
     return true;
 }
 
-[[nodiscard]] bool runComponentActivateToggle(const UIBenchmarkOptions& options,
-                                              UIBenchmarkReport& report,
-                                              std::string& error)
+[[nodiscard]] UI::UIComponentBuildPoolStatistics
+componentBuildPoolDelta(const UI::UIComponentBuildPoolStatistics& before,
+                        const UI::UIComponentBuildPoolStatistics& after) noexcept
+{
+    return {
+        .requested = after.requested - before.requested,
+        .reserved = after.reserved - before.reserved,
+        .published = after.published - before.published,
+        .capacityFailures = after.capacityFailures - before.capacityFailures,
+        .outstandingReservations = after.outstandingReservations,
+    };
+}
+
+[[nodiscard]] UI::UIComponentBuildStatistics
+componentBuildStatisticsDelta(const UI::UIComponentBuildStatistics& before,
+                              const UI::UIComponentBuildStatistics& after) noexcept
+{
+    return {
+        .nodes = componentBuildPoolDelta(before.nodes, after.nodes),
+        .textBytes = componentBuildPoolDelta(before.textBytes, after.textBytes),
+        .canvasCommands = componentBuildPoolDelta(before.canvasCommands, after.canvasCommands),
+        .behaviors = {
+            .activate = componentBuildPoolDelta(before.behaviors.activate,
+                                                after.behaviors.activate),
+            .toggle = componentBuildPoolDelta(before.behaviors.toggle,
+                                              after.behaviors.toggle),
+            .range = componentBuildPoolDelta(before.behaviors.range,
+                                             after.behaviors.range),
+            .textInput = componentBuildPoolDelta(before.behaviors.textInput,
+                                                 after.behaviors.textInput),
+            .scroll = componentBuildPoolDelta(before.behaviors.scroll,
+                                              after.behaviors.scroll),
+            .selection = componentBuildPoolDelta(before.behaviors.selection,
+                                                 after.behaviors.selection),
+        },
+        .activeTransactionCount = after.activeTransactionCount,
+        .transactionFailureCount =
+            after.transactionFailureCount - before.transactionFailureCount,
+    };
+}
+
+[[nodiscard]] bool matchesComponentBuildPool(
+    const UI::UIComponentBuildPoolStatistics& statistics, u64 expected) noexcept
+{
+    return statistics.requested == expected && statistics.reserved == expected &&
+           statistics.published == expected && statistics.capacityFailures == 0 &&
+           statistics.outstandingReservations == 0;
+}
+
+using ComponentBuilder = bool (*)(UIFixture&, ComponentRootArray&, UIBenchmarkReport*,
+                                  std::string&);
+
+[[nodiscard]] bool runComponentBuild(const UIBenchmarkOptions& options,
+                                     UIBenchmarkReport& report,
+                                     const UI::UIComponentBuildBudget& budget,
+                                     ComponentBuilder buildComponents,
+                                     std::string& error)
 {
     if (options.measureIterations >
         (std::numeric_limits<u64>::max)() / kComponentTextByteCount) {
@@ -1929,6 +2143,8 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
         error = status.error().message;
         return false;
     }
+    UI::UIComponentBuildStatistics componentStatisticsBaseline =
+        fixture.context->statistics().componentBuild;
 
     Core::SteadyMonotonicClock clock{};
     const auto wallBegin = clock.now();
@@ -1942,8 +2158,7 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
         const bool measured = iteration >= options.warmUpIterations;
         const auto totalBegin = clock.now();
         const auto buildBegin = clock.now();
-        if (!buildActivateToggleComponents(fixture, componentRoots,
-                                           measured ? &report : nullptr, error)) {
+        if (!buildComponents(fixture, componentRoots, measured ? &report : nullptr, error)) {
             return false;
         }
         const auto buildEnd = clock.now();
@@ -1952,8 +2167,18 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
         if (authoredStatistics.liveNodeCount != kComponentContextNodeCount ||
             authoredStatistics.textByteUsed != kComponentTextByteCount ||
             authoredStatistics.activeCanvasCommandCount != kComponentCanvasCommandCount ||
-            authoredStatistics.activeActivateBehaviorCount != kComponentActivateSlotCount ||
-            authoredStatistics.activeToggleBehaviorCount != kComponentToggleSlotCount) {
+            authoredStatistics.activeActivateBehaviorCount !=
+                kComponentCount * budget.behaviors.activate ||
+            authoredStatistics.activeToggleBehaviorCount !=
+                kComponentCount * budget.behaviors.toggle ||
+            authoredStatistics.activeRangeInputBehaviorCount !=
+                kComponentCount * budget.behaviors.range ||
+            authoredStatistics.activeTextInputBehaviorCount !=
+                kComponentCount * budget.behaviors.textInput ||
+            authoredStatistics.activeScrollBehaviorCount !=
+                kComponentCount * budget.behaviors.scroll ||
+            authoredStatistics.activeSelectBehaviorCount !=
+                kComponentCount * budget.behaviors.selection) {
             error = "UI component benchmark authored-state invariant failed";
             return false;
         }
@@ -2019,7 +2244,7 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
             report.workH = committedStatistics.committedHitNodeCount;
         }
 
-        if (!destroyActivateToggleComponents(fixture, componentRoots, error)) {
+        if (!destroyComponents(fixture, componentRoots, error)) {
             return false;
         }
         if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
@@ -2030,11 +2255,16 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
         if (releasedStatistics.liveNodeCount != 1 || releasedStatistics.textByteUsed != 0 ||
             releasedStatistics.activeCanvasCommandCount != 0 ||
             releasedStatistics.activeActivateBehaviorCount != 0 ||
-            releasedStatistics.activeToggleBehaviorCount != 0) {
+            releasedStatistics.activeToggleBehaviorCount != 0 ||
+            releasedStatistics.activeRangeInputBehaviorCount != 0 ||
+            releasedStatistics.activeTextInputBehaviorCount != 0 ||
+            releasedStatistics.activeScrollBehaviorCount != 0 ||
+            releasedStatistics.activeSelectBehaviorCount != 0) {
             error = "UI component benchmark retained state was not fully released";
             return false;
         }
         if (iteration + 1 == options.warmUpIterations) {
+            componentStatisticsBaseline = releasedStatistics.componentBuild;
             captureAllocationBaseline(memory, report);
         }
     }
@@ -2053,8 +2283,14 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
     report.configuredComponentTextBytesPerTransaction = kComponentTextBytesPerTransaction;
     report.configuredComponentCanvasCommandsPerTransaction =
         kComponentCanvasCommandsPerTransaction;
+    report.configuredComponentBehaviorSlotsPerTransaction = budget.behaviors;
+    report.componentReservationStatistics = componentBuildStatisticsDelta(
+        componentStatisticsBaseline, report.statistics.componentBuild);
 
     const u64 measuredTransactions = options.measureIterations * kComponentCount;
+    const auto expectedPoolCount = [measuredTransactions](usize perTransaction) noexcept {
+        return measuredTransactions * perTransaction;
+    };
     if (report.pmrAllocationsAfter != report.pmrAllocationsBefore ||
         report.componentTransactionsStarted != measuredTransactions ||
         report.componentTransactionsCommitted != measuredTransactions ||
@@ -2066,22 +2302,66 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
             options.measureIterations * kComponentCanvasCommandCount ||
         report.componentCanvasCommandsPublished != report.componentCanvasCommandsRequested ||
         report.componentActivateSlotsRequested !=
-            options.measureIterations * kComponentActivateSlotCount ||
+            expectedPoolCount(budget.behaviors.activate) ||
         report.componentActivateSlotsPublished != report.componentActivateSlotsRequested ||
         report.componentToggleSlotsRequested !=
-            options.measureIterations * kComponentToggleSlotCount ||
+            expectedPoolCount(budget.behaviors.toggle) ||
         report.componentToggleSlotsPublished != report.componentToggleSlotsRequested ||
+        report.componentRangeSlotsRequested != expectedPoolCount(budget.behaviors.range) ||
+        report.componentRangeSlotsPublished != report.componentRangeSlotsRequested ||
+        report.componentTextInputSlotsRequested !=
+            expectedPoolCount(budget.behaviors.textInput) ||
+        report.componentTextInputSlotsPublished != report.componentTextInputSlotsRequested ||
+        report.componentScrollSlotsRequested != expectedPoolCount(budget.behaviors.scroll) ||
+        report.componentScrollSlotsPublished != report.componentScrollSlotsRequested ||
+        report.componentSelectionSlotsRequested !=
+            expectedPoolCount(budget.behaviors.selection) ||
+        report.componentSelectionSlotsPublished != report.componentSelectionSlotsRequested ||
         report.componentCleanCommitCount != options.measureIterations ||
         report.componentCleanCommitRebuildCount != 0 || report.componentTreeChecksum == 0 ||
         report.statistics.liveNodeCount != 1 || report.statistics.textByteUsed != 0 ||
         report.statistics.activeCanvasCommandCount != 0 ||
         report.statistics.activeActivateBehaviorCount != 0 ||
         report.statistics.activeToggleBehaviorCount != 0 ||
+        report.statistics.activeRangeInputBehaviorCount != 0 ||
+        report.statistics.activeTextInputBehaviorCount != 0 ||
+        report.statistics.activeScrollBehaviorCount != 0 ||
+        report.statistics.activeSelectBehaviorCount != 0 ||
         report.statistics.canvasCommandHighWater != kComponentCanvasCommandCount ||
         report.statistics.textByteHighWater != kComponentTextByteCount ||
-        report.statistics.activateBehaviorHighWater != kComponentActivateSlotCount ||
-        report.statistics.toggleBehaviorHighWater != kComponentToggleSlotCount) {
-        error = "ui_component_build_activate_toggle_v1 invariant failed";
+        report.statistics.activateBehaviorHighWater !=
+            kComponentCount * budget.behaviors.activate ||
+        report.statistics.toggleBehaviorHighWater !=
+            kComponentCount * budget.behaviors.toggle ||
+        report.statistics.rangeInputBehaviorHighWater !=
+            kComponentCount * budget.behaviors.range ||
+        report.statistics.textInputBehaviorHighWater !=
+            kComponentCount * budget.behaviors.textInput ||
+        report.statistics.scrollBehaviorHighWater !=
+            kComponentCount * budget.behaviors.scroll ||
+        report.statistics.selectBehaviorHighWater !=
+            kComponentCount * budget.behaviors.selection ||
+        !matchesComponentBuildPool(report.componentReservationStatistics.nodes,
+                                   expectedPoolCount(budget.nodes)) ||
+        !matchesComponentBuildPool(report.componentReservationStatistics.textBytes,
+                                   expectedPoolCount(budget.textBytes)) ||
+        !matchesComponentBuildPool(report.componentReservationStatistics.canvasCommands,
+                                   expectedPoolCount(budget.canvasCommands)) ||
+        !matchesComponentBuildPool(report.componentReservationStatistics.behaviors.activate,
+                                   expectedPoolCount(budget.behaviors.activate)) ||
+        !matchesComponentBuildPool(report.componentReservationStatistics.behaviors.toggle,
+                                   expectedPoolCount(budget.behaviors.toggle)) ||
+        !matchesComponentBuildPool(report.componentReservationStatistics.behaviors.range,
+                                   expectedPoolCount(budget.behaviors.range)) ||
+        !matchesComponentBuildPool(report.componentReservationStatistics.behaviors.textInput,
+                                   expectedPoolCount(budget.behaviors.textInput)) ||
+        !matchesComponentBuildPool(report.componentReservationStatistics.behaviors.scroll,
+                                   expectedPoolCount(budget.behaviors.scroll)) ||
+        !matchesComponentBuildPool(report.componentReservationStatistics.behaviors.selection,
+                                   expectedPoolCount(budget.behaviors.selection)) ||
+        report.componentReservationStatistics.activeTransactionCount != 0 ||
+        report.componentReservationStatistics.transactionFailureCount != 0) {
+        error = std::string(report.workload) + " invariant failed";
         return false;
     }
 
@@ -2108,6 +2388,16 @@ using ComponentRootArray = std::array<UI::UINodeId, kComponentCount>;
     report.displayListSamples.reserve(count);
     report.routeSamples.reserve(count);
     return true;
+}
+
+void writeComponentBuildPool(std::ostream& output,
+                             const UI::UIComponentBuildPoolStatistics& statistics)
+{
+    output << "{\"requested\":" << statistics.requested
+           << ",\"reserved\":" << statistics.reserved
+           << ",\"published\":" << statistics.published
+           << ",\"capacity_failures\":" << statistics.capacityFailures
+           << ",\"outstanding\":" << statistics.outstandingReservations << '}';
 }
 
 void writeReport(std::ostream& output, const UIBenchmarkReport& report)
@@ -2156,6 +2446,18 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << report.configuredComponentTextBytesPerTransaction
            << ",\"component_canvas_commands_per_transaction\":"
            << report.configuredComponentCanvasCommandsPerTransaction
+           << ",\"component_activate_slots_per_transaction\":"
+           << report.configuredComponentBehaviorSlotsPerTransaction.activate
+           << ",\"component_toggle_slots_per_transaction\":"
+           << report.configuredComponentBehaviorSlotsPerTransaction.toggle
+           << ",\"component_range_slots_per_transaction\":"
+           << report.configuredComponentBehaviorSlotsPerTransaction.range
+           << ",\"component_text_input_slots_per_transaction\":"
+           << report.configuredComponentBehaviorSlotsPerTransaction.textInput
+           << ",\"component_scroll_slots_per_transaction\":"
+           << report.configuredComponentBehaviorSlotsPerTransaction.scroll
+           << ",\"component_selection_slots_per_transaction\":"
+           << report.configuredComponentBehaviorSlotsPerTransaction.selection
            << "}}";
     output << ",\"fingerprint\":{\"buildType\":";
     writeJsonString(output, BuildType);
@@ -2243,6 +2545,40 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
                << report.componentToggleSlotsPublished
                << "},\"range\":{\"supported\":false},\"text_input\":{\"supported\":false},"
                   "\"scroll\":{\"supported\":false},\"selection\":{\"supported\":false}}}";
+    } else if (report.workload == kComponentBuildWorkload) {
+        const UI::UIComponentBuildStatistics& statistics =
+            report.componentReservationStatistics;
+        output << ",\"component_build\":{\"coverage\":\"all_reserved_pools\""
+                  ",\"transaction_scope\":\"UIElementBuildTransaction\""
+                  ",\"frozen_workload_complete\":true"
+                  ",\"reservation_counters_available\":true"
+                  ",\"transactions_started\":"
+               << report.componentTransactionsStarted
+               << ",\"transactions_committed\":" << report.componentTransactionsCommitted
+               << ",\"clean_commits\":" << report.componentCleanCommitCount
+               << ",\"clean_commit_rebuilds\":"
+               << report.componentCleanCommitRebuildCount
+               << ",\"active_transactions\":" << statistics.activeTransactionCount
+               << ",\"transaction_failures\":" << statistics.transactionFailureCount
+               << ",\"reservations\":{\"nodes\":";
+        writeComponentBuildPool(output, statistics.nodes);
+        output << ",\"text_bytes\":";
+        writeComponentBuildPool(output, statistics.textBytes);
+        output << ",\"canvas_commands\":";
+        writeComponentBuildPool(output, statistics.canvasCommands);
+        output << ",\"behaviors\":{\"activate\":";
+        writeComponentBuildPool(output, statistics.behaviors.activate);
+        output << ",\"toggle\":";
+        writeComponentBuildPool(output, statistics.behaviors.toggle);
+        output << ",\"range\":";
+        writeComponentBuildPool(output, statistics.behaviors.range);
+        output << ",\"text_input\":";
+        writeComponentBuildPool(output, statistics.behaviors.textInput);
+        output << ",\"scroll\":";
+        writeComponentBuildPool(output, statistics.behaviors.scroll);
+        output << ",\"selection\":";
+        writeComponentBuildPool(output, statistics.behaviors.selection);
+        output << "}}}";
     }
     output << ",\"capacity\":{\"nodes\":" << report.statistics.nodeCapacity
            << ",\"dirty_queue\":" << report.statistics.dirtyQueueCapacity
@@ -2255,6 +2591,10 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"listeners\":" << report.statistics.routedPointerListenerCapacity
            << ",\"activate_behavior\":" << report.statistics.activateBehaviorCapacity
            << ",\"toggle_behavior\":" << report.statistics.toggleBehaviorCapacity
+           << ",\"range_behavior\":" << report.statistics.rangeInputBehaviorCapacity
+           << ",\"text_input_behavior\":" << report.statistics.textInputBehaviorCapacity
+           << ",\"scroll_behavior\":" << report.statistics.scrollBehaviorCapacity
+           << ",\"selection_behavior\":" << report.statistics.selectBehaviorCapacity
            << ",\"text_bytes\":" << report.statistics.textByteCapacity << '}';
     output << ",\"high_water\":{\"live_nodes\":" << report.liveNodeHighWater
            << ",\"dirty_queue\":" << report.statistics.dirtyQueueHighWater
@@ -2270,6 +2610,10 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"image_pins\":" << report.imagePinHighWater
            << ",\"activate_behavior\":" << report.statistics.activateBehaviorHighWater
            << ",\"toggle_behavior\":" << report.statistics.toggleBehaviorHighWater
+           << ",\"range_behavior\":" << report.statistics.rangeInputBehaviorHighWater
+           << ",\"text_input_behavior\":" << report.statistics.textInputBehaviorHighWater
+           << ",\"scroll_behavior\":" << report.statistics.scrollBehaviorHighWater
+           << ",\"selection_behavior\":" << report.statistics.selectBehaviorHighWater
            << ",\"text_bytes\":" << report.statistics.textByteHighWater << '}';
     output << ",\"allocation\":{\"domain\":\"ui_pmr\",\"before\":"
            << report.pmrAllocationsBefore << ",\"after\":" << report.pmrAllocationsAfter
@@ -2289,6 +2633,9 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
     if (report.workload == kComponentActivateToggleWorkload) {
         output << ",\"component_cleanup_excluded_from_stage_timing\""
                   ",\"ui_component_build_v1_waits_for_all_behavior_reservations\"";
+    } else if (report.workload == kComponentBuildWorkload) {
+        output << ",\"component_cleanup_excluded_from_stage_timing\""
+                  ",\"component_reservation_counters_are_measurement_window_deltas\"";
     }
     output << "]}\n";
 }
@@ -2300,7 +2647,8 @@ bool isUIBenchmarkWorkload(std::string_view workload) noexcept
     return workload == kStaticCommitWorkload || workload == kPaintDirtyWorkload ||
            workload == kRouteWorkload || workload == kVirtualCollectionWorkload ||
            workload == kImageNineSliceWorkload ||
-           workload == kComponentActivateToggleWorkload;
+           workload == kComponentActivateToggleWorkload ||
+           workload == kComponentBuildWorkload;
 }
 
 void printUIBenchmarkHelp(std::ostream& output)
@@ -2310,8 +2658,9 @@ void printUIBenchmarkHelp(std::ostream& output)
            << "  --workload=ui_route_v1               4096 hit entries, depth-64 route sequence\n"
            << "  --workload=ui_virtual_collection_v1  100k items through a fixed 64-row pool\n"
            << "  --workload=ui_image_nineslice_v1     5096 image quads, 64 unique resources\n"
+           << "  --workload=ui_component_build_v1     256 reserved four-node full-pool components\n"
            << "  --workload=ui_component_build_activate_toggle_v1\n"
-              "                                         256 bounded four-node Activate/Toggle components\n";
+              "                                         legacy Activate/Toggle prerequisite\n";
 }
 
 int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
@@ -2336,7 +2685,11 @@ int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
         } else if (workload == kImageNineSliceWorkload) {
             (void)runImageNineSlice(options, report, error);
         } else if (workload == kComponentActivateToggleWorkload) {
-            (void)runComponentActivateToggle(options, report, error);
+            (void)runComponentBuild(options, report, kComponentActivateToggleBudget,
+                                    &buildActivateToggleComponents, error);
+        } else if (workload == kComponentBuildWorkload) {
+            (void)runComponentBuild(options, report, kComponentBuildBudget,
+                                    &buildReservedComponents, error);
         } else {
             error = "unknown UI benchmark workload";
         }
