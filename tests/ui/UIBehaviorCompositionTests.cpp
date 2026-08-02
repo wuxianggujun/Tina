@@ -359,5 +359,51 @@ TEST(UIBehaviorCompositionTests, FailedCreateAndNodeReuseReleaseBehaviorSlotsWit
     EXPECT_EQ(context->statistics().rangeInputBehaviorHighWater, 1U);
 }
 
+TEST(UIBehaviorCompositionTests, TextInputPublicationRollbackStatisticsAndReuseAreAllocationStable)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows);
+    const Platform::WindowId window = *windows->tryEmplace(1);
+    ObservingMemoryResource resource;
+    auto context = createContext(window, {
+                                             .nodeCapacity = 4,
+                                             .rootCapacity = 1,
+                                             .textByteCapacity = 12,
+                                         },
+                                 resource);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+
+    auto failed =
+        context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("this is too long"));
+    ASSERT_FALSE(failed);
+    EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(context->statistics().activeTextInputBehaviorCount, 0U);
+    EXPECT_EQ(context->statistics().liveNodeCount, 1U);
+
+    auto first = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("first"));
+    ASSERT_TRUE(first);
+    EXPECT_EQ(context->statistics().activeTextInputBehaviorCount, 1U);
+    EXPECT_EQ(context->statistics().textInputBehaviorCapacity, 4U);
+
+    auto second = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("second"));
+    ASSERT_TRUE(second);
+    EXPECT_EQ(context->statistics().activeTextInputBehaviorCount, 2U);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult);
+    auto updater = std::move(*updaterResult);
+    assertOk(updater.setTextSelection(*first, {.anchorCodepoint = 1, .caretCodepoint = 4}));
+    const usize allocationCount = resource.allocationCount();
+    assertOk(updater.destroy(*first));
+    EXPECT_EQ(context->statistics().activeTextInputBehaviorCount, 1U);
+    auto reused = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("again"));
+    ASSERT_TRUE(reused);
+    auto selection = updater.textSelection(*reused);
+    ASSERT_TRUE(selection);
+    EXPECT_EQ(*selection, (UI::UITextSelection{}));
+    EXPECT_EQ(context->statistics().textInputBehaviorHighWater, 2U);
+    EXPECT_EQ(resource.allocationCount(), allocationCount);
+}
+
 } // namespace
 } // namespace Tina::Tests

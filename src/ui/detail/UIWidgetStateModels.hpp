@@ -9,7 +9,6 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
-#include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITreeView.hpp>
 
 #include "UITextStorage.hpp"
@@ -23,11 +22,6 @@ struct WidgetTextState final {
     UIContentAlignment alignment{};
     UITextMetrics metrics{};
     bool hasContent = false;
-};
-
-struct TextEditState final {
-    UITextEditPaint paint{};
-    UITextSelection selection{};
 };
 
 struct ProgressBarState final {

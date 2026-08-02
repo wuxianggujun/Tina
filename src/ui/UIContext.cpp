@@ -170,7 +170,6 @@ using Detail::ScrollViewState;
 using Detail::SliderPaintGeometry;
 using Detail::sliderPaintGeometry;
 using Detail::setScrollAxisOffset;
-using Detail::TextEditState;
 using Detail::textEditCodepointFromHorizontalPosition;
 using Detail::TreeViewItemState;
 using Detail::TreeViewLayoutScratch;
@@ -314,7 +313,8 @@ struct UIContext::Impl final {
     Detail::UISemanticsSnapshotBuilder semanticsSnapshotBuilder;
     Detail::UICanvasCommandStorage canvasCommandStorage;
     Detail::UIImageContentStorage imageContentStorage;
-    std::pmr::vector<TextEditState> textEditStatesByNodeIndex;
+    // TextInput selection lives in the behavior side store; TextEdit chrome remains kind-owned.
+    std::pmr::vector<UITextEditPaint> textEditPaintsByNodeIndex;
     std::pmr::vector<ProgressBarState> progressBarStatesByNodeIndex;
     std::pmr::vector<RadioButtonState> radioButtonStatesByNodeIndex;
     std::pmr::vector<ScrollViewState> scrollViewStatesByNodeIndex;
@@ -462,7 +462,7 @@ struct UIContext::Impl final {
           semanticsSnapshotBuilder(capacities.nodeCapacity, capacities.nodeCapacity, resource),
           canvasCommandStorage(capacities.nodeCapacity, capacities.canvasCommandCapacity, resource),
           imageContentStorage(capacities.nodeCapacity, capacities.imageContentCapacity, resource),
-          textEditStatesByNodeIndex(&resource),
+          textEditPaintsByNodeIndex(&resource),
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
           scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
           dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
@@ -478,7 +478,7 @@ struct UIContext::Impl final {
           routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
           buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, resource),
           behaviorStateStorage(capacities.nodeCapacity, capacities.nodeCapacity,
-                               capacities.nodeCapacity, capacities.nodeCapacity, resource),
+                               capacities.nodeCapacity, capacities.nodeCapacity, capacities.nodeCapacity, resource),
           defaultActionPressState(owner), rangeInputPressLatch(owner),
           checkboxPaintsByNodeIndex(&resource),
           sliderPaintsByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
@@ -546,7 +546,7 @@ struct UIContext::Impl final {
         impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
         impl->textStatesByIndex.resize(normalized.nodeCapacity);
         impl->semanticsStatesByNodeIndex.resize(normalized.nodeCapacity);
-        impl->textEditStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->textEditPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->progressBarStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->radioButtonStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->scrollViewStatesByNodeIndex.resize(normalized.nodeCapacity);
@@ -1863,9 +1863,9 @@ struct UIContext::Impl final {
             return widgetPaintColor(node, color);
         }
         if (record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
-            nodeIndex < textEditStatesByNodeIndex.size())
+            nodeIndex < textEditPaintsByNodeIndex.size())
         {
-            const UITextEditPaint& paint = textEditStatesByNodeIndex[nodeIndex].paint;
+            const UITextEditPaint& paint = textEditPaintsByNodeIndex[nodeIndex];
             const auto applyOverride = [&color](UIStraightSrgba8Color overrideColor) noexcept {
                 if (overrideColor.alpha != 0)
                 {
@@ -2403,15 +2403,14 @@ struct UIContext::Impl final {
                 : (textState != nullptr ? premultiply(style.color) : UIPremultipliedRgba8Color{});
         const bool preeditActive = focused && imeComposition.active();
         const UITextEditPaint paint =
-            nodeIndex < textEditStatesByNodeIndex.size() ? textEditStatesByNodeIndex[nodeIndex].paint
+            nodeIndex < textEditPaintsByNodeIndex.size() ? textEditPaintsByNodeIndex[nodeIndex]
                                                          : UITextEditPaint{};
+        const Detail::UITextInputState* textInputState = behaviorStateStorage.tryTextInputState(nodeIndex);
         return Detail::UITextEditPaintState{
             .focused = focused,
             .preeditActive = preeditActive,
             .committedText = presentationTextViewFor(nodeIndex),
-            .selection = focused && nodeIndex < textEditStatesByNodeIndex.size()
-                             ? textEditStatesByNodeIndex[nodeIndex].selection
-                             : UITextSelection{},
+            .selection = focused && textInputState != nullptr ? textInputState->selection : UITextSelection{},
             .preeditText = preeditActive ? imeComposition.preeditUtf8() : std::string_view{},
             .preeditCursorCodepoint = preeditActive ? imeComposition.cursorCodepoint() : 0,
             .style = style,
@@ -3518,9 +3517,9 @@ struct UIContext::Impl final {
         {
             sliderPaintsByNodeIndex[index] = {};
         }
-        if (index < textEditStatesByNodeIndex.size())
+        if (index < textEditPaintsByNodeIndex.size())
         {
-            textEditStatesByNodeIndex[index] = {};
+            textEditPaintsByNodeIndex[index] = {};
         }
         if (index < progressBarStatesByNodeIndex.size())
         {
@@ -4010,7 +4009,7 @@ struct UIContext::Impl final {
             .dropdown = dropdownStatesByNodeIndex[index].paint,
             .listView = listViewStatesByNodeIndex[index].paint,
             .treeView = treeViewStatesByNodeIndex[index].paint,
-            .textEdit = textEditStatesByNodeIndex[index].paint,
+            .textEdit = textEditPaintsByNodeIndex[index],
         };
     }
 
@@ -4478,10 +4477,6 @@ struct UIContext::Impl final {
         state.length = static_cast<u32>(text.size());
         state.metrics = *metrics;
         state.hasContent = true;
-        if (kind == BuiltinElementKind::TextEdit)
-        {
-            textEditStatesByNodeIndex[node.index()].selection = {};
-        }
         refreshLocalPaintCache(node.index());
         return Core::success();
     }
@@ -5904,9 +5899,11 @@ struct UIContext::Impl final {
             state.length = 0;
             state.metrics = {};
             state.hasContent = false;
-            if (record->kind == BuiltinElementKind::TextEdit)
+            if (Detail::UITextInputState* textInputState =
+                    behaviorStateStorage.tryTextInputState(node.index());
+                textInputState != nullptr)
             {
-                textEditStatesByNodeIndex[node.index()].selection = {};
+                textInputState->selection = {};
                 if (clearActiveIme)
                 {
                     resetImeCompositionState();
@@ -5924,9 +5921,11 @@ struct UIContext::Impl final {
         state.length = static_cast<u32>(utf8.size());
         state.metrics = *metrics;
         state.hasContent = true;
-        if (record->kind == BuiltinElementKind::TextEdit)
+        if (Detail::UITextInputState* textInputState =
+                behaviorStateStorage.tryTextInputState(node.index());
+            textInputState != nullptr)
         {
-            UITextSelection& selection = textEditStatesByNodeIndex[node.index()].selection;
+            UITextSelection& selection = textInputState->selection;
             selection.anchorCodepoint = (std::min)(selection.anchorCodepoint, metrics->codepointCount);
             selection.caretCodepoint = (std::min)(selection.caretCodepoint, metrics->codepointCount);
             if (clearActiveIme)
@@ -6158,10 +6157,10 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        const NodeRecord* record = nodes.tryGet(textEdit.storageId());
-        if (record == nullptr || record->kind != BuiltinElementKind::TextEdit)
+        Detail::UITextInputState* state = behaviorStateStorage.tryTextInputState(textEdit.index());
+        if (state == nullptr)
         {
-            return fail(UIErrorCode::InvalidText, "UI selection requires a TextEdit node");
+            return fail(UIErrorCode::InvalidText, "UI selection requires a TextInput behavior");
         }
         if (!isNodeWithinRoot(updaterRoot, textEdit))
         {
@@ -6172,8 +6171,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidText, "UI TextEdit selection exceeds the text length");
         }
-        TextEditState& state = textEditStatesByNodeIndex[textEdit.index()];
-        if (state.selection == selection)
+        if (state->selection == selection)
         {
             return Core::success();
         }
@@ -6185,7 +6183,7 @@ struct UIContext::Impl final {
         {
             static_cast<void>(clearImeComposition());
         }
-        state.selection = selection;
+        state->selection = selection;
         return Core::success();
     }
 
@@ -6204,16 +6202,16 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        const NodeRecord* record = nodes.tryGet(textEdit.storageId());
-        if (record == nullptr || record->kind != BuiltinElementKind::TextEdit)
+        const Detail::UITextInputState* state = behaviorStateStorage.tryTextInputState(textEdit.index());
+        if (state == nullptr)
         {
-            return fail(UIErrorCode::InvalidText, "UI selection requires a TextEdit node");
+            return fail(UIErrorCode::InvalidText, "UI selection requires a TextInput behavior");
         }
         if (!isNodeWithinRoot(updaterRoot, textEdit))
         {
             return fail(UIErrorCode::InvalidNode, "UI TextEdit is not owned by the updater root");
         }
-        return textEditStatesByNodeIndex[textEdit.index()].selection;
+        return state->selection;
     }
 
     [[nodiscard]] Core::Status setTextEditPaintFromUpdater(UINodeId updaterRoot, UINodeId textEdit,
@@ -6242,8 +6240,8 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI TextEdit is not owned by the updater root");
         }
-        TextEditState& state = textEditStatesByNodeIndex[textEdit.index()];
-        if (state.paint == paint)
+        UITextEditPaint& currentPaint = textEditPaintsByNodeIndex[textEdit.index()];
+        if (currentPaint == paint)
         {
             detachThemeBinding(textEdit.index(), ThemeBindingTextEditPaint);
             return Core::success();
@@ -6252,7 +6250,7 @@ struct UIContext::Impl final {
         {
             return dirty;
         }
-        state.paint = paint;
+        currentPaint = paint;
         detachThemeBinding(textEdit.index(), ThemeBindingTextEditPaint);
         return Core::success();
     }
@@ -6282,7 +6280,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI TextEdit is not owned by the updater root");
         }
-        return textEditStatesByNodeIndex[textEdit.index()].paint;
+        return textEditPaintsByNodeIndex[textEdit.index()];
     }
 
     [[nodiscard]] Core::Status setButtonActionFromUpdater(UINodeId updaterRoot, UINodeId button,
@@ -6788,14 +6786,18 @@ struct UIContext::Impl final {
         {
             return Core::success();
         }
-        TextEditState& state = textEditStatesByNodeIndex[textEdit.index()];
-        UITextSelection next = state.selection;
+        Detail::UITextInputState* state = behaviorStateStorage.tryTextInputState(textEdit.index());
+        if (state == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI TextEdit is missing TextInput behavior state");
+        }
+        UITextSelection next = state->selection;
         next.caretCodepoint = textEditCodepointFromPointer(textEdit, position);
         if (!extendSelection)
         {
             next.anchorCodepoint = next.caretCodepoint;
         }
-        if (next == state.selection)
+        if (next == state->selection)
         {
             return Core::success();
         }
@@ -6807,7 +6809,7 @@ struct UIContext::Impl final {
         {
             return composition;
         }
-        state.selection = next;
+        state->selection = next;
         return Core::success();
     }
 
@@ -13324,7 +13326,14 @@ struct UIContext::Impl final {
         }
 
         const std::string_view current = textViewFor(focusedTextEdit.index());
-        const UITextSelection selection = textEditStatesByNodeIndex[focusedTextEdit.index()].selection;
+        Detail::UITextInputState* textInputState =
+            behaviorStateStorage.tryTextInputState(focusedTextEdit.index());
+        if (textInputState == nullptr)
+        {
+            clearImeFocus();
+            return fail(Core::CoreErrorCode::Internal, "UI TextEdit is missing TextInput behavior state");
+        }
+        const UITextSelection selection = textInputState->selection;
         const u32 selectionBegin = (std::min)(selection.anchorCodepoint, selection.caretCodepoint);
         const u32 selectionEnd = (std::max)(selection.anchorCodepoint, selection.caretCodepoint);
         const usize selectionBeginByte = utf8ByteOffsetForCodepoint(current, selectionBegin);
@@ -13356,7 +13365,7 @@ struct UIContext::Impl final {
         }
         const auto insertedCodepoints = Core::countStrictUtf8CodepointsWithoutNul(committedUtf8);
         const u32 nextCaret = selectionBegin + insertedCodepoints.value_or(0U);
-        textEditStatesByNodeIndex[focusedTextEdit.index()].selection = {
+        textInputState->selection = {
             .anchorCodepoint = nextCaret,
             .caretCodepoint = nextCaret,
         };
@@ -13404,9 +13413,15 @@ struct UIContext::Impl final {
             return UITextInputRouteResult{};
         }
 
-        TextEditState& editState = textEditStatesByNodeIndex[focusedTextEdit.index()];
+        Detail::UITextInputState* editState =
+            behaviorStateStorage.tryTextInputState(focusedTextEdit.index());
+        if (editState == nullptr)
+        {
+            clearImeFocus();
+            return fail(Core::CoreErrorCode::Internal, "UI TextEdit is missing TextInput behavior state");
+        }
         const u32 codepointCount = textStatesByIndex[focusedTextEdit.index()].metrics.codepointCount;
-        const UITextSelection currentSelection = editState.selection;
+        const UITextSelection currentSelection = editState->selection;
         const auto plan = planTextEditCommand(currentSelection, codepointCount,
                                               command, extendSelection);
         if (!plan.has_value())
@@ -13432,7 +13447,7 @@ struct UIContext::Impl final {
             {
                 return Core::failure(status.error());
             }
-            editState.selection = plan->nextSelection;
+            editState->selection = plan->nextSelection;
             return UITextInputRouteResult{.consumed = true, .applied = true};
         }
 
@@ -13463,7 +13478,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(status.error());
         }
-        editState.selection = {
+        editState->selection = {
             .anchorCodepoint = plan->deleteBeginCodepoint,
             .caretCodepoint = plan->deleteBeginCodepoint,
         };
@@ -13505,6 +13520,9 @@ struct UIContext::Impl final {
             .rangeInputBehaviorCapacity = behaviorStateStorage.rangeInputCapacity(),
             .activeRangeInputBehaviorCount = behaviorStateStorage.activeRangeInputCount(),
             .rangeInputBehaviorHighWater = behaviorStateStorage.rangeInputHighWater(),
+            .textInputBehaviorCapacity = behaviorStateStorage.textInputCapacity(),
+            .activeTextInputBehaviorCount = behaviorStateStorage.activeTextInputCount(),
+            .textInputBehaviorHighWater = behaviorStateStorage.textInputHighWater(),
             .textByteCapacity = textStorage.capacity(),
             .textByteUsed = textStorage.used(),
             .textByteHighWater = textStorage.highWater(),

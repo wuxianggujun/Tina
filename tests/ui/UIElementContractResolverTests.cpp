@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <tina/ui/UIErrors.hpp>
+
 #include "detail/UIElementContractResolver.hpp"
 
 #include <array>
@@ -152,6 +154,16 @@ TEST(UIElementContractResolverTests, RangeInputComposesWithActivateAndToggleWith
     kind = UI::Detail::resolveElementBuiltinKind(descriptor);
     ASSERT_TRUE(kind);
     EXPECT_EQ(*kind, BuiltinElementKind::Label);
+}
+
+TEST(UIElementContractResolverTests, MixedTextInputCompositionRemainsRejectedUntilInputRoutingIsCapabilityBased)
+{
+    UI::UIElementDescriptor descriptor = UI::makeTextEditElement("Input");
+    descriptor.behaviors |= UI::UIElementBehavior::Activate;
+
+    const auto kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_FALSE(kind);
+    EXPECT_EQ(kind.error().code, UI::UIErrorCode::InvalidElementDescriptor);
 }
 
 TEST(UIElementContractResolverTests, SemanticsActionsRequireMatchingBehaviors)

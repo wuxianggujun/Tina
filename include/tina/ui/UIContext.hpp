@@ -81,6 +81,9 @@ struct UIContextStatistics final {
     usize rangeInputBehaviorCapacity = 0;
     usize activeRangeInputBehaviorCount = 0;
     usize rangeInputBehaviorHighWater = 0;
+    usize textInputBehaviorCapacity = 0;
+    usize activeTextInputBehaviorCount = 0;
+    usize textInputBehaviorHighWater = 0;
     usize textByteCapacity = 0;
     usize textByteUsed = 0;
     usize textByteHighWater = 0;

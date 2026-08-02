@@ -69,7 +69,7 @@ private Render backend, currently bgfx
 | --- | --- |
 | Element 描述 | `include/tina/ui/UIElement.hpp` 的 `UIElementDescriptor` 与 `make*Element()` |
 | Tree/事务/快照 | `include/tina/ui/UIContext.hpp` 的 builder、updater、`UIElementBuildTransaction` 与 committed views |
-| Behavior | `include/tina/ui/UIBehavior.hpp`；Activate/Toggle/RangeInput 使用私有 fixed-capacity side store，其余标准 capability 当前仍由 resolver 约束到私有 kind |
+| Behavior | `include/tina/ui/UIBehavior.hpp`；Activate/Toggle/RangeInput/TextInput 使用私有 fixed-capacity side store，其余标准 capability 当前仍由 resolver 约束到私有 kind |
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
 | Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp` 与 `UIPaint.hpp`；Image content 和 Canvas `SolidRect`/`Image`/`NineSlice` |
 | Render bridge | `include/tina/integration/UIRenderDisplayList.hpp` |
@@ -190,8 +190,9 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 - 声明 transition、tween、timeline 或 keyframe animation；
 - 传入任意 GPU/paint callback。
 
-Activate/Toggle/RangeInput 已从 concrete kind 拆到独立 fixed-capacity side store；TextInput/Scroll/Select 仍只接受
-能映射为现有 `BuiltinElementKind` storage contract 的组合。第三方组件的推荐方式是**组合 Element 子树**，
+Activate/Toggle/RangeInput/TextInput 已从 concrete kind 拆到独立 fixed-capacity side store；TextInput resolver 仍选择
+现有 TextEdit kind 以复用单行文本、焦点、Pointer selection 与 IME 路径，Scroll/Select 仍只接受能映射为现有
+`BuiltinElementKind` storage contract 的组合。第三方组件的推荐方式是**组合 Element 子树**，
 不是继承 Widget。
 
 ### 当前业务组件写法
@@ -313,9 +314,10 @@ NodeRecord
 ```
 
 创建 Element 时按 capability 从对应固定池取得 slot，setter 按 capability 校验，而不是按 concrete kind
-校验。Activate/Toggle/RangeInput 切片已实现三池原子预检、publish/release/reuse、capacity/active/high-water 统计，以及
-capability setter/query、Keyboard 和 accessibility 默认行为路由；Activate Pointer 路由同样按 capability，Slider
-paint、change callback 与 Pointer drag geometry 继续由 concrete Slider 承担。TextInput/Scroll/Select 尚未迁移。官方
+校验。Activate/Toggle/RangeInput/TextInput 切片已实现四池原子预检、publish/release/reuse 与 capacity/active/high-water 统计；
+Activate/Toggle/RangeInput 默认行为及 TextInput selection setter/query 按 capability，TextInput 的 Keyboard/IME/Pointer
+路由仍复用 concrete TextEdit。Slider paint/change callback/Pointer drag geometry 与 TextEdit paint 同样由对应 concrete kind 承担。
+Scroll/Select 尚未迁移。官方
 `make*Element()` 保持为稳定 recipe。只有标准 Behavior + routed listener 无法表达真实需求时，才考虑
 startup-only custom Behavior SPI。
 
@@ -666,9 +668,9 @@ counter、容量/分配不变量可以立即作为确定性门禁：
    - A Done：Image/Icon content、atlas/tint/fit/sampling、root-scoped resolve/pin、RGBA ImageQuad 和 Image semantics；
    - B Done：同源 NineSlice、1..9 quad 原子展开、小 destination/inset/clip/fractional-DPI 规则；
    - C Done：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling、missing/unavailable/resource invalidation、6-case DPI-like size matrix 与 `ui_image_nineslice_v1` benchmark 全部关闭；
-5. `UI-COMPONENT-001`：Runtime bounded component transaction 与 Activate/Toggle/RangeInput side store 切片已完成；
+5. `UI-COMPONENT-001`：Runtime bounded component transaction 与 Activate/Toggle/RangeInput/TextInput side store 切片已完成；
    `ui_component_build_activate_toggle_v1` 已为 Activate/Toggle 提供诚实的 256×4 前置 benchmark；后续迁移
-   TextInput/Scroll/Select，并补统一 reservation/counter 后才发布冻结的 `ui_component_build_v1`；
+   Scroll/Select，并补统一 reservation/counter 后才发布冻结的 `ui_component_build_v1`；
 6. `UI-STYLE-001`：等待 Image 与 Component 两条目标属性面稳定后，开放强类型 StyleClass/token 与
    node-local pseudo-state stylesheet，并把 image tint/opacity 纳入 dirty metadata；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。
