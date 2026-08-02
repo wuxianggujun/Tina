@@ -188,7 +188,7 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
   Windows/Linux moved-prefix consumer 已可用；
 - 注册任意新 Widget class 或 Behavior state machine；
 - 从 UI 持有 AssetHandle/Lease、FrameResourceRef 或 texture/bgfx handle；
-- 声明完整 timeline/keyframe 或 layout animation（BackgroundColor paint-only transition 首刀已可用）；
+- 声明完整 timeline/keyframe 或 layout animation（paint-only color/opacity/radius/visual-offset transition 已可用）；
 - 传入任意 GPU/paint callback。
 
 Activate/Toggle/RangeInput/TextInput/Scroll/Select 已从 concrete kind 拆到独立 fixed-capacity side store；TextInput/Scroll/Select resolver
@@ -724,7 +724,7 @@ counter、容量/分配不变量可以立即作为确定性门禁：
     Image tint/opacity、stylesheet imageTint token、showcase Integration、属性 dirty metadata
     （`UIStylePropertyKind` + Context 分发）、Visual ROI 门禁 `RunUiStyleVisualGate.ps1` 已落地；
     下一主线 `UI-MOTION-001`；
-7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。
+7. `UI-MOTION-001` Done：paint-only transition（color/opacity/radius/visual-offset）+ `ui_motion_v1`。
 
 独立或后置 lane：
 

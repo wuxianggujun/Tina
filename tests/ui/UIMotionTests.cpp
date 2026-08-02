@@ -228,5 +228,97 @@ TEST(UIMotionTests, CapacityFailureLeavesExistingTracksIntact)
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
 }
 
+TEST(UIMotionTests, CornerRadiusAndOpacityTransitionsArePaintOnly)
+{
+    auto context = createMotionContext(8);
+    ASSERT_NE(context, nullptr);
+    FakeMotionClock clock;
+    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(40.0F, 30.0F));
+    panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(40, 40, 40, 255), 0.0F);
+    const auto node = updater.createElement(root.rootNodeId(), panel);
+    ASSERT_TRUE(node.has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+
+    UI::UITransitionSpec radiusSpec{
+        .property = UI::UIAnimatableProperty::CornerRadius,
+        .duration = Core::Duration{0.100},
+        .easing = UI::UIEasing::Linear,
+    };
+    UI::UITransitionSpec opacitySpec{
+        .property = UI::UIAnimatableProperty::Opacity,
+        .duration = Core::Duration{0.100},
+        .easing = UI::UIEasing::Linear,
+    };
+    ASSERT_TRUE(context->beginCornerRadiusTransition(*node, 8.0F, radiusSpec).has_value());
+    ASSERT_TRUE(context->beginOpacityTransition(*node, 0.0F, opacitySpec).has_value());
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 2U);
+    EXPECT_FALSE(context->statistics().layoutDirty);
+
+    clock.advance(Core::Duration{0.050});
+    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* mid = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_NE(mid, nullptr);
+    // Opacity 0.5 on (40,40,40,255) -> premultiplied ~ (20,20,20,128)
+    EXPECT_EQ(mid->solidFill.alpha, 128);
+    EXPECT_FALSE(context->statistics().layoutDirty);
+
+    clock.advance(Core::Duration{0.050});
+    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
+    const auto* end = findSolidPaint(context->committedPaint(), *node);
+    // Opacity 0 -> transparent fill may omit solid entry or alpha 0.
+    if (end != nullptr)
+    {
+        EXPECT_EQ(end->solidFill.alpha, 0);
+    }
+}
+
+TEST(UIMotionTests, VisualOffsetShiftsPaintWorldRectNotLayout)
+{
+    auto context = createMotionContext();
+    ASSERT_NE(context, nullptr);
+    FakeMotionClock clock;
+    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(20.0F, 20.0F));
+    panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(10, 20, 30, 255));
+    const auto node = updater.createElement(root.rootNodeId(), panel);
+    ASSERT_TRUE(node.has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
+    const auto* before = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_NE(before, nullptr);
+    const float beforeX = before->worldRect.x;
+    const float beforeY = before->worldRect.y;
+
+    UI::UITransitionSpec spec{
+        .property = UI::UIAnimatableProperty::VisualOffset,
+        .duration = Core::Duration{0.0},
+    };
+    ASSERT_TRUE(context->beginVisualOffsetTransition(*node, 12.0F, 8.0F, spec).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
+    const auto* after = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_NE(after, nullptr);
+    EXPECT_FLOAT_EQ(after->worldRect.x, beforeX + 12.0F);
+    EXPECT_FLOAT_EQ(after->worldRect.y, beforeY + 8.0F);
+    EXPECT_FALSE(context->statistics().layoutDirty);
+    EXPECT_FALSE(context->statistics().hitDirty);
+}
+
 } // namespace
 } // namespace Tina::Tests

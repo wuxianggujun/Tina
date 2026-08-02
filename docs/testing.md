@@ -174,6 +174,9 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_virtual
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_image_nineslice_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_component_build_v1 --warmup=10 --samples=100 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_style_state_v1 --warmup=60 --samples=600 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_v1 --warmup=30 --samples=120 --seed=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_v1 --warmup=30 --samples=120 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_v1 --warmup=30 --samples=120 --seed=2
 py -3 tools\bench\run_benchmark_gate.py --processes 5 `
   out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe -- `
   --workload=ui_static_commit_v1 --warmup=60 --samples=600 --seed=1

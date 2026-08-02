@@ -399,6 +399,12 @@ struct UIContext::Impl final {
     const Core::IMonotonicClock* motionClock = nullptr;
     Core::SteadyMonotonicClock motionDefaultClock{};
     bool reducedMotionEnabled = false;
+    // Residual presentation after tracks complete (still paint-only; not hit).
+    std::pmr::vector<float> presentationOpacityByNodeIndex;
+    std::pmr::vector<u8> presentationOpacityValidByNodeIndex;
+    std::pmr::vector<float> presentationOffsetXByNodeIndex;
+    std::pmr::vector<float> presentationOffsetYByNodeIndex;
+    std::pmr::vector<u8> presentationOffsetValidByNodeIndex;
     std::pmr::vector<std::array<UIStyleClassId, Detail::MaxStyleClassesPerNode>>
         styleClassesByNodeIndex;
     std::pmr::vector<u8> styleClassCountsByNodeIndex;
@@ -602,6 +608,11 @@ struct UIContext::Impl final {
                             },
                             resource),
           motionTrackStorage(capacities.motionTrackCapacity, resource),
+          presentationOpacityByNodeIndex(&resource),
+          presentationOpacityValidByNodeIndex(&resource),
+          presentationOffsetXByNodeIndex(&resource),
+          presentationOffsetYByNodeIndex(&resource),
+          presentationOffsetValidByNodeIndex(&resource),
           styleClassesByNodeIndex(&resource), styleClassCountsByNodeIndex(&resource),
           styleStatesByNodeIndex(&resource), resolvedBoxFillCacheByNodeIndex(&resource),
           resolvedStyleColorTokenByNodeIndex(&resource),
@@ -700,6 +711,11 @@ struct UIContext::Impl final {
         auto impl = std::unique_ptr<Impl>(new Impl(ownerWindow, capacities, std::this_thread::get_id(),
                                                    std::move(lifetimeControl), std::move(*poolResult), resource));
         impl->motionClock = &impl->motionDefaultClock;
+        impl->presentationOpacityByNodeIndex.resize(normalized.nodeCapacity, 1.0F);
+        impl->presentationOpacityValidByNodeIndex.resize(normalized.nodeCapacity, 0);
+        impl->presentationOffsetXByNodeIndex.resize(normalized.nodeCapacity, 0.0F);
+        impl->presentationOffsetYByNodeIndex.resize(normalized.nodeCapacity, 0.0F);
+        impl->presentationOffsetValidByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->idsByIndex.resize(normalized.nodeCapacity);
         impl->layoutStylesByIndex.resize(normalized.nodeCapacity);
         impl->pointerHitPoliciesByIndex.resize(normalized.nodeCapacity, UIPointerHitPolicy::Ignore);
@@ -2441,7 +2457,9 @@ struct UIContext::Impl final {
 
     [[nodiscard]] UIBoxPaint resolvedBoxChrome(UINodeId node, u32 nodeIndex) const noexcept
     {
-        UIBoxPaint chrome = boxPaintsByIndex[nodeIndex];
+        // Motion presentation (border/radius/visual offset) is applied first;
+        // button pressed/focus chrome may still override for interaction feedback.
+        UIBoxPaint chrome = presentationBoxPaint(node, nodeIndex);
         const NodeRecord* record = recordByIndex(nodeIndex);
         if (record == nullptr || !isButtonChromeKind(record->kind) || nodeIndex >= buttonPaintsByNodeIndex.size() ||
             !isCandidateNodeEnabled(node))
@@ -2917,10 +2935,35 @@ struct UIContext::Impl final {
         const WidgetTextState* textState =
             nodeIndex < textStatesByIndex.size() ? &textStatesByIndex[nodeIndex] : nullptr;
         const UITextStyle style = textState != nullptr ? textState->style : UITextStyle{};
-        const UIPremultipliedRgba8Color textColor =
-            applyDisabledOpacity && nodeIndex < localTextColorCacheByIndex.size()
-                ? widgetPaintColor(node, localTextColorCacheByIndex[nodeIndex])
-                : (textState != nullptr ? premultiply(style.color) : UIPremultipliedRgba8Color{});
+        UIPremultipliedRgba8Color textColor{};
+        if (textState != nullptr)
+        {
+            const auto motionPresentation = motionTrackStorage.presentationFor(node);
+            if (motionPresentation.hasTextColor)
+            {
+                textColor = premultiply(motionPresentation.textColor);
+            }
+            else if (applyDisabledOpacity && nodeIndex < localTextColorCacheByIndex.size())
+            {
+                textColor = widgetPaintColor(node, localTextColorCacheByIndex[nodeIndex]);
+            }
+            else
+            {
+                textColor = premultiply(style.color);
+            }
+            if (motionPresentation.hasOpacity ||
+                (nodeIndex < presentationOpacityValidByNodeIndex.size() &&
+                 presentationOpacityValidByNodeIndex[nodeIndex] != 0))
+            {
+                const float opacity = currentOpacity(node, nodeIndex);
+                if (opacity < 1.0F)
+                {
+                    textColor = applyOpacity(
+                        textColor,
+                        static_cast<u8>(std::clamp(opacity, 0.0F, 1.0F) * 255.0F + 0.5F));
+                }
+            }
+        }
         const bool preeditActive = focused && imeComposition.active();
         const UITextEditPaint paint =
             nodeIndex < textEditPaintsByNodeIndex.size() ? textEditPaintsByNodeIndex[nodeIndex]
@@ -2962,7 +3005,9 @@ struct UIContext::Impl final {
         const UIBoxPaint boxPaint = resolvedBoxChrome(layoutEntry.node, nodeIndex);
         const UIPremultipliedRgba8Color resolvedFill =
             presentationBoxFill(layoutEntry.node, nodeIndex);
-        paintEntryCount += countBoxChromePaintEntries(boxPaint, layoutEntry.worldRect, !resolvedFill.isTransparent());
+        const UILogicalRect paintWorld =
+            presentationPaintWorldRect(layoutEntry.node, nodeIndex, layoutEntry.worldRect);
+        paintEntryCount += countBoxChromePaintEntries(boxPaint, paintWorld, !resolvedFill.isTransparent());
         paintEntryCount += countCanvasPaintEntries(layoutEntry);
         if (const UIImageContent* image = imageContentStorage.get(nodeIndex); image != nullptr)
         {
@@ -3181,7 +3226,9 @@ struct UIContext::Impl final {
         const UIBoxPaint boxPaint = resolvedBoxChrome(layoutEntry.node, nodeIndex);
         const UIPremultipliedRgba8Color fill =
             presentationBoxFill(layoutEntry.node, nodeIndex);
-        appendBoxChromePaints(output, layoutEntry.node, layoutEntry.worldRect, layoutEntry.effectiveClip,
+        const UILogicalRect paintWorld =
+            presentationPaintWorldRect(layoutEntry.node, nodeIndex, layoutEntry.worldRect);
+        appendBoxChromePaints(output, layoutEntry.node, paintWorld, layoutEntry.effectiveClip,
                               nextPaintOrdinal, boxPaint, fill);
         appendCanvasPaints(output, layoutEntry, nextPaintOrdinal);
         appendImagePaint(output, layoutEntry, nextPaintOrdinal);
@@ -4136,6 +4183,14 @@ struct UIContext::Impl final {
         imageContentStorage.release(index);
         behaviorStateStorage.release(index);
         motionTrackStorage.releaseNode(idForIndex(index));
+        if (index < presentationOpacityValidByNodeIndex.size())
+        {
+            presentationOpacityByNodeIndex[index] = 1.0F;
+            presentationOpacityValidByNodeIndex[index] = 0;
+            presentationOffsetXByNodeIndex[index] = 0.0F;
+            presentationOffsetYByNodeIndex[index] = 0.0F;
+            presentationOffsetValidByNodeIndex[index] = 0;
+        }
         dirtyQueueStorage.resetNode(index);
         layoutScratchByIndex[index] = {};
         layoutWorkByIndex[index] = 0;
@@ -5192,15 +5247,7 @@ struct UIContext::Impl final {
                 continue;
             }
             const u32 index = completed.node.index();
-            boxPaintsByIndex[index].solidFill = UISolidFill{.color = completed.color};
-            detachThemeBinding(index, ThemeBindingBoxPaint);
-            resolvedBoxFillCacheByNodeIndex[index] = premultiply(completed.color);
-            setResolvedStyleColorTokenDependency(index, {});
-            if (!dirtyQueueStorage.isQueued(index))
-            {
-                dirtyQueueStorage.enqueue(completed.node);
-            }
-            dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+            applyCompletedMotion(completed);
         }
         if (!motionTrackStorage.lastCompleted().empty())
         {
@@ -5214,33 +5261,87 @@ struct UIContext::Impl final {
         return reducedMotionEnabled;
     }
 
+    void applyCompletedMotion(const Detail::UIMotionTrackStorage::Completed& completed) noexcept
+    {
+        if (!contains(completed.node))
+        {
+            return;
+        }
+        const u32 index = completed.node.index();
+        switch (completed.property)
+        {
+        case UIAnimatableProperty::BackgroundColor:
+            boxPaintsByIndex[index].solidFill = UISolidFill{.color = completed.color};
+            detachThemeBinding(index, ThemeBindingBoxPaint);
+            resolvedBoxFillCacheByNodeIndex[index] = premultiply(completed.color);
+            setResolvedStyleColorTokenDependency(index, {});
+            break;
+        case UIAnimatableProperty::BorderColor:
+            boxPaintsByIndex[index].borderLight = completed.color;
+            boxPaintsByIndex[index].borderDark = completed.color;
+            detachThemeBinding(index, ThemeBindingBoxPaint);
+            break;
+        case UIAnimatableProperty::TextColor:
+            if (index < textStatesByIndex.size() && textStatesByIndex[index].hasContent)
+            {
+                textStatesByIndex[index].style.color = completed.color;
+                detachThemeBinding(index, ThemeBindingTextStyle);
+                localTextColorCacheByIndex[index] = premultiply(completed.color);
+            }
+            break;
+        case UIAnimatableProperty::Opacity:
+            if (index < presentationOpacityValidByNodeIndex.size())
+            {
+                presentationOpacityByNodeIndex[index] =
+                    std::clamp(completed.scalar, 0.0F, 1.0F);
+                presentationOpacityValidByNodeIndex[index] = 1;
+            }
+            break;
+        case UIAnimatableProperty::CornerRadius:
+            boxPaintsByIndex[index].cornerRadius = (std::max)(0.0F, completed.scalar);
+            detachThemeBinding(index, ThemeBindingBoxPaint);
+            break;
+        case UIAnimatableProperty::VisualOffset:
+            if (index < presentationOffsetValidByNodeIndex.size())
+            {
+                presentationOffsetXByNodeIndex[index] = completed.offset.x;
+                presentationOffsetYByNodeIndex[index] = completed.offset.y;
+                presentationOffsetValidByNodeIndex[index] = 1;
+            }
+            break;
+        }
+        if (!dirtyQueueStorage.isQueued(index))
+        {
+            dirtyQueueStorage.enqueue(completed.node);
+        }
+        dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+    }
+
+    [[nodiscard]] UIStraightSrgba8Color unpremultiplyColor(UIPremultipliedRgba8Color premul) const noexcept
+    {
+        if (premul.alpha == 0)
+        {
+            return {};
+        }
+        const float inv = 255.0F / static_cast<float>(premul.alpha);
+        return UIStraightSrgba8Color{
+            .red = static_cast<u8>(std::min(255.0F, static_cast<float>(premul.red) * inv + 0.5F)),
+            .green = static_cast<u8>(std::min(255.0F, static_cast<float>(premul.green) * inv + 0.5F)),
+            .blue = static_cast<u8>(std::min(255.0F, static_cast<float>(premul.blue) * inv + 0.5F)),
+            .alpha = premul.alpha,
+        };
+    }
+
     [[nodiscard]] UIStraightSrgba8Color currentBackgroundColor(UINodeId node, u32 nodeIndex) const noexcept
     {
-        if (const Detail::UIMotionTrackStorage::Track* track =
-                motionTrackStorage.findActiveBackgroundColor(node);
-            track != nullptr)
+        const auto presentation = motionTrackStorage.presentationFor(node);
+        if (presentation.hasBackgroundColor)
         {
-            return track->presentationColor;
+            return presentation.backgroundColor;
         }
         if (nodeIndex < resolvedBoxFillCacheByNodeIndex.size())
         {
-            // Convert premultiplied cache back is lossy; prefer box paint solid
-            // when present, else unpremultiply is not available. Use solidFill
-            // from box paint as authoring/local color and stylesheet-resolved
-            // only through paint path. For transition starts, use unpremultiply
-            // approximation from cache when alpha>0.
-            const UIPremultipliedRgba8Color premul = resolvedBoxFillCacheByNodeIndex[nodeIndex];
-            if (premul.alpha == 0)
-            {
-                return {};
-            }
-            const float inv = 255.0F / static_cast<float>(premul.alpha);
-            return UIStraightSrgba8Color{
-                .red = static_cast<u8>(std::min(255.0F, static_cast<float>(premul.red) * inv + 0.5F)),
-                .green = static_cast<u8>(std::min(255.0F, static_cast<float>(premul.green) * inv + 0.5F)),
-                .blue = static_cast<u8>(std::min(255.0F, static_cast<float>(premul.blue) * inv + 0.5F)),
-                .alpha = premul.alpha,
-            };
+            return unpremultiplyColor(resolvedBoxFillCacheByNodeIndex[nodeIndex]);
         }
         if (boxPaintsByIndex[nodeIndex].solidFill.has_value())
         {
@@ -5249,8 +5350,80 @@ struct UIContext::Impl final {
         return {};
     }
 
-    [[nodiscard]] Core::Status beginBackgroundColorTransition(
-        UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec)
+    [[nodiscard]] UIStraightSrgba8Color currentBorderColor(UINodeId node, u32 nodeIndex) const noexcept
+    {
+        const auto presentation = motionTrackStorage.presentationFor(node);
+        if (presentation.hasBorderColor)
+        {
+            return presentation.borderColor;
+        }
+        const UIBoxPaint& paint = boxPaintsByIndex[nodeIndex];
+        return paint.borderLight.alpha != 0 ? paint.borderLight : paint.borderDark;
+    }
+
+    [[nodiscard]] UIStraightSrgba8Color currentTextColor(UINodeId node, u32 nodeIndex) const noexcept
+    {
+        const auto presentation = motionTrackStorage.presentationFor(node);
+        if (presentation.hasTextColor)
+        {
+            return presentation.textColor;
+        }
+        if (nodeIndex < textStatesByIndex.size() && textStatesByIndex[nodeIndex].hasContent)
+        {
+            return textStatesByIndex[nodeIndex].style.color;
+        }
+        return {};
+    }
+
+    [[nodiscard]] float currentOpacity(UINodeId node, u32 nodeIndex) const noexcept
+    {
+        const auto presentation = motionTrackStorage.presentationFor(node);
+        if (presentation.hasOpacity)
+        {
+            return presentation.opacity;
+        }
+        if (nodeIndex < presentationOpacityValidByNodeIndex.size() &&
+            presentationOpacityValidByNodeIndex[nodeIndex] != 0)
+        {
+            return presentationOpacityByNodeIndex[nodeIndex];
+        }
+        return 1.0F;
+    }
+
+    [[nodiscard]] float currentCornerRadius(UINodeId node, u32 nodeIndex) const noexcept
+    {
+        const auto presentation = motionTrackStorage.presentationFor(node);
+        if (presentation.hasCornerRadius)
+        {
+            return presentation.cornerRadius;
+        }
+        return boxPaintsByIndex[nodeIndex].cornerRadius;
+    }
+
+    [[nodiscard]] Detail::UIMotionTrackStorage::Scalar2 currentVisualOffset(UINodeId node,
+                                                                            u32 nodeIndex) const noexcept
+    {
+        const auto presentation = motionTrackStorage.presentationFor(node);
+        if (presentation.hasVisualOffset)
+        {
+            return presentation.visualOffset;
+        }
+        if (nodeIndex < presentationOffsetValidByNodeIndex.size() &&
+            presentationOffsetValidByNodeIndex[nodeIndex] != 0)
+        {
+            return {.x = presentationOffsetXByNodeIndex[nodeIndex],
+                    .y = presentationOffsetYByNodeIndex[nodeIndex]};
+        }
+        // Default start for a new VisualOffset track is identity (no paint shift).
+        // Authored drop-shadow offsets remain on UIBoxPaint.shadowOffset*.
+        static_cast<void>(node);
+        static_cast<void>(nodeIndex);
+        return {};
+    }
+
+    [[nodiscard]] Core::Status beginColorPropertyTransition(
+        UINodeId node, UIAnimatableProperty property, UIStraightSrgba8Color target,
+        const UITransitionSpec& spec)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
@@ -5262,34 +5435,221 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if (spec.property != UIAnimatableProperty::BackgroundColor)
+        if (spec.property != property)
         {
-            return fail(UIErrorCode::InvalidStyle,
-                        "UI motion first slice only supports BackgroundColor");
+            return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
         }
         const u32 index = node.index();
-        const UIStraightSrgba8Color start = currentBackgroundColor(node, index);
+        UIStraightSrgba8Color start{};
+        switch (property)
+        {
+        case UIAnimatableProperty::BackgroundColor:
+            start = currentBackgroundColor(node, index);
+            break;
+        case UIAnimatableProperty::BorderColor:
+            start = currentBorderColor(node, index);
+            break;
+        case UIAnimatableProperty::TextColor:
+            if (index >= textStatesByIndex.size() || !textStatesByIndex[index].hasContent)
+            {
+                return fail(UIErrorCode::InvalidText,
+                            "UI text color transition requires intrinsic text content");
+            }
+            start = currentTextColor(node, index);
+            break;
+        default:
+            return fail(UIErrorCode::InvalidStyle, "UI color transition property is unsupported");
+        }
         const Core::MonotonicTimePoint now = motionNow();
         if (reducedMotionEnabled || spec.duration.count() <= 0.0)
         {
-            // Snap: write local solid fill and detach theme box paint so the
-            // target is stable; paint-only dirty.
             if (Core::Status dirty =
                     markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
                 !dirty)
             {
                 return dirty;
             }
-            boxPaintsByIndex[index].solidFill = UISolidFill{.color = target};
-            detachThemeBinding(index, ThemeBindingBoxPaint);
-            resolvedBoxFillCacheByNodeIndex[index] = premultiply(target);
-            setResolvedStyleColorTokenDependency(index, {});
-            motionTrackStorage.releaseNode(node);
+            applyCompletedMotion(Detail::UIMotionTrackStorage::Completed{
+                .node = node,
+                .property = property,
+                .valueKind = Detail::UIMotionTrackStorage::ValueKind::Color,
+                .color = target,
+            });
+            motionTrackStorage.releaseProperty(node, property);
             return Core::success();
         }
+        if (Core::Status status = motionTrackStorage.beginOrRetargetColor(
+                node, property, start, target, spec, now);
+            !status)
+        {
+            return status;
+        }
+        return markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+    }
 
-        if (Core::Status status = motionTrackStorage.beginOrRetargetBackgroundColor(
-                node, start, target, spec, now);
+    [[nodiscard]] Core::Status beginBackgroundColorTransition(
+        UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec)
+    {
+        return beginColorPropertyTransition(node, UIAnimatableProperty::BackgroundColor, target, spec);
+    }
+
+    [[nodiscard]] Core::Status beginBorderColorTransition(
+        UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec)
+    {
+        return beginColorPropertyTransition(node, UIAnimatableProperty::BorderColor, target, spec);
+    }
+
+    [[nodiscard]] Core::Status beginTextColorTransition(
+        UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec)
+    {
+        return beginColorPropertyTransition(node, UIAnimatableProperty::TextColor, target, spec);
+    }
+
+    [[nodiscard]] Core::Status beginOpacityTransition(
+        UINodeId node, float targetOpacity, const UITransitionSpec& spec)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (spec.property != UIAnimatableProperty::Opacity)
+        {
+            return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
+        }
+        if (!std::isfinite(targetOpacity))
+        {
+            return fail(UIErrorCode::InvalidStyle, "UI opacity target must be finite");
+        }
+        targetOpacity = std::clamp(targetOpacity, 0.0F, 1.0F);
+        const u32 index = node.index();
+        const float start = currentOpacity(node, index);
+        const Core::MonotonicTimePoint now = motionNow();
+        if (reducedMotionEnabled || spec.duration.count() <= 0.0)
+        {
+            if (Core::Status dirty =
+                    markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+                !dirty)
+            {
+                return dirty;
+            }
+            applyCompletedMotion(Detail::UIMotionTrackStorage::Completed{
+                .node = node,
+                .property = UIAnimatableProperty::Opacity,
+                .valueKind = Detail::UIMotionTrackStorage::ValueKind::Scalar,
+                .scalar = targetOpacity,
+            });
+            motionTrackStorage.releaseProperty(node, UIAnimatableProperty::Opacity);
+            return Core::success();
+        }
+        if (Core::Status status = motionTrackStorage.beginOrRetargetScalar(
+                node, UIAnimatableProperty::Opacity, start, targetOpacity, spec, now);
+            !status)
+        {
+            return status;
+        }
+        return markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+    }
+
+    [[nodiscard]] Core::Status beginCornerRadiusTransition(
+        UINodeId node, float targetRadius, const UITransitionSpec& spec)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (spec.property != UIAnimatableProperty::CornerRadius)
+        {
+            return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
+        }
+        if (!std::isfinite(targetRadius) || targetRadius < 0.0F)
+        {
+            return fail(UIErrorCode::InvalidStyle, "UI corner radius target must be finite and non-negative");
+        }
+        const u32 index = node.index();
+        const float start = currentCornerRadius(node, index);
+        const Core::MonotonicTimePoint now = motionNow();
+        if (reducedMotionEnabled || spec.duration.count() <= 0.0)
+        {
+            if (Core::Status dirty =
+                    markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+                !dirty)
+            {
+                return dirty;
+            }
+            applyCompletedMotion(Detail::UIMotionTrackStorage::Completed{
+                .node = node,
+                .property = UIAnimatableProperty::CornerRadius,
+                .valueKind = Detail::UIMotionTrackStorage::ValueKind::Scalar,
+                .scalar = targetRadius,
+            });
+            motionTrackStorage.releaseProperty(node, UIAnimatableProperty::CornerRadius);
+            return Core::success();
+        }
+        if (Core::Status status = motionTrackStorage.beginOrRetargetScalar(
+                node, UIAnimatableProperty::CornerRadius, start, targetRadius, spec, now);
+            !status)
+        {
+            return status;
+        }
+        return markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+    }
+
+    [[nodiscard]] Core::Status beginVisualOffsetTransition(
+        UINodeId node, float targetOffsetX, float targetOffsetY, const UITransitionSpec& spec)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (spec.property != UIAnimatableProperty::VisualOffset)
+        {
+            return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
+        }
+        if (!std::isfinite(targetOffsetX) || !std::isfinite(targetOffsetY))
+        {
+            return fail(UIErrorCode::InvalidStyle, "UI visual offset target must be finite");
+        }
+        const u32 index = node.index();
+        const auto start = currentVisualOffset(node, index);
+        const Core::MonotonicTimePoint now = motionNow();
+        const Detail::UIMotionTrackStorage::Scalar2 target{.x = targetOffsetX, .y = targetOffsetY};
+        if (reducedMotionEnabled || spec.duration.count() <= 0.0)
+        {
+            if (Core::Status dirty =
+                    markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+                !dirty)
+            {
+                return dirty;
+            }
+            applyCompletedMotion(Detail::UIMotionTrackStorage::Completed{
+                .node = node,
+                .property = UIAnimatableProperty::VisualOffset,
+                .valueKind = Detail::UIMotionTrackStorage::ValueKind::Offset,
+                .offset = target,
+            });
+            motionTrackStorage.releaseProperty(node, UIAnimatableProperty::VisualOffset);
+            return Core::success();
+        }
+        if (Core::Status status = motionTrackStorage.beginOrRetargetOffset(
+                node, UIAnimatableProperty::VisualOffset, start, target, spec, now);
             !status)
         {
             return status;
@@ -5305,7 +5665,6 @@ struct UIContext::Impl final {
         }
         if (motionTrackStorage.activeCount() == 0)
         {
-            // M==0: no extra dirty/rebuild work (ADR / UI-MOTION-001).
             return Core::success();
         }
         const usize before = motionTrackStorage.activeCount();
@@ -5313,40 +5672,88 @@ struct UIContext::Impl final {
         for (const Detail::UIMotionTrackStorage::Completed& completed :
              motionTrackStorage.lastCompleted())
         {
-            if (!contains(completed.node))
-            {
-                continue;
-            }
-            const u32 index = completed.node.index();
-            boxPaintsByIndex[index].solidFill = UISolidFill{.color = completed.color};
-            detachThemeBinding(index, ThemeBindingBoxPaint);
-            resolvedBoxFillCacheByNodeIndex[index] = premultiply(completed.color);
-            setResolvedStyleColorTokenDependency(index, {});
-            if (!dirtyQueueStorage.isQueued(index))
-            {
-                dirtyQueueStorage.enqueue(completed.node);
-            }
-            dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+            applyCompletedMotion(completed);
         }
         if (motionTrackStorage.lastSampledCount() == 0 && before == 0)
         {
             return Core::success();
         }
-        // Any sampled track (including completions) needs paint republication.
         phaseDirty |= PhasePaint;
         return Core::success();
+    }
+
+    [[nodiscard]] UIBoxPaint presentationBoxPaint(UINodeId node, u32 nodeIndex) const noexcept
+    {
+        UIBoxPaint paint = boxPaintsByIndex[nodeIndex];
+        const auto presentation = motionTrackStorage.presentationFor(node);
+        if (presentation.hasBorderColor)
+        {
+            paint.borderLight = presentation.borderColor;
+            paint.borderDark = presentation.borderColor;
+        }
+        if (presentation.hasCornerRadius)
+        {
+            paint.cornerRadius = presentation.cornerRadius;
+        }
+        // VisualOffset is applied to paint worldRect (not hit/layout) by callers.
+        return paint;
+    }
+
+    [[nodiscard]] UILogicalRect presentationPaintWorldRect(UINodeId node, u32 nodeIndex,
+                                                           UILogicalRect worldRect) const noexcept
+    {
+        const auto offset = currentVisualOffset(node, nodeIndex);
+        // Only residual/active motion offsets shift chrome; default currentVisualOffset
+        // falls back to box shadow offsets for transition *starts*, but paint shift
+        // must not double-count authored drop-shadow offsets.
+        const auto presentation = motionTrackStorage.presentationFor(node);
+        float dx = 0.0F;
+        float dy = 0.0F;
+        if (presentation.hasVisualOffset)
+        {
+            dx = presentation.visualOffset.x;
+            dy = presentation.visualOffset.y;
+        }
+        else if (nodeIndex < presentationOffsetValidByNodeIndex.size() &&
+                 presentationOffsetValidByNodeIndex[nodeIndex] != 0)
+        {
+            dx = presentationOffsetXByNodeIndex[nodeIndex];
+            dy = presentationOffsetYByNodeIndex[nodeIndex];
+        }
+        if (dx == 0.0F && dy == 0.0F)
+        {
+            return worldRect;
+        }
+        worldRect.x = normalizeFloat(worldRect.x + dx);
+        worldRect.y = normalizeFloat(worldRect.y + dy);
+        return worldRect;
     }
 
     [[nodiscard]] UIPremultipliedRgba8Color presentationBoxFill(UINodeId node,
                                                                 u32 nodeIndex) const noexcept
     {
-        if (const Detail::UIMotionTrackStorage::Track* track =
-                motionTrackStorage.findActiveBackgroundColor(node);
-            track != nullptr)
+        UIPremultipliedRgba8Color fill = resolvedBoxFillCacheByNodeIndex[nodeIndex];
+        const auto presentation = motionTrackStorage.presentationFor(node);
+        if (presentation.hasBackgroundColor)
         {
-            return premultiply(track->presentationColor);
+            fill = premultiply(presentation.backgroundColor);
         }
-        return resolvedBoxFillCacheByNodeIndex[nodeIndex];
+        float opacity = 1.0F;
+        if (presentation.hasOpacity)
+        {
+            opacity = presentation.opacity;
+        }
+        else if (nodeIndex < presentationOpacityValidByNodeIndex.size() &&
+                 presentationOpacityValidByNodeIndex[nodeIndex] != 0)
+        {
+            opacity = presentationOpacityByNodeIndex[nodeIndex];
+        }
+        if (opacity < 1.0F)
+        {
+            const u8 opacityByte = static_cast<u8>(std::clamp(opacity, 0.0F, 1.0F) * 255.0F + 0.5F);
+            fill = applyOpacity(fill, opacityByte);
+        }
+        return fill;
     }
 
     [[nodiscard]] Core::Status installStyleSheet(
@@ -16825,6 +17232,36 @@ Core::Status UIContext::beginBackgroundColorTransition(
     UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec)
 {
     return m_impl->beginBackgroundColorTransition(node, target, spec);
+}
+
+Core::Status UIContext::beginBorderColorTransition(
+    UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec)
+{
+    return m_impl->beginBorderColorTransition(node, target, spec);
+}
+
+Core::Status UIContext::beginTextColorTransition(
+    UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec)
+{
+    return m_impl->beginTextColorTransition(node, target, spec);
+}
+
+Core::Status UIContext::beginOpacityTransition(
+    UINodeId node, float targetOpacity, const UITransitionSpec& spec)
+{
+    return m_impl->beginOpacityTransition(node, targetOpacity, spec);
+}
+
+Core::Status UIContext::beginCornerRadiusTransition(
+    UINodeId node, float targetRadius, const UITransitionSpec& spec)
+{
+    return m_impl->beginCornerRadiusTransition(node, targetRadius, spec);
+}
+
+Core::Status UIContext::beginVisualOffsetTransition(
+    UINodeId node, float targetOffsetX, float targetOffsetY, const UITransitionSpec& spec)
+{
+    return m_impl->beginVisualOffsetTransition(node, targetOffsetX, targetOffsetY, spec);
 }
 
 Core::Status UIContext::sampleMotion(Core::MonotonicTimePoint now)

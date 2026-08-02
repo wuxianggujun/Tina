@@ -30,6 +30,28 @@ namespace {
     return static_cast<float>(t);
 }
 
+[[nodiscard]] Core::Status validateSpec(const UITransitionSpec& spec,
+                                        UIAnimatableProperty expectedProperty) noexcept
+{
+    if (spec.property != expectedProperty) {
+        return Core::failure(UIErrorCode::InvalidStyle,
+                             "UI motion transition property does not match API");
+    }
+    if (!isPaintOnlyAnimatableProperty(spec.property)) {
+        return Core::failure(UIErrorCode::InvalidStyle,
+                             "UI motion property is not paint-only");
+    }
+    if (!isValidUIEasing(spec.easing)) {
+        return Core::failure(UIErrorCode::InvalidStyle, "UI motion easing is not recognized");
+    }
+    if (spec.duration.count() < 0.0 || spec.delay.count() < 0.0 ||
+        !std::isfinite(spec.duration.count()) || !std::isfinite(spec.delay.count())) {
+        return Core::failure(UIErrorCode::InvalidStyle,
+                             "UI motion duration/delay must be finite and non-negative");
+    }
+    return Core::success();
+}
+
 } // namespace
 
 UIMotionTrackStorage::UIMotionTrackStorage(usize trackCapacity, std::pmr::memory_resource& resource)
@@ -132,12 +154,12 @@ void UIMotionTrackStorage::linkActive(u32 slotIndex) noexcept
 }
 
 const UIMotionTrackStorage::Track*
-UIMotionTrackStorage::findActiveBackgroundColor(UINodeId node) const noexcept
+UIMotionTrackStorage::findActive(UINodeId node, UIAnimatableProperty property) const noexcept
 {
     for (u32 slot = activeHead_; slot != InvalidSlot;) {
         const Track& track = tracks_[slot];
         const u32 next = track.nextActive;
-        if (track.node == node && track.property == UIAnimatableProperty::BackgroundColor) {
+        if (track.node == node && track.property == property) {
             return &track;
         }
         slot = next;
@@ -145,70 +167,112 @@ UIMotionTrackStorage::findActiveBackgroundColor(UINodeId node) const noexcept
     return nullptr;
 }
 
-UIMotionTrackStorage::Track* UIMotionTrackStorage::findActiveBackgroundColor(UINodeId node) noexcept
+UIMotionTrackStorage::Track*
+UIMotionTrackStorage::findActive(UINodeId node, UIAnimatableProperty property) noexcept
 {
     return const_cast<Track*>(
-        static_cast<const UIMotionTrackStorage*>(this)->findActiveBackgroundColor(node));
+        static_cast<const UIMotionTrackStorage*>(this)->findActive(node, property));
 }
 
-Core::Status UIMotionTrackStorage::beginOrRetargetBackgroundColor(
-    UINodeId node, UIStraightSrgba8Color start, UIStraightSrgba8Color target,
-    const UITransitionSpec& spec, Core::MonotonicTimePoint now)
+Core::Status UIMotionTrackStorage::beginOrRetargetCommon(
+    UINodeId node, UIAnimatableProperty property, ValueKind kind, const UITransitionSpec& spec,
+    Core::MonotonicTimePoint now, Track*& outTrack)
 {
+    outTrack = nullptr;
     if (!node.hasValue()) {
         return Core::failure(UIErrorCode::InvalidNode, "UI motion track requires a live node");
     }
-    if (spec.property != UIAnimatableProperty::BackgroundColor) {
+    if (Core::Status status = validateSpec(spec, property); !status) {
+        return status;
+    }
+    if (valueKindForProperty(property) != kind) {
         return Core::failure(UIErrorCode::InvalidStyle,
-                             "UI motion first slice only supports BackgroundColor");
-    }
-    if (!isValidUIEasing(spec.easing)) {
-        return Core::failure(UIErrorCode::InvalidStyle, "UI motion easing is not recognized");
-    }
-    if (spec.duration.count() < 0.0 || spec.delay.count() < 0.0 ||
-        !std::isfinite(spec.duration.count()) || !std::isfinite(spec.delay.count())) {
-        return Core::failure(UIErrorCode::InvalidStyle, "UI motion duration/delay must be finite and non-negative");
+                             "UI motion property value kind mismatch");
     }
 
-    if (Track* existing = findActiveBackgroundColor(node); existing != nullptr) {
-        existing->startColor = start;
-        existing->targetColor = target;
-        existing->presentationColor = start;
+    if (Track* existing = findActive(node, property); existing != nullptr) {
         existing->startTime = now;
         existing->duration = spec.duration;
         existing->delay = spec.delay;
         existing->easing = spec.easing;
+        outTrack = existing;
         return Core::success();
     }
 
     const u32 slot = allocateSlot();
     if (slot == InvalidSlot) {
-        return Core::failure(UIErrorCode::CapacityExceeded, "UI motion track capacity has been exhausted");
+        return Core::failure(UIErrorCode::CapacityExceeded,
+                             "UI motion track capacity has been exhausted");
     }
     Track& track = tracks_[slot];
     track = {};
     track.node = node;
-    track.property = UIAnimatableProperty::BackgroundColor;
-    track.startColor = start;
-    track.targetColor = target;
-    track.presentationColor = start;
+    track.property = property;
+    track.valueKind = kind;
     track.startTime = now;
     track.duration = spec.duration;
     track.delay = spec.delay;
     track.easing = spec.easing;
     linkActive(slot);
+    outTrack = &track;
     return Core::success();
 }
 
-void UIMotionTrackStorage::snapAndDeactivate(u32 slotIndex) noexcept
+Core::Status UIMotionTrackStorage::beginOrRetargetColor(
+    UINodeId node, UIAnimatableProperty property, UIStraightSrgba8Color start,
+    UIStraightSrgba8Color target, const UITransitionSpec& spec, Core::MonotonicTimePoint now)
 {
-    if (slotIndex >= tracks_.size()) {
-        return;
+    Track* track = nullptr;
+    if (Core::Status status =
+            beginOrRetargetCommon(node, property, ValueKind::Color, spec, now, track);
+        !status) {
+        return status;
     }
-    Track& track = tracks_[slotIndex];
-    track.presentationColor = track.targetColor;
-    unlinkActive(slotIndex);
-    freeSlot(slotIndex);
+    track->startColor = start;
+    track->targetColor = target;
+    track->presentationColor = start;
+    return Core::success();
+}
+
+Core::Status UIMotionTrackStorage::beginOrRetargetScalar(
+    UINodeId node, UIAnimatableProperty property, float start, float target,
+    const UITransitionSpec& spec, Core::MonotonicTimePoint now)
+{
+    if (!std::isfinite(start) || !std::isfinite(target)) {
+        return Core::failure(UIErrorCode::InvalidStyle,
+                             "UI motion scalar values must be finite");
+    }
+    Track* track = nullptr;
+    if (Core::Status status =
+            beginOrRetargetCommon(node, property, ValueKind::Scalar, spec, now, track);
+        !status) {
+        return status;
+    }
+    track->startScalar = start;
+    track->targetScalar = target;
+    track->presentationScalar = start;
+    return Core::success();
+}
+
+Core::Status UIMotionTrackStorage::beginOrRetargetOffset(
+    UINodeId node, UIAnimatableProperty property, Scalar2 start, Scalar2 target,
+    const UITransitionSpec& spec, Core::MonotonicTimePoint now)
+{
+    if (!std::isfinite(start.x) || !std::isfinite(start.y) || !std::isfinite(target.x) ||
+        !std::isfinite(target.y)) {
+        return Core::failure(UIErrorCode::InvalidStyle,
+                             "UI motion offset values must be finite");
+    }
+    Track* track = nullptr;
+    if (Core::Status status =
+            beginOrRetargetCommon(node, property, ValueKind::Offset, spec, now, track);
+        !status) {
+        return status;
+    }
+    track->startOffset = start;
+    track->targetOffset = target;
+    track->presentationOffset = start;
+    return Core::success();
 }
 
 void UIMotionTrackStorage::snapAllActive() noexcept
@@ -217,10 +281,27 @@ void UIMotionTrackStorage::snapAllActive() noexcept
     for (u32 slot = activeHead_; slot != InvalidSlot;) {
         Track& track = tracks_[slot];
         const u32 next = track.nextActive;
-        track.presentationColor = track.targetColor;
+        Completed completed{
+            .node = track.node,
+            .property = track.property,
+            .valueKind = track.valueKind,
+        };
+        switch (track.valueKind) {
+        case ValueKind::Color:
+            track.presentationColor = track.targetColor;
+            completed.color = track.targetColor;
+            break;
+        case ValueKind::Scalar:
+            track.presentationScalar = track.targetScalar;
+            completed.scalar = track.targetScalar;
+            break;
+        case ValueKind::Offset:
+            track.presentationOffset = track.targetOffset;
+            completed.offset = track.targetOffset;
+            break;
+        }
         if (lastCompleted_.size() < lastCompleted_.capacity()) {
-            lastCompleted_.push_back(
-                Completed{.node = track.node, .color = track.targetColor});
+            lastCompleted_.push_back(completed);
         }
         unlinkActive(slot);
         freeSlot(slot);
@@ -245,6 +326,22 @@ void UIMotionTrackStorage::releaseNode(UINodeId node) noexcept
     }
 }
 
+void UIMotionTrackStorage::releaseProperty(UINodeId node, UIAnimatableProperty property) noexcept
+{
+    if (!node.hasValue()) {
+        return;
+    }
+    for (u32 slot = activeHead_; slot != InvalidSlot;) {
+        Track& track = tracks_[slot];
+        const u32 next = track.nextActive;
+        if (track.node == node && track.property == property) {
+            unlinkActive(slot);
+            freeSlot(slot);
+        }
+        slot = next;
+    }
+}
+
 std::span<const UIMotionTrackStorage::Completed>
 UIMotionTrackStorage::lastCompleted() const noexcept
 {
@@ -261,12 +358,42 @@ usize UIMotionTrackStorage::sample(Core::MonotonicTimePoint now) noexcept
         ++sampled;
         const float linear = progressAt(track, now);
         const float eased = evaluateUIEasing(track.easing, linear);
-        track.presentationColor = lerpStraightSrgba8(track.startColor, track.targetColor, eased);
+        Completed completed{
+            .node = track.node,
+            .property = track.property,
+            .valueKind = track.valueKind,
+        };
+        switch (track.valueKind) {
+        case ValueKind::Color:
+            track.presentationColor =
+                lerpStraightSrgba8(track.startColor, track.targetColor, eased);
+            if (linear >= 1.0F) {
+                track.presentationColor = track.targetColor;
+                completed.color = track.targetColor;
+            }
+            break;
+        case ValueKind::Scalar:
+            track.presentationScalar =
+                lerpFloat(track.startScalar, track.targetScalar, eased);
+            if (linear >= 1.0F) {
+                track.presentationScalar = track.targetScalar;
+                completed.scalar = track.targetScalar;
+            }
+            break;
+        case ValueKind::Offset:
+            track.presentationOffset = {
+                .x = lerpFloat(track.startOffset.x, track.targetOffset.x, eased),
+                .y = lerpFloat(track.startOffset.y, track.targetOffset.y, eased),
+            };
+            if (linear >= 1.0F) {
+                track.presentationOffset = track.targetOffset;
+                completed.offset = track.targetOffset;
+            }
+            break;
+        }
         if (linear >= 1.0F) {
-            track.presentationColor = track.targetColor;
             if (lastCompleted_.size() < lastCompleted_.capacity()) {
-                lastCompleted_.push_back(
-                    Completed{.node = track.node, .color = track.targetColor});
+                lastCompleted_.push_back(completed);
             }
             unlinkActive(slot);
             freeSlot(slot);
@@ -275,6 +402,51 @@ usize UIMotionTrackStorage::sample(Core::MonotonicTimePoint now) noexcept
     }
     lastSampledCount_ = sampled;
     return activeCount_;
+}
+
+UIMotionTrackStorage::NodePresentation
+UIMotionTrackStorage::presentationFor(UINodeId node) const noexcept
+{
+    NodePresentation presentation{};
+    if (!node.hasValue()) {
+        return presentation;
+    }
+    for (u32 slot = activeHead_; slot != InvalidSlot;) {
+        const Track& track = tracks_[slot];
+        const u32 next = track.nextActive;
+        if (track.node != node) {
+            slot = next;
+            continue;
+        }
+        switch (track.property) {
+        case UIAnimatableProperty::BackgroundColor:
+            presentation.hasBackgroundColor = true;
+            presentation.backgroundColor = track.presentationColor;
+            break;
+        case UIAnimatableProperty::BorderColor:
+            presentation.hasBorderColor = true;
+            presentation.borderColor = track.presentationColor;
+            break;
+        case UIAnimatableProperty::TextColor:
+            presentation.hasTextColor = true;
+            presentation.textColor = track.presentationColor;
+            break;
+        case UIAnimatableProperty::Opacity:
+            presentation.hasOpacity = true;
+            presentation.opacity = track.presentationScalar;
+            break;
+        case UIAnimatableProperty::CornerRadius:
+            presentation.hasCornerRadius = true;
+            presentation.cornerRadius = track.presentationScalar;
+            break;
+        case UIAnimatableProperty::VisualOffset:
+            presentation.hasVisualOffset = true;
+            presentation.visualOffset = track.presentationOffset;
+            break;
+        }
+        slot = next;
+    }
+    return presentation;
 }
 
 } // namespace Tina::UI::Detail

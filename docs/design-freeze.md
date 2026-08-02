@@ -40,7 +40,7 @@
 | WindowSurface | move-only native lease 与主窗口交接 | [0020](adr/0020-window-surface-handoff.md) | Implemented |
 | Runtime UI | startup transaction + root/phase-scoped capability | [0021](adr/0021-runtime-ui-startup-capability.md) | Implemented |
 | UI Authoring | Element 组合 authoring、父/子布局分离与统一 committed 内容放置 | [0022](adr/0022-ui-element-authoring-and-layout.md) | Implemented：descriptor/recipe、Flow/Flex、Semantics、StyleRole/reset、bounded build transaction、`SolidRect` Canvas 与统一 RoundedRect 已落地 |
-| UI 扩展 | 可组合标准 Behavior、bounded Component、node-local StyleSheet、Image/Icon/NineSlice 与 paint-only Motion | [0023](adr/0023-ui-extensibility-style-paint-motion.md) | Partial：UI-IMAGE-001 A/B/C、UI-COMPONENT-001，以及 Style foundation/BoxFill state/ColorToken registry/value/运行期 reverse-dependency 更新/Runtime facade/`ui_style_state_v1` 已落地；Style 其余属性面与 Motion 继续按垂直切片实现 |
+| UI 扩展 | 可组合标准 Behavior、bounded Component、node-local StyleSheet、Image/Icon/NineSlice 与 paint-only Motion | [0023](adr/0023-ui-extensibility-style-paint-motion.md) | Partial→近完成：IMAGE/COMPONENT/STYLE Done；MOTION paint-only tracks + `ui_motion_v1` Done；声明式 Style transition 预留与完整产品 Visual 仍可增强 |
 
 ## Proposed
 

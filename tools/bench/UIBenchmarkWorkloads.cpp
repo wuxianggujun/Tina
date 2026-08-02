@@ -42,6 +42,8 @@ inline constexpr std::string_view kComponentActivateToggleWorkload =
     "ui_component_build_activate_toggle_v1";
 inline constexpr std::string_view kComponentBuildWorkload = "ui_component_build_v1";
 inline constexpr std::string_view kStyleStateWorkload = "ui_style_state_v1";
+inline constexpr std::string_view kMotionWorkload = "ui_motion_v1";
+inline constexpr usize kMotionTrackCapacity = 1024;
 
 inline constexpr usize kLargeNodeCount = 4096;
 inline constexpr usize kFlatLeafCount = kLargeNodeCount - 1;
@@ -320,6 +322,13 @@ struct UIBenchmarkReport final {
     u64 styleEnabledDisplayListChecksum = 0;
     u64 styleDisabledDisplayListChecksum = 0;
     u64 styleStateChecksum = 0;
+
+    u64 configuredMotionTrackCapacity = 0;
+    u64 configuredActiveMotionTracks = 0;
+    u64 motionSampledTracks = 0;
+    u64 motionActiveTracks = 0;
+    u64 motionTrackHighWater = 0;
+    u64 motionZeroActiveIterations = 0;
 
     usize pmrAllocationsBefore = 0;
     usize pmrAllocationsAfter = 0;
@@ -1221,7 +1230,31 @@ void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) no
         hash.addU64(report.styleStateChecksum);
         hashStyleStatistics(hash, report.statistics.style);
     }
+    if (report.workload == kMotionWorkload) {
+        hash.addU64(report.configuredMotionTrackCapacity);
+        hash.addU64(report.configuredActiveMotionTracks);
+        hash.addU64(report.motionSampledTracks);
+        hash.addU64(report.motionActiveTracks);
+        hash.addU64(report.motionTrackHighWater);
+        hash.addU64(report.motionZeroActiveIterations);
+    }
 }
+
+class BenchMotionClock final : public Core::IMonotonicClock {
+  public:
+    [[nodiscard]] Core::MonotonicTimePoint now() const noexcept override
+    {
+        return now_;
+    }
+
+    void advance(Core::Duration delta) noexcept
+    {
+        now_ += std::chrono::duration_cast<Core::MonotonicDuration>(delta);
+    }
+
+  private:
+    Core::MonotonicTimePoint now_{};
+};
 
 [[nodiscard]] u64 hashSemantics(UI::UICommittedSemanticsView semantics) noexcept
 {
@@ -1509,6 +1542,170 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     DeterministicHash hash{};
     hashStatistics(hash, report);
     hash.addU32(dirtyLeaf.index());
+    report.checksum = hash.value();
+    return true;
+}
+
+[[nodiscard]] u64 motionActiveTrackTarget(u64 seed) noexcept
+{
+    // Docs: exercise 0 / 64 / 1024 active tracks under fixed capacity.
+    switch (seed % 3U) {
+    case 0:
+        return 0;
+    case 1:
+        return 64;
+    default:
+        return kMotionTrackCapacity;
+    }
+}
+
+[[nodiscard]] bool runMotion(const UIBenchmarkOptions& options, UIBenchmarkReport& report,
+                             std::string& error)
+{
+    const u64 activeTarget = motionActiveTrackTarget(options.seed);
+    CountingMemoryResource memory{};
+    UI::UIContextCapacityConfig capacity = largeContextCapacity();
+    capacity.motionTrackCapacity = kMotionTrackCapacity;
+    auto fixtureResult = createFixture(capacity, memory, error);
+    if (!fixtureResult) {
+        return false;
+    }
+    UIFixture fixture = std::move(*fixtureResult);
+    std::vector<UI::UINodeId> leaves;
+    if (!populateFlatPaintTree(fixture, leaves, error)) {
+        return false;
+    }
+    if (activeTarget > leaves.size()) {
+        error = "ui_motion_v1 leaf count is below active track target";
+        return false;
+    }
+
+    BenchMotionClock motionClock{};
+    if (Core::Status status = fixture.context->setMotionClock(&motionClock); !status) {
+        error = status.error().message;
+        return false;
+    }
+
+    auto builderResult = createDisplayListBuilder(static_cast<u32>(kLargeNodeCount), memory, error);
+    if (!builderResult) {
+        return false;
+    }
+    Render::UIDisplayListBuilder builder = std::move(*builderResult);
+    constexpr UI::UILogicalSize Viewport{.width = 1.0F, .height = static_cast<float>(kLargeNodeCount)};
+    constexpr Render::UIPixelRect Framebuffer{.x = 0, .y = 0, .width = 1, .height = kLargeNodeCount};
+
+    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        error = status.error().message;
+        return false;
+    }
+    if (!buildDisplayList(fixture, builder, Framebuffer, nullptr, error)) {
+        return false;
+    }
+
+    report.configuredNodeCount = kLargeNodeCount;
+    report.configuredMotionTrackCapacity = kMotionTrackCapacity;
+    report.configuredActiveMotionTracks = activeTarget;
+
+    Core::SteadyMonotonicClock wallClock{};
+    const auto wallBegin = wallClock.now();
+    const u64 totalIterations = options.warmUpIterations + options.measureIterations;
+    if (options.warmUpIterations == 0) {
+        captureAllocationBaseline(memory, report);
+    }
+
+    UI::UITransitionSpec spec{
+        .property = UI::UIAnimatableProperty::BackgroundColor,
+        .duration = Core::Duration{0.100},
+        .delay = Core::Duration{0.0},
+        .easing = UI::UIEasing::Linear,
+    };
+
+    for (u64 iteration = 0; iteration < totalIterations; ++iteration) {
+        const bool measured = iteration >= options.warmUpIterations;
+        const auto totalBegin = wallClock.now();
+
+        // Retarget or start M tracks each iteration (M==0 skips begin).
+        for (u64 index = 0; index < activeTarget; ++index) {
+            const UI::UINodeId leaf = leaves[static_cast<usize>(index)];
+            const UI::UIStraightSrgba8Color target =
+                ((iteration + index) & 1U) == 0U ? UI::rgba8(40, 120, 200)
+                                                 : UI::rgba8(200, 80, 40);
+            if (Core::Status status =
+                    fixture.context->beginBackgroundColorTransition(leaf, target, spec);
+                !status) {
+                error = status.error().message;
+                return false;
+            }
+        }
+
+        motionClock.advance(Core::Duration{0.050});
+        const auto commitBegin = wallClock.now();
+        // commitLayout samples motion via context clock.
+        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+            error = status.error().message;
+            return false;
+        }
+        const auto commitEnd = wallClock.now();
+        const UI::UIContextStatistics statistics = fixture.context->statistics();
+        const auto displayBegin = wallClock.now();
+        if (!buildDisplayList(fixture, builder, Framebuffer, measured ? &report : nullptr, error)) {
+            return false;
+        }
+        const auto displayEnd = wallClock.now();
+
+        if (measured) {
+            report.commitSamples.push_back(elapsedNs(commitBegin, commitEnd));
+            report.displayListSamples.push_back(elapsedNs(displayBegin, displayEnd));
+            report.totalSamples.push_back(elapsedNs(totalBegin, displayEnd));
+            accumulateCommitStatistics(statistics, report);
+            report.motionSampledTracks += statistics.motion.lastSampledTrackCount;
+            report.motionActiveTracks += statistics.motion.activeTrackCount;
+            report.motionTrackHighWater =
+                (std::max)(report.motionTrackHighWater, statistics.motion.trackHighWater);
+            if (activeTarget == 0) {
+                ++report.motionZeroActiveIterations;
+                if (statistics.motion.lastSampledTrackCount != 0 ||
+                    statistics.motion.activeTrackCount != 0 || statistics.layoutDirty ||
+                    statistics.hitDirty) {
+                    error = "ui_motion_v1 M==0 produced motion/layout/hit work";
+                    return false;
+                }
+            } else if (statistics.layoutDirty || statistics.hitDirty ||
+                       statistics.lastLayoutPassCount != 0 || statistics.lastHitRebuildCount != 0) {
+                error = "ui_motion_v1 paint-only sample dirtied layout/hit";
+                return false;
+            }
+        }
+        if (iteration + 1 == options.warmUpIterations) {
+            captureAllocationBaseline(memory, report);
+        }
+    }
+
+    report.wallNs = elapsedNs(wallBegin, wallClock.now());
+    captureFinalState(memory, report, fixture);
+    report.layoutSnapshotHighWater = report.workN;
+    report.hitSnapshotHighWater = report.workH;
+    report.paintSnapshotHighWater = report.workP;
+
+    if (report.pmrAllocationsAfter != report.pmrAllocationsBefore || report.layoutPasses != 0 ||
+        report.measuredNodes != 0 || report.arrangedNodes != 0 || report.hitRebuilds != 0) {
+        error = "ui_motion_v1 layout/hit/allocation invariant failed";
+        return false;
+    }
+    if (activeTarget == 0) {
+        if (report.motionZeroActiveIterations != options.measureIterations ||
+            report.motionSampledTracks != 0) {
+            error = "ui_motion_v1 zero-active counter invariant failed";
+            return false;
+        }
+    } else if (report.motionSampledTracks == 0 ||
+               report.motionTrackHighWater < activeTarget) {
+        error = "ui_motion_v1 active-track counter invariant failed";
+        return false;
+    }
+
+    DeterministicHash hash{};
+    hashStatistics(hash, report);
     report.checksum = hash.value();
     return true;
 }
@@ -2830,6 +3027,10 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
                << ",\"style_classes_per_node\":" << report.configuredStyleClassesPerNode
                << ",\"style_rules_per_bucket\":" << report.configuredStyleRulesPerBucket;
     }
+    if (report.workload == kMotionWorkload) {
+        output << ",\"motion_track_capacity\":" << report.configuredMotionTrackCapacity
+               << ",\"active_motion_tracks\":" << report.configuredActiveMotionTracks;
+    }
     output << "}}";
     output << ",\"fingerprint\":{\"buildType\":";
     writeJsonString(output, BuildType);
@@ -2973,7 +3174,14 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
                << report.statistics.style.compileFailureCount
                << ",\"capacity_failures\":"
                << report.statistics.style.capacityFailureCount
-               << ",\"revision\":" << report.statistics.style.revision << '}';
+                << ",\"revision\":" << report.statistics.style.revision << '}';
+    }
+    if (report.workload == kMotionWorkload) {
+        output << ",\"motion\":{\"sampled_tracks\":" << report.motionSampledTracks
+               << ",\"active_tracks_sum\":" << report.motionActiveTracks
+               << ",\"track_high_water\":" << report.motionTrackHighWater
+               << ",\"zero_active_iterations\":" << report.motionZeroActiveIterations
+               << ",\"track_capacity\":" << report.statistics.motion.trackCapacity << '}';
     }
     output << ",\"capacity\":{\"nodes\":" << report.statistics.nodeCapacity
            << ",\"dirty_queue\":" << report.statistics.dirtyQueueCapacity
@@ -3064,6 +3272,10 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
     } else if (report.workload == kStyleStateWorkload) {
         output << ",\"style_rules_compiled_before_first_retained_node\""
                   ",\"single_node_state_change_resolves_only_the_dirty_node\"";
+    } else if (report.workload == kMotionWorkload) {
+        output << ",\"motion_samples_only_active_tracks\""
+                  ",\"m_equals_zero_adds_no_extra_dirty_or_rebuild\""
+                  ",\"seed_selects_active_track_count_0_64_or_1024\"";
     }
     output << "]}\n";
 }
@@ -3076,7 +3288,8 @@ bool isUIBenchmarkWorkload(std::string_view workload) noexcept
            workload == kRouteWorkload || workload == kVirtualCollectionWorkload ||
            workload == kImageNineSliceWorkload ||
            workload == kComponentActivateToggleWorkload ||
-           workload == kComponentBuildWorkload || workload == kStyleStateWorkload;
+           workload == kComponentBuildWorkload || workload == kStyleStateWorkload ||
+           workload == kMotionWorkload;
 }
 
 void printUIBenchmarkHelp(std::ostream& output)
@@ -3088,6 +3301,7 @@ void printUIBenchmarkHelp(std::ostream& output)
            << "  --workload=ui_image_nineslice_v1     5096 image quads, 64 unique resources\n"
            << "  --workload=ui_component_build_v1     256 reserved four-node full-pool components\n"
            << "  --workload=ui_style_state_v1         4096 nodes, 256 rules, one state change\n"
+           << "  --workload=ui_motion_v1              4096 nodes, active tracks 0/64/1024 by seed\n"
            << "  --workload=ui_component_build_activate_toggle_v1\n"
               "                                         legacy Activate/Toggle prerequisite\n";
 }
@@ -3121,6 +3335,8 @@ int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
                                     &buildReservedComponents, error);
         } else if (workload == kStyleStateWorkload) {
             (void)runStyleState(options, report, error);
+        } else if (workload == kMotionWorkload) {
+            (void)runMotion(options, report, error);
         } else {
             error = "unknown UI benchmark workload";
         }

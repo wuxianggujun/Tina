@@ -494,14 +494,24 @@ class UIContext final {
     [[nodiscard]] Core::Status setStyleColorToken(
         UIStyleTokenId token, UIStraightSrgba8Color value);
 
-    // UI-MOTION-001 first slice: paint-only BackgroundColor transitions.
-    // Owner-thread only. Capacity failure leaves active tracks and paint unchanged.
+    // UI-MOTION-001: paint-only transitions (color/opacity/radius/visual offset).
+    // Owner-thread only. Capacity failure leaves tracks and paint unchanged.
     // reduced-motion snaps to target without occupying the active list after the call.
     [[nodiscard]] Core::Status setMotionClock(const Core::IMonotonicClock* clock);
     [[nodiscard]] Core::Status setReducedMotion(bool enabled);
     [[nodiscard]] bool reducedMotion() const noexcept;
     [[nodiscard]] Core::Status beginBackgroundColorTransition(
         UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginBorderColorTransition(
+        UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginTextColorTransition(
+        UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginOpacityTransition(
+        UINodeId node, float targetOpacity, const UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginCornerRadiusTransition(
+        UINodeId node, float targetRadius, const UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginVisualOffsetTransition(
+        UINodeId node, float targetOffsetX, float targetOffsetY, const UITransitionSpec& spec);
     // Advances fakeable clock sample before paint publication. Safe no-op when
     // no tracks are active (M==0 does not force Paint dirty by itself).
     [[nodiscard]] Core::Status sampleMotion(Core::MonotonicTimePoint now);

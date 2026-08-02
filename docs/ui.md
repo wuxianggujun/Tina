@@ -17,7 +17,7 @@
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
 | Paint | box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
-| Motion | **首刀 InProgress：** 可伪造 monotonic clock + fixed-capacity BackgroundColor transition（duration/easing/retarget/reduced-motion）；hover/pressed 默认仍即时切色，除非游戏显式 `beginBackgroundColorTransition` |
+| Motion | **Done：** 可伪造 clock + fixed-capacity paint-only tracks（Background/Border/Text color、Opacity、CornerRadius、VisualOffset）；reduced-motion；`ui_motion_v1`。hover/pressed 默认仍即时切色，除非显式 begin*Transition |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |
@@ -546,7 +546,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone、`ui_image_nineslice_v1`、完整 `ui_component_build_v1` 与 `ui_style_state_v1` 已落地；后续补 Motion workload；固定机前时间结论只报 provisional |
 | `UI-COMPONENT-001` | Done；Runtime phase-scoped bounded transaction、六类 fixed-capacity Behavior side store、node/text/canvas/各 Behavior pool 统一 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | `UI-STYLE-001` | InProgress；强类型 StyleClass/ColorToken、startup registry/value、运行期 reverse-dependency token getter/setter、node-local pseudo-state selector、literal/token-backed BoxFill rule、预编译 stylesheet、Runtime facade 与固定 workload 已落地；待 Image tint/opacity 等属性面与 Integration/Visual 门禁；不做完整 CSS |
-| `UI-MOTION-001` | fixed-capacity paint-only transition、monotonic clock、retarget 与 reduced-motion；action/hit/layout 契约保持不变 |
+| `UI-MOTION-001` | Done；fixed-capacity paint-only transition、monotonic clock、retarget、reduced-motion 与 `ui_motion_v1` |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |
 | `UI-FLOW-001` | Deferred：有真实页面栈需求后再增加 Activatable Screen、Layer Stack、Action Router 与输入设备提示 |
 | `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |

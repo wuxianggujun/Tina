@@ -13,6 +13,7 @@ inline constexpr std::string_view ComponentPrerequisiteWorkload =
     "ui_component_build_activate_toggle_v1";
 inline constexpr std::string_view ComponentWorkload = "ui_component_build_v1";
 inline constexpr std::string_view StyleStateWorkload = "ui_style_state_v1";
+inline constexpr std::string_view MotionWorkload = "ui_motion_v1";
 
 [[nodiscard]] std::string extractChecksum(std::string_view json)
 {
@@ -48,7 +49,7 @@ inline constexpr std::string_view StyleStateWorkload = "ui_style_state_v1";
 }
 
 [[nodiscard]] std::string runUIWorkload(std::string_view workload,
-                                        u64 measureIterations = 1)
+                                        u64 measureIterations = 1, u64 seed = 7)
 {
     std::ostringstream output;
     std::ostringstream errors;
@@ -56,7 +57,7 @@ inline constexpr std::string_view StyleStateWorkload = "ui_style_state_v1";
                                         {
                                             .warmUpIterations = 1,
                                             .measureIterations = measureIterations,
-                                            .seed = 7,
+                                            .seed = seed,
                                         },
                                         output, errors);
     EXPECT_EQ(exitCode, 0) << errors.str();
@@ -69,12 +70,14 @@ TEST(UIBenchmarkWorkloadsTests, RegistersPrerequisiteAndFrozenComponentWorkloads
     EXPECT_TRUE(isUIBenchmarkWorkload(ComponentPrerequisiteWorkload));
     EXPECT_TRUE(isUIBenchmarkWorkload(ComponentWorkload));
     EXPECT_TRUE(isUIBenchmarkWorkload(StyleStateWorkload));
+    EXPECT_TRUE(isUIBenchmarkWorkload(MotionWorkload));
 
     std::ostringstream help;
     printUIBenchmarkHelp(help);
     EXPECT_NE(help.str().find(ComponentPrerequisiteWorkload), std::string::npos);
     EXPECT_NE(help.str().find(ComponentWorkload), std::string::npos);
     EXPECT_NE(help.str().find(StyleStateWorkload), std::string::npos);
+    EXPECT_NE(help.str().find(MotionWorkload), std::string::npos);
 }
 
 TEST(UIBenchmarkWorkloadsTests, ComponentPrerequisiteReportsStableHonestSchema)
@@ -213,6 +216,26 @@ TEST(UIBenchmarkWorkloadsTests, StyleStateReportsBoundedSingleNodeResolution)
     ASSERT_EQ(enabledChecksum.size(), 16U);
     ASSERT_EQ(disabledChecksum.size(), 16U);
     EXPECT_NE(enabledChecksum, disabledChecksum);
+
+    const std::string firstChecksum = extractChecksum(first);
+    const std::string secondChecksum = extractChecksum(second);
+    ASSERT_EQ(firstChecksum.size(), 16U);
+    EXPECT_EQ(firstChecksum, secondChecksum);
+}
+
+TEST(UIBenchmarkWorkloadsTests, MotionZeroActiveAddsNoExtraDirty)
+{
+    // seed % 3 == 0 → 0 active tracks
+    const std::string first = runUIWorkload(MotionWorkload, 2, 0);
+    const std::string second = runUIWorkload(MotionWorkload, 2, 0);
+
+    EXPECT_NE(first.find("\"status\":\"ok\",\"schema\":1"), std::string::npos);
+    EXPECT_NE(first.find("\"id\":\"ui_motion_v1\""), std::string::npos);
+    EXPECT_NE(first.find("\"active_motion_tracks\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"motion_track_capacity\":1024"), std::string::npos);
+    EXPECT_NE(first.find("\"zero_active_iterations\":2"), std::string::npos);
+    EXPECT_NE(first.find("\"sampled_tracks\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"delta\":0"), std::string::npos);
 
     const std::string firstChecksum = extractChecksum(first);
     const std::string secondChecksum = extractChecksum(second);
