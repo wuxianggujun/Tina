@@ -342,6 +342,80 @@ TEST_F(PrimaryWindowUICapabilityTest, StyleRegistrationAfterRootCreationIsSticky
     EXPECT_EQ(finish.error().code, UI::UIErrorCode::InvalidStyle);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, StyleColorTokenFacadeRoundTripsAndExpiresWithPhase)
+{
+    constexpr UI::UIStraightSrgba8Color InitialColor = UI::rgb(0x2357A6);
+    constexpr UI::UIStraightSrgba8Color UpdatedColor = UI::rgb(0x3978C5);
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto token = builder->registerStyleColorToken(InitialColor);
+    ASSERT_TRUE(token.has_value()) << token.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    auto updateEpoch = state.beginUIUpdatePhase(context.get());
+    ASSERT_TRUE(updateEpoch.has_value()) << updateEpoch.error().message;
+    auto tree = state.treeUpdater(*updateEpoch, CapabilityPhase::UIUpdate, *root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    std::optional<Core::Result<UI::UIStraightSrgba8Color>> crossThread;
+    std::thread worker([&] { crossThread.emplace(tree->styleColorToken(*token)); });
+    worker.join();
+    ASSERT_TRUE(crossThread.has_value());
+    ASSERT_FALSE(crossThread->has_value());
+    EXPECT_EQ(crossThread->error().code, RuntimeErrorCode::WrongOwnerThread);
+
+    auto initial = tree->styleColorToken(*token);
+    ASSERT_TRUE(initial.has_value()) << initial.error().message;
+    EXPECT_EQ(*initial, InitialColor);
+    ASSERT_TRUE(tree->setStyleColorToken(*token, UpdatedColor).has_value());
+    auto updated = tree->styleColorToken(*token);
+    ASSERT_TRUE(updated.has_value()) << updated.error().message;
+    EXPECT_EQ(*updated, UpdatedColor);
+
+    ASSERT_TRUE(state.finishPhase(*updateEpoch, CapabilityPhase::UIUpdate).has_value());
+    auto expiredGet = tree->styleColorToken(*token);
+    ASSERT_FALSE(expiredGet.has_value());
+    EXPECT_EQ(expiredGet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSet = tree->setStyleColorToken(*token, InitialColor);
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, InvalidStyleColorTokenFailureIsSticky)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto token = builder->registerStyleColorToken(UI::rgb(0x2357A6));
+    ASSERT_TRUE(token.has_value()) << token.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    auto invalid = tree->styleColorToken(UI::UIStyleTokenId{});
+    ASSERT_FALSE(invalid.has_value());
+
+    Core::Status otherwiseValid =
+        tree->setStyleColorToken(*token, UI::rgb(0x3978C5));
+    ASSERT_FALSE(otherwiseValid.has_value());
+    EXPECT_EQ(otherwiseValid.error().code, invalid.error().code);
+    EXPECT_EQ(otherwiseValid.error().message, invalid.error().message);
+
+    Core::Status finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, invalid.error().code);
+    EXPECT_EQ(finish.error().message, invalid.error().message);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, FailedStyleSheetInstallPreservesActiveSheetAndSticksError)
 {
     CapabilityState state;

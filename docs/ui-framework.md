@@ -369,9 +369,10 @@ paint/state 更新不扫描全树或完整 rule table，并输出 inspected node
 ListView/TreeView owner 更新时仅额外刷新固定 materialized row pool，防止虚拟行复用残留 Selected 样式。
 
 `PrimaryWindowUIRootBuilder` 已在 `GameStateEnter` 暴露同一 startup-only class/ColorToken 注册与
-literal/token-backed sheet 安装契约；`ui_style_state_v1` 已补齐 4096-node/256-rule 固定 workload、单节点
-resolve counter、token/bucket/class-link high-water、clean commit 零工作与稳定 checksum。下一步仍需补运行期
-token value update 与 reverse dependency、Image tint/opacity、其他属性 dirty metadata 和产品视觉门禁。
+literal/token-backed sheet 安装契约；`UIContext` 与 phase-scoped `PrimaryWindowUITreeUpdater` 还提供运行期
+`styleColorToken()` / `setStyleColorToken()`。`ui_style_state_v1` 已补齐 4096-node/256-rule 固定 workload、
+单节点 resolve counter、token/bucket/class-link high-water、clean commit 零工作与稳定 checksum。下一步仍需补
+固定容量 reverse-dependency index、Image tint/opacity、其他属性 dirty metadata 和产品视觉门禁。
 
 第一版 selector 只支持当前节点的 `role + class + state mask`，不支持 descendant、`nth-child`、运行时
 CSS parser 或任意 specificity。推荐优先级：
@@ -383,10 +384,19 @@ built-in recipe
   < local inline override
 ```
 
-每个属性静态声明 dirty 影响。颜色/opacity 只触发 Paint，font size/padding 触发 Measure/Arrange，hit policy
-触发 Hit，语义属性触发 Semantics。运行期 token value update 尚未开放；进入该切片时可用固定容量 token
-reverse-dependency link 只重解析引用了变化 token 的节点，若尚未建立该索引则必须明确按 `O(N)` 扫描并输出
-inspected/resolved-node counter，不能在没有索引和容量定义时宣称只访问受影响节点。
+每个属性静态声明 dirty 影响。颜色/opacity 目标上只影响 Paint，font size/padding 触发 Measure/Arrange，hit
+policy 触发 Hit，语义属性触发 Semantics。当前运行期 ColorToken 更新尚无持久 reverse-dependency index：
+
+- 相同值直接 no-op，`lastStyleTokenUpdateInspectedNodeCount`、
+  `lastStyleTokenUpdateResolvedNodeCount`、`lastStyleTokenUpdateAffectedNodeCount` 与
+  `lastStyleTokenUpdateCandidateRuleCount` 全部为0；
+- 非 no-op 第一遍扫描全部 live node 并预检 dirty queue。inspected 计全部 live node；带 local BoxFill override
+  的节点不做 resolver，resolved 只计实际 resolve 的节点；affected 只计 winning rule 的 ColorToken 等于目标
+  token 的节点；candidate 计这次第一遍 resolver 检查的 candidate rule；
+- dirty queue 容量不足时返回 `CapacityExceeded`，保留上述检查统计，但 token 值、dirty state 与 committed
+  snapshot 不变；容量通过后才修改 token，并用第二遍 live-node 扫描为 affected 节点发布 Paint dirty；
+- 因此失败路径为一遍 `O(N)`，成功路径为两遍 `O(N)` 加 candidate matching，而不是 `O(affected)`。只有
+  将来增加固定容量 reverse-dependency link 后，才可宣称按受影响 link 工作。
 
 ### Image、Icon 与 NineSlice
 
@@ -624,7 +634,7 @@ Image/Icon/NineSlice 实际展开的 image quad 数，`U` 为本帧唯一 `(reso
 | clean `UIContext` commit | 当前只检查 dirty phase/viewport 后直接返回，UI commit 近似 `O(1)`；Render bridge 仍需按帧消费 committed paint，不能把整个 UI render 误写成 `O(1)` | clean frame 重新 Measure/Arrange、Hit、Paint snapshot 或 Style resolve |
 | 单节点 hover/pressed/focus paint 变化 | 当前不会触发 Layout/Hit；dirty paint cache 只重算变化节点，但 candidate 容量校验与 committed paint 组装仍线性遍历，整体按 `O(N + P)` 记录 | 将局部 paint 状态扩大为 Structure/Measure/Arrange dirty，或声称当前完整 publication 是 `O(D)` |
 | Component build | 目标为创建期 `O(C)`；node/text/canvas/behavior reservation 分别计数，commit 后只留下 Element 与 side-state slot | retained wrapper object、每节点 heap/vtable、每帧重放 recipe |
-| 单节点 Style resolve | 目标为 `O(R)` 的 node-local `role + fixed class set + state mask` bucket lookup；Theme swap 在没有固定 reverse-dependency index 时如实记为 `O(N)`，有索引后按受影响 link 处理 | descendant/ancestor selector、运行时字符串 CSS、局部状态变化时扫描整棵树或全规则表 |
+| 单节点 Style resolve / ColorToken update | node-local state resolve 为 `O(R)` 的 `role + fixed class set + state mask` bucket lookup；当前 token update 无 reverse index，失败路径一遍、成功路径两遍 `O(N)` live-node 扫描，并以四个 `lastStyleTokenUpdate*` counter 记录第一遍工作量；有固定索引后才按受影响 link 处理 | descendant/ancestor selector、运行时字符串 CSS、局部 state 扫描整棵树、把当前 token update 宣称为 `O(affected)` |
 | Pointer hit/route | 当前 point query 最坏反向扫描 `O(H)` 个 committed hit entry；找到 target 后 route 按 ancestry depth/listener 数工作，且不 layout、不分配 | 把当前 point query 宣称为常数时间；没有 workload 证据就提前引入复杂空间索引 |
 | active Motion | sample 目标为 `O(M)`，只遍历 active track；在当前 paint compiler 下，每个动画帧还必须如实计入 `O(N + P)` publication 成本 | 无 active track 仍使 Paint dirty、每帧扫描全部节点寻找动画、插值 Layout/Hit 属性 |
 | Image/Icon/NineSlice | paint 展开为 `O(Q)`，资源工作为 `O(U)`；Image/Icon 均为 1 quad，NineSlice 每个命令最多 9 quad，完整容量预检后一次发布 | UI commit 同步 Asset I/O、每 quad 重复 resolve/pin、未 pin 的 GPU handle、容量不足时截断半个 NineSlice、为 batch 全局重排 paint order |
@@ -704,9 +714,9 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 5. `UI-COMPONENT-001` Done：Runtime bounded transaction、六类 Behavior side store、node/text/canvas/Behavior
    统一 reservation/counter 与冻结的 `ui_component_build_v1` 已落地；
 6. `UI-STYLE-001` InProgress：fixed-capacity style kernel、Context class/token capacity 与 startup install、
-   startup ColorToken registry/value、每节点最多 4 个 class link、retained state + literal/token-backed resolved
-   BoxFill paint cache、Runtime startup facade，以及 `ui_style_state_v1` 已落地；下一步补运行期 token update/
-   reverse dependency、Image tint/opacity 与其他属性 dirty metadata；
+   ColorToken registry/value 与运行期 O(N) getter/setter、每节点最多 4 个 class link、retained state +
+   literal/token-backed resolved BoxFill paint cache、Runtime facade，以及 `ui_style_state_v1` 已落地；下一步补
+   固定容量 reverse dependency、Image tint/opacity 与其他属性 dirty metadata；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。
 
 独立或后置 lane：

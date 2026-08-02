@@ -92,6 +92,11 @@ class PrimaryWindowUICapabilityState final {
                                             UI::UINodeId node, UI::UIStyleRoleId role);
     [[nodiscard]] Core::Result<UI::UIStyleRoleId>
     styleRole(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId node);
+    [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color>
+    styleColorToken(u64 epoch, PrimaryWindowUIPhase phase, UI::UIStyleTokenId token);
+    [[nodiscard]] Core::Status setStyleColorToken(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UIStyleTokenId token,
+        UI::UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status clearOverride(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                              UI::UINodeId node, UI::UIStyleOverride properties);
     [[nodiscard]] Core::Result<UI::UITheme> productTheme(u64 epoch, PrimaryWindowUIPhase phase);

@@ -151,6 +151,10 @@ struct UIContextStatistics final {
     usize lastStyleInspectedNodeCount = 0;
     usize lastStyleResolvedNodeCount = 0;
     usize lastStyleCandidateRuleCount = 0;
+    usize lastStyleTokenUpdateInspectedNodeCount = 0;
+    usize lastStyleTokenUpdateResolvedNodeCount = 0;
+    usize lastStyleTokenUpdateAffectedNodeCount = 0;
+    usize lastStyleTokenUpdateCandidateRuleCount = 0;
     usize dirtyQueuePendingCount = 0;
     usize dirtyQueueHighWater = 0;
     UIStyleStatistics style{};
@@ -477,6 +481,13 @@ class UIContext final {
     registerStyleColorToken(UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status installStyleSheet(
         std::span<const UIStyleBoxFillRule> rules);
+    // Runtime token updates scan live nodes until a fixed-capacity reverse
+    // dependency index is introduced. A capacity failure preserves the token,
+    // committed paint, and dirty state. Owner-thread only.
+    [[nodiscard]] Core::Result<UIStraightSrgba8Color>
+    styleColorToken(UIStyleTokenId token) const;
+    [[nodiscard]] Core::Status setStyleColorToken(
+        UIStyleTokenId token, UIStraightSrgba8Color value);
 
     // Opens (or replaces) the text face used by measure/paint. Closes the previous
     // face, clears the glyph atlas, and dirties layout/paint for nodes with text.

@@ -79,6 +79,28 @@ UIStyleSheetStorage::registerColorToken(UIStraightSrgba8Color value)
     return UIStyleTokenId{.value = static_cast<u32>(colorTokens_.size())};
 }
 
+Core::Result<UIStraightSrgba8Color>
+UIStyleSheetStorage::colorToken(UIStyleTokenId token) const
+{
+    if (!token.hasValue() || token.value > colorTokens_.size())
+    {
+        return Core::failure(UIErrorCode::InvalidStyle,
+                             "UI style token is not registered");
+    }
+    return colorTokens_[token.value - 1U];
+}
+
+Core::Status UIStyleSheetStorage::setColorToken(
+    UIStyleTokenId token, UIStraightSrgba8Color value)
+{
+    if (!token.hasValue() || token.value > colorTokens_.size())
+    {
+        return invalidStyle("UI style token is not registered");
+    }
+    colorTokens_[token.value - 1U] = value;
+    return Core::success();
+}
+
 Core::Status UIStyleSheetStorage::validateRule(const UIStyleBoxFillRule& rule) const
 {
     if (!isValidStyleRole(rule.role))
@@ -322,6 +344,7 @@ UIStyleBoxFillResolution UIStyleSheetStorage::resolveValidated(
             {
                 hasWinningRule = true;
                 winningRuleIndex = ruleIndex;
+                resolution.colorToken = rule.colorToken;
                 resolution.color = rule.colorToken.hasValue()
                                        ? colorTokens_[rule.colorToken.value - 1U]
                                        : rule.color;

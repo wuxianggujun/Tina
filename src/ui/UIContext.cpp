@@ -523,6 +523,10 @@ struct UIContext::Impl final {
     usize lastStyleInspectedNodeCount = 0;
     usize lastStyleResolvedNodeCount = 0;
     usize lastStyleCandidateRuleCount = 0;
+    usize lastStyleTokenUpdateInspectedNodeCount = 0;
+    usize lastStyleTokenUpdateResolvedNodeCount = 0;
+    usize lastStyleTokenUpdateAffectedNodeCount = 0;
+    usize lastStyleTokenUpdateCandidateRuleCount = 0;
     usize routeDispatchDepth = 0;
     u64 buttonRouteSerial = 0;
     u64 accessibilityActionSequence = 0;
@@ -2170,6 +2174,16 @@ struct UIContext::Impl final {
         return result;
     }
 
+    [[nodiscard]] Detail::UIStyleBoxFillResolution resolveStyleBoxFill(
+        u32 nodeIndex, UIStyleState states) const noexcept
+    {
+        const usize classCount = styleClassCountsByNodeIndex[nodeIndex];
+        const auto classes = std::span<const UIStyleClassId>(
+            styleClassesByNodeIndex[nodeIndex].data(), classCount);
+        return styleSheetStorage.resolveValidated(
+            styleRolesByNodeIndex[nodeIndex], classes, states);
+    }
+
     [[nodiscard]] usize refreshResolvedStyleCache(u32 nodeIndex,
                                                    UIStyleState states) noexcept
     {
@@ -2190,12 +2204,8 @@ struct UIContext::Impl final {
             return 0;
         }
 
-        const usize classCount = styleClassCountsByNodeIndex[nodeIndex];
-        const auto classes = std::span<const UIStyleClassId>(
-            styleClassesByNodeIndex[nodeIndex].data(), classCount);
         const Detail::UIStyleBoxFillResolution resolution =
-            styleSheetStorage.resolveValidated(styleRolesByNodeIndex[nodeIndex],
-                                               classes, states);
+            resolveStyleBoxFill(nodeIndex, states);
         if (resolution.color.has_value())
         {
             resolvedFill = premultiply(*resolution.color);
@@ -4680,6 +4690,139 @@ struct UIContext::Impl final {
                         "UI style tokens must be registered before creating retained nodes");
         }
         return styleSheetStorage.registerColorToken(value);
+    }
+
+    [[nodiscard]] Core::Result<UIStraightSrgba8Color>
+    styleColorToken(UIStyleTokenId token) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        return styleSheetStorage.colorToken(token);
+    }
+
+    struct StyleTokenUpdateStatistics final {
+        usize inspectedNodeCount = 0;
+        usize resolvedNodeCount = 0;
+        usize affectedNodeCount = 0;
+        usize candidateRuleCount = 0;
+    };
+
+    [[nodiscard]] Core::Status preflightStyleColorTokenDirtyQueue(
+        UIStyleTokenId token, StyleTokenUpdateStatistics& statistics)
+    {
+        compactDirtyQueue();
+        usize requiredQueueEntries = 0;
+        for (u32 index = 0; index < styleRolesByNodeIndex.size(); ++index)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr)
+            {
+                continue;
+            }
+            ++statistics.inspectedNodeCount;
+            if (hasLocalBoxFillOverride(index, *record))
+            {
+                continue;
+            }
+            const auto resolution = resolveStyleBoxFill(
+                index, deriveStyleState(idForIndex(index), index));
+            ++statistics.resolvedNodeCount;
+            statistics.candidateRuleCount += resolution.candidateRuleCount;
+            if (resolution.colorToken != token)
+            {
+                continue;
+            }
+            ++statistics.affectedNodeCount;
+            if (!dirtyQueueStorage.isQueued(index) &&
+                !dirtyQueueStorage.isReserved(index))
+            {
+                ++requiredQueueEntries;
+            }
+        }
+
+        const usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
+        if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
+            requiredQueueEntries >
+                dirtyQueueStorage.queueCapacity() - occupiedQueueEntries)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI style token update exceeds dirty queue capacity");
+        }
+        return Core::success();
+    }
+
+    void publishStyleColorTokenDirtyState(UIStyleTokenId token) noexcept
+    {
+        bool changed = false;
+        for (u32 index = 0; index < styleRolesByNodeIndex.size(); ++index)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || hasLocalBoxFillOverride(index, *record))
+            {
+                continue;
+            }
+            const auto resolution = resolveStyleBoxFill(
+                index, deriveStyleState(idForIndex(index), index));
+            if (resolution.colorToken != token)
+            {
+                continue;
+            }
+            if (!dirtyQueueStorage.isQueued(index))
+            {
+                dirtyQueueStorage.enqueue(idForIndex(index));
+            }
+            dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+            changed = true;
+        }
+        if (changed)
+        {
+            phaseDirty |= PhasePaint;
+        }
+    }
+
+    [[nodiscard]] Core::Status setStyleColorToken(
+        UIStyleTokenId token, UIStraightSrgba8Color value)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+
+        auto current = styleSheetStorage.colorToken(token);
+        if (!current)
+        {
+            return Core::failure(current.error());
+        }
+        lastStyleTokenUpdateInspectedNodeCount = 0;
+        lastStyleTokenUpdateResolvedNodeCount = 0;
+        lastStyleTokenUpdateAffectedNodeCount = 0;
+        lastStyleTokenUpdateCandidateRuleCount = 0;
+        if (*current == value)
+        {
+            return Core::success();
+        }
+
+        StyleTokenUpdateStatistics statistics{};
+        const Core::Status capacity =
+            preflightStyleColorTokenDirtyQueue(token, statistics);
+        lastStyleTokenUpdateInspectedNodeCount = statistics.inspectedNodeCount;
+        lastStyleTokenUpdateResolvedNodeCount = statistics.resolvedNodeCount;
+        lastStyleTokenUpdateAffectedNodeCount = statistics.affectedNodeCount;
+        lastStyleTokenUpdateCandidateRuleCount = statistics.candidateRuleCount;
+        if (!capacity)
+        {
+            return capacity;
+        }
+        if (Core::Status update = styleSheetStorage.setColorToken(token, value);
+            !update)
+        {
+            return update;
+        }
+        publishStyleColorTokenDirtyState(token);
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status installStyleSheet(
@@ -14500,6 +14643,14 @@ struct UIContext::Impl final {
             .lastStyleInspectedNodeCount = lastStyleInspectedNodeCount,
             .lastStyleResolvedNodeCount = lastStyleResolvedNodeCount,
             .lastStyleCandidateRuleCount = lastStyleCandidateRuleCount,
+            .lastStyleTokenUpdateInspectedNodeCount =
+                lastStyleTokenUpdateInspectedNodeCount,
+            .lastStyleTokenUpdateResolvedNodeCount =
+                lastStyleTokenUpdateResolvedNodeCount,
+            .lastStyleTokenUpdateAffectedNodeCount =
+                lastStyleTokenUpdateAffectedNodeCount,
+            .lastStyleTokenUpdateCandidateRuleCount =
+                lastStyleTokenUpdateCandidateRuleCount,
             .dirtyQueuePendingCount = validDirtyQueueCount(),
             .dirtyQueueHighWater = dirtyQueueStorage.highWater(),
             .style = {
@@ -15973,6 +16124,18 @@ Core::Result<UIStyleTokenId>
 UIContext::registerStyleColorToken(UIStraightSrgba8Color value)
 {
     return m_impl->registerStyleColorToken(value);
+}
+
+Core::Result<UIStraightSrgba8Color>
+UIContext::styleColorToken(UIStyleTokenId token) const
+{
+    return m_impl->styleColorToken(token);
+}
+
+Core::Status UIContext::setStyleColorToken(
+    UIStyleTokenId token, UIStraightSrgba8Color value)
+{
+    return m_impl->setStyleColorToken(token, value);
 }
 
 Core::Status UIContext::installStyleSheet(

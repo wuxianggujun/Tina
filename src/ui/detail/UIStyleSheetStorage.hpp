@@ -24,6 +24,7 @@ struct UIStyleSheetStorageCapacity final {
 
 struct UIStyleBoxFillResolution final {
     std::optional<UIStraightSrgba8Color> color{};
+    UIStyleTokenId colorToken{};
     usize candidateRuleCount = 0;
 };
 
@@ -57,6 +58,10 @@ class UIStyleSheetStorage final {
     [[nodiscard]] Core::Result<UIStyleClassId> registerClass();
     [[nodiscard]] Core::Result<UIStyleTokenId>
     registerColorToken(UIStraightSrgba8Color value);
+    [[nodiscard]] Core::Result<UIStraightSrgba8Color>
+    colorToken(UIStyleTokenId token) const;
+    [[nodiscard]] Core::Status setColorToken(
+        UIStyleTokenId token, UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status validateClasses(
         std::span<const UIStyleClassId> classes) const;
     [[nodiscard]] Core::Status compile(std::span<const UIStyleBoxFillRule> rules);

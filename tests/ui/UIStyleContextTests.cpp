@@ -5,6 +5,8 @@
 
 #include <array>
 #include <memory>
+#include <optional>
+#include <thread>
 
 namespace Tina::Tests {
 namespace {
@@ -180,6 +182,173 @@ TEST(UIStyleContextTests, RegisteredColorTokenDrivesCommittedBoxFill)
     const auto lateToken = context->registerStyleColorToken(UI::rgb(0x111111));
     ASSERT_FALSE(lateToken.has_value());
     EXPECT_EQ(lateToken.error().code, UI::UIErrorCode::InvalidStyle);
+}
+
+TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
+{
+    auto context = createStyleContext(styleTestCapacity());
+    ASSERT_NE(context, nullptr);
+    const UI::UIStyleTokenId primaryToken =
+        *context->registerStyleColorToken(UI::rgb(0x2463A5));
+    const UI::UIStyleTokenId secondaryToken =
+        *context->registerStyleColorToken(UI::rgb(0xBA4A35));
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .colorToken = primaryToken,
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .colorToken = secondaryToken,
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::TextInput,
+            .color = UI::rgb(0x667788),
+        },
+    };
+    assertOk(context->installStyleSheet(rules));
+
+    auto root = createStyleRoot(*context);
+    ASSERT_TRUE(root);
+    const auto createPanel = [&](UI::UIStyleRoleId role,
+                                 std::optional<UI::UIStraightSrgba8Color> localFill = std::nullopt) {
+        UI::UIElementDescriptor descriptor =
+            UI::makePanelElement(fixedSize(40.0F, 20.0F));
+        descriptor.visual.styleRole = role;
+        if (localFill.has_value())
+        {
+            descriptor.visual.boxPaint = UI::UIBoxPaint{
+                .solidFill = UI::UISolidFill{.color = *localFill},
+            };
+        }
+        return context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    };
+    const auto primaryPanel = createPanel(UI::UIStyleRoleId::PanelSurface);
+    const auto secondaryPanel = createPanel(UI::UIStyleRoleId::ButtonPrimary);
+    const auto literalPanel = createPanel(UI::UIStyleRoleId::TextInput);
+    const auto localPanel = createPanel(UI::UIStyleRoleId::PanelSurface,
+                                        UI::rgb(0x22AA55));
+    ASSERT_TRUE(primaryPanel && secondaryPanel && literalPanel && localPanel);
+    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+
+    const auto initialValue = context->styleColorToken(primaryToken);
+    ASSERT_TRUE(initialValue.has_value()) << initialValue.error().message;
+    EXPECT_EQ(*initialValue, UI::rgb(0x2463A5));
+    assertOk(context->setStyleColorToken(primaryToken, UI::rgb(0x3978C5)));
+
+    const UI::UIContextStatistics updateStatistics = context->statistics();
+    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateInspectedNodeCount, 5U);
+    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateResolvedNodeCount, 4U);
+    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateAffectedNodeCount, 1U);
+    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateCandidateRuleCount, 3U);
+    EXPECT_EQ(updateStatistics.dirtyQueuePendingCount, 1U);
+    EXPECT_FALSE(updateStatistics.layoutDirty);
+    EXPECT_FALSE(updateStatistics.hitDirty);
+    EXPECT_TRUE(updateStatistics.paintDirty);
+    EXPECT_FALSE(updateStatistics.semanticsDirty);
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *primaryPanel,
+                             UI::premultiply(UI::rgb(0x2463A5))));
+
+    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *primaryPanel,
+                             UI::premultiply(UI::rgb(0x3978C5))));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *secondaryPanel,
+                             UI::premultiply(UI::rgb(0xBA4A35))));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *literalPanel,
+                             UI::premultiply(UI::rgb(0x667788))));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *localPanel,
+                             UI::premultiply(UI::rgb(0x22AA55))));
+
+    const UI::UIContextStatistics beforeNoOp = context->statistics();
+    assertOk(context->setStyleColorToken(primaryToken, UI::rgb(0x3978C5)));
+    const UI::UIContextStatistics afterNoOp = context->statistics();
+    EXPECT_EQ(afterNoOp.lastStyleTokenUpdateInspectedNodeCount, 0U);
+    EXPECT_EQ(afterNoOp.lastStyleTokenUpdateResolvedNodeCount, 0U);
+    EXPECT_EQ(afterNoOp.lastStyleTokenUpdateAffectedNodeCount, 0U);
+    EXPECT_EQ(afterNoOp.lastStyleTokenUpdateCandidateRuleCount, 0U);
+    EXPECT_EQ(afterNoOp.dirtyQueuePendingCount,
+              beforeNoOp.dirtyQueuePendingCount);
+    EXPECT_EQ(afterNoOp.paintRevision, beforeNoOp.paintRevision);
+}
+
+TEST(UIStyleContextTests, RuntimeColorTokenUpdateIsOwnerThreadValidated)
+{
+    auto context = createStyleContext(styleTestCapacity());
+    ASSERT_NE(context, nullptr);
+    const UI::UIStyleTokenId token =
+        *context->registerStyleColorToken(UI::rgb(0x2463A5));
+
+    const auto invalidQuery = context->styleColorToken(UI::UIStyleTokenId{});
+    ASSERT_FALSE(invalidQuery.has_value());
+    EXPECT_EQ(invalidQuery.error().code, UI::UIErrorCode::InvalidStyle);
+    const Core::Status invalidSet = context->setStyleColorToken(
+        UI::UIStyleTokenId{.value = token.value + 1U}, UI::rgb(0x3978C5));
+    ASSERT_FALSE(invalidSet.has_value());
+    EXPECT_EQ(invalidSet.error().code, UI::UIErrorCode::InvalidStyle);
+
+    std::optional<Core::Result<UI::UIStraightSrgba8Color>> threadedQuery;
+    Core::Status threadedSet = Core::success();
+    std::thread worker([&] {
+        threadedQuery.emplace(context->styleColorToken(token));
+        threadedSet = context->setStyleColorToken(token, UI::rgb(0x3978C5));
+    });
+    worker.join();
+    ASSERT_TRUE(threadedQuery.has_value());
+    ASSERT_FALSE(threadedQuery->has_value());
+    EXPECT_EQ(threadedQuery->error().code, UI::UIErrorCode::WrongOwnerThread);
+    ASSERT_FALSE(threadedSet.has_value());
+    EXPECT_EQ(threadedSet.error().code, UI::UIErrorCode::WrongOwnerThread);
+    EXPECT_EQ(*context->styleColorToken(token), UI::rgb(0x2463A5));
+}
+
+TEST(UIStyleContextTests, RuntimeColorTokenCapacityFailureIsAtomic)
+{
+    auto config = styleTestCapacity();
+    config.nodeCapacity = 4;
+    config.dirtyQueueCapacity = 1;
+    config.styleTokenCapacity = 1;
+    auto context = createStyleContext(config);
+    ASSERT_NE(context, nullptr);
+    const UI::UIStyleTokenId token =
+        *context->registerStyleColorToken(UI::rgb(0x2463A5));
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .colorToken = token,
+        },
+    };
+    assertOk(context->installStyleSheet(rules));
+
+    auto root = createStyleRoot(*context);
+    ASSERT_TRUE(root);
+    UI::UIElementDescriptor descriptor =
+        UI::makePanelElement(fixedSize(40.0F, 20.0F));
+    descriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
+    const auto first = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    const auto second = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    ASSERT_TRUE(first && second);
+    assertOk(context->commitLayout({.width = 120.0F, .height = 80.0F}));
+    const UI::UIContextStatistics before = context->statistics();
+
+    const Core::Status rejected =
+        context->setStyleColorToken(token, UI::rgb(0x3978C5));
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(*context->styleColorToken(token), UI::rgb(0x2463A5));
+
+    const UI::UIContextStatistics after = context->statistics();
+    EXPECT_EQ(after.lastStyleTokenUpdateInspectedNodeCount, 3U);
+    EXPECT_EQ(after.lastStyleTokenUpdateResolvedNodeCount, 3U);
+    EXPECT_EQ(after.lastStyleTokenUpdateAffectedNodeCount, 2U);
+    EXPECT_EQ(after.lastStyleTokenUpdateCandidateRuleCount, 2U);
+    EXPECT_EQ(after.dirtyQueuePendingCount, before.dirtyQueuePendingCount);
+    EXPECT_EQ(after.paintRevision, before.paintRevision);
+    EXPECT_EQ(after.paintDirty, before.paintDirty);
+    EXPECT_EQ(after.semanticsDirty, before.semanticsDirty);
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *first,
+                             UI::premultiply(UI::rgb(0x2463A5))));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *second,
+                             UI::premultiply(UI::rgb(0x2463A5))));
 }
 
 TEST(UIStyleContextTests, NodeClassLinksReleaseOnDestroyAndReuse)

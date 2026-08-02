@@ -315,6 +315,28 @@ Core::Result<UI::UIStyleRoleId> PrimaryWindowUITreeUpdater::styleRole(UI::UINode
     return m_state->styleRole(m_epoch, m_phase, m_updater, node);
 }
 
+Core::Result<UI::UIStraightSrgba8Color>
+PrimaryWindowUITreeUpdater::styleColorToken(UI::UIStyleTokenId token) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIStraightSrgba8Color>(
+            "PrimaryWindowUITreeUpdater::styleColorToken");
+    }
+    return m_state->styleColorToken(m_epoch, m_phase, token);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setStyleColorToken(
+    UI::UIStyleTokenId token, UI::UIStraightSrgba8Color value)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>(
+            "PrimaryWindowUITreeUpdater::setStyleColorToken");
+    }
+    return m_state->setStyleColorToken(m_epoch, m_phase, token, value);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::clearOverride(UI::UINodeId node, UI::UIStyleOverride properties)
 {
     if (m_state == nullptr)

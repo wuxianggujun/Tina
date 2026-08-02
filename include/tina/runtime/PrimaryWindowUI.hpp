@@ -128,6 +128,10 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status clearFocus();
     [[nodiscard]] Core::Status setStyleRole(UI::UINodeId node, UI::UIStyleRoleId role);
     [[nodiscard]] Core::Result<UI::UIStyleRoleId> styleRole(UI::UINodeId node) const;
+    [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color>
+    styleColorToken(UI::UIStyleTokenId token) const;
+    [[nodiscard]] Core::Status setStyleColorToken(
+        UI::UIStyleTokenId token, UI::UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status clearOverride(
         UI::UINodeId node,
         UI::UIStyleOverride properties = UI::UIStyleOverride::All);

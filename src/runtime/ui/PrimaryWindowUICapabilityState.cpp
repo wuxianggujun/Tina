@@ -694,6 +694,42 @@ PrimaryWindowUICapabilityState::styleRole(u64 epoch, PrimaryWindowUIPhase phase,
     return *role;
 }
 
+Core::Result<UI::UIStraightSrgba8Color>
+PrimaryWindowUICapabilityState::styleColorToken(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UIStyleTokenId token)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::styleColorToken";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto value = context_->styleColorToken(token);
+    if (!value)
+    {
+        return Core::failure(rememberFirstError(std::move(value.error()), Operation));
+    }
+    return *value;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setStyleColorToken(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UIStyleTokenId token,
+    UI::UIStraightSrgba8Color value)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setStyleColorToken";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->setStyleColorToken(token, value);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Status PrimaryWindowUICapabilityState::clearOverride(u64 epoch, PrimaryWindowUIPhase phase,
                                                            UI::UITreeUpdater& updater, UI::UINodeId node,
                                                            UI::UIStyleOverride properties)

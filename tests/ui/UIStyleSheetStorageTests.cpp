@@ -128,6 +128,63 @@ TEST(UIStyleSheetStorageTests, RegistersColorTokensAndResolvesTokenBackedRule)
     EXPECT_EQ(statistics.capacityFailureCount, 1U);
 }
 
+TEST(UIStyleSheetStorageTests, UpdatesColorTokenWithoutRecompileOrAllocation)
+{
+    CountingMemoryResource resource;
+    auto storage = makeStorage(resource, {
+        .tokenCapacity = 1,
+        .ruleCapacity = 2,
+        .bucketCapacity = 1,
+        .maxRulesPerBucket = 2,
+    });
+    const UI::UIStyleTokenId token =
+        *storage.registerColorToken(UI::rgb(0x123456));
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .colorToken = token,
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .requiredStates = UI::UIStyleState::Disabled,
+            .color = UI::rgb(0xABCDEF),
+        },
+    };
+    ASSERT_TRUE(storage.compile(rules).has_value());
+
+    const auto initial = storage.colorToken(token);
+    ASSERT_TRUE(initial.has_value());
+    EXPECT_EQ(*initial, UI::rgb(0x123456));
+    const auto tokenResolution = storage.resolve(
+        UI::UIStyleRoleId::PanelSurface, {}, UI::UIStyleState::None);
+    ASSERT_TRUE(tokenResolution.has_value());
+    EXPECT_EQ(tokenResolution->colorToken, token);
+    const auto literalResolution = storage.resolve(
+        UI::UIStyleRoleId::PanelSurface, {}, UI::UIStyleState::Disabled);
+    ASSERT_TRUE(literalResolution.has_value());
+    EXPECT_FALSE(literalResolution->colorToken.hasValue());
+
+    const usize allocationCount = resource.allocationCount();
+    ASSERT_TRUE(storage.setColorToken(token, UI::rgb(0x123456)).has_value());
+    ASSERT_TRUE(storage.setColorToken(token, UI::rgb(0x3978C5)).has_value());
+    EXPECT_EQ(resource.allocationCount(), allocationCount);
+    EXPECT_EQ(storage.statistics().revision, 1U);
+    const auto updated = storage.resolve(
+        UI::UIStyleRoleId::PanelSurface, {}, UI::UIStyleState::None);
+    ASSERT_TRUE(updated.has_value());
+    ASSERT_TRUE(updated->color.has_value());
+    EXPECT_EQ(*updated->color, UI::rgb(0x3978C5));
+    EXPECT_EQ(updated->colorToken, token);
+
+    const auto invalidQuery = storage.colorToken(UI::UIStyleTokenId{});
+    ASSERT_FALSE(invalidQuery.has_value());
+    EXPECT_EQ(invalidQuery.error().code, UI::UIErrorCode::InvalidStyle);
+    const Core::Status invalidSet = storage.setColorToken(
+        UI::UIStyleTokenId{.value = token.value + 1U}, UI::rgb(0xFFFFFF));
+    ASSERT_FALSE(invalidSet.has_value());
+    EXPECT_EQ(invalidSet.error().code, UI::UIErrorCode::InvalidStyle);
+}
+
 TEST(UIStyleSheetStorageTests, RejectsInvalidOrAmbiguousColorTokenRulesAtomically)
 {
     std::pmr::monotonic_buffer_resource resource;

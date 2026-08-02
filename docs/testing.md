@@ -124,6 +124,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 include/type token 扫描；所有 Tina imported target 的 include 都来自安装 prefix 而非源码树；外部
 `tina_sdk_consumer` 只链接 `Tina::GameSDK`，并从 relocated installed headers 编译
 `PrimaryWindowUIRootBuilder` 的 StyleClass/ColorToken 注册、token-backed stylesheet 安装与 root 创建调用，
+以及 `PrimaryWindowUITreeUpdater` 的运行期 ColorToken getter/setter，
 运行一帧后输出 `{"status":"ok","consumer":"installed-tina-sdk"}`。Headless consumer 不具备 primary
 window UI，样式 facade 的运行期 phase/sticky-error 行为由 `tina_runtime_ui_tests` 覆盖。PlatformGlfw consumer 只链接
 `Tina::PlatformGlfw`，必须创建隐藏窗口、读取 metrics、poll 一帧并输出
@@ -202,6 +203,16 @@ class link；当前 workload 不注册 token，JSON 必须报告 `registered_tok
 只切换一个 retained `Disabled` state，必须得到 inspected/resolved nodes=1、candidate rules=16、layout/hit=0、
 clean commit style/rebuild=0、bucket/class-link high-water 稳定、非零 style/DisplayList checksum 与
 warmup 后 UI PMR allocation delta=0。
+
+运行期 ColorToken 最小回归必须直接运行 `tina_ui_tests` 的
+`UIStyleContextTests.RuntimeColorToken*` 与 `tina_runtime_ui_tests` 的
+`PrimaryWindowUICapabilityTest.*StyleColorToken*`。前者验证只为 winning-token 依赖发布 Paint dirty、
+Layout/Hit/Semantics 保持 clean、local override 排除、no-op
+四个 counter 归零、owner-thread、dirty queue 容量失败原子性，以及失败时检查统计仍保留；后者验证
+phase-scoped Runtime getter/setter、跨线程/过期 phase 拒绝与 sticky error。确定性断言按以下口径读取
+`UIContextStatistics`：inspected=全部 live node，resolved=第一遍实际 resolver 的节点，affected=winning
+token 等于目标 token 的节点，candidate=第一遍 matcher 检查数。当前 `ui_style_state_v1` 不注册 token，不能
+替代这组运行期 O(N) 更新测试；公开头变化还需继续通过 header-isolation 与安装 SDK consumer gate。
 
 正式采样规模、fingerprint 与固定机规则见[性能与内存](performance-memory.md)和
 [ADR 0018](adr/0018-benchmark-protocol.md)。

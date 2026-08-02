@@ -64,6 +64,10 @@ Image/Icon/NineSlice 和 Motion 必须扩展现有统计模型，而不是另建
   Paint 或 Semantics rebuild；这不代表 Render bridge 提交既有 DisplayList 的整条渲染链是 `O(1)`；
 - paint-only 局部状态不会使 Layout/Hit dirty，但当前 paint candidate 容量校验与 committed paint 组装仍会
   线性遍历 layout/paint 数据；只能说 dirty cache 重算是局部的，不能把完整 publication 宣称为 `O(D)`；
+- 运行期 `setStyleColorToken()` 当前没有持久 reverse-dependency index。非 no-op 第一遍按 `O(N)` 扫描全部
+  live node 并完成 dirty queue 容量预检，成功后第二遍 `O(N)` 扫描为 affected 节点发布 Paint dirty；失败只执行
+  第一遍且保持 token/dirty/committed 不变，no-op 零扫描。四个 `lastStyleTokenUpdate*` counter 记录第一遍的
+  inspected/resolved/affected/candidate 工作量，不能据 affected 数把当前实现报告为 `O(affected)`；
 - Motion 会让 paint commit 连续发生多帧。其 active track sample 必须只遍历 `M` 条 active track，但仍要
   单独测量当前 `O(N + P)` paint publication；若不达预算，先优化 candidate compiler，再提高 Motion 容量。
 - Image/Icon/NineSlice 的 committed geometry 可以在 UI clean frame 保持不变，但 packet-local
@@ -85,7 +89,7 @@ Style 垂直切片已补齐 `ui_style_state_v1`，并将 style token capacity/co
 | `ui_virtual_collection_v1` | 100k logical items、固定 64-row pool/scroll sequence | materialized row/high-water，warmup 后 Tina-routed storage 不增长，selection/semantics checksum |
 | `ui_component_build_v1` | 256 个四节点 Component；固定 text/canvas payload 与 Activate/Toggle/Range/TextInput/Scroll/Selection slot mix | build/commit 时间、node/text-byte/canvas/behavior 的 reserved/published counter、各 pool high-water、allocation delta 与 tree checksum；commit 后无 retained wrapper，后续 clean commit rebuild 为 0 |
 | `ui_component_build_activate_toggle_v1` | 256 个四节点 Component；每组件固定 11 text bytes、2 Canvas commands、2 Activate + 2 Toggle slots | **前置证据，非冻结 workload 验收：** 直接测 `UIElementBuildTransaction` 的 build/commit/clean-commit 时间、requested/published 与 side-store capacity/high-water、稳定 tree checksum、allocation delta/clean rebuild 为 0；schema 明示其余 Behavior 和 reservation counter 未覆盖 |
-| `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved/inspected nodes、candidate rules、token/bucket/class-link capacity/high-water；当前 workload 注册 token=0；单节点 state change 不全树 resolve |
+| `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved/inspected nodes、candidate rules、token/bucket/class-link capacity/high-water；当前 workload 注册 token=0，只验证单节点 state change，不覆盖运行期 token update 的 O(N) 扫描 |
 | `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | 每 build `Q=5096/U=64/B=1000`、64 resolve hit、5032 cache dedupe、64 pin acquire/release；missing/not-ready/extent mismatch/resource-intern dedupe 与 allocation delta 为 0；command/batch/resource/pin high-water 和 DisplayList checksum 稳定 |
 | `ui_motion_v1` | 4096 nodes、active track 分别为 0/64/1024、固定 clock | sampled/active/high-water=`M`；0 active 时 motion work/额外 dirty 为 0；layout/hit rebuild 为 0，记录 paint publication |
 

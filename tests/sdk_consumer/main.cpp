@@ -63,6 +63,17 @@ class ConsumerState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(tree.error()));
         }
+        auto activeColor = tree->styleColorToken(*colorToken);
+        if (!activeColor)
+        {
+            return Tina::Core::failure(std::move(activeColor.error()));
+        }
+        if (Tina::Core::Status status =
+                tree->setStyleColorToken(*colorToken, Tina::UI::rgb(0x3978C5));
+            !status)
+        {
+            return status;
+        }
         const std::array classes{*styleClass};
         Tina::UI::UIElementDescriptor panel = Tina::UI::makePanelElement();
         panel.visual.styleRole = Tina::UI::UIStyleRoleId::PanelSurface;
