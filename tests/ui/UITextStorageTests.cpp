@@ -121,6 +121,97 @@ TEST(UITextStorageTests, CapacityFailurePreservesStatistics)
     EXPECT_EQ(storage.highWater(), 6U);
 }
 
+TEST(UITextStorageTests, ReservationExcludesOrdinaryAllocationsAndPublishesExplicitly)
+{
+    UI::Detail::UITextStorage storage(8, 4, *std::pmr::get_default_resource());
+
+    auto reservation = storage.reserve(6);
+    ASSERT_TRUE(reservation.has_value()) << (reservation ? "" : reservation.error().message);
+    EXPECT_EQ(reservation->remainingBytes(), 6U);
+    EXPECT_EQ(storage.used(), 6U);
+    EXPECT_EQ(storage.outstandingReservedBytes(), 6U);
+    EXPECT_EQ(storage.reservationRequestedBytes(), 6U);
+    EXPECT_EQ(storage.reservationReservedBytes(), 6U);
+    EXPECT_EQ(storage.reservationPublishedBytes(), 0U);
+    EXPECT_EQ(storage.reservationCapacityFailureCount(), 0U);
+
+    auto excluded = storage.allocate(3);
+    ASSERT_FALSE(excluded.has_value());
+    EXPECT_EQ(excluded.error().code, UI::UIErrorCode::CapacityExceeded);
+
+    auto published = storage.allocateReserved(*reservation, 2);
+    ASSERT_TRUE(published.has_value()) << (published ? "" : published.error().message);
+    EXPECT_EQ(published->offset, 0U);
+    EXPECT_EQ(published->capacity, 2U);
+    EXPECT_EQ(reservation->remainingBytes(), 4U);
+    EXPECT_EQ(storage.outstandingReservedBytes(), 4U);
+    EXPECT_EQ(storage.reservationPublishedBytes(), 2U);
+
+    storage.releaseReservation(*reservation);
+    EXPECT_EQ(reservation->remainingBytes(), 0U);
+    EXPECT_EQ(storage.outstandingReservedBytes(), 0U);
+    EXPECT_EQ(storage.used(), 2U);
+    storage.releaseReservation(*reservation);
+    EXPECT_EQ(storage.used(), 2U);
+
+    auto reclaimed = storage.allocate(6);
+    ASSERT_TRUE(reclaimed.has_value()) << (reclaimed ? "" : reclaimed.error().message);
+    storage.release(*published);
+    storage.release(*reclaimed);
+    EXPECT_EQ(storage.used(), 0U);
+}
+
+TEST(UITextStorageTests, ReservationChecksContiguousSpaceInsteadOfAggregateUnusedBytes)
+{
+    UI::Detail::UITextStorage storage(12, 4, *std::pmr::get_default_resource());
+    auto first = storage.allocate(4);
+    auto middle = storage.allocate(4);
+    auto last = storage.allocate(4);
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(middle.has_value());
+    ASSERT_TRUE(last.has_value());
+    storage.release(*first);
+    storage.release(*last);
+    ASSERT_EQ(storage.used(), 4U);
+
+    auto fragmented = storage.reserve(6);
+    ASSERT_FALSE(fragmented.has_value());
+    EXPECT_EQ(fragmented.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(storage.used(), 4U);
+    EXPECT_EQ(storage.outstandingReservedBytes(), 0U);
+    EXPECT_EQ(storage.reservationRequestedBytes(), 6U);
+    EXPECT_EQ(storage.reservationReservedBytes(), 0U);
+    EXPECT_EQ(storage.reservationPublishedBytes(), 0U);
+    EXPECT_EQ(storage.reservationCapacityFailureCount(), 1U);
+
+    auto fitting = storage.reserve(4);
+    ASSERT_TRUE(fitting.has_value()) << (fitting ? "" : fitting.error().message);
+    EXPECT_EQ(storage.reservationRequestedBytes(), 10U);
+    EXPECT_EQ(storage.reservationReservedBytes(), 4U);
+    EXPECT_EQ(storage.outstandingReservedBytes(), 4U);
+    storage.releaseReservation(*fitting);
+    storage.release(*middle);
+    EXPECT_EQ(storage.used(), 0U);
+}
+
+TEST(UITextStorageTests, FailedReservedAllocationDoesNotConsumeReservation)
+{
+    UI::Detail::UITextStorage storage(8, 2, *std::pmr::get_default_resource());
+    auto reservation = storage.reserve(5);
+    ASSERT_TRUE(reservation.has_value());
+
+    auto oversized = storage.allocateReserved(*reservation, 6);
+    ASSERT_FALSE(oversized.has_value());
+    EXPECT_EQ(oversized.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(reservation->remainingBytes(), 5U);
+    EXPECT_EQ(storage.outstandingReservedBytes(), 5U);
+    EXPECT_EQ(storage.reservationPublishedBytes(), 0U);
+    EXPECT_EQ(storage.used(), 5U);
+
+    storage.releaseReservation(*reservation);
+    EXPECT_EQ(storage.used(), 0U);
+}
+
 TEST(UITextStorageTests, RuntimeOperationsStayWithinReservedPmrStorage)
 {
     ObservingMemoryResource resource;
@@ -144,6 +235,15 @@ TEST(UITextStorageTests, RuntimeOperationsStayWithinReservedPmrStorage)
     ASSERT_TRUE(reusedThird.has_value());
     storage.write(*reusedFirst, "Tina");
     EXPECT_EQ(storage.view(*reusedFirst, 4), "Tina");
+
+    storage.release(*second);
+    storage.release(*fourth);
+    auto reservation = storage.reserve(12);
+    ASSERT_TRUE(reservation.has_value()) << (reservation ? "" : reservation.error().message);
+    auto reserved = storage.allocateReserved(*reservation, 8);
+    ASSERT_TRUE(reserved.has_value()) << (reserved ? "" : reserved.error().message);
+    storage.releaseReservation(*reservation);
+    storage.release(*reserved);
     EXPECT_EQ(resource.allocationCount(), allocationCountAfterConstruction);
 }
 

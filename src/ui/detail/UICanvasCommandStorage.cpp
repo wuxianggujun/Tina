@@ -4,6 +4,7 @@
 #include <tina/ui/UIErrors.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 namespace Tina::UI::Detail {
@@ -82,14 +83,80 @@ UICanvasCommandStorage::UICanvasCommandStorage(usize nodeCapacity, usize command
 
 Core::Status UICanvasCommandStorage::assign(u32 nodeIndex, std::span<const UICanvasCommand> commands)
 {
+    return assignImpl(nodeIndex, commands, nullptr);
+}
+
+Core::Result<UICanvasCommandStorage::Reservation> UICanvasCommandStorage::reserve(usize commandCount)
+{
+    reservationRequestedCount_ += commandCount;
+    if (activeCount_ > slots_.size() || outstandingReservedCount_ > slots_.size() - activeCount_ ||
+        commandCount > slots_.size() - activeCount_ - outstandingReservedCount_)
+    {
+        ++reservationCapacityFailureCount_;
+        return Core::failure(UIErrorCode::CapacityExceeded,
+                             "UI canvas command reservation exceeds available capacity");
+    }
+
+    outstandingReservedCount_ += commandCount;
+    reservationReservedCount_ += commandCount;
+    return Reservation{.remaining = commandCount};
+}
+
+Core::Status UICanvasCommandStorage::assignReserved(u32 nodeIndex,
+                                                    std::span<const UICanvasCommand> commands,
+                                                    Reservation& reservation)
+{
+    return assignImpl(nodeIndex, commands, &reservation);
+}
+
+void UICanvasCommandStorage::releaseReservation(Reservation& reservation) noexcept
+{
+    if (reservation.empty())
+    {
+        return;
+    }
+
+    if (reservation.remaining <= outstandingReservedCount_)
+    {
+        outstandingReservedCount_ -= reservation.remaining;
+    } else
+    {
+        assert(false && "UI canvas reservation exceeds outstanding capacity");
+    }
+    reservation = {};
+}
+
+Core::Status UICanvasCommandStorage::assignImpl(u32 nodeIndex,
+                                                std::span<const UICanvasCommand> commands,
+                                                Reservation* reservation)
+{
     if (nodeIndex >= statesByNodeIndex_.size())
     {
         return Core::failure(Core::CoreErrorCode::Internal, "UI canvas state index is out of range");
     }
-    if (activeCount_ > slots_.size() || commands.size() > (std::numeric_limits<u32>::max)() ||
-        commands.size() > slots_.size() - activeCount_)
+    const NodeState& currentState = statesByNodeIndex_[nodeIndex];
+    if (currentState.first != InvalidCommandIndex || currentState.count != 0)
+    {
+        return Core::failure(Core::CoreErrorCode::Internal, "UI node already owns canvas commands");
+    }
+    if (commands.size() > (std::numeric_limits<u32>::max)())
     {
         return Core::failure(UIErrorCode::CapacityExceeded, "UI canvas command capacity has been exhausted");
+    }
+    if (reservation == nullptr)
+    {
+        if (activeCount_ > slots_.size() || outstandingReservedCount_ > slots_.size() - activeCount_ ||
+            commands.size() > slots_.size() - activeCount_ - outstandingReservedCount_)
+        {
+            return Core::failure(UIErrorCode::CapacityExceeded,
+                                 "UI canvas command capacity has been exhausted");
+        }
+    } else if (commands.size() > reservation->remaining ||
+               commands.size() > outstandingReservedCount_ || activeCount_ > slots_.size() ||
+               commands.size() > slots_.size() - activeCount_)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded,
+                             "UI canvas command assignment exceeds the outstanding reservation");
     }
     for (const UICanvasCommand& command : commands)
     {
@@ -126,6 +193,12 @@ Core::Status UICanvasCommandStorage::assign(u32 nodeIndex, std::span<const UICan
     statesByNodeIndex_[nodeIndex] = nextState;
     activeCount_ += commands.size();
     highWater_ = (std::max)(highWater_, activeCount_);
+    if (reservation != nullptr)
+    {
+        reservation->remaining -= commands.size();
+        outstandingReservedCount_ -= commands.size();
+        reservationPublishedCount_ += commands.size();
+    }
     return Core::success();
 }
 
@@ -165,6 +238,31 @@ usize UICanvasCommandStorage::activeCount() const noexcept
 usize UICanvasCommandStorage::highWater() const noexcept
 {
     return highWater_;
+}
+
+usize UICanvasCommandStorage::outstandingReservedCount() const noexcept
+{
+    return outstandingReservedCount_;
+}
+
+usize UICanvasCommandStorage::reservationRequestedCount() const noexcept
+{
+    return reservationRequestedCount_;
+}
+
+usize UICanvasCommandStorage::reservationReservedCount() const noexcept
+{
+    return reservationReservedCount_;
+}
+
+usize UICanvasCommandStorage::reservationPublishedCount() const noexcept
+{
+    return reservationPublishedCount_;
+}
+
+usize UICanvasCommandStorage::reservationCapacityFailureCount() const noexcept
+{
+    return reservationCapacityFailureCount_;
 }
 
 } // namespace Tina::UI::Detail

@@ -10,6 +10,33 @@
 namespace Tina::Tests {
 namespace {
 
+class ObservingMemoryResource final : public std::pmr::memory_resource {
+public:
+    [[nodiscard]] usize allocationCount() const noexcept
+    {
+        return allocationCount_;
+    }
+
+private:
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    {
+        ++allocationCount_;
+        return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    {
+        std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+    }
+
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override
+    {
+        return this == &other;
+    }
+
+    usize allocationCount_ = 0;
+};
+
 [[nodiscard]] Core::AssetId canvasImageAsset()
 {
     Core::AssetId::Bytes bytes{};
@@ -176,6 +203,98 @@ TEST(UICanvasCommandStorageTests, ReleaseReturnsSlotsForReuseAndPreservesHighWat
     EXPECT_EQ(visitedCount, 1U);
     EXPECT_EQ(storage.activeCount(), 1U);
     EXPECT_EQ(storage.highWater(), 2U);
+}
+
+TEST(UICanvasCommandStorageTests, ReservationExcludesOrdinaryAssignmentsAndPublishesExplicitly)
+{
+    UI::Detail::UICanvasCommandStorage storage(4, 3, *std::pmr::get_default_resource());
+    const std::array commands{
+        UI::UICanvasCommand{.bounds = {.width = 1.0F, .height = 1.0F}},
+        UI::UICanvasCommand{.bounds = {.width = 2.0F, .height = 2.0F}},
+    };
+
+    auto reservation = storage.reserve(2);
+    ASSERT_TRUE(reservation.has_value()) << (reservation ? "" : reservation.error().message);
+    EXPECT_EQ(reservation->remaining, 2U);
+    EXPECT_EQ(storage.outstandingReservedCount(), 2U);
+    EXPECT_EQ(storage.reservationRequestedCount(), 2U);
+    EXPECT_EQ(storage.reservationReservedCount(), 2U);
+    EXPECT_EQ(storage.reservationPublishedCount(), 0U);
+    EXPECT_EQ(storage.reservationCapacityFailureCount(), 0U);
+
+    const Core::Status excluded = storage.assign(0, commands);
+    ASSERT_FALSE(excluded.has_value());
+    EXPECT_EQ(excluded.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(storage.activeCount(), 0U);
+
+    ASSERT_TRUE(storage.assignReserved(1, std::span(commands.data(), 1), *reservation).has_value());
+    EXPECT_EQ(reservation->remaining, 1U);
+    EXPECT_EQ(storage.outstandingReservedCount(), 1U);
+    EXPECT_EQ(storage.reservationPublishedCount(), 1U);
+    EXPECT_EQ(storage.activeCount(), 1U);
+
+    ASSERT_TRUE(storage.assign(2, std::span(commands.data(), 1)).has_value());
+    EXPECT_EQ(storage.activeCount(), 2U);
+    storage.releaseReservation(*reservation);
+    storage.releaseReservation(*reservation);
+    EXPECT_EQ(reservation->remaining, 0U);
+    EXPECT_EQ(storage.outstandingReservedCount(), 0U);
+    EXPECT_EQ(storage.activeCount(), 2U);
+}
+
+TEST(UICanvasCommandStorageTests, FailedReservationAndReservedAssignmentAreAtomic)
+{
+    UI::Detail::UICanvasCommandStorage storage(2, 2, *std::pmr::get_default_resource());
+    const UI::UICanvasCommand valid{.bounds = {.width = 1.0F, .height = 1.0F}};
+    auto reservation = storage.reserve(1);
+    ASSERT_TRUE(reservation.has_value());
+
+    auto overflow = storage.reserve(2);
+    ASSERT_FALSE(overflow.has_value());
+    EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(storage.reservationRequestedCount(), 3U);
+    EXPECT_EQ(storage.reservationReservedCount(), 1U);
+    EXPECT_EQ(storage.reservationCapacityFailureCount(), 1U);
+    EXPECT_EQ(storage.outstandingReservedCount(), 1U);
+
+    UI::UICanvasCommand invalid = valid;
+    invalid.bounds.width = (std::numeric_limits<float>::quiet_NaN)();
+    const Core::Status rejected = storage.assignReserved(0, std::span(&invalid, 1), *reservation);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+    EXPECT_EQ(reservation->remaining, 1U);
+    EXPECT_EQ(storage.outstandingReservedCount(), 1U);
+    EXPECT_EQ(storage.reservationPublishedCount(), 0U);
+    EXPECT_EQ(storage.activeCount(), 0U);
+
+    const std::array tooMany{valid, valid};
+    const Core::Status exceedsReservation = storage.assignReserved(0, tooMany, *reservation);
+    ASSERT_FALSE(exceedsReservation.has_value());
+    EXPECT_EQ(exceedsReservation.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(reservation->remaining, 1U);
+    EXPECT_EQ(storage.outstandingReservedCount(), 1U);
+    EXPECT_EQ(storage.activeCount(), 0U);
+
+    storage.releaseReservation(*reservation);
+    EXPECT_EQ(storage.outstandingReservedCount(), 0U);
+}
+
+TEST(UICanvasCommandStorageTests, ReservationOperationsDoNotGrowPmrStorageAfterConstruction)
+{
+    ObservingMemoryResource resource;
+    UI::Detail::UICanvasCommandStorage storage(2, 2, resource);
+    const usize allocationsAfterConstruction = resource.allocationCount();
+    const std::array commands{
+        UI::UICanvasCommand{.bounds = {.width = 1.0F, .height = 1.0F}},
+        UI::UICanvasCommand{.bounds = {.width = 2.0F, .height = 2.0F}},
+    };
+
+    auto reservation = storage.reserve(commands.size());
+    ASSERT_TRUE(reservation.has_value());
+    ASSERT_TRUE(storage.assignReserved(0, commands, *reservation).has_value());
+    storage.releaseReservation(*reservation);
+    storage.release(0);
+    EXPECT_EQ(resource.allocationCount(), allocationsAfterConstruction);
 }
 
 } // namespace

@@ -17,6 +17,72 @@ UITextStorage::UITextStorage(usize byteCapacity, usize freeAllocationCapacity, s
 
 Core::Result<UITextStorage::Allocation> UITextStorage::allocate(u32 byteCount)
 {
+    return allocateBlock(byteCount);
+}
+
+Core::Result<UITextStorage::Reservation> UITextStorage::reserve(u32 byteCount)
+{
+    reservationRequestedBytes_ += byteCount;
+    auto allocation = allocateBlock(byteCount);
+    if (!allocation)
+    {
+        ++reservationCapacityFailureCount_;
+        return Core::failure(allocation.error());
+    }
+
+    outstandingReservedBytes_ += byteCount;
+    reservationReservedBytes_ += byteCount;
+    return Reservation{.remaining = *allocation};
+}
+
+Core::Result<UITextStorage::Allocation> UITextStorage::allocateReserved(Reservation& reservation, u32 byteCount)
+{
+    const usize remainingOffset = reservation.remaining.offset;
+    if (byteCount > reservation.remaining.capacity || byteCount > outstandingReservedBytes_ ||
+        remainingOffset > bytes_.size() || static_cast<usize>(byteCount) > bytes_.size() - remainingOffset)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded,
+                             "UI text allocation exceeds the outstanding reservation");
+    }
+    if (byteCount == 0)
+    {
+        return Allocation{};
+    }
+
+    const Allocation allocated{
+        .offset = reservation.remaining.offset,
+        .capacity = byteCount,
+    };
+    reservation.remaining.offset += byteCount;
+    reservation.remaining.capacity -= byteCount;
+    outstandingReservedBytes_ -= byteCount;
+    reservationPublishedBytes_ += byteCount;
+    return allocated;
+}
+
+void UITextStorage::releaseReservation(Reservation& reservation) noexcept
+{
+    if (reservation.remaining.capacity == 0)
+    {
+        reservation = {};
+        return;
+    }
+
+    assert(reservation.remaining.capacity <= outstandingReservedBytes_);
+    if (reservation.remaining.capacity > outstandingReservedBytes_)
+    {
+        reservation = {};
+        return;
+    }
+
+    outstandingReservedBytes_ -= reservation.remaining.capacity;
+    const Allocation remaining = reservation.remaining;
+    reservation = {};
+    release(remaining);
+}
+
+Core::Result<UITextStorage::Allocation> UITextStorage::allocateBlock(u32 byteCount)
+{
     if (byteCount == 0)
     {
         return Allocation{};
@@ -155,6 +221,31 @@ usize UITextStorage::used() const noexcept
 usize UITextStorage::highWater() const noexcept
 {
     return highWater_;
+}
+
+usize UITextStorage::outstandingReservedBytes() const noexcept
+{
+    return outstandingReservedBytes_;
+}
+
+usize UITextStorage::reservationRequestedBytes() const noexcept
+{
+    return reservationRequestedBytes_;
+}
+
+usize UITextStorage::reservationReservedBytes() const noexcept
+{
+    return reservationReservedBytes_;
+}
+
+usize UITextStorage::reservationPublishedBytes() const noexcept
+{
+    return reservationPublishedBytes_;
+}
+
+usize UITextStorage::reservationCapacityFailureCount() const noexcept
+{
+    return reservationCapacityFailureCount_;
 }
 
 } // namespace Tina::UI::Detail

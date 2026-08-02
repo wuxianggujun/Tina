@@ -14,9 +14,24 @@ namespace Tina::UI::Detail {
 
 class UICanvasCommandStorage final {
   public:
+    struct Reservation final {
+        usize remaining = 0;
+
+        [[nodiscard]] bool empty() const noexcept
+        {
+            return remaining == 0;
+        }
+
+        bool operator==(const Reservation&) const = default;
+    };
+
     UICanvasCommandStorage(usize nodeCapacity, usize commandCapacity, std::pmr::memory_resource& resource);
 
     [[nodiscard]] Core::Status assign(u32 nodeIndex, std::span<const UICanvasCommand> commands);
+    [[nodiscard]] Core::Result<Reservation> reserve(usize commandCount);
+    [[nodiscard]] Core::Status assignReserved(u32 nodeIndex, std::span<const UICanvasCommand> commands,
+                                              Reservation& reservation);
+    void releaseReservation(Reservation& reservation) noexcept;
     void release(u32 nodeIndex) noexcept;
 
     template <typename Visitor>
@@ -45,6 +60,11 @@ class UICanvasCommandStorage final {
     [[nodiscard]] usize capacity() const noexcept;
     [[nodiscard]] usize activeCount() const noexcept;
     [[nodiscard]] usize highWater() const noexcept;
+    [[nodiscard]] usize outstandingReservedCount() const noexcept;
+    [[nodiscard]] usize reservationRequestedCount() const noexcept;
+    [[nodiscard]] usize reservationReservedCount() const noexcept;
+    [[nodiscard]] usize reservationPublishedCount() const noexcept;
+    [[nodiscard]] usize reservationCapacityFailureCount() const noexcept;
 
   private:
     static constexpr u32 InvalidCommandIndex = (std::numeric_limits<u32>::max)();
@@ -59,11 +79,19 @@ class UICanvasCommandStorage final {
         u32 count = 0;
     };
 
+    [[nodiscard]] Core::Status assignImpl(u32 nodeIndex, std::span<const UICanvasCommand> commands,
+                                          Reservation* reservation);
+
     std::pmr::vector<NodeState> statesByNodeIndex_;
     std::pmr::vector<CommandSlot> slots_;
     u32 freeHead_ = InvalidCommandIndex;
     usize activeCount_ = 0;
     usize highWater_ = 0;
+    usize outstandingReservedCount_ = 0;
+    usize reservationRequestedCount_ = 0;
+    usize reservationReservedCount_ = 0;
+    usize reservationPublishedCount_ = 0;
+    usize reservationCapacityFailureCount_ = 0;
 };
 
 } // namespace Tina::UI::Detail
