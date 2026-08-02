@@ -3,9 +3,128 @@
 #include <tina/ui/UIErrors.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cassert>
+#include <string_view>
 #include <utility>
 
 namespace Tina::UI::Detail {
+namespace {
+
+using CapacityFailureMessages = std::array<std::string_view, 6>;
+
+constexpr CapacityFailureMessages ReserveCapacityFailureMessages{
+    "UI Activate behavior capacity could not be reserved",
+    "UI Toggle behavior capacity could not be reserved",
+    "UI RangeInput behavior capacity could not be reserved",
+    "UI TextInput behavior capacity could not be reserved",
+    "UI Scroll behavior capacity could not be reserved",
+    "UI Select behavior capacity could not be reserved",
+};
+
+constexpr CapacityFailureMessages PublishCapacityFailureMessages{
+    "UI Activate behavior capacity has been exhausted",
+    "UI Toggle behavior capacity has been exhausted",
+    "UI RangeInput behavior capacity has been exhausted",
+    "UI TextInput behavior capacity has been exhausted",
+    "UI Scroll behavior capacity has been exhausted",
+    "UI Select behavior capacity has been exhausted",
+};
+
+constexpr CapacityFailureMessages ReservationQuotaFailureMessages{
+    "UI Activate behavior reservation has been exhausted",
+    "UI Toggle behavior reservation has been exhausted",
+    "UI RangeInput behavior reservation has been exhausted",
+    "UI TextInput behavior reservation has been exhausted",
+    "UI Scroll behavior reservation has been exhausted",
+    "UI Select behavior reservation has been exhausted",
+};
+
+[[nodiscard]] UIBehaviorStateSlotCounts requiredSlotCounts(UIElementBehavior behaviors) noexcept
+{
+    return {
+        .activate = hasBehavior(behaviors, UIElementBehavior::Activate) ? 1U : 0U,
+        .toggle = hasBehavior(behaviors, UIElementBehavior::Toggle) ? 1U : 0U,
+        .range = hasBehavior(behaviors, UIElementBehavior::RangeInput) ? 1U : 0U,
+        .textInput = hasBehavior(behaviors, UIElementBehavior::TextInput) ? 1U : 0U,
+        .scroll = hasBehavior(behaviors, UIElementBehavior::Scroll) ? 1U : 0U,
+        .selection = hasBehavior(behaviors, UIElementBehavior::Select) ? 1U : 0U,
+    };
+}
+
+void addCounts(UIBehaviorStateSlotCounts& destination, const UIBehaviorStateSlotCounts& source) noexcept
+{
+    destination.activate += source.activate;
+    destination.toggle += source.toggle;
+    destination.range += source.range;
+    destination.textInput += source.textInput;
+    destination.scroll += source.scroll;
+    destination.selection += source.selection;
+}
+
+[[nodiscard]] bool hasCounts(const UIBehaviorStateSlotCounts& counts) noexcept
+{
+    return counts.activate != 0 || counts.toggle != 0 || counts.range != 0 || counts.textInput != 0 ||
+           counts.scroll != 0 || counts.selection != 0;
+}
+
+[[nodiscard]] constexpr usize countFailure(bool failed) noexcept
+{
+    return failed ? 1U : 0U;
+}
+
+[[nodiscard]] Core::Status capacityFailure(const UIBehaviorStateSlotCounts& failures,
+                                           const CapacityFailureMessages& messages)
+{
+    if (failures.activate != 0)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, messages[0]);
+    }
+    if (failures.toggle != 0)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, messages[1]);
+    }
+    if (failures.range != 0)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, messages[2]);
+    }
+    if (failures.textInput != 0)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, messages[3]);
+    }
+    if (failures.scroll != 0)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, messages[4]);
+    }
+    assert(failures.selection != 0);
+    return Core::failure(UIErrorCode::CapacityExceeded, messages[5]);
+}
+
+[[nodiscard]] bool hasCapacity(usize capacity, usize active, usize reserved, usize requested) noexcept
+{
+    return active <= capacity && reserved <= capacity - active && requested <= capacity - active - reserved;
+}
+
+[[nodiscard]] bool containsCounts(const UIBehaviorStateSlotCounts& available,
+                                  const UIBehaviorStateSlotCounts& required) noexcept
+{
+    return required.activate <= available.activate && required.toggle <= available.toggle &&
+           required.range <= available.range && required.textInput <= available.textInput &&
+           required.scroll <= available.scroll && required.selection <= available.selection;
+}
+
+void subtractCounts(UIBehaviorStateSlotCounts& destination, const UIBehaviorStateSlotCounts& source) noexcept
+{
+    assert(containsCounts(destination, source));
+    destination.activate -= source.activate;
+    destination.toggle -= source.toggle;
+    destination.range -= source.range;
+    destination.textInput -= source.textInput;
+    destination.scroll -= source.scroll;
+    destination.selection -= source.selection;
+}
+
+} // namespace
 
 UIBehaviorStateStorage::UIBehaviorStateStorage(usize nodeCapacity, usize activateCapacity, usize toggleCapacity,
                                                usize rangeInputCapacity, usize textInputCapacity,
@@ -61,7 +180,7 @@ UIBehaviorStateStorage::UIBehaviorStateStorage(usize nodeCapacity, usize activat
     selectFreeHead_ = selectCapacity == 0 ? InvalidSlot : 0U;
 }
 
-Core::Status UIBehaviorStateStorage::publish(u32 nodeIndex, UIElementBehavior behaviors)
+Core::Status UIBehaviorStateStorage::validatePublishTarget(u32 nodeIndex) const
 {
     if (nodeIndex >= activateSlotByNodeIndex_.size() || nodeIndex >= toggleSlotByNodeIndex_.size() ||
         nodeIndex >= rangeInputSlotByNodeIndex_.size() || nodeIndex >= textInputSlotByNodeIndex_.size() ||
@@ -75,37 +194,136 @@ Core::Status UIBehaviorStateStorage::publish(u32 nodeIndex, UIElementBehavior be
     {
         return Core::failure(Core::CoreErrorCode::Internal, "UI node already owns behavior state storage");
     }
+    return Core::success();
+}
 
+Core::Status UIBehaviorStateStorage::reserve(const UIBehaviorStateSlotCounts& requested)
+{
+    addCounts(counters_.requested, requested);
+
+    const UIBehaviorStateSlotCounts& outstanding = counters_.outstandingReservations;
+    const UIBehaviorStateSlotCounts failures{
+        .activate = countFailure(
+            !hasCapacity(activateSlots_.size(), activeActivateCount_, outstanding.activate, requested.activate)),
+        .toggle = countFailure(
+            !hasCapacity(toggleSlots_.size(), activeToggleCount_, outstanding.toggle, requested.toggle)),
+        .range = countFailure(
+            !hasCapacity(rangeInputSlots_.size(), activeRangeInputCount_, outstanding.range, requested.range)),
+        .textInput = countFailure(
+            !hasCapacity(textInputSlots_.size(), activeTextInputCount_, outstanding.textInput, requested.textInput)),
+        .scroll = countFailure(
+            !hasCapacity(scrollSlots_.size(), activeScrollCount_, outstanding.scroll, requested.scroll)),
+        .selection = countFailure(
+            !hasCapacity(selectSlots_.size(), activeSelectCount_, outstanding.selection, requested.selection)),
+    };
+
+    if (hasCounts(failures))
+    {
+        addCounts(counters_.capacityFailures, failures);
+        return capacityFailure(failures, ReserveCapacityFailureMessages);
+    }
+
+    addCounts(counters_.reserved, requested);
+    addCounts(counters_.outstandingReservations, requested);
+    return Core::success();
+}
+
+Core::Status UIBehaviorStateStorage::publish(u32 nodeIndex, UIElementBehavior behaviors)
+{
+    if (Core::Status target = validatePublishTarget(nodeIndex); !target)
+    {
+        return target;
+    }
+
+    const UIBehaviorStateSlotCounts required = requiredSlotCounts(behaviors);
+    const UIBehaviorStateSlotCounts& outstanding = counters_.outstandingReservations;
+    const UIBehaviorStateSlotCounts failures{
+        .activate = countFailure(
+            !hasCapacity(activateSlots_.size(), activeActivateCount_, outstanding.activate, required.activate) ||
+            (required.activate != 0 &&
+             (activateFreeHead_ == InvalidSlot || activateFreeHead_ >= activateSlots_.size()))),
+        .toggle = countFailure(
+            !hasCapacity(toggleSlots_.size(), activeToggleCount_, outstanding.toggle, required.toggle) ||
+            (required.toggle != 0 &&
+             (toggleFreeHead_ == InvalidSlot || toggleFreeHead_ >= toggleSlots_.size()))),
+        .range = countFailure(
+            !hasCapacity(rangeInputSlots_.size(), activeRangeInputCount_, outstanding.range, required.range) ||
+            (required.range != 0 &&
+             (rangeInputFreeHead_ == InvalidSlot || rangeInputFreeHead_ >= rangeInputSlots_.size()))),
+        .textInput = countFailure(
+            !hasCapacity(textInputSlots_.size(), activeTextInputCount_, outstanding.textInput, required.textInput) ||
+            (required.textInput != 0 &&
+             (textInputFreeHead_ == InvalidSlot || textInputFreeHead_ >= textInputSlots_.size()))),
+        .scroll = countFailure(
+            !hasCapacity(scrollSlots_.size(), activeScrollCount_, outstanding.scroll, required.scroll) ||
+            (required.scroll != 0 &&
+             (scrollFreeHead_ == InvalidSlot || scrollFreeHead_ >= scrollSlots_.size()))),
+        .selection = countFailure(
+            !hasCapacity(selectSlots_.size(), activeSelectCount_, outstanding.selection, required.selection) ||
+            (required.selection != 0 &&
+             (selectFreeHead_ == InvalidSlot || selectFreeHead_ >= selectSlots_.size()))),
+    };
+
+    if (hasCounts(failures))
+    {
+        addCounts(counters_.capacityFailures, failures);
+        return capacityFailure(failures, PublishCapacityFailureMessages);
+    }
+
+    publishPreflighted(nodeIndex, behaviors);
+    addCounts(counters_.published, required);
+    return Core::success();
+}
+
+Core::Status UIBehaviorStateStorage::publishReserved(u32 nodeIndex, UIElementBehavior behaviors,
+                                                     UIBehaviorStateSlotCounts& remainingReservation)
+{
+    if (Core::Status target = validatePublishTarget(nodeIndex); !target)
+    {
+        return target;
+    }
+
+    const UIBehaviorStateSlotCounts required = requiredSlotCounts(behaviors);
+    const UIBehaviorStateSlotCounts failures{
+        .activate = countFailure(required.activate > remainingReservation.activate),
+        .toggle = countFailure(required.toggle > remainingReservation.toggle),
+        .range = countFailure(required.range > remainingReservation.range),
+        .textInput = countFailure(required.textInput > remainingReservation.textInput),
+        .scroll = countFailure(required.scroll > remainingReservation.scroll),
+        .selection = countFailure(required.selection > remainingReservation.selection),
+    };
+    if (hasCounts(failures))
+    {
+        addCounts(counters_.capacityFailures, failures);
+        return capacityFailure(failures, ReservationQuotaFailureMessages);
+    }
+    if (!containsCounts(counters_.outstandingReservations, required))
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "UI behavior reservation is not owned by this storage");
+    }
+
+    publishPreflighted(nodeIndex, behaviors);
+    subtractCounts(remainingReservation, required);
+    subtractCounts(counters_.outstandingReservations, required);
+    addCounts(counters_.published, required);
+    return Core::success();
+}
+
+void UIBehaviorStateStorage::releaseReservation(UIBehaviorStateSlotCounts& remainingReservation) noexcept
+{
+    subtractCounts(counters_.outstandingReservations, remainingReservation);
+    remainingReservation = {};
+}
+
+void UIBehaviorStateStorage::publishPreflighted(u32 nodeIndex, UIElementBehavior behaviors) noexcept
+{
     const bool requiresActivate = hasBehavior(behaviors, UIElementBehavior::Activate);
     const bool requiresToggle = hasBehavior(behaviors, UIElementBehavior::Toggle);
     const bool requiresRangeInput = hasBehavior(behaviors, UIElementBehavior::RangeInput);
     const bool requiresTextInput = hasBehavior(behaviors, UIElementBehavior::TextInput);
     const bool requiresScroll = hasBehavior(behaviors, UIElementBehavior::Scroll);
     const bool requiresSelect = hasBehavior(behaviors, UIElementBehavior::Select);
-    if (requiresActivate && (activateFreeHead_ == InvalidSlot || activateFreeHead_ >= activateSlots_.size()))
-    {
-        return Core::failure(UIErrorCode::CapacityExceeded, "UI Activate behavior capacity has been exhausted");
-    }
-    if (requiresToggle && (toggleFreeHead_ == InvalidSlot || toggleFreeHead_ >= toggleSlots_.size()))
-    {
-        return Core::failure(UIErrorCode::CapacityExceeded, "UI Toggle behavior capacity has been exhausted");
-    }
-    if (requiresRangeInput && (rangeInputFreeHead_ == InvalidSlot || rangeInputFreeHead_ >= rangeInputSlots_.size()))
-    {
-        return Core::failure(UIErrorCode::CapacityExceeded, "UI RangeInput behavior capacity has been exhausted");
-    }
-    if (requiresTextInput && (textInputFreeHead_ == InvalidSlot || textInputFreeHead_ >= textInputSlots_.size()))
-    {
-        return Core::failure(UIErrorCode::CapacityExceeded, "UI TextInput behavior capacity has been exhausted");
-    }
-    if (requiresScroll && (scrollFreeHead_ == InvalidSlot || scrollFreeHead_ >= scrollSlots_.size()))
-    {
-        return Core::failure(UIErrorCode::CapacityExceeded, "UI Scroll behavior capacity has been exhausted");
-    }
-    if (requiresSelect && (selectFreeHead_ == InvalidSlot || selectFreeHead_ >= selectSlots_.size()))
-    {
-        return Core::failure(UIErrorCode::CapacityExceeded, "UI Select behavior capacity has been exhausted");
-    }
 
     if (requiresActivate)
     {
@@ -178,7 +396,6 @@ Core::Status UIBehaviorStateStorage::publish(u32 nodeIndex, UIElementBehavior be
         ++activeSelectCount_;
         selectHighWater_ = (std::max)(selectHighWater_, activeSelectCount_);
     }
-    return Core::success();
 }
 
 void UIBehaviorStateStorage::release(u32 nodeIndex) noexcept
@@ -473,6 +690,11 @@ usize UIBehaviorStateStorage::activeSelectCount() const noexcept
 usize UIBehaviorStateStorage::selectHighWater() const noexcept
 {
     return selectHighWater_;
+}
+
+UIBehaviorStateStorageCounters UIBehaviorStateStorage::counters() const noexcept
+{
+    return counters_;
 }
 
 } // namespace Tina::UI::Detail

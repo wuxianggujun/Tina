@@ -35,13 +35,39 @@ struct UISelectBehaviorState final {
     UINodeId selectedOption{};
 };
 
+struct UIBehaviorStateSlotCounts final {
+    usize activate = 0;
+    usize toggle = 0;
+    usize range = 0;
+    usize textInput = 0;
+    usize scroll = 0;
+    usize selection = 0;
+
+    bool operator==(const UIBehaviorStateSlotCounts&) const = default;
+};
+
+struct UIBehaviorStateStorageCounters final {
+    // Monotonic slot totals. Published includes ordinary and reservation-backed publish operations.
+    UIBehaviorStateSlotCounts requested{};
+    UIBehaviorStateSlotCounts reserved{};
+    UIBehaviorStateSlotCounts published{};
+    UIBehaviorStateSlotCounts capacityFailures{};
+    // Current capacity held by successful reservations but not yet published or released.
+    UIBehaviorStateSlotCounts outstandingReservations{};
+};
+
 class UIBehaviorStateStorage final {
   public:
     UIBehaviorStateStorage(usize nodeCapacity, usize activateCapacity, usize toggleCapacity, usize rangeInputCapacity,
                            usize textInputCapacity, usize scrollCapacity, usize selectCapacity,
                            std::pmr::memory_resource& resource);
 
+    // On success, the caller keeps a mutable copy of requested as its remaining reservation.
+    [[nodiscard]] Core::Status reserve(const UIBehaviorStateSlotCounts& requested);
     [[nodiscard]] Core::Status publish(u32 nodeIndex, UIElementBehavior behaviors);
+    [[nodiscard]] Core::Status publishReserved(u32 nodeIndex, UIElementBehavior behaviors,
+                                               UIBehaviorStateSlotCounts& remainingReservation);
+    void releaseReservation(UIBehaviorStateSlotCounts& remainingReservation) noexcept;
     void release(u32 nodeIndex) noexcept;
 
     [[nodiscard]] bool hasActivate(u32 nodeIndex) const noexcept;
@@ -75,6 +101,7 @@ class UIBehaviorStateStorage final {
     [[nodiscard]] usize selectCapacity() const noexcept;
     [[nodiscard]] usize activeSelectCount() const noexcept;
     [[nodiscard]] usize selectHighWater() const noexcept;
+    [[nodiscard]] UIBehaviorStateStorageCounters counters() const noexcept;
 
   private:
     static constexpr u32 InvalidSlot = (std::numeric_limits<u32>::max)();
@@ -114,6 +141,9 @@ class UIBehaviorStateStorage final {
         bool active = false;
     };
 
+    [[nodiscard]] Core::Status validatePublishTarget(u32 nodeIndex) const;
+    void publishPreflighted(u32 nodeIndex, UIElementBehavior behaviors) noexcept;
+
     std::pmr::vector<u32> activateSlotByNodeIndex_;
     std::pmr::vector<u32> toggleSlotByNodeIndex_;
     std::pmr::vector<u32> rangeInputSlotByNodeIndex_;
@@ -144,6 +174,7 @@ class UIBehaviorStateStorage final {
     usize scrollHighWater_ = 0;
     usize activeSelectCount_ = 0;
     usize selectHighWater_ = 0;
+    UIBehaviorStateStorageCounters counters_{};
 };
 
 } // namespace Tina::UI::Detail
