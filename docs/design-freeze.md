@@ -44,8 +44,11 @@
 
 ## Proposed
 
-当前无 Proposed ADR。固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-002），
-不单独占 Proposed 行。
+| 领域 | 候选决定 | ADR | 当前状态 |
+| --- | --- | --- | --- |
+| SDK 发布 | pre-1.0 SemVer、tuple-scoped 静态 C++ 兼容、API/symbol baseline 与 previous-release probe | [0024](adr/0024-sdk-abi-compatibility.md) | 待维护者选择 pre-1.0 版本方案；当前 `SameMajorVersion` 与 consumer gate 不构成正式 ABI 承诺 |
+
+固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-002），不单独占 Proposed 行。
 
 ## Deferred
 

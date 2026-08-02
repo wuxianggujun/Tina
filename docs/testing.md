@@ -138,6 +138,22 @@ staging prefix 物理移动到 relocated prefix，证明原 prefix 已消失、p
 prefix/build/source 路径，并仅从新位置 configure/link/run。该 moved-prefix 门禁仍不替代跨发行版
 artifact transfer 或正式 ABI 兼容性验证。
 
+跨发行版 gate 只在 release/ABI candidate 阶段按需运行，不进入日常回归矩阵：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkCrossDistroGate.ps1 `
+  -OutJson artifacts\gates\sdk-001-linux-cross-distro-consumer.json
+```
+
+其成功条件额外包括：Ubuntu 24.04/GCC 13 producer 产出 Release GameSDK archive、JSON metadata 和
+SHA256；Debian 13/GCC 14 consumer 只读挂载 artifact volume，不挂载 Tina source/build tree，使用自己镜像内
+的 vcpkg/xxHash，并把 archive 解包到不同绝对 prefix；package/header 扫描拒绝全部 producer
+source/build/staging/package prefix 泄漏到 installed CMake metadata，header 扫描继续拒绝第三方 API token，
+consumer configure 同时拒绝 imported target 使用 producer include 路径，最终 consumer 输出
+`{"status":"ok","consumer":"installed-tina-sdk"}`。脚本存在或镜像成功构建都不能代替完整 producer →
+consumer exit 0 证据；正式 ABI 另由 [ADR 0024](adr/0024-sdk-abi-compatibility.md) 决策。
+
 ## UI performance quick run
 
 `tina_bench` 的 UI workload 使用真实 `UIContext`、committed snapshots、pointer route、虚拟集合、

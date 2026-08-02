@@ -193,6 +193,19 @@ relocated prefix；原 prefix 消失后，package 路径扫描、`find_package`�
 入口固定限制为 2 CPU/8 GiB，并为每个 SDK gate 使用独立的 container-only build directory，避免
 WSL `/mnt/c` 与 Docker `/work/tina` 共用绝对路径 cache。
 
+跨发行版 artifact transfer 是 **release/ABI candidate 门禁**，不属于日常开发或每次 SDK 修改的必跑项。
+需要生成发布证据时，下面的编排器才会让 Ubuntu 24.04/GCC 13 producer 将 Release GameSDK 写入 named
+volume，再由不挂载 Tina 源码的 Debian 13/GCC 14 consumer 使用独立 vcpkg/xxHash 解包、配置、链接和运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkCrossDistroGate.ps1 `
+  -OutJson artifacts\gates\sdk-001-linux-cross-distro-consumer.json
+```
+
+镜像层可以跨执行复用；容器和 artifact volume 无论成功失败都由 wrapper 回收。只有完整命令 exit 0 和 JSON
+证据同时存在时，才能把该 tuple 记录为已验证；它仍不等于正式 ABI 兼容承诺。
+
 ## Windows Platform/Desktop/bgfx
 
 ```powershell
