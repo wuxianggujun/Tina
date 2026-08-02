@@ -25,6 +25,9 @@ struct UIStyleSheetStorageCapacity final {
 struct UIStyleBoxFillResolution final {
     std::optional<UIStraightSrgba8Color> color{};
     UIStyleTokenId colorToken{};
+    // Present only when a matching rule declared image tint (literal or token).
+    std::optional<UIStraightSrgba8Color> imageTint{};
+    UIStyleTokenId imageTintToken{};
     usize candidateRuleCount = 0;
 };
 

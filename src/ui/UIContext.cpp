@@ -399,10 +399,18 @@ struct UIContext::Impl final {
     std::pmr::vector<UIPremultipliedRgba8Color> resolvedBoxFillCacheByNodeIndex;
     // Winning ColorToken dependency for reverse invalidation. Zero means the
     // node is not linked. Heads/next/prev use 1-based node indices so 0 is NIL.
+    // Box fill and image tint keep independent reverse lists so one node can
+    // depend on two tokens (or the same token once per channel).
     std::pmr::vector<UIStyleTokenId> resolvedStyleColorTokenByNodeIndex;
     std::pmr::vector<u32> styleTokenDependencyNextByNodeIndex;
     std::pmr::vector<u32> styleTokenDependencyPrevByNodeIndex;
     std::pmr::vector<u32> styleTokenDependencyHeadByTokenIndex;
+    std::pmr::vector<UIStyleTokenId> resolvedImageTintTokenByNodeIndex;
+    std::pmr::vector<u32> imageTintTokenDependencyNextByNodeIndex;
+    std::pmr::vector<u32> imageTintTokenDependencyPrevByNodeIndex;
+    std::pmr::vector<u32> imageTintTokenDependencyHeadByTokenIndex;
+    std::pmr::vector<UIStraightSrgba8Color> resolvedImageTintCacheByNodeIndex;
+    std::pmr::vector<u8> resolvedImageTintValidByNodeIndex;
     usize activeNodeStyleClassLinkCount = 0;
     usize nodeStyleClassLinkHighWater = 0;
     usize nodeStyleClassLinkCapacityFailureCount = 0;
@@ -592,6 +600,12 @@ struct UIContext::Impl final {
           styleTokenDependencyNextByNodeIndex(&resource),
           styleTokenDependencyPrevByNodeIndex(&resource),
           styleTokenDependencyHeadByTokenIndex(&resource),
+          resolvedImageTintTokenByNodeIndex(&resource),
+          imageTintTokenDependencyNextByNodeIndex(&resource),
+          imageTintTokenDependencyPrevByNodeIndex(&resource),
+          imageTintTokenDependencyHeadByTokenIndex(&resource),
+          resolvedImageTintCacheByNodeIndex(&resource),
+          resolvedImageTintValidByNodeIndex(&resource),
           boxPaintsByIndex(&resource),
           buttonPaintsByNodeIndex(&resource),
           themeBindingsByNodeIndex(&resource), styleOverridesByNodeIndex(&resource), themeDirtyScratchByNodeIndex(&resource),
@@ -691,6 +705,12 @@ struct UIContext::Impl final {
         impl->styleTokenDependencyNextByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->styleTokenDependencyPrevByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->styleTokenDependencyHeadByTokenIndex.resize(normalized.styleTokenCapacity, 0);
+        impl->resolvedImageTintTokenByNodeIndex.resize(normalized.nodeCapacity);
+        impl->imageTintTokenDependencyNextByNodeIndex.resize(normalized.nodeCapacity, 0);
+        impl->imageTintTokenDependencyPrevByNodeIndex.resize(normalized.nodeCapacity, 0);
+        impl->imageTintTokenDependencyHeadByTokenIndex.resize(normalized.styleTokenCapacity, 0);
+        impl->resolvedImageTintCacheByNodeIndex.resize(normalized.nodeCapacity);
+        impl->resolvedImageTintValidByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
         impl->buttonPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->themeBindingsByNodeIndex.resize(normalized.nodeCapacity, 0);
@@ -2198,65 +2218,86 @@ struct UIContext::Impl final {
             styleRolesByNodeIndex[nodeIndex], classes, states);
     }
 
-    void unlinkStyleTokenDependency(u32 nodeIndex) noexcept
+    void unlinkTokenDependencyList(u32 nodeIndex, std::pmr::vector<UIStyleTokenId>& tokenByNode,
+                                   std::pmr::vector<u32>& nextByNode, std::pmr::vector<u32>& prevByNode,
+                                   std::pmr::vector<u32>& headByToken) noexcept
     {
-        if (nodeIndex >= resolvedStyleColorTokenByNodeIndex.size())
+        if (nodeIndex >= tokenByNode.size())
         {
             return;
         }
-        const UIStyleTokenId token = resolvedStyleColorTokenByNodeIndex[nodeIndex];
+        const UIStyleTokenId token = tokenByNode[nodeIndex];
         if (!token.hasValue())
         {
             return;
         }
         const usize tokenSlot = token.value - 1U;
-        if (tokenSlot >= styleTokenDependencyHeadByTokenIndex.size())
+        if (tokenSlot >= headByToken.size())
         {
-            resolvedStyleColorTokenByNodeIndex[nodeIndex] = {};
-            styleTokenDependencyNextByNodeIndex[nodeIndex] = 0;
-            styleTokenDependencyPrevByNodeIndex[nodeIndex] = 0;
+            tokenByNode[nodeIndex] = {};
+            nextByNode[nodeIndex] = 0;
+            prevByNode[nodeIndex] = 0;
             return;
         }
-        const u32 next = styleTokenDependencyNextByNodeIndex[nodeIndex];
-        const u32 prev = styleTokenDependencyPrevByNodeIndex[nodeIndex];
+        const u32 next = nextByNode[nodeIndex];
+        const u32 prev = prevByNode[nodeIndex];
         if (prev == 0)
         {
-            styleTokenDependencyHeadByTokenIndex[tokenSlot] = next;
+            headByToken[tokenSlot] = next;
         }
         else
         {
-            styleTokenDependencyNextByNodeIndex[prev - 1U] = next;
+            nextByNode[prev - 1U] = next;
         }
         if (next != 0)
         {
-            styleTokenDependencyPrevByNodeIndex[next - 1U] = prev;
+            prevByNode[next - 1U] = prev;
         }
-        styleTokenDependencyNextByNodeIndex[nodeIndex] = 0;
-        styleTokenDependencyPrevByNodeIndex[nodeIndex] = 0;
-        resolvedStyleColorTokenByNodeIndex[nodeIndex] = {};
+        nextByNode[nodeIndex] = 0;
+        prevByNode[nodeIndex] = 0;
+        tokenByNode[nodeIndex] = {};
     }
 
-    void linkStyleTokenDependency(u32 nodeIndex, UIStyleTokenId token) noexcept
+    void linkTokenDependencyList(u32 nodeIndex, UIStyleTokenId token,
+                                 std::pmr::vector<UIStyleTokenId>& tokenByNode,
+                                 std::pmr::vector<u32>& nextByNode, std::pmr::vector<u32>& prevByNode,
+                                 std::pmr::vector<u32>& headByToken) noexcept
     {
-        if (!token.hasValue() || nodeIndex >= resolvedStyleColorTokenByNodeIndex.size())
+        if (!token.hasValue() || nodeIndex >= tokenByNode.size())
         {
             return;
         }
         const usize tokenSlot = token.value - 1U;
-        if (tokenSlot >= styleTokenDependencyHeadByTokenIndex.size())
+        if (tokenSlot >= headByToken.size())
         {
             return;
         }
         const u32 nodeLink = nodeIndex + 1U;
-        const u32 head = styleTokenDependencyHeadByTokenIndex[tokenSlot];
-        styleTokenDependencyNextByNodeIndex[nodeIndex] = head;
-        styleTokenDependencyPrevByNodeIndex[nodeIndex] = 0;
+        const u32 head = headByToken[tokenSlot];
+        nextByNode[nodeIndex] = head;
+        prevByNode[nodeIndex] = 0;
         if (head != 0)
         {
-            styleTokenDependencyPrevByNodeIndex[head - 1U] = nodeLink;
+            prevByNode[head - 1U] = nodeLink;
         }
-        styleTokenDependencyHeadByTokenIndex[tokenSlot] = nodeLink;
-        resolvedStyleColorTokenByNodeIndex[nodeIndex] = token;
+        headByToken[tokenSlot] = nodeLink;
+        tokenByNode[nodeIndex] = token;
+    }
+
+    void unlinkStyleTokenDependency(u32 nodeIndex) noexcept
+    {
+        unlinkTokenDependencyList(nodeIndex, resolvedStyleColorTokenByNodeIndex,
+                                  styleTokenDependencyNextByNodeIndex,
+                                  styleTokenDependencyPrevByNodeIndex,
+                                  styleTokenDependencyHeadByTokenIndex);
+    }
+
+    void linkStyleTokenDependency(u32 nodeIndex, UIStyleTokenId token) noexcept
+    {
+        linkTokenDependencyList(nodeIndex, token, resolvedStyleColorTokenByNodeIndex,
+                                styleTokenDependencyNextByNodeIndex,
+                                styleTokenDependencyPrevByNodeIndex,
+                                styleTokenDependencyHeadByTokenIndex);
     }
 
     void setResolvedStyleColorTokenDependency(u32 nodeIndex, UIStyleTokenId token) noexcept
@@ -2265,8 +2306,7 @@ struct UIContext::Impl final {
         {
             return;
         }
-        const UIStyleTokenId current = resolvedStyleColorTokenByNodeIndex[nodeIndex];
-        if (current == token)
+        if (resolvedStyleColorTokenByNodeIndex[nodeIndex] == token)
         {
             return;
         }
@@ -2275,6 +2315,61 @@ struct UIContext::Impl final {
         {
             linkStyleTokenDependency(nodeIndex, token);
         }
+    }
+
+    void unlinkImageTintTokenDependency(u32 nodeIndex) noexcept
+    {
+        unlinkTokenDependencyList(nodeIndex, resolvedImageTintTokenByNodeIndex,
+                                  imageTintTokenDependencyNextByNodeIndex,
+                                  imageTintTokenDependencyPrevByNodeIndex,
+                                  imageTintTokenDependencyHeadByTokenIndex);
+    }
+
+    void linkImageTintTokenDependency(u32 nodeIndex, UIStyleTokenId token) noexcept
+    {
+        linkTokenDependencyList(nodeIndex, token, resolvedImageTintTokenByNodeIndex,
+                                imageTintTokenDependencyNextByNodeIndex,
+                                imageTintTokenDependencyPrevByNodeIndex,
+                                imageTintTokenDependencyHeadByTokenIndex);
+    }
+
+    void setResolvedImageTintTokenDependency(u32 nodeIndex, UIStyleTokenId token) noexcept
+    {
+        if (nodeIndex >= resolvedImageTintTokenByNodeIndex.size())
+        {
+            return;
+        }
+        if (resolvedImageTintTokenByNodeIndex[nodeIndex] == token)
+        {
+            return;
+        }
+        unlinkImageTintTokenDependency(nodeIndex);
+        if (token.hasValue())
+        {
+            linkImageTintTokenDependency(nodeIndex, token);
+        }
+    }
+
+    [[nodiscard]] bool hasLocalImageTintOverride(u32 nodeIndex) const noexcept
+    {
+        return nodeIndex < styleOverridesByNodeIndex.size() &&
+               (styleOverridesByNodeIndex[nodeIndex] &
+                static_cast<u16>(UIStyleOverride::ImageTint)) != 0;
+    }
+
+    [[nodiscard]] UIStraightSrgba8Color resolvedImageTintColor(u32 nodeIndex,
+                                                               const UIImageContent& image) const noexcept
+    {
+        if (hasLocalImageTintOverride(nodeIndex))
+        {
+            return image.tint;
+        }
+        if (nodeIndex < resolvedImageTintValidByNodeIndex.size() &&
+            resolvedImageTintValidByNodeIndex[nodeIndex] != 0)
+        {
+            return resolvedImageTintCacheByNodeIndex[nodeIndex];
+        }
+        return image.tint;
     }
 
     [[nodiscard]] usize refreshResolvedStyleCache(u32 nodeIndex,
@@ -2291,21 +2386,40 @@ struct UIContext::Impl final {
         styleStatesByNodeIndex[nodeIndex] = states;
         UIPremultipliedRgba8Color resolvedFill = resolveBuiltinBoxFillColor(
             node, nodeIndex, localSolidFillCacheByIndex[nodeIndex]);
+
+        const Detail::UIStyleBoxFillResolution resolution =
+            resolveStyleBoxFill(nodeIndex, states);
+
         if (hasLocalBoxFillOverride(nodeIndex, *record))
         {
             resolvedBoxFillCacheByNodeIndex[nodeIndex] = resolvedFill;
             setResolvedStyleColorTokenDependency(nodeIndex, {});
-            return 0;
+        }
+        else
+        {
+            if (resolution.color.has_value())
+            {
+                resolvedFill = premultiply(*resolution.color);
+            }
+            resolvedBoxFillCacheByNodeIndex[nodeIndex] = resolvedFill;
+            setResolvedStyleColorTokenDependency(nodeIndex, resolution.colorToken);
         }
 
-        const Detail::UIStyleBoxFillResolution resolution =
-            resolveStyleBoxFill(nodeIndex, states);
-        if (resolution.color.has_value())
+        if (hasLocalImageTintOverride(nodeIndex) || !resolution.imageTint.has_value())
         {
-            resolvedFill = premultiply(*resolution.color);
+            if (nodeIndex < resolvedImageTintValidByNodeIndex.size())
+            {
+                resolvedImageTintValidByNodeIndex[nodeIndex] = 0;
+                resolvedImageTintCacheByNodeIndex[nodeIndex] = {};
+            }
+            setResolvedImageTintTokenDependency(nodeIndex, {});
         }
-        resolvedBoxFillCacheByNodeIndex[nodeIndex] = resolvedFill;
-        setResolvedStyleColorTokenDependency(nodeIndex, resolution.colorToken);
+        else
+        {
+            resolvedImageTintCacheByNodeIndex[nodeIndex] = *resolution.imageTint;
+            resolvedImageTintValidByNodeIndex[nodeIndex] = 1;
+            setResolvedImageTintTokenDependency(nodeIndex, resolution.imageTintToken);
+        }
         return resolution.candidateRuleCount;
     }
 
@@ -2840,12 +2954,14 @@ struct UIContext::Impl final {
             resolvedBoxFillCacheByNodeIndex[nodeIndex];
         paintEntryCount += countBoxChromePaintEntries(boxPaint, layoutEntry.worldRect, !resolvedFill.isTransparent());
         paintEntryCount += countCanvasPaintEntries(layoutEntry);
-        if (const UIImageContent* image = imageContentStorage.get(nodeIndex);
-            image != nullptr && image->tint.alpha != 0 &&
-            layoutEntry.contentPlacement.contentBox.width > 0.0F &&
-            layoutEntry.contentPlacement.contentBox.height > 0.0F)
+        if (const UIImageContent* image = imageContentStorage.get(nodeIndex); image != nullptr)
         {
-            ++paintEntryCount;
+            const UIStraightSrgba8Color tint = resolvedImageTintColor(nodeIndex, *image);
+            if (tint.alpha != 0 && layoutEntry.contentPlacement.contentBox.width > 0.0F &&
+                layoutEntry.contentPlacement.contentBox.height > 0.0F)
+            {
+                ++paintEntryCount;
+            }
         }
         auto controlPaintBatch = resolveControlPaintBatch(layoutEntry, false);
         if (!controlPaintBatch)
@@ -3019,7 +3135,12 @@ struct UIContext::Impl final {
         const u32 nodeIndex = layoutEntry.node.index();
         const UIImageContent* image = imageContentStorage.get(nodeIndex);
         const NodeRecord* record = recordByIndex(nodeIndex);
-        if (image == nullptr || record == nullptr || image->tint.alpha == 0)
+        if (image == nullptr || record == nullptr)
+        {
+            return;
+        }
+        const UIStraightSrgba8Color tint = resolvedImageTintColor(nodeIndex, *image);
+        if (tint.alpha == 0)
         {
             return;
         }
@@ -3035,7 +3156,7 @@ struct UIContext::Impl final {
             .effectiveClip = intersectRects(layoutEntry.effectiveClip,
                                             layoutEntry.contentPlacement.contentBox),
             .paintOrdinal = nextPaintOrdinal,
-            .solidFill = premultiply(image->tint),
+            .solidFill = premultiply(tint),
             .kind = UICommittedPaintKind::Image,
             .imageSource = image->source,
             .imageSampling = image->sampling,
@@ -3981,6 +4102,12 @@ struct UIContext::Impl final {
             styleStatesByNodeIndex[index] = UIStyleState::None;
             resolvedBoxFillCacheByNodeIndex[index] = {};
             unlinkStyleTokenDependency(index);
+            unlinkImageTintTokenDependency(index);
+            if (index < resolvedImageTintValidByNodeIndex.size())
+            {
+                resolvedImageTintValidByNodeIndex[index] = 0;
+                resolvedImageTintCacheByNodeIndex[index] = {};
+            }
         }
         boxPaintsByIndex[index] = {};
         buttonPaintsByNodeIndex[index] = {};
@@ -4805,18 +4932,19 @@ struct UIContext::Impl final {
         usize candidateRuleCount = 0;
     };
 
-    [[nodiscard]] u32 styleTokenDependencyHead(UIStyleTokenId token) const noexcept
+    [[nodiscard]] u32 tokenDependencyHead(UIStyleTokenId token,
+                                          const std::pmr::vector<u32>& headByToken) const noexcept
     {
         if (!token.hasValue())
         {
             return 0;
         }
         const usize tokenSlot = token.value - 1U;
-        if (tokenSlot >= styleTokenDependencyHeadByTokenIndex.size())
+        if (tokenSlot >= headByToken.size())
         {
             return 0;
         }
-        return styleTokenDependencyHeadByTokenIndex[tokenSlot];
+        return headByToken[tokenSlot];
     }
 
     [[nodiscard]] Core::Status preflightStyleColorTokenDirtyQueue(
@@ -4824,34 +4952,43 @@ struct UIContext::Impl final {
     {
         compactDirtyQueue();
         usize requiredQueueEntries = 0;
-        for (u32 link = styleTokenDependencyHead(token); link != 0;)
-        {
-            const u32 index = link - 1U;
-            if (index >= styleTokenDependencyNextByNodeIndex.size())
+        const auto visitList = [&](u32 head, const std::pmr::vector<u32>& nextByNode,
+                                   auto isSuppressed) {
+            for (u32 link = head; link != 0;)
             {
-                break;
+                const u32 index = link - 1U;
+                if (index >= nextByNode.size())
+                {
+                    break;
+                }
+                link = nextByNode[index];
+                ++statistics.inspectedNodeCount;
+                const NodeRecord* record = recordByIndex(index);
+                if (record == nullptr || isSuppressed(index, *record))
+                {
+                    continue;
+                }
+                // Reverse index already stores the winning token; no full-tree
+                // resolve or candidate-rule scan is required on the update path.
+                ++statistics.resolvedNodeCount;
+                ++statistics.affectedNodeCount;
+                if (!dirtyQueueStorage.isQueued(index) &&
+                    !dirtyQueueStorage.isReserved(index))
+                {
+                    ++requiredQueueEntries;
+                }
             }
-            link = styleTokenDependencyNextByNodeIndex[index];
-            ++statistics.inspectedNodeCount;
-            const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr)
-            {
-                continue;
-            }
-            if (hasLocalBoxFillOverride(index, *record))
-            {
-                continue;
-            }
-            // Reverse index already stores the winning token; no full-tree
-            // resolve or candidate-rule scan is required on the update path.
-            ++statistics.resolvedNodeCount;
-            ++statistics.affectedNodeCount;
-            if (!dirtyQueueStorage.isQueued(index) &&
-                !dirtyQueueStorage.isReserved(index))
-            {
-                ++requiredQueueEntries;
-            }
-        }
+        };
+        visitList(tokenDependencyHead(token, styleTokenDependencyHeadByTokenIndex),
+                  styleTokenDependencyNextByNodeIndex,
+                  [this](u32 index, const NodeRecord& record) {
+                      return hasLocalBoxFillOverride(index, record);
+                  });
+        visitList(tokenDependencyHead(token, imageTintTokenDependencyHeadByTokenIndex),
+                  imageTintTokenDependencyNextByNodeIndex,
+                  [this](u32 index, const NodeRecord&) {
+                      return hasLocalImageTintOverride(index);
+                  });
 
         const usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
         if (occupiedQueueEntries > dirtyQueueStorage.queueCapacity() ||
@@ -4867,26 +5004,39 @@ struct UIContext::Impl final {
     void publishStyleColorTokenDirtyState(UIStyleTokenId token) noexcept
     {
         bool changed = false;
-        for (u32 link = styleTokenDependencyHead(token); link != 0;)
-        {
-            const u32 index = link - 1U;
-            if (index >= styleTokenDependencyNextByNodeIndex.size())
+        const auto publishList = [&](u32 head, const std::pmr::vector<u32>& nextByNode,
+                                     auto isSuppressed) {
+            for (u32 link = head; link != 0;)
             {
-                break;
+                const u32 index = link - 1U;
+                if (index >= nextByNode.size())
+                {
+                    break;
+                }
+                link = nextByNode[index];
+                const NodeRecord* record = recordByIndex(index);
+                if (record == nullptr || isSuppressed(index, *record))
+                {
+                    continue;
+                }
+                if (!dirtyQueueStorage.isQueued(index))
+                {
+                    dirtyQueueStorage.enqueue(idForIndex(index));
+                }
+                dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+                changed = true;
             }
-            link = styleTokenDependencyNextByNodeIndex[index];
-            const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr || hasLocalBoxFillOverride(index, *record))
-            {
-                continue;
-            }
-            if (!dirtyQueueStorage.isQueued(index))
-            {
-                dirtyQueueStorage.enqueue(idForIndex(index));
-            }
-            dirtyQueueStorage.flags(index) |= UIDirty::Paint;
-            changed = true;
-        }
+        };
+        publishList(tokenDependencyHead(token, styleTokenDependencyHeadByTokenIndex),
+                    styleTokenDependencyNextByNodeIndex,
+                    [this](u32 index, const NodeRecord& record) {
+                        return hasLocalBoxFillOverride(index, record);
+                    });
+        publishList(tokenDependencyHead(token, imageTintTokenDependencyHeadByTokenIndex),
+                    imageTintTokenDependencyNextByNodeIndex,
+                    [this](u32 index, const NodeRecord&) {
+                        return hasLocalImageTintOverride(index);
+                    });
         if (changed)
         {
             phaseDirty |= PhasePaint;
@@ -6731,7 +6881,8 @@ struct UIContext::Impl final {
         {
             return staged;
         }
-        if ((overridesToClear & boxFillOverrideMask(**nodeResult)) != 0)
+        if ((overridesToClear & boxFillOverrideMask(**nodeResult)) != 0 ||
+            (overridesToClear & static_cast<u16>(UIStyleOverride::ImageTint)) != 0)
         {
             stageThemePaintChange(index);
         }
@@ -6744,6 +6895,10 @@ struct UIContext::Impl final {
         styleOverridesByNodeIndex[index] &= static_cast<u16>(~requested);
         themeBindingsByNodeIndex[index] = nextBindings;
         applyStagedProductChromeTransition(index, role, productTheme, affectedBindings, affectedBindings);
+        if ((overridesToClear & static_cast<u16>(UIStyleOverride::ImageTint)) != 0)
+        {
+            static_cast<void>(refreshResolvedStyleCache(index));
+        }
         publishThemeDirtyState();
         return Core::success();
     }
@@ -6825,17 +6980,47 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidElementDescriptor,
                         "UI image tint requires retained image content");
         }
-        if (current->tint == tint)
+        const u32 index = node.index();
+        const UIStraightSrgba8Color previousResolved = resolvedImageTintColor(index, *current);
+        const bool alreadyLocal = hasLocalImageTintOverride(index);
+        // Effective color unchanged: still detach sheet if needed, but no paint dirty.
+        if (previousResolved == tint)
         {
+            if (!alreadyLocal)
+            {
+                styleOverridesByNodeIndex[index] |= static_cast<u16>(UIStyleOverride::ImageTint);
+                setResolvedImageTintTokenDependency(index, {});
+                if (index < resolvedImageTintValidByNodeIndex.size())
+                {
+                    resolvedImageTintValidByNodeIndex[index] = 0;
+                    resolvedImageTintCacheByNodeIndex[index] = {};
+                }
+                if (current->tint != tint)
+                {
+                    return imageContentStorage.setTint(index, tint);
+                }
+            }
             return Core::success();
         }
         // Dirty metadata: tint/opacity is paint-only. Intrinsic size changes
         // would require a separate image content API and Measure dirty.
+        // Local setter detaches stylesheet image tint (override wins).
         if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus)
         {
             return dirtyStatus;
         }
-        return imageContentStorage.setTint(node.index(), tint);
+        if (Core::Status setTint = imageContentStorage.setTint(index, tint); !setTint)
+        {
+            return setTint;
+        }
+        styleOverridesByNodeIndex[index] |= static_cast<u16>(UIStyleOverride::ImageTint);
+        setResolvedImageTintTokenDependency(index, {});
+        if (index < resolvedImageTintValidByNodeIndex.size())
+        {
+            resolvedImageTintValidByNodeIndex[index] = 0;
+            resolvedImageTintCacheByNodeIndex[index] = {};
+        }
+        return Core::success();
     }
 
     [[nodiscard]] Core::Result<UIStraightSrgba8Color> imageTintFromUpdater(UINodeId updaterRoot,
@@ -6864,7 +7049,7 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidElementDescriptor,
                         "UI image tint requires retained image content");
         }
-        return current->tint;
+        return resolvedImageTintColor(node.index(), *current);
     }
 
     [[nodiscard]] Core::Status setButtonPaintFromUpdater(UINodeId updaterRoot, UINodeId button,

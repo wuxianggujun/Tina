@@ -717,7 +717,7 @@ counter、容量/分配不变量可以立即作为确定性门禁：
   6. `UI-STYLE-001` InProgress：fixed-capacity style kernel、Context class/token capacity 与 startup install、
     ColorToken registry/value 与运行期 reverse-dependency getter/setter、每节点最多 4 个 class link、retained
     state + literal/token-backed resolved BoxFill paint cache、Runtime facade，以及 `ui_style_state_v1` 已落地；
-    Image tint/opacity 运行期 paint-only API 已落地；下一步补 stylesheet 驱动 Image tint token、其他属性 dirty metadata 及产品视觉门禁；
+    Image tint/opacity 运行期 paint-only API 与 stylesheet imageTint/imageTintToken（独立 reverse-dependency）已落地；下一步补其他属性 dirty metadata 及产品视觉门禁；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。
 
 独立或后置 lane：

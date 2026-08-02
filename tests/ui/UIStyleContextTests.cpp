@@ -2,10 +2,12 @@
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIElement.hpp>
 
 #include <array>
 #include <memory>
 #include <optional>
+#include <span>
 #include <thread>
 
 namespace Tina::Tests {
@@ -94,6 +96,42 @@ findPaintEntry(UI::UICommittedPaintView view, UI::UINodeId node) noexcept
         }
     }
     return false;
+}
+
+[[nodiscard]] Core::AssetId styleImageAssetId()
+{
+    Core::AssetId::Bytes bytes{};
+    bytes[0] = std::byte{0x51};
+    return *Core::AssetId::fromBytes(bytes);
+}
+
+[[nodiscard]] UI::UIImageContent styleImageContent(UI::UIStraightSrgba8Color tint)
+{
+    return UI::UIImageContent{
+        .source =
+            {
+                .texture = styleImageAssetId(),
+                .sourcePixels = {.x = 0, .y = 0, .width = 16, .height = 16},
+                .texturePixelExtent = {.width = 16, .height = 16},
+                .intrinsicLogicalSize = {.width = 16.0F, .height = 16.0F},
+            },
+        .fit = UI::UIImageFit::Fill,
+        .tint = tint,
+        .sampling = UI::UIImageSampling::Nearest,
+    };
+}
+
+[[nodiscard]] const UI::UICommittedPaintEntry*
+findImagePaintEntry(UI::UICommittedPaintView view, UI::UINodeId node) noexcept
+{
+    for (const UI::UICommittedPaintEntry& entry : view.entries())
+    {
+        if (entry.node == node && entry.kind == UI::UICommittedPaintKind::Image)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
 }
 
 TEST(UIStyleContextTests, RegistersAndAtomicallyInstallsOnlyBeforeFirstNode)
@@ -683,6 +721,78 @@ TEST(UIStyleContextTests, ControlPaintOverridesSuppressStylesheetEvenAtExistingV
     EXPECT_EQ(findPaintEntry(context->committedPaint(), *button), nullptr);
     EXPECT_EQ(findPaintEntry(context->committedPaint(), *checkbox), nullptr);
     EXPECT_EQ(findPaintEntry(context->committedPaint(), *textEdit), nullptr);
+}
+
+TEST(UIStyleContextTests, StylesheetImageTintTokenDrivesPaintAndLocalOverride)
+{
+    auto capacities = styleTestCapacity();
+    capacities.imageContentCapacity = 2;
+    auto context = createStyleContext(capacities);
+    ASSERT_NE(context, nullptr);
+
+    auto styleClass = context->registerStyleClass();
+    ASSERT_TRUE(styleClass.has_value()) << styleClass.error().message;
+    auto tintToken = context->registerStyleColorToken(UI::rgba8(16, 32, 48, 255));
+    ASSERT_TRUE(tintToken.has_value()) << tintToken.error().message;
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .styleClass = *styleClass,
+            .imageTintToken = *tintToken,
+        },
+    };
+    assertOk(context->installStyleSheet(rules));
+
+    auto root = createStyleRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UIStyleClassId classId = *styleClass;
+    UI::UIElementDescriptor imageDesc =
+        UI::makeImageElement(styleImageContent(UI::rgba8(255, 255, 255, 255)), "Icon",
+                             fixedSize(32.0F, 32.0F));
+    imageDesc.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
+    imageDesc.visual.styleClasses = std::span(&classId, 1);
+    const auto image = context->rootBuilder().createElement(root.rootNodeId(), imageDesc);
+    ASSERT_TRUE(image.has_value()) << image.error().message;
+
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    auto updater = std::move(*updaterResult);
+
+    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
+    const auto* paint = findImagePaintEntry(context->committedPaint(), *image);
+    ASSERT_NE(paint, nullptr);
+    EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(16, 32, 48, 255)));
+    EXPECT_EQ(*updater.imageTint(*image), UI::rgba8(16, 32, 48, 255));
+
+    assertOk(context->setStyleColorToken(*tintToken, UI::rgba8(200, 100, 50, 180)));
+    const UI::UIContextStatistics afterToken = context->statistics();
+    EXPECT_EQ(afterToken.lastStyleTokenUpdateAffectedNodeCount, 1U);
+    EXPECT_TRUE(afterToken.paintDirty);
+    EXPECT_FALSE(afterToken.layoutDirty);
+    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
+    paint = findImagePaintEntry(context->committedPaint(), *image);
+    ASSERT_NE(paint, nullptr);
+    EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(200, 100, 50, 180)));
+
+    assertOk(updater.setImageTint(*image, UI::rgba8(1, 2, 3, 255)));
+    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
+    paint = findImagePaintEntry(context->committedPaint(), *image);
+    ASSERT_NE(paint, nullptr);
+    EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(1, 2, 3, 255)));
+
+    // Local override suppresses stylesheet token updates.
+    assertOk(context->setStyleColorToken(*tintToken, UI::rgba8(9, 9, 9, 255)));
+    EXPECT_EQ(context->statistics().lastStyleTokenUpdateAffectedNodeCount, 0U);
+    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
+    paint = findImagePaintEntry(context->committedPaint(), *image);
+    ASSERT_NE(paint, nullptr);
+    EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(1, 2, 3, 255)));
+
+    assertOk(updater.clearOverride(*image, UI::UIStyleOverride::ImageTint));
+    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
+    paint = findImagePaintEntry(context->committedPaint(), *image);
+    ASSERT_NE(paint, nullptr);
+    EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(9, 9, 9, 255)));
 }
 
 } // namespace

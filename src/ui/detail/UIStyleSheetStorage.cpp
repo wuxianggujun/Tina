@@ -126,6 +126,18 @@ Core::Status UIStyleSheetStorage::validateRule(const UIStyleBoxFillRule& rule) c
             return invalidStyle("UI style rule cannot combine a color token and literal color");
         }
     }
+    if (rule.imageTintToken.hasValue())
+    {
+        if (rule.imageTintToken.value > colorTokens_.size())
+        {
+            return invalidStyle("UI style rule references an unregistered image tint token");
+        }
+        if (rule.imageTint != UIStraightSrgba8Color{})
+        {
+            return invalidStyle(
+                "UI style rule cannot combine an image tint token and literal image tint");
+        }
+    }
     return Core::success();
 }
 
@@ -322,8 +334,10 @@ UIStyleBoxFillResolution UIStyleSheetStorage::resolveValidated(
 {
     const Buffer& active = buffers_[activeBufferIndex_];
     UIStyleBoxFillResolution resolution{};
-    usize winningRuleIndex = 0;
-    bool hasWinningRule = false;
+    usize winningBoxFillRuleIndex = 0;
+    bool hasWinningBoxFillRule = false;
+    usize winningImageTintRuleIndex = 0;
+    bool hasWinningImageTintRule = false;
 
     const auto inspectBucket = [&](const Bucket* bucket) {
         if (bucket == nullptr)
@@ -340,14 +354,28 @@ UIStyleBoxFillResolution UIStyleSheetStorage::resolveValidated(
             {
                 continue;
             }
-            if (!hasWinningRule || ruleIndex > winningRuleIndex)
+            // Box fill: every matching rule participates (existing later-wins).
+            if (!hasWinningBoxFillRule || ruleIndex > winningBoxFillRuleIndex)
             {
-                hasWinningRule = true;
-                winningRuleIndex = ruleIndex;
+                hasWinningBoxFillRule = true;
+                winningBoxFillRuleIndex = ruleIndex;
                 resolution.colorToken = rule.colorToken;
                 resolution.color = rule.colorToken.hasValue()
                                        ? colorTokens_[rule.colorToken.value - 1U]
                                        : rule.color;
+            }
+            // Image tint: only rules that declare tint (token or non-default literal).
+            const bool declaresImageTint =
+                rule.imageTintToken.hasValue() || rule.imageTint != UIStraightSrgba8Color{};
+            if (declaresImageTint &&
+                (!hasWinningImageTintRule || ruleIndex > winningImageTintRuleIndex))
+            {
+                hasWinningImageTintRule = true;
+                winningImageTintRuleIndex = ruleIndex;
+                resolution.imageTintToken = rule.imageTintToken;
+                resolution.imageTint = rule.imageTintToken.hasValue()
+                                           ? colorTokens_[rule.imageTintToken.value - 1U]
+                                           : rule.imageTint;
             }
         }
     };

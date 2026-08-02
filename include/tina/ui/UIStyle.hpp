@@ -105,14 +105,20 @@ constexpr UIStyleState& operator|=(UIStyleState& left, UIStyleState right) noexc
 
 // First stylesheet declaration slice. Rules are copied and precompiled by the
 // owning UIContext; caller storage is borrowed only for installStyleSheet().
-// A non-zero colorToken selects its startup-registered value and requires color
-// to remain default initialized, avoiding ambiguous literal/token precedence.
+// A non-zero colorToken/imageTintToken selects its startup-registered value and
+// requires the matching literal color to remain default initialized, avoiding
+// ambiguous literal/token precedence. Box fill and image tint later-rule-wins
+// independently when matching the same role/class/state chain.
 struct UIStyleBoxFillRule final {
     UIStyleRoleId role = UIStyleRoleId::None;
     UIStyleClassId styleClass{};
     UIStyleState requiredStates = UIStyleState::None;
     UIStraightSrgba8Color color{};
     UIStyleTokenId colorToken{};
+    // Optional Image/Icon tint. Applied only when imageTintToken is set or
+    // imageTint is non-default; otherwise the rule does not touch image tint.
+    UIStraightSrgba8Color imageTint{};
+    UIStyleTokenId imageTintToken{};
 };
 
 // A local setter detaches one property from its role. clearOverride() restores
@@ -131,7 +137,8 @@ enum class UIStyleOverride : u16 {
     ListViewPaint = 1U << 9U,
     TreeViewPaint = 1U << 10U,
     TextEditPaint = 1U << 11U,
-    All = (1U << 12U) - 1U,
+    ImageTint = 1U << 12U,
+    All = (1U << 13U) - 1U,
 };
 
 [[nodiscard]] constexpr UIStyleOverride operator|(UIStyleOverride left, UIStyleOverride right) noexcept
