@@ -187,7 +187,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 DesktopBootstrap/RenderBgfx 闭包，并在 Windows 覆盖可选 UIFreetype/Vorbis/Opus 图。`xxHash`、`glfw3`、
 `Freetype`、`Threads` 与可选 codec package 继续由 consumer toolchain 解析；
 RenderBgfx 在 Tina prefix 中安装最小 `bgfx`/`bx`/`bimg` runtime package，不包含 shaderc、图片 codec 或
-离线工具。Docker 入口固定限制为 2 CPU/8 GiB。
+离线工具。每个 consumer gate 都先安装到 staging prefix，再物理移动到不同名的
+relocated prefix；原 prefix 消失后，package 路径扫描、`find_package`、链接和运行只允许使用新位置。
+这证明同一 OS/toolchain 内的 moved-prefix relocatability，不替代跨发行版 artifact transfer。Docker
+入口固定限制为 2 CPU/8 GiB，并为每个 SDK gate 使用独立的 container-only build directory，避免
+WSL `/mnt/c` 与 Docker `/work/tina` 共用绝对路径 cache。
 
 ## Windows Platform/Desktop/bgfx
 

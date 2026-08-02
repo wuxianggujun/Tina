@@ -609,7 +609,8 @@ Invoke/Toggle/RangeValue/Value patterns。
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
-- 安装 SDK 的跨发行版 relocatability 与正式发布 ABI/兼容策略。
+- 安装 SDK 的跨发行版 artifact transfer 与正式发布 ABI/兼容策略；同一
+  OS/toolchain 内的 moved-prefix relocatability 已由 Windows/Linux consumer gate 覆盖。
 
 任务状态见 [Backlog](backlog.md)。修改公开头后必须构建 header-isolation/consumer、扫描第三方 token，
 并按 [测试说明](testing.md) 运行受影响 executable 与 sample。

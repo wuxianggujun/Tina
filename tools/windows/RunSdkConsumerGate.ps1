@@ -52,7 +52,8 @@ $consumerDirectoryName = if($isDesktopBootstrapConsumer) {
 } else {
     "sdk-consumer"
 }
-$installPrefix = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-prefix"
+$installStagingPrefix = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-staging-prefix"
+$installPrefix = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-relocated-prefix"
 $consumerBuildDirectory = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-build"
 $missingComponentBuildDirectory = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-missing-component-build"
 $componentIsolationBuildDirectory = Join-Path $resolvedBuildDirectory "$consumerDirectoryName-component-isolation-build"
@@ -76,6 +77,7 @@ $consumerTarget = if($isDesktopBootstrapConsumer) {
 }
 $consumerExecutableName = "$consumerTarget.exe"
 $verificationScript = Join-Path $sourceDirectory "cmake/VerifyInstalledTinaSdkHeaders.cmake"
+$relocationVerificationScript = Join-Path $sourceDirectory "cmake/VerifyRelocatedTinaSdkPackage.cmake"
 $generator = Get-CMakeCacheValue "CMAKE_GENERATOR"
 $generatorPlatform = Get-CMakeCacheValue "CMAKE_GENERATOR_PLATFORM"
 $toolchainFile = Get-CMakeCacheValue "CMAKE_TOOLCHAIN_FILE"
@@ -84,7 +86,7 @@ $vcpkgTargetTriplet = Get-CMakeCacheValue "VCPKG_TARGET_TRIPLET"
 
 $buildDirectoryPrefix = $resolvedBuildDirectory.TrimEnd([System.IO.Path]::DirectorySeparatorChar) +
     [System.IO.Path]::DirectorySeparatorChar
-foreach($managedDirectory in @($installPrefix, $consumerBuildDirectory, $missingComponentBuildDirectory,
+foreach($managedDirectory in @($installStagingPrefix, $installPrefix, $consumerBuildDirectory, $missingComponentBuildDirectory,
         $componentIsolationBuildDirectory)) {
     if(-not $managedDirectory.StartsWith($buildDirectoryPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to refresh SDK gate directory outside the Tina build tree: $managedDirectory"
@@ -112,13 +114,29 @@ $sdkBuildArguments = @(
 & cmake @sdkBuildArguments
 if($LASTEXITCODE -ne 0) { throw "Tina Game SDK build failed with exit code $LASTEXITCODE" }
 
-& cmake --install $resolvedBuildDirectory --config $Configuration --prefix $installPrefix
+& cmake --install $resolvedBuildDirectory --config $Configuration --prefix $installStagingPrefix
 if($LASTEXITCODE -ne 0) { throw "Tina Game SDK install failed with exit code $LASTEXITCODE" }
 
 $audioMiniaudioEnabled = (Get-CMakeCacheValue "TINA_BUILD_AUDIO_MINIAUDIO") -eq "ON"
-& cmake "-DTINA_SDK_INCLUDE_DIR=$($installPrefix -replace '\\', '/')/include" `
+& cmake "-DTINA_SDK_INCLUDE_DIR=$($installStagingPrefix -replace '\\', '/')/include" `
     "-DTINA_EXPECT_AUDIO_MINIAUDIO=$audioMiniaudioEnabled" -P $verificationScript
 if($LASTEXITCODE -ne 0) { throw "Installed Tina SDK header verification failed with exit code $LASTEXITCODE" }
+
+Move-Item -LiteralPath $installStagingPrefix -Destination $installPrefix
+if(Test-Path -LiteralPath $installStagingPrefix) {
+    throw "Original Tina SDK staging prefix still exists after relocation: $installStagingPrefix"
+}
+
+& cmake "-DTINA_SDK_RELOCATED_PREFIX=$($installPrefix -replace '\\', '/')" `
+    "-DTINA_SDK_ORIGINAL_PREFIX=$($installStagingPrefix -replace '\\', '/')" `
+    "-DTINA_FORBIDDEN_BUILD_DIR=$($resolvedBuildDirectory -replace '\\', '/')" `
+    "-DTINA_FORBIDDEN_SOURCE_DIR=$($sourceDirectory -replace '\\', '/')" `
+    -P $relocationVerificationScript
+if($LASTEXITCODE -ne 0) { throw "Relocated Tina SDK package verification failed with exit code $LASTEXITCODE" }
+
+& cmake "-DTINA_SDK_INCLUDE_DIR=$($installPrefix -replace '\\', '/')/include" `
+    "-DTINA_EXPECT_AUDIO_MINIAUDIO=$audioMiniaudioEnabled" -P $verificationScript
+if($LASTEXITCODE -ne 0) { throw "Relocated Tina SDK header verification failed with exit code $LASTEXITCODE" }
 
 $commonConfigureArguments = @(
     "-G", $generator,

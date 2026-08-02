@@ -182,7 +182,8 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 
 ### 还不可以
 
-- 通过安装目录使用 AudioMiniaudio adapter，或依赖跨发行版 relocatability 与正式 ABI/兼容策略；
+- 依赖跨发行版 artifact transfer 或正式 ABI/兼容策略；AudioMiniaudio 安装 adapter 与
+  Windows/Linux moved-prefix consumer 已可用；
 - 注册任意新 Widget class 或 Behavior state machine；
 - 定义用户 StyleClass、selector、pseudo-state stylesheet；
 - 从 UI 持有 AssetHandle/Lease、FrameResourceRef 或 texture/bgfx handle；
@@ -676,8 +677,8 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 
 - `UI-RANGE-INPUT-KEYBOARD` 已关闭：它只依赖 Slider Focusable 子切片与 Runtime input route，不依赖
   ADR 0023；capability-shaped 调值 command 与 fixed-capacity exact-control Down/Up latch 不复用空间焦点状态；
-- `SDK-001` 的 GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx 与可选 UIFreetype 安装切片已落地，
-  待 AudioMiniaudio、跨发行版 relocatability 与正式 ABI/兼容策略；此后每个新增公共 UI 切片同步增加
+- `SDK-001` 的 GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装与
+  Windows/Linux moved-prefix 切片已落地，待跨发行版 artifact transfer 与正式 ABI/兼容策略；此后每个新增公共 UI 切片同步增加
   consumer 覆盖；
 - `UI-FLOW-001` 只有真实页面栈需求后才增加 Activatable Screen/Layer Stack/Action Router；
 - `UI-BEHAVIOR-SPI-001` 只有标准 Behavior 无法满足有证据的插件场景时才冻结高级 SPI。

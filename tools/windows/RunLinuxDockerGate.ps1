@@ -64,6 +64,7 @@ $map = @{
         Script = 'tools/linux/run-sdk-consumer-gate.sh'
         Container = 'tina-sdk-001-gcc13-consumer'
         GateId = 'SDK-001-linux-gcc13-consumer'
+        BuildDirectory = '/work/tina/out/build/docker-linux-gcc13-vnext-sdk-consumer'
     }
     'sdk-platform-glfw-consumer' = @{
         Image = 'tina-linux-gcc13-platform:test-001'
@@ -71,6 +72,7 @@ $map = @{
         Script = 'tools/linux/run-sdk-platform-glfw-consumer-gate.sh'
         Container = 'tina-sdk-001-gcc13-platform-glfw-consumer'
         GateId = 'SDK-001-linux-gcc13-platform-glfw-consumer'
+        BuildDirectory = '/work/tina/out/build/docker-linux-gcc13-vnext-platform-sdk-platform-glfw-consumer'
     }
     'sdk-desktop-bootstrap-consumer' = @{
         Image = 'tina-linux-gcc13-platform:test-001'
@@ -78,6 +80,7 @@ $map = @{
         Script = 'tools/linux/run-sdk-desktop-bootstrap-consumer-gate.sh'
         Container = 'tina-sdk-001-gcc13-desktop-bootstrap-consumer'
         GateId = 'SDK-001-linux-gcc13-desktop-bootstrap-consumer'
+        BuildDirectory = '/work/tina/out/build/docker-linux-gcc13-vnext-bgfx-sdk-desktop-bootstrap-consumer'
     }
     'sdk-audio-miniaudio-consumer' = @{
         Image = 'tina-linux-gcc13:test-001'
@@ -85,6 +88,7 @@ $map = @{
         Script = 'tools/linux/run-sdk-audio-miniaudio-consumer-gate.sh'
         Container = 'tina-sdk-001-gcc13-audio-miniaudio-consumer'
         GateId = 'SDK-001-linux-gcc13-audio-miniaudio-consumer'
+        BuildDirectory = '/work/tina/out/build/docker-linux-gcc13-vnext-audio-miniaudio-sdk-consumer'
     }
 }
 
@@ -138,7 +142,12 @@ $dockerArgs = @(
     '--cpus=2', '--memory=8g',
     '-e', 'VCPKG_ROOT=/opt/vcpkg',
     '-e', 'VCPKG_FORCE_SYSTEM_BINARIES=1',
-    '-e', 'VCPKG_DISABLE_METRICS=1',
+    '-e', 'VCPKG_DISABLE_METRICS=1'
+)
+if($cfg.ContainsKey('BuildDirectory')) {
+    $dockerArgs += @('-e', "TINA_SDK_BUILD_DIRECTORY=$($cfg.BuildDirectory)")
+}
+$dockerArgs += @(
     '-v', "${mount}:/work/tina",
     '-w', '/work/tina',
     $ImageName,
