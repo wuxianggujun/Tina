@@ -22,6 +22,9 @@ namespace Tina::UI {
 
 struct UIElementVisual final {
     UIStyleRoleId styleRole = UIStyleRoleId::None;
+    // Borrowed only for createElement(); at most four registered ids are copied
+    // into Context-owned fixed-capacity node links before the node is returned.
+    std::span<const UIStyleClassId> styleClasses{};
     std::optional<UIBoxPaint> boxPaint{};
     // Borrowed only for createElement(); commands are copied into the
     // UIContext-owned fixed-capacity canvas pool before the node is returned.

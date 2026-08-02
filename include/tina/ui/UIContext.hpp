@@ -53,6 +53,26 @@ struct UIContextLifetimeControl;
 
 namespace Tina::UI {
 
+struct UIStyleStatistics final {
+    usize classCapacity = 0;
+    usize registeredClassCount = 0;
+    usize classHighWater = 0;
+    usize ruleCapacity = 0;
+    usize activeRuleCount = 0;
+    usize ruleHighWater = 0;
+    usize bucketCapacity = 0;
+    usize activeBucketCount = 0;
+    usize bucketHighWater = 0;
+    usize rulesPerBucketCapacity = 0;
+    usize bucketCandidateHighWater = 0;
+    usize nodeClassLinkCapacity = 0;
+    usize activeNodeClassLinkCount = 0;
+    usize nodeClassLinkHighWater = 0;
+    usize compileFailureCount = 0;
+    usize capacityFailureCount = 0;
+    u64 revision = 0;
+};
+
 struct UIContextStatistics final {
     usize nodeCapacity = 0;
     usize rootCapacity = 0;
@@ -127,6 +147,7 @@ struct UIContextStatistics final {
     usize lastPaintSnapshotRebuildCount = 0;
     usize dirtyQueuePendingCount = 0;
     usize dirtyQueueHighWater = 0;
+    UIStyleStatistics style{};
     UIComponentBuildStatistics componentBuild{};
 };
 
@@ -440,6 +461,12 @@ class UIContext final {
     // new nodes inherit the latest theme. Owner-thread only.
     [[nodiscard]] const UITheme& productTheme() const noexcept;
     [[nodiscard]] Core::Status setProductTheme(const UITheme& theme);
+    // Startup-only stylesheet registration. Both operations require the owner
+    // thread and no live retained nodes. installStyleSheet copies all rules and
+    // atomically replaces the previous compiled sheet on success.
+    [[nodiscard]] Core::Result<UIStyleClassId> registerStyleClass();
+    [[nodiscard]] Core::Status installStyleSheet(
+        std::span<const UIStyleBoxFillRule> rules);
 
     // Opens (or replaces) the text face used by measure/paint. Closes the previous
     // face, clears the glyph atlas, and dirties layout/paint for nodes with text.

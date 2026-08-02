@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/ui/UIPaint.hpp>
 
 #include <compare>
 
@@ -101,6 +102,15 @@ constexpr UIStyleState& operator|=(UIStyleState& left, UIStyleState right) noexc
 {
     return (set & state) == state;
 }
+
+// First stylesheet declaration slice. Rules are copied and precompiled by the
+// owning UIContext; caller storage is borrowed only for installStyleSheet().
+struct UIStyleBoxFillRule final {
+    UIStyleRoleId role = UIStyleRoleId::None;
+    UIStyleClassId styleClass{};
+    UIStyleState requiredStates = UIStyleState::None;
+    UIStraightSrgba8Color color{};
+};
 
 // A local setter detaches one property from its role. clearOverride() restores
 // selected properties from the active product theme without touching others.

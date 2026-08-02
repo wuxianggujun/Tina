@@ -197,13 +197,23 @@ Core::Status UIStyleSheetStorage::validateResolveInput(
     {
         return invalidStyle("UI style resolve contains an invalid role");
     }
-    if (classes.size() > MaxStyleClassesPerNode)
+    if (Core::Status validClasses = validateClasses(classes); !validClasses)
     {
-        return invalidStyle("UI style resolve exceeds the per-node class limit");
+        return validClasses;
     }
     if (!isValidStyleStateMask(states))
     {
         return invalidStyle("UI style resolve contains an invalid state mask");
+    }
+    return Core::success();
+}
+
+Core::Status UIStyleSheetStorage::validateClasses(
+    std::span<const UIStyleClassId> classes) const
+{
+    if (classes.size() > MaxStyleClassesPerNode)
+    {
+        return invalidStyle("UI style resolve exceeds the per-node class limit");
     }
     for (usize index = 0; index < classes.size(); ++index)
     {

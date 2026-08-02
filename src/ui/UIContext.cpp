@@ -39,6 +39,7 @@
 #include "detail/UISemanticsSnapshotBuilder.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
 #include "detail/UIStyleRoleResolver.hpp"
+#include "detail/UIStyleSheetStorage.hpp"
 #include "detail/UIThemeTransitionResolver.hpp"
 #include "detail/UIVirtualCollectionLayout.hpp"
 #include "detail/UITextEditModel.hpp"
@@ -361,6 +362,14 @@ struct UIContext::Impl final {
     // scope stops being topmost. Storage is fixed and index-aligned.
     std::pmr::vector<UINodeId> focusRestoreByNodeIndex;
     std::pmr::vector<UIStyleRoleId> styleRolesByNodeIndex;
+    Detail::UIStyleSheetStorage styleSheetStorage;
+    std::pmr::vector<std::array<UIStyleClassId, Detail::MaxStyleClassesPerNode>>
+        styleClassesByNodeIndex;
+    std::pmr::vector<u8> styleClassCountsByNodeIndex;
+    usize activeNodeStyleClassLinkCount = 0;
+    usize nodeStyleClassLinkHighWater = 0;
+    usize nodeStyleClassLinkCapacityFailureCount = 0;
+    bool styleRegistrationClosed = false;
     std::pmr::vector<UIBoxPaint> boxPaintsByIndex;
     std::pmr::vector<UIButtonPaint> buttonPaintsByNodeIndex;
     // Each bit tracks one property that still inherits product chrome. Theme
@@ -523,7 +532,16 @@ struct UIContext::Impl final {
         : ownerWindow(owner), capacityConfig(capacities), ownerThreadId(threadId), lifetime(std::move(lifetimeControl)),
           nodes(std::move(nodePool)), idsByIndex(&resource), layoutStylesByIndex(&resource),
           pointerHitPoliciesByIndex(&resource), enabledByNodeIndex(&resource), focusScopeModesByNodeIndex(&resource),
-          focusRestoreByNodeIndex(&resource), styleRolesByNodeIndex(&resource), boxPaintsByIndex(&resource),
+          focusRestoreByNodeIndex(&resource), styleRolesByNodeIndex(&resource),
+          styleSheetStorage({
+                                .classCapacity = capacities.styleClassCapacity,
+                                .ruleCapacity = capacities.styleRuleCapacity,
+                                .bucketCapacity = capacities.styleBucketCapacity,
+                                .maxRulesPerBucket = capacities.styleRulesPerBucketCapacity,
+                            },
+                            resource),
+          styleClassesByNodeIndex(&resource), styleClassCountsByNodeIndex(&resource),
+          boxPaintsByIndex(&resource),
           buttonPaintsByNodeIndex(&resource),
           themeBindingsByNodeIndex(&resource), styleOverridesByNodeIndex(&resource), themeDirtyScratchByNodeIndex(&resource),
           themeTextMetricsScratchByNodeIndex(&resource), localSolidFillCacheByIndex(&resource),
@@ -613,6 +631,8 @@ struct UIContext::Impl final {
         impl->focusScopeModesByNodeIndex.resize(normalized.nodeCapacity, UIFocusScopeMode::None);
         impl->focusRestoreByNodeIndex.resize(normalized.nodeCapacity);
         impl->styleRolesByNodeIndex.resize(normalized.nodeCapacity, UIStyleRoleId::None);
+        impl->styleClassesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->styleClassCountsByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
         impl->buttonPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->themeBindingsByNodeIndex.resize(normalized.nodeCapacity, 0);
@@ -3582,6 +3602,17 @@ struct UIContext::Impl final {
         {
             styleRolesByNodeIndex[index] = UIStyleRoleId::None;
         }
+        if (index < styleClassCountsByNodeIndex.size())
+        {
+            const usize releasedCount = styleClassCountsByNodeIndex[index];
+            if (releasedCount > activeNodeStyleClassLinkCount)
+            {
+                std::terminate();
+            }
+            activeNodeStyleClassLinkCount -= releasedCount;
+            styleClassCountsByNodeIndex[index] = 0;
+            styleClassesByNodeIndex[index] = {};
+        }
         boxPaintsByIndex[index] = {};
         buttonPaintsByNodeIndex[index] = {};
         if (index < themeBindingsByNodeIndex.size())
@@ -4357,6 +4388,37 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Result<UIStyleClassId> registerStyleClass()
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (styleRegistrationClosed)
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI style classes must be registered before creating retained nodes");
+        }
+        return styleSheetStorage.registerClass();
+    }
+
+    [[nodiscard]] Core::Status installStyleSheet(
+        std::span<const UIStyleBoxFillRule> rules)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (styleRegistrationClosed)
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI stylesheet must be installed before creating retained nodes");
+        }
+        return styleSheetStorage.compile(rules);
+    }
+
     [[nodiscard]] Core::Status reserveComponentBuildStorage(
         UIComponentBuildBudget budget, UIComponentBuildReservation& reservation)
     {
@@ -4573,6 +4635,7 @@ struct UIContext::Impl final {
         {
             layoutStylesByIndex[node.index()].placement = UILayoutPlacement::Overlay;
         }
+        styleRegistrationClosed = true;
         // Interactive controls are targetable. Label remains read-only and
         // decorative unless the caller explicitly changes its hit policy.
         pointerHitPoliciesByIndex[node.index()] =
@@ -4681,6 +4744,13 @@ struct UIContext::Impl final {
                                      ? defaultThemeBindingsFor(descriptor.visual.styleRole)
                                      : 0;
         styleRolesByNodeIndex[node.index()] = descriptor.visual.styleRole;
+        const usize styleClassCount = descriptor.visual.styleClasses.size();
+        std::copy(descriptor.visual.styleClasses.begin(), descriptor.visual.styleClasses.end(),
+                  styleClassesByNodeIndex[node.index()].begin());
+        styleClassCountsByNodeIndex[node.index()] = static_cast<u8>(styleClassCount);
+        activeNodeStyleClassLinkCount += styleClassCount;
+        nodeStyleClassLinkHighWater =
+            (std::max)(nodeStyleClassLinkHighWater, activeNodeStyleClassLinkCount);
         themeBindingsByNodeIndex[node.index()] = nextBindings;
         applyProductChromeTransition(node.index(), descriptor.visual.styleRole, productTheme,
                                      previousBindings | nextBindings, nextBindings);
@@ -4798,6 +4868,20 @@ struct UIContext::Impl final {
         if (!isValidStyleRole(descriptor.visual.styleRole))
         {
             return fail(UIErrorCode::InvalidElementDescriptor, "UI element style role is not recognized");
+        }
+        if (Core::Status classes = styleSheetStorage.validateClasses(
+                descriptor.visual.styleClasses);
+            !classes)
+        {
+            return Core::failure(classes.error());
+        }
+        if (activeNodeStyleClassLinkCount > capacityConfig.nodeStyleClassLinkCapacity ||
+            descriptor.visual.styleClasses.size() >
+                capacityConfig.nodeStyleClassLinkCapacity - activeNodeStyleClassLinkCount)
+        {
+            ++nodeStyleClassLinkCapacityFailureCount;
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI node style class link capacity has been exhausted");
         }
         if (descriptor.textStyle.has_value() && !descriptor.text.has_value())
         {
@@ -13999,6 +14083,8 @@ struct UIContext::Impl final {
     {
         const Detail::UIBehaviorStateStorageCounters behaviorCounters =
             behaviorStateStorage.counters();
+        const Detail::UIStyleSheetStorageStatistics styleStatistics =
+            styleSheetStorage.statistics();
         return UIContextStatistics{
             .nodeCapacity = capacityConfig.nodeCapacity,
             .rootCapacity = capacityConfig.rootCapacity,
@@ -14068,6 +14154,26 @@ struct UIContext::Impl final {
             .lastPaintSnapshotRebuildCount = lastPaintSnapshotRebuildCount,
             .dirtyQueuePendingCount = validDirtyQueueCount(),
             .dirtyQueueHighWater = dirtyQueueStorage.highWater(),
+            .style = {
+                .classCapacity = styleStatistics.classCapacity,
+                .registeredClassCount = styleStatistics.registeredClassCount,
+                .classHighWater = styleStatistics.classHighWater,
+                .ruleCapacity = styleStatistics.ruleCapacity,
+                .activeRuleCount = styleStatistics.activeRuleCount,
+                .ruleHighWater = styleStatistics.ruleHighWater,
+                .bucketCapacity = styleStatistics.bucketCapacity,
+                .activeBucketCount = styleStatistics.activeBucketCount,
+                .bucketHighWater = styleStatistics.bucketHighWater,
+                .rulesPerBucketCapacity = styleStatistics.maxRulesPerBucket,
+                .bucketCandidateHighWater = styleStatistics.bucketCandidateHighWater,
+                .nodeClassLinkCapacity = capacityConfig.nodeStyleClassLinkCapacity,
+                .activeNodeClassLinkCount = activeNodeStyleClassLinkCount,
+                .nodeClassLinkHighWater = nodeStyleClassLinkHighWater,
+                .compileFailureCount = styleStatistics.compileFailureCount,
+                .capacityFailureCount = styleStatistics.capacityFailureCount +
+                                        nodeStyleClassLinkCapacityFailureCount,
+                .revision = styleStatistics.revision,
+            },
             .componentBuild = {
                 .nodes = componentBuildNodeStatistics,
                 .textBytes = makePoolStatistics(
@@ -15505,6 +15611,17 @@ const UITheme& UIContext::productTheme() const noexcept
 Core::Status UIContext::setProductTheme(const UITheme& theme)
 {
     return m_impl->setProductTheme(theme);
+}
+
+Core::Result<UIStyleClassId> UIContext::registerStyleClass()
+{
+    return m_impl->registerStyleClass();
+}
+
+Core::Status UIContext::installStyleSheet(
+    std::span<const UIStyleBoxFillRule> rules)
+{
+    return m_impl->installStyleSheet(rules);
 }
 
 Core::Status UIContext::openTextFont(std::span<const std::byte> fontBytes, i32 faceIndex)

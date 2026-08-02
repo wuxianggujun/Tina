@@ -87,22 +87,22 @@ TEST(UIStyleSheetStorageTests, ResolvesRoleClassStateAndGlobalSourceOrder)
     const auto green = UI::rgb(0x22AA66);
     const auto red = UI::rgb(0xCC3344);
     const std::array rules{
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::ButtonPrimary,
             .color = gray,
         },
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::ButtonPrimary,
             .styleClass = accent,
             .color = blue,
         },
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::ButtonPrimary,
             .styleClass = accent,
             .requiredStates = UI::UIStyleState::Hovered,
             .color = green,
         },
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::ButtonPrimary,
             .styleClass = compact,
             .requiredStates = UI::UIStyleState::Hovered,
@@ -135,7 +135,7 @@ TEST(UIStyleSheetStorageTests, FailedCompilePreservesPublishedSheetAndRevision)
     const UI::UIStyleClassId styleClass = *storage.registerClass();
     const auto originalColor = UI::rgb(0x123456);
     const std::array original{
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
             .styleClass = styleClass,
             .color = originalColor,
@@ -144,7 +144,7 @@ TEST(UIStyleSheetStorageTests, FailedCompilePreservesPublishedSheetAndRevision)
     ASSERT_TRUE(storage.compile(original).has_value());
 
     const std::array invalid{
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
             .styleClass = UI::UIStyleClassId{.value = 4},
             .color = UI::rgb(0xFFFFFF),
@@ -172,7 +172,7 @@ TEST(UIStyleSheetStorageTests, RejectsInvalidStateAndClassSets)
     auto storage = makeStorage(resource);
     const UI::UIStyleClassId styleClass = *storage.registerClass();
     const std::array invalidStateRule{
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::ButtonPrimary,
             .styleClass = styleClass,
             .requiredStates = static_cast<UI::UIStyleState>(1U << 12U),
@@ -222,7 +222,7 @@ TEST(UIStyleSheetStorageTests, RuleCapacityFailurePreservesPublishedSheet)
     });
     const auto originalColor = UI::rgb(0x123456);
     const std::array baseline{
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
             .color = originalColor,
         },
@@ -231,7 +231,7 @@ TEST(UIStyleSheetStorageTests, RuleCapacityFailurePreservesPublishedSheet)
 
     const std::array overflow{
         baseline[0],
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelElevated,
             .color = UI::rgb(0x654321),
         },
@@ -254,7 +254,7 @@ TEST(UIStyleSheetStorageTests, EmptyCompileAtomicallyClearsPublishedSheet)
     std::pmr::monotonic_buffer_resource resource;
     auto storage = makeStorage(resource);
     const std::array rules{
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
             .color = UI::rgb(0x123456),
         },
@@ -263,7 +263,7 @@ TEST(UIStyleSheetStorageTests, EmptyCompileAtomicallyClearsPublishedSheet)
     ASSERT_TRUE(storage.compile({}).has_value());
 
     const std::array invalid{
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = static_cast<UI::UIStyleRoleId>(0xFF),
             .color = UI::rgb(0x654321),
         },
@@ -296,7 +296,7 @@ TEST(UIStyleSheetStorageTests, CapacityFailuresAreAtomicAcrossRuleBucketAndCandi
     const UI::UIStyleClassId firstClass = *storage.registerClass();
     const UI::UIStyleClassId secondClass = *storage.registerClass();
     const std::array baseline{
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
             .styleClass = firstClass,
             .color = UI::rgb(0x111111),
@@ -306,7 +306,7 @@ TEST(UIStyleSheetStorageTests, CapacityFailuresAreAtomicAcrossRuleBucketAndCandi
 
     const std::array bucketOverflow{
         baseline[0],
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
             .styleClass = secondClass,
             .color = UI::rgb(0x222222),
@@ -318,7 +318,7 @@ TEST(UIStyleSheetStorageTests, CapacityFailuresAreAtomicAcrossRuleBucketAndCandi
 
     const std::array candidateOverflow{
         baseline[0],
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
             .styleClass = firstClass,
             .requiredStates = UI::UIStyleState::Focused,
@@ -342,12 +342,12 @@ TEST(UIStyleSheetStorageTests, CompileAndResolveStayWithinConstructionPmrBudget)
     const UI::UIStyleClassId styleClass = *storage.registerClass();
     const usize constructionAllocationCount = resource.allocationCount();
     const std::array rules{
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::ButtonDanger,
             .styleClass = styleClass,
             .color = UI::rgb(0xAA0000),
         },
-        UI::Detail::UIStyleBoxFillRule{
+        UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::ButtonDanger,
             .styleClass = styleClass,
             .requiredStates = UI::UIStyleState::Pressed,

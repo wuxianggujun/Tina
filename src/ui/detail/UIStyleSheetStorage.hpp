@@ -21,15 +21,6 @@ struct UIStyleSheetStorageCapacity final {
     usize maxRulesPerBucket = 0;
 };
 
-struct UIStyleBoxFillRule final {
-    UIStyleRoleId role = UIStyleRoleId::None;
-    // Zero selects the role-only bucket. Non-zero ids are stylesheet-local
-    // ordinals and must be registered before compile().
-    UIStyleClassId styleClass{};
-    UIStyleState requiredStates = UIStyleState::None;
-    UIStraightSrgba8Color color{};
-};
-
 struct UIStyleBoxFillResolution final {
     std::optional<UIStraightSrgba8Color> color{};
     usize candidateRuleCount = 0;
@@ -60,6 +51,8 @@ class UIStyleSheetStorage final {
     // Class registration is independent from atomic sheet replacement. A
     // failed compile preserves the class registry as well as the active sheet.
     [[nodiscard]] Core::Result<UIStyleClassId> registerClass();
+    [[nodiscard]] Core::Status validateClasses(
+        std::span<const UIStyleClassId> classes) const;
     [[nodiscard]] Core::Status compile(std::span<const UIStyleBoxFillRule> rules);
     [[nodiscard]] Core::Result<UIStyleBoxFillResolution>
     resolve(UIStyleRoleId role, std::span<const UIStyleClassId> classes,
