@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/ui/UIDirty.hpp>
 #include <tina/ui/UIPaint.hpp>
 
 #include <compare>
@@ -160,6 +161,84 @@ constexpr UIStyleOverride& operator|=(UIStyleOverride& left, UIStyleOverride rig
 [[nodiscard]] constexpr bool hasStyleOverride(UIStyleOverride set, UIStyleOverride property) noexcept
 {
     return (set & property) == property;
+}
+
+// Static dirty metadata for style/visual mutations (ADR 0023 / UI-STYLE-001).
+// Call sites map property kinds through this table instead of inventing ad-hoc
+// phase combinations. Flags are OR-able UIDirty bits; publication still goes
+// through UIContext dirty-queue helpers (no bypass of capacity/atomicity).
+enum class UIStylePropertyKind : u8 {
+    // Box fill / chrome / ColorToken-backed fill / image tint/opacity.
+    ColorOrOpacity = 0,
+    // Runtime ColorToken reverse-path: paint snapshot only (no semantics phase).
+    ColorToken = 1,
+    // Font metrics / text style that affect intrinsic measure.
+    TextStyle = 2,
+    // Content placement inside an already-measured box.
+    ContentAlignment = 3,
+    // Hit policy only (hover clear may also request ColorOrOpacity separately).
+    PointerHitPolicy = 4,
+    // Full layout style (size/flex/padding/etc.).
+    LayoutStyle = 5,
+};
+
+[[nodiscard]] constexpr UIDirty dirtyFlagsForStyleProperty(UIStylePropertyKind kind) noexcept
+{
+    switch (kind) {
+    case UIStylePropertyKind::ColorOrOpacity:
+        // Matches markPaintDirty: paint + semantics phase.
+        return UIDirty::Paint | UIDirty::Semantics;
+    case UIStylePropertyKind::ColorToken:
+        return UIDirty::Paint;
+    case UIStylePropertyKind::TextStyle:
+        return UIDirty::Style | UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite |
+               UIDirty::HitTest | UIDirty::Paint | UIDirty::Semantics;
+    case UIStylePropertyKind::ContentAlignment:
+        // Intrinsic content placement: remeasure path + paint (current setter).
+        return UIDirty::Style | UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite |
+               UIDirty::HitTest | UIDirty::Paint | UIDirty::Semantics;
+    case UIStylePropertyKind::PointerHitPolicy:
+        return UIDirty::HitTest;
+    case UIStylePropertyKind::LayoutStyle:
+        // Matches markLayoutDirtyBatch changed-node mask (incl. Semantics).
+        return UIDirty::Style | UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite |
+               UIDirty::HitTest | UIDirty::Semantics;
+    }
+    return UIDirty::None;
+}
+
+[[nodiscard]] constexpr bool stylePropertyDirtiesLayout(UIStylePropertyKind kind) noexcept
+{
+    return hasDirty(dirtyFlagsForStyleProperty(kind),
+                    UIDirty::Measure | UIDirty::Arrange | UIDirty::Style);
+}
+
+[[nodiscard]] constexpr bool stylePropertyDirtiesPaint(UIStylePropertyKind kind) noexcept
+{
+    return hasDirty(dirtyFlagsForStyleProperty(kind), UIDirty::Paint);
+}
+
+[[nodiscard]] constexpr bool stylePropertyDirtiesHit(UIStylePropertyKind kind) noexcept
+{
+    return hasDirty(dirtyFlagsForStyleProperty(kind), UIDirty::HitTest);
+}
+
+[[nodiscard]] constexpr bool stylePropertyDirtiesSemantics(UIStylePropertyKind kind) noexcept
+{
+    return hasDirty(dirtyFlagsForStyleProperty(kind), UIDirty::Semantics);
+}
+
+// Local paint overrides (BoxPaint / ImageTint / control paints) are paint-only.
+[[nodiscard]] constexpr UIDirty dirtyFlagsForStyleOverride(UIStyleOverride property) noexcept
+{
+    if (property == UIStyleOverride::None) {
+        return UIDirty::None;
+    }
+    if (hasStyleOverride(property, UIStyleOverride::TextStyle)) {
+        return dirtyFlagsForStyleProperty(UIStylePropertyKind::TextStyle);
+    }
+    // Remaining override bits are paint chrome (box/control paints, image tint).
+    return dirtyFlagsForStyleProperty(UIStylePropertyKind::ColorOrOpacity);
 }
 
 } // namespace Tina::UI

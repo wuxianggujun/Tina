@@ -20,3 +20,14 @@ static_assert(Tina::UI::hasStyleOverride(
     Tina::UI::UIStyleOverride::TextStyle));
 static_assert(Tina::UI::hasStyleOverride(Tina::UI::UIStyleOverride::All,
                                            Tina::UI::UIStyleOverride::ImageTint));
+static_assert(!Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::ColorOrOpacity));
+static_assert(Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::ColorOrOpacity));
+static_assert(!Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::ColorToken));
+static_assert(Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::ColorToken));
+static_assert(Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::TextStyle));
+static_assert(Tina::UI::stylePropertyDirtiesHit(Tina::UI::UIStylePropertyKind::PointerHitPolicy));
+static_assert(!Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::PointerHitPolicy));
+static_assert(Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::LayoutStyle));
+static_assert(!Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::LayoutStyle));
+static_assert(Tina::UI::dirtyFlagsForStyleOverride(Tina::UI::UIStyleOverride::ImageTint) ==
+              Tina::UI::dirtyFlagsForStyleProperty(Tina::UI::UIStylePropertyKind::ColorOrOpacity));

@@ -4569,6 +4569,58 @@ struct UIContext::Impl final {
         return markPaintDirtyBatch({node});
     }
 
+    // Dispatches through UIStylePropertyKind static dirty metadata (UI-STYLE-001).
+    // Keeps capacity/atomic dirty-queue helpers as the only mutation path.
+    [[nodiscard]] Core::Status markStylePropertyDirty(UINodeId node, UIStylePropertyKind kind)
+    {
+        static_assert(!stylePropertyDirtiesLayout(UIStylePropertyKind::ColorOrOpacity));
+        static_assert(stylePropertyDirtiesPaint(UIStylePropertyKind::ColorOrOpacity));
+        static_assert(!stylePropertyDirtiesLayout(UIStylePropertyKind::ColorToken));
+        static_assert(stylePropertyDirtiesPaint(UIStylePropertyKind::ColorToken));
+        static_assert(stylePropertyDirtiesLayout(UIStylePropertyKind::TextStyle));
+        static_assert(stylePropertyDirtiesPaint(UIStylePropertyKind::TextStyle));
+        static_assert(stylePropertyDirtiesHit(UIStylePropertyKind::PointerHitPolicy));
+        static_assert(!stylePropertyDirtiesPaint(UIStylePropertyKind::PointerHitPolicy));
+        static_assert(stylePropertyDirtiesLayout(UIStylePropertyKind::LayoutStyle));
+        static_assert(!stylePropertyDirtiesPaint(UIStylePropertyKind::LayoutStyle));
+
+        switch (kind) {
+        case UIStylePropertyKind::ColorOrOpacity:
+            return markPaintDirty(node);
+        case UIStylePropertyKind::ColorToken: {
+            if (!contains(node) || node.index() >= dirtyQueueStorage.nodeCapacity()) {
+                return fail(UIErrorCode::InvalidNode, "UI style property dirty node is invalid");
+            }
+            const u32 index = node.index();
+            if (!dirtyQueueStorage.isQueued(index) && !dirtyQueueStorage.isReserved(index)) {
+                compactDirtyQueue();
+                if (occupiedDirtyQueueSlotCount() >= dirtyQueueStorage.queueCapacity()) {
+                    return fail(UIErrorCode::CapacityExceeded,
+                                "UI dirty queue capacity has been exhausted");
+                }
+            }
+            if (!dirtyQueueStorage.isQueued(index)) {
+                dirtyQueueStorage.enqueue(node);
+            }
+            dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+            phaseDirty |= PhasePaint;
+            return Core::success();
+        }
+        case UIStylePropertyKind::TextStyle:
+        case UIStylePropertyKind::ContentAlignment: {
+            if (Core::Status layout = markLayoutStyleDirty(node); !layout) {
+                return layout;
+            }
+            return markPaintDirty(node);
+        }
+        case UIStylePropertyKind::PointerHitPolicy:
+            return markHitTestDirty(node);
+        case UIStylePropertyKind::LayoutStyle:
+            return markLayoutStyleDirty(node);
+        }
+        return Core::success();
+    }
+
     void clearDirtyState() noexcept
     {
         dirtyQueueStorage.clearQueuedDirtyState();
@@ -6463,7 +6515,9 @@ struct UIContext::Impl final {
             return Core::success();
         }
 
-        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus)
+        if (Core::Status dirtyStatus =
+                markStylePropertyDirty(node, UIStylePropertyKind::LayoutStyle);
+            !dirtyStatus)
         {
             return dirtyStatus;
         }
@@ -6509,12 +6563,17 @@ struct UIContext::Impl final {
         const bool clearHover = hoveredPrimaryControl == node && policy != UIPointerHitPolicy::Targetable;
         if (clearHover)
         {
-            if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus)
+            // Hover chrome is paint-only; hit policy itself is HitTest metadata.
+            if (Core::Status dirtyStatus =
+                    markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+                !dirtyStatus)
             {
                 return dirtyStatus;
             }
         }
-        if (Core::Status dirtyStatus = markHitTestDirty(node); !dirtyStatus)
+        if (Core::Status dirtyStatus =
+                markStylePropertyDirty(node, UIStylePropertyKind::PointerHitPolicy);
+            !dirtyStatus)
         {
             return dirtyStatus;
         }
@@ -6937,14 +6996,18 @@ struct UIContext::Impl final {
             {
                 return Core::success();
             }
-            if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus)
+            if (Core::Status dirtyStatus =
+                    markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+                !dirtyStatus)
             {
                 return dirtyStatus;
             }
             detachThemeBinding(node.index(), ThemeBindingBoxPaint);
             return Core::success();
         }
-        if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus)
+        if (Core::Status dirtyStatus =
+                markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+            !dirtyStatus)
         {
             return dirtyStatus;
         }
@@ -7002,10 +7065,11 @@ struct UIContext::Impl final {
             }
             return Core::success();
         }
-        // Dirty metadata: tint/opacity is paint-only. Intrinsic size changes
-        // would require a separate image content API and Measure dirty.
+        // Dirty metadata: ImageTint → ColorOrOpacity (Paint only, no Measure).
         // Local setter detaches stylesheet image tint (override wins).
-        if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus)
+        if (Core::Status dirtyStatus =
+                markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+            !dirtyStatus)
         {
             return dirtyStatus;
         }
@@ -7308,13 +7372,11 @@ struct UIContext::Impl final {
             metrics = *measured;
         }
 
-        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus)
+        if (Core::Status dirtyStatus =
+                markStylePropertyDirty(node, UIStylePropertyKind::TextStyle);
+            !dirtyStatus)
         {
             return dirtyStatus;
-        }
-        if (Core::Status paintStatus = markPaintDirty(node); !paintStatus)
-        {
-            return paintStatus;
         }
         state.style = style;
         state.metrics = metrics;
@@ -7359,13 +7421,11 @@ struct UIContext::Impl final {
         {
             return Core::success();
         }
-        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus)
+        if (Core::Status dirtyStatus =
+                markStylePropertyDirty(node, UIStylePropertyKind::ContentAlignment);
+            !dirtyStatus)
         {
             return dirtyStatus;
-        }
-        if (Core::Status paintStatus = markPaintDirty(node); !paintStatus)
-        {
-            return paintStatus;
         }
         state.alignment = alignment;
         return Core::success();

@@ -38,6 +38,7 @@ add_executable(tina_ui_tests
     UIPropertyNormalizationTests.cpp
     UIStyleRoleResolverTests.cpp
     UIStyleContextTests.cpp
+    UIStylePropertyDirtyMetadataTests.cpp
     UIStyleSheetStorageTests.cpp
     UIThemeTransitionResolverTests.cpp
     UIWidgetTraitsTests.cpp
