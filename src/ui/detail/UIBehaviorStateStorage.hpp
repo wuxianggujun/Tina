@@ -3,6 +3,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/ui/UIBehavior.hpp>
+#include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UITextEdit.hpp>
 
@@ -30,10 +31,15 @@ struct UIScrollBehaviorState final {
     UILogicalRect committedViewportRect{};
 };
 
+struct UISelectBehaviorState final {
+    UINodeId selectedOption{};
+};
+
 class UIBehaviorStateStorage final {
   public:
     UIBehaviorStateStorage(usize nodeCapacity, usize activateCapacity, usize toggleCapacity, usize rangeInputCapacity,
-                           usize textInputCapacity, usize scrollCapacity, std::pmr::memory_resource& resource);
+                           usize textInputCapacity, usize scrollCapacity, usize selectCapacity,
+                           std::pmr::memory_resource& resource);
 
     [[nodiscard]] Core::Status publish(u32 nodeIndex, UIElementBehavior behaviors);
     void release(u32 nodeIndex) noexcept;
@@ -48,6 +54,8 @@ class UIBehaviorStateStorage final {
     [[nodiscard]] const UITextInputState* tryTextInputState(u32 nodeIndex) const noexcept;
     [[nodiscard]] UIScrollBehaviorState* tryScrollState(u32 nodeIndex) noexcept;
     [[nodiscard]] const UIScrollBehaviorState* tryScrollState(u32 nodeIndex) const noexcept;
+    [[nodiscard]] UISelectBehaviorState* trySelectState(u32 nodeIndex) noexcept;
+    [[nodiscard]] const UISelectBehaviorState* trySelectState(u32 nodeIndex) const noexcept;
 
     [[nodiscard]] usize activateCapacity() const noexcept;
     [[nodiscard]] usize activeActivateCount() const noexcept;
@@ -64,6 +72,9 @@ class UIBehaviorStateStorage final {
     [[nodiscard]] usize scrollCapacity() const noexcept;
     [[nodiscard]] usize activeScrollCount() const noexcept;
     [[nodiscard]] usize scrollHighWater() const noexcept;
+    [[nodiscard]] usize selectCapacity() const noexcept;
+    [[nodiscard]] usize activeSelectCount() const noexcept;
+    [[nodiscard]] usize selectHighWater() const noexcept;
 
   private:
     static constexpr u32 InvalidSlot = (std::numeric_limits<u32>::max)();
@@ -97,21 +108,30 @@ class UIBehaviorStateStorage final {
         bool active = false;
     };
 
+    struct SelectSlot final {
+        u32 next = InvalidSlot;
+        UISelectBehaviorState state{};
+        bool active = false;
+    };
+
     std::pmr::vector<u32> activateSlotByNodeIndex_;
     std::pmr::vector<u32> toggleSlotByNodeIndex_;
     std::pmr::vector<u32> rangeInputSlotByNodeIndex_;
     std::pmr::vector<u32> textInputSlotByNodeIndex_;
     std::pmr::vector<u32> scrollSlotByNodeIndex_;
+    std::pmr::vector<u32> selectSlotByNodeIndex_;
     std::pmr::vector<ActivateSlot> activateSlots_;
     std::pmr::vector<ToggleSlot> toggleSlots_;
     std::pmr::vector<RangeInputSlot> rangeInputSlots_;
     std::pmr::vector<TextInputSlot> textInputSlots_;
     std::pmr::vector<ScrollSlot> scrollSlots_;
+    std::pmr::vector<SelectSlot> selectSlots_;
     u32 activateFreeHead_ = InvalidSlot;
     u32 toggleFreeHead_ = InvalidSlot;
     u32 rangeInputFreeHead_ = InvalidSlot;
     u32 textInputFreeHead_ = InvalidSlot;
     u32 scrollFreeHead_ = InvalidSlot;
+    u32 selectFreeHead_ = InvalidSlot;
     usize activeActivateCount_ = 0;
     usize activateHighWater_ = 0;
     usize activeToggleCount_ = 0;
@@ -122,6 +142,8 @@ class UIBehaviorStateStorage final {
     usize textInputHighWater_ = 0;
     usize activeScrollCount_ = 0;
     usize scrollHighWater_ = 0;
+    usize activeSelectCount_ = 0;
+    usize selectHighWater_ = 0;
 };
 
 } // namespace Tina::UI::Detail

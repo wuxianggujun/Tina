@@ -176,6 +176,16 @@ TEST(UIElementContractResolverTests, MixedScrollCompositionRemainsRejectedUntilR
     EXPECT_EQ(kind.error().code, UI::UIErrorCode::InvalidElementDescriptor);
 }
 
+TEST(UIElementContractResolverTests, MixedSelectCompositionRemainsRejectedUntilRoutingIsCapabilityBased)
+{
+    UI::UIElementDescriptor descriptor = UI::makeDropdownElement("Dropdown");
+    descriptor.behaviors |= UI::UIElementBehavior::Toggle;
+
+    const auto kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_FALSE(kind);
+    EXPECT_EQ(kind.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+}
+
 TEST(UIElementContractResolverTests, SemanticsActionsRequireMatchingBehaviors)
 {
     const UI::UIElementDescriptor checkbox = UI::makeCheckboxElement();

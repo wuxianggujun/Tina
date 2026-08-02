@@ -460,5 +460,53 @@ TEST(UIBehaviorCompositionTests, ScrollPublicationRollbackStatisticsAndReuseAreA
     EXPECT_EQ(resource.allocationCount(), allocationCount);
 }
 
+TEST(UIBehaviorCompositionTests, SelectPublicationRollbackStatisticsAndReuseAreAllocationStable)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows);
+    const Platform::WindowId window = *windows->tryEmplace(1);
+    ObservingMemoryResource resource;
+    auto context = createContext(window, {
+                                             .nodeCapacity = 4,
+                                             .rootCapacity = 1,
+                                             .textByteCapacity = 12,
+                                         },
+                                 resource);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+
+    auto failed =
+        context->rootBuilder().createElement(root.rootNodeId(), UI::makeDropdownElement("this is too long"));
+    ASSERT_FALSE(failed);
+    EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(context->statistics().activeSelectBehaviorCount, 0U);
+    EXPECT_EQ(context->statistics().selectBehaviorHighWater, 1U);
+    EXPECT_EQ(context->statistics().liveNodeCount, 1U);
+
+    auto first = context->rootBuilder().createElement(root.rootNodeId(), UI::makeDropdownElement("first"));
+    ASSERT_TRUE(first);
+    auto updater = createUpdater(*context, root);
+    auto popup = updater.createElement(*first, UI::makePopupElement());
+    ASSERT_TRUE(popup);
+    auto item = updater.createElement(*popup, UI::makeDropdownItemElement("item"));
+    ASSERT_TRUE(item);
+    assertOk(updater.setDropdownSelectedItem(*first, *item));
+    EXPECT_EQ(updater.dropdownSelectedItem(*first).value(), *item);
+    EXPECT_EQ(context->statistics().activeSelectBehaviorCount, 1U);
+    EXPECT_EQ(context->statistics().selectBehaviorCapacity, 4U);
+
+    const usize allocationCount = resource.allocationCount();
+    assertOk(updater.destroy(*first));
+    EXPECT_EQ(context->statistics().activeSelectBehaviorCount, 0U);
+    auto reused = context->rootBuilder().createElement(root.rootNodeId(), UI::makeDropdownElement("again"));
+    ASSERT_TRUE(reused);
+    auto selected = updater.dropdownSelectedItem(*reused);
+    ASSERT_TRUE(selected);
+    EXPECT_FALSE(selected->hasValue());
+    EXPECT_EQ(context->statistics().activeSelectBehaviorCount, 1U);
+    EXPECT_EQ(context->statistics().selectBehaviorHighWater, 1U);
+    EXPECT_EQ(resource.allocationCount(), allocationCount);
+}
+
 } // namespace
 } // namespace Tina::Tests

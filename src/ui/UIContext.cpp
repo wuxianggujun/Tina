@@ -320,6 +320,7 @@ struct UIContext::Impl final {
     // Scroll style/offset/metrics live in the behavior side store; chrome remains kind-owned.
     std::pmr::vector<UIScrollViewPaint> scrollViewPaintsByNodeIndex;
     std::pmr::vector<ScrollViewLayoutScratch> scrollViewLayoutScratchByNodeIndex;
+    // Select ownership lives in the behavior side store; popup linkage and chrome remain kind-owned.
     std::pmr::vector<DropdownState> dropdownStatesByNodeIndex;
     std::pmr::vector<PopupState> popupStatesByNodeIndex;
     std::pmr::vector<PopupLayoutScratch> popupLayoutScratchByNodeIndex;
@@ -480,7 +481,7 @@ struct UIContext::Impl final {
           buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, resource),
           behaviorStateStorage(capacities.nodeCapacity, capacities.nodeCapacity,
                                capacities.nodeCapacity, capacities.nodeCapacity, capacities.nodeCapacity,
-                               capacities.nodeCapacity, resource),
+                               capacities.nodeCapacity, capacities.nodeCapacity, resource),
           defaultActionPressState(owner), rangeInputPressLatch(owner),
           checkboxPaintsByNodeIndex(&resource),
           sliderPaintsByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
@@ -1992,8 +1993,10 @@ struct UIContext::Impl final {
     [[nodiscard]] UIPremultipliedRgba8Color resolvedDropdownSelectionColor(UINodeId item) const noexcept
     {
         const UINodeId dropdown = dropdownForItem(item);
+        const Detail::UISelectBehaviorState* select =
+            dropdown.hasValue() ? behaviorStateStorage.trySelectState(dropdown.index()) : nullptr;
         if (!dropdown.hasValue() || dropdown.index() >= dropdownStatesByNodeIndex.size() ||
-            dropdownStatesByNodeIndex[dropdown.index()].selectedItem != item)
+            select == nullptr || select->selectedOption != item)
         {
             return {};
         }
@@ -2738,7 +2741,8 @@ struct UIContext::Impl final {
         source.description = semanticsDescriptionViewFor(nodeIndex);
         if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
         {
-            const UINodeId selected = dropdownStatesByNodeIndex[nodeIndex].selectedItem;
+            const Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(nodeIndex);
+            const UINodeId selected = select != nullptr ? select->selectedOption : UINodeId{};
             source.valueText = contains(selected) ? textViewFor(selected.index()) : std::string_view{};
         } else if (record->kind == BuiltinElementKind::TextEdit)
         {
@@ -3429,8 +3433,9 @@ struct UIContext::Impl final {
     [[nodiscard]] bool isSelectedDropdownItem(UINodeId item) const noexcept
     {
         const UINodeId dropdown = dropdownForItem(item);
-        return dropdown.hasValue() && dropdown.index() < dropdownStatesByNodeIndex.size() &&
-               dropdownStatesByNodeIndex[dropdown.index()].selectedItem == item;
+        const Detail::UISelectBehaviorState* select =
+            dropdown.hasValue() ? behaviorStateStorage.trySelectState(dropdown.index()) : nullptr;
+        return select != nullptr && select->selectedOption == item;
     }
 
     [[nodiscard]] std::string_view presentationTextViewFor(u32 index) const noexcept
@@ -3438,7 +3443,8 @@ struct UIContext::Impl final {
         const NodeRecord* record = recordByIndex(index);
         if (record != nullptr && record->kind == BuiltinElementKind::Dropdown && index < dropdownStatesByNodeIndex.size())
         {
-            const UINodeId selected = dropdownStatesByNodeIndex[index].selectedItem;
+            const Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(index);
+            const UINodeId selected = select != nullptr ? select->selectedOption : UINodeId{};
             if (contains(selected) && selected.index() < textStatesByIndex.size() &&
                 textStatesByIndex[selected.index()].hasContent)
             {
@@ -3453,7 +3459,8 @@ struct UIContext::Impl final {
         const NodeRecord* record = recordByIndex(index);
         if (record != nullptr && record->kind == BuiltinElementKind::Dropdown && index < dropdownStatesByNodeIndex.size())
         {
-            const UINodeId selected = dropdownStatesByNodeIndex[index].selectedItem;
+            const Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(index);
+            const UINodeId selected = select != nullptr ? select->selectedOption : UINodeId{};
             if (contains(selected) && selected.index() < textStatesByIndex.size() &&
                 textStatesByIndex[selected.index()].hasContent)
             {
@@ -5098,10 +5105,11 @@ struct UIContext::Impl final {
             if (record->kind == BuiltinElementKind::DropdownItem)
             {
                 const UINodeId dropdown = dropdownForItem(node);
-                if (dropdown.hasValue() && dropdown.index() < dropdownStatesByNodeIndex.size() &&
-                    dropdownStatesByNodeIndex[dropdown.index()].selectedItem == node)
+                Detail::UISelectBehaviorState* select =
+                    dropdown.hasValue() ? behaviorStateStorage.trySelectState(dropdown.index()) : nullptr;
+                if (select != nullptr && select->selectedOption == node)
                 {
-                    dropdownStatesByNodeIndex[dropdown.index()].selectedItem = {};
+                    select->selectedOption = {};
                 }
             }
             if (record->kind == BuiltinElementKind::Popup)
@@ -5113,7 +5121,12 @@ struct UIContext::Impl final {
                     if (dropdownState.popup == node)
                     {
                         dropdownState.popup = {};
-                        dropdownState.selectedItem = {};
+                        if (Detail::UISelectBehaviorState* select =
+                                behaviorStateStorage.trySelectState(dropdown.index());
+                            select != nullptr)
+                        {
+                            select->selectedOption = {};
+                        }
                     }
                 }
                 if (activePopupNode == node)
@@ -8254,17 +8267,21 @@ struct UIContext::Impl final {
             }
         }
 
-        DropdownState& state = dropdownStatesByNodeIndex[dropdown.index()];
-        if (state.selectedItem == item)
+        Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(dropdown.index());
+        if (select == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI Dropdown is missing Select behavior state");
+        }
+        if (select->selectedOption == item)
         {
             return Core::success();
         }
-        const UINodeId previousItem = state.selectedItem;
+        const UINodeId previousItem = select->selectedOption;
         if (Core::Status dirty = markLayoutDirtyBatch({dropdown, previousItem, item}); !dirty)
         {
             return dirty;
         }
-        state.selectedItem = item;
+        select->selectedOption = item;
         return Core::success();
     }
 
@@ -8276,7 +8293,12 @@ struct UIContext::Impl final {
         {
             return Core::failure(openResult.error());
         }
-        const UINodeId selected = dropdownStatesByNodeIndex[dropdown.index()].selectedItem;
+        const Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(dropdown.index());
+        if (select == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI Dropdown is missing Select behavior state");
+        }
+        const UINodeId selected = select->selectedOption;
         return contains(selected) ? selected : UINodeId{};
     }
 
@@ -8300,7 +8322,14 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI DropdownItem is not owned by the updater root");
         }
-        return isSelectedDropdownItem(item);
+        const UINodeId dropdown = dropdownForItem(item);
+        const Detail::UISelectBehaviorState* select =
+            dropdown.hasValue() ? behaviorStateStorage.trySelectState(dropdown.index()) : nullptr;
+        if (dropdown.hasValue() && select == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI Dropdown is missing Select behavior state");
+        }
+        return select != nullptr && select->selectedOption == item;
     }
 
     [[nodiscard]] Core::Status setDropdownPaintFromUpdater(UINodeId updaterRoot, UINodeId dropdown,
@@ -9128,7 +9157,8 @@ struct UIContext::Impl final {
         addRouteLayoutDirtyReservationCandidates(control);
         if (dropdown.hasValue())
         {
-            addRouteLayoutDirtyReservationCandidates(dropdownStatesByNodeIndex[dropdown.index()].selectedItem);
+            const Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(dropdown.index());
+            addRouteLayoutDirtyReservationCandidates(select != nullptr ? select->selectedOption : UINodeId{});
         }
     }
 
@@ -9164,9 +9194,13 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidParent, "UI DropdownItem is detached from its Dropdown");
         }
-        DropdownState& dropdownState = dropdownStatesByNodeIndex[dropdown.index()];
+        Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(dropdown.index());
+        if (select == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI Dropdown is missing Select behavior state");
+        }
         PopupState& popupState = popupStatesByNodeIndex[popup.index()];
-        const UINodeId previousItem = dropdownState.selectedItem;
+        const UINodeId previousItem = select->selectedOption;
         const bool changed = previousItem != control || popupState.open;
         if (!changed)
         {
@@ -9177,7 +9211,7 @@ struct UIContext::Impl final {
             return Core::failure(dirty.error());
         }
 
-        dropdownState.selectedItem = control;
+        select->selectedOption = control;
         popupState.open = false;
         if (activePopupNode == popup)
         {
@@ -12311,6 +12345,11 @@ struct UIContext::Impl final {
         const auto& entries = committedHitBuffers[publishedHitBufferIndex];
         if (command == UIDropdownCommand::PreviousItem || command == UIDropdownCommand::NextItem)
         {
+            const Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(dropdown.index());
+            if (select == nullptr)
+            {
+                return fail(Core::CoreErrorCode::Internal, "UI Dropdown is missing Select behavior state");
+            }
             const bool next = command == UIDropdownCommand::NextItem;
             u32 firstCandidate = InvalidUIHitEntryIndex;
             u32 lastCandidate = InvalidUIHitEntryIndex;
@@ -12333,7 +12372,7 @@ struct UIContext::Impl final {
                     firstCandidate = entryIndex;
                 }
                 lastCandidate = entryIndex;
-                if (entry.node == dropdownStatesByNodeIndex[dropdown.index()].selectedItem)
+                if (entry.node == select->selectedOption)
                 {
                     selectedCandidate = entryIndex;
                 }
@@ -13590,6 +13629,9 @@ struct UIContext::Impl final {
             .scrollBehaviorCapacity = behaviorStateStorage.scrollCapacity(),
             .activeScrollBehaviorCount = behaviorStateStorage.activeScrollCount(),
             .scrollBehaviorHighWater = behaviorStateStorage.scrollHighWater(),
+            .selectBehaviorCapacity = behaviorStateStorage.selectCapacity(),
+            .activeSelectBehaviorCount = behaviorStateStorage.activeSelectCount(),
+            .selectBehaviorHighWater = behaviorStateStorage.selectHighWater(),
             .textByteCapacity = textStorage.capacity(),
             .textByteUsed = textStorage.used(),
             .textByteHighWater = textStorage.highWater(),

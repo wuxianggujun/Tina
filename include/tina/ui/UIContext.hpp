@@ -87,6 +87,9 @@ struct UIContextStatistics final {
     usize scrollBehaviorCapacity = 0;
     usize activeScrollBehaviorCount = 0;
     usize scrollBehaviorHighWater = 0;
+    usize selectBehaviorCapacity = 0;
+    usize activeSelectBehaviorCount = 0;
+    usize selectBehaviorHighWater = 0;
     usize textByteCapacity = 0;
     usize textByteUsed = 0;
     usize textByteHighWater = 0;

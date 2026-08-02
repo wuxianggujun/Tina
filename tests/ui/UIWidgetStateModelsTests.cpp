@@ -29,7 +29,6 @@ TEST(UIWidgetStateModelsTests, ContainersStartClosedUnboundAndAtOrigin)
     const UI::Detail::TreeViewState treeView{};
 
     EXPECT_FALSE(dropdown.popup.hasValue());
-    EXPECT_FALSE(dropdown.selectedItem.hasValue());
     EXPECT_FALSE(popup.open);
     EXPECT_FALSE(listView.dataSource.hasValue());
     EXPECT_FALSE(listView.selection.hasValue());

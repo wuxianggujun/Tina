@@ -43,7 +43,6 @@ struct ScrollViewLayoutScratch final {
 
 struct DropdownState final {
     UINodeId popup{};
-    UINodeId selectedItem{};
     UIDropdownPaint paint{};
 };
 
