@@ -69,10 +69,10 @@ Image/Icon/NineSlice 和 Motion 必须扩展现有统计模型，而不是另建
   `FrameResourceRef/FramePin` 不能跨帧复用；Render bridge 每帧仍按 `O(Q + U + B)` 构建 image commands、
   resolve/pin 唯一资源并合并相邻 batch。该成本必须单列，不能错误归入 UI commit rebuild。
 
-`UI-PERF-001` 的首个 milestone 已建立前四条版本化 workload，Image 垂直切片已补齐第五条；Component
-主线另有 `ui_component_build_activate_toggle_v1` 前置 workload，真实覆盖现有 transaction 与
-Activate/Toggle side store，但明确不冒充尚缺统一 reservation counter 和其余四类 Behavior 的
-`ui_component_build_v1`。其余 workload 随对应垂直切片补齐。
+`UI-PERF-001` 的首个 milestone 已建立前四条版本化 workload，Image 与 Component 垂直切片已分别补齐
+`ui_image_nineslice_v1` 和 `ui_component_build_v1`。旧
+`ui_component_build_activate_toggle_v1` 仅保留为 Activate/Toggle 前置诊断 workload，不替代完整验收。
+其余 workload 随 Style/Motion 垂直切片补齐。
 在 `PERF-002` 固定门禁机完成前，时间结论保持 `conclusion=provisional`：
 
 | Workload | 固定规模 | 确定性输出/门禁 |
@@ -134,7 +134,8 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
 版本化 JSON：`schema`、workload id/version/seed/parameters、build/host fingerprint、counters
 checksum、p50/p95/p99。当前包含 `null_runtime_frames`（Headless+Null+DisabledTask）以及
 `ui_static_commit_v1`、`ui_paint_dirty_v1`、`ui_route_v1`、`ui_virtual_collection_v1`、
-`ui_image_nineslice_v1`，以及不替代冻结验收的 `ui_component_build_activate_toggle_v1` 前置 workload。
+`ui_image_nineslice_v1`、`ui_component_build_v1`，以及仅作历史前置诊断的
+`ui_component_build_activate_toggle_v1` workload。
 
 `tools/bench/run_benchmark_gate.py` 顺序启动独立 `tina_bench` 进程，先要求全部子结果的 schema、
 workload/version/seed/parameters、fingerprint 和 checksum 完全兼容，再对 run-level p99 计算 median/MAD。
@@ -165,6 +166,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_paint_d
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_route_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_virtual_collection_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_image_nineslice_v1 --warmup=60 --samples=600 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_component_build_v1 --warmup=60 --samples=600 --seed=1
 py -3 tools\bench\run_benchmark_gate.py --processes 5 `
   out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe -- `
   --workload=null_runtime_frames --warmup=60 --samples=600 --seed=1
@@ -173,8 +175,8 @@ py -3 -m unittest tools/bench/test_run_benchmark_gate.py -v
 
 正式候选采样遵循 ADR 0018：每进程 warm-up 600、普通样本至少 2,000；p99/泄漏结论使用 10,000，且需
 多进程 runner 可以验证统计与兼容协议，但只有受审固定 machine profile/baseline 才能启用 hard gate。
-当前 UI workload 是 `UI-PERF-001` 首个 milestone，不能把上面的现有命令描述成已经覆盖
-Component/Style/Motion。
+当前命令已覆盖 `UI-PERF-001` 首个 milestone、Image/NineSlice 与完整 Component workload；尚未覆盖
+Style/Motion。
 
 ## 验证工具
 

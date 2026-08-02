@@ -92,8 +92,8 @@ UIElementDescriptor button = makeButtonElement("Apply", layout);
 ```
 
 游戏保存 `UINodeId`，不保存 `Widget*`。节点状态由 `UIContext` 的固定容量 store 拥有；generation/owner
-校验拒绝 stale 或跨窗口 ID。多节点组件由 `UIElementBuildTransaction` 先声明 node budget，任一步失败时
-回滚整个子树及其 text/canvas storage。
+校验拒绝 stale 或跨窗口 ID。多节点组件由 `UIElementBuildTransaction` 先声明 node/text/canvas/Behavior
+完整预算，任一步失败时回滚整个子树及所有已消费或未消费 reservation。
 
 ### 一帧如何流动
 
@@ -213,8 +213,8 @@ buildInventorySlot(Runtime::PrimaryWindowUITreeUpdater& tree,
 ```
 
 实现应由 Button root 负责 input/focus/semantics，子 Element 负责 icon/count 的表现，不为每个业务控件
-增加新的继承层。Runtime facade 已提供 phase-scoped、node-bounded component transaction 并保证失败时整棵
-回滚；text/canvas/各 Behavior pool 的统一预留仍由 `UI-COMPONENT-001` 后续切片补齐。
+增加新的继承层。Runtime facade 已提供 phase-scoped bounded component transaction，并在首次 mutation 前统一
+预留 node/text/canvas/各 Behavior pool；失败时整棵回滚，commit 后不保留 component wrapper。
 
 ## 成熟 UI 系统怎样设计
 
@@ -664,14 +664,13 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 2. ADR 0023 已接受，容量单位、失败语义和性能 workload 已冻结；
 3. `UI-PERF-001`：static/paint-dirty/route/virtual-collection 与通用 counter/checksum 首个 milestone
    已完成，任务转为 `InProgress` 并解锁 Image/Component；后续每个垂直切片继续扩展同一协议；
-4. `UI-IMAGE-001` 与 `UI-COMPONENT-001` 是两个可并行分支；前者不依赖 Behavior side store：
+4. `UI-IMAGE-001` 与 `UI-COMPONENT-001` 两个并行分支均已完成；前者不依赖 Behavior side store：
    - A Done：Image/Icon content、atlas/tint/fit/sampling、root-scoped resolve/pin、RGBA ImageQuad 和 Image semantics；
    - B Done：同源 NineSlice、1..9 quad 原子展开、小 destination/inset/clip/fractional-DPI 规则；
    - C Done：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling、missing/unavailable/resource invalidation、6-case DPI-like size matrix 与 `ui_image_nineslice_v1` benchmark 全部关闭；
-5. `UI-COMPONENT-001`：Runtime bounded component transaction 与 Activate/Toggle/RangeInput/TextInput/Scroll/Select side store 切片已完成；
-   `ui_component_build_activate_toggle_v1` 已为 Activate/Toggle 提供诚实的 256×4 前置 benchmark；后续补
-   统一 reservation/counter 后才发布冻结的 `ui_component_build_v1`；
-6. `UI-STYLE-001`：等待 Image 与 Component 两条目标属性面稳定后，开放强类型 StyleClass/token 与
+5. `UI-COMPONENT-001` Done：Runtime bounded transaction、六类 Behavior side store、node/text/canvas/Behavior
+   统一 reservation/counter 与冻结的 `ui_component_build_v1` 已落地；
+6. `UI-STYLE-001`：Image 与 Component 两条目标属性面已稳定，下一步开放强类型 StyleClass/token 与
    node-local pseudo-state stylesheet，并把 image tint/opacity 纳入 dirty metadata；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。
 

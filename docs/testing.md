@@ -162,13 +162,14 @@ packet-local image resolve/pin 与 backend-neutral DisplayList。共享开发机
 属于确定性不变量。
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-debug --target tina_bench --parallel 2 -- /nr:false
+cmake --build --preset windows-vnext-bgfx-debug --target tina_bench tina_bench_tests --parallel 2 -- /nr:false
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench_tests.exe
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_static_commit_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_paint_dirty_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_route_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_virtual_collection_v1 --warmup=60 --samples=600 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_image_nineslice_v1 --warmup=60 --samples=600 --seed=1
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_component_build_activate_toggle_v1 --warmup=10 --samples=100 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_component_build_v1 --warmup=10 --samples=100 --seed=1
 py -3 tools\bench\run_benchmark_gate.py --processes 5 `
   out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe -- `
   --workload=ui_static_commit_v1 --warmup=60 --samples=600 --seed=1
@@ -186,14 +187,12 @@ multi-process runner 顺序启动独立进程，要求所有子结果的 workloa
 missing/not-ready/extent mismatch、零 resource-intern dedupe、pin/resource 最终归零、稳定非零
 DisplayList checksum 与 `allocation.delta=0`。
 
-`ui_component_build_activate_toggle_v1` 是完整 `ui_component_build_v1` 之前的可执行前置 workload：每个
-sample 通过现有 `UIElementBuildTransaction` 创建 256 个四节点 Component，固定为每组件 11 text bytes、2 Canvas
-commands、2 Activate slots 和 2 Toggle slots；断言 tree checksum 稳定、warmup 后 UI PMR allocation delta 为
-0、后续 clean commit rebuild 为 0，并在 JSON 中固定报告
-`coverage=activate_toggle_only`、`transaction_scope=UIElementBuildTransaction`、
-`frozen_workload_complete=false` 和
-`reservation_counters_available=false`。Range/TextInput/Scroll/Selection 与统一 reservation counter 落地前，
-不得把这个前置 workload 当成 ADR 0023 冻结的 `ui_component_build_v1`。
+`ui_component_build_v1` 每个 sample 通过 `UIElementBuildTransaction` 创建 256 个四节点 Component：ScrollView
+root（Scroll + 2 Canvas commands）、RangeInput + Activate + Toggle、TextEdit、Dropdown（Activate + Select）。
+每事务固定预留 4 nodes、11 text bytes、2 Canvas commands，以及 Activate=2、Toggle/Range/TextInput/Scroll/
+Selection=1；JSON 必须报告各池 requested=reserved=published、capacity failure/outstanding=0、稳定非零 tree
+checksum、warmup 后 UI PMR allocation delta=0 与 clean commit rebuild=0。旧
+`ui_component_build_activate_toggle_v1` 只保留为 `coverage=activate_toggle_only` 的前置诊断 workload。
 
 正式采样规模、fingerprint 与固定机规则见[性能与内存](performance-memory.md)和
 [ADR 0018](adr/0018-benchmark-protocol.md)。

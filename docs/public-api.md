@@ -294,11 +294,14 @@ registration；frame build 按 `(root, AssetId)` 去重 resolve/pin，不在 UI 
 `UISemanticsDescriptor` 支持 Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions；
 committed semantics 使用最近 published ancestor，显式空 name 不回退 content。`UIStyleRoleId` 与 behavior/
 semantics 分离，`setStyleRole()` 切换 recipe，`clearOverride()` 从当前 product theme 恢复选定属性；Runtime
-phase facade 同样暴露 role/query/reset。`UIElementBuildTransaction` 为直接 `UITreeUpdater` authoring 提供固定
-node budget；Runtime 对应的 move-only `PrimaryWindowUIBuildTransaction` 由
+phase facade 同样暴露 role/query/reset。`UIElementBuildTransaction` 为直接 `UITreeUpdater` authoring 提供
+`UIComponentBuildBudget`，在 component root 创建前统一预留 node、text byte、Canvas command 与六类标准
+Behavior slot；Runtime 对应的 move-only `PrimaryWindowUIBuildTransaction` 由
 `PrimaryWindowUITreeUpdater::beginBuildTransaction()` 创建。二者都在多节点创建失败/析构时回滚整棵子树并
 阻止中途 snapshot commit。Runtime transaction 的每次操作校验 phase epoch，不得跨 callback 保存；活动事务
 逃逸时 phase finish 强制回滚并返回 `BuildTransactionInProgress`，成功 commit 后只留下普通 retained subtree。
+`UIContextStatistics::componentBuild` 提供各 reservation pool 的 requested/reserved/published/failure/outstanding
+counter、活动事务数与失败事务数。
 
 `UIElementVisual::canvas` 接受 borrowed、backend-neutral `SolidRect`/`Image`/`NineSlice` command span。
 `SolidRect` 可设置统一 logical-pixel `cornerRadius`；Image/NineSlice 复用 `UIImageSource`，NineSlice 另带

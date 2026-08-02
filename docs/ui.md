@@ -22,7 +22,7 @@
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |
 | Runtime | startup root builder、phase-scoped tree updater 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
-| Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture 与 100k virtual collection 四条 schema-v1 provisional workload |
+| Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture、100k virtual collection、Image/NineSlice 与完整 Component build schema-v1 provisional workload |
 | Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
 ## 所有权与句柄
@@ -92,8 +92,9 @@ Runtime phase facade 同样可切换/query role 和 reset override。
 必须由 Button root 提供显式 name。`makeImageElement()` 只为独立表达信息的图片发布 Image role，并要求
 调用方显式给出 name，不能从 AssetId 或资源文件名推导可访问名称。
 
-多节点业务组件可通过 `UIElementBuildTransaction` 或 Runtime 的 `PrimaryWindowUIBuildTransaction` 固定 node
-budget 构建；集合内部 row pool 计入预算，创建失败、reset 或析构会回滚整棵组件及 text/canvas storage，
+多节点业务组件可通过 `UIElementBuildTransaction` 或 Runtime 的 `PrimaryWindowUIBuildTransaction` 声明完整
+`UIComponentBuildBudget`；node、UTF-8 byte、Canvas command、Activate/Toggle/Range/TextInput/Scroll/Select slot
+会在创建 component root 前统一预留，集合内部 row pool 也计入预算。创建失败、reset 或析构会回滚整棵组件，
 active transaction 期间 structure/layout commit 返回 `BuildTransactionInProgress`。Runtime facade 由 capability
 state 持有底层事务并逐操作校验 epoch/phase；成功 commit 后只留下普通 retained subtree，不保留 component
 wrapper。公开 `UIWidgetKind` 已删除；私有 `BuiltinElementKind` 只服务成熟控件 storage/行为分派。
@@ -110,7 +111,7 @@ stylesheet 仍属后续扩展。
 | --- | --- | --- |
 | 组合 Panel/Label/Button/List 等 retained 子树 | 可用 | 通过统一 `createElement()` 与官方 `make*Element()` recipe |
 | 自定义布局、Semantics、命中策略、局部 box/text paint | 可用 | 仍受 fixed-capacity、owner-thread 与 phase 生命周期约束 |
-| 多节点业务组件 | 直接与 Runtime phase facade 均可用 | `UIElementBuildTransaction` / `PrimaryWindowUIBuildTransaction` 固定 node budget、失败整棵回滚；Runtime transaction 不得跨 callback 保存 |
+| 多节点业务组件 | 直接与 Runtime phase facade 均可用 | `UIElementBuildTransaction` / `PrimaryWindowUIBuildTransaction` 统一预留 node/text/canvas/Behavior 完整预算、失败整棵回滚；Runtime transaction 不得跨 callback 保存 |
 | 自定义 Canvas | 可用首版 | backend-neutral `SolidRect`、`Image`、Stretch-only `NineSlice`；只保存 AssetId/图片元数据，不能提交 shader、GPU handle 或任意 paint callback |
 | 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override；没有用户 StyleClass/selector/pseudo-state rule |
 | 自定义交互 | 部分可用 | 可组合标准 Activate/Toggle/RangeInput capability、挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
@@ -134,7 +135,8 @@ Tree mutation、layout、hit、paint 与 semantics 都有固定容量和明确 c
 
 `UIElementBuildTransaction` 开始后其子树是 live retained state，但任何 committed view 都不能中途观察它；
 成功 `commit()` 只结束 build guard，下一次正常 `commitLayout()` 才一次发布。预算耗尽、子节点 descriptor
-失败、显式 reset 或析构都销毁 component root，从而统一回收子树、UTF-8 与 Canvas slot。
+失败、显式 reset 或析构都销毁 component root，从而统一回收子树、UTF-8、Canvas 与 Behavior slot；
+`UIContextStatistics::componentBuild` 同时发布各池 requested/reserved/published/failure/outstanding counter。
 
 Layout 使用窗口 logical extent，不直接读取 framebuffer pixel。content scale/resize 更新 layout size，但同一
 WindowId 不重建 Context。clean-subtree measure/arrange reuse 已实现；ListView/TreeView 通过固定 row pool
@@ -532,8 +534,8 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-002` | Windows UIA 产品验收：真实 HWND 跨进程属性/action gate 已有，待固化证据并完成 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
-| `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone、`ui_image_nineslice_v1` 与非冻结的 `ui_component_build_activate_toggle_v1` 前置 workload 已落地；后续补完整 Component build、Style、Motion workload；固定机前时间结论只报 provisional |
-| `UI-COMPONENT-001` | InProgress；Runtime phase-scoped node-bounded component transaction 与 Activate/Toggle/RangeInput/TextInput/Scroll/Select fixed-capacity side store 切片已落地；待各 pool 统一 reservation/counter 与 `ui_component_build_v1` |
+| `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone、`ui_image_nineslice_v1` 与完整 `ui_component_build_v1` 已落地；后续补 Style、Motion workload；固定机前时间结论只报 provisional |
+| `UI-COMPONENT-001` | Done；Runtime phase-scoped bounded transaction、六类 fixed-capacity Behavior side store、node/text/canvas/各 Behavior pool 统一 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | `UI-STYLE-001` | 开放强类型 StyleClass/token ID、node-local pseudo-state selector 与预编译有界 stylesheet；不做完整 CSS |
 | `UI-MOTION-001` | fixed-capacity paint-only transition、monotonic clock、retarget 与 reduced-motion；action/hit/layout 契约保持不变 |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |
@@ -546,7 +548,7 @@ ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 
 Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；UI-002-SPI 与
 可选 `tina_ui_uia` 属性、fragment、control pattern 与 action 切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture 与 UI-005 的
 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView 已完成。外部 Narrator 真机门禁与 UI-003
-跨 GPU/DPI 金标仍不能标成 Done。ADR 0022 的 Element composition 主体已完成；下一阶段按
-`UI-PERF-001` 后 Image/Icon 与 Component/Behavior 可作为两个独立分支并行推进；只有一条 UI lane 时
-先做 Image/Icon，随后两条分支汇合到 StyleClass/pseudo-state，再做 paint-only Motion。不再重复列已删除的
+跨 GPU/DPI 金标仍不能标成 Done。ADR 0022 的 Element composition 主体已完成；Image/Icon 与
+Component/Behavior 两条 ADR 0023 分支现已汇合，下一条 UI lane 是 StyleClass/pseudo-state，随后再做
+paint-only Motion。不再重复列已删除的
 `UIWidgetKind` 迁移，也不把尚未实现的目标 API 写成当前能力。
