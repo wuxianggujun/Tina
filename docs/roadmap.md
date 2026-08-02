@@ -33,7 +33,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | UI-COMPONENT-001 | Done；标准 Behavior 独立 side store、phase-scoped bounded transaction、全池 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | UI-IMAGE-001 | Done；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
 | UI-STYLE-001 | Done；StyleClass/ColorToken、reverse-dependency、imageTint、dirty metadata、showcase Integration、`RunUiStyleVisualGate.ps1` 已落地 |
-| UI-MOTION-001 | color/opacity/corner radius/visual offset 的 fixed-capacity transition 与 reduced-motion |
+| UI-MOTION-001 | InProgress；BackgroundColor fixed-capacity transition + reduced-motion + fakeable clock 首刀已落地；待其余 paint 属性与 `ui_motion_v1` |
 
 UI 框架主线按以下顺序推进；这是 UI lane 的依赖顺序，不阻塞 Asset、Render、UIA 等其他 lane 并行：
 

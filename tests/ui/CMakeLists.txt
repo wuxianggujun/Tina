@@ -40,6 +40,7 @@ add_executable(tina_ui_tests
     UIStyleContextTests.cpp
     UIStylePropertyDirtyMetadataTests.cpp
     UIStyleSheetStorageTests.cpp
+    UIMotionTests.cpp
     UIThemeTransitionResolverTests.cpp
     UIWidgetTraitsTests.cpp
     UIWidgetStateModelsTests.cpp
@@ -92,6 +93,7 @@ add_executable(tina_ui_tests
     header_isolation/UIPopupHeader.cpp
     header_isolation/UISliderHeader.cpp
     header_isolation/UIStyleHeader.cpp
+    header_isolation/UIMotionHeader.cpp
     header_isolation/UISemanticsHeader.cpp
     header_isolation/UIAccessibilityHeader.cpp
     header_isolation/UIDirtyHeader.cpp

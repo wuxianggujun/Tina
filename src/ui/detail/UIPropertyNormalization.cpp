@@ -174,6 +174,9 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
             config.nodeStyleClassLinkCapacity == 0
                 ? config.nodeCapacity * 4U
                 : config.nodeStyleClassLinkCapacity,
+        .motionTrackCapacity = config.motionTrackCapacity == 0
+                                   ? UIContextCapacityConfig::DefaultMotionTrackCapacity
+                                   : config.motionTrackCapacity,
         .applyDefaultProductChrome = config.applyDefaultProductChrome,
     };
 }

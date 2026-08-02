@@ -24,6 +24,7 @@
 #include <tina/ui/UIImageSource.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
+#include <tina/ui/UIMotion.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIPopup.hpp>

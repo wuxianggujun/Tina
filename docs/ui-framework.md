@@ -188,7 +188,7 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
   Windows/Linux moved-prefix consumer 已可用；
 - 注册任意新 Widget class 或 Behavior state machine；
 - 从 UI 持有 AssetHandle/Lease、FrameResourceRef 或 texture/bgfx handle；
-- 声明 transition、tween、timeline 或 keyframe animation；
+- 声明完整 timeline/keyframe 或 layout animation（BackgroundColor paint-only transition 首刀已可用）；
 - 传入任意 GPU/paint callback。
 
 Activate/Toggle/RangeInput/TextInput/Scroll/Select 已从 concrete kind 拆到独立 fixed-capacity side store；TextInput/Scroll/Select resolver

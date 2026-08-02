@@ -13,6 +13,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIScrollView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISlider.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIStyle.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIMotion.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDirty.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedHit.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedLayout.hpp
@@ -54,6 +55,8 @@ add_library(tina_ui STATIC
     detail/UICanvasCommandStorage.cpp
     detail/UIImageContentStorage.hpp
     detail/UIImageContentStorage.cpp
+    detail/UIMotionTrackStorage.hpp
+    detail/UIMotionTrackStorage.cpp
     detail/UICommandPressLatch.hpp
     detail/UIControlGeometry.hpp
     detail/UIControlGeometry.cpp

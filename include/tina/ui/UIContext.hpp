@@ -21,6 +21,7 @@
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
+#include <tina/ui/UIMotion.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIPopup.hpp>
@@ -159,6 +160,7 @@ struct UIContextStatistics final {
     usize dirtyQueueHighWater = 0;
     UIStyleStatistics style{};
     UIComponentBuildStatistics componentBuild{};
+    UIMotionStatistics motion{};
 };
 
 class UIContext;
@@ -491,6 +493,18 @@ class UIContext final {
     styleColorToken(UIStyleTokenId token) const;
     [[nodiscard]] Core::Status setStyleColorToken(
         UIStyleTokenId token, UIStraightSrgba8Color value);
+
+    // UI-MOTION-001 first slice: paint-only BackgroundColor transitions.
+    // Owner-thread only. Capacity failure leaves active tracks and paint unchanged.
+    // reduced-motion snaps to target without occupying the active list after the call.
+    [[nodiscard]] Core::Status setMotionClock(const Core::IMonotonicClock* clock);
+    [[nodiscard]] Core::Status setReducedMotion(bool enabled);
+    [[nodiscard]] bool reducedMotion() const noexcept;
+    [[nodiscard]] Core::Status beginBackgroundColorTransition(
+        UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec);
+    // Advances fakeable clock sample before paint publication. Safe no-op when
+    // no tracks are active (M==0 does not force Paint dirty by itself).
+    [[nodiscard]] Core::Status sampleMotion(Core::MonotonicTimePoint now);
 
     // Opens (or replaces) the text face used by measure/paint. Closes the previous
     // face, clears the glyph atlas, and dirties layout/paint for nodes with text.

@@ -3,7 +3,9 @@
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/core/text/Utf8.hpp>
+#include <tina/core/time/MonotonicClock.hpp>
 #include <tina/ui/UIDirty.hpp>
+#include <tina/ui/UIMotion.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITheme.hpp>
 #include <tina/ui/text/UIGlyphAtlas.hpp>
@@ -24,6 +26,7 @@
 #include "detail/UIDirtyQueueStorage.hpp"
 #include "detail/UIImeCompositionState.hpp"
 #include "detail/UIImageContentStorage.hpp"
+#include "detail/UIMotionTrackStorage.hpp"
 #include "detail/UINineSlicePaintEmitter.hpp"
 #include "detail/UIInputPrimitives.hpp"
 #include "detail/UILayoutMeasurement.hpp"
@@ -392,6 +395,10 @@ struct UIContext::Impl final {
     std::pmr::vector<UINodeId> focusRestoreByNodeIndex;
     std::pmr::vector<UIStyleRoleId> styleRolesByNodeIndex;
     Detail::UIStyleSheetStorage styleSheetStorage;
+    Detail::UIMotionTrackStorage motionTrackStorage;
+    const Core::IMonotonicClock* motionClock = nullptr;
+    Core::SteadyMonotonicClock motionDefaultClock{};
+    bool reducedMotionEnabled = false;
     std::pmr::vector<std::array<UIStyleClassId, Detail::MaxStyleClassesPerNode>>
         styleClassesByNodeIndex;
     std::pmr::vector<u8> styleClassCountsByNodeIndex;
@@ -594,6 +601,7 @@ struct UIContext::Impl final {
                                 .maxRulesPerBucket = capacities.styleRulesPerBucketCapacity,
                             },
                             resource),
+          motionTrackStorage(capacities.motionTrackCapacity, resource),
           styleClassesByNodeIndex(&resource), styleClassCountsByNodeIndex(&resource),
           styleStatesByNodeIndex(&resource), resolvedBoxFillCacheByNodeIndex(&resource),
           resolvedStyleColorTokenByNodeIndex(&resource),
@@ -685,11 +693,13 @@ struct UIContext::Impl final {
             .styleBucketCapacity = normalized.styleBucketCapacity,
             .styleRulesPerBucketCapacity = normalized.styleRulesPerBucketCapacity,
             .nodeStyleClassLinkCapacity = normalized.nodeStyleClassLinkCapacity,
+            .motionTrackCapacity = normalized.motionTrackCapacity,
             .applyDefaultProductChrome = normalized.applyDefaultProductChrome,
         };
 
         auto impl = std::unique_ptr<Impl>(new Impl(ownerWindow, capacities, std::this_thread::get_id(),
                                                    std::move(lifetimeControl), std::move(*poolResult), resource));
+        impl->motionClock = &impl->motionDefaultClock;
         impl->idsByIndex.resize(normalized.nodeCapacity);
         impl->layoutStylesByIndex.resize(normalized.nodeCapacity);
         impl->pointerHitPoliciesByIndex.resize(normalized.nodeCapacity, UIPointerHitPolicy::Ignore);
@@ -2951,7 +2961,7 @@ struct UIContext::Impl final {
         const u32 nodeIndex = layoutEntry.node.index();
         const UIBoxPaint boxPaint = resolvedBoxChrome(layoutEntry.node, nodeIndex);
         const UIPremultipliedRgba8Color resolvedFill =
-            resolvedBoxFillCacheByNodeIndex[nodeIndex];
+            presentationBoxFill(layoutEntry.node, nodeIndex);
         paintEntryCount += countBoxChromePaintEntries(boxPaint, layoutEntry.worldRect, !resolvedFill.isTransparent());
         paintEntryCount += countCanvasPaintEntries(layoutEntry);
         if (const UIImageContent* image = imageContentStorage.get(nodeIndex); image != nullptr)
@@ -3170,7 +3180,7 @@ struct UIContext::Impl final {
         const u32 nodeIndex = layoutEntry.node.index();
         const UIBoxPaint boxPaint = resolvedBoxChrome(layoutEntry.node, nodeIndex);
         const UIPremultipliedRgba8Color fill =
-            resolvedBoxFillCacheByNodeIndex[nodeIndex];
+            presentationBoxFill(layoutEntry.node, nodeIndex);
         appendBoxChromePaints(output, layoutEntry.node, layoutEntry.worldRect, layoutEntry.effectiveClip,
                               nextPaintOrdinal, boxPaint, fill);
         appendCanvasPaints(output, layoutEntry, nextPaintOrdinal);
@@ -4125,6 +4135,7 @@ struct UIContext::Impl final {
         canvasCommandStorage.release(index);
         imageContentStorage.release(index);
         behaviorStateStorage.release(index);
+        motionTrackStorage.releaseNode(idForIndex(index));
         dirtyQueueStorage.resetNode(index);
         layoutScratchByIndex[index] = {};
         layoutWorkByIndex[index] = 0;
@@ -5136,6 +5147,206 @@ struct UIContext::Impl final {
         }
         publishStyleColorTokenDirtyState(token);
         return Core::success();
+    }
+
+    [[nodiscard]] Core::MonotonicTimePoint motionNow() const noexcept
+    {
+        const Core::IMonotonicClock* clock =
+            motionClock != nullptr ? motionClock : &motionDefaultClock;
+        return clock->now();
+    }
+
+    [[nodiscard]] Core::Status setMotionClock(const Core::IMonotonicClock* clock)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        motionClock = clock != nullptr ? clock : &motionDefaultClock;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setReducedMotion(bool enabled)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        if (reducedMotionEnabled == enabled)
+        {
+            return Core::success();
+        }
+        reducedMotionEnabled = enabled;
+        if (!enabled)
+        {
+            return Core::success();
+        }
+        // Snap every active track to target and free slots (ADR: reduced-motion
+        // does not keep tracks on the active list after the call).
+        motionTrackStorage.snapAllActive();
+        for (const Detail::UIMotionTrackStorage::Completed& completed :
+             motionTrackStorage.lastCompleted())
+        {
+            if (!contains(completed.node))
+            {
+                continue;
+            }
+            const u32 index = completed.node.index();
+            boxPaintsByIndex[index].solidFill = UISolidFill{.color = completed.color};
+            detachThemeBinding(index, ThemeBindingBoxPaint);
+            resolvedBoxFillCacheByNodeIndex[index] = premultiply(completed.color);
+            setResolvedStyleColorTokenDependency(index, {});
+            if (!dirtyQueueStorage.isQueued(index))
+            {
+                dirtyQueueStorage.enqueue(completed.node);
+            }
+            dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+        }
+        if (!motionTrackStorage.lastCompleted().empty())
+        {
+            phaseDirty |= PhasePaint;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] bool reducedMotion() const noexcept
+    {
+        return reducedMotionEnabled;
+    }
+
+    [[nodiscard]] UIStraightSrgba8Color currentBackgroundColor(UINodeId node, u32 nodeIndex) const noexcept
+    {
+        if (const Detail::UIMotionTrackStorage::Track* track =
+                motionTrackStorage.findActiveBackgroundColor(node);
+            track != nullptr)
+        {
+            return track->presentationColor;
+        }
+        if (nodeIndex < resolvedBoxFillCacheByNodeIndex.size())
+        {
+            // Convert premultiplied cache back is lossy; prefer box paint solid
+            // when present, else unpremultiply is not available. Use solidFill
+            // from box paint as authoring/local color and stylesheet-resolved
+            // only through paint path. For transition starts, use unpremultiply
+            // approximation from cache when alpha>0.
+            const UIPremultipliedRgba8Color premul = resolvedBoxFillCacheByNodeIndex[nodeIndex];
+            if (premul.alpha == 0)
+            {
+                return {};
+            }
+            const float inv = 255.0F / static_cast<float>(premul.alpha);
+            return UIStraightSrgba8Color{
+                .red = static_cast<u8>(std::min(255.0F, static_cast<float>(premul.red) * inv + 0.5F)),
+                .green = static_cast<u8>(std::min(255.0F, static_cast<float>(premul.green) * inv + 0.5F)),
+                .blue = static_cast<u8>(std::min(255.0F, static_cast<float>(premul.blue) * inv + 0.5F)),
+                .alpha = premul.alpha,
+            };
+        }
+        if (boxPaintsByIndex[nodeIndex].solidFill.has_value())
+        {
+            return boxPaintsByIndex[nodeIndex].solidFill->color;
+        }
+        return {};
+    }
+
+    [[nodiscard]] Core::Status beginBackgroundColorTransition(
+        UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (spec.property != UIAnimatableProperty::BackgroundColor)
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI motion first slice only supports BackgroundColor");
+        }
+        const u32 index = node.index();
+        const UIStraightSrgba8Color start = currentBackgroundColor(node, index);
+        const Core::MonotonicTimePoint now = motionNow();
+        if (reducedMotionEnabled || spec.duration.count() <= 0.0)
+        {
+            // Snap: write local solid fill and detach theme box paint so the
+            // target is stable; paint-only dirty.
+            if (Core::Status dirty =
+                    markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+                !dirty)
+            {
+                return dirty;
+            }
+            boxPaintsByIndex[index].solidFill = UISolidFill{.color = target};
+            detachThemeBinding(index, ThemeBindingBoxPaint);
+            resolvedBoxFillCacheByNodeIndex[index] = premultiply(target);
+            setResolvedStyleColorTokenDependency(index, {});
+            motionTrackStorage.releaseNode(node);
+            return Core::success();
+        }
+
+        if (Core::Status status = motionTrackStorage.beginOrRetargetBackgroundColor(
+                node, start, target, spec, now);
+            !status)
+        {
+            return status;
+        }
+        return markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
+    }
+
+    [[nodiscard]] Core::Status sampleMotion(Core::MonotonicTimePoint now)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        if (motionTrackStorage.activeCount() == 0)
+        {
+            // M==0: no extra dirty/rebuild work (ADR / UI-MOTION-001).
+            return Core::success();
+        }
+        const usize before = motionTrackStorage.activeCount();
+        static_cast<void>(motionTrackStorage.sample(now));
+        for (const Detail::UIMotionTrackStorage::Completed& completed :
+             motionTrackStorage.lastCompleted())
+        {
+            if (!contains(completed.node))
+            {
+                continue;
+            }
+            const u32 index = completed.node.index();
+            boxPaintsByIndex[index].solidFill = UISolidFill{.color = completed.color};
+            detachThemeBinding(index, ThemeBindingBoxPaint);
+            resolvedBoxFillCacheByNodeIndex[index] = premultiply(completed.color);
+            setResolvedStyleColorTokenDependency(index, {});
+            if (!dirtyQueueStorage.isQueued(index))
+            {
+                dirtyQueueStorage.enqueue(completed.node);
+            }
+            dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+        }
+        if (motionTrackStorage.lastSampledCount() == 0 && before == 0)
+        {
+            return Core::success();
+        }
+        // Any sampled track (including completions) needs paint republication.
+        phaseDirty |= PhasePaint;
+        return Core::success();
+    }
+
+    [[nodiscard]] UIPremultipliedRgba8Color presentationBoxFill(UINodeId node,
+                                                                u32 nodeIndex) const noexcept
+    {
+        if (const Detail::UIMotionTrackStorage::Track* track =
+                motionTrackStorage.findActiveBackgroundColor(node);
+            track != nullptr)
+        {
+            return premultiply(track->presentationColor);
+        }
+        return resolvedBoxFillCacheByNodeIndex[nodeIndex];
     }
 
     [[nodiscard]] Core::Status installStyleSheet(
@@ -11304,6 +11515,12 @@ struct UIContext::Impl final {
         {
             return viewportStatus;
         }
+        // Sample paint-only motion before deciding clean/dirty commit. M==0 is a
+        // pure no-op and does not force paint republication.
+        if (Core::Status motionStatus = sampleMotion(motionNow()); !motionStatus)
+        {
+            return motionStatus;
+        }
         viewportSize.width = normalizeFloat(viewportSize.width);
         viewportSize.height = normalizeFloat(viewportSize.height);
         const bool viewportChanged = !hasCommittedViewport || viewportSize != committedViewportSize;
@@ -15156,6 +15373,14 @@ struct UIContext::Impl final {
                 .activeTransactionCount = activeBuildTransactionCount,
                 .transactionFailureCount = componentBuildTransactionFailureCount,
             },
+            .motion =
+                {
+                    .trackCapacity = motionTrackStorage.capacity(),
+                    .activeTrackCount = motionTrackStorage.activeCount(),
+                    .trackHighWater = motionTrackStorage.highWater(),
+                    .lastSampledTrackCount = motionTrackStorage.lastSampledCount(),
+                    .reducedMotion = reducedMotionEnabled,
+                },
         };
     }
 };
@@ -16579,6 +16804,32 @@ Core::Status UIContext::setStyleColorToken(
     UIStyleTokenId token, UIStraightSrgba8Color value)
 {
     return m_impl->setStyleColorToken(token, value);
+}
+
+Core::Status UIContext::setMotionClock(const Core::IMonotonicClock* clock)
+{
+    return m_impl->setMotionClock(clock);
+}
+
+Core::Status UIContext::setReducedMotion(bool enabled)
+{
+    return m_impl->setReducedMotion(enabled);
+}
+
+bool UIContext::reducedMotion() const noexcept
+{
+    return m_impl->reducedMotion();
+}
+
+Core::Status UIContext::beginBackgroundColorTransition(
+    UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec)
+{
+    return m_impl->beginBackgroundColorTransition(node, target, spec);
+}
+
+Core::Status UIContext::sampleMotion(Core::MonotonicTimePoint now)
+{
+    return m_impl->sampleMotion(now);
 }
 
 Core::Status UIContext::installStyleSheet(

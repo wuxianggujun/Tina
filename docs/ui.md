@@ -17,7 +17,7 @@
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
 | Paint | box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
-| Motion | **尚未实现** duration/easing/tween/timeline；hover/pressed/focused/disabled 等状态当前直接切换目标 paint，不做时间插值 |
+| Motion | **首刀 InProgress：** 可伪造 monotonic clock + fixed-capacity BackgroundColor transition（duration/easing/retarget/reduced-motion）；hover/pressed 默认仍即时切色，除非游戏显式 `beginBackgroundColorTransition` |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |

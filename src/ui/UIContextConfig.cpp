@@ -87,6 +87,10 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     {
         return invalidContextConfig("UI node style class link capacity exceeds four links per node");
     }
+    if (config.motionTrackCapacity > UIContextCapacityConfig::MaxMotionTrackCapacity)
+    {
+        return invalidContextConfig("UI motion track capacity exceeds the configured maximum");
+    }
 
     return Core::success();
 }

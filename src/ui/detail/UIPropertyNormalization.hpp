@@ -33,6 +33,7 @@ struct NormalizedUIContextCapacityConfig final {
     usize styleBucketCapacity = 0;
     usize styleRulesPerBucketCapacity = 0;
     usize nodeStyleClassLinkCapacity = 0;
+    usize motionTrackCapacity = 0;
     bool applyDefaultProductChrome = true;
 };
 
