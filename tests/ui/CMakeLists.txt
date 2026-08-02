@@ -37,6 +37,7 @@ add_executable(tina_ui_tests
     UIPaintSnapshotBuilderTests.cpp
     UIPropertyNormalizationTests.cpp
     UIStyleRoleResolverTests.cpp
+    UIStyleSheetStorageTests.cpp
     UIThemeTransitionResolverTests.cpp
     UIWidgetTraitsTests.cpp
     UIWidgetStateModelsTests.cpp

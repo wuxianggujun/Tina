@@ -95,6 +95,8 @@ add_library(tina_ui STATIC
     detail/UISemanticsSnapshotBuilder.cpp
     detail/UIStyleRoleResolver.hpp
     detail/UIStyleRoleResolver.cpp
+    detail/UIStyleSheetStorage.hpp
+    detail/UIStyleSheetStorage.cpp
     detail/UIThemeTransitionResolver.hpp
     detail/UIThemeTransitionResolver.cpp
     detail/UIVirtualCollectionLayout.hpp

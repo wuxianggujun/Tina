@@ -2,6 +2,8 @@
 
 #include <tina/core/base/Types.hpp>
 
+#include <compare>
+
 namespace Tina::UI {
 
 // Theme recipe identity is independent from behavior and semantics. None means
@@ -29,6 +31,76 @@ enum class UIStyleRoleId : u8 {
     ListView,
     TreeView,
 };
+
+// Startup-registered stylesheet identities. Zero is invalid so a default
+// constructed id never aliases a registered class or token.
+struct UIStyleClassId final {
+    u32 value = 0;
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return value != 0;
+    }
+
+    explicit constexpr operator bool() const noexcept
+    {
+        return hasValue();
+    }
+
+    auto operator<=>(const UIStyleClassId&) const = default;
+};
+
+struct UIStyleTokenId final {
+    u32 value = 0;
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return value != 0;
+    }
+
+    explicit constexpr operator bool() const noexcept
+    {
+        return hasValue();
+    }
+
+    auto operator<=>(const UIStyleTokenId&) const = default;
+};
+
+// Node-local pseudo states are a mask. Style matching must derive this mask
+// from retained state; it does not create a second interaction state machine.
+enum class UIStyleState : u16 {
+    None = 0,
+    Hovered = 1U << 0U,
+    Pressed = 1U << 1U,
+    Focused = 1U << 2U,
+    Disabled = 1U << 3U,
+    Checked = 1U << 4U,
+    Selected = 1U << 5U,
+    Open = 1U << 6U,
+    Dragging = 1U << 7U,
+    All = (1U << 8U) - 1U,
+};
+
+[[nodiscard]] constexpr UIStyleState operator|(UIStyleState left, UIStyleState right) noexcept
+{
+    return static_cast<UIStyleState>(static_cast<u16>(left) | static_cast<u16>(right));
+}
+
+[[nodiscard]] constexpr UIStyleState operator&(UIStyleState left, UIStyleState right) noexcept
+{
+    return static_cast<UIStyleState>(static_cast<u16>(left) & static_cast<u16>(right));
+}
+
+constexpr UIStyleState& operator|=(UIStyleState& left, UIStyleState right) noexcept
+{
+    left = left | right;
+    return left;
+}
+
+[[nodiscard]] constexpr bool hasStyleState(UIStyleState set, UIStyleState state) noexcept
+{
+    return (set & state) == state;
+}
 
 // A local setter detaches one property from its role. clearOverride() restores
 // selected properties from the active product theme without touching others.
