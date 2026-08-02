@@ -42,6 +42,7 @@ class CountingMemoryResource final : public std::pmr::memory_resource {
     std::pmr::memory_resource& resource,
     UI::Detail::UIStyleSheetStorageCapacity capacity = {
         .classCapacity = 4,
+        .tokenCapacity = 4,
         .ruleCapacity = 8,
         .bucketCapacity = 8,
         .maxRulesPerBucket = 4,
@@ -74,6 +75,101 @@ TEST(UIStyleSheetStorageTests, RegistersStrongClassIdsAndReportsCapacity)
     EXPECT_EQ(stats.registeredClassCount, 2U);
     EXPECT_EQ(stats.classHighWater, 2U);
     EXPECT_EQ(stats.capacityFailureCount, 1U);
+}
+
+TEST(UIStyleSheetStorageTests, RegistersColorTokensAndResolvesTokenBackedRule)
+{
+    std::pmr::monotonic_buffer_resource resource;
+    auto storage = makeStorage(resource, {
+        .classCapacity = 1,
+        .tokenCapacity = 2,
+        .ruleCapacity = 2,
+        .bucketCapacity = 1,
+        .maxRulesPerBucket = 2,
+    });
+    const auto first = storage.registerColorToken(UI::rgb(0x123456));
+    const auto second = storage.registerColorToken(UI::rgb(0xABCDEF));
+    const auto exhausted = storage.registerColorToken(UI::rgb(0xFFFFFF));
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(first->value, 1U);
+    EXPECT_EQ(second->value, 2U);
+    ASSERT_FALSE(exhausted.has_value());
+    EXPECT_EQ(exhausted.error().code, UI::UIErrorCode::CapacityExceeded);
+
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .colorToken = *first,
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .requiredStates = UI::UIStyleState::Disabled,
+            .colorToken = *second,
+        },
+    };
+    ASSERT_TRUE(storage.compile(rules).has_value());
+
+    const auto enabled = storage.resolve(UI::UIStyleRoleId::PanelSurface, {},
+                                         UI::UIStyleState::None);
+    ASSERT_TRUE(enabled.has_value());
+    ASSERT_TRUE(enabled->color.has_value());
+    EXPECT_EQ(*enabled->color, UI::rgb(0x123456));
+    const auto disabled = storage.resolve(UI::UIStyleRoleId::PanelSurface, {},
+                                          UI::UIStyleState::Disabled);
+    ASSERT_TRUE(disabled.has_value());
+    ASSERT_TRUE(disabled->color.has_value());
+    EXPECT_EQ(*disabled->color, UI::rgb(0xABCDEF));
+
+    const auto statistics = storage.statistics();
+    EXPECT_EQ(statistics.tokenCapacity, 2U);
+    EXPECT_EQ(statistics.registeredTokenCount, 2U);
+    EXPECT_EQ(statistics.tokenHighWater, 2U);
+    EXPECT_EQ(statistics.capacityFailureCount, 1U);
+}
+
+TEST(UIStyleSheetStorageTests, RejectsInvalidOrAmbiguousColorTokenRulesAtomically)
+{
+    std::pmr::monotonic_buffer_resource resource;
+    auto storage = makeStorage(resource);
+    const UI::UIStyleTokenId token =
+        *storage.registerColorToken(UI::rgb(0x135724));
+    const std::array baseline{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .colorToken = token,
+        },
+    };
+    ASSERT_TRUE(storage.compile(baseline).has_value());
+
+    const std::array unregistered{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .colorToken = UI::UIStyleTokenId{.value = token.value + 1U},
+        },
+    };
+    const Core::Status unknownToken = storage.compile(unregistered);
+    ASSERT_FALSE(unknownToken.has_value());
+    EXPECT_EQ(unknownToken.error().code, UI::UIErrorCode::InvalidStyle);
+
+    const std::array ambiguous{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .color = UI::rgb(0xFFFFFF),
+            .colorToken = token,
+        },
+    };
+    const Core::Status ambiguousValue = storage.compile(ambiguous);
+    ASSERT_FALSE(ambiguousValue.has_value());
+    EXPECT_EQ(ambiguousValue.error().code, UI::UIErrorCode::InvalidStyle);
+
+    const auto resolved = storage.resolve(UI::UIStyleRoleId::PanelSurface, {},
+                                          UI::UIStyleState::None);
+    ASSERT_TRUE(resolved.has_value());
+    ASSERT_TRUE(resolved->color.has_value());
+    EXPECT_EQ(*resolved->color, UI::rgb(0x135724));
+    EXPECT_EQ(storage.statistics().revision, 1U);
+    EXPECT_EQ(storage.statistics().compileFailureCount, 2U);
 }
 
 TEST(UIStyleSheetStorageTests, ResolvesRoleClassStateAndGlobalSourceOrder)

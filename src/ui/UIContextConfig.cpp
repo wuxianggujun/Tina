@@ -64,12 +64,14 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     {
         return invalidContextConfig("UI text byte capacity exceeds the configured maximum");
     }
-    if (config.styleClassCapacity == 0 || config.styleRuleCapacity == 0 ||
+    if (config.styleClassCapacity == 0 || config.styleTokenCapacity == 0 ||
+        config.styleRuleCapacity == 0 ||
         config.styleBucketCapacity == 0 || config.styleRulesPerBucketCapacity == 0)
     {
         return invalidContextConfig("UI style capacities must be greater than zero");
     }
     if (config.styleClassCapacity > UIContextCapacityConfig::MaxStyleClassCapacity ||
+        config.styleTokenCapacity > UIContextCapacityConfig::MaxStyleTokenCapacity ||
         config.styleRuleCapacity > UIContextCapacityConfig::MaxStyleRuleCapacity ||
         config.styleBucketCapacity > UIContextCapacityConfig::MaxStyleBucketCapacity)
     {

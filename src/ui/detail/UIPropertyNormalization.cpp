@@ -166,6 +166,7 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
                                 ? UIContextCapacityConfig::DefaultTextByteCapacity
                                 : config.textByteCapacity,
         .styleClassCapacity = config.styleClassCapacity,
+        .styleTokenCapacity = config.styleTokenCapacity,
         .styleRuleCapacity = config.styleRuleCapacity,
         .styleBucketCapacity = config.styleBucketCapacity,
         .styleRulesPerBucketCapacity = config.styleRulesPerBucketCapacity,

@@ -587,6 +587,7 @@ void writeTimingSummary(std::ostream& output, const TimingSummary& summary,
 {
     UI::UIContextCapacityConfig capacity = largeContextCapacity();
     capacity.styleClassCapacity = kStyleClassCount;
+    capacity.styleTokenCapacity = kStyleClassCount;
     capacity.styleRuleCapacity = kStyleRuleCount;
     capacity.styleBucketCapacity = kStyleClassCount;
     capacity.styleRulesPerBucketCapacity = kStyleRulesPerClass;
@@ -1099,6 +1100,9 @@ void hashStyleStatistics(DeterministicHash& hash,
     hash.addU64(statistics.classCapacity);
     hash.addU64(statistics.registeredClassCount);
     hash.addU64(statistics.classHighWater);
+    hash.addU64(statistics.tokenCapacity);
+    hash.addU64(statistics.registeredTokenCount);
+    hash.addU64(statistics.tokenHighWater);
     hash.addU64(statistics.ruleCapacity);
     hash.addU64(statistics.activeRuleCount);
     hash.addU64(statistics.ruleHighWater);
@@ -1690,6 +1694,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         report.styleCleanInspectedNodes != 0U || report.styleCleanResolvedNodes != 0U ||
         report.styleCleanCandidateRules != 0U ||
         style.registeredClassCount != kStyleClassCount ||
+        style.registeredTokenCount != 0U ||
         style.activeRuleCount != kStyleRuleCount || style.activeBucketCount != kStyleClassCount ||
         style.bucketCandidateHighWater != kStyleRulesPerClass ||
         style.activeNodeClassLinkCount != kStyleNodeClassLinkCount ||
@@ -2958,6 +2963,8 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
                << ",\"clean_candidate_rules\":" << report.styleCleanCandidateRules
                << ",\"registered_classes\":"
                << report.statistics.style.registeredClassCount
+               << ",\"registered_tokens\":"
+               << report.statistics.style.registeredTokenCount
                << ",\"active_rules\":" << report.statistics.style.activeRuleCount
                << ",\"active_buckets\":" << report.statistics.style.activeBucketCount
                << ",\"active_node_class_links\":"
@@ -2986,6 +2993,7 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"text_bytes\":" << report.statistics.textByteCapacity;
     if (report.workload == kStyleStateWorkload) {
         output << ",\"style_classes\":" << report.statistics.style.classCapacity
+               << ",\"style_tokens\":" << report.statistics.style.tokenCapacity
                << ",\"style_rules\":" << report.statistics.style.ruleCapacity
                << ",\"style_buckets\":" << report.statistics.style.bucketCapacity
                << ",\"style_rules_per_bucket\":"
@@ -3015,6 +3023,7 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"text_bytes\":" << report.statistics.textByteHighWater;
     if (report.workload == kStyleStateWorkload) {
         output << ",\"style_classes\":" << report.statistics.style.classHighWater
+               << ",\"style_tokens\":" << report.statistics.style.tokenHighWater
                << ",\"style_rules\":" << report.statistics.style.ruleHighWater
                << ",\"style_buckets\":" << report.statistics.style.bucketHighWater
                << ",\"style_bucket_candidates\":"

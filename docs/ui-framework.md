@@ -175,8 +175,8 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 - 用 Panel、Label、Button、Checkbox、Slider、ListView、TreeView 等组合自己的业务组件；
 - 定义组件函数并返回一组 `UINodeId`，例如 Inventory slot 的 root/icon/count label；
 - 设置布局、文本、Semantics、命中策略、StyleRole、局部 box/text/control paint；
-- 在 `UIContext` 创建首个节点前注册 StyleClass、安装 literal BoxFill stylesheet；游戏侧通过
-  `GameStateEnter` 的 `PrimaryWindowUIRootBuilder` 使用同一 startup-only 契约；
+- 在 `UIContext` 创建首个节点前注册 StyleClass/ColorToken、安装 literal/token-backed BoxFill stylesheet；
+  游戏侧通过 `GameStateEnter` 的 `PrimaryWindowUIRootBuilder` 使用同一 startup-only 契约；
 - 注册 routed pointer listener，使用 Button/Slider/selection 等已有 callback；
 - 使用 Image/Icon content，以及 `SolidRect`/`Image`/Stretch-only `NineSlice` Canvas 组合 backend-neutral 图形。
 - 通过安装目录使用 backend-neutral `Tina::GameSDK`、独立 `PlatformGlfw`、DesktopBootstrap/RenderBgfx
@@ -349,16 +349,18 @@ enum class UIStyleState : u16 {
 ```
 
 `UI-STYLE-001` 当前为 `InProgress`。已落地的 foundation/context 切片包括：强类型
-`UIStyleClassId`/`UIStyleTokenId` 与 node-local state mask、公开 literal `UIStyleBoxFillRule`，以及私有
-fixed-capacity 双缓冲 compiler。compiler 按 `(role,class)` 建 bucket、二分查找并做 required-state subset
-匹配；同一匹配链 later rule wins，compile 失败保留旧 sheet 与 revision，构造完成后 compile/resolve 不增长
-PMR storage。
+`UIStyleClassId`/`UIStyleTokenId` 与 node-local state mask、startup-only ColorToken registry/value、公开
+literal/token-backed `UIStyleBoxFillRule`，以及私有 fixed-capacity 双缓冲 compiler。compiler 按
+`(role,class)` 建 bucket、二分查找并做 required-state subset 匹配；同一匹配链 later rule wins，token rule
+拒绝未注册 ID 以及 literal/token 二义性，compile 失败保留旧 sheet 与 revision，构造完成后
+register/compile/resolve 不增长 PMR storage。
 
-`UIContextCapacityConfig` 已固定 class/rule/bucket/rules-per-bucket/node-class-link 容量；
-`registerStyleClass()` 与 `installStyleSheet()` 仅允许首个节点创建前在 owner thread 调用，安装会复制规则并
-原子替换 compiled sheet。`UIElementVisual::styleClasses` 是 authoring borrowed span，创建时复制到每节点最多
-4 个 class slot；destroy、创建回滚与 slot reuse 都会释放 link。`UIContextStatistics::style` 已发布这些容量、
-active/high-water、failure 与 revision counter。
+`UIContextCapacityConfig` 已固定 class/token/rule/bucket/rules-per-bucket/node-class-link 容量；
+`registerStyleClass()`、`registerStyleColorToken()` 与 `installStyleSheet()` 仅允许首个节点创建前在 owner thread
+调用。ColorToken 值和 rules 均复制到 Context-owned PMR storage，安装会原子替换 compiled sheet。
+`UIElementVisual::styleClasses` 是 authoring borrowed span，创建时复制到每节点最多 4 个 class slot；destroy、
+创建回滚与 slot reuse 都会释放 link。`UIContextStatistics::style` 已发布 class/token/rule/bucket/link 的
+capacity/count/high-water、failure 与 revision counter。
 
 首个 paint/state 垂直切片也已落地：Context 从既有 retained interaction/control storage 派生
 Hovered/Pressed/Focused/Disabled/Checked/Selected/Open/Dragging，按 dirty node 刷新 per-node resolved BoxFill
@@ -366,10 +368,10 @@ cache，再由 committed paint 只读该 cache。优先级为 product chrome < s
 paint/state 更新不扫描全树或完整 rule table，并输出 inspected node、resolved node 与 candidate rule counter。
 ListView/TreeView owner 更新时仅额外刷新固定 materialized row pool，防止虚拟行复用残留 Selected 样式。
 
-`PrimaryWindowUIRootBuilder` 已在 `GameStateEnter` 暴露同一 startup-only class 注册与 literal sheet 安装契约；
-`ui_style_state_v1` 已补齐 4096-node/256-rule 固定 workload、单节点 resolve counter、bucket/class-link
-high-water、clean commit 零工作与稳定 checksum。下一步仍需补 token registry/value/declaration 与 reverse
-dependency、Image tint/opacity、其他属性 dirty metadata 和产品视觉门禁。
+`PrimaryWindowUIRootBuilder` 已在 `GameStateEnter` 暴露同一 startup-only class/ColorToken 注册与
+literal/token-backed sheet 安装契约；`ui_style_state_v1` 已补齐 4096-node/256-rule 固定 workload、单节点
+resolve counter、token/bucket/class-link high-water、clean commit 零工作与稳定 checksum。下一步仍需补运行期
+token value update 与 reverse dependency、Image tint/opacity、其他属性 dirty metadata 和产品视觉门禁。
 
 第一版 selector 只支持当前节点的 `role + class + state mask`，不支持 descendant、`nth-child`、运行时
 CSS parser 或任意 specificity。推荐优先级：
@@ -382,9 +384,9 @@ built-in recipe
 ```
 
 每个属性静态声明 dirty 影响。颜色/opacity 只触发 Paint，font size/padding 触发 Measure/Arrange，hit policy
-触发 Hit，语义属性触发 Semantics。目标实现可用固定容量 token reverse-dependency link 只重解析引用了变化
-token 的节点；若首切片尚未建立该索引，Theme swap 必须明确按 `O(N)` 扫描并输出 inspected/resolved-node
-counter，不能在没有索引和容量定义时宣称只访问受影响节点。
+触发 Hit，语义属性触发 Semantics。运行期 token value update 尚未开放；进入该切片时可用固定容量 token
+reverse-dependency link 只重解析引用了变化 token 的节点，若尚未建立该索引则必须明确按 `O(N)` 扫描并输出
+inspected/resolved-node counter，不能在没有索引和容量定义时宣称只访问受影响节点。
 
 ### Image、Icon 与 NineSlice
 
@@ -701,9 +703,10 @@ counter、容量/分配不变量可以立即作为确定性门禁：
    - C Done：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling、missing/unavailable/resource invalidation、6-case DPI-like size matrix 与 `ui_image_nineslice_v1` benchmark 全部关闭；
 5. `UI-COMPONENT-001` Done：Runtime bounded transaction、六类 Behavior side store、node/text/canvas/Behavior
    统一 reservation/counter 与冻结的 `ui_component_build_v1` 已落地；
-6. `UI-STYLE-001` InProgress：fixed-capacity style kernel、Context capacity/startup install、每节点最多 4 个
-   class link、retained state + resolved BoxFill paint cache、Runtime startup facade，以及 `ui_style_state_v1` 已落地；
-   下一步补 token dependency、Image tint/opacity 与其他属性 dirty metadata；
+6. `UI-STYLE-001` InProgress：fixed-capacity style kernel、Context class/token capacity 与 startup install、
+   startup ColorToken registry/value、每节点最多 4 个 class link、retained state + literal/token-backed resolved
+   BoxFill paint cache、Runtime startup facade，以及 `ui_style_state_v1` 已落地；下一步补运行期 token update/
+   reverse dependency、Image tint/opacity 与其他属性 dirty metadata；
 7. `UI-MOTION-001`：在稳定 VisualState/Style target 上增加 paint-only transition，并验证连续 paint 成本。
 
 独立或后置 lane：

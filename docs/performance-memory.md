@@ -52,8 +52,9 @@ stale、资源不归零）可以直接阻断。
 
 ## UI 演进性能预算
 
-当前 `UIContextCapacityConfig` 已在 Create 时固定 node/root/dirty/layout/hit/paint/canvas/listener/text 等容量，
-非零配置在 Context 生命周期中不增长。`UIContextStatistics` 已公开 capacity/high-water、phase dirty、
+当前 `UIContextCapacityConfig` 已在 Create 时固定 node/root/dirty/layout/hit/paint/canvas/listener/text，
+以及 StyleSheet class/ColorToken/rule/bucket/node-class-link 等容量，非零配置在 Context 生命周期中不增长。
+`UIContextStatistics` 已公开 capacity/high-water、phase dirty、
 layout measure/arrange、Hit rebuild、Paint cache/snapshot rebuild 等计数，因此 Component、StyleSheet、
 Image/Icon/NineSlice 和 Motion 必须扩展现有统计模型，而不是另建不可观测的 UI 子系统。
 
@@ -72,7 +73,8 @@ Image/Icon/NineSlice 和 Motion 必须扩展现有统计模型，而不是另建
 `UI-PERF-001` 的首个 milestone 已建立前四条版本化 workload，Image 与 Component 垂直切片已分别补齐
 `ui_image_nineslice_v1` 和 `ui_component_build_v1`。旧
 `ui_component_build_activate_toggle_v1` 仅保留为 Activate/Toggle 前置诊断 workload，不替代完整验收。
-Style 垂直切片已补齐 `ui_style_state_v1`；其余 workload 随 Motion 垂直切片补齐。
+Style 垂直切片已补齐 `ui_style_state_v1`，并将 style token capacity/count/high-water 纳入 JSON/checksum；
+其余 workload 随 Motion 垂直切片补齐。
 在 `PERF-002` 固定门禁机完成前，时间结论保持 `conclusion=provisional`：
 
 | Workload | 固定规模 | 确定性输出/门禁 |
@@ -83,7 +85,7 @@ Style 垂直切片已补齐 `ui_style_state_v1`；其余 workload 随 Motion 垂
 | `ui_virtual_collection_v1` | 100k logical items、固定 64-row pool/scroll sequence | materialized row/high-water，warmup 后 Tina-routed storage 不增长，selection/semantics checksum |
 | `ui_component_build_v1` | 256 个四节点 Component；固定 text/canvas payload 与 Activate/Toggle/Range/TextInput/Scroll/Selection slot mix | build/commit 时间、node/text-byte/canvas/behavior 的 reserved/published counter、各 pool high-water、allocation delta 与 tree checksum；commit 后无 retained wrapper，后续 clean commit rebuild 为 0 |
 | `ui_component_build_activate_toggle_v1` | 256 个四节点 Component；每组件固定 11 text bytes、2 Canvas commands、2 Activate + 2 Toggle slots | **前置证据，非冻结 workload 验收：** 直接测 `UIElementBuildTransaction` 的 build/commit/clean-commit 时间、requested/published 与 side-store capacity/high-water、稳定 tree checksum、allocation delta/clean rebuild 为 0；schema 明示其余 Behavior 和 reservation counter 未覆盖 |
-| `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved/inspected nodes、candidate rules、bucket/class-link high-water；单节点 state change 不全树 resolve |
+| `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved/inspected nodes、candidate rules、token/bucket/class-link capacity/high-water；当前 workload 注册 token=0；单节点 state change 不全树 resolve |
 | `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | 每 build `Q=5096/U=64/B=1000`、64 resolve hit、5032 cache dedupe、64 pin acquire/release；missing/not-ready/extent mismatch/resource-intern dedupe 与 allocation delta 为 0；command/batch/resource/pin high-water 和 DisplayList checksum 稳定 |
 | `ui_motion_v1` | 4096 nodes、active track 分别为 0/64/1024、固定 clock | sampled/active/high-water=`M`；0 active 时 motion work/额外 dirty 为 0；layout/hit rebuild 为 0，记录 paint publication |
 
@@ -92,7 +94,8 @@ Render submit/present wait 与 GPU timestamp 继续单列。UI benchmark 不能�
 原子 publication 获得更快结果，因此每次结果必须同时校验 checksum 与固定参数。
 
 合入上述 UI 能力时同时遵守：Behavior side store 直接索引且无 per-node heap/vtable；Component recipe 只付
-创建成本、不留下 retained wrapper；StyleSheet startup precompile 且 local state 只匹配 node-local rule bucket；
+创建成本、不留下 retained wrapper；StyleSheet startup ColorToken values/rules 复制到固定 PMR storage 并
+precompile，local state 只匹配 node-local rule bucket；
 Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineSlice 不在 UI commit 同步加载 Asset，
 资源解析按每帧唯一 `(resolver scope, AssetId)` 去重，展开容量不足时完整失败且不截断。目标复杂度和路线见
 [UI 框架设计](ui-framework.md)。

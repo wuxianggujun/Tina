@@ -1204,6 +1204,17 @@ Core::Result<UI::UIStyleClassId> PrimaryWindowUIRootBuilder::registerStyleClass(
     return m_state->registerStyleClass(m_epoch);
 }
 
+Core::Result<UI::UIStyleTokenId>
+PrimaryWindowUIRootBuilder::registerStyleColorToken(UI::UIStraightSrgba8Color value)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIStyleTokenId>(
+            "PrimaryWindowUIRootBuilder::registerStyleColorToken");
+    }
+    return m_state->registerStyleColorToken(m_epoch, value);
+}
+
 Core::Status PrimaryWindowUIRootBuilder::installStyleSheet(
     std::span<const UI::UIStyleBoxFillRule> rules)
 {

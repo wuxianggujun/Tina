@@ -191,11 +191,13 @@ TEST(UIBenchmarkWorkloadsTests, StyleStateReportsBoundedSingleNodeResolution)
                          "\"candidate_rules\":32,\"clean_commits\":2,"
                          "\"clean_inspected_nodes\":0,\"clean_resolved_nodes\":0,"
                          "\"clean_candidate_rules\":0,\"registered_classes\":64,"
-                         "\"active_rules\":256,\"active_buckets\":64,"
+                         "\"registered_tokens\":0,\"active_rules\":256,"
+                         "\"active_buckets\":64,"
                          "\"active_node_class_links\":16380,\"compile_failures\":0,"
                          "\"capacity_failures\":0,\"revision\":1}"),
               std::string::npos);
     EXPECT_NE(first.find("\"style_classes\":64"), std::string::npos);
+    EXPECT_NE(first.find("\"style_tokens\":64"), std::string::npos);
     EXPECT_NE(first.find("\"style_rules\":256"), std::string::npos);
     EXPECT_NE(first.find("\"style_buckets\":64"), std::string::npos);
     EXPECT_NE(first.find("\"style_rules_per_bucket\":4"), std::string::npos);

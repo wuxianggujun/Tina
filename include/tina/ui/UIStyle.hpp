@@ -105,11 +105,14 @@ constexpr UIStyleState& operator|=(UIStyleState& left, UIStyleState right) noexc
 
 // First stylesheet declaration slice. Rules are copied and precompiled by the
 // owning UIContext; caller storage is borrowed only for installStyleSheet().
+// A non-zero colorToken selects its startup-registered value and requires color
+// to remain default initialized, avoiding ambiguous literal/token precedence.
 struct UIStyleBoxFillRule final {
     UIStyleRoleId role = UIStyleRoleId::None;
     UIStyleClassId styleClass{};
     UIStyleState requiredStates = UIStyleState::None;
     UIStraightSrgba8Color color{};
+    UIStyleTokenId colorToken{};
 };
 
 // A local setter detaches one property from its role. clearOverride() restores

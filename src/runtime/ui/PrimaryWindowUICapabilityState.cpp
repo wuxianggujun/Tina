@@ -320,6 +320,26 @@ PrimaryWindowUICapabilityState::registerStyleClass(u64 epoch)
     return *styleClass;
 }
 
+Core::Result<UI::UIStyleTokenId>
+PrimaryWindowUICapabilityState::registerStyleColorToken(
+    u64 epoch, UI::UIStraightSrgba8Color value)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUIRootBuilder::registerStyleColorToken";
+    if (Core::Status status =
+            validate(epoch, PrimaryWindowUIPhase::GameStateEnter, true, Operation);
+        !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto token = context_->registerStyleColorToken(value);
+    if (!token)
+    {
+        return Core::failure(rememberFirstError(std::move(token.error()), Operation));
+    }
+    return *token;
+}
+
 Core::Status PrimaryWindowUICapabilityState::installStyleSheet(
     u64 epoch, std::span<const UI::UIStyleBoxFillRule> rules)
 {

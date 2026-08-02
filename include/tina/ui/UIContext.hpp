@@ -57,6 +57,9 @@ struct UIStyleStatistics final {
     usize classCapacity = 0;
     usize registeredClassCount = 0;
     usize classHighWater = 0;
+    usize tokenCapacity = 0;
+    usize registeredTokenCount = 0;
+    usize tokenHighWater = 0;
     usize ruleCapacity = 0;
     usize activeRuleCount = 0;
     usize ruleHighWater = 0;
@@ -464,11 +467,14 @@ class UIContext final {
     // new nodes inherit the latest theme. Owner-thread only.
     [[nodiscard]] const UITheme& productTheme() const noexcept;
     [[nodiscard]] Core::Status setProductTheme(const UITheme& theme);
-    // Startup-only stylesheet registration. Both operations require the owner
+    // Startup-only stylesheet registration. These operations require the owner
     // thread and must run before the first retained node is created; destroying
-    // all nodes does not reopen registration. installStyleSheet copies all rules
-    // and atomically replaces the previous compiled sheet on success.
+    // all nodes does not reopen registration. Token values and stylesheet rules
+    // are copied into Context-owned fixed-capacity storage. installStyleSheet
+    // atomically replaces the previous compiled sheet on success.
     [[nodiscard]] Core::Result<UIStyleClassId> registerStyleClass();
+    [[nodiscard]] Core::Result<UIStyleTokenId>
+    registerStyleColorToken(UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status installStyleSheet(
         std::span<const UIStyleBoxFillRule> rules);
 

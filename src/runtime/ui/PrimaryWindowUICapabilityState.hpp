@@ -47,6 +47,8 @@ class PrimaryWindowUICapabilityState final {
     findImageResolver(UI::UINodeId root) const noexcept;
 
     [[nodiscard]] Core::Result<UI::UIStyleClassId> registerStyleClass(u64 epoch);
+    [[nodiscard]] Core::Result<UI::UIStyleTokenId>
+    registerStyleColorToken(u64 epoch, UI::UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status installStyleSheet(
         u64 epoch, std::span<const UI::UIStyleBoxFillRule> rules);
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot(u64 epoch);

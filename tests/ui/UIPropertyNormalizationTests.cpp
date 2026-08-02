@@ -60,6 +60,8 @@ TEST(UIPropertyNormalizationTests, ContextCapacitiesDeriveFromNodeCapacity)
               UI::UIContextCapacityConfig::DefaultTextByteCapacity);
     EXPECT_EQ(normalized->styleClassCapacity,
               UI::UIContextCapacityConfig::DefaultStyleClassCapacity);
+    EXPECT_EQ(normalized->styleTokenCapacity,
+              UI::UIContextCapacityConfig::DefaultStyleTokenCapacity);
     EXPECT_EQ(normalized->styleRuleCapacity,
               UI::UIContextCapacityConfig::DefaultStyleRuleCapacity);
     EXPECT_EQ(normalized->styleBucketCapacity,
@@ -84,6 +86,7 @@ TEST(UIPropertyNormalizationTests, ContextCapacitiesPreserveOverridesAndRejectIn
         .buttonActionCapacity = 13,
         .textByteCapacity = 1024,
         .styleClassCapacity = 12,
+        .styleTokenCapacity = 10,
         .styleRuleCapacity = 24,
         .styleBucketCapacity = 16,
         .styleRulesPerBucketCapacity = 6,
@@ -102,6 +105,7 @@ TEST(UIPropertyNormalizationTests, ContextCapacitiesPreserveOverridesAndRejectIn
     EXPECT_EQ(normalized->buttonActionCapacity, 13U);
     EXPECT_EQ(normalized->textByteCapacity, 1024U);
     EXPECT_EQ(normalized->styleClassCapacity, 12U);
+    EXPECT_EQ(normalized->styleTokenCapacity, 10U);
     EXPECT_EQ(normalized->styleRuleCapacity, 24U);
     EXPECT_EQ(normalized->styleBucketCapacity, 16U);
     EXPECT_EQ(normalized->styleRulesPerBucketCapacity, 6U);
@@ -120,6 +124,10 @@ TEST(UIPropertyNormalizationTests, ContextRejectsInvalidStyleCapacities)
     config.styleClassCapacity = 0;
     EXPECT_FALSE(UI::Detail::normalizeUIContextCapacityConfig(config).has_value());
     config.styleClassCapacity = 4;
+
+    config.styleTokenCapacity = 0;
+    EXPECT_FALSE(UI::Detail::normalizeUIContextCapacityConfig(config).has_value());
+    config.styleTokenCapacity = 4;
 
     config.styleBucketCapacity = config.styleRuleCapacity + 1U;
     EXPECT_FALSE(UI::Detail::normalizeUIContextCapacityConfig(config).has_value());

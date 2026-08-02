@@ -18,10 +18,12 @@ struct UIContextCapacityConfig final {
     static constexpr usize MaxTextByteCapacity = 64U * 1024U * 1024U;
     static constexpr usize DefaultTextByteCapacity = 64U * 1024U;
     static constexpr usize DefaultStyleClassCapacity = 256;
+    static constexpr usize DefaultStyleTokenCapacity = 256;
     static constexpr usize DefaultStyleRuleCapacity = 256;
     static constexpr usize DefaultStyleBucketCapacity = 256;
     static constexpr usize DefaultStyleRulesPerBucketCapacity = 256;
     static constexpr usize MaxStyleClassCapacity = MaxNodeCapacity;
+    static constexpr usize MaxStyleTokenCapacity = MaxNodeCapacity;
     static constexpr usize MaxStyleRuleCapacity = MaxNodeCapacity;
     static constexpr usize MaxStyleBucketCapacity = MaxNodeCapacity;
     static constexpr usize MaxNodeStyleClassLinkCapacity = MaxNodeCapacity * 4U;
@@ -57,9 +59,10 @@ struct UIContextCapacityConfig final {
     // across the context. Zero uses DefaultTextByteCapacity. Storage is
     // pre-reserved at Create.
     usize textByteCapacity = 0;
-    // Stylesheets are compiled into fixed rule and (role,class) bucket pools.
-    // Node links default to four class slots per retained node.
+    // Stylesheets own fixed token values and compile into fixed rule and
+    // (role,class) bucket pools. Node links default to four class slots per node.
     usize styleClassCapacity = DefaultStyleClassCapacity;
+    usize styleTokenCapacity = DefaultStyleTokenCapacity;
     usize styleRuleCapacity = DefaultStyleRuleCapacity;
     usize styleBucketCapacity = DefaultStyleBucketCapacity;
     usize styleRulesPerBucketCapacity = DefaultStyleRulesPerBucketCapacity;

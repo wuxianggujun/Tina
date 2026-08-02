@@ -241,7 +241,7 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     EXPECT_EQ(expiredBuilder.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
-TEST_F(PrimaryWindowUICapabilityTest, StyleSheetFacadeRegistersClassAndInstallsLiteralSheetBeforeRootCreation)
+TEST_F(PrimaryWindowUICapabilityTest, StyleSheetFacadeRegistersClassTokenAndInstallsBeforeRootCreation)
 {
     CapabilityState state;
     auto epoch = state.beginGameStateEnterPhase(context.get());
@@ -259,15 +259,19 @@ TEST_F(PrimaryWindowUICapabilityTest, StyleSheetFacadeRegistersClassAndInstallsL
     auto styleClassResult = builder->registerStyleClass();
     ASSERT_TRUE(styleClassResult.has_value()) << styleClassResult.error().message;
     const UI::UIStyleClassId styleClass = *styleClassResult;
+    auto colorTokenResult = builder->registerStyleColorToken(UI::rgb(0x2357A6));
+    ASSERT_TRUE(colorTokenResult.has_value()) << colorTokenResult.error().message;
     UI::UIStyleBoxFillRule rule{
         .role = UI::UIStyleRoleId::PanelSurface,
         .styleClass = styleClass,
-        .color = UI::rgb(0x2357A6),
+        .colorToken = *colorTokenResult,
     };
     ASSERT_TRUE(builder->installStyleSheet(std::span(&rule, 1)).has_value());
+    rule.colorToken = {};
     rule.color = UI::rgb(0xB42318);
     const UI::UIStyleStatistics published = context->statistics().style;
     EXPECT_EQ(published.registeredClassCount, 1U);
+    EXPECT_EQ(published.registeredTokenCount, 1U);
     EXPECT_EQ(published.activeRuleCount, 1U);
     EXPECT_EQ(published.activeBucketCount, 1U);
     EXPECT_EQ(published.revision, 1U);
@@ -294,6 +298,9 @@ TEST_F(PrimaryWindowUICapabilityTest, StyleSheetFacadeRegistersClassAndInstallsL
     auto expiredClass = builder->registerStyleClass();
     ASSERT_FALSE(expiredClass.has_value());
     EXPECT_EQ(expiredClass.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredToken = builder->registerStyleColorToken(UI::rgb(0xFFFFFF));
+    ASSERT_FALSE(expiredToken.has_value());
+    EXPECT_EQ(expiredToken.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     Core::Status expiredSheet =
         builder->installStyleSheet(std::span<const UI::UIStyleBoxFillRule>{});
     ASSERT_FALSE(expiredSheet.has_value());
@@ -311,10 +318,18 @@ TEST_F(PrimaryWindowUICapabilityTest, StyleRegistrationAfterRootCreationIsSticky
     ASSERT_TRUE(root.has_value()) << root.error().message;
 
     const usize registeredBefore = context->statistics().style.registeredClassCount;
+    const usize registeredTokensBefore = context->statistics().style.registeredTokenCount;
     auto lateClass = builder->registerStyleClass();
     ASSERT_FALSE(lateClass.has_value());
     EXPECT_EQ(lateClass.error().code, UI::UIErrorCode::InvalidStyle);
     EXPECT_EQ(context->statistics().style.registeredClassCount, registeredBefore);
+
+    auto lateToken = builder->registerStyleColorToken(UI::rgb(0xFFFFFF));
+    ASSERT_FALSE(lateToken.has_value());
+    EXPECT_EQ(lateToken.error().code, lateClass.error().code);
+    EXPECT_EQ(lateToken.error().message, lateClass.error().message);
+    EXPECT_EQ(context->statistics().style.registeredTokenCount,
+              registeredTokensBefore);
 
     Core::Status otherwiseValid =
         builder->installStyleSheet(std::span<const UI::UIStyleBoxFillRule>{});

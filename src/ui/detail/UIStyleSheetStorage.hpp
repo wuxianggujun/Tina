@@ -16,6 +16,7 @@ inline constexpr usize MaxStyleClassesPerNode = 4;
 
 struct UIStyleSheetStorageCapacity final {
     usize classCapacity = 0;
+    usize tokenCapacity = 0;
     usize ruleCapacity = 0;
     usize bucketCapacity = 0;
     usize maxRulesPerBucket = 0;
@@ -30,6 +31,9 @@ struct UIStyleSheetStorageStatistics final {
     usize classCapacity = 0;
     usize registeredClassCount = 0;
     usize classHighWater = 0;
+    usize tokenCapacity = 0;
+    usize registeredTokenCount = 0;
+    usize tokenHighWater = 0;
     usize ruleCapacity = 0;
     usize activeRuleCount = 0;
     usize ruleHighWater = 0;
@@ -48,9 +52,11 @@ class UIStyleSheetStorage final {
     UIStyleSheetStorage(UIStyleSheetStorageCapacity capacity,
                         std::pmr::memory_resource& resource);
 
-    // Class registration is independent from atomic sheet replacement. A
-    // failed compile preserves the class registry as well as the active sheet.
+    // Class/token registration is independent from atomic sheet replacement. A
+    // failed compile preserves both registries as well as the active sheet.
     [[nodiscard]] Core::Result<UIStyleClassId> registerClass();
+    [[nodiscard]] Core::Result<UIStyleTokenId>
+    registerColorToken(UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status validateClasses(
         std::span<const UIStyleClassId> classes) const;
     [[nodiscard]] Core::Status compile(std::span<const UIStyleBoxFillRule> rules);
@@ -95,6 +101,8 @@ class UIStyleSheetStorage final {
     UIStyleSheetStorageCapacity capacity_{};
     usize registeredClassCount_ = 0;
     usize classHighWater_ = 0;
+    std::pmr::vector<UIStraightSrgba8Color> colorTokens_;
+    usize tokenHighWater_ = 0;
     usize ruleHighWater_ = 0;
     usize bucketHighWater_ = 0;
     usize bucketCandidateHighWater_ = 0;

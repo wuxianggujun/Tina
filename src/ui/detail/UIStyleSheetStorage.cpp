@@ -42,8 +42,10 @@ void UIStyleSheetStorage::Buffer::clear() noexcept
 
 UIStyleSheetStorage::UIStyleSheetStorage(UIStyleSheetStorageCapacity capacity,
                                          std::pmr::memory_resource& resource)
-    : capacity_(capacity), buffers_{Buffer(capacity, resource), Buffer(capacity, resource)}
+    : capacity_(capacity), colorTokens_(&resource),
+      buffers_{Buffer(capacity, resource), Buffer(capacity, resource)}
 {
+    colorTokens_.reserve(capacity.tokenCapacity);
 }
 
 Core::Result<UIStyleClassId> UIStyleSheetStorage::registerClass()
@@ -61,6 +63,22 @@ Core::Result<UIStyleClassId> UIStyleSheetStorage::registerClass()
     return UIStyleClassId{.value = static_cast<u32>(registeredClassCount_)};
 }
 
+Core::Result<UIStyleTokenId>
+UIStyleSheetStorage::registerColorToken(UIStraightSrgba8Color value)
+{
+    if (colorTokens_.size() >= capacity_.tokenCapacity ||
+        colorTokens_.size() >= (std::numeric_limits<u32>::max)())
+    {
+        ++capacityFailureCount_;
+        return Core::failure(UIErrorCode::CapacityExceeded,
+                             "UI style token capacity has been exhausted");
+    }
+
+    colorTokens_.push_back(value);
+    tokenHighWater_ = (std::max)(tokenHighWater_, colorTokens_.size());
+    return UIStyleTokenId{.value = static_cast<u32>(colorTokens_.size())};
+}
+
 Core::Status UIStyleSheetStorage::validateRule(const UIStyleBoxFillRule& rule) const
 {
     if (!isValidStyleRole(rule.role))
@@ -74,6 +92,17 @@ Core::Status UIStyleSheetStorage::validateRule(const UIStyleBoxFillRule& rule) c
     if (!isValidStyleStateMask(rule.requiredStates))
     {
         return invalidStyle("UI style rule contains an invalid state mask");
+    }
+    if (rule.colorToken.hasValue())
+    {
+        if (rule.colorToken.value > colorTokens_.size())
+        {
+            return invalidStyle("UI style rule references an unregistered token");
+        }
+        if (rule.color != UIStraightSrgba8Color{})
+        {
+            return invalidStyle("UI style rule cannot combine a color token and literal color");
+        }
     }
     return Core::success();
 }
@@ -293,7 +322,9 @@ UIStyleBoxFillResolution UIStyleSheetStorage::resolveValidated(
             {
                 hasWinningRule = true;
                 winningRuleIndex = ruleIndex;
-                resolution.color = rule.color;
+                resolution.color = rule.colorToken.hasValue()
+                                       ? colorTokens_[rule.colorToken.value - 1U]
+                                       : rule.color;
             }
         }
     };
@@ -313,6 +344,9 @@ UIStyleSheetStorageStatistics UIStyleSheetStorage::statistics() const noexcept
         .classCapacity = capacity_.classCapacity,
         .registeredClassCount = registeredClassCount_,
         .classHighWater = classHighWater_,
+        .tokenCapacity = capacity_.tokenCapacity,
+        .registeredTokenCount = colorTokens_.size(),
+        .tokenHighWater = tokenHighWater_,
         .ruleCapacity = capacity_.ruleCapacity,
         .activeRuleCount = active.rules.size(),
         .ruleHighWater = ruleHighWater_,

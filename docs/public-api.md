@@ -310,8 +310,9 @@ source-pixel 与 destination-logical insets，首版只支持 Stretch。命令�
 `UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。`UIBoxPaint::cornerRadius` 同样只
 圆化自身 chrome，不建立子树 clip。NineSlice 在 committed paint 中按 row-major 精确展开1..9个 Image
 entry，小目标按两侧 destination inset 比例压缩并消除零面积 patch；paint/DisplayList 容量不足不截断。
-逐角半径与 rounded clip 仍是后续扩展。startup-only 强类型 StyleClass、node-local state 与 literal BoxFill
-stylesheet 已开放；token/declaration、Image tint/opacity 与其他属性面仍由 `UI-STYLE-001` 跟踪。
+逐角半径与 rounded clip 仍是后续扩展。startup-only 强类型 StyleClass/ColorToken、node-local state 与
+literal/token-backed BoxFill stylesheet 已开放；运行期 token 更新/reverse dependency、Image tint/opacity 与
+其他属性面仍由 `UI-STYLE-001` 跟踪。
 
 `paintSnapshotCapacity` 为0时从 `nodeCapacity` 派生，非0时独立上限为8,388,608，因为一个节点可生成多个
 glyph/control/Canvas/NineSlice entry；Semantics entry/scratch 仍严格按 node 数分配。
@@ -323,8 +324,9 @@ setter/query 与 Scroll style/offset/metrics 按 capability 校验，Select pool
 ScrollView paint/thumb geometry 与 Dropdown selection API/popup/paint/input routing 仍是 kind-specific。TextInput/Scroll/Select 输入与视觉路由仍由私有
 resolver 选择 TextEdit/ScrollView/Dropdown，并要求匹配现有 `BuiltinElementKind` contract；不受支持的混合组合返回
 `InvalidElementDescriptor`。当前可在首个 retained node 前通过 `UIContext` 或 `GameStateEnter` 的
-`PrimaryWindowUIRootBuilder` 注册 StyleClass 并安装 node-local literal BoxFill rules；仍**不支持**注册 Widget
-subclass、新 Behavior/state machine、通用 selector/token declaration、Motion/timeline 或 GPU paint callback。因此“可组合业务 UI”不等于“已有开放控件插件
+`PrimaryWindowUIRootBuilder` 注册 StyleClass/ColorToken 并安装 node-local literal/token-backed BoxFill rules；
+仍**不支持**注册 Widget subclass、新 Behavior/state machine、通用 selector、运行期 token 更新、
+Motion/timeline 或 GPU paint callback。因此“可组合业务 UI”不等于“已有开放控件插件
 ABI”。目标边界见 [UI 框架设计](ui-framework.md)和 Accepted
 [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。正式外部使用仍以 `SDK-001` 的安装 package 与
 consumer gate 为准。
@@ -611,7 +613,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
-- stylesheet token/declaration、Image tint/opacity 等完整属性面与 paint-only Motion；
+- stylesheet 运行期 token 更新/reverse dependency、Image tint/opacity 等完整属性面与 paint-only Motion；
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；

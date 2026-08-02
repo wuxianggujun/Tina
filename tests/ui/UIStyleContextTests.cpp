@@ -46,6 +46,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
         .nodeCapacity = 8,
         .rootCapacity = 1,
         .styleClassCapacity = 4,
+        .styleTokenCapacity = 4,
         .styleRuleCapacity = 4,
         .styleBucketCapacity = 4,
         .styleRulesPerBucketCapacity = 4,
@@ -139,6 +140,46 @@ TEST(UIStyleContextTests, RegistersAndAtomicallyInstallsOnlyBeforeFirstNode)
     ASSERT_FALSE(lateSheet.has_value());
     EXPECT_EQ(lateSheet.error().code, UI::UIErrorCode::InvalidStyle);
     EXPECT_EQ(context->statistics().style.revision, 1U);
+}
+
+TEST(UIStyleContextTests, RegisteredColorTokenDrivesCommittedBoxFill)
+{
+    auto config = styleTestCapacity();
+    config.styleTokenCapacity = 1;
+    auto context = createStyleContext(config);
+    ASSERT_NE(context, nullptr);
+    const auto token = context->registerStyleColorToken(UI::rgb(0x2463A5));
+    ASSERT_TRUE(token.has_value()) << token.error().message;
+    const auto exhausted = context->registerStyleColorToken(UI::rgb(0xFFFFFF));
+    ASSERT_FALSE(exhausted.has_value());
+    EXPECT_EQ(exhausted.error().code, UI::UIErrorCode::CapacityExceeded);
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .colorToken = *token,
+        },
+    };
+    assertOk(context->installStyleSheet(rules));
+
+    auto root = createStyleRoot(*context);
+    ASSERT_TRUE(root);
+    UI::UIElementDescriptor descriptor =
+        UI::makePanelElement(fixedSize(40.0F, 30.0F));
+    descriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
+    const auto panel = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *panel,
+                             UI::premultiply(UI::rgb(0x2463A5))));
+
+    const auto statistics = context->statistics().style;
+    EXPECT_EQ(statistics.tokenCapacity, 1U);
+    EXPECT_EQ(statistics.registeredTokenCount, 1U);
+    EXPECT_EQ(statistics.tokenHighWater, 1U);
+    EXPECT_EQ(statistics.capacityFailureCount, 1U);
+    const auto lateToken = context->registerStyleColorToken(UI::rgb(0x111111));
+    ASSERT_FALSE(lateToken.has_value());
+    EXPECT_EQ(lateToken.error().code, UI::UIErrorCode::InvalidStyle);
 }
 
 TEST(UIStyleContextTests, NodeClassLinksReleaseOnDestroyAndReuse)

@@ -32,7 +32,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-COMPONENT-001 | Done；标准 Behavior 独立 side store、phase-scoped bounded transaction、全池 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | UI-IMAGE-001 | Done；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
-| UI-STYLE-001 | 强类型 StyleClass/token、node-local pseudo-state 与预编译有界 stylesheet |
+| UI-STYLE-001 | InProgress；强类型 StyleClass、startup-only ColorToken value、node-local pseudo-state 与预编译有界 stylesheet 已落地，待运行期 token 更新/reverse dependency 与更多属性面 |
 | UI-MOTION-001 | color/opacity/corner radius/visual offset 的 fixed-capacity transition 与 reduced-motion |
 
 UI 框架主线按以下顺序推进；这是 UI lane 的依赖顺序，不阻塞 Asset、Render、UIA 等其他 lane 并行：
@@ -58,7 +58,8 @@ SDK-001 (independent packaging lane; does not wait for UI-FLOW-001)
 
 `UI-IMAGE-001` 与 `UI-COMPONENT-001` 两条无直接依赖的 lane 均已完成：前者关闭 Image/Icon/NineSlice
 产品与性能证据，后者关闭完整 component reservation/counter 与 `ui_component_build_v1`。当前单 UI lane
-已经汇合到 `UI-STYLE-001`。
+已经汇合到 `UI-STYLE-001`；其中 startup-only ColorToken registry/value 与 token-backed BoxFill 已完成，
+下一切片是运行期 token update/reverse dependency、Image tint/opacity 和其他属性 dirty metadata。
 `UI-RANGE-INPUT-KEYBOARD` 已独立关闭且不依赖 ADR 0023；已完成的 Image/Component 均未复制其输入状态。
 `UI-PERF-001` 首个 milestone 已完成，任务为 `InProgress`，Image/Component 已解锁；它不是只执行一次，
 Component、Image 与 Style 已扩展同一协议；Motion 后续垂直切片仍必须继续扩展 counter/checksum 协议。

@@ -36,12 +36,17 @@ class ConsumerState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(styleClass.error()));
         }
+        auto colorToken = builder->registerStyleColorToken(Tina::UI::rgb(0x2463A5));
+        if (!colorToken)
+        {
+            return Tina::Core::failure(std::move(colorToken.error()));
+        }
         const std::array rules{
             Tina::UI::UIStyleBoxFillRule{
                 .role = Tina::UI::UIStyleRoleId::PanelSurface,
                 .styleClass = *styleClass,
                 .requiredStates = Tina::UI::UIStyleState::Disabled,
-                .color = Tina::UI::rgb(0x2463A5),
+                .colorToken = *colorToken,
             },
         };
         if (Tina::Core::Status status = builder->installStyleSheet(rules); !status)

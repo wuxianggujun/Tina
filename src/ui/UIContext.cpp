@@ -570,6 +570,7 @@ struct UIContext::Impl final {
           focusRestoreByNodeIndex(&resource), styleRolesByNodeIndex(&resource),
           styleSheetStorage({
                                 .classCapacity = capacities.styleClassCapacity,
+                                .tokenCapacity = capacities.styleTokenCapacity,
                                 .ruleCapacity = capacities.styleRuleCapacity,
                                 .bucketCapacity = capacities.styleBucketCapacity,
                                 .maxRulesPerBucket = capacities.styleRulesPerBucketCapacity,
@@ -651,6 +652,7 @@ struct UIContext::Impl final {
             .buttonActionCapacity = normalized.buttonActionCapacity,
             .textByteCapacity = normalized.textByteCapacity,
             .styleClassCapacity = normalized.styleClassCapacity,
+            .styleTokenCapacity = normalized.styleTokenCapacity,
             .styleRuleCapacity = normalized.styleRuleCapacity,
             .styleBucketCapacity = normalized.styleBucketCapacity,
             .styleRulesPerBucketCapacity = normalized.styleRulesPerBucketCapacity,
@@ -4662,6 +4664,22 @@ struct UIContext::Impl final {
                         "UI style classes must be registered before creating retained nodes");
         }
         return styleSheetStorage.registerClass();
+    }
+
+    [[nodiscard]] Core::Result<UIStyleTokenId>
+    registerStyleColorToken(UIStraightSrgba8Color value)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (styleRegistrationClosed)
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI style tokens must be registered before creating retained nodes");
+        }
+        return styleSheetStorage.registerColorToken(value);
     }
 
     [[nodiscard]] Core::Status installStyleSheet(
@@ -14488,6 +14506,9 @@ struct UIContext::Impl final {
                 .classCapacity = styleStatistics.classCapacity,
                 .registeredClassCount = styleStatistics.registeredClassCount,
                 .classHighWater = styleStatistics.classHighWater,
+                .tokenCapacity = styleStatistics.tokenCapacity,
+                .registeredTokenCount = styleStatistics.registeredTokenCount,
+                .tokenHighWater = styleStatistics.tokenHighWater,
                 .ruleCapacity = styleStatistics.ruleCapacity,
                 .activeRuleCount = styleStatistics.activeRuleCount,
                 .ruleHighWater = styleStatistics.ruleHighWater,
@@ -15946,6 +15967,12 @@ Core::Status UIContext::setProductTheme(const UITheme& theme)
 Core::Result<UIStyleClassId> UIContext::registerStyleClass()
 {
     return m_impl->registerStyleClass();
+}
+
+Core::Result<UIStyleTokenId>
+UIContext::registerStyleColorToken(UIStraightSrgba8Color value)
+{
+    return m_impl->registerStyleColorToken(value);
 }
 
 Core::Status UIContext::installStyleSheet(

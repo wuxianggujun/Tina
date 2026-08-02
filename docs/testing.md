@@ -122,8 +122,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 
 成功条件是：版本化 package 和声明的 `Tina_GAME_SDK_TARGETS` 全部可发现；实际安装头通过第三方
 include/type token 扫描；所有 Tina imported target 的 include 都来自安装 prefix 而非源码树；外部
-`tina_sdk_consumer` 只链接 `Tina::GameSDK` 并运行一帧后输出
-`{"status":"ok","consumer":"installed-tina-sdk"}`。PlatformGlfw consumer 只链接
+`tina_sdk_consumer` 只链接 `Tina::GameSDK`，并从 relocated installed headers 编译
+`PrimaryWindowUIRootBuilder` 的 StyleClass/ColorToken 注册、token-backed stylesheet 安装与 root 创建调用，
+运行一帧后输出 `{"status":"ok","consumer":"installed-tina-sdk"}`。Headless consumer 不具备 primary
+window UI，样式 facade 的运行期 phase/sticky-error 行为由 `tina_runtime_ui_tests` 覆盖。PlatformGlfw consumer 只链接
 `Tina::PlatformGlfw`，必须创建隐藏窗口、读取 metrics、poll 一帧并输出
 `"consumer":"installed-tina-platform-glfw"`。Null package 请求 `PlatformGlfw` 与所有 package 请求未知
 component 必须被拒绝；未请求 `PlatformGlfw` 时不得加载 GLFW dependency/target。Desktop consumer 只链接
@@ -195,7 +197,8 @@ Selection=1；JSON 必须报告各池 requested=reserved=published、capacity fa
 checksum、warmup 后 UI PMR allocation delta=0 与 clean commit rebuild=0。旧
 `ui_component_build_activate_toggle_v1` 只保留为 `coverage=activate_toggle_only` 的前置诊断 workload。
 
-`ui_style_state_v1` 固定 4096 nodes、64 classes、256 rules 与每个 styled node 4 个 class link；每个 sample
+`ui_style_state_v1` 固定 4096 nodes、64 classes、64 ColorToken capacity、256 rules 与每个 styled node 4 个
+class link；当前 workload 不注册 token，JSON 必须报告 `registered_tokens=0`、token high-water=0。每个 sample
 只切换一个 retained `Disabled` state，必须得到 inspected/resolved nodes=1、candidate rules=16、layout/hit=0、
 clean commit style/rebuild=0、bucket/class-link high-water 稳定、非零 style/DisplayList checksum 与
 warmup 后 UI PMR allocation delta=0。

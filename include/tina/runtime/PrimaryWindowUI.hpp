@@ -255,10 +255,12 @@ class PrimaryWindowUIRootBuilder final {
     PrimaryWindowUIRootBuilder& operator=(PrimaryWindowUIRootBuilder&& other) noexcept;
 
     // Startup stylesheet authoring is available only during GameStateEnter and
-    // before createRoot() publishes the first retained node. The Context copies
-    // rules during installStyleSheet(), owns returned class ids, and atomically
-    // preserves the previous sheet when compilation fails.
+    // before createRoot() publishes the first retained node. The Context owns
+    // returned class/token ids and copied token values, validates rule references,
+    // and atomically preserves the previous sheet when compilation fails.
     [[nodiscard]] Core::Result<UI::UIStyleClassId> registerStyleClass();
+    [[nodiscard]] Core::Result<UI::UIStyleTokenId>
+    registerStyleColorToken(UI::UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status installStyleSheet(
         std::span<const UI::UIStyleBoxFillRule> rules);
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot();

@@ -28,6 +28,7 @@ struct NormalizedUIContextCapacityConfig final {
     usize buttonActionCapacity = 0;
     usize textByteCapacity = 0;
     usize styleClassCapacity = 0;
+    usize styleTokenCapacity = 0;
     usize styleRuleCapacity = 0;
     usize styleBucketCapacity = 0;
     usize styleRulesPerBucketCapacity = 0;
