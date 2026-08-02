@@ -567,9 +567,10 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     };
     if (counters.stateEnters != 1 || counters.stateExits != 1 || counters.applicationShutdowns != 1 ||
         counters.uiRootsCreated != 1 || counters.uiRootsReleased != 1 || counters.finalUI.rootAlive ||
-        counters.finalUI.controlCount != 20 || counters.finalUI.imageProductCount != 4) {
+        counters.finalUI.controlCount != 20 || counters.finalUI.imageProductCount != 4 ||
+        !counters.finalUI.stylesheetInstalled || counters.finalUI.styleTokenUpdates == 0) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "UI showcase lifecycle or control inventory verification failed");
+                                   "UI showcase lifecycle, stylesheet, or control inventory verification failed");
     }
     if (counters.logicalPixelWidth != options.windowLogicalWidth ||
         counters.logicalPixelHeight != options.windowLogicalHeight ||
@@ -630,14 +631,15 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     if (options.autoDemo) {
         constexpr Tina::UI::UIListViewItemKey ExpectedListSelectionKey = 1'007;
         constexpr Tina::UI::UITreeViewItemKey ExpectedTreeSelectionKey = 4;
+        // styleTokenUpdates: 1 initial applyTheme + 2 Dark/Light switches (header accent ColorToken path).
         if (counters.finalUI.themeSwitches != 2 || counters.finalUI.sliderChanges == 0 ||
             std::lround(counters.finalUI.progressValue) != 84 || counters.finalUI.theme != options.initialTheme ||
             counters.finalUI.treeExpansionChanges != 2 ||
             counters.finalUI.listSelectionKey != ExpectedListSelectionKey ||
             counters.finalUI.treeSelectionKey != ExpectedTreeSelectionKey || counters.finalUI.dropdownSelection != 1 ||
-            std::lround(counters.finalUI.scrollOffset) != 80) {
+            std::lround(counters.finalUI.scrollOffset) != 80 || counters.finalUI.styleTokenUpdates < 3) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "UI showcase automated theme, value, popup, collection, or scrolling exercise did not complete");
+                                       "UI showcase automated theme, stylesheet token, value, popup, collection, or scrolling exercise did not complete");
         }
     }
     return Tina::Core::success();
@@ -694,6 +696,8 @@ class ShowcaseApplication final : public Tina::IGameApplication {
               << ",\"scrollOffset\":" << counters.finalUI.scrollOffset
               << ",\"controls\":" << counters.finalUI.controlCount
               << ",\"imageProducts\":" << counters.finalUI.imageProductCount
+              << ",\"stylesheetInstalled\":" << (counters.finalUI.stylesheetInstalled ? "true" : "false")
+              << ",\"styleTokenUpdates\":" << counters.finalUI.styleTokenUpdates
               << ",\"imageAtlasUploaded\":" << (counters.imageAtlasUploaded ? "true" : "false")
               << ",\"imageAtlasReleased\":" << (counters.imageAtlasReleased ? "true" : "false")
               << ",\"imageAtlasInvalidated\":" << (counters.imageAtlasInvalidatedAfterRelease ? "true" : "false")

@@ -308,6 +308,36 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     if (!rootBuilder) {
         return Core::failure(std::move(rootBuilder.error()));
     }
+
+    // Startup-only StyleClass/ColorToken/sheet: product Integration evidence for
+    // UI-STYLE-001. Header accent fill is stylesheet-driven via token updates on
+    // Dark/Light switch (not setBoxPaint).
+    initialTheme_ = initialTheme;
+    currentTheme_ = initialTheme;
+    const UI::UITheme productTheme =
+        initialTheme == ShowcaseTheme::Dark ? UI::makeDefaultProductTheme() : UI::makeLightProductTheme();
+    auto chromeClass = rootBuilder->registerStyleClass();
+    if (!chromeClass) {
+        return Core::failure(std::move(chromeClass.error()));
+    }
+    auto accentToken = rootBuilder->registerStyleColorToken(productTheme.accent);
+    if (!accentToken) {
+        return Core::failure(std::move(accentToken.error()));
+    }
+    showcaseChromeClass_ = *chromeClass;
+    headerAccentToken_ = *accentToken;
+    const std::array sheetRules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::PanelSurface,
+            .styleClass = showcaseChromeClass_,
+            .colorToken = headerAccentToken_,
+        },
+    };
+    if (Core::Status status = rootBuilder->installStyleSheet(std::span(sheetRules)); !status) {
+        return status;
+    }
+    stylesheetInstalled_ = true;
+
     auto root = rootBuilder->createRoot();
     if (!root) {
         return Core::failure(std::move(root.error()));
@@ -321,10 +351,6 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return Core::failure(std::move(tree.error()));
     }
 
-    initialTheme_ = initialTheme;
-    currentTheme_ = initialTheme;
-    const UI::UITheme productTheme =
-        initialTheme == ShowcaseTheme::Dark ? UI::makeDefaultProductTheme() : UI::makeLightProductTheme();
     if (Core::Status status = tree->setProductTheme(productTheme); !status) {
         return status;
     }
@@ -359,8 +385,11 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     UI::UILayoutStyle headerAccentLayout = sizedStyle(8.0F, 0.0F);
     headerAccentLayout.size.height = UI::UILayoutLength::Percent(100.0F);
     headerAccentLayout.flexItem.shrink = 0.0F;
+    UI::UIElementDescriptor headerAccentDesc = UI::makePanelElement(headerAccentLayout);
+    headerAccentDesc.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
+    headerAccentDesc.visual.styleClasses = std::span(&showcaseChromeClass_, 1);
     if (Core::Status status =
-            storeNode(createPanel(*tree, nodes_.header, headerAccentLayout), nodes_.headerAccent);
+            storeNode(tree->createElement(nodes_.header, headerAccentDesc), nodes_.headerAccent);
         !status) {
         return status;
     }
@@ -1174,9 +1203,11 @@ Core::Status ShowcaseUI::applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTh
         !status) {
         return status;
     }
-    if (Core::Status status = tree.setBoxPaint(nodes_.headerAccent, UI::makeSolidBox(theme.accent)); !status) {
+    // Header accent uses stylesheet ColorToken (product Integration path).
+    if (Core::Status status = tree.setStyleColorToken(headerAccentToken_, theme.accent); !status) {
         return status;
     }
+    ++styleTokenUpdates_;
     if (Core::Status status =
             tree.setBoxPaint(nodes_.navigation, UI::makePanelBoxPaint(theme, theme.surface1, UI::UIElevation::Low));
         !status) {
@@ -1751,6 +1782,7 @@ ShowcaseUISnapshot ShowcaseUI::snapshot() const noexcept
         .buttonActivations = buttonActivations_,
         .sliderChanges = sliderChanges_,
         .treeExpansionChanges = treeExpansionChanges_,
+        .styleTokenUpdates = styleTokenUpdates_,
         .listSelectionKey = listSelectionKey_,
         .treeSelectionKey = treeSelectionKey_,
         .dropdownSelection = dropdownSelectionIndex_,
@@ -1759,6 +1791,7 @@ ShowcaseUISnapshot ShowcaseUI::snapshot() const noexcept
         .imageProductCount = imageProductCount_,
         .quality = quality_,
         .notificationsEnabled = notificationsEnabled_,
+        .stylesheetInstalled = stylesheetInstalled_,
         .rootAlive = static_cast<bool>(root_),
     };
 }

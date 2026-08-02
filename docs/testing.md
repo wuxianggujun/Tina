@@ -653,7 +653,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 | `tina_sample_null` | EngineHost、固定帧、Headless/Null lifecycle | GLFW、GPU、可见 UI |
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
-| `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List 产品门禁 | 正式编辑器 / authoring 写入 |
+| `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
 | `tina_sample_editor_shell` | 只读工具壳：Hierarchy TreeView + Inspector + Viewport 占位；startup StyleClass/ColorToken/sheet；运行期 token 更新；JSON `readOnly=true`/`editorModule=false`/`stylesheetInstalled` | 正式 `Tina::Editor` 模块、authoring 写入、undo/cook、`2D-EDITOR` 产品工具 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |

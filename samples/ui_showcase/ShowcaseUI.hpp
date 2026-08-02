@@ -28,6 +28,7 @@ struct ShowcaseUISnapshot final {
     Core::u64 buttonActivations = 0;
     Core::u64 sliderChanges = 0;
     Core::u64 treeExpansionChanges = 0;
+    Core::u64 styleTokenUpdates = 0;
     UI::UIListViewItemKey listSelectionKey = UI::InvalidUIListViewItemKey;
     UI::UITreeViewItemKey treeSelectionKey = UI::InvalidUITreeViewItemKey;
     Core::usize dropdownSelection = 0;
@@ -36,6 +37,7 @@ struct ShowcaseUISnapshot final {
     Core::usize imageProductCount = 0;
     ShowcaseQuality quality = ShowcaseQuality::Balanced;
     bool notificationsEnabled = false;
+    bool stylesheetInstalled = false;
     bool rootAlive = false;
 };
 
@@ -178,6 +180,10 @@ class ShowcaseUI final {
     Core::usize dropdownSelectionIndex_ = 0;
     Core::usize controlCount_ = 0;
     Core::usize imageProductCount_ = 0;
+    Core::u64 styleTokenUpdates_ = 0;
+    UI::UIStyleClassId showcaseChromeClass_{};
+    UI::UIStyleTokenId headerAccentToken_{};
+    bool stylesheetInstalled_ = false;
     bool progressDirty_ = false;
     bool notificationsDirty_ = false;
     bool notificationsEnabled_ = false;
