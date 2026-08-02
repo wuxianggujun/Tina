@@ -212,7 +212,7 @@ Layout/Hit/Semantics 保持 clean、local override 排除、no-op
 phase-scoped Runtime getter/setter、跨线程/过期 phase 拒绝与 sticky error。确定性断言按以下口径读取
 `UIContextStatistics`：inspected=全部 live node，resolved=第一遍实际 resolver 的节点，affected=winning
 token 等于目标 token 的节点，candidate=第一遍 matcher 检查数。当前 `ui_style_state_v1` 不注册 token，不能
-替代这组运行期 O(N) 更新测试；公开头变化还需继续通过 header-isolation 与安装 SDK consumer gate。
+替代这组运行期 reverse-dependency 更新测试；公开头变化还需继续通过 header-isolation 与安装 SDK consumer gate。
 
 正式采样规模、fingerprint 与固定机规则见[性能与内存](performance-memory.md)和
 [ADR 0018](adr/0018-benchmark-protocol.md)。

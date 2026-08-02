@@ -311,9 +311,9 @@ source-pixel 与 destination-logical insets，首版只支持 Stretch。命令�
 圆化自身 chrome，不建立子树 clip。NineSlice 在 committed paint 中按 row-major 精确展开1..9个 Image
 entry，小目标按两侧 destination inset 比例压缩并消除零面积 patch；paint/DisplayList 容量不足不截断。
 逐角半径与 rounded clip 仍是后续扩展。startup-only 强类型 StyleClass/ColorToken、node-local state、
-literal/token-backed BoxFill stylesheet，以及运行期 ColorToken getter/setter 已开放；固定容量 reverse
-dependency、Image tint/opacity 与其他属性面仍由 `UI-STYLE-001` 跟踪。当前 token update 无持久 reverse
-index，按 live node 执行有界 O(N) 预检，并在第二遍扫描为 affected 节点发布 Paint dirty，不是
+literal/token-backed BoxFill stylesheet，以及运行期 ColorToken getter/setter 与固定 reverse-dependency
+更新路径已开放；Image tint/opacity 与其他属性面仍由 `UI-STYLE-001` 跟踪。token update 按依赖链
+`O(affected links)` 预检并发布 Paint dirty，不是
 `O(affected)`。
 
 `paintSnapshotCapacity` 为0时从 `nodeCapacity` 派生，非0时独立上限为8,388,608，因为一个节点可生成多个
@@ -329,7 +329,7 @@ resolver 选择 TextEdit/ScrollView/Dropdown，并要求匹配现有 `BuiltinEle
 `PrimaryWindowUIRootBuilder` 注册 StyleClass/ColorToken 并安装 node-local literal/token-backed BoxFill rules；
 `UIContext` 与 phase-scoped `PrimaryWindowUITreeUpdater` 提供 `styleColorToken()` / `setStyleColorToken()`；
 setter 先预检 dirty queue，失败时保持 token/dirty/committed 不变。仍**不支持**注册 Widget subclass、新
-Behavior/state machine、通用 selector、token reverse dependency、Motion/timeline 或 GPU paint callback。
+Behavior/state machine、通用 selector、Motion/timeline 或 GPU paint callback。
 因此“可组合业务 UI”不等于“已有开放控件插件
 ABI”。目标边界见 [UI 框架设计](ui-framework.md)和 Accepted
 [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。正式外部使用仍以 `SDK-001` 的安装 package 与
@@ -617,8 +617,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
-- stylesheet 固定容量 token reverse dependency、Image tint/opacity 等完整属性面与 paint-only Motion；当前
-  已有运行期 ColorToken 更新仍按 O(N) live-node 扫描；
+- stylesheet Image tint/opacity 等完整属性面与 paint-only Motion；ColorToken reverse-dependency 更新已落地；
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；

@@ -240,7 +240,7 @@ Focusable/Focus semantics 已与私有 keyboard-focus trait 对齐，Slider 可�
 `UI-STATE-FEEDBACK` 的 Dark/Light 产品视觉证据已完成。RangeInput 通过独立 capability command 在 focused
 Slider 上消费 Arrow/D-pad 调值，不复用通用空间焦点状态机。Image、Component 与
 StyleClass/pseudo-state 与 startup-only ColorToken value 的产品/性能/契约切片均已落地；后续补运行期 token
-更新及 reverse dependency、Image tint/opacity 等属性面与 paint-only Motion，具体取舍见
+更新（含 reverse dependency）、Image tint/opacity 等属性面与 paint-only Motion，具体取舍见
 [UI 框架设计](ui-framework.md)。
 
 文本使用严格 UTF-8；MSVC target 强制 `/utf-8`。可选 FreeType 负责 rasterization，UI/Render 通过 R8

@@ -9,12 +9,12 @@
 失效、6-case 尺寸矩阵和 `ui_image_nineslice_v1` 性能证据均已落地，任务已关闭。下文保留 Accepted 时的
 背景和迁移顺序，不把历史措辞改写成当前完成度。
 
-实现注记（2026-08-02）：运行期 ColorToken getter/setter 已落地。当前没有持久 reverse-dependency index；
-token 变化先按 `O(N)` 扫描全部 live node 并预检 dirty queue，再在成功路径执行第二次扫描，为 affected
-节点发布 Paint dirty。预检容量
-不足时 token、dirty state 与 committed snapshot 保持不变；no-op 不扫描。四个
-`lastStyleTokenUpdate*` counter 分别记录第一遍预检的 inspected/resolved/affected/candidate 工作量。固定容量
-reverse-dependency link 仍是后续优化，不改写本 ADR 的 Accepted 目标；正式发布 ABI 仍由 SDK/ABI 工作流决定。
+实现注记（2026-08-02）：运行期 ColorToken getter/setter 已落地。后续切片补充固定容量 reverse-dependency
+链：resolve cache 记录每节点 winning ColorToken，token 更新只遍历依赖节点预检 dirty queue 并发布 Paint
+dirty（`O(affected links)`，不再两遍全树 resolve）。预检容量不足时 token、dirty state 与 committed snapshot
+保持不变；no-op 不扫描。四个 `lastStyleTokenUpdate*` counter 记录依赖链上的
+inspected/resolved/affected/candidate 工作量（reverse path 上 candidate=0）。正式发布 ABI 仍由 SDK/ABI
+工作流决定。
 
 ## 背景
 
@@ -130,10 +130,10 @@ transition 的节点在 Style candidate 阶段预留 track，状态变化只写 
   Hit 或 Paint snapshot rebuild；
 - Behavior capability 拆分增加的是固定 side-store slot 和直接索引，不是每节点对象、vtable 或 allocator；
   Component recipe 只在 authoring phase 支付与其创建节点数成正比的成本；
-- 单节点 Style state 只匹配该节点预编译 bucket，不扫描祖先、后代或完整 rule table；当前运行期
-  `setStyleColorToken()` 没有固定 reverse-dependency index，成功路径按两遍 `O(N)` live-node 扫描完成预检，
-  并为 affected 节点发布 Paint dirty；第一遍输出 inspected/resolved/affected/candidate counter，未来有固定
-  索引后才可按受影响 link 处理；
+- 单节点 Style state 只匹配该节点预编译 bucket，不扫描祖先、后代或完整 rule table；运行期
+  `setStyleColorToken()` 经固定 reverse-dependency 链按 `O(affected links)` 预检 dirty queue 并为依赖节点
+  发布 Paint dirty；`lastStyleTokenUpdate*` counter 记录依赖链上的 inspected/resolved/affected/candidate
+  工作量（reverse path 上 candidate=0）；
 - Motion sampling 与 active track 数 `M` 成正比，`M == 0` 时不产生额外 Paint dirty。当前 committed paint
   candidate 的容量校验与 publication 仍按 layout/paint 数据线性工作，因此连续动画帧的真实成本必须与
   `N/P/M` 一起测量，不能仅用“dirty cache 局部更新”推导整帧 `O(M)`；

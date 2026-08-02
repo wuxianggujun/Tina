@@ -16,7 +16,7 @@
 | Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、committed content placement、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
 | Paint | box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
-| Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；当前 token 更新为无 reverse index 的有界两遍 `O(N)` 扫描，**无**圆角子树 clip/毛玻璃/完整 CSS |
+| Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | **尚未实现** duration/easing/tween/timeline；hover/pressed/focused/disabled 等状态当前直接切换目标 paint，不做时间插值 |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
@@ -99,16 +99,15 @@ active transaction 期间 structure/layout commit 返回 `BuildTransactionInProg
 state 持有底层事务并逐操作校验 epoch/phase；成功 commit 后只留下普通 retained subtree，不保留 component
 wrapper。公开 `UIWidgetKind` 已删除；私有 `BuiltinElementKind` 只服务成熟控件 storage/行为分派。
 Canvas 命令复制到固定容量 storage：`SolidRect` 支持统一 `cornerRadius`，`Image` 复用 `UIImageSource`，
-`NineSlice` 使用 source-pixel/destination-logical insets 且首版仅 Stretch。逐角半径、圆角子树 clip、
-固定容量 token reverse-dependency index 与 BoxFill 之外的属性面仍属后续扩展。
+`NineSlice` 使用 source-pixel/destination-logical insets 且首版仅 Stretch。逐角半径、圆角子树 clip 与
+BoxFill 之外的属性面仍属后续扩展。
 
 `UIContext::styleColorToken()` / `setStyleColorToken()` 以及 phase-scoped
 `PrimaryWindowUITreeUpdater` 对应入口提供运行期 ColorToken 读取和更新。相同值 no-op 的四个
-`lastStyleTokenUpdate*` counter 均为0；非 no-op 先扫描全部 live node 并预检 dirty queue，成功后再扫描一次
-为 affected 节点发布 Paint dirty。第一遍统计中 inspected 是全部 live node，resolved 排除 local BoxFill override，affected 是最终
-winning token 等于目标 token 的节点，candidate 是 resolver 检查的候选 rule 数。容量失败仍保留这组检查
-统计，但 token 值、dirty state 与 committed snapshot 均不改变。当前没有持久 reverse index，不能把该路径
-描述为只访问 affected node；这些公开接口也不代表正式发布 ABI 已冻结。
+`lastStyleTokenUpdate*` counter 均为0；非 no-op 只遍历 reverse-dependency 链上的节点并预检 dirty queue，
+成功后再沿同一依赖链发布 Paint dirty。inspected/resolved/affected 均按依赖节点计，reverse path 上
+`candidate=0`（不再做全树 resolve）。容量失败仍保留这组检查统计，但 token 值、dirty state 与 committed
+snapshot 均不改变。这些公开接口也不代表正式发布 ABI 已冻结。
 
 ### 第三方扩展边界
 
@@ -121,7 +120,7 @@ winning token 等于目标 token 的节点，candidate 是 resolver 检查的候
 | 自定义布局、Semantics、命中策略、局部 box/text paint | 可用 | 仍受 fixed-capacity、owner-thread 与 phase 生命周期约束 |
 | 多节点业务组件 | 直接与 Runtime phase facade 均可用 | `UIElementBuildTransaction` / `PrimaryWindowUIBuildTransaction` 统一预留 node/text/canvas/Behavior 完整预算、失败整棵回滚；Runtime transaction 不得跨 callback 保存 |
 | 自定义 Canvas | 可用首版 | backend-neutral `SolidRect`、`Image`、Stretch-only `NineSlice`；只保存 AssetId/图片元数据，不能提交 shader、GPU handle 或任意 paint callback |
-| 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override，在首个 retained node 前注册强类型 StyleClass/ColorToken、安装 node-local pseudo-state + literal/token-backed BoxFill rule，并在 owner thread/有效 Runtime phase 更新 ColorToken；当前更新按 `O(N)` 扫描且尚无 reverse dependency 与通用 selector |
+| 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override，在首个 retained node 前注册强类型 StyleClass/ColorToken、安装 node-local pseudo-state + literal/token-backed BoxFill rule，并在 owner thread/有效 Runtime phase 更新 ColorToken（reverse-dependency `O(affected)`）；尚无通用 selector / descendant 匹配 |
 | 自定义交互 | 部分可用 | 可组合标准 Activate/Toggle/RangeInput capability、挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
 | 安装后作为外部 SDK 使用 | 主要切片可用 | backend-neutral `Tina::GameSDK`、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype 与 AudioMiniaudio 已有安装 consumer；Windows/Linux gate 会物理移动 prefix 后再 configure/link/run；待跨发行版 artifact transfer 与正式 ABI 策略 |
 
@@ -415,8 +414,8 @@ retained 状态并标记必要的 dirty 类别。
 
 `UIBoxPaint` 仍是 escape hatch，并可携带 borderLight/borderDark/borderWidth、shadow（假 elevation）与
 统一 `cornerRadius`。Image/Icon/NineSlice 基础绘制、产品采用、失效/尺寸矩阵与性能 workload 已关闭。
-逐角半径、圆角子树 clip、毛玻璃、固定容量 token reverse-dependency index 与完整 CSS 仍未实现；
-ColorToken startup registry/value 与运行期有界 O(N) update、literal/token-backed BoxFill rule、node-local state
+逐角半径、圆角子树 clip、毛玻璃与完整 CSS 仍未实现；
+ColorToken startup registry/value 与运行期 reverse-dependency update、literal/token-backed BoxFill rule、node-local state
 和 Runtime 入口已经可用。
 
 ## 产品接入与证据
@@ -546,7 +545,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone、`ui_image_nineslice_v1`、完整 `ui_component_build_v1` 与 `ui_style_state_v1` 已落地；后续补 Motion workload；固定机前时间结论只报 provisional |
 | `UI-COMPONENT-001` | Done；Runtime phase-scoped bounded transaction、六类 fixed-capacity Behavior side store、node/text/canvas/各 Behavior pool 统一 reservation/counter 与 `ui_component_build_v1` 已落地 |
-| `UI-STYLE-001` | InProgress；强类型 StyleClass/ColorToken、startup registry/value、运行期有界 O(N) token getter/setter、node-local pseudo-state selector、literal/token-backed BoxFill rule、预编译 stylesheet、Runtime facade 与固定 workload 已落地；待固定容量 reverse-dependency index 与更多属性面；不做完整 CSS |
+| `UI-STYLE-001` | InProgress；强类型 StyleClass/ColorToken、startup registry/value、运行期 reverse-dependency token getter/setter、node-local pseudo-state selector、literal/token-backed BoxFill rule、预编译 stylesheet、Runtime facade 与固定 workload 已落地；待 Image tint/opacity 等属性面与 Integration/Visual 门禁；不做完整 CSS |
 | `UI-MOTION-001` | fixed-capacity paint-only transition、monotonic clock、retarget 与 reduced-motion；action/hit/layout 契约保持不变 |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |
 | `UI-FLOW-001` | Deferred：有真实页面栈需求后再增加 Activatable Screen、Layer Stack、Action Router 与输入设备提示 |
@@ -560,5 +559,5 @@ Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sam
 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView 已完成。外部 Narrator 真机门禁与 UI-003
 跨 GPU/DPI 金标仍不能标成 Done。ADR 0022 的 Element composition 主体已完成；Image/Icon、
 Component/Behavior、StyleClass/pseudo-state 与 ColorToken 运行期更新切片均已汇合，下一条 UI lane 是固定容量
-reverse-dependency index、Image tint/opacity 等属性面，随后再做 paint-only Motion。不再重复列已删除的
+Image tint/opacity 等属性面与产品视觉门禁，随后再做 paint-only Motion。不再重复列已删除的
 `UIWidgetKind` 迁移，也不把尚未实现的目标 API 写成当前能力。

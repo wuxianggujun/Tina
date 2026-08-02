@@ -237,10 +237,11 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
     assertOk(context->setStyleColorToken(primaryToken, UI::rgb(0x3978C5)));
 
     const UI::UIContextStatistics updateStatistics = context->statistics();
-    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateInspectedNodeCount, 5U);
-    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateResolvedNodeCount, 4U);
+    // Reverse-dependency index walks only nodes whose winning BoxFill is this token.
+    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateInspectedNodeCount, 1U);
+    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateResolvedNodeCount, 1U);
     EXPECT_EQ(updateStatistics.lastStyleTokenUpdateAffectedNodeCount, 1U);
-    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateCandidateRuleCount, 3U);
+    EXPECT_EQ(updateStatistics.lastStyleTokenUpdateCandidateRuleCount, 0U);
     EXPECT_EQ(updateStatistics.dirtyQueuePendingCount, 1U);
     EXPECT_FALSE(updateStatistics.layoutDirty);
     EXPECT_FALSE(updateStatistics.hitDirty);
@@ -337,10 +338,10 @@ TEST(UIStyleContextTests, RuntimeColorTokenCapacityFailureIsAtomic)
     EXPECT_EQ(*context->styleColorToken(token), UI::rgb(0x2463A5));
 
     const UI::UIContextStatistics after = context->statistics();
-    EXPECT_EQ(after.lastStyleTokenUpdateInspectedNodeCount, 3U);
-    EXPECT_EQ(after.lastStyleTokenUpdateResolvedNodeCount, 3U);
+    EXPECT_EQ(after.lastStyleTokenUpdateInspectedNodeCount, 2U);
+    EXPECT_EQ(after.lastStyleTokenUpdateResolvedNodeCount, 2U);
     EXPECT_EQ(after.lastStyleTokenUpdateAffectedNodeCount, 2U);
-    EXPECT_EQ(after.lastStyleTokenUpdateCandidateRuleCount, 2U);
+    EXPECT_EQ(after.lastStyleTokenUpdateCandidateRuleCount, 0U);
     EXPECT_EQ(after.dirtyQueuePendingCount, before.dirtyQueuePendingCount);
     EXPECT_EQ(after.paintRevision, before.paintRevision);
     EXPECT_EQ(after.paintDirty, before.paintDirty);
