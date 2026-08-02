@@ -16,6 +16,8 @@ class UIImageContentStorage final {
                           std::pmr::memory_resource& resource);
 
     [[nodiscard]] Core::Status assign(u32 nodeIndex, const UIImageContent& content);
+    // Paint-only mutation: tint/opacity does not change intrinsic layout size.
+    [[nodiscard]] Core::Status setTint(u32 nodeIndex, UIStraightSrgba8Color tint);
     void release(u32 nodeIndex) noexcept;
 
     [[nodiscard]] const UIImageContent* get(u32 nodeIndex) const noexcept;

@@ -373,6 +373,24 @@ Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI
     return m_state->setBoxPaint(m_epoch, m_phase, m_updater, node, paint);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setImageTint(UI::UINodeId node, UI::UIStraightSrgba8Color tint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setImageTint");
+    }
+    return m_state->setImageTint(m_epoch, m_phase, m_updater, node, tint);
+}
+
+Core::Result<UI::UIStraightSrgba8Color> PrimaryWindowUITreeUpdater::imageTint(UI::UINodeId node) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIStraightSrgba8Color>("PrimaryWindowUITreeUpdater::imageTint");
+    }
+    return m_state->imageTint(m_epoch, m_phase, m_updater, node);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint)
 {
     if (m_state == nullptr)

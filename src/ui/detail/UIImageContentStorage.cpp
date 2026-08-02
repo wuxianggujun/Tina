@@ -49,6 +49,23 @@ Core::Status UIImageContentStorage::assign(u32 nodeIndex, const UIImageContent& 
     return Core::success();
 }
 
+Core::Status UIImageContentStorage::setTint(u32 nodeIndex, UIStraightSrgba8Color tint)
+{
+    if (nodeIndex >= slotByNodeIndex_.size())
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "UI image content state index is out of range");
+    }
+    const u32 slotIndex = slotByNodeIndex_[nodeIndex];
+    if (slotIndex == InvalidSlot || slotIndex >= slots_.size() || !slots_[slotIndex].active)
+    {
+        return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                             "UI node does not own image content storage");
+    }
+    slots_[slotIndex].content.tint = tint;
+    return Core::success();
+}
+
 void UIImageContentStorage::release(u32 nodeIndex) noexcept
 {
     if (nodeIndex >= slotByNodeIndex_.size())

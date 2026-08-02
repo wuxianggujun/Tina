@@ -790,6 +790,40 @@ Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindo
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setImageTint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                          UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                          UI::UIStraightSrgba8Color tint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setImageTint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setImageTint(node, tint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIStraightSrgba8Color>
+PrimaryWindowUICapabilityState::imageTint(u64 epoch, PrimaryWindowUIPhase phase,
+                                          const UI::UITreeUpdater& updater, UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::imageTint";
+    if (Core::Status status = validate(epoch, phase, false, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = updater.imageTint(node);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setButtonPaint(u64 epoch, PrimaryWindowUIPhase phase,
                                                             UI::UITreeUpdater& updater, UI::UINodeId button,
                                                             const UI::UIButtonPaint& paint)

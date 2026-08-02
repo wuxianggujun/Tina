@@ -165,6 +165,61 @@ TEST_F(UIImageTest, InvalidImageAndMixedTextFailWithoutPublishingNodes)
     EXPECT_EQ(context->statistics().activeImageContentCount, 0U);
 }
 
+TEST_F(UIImageTest, RuntimeImageTintIsPaintOnlyAndNoOpPreservesDirty)
+{
+    auto context = createContext();
+    ASSERT_NE(context, nullptr);
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    const auto image = updater.createElement(
+        root.rootNodeId(), UI::makeImageElement(imageContent(), "Tinted", fixedSize(80.0F, 40.0F)));
+    ASSERT_TRUE(image.has_value()) << image.error().message;
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const UI::UIContextStatistics afterCommit = context->statistics();
+    EXPECT_FALSE(afterCommit.layoutDirty);
+    EXPECT_FALSE(afterCommit.hitDirty);
+    EXPECT_FALSE(afterCommit.paintDirty);
+
+    const auto initialTint = updater.imageTint(*image);
+    ASSERT_TRUE(initialTint.has_value()) << initialTint.error().message;
+    EXPECT_EQ(*initialTint, UI::rgba8(255, 128, 64, 200));
+
+    ASSERT_TRUE(updater.setImageTint(*image, UI::rgba8(255, 128, 64, 200)).has_value());
+    const UI::UIContextStatistics afterNoOp = context->statistics();
+    EXPECT_FALSE(afterNoOp.layoutDirty);
+    EXPECT_FALSE(afterNoOp.hitDirty);
+    EXPECT_FALSE(afterNoOp.paintDirty);
+    EXPECT_EQ(afterNoOp.paintRevision, afterCommit.paintRevision);
+
+    ASSERT_TRUE(updater.setImageTint(*image, UI::rgba8(16, 32, 48, 255)).has_value());
+    const UI::UIContextStatistics afterTint = context->statistics();
+    EXPECT_FALSE(afterTint.layoutDirty);
+    EXPECT_FALSE(afterTint.hitDirty);
+    EXPECT_TRUE(afterTint.paintDirty);
+    // markPaintDirty also dirties Semantics phase (shared paint invalidation path).
+
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    const auto paintEntry = std::ranges::find_if(
+        paint, [image](const UI::UICommittedPaintEntry& entry) { return entry.node == *image; });
+    ASSERT_NE(paintEntry, paint.end());
+    EXPECT_EQ(paintEntry->kind, UI::UICommittedPaintKind::Image);
+    EXPECT_EQ(paintEntry->solidFill, UI::premultiply(UI::rgba8(16, 32, 48, 255)));
+    EXPECT_EQ(*updater.imageTint(*image), UI::rgba8(16, 32, 48, 255));
+
+    const auto missing = updater.imageTint(root.rootNodeId());
+    ASSERT_FALSE(missing.has_value());
+    EXPECT_EQ(missing.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+    const Core::Status rejected = updater.setImageTint(root.rootNodeId(), UI::rgba8(1, 2, 3, 4));
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+}
+
 TEST_F(UIImageTest, CapacityFailureRollsBackNodeAndStorage)
 {
     auto context = createContext(1);

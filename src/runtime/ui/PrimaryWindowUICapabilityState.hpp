@@ -103,6 +103,10 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Status setProductTheme(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITheme& theme);
     [[nodiscard]] Core::Status setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                            UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setImageTint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                            UI::UINodeId node, UI::UIStraightSrgba8Color tint);
+    [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color>
+    imageTint(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId node);
     [[nodiscard]] Core::Status setButtonPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId button, const UI::UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(u64 epoch, PrimaryWindowUIPhase phase,

@@ -313,6 +313,9 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UIStyleRoleId> styleRole(UINodeId node) const;
     [[nodiscard]] Core::Status clearOverride(UINodeId node, UIStyleOverride properties = UIStyleOverride::All);
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
+    // Paint-only image tint/opacity. Does not dirty Measure/Arrange/Hit.
+    [[nodiscard]] Core::Status setImageTint(UINodeId node, UIStraightSrgba8Color tint);
+    [[nodiscard]] Core::Result<UIStraightSrgba8Color> imageTint(UINodeId node) const;
     [[nodiscard]] Core::Status setButtonPaint(UINodeId button, const UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UIButtonPaint> buttonPaint(UINodeId button) const;
     // Intrinsic-text elements only. Stores strict UTF-8 without NUL into the
@@ -481,9 +484,9 @@ class UIContext final {
     registerStyleColorToken(UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status installStyleSheet(
         std::span<const UIStyleBoxFillRule> rules);
-    // Runtime token updates scan live nodes until a fixed-capacity reverse
-    // dependency index is introduced. A capacity failure preserves the token,
-    // committed paint, and dirty state. Owner-thread only.
+    // Runtime token updates walk the fixed reverse-dependency index. A capacity
+    // failure preserves the token, committed paint, and dirty state. Owner-thread
+    // only.
     [[nodiscard]] Core::Result<UIStraightSrgba8Color>
     styleColorToken(UIStyleTokenId token) const;
     [[nodiscard]] Core::Status setStyleColorToken(
@@ -678,6 +681,12 @@ class UIContext final {
                                                        UIStyleOverride properties);
     [[nodiscard]] Core::Result<bool> isEnabledFromUpdater(UINodeId updaterRoot, UINodeId node) const;
     [[nodiscard]] Core::Status setBoxPaintFromUpdater(UINodeId updaterRoot, UINodeId node, const UIBoxPaint& paint);
+    // Paint-only: tint/opacity does not dirty Measure/Arrange/Hit. Nodes without
+    // retained image content fail closed without mutating dirty state.
+    [[nodiscard]] Core::Status setImageTintFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                       UIStraightSrgba8Color tint);
+    [[nodiscard]] Core::Result<UIStraightSrgba8Color> imageTintFromUpdater(UINodeId updaterRoot,
+                                                                           UINodeId node) const;
     [[nodiscard]] Core::Status setButtonPaintFromUpdater(UINodeId updaterRoot, UINodeId button,
                                                          const UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UIButtonPaint> buttonPaintFromUpdater(UINodeId updaterRoot, UINodeId button) const;

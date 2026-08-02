@@ -140,6 +140,9 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UITheme> productTheme() const;
     [[nodiscard]] Core::Status setProductTheme(const UI::UITheme& theme);
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
+    // Paint-only: image tint/opacity does not dirty layout or hit.
+    [[nodiscard]] Core::Status setImageTint(UI::UINodeId node, UI::UIStraightSrgba8Color tint);
+    [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color> imageTint(UI::UINodeId node) const;
     [[nodiscard]] Core::Status setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(UI::UINodeId button) const;
     [[nodiscard]] Core::Status setText(UI::UINodeId node, std::string_view utf8);

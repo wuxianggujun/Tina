@@ -6798,6 +6798,75 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setImageTintFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                       UIStraightSrgba8Color tint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const UIImageContent* current = imageContentStorage.get(node.index());
+        if (current == nullptr)
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI image tint requires retained image content");
+        }
+        if (current->tint == tint)
+        {
+            return Core::success();
+        }
+        // Dirty metadata: tint/opacity is paint-only. Intrinsic size changes
+        // would require a separate image content API and Measure dirty.
+        if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus)
+        {
+            return dirtyStatus;
+        }
+        return imageContentStorage.setTint(node.index(), tint);
+    }
+
+    [[nodiscard]] Core::Result<UIStraightSrgba8Color> imageTintFromUpdater(UINodeId updaterRoot,
+                                                                           UINodeId node) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = const_cast<Impl*>(this)->resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const UIImageContent* current = imageContentStorage.get(node.index());
+        if (current == nullptr)
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI image tint requires retained image content");
+        }
+        return current->tint;
+    }
+
     [[nodiscard]] Core::Status setButtonPaintFromUpdater(UINodeId updaterRoot, UINodeId button,
                                                          const UIButtonPaint& paint)
     {
@@ -15321,6 +15390,24 @@ Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
     return m_context->setBoxPaintFromUpdater(m_root, node, paint);
 }
 
+Core::Status UITreeUpdater::setImageTint(UINodeId node, UIStraightSrgba8Color tint)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setImageTintFromUpdater(m_root, node, tint);
+}
+
+Core::Result<UIStraightSrgba8Color> UITreeUpdater::imageTint(UINodeId node) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->imageTintFromUpdater(m_root, node);
+}
+
 Core::Status UITreeUpdater::setButtonPaint(UINodeId button, const UIButtonPaint& paint)
 {
     if (m_context == nullptr)
@@ -16670,6 +16757,16 @@ Core::Result<bool> UIContext::isEnabledFromUpdater(UINodeId updaterRoot, UINodeI
 Core::Status UIContext::setBoxPaintFromUpdater(UINodeId updaterRoot, UINodeId node, const UIBoxPaint& paint)
 {
     return m_impl->setBoxPaintFromUpdater(updaterRoot, node, paint);
+}
+
+Core::Status UIContext::setImageTintFromUpdater(UINodeId updaterRoot, UINodeId node, UIStraightSrgba8Color tint)
+{
+    return m_impl->setImageTintFromUpdater(updaterRoot, node, tint);
+}
+
+Core::Result<UIStraightSrgba8Color> UIContext::imageTintFromUpdater(UINodeId updaterRoot, UINodeId node) const
+{
+    return m_impl->imageTintFromUpdater(updaterRoot, node);
 }
 
 Core::Status UIContext::setButtonPaintFromUpdater(UINodeId updaterRoot, UINodeId button, const UIButtonPaint& paint)
