@@ -52,7 +52,7 @@ class PrimaryWindowUIBuildTransaction final {
     void reset() noexcept;
 
     [[nodiscard]] UI::UINodeId rootNodeId() const noexcept;
-    [[nodiscard]] usize remainingNodeBudget() const noexcept;
+    [[nodiscard]] UI::UIComponentBuildBudget remainingBudget() const noexcept;
     [[nodiscard]] bool isActive() const noexcept;
     explicit operator bool() const noexcept;
 
@@ -116,7 +116,7 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<PrimaryWindowUIBuildTransaction>
     beginBuildTransaction(UI::UINodeId parent,
                           const UI::UIElementDescriptor& rootDescriptor,
-                          usize nodeBudget);
+                          UI::UIComponentBuildBudget budget);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);

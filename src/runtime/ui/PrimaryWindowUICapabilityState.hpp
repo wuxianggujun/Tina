@@ -55,7 +55,7 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<PrimaryWindowUIBuildTransaction>
     beginBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                           UI::UINodeId parent, const UI::UIElementDescriptor& rootDescriptor,
-                          usize nodeBudget);
+                          UI::UIComponentBuildBudget budget);
     [[nodiscard]] Core::Result<UI::UINodeId>
     createElementFromBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId parent,
                                       const UI::UIElementDescriptor& descriptor);
@@ -64,7 +64,7 @@ class PrimaryWindowUICapabilityState final {
     void resetBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase) noexcept;
     [[nodiscard]] UI::UINodeId buildTransactionRootNodeId(u64 epoch,
                                                           PrimaryWindowUIPhase phase) const noexcept;
-    [[nodiscard]] usize buildTransactionRemainingNodeBudget(
+    [[nodiscard]] UI::UIComponentBuildBudget buildTransactionRemainingBudget(
         u64 epoch, PrimaryWindowUIPhase phase) const noexcept;
     [[nodiscard]] bool isBuildTransactionActive(u64 epoch,
                                                 PrimaryWindowUIPhase phase) const noexcept;

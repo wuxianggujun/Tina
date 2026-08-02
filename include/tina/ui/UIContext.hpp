@@ -10,6 +10,7 @@
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
+#include <tina/ui/UIComponentBuild.hpp>
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIElement.hpp>
@@ -126,6 +127,7 @@ struct UIContextStatistics final {
     usize lastPaintSnapshotRebuildCount = 0;
     usize dirtyQueuePendingCount = 0;
     usize dirtyQueueHighWater = 0;
+    UIComponentBuildStatistics componentBuild{};
 };
 
 class UIContext;
@@ -230,7 +232,7 @@ class UIElementBuildTransaction final {
     void reset() noexcept;
 
     [[nodiscard]] UINodeId rootNodeId() const noexcept;
-    [[nodiscard]] usize remainingNodeBudget() const noexcept;
+    [[nodiscard]] UIComponentBuildBudget remainingBudget() const noexcept;
     [[nodiscard]] bool isActive() const noexcept;
 
   private:
@@ -238,12 +240,12 @@ class UIElementBuildTransaction final {
     friend class UITreeUpdater;
 
     UIElementBuildTransaction(UIContext& context, UINodeId updaterRoot, UINodeId componentRoot,
-                              usize remainingNodeBudget) noexcept;
+                              UIComponentBuildBudget remainingBudget) noexcept;
 
     std::weak_ptr<Detail::UIContextLifetimeControl> m_lifetime{};
     UINodeId m_updaterRoot{};
     UINodeId m_componentRoot{};
-    usize m_remainingNodeBudget = 0;
+    UIComponentBuildBudget m_remainingBudget{};
     std::optional<Core::Error> m_failure{};
 };
 
@@ -261,7 +263,8 @@ class UITreeUpdater final {
 
     [[nodiscard]] Core::Result<UINodeId> createElement(UINodeId parent, const UIElementDescriptor& descriptor);
     [[nodiscard]] Core::Result<UIElementBuildTransaction>
-    beginBuildTransaction(UINodeId parent, const UIElementDescriptor& rootDescriptor, usize nodeBudget);
+    beginBuildTransaction(UINodeId parent, const UIElementDescriptor& rootDescriptor,
+                          UIComponentBuildBudget budget);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UINodeId node, UIPointerHitPolicy policy);
@@ -582,12 +585,17 @@ class UIContext final {
                                                                   const UIElementDescriptor& descriptor);
     [[nodiscard]] Core::Result<UIElementBuildTransaction>
     beginBuildTransactionFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                     const UIElementDescriptor& rootDescriptor, usize nodeBudget);
+                                     const UIElementDescriptor& rootDescriptor,
+                                     UIComponentBuildBudget budget);
     [[nodiscard]] Core::Result<UINodeId>
     createElementFromBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot, UINodeId parent,
-                                      const UIElementDescriptor& descriptor, usize& remainingNodeBudget);
-    [[nodiscard]] Core::Status commitBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot);
-    void rollbackBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot) noexcept;
+                                      const UIElementDescriptor& descriptor,
+                                      UIComponentBuildBudget& remainingBudget);
+    [[nodiscard]] Core::Status commitBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot,
+                                                      UIComponentBuildBudget& remainingBudget);
+    void rollbackBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot,
+                                  UIComponentBuildBudget& remainingBudget) noexcept;
+    [[nodiscard]] bool isBuildTransactionActive(UINodeId componentRoot) const noexcept;
     [[nodiscard]] Core::Status setProgressBarRangeFromUpdater(UINodeId updaterRoot, UINodeId progressBar,
                                                               float minValue, float maxValue);
     [[nodiscard]] Core::Status setProgressBarValueFromUpdater(UINodeId updaterRoot, UINodeId progressBar, float value);

@@ -363,7 +363,9 @@ TEST_F(UINineSliceTest, DestroyAndBuildRollbackRecycleTheRetainedCommandSlot)
     const UI::UICanvasCommand command = nineSliceCommand();
     UI::UIElementDescriptor descriptor = UI::makePanelElement(fixedSize(80.0F, 70.0F));
     descriptor.visual.canvas = std::span(&command, 1);
-    auto transactionResult = updater.beginBuildTransaction(root.rootNodeId(), descriptor, 1);
+    auto transactionResult = updater.beginBuildTransaction(
+        root.rootNodeId(), descriptor,
+        {.nodes = 1, .canvasCommands = 1});
     ASSERT_TRUE(transactionResult.has_value()) << transactionResult.error().message;
     UI::UIElementBuildTransaction transaction = std::move(*transactionResult);
     EXPECT_EQ(context->statistics().activeCanvasCommandCount, 1U);

@@ -273,7 +273,71 @@ struct CommittedHitBuildResult final {
     return Core::failure(makeError(code, message, location));
 }
 
+[[nodiscard]] constexpr Detail::UIBehaviorStateSlotCounts
+toBehaviorSlotCounts(UIBehaviorSlotBudget budget) noexcept
+{
+    return {
+        .activate = budget.activate,
+        .toggle = budget.toggle,
+        .range = budget.range,
+        .textInput = budget.textInput,
+        .scroll = budget.scroll,
+        .selection = budget.selection,
+    };
+}
+
+[[nodiscard]] constexpr UIBehaviorSlotBudget
+toBehaviorSlotBudget(Detail::UIBehaviorStateSlotCounts counts) noexcept
+{
+    return {
+        .activate = counts.activate,
+        .toggle = counts.toggle,
+        .range = counts.range,
+        .textInput = counts.textInput,
+        .scroll = counts.scroll,
+        .selection = counts.selection,
+    };
+}
+
+[[nodiscard]] constexpr bool containsBudget(UIBehaviorSlotBudget available,
+                                            UIBehaviorSlotBudget required) noexcept
+{
+    return required.activate <= available.activate && required.toggle <= available.toggle &&
+           required.range <= available.range && required.textInput <= available.textInput &&
+           required.scroll <= available.scroll && required.selection <= available.selection;
+}
+
+[[nodiscard]] constexpr bool containsBudget(UIComponentBuildBudget available,
+                                            UIComponentBuildBudget required) noexcept
+{
+    return required.nodes <= available.nodes && required.textBytes <= available.textBytes &&
+           required.canvasCommands <= available.canvasCommands &&
+           containsBudget(available.behaviors, required.behaviors);
+}
+
+[[nodiscard]] constexpr UIComponentBuildPoolStatistics
+makePoolStatistics(usize requested, usize reserved, usize published,
+                   usize capacityFailures, usize outstandingReservations) noexcept
+{
+    return {
+        .requested = requested,
+        .reserved = reserved,
+        .published = published,
+        .capacityFailures = capacityFailures,
+        .outstandingReservations = outstandingReservations,
+    };
+}
+
 } // namespace
+
+struct UIComponentBuildReservation final {
+    UINodeId componentRoot{};
+    UIComponentBuildBudget remaining{};
+    Detail::UITextStorage::Reservation text{};
+    Detail::UICanvasCommandStorage::Reservation canvas{};
+    Detail::UIBehaviorStateSlotCounts behaviors{};
+    bool active = false;
+};
 
 struct UIContext::Impl final {
     Platform::WindowId ownerWindow{};
@@ -390,6 +454,10 @@ struct UIContext::Impl final {
     bool hasCommittedViewport = false;
     usize liveRootCount = 0;
     usize activeBuildTransactionCount = 0;
+    std::pmr::vector<UIComponentBuildReservation> componentBuildReservationsByNodeIndex;
+    UIComponentBuildReservation* activeComponentBuildReservation = nullptr;
+    UIComponentBuildPoolStatistics componentBuildNodeStatistics{};
+    usize componentBuildTransactionFailureCount = 0;
     u32 firstRootIndex = InvalidNodeIndex;
     u32 lastRootIndex = InvalidNodeIndex;
     // Single phase-level dirty truth. Node-level dirty flags remain the
@@ -495,7 +563,8 @@ struct UIContext::Impl final {
                                 std::pmr::vector<UICommittedPaintEntry>(&resource)},
           committedSemanticsBuffers{std::pmr::vector<UISemanticsEntry>(&resource),
                                     std::pmr::vector<UISemanticsEntry>(&resource)},
-          committedSemanticsTextBuffers{std::pmr::vector<char>(&resource), std::pmr::vector<char>(&resource)}
+          committedSemanticsTextBuffers{std::pmr::vector<char>(&resource), std::pmr::vector<char>(&resource)},
+          componentBuildReservationsByNodeIndex(&resource)
     {
     }
 
@@ -563,6 +632,7 @@ struct UIContext::Impl final {
         impl->treeViewStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->treeViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->treeViewItemStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->componentBuildReservationsByNodeIndex.resize(normalized.nodeCapacity);
         impl->layoutScratchByIndex.resize(normalized.nodeCapacity);
         impl->layoutWorkByIndex.resize(normalized.nodeCapacity, 0);
         impl->layoutOrderScratch.reserve(normalized.nodeCapacity);
@@ -4282,9 +4352,165 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status reserveComponentBuildStorage(
+        UIComponentBuildBudget budget, UIComponentBuildReservation& reservation)
+    {
+        reservation = {};
+        componentBuildNodeStatistics.requested += budget.nodes;
+        if (componentBuildNodeStatistics.outstandingReservations > nodes.availableCount() ||
+            budget.nodes > nodes.availableCount() - componentBuildNodeStatistics.outstandingReservations)
+        {
+            ++componentBuildNodeStatistics.capacityFailures;
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI component node reservation exceeds remaining capacity");
+        }
+
+        componentBuildNodeStatistics.reserved += budget.nodes;
+        componentBuildNodeStatistics.outstandingReservations += budget.nodes;
+        reservation.remaining.nodes = budget.nodes;
+        reservation.active = true;
+        auto rollback = Core::makeScopeExit([this, &reservation]() noexcept {
+            releaseComponentBuildStorage(reservation);
+        });
+
+        if (budget.textBytes > (std::numeric_limits<u32>::max)())
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI component text reservation exceeds the 32-bit text arena range");
+        }
+        auto textReservation = textStorage.reserve(static_cast<u32>(budget.textBytes));
+        if (!textReservation)
+        {
+            return Core::failure(textReservation.error());
+        }
+        reservation.text = *textReservation;
+        reservation.remaining.textBytes = budget.textBytes;
+
+        auto canvasReservation = canvasCommandStorage.reserve(budget.canvasCommands);
+        if (!canvasReservation)
+        {
+            return Core::failure(canvasReservation.error());
+        }
+        reservation.canvas = *canvasReservation;
+        reservation.remaining.canvasCommands = budget.canvasCommands;
+
+        const Detail::UIBehaviorStateSlotCounts behaviorCounts =
+            toBehaviorSlotCounts(budget.behaviors);
+        if (Core::Status behaviorReservation = behaviorStateStorage.reserve(behaviorCounts);
+            !behaviorReservation)
+        {
+            return behaviorReservation;
+        }
+        reservation.behaviors = behaviorCounts;
+        reservation.remaining.behaviors = budget.behaviors;
+        rollback.release();
+        return Core::success();
+    }
+
+    void releaseComponentBuildStorage(UIComponentBuildReservation& reservation) noexcept
+    {
+        if (!reservation.active)
+        {
+            return;
+        }
+        if (reservation.remaining.nodes > componentBuildNodeStatistics.outstandingReservations)
+        {
+            std::terminate();
+        }
+        componentBuildNodeStatistics.outstandingReservations -= reservation.remaining.nodes;
+        textStorage.releaseReservation(reservation.text);
+        canvasCommandStorage.releaseReservation(reservation.canvas);
+        behaviorStateStorage.releaseReservation(reservation.behaviors);
+        reservation = {};
+    }
+
+    [[nodiscard]] UIComponentBuildReservation*
+    findComponentBuildReservation(UINodeId componentRoot) noexcept
+    {
+        if (!componentRoot.hasValue() || componentRoot.index() >= componentBuildReservationsByNodeIndex.size())
+        {
+            return nullptr;
+        }
+        UIComponentBuildReservation& reservation =
+            componentBuildReservationsByNodeIndex[componentRoot.index()];
+        return reservation.active && reservation.componentRoot == componentRoot ? &reservation : nullptr;
+    }
+
+    [[nodiscard]] const UIComponentBuildReservation*
+    findComponentBuildReservation(UINodeId componentRoot) const noexcept
+    {
+        if (!componentRoot.hasValue() || componentRoot.index() >= componentBuildReservationsByNodeIndex.size())
+        {
+            return nullptr;
+        }
+        const UIComponentBuildReservation& reservation =
+            componentBuildReservationsByNodeIndex[componentRoot.index()];
+        return reservation.active && reservation.componentRoot == componentRoot ? &reservation : nullptr;
+    }
+
+    [[nodiscard]] bool isBuildTransactionActive(UINodeId componentRoot) const noexcept
+    {
+        return findComponentBuildReservation(componentRoot) != nullptr && contains(componentRoot);
+    }
+
+    [[nodiscard]] Core::Result<TextByteAllocation> allocateRetainedText(u32 byteCount)
+    {
+        if (activeComponentBuildReservation == nullptr)
+        {
+            return textStorage.allocate(byteCount);
+        }
+        auto allocation = textStorage.allocateReserved(activeComponentBuildReservation->text, byteCount);
+        if (allocation)
+        {
+            activeComponentBuildReservation->remaining.textBytes =
+                activeComponentBuildReservation->text.remainingBytes();
+        }
+        return allocation;
+    }
+
+    [[nodiscard]] Core::Status assignRetainedCanvas(
+        u32 nodeIndex, std::span<const UICanvasCommand> commands)
+    {
+        if (activeComponentBuildReservation == nullptr)
+        {
+            return canvasCommandStorage.assign(nodeIndex, commands);
+        }
+        Core::Status status = canvasCommandStorage.assignReserved(
+            nodeIndex, commands, activeComponentBuildReservation->canvas);
+        if (status)
+        {
+            activeComponentBuildReservation->remaining.canvasCommands =
+                activeComponentBuildReservation->canvas.remaining;
+        }
+        return status;
+    }
+
     [[nodiscard]] Core::Result<UINodeId> createNode(BuiltinElementKind kind,
                                                     UIElementBehavior behaviors)
     {
+        if (activeComponentBuildReservation == nullptr)
+        {
+            const usize available = nodes.availableCount();
+            if (available == 0)
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI node capacity has been exhausted");
+            }
+            if (componentBuildNodeStatistics.outstandingReservations > available ||
+                (componentBuildNodeStatistics.outstandingReservations != 0 &&
+                 available == componentBuildNodeStatistics.outstandingReservations))
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI node capacity is reserved by active component builds");
+            }
+        }
+        else if (activeComponentBuildReservation->remaining.nodes == 0 ||
+                 componentBuildNodeStatistics.outstandingReservations == 0)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI component node reservation has been exhausted");
+        }
+
         auto idResult = nodes.tryEmplace();
         if (!idResult)
         {
@@ -4303,12 +4529,25 @@ struct UIContext::Impl final {
         record->kind = kind;
         record->behaviors = behaviors;
         record->rootIndex = node.index();
-        if (Core::Status published = behaviorStateStorage.publish(node.index(), behaviors); !published)
+        Core::Status published = activeComponentBuildReservation == nullptr
+                                     ? behaviorStateStorage.publish(node.index(), behaviors)
+                                     : behaviorStateStorage.publishReserved(
+                                           node.index(), behaviors,
+                                           activeComponentBuildReservation->behaviors);
+        if (!published)
         {
             idsByIndex[node.index()] = {};
             static_cast<void>(nodes.erase(node.storageId()));
             resetNodeSideData(node.index());
             return Core::failure(published.error());
+        }
+        if (activeComponentBuildReservation != nullptr)
+        {
+            --activeComponentBuildReservation->remaining.nodes;
+            --componentBuildNodeStatistics.outstandingReservations;
+            ++componentBuildNodeStatistics.published;
+            activeComponentBuildReservation->remaining.behaviors =
+                toBehaviorSlotBudget(activeComponentBuildReservation->behaviors);
         }
         const UIStyleRoleId styleRole = defaultStyleRoleForKind(kind);
         styleRolesByNodeIndex[node.index()] = styleRole;
@@ -4347,6 +4586,20 @@ struct UIContext::Impl final {
         return node;
     }
 
+    [[nodiscard]] usize availableNodeCountForCurrentCreation() const noexcept
+    {
+        const usize available = nodes.availableCount();
+        if (activeComponentBuildReservation != nullptr)
+        {
+            return (std::min)(available, activeComponentBuildReservation->remaining.nodes);
+        }
+        if (componentBuildNodeStatistics.outstandingReservations > available)
+        {
+            return 0;
+        }
+        return available - componentBuildNodeStatistics.outstandingReservations;
+    }
+
     [[nodiscard]] Core::Status initializeSemantics(u32 index, const UISemanticsDescriptor& descriptor,
                                                    UIElementBehavior behaviors)
     {
@@ -4371,7 +4624,7 @@ struct UIContext::Impl final {
 
         const u32 nameLength = static_cast<u32>(name.size());
         const u32 descriptionLength = static_cast<u32>(description.size());
-        auto allocation = textStorage.allocate(nameLength + descriptionLength);
+        auto allocation = allocateRetainedText(nameLength + descriptionLength);
         if (!allocation)
         {
             return Core::failure(allocation.error());
@@ -4431,7 +4684,7 @@ struct UIContext::Impl final {
         {
             return semantics;
         }
-        if (Core::Status canvas = canvasCommandStorage.assign(node.index(), descriptor.visual.canvas); !canvas)
+        if (Core::Status canvas = assignRetainedCanvas(node.index(), descriptor.visual.canvas); !canvas)
         {
             return canvas;
         }
@@ -4485,7 +4738,7 @@ struct UIContext::Impl final {
             return Core::success();
         }
 
-        auto allocation = textStorage.allocate(static_cast<u32>(text.size()));
+        auto allocation = allocateRetainedText(static_cast<u32>(text.size()));
         if (!allocation)
         {
             return Core::failure(allocation.error());
@@ -4765,7 +5018,7 @@ struct UIContext::Impl final {
             return Core::failure(normalized.error());
         }
         const usize requiredNodes = static_cast<usize>(normalized->materializedItemCapacity) + 1U;
-        if (nodes.availableCount() < requiredNodes)
+        if (availableNodeCountForCurrentCreation() < requiredNodes)
         {
             return fail(UIErrorCode::CapacityExceeded,
                         "UI ListView row pool exceeds the remaining node capacity");
@@ -4810,7 +5063,7 @@ struct UIContext::Impl final {
             return Core::failure(normalized.error());
         }
         const usize requiredNodes = static_cast<usize>(normalized->materializedItemCapacity) + 1U;
-        if (nodes.availableCount() < requiredNodes)
+        if (availableNodeCountForCurrentCreation() < requiredNodes)
         {
             return fail(UIErrorCode::CapacityExceeded, "UI TreeView row pool exceeds the remaining node capacity");
         }
@@ -4875,13 +5128,62 @@ struct UIContext::Impl final {
         return createElement(parent, descriptor);
     }
 
-    [[nodiscard]] Core::Result<usize> requiredNodeCountForElement(const UIElementDescriptor& descriptor) const
+    [[nodiscard]] Core::Result<UIComponentBuildBudget>
+    requiredBuildBudgetForElement(const UIElementDescriptor& descriptor) const
     {
         auto kind = resolveElementBuiltinKind(descriptor);
         if (!kind)
         {
             return Core::failure(kind.error());
         }
+        UIComponentBuildBudget required{.nodes = 1};
+        const auto addBehaviorSlots = [](UIBehaviorSlotBudget& slots,
+                                         UIElementBehavior behaviors,
+                                         usize count = 1U) noexcept {
+            if (hasBehavior(behaviors, UIElementBehavior::Activate))
+            {
+                slots.activate += count;
+            }
+            if (hasBehavior(behaviors, UIElementBehavior::Toggle))
+            {
+                slots.toggle += count;
+            }
+            if (hasBehavior(behaviors, UIElementBehavior::RangeInput))
+            {
+                slots.range += count;
+            }
+            if (hasBehavior(behaviors, UIElementBehavior::TextInput))
+            {
+                slots.textInput += count;
+            }
+            if (hasBehavior(behaviors, UIElementBehavior::Scroll))
+            {
+                slots.scroll += count;
+            }
+            if (hasBehavior(behaviors, UIElementBehavior::Select))
+            {
+                slots.selection += count;
+            }
+        };
+        addBehaviorSlots(required.behaviors, descriptor.behaviors);
+
+        const usize semanticsNameBytes = descriptor.semantics.name.has_value()
+                                             ? descriptor.semantics.name->size()
+                                             : 0U;
+        const usize semanticsDescriptionBytes = descriptor.semantics.description.has_value()
+                                                    ? descriptor.semantics.description->size()
+                                                    : 0U;
+        const usize intrinsicTextBytes = descriptor.text.has_value() ? descriptor.text->size() : 0U;
+        if (semanticsDescriptionBytes > (std::numeric_limits<usize>::max)() - semanticsNameBytes ||
+            intrinsicTextBytes > (std::numeric_limits<usize>::max)() -
+                                     semanticsNameBytes - semanticsDescriptionBytes)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI component descriptor text budget overflowed");
+        }
+        required.textBytes = semanticsNameBytes + semanticsDescriptionBytes + intrinsicTextBytes;
+        required.canvasCommands = descriptor.visual.canvas.size();
+
         if (*kind == BuiltinElementKind::ListView)
         {
             auto config = normalizeListViewCreateConfig(descriptor.listView);
@@ -4889,133 +5191,209 @@ struct UIContext::Impl final {
             {
                 return Core::failure(config.error());
             }
-            return static_cast<usize>(config->materializedItemCapacity) + 1U;
+            const usize rowCount = config->materializedItemCapacity;
+            required.nodes += rowCount;
+            addBehaviorSlots(required.behaviors,
+                             defaultBehaviorsForKind(BuiltinElementKind::ListViewItem), rowCount);
         }
-        if (*kind == BuiltinElementKind::TreeView)
+        else if (*kind == BuiltinElementKind::TreeView)
         {
             auto config = normalizeTreeViewCreateConfig(descriptor.treeView);
             if (!config)
             {
                 return Core::failure(config.error());
             }
-            return static_cast<usize>(config->materializedItemCapacity) + 1U;
+            const usize rowCount = config->materializedItemCapacity;
+            required.nodes += rowCount;
+            addBehaviorSlots(required.behaviors,
+                             defaultBehaviorsForKind(BuiltinElementKind::TreeViewItem), rowCount);
         }
-        return 1U;
+        return required;
     }
 
     [[nodiscard]] Core::Result<UIElementBuildTransaction>
     beginBuildTransaction(UIContext& context, UINodeId updaterRoot, UINodeId parent,
-                          const UIElementDescriptor& rootDescriptor, usize nodeBudget)
+                          const UIElementDescriptor& rootDescriptor, UIComponentBuildBudget budget)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
             return Core::failure(ownerThread.error());
         }
         drainDeferredRootDestroys();
-        if (nodeBudget == 0)
+        if (budget.nodes == 0)
         {
+            ++componentBuildTransactionFailureCount;
             return fail(UIErrorCode::InvalidElementDescriptor,
                         "UI component build transaction requires a positive node budget");
         }
-        if (nodeBudget > nodes.availableCount())
+        auto requiredBudget = requiredBuildBudgetForElement(rootDescriptor);
+        if (!requiredBudget)
         {
+            ++componentBuildTransactionFailureCount;
+            return Core::failure(requiredBudget.error());
+        }
+        if (!containsBudget(budget, *requiredBudget))
+        {
+            ++componentBuildTransactionFailureCount;
             return fail(UIErrorCode::CapacityExceeded,
-                        "UI component build transaction budget exceeds remaining node capacity");
+                        "UI component root exceeds its declared build budget");
         }
-        auto requiredNodes = requiredNodeCountForElement(rootDescriptor);
-        if (!requiredNodes)
+
+        UIComponentBuildReservation reservation;
+        if (Core::Status reserved = reserveComponentBuildStorage(budget, reservation); !reserved)
         {
-            return Core::failure(requiredNodes.error());
+            ++componentBuildTransactionFailureCount;
+            return Core::failure(reserved.error());
         }
-        if (*requiredNodes > nodeBudget)
+        auto reservationRollback = Core::makeScopeExit([this, &reservation]() noexcept {
+            releaseComponentBuildStorage(reservation);
+        });
+
+        if (activeComponentBuildReservation != nullptr)
         {
-            return fail(UIErrorCode::CapacityExceeded,
-                        "UI component root exceeds its build transaction node budget");
+            ++componentBuildTransactionFailureCount;
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI component build reservation scope is already active");
         }
+        activeComponentBuildReservation = &reservation;
+        auto activeScope = Core::makeScopeExit([this]() noexcept {
+            activeComponentBuildReservation = nullptr;
+        });
         auto componentRoot = createElementFromUpdater(updaterRoot, parent, rootDescriptor);
         if (!componentRoot)
         {
+            ++componentBuildTransactionFailureCount;
             return Core::failure(componentRoot.error());
         }
+        activeScope.release();
+        activeComponentBuildReservation = nullptr;
+
+        UIComponentBuildReservation& storedReservation =
+            componentBuildReservationsByNodeIndex[componentRoot->index()];
+        if (storedReservation.active)
+        {
+            static_cast<void>(destroySubtree(*componentRoot));
+            ++componentBuildTransactionFailureCount;
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI component root already owns a build reservation");
+        }
+        reservation.componentRoot = *componentRoot;
+        storedReservation = std::move(reservation);
+        reservation = {};
+        reservationRollback.release();
         ++activeBuildTransactionCount;
         return UIElementBuildTransaction{
             context,
             updaterRoot,
             *componentRoot,
-            nodeBudget - *requiredNodes,
+            storedReservation.remaining,
         };
     }
 
     [[nodiscard]] Core::Result<UINodeId>
     createElementFromBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot, UINodeId parent,
-                                      const UIElementDescriptor& descriptor, usize& remainingNodeBudget)
+                                      const UIElementDescriptor& descriptor,
+                                      UIComponentBuildBudget& remainingBudget)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
             return Core::failure(ownerThread.error());
         }
-        if (activeBuildTransactionCount == 0 || !contains(updaterRoot) || !contains(componentRoot) ||
+        UIComponentBuildReservation* reservation = findComponentBuildReservation(componentRoot);
+        if (activeBuildTransactionCount == 0 || reservation == nullptr || !contains(updaterRoot) ||
+            !contains(componentRoot) ||
             !isNodeWithinRoot(updaterRoot, componentRoot))
         {
+            ++componentBuildTransactionFailureCount;
             return fail(UIErrorCode::InvalidNode, "UI component build transaction is no longer active");
         }
         if (!contains(parent) || !isNodeWithinSubtree(componentRoot, parent))
         {
+            ++componentBuildTransactionFailureCount;
             return fail(UIErrorCode::InvalidParent,
                         "UI component build transaction parent must belong to its component subtree");
         }
-        auto requiredNodes = requiredNodeCountForElement(descriptor);
-        if (!requiredNodes)
+        auto requiredBudget = requiredBuildBudgetForElement(descriptor);
+        if (!requiredBudget)
         {
-            return Core::failure(requiredNodes.error());
+            ++componentBuildTransactionFailureCount;
+            return Core::failure(requiredBudget.error());
         }
-        if (*requiredNodes > remainingNodeBudget)
+        if (!containsBudget(reservation->remaining, *requiredBudget))
         {
+            ++componentBuildTransactionFailureCount;
             return fail(UIErrorCode::CapacityExceeded,
-                        "UI component build transaction node budget has been exhausted");
+                        "UI component build transaction budget has been exhausted");
         }
+
+        if (activeComponentBuildReservation != nullptr)
+        {
+            ++componentBuildTransactionFailureCount;
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI component build reservation scope is already active");
+        }
+        activeComponentBuildReservation = reservation;
+        auto activeScope = Core::makeScopeExit([this]() noexcept {
+            activeComponentBuildReservation = nullptr;
+        });
         auto node = createElement(parent, descriptor);
+        remainingBudget = reservation->remaining;
         if (!node)
         {
+            ++componentBuildTransactionFailureCount;
             return Core::failure(node.error());
         }
-        remainingNodeBudget -= *requiredNodes;
         return node;
     }
 
-    [[nodiscard]] Core::Status commitBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot)
+    [[nodiscard]] Core::Status commitBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot,
+                                                      UIComponentBuildBudget& remainingBudget)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
             return ownerThread;
         }
-        if (activeBuildTransactionCount == 0)
+        UIComponentBuildReservation* reservation = findComponentBuildReservation(componentRoot);
+        if (activeBuildTransactionCount == 0 || reservation == nullptr)
         {
+            ++componentBuildTransactionFailureCount;
             return fail(UIErrorCode::InvalidNode, "UI component build transaction is no longer active");
         }
         if (!contains(updaterRoot) || !contains(componentRoot) || !isNodeWithinRoot(updaterRoot, componentRoot))
         {
+            releaseComponentBuildStorage(*reservation);
             --activeBuildTransactionCount;
+            remainingBudget = {};
+            ++componentBuildTransactionFailureCount;
             return fail(UIErrorCode::InvalidNode, "UI component build transaction root is no longer alive");
         }
+        releaseComponentBuildStorage(*reservation);
         --activeBuildTransactionCount;
+        remainingBudget = {};
         return Core::success();
     }
 
-    void rollbackBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot) noexcept
+    void rollbackBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot,
+                                  UIComponentBuildBudget& remainingBudget) noexcept
     {
         if (!isOwnerThread())
         {
             std::terminate();
         }
-        if (activeBuildTransactionCount != 0)
-        {
-            --activeBuildTransactionCount;
-        }
+        UIComponentBuildReservation* reservation = findComponentBuildReservation(componentRoot);
         if (contains(updaterRoot) && contains(componentRoot) && isNodeWithinRoot(updaterRoot, componentRoot))
         {
             static_cast<void>(destroySubtree(componentRoot));
         }
+        if (reservation != nullptr && reservation->active)
+        {
+            releaseComponentBuildStorage(*reservation);
+            if (activeBuildTransactionCount != 0)
+            {
+                --activeBuildTransactionCount;
+            }
+        }
+        remainingBudget = {};
     }
 
     void unlinkFromTree(u32 index, NodeRecord& record) noexcept
@@ -5154,6 +5532,24 @@ struct UIContext::Impl final {
         }
     }
 
+    void releaseComponentBuildReservationsInSubtree(UINodeId subtreeRoot) noexcept
+    {
+        for (UIComponentBuildReservation& reservation : componentBuildReservationsByNodeIndex)
+        {
+            if (!reservation.active || !contains(reservation.componentRoot) ||
+                !isNodeWithinSubtree(subtreeRoot, reservation.componentRoot))
+            {
+                continue;
+            }
+            releaseComponentBuildStorage(reservation);
+            if (activeBuildTransactionCount == 0)
+            {
+                std::terminate();
+            }
+            --activeBuildTransactionCount;
+        }
+    }
+
     [[nodiscard]] Core::Status destroySubtree(UINodeId node)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
@@ -5175,6 +5571,7 @@ struct UIContext::Impl final {
             // destruction. Generation validation makes that outcome idempotent.
             return Core::success();
         }
+        releaseComponentBuildReservationsInSubtree(node);
         const bool wasRoot = record->kind == BuiltinElementKind::Root;
         unlinkFromTree(node.index(), *record);
         eraseDetachedSubtree(node.index());
@@ -5200,6 +5597,7 @@ struct UIContext::Impl final {
             return;
         }
 
+        releaseComponentBuildReservationsInSubtree(root);
         unlinkFromTree(root.index(), *rootRecord);
         eraseDetachedSubtree(root.index());
         if (liveRootCount > 0)
@@ -13594,6 +13992,8 @@ struct UIContext::Impl final {
 
     [[nodiscard]] UIContextStatistics statistics() const noexcept
     {
+        const Detail::UIBehaviorStateStorageCounters behaviorCounters =
+            behaviorStateStorage.counters();
         return UIContextStatistics{
             .nodeCapacity = capacityConfig.nodeCapacity,
             .rootCapacity = capacityConfig.rootCapacity,
@@ -13663,6 +14063,61 @@ struct UIContext::Impl final {
             .lastPaintSnapshotRebuildCount = lastPaintSnapshotRebuildCount,
             .dirtyQueuePendingCount = validDirtyQueueCount(),
             .dirtyQueueHighWater = dirtyQueueStorage.highWater(),
+            .componentBuild = {
+                .nodes = componentBuildNodeStatistics,
+                .textBytes = makePoolStatistics(
+                    textStorage.reservationRequestedBytes(),
+                    textStorage.reservationReservedBytes(),
+                    textStorage.reservationPublishedBytes(),
+                    textStorage.reservationCapacityFailureCount(),
+                    textStorage.outstandingReservedBytes()),
+                .canvasCommands = makePoolStatistics(
+                    canvasCommandStorage.reservationRequestedCount(),
+                    canvasCommandStorage.reservationReservedCount(),
+                    canvasCommandStorage.reservationPublishedCount(),
+                    canvasCommandStorage.reservationCapacityFailureCount(),
+                    canvasCommandStorage.outstandingReservedCount()),
+                .behaviors = {
+                    .activate = makePoolStatistics(
+                        behaviorCounters.requested.activate,
+                        behaviorCounters.reserved.activate,
+                        behaviorCounters.published.activate,
+                        behaviorCounters.capacityFailures.activate,
+                        behaviorCounters.outstandingReservations.activate),
+                    .toggle = makePoolStatistics(
+                        behaviorCounters.requested.toggle,
+                        behaviorCounters.reserved.toggle,
+                        behaviorCounters.published.toggle,
+                        behaviorCounters.capacityFailures.toggle,
+                        behaviorCounters.outstandingReservations.toggle),
+                    .range = makePoolStatistics(
+                        behaviorCounters.requested.range,
+                        behaviorCounters.reserved.range,
+                        behaviorCounters.published.range,
+                        behaviorCounters.capacityFailures.range,
+                        behaviorCounters.outstandingReservations.range),
+                    .textInput = makePoolStatistics(
+                        behaviorCounters.requested.textInput,
+                        behaviorCounters.reserved.textInput,
+                        behaviorCounters.published.textInput,
+                        behaviorCounters.capacityFailures.textInput,
+                        behaviorCounters.outstandingReservations.textInput),
+                    .scroll = makePoolStatistics(
+                        behaviorCounters.requested.scroll,
+                        behaviorCounters.reserved.scroll,
+                        behaviorCounters.published.scroll,
+                        behaviorCounters.capacityFailures.scroll,
+                        behaviorCounters.outstandingReservations.scroll),
+                    .selection = makePoolStatistics(
+                        behaviorCounters.requested.selection,
+                        behaviorCounters.reserved.selection,
+                        behaviorCounters.published.selection,
+                        behaviorCounters.capacityFailures.selection,
+                        behaviorCounters.outstandingReservations.selection),
+                },
+                .activeTransactionCount = activeBuildTransactionCount,
+                .transactionFailureCount = componentBuildTransactionFailureCount,
+            },
         };
     }
 };
@@ -13835,9 +14290,9 @@ Core::Result<UINodeId> UIRootBuilder::createElement(UINodeId parent, const UIEle
 
 UIElementBuildTransaction::UIElementBuildTransaction(UIContext& context, UINodeId updaterRoot,
                                                      UINodeId componentRoot,
-                                                     usize remainingNodeBudget) noexcept
+                                                     UIComponentBuildBudget remainingBudget) noexcept
     : m_lifetime(context.m_impl->lifetime), m_updaterRoot(updaterRoot), m_componentRoot(componentRoot),
-      m_remainingNodeBudget(remainingNodeBudget)
+      m_remainingBudget(remainingBudget)
 {
 }
 
@@ -13849,7 +14304,7 @@ UIElementBuildTransaction::~UIElementBuildTransaction() noexcept
 UIElementBuildTransaction::UIElementBuildTransaction(UIElementBuildTransaction&& other) noexcept
     : m_lifetime(std::move(other.m_lifetime)), m_updaterRoot(std::exchange(other.m_updaterRoot, {})),
       m_componentRoot(std::exchange(other.m_componentRoot, {})),
-      m_remainingNodeBudget(std::exchange(other.m_remainingNodeBudget, 0)),
+      m_remainingBudget(std::exchange(other.m_remainingBudget, UIComponentBuildBudget{})),
       m_failure(std::move(other.m_failure))
 {
     other.m_failure.reset();
@@ -13865,7 +14320,7 @@ UIElementBuildTransaction& UIElementBuildTransaction::operator=(UIElementBuildTr
     m_lifetime = std::move(other.m_lifetime);
     m_updaterRoot = std::exchange(other.m_updaterRoot, {});
     m_componentRoot = std::exchange(other.m_componentRoot, {});
-    m_remainingNodeBudget = std::exchange(other.m_remainingNodeBudget, 0);
+    m_remainingBudget = std::exchange(other.m_remainingBudget, UIComponentBuildBudget{});
     m_failure = std::move(other.m_failure);
     other.m_failure.reset();
     return *this;
@@ -13890,7 +14345,7 @@ Core::Result<UINodeId> UIElementBuildTransaction::createElement(UINodeId parent,
         return fail(UIErrorCode::WrongContext, "UI component build transaction context no longer exists");
     }
     auto created = context->createElementFromBuildTransaction(
-        m_updaterRoot, m_componentRoot, parent, descriptor, m_remainingNodeBudget);
+        m_updaterRoot, m_componentRoot, parent, descriptor, m_remainingBudget);
     if (!created)
     {
         if (created.error().code == UIErrorCode::WrongOwnerThread)
@@ -13898,9 +14353,9 @@ Core::Result<UINodeId> UIElementBuildTransaction::createElement(UINodeId parent,
             return Core::failure(created.error());
         }
         m_failure = created.error();
-        context->rollbackBuildTransaction(m_updaterRoot, m_componentRoot);
+        context->rollbackBuildTransaction(m_updaterRoot, m_componentRoot, m_remainingBudget);
         m_componentRoot = {};
-        m_remainingNodeBudget = 0;
+        m_remainingBudget = {};
         return Core::failure(*m_failure);
     }
     return created;
@@ -13924,7 +14379,9 @@ Core::Result<UINodeId> UIElementBuildTransaction::commit()
         return fail(UIErrorCode::WrongContext, "UI component build transaction context no longer exists");
     }
     const UINodeId componentRoot = m_componentRoot;
-    if (Core::Status status = context->commitBuildTransaction(m_updaterRoot, componentRoot); !status)
+    if (Core::Status status =
+            context->commitBuildTransaction(m_updaterRoot, componentRoot, m_remainingBudget);
+        !status)
     {
         if (status.error().code == UIErrorCode::WrongOwnerThread)
         {
@@ -13932,13 +14389,13 @@ Core::Result<UINodeId> UIElementBuildTransaction::commit()
         }
         m_failure = status.error();
         m_componentRoot = {};
-        m_remainingNodeBudget = 0;
+        m_remainingBudget = {};
         return Core::failure(*m_failure);
     }
     m_lifetime.reset();
     m_updaterRoot = {};
     m_componentRoot = {};
-    m_remainingNodeBudget = 0;
+    m_remainingBudget = {};
     return componentRoot;
 }
 
@@ -13951,13 +14408,13 @@ void UIElementBuildTransaction::reset() noexcept
         UIContext* context = lifetime ? lifetime->attachedContext() : nullptr;
         if (context != nullptr)
         {
-            context->rollbackBuildTransaction(m_updaterRoot, componentRoot);
+            context->rollbackBuildTransaction(m_updaterRoot, componentRoot, m_remainingBudget);
         }
     }
     m_lifetime.reset();
     m_updaterRoot = {};
     m_componentRoot = {};
-    m_remainingNodeBudget = 0;
+    m_remainingBudget = {};
     m_failure.reset();
 }
 
@@ -13966,9 +14423,9 @@ UINodeId UIElementBuildTransaction::rootNodeId() const noexcept
     return m_componentRoot;
 }
 
-usize UIElementBuildTransaction::remainingNodeBudget() const noexcept
+UIComponentBuildBudget UIElementBuildTransaction::remainingBudget() const noexcept
 {
-    return m_remainingNodeBudget;
+    return isActive() ? m_remainingBudget : UIComponentBuildBudget{};
 }
 
 bool UIElementBuildTransaction::isActive() const noexcept
@@ -13982,7 +14439,8 @@ bool UIElementBuildTransaction::isActive() const noexcept
     {
         return false;
     }
-    return lifetime->attachedContext() != nullptr;
+    UIContext* context = lifetime->attachedContext();
+    return context != nullptr && context->isBuildTransactionActive(m_componentRoot);
 }
 
 UITreeUpdater::UITreeUpdater(UIContext& context, UINodeId root) noexcept : m_context(&context), m_root(root)
@@ -14017,13 +14475,13 @@ Core::Result<UINodeId> UITreeUpdater::createElement(UINodeId parent, const UIEle
 
 Core::Result<UIElementBuildTransaction>
 UITreeUpdater::beginBuildTransaction(UINodeId parent, const UIElementDescriptor& rootDescriptor,
-                                     usize nodeBudget)
+                                     UIComponentBuildBudget budget)
 {
     if (m_context == nullptr)
     {
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
-    return m_context->beginBuildTransactionFromUpdater(m_root, parent, rootDescriptor, nodeBudget);
+    return m_context->beginBuildTransactionFromUpdater(m_root, parent, rootDescriptor, budget);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -15368,27 +15826,36 @@ Core::Result<UINodeId> UIContext::createElementFromUpdater(UINodeId updaterRoot,
 
 Core::Result<UIElementBuildTransaction>
 UIContext::beginBuildTransactionFromUpdater(UINodeId updaterRoot, UINodeId parent,
-                                            const UIElementDescriptor& rootDescriptor, usize nodeBudget)
+                                            const UIElementDescriptor& rootDescriptor,
+                                            UIComponentBuildBudget budget)
 {
-    return m_impl->beginBuildTransaction(*this, updaterRoot, parent, rootDescriptor, nodeBudget);
+    return m_impl->beginBuildTransaction(*this, updaterRoot, parent, rootDescriptor, budget);
 }
 
 Core::Result<UINodeId>
 UIContext::createElementFromBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot, UINodeId parent,
-                                             const UIElementDescriptor& descriptor, usize& remainingNodeBudget)
+                                             const UIElementDescriptor& descriptor,
+                                             UIComponentBuildBudget& remainingBudget)
 {
     return m_impl->createElementFromBuildTransaction(
-        updaterRoot, componentRoot, parent, descriptor, remainingNodeBudget);
+        updaterRoot, componentRoot, parent, descriptor, remainingBudget);
 }
 
-Core::Status UIContext::commitBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot)
+Core::Status UIContext::commitBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot,
+                                               UIComponentBuildBudget& remainingBudget)
 {
-    return m_impl->commitBuildTransaction(updaterRoot, componentRoot);
+    return m_impl->commitBuildTransaction(updaterRoot, componentRoot, remainingBudget);
 }
 
-void UIContext::rollbackBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot) noexcept
+void UIContext::rollbackBuildTransaction(UINodeId updaterRoot, UINodeId componentRoot,
+                                         UIComponentBuildBudget& remainingBudget) noexcept
 {
-    m_impl->rollbackBuildTransaction(updaterRoot, componentRoot);
+    m_impl->rollbackBuildTransaction(updaterRoot, componentRoot, remainingBudget);
+}
+
+bool UIContext::isBuildTransactionActive(UINodeId componentRoot) const noexcept
+{
+    return m_impl->isBuildTransactionActive(componentRoot);
 }
 
 Core::Status UIContext::setLayoutStyleFromUpdater(UINodeId updaterRoot, UINodeId node, const UILayoutStyle& style)

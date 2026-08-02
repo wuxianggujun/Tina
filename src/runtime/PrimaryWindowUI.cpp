@@ -94,9 +94,10 @@ UI::UINodeId PrimaryWindowUIBuildTransaction::rootNodeId() const noexcept
     return m_state != nullptr ? m_state->buildTransactionRootNodeId(m_epoch, m_phase) : UI::UINodeId{};
 }
 
-usize PrimaryWindowUIBuildTransaction::remainingNodeBudget() const noexcept
+UI::UIComponentBuildBudget PrimaryWindowUIBuildTransaction::remainingBudget() const noexcept
 {
-    return m_state != nullptr ? m_state->buildTransactionRemainingNodeBudget(m_epoch, m_phase) : 0;
+    return m_state != nullptr ? m_state->buildTransactionRemainingBudget(m_epoch, m_phase)
+                              : UI::UIComponentBuildBudget{};
 }
 
 bool PrimaryWindowUIBuildTransaction::isActive() const noexcept
@@ -212,7 +213,8 @@ PrimaryWindowUITreeUpdater::createElement(UI::UINodeId parent, const UI::UIEleme
 
 Core::Result<PrimaryWindowUIBuildTransaction>
 PrimaryWindowUITreeUpdater::beginBuildTransaction(
-    UI::UINodeId parent, const UI::UIElementDescriptor& rootDescriptor, usize nodeBudget)
+    UI::UINodeId parent, const UI::UIElementDescriptor& rootDescriptor,
+    UI::UIComponentBuildBudget budget)
 {
     if (m_state == nullptr)
     {
@@ -220,7 +222,7 @@ PrimaryWindowUITreeUpdater::beginBuildTransaction(
             "PrimaryWindowUITreeUpdater::beginBuildTransaction");
     }
     return m_state->beginBuildTransaction(
-        m_epoch, m_phase, m_updater, parent, rootDescriptor, nodeBudget);
+        m_epoch, m_phase, m_updater, parent, rootDescriptor, budget);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style)

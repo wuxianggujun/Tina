@@ -96,6 +96,7 @@ add_executable(tina_ui_tests
     header_isolation/UICommittedLayoutHeader.cpp
     header_isolation/UICommittedPaintHeader.cpp
     header_isolation/UICommittedStructureHeader.cpp
+    header_isolation/UIComponentBuildHeader.cpp
     header_isolation/UIContentHeader.cpp
     header_isolation/UIContextHeader.cpp
     header_isolation/UIContextConfigHeader.cpp

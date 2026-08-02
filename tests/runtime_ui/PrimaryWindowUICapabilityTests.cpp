@@ -240,12 +240,18 @@ TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionCommitsBoundedComponentDur
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
 
     auto transactionResult =
-        tree->beginBuildTransaction(root->rootNodeId(), UI::makePanelElement(), 4);
+        tree->beginBuildTransaction(
+            root->rootNodeId(), UI::makePanelElement(),
+            {.nodes = 4, .textBytes = 22, .canvasCommands = 1,
+             .behaviors = {.activate = 1}});
     ASSERT_TRUE(transactionResult.has_value()) << transactionResult.error().message;
     PrimaryWindowUIBuildTransaction transaction = std::move(*transactionResult);
     const UI::UINodeId componentRoot = transaction.rootNodeId();
     ASSERT_TRUE(componentRoot.hasValue());
-    EXPECT_EQ(transaction.remainingNodeBudget(), 3U);
+    EXPECT_EQ(transaction.remainingBudget(),
+              (UI::UIComponentBuildBudget{
+                  .nodes = 3, .textBytes = 22, .canvasCommands = 1,
+                  .behaviors = {.activate = 1}}));
 
     auto label = transaction.createElement(componentRoot, UI::makeLabelElement("Runtime component"));
     auto button = transaction.createElement(componentRoot, UI::makeButtonElement("Apply"));
@@ -259,7 +265,7 @@ TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionCommitsBoundedComponentDur
     canvasDescriptor.visual.canvas = std::span(&canvasCommand, 1);
     auto canvas = transaction.createElement(componentRoot, canvasDescriptor);
     ASSERT_TRUE(canvas.has_value()) << canvas.error().message;
-    EXPECT_EQ(transaction.remainingNodeBudget(), 0U);
+    EXPECT_EQ(transaction.remainingBudget(), UI::UIComponentBuildBudget{});
 
     auto committed = transaction.commit();
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
@@ -288,7 +294,8 @@ TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionCommitsDuringUIUpdatePhase
     auto tree = state.treeUpdater(*updateEpoch, CapabilityPhase::UIUpdate, *root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
     auto transaction = tree->beginBuildTransaction(
-        root->rootNodeId(), UI::makePanelElement(), 2);
+        root->rootNodeId(), UI::makePanelElement(),
+        {.nodes = 2, .textBytes = 5});
     ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
     auto label = transaction->createElement(transaction->rootNodeId(), UI::makeLabelElement("Frame"));
     ASSERT_TRUE(label.has_value()) << label.error().message;
@@ -315,7 +322,9 @@ TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionBudgetFailureRollsBackReta
     };
     UI::UIElementDescriptor componentDescriptor = UI::makePanelElement();
     componentDescriptor.visual.canvas = std::span(&canvasCommand, 1);
-    auto transaction = tree->beginBuildTransaction(root->rootNodeId(), componentDescriptor, 2);
+    auto transaction = tree->beginBuildTransaction(
+        root->rootNodeId(), componentDescriptor,
+        {.nodes = 2, .textBytes = 9, .canvasCommands = 1});
     ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
     auto label = transaction->createElement(transaction->rootNodeId(), UI::makeLabelElement("Temporary"));
     ASSERT_TRUE(label.has_value()) << label.error().message;
@@ -347,7 +356,8 @@ TEST_F(PrimaryWindowUICapabilityTest, PhaseFinishRollsBackEscapedBuildTransactio
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
     auto transaction = tree->beginBuildTransaction(
-        root->rootNodeId(), UI::makePanelElement(), 2);
+        root->rootNodeId(), UI::makePanelElement(),
+        {.nodes = 2, .textBytes = 7});
     ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
     ASSERT_TRUE(transaction->createElement(
         transaction->rootNodeId(), UI::makeLabelElement("Escaped")).has_value());
@@ -380,7 +390,7 @@ TEST_F(PrimaryWindowUICapabilityTest, MovedBuildTransactionResetRollsBackExactly
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
     auto transactionResult = tree->beginBuildTransaction(
-        root->rootNodeId(), UI::makePanelElement(), 1);
+        root->rootNodeId(), UI::makePanelElement(), {.nodes = 1});
     ASSERT_TRUE(transactionResult.has_value()) << transactionResult.error().message;
     PrimaryWindowUIBuildTransaction transaction = std::move(*transactionResult);
     PrimaryWindowUIBuildTransaction moved = std::move(transaction);
@@ -411,7 +421,8 @@ TEST_F(PrimaryWindowUICapabilityTest, AbandonedBuildTransactionDestructorRollsBa
 
     {
         auto transaction = tree->beginBuildTransaction(
-            root->rootNodeId(), UI::makePanelElement(), 2);
+            root->rootNodeId(), UI::makePanelElement(),
+            {.nodes = 2, .textBytes = 9});
         ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
         ASSERT_TRUE(transaction->createElement(
             transaction->rootNodeId(), UI::makeLabelElement("Abandoned")).has_value());
@@ -439,7 +450,7 @@ TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionRejectsForeignParentBefore
     const usize liveNodesBefore = context->liveNodeCount();
 
     auto foreignParent = firstTree->beginBuildTransaction(
-        secondRoot->rootNodeId(), UI::makePanelElement(), 1);
+        secondRoot->rootNodeId(), UI::makePanelElement(), {.nodes = 1});
     ASSERT_FALSE(foreignParent.has_value());
     EXPECT_EQ(foreignParent.error().code, UI::UIErrorCode::InvalidNode);
     EXPECT_EQ(context->liveNodeCount(), liveNodesBefore);
@@ -1485,7 +1496,8 @@ TEST_F(PrimaryWindowUICapabilityTest, AbortPhaseInvalidatesFacadesAndAllowsTheNe
     auto tree = builder->treeUpdater(*root);
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
     auto transaction = tree->beginBuildTransaction(
-        root->rootNodeId(), UI::makePanelElement(), 2);
+        root->rootNodeId(), UI::makePanelElement(),
+        {.nodes = 2, .textBytes = 5});
     ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
     ASSERT_TRUE(transaction->createElement(
         transaction->rootNodeId(), UI::makeLabelElement("Abort")).has_value());

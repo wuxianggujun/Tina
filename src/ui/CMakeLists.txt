@@ -18,6 +18,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedLayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedPaint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedStructure.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIComponentBuild.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContent.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISemantics.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIAccessibility.hpp

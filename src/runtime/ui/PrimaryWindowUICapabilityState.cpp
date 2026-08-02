@@ -347,7 +347,7 @@ PrimaryWindowUICapabilityState::createElement(u64 epoch, PrimaryWindowUIPhase ph
 Core::Result<PrimaryWindowUIBuildTransaction>
 PrimaryWindowUICapabilityState::beginBuildTransaction(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
-    const UI::UIElementDescriptor& rootDescriptor, usize nodeBudget)
+    const UI::UIElementDescriptor& rootDescriptor, UI::UIComponentBuildBudget budget)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::beginBuildTransaction";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
@@ -362,7 +362,7 @@ PrimaryWindowUICapabilityState::beginBuildTransaction(
             Operation));
     }
 
-    auto transaction = updater.beginBuildTransaction(parent, rootDescriptor, nodeBudget);
+    auto transaction = updater.beginBuildTransaction(parent, rootDescriptor, budget);
     if (!transaction)
     {
         return Core::failure(rememberFirstError(std::move(transaction.error()), Operation));
@@ -437,7 +437,9 @@ PrimaryWindowUICapabilityState::commitBuildTransaction(u64 epoch, PrimaryWindowU
 void PrimaryWindowUICapabilityState::resetBuildTransaction(u64 epoch,
                                                             PrimaryWindowUIPhase phase) noexcept
 {
-    if (!isBuildTransactionActive(epoch, phase))
+    if (std::this_thread::get_id() != ownerThreadId_ || epoch == 0 || epoch != epoch_ ||
+        epoch != buildTransactionEpoch_ || phase == PrimaryWindowUIPhase::None ||
+        phase != phase_ || phase != buildTransactionPhase_ || !buildTransaction_.has_value())
     {
         return;
     }
@@ -452,10 +454,11 @@ UI::UINodeId PrimaryWindowUICapabilityState::buildTransactionRootNodeId(
     return isBuildTransactionActive(epoch, phase) ? buildTransaction_->rootNodeId() : UI::UINodeId{};
 }
 
-usize PrimaryWindowUICapabilityState::buildTransactionRemainingNodeBudget(
+UI::UIComponentBuildBudget PrimaryWindowUICapabilityState::buildTransactionRemainingBudget(
     u64 epoch, PrimaryWindowUIPhase phase) const noexcept
 {
-    return isBuildTransactionActive(epoch, phase) ? buildTransaction_->remainingNodeBudget() : 0;
+    return isBuildTransactionActive(epoch, phase) ? buildTransaction_->remainingBudget()
+                                                   : UI::UIComponentBuildBudget{};
 }
 
 bool PrimaryWindowUICapabilityState::isBuildTransactionActive(

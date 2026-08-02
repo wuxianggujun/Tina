@@ -508,11 +508,15 @@ TEST_F(UIElementTest, BuildTransactionPublishesOnlyAfterSuccessfulBoundedConstru
     ASSERT_TRUE(root.hasValue());
     auto updater = createUpdater(*context, root);
 
-    auto transactionResult = updater.beginBuildTransaction(root.rootNodeId(), UI::makePanelElement(), 3);
+    auto transactionResult = updater.beginBuildTransaction(
+        root.rootNodeId(), UI::makePanelElement(),
+        {.nodes = 3, .textBytes = 10, .behaviors = {.activate = 1}});
     ASSERT_TRUE(transactionResult.has_value()) << transactionResult.error().message;
     UI::UIElementBuildTransaction transaction = std::move(*transactionResult);
     ASSERT_TRUE(transaction.isActive());
-    EXPECT_EQ(transaction.remainingNodeBudget(), 2U);
+    EXPECT_EQ(transaction.remainingBudget(),
+              (UI::UIComponentBuildBudget{
+                  .nodes = 2, .textBytes = 10, .behaviors = {.activate = 1}}));
 
     const Core::Status structureWhileActive = context->commitStructure();
     ASSERT_FALSE(structureWhileActive.has_value());
@@ -526,7 +530,7 @@ TEST_F(UIElementTest, BuildTransactionPublishesOnlyAfterSuccessfulBoundedConstru
     ASSERT_TRUE(label.has_value()) << label.error().message;
     auto button = transaction.createElement(transaction.rootNodeId(), UI::makeButtonElement("Apply"));
     ASSERT_TRUE(button.has_value()) << button.error().message;
-    EXPECT_EQ(transaction.remainingNodeBudget(), 0U);
+    EXPECT_EQ(transaction.remainingBudget(), UI::UIComponentBuildBudget{});
 
     auto committedComponent = transaction.commit();
     ASSERT_TRUE(committedComponent.has_value()) << committedComponent.error().message;
@@ -555,7 +559,9 @@ TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtr
     UI::UIElementDescriptor rangeDescriptor = UI::makeLabelElement("Range");
     rangeDescriptor.behaviors = UI::UIElementBehavior::RangeInput;
 
-    auto exhaustedResult = updater.beginBuildTransaction(root.rootNodeId(), UI::makePanelElement(), 2);
+    auto exhaustedResult = updater.beginBuildTransaction(
+        root.rootNodeId(), UI::makePanelElement(),
+        {.nodes = 2, .textBytes = 5, .behaviors = {.range = 1}});
     ASSERT_TRUE(exhaustedResult.has_value()) << exhaustedResult.error().message;
     UI::UIElementBuildTransaction exhausted = std::move(*exhaustedResult);
     ASSERT_TRUE(exhausted.createElement(exhausted.rootNodeId(), rangeDescriptor).has_value());
@@ -570,7 +576,11 @@ TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtr
     ASSERT_FALSE(poisonedCommit.has_value());
     EXPECT_EQ(poisonedCommit.error().code, UI::UIErrorCode::CapacityExceeded);
 
-    auto invalidChildResult = updater.beginBuildTransaction(root.rootNodeId(), UI::makePanelElement(), 2);
+    auto invalidChildResult = updater.beginBuildTransaction(
+        root.rootNodeId(), UI::makePanelElement(),
+        {.nodes = 2,
+         .textBytes = 7,
+         .behaviors = {.activate = 1, .toggle = 1, .range = 1, .textInput = 1}});
     ASSERT_TRUE(invalidChildResult.has_value()) << invalidChildResult.error().message;
     UI::UIElementBuildTransaction invalidChild = std::move(*invalidChildResult);
     UI::UIElementDescriptor invalidToggle{
@@ -585,7 +595,9 @@ TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtr
     EXPECT_EQ(context->liveNodeCount(), baselineNodes);
 
     {
-        auto abandonedResult = updater.beginBuildTransaction(root.rootNodeId(), UI::makePanelElement(), 2);
+        auto abandonedResult = updater.beginBuildTransaction(
+            root.rootNodeId(), UI::makePanelElement(),
+            {.nodes = 2, .textBytes = 5, .behaviors = {.range = 1}});
         ASSERT_TRUE(abandonedResult.has_value()) << abandonedResult.error().message;
         UI::UIElementBuildTransaction abandoned = std::move(*abandonedResult);
         ASSERT_TRUE(abandoned.createElement(abandoned.rootNodeId(), rangeDescriptor).has_value());
@@ -595,7 +607,9 @@ TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtr
     EXPECT_EQ(context->liveNodeCount(), baselineNodes);
     EXPECT_EQ(context->statistics().activeRangeInputBehaviorCount, 0U);
 
-    auto reusedResult = updater.beginBuildTransaction(root.rootNodeId(), rangeDescriptor, 1);
+    auto reusedResult = updater.beginBuildTransaction(
+        root.rootNodeId(), rangeDescriptor,
+        {.nodes = 1, .textBytes = 5, .behaviors = {.range = 1}});
     ASSERT_TRUE(reusedResult.has_value()) << reusedResult.error().message;
     UI::UIElementBuildTransaction reused = std::move(*reusedResult);
     const UI::UINodeId reusedRange = reused.rootNodeId();
@@ -627,27 +641,176 @@ TEST_F(UIElementTest, BuildTransactionBudgetIncludesVirtualCollectionRowPools)
     const UI::UIElementDescriptor listDescriptor = UI::makeListViewElement({
         .materializedItemCapacity = 3,
     });
-    const auto undersized = updater.beginBuildTransaction(root.rootNodeId(), listDescriptor, 3);
+    const auto undersized = updater.beginBuildTransaction(
+        root.rootNodeId(), listDescriptor,
+        {.nodes = 3, .behaviors = {.activate = 3}});
     ASSERT_FALSE(undersized.has_value());
     EXPECT_EQ(undersized.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->liveNodeCount(), 1U);
 
-    auto listResult = updater.beginBuildTransaction(root.rootNodeId(), listDescriptor, 4);
+    auto listResult = updater.beginBuildTransaction(
+        root.rootNodeId(), listDescriptor,
+        {.nodes = 4, .behaviors = {.activate = 3}});
     ASSERT_TRUE(listResult.has_value()) << listResult.error().message;
     UI::UIElementBuildTransaction list = std::move(*listResult);
-    EXPECT_EQ(list.remainingNodeBudget(), 0U);
+    EXPECT_EQ(list.remainingBudget(), UI::UIComponentBuildBudget{});
     ASSERT_TRUE(list.commit().has_value());
     EXPECT_EQ(context->liveNodeCount(), 5U);
 
     const UI::UIElementDescriptor treeDescriptor = UI::makeTreeViewElement({
         .materializedItemCapacity = 2,
     });
-    auto treeResult = updater.beginBuildTransaction(root.rootNodeId(), treeDescriptor, 3);
+    auto treeResult = updater.beginBuildTransaction(
+        root.rootNodeId(), treeDescriptor,
+        {.nodes = 3, .behaviors = {.activate = 2}});
     ASSERT_TRUE(treeResult.has_value()) << treeResult.error().message;
     UI::UIElementBuildTransaction tree = std::move(*treeResult);
-    EXPECT_EQ(tree.remainingNodeBudget(), 0U);
+    EXPECT_EQ(tree.remainingBudget(), UI::UIComponentBuildBudget{});
     ASSERT_TRUE(tree.commit().has_value());
     EXPECT_EQ(context->liveNodeCount(), 8U);
+}
+
+TEST_F(UIElementTest, ComponentBuildReservationIsolatesEveryPoolAndPublishesCounters)
+{
+    auto context = createContext(
+        window,
+        {
+            .nodeCapacity = 4,
+            .rootCapacity = 1,
+            .canvasCommandCapacity = 2,
+            .textByteCapacity = 8,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+
+    auto transactionResult = updater.beginBuildTransaction(
+        root.rootNodeId(), UI::makePanelElement(),
+        {.nodes = 2,
+         .textBytes = 8,
+         .canvasCommands = 2,
+         .behaviors = {.activate = 4}});
+    ASSERT_TRUE(transactionResult.has_value()) << transactionResult.error().message;
+    UI::UIElementBuildTransaction transaction = std::move(*transactionResult);
+
+    auto unreservedPanel = updater.createElement(root.rootNodeId(), UI::makePanelElement());
+    ASSERT_TRUE(unreservedPanel.has_value()) << unreservedPanel.error().message;
+    const auto nodeTheft = updater.createElement(root.rootNodeId(), UI::makePanelElement());
+    ASSERT_FALSE(nodeTheft.has_value());
+    EXPECT_EQ(nodeTheft.error().code, UI::UIErrorCode::CapacityExceeded);
+    assertOk(updater.destroy(*unreservedPanel));
+
+    const auto textTheft = updater.createElement(root.rootNodeId(), UI::makeLabelElement("12345678"));
+    ASSERT_FALSE(textTheft.has_value());
+    EXPECT_EQ(textTheft.error().code, UI::UIErrorCode::CapacityExceeded);
+
+    const std::array<UI::UICanvasCommand, 2> canvasCommands{
+        UI::UICanvasCommand{.bounds = {.width = 1.0F, .height = 1.0F}, .color = UI::rgb(0x102030)},
+        UI::UICanvasCommand{.bounds = {.width = 1.0F, .height = 1.0F}, .color = UI::rgb(0x405060)},
+    };
+    UI::UIElementDescriptor canvasTheftDescriptor = UI::makePanelElement();
+    canvasTheftDescriptor.visual.canvas = canvasCommands;
+    const auto canvasTheft = updater.createElement(root.rootNodeId(), canvasTheftDescriptor);
+    ASSERT_FALSE(canvasTheft.has_value());
+    EXPECT_EQ(canvasTheft.error().code, UI::UIErrorCode::CapacityExceeded);
+
+    const auto behaviorTheft = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
+    ASSERT_FALSE(behaviorTheft.has_value());
+    EXPECT_EQ(behaviorTheft.error().code, UI::UIErrorCode::CapacityExceeded);
+
+    UI::UIElementDescriptor childDescriptor = UI::makeButtonElement("Test");
+    childDescriptor.visual.canvas = std::span(canvasCommands.data(), 1);
+    auto child = transaction.createElement(transaction.rootNodeId(), childDescriptor);
+    ASSERT_TRUE(child.has_value()) << child.error().message;
+    EXPECT_EQ(transaction.remainingBudget(),
+              (UI::UIComponentBuildBudget{
+                  .textBytes = 4,
+                  .canvasCommands = 1,
+                  .behaviors = {.activate = 3}}));
+
+    const UI::UIContextStatistics activeStatistics = context->statistics();
+    EXPECT_EQ(activeStatistics.componentBuild.activeTransactionCount, 1U);
+    EXPECT_EQ(activeStatistics.componentBuild.nodes.outstandingReservations, 0U);
+    EXPECT_EQ(activeStatistics.componentBuild.textBytes.outstandingReservations, 4U);
+    EXPECT_EQ(activeStatistics.componentBuild.canvasCommands.outstandingReservations, 1U);
+    EXPECT_EQ(activeStatistics.componentBuild.behaviors.activate.outstandingReservations, 3U);
+
+    ASSERT_TRUE(transaction.commit().has_value());
+    const UI::UIComponentBuildStatistics statistics = context->statistics().componentBuild;
+    EXPECT_EQ(statistics.activeTransactionCount, 0U);
+    EXPECT_EQ(statistics.nodes.requested, 2U);
+    EXPECT_EQ(statistics.nodes.reserved, 2U);
+    EXPECT_EQ(statistics.nodes.published, 2U);
+    EXPECT_EQ(statistics.textBytes.requested, 8U);
+    EXPECT_EQ(statistics.textBytes.reserved, 8U);
+    EXPECT_EQ(statistics.textBytes.published, 4U);
+    EXPECT_EQ(statistics.canvasCommands.requested, 2U);
+    EXPECT_EQ(statistics.canvasCommands.reserved, 2U);
+    EXPECT_EQ(statistics.canvasCommands.published, 1U);
+    EXPECT_EQ(statistics.behaviors.activate.requested, 4U);
+    EXPECT_EQ(statistics.behaviors.activate.reserved, 4U);
+    EXPECT_EQ(statistics.behaviors.activate.published, 1U);
+    EXPECT_EQ(statistics.textBytes.outstandingReservations, 0U);
+    EXPECT_EQ(statistics.canvasCommands.outstandingReservations, 0U);
+    EXPECT_EQ(statistics.behaviors.activate.outstandingReservations, 0U);
+}
+
+TEST_F(UIElementTest, ComponentBuildCapacityFailureAndSubtreeDestroyReleaseReservationsExactlyOnce)
+{
+    auto context = createContext(
+        window,
+        {
+            .nodeCapacity = 8,
+            .rootCapacity = 1,
+            .canvasCommandCapacity = 2,
+            .textByteCapacity = 8,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    const usize baselineNodes = context->liveNodeCount();
+
+    const auto rejected = updater.beginBuildTransaction(
+        root.rootNodeId(), UI::makePanelElement(),
+        {.nodes = 2, .textBytes = 9});
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(context->liveNodeCount(), baselineNodes);
+    EXPECT_EQ(context->statistics().componentBuild.nodes.outstandingReservations, 0U);
+    EXPECT_EQ(context->statistics().componentBuild.textBytes.outstandingReservations, 0U);
+    EXPECT_EQ(context->statistics().componentBuild.textBytes.capacityFailures, 1U);
+
+    const UI::UICanvasCommand command{
+        .bounds = {.width = 1.0F, .height = 1.0F},
+        .color = UI::rgb(0x336699),
+    };
+    auto transactionResult = updater.beginBuildTransaction(
+        root.rootNodeId(), UI::makePanelElement(),
+        {.nodes = 4,
+         .textBytes = 8,
+         .canvasCommands = 2,
+         .behaviors = {.activate = 2}});
+    ASSERT_TRUE(transactionResult.has_value()) << transactionResult.error().message;
+    UI::UIElementBuildTransaction transaction = std::move(*transactionResult);
+    UI::UIElementDescriptor childDescriptor = UI::makeButtonElement("Test");
+    childDescriptor.visual.canvas = std::span(&command, 1);
+    ASSERT_TRUE(transaction.createElement(transaction.rootNodeId(), childDescriptor).has_value());
+    const UI::UINodeId componentRoot = transaction.rootNodeId();
+
+    assertOk(updater.destroy(componentRoot));
+    EXPECT_FALSE(transaction.isActive());
+    EXPECT_EQ(transaction.remainingBudget(), UI::UIComponentBuildBudget{});
+    EXPECT_EQ(context->liveNodeCount(), baselineNodes);
+    const auto afterDestroy = context->statistics().componentBuild;
+    EXPECT_EQ(afterDestroy.activeTransactionCount, 0U);
+    EXPECT_EQ(afterDestroy.nodes.outstandingReservations, 0U);
+    EXPECT_EQ(afterDestroy.textBytes.outstandingReservations, 0U);
+    EXPECT_EQ(afterDestroy.canvasCommands.outstandingReservations, 0U);
+    EXPECT_EQ(afterDestroy.behaviors.activate.outstandingReservations, 0U);
+
+    transaction.reset();
+    EXPECT_EQ(context->liveNodeCount(), baselineNodes);
+    EXPECT_EQ(context->statistics().componentBuild.activeTransactionCount, 0U);
 }
 
 TEST_F(UIElementTest, CanvasCommandsAreCopiedAndPaintAfterTheElementBoxInLocalOrder)
@@ -795,7 +958,9 @@ TEST_F(UIElementTest, CanvasCapacityValidationDestroyAndTransactionRollbackRecyc
 
     UI::UIElementDescriptor oneCommand = UI::makePanelElement();
     oneCommand.visual.canvas = std::span<const UI::UICanvasCommand>(validCommands.data(), 1);
-    auto transactionResult = updater.beginBuildTransaction(root.rootNodeId(), oneCommand, 2);
+    auto transactionResult = updater.beginBuildTransaction(
+        root.rootNodeId(), oneCommand,
+        {.nodes = 2, .canvasCommands = 2});
     ASSERT_TRUE(transactionResult.has_value()) << transactionResult.error().message;
     UI::UIElementBuildTransaction transaction = std::move(*transactionResult);
     ASSERT_TRUE(transaction.createElement(transaction.rootNodeId(), oneCommand).has_value());
