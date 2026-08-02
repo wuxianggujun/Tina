@@ -3,6 +3,8 @@
 include(CMakeFindDependencyMacro)
 
 set(Tina_VERSION "@PROJECT_VERSION@")
+set_and_check(Tina_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+
 find_dependency(xxHash CONFIG)
 if(@TINA_PACKAGE_WITH_PHYSICS2D@)
     find_dependency(box2d CONFIG)
@@ -10,11 +12,11 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/TinaTargets.cmake")
 
-set_and_check(Tina_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set(Tina_GameSDK_FOUND TRUE)
 set(Tina_PlatformGlfw_FOUND FALSE)
 set(Tina_RenderBgfx_FOUND FALSE)
 set(Tina_UIFreetype_FOUND FALSE)
+set(Tina_AudioMiniaudio_FOUND FALSE)
 set(Tina_DesktopBootstrap_FOUND FALSE)
 set(Tina_GAME_SDK_TARGETS
     Tina::GameSDK
@@ -87,6 +89,51 @@ if(@TINA_PACKAGE_WITH_UI_FREETYPE@ AND
     endif()
 endif()
 
+if(@TINA_PACKAGE_WITH_AUDIO_MINIAUDIO@ AND "AudioMiniaudio" IN_LIST Tina_FIND_COMPONENTS)
+    set(tina_audio_miniaudio_dependencies_found TRUE)
+
+    if(@TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS@)
+        if(Tina_FIND_REQUIRED_AudioMiniaudio)
+            find_dependency(Threads)
+        else()
+            find_package(Threads QUIET)
+        endif()
+        if(NOT Threads_FOUND)
+            set(tina_audio_miniaudio_dependencies_found FALSE)
+        endif()
+    endif()
+
+    if(@TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBVORBIS@)
+        if(Tina_FIND_REQUIRED_AudioMiniaudio)
+            find_dependency(Vorbis CONFIG)
+        else()
+            find_package(Vorbis CONFIG QUIET)
+        endif()
+        if(NOT Vorbis_FOUND)
+            set(tina_audio_miniaudio_dependencies_found FALSE)
+        endif()
+    endif()
+
+    if(@TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBOPUS@)
+        if(Tina_FIND_REQUIRED_AudioMiniaudio)
+            find_dependency(Opus CONFIG)
+            find_dependency(OpusFile CONFIG)
+        else()
+            find_package(Opus CONFIG QUIET)
+            find_package(OpusFile CONFIG QUIET)
+        endif()
+        if(NOT Opus_FOUND OR NOT OpusFile_FOUND)
+            set(tina_audio_miniaudio_dependencies_found FALSE)
+        endif()
+    endif()
+
+    if(tina_audio_miniaudio_dependencies_found)
+        include("${CMAKE_CURRENT_LIST_DIR}/TinaAudioMiniaudioTargets.cmake")
+        set(Tina_AudioMiniaudio_FOUND TRUE)
+    endif()
+    unset(tina_audio_miniaudio_dependencies_found)
+endif()
+
 if(@TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP@ AND tina_load_desktop_bootstrap AND
    TARGET Tina::PlatformGlfw AND TARGET Tina::RenderBgfx AND
    (NOT @TINA_PACKAGE_WITH_UI_FREETYPE@ OR TARGET Tina::UIFreetype))
@@ -105,6 +152,10 @@ endif()
 if(TARGET Tina::UIFreetype)
     list(APPEND Tina_ADAPTER_TARGETS Tina::UIFreetype)
     list(APPEND Tina_PACKAGE_TARGETS Tina::UIFreetype)
+endif()
+if(TARGET Tina::AudioMiniaudio)
+    list(APPEND Tina_ADAPTER_TARGETS Tina::AudioMiniaudio)
+    list(APPEND Tina_PACKAGE_TARGETS Tina::AudioMiniaudio)
 endif()
 if(TARGET Tina::DesktopBootstrap)
     set(Tina_DESKTOP_BOOTSTRAP_TARGETS

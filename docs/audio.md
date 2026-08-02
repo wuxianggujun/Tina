@@ -170,7 +170,13 @@ cmake --build --preset windows-vnext-audio-miniaudio-debug `
   --target tina_audio_tests tina_audio_miniaudio_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer AudioMiniaudio -Configuration Debug
 ```
+
+安装 consumer 只链接 `Tina::AudioMiniaudio` 并验证 null backend callback/shutdown；Linux GCC13 使用
+`tools/linux/run-sdk-audio-miniaudio-consumer-gate.sh`。启用 Vorbis/Opus 的 Windows preset 还需对对应
+build directory 运行同一 consumer，以验证安装 package 的 codec dependency 闭包。
 
 产品接线还需 product-2d 300帧 smoke。测试数量随工作树变化，不在本文固化；完整命令见
 [测试说明](testing.md)。

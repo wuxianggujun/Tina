@@ -20,7 +20,7 @@ foreach(tina_component IN LISTS TINA_EXPECT_MISSING_COMPONENTS)
     endif()
 endforeach()
 
-foreach(tina_adapter IN ITEMS PlatformGlfw RenderBgfx UIFreetype DesktopBootstrap)
+foreach(tina_adapter IN ITEMS PlatformGlfw RenderBgfx UIFreetype AudioMiniaudio DesktopBootstrap)
     if(Tina_${tina_adapter}_FOUND OR TARGET Tina::${tina_adapter})
         message(FATAL_ERROR "Unrequested Tina component ${tina_adapter} leaked into the missing-component probe")
     endif()

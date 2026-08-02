@@ -92,6 +92,24 @@ function(tina_configure_game_sdk_package)
         set(TINA_PACKAGE_WITH_UI_FREETYPE ON)
     endif()
 
+    set(TINA_PACKAGE_WITH_AUDIO_MINIAUDIO OFF)
+    set(TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS OFF)
+    set(TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBVORBIS OFF)
+    set(TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBOPUS OFF)
+    if(TARGET tina_audio_miniaudio)
+        tina_configure_game_sdk_target(tina_audio_miniaudio AudioMiniaudio)
+        set(TINA_PACKAGE_WITH_AUDIO_MINIAUDIO ON)
+        if(UNIX AND NOT APPLE)
+            set(TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS ON)
+        endif()
+        if(TINA_AUDIO_ENABLE_LIBVORBIS)
+            set(TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBVORBIS ON)
+        endif()
+        if(TINA_AUDIO_ENABLE_LIBOPUS)
+            set(TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBOPUS ON)
+        endif()
+    endif()
+
     set(TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP OFF)
     if(TARGET tina_bootstrap_desktop)
         tina_configure_game_sdk_target(tina_bootstrap_desktop DesktopBootstrap)
@@ -191,6 +209,14 @@ function(tina_configure_game_sdk_package)
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         )
     endif()
+    if(TARGET tina_audio_miniaudio)
+        install(TARGETS tina_audio_miniaudio
+            EXPORT TinaAudioMiniaudioTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
     if(TARGET tina_bootstrap_desktop)
         install(TARGETS tina_bootstrap_desktop
             EXPORT TinaDesktopBootstrapTargets
@@ -244,6 +270,14 @@ function(tina_configure_game_sdk_package)
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui/text"
         )
     endif()
+    if(TARGET tina_audio_miniaudio)
+        install(FILES "${PROJECT_SOURCE_DIR}/include/tina/audio/AudioDecode.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/audio"
+        )
+        install(FILES "${PROJECT_SOURCE_DIR}/include/tina/audio/miniaudio/MiniaudioDevice.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/audio/miniaudio"
+        )
+    endif()
     if(TARGET tina_bootstrap_desktop)
         install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/desktop"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina"
@@ -291,6 +325,13 @@ function(tina_configure_game_sdk_package)
     if(TARGET tina_ui_freetype)
         install(EXPORT TinaUIFreetypeTargets
             FILE TinaUIFreetypeTargets.cmake
+            NAMESPACE Tina::
+            DESTINATION "${tina_package_directory}"
+        )
+    endif()
+    if(TARGET tina_audio_miniaudio)
+        install(EXPORT TinaAudioMiniaudioTargets
+            FILE TinaAudioMiniaudioTargets.cmake
             NAMESPACE Tina::
             DESTINATION "${tina_package_directory}"
         )

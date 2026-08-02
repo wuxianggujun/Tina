@@ -5,13 +5,13 @@
 
 .PARAMETER Gate
   gcc13-null | gcc13-platform | clang22-null | clang22-sanitize | sdk-consumer | sdk-platform-glfw-consumer |
-  sdk-desktop-bootstrap-consumer
+  sdk-desktop-bootstrap-consumer | sdk-audio-miniaudio-consumer
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('gcc13-null', 'gcc13-platform', 'clang22-null', 'clang22-sanitize', 'sdk-consumer',
-        'sdk-platform-glfw-consumer', 'sdk-desktop-bootstrap-consumer')]
+        'sdk-platform-glfw-consumer', 'sdk-desktop-bootstrap-consumer', 'sdk-audio-miniaudio-consumer')]
     [string]$Gate,
     [string]$SourceRoot = '',
     [switch]$SkipImageBuild,
@@ -78,6 +78,13 @@ $map = @{
         Script = 'tools/linux/run-sdk-desktop-bootstrap-consumer-gate.sh'
         Container = 'tina-sdk-001-gcc13-desktop-bootstrap-consumer'
         GateId = 'SDK-001-linux-gcc13-desktop-bootstrap-consumer'
+    }
+    'sdk-audio-miniaudio-consumer' = @{
+        Image = 'tina-linux-gcc13:test-001'
+        Dockerfile = 'docker/linux-gcc13/Dockerfile'
+        Script = 'tools/linux/run-sdk-audio-miniaudio-consumer-gate.sh'
+        Container = 'tina-sdk-001-gcc13-audio-miniaudio-consumer'
+        GateId = 'SDK-001-linux-gcc13-audio-miniaudio-consumer'
     }
 }
 

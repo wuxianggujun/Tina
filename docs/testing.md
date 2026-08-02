@@ -86,6 +86,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 -Consumer PlatformGlfw -Configuration Debug
 powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer AudioMiniaudio -Configuration Debug
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 `
+  -BuildDirectory out\build\windows-msvc-vnext-audio-miniaudio-codecs `
+  -Consumer AudioMiniaudio -Configuration Debug
+powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 -Consumer DesktopBootstrap -Configuration Debug
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 `
@@ -98,6 +104,7 @@ export VCPKG_ROOT=/opt/vcpkg
 tools/linux/run-sdk-consumer-gate.sh
 tools/linux/run-sdk-platform-glfw-consumer-gate.sh
 tools/linux/run-sdk-desktop-bootstrap-consumer-gate.sh
+tools/linux/run-sdk-audio-miniaudio-consumer-gate.sh
 ```
 
 Windows Docker 入口为：
@@ -109,6 +116,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-platform-glfw-consumer
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-desktop-bootstrap-consumer
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-audio-miniaudio-consumer
 ```
 
 成功条件是：版本化 package 和声明的 `Tina_GAME_SDK_TARGETS` 全部可发现；实际安装头通过第三方
@@ -121,8 +130,11 @@ component 必须被拒绝；未请求 `PlatformGlfw` 时不得加载 GLFW depend
 `Tina::DesktopBootstrap`，必须发现 `Tina::PlatformGlfw` 与 `Tina::RenderBgfx`；FreeType 图还必须发现
 `Tina::UIFreetype`。隐藏窗口运行一帧后必须输出
 `{"status":"ok","consumer":"installed-tina-desktop-bootstrap"}`。GameSDK-only isolation probe 禁用
-GLFW/bgfx/FreeType 查找后仍须配置成功，且不得出现任何 adapter target。门禁仍不替代 AudioMiniaudio
-安装闭包、跨发行版 relocatability 或正式 ABI 兼容性验证。
+GLFW/bgfx/FreeType/miniaudio/codec/Threads 查找后仍须配置成功，且不得出现任何 adapter target。
+AudioMiniaudio consumer 只链接 `Tina::AudioMiniaudio`，验证内置 codec capability、null backend callback 与
+shutdown，并输出 `{"status":"ok","consumer":"installed-tina-audio-miniaudio"}`；codec 图还必须从
+consumer toolchain 解析 `Vorbis`、`Opus` 与 `OpusFile` dependency closure。门禁仍不替代跨发行版
+relocatability 或正式 ABI 兼容性验证。
 
 ## UI performance quick run
 
@@ -259,7 +271,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunUi002UiaG
 | Audio | `tina_audio_tests` | miniaudio tests、product-2d |
 | Physics2D | `tina_physics2d_tests`（body/shape/joint、sensor、query、grid bridge） | Release bench、product-2d |
 | CMake/preset/dependency | 所有受影响 configure 图 | 最小 executable + product smoke |
-| install/export/Game SDK | `RunSdkConsumerGate.ps1`、`run-sdk-consumer-gate.sh`、PlatformGlfw/DesktopBootstrap wrapper | AudioMiniaudio package 闭包；跨发行版 relocatability；ABI/兼容策略 |
+| install/export/Game SDK | `RunSdkConsumerGate.ps1`、`run-sdk-consumer-gate.sh`、各 adapter wrapper | 跨发行版 relocatability；ABI/兼容策略 |
 
 公共 API 变化还必须编译 header-isolation/consumer 测试，并扫描公开头是否出现第三方 token。
 

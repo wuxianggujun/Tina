@@ -205,6 +205,16 @@
       }
     },
     {
+      "name": "linux-gcc13-vnext-audio-miniaudio",
+      "displayName": "Linux vNext Audio miniaudio adapter (GCC 13 + C++23)",
+      "inherits": "linux-gcc13-vnext",
+      "binaryDir": "${sourceDir}/out/build/linux-gcc13-vnext-audio-miniaudio",
+      "cacheVariables": {
+        "TINA_BUILD_AUDIO_MINIAUDIO": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;audio-miniaudio"
+      }
+    },
+    {
       "name": "linux-gcc13-vnext-platform",
       "displayName": "Linux vNext Platform (GCC 13 + GLFW + C++23)",
       "inherits": "linux-gcc13-vnext",
@@ -419,6 +429,11 @@
     {
       "name": "linux-gcc13-vnext-physics2d-debug",
       "configurePreset": "linux-gcc13-vnext-physics2d",
+      "jobs": 2
+    },
+    {
+      "name": "linux-gcc13-vnext-audio-miniaudio-debug",
+      "configurePreset": "linux-gcc13-vnext-audio-miniaudio",
       "jobs": 2
     },
     {

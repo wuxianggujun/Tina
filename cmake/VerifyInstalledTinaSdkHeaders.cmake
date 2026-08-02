@@ -12,6 +12,20 @@ if(NOT tina_sdk_headers)
     message(FATAL_ERROR "Installed Tina SDK contains no public headers")
 endif()
 
+if(DEFINED TINA_EXPECT_AUDIO_MINIAUDIO)
+    set(tina_audio_miniaudio_headers
+        "${tina_sdk_include_directory}/tina/audio/AudioDecode.hpp"
+        "${tina_sdk_include_directory}/tina/audio/miniaudio/MiniaudioDevice.hpp"
+    )
+    foreach(tina_audio_miniaudio_header IN LISTS tina_audio_miniaudio_headers)
+        if(TINA_EXPECT_AUDIO_MINIAUDIO AND NOT EXISTS "${tina_audio_miniaudio_header}")
+            message(FATAL_ERROR "Installed AudioMiniaudio header is missing: ${tina_audio_miniaudio_header}")
+        elseif(NOT TINA_EXPECT_AUDIO_MINIAUDIO AND EXISTS "${tina_audio_miniaudio_header}")
+            message(FATAL_ERROR "AudioMiniaudio header leaked into an SDK package without that adapter")
+        endif()
+    endforeach()
+endif()
+
 set(tina_forbidden_patterns
     "#[ \t]*include[ \t]*[<\"](bgfx|GLFW|entt|box2d|miniaudio|freetype|ft2build|xxhash|cgltf|stb|X11|wayland|xcb)[/.>\"]"
     "bgfx::"

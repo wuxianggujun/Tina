@@ -23,6 +23,12 @@ case "${CONSUMER}" in
     CONSUMER_SOURCE_DIRECTORY="${ROOT}/tests/sdk_consumer_platform_glfw"
     CONSUMER_TARGET="tina_sdk_platform_glfw_consumer"
     ;;
+  AudioMiniaudio)
+    DEFAULT_CONFIGURE_PRESET="linux-gcc13-vnext-audio-miniaudio"
+    CONSUMER_DIRECTORY_NAME="sdk-audio-miniaudio-consumer"
+    CONSUMER_SOURCE_DIRECTORY="${ROOT}/tests/sdk_consumer_audio_miniaudio"
+    CONSUMER_TARGET="tina_sdk_audio_miniaudio_consumer"
+    ;;
   DesktopBootstrap)
     DEFAULT_CONFIGURE_PRESET="linux-gcc13-vnext-bgfx"
     CONSUMER_DIRECTORY_NAME="sdk-desktop-bootstrap-consumer"
@@ -30,7 +36,7 @@ case "${CONSUMER}" in
     CONSUMER_TARGET="tina_sdk_desktop_bootstrap_consumer"
     ;;
   *)
-    echo "TINA_SDK_CONSUMER must be GameSDK, PlatformGlfw, or DesktopBootstrap; got '${CONSUMER}'" >&2
+    echo "TINA_SDK_CONSUMER must be GameSDK, PlatformGlfw, AudioMiniaudio, or DesktopBootstrap; got '${CONSUMER}'" >&2
     exit 2
     ;;
 esac
@@ -109,13 +115,21 @@ sdk_build_targets=(tina_runtime tina_scene tina_asset)
 if [[ "${CONSUMER}" == "PlatformGlfw" ]]; then
   sdk_build_targets+=(tina_platform_glfw)
 fi
+if [[ "${CONSUMER}" == "AudioMiniaudio" ]]; then
+  sdk_build_targets+=(tina_audio_miniaudio)
+fi
 if [[ "${CONSUMER}" == "DesktopBootstrap" ]]; then
   sdk_build_targets+=(tina_bootstrap_desktop)
 fi
 cmake --build "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" \
   --target "${sdk_build_targets[@]}" --parallel "${BUILD_JOBS}"
 cmake --install "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" --prefix "${INSTALL_PREFIX}"
-cmake "-DTINA_SDK_INCLUDE_DIR=${INSTALL_PREFIX}/include" -P "${VERIFICATION_SCRIPT}"
+AUDIO_MINIAUDIO_ENABLED=OFF
+if [[ "$(cache_value TINA_BUILD_AUDIO_MINIAUDIO)" == "ON" ]]; then
+  AUDIO_MINIAUDIO_ENABLED=ON
+fi
+cmake "-DTINA_SDK_INCLUDE_DIR=${INSTALL_PREFIX}/include" \
+  "-DTINA_EXPECT_AUDIO_MINIAUDIO=${AUDIO_MINIAUDIO_ENABLED}" -P "${VERIFICATION_SCRIPT}"
 
 common_configure_arguments=(
   -G "${GENERATOR}"
@@ -147,13 +161,24 @@ cmake "${configure_arguments[@]}"
 
 case "${CONSUMER}" in
   GameSDK)
-    missing_components="PlatformGlfw;RenderBgfx;UIFreetype;DesktopBootstrap;DefinitelyMissing"
+    missing_components="PlatformGlfw;RenderBgfx;UIFreetype;AudioMiniaudio;DesktopBootstrap;DefinitelyMissing"
     ;;
   PlatformGlfw)
-    missing_components="RenderBgfx;UIFreetype;DefinitelyMissing"
+    if [[ "${AUDIO_MINIAUDIO_ENABLED}" == "ON" ]]; then
+      missing_components="RenderBgfx;UIFreetype;DefinitelyMissing"
+    else
+      missing_components="RenderBgfx;UIFreetype;AudioMiniaudio;DefinitelyMissing"
+    fi
+    ;;
+  AudioMiniaudio)
+    missing_components="PlatformGlfw;RenderBgfx;UIFreetype;DesktopBootstrap;DefinitelyMissing"
     ;;
   DesktopBootstrap)
-    missing_components="DefinitelyMissing"
+    if [[ "${AUDIO_MINIAUDIO_ENABLED}" == "ON" ]]; then
+      missing_components="DefinitelyMissing"
+    else
+      missing_components="AudioMiniaudio;DefinitelyMissing"
+    fi
     ;;
 esac
 cmake \
@@ -168,6 +193,11 @@ cmake \
   -DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE \
   -DCMAKE_DISABLE_FIND_PACKAGE_bgfx=TRUE \
   -DCMAKE_DISABLE_FIND_PACKAGE_Freetype=TRUE \
+  -DCMAKE_DISABLE_FIND_PACKAGE_miniaudio=TRUE \
+  -DCMAKE_DISABLE_FIND_PACKAGE_Vorbis=TRUE \
+  -DCMAKE_DISABLE_FIND_PACKAGE_Opus=TRUE \
+  -DCMAKE_DISABLE_FIND_PACKAGE_OpusFile=TRUE \
+  -DCMAKE_DISABLE_FIND_PACKAGE_Threads=TRUE \
   "${common_configure_arguments[@]}"
 
 cmake --build "${CONSUMER_BUILD_DIRECTORY}" --config "${CONFIGURATION}" \

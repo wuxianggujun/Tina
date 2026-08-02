@@ -20,7 +20,7 @@ if (TINA_AUDIO_ENABLE_LIBVORBIS)
 endif ()
 if (TINA_AUDIO_ENABLE_LIBOPUS)
     find_package(Opus CONFIG REQUIRED)
-    find_package(Opusfile CONFIG REQUIRED)
+    find_package(OpusFile CONFIG REQUIRED)
 endif ()
 
 

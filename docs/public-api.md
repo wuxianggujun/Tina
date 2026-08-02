@@ -33,6 +33,13 @@ find_package(Tina CONFIG REQUIRED COMPONENTS DesktopBootstrap)
 target_link_libraries(game PRIVATE Tina::DesktopBootstrap)
 ```
 
+高级音频集成可独立请求 miniaudio adapter：
+
+```cmake
+find_package(Tina CONFIG REQUIRED COMPONENTS AudioMiniaudio)
+target_link_libraries(audio_tool PRIVATE Tina::AudioMiniaudio)
+```
+
 `Tina::GameSDK` 聚合下表中的 backend-neutral Runtime、Scene、Asset、UI、Audio 等稳定模块；安装 package
 声明 `xxHash`（以及启用 Physics2D 时的 `box2d`）依赖。Windows 与 Linux 外部 headless
 consumer 已经只通过安装前缀完成 configure/build/run，并复用同一安装头第三方 token 扫描。`PlatformGlfw`
@@ -41,6 +48,8 @@ component 时不会加载 GLFW 依赖或定义 `Tina::PlatformGlfw`。Windows �
 读取初始 metrics 并 poll 一帧；它不进入 `Tina::GameSDK` 聚合。`DesktopBootstrap` 自动加载
 `PlatformGlfw`、`RenderBgfx`，并在安装图启用 FreeType 时加载可选 `UIFreetype`。RenderBgfx 的同一 prefix
 只携带 `bgfx`/`bx`/`bimg` runtime targets、archives 与 headers，不安装 shaderc、图片 codec 或离线工具。
+`AudioMiniaudio` 将 miniaudio 实现静态编入 adapter，不传播其 header；Linux consumer 解析 `Threads`，启用
+Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请求该 component 时不加载这些依赖。
 
 ## CMake targets
 
@@ -61,12 +70,12 @@ component 时不会加载 GLFW 依赖或定义 `Tina::PlatformGlfw`。Windows �
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
-| `Tina::AudioMiniaudio` | miniaudio device adapter；当前仍仅 build tree 使用 |
+| `Tina::AudioMiniaudio` | optional installed miniaudio device/decode adapter；需 `COMPONENTS AudioMiniaudio` |
 | `Tina::Physics2D` | optional Box2D-backed Tina API |
 
 Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
-`Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；当前安装 package
-条件导出前三者和 `Tina::DesktopBootstrap`，`Tina::AudioMiniaudio` 仍只在 build tree 使用。
+`Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；安装 package 按构建图
+条件导出四个 adapter 和 `Tina::DesktopBootstrap`。
 
 ## Core 约定
 
@@ -600,7 +609,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
-- 可安装的 `Tina::AudioMiniaudio` 闭包、跨发行版 relocatability 与正式发布 ABI/兼容策略。
+- 安装 SDK 的跨发行版 relocatability 与正式发布 ABI/兼容策略。
 
 任务状态见 [Backlog](backlog.md)。修改公开头后必须构建 header-isolation/consumer、扫描第三方 token，
 并按 [测试说明](testing.md) 运行受影响 executable 与 sample。

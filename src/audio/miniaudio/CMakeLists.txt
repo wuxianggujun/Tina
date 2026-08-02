@@ -37,13 +37,13 @@ endif ()
 
 target_link_libraries(tina_audio_miniaudio
     PUBLIC Tina::Audio
-    PRIVATE Tina::ProjectOptions
+    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 if (TINA_AUDIO_ENABLE_LIBVORBIS)
     target_link_libraries(tina_audio_miniaudio PRIVATE Vorbis::vorbis Vorbis::vorbisfile)
 endif ()
 if (TINA_AUDIO_ENABLE_LIBOPUS)
-    target_link_libraries(tina_audio_miniaudio PRIVATE Opus::opus Opusfile::opusfile)
+    target_link_libraries(tina_audio_miniaudio PRIVATE Opus::opus OpusFile::opusfile)
 endif ()
 
 if (UNIX AND NOT APPLE)

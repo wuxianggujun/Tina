@@ -43,6 +43,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 | `windows-msvc-vnext-audio-miniaudio-codecs` | miniaudio + Vorbis/Opus | 对应 codec features |
 | `windows-msvc-vnext-bgfx-product-2d` | bgfx + Physics2D + FreeType + miniaudio | `tests;platform-glfw;physics2d;ui-freetype;audio-miniaudio` |
 | `linux-gcc13-vnext` | Linux Null | `tests` |
+| `linux-gcc13-vnext-audio-miniaudio` | Linux Null + miniaudio adapter | `tests;audio-miniaudio` |
 | `linux-gcc13-vnext-platform` | Linux GLFW/X11 | `tests;platform-glfw` |
 | `linux-gcc13-vnext-platform-wayland` | Linux GLFW/Wayland | `tests;platform-glfw;wayland` |
 | `linux-clang22-vnext` | Clang Null | `tests` |
@@ -122,6 +123,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 consumer 通过 `find_package(Tina CONFIG REQUIRED COMPONENTS PlatformGlfw)`，只链接
 `Tina::PlatformGlfw`，创建隐藏窗口、读取初始 metrics、poll 一帧并 shutdown。
 
+AudioMiniaudio consumer 只链接独立 adapter；默认图和启用 Vorbis/Opus 的图都需通过：
+
+```powershell
+cmake --preset windows-msvc-vnext-audio-miniaudio
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer AudioMiniaudio -Configuration Debug
+
+cmake --preset windows-msvc-vnext-audio-miniaudio-codecs
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 `
+  -BuildDirectory out\build\windows-msvc-vnext-audio-miniaudio-codecs `
+  -Consumer AudioMiniaudio -Configuration Debug
+```
+
+consumer 会查询内置 WAV/FLAC/MP3 capability，启动 null backend、等待 callback，再 stop/shutdown；codec 图
+同时验证安装 target 能从 consumer toolchain 解析 `Vorbis`、`Opus` 与 `OpusFile`。
+
 DesktopBootstrap consumer 只链接组合入口，并分别覆盖基础 bgfx 与可选 FreeType 图：
 
 ```powershell
@@ -136,18 +154,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -Consumer DesktopBootstrap -Configuration Debug
 ```
 
-Linux GCC13 三个安装 consumer 使用同一安装头扫描和仓库外 consumer：
+Linux GCC13 四个安装 consumer 使用同一安装头扫描和仓库外 consumer：
 
 ```bash
 export VCPKG_ROOT=/opt/vcpkg
 tools/linux/run-sdk-consumer-gate.sh
 tools/linux/run-sdk-platform-glfw-consumer-gate.sh
 tools/linux/run-sdk-desktop-bootstrap-consumer-gate.sh
+tools/linux/run-sdk-audio-miniaudio-consumer-gate.sh
 ```
 
 基础脚本默认增量配置 `linux-gcc13-vnext`，PlatformGlfw wrapper 默认使用
-`linux-gcc13-vnext-platform`，DesktopBootstrap wrapper 默认使用 `linux-gcc13-vnext-bgfx`，后两者均通过
-`xvfb-run` 执行；可用 `TINA_SDK_CONFIGURE_PRESET`、
+`linux-gcc13-vnext-platform`，DesktopBootstrap wrapper 默认使用 `linux-gcc13-vnext-bgfx`，AudioMiniaudio
+wrapper 默认使用 `linux-gcc13-vnext-audio-miniaudio`；两个窗口 consumer 通过 `xvfb-run` 执行。可用
+`TINA_SDK_CONFIGURE_PRESET`、
 `TINA_SDK_BUILD_DIRECTORY`、`TINA_SDK_CONFIGURATION`、`TINA_SDK_BUILD_JOBS` 与
 `TINA_SDK_CONSUMER` 覆盖工具链、build tree 和 consumer。
 Windows 主机可通过现有 GCC13 Docker 镜像运行相同门禁：
@@ -159,10 +179,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-platform-glfw-consumer
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-desktop-bootstrap-consumer
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-audio-miniaudio-consumer
 ```
 
-这些门禁证明 Windows/Linux headless/Null SDK、独立 PlatformGlfw 和 DesktopBootstrap/RenderBgfx 闭包，
-并在 Windows 覆盖可选 UIFreetype 图。`xxHash`、`glfw3`、`Freetype` 继续由 consumer toolchain 解析；
+这些门禁证明 Windows/Linux headless/Null SDK、独立 PlatformGlfw、AudioMiniaudio 和
+DesktopBootstrap/RenderBgfx 闭包，并在 Windows 覆盖可选 UIFreetype/Vorbis/Opus 图。`xxHash`、`glfw3`、
+`Freetype`、`Threads` 与可选 codec package 继续由 consumer toolchain 解析；
 RenderBgfx 在 Tina prefix 中安装最小 `bgfx`/`bx`/`bimg` runtime package，不包含 shaderc、图片 codec 或
 离线工具。Docker 入口固定限制为 2 CPU/8 GiB。
 
