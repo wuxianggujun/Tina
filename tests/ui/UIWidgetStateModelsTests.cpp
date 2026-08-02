@@ -23,14 +23,11 @@ TEST(UIWidgetStateModelsTests, TextAndProgressControlsStartFromStableDefaults)
 
 TEST(UIWidgetStateModelsTests, ContainersStartClosedUnboundAndAtOrigin)
 {
-    const UI::Detail::ScrollViewState scrollView{};
     const UI::Detail::DropdownState dropdown{};
     const UI::Detail::PopupState popup{};
     const UI::Detail::ListViewState listView{};
     const UI::Detail::TreeViewState treeView{};
 
-    EXPECT_FLOAT_EQ(scrollView.requestedOffset.x, 0.0F);
-    EXPECT_FLOAT_EQ(scrollView.requestedOffset.y, 0.0F);
     EXPECT_FALSE(dropdown.popup.hasValue());
     EXPECT_FALSE(dropdown.selectedItem.hasValue());
     EXPECT_FALSE(popup.open);

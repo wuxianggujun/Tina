@@ -36,14 +36,6 @@ struct RadioButtonState final {
     bool selected = false;
 };
 
-struct ScrollViewState final {
-    UIScrollViewStyle style{};
-    UIScrollViewPaint paint{};
-    UIScrollOffset requestedOffset{};
-    UIScrollViewMetrics committedMetrics{};
-    UILogicalRect committedViewportRect{};
-};
-
 struct ScrollViewLayoutScratch final {
     UIScrollViewMetrics metrics{};
     UILogicalRect viewportRect{};

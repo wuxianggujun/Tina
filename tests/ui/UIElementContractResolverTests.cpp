@@ -166,6 +166,16 @@ TEST(UIElementContractResolverTests, MixedTextInputCompositionRemainsRejectedUnt
     EXPECT_EQ(kind.error().code, UI::UIErrorCode::InvalidElementDescriptor);
 }
 
+TEST(UIElementContractResolverTests, MixedScrollCompositionRemainsRejectedUntilRoutingIsCapabilityBased)
+{
+    UI::UIElementDescriptor descriptor = UI::makeScrollViewElement();
+    descriptor.behaviors |= UI::UIElementBehavior::Activate;
+
+    const auto kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_FALSE(kind);
+    EXPECT_EQ(kind.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+}
+
 TEST(UIElementContractResolverTests, SemanticsActionsRequireMatchingBehaviors)
 {
     const UI::UIElementDescriptor checkbox = UI::makeCheckboxElement();

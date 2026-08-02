@@ -9,19 +9,22 @@ namespace Tina::UI::Detail {
 
 UIBehaviorStateStorage::UIBehaviorStateStorage(usize nodeCapacity, usize activateCapacity, usize toggleCapacity,
                                                usize rangeInputCapacity, usize textInputCapacity,
+                                               usize scrollCapacity,
                                                std::pmr::memory_resource& resource)
     : activateSlotByNodeIndex_(&resource), toggleSlotByNodeIndex_(&resource), rangeInputSlotByNodeIndex_(&resource),
-      textInputSlotByNodeIndex_(&resource), activateSlots_(&resource), toggleSlots_(&resource),
-      rangeInputSlots_(&resource), textInputSlots_(&resource)
+      textInputSlotByNodeIndex_(&resource), scrollSlotByNodeIndex_(&resource), activateSlots_(&resource),
+      toggleSlots_(&resource), rangeInputSlots_(&resource), textInputSlots_(&resource), scrollSlots_(&resource)
 {
     activateSlotByNodeIndex_.resize(nodeCapacity, InvalidSlot);
     toggleSlotByNodeIndex_.resize(nodeCapacity, InvalidSlot);
     rangeInputSlotByNodeIndex_.resize(nodeCapacity, InvalidSlot);
     textInputSlotByNodeIndex_.resize(nodeCapacity, InvalidSlot);
+    scrollSlotByNodeIndex_.resize(nodeCapacity, InvalidSlot);
     activateSlots_.resize(activateCapacity);
     toggleSlots_.resize(toggleCapacity);
     rangeInputSlots_.resize(rangeInputCapacity);
     textInputSlots_.resize(textInputCapacity);
+    scrollSlots_.resize(scrollCapacity);
 
     for (usize index = 0; index < activateCapacity; ++index)
     {
@@ -39,21 +42,28 @@ UIBehaviorStateStorage::UIBehaviorStateStorage(usize nodeCapacity, usize activat
     {
         textInputSlots_[index].next = index + 1U < textInputCapacity ? static_cast<u32>(index + 1U) : InvalidSlot;
     }
+    for (usize index = 0; index < scrollCapacity; ++index)
+    {
+        scrollSlots_[index].next = index + 1U < scrollCapacity ? static_cast<u32>(index + 1U) : InvalidSlot;
+    }
     activateFreeHead_ = activateCapacity == 0 ? InvalidSlot : 0U;
     toggleFreeHead_ = toggleCapacity == 0 ? InvalidSlot : 0U;
     rangeInputFreeHead_ = rangeInputCapacity == 0 ? InvalidSlot : 0U;
     textInputFreeHead_ = textInputCapacity == 0 ? InvalidSlot : 0U;
+    scrollFreeHead_ = scrollCapacity == 0 ? InvalidSlot : 0U;
 }
 
 Core::Status UIBehaviorStateStorage::publish(u32 nodeIndex, UIElementBehavior behaviors)
 {
     if (nodeIndex >= activateSlotByNodeIndex_.size() || nodeIndex >= toggleSlotByNodeIndex_.size() ||
-        nodeIndex >= rangeInputSlotByNodeIndex_.size() || nodeIndex >= textInputSlotByNodeIndex_.size())
+        nodeIndex >= rangeInputSlotByNodeIndex_.size() || nodeIndex >= textInputSlotByNodeIndex_.size() ||
+        nodeIndex >= scrollSlotByNodeIndex_.size())
     {
         return Core::failure(Core::CoreErrorCode::Internal, "UI behavior state index is out of range");
     }
     if (activateSlotByNodeIndex_[nodeIndex] != InvalidSlot || toggleSlotByNodeIndex_[nodeIndex] != InvalidSlot ||
-        rangeInputSlotByNodeIndex_[nodeIndex] != InvalidSlot || textInputSlotByNodeIndex_[nodeIndex] != InvalidSlot)
+        rangeInputSlotByNodeIndex_[nodeIndex] != InvalidSlot || textInputSlotByNodeIndex_[nodeIndex] != InvalidSlot ||
+        scrollSlotByNodeIndex_[nodeIndex] != InvalidSlot)
     {
         return Core::failure(Core::CoreErrorCode::Internal, "UI node already owns behavior state storage");
     }
@@ -62,6 +72,7 @@ Core::Status UIBehaviorStateStorage::publish(u32 nodeIndex, UIElementBehavior be
     const bool requiresToggle = hasBehavior(behaviors, UIElementBehavior::Toggle);
     const bool requiresRangeInput = hasBehavior(behaviors, UIElementBehavior::RangeInput);
     const bool requiresTextInput = hasBehavior(behaviors, UIElementBehavior::TextInput);
+    const bool requiresScroll = hasBehavior(behaviors, UIElementBehavior::Scroll);
     if (requiresActivate && (activateFreeHead_ == InvalidSlot || activateFreeHead_ >= activateSlots_.size()))
     {
         return Core::failure(UIErrorCode::CapacityExceeded, "UI Activate behavior capacity has been exhausted");
@@ -77,6 +88,10 @@ Core::Status UIBehaviorStateStorage::publish(u32 nodeIndex, UIElementBehavior be
     if (requiresTextInput && (textInputFreeHead_ == InvalidSlot || textInputFreeHead_ >= textInputSlots_.size()))
     {
         return Core::failure(UIErrorCode::CapacityExceeded, "UI TextInput behavior capacity has been exhausted");
+    }
+    if (requiresScroll && (scrollFreeHead_ == InvalidSlot || scrollFreeHead_ >= scrollSlots_.size()))
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, "UI Scroll behavior capacity has been exhausted");
     }
 
     if (requiresActivate)
@@ -126,13 +141,26 @@ Core::Status UIBehaviorStateStorage::publish(u32 nodeIndex, UIElementBehavior be
         ++activeTextInputCount_;
         textInputHighWater_ = (std::max)(textInputHighWater_, activeTextInputCount_);
     }
+    if (requiresScroll)
+    {
+        const u32 slotIndex = scrollFreeHead_;
+        ScrollSlot& slot = scrollSlots_[slotIndex];
+        scrollFreeHead_ = slot.next;
+        slot.next = InvalidSlot;
+        slot.state = {};
+        slot.active = true;
+        scrollSlotByNodeIndex_[nodeIndex] = slotIndex;
+        ++activeScrollCount_;
+        scrollHighWater_ = (std::max)(scrollHighWater_, activeScrollCount_);
+    }
     return Core::success();
 }
 
 void UIBehaviorStateStorage::release(u32 nodeIndex) noexcept
 {
     if (nodeIndex >= activateSlotByNodeIndex_.size() || nodeIndex >= toggleSlotByNodeIndex_.size() ||
-        nodeIndex >= rangeInputSlotByNodeIndex_.size() || nodeIndex >= textInputSlotByNodeIndex_.size())
+        nodeIndex >= rangeInputSlotByNodeIndex_.size() || nodeIndex >= textInputSlotByNodeIndex_.size() ||
+        nodeIndex >= scrollSlotByNodeIndex_.size())
     {
         return;
     }
@@ -192,6 +220,20 @@ void UIBehaviorStateStorage::release(u32 nodeIndex) noexcept
         }
     }
     textInputSlotByNodeIndex_[nodeIndex] = InvalidSlot;
+
+    const u32 scrollSlotIndex = scrollSlotByNodeIndex_[nodeIndex];
+    if (scrollSlotIndex != InvalidSlot && scrollSlotIndex < scrollSlots_.size())
+    {
+        ScrollSlot& slot = scrollSlots_[scrollSlotIndex];
+        if (slot.active)
+        {
+            slot = {};
+            slot.next = scrollFreeHead_;
+            scrollFreeHead_ = scrollSlotIndex;
+            --activeScrollCount_;
+        }
+    }
+    scrollSlotByNodeIndex_[nodeIndex] = InvalidSlot;
 }
 
 bool UIBehaviorStateStorage::hasActivate(u32 nodeIndex) const noexcept
@@ -266,6 +308,25 @@ const UITextInputState* UIBehaviorStateStorage::tryTextInputState(u32 nodeIndex)
     return &textInputSlots_[slotIndex].state;
 }
 
+UIScrollBehaviorState* UIBehaviorStateStorage::tryScrollState(u32 nodeIndex) noexcept
+{
+    return const_cast<UIScrollBehaviorState*>(std::as_const(*this).tryScrollState(nodeIndex));
+}
+
+const UIScrollBehaviorState* UIBehaviorStateStorage::tryScrollState(u32 nodeIndex) const noexcept
+{
+    if (nodeIndex >= scrollSlotByNodeIndex_.size())
+    {
+        return nullptr;
+    }
+    const u32 slotIndex = scrollSlotByNodeIndex_[nodeIndex];
+    if (slotIndex >= scrollSlots_.size() || !scrollSlots_[slotIndex].active)
+    {
+        return nullptr;
+    }
+    return &scrollSlots_[slotIndex].state;
+}
+
 usize UIBehaviorStateStorage::activateCapacity() const noexcept
 {
     return activateSlots_.size();
@@ -324,6 +385,21 @@ usize UIBehaviorStateStorage::activeTextInputCount() const noexcept
 usize UIBehaviorStateStorage::textInputHighWater() const noexcept
 {
     return textInputHighWater_;
+}
+
+usize UIBehaviorStateStorage::scrollCapacity() const noexcept
+{
+    return scrollSlots_.size();
+}
+
+usize UIBehaviorStateStorage::activeScrollCount() const noexcept
+{
+    return activeScrollCount_;
+}
+
+usize UIBehaviorStateStorage::scrollHighWater() const noexcept
+{
+    return scrollHighWater_;
 }
 
 } // namespace Tina::UI::Detail

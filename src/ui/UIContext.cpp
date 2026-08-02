@@ -166,7 +166,7 @@ using Detail::ScrollBarGeometry;
 using Detail::ScrollBarPointerHit;
 using Detail::ScrollViewLayoutScratch;
 using Detail::ScrollViewLayoutInput;
-using Detail::ScrollViewState;
+using Detail::UIScrollBehaviorState;
 using Detail::SliderPaintGeometry;
 using Detail::sliderPaintGeometry;
 using Detail::setScrollAxisOffset;
@@ -317,7 +317,8 @@ struct UIContext::Impl final {
     std::pmr::vector<UITextEditPaint> textEditPaintsByNodeIndex;
     std::pmr::vector<ProgressBarState> progressBarStatesByNodeIndex;
     std::pmr::vector<RadioButtonState> radioButtonStatesByNodeIndex;
-    std::pmr::vector<ScrollViewState> scrollViewStatesByNodeIndex;
+    // Scroll style/offset/metrics live in the behavior side store; chrome remains kind-owned.
+    std::pmr::vector<UIScrollViewPaint> scrollViewPaintsByNodeIndex;
     std::pmr::vector<ScrollViewLayoutScratch> scrollViewLayoutScratchByNodeIndex;
     std::pmr::vector<DropdownState> dropdownStatesByNodeIndex;
     std::pmr::vector<PopupState> popupStatesByNodeIndex;
@@ -464,7 +465,7 @@ struct UIContext::Impl final {
           imageContentStorage(capacities.nodeCapacity, capacities.imageContentCapacity, resource),
           textEditPaintsByNodeIndex(&resource),
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
-          scrollViewStatesByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
+          scrollViewPaintsByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
           dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
           popupLayoutScratchByNodeIndex(&resource), listViewStatesByNodeIndex(&resource),
           listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
@@ -478,7 +479,8 @@ struct UIContext::Impl final {
           routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
           buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, resource),
           behaviorStateStorage(capacities.nodeCapacity, capacities.nodeCapacity,
-                               capacities.nodeCapacity, capacities.nodeCapacity, capacities.nodeCapacity, resource),
+                               capacities.nodeCapacity, capacities.nodeCapacity, capacities.nodeCapacity,
+                               capacities.nodeCapacity, resource),
           defaultActionPressState(owner), rangeInputPressLatch(owner),
           checkboxPaintsByNodeIndex(&resource),
           sliderPaintsByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
@@ -549,7 +551,7 @@ struct UIContext::Impl final {
         impl->textEditPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->progressBarStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->radioButtonStatesByNodeIndex.resize(normalized.nodeCapacity);
-        impl->scrollViewStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->scrollViewPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->scrollViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->dropdownStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->popupStatesByNodeIndex.resize(normalized.nodeCapacity);
@@ -1549,16 +1551,21 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidLayout, "UI flex layout accumulation produced a non-finite value");
         }
 
-        if (parentRecord->kind == BuiltinElementKind::ScrollView && parentIndex < scrollViewStatesByNodeIndex.size() &&
+        if (parentRecord->kind == BuiltinElementKind::ScrollView && parentIndex < scrollViewPaintsByNodeIndex.size() &&
             parentIndex < scrollViewLayoutScratchByNodeIndex.size())
         {
-            ScrollViewState& state = scrollViewStatesByNodeIndex[parentIndex];
+            const UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(parentIndex);
+            if (state == nullptr)
+            {
+                return fail(Core::CoreErrorCode::Internal, "UI ScrollView is missing Scroll behavior state");
+            }
+            const UIScrollViewPaint& paint = scrollViewPaintsByNodeIndex[parentIndex];
             const auto plan = resolveScrollViewLayout(ScrollViewLayoutInput{
                 .availableRect = unscrolledContentRect,
                 .rawContentSize = flexSummary.contentSize(parentStyle.flexContainer.direction),
-                .style = state.style,
-                .scrollBarThickness = state.paint.thickness,
-                .requestedOffset = state.requestedOffset,
+                .style = state->style,
+                .scrollBarThickness = paint.thickness,
+                .requestedOffset = state->requestedOffset,
             });
             scrollViewLayoutScratchByNodeIndex[parentIndex] = ScrollViewLayoutScratch{
                 .metrics = plan.metrics,
@@ -2217,24 +2224,24 @@ struct UIContext::Impl final {
                         : paint.thumbColor;
             add(geometry.thumb, controlColor(thumbColor));
         } else if (record != nullptr && record->kind == BuiltinElementKind::ScrollView &&
-                   nodeIndex < scrollViewStatesByNodeIndex.size() &&
+                   nodeIndex < scrollViewPaintsByNodeIndex.size() &&
                    nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
         {
-            const ScrollViewState& scroll = scrollViewStatesByNodeIndex[nodeIndex];
+            const UIScrollViewPaint& scroll = scrollViewPaintsByNodeIndex[nodeIndex];
             const ScrollViewLayoutScratch& scrollLayout = scrollViewLayoutScratchByNodeIndex[nodeIndex];
             const auto addBar = [&](UIScrollAxes axis) noexcept {
                 const ScrollBarGeometry geometry =
-                    makeScrollBarGeometry(scrollLayout.metrics, scrollLayout.viewportRect, scroll.paint, axis);
+                    makeScrollBarGeometry(scrollLayout.metrics, scrollLayout.viewportRect, scroll, axis);
                 if (!geometry.visible)
                 {
                     return;
                 }
-                add(geometry.track, controlColor(scroll.paint.trackColor));
+                add(geometry.track, controlColor(scroll.trackColor));
                 const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
                                                                  armedScrollAxis == axis &&
-                                                                 scroll.paint.draggingThumbColor.alpha != 0
-                                                             ? scroll.paint.draggingThumbColor
-                                                             : scroll.paint.thumbColor;
+                                                                 scroll.draggingThumbColor.alpha != 0
+                                                             ? scroll.draggingThumbColor
+                                                             : scroll.thumbColor;
                 add(geometry.thumb, controlColor(thumbColor));
             };
             addBar(UIScrollAxes::Horizontal);
@@ -2682,8 +2689,12 @@ struct UIContext::Impl final {
                    nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
         {
             const UIScrollViewMetrics& metrics = scrollViewLayoutScratchByNodeIndex[nodeIndex].metrics;
-            const bool vertical = hasScrollAxis(scrollViewStatesByNodeIndex[nodeIndex].style.axes,
-                                                UIScrollAxes::Vertical);
+            const UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(nodeIndex);
+            if (state == nullptr)
+            {
+                return false;
+            }
+            const bool vertical = hasScrollAxis(state->style.axes, UIScrollAxes::Vertical);
             entry.focused = enabled && scrollThumbDragActive && armedScrollView == node;
             entry.hasRange = true;
             entry.maxValue = vertical ? metrics.maxOffsetY() : metrics.maxOffsetX();
@@ -3529,9 +3540,9 @@ struct UIContext::Impl final {
         {
             radioButtonStatesByNodeIndex[index] = {};
         }
-        if (index < scrollViewStatesByNodeIndex.size())
+        if (index < scrollViewPaintsByNodeIndex.size())
         {
-            scrollViewStatesByNodeIndex[index] = {};
+            scrollViewPaintsByNodeIndex[index] = {};
         }
         if (index < scrollViewLayoutScratchByNodeIndex.size())
         {
@@ -4005,7 +4016,7 @@ struct UIContext::Impl final {
             .slider = sliderPaintsByNodeIndex[index],
             .progressBar = progressBarStatesByNodeIndex[index].paint,
             .radioButton = radioButtonStatesByNodeIndex[index].paint,
-            .scrollView = scrollViewStatesByNodeIndex[index].paint,
+            .scrollView = scrollViewPaintsByNodeIndex[index],
             .dropdown = dropdownStatesByNodeIndex[index].paint,
             .listView = listViewStatesByNodeIndex[index].paint,
             .treeView = treeViewStatesByNodeIndex[index].paint,
@@ -7101,9 +7112,25 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != BuiltinElementKind::ScrollView)
+        if ((*nodeResult)->kind != BuiltinElementKind::ScrollView ||
+            scrollView.index() >= scrollViewPaintsByNodeIndex.size())
         {
             return fail(UIErrorCode::InvalidControlValue, "UI ScrollView API requires a ScrollView node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveScroll(UINodeId node)
+    {
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!hasBehavior((*nodeResult)->behaviors, UIElementBehavior::Scroll) ||
+            behaviorStateStorage.tryScrollState(node.index()) == nullptr)
+        {
+            return fail(UIErrorCode::InvalidControlValue, "UI Scroll API requires a Scroll-capable node");
         }
         return *nodeResult;
     }
@@ -7128,7 +7155,8 @@ struct UIContext::Impl final {
 
     [[nodiscard]] bool isLiveScrollView(UINodeId scrollView) const noexcept
     {
-        if (!scrollView.hasValue() || !contains(scrollView) || scrollView.index() >= scrollViewStatesByNodeIndex.size())
+        if (!scrollView.hasValue() || !contains(scrollView) || scrollView.index() >= scrollViewPaintsByNodeIndex.size() ||
+            behaviorStateStorage.tryScrollState(scrollView.index()) == nullptr)
         {
             return false;
         }
@@ -7192,8 +7220,13 @@ struct UIContext::Impl final {
         {
             return {};
         }
-        const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
-        return makeScrollBarGeometry(state.committedMetrics, state.committedViewportRect, state.paint, axis);
+        const UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(scrollView.index());
+        if (state == nullptr)
+        {
+            return {};
+        }
+        return makeScrollBarGeometry(state->committedMetrics, state->committedViewportRect,
+                                     scrollViewPaintsByNodeIndex[scrollView.index()], axis);
     }
 
     [[nodiscard]] Core::Result<bool> applyScrollOffsetFromInput(UINodeId scrollView, UIScrollOffset requested)
@@ -7234,15 +7267,19 @@ struct UIContext::Impl final {
             state.requestedScrollOffset = requested.y;
             return true;
         }
-        ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
-        const UIScrollViewMetrics& metrics = state.committedMetrics;
-        requested.x = hasScrollAxis(state.style.axes, UIScrollAxes::Horizontal)
+        UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(scrollView.index());
+        if (state == nullptr)
+        {
+            return Core::failure(Core::CoreErrorCode::Internal, "UI ScrollView is missing Scroll behavior state");
+        }
+        const UIScrollViewMetrics& metrics = state->committedMetrics;
+        requested.x = hasScrollAxis(state->style.axes, UIScrollAxes::Horizontal)
                           ? normalizeFloat((std::clamp)(requested.x, 0.0F, metrics.maxOffsetX()))
                           : 0.0F;
-        requested.y = hasScrollAxis(state.style.axes, UIScrollAxes::Vertical)
+        requested.y = hasScrollAxis(state->style.axes, UIScrollAxes::Vertical)
                           ? normalizeFloat((std::clamp)(requested.y, 0.0F, metrics.maxOffsetY()))
                           : 0.0F;
-        if (state.requestedOffset == requested)
+        if (state->requestedOffset == requested)
         {
             return false;
         }
@@ -7250,7 +7287,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(dirty.error());
         }
-        state.requestedOffset = requested;
+        state->requestedOffset = requested;
         return true;
     }
 
@@ -7282,9 +7319,13 @@ struct UIContext::Impl final {
                     state.style.wheelStep, delta),
             };
         }
-        const ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        const UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(scrollView.index());
+        if (state == nullptr)
+        {
+            return {};
+        }
         return resolveScrollWheelOffset(
-            state.requestedOffset, state.style, state.committedMetrics, delta);
+            state->requestedOffset, state->style, state->committedMetrics, delta);
     }
 
     [[nodiscard]] bool scrollWheelWouldChange(UINodeId scrollView, UILogicalPoint delta) const noexcept
@@ -7302,7 +7343,8 @@ struct UIContext::Impl final {
         {
             return treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset != resolved.y;
         }
-        return scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset != resolved;
+        const UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(scrollView.index());
+        return state != nullptr && state->requestedOffset != resolved;
     }
 
     [[nodiscard]] Core::Result<bool> applyScrollWheel(UINodeId scrollView, UILogicalPoint delta)
@@ -7323,12 +7365,20 @@ struct UIContext::Impl final {
         {
             return false;
         }
+        const bool listView = isLiveListView(scrollView);
+        const bool treeView = isLiveTreeView(scrollView);
+        const UIScrollBehaviorState* scrollState =
+            listView || treeView ? nullptr : behaviorStateStorage.tryScrollState(scrollView.index());
+        if (!listView && !treeView && scrollState == nullptr)
+        {
+            return false;
+        }
         const ScrollBarGeometry geometry = committedScrollBarGeometry(scrollView, axis);
         const float maxOffset =
-            isLiveListView(scrollView) ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
-            : isLiveTreeView(scrollView)
+            listView ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
+            : treeView
                 ? treeViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
-                : scrollAxisMaxOffset(scrollViewStatesByNodeIndex[scrollView.index()].committedMetrics, axis);
+                : scrollAxisMaxOffset(scrollState->committedMetrics, axis);
         const auto axisOffset = resolveScrollThumbOffset(
             geometry, axis, position, grabOffset, maxOffset);
         if (!axisOffset)
@@ -7336,11 +7386,11 @@ struct UIContext::Impl final {
             return false;
         }
         UIScrollOffset next =
-            isLiveListView(scrollView)
+            listView
                 ? UIScrollOffset{.x = 0.0F, .y = listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
-            : isLiveTreeView(scrollView)
+            : treeView
                 ? UIScrollOffset{.x = 0.0F, .y = treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
-                                  : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
+                                  : scrollState->requestedOffset;
         setScrollAxisOffset(next, axis, *axisOffset);
         return applyScrollOffsetFromInput(scrollView, next);
     }
@@ -7353,26 +7403,32 @@ struct UIContext::Impl final {
         {
             return false;
         }
+        const bool listView = isLiveListView(scrollView);
+        const bool treeView = isLiveTreeView(scrollView);
+        const UIScrollBehaviorState* scrollState =
+            listView || treeView ? nullptr : behaviorStateStorage.tryScrollState(scrollView.index());
+        if (!listView && !treeView && scrollState == nullptr)
+        {
+            return false;
+        }
         const ScrollBarGeometry geometry = committedScrollBarGeometry(scrollView, axis);
         if (!geometry.visible)
         {
             return false;
         }
-        const float pageExtent = isLiveListView(scrollView)
+        const float pageExtent = listView
                                      ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.viewportSize.height
-            : isLiveTreeView(scrollView)
+            : treeView
                 ? treeViewStatesByNodeIndex[scrollView.index()].committedMetrics.viewportSize.height
                                      : (axis == UIScrollAxes::Horizontal
-                                            ? scrollViewStatesByNodeIndex[scrollView.index()]
-                                                  .committedMetrics.viewportSize.width
-                                            : scrollViewStatesByNodeIndex[scrollView.index()]
-                                                  .committedMetrics.viewportSize.height);
+                                            ? scrollState->committedMetrics.viewportSize.width
+                                            : scrollState->committedMetrics.viewportSize.height);
         UIScrollOffset next =
-            isLiveListView(scrollView)
+            listView
                 ? UIScrollOffset{.x = 0.0F, .y = listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
-            : isLiveTreeView(scrollView)
+            : treeView
                 ? UIScrollOffset{.x = 0.0F, .y = treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
-                                  : scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
+                                  : scrollState->requestedOffset;
         const auto axisOffset = resolveScrollTrackPageOffset(
             geometry, axis, position, scrollAxisOffset(next, axis), pageExtent);
         if (!axisOffset)
@@ -7419,11 +7475,15 @@ struct UIContext::Impl final {
                 }
                 continue;
             }
-            const ScrollViewState& state = scrollViewStatesByNodeIndex[node.index()];
+            const UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(node.index());
+            if (state == nullptr)
+            {
+                continue;
+            }
             for (const UIScrollAxes axis : {UIScrollAxes::Horizontal, UIScrollAxes::Vertical})
             {
-                if (!hasScrollAxis(state.style.axes, axis) ||
-                    !(scrollAxisMaxOffset(state.committedMetrics, axis) > 0.0F))
+                if (!hasScrollAxis(state->style.axes, axis) ||
+                    !(scrollAxisMaxOffset(state->committedMetrics, axis) > 0.0F))
                 {
                     continue;
                 }
@@ -7455,7 +7515,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        auto scrollResult = resolveScrollView(scrollView);
+        auto scrollResult = resolveScroll(scrollView);
         if (!scrollResult)
         {
             return Core::failure(scrollResult.error());
@@ -7469,7 +7529,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(normalized.error());
         }
-        ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        UIScrollBehaviorState& state = *behaviorStateStorage.tryScrollState(scrollView.index());
         if (state.style == *normalized)
         {
             return Core::success();
@@ -7493,7 +7553,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        auto scrollResult = const_cast<Impl*>(this)->resolveScrollView(scrollView);
+        auto scrollResult = const_cast<Impl*>(this)->resolveScroll(scrollView);
         if (!scrollResult)
         {
             return Core::failure(scrollResult.error());
@@ -7502,7 +7562,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
         }
-        return scrollViewStatesByNodeIndex[scrollView.index()].style;
+        return behaviorStateStorage.tryScrollState(scrollView.index())->style;
     }
 
     [[nodiscard]] Core::Status setScrollViewOffsetFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
@@ -7517,7 +7577,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        auto scrollResult = resolveScrollView(scrollView);
+        auto scrollResult = resolveScroll(scrollView);
         if (!scrollResult)
         {
             return Core::failure(scrollResult.error());
@@ -7531,7 +7591,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(normalized.error());
         }
-        ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
+        UIScrollBehaviorState& state = *behaviorStateStorage.tryScrollState(scrollView.index());
         if (state.requestedOffset == *normalized)
         {
             return Core::success();
@@ -7555,7 +7615,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        auto scrollResult = const_cast<Impl*>(this)->resolveScrollView(scrollView);
+        auto scrollResult = const_cast<Impl*>(this)->resolveScroll(scrollView);
         if (!scrollResult)
         {
             return Core::failure(scrollResult.error());
@@ -7564,7 +7624,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
         }
-        return scrollViewStatesByNodeIndex[scrollView.index()].requestedOffset;
+        return behaviorStateStorage.tryScrollState(scrollView.index())->requestedOffset;
     }
 
     [[nodiscard]] Core::Result<UIScrollViewMetrics> scrollViewMetricsFromUpdater(UINodeId updaterRoot,
@@ -7578,7 +7638,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
         }
-        auto scrollResult = const_cast<Impl*>(this)->resolveScrollView(scrollView);
+        auto scrollResult = const_cast<Impl*>(this)->resolveScroll(scrollView);
         if (!scrollResult)
         {
             return Core::failure(scrollResult.error());
@@ -7587,7 +7647,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
         }
-        return scrollViewStatesByNodeIndex[scrollView.index()].committedMetrics;
+        return behaviorStateStorage.tryScrollState(scrollView.index())->committedMetrics;
     }
 
     [[nodiscard]] Core::Status setScrollViewPaintFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
@@ -7616,20 +7676,20 @@ struct UIContext::Impl final {
         {
             return Core::failure(normalized.error());
         }
-        ScrollViewState& state = scrollViewStatesByNodeIndex[scrollView.index()];
-        if (state.paint == *normalized)
+        UIScrollViewPaint& state = scrollViewPaintsByNodeIndex[scrollView.index()];
+        if (state == *normalized)
         {
             detachThemeBinding(scrollView.index(), ThemeBindingScrollViewPaint);
             return Core::success();
         }
-        const bool layoutChanged = state.paint.thickness != normalized->thickness ||
-                                   state.paint.minThumbExtent != normalized->minThumbExtent;
+        const bool layoutChanged = state.thickness != normalized->thickness ||
+                                   state.minThumbExtent != normalized->minThumbExtent;
         Core::Status dirty = layoutChanged ? markLayoutStyleDirty(scrollView) : markPaintDirty(scrollView);
         if (!dirty)
         {
             return dirty;
         }
-        state.paint = *normalized;
+        state = *normalized;
         detachThemeBinding(scrollView.index(), ThemeBindingScrollViewPaint);
         return Core::success();
     }
@@ -7654,7 +7714,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI ScrollView is not owned by the updater root");
         }
-        return scrollViewStatesByNodeIndex[scrollView.index()].paint;
+        return scrollViewPaintsByNodeIndex[scrollView.index()];
     }
 
     [[nodiscard]] Core::Result<bool> isScrollViewDraggingFromUpdater(UINodeId updaterRoot,
@@ -9745,15 +9805,19 @@ struct UIContext::Impl final {
         {
             const NodeRecord* record = recordByIndex(index);
             if (record == nullptr || record->kind != BuiltinElementKind::ScrollView ||
-                index >= scrollViewStatesByNodeIndex.size() || index >= scrollViewLayoutScratchByNodeIndex.size())
+                index >= scrollViewLayoutScratchByNodeIndex.size())
             {
                 continue;
             }
-            ScrollViewState& state = scrollViewStatesByNodeIndex[index];
+            UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(index);
+            if (state == nullptr)
+            {
+                continue;
+            }
             const ScrollViewLayoutScratch& layout = scrollViewLayoutScratchByNodeIndex[index];
-            state.requestedOffset = layout.metrics.offset;
-            state.committedMetrics = layout.metrics;
-            state.committedViewportRect = layout.viewportRect;
+            state->requestedOffset = layout.metrics.offset;
+            state->committedMetrics = layout.metrics;
+            state->committedViewportRect = layout.viewportRect;
         }
         for (const u32 index : order)
         {
@@ -13523,6 +13587,9 @@ struct UIContext::Impl final {
             .textInputBehaviorCapacity = behaviorStateStorage.textInputCapacity(),
             .activeTextInputBehaviorCount = behaviorStateStorage.activeTextInputCount(),
             .textInputBehaviorHighWater = behaviorStateStorage.textInputHighWater(),
+            .scrollBehaviorCapacity = behaviorStateStorage.scrollCapacity(),
+            .activeScrollBehaviorCount = behaviorStateStorage.activeScrollCount(),
+            .scrollBehaviorHighWater = behaviorStateStorage.scrollHighWater(),
             .textByteCapacity = textStorage.capacity(),
             .textByteUsed = textStorage.used(),
             .textByteHighWater = textStorage.highWater(),

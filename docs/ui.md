@@ -116,14 +116,14 @@ stylesheet 仍属后续扩展。
 | 自定义交互 | 部分可用 | 可组合标准 Activate/Toggle/RangeInput capability、挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
 | 安装后作为外部 SDK 使用 | 主要切片可用 | backend-neutral `Tina::GameSDK`、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype 与 AudioMiniaudio 已有安装 consumer；Windows/Linux gate 会物理移动 prefix 后再 configure/link/run；待跨发行版 artifact transfer 与正式 ABI 策略 |
 
-`UIElementBehavior` 在公开头中表现为正交 flags。Activate/Toggle/RangeInput/TextInput 已迁移到私有固定容量 side store：
-创建时按 capability 对四个 pool 原子预检并发布 slot，destroy/事务回滚会释放并复用 slot；Activate action、
-Toggle state、Range value/range setter/default behavior 与 TextInput selection setter/query 按 capability 校验。
-`UIContextStatistics` 同时公开四个 pool 的 capacity、active 与 high-water。Slider paint/change callback/Pointer drag geometry
-和 TextEdit paint 仍是对应 private kind 的具体能力；TextInput resolver 当前也仍选择 TextEdit，以复用单行文本、焦点、
-Pointer selection 与 IME 路径。Scroll/Select 状态尚未迁移，不受支持的混合组合继续返回 `InvalidElementDescriptor`。
-因此当前任意组合面仍是 Activate/Toggle/RangeInput；TextInput 只完成状态所有权迁移，不能仅靠新增 flags 得到任意
-TextInput 视觉/输入路由、Knob、自定义 drag state machine 或新的 Behavior SPI；更高阶
+`UIElementBehavior` 在公开头中表现为正交 flags。Activate/Toggle/RangeInput/TextInput/Scroll 已迁移到私有固定容量 side store：
+创建时按 capability 对五个 pool 原子预检并发布 slot，destroy/事务回滚会释放并复用 slot；Activate action、
+Toggle state、Range value/range setter/default behavior、TextInput selection setter/query 与 Scroll style/offset/metrics
+按 capability 校验。`UIContextStatistics` 同时公开五个 pool 的 capacity、active 与 high-water。Slider paint/change callback/
+Pointer drag geometry、TextEdit paint 以及 ScrollView paint/thumb geometry 仍是对应 private kind 的具体能力；TextInput resolver
+当前仍选择 TextEdit，Scroll resolver 当前仍选择 ScrollView，以复用既有输入与视觉路径；Select 状态尚未迁移，不受支持的
+混合组合继续返回 `InvalidElementDescriptor`。因此当前任意组合面仍是 Activate/Toggle/RangeInput；TextInput 与 Scroll
+只完成状态所有权迁移，不能仅靠新增 flags 得到任意输入路由、滚动条视觉、Knob、自定义 drag state machine 或新的 Behavior SPI；更高阶
 SPI 继续后置，不能绕过 committed snapshot 或 Render 边界。
 
 ## Tree 与事务提交
@@ -533,7 +533,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone、`ui_image_nineslice_v1` 与非冻结的 `ui_component_build_activate_toggle_v1` 前置 workload 已落地；后续补完整 Component build、Style、Motion workload；固定机前时间结论只报 provisional |
-| `UI-COMPONENT-001` | InProgress；Runtime phase-scoped node-bounded component transaction 与 Activate/Toggle/RangeInput/TextInput fixed-capacity side store 切片已落地；待 Scroll/Select、各 pool 统一 reservation/counter 与 `ui_component_build_v1` |
+| `UI-COMPONENT-001` | InProgress；Runtime phase-scoped node-bounded component transaction 与 Activate/Toggle/RangeInput/TextInput/Scroll fixed-capacity side store 切片已落地；待 Select、各 pool 统一 reservation/counter 与 `ui_component_build_v1` |
 | `UI-STYLE-001` | 开放强类型 StyleClass/token ID、node-local pseudo-state selector 与预编译有界 stylesheet；不做完整 CSS |
 | `UI-MOTION-001` | fixed-capacity paint-only transition、monotonic clock、retarget 与 reduced-motion；action/hit/layout 契约保持不变 |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |

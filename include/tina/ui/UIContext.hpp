@@ -84,6 +84,9 @@ struct UIContextStatistics final {
     usize textInputBehaviorCapacity = 0;
     usize activeTextInputBehaviorCount = 0;
     usize textInputBehaviorHighWater = 0;
+    usize scrollBehaviorCapacity = 0;
+    usize activeScrollBehaviorCount = 0;
+    usize scrollBehaviorHighWater = 0;
     usize textByteCapacity = 0;
     usize textByteUsed = 0;
     usize textByteHighWater = 0;

@@ -405,5 +405,60 @@ TEST(UIBehaviorCompositionTests, TextInputPublicationRollbackStatisticsAndReuseA
     EXPECT_EQ(resource.allocationCount(), allocationCount);
 }
 
+TEST(UIBehaviorCompositionTests, ScrollPublicationRollbackStatisticsAndReuseAreAllocationStable)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows);
+    const Platform::WindowId window = *windows->tryEmplace(1);
+    ObservingMemoryResource resource;
+    auto context = createContext(window, {
+                                             .nodeCapacity = 4,
+                                             .rootCapacity = 1,
+                                             .textByteCapacity = 4,
+                                         },
+                                 resource);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+
+    UI::UIElementDescriptor invalid = UI::makeScrollViewElement();
+    invalid.semantics.name = "too long";
+    auto failed = context->rootBuilder().createElement(root.rootNodeId(), invalid);
+    ASSERT_FALSE(failed);
+    EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(context->statistics().activeScrollBehaviorCount, 0U);
+    EXPECT_EQ(context->statistics().scrollBehaviorHighWater, 1U);
+    EXPECT_EQ(context->statistics().liveNodeCount, 1U);
+
+    auto first = context->rootBuilder().createElement(root.rootNodeId(), UI::makeScrollViewElement());
+    ASSERT_TRUE(first);
+    auto second = context->rootBuilder().createElement(root.rootNodeId(), UI::makeScrollViewElement());
+    ASSERT_TRUE(second);
+    auto updater = createUpdater(*context, root);
+    UI::UIScrollViewStyle style{};
+    style.axes = UI::UIScrollAxes::Horizontal;
+    style.wheelStep = 17.0F;
+    assertOk(updater.setScrollViewStyle(*first, style));
+    assertOk(updater.setScrollViewOffset(*first, {.x = 7.0F, .y = 9.0F}));
+    EXPECT_EQ(context->statistics().activeScrollBehaviorCount, 2U);
+    EXPECT_EQ(context->statistics().scrollBehaviorCapacity, 4U);
+
+    const usize allocationCount = resource.allocationCount();
+    assertOk(updater.destroy(*first));
+    EXPECT_EQ(context->statistics().activeScrollBehaviorCount, 1U);
+    auto reused = context->rootBuilder().createElement(root.rootNodeId(), UI::makeScrollViewElement());
+    ASSERT_TRUE(reused);
+    auto reusedStyle = updater.scrollViewStyle(*reused);
+    ASSERT_TRUE(reusedStyle);
+    EXPECT_EQ(*reusedStyle, (UI::UIScrollViewStyle{}));
+    auto reusedOffset = updater.scrollViewOffset(*reused);
+    ASSERT_TRUE(reusedOffset);
+    EXPECT_EQ(*reusedOffset, (UI::UIScrollOffset{}));
+    auto reusedMetrics = updater.scrollViewMetrics(*reused);
+    ASSERT_TRUE(reusedMetrics);
+    EXPECT_EQ(*reusedMetrics, (UI::UIScrollViewMetrics{}));
+    EXPECT_EQ(context->statistics().scrollBehaviorHighWater, 2U);
+    EXPECT_EQ(resource.allocationCount(), allocationCount);
+}
+
 } // namespace
 } // namespace Tina::Tests
