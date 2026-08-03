@@ -387,6 +387,53 @@ TEST_F(PrimaryWindowUICapabilityTest, StyleColorTokenFacadeRoundTripsAndExpiresW
     EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, MotionFacadeBeginsBackgroundTransitionAndExpires)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto enterTree = builder->treeUpdater(*root);
+    ASSERT_TRUE(enterTree.has_value()) << enterTree.error().message;
+    UI::UIElementDescriptor panel = UI::makePanelElement();
+    panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
+    panel.layout.size.width = UI::UILayoutLength::Px(40.0F);
+    panel.layout.size.height = UI::UILayoutLength::Px(30.0F);
+    const auto node = enterTree->createElement(root->rootNodeId(), panel);
+    ASSERT_TRUE(node.has_value()) << node.error().message;
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    auto updateEpoch = state.beginUIUpdatePhase(context.get());
+    ASSERT_TRUE(updateEpoch.has_value()) << updateEpoch.error().message;
+    auto tree = state.treeUpdater(*updateEpoch, CapabilityPhase::UIUpdate, *root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    auto reduced = tree->reducedMotion();
+    ASSERT_TRUE(reduced.has_value()) << reduced.error().message;
+    EXPECT_FALSE(*reduced);
+    ASSERT_TRUE(tree->setReducedMotion(false).has_value());
+
+    UI::UITransitionSpec spec{
+        .property = UI::UIAnimatableProperty::BackgroundColor,
+        .duration = Core::Duration{0.100},
+        .easing = UI::UIEasing::EaseOut,
+    };
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(tree->beginBackgroundColorTransition(*node, UI::rgba8(100, 0, 0, 255), spec).has_value());
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
+    EXPECT_TRUE(context->statistics().paintDirty);
+    EXPECT_FALSE(context->statistics().layoutDirty);
+    EXPECT_FALSE(context->statistics().hitDirty);
+
+    ASSERT_TRUE(state.finishPhase(*updateEpoch, CapabilityPhase::UIUpdate).has_value());
+    Core::Status expired = tree->beginBackgroundColorTransition(*node, UI::rgba8(0, 100, 0, 255), spec);
+    ASSERT_FALSE(expired.has_value());
+    EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, InvalidStyleColorTokenFailureIsSticky)
 {
     CapabilityState state;

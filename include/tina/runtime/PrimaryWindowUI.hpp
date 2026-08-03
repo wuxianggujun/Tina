@@ -10,6 +10,7 @@
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIListView.hpp>
+#include <tina/ui/UIMotion.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIRadioButton.hpp>
@@ -143,6 +144,21 @@ class PrimaryWindowUITreeUpdater final {
     // Paint-only: image tint/opacity does not dirty layout or hit.
     [[nodiscard]] Core::Status setImageTint(UI::UINodeId node, UI::UIStraightSrgba8Color tint);
     [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color> imageTint(UI::UINodeId node) const;
+    // Paint-only Motion (UI-MOTION-001). Host samples on commitLayout; M==0 is free.
+    [[nodiscard]] Core::Status setReducedMotion(bool enabled);
+    [[nodiscard]] Core::Result<bool> reducedMotion() const;
+    [[nodiscard]] Core::Status beginBackgroundColorTransition(
+        UI::UINodeId node, UI::UIStraightSrgba8Color target, const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginBorderColorTransition(
+        UI::UINodeId node, UI::UIStraightSrgba8Color target, const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginTextColorTransition(
+        UI::UINodeId node, UI::UIStraightSrgba8Color target, const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginOpacityTransition(
+        UI::UINodeId node, float targetOpacity, const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginCornerRadiusTransition(
+        UI::UINodeId node, float targetRadius, const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginVisualOffsetTransition(
+        UI::UINodeId node, float targetOffsetX, float targetOffsetY, const UI::UITransitionSpec& spec);
     [[nodiscard]] Core::Status setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(UI::UINodeId button) const;
     [[nodiscard]] Core::Status setText(UI::UINodeId node, std::string_view utf8);

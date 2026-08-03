@@ -824,6 +824,134 @@ PrimaryWindowUICapabilityState::imageTint(u64 epoch, PrimaryWindowUIPhase phase,
     return *result;
 }
 
+Core::Status PrimaryWindowUICapabilityState::setReducedMotion(u64 epoch, PrimaryWindowUIPhase phase, bool enabled)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setReducedMotion";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->setReducedMotion(enabled);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::reducedMotion(u64 epoch, PrimaryWindowUIPhase phase)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::reducedMotion";
+    if (Core::Status status = validate(epoch, phase, false, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return context_->reducedMotion();
+}
+
+Core::Status PrimaryWindowUICapabilityState::beginBackgroundColorTransition(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, UI::UIStraightSrgba8Color target,
+    const UI::UITransitionSpec& spec)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::beginBackgroundColorTransition";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->beginBackgroundColorTransition(node, target, spec);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::beginBorderColorTransition(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, UI::UIStraightSrgba8Color target,
+    const UI::UITransitionSpec& spec)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::beginBorderColorTransition";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->beginBorderColorTransition(node, target, spec);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::beginTextColorTransition(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, UI::UIStraightSrgba8Color target,
+    const UI::UITransitionSpec& spec)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::beginTextColorTransition";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->beginTextColorTransition(node, target, spec);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::beginOpacityTransition(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, float targetOpacity,
+    const UI::UITransitionSpec& spec)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::beginOpacityTransition";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->beginOpacityTransition(node, targetOpacity, spec);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::beginCornerRadiusTransition(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, float targetRadius,
+    const UI::UITransitionSpec& spec)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::beginCornerRadiusTransition";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->beginCornerRadiusTransition(node, targetRadius, spec);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::beginVisualOffsetTransition(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, float targetOffsetX, float targetOffsetY,
+    const UI::UITransitionSpec& spec)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::beginVisualOffsetTransition";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status =
+        context_->beginVisualOffsetTransition(node, targetOffsetX, targetOffsetY, spec);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Status PrimaryWindowUICapabilityState::setButtonPaint(u64 epoch, PrimaryWindowUIPhase phase,
                                                             UI::UITreeUpdater& updater, UI::UINodeId button,
                                                             const UI::UIButtonPaint& paint)

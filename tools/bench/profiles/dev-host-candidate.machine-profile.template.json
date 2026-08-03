@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "schemaName": "tina_bench_machine_profile",
+  "machineId": "dev-host-candidate-not-approved",
+  "machine": {
+    "os": "Microsoft Windows 11 Pro 10.0.26200",
+    "cpu": "11th Gen Intel(R) Core(TM) i5-11320H @ 3.20GHz (4C/8T)",
+    "gpu": "Intel(R) Iris(R) Xe Graphics",
+    "gpuDriver": "32.0.101.7080",
+    "ramBytes": 16952647680,
+    "powerPlan": "unspecified-dev-host",
+    "affinity": "unpinned",
+    "workerCount": 0
+  },
+  "build": {
+    "gitCommit": "REPLACE_WITH_CLEAN_RELEASE_COMMIT",
+    "gitDirty": false,
+    "preset": "windows-vnext-bgfx-release-REPLACE",
+    "configuration": "Release",
+    "compiler": "MSVC 19.50.35728 for x64",
+    "linker": "link.exe (MSVC toolset 14.50)",
+    "vcpkgBaseline": "REPLACE_WITH_VCPKG_BASELINE",
+    "binarySha256": "REPLACE_WITH_RELEASE_TINA_BENCH_SHA256",
+    "tracyEnabled": false
+  },
+  "benchmarkFingerprint": {
+    "REPLACE": "copy fingerprint object from a formal Release multi-process candidate JSON"
+  },
+  "noiseCalibration": {
+    "metric": "timing_ns.p99",
+    "processCount": 10,
+    "observedMedianNs": 0,
+    "observedMadNs": 0,
+    "maxCandidateRelativeMad": 0.15,
+    "absoluteNoiseFloorNs": 0,
+    "notes": [
+      "Fill observedMedianNs/observedMadNs/absoluteNoiseFloorNs from a 10-process formal sample on this host.",
+      "Do not set review.status to approved until those fields are measured on a pinned Release build."
+    ]
+  },
+  "review": {
+    "status": "draft",
+    "reviewedBy": "",
+    "reviewedAt": "",
+    "notes": [
+      "NOT a hard-gate profile. run_benchmark_gate.py requires review.status=approved.",
+      "Host facts captured 2026-08-03 on the development laptop (TIMI A29R).",
+      "Debug provisional multi-process evidence already exists under docs/perf-002-provisional-evidence.md."
+    ]
+  }
+}

@@ -391,6 +391,84 @@ Core::Result<UI::UIStraightSrgba8Color> PrimaryWindowUITreeUpdater::imageTint(UI
     return m_state->imageTint(m_epoch, m_phase, m_updater, node);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setReducedMotion(bool enabled)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setReducedMotion");
+    }
+    return m_state->setReducedMotion(m_epoch, m_phase, enabled);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::reducedMotion() const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::reducedMotion");
+    }
+    return m_state->reducedMotion(m_epoch, m_phase);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::beginBackgroundColorTransition(
+    UI::UINodeId node, UI::UIStraightSrgba8Color target, const UI::UITransitionSpec& spec)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::beginBackgroundColorTransition");
+    }
+    return m_state->beginBackgroundColorTransition(m_epoch, m_phase, node, target, spec);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::beginBorderColorTransition(
+    UI::UINodeId node, UI::UIStraightSrgba8Color target, const UI::UITransitionSpec& spec)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::beginBorderColorTransition");
+    }
+    return m_state->beginBorderColorTransition(m_epoch, m_phase, node, target, spec);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::beginTextColorTransition(
+    UI::UINodeId node, UI::UIStraightSrgba8Color target, const UI::UITransitionSpec& spec)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::beginTextColorTransition");
+    }
+    return m_state->beginTextColorTransition(m_epoch, m_phase, node, target, spec);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::beginOpacityTransition(
+    UI::UINodeId node, float targetOpacity, const UI::UITransitionSpec& spec)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::beginOpacityTransition");
+    }
+    return m_state->beginOpacityTransition(m_epoch, m_phase, node, targetOpacity, spec);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::beginCornerRadiusTransition(
+    UI::UINodeId node, float targetRadius, const UI::UITransitionSpec& spec)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::beginCornerRadiusTransition");
+    }
+    return m_state->beginCornerRadiusTransition(m_epoch, m_phase, node, targetRadius, spec);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::beginVisualOffsetTransition(
+    UI::UINodeId node, float targetOffsetX, float targetOffsetY, const UI::UITransitionSpec& spec)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::beginVisualOffsetTransition");
+    }
+    return m_state->beginVisualOffsetTransition(m_epoch, m_phase, node, targetOffsetX, targetOffsetY, spec);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint)
 {
     if (m_state == nullptr)

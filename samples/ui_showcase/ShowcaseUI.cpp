@@ -1208,17 +1208,39 @@ Core::Status ShowcaseUI::applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTh
         return status;
     }
     ++styleTokenUpdates_;
+    // Product Motion demo: theme switch retargets card BackgroundColor paint-only
+    // transitions (does not delay callbacks or change hit/layout).
+    if (countSwitch) {
+        const UI::UITransitionSpec cardMotion{
+            .property = UI::UIAnimatableProperty::BackgroundColor,
+            .duration = Core::Duration{0.120},
+            .delay = Core::Duration{0.0},
+            .easing = UI::UIEasing::EaseOut,
+        };
+        for (UI::UINodeId card : nodes_.cards) {
+            if (!card.hasValue()) {
+                continue;
+            }
+            if (Core::Status status =
+                    tree.beginBackgroundColorTransition(card, theme.surface1, cardMotion);
+                !status) {
+                return status;
+            }
+            ++motionBegins_;
+        }
+    } else {
+        for (UI::UINodeId card : nodes_.cards) {
+            if (Core::Status status =
+                    tree.setBoxPaint(card, UI::makePanelBoxPaint(theme, theme.surface1, UI::UIElevation::Low));
+                !status) {
+                return status;
+            }
+        }
+    }
     if (Core::Status status =
             tree.setBoxPaint(nodes_.navigation, UI::makePanelBoxPaint(theme, theme.surface1, UI::UIElevation::Low));
         !status) {
         return status;
-    }
-    for (UI::UINodeId card : nodes_.cards) {
-        if (Core::Status status =
-                tree.setBoxPaint(card, UI::makePanelBoxPaint(theme, theme.surface1, UI::UIElevation::Low));
-            !status) {
-            return status;
-        }
     }
 
     const std::array accentColors{
@@ -1783,6 +1805,7 @@ ShowcaseUISnapshot ShowcaseUI::snapshot() const noexcept
         .sliderChanges = sliderChanges_,
         .treeExpansionChanges = treeExpansionChanges_,
         .styleTokenUpdates = styleTokenUpdates_,
+        .motionBegins = motionBegins_,
         .listSelectionKey = listSelectionKey_,
         .treeSelectionKey = treeSelectionKey_,
         .dropdownSelection = dropdownSelectionIndex_,

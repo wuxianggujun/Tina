@@ -107,6 +107,26 @@ class PrimaryWindowUICapabilityState final {
                                             UI::UINodeId node, UI::UIStraightSrgba8Color tint);
     [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color>
     imageTint(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId node);
+    [[nodiscard]] Core::Status setReducedMotion(u64 epoch, PrimaryWindowUIPhase phase, bool enabled);
+    [[nodiscard]] Core::Result<bool> reducedMotion(u64 epoch, PrimaryWindowUIPhase phase);
+    [[nodiscard]] Core::Status beginBackgroundColorTransition(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, UI::UIStraightSrgba8Color target,
+        const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginBorderColorTransition(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, UI::UIStraightSrgba8Color target,
+        const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginTextColorTransition(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, UI::UIStraightSrgba8Color target,
+        const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginOpacityTransition(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, float targetOpacity,
+        const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginCornerRadiusTransition(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, float targetRadius,
+        const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Status beginVisualOffsetTransition(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, float targetOffsetX, float targetOffsetY,
+        const UI::UITransitionSpec& spec);
     [[nodiscard]] Core::Status setButtonPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId button, const UI::UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(u64 epoch, PrimaryWindowUIPhase phase,

@@ -29,6 +29,7 @@ struct ShowcaseUISnapshot final {
     Core::u64 sliderChanges = 0;
     Core::u64 treeExpansionChanges = 0;
     Core::u64 styleTokenUpdates = 0;
+    Core::u64 motionBegins = 0;
     UI::UIListViewItemKey listSelectionKey = UI::InvalidUIListViewItemKey;
     UI::UITreeViewItemKey treeSelectionKey = UI::InvalidUITreeViewItemKey;
     Core::usize dropdownSelection = 0;
@@ -181,6 +182,7 @@ class ShowcaseUI final {
     Core::usize controlCount_ = 0;
     Core::usize imageProductCount_ = 0;
     Core::u64 styleTokenUpdates_ = 0;
+    Core::u64 motionBegins_ = 0;
     UI::UIStyleClassId showcaseChromeClass_{};
     UI::UIStyleTokenId headerAccentToken_{};
     bool stylesheetInstalled_ = false;

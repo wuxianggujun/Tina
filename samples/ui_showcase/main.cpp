@@ -632,14 +632,16 @@ class ShowcaseApplication final : public Tina::IGameApplication {
         constexpr Tina::UI::UIListViewItemKey ExpectedListSelectionKey = 1'007;
         constexpr Tina::UI::UITreeViewItemKey ExpectedTreeSelectionKey = 4;
         // styleTokenUpdates: 1 initial applyTheme + 2 Dark/Light switches (header accent ColorToken path).
+        // motionBegins: 2 theme switches × 6 cards (BackgroundColor paint-only product Motion).
         if (counters.finalUI.themeSwitches != 2 || counters.finalUI.sliderChanges == 0 ||
             std::lround(counters.finalUI.progressValue) != 84 || counters.finalUI.theme != options.initialTheme ||
             counters.finalUI.treeExpansionChanges != 2 ||
             counters.finalUI.listSelectionKey != ExpectedListSelectionKey ||
             counters.finalUI.treeSelectionKey != ExpectedTreeSelectionKey || counters.finalUI.dropdownSelection != 1 ||
-            std::lround(counters.finalUI.scrollOffset) != 80 || counters.finalUI.styleTokenUpdates < 3) {
+            std::lround(counters.finalUI.scrollOffset) != 80 || counters.finalUI.styleTokenUpdates < 3 ||
+            counters.finalUI.motionBegins < 12) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "UI showcase automated theme, stylesheet token, value, popup, collection, or scrolling exercise did not complete");
+                                       "UI showcase automated theme, stylesheet token, motion, value, popup, collection, or scrolling exercise did not complete");
         }
     }
     return Tina::Core::success();
@@ -698,6 +700,7 @@ class ShowcaseApplication final : public Tina::IGameApplication {
               << ",\"imageProducts\":" << counters.finalUI.imageProductCount
               << ",\"stylesheetInstalled\":" << (counters.finalUI.stylesheetInstalled ? "true" : "false")
               << ",\"styleTokenUpdates\":" << counters.finalUI.styleTokenUpdates
+              << ",\"motionBegins\":" << counters.finalUI.motionBegins
               << ",\"imageAtlasUploaded\":" << (counters.imageAtlasUploaded ? "true" : "false")
               << ",\"imageAtlasReleased\":" << (counters.imageAtlasReleased ? "true" : "false")
               << ",\"imageAtlasInvalidated\":" << (counters.imageAtlasInvalidatedAfterRelease ? "true" : "false")

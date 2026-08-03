@@ -241,7 +241,8 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 
 两个自动 smoke 均须 exit 0，并输出 `controls=20`、`imageProducts=4`、`themeSwitches=2`、`sliderChanges>0`、
 `progressValue=84`、`dropdownSelection=1`、`listSelectionKey=1007`、`treeSelectionKey=4`、
-`treeExpansionChanges=2`、`scrollOffset=80`、`stylesheetInstalled=true`、`styleTokenUpdates>=3`（auto-demo）、
+`treeExpansionChanges=2`、`scrollOffset=80`、`stylesheetInstalled=true`、`styleTokenUpdates>=3`、
+`motionBegins>=12`（auto-demo：2 次主题切换 × 6 cards）、
 `uiRootsCreated=1`、`uiRootsReleased=1`，最终主题回到 `initialTheme`。图片产品证据还必须满足
 `imageAtlasUploaded=true`、`imageAtlasReleased=true`、`imageResolverCalls=imageResolverHits>0`、
 `imageResolverUnavailable=0`、`maxImageQuads=12`、`maxImageBatches=4`、`maxUniqueImageResources=1`、
