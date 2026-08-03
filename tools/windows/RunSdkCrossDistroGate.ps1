@@ -135,6 +135,9 @@ try {
         & docker @producerArgs
     }
 
+    # Always mount the tip consumer script + verification cmake from the source
+    # tree so gate logic tracks the repo without requiring an image rebuild for
+    # every script tweak. Producer source is still NOT mounted into consumer.
     $consumerArgs = @(
         'run', '--name', $ConsumerContainer,
         '--cpus=2', '--memory=8g',
@@ -142,6 +145,9 @@ try {
         '-e', 'VCPKG_FORCE_SYSTEM_BINARIES=1',
         '-e', 'VCPKG_DISABLE_METRICS=1',
         '-v', "${ArtifactVolume}:/input:ro",
+        '-v', "${sourceMount}/tools/linux/run-sdk-cross-distro-consumer-gate.sh:/usr/local/bin/tina-sdk-cross-distro-consumer-gate:ro",
+        '-v', "${sourceMount}/cmake/VerifyInstalledTinaSdkHeaders.cmake:/opt/tina-sdk-gate/cmake/VerifyInstalledTinaSdkHeaders.cmake:ro",
+        '-v', "${sourceMount}/cmake/VerifyRelocatedTinaSdkPackage.cmake:/opt/tina-sdk-gate/cmake/VerifyRelocatedTinaSdkPackage.cmake:ro",
         $ConsumerImage,
         'bash', $ConsumerScript
     )

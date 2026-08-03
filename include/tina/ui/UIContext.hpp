@@ -48,7 +48,7 @@
 
 namespace Tina::UI::Detail {
 
-struct UIContextLifetimeControl;
+class UIContextLifetimeControl;
 
 } // namespace Tina::UI::Detail
 

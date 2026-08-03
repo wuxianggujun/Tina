@@ -138,5 +138,6 @@ Docker Desktop 重启后复跑（`-SkipImageBuild`，沿用既有镜像）。WSL
 | Clang22 Null | `artifacts/gates/test-001-linux-clang22-null-20260803-tip.json` | ok；同 Null 套件规模 |
 | Clang22 Sanitize | `artifacts/gates/test-001-linux-clang22-sanitize-20260803-tip.json` | ok；ASan/UBSan/LSan |
 | SDK GameSDK consumer | `artifacts/gates/sdk-001-linux-gcc13-consumer-20260803-tip.json` | ok；`installed-tina-sdk` |
+| SDK cross-distro | `artifacts/gates/sdk-001-linux-cross-distro-20260803-tip.json` | ok；Ubuntu24.04/GCC13 → Debian13/GCC14 |
 
 详表：[docker-tip-evidence-20260803.md](docker-tip-evidence-20260803.md)。

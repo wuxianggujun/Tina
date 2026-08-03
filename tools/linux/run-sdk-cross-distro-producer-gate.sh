@@ -81,9 +81,21 @@ echo "cmake=$(cmake --version | head -n1)"
 echo "jobs=${BUILD_JOBS}"
 
 # Preserve the gate-owned CMake/vcpkg cache while refreshing only transient
-# install and packaging directories.
+# install and packaging directories. Drop CMakeCache when the absolute source
+# root changed (WSL /mnt/c vs Docker /work/tina) so -ffile-prefix-map is reapplied.
+# shellcheck source=cmake-cache-source-guard.sh
+source "${ROOT}/tools/linux/cmake-cache-source-guard.sh"
+tina_guard_cmake_cache_source "${BUILD_DIRECTORY}" "${ROOT}"
+
 mkdir -p -- "${BUILD_DIRECTORY}" "${OUTPUT_DIRECTORY}"
 rm -rf -- "${STAGING_PREFIX}" "${PACKAGE_PARENT}" "${OUTPUT_TMP_DIRECTORY}"
+
+# Force a clean object graph under the producer tree so path-remapped objects
+# replace any previously compiled absolute-path .o files.
+if [[ -d "${BUILD_DIRECTORY}/src" ]]; then
+  echo "Refreshing producer object trees for path-remapped Release objects"
+  find "${BUILD_DIRECTORY}/src" -type f \( -name '*.o' -o -name '*.a' \) -delete
+fi
 
 cmake --preset linux-gcc13-vnext \
   -B "${BUILD_DIRECTORY}" \

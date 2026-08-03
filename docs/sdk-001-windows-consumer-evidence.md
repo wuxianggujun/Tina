@@ -48,7 +48,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 
 See [docker-tip-evidence-20260803.md](docker-tip-evidence-20260803.md).
 
+## 2026-08-03 Linux cross-distro (Ubuntu → Debian)
+
+`RunSdkCrossDistroGate.ps1` tip exit 0：producer GCC13 Release GameSDK archive → Debian 13/GCC14
+consumer `installed-tina-sdk`（path-remapped static libs；详见
+[docker-tip-evidence-20260803.md](docker-tip-evidence-20260803.md)）。
+
 ### Still open for SDK-001 Done
 
-- Cross-distro `RunSdkCrossDistroGate.ps1` full producer→consumer exit 0
 - ADR 0024 formal ABI / compatibility policy acceptance

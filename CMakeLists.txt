@@ -181,6 +181,20 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         -Wextra
         "$<$<CONFIG:Release>:-O3>"
     )
+    # Keep installed static libraries free of absolute producer checkout paths so
+    # cross-distro SDK consumers can reject source/build path leakage in .a files.
+    if(NOT PROJECT_SOURCE_DIR STREQUAL "")
+        target_compile_options(tina_project_options INTERFACE
+            "SHELL:-ffile-prefix-map=${PROJECT_SOURCE_DIR}=."
+            "SHELL:-fdebug-prefix-map=${PROJECT_SOURCE_DIR}=."
+        )
+    endif()
+    if(NOT CMAKE_BINARY_DIR STREQUAL "" AND NOT CMAKE_BINARY_DIR STREQUAL PROJECT_SOURCE_DIR)
+        target_compile_options(tina_project_options INTERFACE
+            "SHELL:-ffile-prefix-map=${CMAKE_BINARY_DIR}=./out/build"
+            "SHELL:-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./out/build"
+        )
+    endif()
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     # Bound compiler-level parallelism so it does not multiply the MSBuild /m value from presets.
     target_compile_options(tina_project_options INTERFACE /MP2 /Zc:__cplusplus)

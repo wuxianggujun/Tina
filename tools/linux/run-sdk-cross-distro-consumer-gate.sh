@@ -202,9 +202,12 @@ for forbidden_path in \
     echo "Producer metadata contains an invalid forbidden path: ${forbidden_path}" >&2
     exit 1
   fi
-  if grep -R -a -F -l -- "${forbidden_path}" "${PACKAGE_METADATA_DIRECTORY}" \
+  # Scan the whole extracted package (CMake package files + installed static
+  # libraries). Producer builds must use -ffile-prefix-map so .a objects do not
+  # embed absolute checkout paths.
+  if grep -R -a -F -l -- "${forbidden_path}" "${RELOCATED_PREFIX}" \
       > "${TMP_DIRECTORY}/path-leaks.txt"; then
-    echo "Installed CMake package leaks producer path ${forbidden_path}:" >&2
+    echo "Extracted SDK leaks producer path ${forbidden_path}:" >&2
     sed -n '1,20p' "${TMP_DIRECTORY}/path-leaks.txt" >&2
     exit 1
   fi

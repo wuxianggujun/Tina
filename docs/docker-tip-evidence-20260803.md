@@ -44,10 +44,30 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 
   -Gate sdk-consumer -SkipImageBuild -OutJson artifacts\gates\sdk-001-linux-gcc13-consumer-20260803-tip.json
 ```
 
+## SDK-001 cross-distro (Ubuntu 24.04/GCC13 → Debian 13/GCC14)
+
+| Field | Value |
+| --- | --- |
+| Gate | `RunSdkCrossDistroGate.ps1 -SkipProducerImageBuild -SkipConsumerImageBuild` |
+| JSON | `artifacts/gates/sdk-001-linux-cross-distro-20260803-tip.json` (**ok**) |
+| Producer | `tina-linux-gcc13:test-001` → archive sha256 `186e88d34fe592d37f752cb106b960a229447009bca6fb027199e58ea05db34a` |
+| Consumer | `tina-sdk-consumer-debian13:sdk-001` → `{"status":"ok","consumer":"installed-tina-sdk"}` |
+| Toolchain pair | producer ubuntu-24.04/gcc-13.3.0 → consumer debian-13/gcc-14.2.0 |
+
+### Path-leak fix for static libraries
+
+First tip attempt failed consumer scan: extracted `libtina_*.a` contained absolute `/work/tina`
+strings from DWARF/assert paths. Mitigations:
+
+1. GCC/Clang `Tina::ProjectOptions`: `-ffile-prefix-map` / `-fdebug-prefix-map` for
+   `PROJECT_SOURCE_DIR` and `CMAKE_BINARY_DIR`.
+2. Producer gate refreshes `src/**/*.o` and `*.a` under the cross-distro build tree after cache
+   guard so remapped objects replace stale absolute-path objects.
+3. Host launcher mounts tip `run-sdk-cross-distro-consumer-gate.sh` + verify cmake into the
+   consumer container (no producer source tree).
+
 ## Notes
 
-- One non-fatal Clang warning: `UIContextLifetimeControl` forward-declared as `struct` vs `class`
-  (Microsoft ABI note; does not fail gate).
-- Cross-distro `RunSdkCrossDistroGate.ps1` not re-run in this batch (can follow with existing
-  `tina-sdk-consumer-debian13:sdk-001` image).
+- `UIContextLifetimeControl` forward decl fixed to `class` (matches implementation).
 - JSON under `artifacts/gates/` is gitignored; this doc is the durable tip record.
+- Formal ABI/version policy remains [ADR 0024](adr/0024-sdk-abi-compatibility.md) (Proposed).
