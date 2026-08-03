@@ -182,8 +182,8 @@ py -3 -m unittest tools/bench/test_run_benchmark_gate.py -v
 
 正式候选采样遵循 ADR 0018：每进程 warm-up 600、普通样本至少 2,000；p99/泄漏结论使用 10,000，且需
 多进程 runner 可以验证统计与兼容协议，但只有受审固定 machine profile/baseline 才能启用 hard gate。
-当前命令已覆盖 `UI-PERF-001` 首个 milestone、Image/NineSlice、完整 Component 与 Style workload；尚未覆盖
-Motion。
+当前命令已覆盖 `UI-PERF-001` 全套 workload（含 Style 与 `ui_motion_v1`）。多进程 provisional 示例见
+[perf-002-provisional-evidence.md](perf-002-provisional-evidence.md)。
 
 ## 验证工具
 

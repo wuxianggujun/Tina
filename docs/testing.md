@@ -157,6 +157,9 @@ consumer configure 同时拒绝 imported target 使用 producer include 路径�
 `{"status":"ok","consumer":"installed-tina-sdk"}`。脚本存在或镜像成功构建都不能代替完整 producer →
 consumer exit 0 证据；正式 ABI 另由 [ADR 0024](adr/0024-sdk-abi-compatibility.md) 决策。
 
+Windows tip moved-prefix 再证（GameSDK / PlatformGlfw / DesktopBootstrap）见
+[sdk-001-windows-consumer-evidence.md](sdk-001-windows-consumer-evidence.md)。
+
 ## UI performance quick run
 
 `tina_bench` 的 UI workload 使用真实 `UIContext`、committed snapshots、pointer route、虚拟集合、
