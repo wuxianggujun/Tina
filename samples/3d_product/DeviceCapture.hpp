@@ -31,12 +31,50 @@ class DeviceCapture final {
     {
         return hasLastCapture_ ? &lastCapture_ : nullptr;
     }
+    void observeSubmittedScene(const Render::RenderSceneStatistics& statistics) noexcept
+    {
+        if (!statistics.mesh3DLightingConfigured)
+        {
+            return;
+        }
+        if (submittedLightingFrames_ == 0)
+        {
+            directionalLightCount_ = statistics.directionalLightCount;
+            pointLight3DCount_ = statistics.pointLight3DCount;
+        }
+        else if (directionalLightCount_ != statistics.directionalLightCount ||
+                 pointLight3DCount_ != statistics.pointLight3DCount)
+        {
+            lightingCountsStable_ = false;
+        }
+        ++submittedLightingFrames_;
+    }
+    [[nodiscard]] Core::u64 submittedLightingFrames() const noexcept
+    {
+        return submittedLightingFrames_;
+    }
+    [[nodiscard]] Core::u32 directionalLightCount() const noexcept
+    {
+        return directionalLightCount_;
+    }
+    [[nodiscard]] Core::u32 pointLight3DCount() const noexcept
+    {
+        return pointLight3DCount_;
+    }
+    [[nodiscard]] bool lightingCountsStable() const noexcept
+    {
+        return lightingCountsStable_;
+    }
 
   private:
     Render::IRenderDevice* device_ = nullptr;
     bool captureNextPresent_ = false;
     bool hasLastCapture_ = false;
     Render::Rgba8FrameCapture lastCapture_{};
+    Core::u64 submittedLightingFrames_ = 0;
+    Core::u32 directionalLightCount_ = 0;
+    Core::u32 pointLight3DCount_ = 0;
+    bool lightingCountsStable_ = true;
 };
 
 class CapturingRenderDevice final : public Render::IRenderDevice {
@@ -57,7 +95,12 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
 
     [[nodiscard]] Core::Result<Render::RenderFrameSubmission> submitFrame(const Render::RenderFrame& frame) override
     {
-        return inner_->submitFrame(frame);
+        auto submission = inner_->submitFrame(frame);
+        if (submission && submission->requiresPresent() && capture_ != nullptr)
+        {
+            capture_->observeSubmittedScene(frame.primaryWorldScene.statistics());
+        }
+        return submission;
     }
     [[nodiscard]] Core::Status present() override
     {

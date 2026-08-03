@@ -63,6 +63,7 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
 | `MeshRenderer3D` | weak mesh/material `AssetHandle`、bounds、base color、可见性 | World 只校验结构；visible extract 通过两个 kind-specific resolver 解析非0 key |
 | `DirectionalLight3D` | linear RGB color、非负 intensity、active 标志 | Entity world local `+Z` 指向光源；每帧最多4个 active light，按稳定 Entity identity 发布 |
+| `PointLight3D` | linear RGB color、非负 intensity、正 influence radius、active 标志 | Entity world position 是灯光中心；每帧最多8个 camera-affecting active light，按稳定 Entity identity 发布；有有效 PerspectiveCamera3D 时 influence sphere 在容量检查前做 frustum culling |
 
 组件 storage 与 entity slot 共用固定容量。`set*` 替换当前值，`clear*` 移除组件；访问 stale 或 cross-world
 ID 失败。Camera2D 与 PerspectiveCamera3D 是独立轨道，可以在同一帧同时存在；各自出现多个 active
@@ -109,7 +110,7 @@ updateWorldTransforms
   -> borrowed resolvers ask Asset registry to intern current Sprite base/optional-normal texture bindings
   -> emit visible SpriteRenderer2D items
   -> validate/cull active PointLight2D, collect all active ShadowOccluder2D, then deep-copy lighting
-  -> collect active DirectionalLight3D and deep-copy the frame lighting snapshot
+  -> collect active DirectionalLight3D/PointLight3D, cull point-light spheres, and deep-copy the frame lighting snapshot
   -> borrowed kind-specific resolvers ask Mesh3D registry to intern current mesh/material bindings
   -> emit visible MeshRenderer3D items
   -> caller commits RenderSceneBuilder
@@ -127,8 +128,11 @@ weak Texture2D handle 并返回 packet-local normal ref；任一解析失败都�
 handle/resolver/binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden mesh
 不解析。`DirectionalLight3D` 使用已发布 world rotation 把 local `+Z` 转为朝向光源的 world direction，
 将 color×intensity 与 `ExtractRenderSceneParams::ambientLightScale` 写入固定4槽的 self-contained
-RenderScene snapshot。没有灯组件时保留低层 device fallback；存在组件但全部 inactive 时发布 ambient-only
-snapshot，避免重新启用 fallback 方向光。超过上限返回 `TooManyActiveDirectionalLights`，不静默裁剪。
+RenderScene snapshot。`PointLight3D` 使用已发布 world position、influence radius 与 color×intensity；有有效
+PerspectiveCamera3D 与非0 surface 时按 sphere-frustum culling 在固定8槽容量检查前裁剪，稳定 Entity identity
+排序后深拷贝为同一 snapshot。没有灯组件时保留低层 device fallback；存在组件但全部 inactive 时发布 ambient-only
+snapshot，避免重新启用 fallback 方向光。超过对应上限返回 `TooManyActiveDirectionalLights` 或
+`TooManyActivePointLights3D`，不静默裁剪。
 `PointLight2D` 使用已发布 world position、显式 world-space influence/source radii 与 color×intensity。
 source radius 必须 finite、非负且不大于 influence radius；它不改变 N3 culling 外圆。Extraction 先验证每个
 active component、`WorldTransform` 和 color×intensity，因此非法灯即使位于视口外也返回

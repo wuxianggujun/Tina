@@ -193,9 +193,10 @@ Prefab 依赖 AssetId（多 prim 展开父+子节点）。`tina_sample_3d` 把 C
 覆盖 multi-mesh cook -> upload/bind -> Prefab resolve -> extract/draw 的产品 E2E。相对文件或
 bufferView 的 baseColor/MR/normal 贴图可 cook 为 RGBA8 Texture2D 并成为 Material dependency；产品路径
 完成外部 URI/size policy、GPU binding 与 experimental metallic-roughness 采样（material factors、
-`Mesh3DLightingDesc` 有界0..4 directional lights）。`DirectionalLight3D` 由 World 拥有，并在每帧 Scene
-extraction 中按稳定 Entity identity 复制为 self-contained RenderScene snapshot。完整 PBR、IBL/shadow、
-point/spot light、light culling、通用 pass system 与通用 GPU submission fence 仍未完成。Frame packet 的 FramePin 只覆盖同步
+`Mesh3DLightingDesc` 有界0..4 directional + 0..8 point lights）。`DirectionalLight3D`/`PointLight3D` 由 World
+拥有，并在每帧 Scene extraction 中按稳定 Entity identity 复制为 self-contained RenderScene snapshot；
+PointLight3D influence sphere 在8灯容量检查前按 active PerspectiveCamera3D frustum cull。完整 PBR、
+IBL/shadow、spot light + culling、通用 pass system 与通用 GPU submission fence 仍未完成。Frame packet 的 FramePin 只覆盖同步
 submit/present 的 CPU 借用期；Texture/Mesh 则使用独立 readback completion marker，并已把 AssetLease
 合并到 backend retirement，二者不能互相作为完成证据。
 

@@ -14,11 +14,12 @@ Cooker 与产品 sample 支持一个 glTF 中多个 mesh（sample 槽位上限 1
 AssetId、registry 分配的独立 binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与
 产品 Material texture owner/binding 已完成（ASSET-001）。Cooked Material v2 携带 metallic/
 roughness factor 与可选 MR/normal Texture2D dependency。bgfx Opaque3D 在 submit 时采样 baseColor，
-并以 **experimental metallic-roughness hybrid** 着色。`Scene::World` 已提供 `DirectionalLight3D`，每帧
-extraction 把最多4个 active component 按稳定 Entity identity 排序并复制为 self-contained `RenderScene`
-lighting snapshot；`tina_sample_3d` 创建3个 light entity、使用 ambient `0.16`，并在 prefab instantiate 后按
+并以 **experimental metallic-roughness hybrid** 着色。`Scene::World` 已提供 `DirectionalLight3D` 与 `PointLight3D`，每帧
+extraction 把最多4个 directional 与8个 camera-affecting point component 按稳定 Entity identity 排序并复制为
+self-contained `RenderScene` lighting snapshot；point influence sphere 在容量检查前按 PerspectiveCamera3D
+frustum cull。`tina_sample_3d` 创建3个 directional 与3个 point light entity（2个提交、1个裁剪）、使用 ambient `0.16`，并在 prefab instantiate 后按
 mesh AABB **自动框定相机**。`IRenderDevice::setMesh3DLighting()` 仍是低层 direct/fallback SPI。
-完整 PBR / IBL / shadow、point/spot light、light culling 与 pass scheduling 仍属 `RENDER-001` 后续。
+完整 PBR / IBL / shadow、spot light + culling 与 pass scheduling 仍属 `RENDER-001` 后续。
 
 ## CLI（`tina_sample_3d`）
 
@@ -50,9 +51,10 @@ List/Tree 展示真实产品数据，不是装饰性控件。
 标准 Button/Checkbox/Slider/ProgressBar 保持 create-time Theme 继承；标题、面板、accent 与状态文字是
 有意的局部层级覆盖，由 `applyTheme()` 集中重算。交互 callback 只记录 pending intent，实际 Theme、
 Checkbox、Slider 与 ProgressBar 提交统一发生在 `updateUI()`，避免事件路由期间重入 retained tree。
-`--ui-theme-demo` 在产品门禁中执行 Dark→Light→Dark 和2次 collection step；当前退出 schema 5 验证
+`--ui-theme-demo` 在产品门禁中执行 Dark→Light→Dark 和2次 collection step；当前退出 schema 6 验证
 两次换肤、最终 Dark、继承 chrome、7 Panel/13 Label、ListView/TreeView 各1个、Tree expansion
-changes `2`、最终 stable keys `2003/4`、progress 终值、root 释放，以及300帧 Scene lighting publication。
+changes `2`、最终 stable keys `2003/4`、progress 终值、root 释放，以及300帧 Scene lighting publication；
+lighting 证据固定3个 directional light、PointLight3D authored/committed/culled=`3/2/1` 与提交计数稳定。
 
 完整 Windows 同轮门禁使用 FreeType 图，直接运行模块测试而不是 CTest：
 
@@ -99,14 +101,14 @@ source glTF/GLB
   -> Scene::World
        PerspectiveCamera3D
        MeshRenderer3D
-       DirectionalLight3D
+       DirectionalLight3D + PointLight3D
   -> extraction AssetHandle-to-FrameResourceRef resolver
   -> RenderScene cull/sort/batch + frame-scoped lighting snapshot
   -> bgfx Opaque3D + UI
 ```
 
 - cgltf 只在 `tina_asset` 的私有 Cooker 实现中出现；Runtime 不解析源 glTF；
-- `Scene::World` 保存 Transform、Camera、DirectionalLight3D 和 weak AssetHandle，不保存 backend key、bgfx/GPU handle；
+- `Scene::World` 保存 Transform、Camera、DirectionalLight3D、PointLight3D 和 weak AssetHandle，不保存 backend key、bgfx/GPU handle；
 - RenderScene 不回查 World，提交时只消费已 commit 的 Camera、mesh item、batch 与 lighting snapshot；
 - `tina_render_bgfx` 私有拥有 shader、vertex/index buffer、view id、uniform 与 texture binding；
 - 普通 Game API 不暴露 cgltf、bgfx 或 native surface 类型。
@@ -124,8 +126,8 @@ EngineHost 仍是唯一组合根。
 | --- | --- |
 | Cooker | glTF 2.0 JSON/GLB；每个 primitive 为 TRIANGLES；POSITION float3，NORMAL/TEXCOORD_0 可选；multi-mesh 与 **multi-primitive SPLIT**（每 prim 一个 StaticMesh+Material；Prefab 展开为 transform 父节点 + 子 draw 节点）输出 distinct AssetId；scene node 转 Prefab hierarchy/dependency |
 | Cooked 数据 | StaticMesh v1 使用 P3N3UV2、UInt16 index、bounds/submesh；Material v2 为 Opaque `UnlitBaseColor` + cooked PBR factors（metallic/roughness）与可选 baseColor/MR/normal Texture2D deps；Prefab v1 保存稳定 node id、父索引、local transform 与 Mesh/Material AssetId |
-| Scene | `PerspectiveCamera3D`、`MeshRenderer3D`、`DirectionalLight3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
-| Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling、稳定排序与相邻实例 batch；最多4个 active directional lights 按稳定 Entity identity 排序，world rotation 解析方向，color×intensity 与 ambient 复制进当前帧 snapshot |
+| Scene | `PerspectiveCamera3D`、`MeshRenderer3D`、`DirectionalLight3D`、`PointLight3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
+| Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling、稳定排序与相邻实例 batch；最多4个 active directional lights 与最多8个 camera-affecting point lights 按稳定 Entity identity 排序，point influence sphere 在容量检查前裁剪，位置/radius/color×intensity 与 ambient 复制进当前帧 snapshot |
 | bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、experimental MR hybrid **采样** baseColor（`s_texColor`）、可选 MR 贴图（`s_texMR`）与 normal 贴图（`s_texNormal`）；当前帧 Scene lighting 覆盖 device fallback，uniform arrays 每帧编码一次并供所有 mesh batch 复用 |
 
 世界坐标为右手、Y-up、局部 `-Z` forward、单位米。Camera 公共字段使用 degree，并要求
@@ -176,7 +178,7 @@ entry pin 覆盖 active packet，Mesh/Texture 通过 AssetSystem retirement ledg
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetSystem→weak Handle Prefab/Scene→Mesh3D registry→packet-local geometry/material ref→bgfx；Mesh/Material/共享 Texture 统一 owner、原子 material bundle + Opaque3D experimental MR、3个 World DirectionalLight3D 的逐帧 snapshot、成熟 retained controls、虚拟化产品数据与事务换肤 | point/spot light、light culling、完整 PBR/IBL/shadow/pass scheduler |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetSystem→weak Handle Prefab/Scene→Mesh3D registry→packet-local geometry/material ref→bgfx；Mesh/Material/共享 Texture 统一 owner、原子 material bundle + Opaque3D experimental MR、3个 World DirectionalLight3D、2个可见+1个裁剪 PointLight3D 的逐帧 snapshot、成熟 retained controls、虚拟化产品数据与事务换肤 | spot light + culling、完整 PBR/IBL/shadow/pass scheduler |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
@@ -204,7 +206,8 @@ Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwi
   image、Draco、morph、skin、animation、sparse accessor 或非三角 primitive；不支持项返回结构化错误；
 - Cooked Material v2 写入 metallic/roughness factor 与可选 MR/normal Texture2D deps；Runtime/bgfx
   产品着色为 **experimental MR hybrid**（有界0..4 directional lights + ambient + baseColor/可选 MR/normal
-  贴图），不是完整 PBR；只有 directional Scene component，尚无 point/spot light、light culling、Shadow、
+  贴图），不是完整 PBR；已有 directional 与 point Scene component，PointLight3D 仅支持线性径向衰减和 sphere-frustum
+  culling；尚无 spot light、Shadow、
   transparent、IBL 或 post；
 - glTF Cooker 读取完整 `pbrMetallicRoughness` 与可选 `normalTexture`；主/外部文件使用单 handle/fd
   bounded snapshot，外部相对 URI 在 percent-decode 与 strict UTF-8 校验后按最终路径强制 authoring-root
@@ -221,6 +224,6 @@ Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwi
   （PERF-001 首切片），但不替代 3D 视觉门禁；
 - Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
 
-下一步只在可执行 Backlog 中维护：`RENDER-001` 剩余（point/spot + culling、IBL、shadow、pass scheduling），
+下一步只在可执行 Backlog 中维护：`RENDER-001` 剩余（spot light + culling、IBL、shadow、pass scheduling），
 Texture/Mesh backend retirement 已使用 readback completion marker；通用 GPU submission fence 不在当前
 Runtime 契约内。详见 [Rendering](rendering.md) 与 [Backlog](backlog.md)。

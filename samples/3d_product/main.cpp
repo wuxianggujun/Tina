@@ -30,6 +30,7 @@
 #include <tina/scene/DirectionalLight3D.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
+#include <tina/scene/PointLight3D.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
 #include <tina/scene/World.hpp>
 
@@ -153,6 +154,12 @@ struct LifecycleCounters final {
     bool materialMrTextureBound = false;
     bool materialNormalTextureBound = false;
     u32 directionalLightCount = 0;
+    u32 authoredPointLight3DCount = 0;
+    u32 pointLight3DCount = 0;
+    u32 culledPointLight3DCount = 0;
+    u64 submittedLightingFrames = 0;
+    u32 submittedDirectionalLightCount = 0;
+    bool lightingCountsStable = false;
     bool lightingConfigured = false;
     bool gltfCooked = false;
     bool prefabInstantiated = false;
@@ -1344,6 +1351,55 @@ class Product3DState final : public Tina::IGameState {
         {
             return status;
         }
+
+        struct ProductPointLight final {
+            Tina::Scene::Vec3 position{};
+            Tina::Render::RenderLinearColor color{};
+            float intensity = 1.0F;
+        };
+        const float pointInfluenceRadius = (std::max)(radius * 2.0F, 2.5F);
+        const std::array ProductPointLights{
+            ProductPointLight{
+                .position = {centerX - radius * 0.8F, centerY + radius * 0.9F,
+                             centerZ + radius * 0.75F},
+                .color = {.red = 1.0F, .green = 0.32F, .blue = 0.12F},
+                .intensity = 1.15F,
+            },
+            ProductPointLight{
+                .position = {centerX + radius * 0.9F, centerY - radius * 0.25F,
+                             centerZ + radius * 0.35F},
+                .color = {.red = 0.12F, .green = 0.42F, .blue = 1.0F},
+                .intensity = 0.8F,
+            },
+            ProductPointLight{
+                .position = {centerX + distance * 5.0F + pointInfluenceRadius * 2.0F,
+                             centerY, centerZ},
+                .color = {.red = 0.2F, .green = 1.0F, .blue = 0.35F},
+            },
+        };
+        for (const ProductPointLight& light : ProductPointLights)
+        {
+            auto lightEntity = world_->createEntity(Tina::Scene::LocalTransform{
+                .position = light.position,
+            });
+            if (!lightEntity)
+            {
+                return Tina::Core::failure(std::move(lightEntity.error()));
+            }
+            if (auto status = world_->setPointLight3D(
+                    *lightEntity,
+                    Tina::Scene::PointLight3D{
+                        .color = light.color,
+                        .intensity = light.intensity,
+                        .influenceRadiusMeters = pointInfluenceRadius,
+                    });
+                !status)
+            {
+                return status;
+            }
+        }
+        counters_->authoredPointLight3DCount = static_cast<u32>(ProductPointLights.size());
+
         if (auto status = world_->updateWorldTransforms(); !status)
         {
             return status;
@@ -1636,6 +1692,14 @@ class Product3DApplication final : public Tina::IGameApplication {
 
     const bool ledgerBalanced =
         capture.get() == nullptr || capture.get()->statistics().liveResources == 0;
+    counters.submittedLightingFrames = capture.submittedLightingFrames();
+    counters.submittedDirectionalLightCount = capture.directionalLightCount();
+    counters.pointLight3DCount = capture.pointLight3DCount();
+    counters.lightingCountsStable = capture.lightingCountsStable();
+    counters.culledPointLight3DCount =
+        counters.authoredPointLight3DCount >= counters.pointLight3DCount
+            ? counters.authoredPointLight3DCount - counters.pointLight3DCount
+            : 0U;
     hostResult->reset();
 
     if (!runResult)
@@ -1755,7 +1819,12 @@ class Product3DApplication final : public Tina::IGameApplication {
         || assetStoreActiveCount != 1U || !prefabAssetResident ||
         !counters.meshBound || !counters.materialTextureBound || counters.catalogCooked != 1 || !counters.gltfCooked ||
         !counters.prefabInstantiated || counters.prefabNodes == 0 || counters.prefabInstances == 0 ||
-        !counters.lightingConfigured || counters.directionalLightCount != 3U || !counters.bindingRegistryReleased ||
+        !counters.lightingConfigured || counters.directionalLightCount != 3U ||
+        counters.authoredPointLight3DCount != 3U || counters.pointLight3DCount != 2U ||
+        counters.culledPointLight3DCount != 1U ||
+        counters.submittedLightingFrames != options.targetFrameCount ||
+        counters.submittedDirectionalLightCount != 3U || !counters.lightingCountsStable ||
+        !counters.bindingRegistryReleased ||
         !ledgerBalanced ||
         !counters.pixelCaptureAttempted || !counters.pixelCaptureOk || counters.pixelCaptureWidth == 0 ||
         counters.pixelCaptureHeight == 0 || counters.pixelCaptureBytes == 0 || counters.pixelFingerprint.empty() ||
@@ -1791,6 +1860,14 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"materialTextureBound\":" << (counters.materialTextureBound ? "true" : "false")
                   << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
                   << ",\"directionalLightCount\":" << counters.directionalLightCount
+                  << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
+                  << ",\"pointLight3DCount\":" << counters.pointLight3DCount
+                  << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount
+                  << ",\"submittedLightingFrames\":" << counters.submittedLightingFrames
+                  << ",\"submittedDirectionalLightCount\":"
+                  << counters.submittedDirectionalLightCount
+                  << ",\"lightingCountsStable\":"
+                  << (counters.lightingCountsStable ? "true" : "false")
                   << ",\"gltfCooked\":" << (counters.gltfCooked ? "true" : "false")
                   << ",\"prefabInstantiated\":" << (counters.prefabInstantiated ? "true" : "false")
                   << ",\"prefabNodes\":" << counters.prefabNodes
@@ -1835,7 +1912,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":5,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":6,\"frames\":"
               << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
@@ -1871,7 +1948,13 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"materialNormalTextureBound\":" << (counters.materialNormalTextureBound ? "true" : "false")
               << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
               << ",\"directionalLightCount\":" << counters.directionalLightCount
+              << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
+              << ",\"pointLight3DCount\":" << counters.pointLight3DCount
+              << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount
               << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
+              << ",\"submittedLightingFrames\":" << counters.submittedLightingFrames
+              << ",\"submittedDirectionalLightCount\":" << counters.submittedDirectionalLightCount
+              << ",\"lightingCountsStable\":" << (counters.lightingCountsStable ? "true" : "false")
               << ",\"bindingRegistryReleased\":"
               << (counters.bindingRegistryReleased ? "true" : "false");
     if (resources.externalGltf || resources.completePbrFixture)

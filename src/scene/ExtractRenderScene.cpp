@@ -110,7 +110,11 @@ struct ShadowOccluder2DCandidate final {
     const Vec3 cameraPosition{camera.positionX, camera.positionY, camera.positionZ};
     const Vec3 forward{camera.forwardX, camera.forwardY, camera.forwardZ};
     const Vec3 up{camera.upX, camera.upY, camera.upZ};
-    const Vec3 right = cross(forward, up);
+    const Vec3 right{
+        forward.y * up.z - forward.z * up.y,
+        forward.z * up.x - forward.x * up.z,
+        forward.x * up.y - forward.y * up.x,
+    };
     const Vec3 relative =
         Vec3{light.positionX, light.positionY, light.positionZ} - cameraPosition;
     const double x = static_cast<double>(dot(relative, right));
