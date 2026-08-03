@@ -25,6 +25,7 @@ mesh AABB **自动框定相机**。`IRenderDevice::setMesh3DLighting()` 仍是�
 
 ```text
 tina_sample_3d [--frames=N] [--frame-delay-ms=N] [--gltf=<path>|--gltf <path>]
+               [--width=N] [--height=N]
                [--ui-theme=dark|light] [--ui-theme-demo] [--help]
 ```
 
@@ -32,6 +33,7 @@ tina_sample_3d [--frames=N] [--frame-delay-ms=N] [--gltf=<path>|--gltf <path>]
 | --- | --- |
 | `--frames=N` | N 帧后退出（默认 300） |
 | `--frame-delay-ms=N` | 每帧 sleep（默认 0） |
+| `--width=N` / `--height=N` | 初始 logical client 尺寸（默认 1280×720）；用于非16:9与响应式布局验证 |
 | `--gltf=<path>` / `--gltf <path>` | 从磁盘 cook 外部 `.gltf`/`.glb`；省略则用内建双 mesh fixture |
 | `--ui-theme=dark|light` | 选择初始产品 Theme（默认 Dark） |
 | `--ui-theme-demo` | 在 UI phase 自动执行 initial→alternate→initial，并执行2次 collection step；要求 `--frames>=3` |
@@ -43,18 +45,21 @@ tina_sample_3d [--frames=N] [--frame-delay-ms=N] [--gltf=<path>|--gltf <path>]
 
 ## Retained UI 与换肤
 
-`samples/3d_product/Product3DUI.*` 独立拥有产品 UI root，固定 1280×720 logical layout 同屏保留 3D
-主视区并提供：标题与 PBR 元信息、Theme Button、Auto Rotate Checkbox、Rotation Speed Slider、逐帧
+`samples/3d_product/Product3DUI.*` 独立拥有产品 UI root。1280×720 是 reference layout；窗口变宽/变高时
+右侧 inspector/collection rail 保持右边距，collection/list/tree 纵向扩展，底部状态栏保持底边距并横向扩展。
+字体和控件继续使用 logical pixel，不随窗口 client 尺寸做全局 zoom。页面提供：标题与 PBR 元信息、
+Theme Button、Auto Rotate Checkbox、Rotation Speed Slider、逐帧
 ProgressBar、Asset ListView、Scene TreeView 和底部状态条。Slider 与 Checkbox 直接控制模型旋转状态，
 List/Tree 展示真实产品数据，不是装饰性控件。
 
 标准 Button/Checkbox/Slider/ProgressBar 保持 create-time Theme 继承；标题、面板、accent 与状态文字是
 有意的局部层级覆盖，由 `applyTheme()` 集中重算。交互 callback 只记录 pending intent，实际 Theme、
 Checkbox、Slider 与 ProgressBar 提交统一发生在 `updateUI()`，避免事件路由期间重入 retained tree。
-`--ui-theme-demo` 在产品门禁中执行 Dark→Light→Dark 和2次 collection step；当前退出 schema 6 验证
+`--ui-theme-demo` 在产品门禁中执行 Dark→Light→Dark 和2次 collection step；当前退出 schema 7 验证
 两次换肤、最终 Dark、继承 chrome、7 Panel/13 Label、ListView/TreeView 各1个、Tree expansion
 changes `2`、最终 stable keys `2003/4`、progress 终值、root 释放，以及300帧 Scene lighting publication；
-lighting 证据固定3个 directional light、PointLight3D authored/committed/culled=`3/2/1` 与提交计数稳定。
+lighting 证据固定3个 directional light、PointLight3D authored/committed/culled=`3/2/1` 与提交计数稳定；
+同时记录 logical/framebuffer extent、窗口 metrics event、最终提交相机 aspect 与 responsive UI authoring。
 
 完整 Windows 同轮门禁使用 FreeType 图，直接运行模块测试而不是 CTest：
 
@@ -182,13 +187,14 @@ entry pin 覆盖 active packet，Mesh/Texture 通过 AssetSystem retirement ledg
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
-`sceneExtract`、`evidenceSchema=5`、mesh/material handle 发布数、`meshBindingsRegistered=2`、
+`sceneExtract`、`evidenceSchema=7`、mesh/material handle 发布数、`meshBindingsRegistered=2`、
 `materialBindingsRegistered=2`、`meshBindingsReleased=2`、`materialBindingsReleased=2`、
 `texturesUploaded=3`、`meshesUploaded=2`、`meshRetirementsAccepted=2`、
 `textureRetirementsAccepted=3`、对应 retirement records 全部 `Released` 且 live=0、
 mesh/material/texture weak handle invalidation 数分别为2/2/3、`bindingRegistryReleased=true`、
 `meshFrameResourceResolverHits=600`、`materialFrameResourceResolverHits=600`、
 `lightingConfigured=true`、`directionalLightCount=3`、`sceneLightingFrames=300`、
+`cameraAspectMatchesSurface=true`、`uiResponsiveLayoutVerified=true`、logical/framebuffer extent、
 `uiPanelsCreated=7`、`uiLabelsCreated=13`、
 Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwitches=2`、
 `uiAutomatedThemeSteps=2`、`uiAutomatedCollectionSteps=2`、`uiTreeExpansionChanges=2`、

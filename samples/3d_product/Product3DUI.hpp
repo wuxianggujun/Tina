@@ -49,6 +49,7 @@ struct Product3DUIEvidence final {
     bool autoRotate = true;
     bool inheritedChromeVerified = false;
     bool controlsInitialStateVerified = false;
+    bool responsiveLayoutVerified = false;
     bool rootAlive = false;
 };
 
@@ -108,6 +109,7 @@ class Product3DUI final {
     };
 
     [[nodiscard]] Core::Status applyTheme(PrimaryWindowUITreeUpdater& tree, Product3DUITheme theme, bool countSwitch);
+    [[nodiscard]] Core::Status applyResponsiveLayout(PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Core::Status applyProgress(PrimaryWindowUITreeUpdater& tree, Core::u64 completedFrames);
     [[nodiscard]] Core::Status publishStatus(PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] UI::UIListViewDataSource assetListDataSource() const noexcept;

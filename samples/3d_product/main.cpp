@@ -24,6 +24,7 @@
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
+#include <tina/runtime/PlatformEvents.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
@@ -57,6 +58,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -66,6 +68,8 @@ using Tina::Core::u64;
 
 inline constexpr u64 DefaultFrameCount = 300;
 inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
+inline constexpr u32 DefaultWindowLogicalWidth = 1280;
+inline constexpr u32 DefaultWindowLogicalHeight = 720;
 // Khronos MetalRoughSpheres* is a mesh-per-sphere MR grid (often 50–100+ meshes).
 inline constexpr u32 MaxProductMeshSlots = 128;
 
@@ -107,6 +111,8 @@ inline constexpr u32 MaxProductMeshSlots = 128;
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
+    u32 windowLogicalWidth = DefaultWindowLogicalWidth;
+    u32 windowLogicalHeight = DefaultWindowLogicalHeight;
     // Empty → in-memory two-mesh fixture. Non-empty → cook external .gltf/.glb path.
     std::string gltfPath{};
     // Empty = capture-only; non-empty = require an exact machine-local pixel match.
@@ -159,6 +165,14 @@ struct LifecycleCounters final {
     u32 culledPointLight3DCount = 0;
     u64 submittedLightingFrames = 0;
     u32 submittedDirectionalLightCount = 0;
+    u64 windowMetricsEvents = 0;
+    u32 logicalPixelWidth = DefaultWindowLogicalWidth;
+    u32 logicalPixelHeight = DefaultWindowLogicalHeight;
+    u32 framebufferPixelWidth = DefaultWindowLogicalWidth;
+    u32 framebufferPixelHeight = DefaultWindowLogicalHeight;
+    float submittedCameraAspectRatio = 0.0F;
+    u64 cameraAspectChanges = 0;
+    bool cameraAspectMatchesSurface = false;
     bool lightingCountsStable = false;
     bool lightingConfigured = false;
     bool gltfCooked = false;
@@ -377,6 +391,8 @@ void printUsage()
         << "\n"
         << "  --frames=N              exit after N frames (default " << DefaultFrameCount << ")\n"
         << "  --frame-delay-ms=N      sleep N ms per frame (default 0)\n"
+        << "  --width=N               initial logical window width (default 1280)\n"
+        << "  --height=N              initial logical window height (default 720)\n"
         << "  --gltf=<path>           cook external .gltf/.glb from disk (omit = built-in two-mesh fixture)\n"
         << "  --gltf <path>           same as --gltf=<path>\n"
         << "  --ui-theme=dark|light   select the initial retained UI theme (default dark)\n"
@@ -400,12 +416,16 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
 {
     constexpr std::string_view FramesPrefix = "--frames=";
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
+    constexpr std::string_view WidthPrefix = "--width=";
+    constexpr std::string_view HeightPrefix = "--height=";
     constexpr std::string_view GltfPrefix = "--gltf=";
     constexpr std::string_view UiThemePrefix = "--ui-theme=";
     constexpr std::string_view PixelFingerprintPrefix = "--expect-pixel-fingerprint=";
     SampleOptions options;
     bool hasFrames = false;
     bool hasDelay = false;
+    bool hasWidth = false;
+    bool hasHeight = false;
     bool hasGltf = false;
     bool hasUiTheme = false;
     bool hasPixelFingerprint = false;
@@ -436,6 +456,26 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
                                            "--frame-delay-ms must appear once and be unsigned");
             }
             hasDelay = true;
+        }
+        else if (argument.starts_with(WidthPrefix))
+        {
+            if (hasWidth || !parseUnsigned(argument.substr(WidthPrefix.size()), options.windowLogicalWidth) ||
+                options.windowLogicalWidth == 0)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--width must appear once and be greater than zero");
+            }
+            hasWidth = true;
+        }
+        else if (argument.starts_with(HeightPrefix))
+        {
+            if (hasHeight || !parseUnsigned(argument.substr(HeightPrefix.size()), options.windowLogicalHeight) ||
+                options.windowLogicalHeight == 0)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--height must appear once and be greater than zero");
+            }
+            hasHeight = true;
         }
         else if (argument.starts_with(GltfPrefix))
         {
@@ -977,6 +1017,44 @@ class Product3DState final : public Tina::IGameState {
     Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_->stateEnters;
+        const Tina::Platform::LogicalExtent initialLogicalExtent =
+            context.engineConfig().primaryWindow.initialLogicalExtent;
+        logicalExtent_ = initialLogicalExtent;
+        framebufferExtent_ = {
+            .width = initialLogicalExtent.width,
+            .height = initialLogicalExtent.height,
+        };
+        counters_->logicalPixelWidth = logicalExtent_.width;
+        counters_->logicalPixelHeight = logicalExtent_.height;
+        counters_->framebufferPixelWidth = framebufferExtent_.width;
+        counters_->framebufferPixelHeight = framebufferExtent_.height;
+
+        auto platformEvents = context.platformEventSubscriptions().subscribe(
+            [this](const Tina::PlatformEventNotification& notification) {
+                if (!std::holds_alternative<Tina::Platform::WindowMetricsChangedEvent>(
+                        notification.event().payload))
+                {
+                    return;
+                }
+                const auto* metrics = notification.primaryWindowMetrics();
+                if (metrics == nullptr)
+                {
+                    return;
+                }
+                ++counters_->windowMetricsEvents;
+                logicalExtent_ = metrics->logicalExtent;
+                framebufferExtent_ = metrics->framebufferExtent;
+                counters_->logicalPixelWidth = logicalExtent_.width;
+                counters_->logicalPixelHeight = logicalExtent_.height;
+                counters_->framebufferPixelWidth = framebufferExtent_.width;
+                counters_->framebufferPixelHeight = framebufferExtent_.height;
+            });
+        if (!platformEvents)
+        {
+            return Tina::Core::failure(std::move(platformEvents.error()));
+        }
+        platformEvents_.emplace(std::move(*platformEvents));
+
         auto* device = capture_->get();
         if (device == nullptr || resources_->meshSlotCount == 0 || !resources_->assetSystem.has_value())
         {
@@ -1422,6 +1500,7 @@ class Product3DState final : public Tina::IGameState {
 
     void onExit(Tina::GameStateExitContext&) noexcept override
     {
+        platformEvents_.reset();
         world_.reset();
         prefabEntities_.clear();
         releaseProductGpuResources();
@@ -1493,8 +1572,8 @@ class Product3DState final : public Tina::IGameState {
                 Tina::Scene::ExtractRenderSceneParams{
                     .surfaceViewport =
                         Tina::Render::Camera2DSurfaceViewport{
-                            .pixelWidth = 1280,
-                            .pixelHeight = 720,
+                            .pixelWidth = framebufferExtent_.width,
+                            .pixelHeight = framebufferExtent_.height,
                         },
                     .mesh3DBindingResolver = Tina::Asset::AssetFrameResourceResolver{
                         .userData = const_cast<Product3DState*>(this),
@@ -1589,8 +1668,11 @@ class Product3DState final : public Tina::IGameState {
     Product3DResources* resources_ = nullptr;
     DeviceCapture* capture_ = nullptr;
     Tina::Sample3D::Product3DUI ui_;
+    std::optional<Tina::PlatformEventSubscription> platformEvents_{};
     std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};
     mutable std::optional<Tina::Scene::World> world_{};
+    Tina::Platform::LogicalExtent logicalExtent_{DefaultWindowLogicalWidth, DefaultWindowLogicalHeight};
+    Tina::Platform::FramebufferExtent framebufferExtent_{DefaultWindowLogicalWidth, DefaultWindowLogicalHeight};
     float rotationHalfAngle_ = 0.0F;
     Tina::Scene::EntityId cameraEntity_{};
     std::vector<Tina::Scene::EntityId> prefabEntities_{};
@@ -1619,12 +1701,12 @@ class Product3DApplication final : public Tina::IGameApplication {
     DeviceCapture* capture_ = nullptr;
 };
 
-[[nodiscard]] Tina::EngineConfig createEngineConfig()
+[[nodiscard]] Tina::EngineConfig createEngineConfig(const SampleOptions& options)
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
     config.applicationName = "Tina vNext 3D Product";
     config.primaryWindow.title = "Tina vNext - glTF Prefab Product 3D";
-    config.primaryWindow.initialLogicalExtent = {1280, 720};
+    config.primaryWindow.initialLogicalExtent = {options.windowLogicalWidth, options.windowLogicalHeight};
     config.primaryWindow.initiallyVisible = true;
     // MetalRoughSpheres-scale external models: one item/batch per mesh instance.
     config.renderSceneCapacities.mesh3DItemCapacity = MaxProductMeshSlots;
@@ -1666,7 +1748,7 @@ class Product3DApplication final : public Tina::IGameApplication {
             -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
             return Tina::Sample3D::wrapCapturingRenderDevice(std::move(device), capture);
         };
-    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig(), std::move(desktopOptions));
+    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig(options), std::move(desktopOptions));
     if (!hostResult)
     {
         writeError(hostResult.error());
@@ -1694,12 +1776,22 @@ class Product3DApplication final : public Tina::IGameApplication {
         capture.get() == nullptr || capture.get()->statistics().liveResources == 0;
     counters.submittedLightingFrames = capture.submittedLightingFrames();
     counters.submittedDirectionalLightCount = capture.directionalLightCount();
+    counters.submittedCameraAspectRatio = capture.submittedCameraAspectRatio();
+    counters.cameraAspectChanges = capture.cameraAspectChanges();
     counters.pointLight3DCount = capture.pointLight3DCount();
     counters.lightingCountsStable = capture.lightingCountsStable();
     counters.culledPointLight3DCount =
         counters.authoredPointLight3DCount >= counters.pointLight3DCount
             ? counters.authoredPointLight3DCount - counters.pointLight3DCount
             : 0U;
+    if (counters.framebufferPixelWidth != 0 && counters.framebufferPixelHeight != 0)
+    {
+        const float expectedAspect = static_cast<float>(counters.framebufferPixelWidth) /
+                                     static_cast<float>(counters.framebufferPixelHeight);
+        counters.cameraAspectMatchesSurface =
+            std::isfinite(counters.submittedCameraAspectRatio) &&
+            std::abs(counters.submittedCameraAspectRatio - expectedAspect) <= 1.0e-4F;
+    }
     hostResult->reset();
 
     if (!runResult)
@@ -1791,7 +1883,8 @@ class Product3DApplication final : public Tina::IGameApplication {
         ui.initialThemeLight == expectedInitialThemeLight &&
         ui.automatedThemeSteps == (options.uiThemeDemo ? 2U : 0U) && unattendedThemeValid &&
         collectionDemoValid && ui.inheritedChromeVerified && ui.controlsInitialStateVerified &&
-        ui.progressUpdates >= options.targetFrameCount && ui.finalProgress >= 99.9F;
+        ui.responsiveLayoutVerified && ui.progressUpdates >= options.targetFrameCount &&
+        ui.finalProgress >= 99.9F;
     if (*runResult != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame ||
         counters.frameUpdates != options.targetFrameCount ||
         counters.renderExtractions != options.targetFrameCount ||
@@ -1824,10 +1917,14 @@ class Product3DApplication final : public Tina::IGameApplication {
         counters.culledPointLight3DCount != 1U ||
         counters.submittedLightingFrames != options.targetFrameCount ||
         counters.submittedDirectionalLightCount != 3U || !counters.lightingCountsStable ||
+        counters.windowMetricsEvents == 0 || !counters.cameraAspectMatchesSurface ||
         !counters.bindingRegistryReleased ||
         !ledgerBalanced ||
         !counters.pixelCaptureAttempted || !counters.pixelCaptureOk || counters.pixelCaptureWidth == 0 ||
-        counters.pixelCaptureHeight == 0 || counters.pixelCaptureBytes == 0 || counters.pixelFingerprint.empty() ||
+        counters.pixelCaptureHeight == 0 ||
+        counters.pixelCaptureWidth != counters.framebufferPixelWidth ||
+        counters.pixelCaptureHeight != counters.framebufferPixelHeight ||
+        counters.pixelCaptureBytes == 0 || counters.pixelFingerprint.empty() ||
         !pixelGoldenMatched)
     {
         std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\","
@@ -1868,6 +1965,15 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << counters.submittedDirectionalLightCount
                   << ",\"lightingCountsStable\":"
                   << (counters.lightingCountsStable ? "true" : "false")
+                  << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents
+                  << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth
+                  << ",\"logicalPixelHeight\":" << counters.logicalPixelHeight
+                  << ",\"framebufferPixelWidth\":" << counters.framebufferPixelWidth
+                  << ",\"framebufferPixelHeight\":" << counters.framebufferPixelHeight
+                  << ",\"submittedCameraAspectRatio\":" << counters.submittedCameraAspectRatio
+                  << ",\"cameraAspectChanges\":" << counters.cameraAspectChanges
+                  << ",\"cameraAspectMatchesSurface\":"
+                  << (counters.cameraAspectMatchesSurface ? "true" : "false")
                   << ",\"gltfCooked\":" << (counters.gltfCooked ? "true" : "false")
                   << ",\"prefabInstantiated\":" << (counters.prefabInstantiated ? "true" : "false")
                   << ",\"prefabNodes\":" << counters.prefabNodes
@@ -1895,6 +2001,8 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << (ui.inheritedChromeVerified ? "true" : "false")
                   << ",\"uiControlsInitialStateVerified\":"
                   << (ui.controlsInitialStateVerified ? "true" : "false")
+                  << ",\"uiResponsiveLayoutVerified\":"
+                  << (ui.responsiveLayoutVerified ? "true" : "false")
                   << ",\"uiProgressUpdates\":" << ui.progressUpdates
                   << ",\"uiProgressFinal\":" << ui.finalProgress
                   << ",\"bindingRegistryReleased\":"
@@ -1912,7 +2020,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":6,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":7,\"frames\":"
               << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
@@ -1955,6 +2063,15 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"submittedLightingFrames\":" << counters.submittedLightingFrames
               << ",\"submittedDirectionalLightCount\":" << counters.submittedDirectionalLightCount
               << ",\"lightingCountsStable\":" << (counters.lightingCountsStable ? "true" : "false")
+              << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents
+              << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth
+              << ",\"logicalPixelHeight\":" << counters.logicalPixelHeight
+              << ",\"framebufferPixelWidth\":" << counters.framebufferPixelWidth
+              << ",\"framebufferPixelHeight\":" << counters.framebufferPixelHeight
+              << ",\"submittedCameraAspectRatio\":" << counters.submittedCameraAspectRatio
+              << ",\"cameraAspectChanges\":" << counters.cameraAspectChanges
+              << ",\"cameraAspectMatchesSurface\":"
+              << (counters.cameraAspectMatchesSurface ? "true" : "false")
               << ",\"bindingRegistryReleased\":"
               << (counters.bindingRegistryReleased ? "true" : "false");
     if (resources.externalGltf || resources.completePbrFixture)
@@ -1989,6 +2106,8 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"uiInheritedChromeVerified\":" << (ui.inheritedChromeVerified ? "true" : "false")
               << ",\"uiControlsInitialStateVerified\":"
               << (ui.controlsInitialStateVerified ? "true" : "false")
+              << ",\"uiResponsiveLayoutVerified\":"
+              << (ui.responsiveLayoutVerified ? "true" : "false")
               << ",\"uiAutoRotateFinal\":" << (ui.autoRotate ? "true" : "false")
               << ",\"uiRotationSpeedFinal\":" << ui.rotationSpeed
               << ",\"uiProgressUpdates\":" << ui.progressUpdates

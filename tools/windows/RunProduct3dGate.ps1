@@ -7,7 +7,7 @@
   Asset, Render, and retained UI GoogleTest executables directly, then run the
   tina_sample_3d 300-frame product smoke with automated Dark -> Light -> Dark
   switching plus ListView/TreeView collection interaction. The final JSON is
-  validated as evidence schema 6.
+  validated as evidence schema 7.
 
   Does not use CTest. Does not clean-first wipe. Exits non-zero on first failure.
 
@@ -156,7 +156,7 @@ $expectedResolverHits = [long]$SampleFrames * 2
 $expectedFields = [ordered]@{
     status                              = 'ok'
     sample                              = 'tina_sample_3d'
-    evidenceSchema                      = 6
+    evidenceSchema                      = 7
     frames                              = $SampleFrames
     gltfCooked                          = $true
     cookedStaticMesh                    = $true
@@ -206,6 +206,12 @@ $expectedFields = [ordered]@{
     submittedLightingFrames             = $SampleFrames
     submittedDirectionalLightCount      = 3
     lightingCountsStable                = $true
+    logicalPixelWidth                   = 1280
+    logicalPixelHeight                  = 720
+    framebufferPixelWidth               = 1280
+    framebufferPixelHeight              = 720
+    cameraAspectChanges                 = 0
+    cameraAspectMatchesSurface          = $true
     bindingRegistryReleased             = $true
     instanceBatchesPerFrame             = 2
     catalogCooked                       = 1
@@ -234,6 +240,7 @@ $expectedFields = [ordered]@{
     uiThemeFinalLight                   = $false
     uiInheritedChromeVerified           = $true
     uiControlsInitialStateVerified      = $true
+    uiResponsiveLayoutVerified          = $true
     uiAutoRotateFinal                   = $true
     uiRotationSpeedFinal                = 1
     uiProgressFinal                     = 100
@@ -265,6 +272,15 @@ if ($null -eq $evidence.PSObject.Properties['uiProgressUpdates'] -or
     [long]$evidence.uiProgressUpdates -lt $SampleFrames) {
     $evidenceErrors.Add("uiProgressUpdates expected>=$SampleFrames actual=$($evidence.uiProgressUpdates)")
 }
+if ($null -eq $evidence.PSObject.Properties['windowMetricsEvents'] -or
+    [long]$evidence.windowMetricsEvents -lt 1) {
+    $evidenceErrors.Add("windowMetricsEvents expected>=1 actual=$($evidence.windowMetricsEvents)")
+}
+$expectedCameraAspect = 1280.0 / 720.0
+if ($null -eq $evidence.PSObject.Properties['submittedCameraAspectRatio'] -or
+    [Math]::Abs([double]$evidence.submittedCameraAspectRatio - $expectedCameraAspect) -gt 0.0001) {
+    $evidenceErrors.Add("submittedCameraAspectRatio expected=$expectedCameraAspect actual=$($evidence.submittedCameraAspectRatio)")
+}
 if ($null -eq $evidence.PSObject.Properties['pixelFingerprint'] -or
     [string]$evidence.pixelFingerprint -notmatch '^[0-9a-f]{32}$') {
     $evidenceErrors.Add("pixelFingerprint must be 32 lowercase hexadecimal characters")
@@ -273,7 +289,7 @@ if ($evidenceErrors.Count -ne 0) {
     Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$($sampleOut.Trim())")
 }
 
-Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=6 frames=$SampleFrames lights=directional-point-culled theme=dark-light-dark collections=list-tree"
+Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=7 frames=$SampleFrames resize=surface-aspect-responsive-ui lights=directional-point-culled theme=dark-light-dark collections=list-tree"
 Add-Step -Name 'tina_sample_3d' -ExitCode 0 -Detail "frames=$SampleFrames pixelFingerprint=$($evidence.pixelFingerprint)"
 
 $report.finishedAtUtc = (Get-Date).ToUniversalTime().ToString('o')

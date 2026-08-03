@@ -19,6 +19,8 @@ namespace UI = Tina::UI;
 
 inline constexpr Core::u64 PanelCount = 7;
 inline constexpr Core::u64 LabelCount = 13;
+inline constexpr float ReferenceLogicalWidth = 1280.0F;
+inline constexpr float ReferenceLogicalHeight = 720.0F;
 inline constexpr UI::UIListViewItemKey AssetItemKeyBase = 2'000;
 inline constexpr UI::UITreeViewItemKey SceneTreeItemKey = 1;
 inline constexpr UI::UITreeViewItemKey CameraTreeItemKey = 2;
@@ -56,6 +58,39 @@ struct Rect final {
     UI::UILayoutStyle style{};
     style.size.width = UI::UILayoutLength::Percent(100.0F);
     style.size.height = UI::UILayoutLength::Percent(100.0F);
+    return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle rightAnchoredStyle(Rect rect) noexcept
+{
+    UI::UILayoutStyle style = absoluteStyle(rect);
+    style.overlay.horizontal = UI::UIAxisAlignment::End;
+    style.overlay.offset.x = UI::UILayoutLength::Px(0.0F);
+    style.margin.right = ReferenceLogicalWidth - rect.left - rect.width;
+    return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle rightAnchoredStretchHeightStyle(Rect rect) noexcept
+{
+    UI::UILayoutStyle style = rightAnchoredStyle(rect);
+    style.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    style.overlay.offset.y = UI::UILayoutLength::Px(0.0F);
+    style.margin.top = rect.top;
+    style.margin.bottom = ReferenceLogicalHeight - rect.top - rect.height;
+    return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle footerStyle(Rect rect) noexcept
+{
+    UI::UILayoutStyle style = absoluteStyle(rect);
+    style.overlay.horizontal = UI::UIAxisAlignment::Stretch;
+    style.overlay.vertical = UI::UIAxisAlignment::End;
+    style.overlay.offset = {};
+    style.margin = {
+        .left = rect.left,
+        .right = ReferenceLogicalWidth - rect.left - rect.width,
+        .bottom = ReferenceLogicalHeight - rect.top - rect.height,
+    };
     return style;
 }
 
@@ -624,6 +659,11 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     evidence_->listSelectionKey = AssetItemKeyBase;
     evidence_->treeSelectionKey = SceneTreeItemKey;
 
+    if (Core::Status status = applyResponsiveLayout(*tree); !status)
+    {
+        return status;
+    }
+
     if (Core::Status status = applyTheme(*tree, config.initialTheme, false); !status)
     {
         return status;
@@ -683,6 +723,72 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     evidence_->treeViewsCreated = 1;
     evidence_->rootAlive = true;
     root_ = std::move(*root);
+    return Core::success();
+}
+
+Core::Status Product3DUI::applyResponsiveLayout(PrimaryWindowUITreeUpdater& tree)
+{
+    struct NodeLayout final {
+        UI::UINodeId node{};
+        Rect reference{};
+    };
+
+    const std::array rightAnchored{
+        NodeLayout{nodes_.inspectorPanel, {932.0F, 20.0F, 324.0F, 376.0F}},
+        NodeLayout{nodes_.inspectorAccent, {932.0F, 20.0F, 6.0F, 376.0F}},
+        NodeLayout{nodes_.inspectorTitle, {956.0F, 38.0F, 276.0F, 28.0F}},
+        NodeLayout{nodes_.inspectorMeta, {956.0F, 69.0F, 276.0F, 22.0F}},
+        NodeLayout{nodes_.autoRotateLabel, {996.0F, 174.0F, 230.0F, 24.0F}},
+        NodeLayout{nodes_.rotationSpeedLabel, {956.0F, 215.0F, 276.0F, 24.0F}},
+        NodeLayout{nodes_.progressCaption, {956.0F, 293.0F, 190.0F, 24.0F}},
+        NodeLayout{nodes_.progressValue, {1168.0F, 293.0F, 64.0F, 24.0F}},
+        NodeLayout{nodes_.collectionTitle, {956.0F, 428.0F, 276.0F, 28.0F}},
+        NodeLayout{nodes_.collectionMeta, {956.0F, 459.0F, 276.0F, 22.0F}},
+        NodeLayout{nodes_.assetListLabel, {956.0F, 489.0F, 128.0F, 22.0F}},
+        NodeLayout{nodes_.sceneTreeLabel, {1096.0F, 489.0F, 136.0F, 22.0F}},
+        NodeLayout{nodes_.themeButton, {956.0F, 105.0F, 276.0F, 42.0F}},
+        NodeLayout{nodes_.autoRotateCheckbox, {956.0F, 170.0F, 28.0F, 28.0F}},
+        NodeLayout{nodes_.rotationSpeedSlider, {956.0F, 245.0F, 276.0F, 32.0F}},
+        NodeLayout{nodes_.frameProgress, {956.0F, 327.0F, 276.0F, 18.0F}},
+    };
+    for (const NodeLayout& layout : rightAnchored)
+    {
+        if (Core::Status status = tree.setLayoutStyle(layout.node, rightAnchoredStyle(layout.reference)); !status)
+        {
+            return status;
+        }
+    }
+
+    const std::array rightAnchoredStretchHeight{
+        NodeLayout{nodes_.collectionPanel, {932.0F, 412.0F, 324.0F, 284.0F}},
+        NodeLayout{nodes_.collectionAccent, {932.0F, 412.0F, 6.0F, 284.0F}},
+        NodeLayout{nodes_.assetList, {956.0F, 516.0F, 128.0F, 156.0F}},
+        NodeLayout{nodes_.sceneTree, {1096.0F, 516.0F, 136.0F, 156.0F}},
+    };
+    for (const NodeLayout& layout : rightAnchoredStretchHeight)
+    {
+        if (Core::Status status = tree.setLayoutStyle(
+                layout.node, rightAnchoredStretchHeightStyle(layout.reference));
+            !status)
+        {
+            return status;
+        }
+    }
+
+    if (Core::Status status = tree.setLayoutStyle(
+            nodes_.statusPanel, footerStyle({24.0F, 646.0F, 884.0F, 50.0F}));
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status = tree.setLayoutStyle(
+            nodes_.status, footerStyle({44.0F, 659.0F, 844.0F, 26.0F}));
+        !status)
+    {
+        return status;
+    }
+
+    evidence_->responsiveLayoutVerified = true;
     return Core::success();
 }
 

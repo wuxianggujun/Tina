@@ -31,9 +31,15 @@ class DeviceCapture final {
     {
         return hasLastCapture_ ? &lastCapture_ : nullptr;
     }
-    void observeSubmittedScene(const Render::RenderSceneStatistics& statistics) noexcept
+    void observeSubmittedScene(const Render::RenderSceneView& scene) noexcept
     {
+        const Render::RenderSceneStatistics& statistics = scene.statistics();
         if (!statistics.mesh3DLightingConfigured)
+        {
+            return;
+        }
+        const auto& camera = scene.perspectiveCamera();
+        if (!camera.has_value())
         {
             return;
         }
@@ -41,11 +47,20 @@ class DeviceCapture final {
         {
             directionalLightCount_ = statistics.directionalLightCount;
             pointLight3DCount_ = statistics.pointLight3DCount;
+            submittedCameraAspectRatio_ = camera->aspectRatio;
         }
-        else if (directionalLightCount_ != statistics.directionalLightCount ||
-                 pointLight3DCount_ != statistics.pointLight3DCount)
+        else
         {
-            lightingCountsStable_ = false;
+            if (directionalLightCount_ != statistics.directionalLightCount ||
+                pointLight3DCount_ != statistics.pointLight3DCount)
+            {
+                lightingCountsStable_ = false;
+            }
+            if (submittedCameraAspectRatio_ != camera->aspectRatio)
+            {
+                ++cameraAspectChanges_;
+                submittedCameraAspectRatio_ = camera->aspectRatio;
+            }
         }
         ++submittedLightingFrames_;
     }
@@ -65,6 +80,14 @@ class DeviceCapture final {
     {
         return lightingCountsStable_;
     }
+    [[nodiscard]] float submittedCameraAspectRatio() const noexcept
+    {
+        return submittedCameraAspectRatio_;
+    }
+    [[nodiscard]] Core::u64 cameraAspectChanges() const noexcept
+    {
+        return cameraAspectChanges_;
+    }
 
   private:
     Render::IRenderDevice* device_ = nullptr;
@@ -74,6 +97,8 @@ class DeviceCapture final {
     Core::u64 submittedLightingFrames_ = 0;
     Core::u32 directionalLightCount_ = 0;
     Core::u32 pointLight3DCount_ = 0;
+    float submittedCameraAspectRatio_ = 0.0F;
+    Core::u64 cameraAspectChanges_ = 0;
     bool lightingCountsStable_ = true;
 };
 
@@ -98,7 +123,7 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
         auto submission = inner_->submitFrame(frame);
         if (submission && submission->requiresPresent() && capture_ != nullptr)
         {
-            capture_->observeSubmittedScene(frame.primaryWorldScene.statistics());
+            capture_->observeSubmittedScene(frame.primaryWorldScene);
         }
         return submission;
     }
