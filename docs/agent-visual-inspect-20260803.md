@@ -50,6 +50,8 @@ Path: `sample2d-freetype/.../frame-02.png`
 
 **Fix:** `samples/editor_shell/main.cpp` — viewport panel padding + four explicit placeholder labels so screenshots are not a blank elevated panel.
 
+**FreeType recapture** (`editor-shell-freetype/.../frame-02.png`): Hierarchy shows Scene/Camera2D/Player/… selection; Inspector Name/Kind/Note for Scene; center shows four readable placeholder lines (Viewport placeholder / No live Scene bind / stylesheet token / Not 2D-EDITOR). Without FreeType, labels still layout as empty bars only — expected for the plain bgfx Debug graph.
+
 ## Automated re-checks (same day)
 
 | Gate / suite | Result |
