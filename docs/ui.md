@@ -488,7 +488,7 @@ Rotation Speed Slider、Frame ProgressBar、Asset ListView、Scene TreeView 与�
 Checkbox 与 Slider 控制实际模型旋转；callback 只提交 intent，`updateUI()` 统一处理控件状态、ProgressBar
 与 `setProductTheme()`。Product3D 的 1280×720 仅是 reference layout：right rail 使用 End 对齐，
 collection/list/tree 与 footer 使用 Stretch/End 保持边距并扩展；字体和控件仍以 logical pixel authoring，
-不会随 client 尺寸做全局 zoom。当前 schema 7 的自动门禁要求 Dark→Light→Dark、2次 collection step、7 Panel、
+不会随 client 尺寸做全局 zoom。当前 schema 8 的自动门禁要求 Dark→Light→Dark、2次 collection step、7 Panel、
 13 Label、ListView/TreeView 各1个、Tree expansion changes `2`、最终 stable keys `2003/4`、进度100%
 与 root 释放，并继续在同一300帧产品门禁中验证3D Scene lighting。动态 glyph atlas 修复后的 FreeType 暗/亮截图分别在
 `artifacts/screenshots/3d-product-ui-freetype-dark-fixed/20260729-003922/frame-02.png` 和

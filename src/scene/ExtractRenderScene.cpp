@@ -487,10 +487,10 @@ struct ShadowOccluder2DCandidate final {
         const float colorR = component->color.red * component->intensity;
         const float colorG = component->color.green * component->intensity;
         const float colorB = component->color.blue * component->intensity;
-        const float innerConeCosine = static_cast<float>(std::cos(
-            static_cast<double>(component->innerConeHalfAngleDegrees) * std::numbers::pi / 180.0));
-        const float outerConeCosine = static_cast<float>(std::cos(
-            static_cast<double>(component->outerConeHalfAngleDegrees) * std::numbers::pi / 180.0));
+        const float innerConeCosine =
+            spotLightConeCosine(component->innerConeHalfAngleDegrees);
+        const float outerConeCosine =
+            spotLightConeCosine(component->outerConeHalfAngleDegrees);
         const float directionLengthSquared = dot(directionFromLight, directionFromLight);
         if (!isFinite(directionFromLight) || !std::isfinite(directionLengthSquared) ||
             directionLengthSquared <= 0.0F || !std::isfinite(colorR) ||
@@ -518,12 +518,8 @@ struct ShadowOccluder2DCandidate final {
             .directionFromLightX = directionFromLight.x,
             .directionFromLightY = directionFromLight.y,
             .directionFromLightZ = directionFromLight.z,
-            .innerConeCosine = static_cast<float>(std::cos(
-                static_cast<double>(component->innerConeHalfAngleDegrees) *
-                std::numbers::pi / 180.0)),
-            .outerConeCosine = static_cast<float>(std::cos(
-                static_cast<double>(component->outerConeHalfAngleDegrees) *
-                std::numbers::pi / 180.0)),
+            .innerConeCosine = spotLightConeCosine(component->innerConeHalfAngleDegrees),
+            .outerConeCosine = spotLightConeCosine(component->outerConeHalfAngleDegrees),
             .colorR = component->color.red * component->intensity,
             .colorG = component->color.green * component->intensity,
             .colorB = component->color.blue * component->intensity,

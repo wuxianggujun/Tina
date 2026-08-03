@@ -201,9 +201,10 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 | N4.3 | Null tests 覆盖3-light、ambient-only、超容量、零方向、负 RGB/ambient |
 | N4.4 | 产品 sample 使用3-light 单次提交并把 count 纳入生命周期成功门禁 |
 
-N4 当时明确保留的边界：这不是完整 PBR/light system；后续 `RENDER-001-SCENE-LIGHTS` 已补
-`DirectionalLight3D`→逐帧 RenderScene snapshot，但 IBL、shadow、point/spot light + culling、vertex
-tangents、skin/animation 与通用 pass scheduler 仍未完成。
+N4 当时明确保留的边界：这不是完整 PBR/light system；后续 `RENDER-001-SCENE-LIGHTS`、
+`RENDER-001-POINT-LIGHTS` 与 `RENDER-001-SPOT-LIGHTS` 已补 directional/point/spot World component、逐帧
+RenderScene snapshot、容量前 influence-sphere culling 与 backend shading；IBL、shadow、vertex tangents、
+skin/animation 与通用 pass scheduler 仍未完成。
 
 ### 验收
 

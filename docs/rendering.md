@@ -3,8 +3,8 @@
 Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在于 `tina_render_bgfx` 私有
 实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，以及 EngineHost 侧
 `RenderFramePacket` + FramePin + packet-local `FrameResourceRef` table + present-return CPU completion。Opaque3D 产品着色为 **experimental
-metallic-roughness hybrid**：Scene extraction 每帧提交0..4个 directional lights + 0..8个 point lights + ambient 的自包含
-`RenderScene` snapshot；`setMesh3DLighting()` 仍是低层 device fallback/direct SPI。当前已有 PointLight3D point light、PerspectiveCamera3D influence-sphere culling 与 bgfx 线性径向衰减；仍无 spot light、IBL 或阴影，也没有通用 pass scheduler 或通用 GPU submission fence；
+metallic-roughness hybrid**：Scene extraction 每帧提交0..4个 directional + 0..8个 point + 0..8个 spot lights + ambient 的自包含
+`RenderScene` snapshot；`setMesh3DLighting()` 仍是低层 device fallback/direct SPI。当前已有 PointLight3D 与 SpotLight3D、PerspectiveCamera3D influence-sphere culling，以及 bgfx 线性径向/平滑角度衰减；仍无 IBL 或阴影，也没有通用 pass scheduler 或通用 GPU submission fence；
 Texture2D/StaticMesh 已有独立、backend-proven 的 GPU resource retirement completion。
 
 ## Target 边界
@@ -59,13 +59,16 @@ Opaque3D（experimental MR hybrid）：产品 registry 通过单次 `setMesh3DMa
 baseColor/MR/normal 与 Cooked Material v2 metallic/roughness factor；细粒度 setter 仅保留为低层 direct
 SPI。submit 时分别绑定 `s_texColor`、`s_texMR`（glTF 打包：G=roughness、B=metallic）与
 `s_texNormal`。`Mesh3DLightingDesc` 是唯一 lighting 描述模型：writer/device 均同步消费0..4个
-backend-neutral directional light、0..8个 point light 与 ambient；超容量、零方向、非正 radius、负 RGB/ambient 或非有限值失败。
-`RenderSceneWriter::setMesh3DLighting()` 将调用方 span 深拷贝进固定4+8槽的 committed frame snapshot；
+backend-neutral directional light、0..8个 point light、0..8个 spot light 与 ambient；超容量、零方向、
+非法 cone、非正 radius、负 RGB/ambient 或非有限值失败。
+`RenderSceneWriter::setMesh3DLighting()` 将调用方 span 深拷贝进固定4+8+8槽的 committed frame snapshot；
 bgfx 只在当前 submit 中临时覆盖持久 device fallback，不污染后续帧。World 未声明灯组件时不发布 snapshot；
 已声明但全部 inactive 时发布0灯 + ambient snapshot，显式覆盖 fallback。
-着色 = baseColor × 贴图 ×（bounded directional Lambert + linear radial point-light Lambert + Blinn-Phong 近似 specular + ambient）；未绑定 baseColor 用
+着色 = baseColor × 贴图 ×（bounded directional Lambert + linear radial point-light Lambert + radial×angular spot-light Lambert + Blinn-Phong 近似 specular + ambient）；未绑定 baseColor 用
 1×1 白；未绑定 MR 图时 metallic=0、roughness=1；未绑定 normal 图时只用几何法线。诚实限制：当前
-DirectionalLight3D/PointLight3D 均可进入 Scene snapshot；PointLight3D 使用 world position/influence radius，在有效 PerspectiveCamera3D 与非0 surface 时做 sphere-frustum culling。仍无 spot light、IBL 或 shadow。
+DirectionalLight3D/PointLight3D/SpotLight3D 均可进入 Scene snapshot；point/spot 使用 world position/influence
+radius，在有效 PerspectiveCamera3D 与非0 surface 时做 sphere-frustum culling；spot 额外提交 world-space
+出光方向与 inner/outer cone cosine。仍无 IBL 或 shadow。
 
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、
@@ -166,7 +169,7 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 | `set/clearMesh3DMaterialBinding` | 原子替换/整组清除三张纹理与 factors | 原子替换/整组清除三张纹理与 factors |
 | `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D MR submit **采样** `s_texColor`（默认 1×1 白） |
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
-| `setMesh3DLighting` | 同步校验/复制低层 fallback | 未提供 frame-scoped Scene lighting 时使用；0..4 directional + 0..8 point lights + ambient |
+| `setMesh3DLighting` | 同步校验/复制低层 fallback | 未提供 frame-scoped Scene lighting 时使用；0..4 directional + 0..8 point + 0..8 spot lights + ambient |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径 |
 
 `createTexture2DBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
@@ -211,7 +214,7 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - native WindowSurface 初始化、resize/suspend、submit/present/shutdown；
 - transient frame budget 与容量失败；
 - Sprite2D textured quad pass + frame-scoped 0..8 point lights；
-- Opaque3D experimental metallic-roughness hybrid mesh/depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point lights；每帧只编码一次 uniform arrays）；
+- Opaque3D experimental metallic-roughness hybrid mesh/depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；每帧只编码一次 uniform arrays）；
 - UI solid/glyph pass；
 - Texture2D/StaticMesh generation storage 与 key binding；
 - Texture2D/StaticMesh backend-proven retirement marker、suspend flush 与 shutdown hard drain；
@@ -221,7 +224,8 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 `tina_sample_2d` 已使用 Cooked Texture2D 与产品 sprite binding；`tina_sample_3d` 已使用 Cooked
 StaticMesh/Material/Prefab 的 **双 mesh** engine-provided、State-owned registry binding（3D-001 / N15），
 N16.4 再统一其 Lease/GPU/binding owner 与 packet-local resource ref；Material 通过原子 bundle 提交
-baseColor/MR/normal/factors；当前 Scene `DirectionalLight3D` 每帧提取到 RenderScene snapshot，bgfx
+baseColor/MR/normal/factors；当前 Scene `DirectionalLight3D`/`PointLight3D`/`SpotLight3D` 每帧提取到
+RenderScene snapshot，point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull，bgfx
 Opaque3D 以 experimental MR hybrid 着色。
 
 ## Surface 与线程
@@ -246,7 +250,8 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 ```
 
 测试映射与 Visual 证据规则见 [测试说明](testing.md)。`RENDER-001` 已落地 experimental MR +
-MR/normal/factors、有界4 directional + 8 point-light 描述，以及 Scene component 到逐帧 RenderScene snapshot；
-产品 sample 的3个 directional entity 与 PointLight3D authored/committed/culled=`3/2/1` 连续300帧稳定提交。
-完整 PBR / IBL / shadow、spot light + culling、pass scheduling、通用 GPU submission fence 与跨 DPI/GPU
+MR/normal/factors、有界4 directional + 8 point + 8 spot-light 描述，以及 Scene component 到逐帧 RenderScene snapshot；
+产品 sample 的3个 directional entity，以及 PointLight3D/SpotLight3D 各自
+authored/committed/culled=`3/2/1` 连续300帧稳定提交。
+完整 PBR / IBL / shadow、pass scheduling、通用 GPU submission fence 与跨 DPI/GPU
 visual gate（`UI-003`）仍后置；Texture/Mesh resource retirement 已不属于这些后置项。

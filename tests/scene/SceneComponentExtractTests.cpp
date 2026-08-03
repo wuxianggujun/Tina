@@ -2094,6 +2094,18 @@ TEST(SceneSpotLight3DTest, SetsClearsQueriesAndRejectsInvalidConeTransactionally
     EXPECT_EQ(*world.spotLight3D(entity), validLight);
 
     light = validLight;
+    light.innerConeHalfAngleDegrees = 20.0F;
+    light.outerConeHalfAngleDegrees =
+        std::nextafter(light.innerConeHalfAngleDegrees,
+                       std::numeric_limits<float>::infinity());
+    ASSERT_EQ(spotLightConeCosine(light.innerConeHalfAngleDegrees),
+              spotLightConeCosine(light.outerConeHalfAngleDegrees));
+    invalid = world.setSpotLight3D(entity, light);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_EQ(*world.spotLight3D(entity), validLight);
+
+    light = validLight;
     light.outerConeHalfAngleDegrees = 90.0F;
     invalid = world.setSpotLight3D(entity, light);
     ASSERT_FALSE(invalid);

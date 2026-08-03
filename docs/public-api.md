@@ -235,7 +235,7 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
   `createMesh3DBinding()` allocator；
 - 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
   `set/clearMesh3DMaterialBinding()` texture/factor bundle；细粒度 material setter 是低层 direct SPI；
-- experimental Opaque3D `Mesh3DLightingDesc`（同步消费0..4 directional + 0..8 point lights + 非负 ambient）；
+- experimental Opaque3D `Mesh3DLightingDesc`（同步消费0..4 directional + 0..8 point + 0..8 spot lights + 非负 ambient）；
   `IRenderDevice::setMesh3DLighting()` 是低层 fallback/direct SPI；
 - primary framebuffer RGBA8 capture。
 
@@ -253,8 +253,8 @@ wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
 并可把一次 `setSprite2DLighting()` / `setMesh3DLighting()` 深拷贝为 self-contained 的 committed frame
 snapshot；同类 lighting 重复设置或非法描述使当前 build 原子失败。Sprite2D snapshot 最多保存8个
-world-space point light、32个 world-space shadow segment 与 ambient；Mesh3D snapshot 最多保存4个 directional
-light、8个 world-space point light 与 ambient，且不改变既有 mesh batch。
+world-space point light、32个 world-space shadow segment 与 ambient；Mesh3D snapshot 最多保存4个 directional、
+8个 world-space point、8个 world-space spot light 与 ambient，且不改变既有 mesh batch。
 commit 后返回 borrowed view。
 `RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的 required `FrameResourceRef`；
 `normalTexture` 是 optional packet-local Texture2D ref，invalid 表示无 normal map；
@@ -389,7 +389,8 @@ Narrator/Inspect 人工金标仍由 UI-002 跟踪，Linux AT-SPI adapter/真机�
 ## Scene
 
 `Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Camera2D/
-SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3D/DirectionalLight3D/PointLight3D。
+SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3D/DirectionalLight3D/
+PointLight3D/SpotLight3D。
 `extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material weak `AssetHandle`。
@@ -419,6 +420,13 @@ Entity world position 是光源中心，transform scale 不缩放半径。extrac
 在有效 PerspectiveCamera3D 与非0 surface 上做 influence sphere-vs-perspective-frustum culling，再按稳定 Entity
 identity 收集最多8个 camera-affecting light。第9个显式返回 `TooManyActivePointLights3D`；无相机或0x0
 surface 时保留未裁剪容量契约。position、radius 与 color×intensity 深拷贝进当前帧 Mesh3D lighting snapshot。
+
+`SpotLight3D` 保存 linear color、非负 intensity、正 world-space `influenceRadiusMeters`、满足
+`0 <= inner < outer < 90` 的 cone half-angle 与 active 标志；Entity world position 是光源中心，world local
+`-Z` 是出光方向，transform scale 不缩放半径。extraction 先校验全部 active component，再复用 influence
+sphere-vs-perspective-frustum culling，并在容量检查前剔除。每帧最多8个 camera-affecting spot light，
+第9个返回 `TooManyActiveSpotLights3D`；无相机或0x0 surface 时保留未裁剪容量契约。position、radius、
+normalized direction、inner/outer cosine 与 color×intensity 深拷贝进同一 Mesh3D lighting snapshot。
 
 `PointLight2D` 保存 linear color、非负 intensity、正 world-space `radiusMeters`、finite
 `sourceRadiusMeters` 与 active 标志；`0 <= sourceRadiusMeters <= radiusMeters`，默认0精确保留 point-source
@@ -560,9 +568,9 @@ multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
 metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtime Opaque3D 为 experimental
 MR hybrid；engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors，
-direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional + 0..8 point lights，World
-directional/point component 每帧提取到 RenderScene，point influence sphere 在容量检查前按相机裁剪。
-spot light、IBL/shadow 尚未完成。
+direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional + 0..8 point + 0..8 spot lights，
+World directional/point/spot component 每帧提取到 RenderScene，point/spot influence sphere 在容量检查前
+按相机裁剪。IBL/shadow 尚未完成。
 
 ## Audio 与 Physics
 
@@ -632,7 +640,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh retirement）；
-- 完整 PBR/IBL/shadow、spot light + culling 与通用 pass scheduler；
+- 完整 PBR/IBL/shadow 与通用 pass scheduler；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；

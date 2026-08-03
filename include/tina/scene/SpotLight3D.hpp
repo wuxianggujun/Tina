@@ -3,6 +3,7 @@
 #include <tina/render/RenderScene.hpp>
 
 #include <cmath>
+#include <numbers>
 
 namespace Tina::Scene {
 
@@ -20,8 +21,16 @@ struct SpotLight3D final {
     friend constexpr bool operator==(const SpotLight3D&, const SpotLight3D&) noexcept = default;
 };
 
+[[nodiscard]] inline float spotLightConeCosine(float halfAngleDegrees) noexcept
+{
+    return static_cast<float>(std::cos(
+        static_cast<double>(halfAngleDegrees) * std::numbers::pi / 180.0));
+}
+
 [[nodiscard]] inline bool isValid(const SpotLight3D& light) noexcept
 {
+    const float innerConeCosine = spotLightConeCosine(light.innerConeHalfAngleDegrees);
+    const float outerConeCosine = spotLightConeCosine(light.outerConeHalfAngleDegrees);
     return std::isfinite(light.color.red) && light.color.red >= 0.0F &&
            std::isfinite(light.color.green) && light.color.green >= 0.0F &&
            std::isfinite(light.color.blue) && light.color.blue >= 0.0F &&
@@ -32,7 +41,8 @@ struct SpotLight3D final {
            std::isfinite(light.outerConeHalfAngleDegrees) &&
            light.innerConeHalfAngleDegrees >= 0.0F &&
            light.innerConeHalfAngleDegrees < light.outerConeHalfAngleDegrees &&
-           light.outerConeHalfAngleDegrees < 90.0F;
+           light.outerConeHalfAngleDegrees < 90.0F && std::isfinite(innerConeCosine) &&
+           std::isfinite(outerConeCosine) && innerConeCosine > outerConeCosine;
 }
 
 } // namespace Tina::Scene

@@ -47,12 +47,14 @@ class DeviceCapture final {
         {
             directionalLightCount_ = statistics.directionalLightCount;
             pointLight3DCount_ = statistics.pointLight3DCount;
+            spotLight3DCount_ = statistics.spotLight3DCount;
             submittedCameraAspectRatio_ = camera->aspectRatio;
         }
         else
         {
             if (directionalLightCount_ != statistics.directionalLightCount ||
-                pointLight3DCount_ != statistics.pointLight3DCount)
+                pointLight3DCount_ != statistics.pointLight3DCount ||
+                spotLight3DCount_ != statistics.spotLight3DCount)
             {
                 lightingCountsStable_ = false;
             }
@@ -76,6 +78,10 @@ class DeviceCapture final {
     {
         return pointLight3DCount_;
     }
+    [[nodiscard]] Core::u32 spotLight3DCount() const noexcept
+    {
+        return spotLight3DCount_;
+    }
     [[nodiscard]] bool lightingCountsStable() const noexcept
     {
         return lightingCountsStable_;
@@ -97,6 +103,7 @@ class DeviceCapture final {
     Core::u64 submittedLightingFrames_ = 0;
     Core::u32 directionalLightCount_ = 0;
     Core::u32 pointLight3DCount_ = 0;
+    Core::u32 spotLight3DCount_ = 0;
     float submittedCameraAspectRatio_ = 0.0F;
     Core::u64 cameraAspectChanges_ = 0;
     bool lightingCountsStable_ = true;
