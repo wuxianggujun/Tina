@@ -513,6 +513,13 @@ class NullRenderDevice final : public IRenderDevice {
                 .colorB = source.colorB,
             };
         }
+        pointLightCount_ = lighting.pointLights.size();
+        for (std::size_t lightIndex = 0; lightIndex < pointLights_.size(); ++lightIndex)
+        {
+            pointLights_[lightIndex] = lightIndex < pointLightCount_
+                ? lighting.pointLights[lightIndex]
+                : Mesh3DPointLight{};
+        }
         ambientScale_ = lighting.ambientScale;
         return Core::success();
     }
@@ -649,6 +656,8 @@ class NullRenderDevice final : public IRenderDevice {
             .colorB = 0.92F,
         }};
     std::size_t directionalLightCount_ = 1;
+    std::array<Mesh3DPointLight, Mesh3DLightingDesc::MaximumPointLightCount> pointLights_{};
+    std::size_t pointLightCount_ = 0;
     float ambientScale_ = 0.18F;
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;

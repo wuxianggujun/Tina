@@ -5,6 +5,7 @@
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
 
 #include <array>
+#include <limits>
 #include <vector>
 
 namespace Tina::Tests {
@@ -158,6 +159,55 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
     ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(7U, {}).has_value());
     ASSERT_TRUE((*device)->destroyTexture2D(*metallicRoughness).has_value());
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
+}
+
+TEST(NullRenderDeviceLightingTest, AcceptsAndValidatesBoundedPointLights)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+
+    const std::array pointLights{
+        Render::Mesh3DPointLight{
+            .worldPositionX = 1.0F,
+            .worldPositionY = 2.0F,
+            .worldPositionZ = -3.0F,
+            .influenceRadius = 4.0F,
+            .colorR = 0.2F,
+            .colorG = 0.3F,
+            .colorB = 0.4F,
+        },
+    };
+    ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .pointLights = pointLights,
+        .ambientScale = 0.1F,
+    }));
+
+    auto invalidRadius = pointLights;
+    invalidRadius[0].influenceRadius = 0.0F;
+    auto radiusFailure = (*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .pointLights = invalidRadius,
+    });
+    ASSERT_FALSE(radiusFailure);
+    EXPECT_EQ(radiusFailure.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
+
+    auto invalidPosition = pointLights;
+    invalidPosition[0].worldPositionZ = std::numeric_limits<float>::infinity();
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .pointLights = invalidPosition,
+    }));
+
+    auto invalidColor = pointLights;
+    invalidColor[0].colorG = -0.1F;
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .pointLights = invalidColor,
+    }));
+
+    const std::array<Render::Mesh3DPointLight,
+                     Render::Mesh3DLightingDesc::MaximumPointLightCount + 1U>
+        tooManyPointLights{};
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .pointLights = tooManyPointLights,
+    }));
 }
 
 TEST(NullRenderDeviceTextureTest, MaterialBundleUpdatesComposeAndClearIsIdempotent)

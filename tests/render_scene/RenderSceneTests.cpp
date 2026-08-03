@@ -600,11 +600,32 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
             .colorB = 0.4F,
         },
     };
+    std::array pointLights{
+        Mesh3DPointLight{
+            .worldPositionX = 1.0F,
+            .worldPositionY = 2.0F,
+            .worldPositionZ = 3.0F,
+            .influenceRadius = 5.0F,
+            .colorR = 0.7F,
+            .colorG = 0.6F,
+            .colorB = 0.5F,
+        },
+        Mesh3DPointLight{
+            .worldPositionX = -4.0F,
+            .influenceRadius = 2.0F,
+            .colorR = 0.2F,
+            .colorG = 0.3F,
+            .colorB = 0.4F,
+        },
+    };
     ASSERT_TRUE(builder.writer().setMesh3DLighting({
         .directionalLights = lights,
+        .pointLights = pointLights,
         .ambientScale = 0.25F,
     }));
     lights[0].colorR = 9.0F;
+    pointLights[0].worldPositionX = 99.0F;
+    pointLights[1].colorB = 99.0F;
 
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value());
@@ -613,9 +634,15 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
     ASSERT_EQ(lighting.directionalLights().size(), 2U);
     EXPECT_FLOAT_EQ(lighting.directionalLights()[0].colorR, 0.5F);
     EXPECT_FLOAT_EQ(lighting.directionalLights()[1].directionTowardLightX, -1.0F);
+    ASSERT_EQ(lighting.pointLights().size(), 2U);
+    EXPECT_FLOAT_EQ(lighting.pointLights()[0].worldPositionX, 1.0F);
+    EXPECT_FLOAT_EQ(lighting.pointLights()[0].influenceRadius, 5.0F);
+    EXPECT_FLOAT_EQ(lighting.pointLights()[1].colorB, 0.4F);
+    EXPECT_EQ(lighting.descriptor().pointLights.data(), lighting.pointLights().data());
     EXPECT_FLOAT_EQ(lighting.ambientScale(), 0.25F);
     EXPECT_TRUE(committed->statistics().mesh3DLightingConfigured);
     EXPECT_EQ(committed->statistics().directionalLightCount, 2U);
+    EXPECT_EQ(committed->statistics().pointLight3DCount, 2U);
     EXPECT_FALSE(committed->empty());
 }
 
@@ -646,6 +673,35 @@ TEST(RenderSceneBuilderTest, InvalidOrDuplicateMesh3DLightingFailsTheBuildAtomic
         builder.writer().setMesh3DLighting({.directionalLights = overflowingLights});
     ASSERT_FALSE(overflowing);
     EXPECT_EQ(overflowing.error().code, RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array invalidPointLights{
+        Mesh3DPointLight{.influenceRadius = 0.0F},
+    };
+    auto invalidPoint =
+        builder.writer().setMesh3DLighting({.pointLights = invalidPointLights});
+    ASSERT_FALSE(invalidPoint);
+    EXPECT_EQ(invalidPoint.error().code, RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array negativePointColor{
+        Mesh3DPointLight{.influenceRadius = 1.0F, .colorR = -0.1F},
+    };
+    auto invalidPointColor =
+        builder.writer().setMesh3DLighting({.pointLights = negativePointColor});
+    ASSERT_FALSE(invalidPointColor);
+    EXPECT_EQ(invalidPointColor.error().code, RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array<Mesh3DPointLight, Mesh3DLightingDesc::MaximumPointLightCount + 1U>
+        tooManyPointLights{};
+    auto tooManyPoints =
+        builder.writer().setMesh3DLighting({.pointLights = tooManyPointLights});
+    ASSERT_FALSE(tooManyPoints);
+    EXPECT_EQ(tooManyPoints.error().code, RenderErrorCode::InvalidMesh3DLighting);
     EXPECT_FALSE(builder.commit().has_value());
 
     ASSERT_TRUE(builder.beginFrame());

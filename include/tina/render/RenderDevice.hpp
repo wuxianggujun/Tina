@@ -411,7 +411,8 @@ class IRenderDevice {
     }
     // RENDER-001: one bounded lighting submission model for experimental Opaque3D MR.
     // Supports 0..MaximumDirectionalLightCount world-space directional lights plus
-    // non-negative ambient. Directions are normalized by the backend. Not IBL/shadows.
+    // non-negative ambient. Directions are normalized by the backend. Point-light
+    // positions and influence radii are world-space. Not IBL/shadows.
     [[nodiscard]] virtual Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting) noexcept
     {
         static_cast<void>(lighting);

@@ -5,6 +5,7 @@
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PointLight2D.hpp>
+#include <tina/scene/PointLight3D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/ShadowOccluder2D.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <optional>
 
 namespace Tina::Scene {
@@ -63,6 +65,11 @@ struct DirectionalLightCandidate final {
     Render::Mesh3DDirectionalLight light{};
 };
 
+struct PointLight3DCandidate final {
+    u64 stableKey = 0;
+    Render::Mesh3DPointLight light{};
+};
+
 struct PointLight2DCandidate final {
     u64 stableKey = 0;
     Render::Sprite2DPointLight light{};
@@ -94,6 +101,38 @@ struct ShadowOccluder2DCandidate final {
     const double outsideY =
         std::max(std::abs(cameraY) - static_cast<double>(camera.worldHeight) * 0.5, 0.0);
     return std::hypot(outsideX, outsideY) <= static_cast<double>(light.radiusMeters);
+}
+
+[[nodiscard]] bool pointLightIntersectsPerspectiveCamera(
+    const Render::Mesh3DPointLight& light,
+    const Render::RenderPerspectiveCamera& camera) noexcept
+{
+    const Vec3 cameraPosition{camera.positionX, camera.positionY, camera.positionZ};
+    const Vec3 forward{camera.forwardX, camera.forwardY, camera.forwardZ};
+    const Vec3 up{camera.upX, camera.upY, camera.upZ};
+    const Vec3 right = cross(forward, up);
+    const Vec3 relative =
+        Vec3{light.worldPositionX, light.worldPositionY, light.worldPositionZ} - cameraPosition;
+    const double x = static_cast<double>(dot(relative, right));
+    const double y = static_cast<double>(dot(relative, up));
+    const double depth = static_cast<double>(dot(relative, forward));
+    const double radius = static_cast<double>(light.influenceRadius);
+
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(depth) ||
+        !std::isfinite(radius) || depth + radius < camera.nearPlaneMeters ||
+        depth - radius > camera.farPlaneMeters) {
+        return false;
+    }
+
+    const double tangentY =
+        std::tan(static_cast<double>(camera.verticalFovDegrees) * std::numbers::pi / 360.0);
+    const double tangentX = tangentY * static_cast<double>(camera.aspectRatio);
+    const double horizontalRadiusScale = std::hypot(tangentX, 1.0);
+    const double verticalRadiusScale = std::hypot(tangentY, 1.0);
+    return depth * tangentX + x >= -radius * horizontalRadiusScale &&
+           depth * tangentX - x >= -radius * horizontalRadiusScale &&
+           depth * tangentY + y >= -radius * verticalRadiusScale &&
+           depth * tangentY - y >= -radius * verticalRadiusScale;
 }
 
 [[nodiscard]] Core::Status publishPointLights2D(
@@ -262,10 +301,11 @@ struct ShadowOccluder2DCandidate final {
     });
 }
 
-[[nodiscard]] Core::Status publishDirectionalLights(
+[[nodiscard]] Core::Status publishMesh3DLights(
     World& world,
     Render::RenderSceneWriter& writer,
-    float ambientLightScale) noexcept
+    float ambientLightScale,
+    const Render::RenderPerspectiveCamera* cullingCamera) noexcept
 {
     if (!std::isfinite(ambientLightScale) || ambientLightScale < 0.0F) {
         return Core::failure(
@@ -327,12 +367,6 @@ struct ShadowOccluder2DCandidate final {
         ++lightCount;
     }
 
-    // No authored component preserves the low-level device fallback. An authored
-    // but fully inactive set publishes ambient-only lighting and disables it.
-    if (!hasDirectionalLight) {
-        return Core::success();
-    }
-
     // Sort only the live prefix. Sorting the whole fixed array confuses GCC's
     // bounds analysis when lightCount is a runtime usize under Maximum*Count.
     if (lightCount > 1)
@@ -349,9 +383,87 @@ struct ShadowOccluder2DCandidate final {
     for (usize index = 0; index < lightCount; ++index) {
         lights[index] = candidates[index].light;
     }
+
+    std::array<PointLight3DCandidate, Render::Mesh3DLightingDesc::MaximumPointLightCount>
+        pointCandidates{};
+    usize pointLightCount = 0;
+    bool hasPointLight = false;
+    for (const EntityId entity : world.liveEntities()) {
+        const PointLight3D* component = world.pointLight3D(entity);
+        if (component == nullptr) {
+            continue;
+        }
+        hasPointLight = true;
+        if (!component->active) {
+            continue;
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        if (!isValid(*component) || transform == nullptr || !isValid(*transform)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene active PointLight3D or its WorldTransform is invalid");
+        }
+        const float colorR = component->color.red * component->intensity;
+        const float colorG = component->color.green * component->intensity;
+        const float colorB = component->color.blue * component->intensity;
+        if (!std::isfinite(colorR) || !std::isfinite(colorG) || !std::isfinite(colorB)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene PointLight3D extraction overflowed");
+        }
+    }
+
+    for (const EntityId entity : world.liveEntities()) {
+        const PointLight3D* component = world.pointLight3D(entity);
+        if (component == nullptr || !component->active) {
+            continue;
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        const Render::Mesh3DPointLight light{
+            .worldPositionX = transform->position.x,
+            .worldPositionY = transform->position.y,
+            .worldPositionZ = transform->position.z,
+            .influenceRadius = component->influenceRadiusMeters,
+            .colorR = component->color.red * component->intensity,
+            .colorG = component->color.green * component->intensity,
+            .colorB = component->color.blue * component->intensity,
+        };
+        if (cullingCamera != nullptr &&
+            !pointLightIntersectsPerspectiveCamera(light, *cullingCamera)) {
+            continue;
+        }
+        if (pointLightCount >= pointCandidates.size()) {
+            return Core::failure(
+                SceneErrorCode::TooManyActivePointLights3D,
+                "Scene extract exceeded the fixed camera-affecting PointLight3D limit");
+        }
+        pointCandidates[pointLightCount] = PointLight3DCandidate{
+            .stableKey = stableEntityKey(entity),
+            .light = light,
+        };
+        ++pointLightCount;
+    }
+
+    if (!hasDirectionalLight && !hasPointLight) {
+        return Core::success();
+    }
+    if (pointLightCount > 1) {
+        std::sort(pointCandidates.data(), pointCandidates.data() + pointLightCount,
+                  [](const PointLight3DCandidate& left,
+                     const PointLight3DCandidate& right) noexcept {
+                      return left.stableKey < right.stableKey;
+                  });
+    }
+    std::array<Render::Mesh3DPointLight, Render::Mesh3DLightingDesc::MaximumPointLightCount>
+        pointLights{};
+    for (usize index = 0; index < pointLightCount; ++index) {
+        pointLights[index] = pointCandidates[index].light;
+    }
     return writer.setMesh3DLighting(Render::Mesh3DLightingDesc{
         .directionalLights =
             std::span<const Render::Mesh3DDirectionalLight>{lights.data(), lightCount},
+        .pointLights =
+            std::span<const Render::Mesh3DPointLight>{pointLights.data(), pointLightCount},
         .ambientScale = ambientLightScale,
     });
 }
@@ -560,6 +672,7 @@ Core::Status extractRenderSceneFromWorld(
 
     EntityId activePerspectiveEntity{};
     usize activePerspectiveCount = 0;
+    std::optional<Render::RenderPerspectiveCamera> resolvedPerspectiveCamera;
     for (const EntityId entity : world.liveEntities()) {
         const PerspectiveCamera3D* camera = world.perspectiveCamera3D(entity);
         if (camera == nullptr || !camera->active) {
@@ -614,11 +727,39 @@ Core::Status extractRenderSceneFromWorld(
             if (const Core::Status status = writer.setPerspectiveCamera(input); !status) {
                 return status;
             }
+            const Quaternion rotation = normalized(transform->rotation);
+            const Vec3 forward = rotate(rotation, Vec3{0.0F, 0.0F, -1.0F});
+            const Vec3 up = rotate(rotation, Vec3{0.0F, 1.0F, 0.0F});
+            const float surfaceAspect =
+                static_cast<float>(params.surfaceViewport.pixelWidth) /
+                static_cast<float>(params.surfaceViewport.pixelHeight);
+            resolvedPerspectiveCamera = Render::RenderPerspectiveCamera{
+                .stableCameraKey = input.stableCameraKey,
+                .positionX = input.worldPose.positionX,
+                .positionY = input.worldPose.positionY,
+                .positionZ = input.worldPose.positionZ,
+                .forwardX = forward.x,
+                .forwardY = forward.y,
+                .forwardZ = forward.z,
+                .upX = up.x,
+                .upY = up.y,
+                .upZ = up.z,
+                .verticalFovDegrees = input.verticalFovDegrees,
+                .nearPlaneMeters = input.nearPlaneMeters,
+                .farPlaneMeters = input.farPlaneMeters,
+                .aspectRatio = surfaceAspect * input.normalizedViewport.width /
+                               input.normalizedViewport.height,
+                .normalizedViewport = input.normalizedViewport,
+            };
         }
     }
 
     if (const Core::Status status =
-            publishDirectionalLights(world, writer, params.ambientLightScale);
+            publishMesh3DLights(
+                world,
+                writer,
+                params.ambientLightScale,
+                resolvedPerspectiveCamera ? &*resolvedPerspectiveCamera : nullptr);
         !status) {
         return status;
     }

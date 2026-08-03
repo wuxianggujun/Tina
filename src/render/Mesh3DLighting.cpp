@@ -12,6 +12,11 @@ Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noex
         return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
                              "Mesh3D directional light count exceeds the fixed device limit");
     }
+    if (lighting.pointLights.size() > Mesh3DLightingDesc::MaximumPointLightCount)
+    {
+        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                             "Mesh3D point light count exceeds the fixed device limit");
+    }
     if (!std::isfinite(lighting.ambientScale) || lighting.ambientScale < 0.0F)
     {
         return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
@@ -38,6 +43,20 @@ Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noex
         {
             return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
                                  "Mesh3D directional light direction must have a finite non-zero length");
+        }
+    }
+
+    for (const Mesh3DPointLight& light : lighting.pointLights)
+    {
+        if (!std::isfinite(light.worldPositionX) || !std::isfinite(light.worldPositionY) ||
+            !std::isfinite(light.worldPositionZ) || !std::isfinite(light.influenceRadius) ||
+            light.influenceRadius <= 0.0F || !std::isfinite(light.colorR) ||
+            !std::isfinite(light.colorG) || !std::isfinite(light.colorB) || light.colorR < 0.0F ||
+            light.colorG < 0.0F || light.colorB < 0.0F)
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidMesh3DLighting,
+                "Mesh3D point light values must be finite with positive radius and non-negative RGB");
         }
     }
 

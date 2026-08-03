@@ -8,6 +8,7 @@
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PointLight2D.hpp>
+#include <tina/scene/PointLight3D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/ShadowOccluder2D.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
@@ -93,6 +94,8 @@ public:
         EntityId entity,
         DirectionalLight3D light) noexcept;
     [[nodiscard]] Core::Status clearDirectionalLight3D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status setPointLight3D(EntityId entity, PointLight3D light) noexcept;
+    [[nodiscard]] Core::Status clearPointLight3D(EntityId entity) noexcept;
 
     [[nodiscard]] bool contains(EntityId entity) const noexcept;
     [[nodiscard]] usize entityCount() const noexcept;
@@ -107,6 +110,7 @@ public:
     [[nodiscard]] const PerspectiveCamera3D* perspectiveCamera3D(EntityId entity) const noexcept;
     [[nodiscard]] const MeshRenderer3D* meshRenderer3D(EntityId entity) const noexcept;
     [[nodiscard]] const DirectionalLight3D* directionalLight3D(EntityId entity) const noexcept;
+    [[nodiscard]] const PointLight3D* pointLight3D(EntityId entity) const noexcept;
 
     // Live entity ids in create-order-independent dense storage. Valid only on
     // the owner thread until the next structural mutation (create/destroy).

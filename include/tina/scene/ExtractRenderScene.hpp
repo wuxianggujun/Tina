@@ -46,6 +46,11 @@ struct ExtractRenderSceneParams final {
 //   resolver empty result returns UnresolvedMesh. Hidden meshes are not resolved.
 // - Active DirectionalLight3D components are sorted by stable entity identity,
 //   transformed to world direction, and published as one bounded lighting snapshot.
+// - Active PointLight3D components use WorldTransform position and are validated
+//   before culling. With one active PerspectiveCamera3D on a non-zero surface,
+//   exact sphere-vs-perspective-frustum culling runs before the eight-slot limit.
+//   Without such a camera, including a suspended surface, all active point lights
+//   retain the same fixed capacity. Directional and point lights share one snapshot.
 // - Active PointLight2D components are validated before culling. With one resolved
 //   Camera2D on a non-zero surface, exact circle-vs-rotated-camera-rectangle culling
 //   uses the same pixel-snapped center that RenderScene commits; boundary contact is

@@ -210,11 +210,23 @@ struct Mesh3DDirectionalLight final {
     float colorB = 1.0F;
 };
 
+struct Mesh3DPointLight final {
+    float worldPositionX = 0.0F;
+    float worldPositionY = 0.0F;
+    float worldPositionZ = 0.0F;
+    float influenceRadius = 1.0F;
+    float colorR = 1.0F;
+    float colorG = 1.0F;
+    float colorB = 1.0F;
+};
+
 struct Mesh3DLightingDesc final {
     static constexpr std::size_t MaximumDirectionalLightCount = 4;
+    static constexpr std::size_t MaximumPointLightCount = 8;
 
     // Consumed synchronously by the receiving writer/device; no span is retained.
     std::span<const Mesh3DDirectionalLight> directionalLights{};
+    std::span<const Mesh3DPointLight> pointLights{};
     float ambientScale = 0.18F;
 };
 
@@ -229,6 +241,11 @@ class RenderMesh3DLighting final {
         return {m_directionalLights.data(), m_directionalLightCount};
     }
 
+    [[nodiscard]] constexpr std::span<const Mesh3DPointLight> pointLights() const noexcept
+    {
+        return {m_pointLights.data(), m_pointLightCount};
+    }
+
     [[nodiscard]] constexpr float ambientScale() const noexcept
     {
         return m_ambientScale;
@@ -236,7 +253,11 @@ class RenderMesh3DLighting final {
 
     [[nodiscard]] constexpr Mesh3DLightingDesc descriptor() const noexcept
     {
-        return {.directionalLights = directionalLights(), .ambientScale = m_ambientScale};
+        return {
+            .directionalLights = directionalLights(),
+            .pointLights = pointLights(),
+            .ambientScale = m_ambientScale,
+        };
     }
 
   private:
@@ -245,6 +266,8 @@ class RenderMesh3DLighting final {
     std::array<Mesh3DDirectionalLight, Mesh3DLightingDesc::MaximumDirectionalLightCount>
         m_directionalLights{};
     u32 m_directionalLightCount = 0;
+    std::array<Mesh3DPointLight, Mesh3DLightingDesc::MaximumPointLightCount> m_pointLights{};
+    u32 m_pointLightCount = 0;
     float m_ambientScale = 0.18F;
 };
 
@@ -376,6 +399,7 @@ struct RenderSceneStatistics final {
     u64 mesh3DSortOrderChecksum = 0;
     bool mesh3DLightingConfigured = false;
     u32 directionalLightCount = 0;
+    u32 pointLight3DCount = 0;
 };
 
 struct RenderSceneBuilderStatistics final {

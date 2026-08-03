@@ -25,6 +25,7 @@ inline constexpr Core::ErrorCode InvalidAnimation{Core::ErrorDomain::Scene, 16};
 inline constexpr Core::ErrorCode TooManyActiveDirectionalLights{Core::ErrorDomain::Scene, 17};
 inline constexpr Core::ErrorCode TooManyActivePointLights2D{Core::ErrorDomain::Scene, 18};
 inline constexpr Core::ErrorCode TooManyActiveShadowOccluders2D{Core::ErrorDomain::Scene, 19};
+inline constexpr Core::ErrorCode TooManyActivePointLights3D{Core::ErrorDomain::Scene, 20};
 
 } // namespace SceneErrorCode
 
