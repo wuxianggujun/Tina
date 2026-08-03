@@ -33,7 +33,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | UI-COMPONENT-001 | Done；标准 Behavior 独立 side store、phase-scoped bounded transaction、全池 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | UI-IMAGE-001 | Done；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
 | UI-STYLE-001 | Done；StyleClass/ColorToken、reverse-dependency、imageTint、dirty metadata、showcase Integration、`RunUiStyleVisualGate.ps1` 已落地 |
-| UI-MOTION-001 | Done；paint-only color/opacity/radius/visual-offset + reduced-motion + `ui_motion_v1` |
+| UI-MOTION-001 | Done；paint-only color/opacity/radius/visual-offset + reduced-motion + Style BackgroundColor reservation/activation + `ui_motion_v1` |
 
 UI 框架主线按以下顺序推进；这是 UI lane 的依赖顺序，不阻塞 Asset、Render、UIA 等其他 lane 并行：
 
@@ -43,26 +43,25 @@ UI-RANGE-INPUT-KEYBOARD Done
 
 UI-STATE-FEEDBACK Done (Windows Dark/Light visual gate 22/22)
   -> ADR 0023 Accepted (capacity/failure/performance contract)
-  -> UI-PERF-001 initial milestone Done / task InProgress
+  -> UI-PERF-001 Done
        |-> UI-IMAGE-001 A Done: Image/Icon + resolver/pin + RGBA ImageQuad + semantics
        |     -> B Done: NineSlice 1..9 quad atomic expansion
        |     -> C Done: product/failure/size adoption + ui_image_nineslice_v1
        `-> UI-COMPONENT-001 Done: complete pool reservation + ui_component_build_v1
 UI-IMAGE-001 Done + UI-COMPONENT-001 Done
-  -> UI-STYLE-001 (waits for both property surfaces)
-  -> UI-MOTION-001
+  -> UI-STYLE-001 Done
+  -> UI-MOTION-001 Done
 
 UI-FLOW-001 (Later; starts only for a real page-stack requirement)
 SDK-001 (independent packaging lane; does not wait for UI-FLOW-001)
 ```
 
 `UI-IMAGE-001` 与 `UI-COMPONENT-001` 两条无直接依赖的 lane 均已完成：前者关闭 Image/Icon/NineSlice
-产品与性能证据，后者关闭完整 component reservation/counter 与 `ui_component_build_v1`。当前单 UI lane
-已经汇合到 `UI-STYLE-001`；其中 startup-only ColorToken registry/value 与 token-backed BoxFill 已完成，
-下一切片是 Image tint/opacity、其他属性 dirty metadata 与 Integration/Visual 门禁。
+产品与性能证据，后者关闭完整 component reservation/counter 与 `ui_component_build_v1`。汇合后的
+`UI-STYLE-001` 与 `UI-MOTION-001` 也已完成：stylesheet imageTint、属性 dirty metadata、Integration/Visual
+门禁、paint-only Motion 与 `ui_motion_v1` 均已落地。
 `UI-RANGE-INPUT-KEYBOARD` 已独立关闭且不依赖 ADR 0023；已完成的 Image/Component 均未复制其输入状态。
-`UI-PERF-001` 首个 milestone 已完成，任务为 `InProgress`，Image/Component 已解锁；它不是只执行一次，
-Component、Image 与 Style 已扩展同一协议；Motion 后续垂直切片仍必须继续扩展 counter/checksum 协议。
+`UI-PERF-001` 已完成，Component、Image、Style 与 Motion 均已扩展同一 counter/checksum 协议。
 固定机绝对时间阈值仍由 `PERF-002` 冻结；在此之前 clean-frame rebuild、容量、
 分配和 checksum 等确定性不变量可以阻断，开发机墙钟只报告 `provisional`。`SDK-001` 先证明当前公开
 SDK 可安装；以后每个新增公共 UI 切片同步扩展 consumer gate，不等待 Deferred 的 UI Flow。
@@ -101,6 +100,9 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | 2D-PHYSICS-EXPAND / N2 | Body/Shape/Joint 独立 generation；Box/Circle/Capsule 与多 shape/body；sensor enter/exit；Distance joint；body 级联 retirement；TileMap bridge 与产品 sample 迁移；29/29 模块测试及 300 帧 sensor/joint 证据 |
 | RENDER-001-NLIGHT / N4 | Opaque3D lighting 收敛为唯一 `Mesh3DLightingDesc`，有界0..4 directional lights；Null/bgfx/shader/sample/test 同步；产品一次提交3灯 |
 | RENDER-001-SCENE-LIGHTS | `DirectionalLight3D` 进入 World；最多4个 active component 按稳定 Entity identity 转换 world direction/color×intensity，逐帧深拷贝为 RenderScene snapshot；Null/bgfx 与 product-3d schema 5 证明3灯连续300帧消费 |
+| 2D-LIGHT-N3 | PointLight2D 在容量提交前按 resolved、pixel-snapped Camera2D 做旋转相机空间精确 circle-vs-rectangle culling；仅 camera-affecting light 占8槽，第9盏显式失败；无相机/0x0 surface 与 ShadowOccluder2D 保留未裁剪语义；product-2d schema 17 固化 authored=3/committed=2/culled=1 |
+| 2D-LIGHT-N4 | PointLight2D source radius 默认0保留硬阴影，正值以固定成本 normalized-depth segment projection 生成连续 penumbra；CPU reference、GLSL120/SPIR-V/DXBC shaderc 与 product-2d schema 18 soft/hard 四跑差分通过 |
+| 2D-LIGHT-N5 | Sprite2D 可选 weak normal Texture2D handle 经独立 resolver 进入 packet-local ref；Null/bgfx 双 ref preflight、`(base, normal)` 连续 batch、derivative TBN 与 flat-normal fallback 已贯通；product-2d schema 19 固定 `texturesUploaded=3`，normal on/off 四跑差分及3份 Texture owner/retirement lifecycle 通过 |
 | 2D-INPUT-ADV / N3 | Runtime 单一 unified binding 覆盖 digital/analog value、deadzone/scale、两种合成、多手柄、UI suppression 与 next-frame transactional rebind；本轮测试执行结果以最终验证记录为准 |
 | 2D-TILEMAP-STREAM | TileMap v3 stream root + 独立 deferred TileMapChunk；固定容量 Camera/layer demand、request budget、cancel/unload、lease 与 transactional capacity；resident generation 贯通 dirty cache；产品 sample 每帧推进 visual/collision residency |
 | 2D-TILEMAP-LRU | retain window 作为 optional cache；按成功 demand update 时位于 load window 的 recency 自动淘汰，读取不 touch；desired 强需求超 capacity 仍 transactional |
@@ -132,9 +134,9 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 门禁 | 当前结论 | 下一关闭点 |
 | --- | --- | --- |
-| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle 已完成；全部 Sprite2D item 使用 packet-local `FrameResourceRef`，fixed-capacity registry 唯一拥有 resident Lease/GPU/binding；schema 16 增加两盏 `PointLight2D`、两条 `ShadowOccluder2D` 与逐次 Render extraction snapshot，并保留 Dark→Light→Dark、Scene Explorer TreeView stable-key selection/scroll/theme/semantics、2份 owner/retirement handoff、weak handle 失效、ledger Released 与四类 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | 2D light culling/soft shadow/normal map/独立视觉金标、TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 均为独立后续项 |
+| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle 已完成；Sprite2D base/optional-normal 都使用 packet-local `FrameResourceRef`，fixed-capacity registry 唯一拥有 resident Lease/GPU/binding；schema 19 继承双灯双遮挡、authored/committed/culled=`3/2/1` 与 soft=2/hard=0 四跑差分，并以 normal count=`1/0`、normal on/off 各自可重复且互异的 RGBA8 fingerprint 关闭 N5；同时保留 Dark→Light→Dark、Scene Explorer TreeView stable-key selection/scroll/theme/semantics、`texturesUploaded=3`、3份 owner/retirement handoff、weak handle 失效、ledger Released 与四类 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | 跨 GPU lighting exact golden、TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 均为独立后续项 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
-| UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 即时反馈、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction、Canvas `SolidRect` 与统一 RoundedRect 已关闭；Image/Icon 的 root-scoped resolve/pin/RGBA ImageQuad 链路与 Canvas NineSlice 原子展开已完成；Showcase 已接入 icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light atlas/sampling 视觉和逐帧结构化证据，以 lifecycle mode 覆盖 atlas invalidation、unavailable 与 missing resolver 连续 skip，并以 6-case size matrix 覆盖 Dark/Light × 1x/1.25x/1.5x client footprint；`ui_image_nineslice_v1` 关闭 `Q=5096/U=64/B=1000`、resolve/pin/dedupe/high-water/allocation/checksum；Component 完成 node/text/canvas/六类 Behavior 全池 reservation/counter 与 `ui_component_build_v1` | `UI-IMAGE-001` 与 `UI-COMPONENT-001` 已关闭；下一 UI lane 为 Style，再进入 Motion；OS 级 DPI 与跨 GPU 金标由 `UI-003` 跟踪 |
+| UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 反馈、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction、Canvas `SolidRect` 与统一 RoundedRect 已关闭；Image/Icon 的 root-scoped resolve/pin/RGBA ImageQuad 链路与 Canvas NineSlice 原子展开已完成；Showcase 已接入 icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light atlas/sampling 视觉和逐帧结构化证据，以 lifecycle mode 覆盖 atlas invalidation、unavailable 与 missing resolver 连续 skip，并以 6-case size matrix 覆盖 Dark/Light × 1x/1.25x/1.5x client footprint；`ui_image_nineslice_v1` 关闭 `Q=5096/U=64/B=1000`、resolve/pin/dedupe/high-water/allocation/checksum；Component 完成全池 reservation/counter 与 `ui_component_build_v1`；Style/Motion 完成 imageTint、Visual gate、persistent BackgroundColor reservation/activation 与 `ui_motion_v1` | OS 级 DPI 与跨 GPU 金标由 `UI-003` 跟踪；完整 keyframe timeline/layout animation 为独立后续项 |
 | UI accessibility | 平台中立 action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns 与真实 showcase HWND 跨进程自动 gate 已落地；gate 可输出属性/fragment、action 结果和正常关闭的 schema 1 JSON | 固化当前 tip 的带日期 gate 结果并完成 Windows Narrator/Inspect 人工金标；Linux AT-SPI 由 `UI-002-LINUX` 独立跟踪 |
 | 3D product | 双 mesh + Resources-owned AssetSystem + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material resolver、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、World DirectionalLight3D→逐帧 RenderScene snapshot 已有证据；schema 5 证明3灯连续300帧发布，并保留2 Mesh/2 Material/3 Texture handoff、weak handle 失效、ledger Released、成熟 retained controls、Asset ListView/Scene TreeView 与 Dark→Light→Dark | RENDER-001 的完整 PBR/IBL/shadow、point/spot light + culling、pass scheduling |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion、独立 Texture/Mesh AssetLease readback retirement，以及 Task timeout/retry + Host-enforced TaskSystem worker-exit/join deadline 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |

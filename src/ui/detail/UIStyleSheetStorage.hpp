@@ -77,6 +77,8 @@ class UIStyleSheetStorage final {
     [[nodiscard]] UIStyleBoxFillResolution
     resolveValidated(UIStyleRoleId role, std::span<const UIStyleClassId> classes,
                      UIStyleState states) const noexcept;
+    [[nodiscard]] bool hasStatefulBoxFillCandidateValidated(UIStyleRoleId role,
+                                                            std::span<const UIStyleClassId> classes) const noexcept;
 
     [[nodiscard]] UIStyleSheetStorageStatistics statistics() const noexcept;
 

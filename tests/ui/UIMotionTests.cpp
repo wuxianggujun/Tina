@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <memory>
+#include <thread>
 
 namespace Tina::Tests {
 namespace {
@@ -318,6 +319,344 @@ TEST(UIMotionTests, VisualOffsetShiftsPaintWorldRectNotLayout)
     EXPECT_FLOAT_EQ(after->worldRect.y, beforeY + 8.0F);
     EXPECT_FALSE(context->statistics().layoutDirty);
     EXPECT_FALSE(context->statistics().hitDirty);
+}
+
+TEST(UIMotionTests, StyleStateChangeCanDriveBackgroundColorTransition)
+{
+    UI::UIContextCapacityConfig config{
+        .nodeCapacity = 8,
+        .rootCapacity = 1,
+        .styleClassCapacity = 4,
+        .styleTokenCapacity = 4,
+        .styleRuleCapacity = 8,
+        .styleBucketCapacity = 8,
+        .styleRulesPerBucketCapacity = 4,
+        .motionTrackCapacity = 4,
+        .applyDefaultProductChrome = false,
+    };
+    auto contextResult = UI::UIContext::Create(makeMotionWindow(), config);
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    auto context = std::move(*contextResult);
+    FakeMotionClock clock;
+    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+
+    auto styleClass = context->registerStyleClass();
+    ASSERT_TRUE(styleClass.has_value()) << styleClass.error().message;
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .styleClass = *styleClass,
+            .color = UI::rgba8(0, 0, 0, 255),
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .styleClass = *styleClass,
+            .requiredStates = UI::UIStyleState::Hovered,
+            .color = UI::rgba8(100, 0, 0, 255),
+        },
+    };
+    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+    ASSERT_TRUE(context
+                    ->setStyleBackgroundColorTransition(UI::UITransitionSpec{
+                        .property = UI::UIAnimatableProperty::BackgroundColor,
+                        .duration = Core::Duration{0.100},
+                        .easing = UI::UIEasing::Linear,
+                    })
+                    .has_value());
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UIElementDescriptor button = UI::makeButtonElement("Go", fixedSize(80.0F, 40.0F));
+    button.visual.styleRole = UI::UIStyleRoleId::ButtonPrimary;
+    const UI::UIStyleClassId classId = *styleClass;
+    button.visual.styleClasses = std::span(&classId, 1);
+    const auto node = updater.createElement(root.rootNodeId(), button);
+    ASSERT_TRUE(node.has_value()) << node.error().message;
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_NE(findSolidPaint(context->committedPaint(), *node), nullptr);
+    EXPECT_EQ(findSolidPaint(context->committedPaint(), *node)->solidFill, UI::premultiply(UI::rgba8(0, 0, 0, 255)));
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
+
+    const UI::UIPointerInputEvent hoverInput{
+        .platformFrame = Platform::PlatformFrameId{1},
+        .transitionOrdinal = 0,
+        .sourceSequence = 1,
+        .window = context->ownerWindow(),
+        .pointer = Platform::PrimaryPointerId,
+        .kind = UI::UIRoutedPointerEventKind::Move,
+        .position = {.x = 40.0F, .y = 20.0F},
+        .delta = {.x = 1.0F, .y = 0.0F},
+        .button = Platform::PointerButton::Primary,
+    };
+    auto route = context->routePointerInput(hoverInput);
+    ASSERT_TRUE(route.has_value()) << route.error().message;
+    // Style→motion retarget runs during paint rebuild on commitLayout.
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
+    EXPECT_FALSE(context->statistics().layoutDirty);
+
+    clock.advance(Core::Duration{0.050});
+    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const auto* mid = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_NE(mid, nullptr);
+    EXPECT_EQ(mid->solidFill, UI::premultiply(UI::rgba8(50, 0, 0, 255)));
+
+    clock.advance(Core::Duration{0.050});
+    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const auto* completed = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_NE(completed, nullptr);
+    EXPECT_EQ(completed->solidFill, UI::premultiply(UI::rgba8(100, 0, 0, 255)));
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
+
+    const UI::UIPointerInputEvent leaveInput{
+        .platformFrame = Platform::PlatformFrameId{2},
+        .transitionOrdinal = 0,
+        .sourceSequence = 2,
+        .window = context->ownerWindow(),
+        .pointer = Platform::PrimaryPointerId,
+        .kind = UI::UIRoutedPointerEventKind::Move,
+        .position = {.x = 140.0F, .y = 70.0F},
+        .delta = {.x = 100.0F, .y = 50.0F},
+        .button = Platform::PointerButton::Primary,
+    };
+    route = context->routePointerInput(leaveInput);
+    ASSERT_TRUE(route.has_value()) << route.error().message;
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
+
+    ASSERT_TRUE(updater.setBoxPaint(*node, UI::makeSolidBox(UI::rgba8(0, 80, 0, 255))).has_value());
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const auto* overridden = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_NE(overridden, nullptr);
+    EXPECT_EQ(overridden->solidFill, UI::premultiply(UI::rgba8(0, 80, 0, 255)));
+}
+
+TEST(UIMotionTests, ElementCreationReservesAgainstAuthoredStyleBinding)
+{
+    UI::UIContextCapacityConfig config{
+        .nodeCapacity = 4,
+        .rootCapacity = 1,
+        .paintSnapshotCapacity = 16,
+        .styleRuleCapacity = 4,
+        .styleBucketCapacity = 4,
+        .styleRulesPerBucketCapacity = 4,
+        .motionTrackCapacity = 1,
+        .applyDefaultProductChrome = false,
+    };
+    auto contextResult = UI::UIContext::Create(makeMotionWindow(), config);
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    auto context = std::move(*contextResult);
+
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .color = UI::rgba8(0, 0, 0, 255),
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .requiredStates = UI::UIStyleState::Hovered,
+            .color = UI::rgba8(100, 0, 0, 255),
+        },
+    };
+    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+    ASSERT_TRUE(context
+                    ->setStyleBackgroundColorTransition(UI::UITransitionSpec{
+                        .property = UI::UIAnimatableProperty::BackgroundColor,
+                        .duration = Core::Duration{0.100},
+                        .easing = UI::UIEasing::Linear,
+                    })
+                    .has_value());
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UIElementDescriptor button = UI::makeButtonElement("No motion", fixedSize(80.0F, 40.0F));
+    button.visual.styleRole = UI::UIStyleRoleId::None;
+    auto unbound = updater.createElement(root.rootNodeId(), button);
+    ASSERT_TRUE(unbound.has_value()) << unbound.error().message;
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 0U);
+
+    const Core::Status initialCommit = context->commitLayout({.width = 160.0F, .height = 80.0F});
+    ASSERT_TRUE(initialCommit.has_value()) << initialCommit.error().message;
+    const UI::UIPointerInputEvent hoverUnbound{
+        .platformFrame = Platform::PlatformFrameId{1},
+        .transitionOrdinal = 0,
+        .sourceSequence = 1,
+        .window = context->ownerWindow(),
+        .pointer = Platform::PrimaryPointerId,
+        .kind = UI::UIRoutedPointerEventKind::Move,
+        .position = {.x = 40.0F, .y = 20.0F},
+        .delta = {.x = 1.0F, .y = 0.0F},
+        .button = Platform::PointerButton::Primary,
+    };
+    ASSERT_TRUE(context->routePointerInput(hoverUnbound).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 0U);
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
+
+    button.visual.styleRole = UI::UIStyleRoleId::ButtonPrimary;
+    auto firstBound = updater.createElement(root.rootNodeId(), button);
+    ASSERT_TRUE(firstBound.has_value()) << firstBound.error().message;
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
+
+    button.text = "Capacity full";
+    auto secondBound = updater.createElement(root.rootNodeId(), button);
+    ASSERT_FALSE(secondBound.has_value());
+    EXPECT_EQ(secondBound.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
+
+    ASSERT_TRUE(updater.setStyleRole(*firstBound, UI::UIStyleRoleId::None).has_value());
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 0U);
+
+    auto reusedReservation = updater.createElement(root.rootNodeId(), button);
+    ASSERT_TRUE(reusedReservation.has_value()) << reusedReservation.error().message;
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
+    ASSERT_TRUE(updater.destroy(*reusedReservation).has_value());
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 0U);
+
+    ASSERT_TRUE(updater.setStyleRole(*firstBound, UI::UIStyleRoleId::ButtonPrimary).has_value());
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
+    ASSERT_TRUE(updater.destroy(*firstBound).has_value());
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 0U);
+}
+
+TEST(UIMotionTests, StyleTransitionEnablePreflightsReservationsAtomically)
+{
+    UI::UIContextCapacityConfig config{
+        .nodeCapacity = 8,
+        .rootCapacity = 1,
+        .styleClassCapacity = 2,
+        .styleRuleCapacity = 4,
+        .styleBucketCapacity = 4,
+        .styleRulesPerBucketCapacity = 4,
+        .motionTrackCapacity = 1,
+        .applyDefaultProductChrome = false,
+    };
+    auto contextResult = UI::UIContext::Create(makeMotionWindow(), config);
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    auto context = std::move(*contextResult);
+
+    auto styleClass = context->registerStyleClass();
+    ASSERT_TRUE(styleClass.has_value()) << styleClass.error().message;
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .styleClass = *styleClass,
+            .color = UI::rgba8(0, 0, 0, 255),
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .styleClass = *styleClass,
+            .requiredStates = UI::UIStyleState::Hovered,
+            .color = UI::rgba8(100, 0, 0, 255),
+        },
+    };
+    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+    const UI::UIStyleClassId classId = *styleClass;
+    UI::UIElementDescriptor button = UI::makeButtonElement("One", fixedSize(80.0F, 40.0F));
+    button.visual.styleRole = UI::UIStyleRoleId::ButtonPrimary;
+    button.visual.styleClasses = std::span(&classId, 1);
+    ASSERT_TRUE(updater.createElement(root.rootNodeId(), button).has_value());
+    button.text = "Two";
+    ASSERT_TRUE(updater.createElement(root.rootNodeId(), button).has_value());
+
+    const UI::UITransitionSpec transition{
+        .property = UI::UIAnimatableProperty::BackgroundColor,
+        .duration = Core::Duration{0.100},
+        .easing = UI::UIEasing::Linear,
+    };
+    const Core::Status enable = context->setStyleBackgroundColorTransition(transition);
+    ASSERT_FALSE(enable.has_value());
+    EXPECT_EQ(enable.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(context->styleBackgroundColorTransition().duration.count(), 0.0);
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 0U);
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
+}
+
+TEST(UIMotionTests, StyleTransitionEnableDrainsDeferredRootsBeforeCapacityPreflight)
+{
+    UI::UIContextCapacityConfig config{
+        .nodeCapacity = 8,
+        .rootCapacity = 2,
+        .styleRuleCapacity = 4,
+        .styleBucketCapacity = 4,
+        .styleRulesPerBucketCapacity = 4,
+        .motionTrackCapacity = 1,
+        .applyDefaultProductChrome = false,
+    };
+    auto contextResult = UI::UIContext::Create(makeMotionWindow(), config);
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    auto context = std::move(*contextResult);
+
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .color = UI::rgba8(0, 0, 0, 255),
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .requiredStates = UI::UIStyleState::Hovered,
+            .color = UI::rgba8(100, 0, 0, 255),
+        },
+    };
+    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+
+    auto firstRootResult = context->rootBuilder().createRoot();
+    auto deferredRootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(firstRootResult.has_value());
+    ASSERT_TRUE(deferredRootResult.has_value());
+    UI::UIRootOwner firstRoot = std::move(*firstRootResult);
+    UI::UIRootOwner deferredRoot = std::move(*deferredRootResult);
+
+    UI::UIElementDescriptor button = UI::makeButtonElement("Bound", fixedSize(80.0F, 40.0F));
+    button.visual.styleRole = UI::UIStyleRoleId::ButtonPrimary;
+    auto firstUpdaterResult = context->treeUpdater(firstRoot);
+    auto deferredUpdaterResult = context->treeUpdater(deferredRoot);
+    ASSERT_TRUE(firstUpdaterResult.has_value());
+    ASSERT_TRUE(deferredUpdaterResult.has_value());
+    const auto firstNode = firstUpdaterResult->createElement(firstRoot.rootNodeId(), button);
+    const auto deferredNode = deferredUpdaterResult->createElement(deferredRoot.rootNodeId(), button);
+    ASSERT_TRUE(firstNode.has_value());
+    ASSERT_TRUE(deferredNode.has_value());
+
+    std::thread releaseThread([ownedRoot = std::move(deferredRoot)]() mutable {
+        ownedRoot.reset();
+    });
+    releaseThread.join();
+
+    ASSERT_TRUE(context
+                    ->setStyleBackgroundColorTransition(UI::UITransitionSpec{
+                        .property = UI::UIAnimatableProperty::BackgroundColor,
+                        .duration = Core::Duration{0.100},
+                        .easing = UI::UIEasing::Linear,
+                    })
+                    .has_value());
+    EXPECT_TRUE(context->contains(*firstNode));
+    EXPECT_FALSE(context->contains(*deferredNode));
+    EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
 }
 
 } // namespace

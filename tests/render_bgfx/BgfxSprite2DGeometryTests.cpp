@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <span>
@@ -35,15 +36,25 @@ public:
 
     [[nodiscard]] FrameResourceRef texture(u64 deviceBindingKey)
     {
+        return resource(FrameResourceKind::Texture2D, deviceBindingKey);
+    }
+
+    [[nodiscard]] FrameResourceRef resource(FrameResourceKind kind, u64 deviceBindingKey)
+    {
         FramePin pin{FramePinKind::Custom, deviceBindingKey, &releaseCount_, &countRelease};
         auto result = packet_.intern(
             FrameResourceDescriptor{
-                .kind = FrameResourceKind::Texture2D,
+                .kind = kind,
                 .deviceBindingKey = deviceBindingKey,
             },
             std::move(pin));
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         return result ? *result : FrameResourceRef{};
+    }
+
+    void beginNextFrame(u64 frameIndex)
+    {
+        EXPECT_TRUE(packet_.beginFrame(frameIndex));
     }
 
     [[nodiscard]] FrameResourceTableView view() const noexcept
@@ -303,6 +314,39 @@ TEST(BgfxSprite2DGeometryTest, MultipleTextureRefsPreserveRenderOrderAndCountCon
     EXPECT_TRUE(std::ranges::equal(indices, ExpectedIndices));
 }
 
+TEST(BgfxSprite2DGeometryTest, NormalTextureChangesSplitContiguousBaseTextureBatches)
+{
+    FrameResourceScope resources;
+    const FrameResourceRef atlas = resources.texture(11);
+    const FrameResourceRef normalA = resources.texture(21);
+    const FrameResourceRef normalB = resources.texture(31);
+
+    auto withoutNormalFirst = sprite(atlas, 10, -4.0F, 0, 0);
+    auto withNormalAFirst = sprite(atlas, 20, -2.0F, 0, 1);
+    withNormalAFirst.normalTexture = normalA;
+    auto withNormalASecond = sprite(atlas, 30, 0.0F, 0, 2);
+    withNormalASecond.normalTexture = normalA;
+    auto withNormalB = sprite(atlas, 40, 2.0F, 0, 3);
+    withNormalB.normalTexture = normalB;
+    auto withoutNormalLast = sprite(atlas, 50, 4.0F, 0, 4);
+
+    RenderSceneBuilder builder = makeBuilder();
+    const std::array inputs{
+        withoutNormalFirst,
+        withNormalAFirst,
+        withNormalASecond,
+        withNormalB,
+        withoutNormalLast,
+    };
+    auto scene = commitScene(builder, inputs);
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
+    ASSERT_TRUE(requirements.has_value()) << requirements.error().message;
+    EXPECT_EQ(requirements->spriteCount, 5U);
+    EXPECT_EQ(requirements->batchCount, 4U);
+}
+
 TEST(BgfxSprite2DGeometryTest, RejectsInvalidTextureRefInCorruptView)
 {
     FrameResourceScope resources;
@@ -345,6 +389,74 @@ TEST(BgfxSprite2DGeometryTest, CrossPacketTextureRefFailsBeforeAnyGeometryWrite)
                vertex.abgr == VertexSentinel.abgr;
     }));
     EXPECT_TRUE(std::ranges::all_of(indices, [](u32 index) { return index == IndexSentinel; }));
+}
+
+TEST(BgfxSprite2DGeometryTest, RejectsCrossPacketNormalTextureRef)
+{
+    FrameResourceScope normalResources;
+    FrameResourceScope submittedResources;
+    const FrameResourceRef texture = submittedResources.texture(1);
+    auto mapped = sprite(texture, 1, 0.0F);
+    mapped.normalTexture = normalResources.texture(2);
+    RenderSceneBuilder builder = makeBuilder();
+    const std::array inputs{mapped};
+    auto scene = commitScene(builder, inputs);
+    ASSERT_TRUE(scene.has_value());
+
+    auto requirements = checkedSprite2DFrame(*scene, submittedResources.view());
+    ASSERT_FALSE(requirements.has_value());
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
+}
+
+TEST(BgfxSprite2DGeometryTest, RejectsStaleNormalTextureRef)
+{
+    FrameResourceScope resources;
+    const FrameResourceRef staleNormal = resources.texture(2);
+    resources.beginNextFrame(1);
+    const FrameResourceRef texture = resources.texture(1);
+    auto mapped = sprite(texture, 1, 0.0F);
+    mapped.normalTexture = staleNormal;
+    RenderSceneBuilder builder = makeBuilder();
+    const std::array inputs{mapped};
+    auto scene = commitScene(builder, inputs);
+    ASSERT_TRUE(scene.has_value());
+
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
+    ASSERT_FALSE(requirements.has_value());
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
+}
+
+TEST(BgfxSprite2DGeometryTest, RejectsWrongKindNormalTextureRef)
+{
+    FrameResourceScope resources;
+    const FrameResourceRef texture = resources.texture(1);
+    auto mapped = sprite(texture, 1, 0.0F);
+    mapped.normalTexture = resources.resource(FrameResourceKind::Mesh3DMaterial, 2);
+    RenderSceneBuilder builder = makeBuilder();
+    const std::array inputs{mapped};
+    auto scene = commitScene(builder, inputs);
+    ASSERT_TRUE(scene.has_value());
+
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
+    ASSERT_FALSE(requirements.has_value());
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
+}
+
+TEST(BgfxSprite2DGeometryTest, RejectsNormalTextureBindingKeyOutsideSpriteBindingRange)
+{
+    FrameResourceScope resources;
+    const FrameResourceRef texture = resources.texture(1);
+    auto mapped = sprite(texture, 1, 0.0F);
+    mapped.normalTexture =
+        resources.texture(static_cast<u64>((std::numeric_limits<u32>::max)()) + 1U);
+    RenderSceneBuilder builder = makeBuilder();
+    const std::array inputs{mapped};
+    auto scene = commitScene(builder, inputs);
+    ASSERT_TRUE(scene.has_value());
+
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
+    ASSERT_FALSE(requirements.has_value());
+    EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
 }
 
 TEST(BgfxSprite2DGeometryTest, RejectsTextureBindingKeyOutsideSpriteBindingRange)

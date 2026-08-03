@@ -53,6 +53,7 @@ consume/claim 后 digital/analog source 均不会穿透。运行时改键只通�
 `SpriteRenderer2D` 保存：
 
 - copyable weak Sprite `AssetHandle`；
+- optional copyable weak Texture2D normal-map `AssetHandle`；
 - size、pivot、UV override；
 - color、sorting layer、order、flip 与 visible。
 
@@ -65,23 +66,42 @@ backend bind 失败不消费 key，同一 device 上的多个 registry 不会碰
 唯一 required Texture2D cooked dependency 校验
 Store owner/generation、kind、payload 与 live binding，再把 binding intern 到当前 packet，只写
 `FrameResourceRef`、transform、UV 与颜色。缺 resolver
-或无法解析的 visible sprite 返回 `UnresolvedSprite`；hidden sprite 不触发解析。
+或无法解析的 visible sprite 返回 `UnresolvedSprite`。非空 normal handle 经独立
+`normalTextureBindingResolver` 解析：产品 adapter 先按 Store 验证 Handle→AssetId，再复用 registry 的
+Texture2D frame-resource resolver。visible sprite 声明的 base/normal 任一解析失败都在 writer 提交前返回
+`UnresolvedSprite`；hidden sprite 对两个 resolver 都是零调用。
 
 Sprite 顺序为 sorting layer → order in layer → stable source ordinal。透明语义不能为了全局纹理合批
-被重排；bgfx 按最终顺序扫描相邻且 texture ref 相同的 Sprite，按连续区间解析 binding、绑定纹理并
-submit。例如 ref 序列 A/A/B/A 会形成3个 batch，而不会重排成 A/A/A/B。空、cross-packet、stale、
-wrong-kind 或 binding 超范围 ref 在提交产生副作用前失败。UI 使用独立 pass，始终不混入 World Sprite batch。
+被重排；bgfx 按最终顺序扫描相邻且 `(baseTexture, normalTexture)` ref pair 相同的 Sprite，按连续区间解析
+binding、绑定纹理并 submit。例如 base ref 序列 A/A/B/A 会形成3个 batch，而不会重排成 A/A/A/B；同一
+base 的 normal ref 不同也会分 batch。base/normal 的空规则、cross-packet、stale、wrong-kind 或 binding
+超范围 ref 都在提交产生副作用前失败。UI 使用独立 pass，始终不混入 World Sprite batch。
 
-`2D-LIGHT-N2` 每帧从同一 World 提取最多8个 active `PointLight2D` 与32个 active
-`ShadowOccluder2D` 线段。Scene 按稳定 Entity identity 把
-world position、显式 radius 与 color×intensity 深拷贝进当前 RenderScene snapshot；bgfx 对每个 fragment
-计算线性径向衰减，并把 occluder 的 local-space 端点经已发布 XY scale、rotation、position 转换为
-world-space 线段；fragment 到 light 的线段相交时只清零该点光贡献。ambient、上述透明排序、连续 texture
-batch 与 premultiplied alpha 不变。没有 PointLight2D 组件时维持原 unlit 输出，inactive-only 可显式发布
-ambient-only。产品 sample 固定创建暖/冷两灯与两条遮挡线并逐帧发布；本切片不包含 normal map、light
-culling、软阴影或独立视觉金标。
+`2D-LIGHT-N1/N2` 建立 frame-scoped `PointLight2D`/`ShadowOccluder2D` snapshot；N3 在同一 World
+extraction 中加入 camera-space point-light culling，N4 增加 finite source radius soft shadow，N5 增加
+Sprite2D optional normal map。Scene 先验证
+active light、已发布 `WorldTransform`、显式 influence/source radii 与 color×intensity，再把灯心转换到旋转
+相机局部空间，以精确 circle-vs-rectangle 相交决定
+是否影响当前 Camera2D；相机中心使用 RenderScene committed view 相同的 pixel snap，边界相切仍保留。
+只有 camera-affecting light 按稳定 Entity identity 占用8个 committed 槽，第9盏仍显式失败。没有 active
+Camera2D 或 framebuffer 0x0 时不裁剪，维持全部 active light 的原容量语义；非法离屏灯也不会被裁剪
+隐藏。ShadowOccluder2D 始终按已发布 XY scale、rotation、position 转换为 world-space 线段且不做
+camera culling，因为视口外 segment 仍可能遮挡边界光线。
 
-产品 sample 当前上传两张 Cooked Texture2D，并把每张 `GpuTextureId` 连同一份 resident `AssetLease`
+bgfx 对每个 fragment 计算线性径向衰减。`sourceRadiusMeters=0` 时 fragment→light 与 occluder 相交只清零
+该点光贡献；正 source radius 时按 receiver→light 深度投影 segment，连续计算 finite source visibility，
+多 segment 使用 multiplicative transmittance。该 line-source 近似保持 `8×32` 固定成本，不是精确 area-light
+积分或重叠区间 union。
+ambient、上述透明排序、连续 texture batch 与 premultiplied alpha 不变。没有 PointLight2D 组件时维持
+原 unlit 输出，inactive-only 可显式发布 ambient-only。产品 sample 固定创建暖/冷两盏相机内灯、1盏
+永久离屏 active light 与两条遮挡线并逐帧发布；schema 19 断言 `authoredPointLight2DCount=3`、
+`pointLight2DCount=2`、`culledPointLight2DCount=1` 与默认 `softShadowPointLight2DCount=2`，同时继承
+schema 16 的双灯双遮挡 evidence。`RunProduct2dShadowVisualGate.ps1` 对 soft/hard 各重复两次并证明两种
+RGBA8 fingerprint 稳定且不同。角色 Sprite 另带独立3×1 normal atlas；`RunProduct2dNormalMapVisualGate.ps1`
+在保持 normal atlas cook/load/upload/register/retire 不变的前提下，仅清空组件 normal handle，对 on/off 各重复
+两次并证明 `normalMappedSpriteCount=1/0`、同模式可重复且跨模式像素不同。当前仍不包含跨 GPU lighting exact golden。
+
+产品 sample 当前上传三张 Cooked Texture2D（Tile、角色 base、角色 normal），并把每张 `GpuTextureId` 连同一份 resident `AssetLease`
 转移给 State-owned `Sprite2DBindingRegistry`；registry 借用 `TileMapResources` 中的 `AssetSystem` 与
 `DeviceCapture` 中的 RenderDevice，两个外部 owner 都必须保持地址稳定并覆盖 State/registry 及已提交的
 retirement pin 生命周期。World 里的 crate/角色帧保存 Catalog Sprite handle，再由 borrowed resolver
@@ -110,14 +130,16 @@ Catalog recipe 支持：
 spriteanim <clip-id> <Once|Loop|PingPong> <sprite-id:duration-seconds>...
 ```
 
-`SpriteAnimator2D` 接收已在 Asset/Scene 边界解析为 `SpriteRenderer2D` 的帧；每帧复制 weak AssetHandle，
+`SpriteAnimator2D` 接收已在 Asset/Scene 边界解析为 `SpriteRenderer2D` 的帧；每帧复制 weak Sprite handle
+与 optional weak normal Texture2D handle，
 但不持有 AssetLease 或 backend texture。它支持 Once 停在末帧、Loop、PingPong 反向经过内部帧、pause/play/stop/restart、
 正倍速和跨多帧的大 delta；无效 clip、非正倍速及负数/非有限 delta 会显式失败。clip 帧在设置时复制，
 `update()` 不分配。
 
 产品 sample 从 Catalog 解析 Idle、Walk、HitWall 三个 clip（共5个 resolved frame），由角色 fixed-step
 状态驱动 `Idle -> Walk -> HitWall`。HitWall 使用 Once clip，并把完成状态写入结构化门禁；角色当前帧
-直接更新 Scene 的 `SpriteRenderer2D`，使用独立角色 Sprite handle/atlas binding。
+直接更新 Scene 的 `SpriteRenderer2D`，使用独立角色 Sprite handle/base atlas binding；默认模式同时复制
+aligned normal atlas handle，`--disable-normal-maps` 只清空该组件 handle，不跳过 normal atlas 生命周期。
 
 ## Particles 与 Trail
 
@@ -253,25 +275,26 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 当前 sample 的结构化产品门禁要求：
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
-- `catalogFromRecipeFile=true`、`catalogRecipeAssets=14`（含2个 cooked chunk）、`texturesUploaded=2`；
-- `evidenceSchema=16`，`sprite2DLightingConfigured=true`、`pointLight2DCount=2`、
-  `shadowOccluder2DCount=2`、
-  `sceneLightingFrames=renderExtractions`，并保留 `uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
+- `catalogFromRecipeFile=true`、`catalogRecipeAssets=15`（含2个 cooked chunk 与独立 normal atlas）、`texturesUploaded=3`；
+- `evidenceSchema=19`，`sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
+  `pointLight2DCount=2`、`culledPointLight2DCount=1`，并继承 schema 16 的双灯双遮挡证据；
+  `shadowOccluder2DCount=2`、`softShadowPointLight2DCount=2`、
+  `normalMappedSpriteCount=1`、`sceneLightingFrames=renderExtractions`，并保留 `uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
   `uiThemeButtonActivations=0`、`uiThemeFinalLight=false`，证明自动 Dark→Light→Dark 在 UI phase 完成；
 - `uiTreeDemoRequested=true`、`uiTreeViewsCreated=1`、`uiTreeLogicalItems=13`、
   `uiTreeMaterializedCapacity=12`、`uiTreeSelectionChanges=2`、最终 stable key `402`/index `12`、
   `uiTreeScrolled=true`、Theme paint 与 Tree/TreeItem selected semantics 均已验证；
-- `spriteBindingTextures=2`、`spriteTextureLeasesAcquired=2`、
-  `spriteTextureRetirementsAccepted=2`、`spriteBindingRegistryReleased=true`、
-  `spriteTextureHandlesInvalidated=2`、`spriteTextureRetirementRecords=2`、
-  `spriteTextureRetirementReleased=2`、`spriteTextureRetirementLive=0`、`spriteBindingResolverHits>0`，并且
+- `spriteBindingTextures=3`、`spriteTextureLeasesAcquired=3`、
+  `spriteTextureRetirementsAccepted=3`、`spriteBindingRegistryReleased=true`、
+  `spriteTextureHandlesInvalidated=3`、`spriteTextureRetirementRecords=3`、
+  `spriteTextureRetirementReleased=3`、`spriteTextureRetirementLive=0`、`spriteBindingResolverHits>0`，并且
   `tileMapSpriteBindingResolverHits>0`、`particleSpriteBindingResolverHits>0`、
   `trailSpriteBindingResolverHits>0`；这些字段都进入 evidence hash；
 - `tileMapStreamRequests=2`、`tileMapStreamCommitted=2`、`tileMapStreamResident=2`，且每个 frame 都推进
   demand/pump/commit；
 - `objectLayerConsumed=true`、`objectLayerObjects=2`，稳定 object `101/102` 已被产品逻辑消费；
 - 300次 extraction/physics step，角色 grounded/walk/hit-right；
-- Tile/角色双纹理 upload/binding、连续 sprite batch、Camera follow/interpolation、chunk cache；
+- Tile/角色 base/角色 normal 三纹理 upload/binding、连续 sprite batch、Camera follow/interpolation、chunk cache；
 - 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；
 - 固定粒子容量12、seed `1414090305`、初始发射10，300帧时 expired=4、
   active/extracted=6；Trail 容量8、创建/active/extracted segment=3、break=1；
@@ -313,7 +336,7 @@ exit 0。2026-07-29 动态 glyph atlas 修复后的 Dark/Light FreeType 截图�
 
 - 当前 streaming 是固定容量 Camera/layer demand owner，已有 retain-window demand-recency LRU，但不包含
   优先级 IO 调度、通用 Tile/Scene 编辑器、自动把任意 object layer 转成完整 gameplay、旧 schema
-  migration、2D light culling、navigation 或网络 rollback；
+  migration、navigation 或网络 rollback；
 - Cooked SpriteAsset 的完整 atlas/PPU metadata resolve 仍可扩展，当前产品使用 Texture2D + 显式 UV/key；
 - GPU chunk mesh cache、复杂透明材质与多 camera/letterbox policy 尚未产品化；
 - 当前 2D-FX 是 CPU fixed-capacity Sprite2D extraction，不包含 Cooked FX asset schema、effect graph/editor、

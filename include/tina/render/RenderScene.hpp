@@ -62,13 +62,15 @@ struct RenderCamera2DInput final {
     RenderPixelSnapPolicy pixelSnap = RenderPixelSnapPolicy::Disabled;
 };
 
-// texture is a packet-local Texture2D reference. The backend resolves it
-// through RenderFrame::resources during the synchronous submit call.
+// texture is a required packet-local Texture2D reference. normalTexture is an
+// optional packet-local Texture2D reference; invalid means no normal map. The
+// backend resolves both through RenderFrame::resources during synchronous submit.
 // UV rect defaults to full texture [0,1]; typed Sprite payload extraction may
 // override it. The position is the resolved geometric center; Scene/Asset
 // extraction applies any authored pivot before writing this render-facing value.
 struct RenderSprite2DInput final {
     FrameResourceRef texture{};
+    FrameResourceRef normalTexture{};
     u64 stableEntityKey = 0;
     float centerX = 0.0F;
     float centerY = 0.0F;
@@ -96,6 +98,9 @@ struct Sprite2DPointLight final {
     float positionX = 0.0F;
     float positionY = 0.0F;
     float radiusMeters = 1.0F;
+    // Zero preserves point-source hard shadows. A positive radius produces a
+    // bounded penumbra and may not exceed radiusMeters.
+    float sourceRadiusMeters = 0.0F;
     float colorR = 1.0F;
     float colorG = 1.0F;
     float colorB = 1.0F;
@@ -109,6 +114,9 @@ struct Sprite2DShadowSegment final {
 };
 
 struct Sprite2DLightingDesc final {
+    // Committed snapshot capacities. Scene extraction may cull point lights before
+    // supplying this descriptor; the writer validates the supplied list and never
+    // silently truncates it.
     static constexpr std::size_t MaximumPointLightCount = 8;
     static constexpr std::size_t MaximumShadowSegmentCount = 32;
 
@@ -279,6 +287,7 @@ struct RenderCamera2D final {
 
 struct RenderSprite2DItem final {
     FrameResourceRef texture{};
+    FrameResourceRef normalTexture{};
     u64 stableEntityKey = 0;
     u32 insertionOrder = 0;
     float centerX = 0.0F;

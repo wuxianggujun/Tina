@@ -388,6 +388,36 @@ UIStyleBoxFillResolution UIStyleSheetStorage::resolveValidated(
     return resolution;
 }
 
+bool UIStyleSheetStorage::hasStatefulBoxFillCandidateValidated(UIStyleRoleId role,
+                                                               std::span<const UIStyleClassId> classes) const noexcept
+{
+    const Buffer& active = buffers_[activeBufferIndex_];
+    const auto bucketHasStatefulRule = [&active](const Bucket* bucket) {
+        if (bucket == nullptr)
+        {
+            return false;
+        }
+        for (usize index = 0; index < bucket->candidateCount; ++index)
+        {
+            const usize candidateIndex = bucket->candidateOffset + index;
+            const UIStyleBoxFillRule& rule = active.rules[active.candidateRuleIndices[candidateIndex]];
+            if (rule.requiredStates != UIStyleState::None)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (bucketHasStatefulRule(findBucket(active, role, {})))
+    {
+        return true;
+    }
+    return std::any_of(classes.begin(), classes.end(), [&](UIStyleClassId styleClass) {
+        return bucketHasStatefulRule(findBucket(active, role, styleClass));
+    });
+}
+
 UIStyleSheetStorageStatistics UIStyleSheetStorage::statistics() const noexcept
 {
     const Buffer& active = buffers_[activeBufferIndex_];

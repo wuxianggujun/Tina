@@ -34,6 +34,8 @@ struct UITransitionSpec final {
 
 struct UIMotionStatistics final {
     usize trackCapacity = 0;
+    usize reservedTrackCount = 0;
+    usize reservedTrackHighWater = 0;
     usize activeTrackCount = 0;
     usize trackHighWater = 0;
     usize lastSampledTrackCount = 0;

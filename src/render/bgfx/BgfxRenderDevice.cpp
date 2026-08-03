@@ -294,6 +294,7 @@ void encodeSprite2DLighting(const Sprite2DLightingDesc& lighting,
         colors[base + 0U] = source.colorR;
         colors[base + 1U] = source.colorG;
         colors[base + 2U] = source.colorB;
+        colors[base + 3U] = source.sourceRadiusMeters;
     }
     for (std::size_t segmentIndex = 0; segmentIndex < lighting.shadowSegments.size(); ++segmentIndex)
     {
@@ -854,6 +855,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        sprite2DNormalSampler_ = bgfx::createUniform("s_normalTex", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(sprite2DNormalSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Sprite2D normal texture sampler uniform");
+        }
+        ++statistics_.liveResources;
+
         sprite2DLightPositionsUniform_ = bgfx::createUniform(
             "u_spriteLightPosRadius", bgfx::UniformType::Vec4,
             static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
@@ -882,6 +891,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        sprite2DNormalParamsUniform_ = bgfx::createUniform("u_spriteNormalParams", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(sprite2DNormalParamsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Sprite2D normal-map params uniform");
+        }
+        ++statistics_.liveResources;
+
         sprite2DShadowSegmentsUniform_ = bgfx::createUniform(
             "u_spriteShadowSegments", bgfx::UniformType::Vec4,
             static_cast<u16>(Sprite2DLightingDesc::MaximumShadowSegmentCount));
@@ -902,6 +919,21 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
                                  "bgfx rejected the Sprite2D default white texture");
+        }
+        ++statistics_.liveResources;
+
+        // Flat +Z tangent-space normal. It remains bound when a batch has no map;
+        // u_spriteNormalParams keeps that batch on the exact pre-normal-map path.
+        constexpr std::array<u8, 4> FlatNormalPixel{128, 128, 255, 255};
+        const bgfx::Memory* flatNormalMemory =
+            bgfx::copy(FlatNormalPixel.data(), static_cast<u32>(FlatNormalPixel.size()));
+        sprite2DDefaultNormalTexture_ = bgfx::createTexture2D(
+            1, 1, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE,
+            flatNormalMemory);
+        if (!bgfx::isValid(sprite2DDefaultNormalTexture_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Sprite2D default flat-normal texture");
         }
         ++statistics_.liveResources;
 
@@ -1369,10 +1401,22 @@ class BgfxRenderDevice final : public IRenderDevice {
                 sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(sprite2DDefaultNormalTexture_))
+            {
+                bgfx::destroy(sprite2DDefaultNormalTexture_);
+                sprite2DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(sprite2DSampler_))
             {
                 bgfx::destroy(sprite2DSampler_);
                 sprite2DSampler_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(sprite2DNormalSampler_))
+            {
+                bgfx::destroy(sprite2DNormalSampler_);
+                sprite2DNormalSampler_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(sprite2DLightPositionsUniform_))
@@ -1391,6 +1435,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(sprite2DLightParamsUniform_);
                 sprite2DLightParamsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(sprite2DNormalParamsUniform_))
+            {
+                bgfx::destroy(sprite2DNormalParamsUniform_);
+                sprite2DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(sprite2DShadowSegmentsUniform_))
@@ -1460,7 +1510,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             // Device-owned init resources (must match ++ in initialize):
             // uiSolidQuadProgram, uiSolidWhiteTexture, uiTexColorUniform,
-            // sprite2DProgram, sprite2DSampler, sprite2DDefaultTexture,
+            // sprite2DProgram, base/normal samplers, lighting/normal uniforms,
+            // sprite2DDefaultTexture, sprite2DDefaultNormalTexture,
             // opaque3DProgram, opaque3DSampler, opaque3DMrSampler,
             // opaque3D light direction/color arrays + MrParams uniforms, opaque3DDefaultTexture,
             // opaque3DDefaultMrTexture, opaque3DVertexBuffer, opaque3DIndexBuffer
@@ -1956,7 +2007,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
 
-        // One submit per contiguous texture-ref batch so product textures can bind per key.
+        // One submit per contiguous (base texture, normal texture) batch so both
+        // packet-local bindings remain stable for the complete draw.
         // bgfx::submit() discards draw state by default, so every batch must
         // publish the complete state required by the following submit.
         const auto sprites = scene.sprites2D();
@@ -1973,6 +2025,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         while (batchBegin < prepared.requirements.spriteCount)
         {
             const FrameResourceRef batchTexture = sprites[batchBegin].texture;
+            const FrameResourceRef batchNormalTexture = sprites[batchBegin].normalTexture;
             const FrameResourceDescriptor* descriptor =
                 resources.resolve(batchTexture, FrameResourceKind::Texture2D);
             if (descriptor == nullptr)
@@ -1980,8 +2033,19 @@ class BgfxRenderDevice final : public IRenderDevice {
                 std::terminate();
             }
             const u32 batchKey = static_cast<u32>(descriptor->deviceBindingKey);
+            const FrameResourceDescriptor* normalDescriptor = nullptr;
+            if (batchNormalTexture)
+            {
+                normalDescriptor = resources.resolve(batchNormalTexture, FrameResourceKind::Texture2D);
+                if (normalDescriptor == nullptr)
+                {
+                    std::terminate();
+                }
+            }
             u32 batchEnd = batchBegin + 1U;
-            while (batchEnd < prepared.requirements.spriteCount && sprites[batchEnd].texture == batchTexture)
+            while (batchEnd < prepared.requirements.spriteCount &&
+                   sprites[batchEnd].texture == batchTexture &&
+                   sprites[batchEnd].normalTexture == batchNormalTexture)
             {
                 ++batchEnd;
             }
@@ -1999,15 +2063,39 @@ class BgfxRenderDevice final : public IRenderDevice {
                     }
                 }
             }
+
+            bgfx::TextureHandle normalTexture = sprite2DDefaultNormalTexture_;
+            float normalMapBound = 0.0F;
+            if (normalDescriptor != nullptr)
+            {
+                const u32 normalBatchKey = static_cast<u32>(normalDescriptor->deviceBindingKey);
+                if (const auto binding = texture2DBindings_.find(normalBatchKey);
+                    binding != texture2DBindings_.end())
+                {
+                    const GpuTextureId id = binding->second;
+                    if (id.index < textures_.size())
+                    {
+                        const TextureSlot& slot = textures_[id.index];
+                        if (slot.live && slot.identity.value() == id.generation && bgfx::isValid(slot.handle))
+                        {
+                            normalTexture = slot.handle;
+                            normalMapBound = 1.0F;
+                        }
+                    }
+                }
+            }
+            const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
             bgfx::setScissor();
             bgfx::setState(kSprite2DPremultipliedAlphaState);
             bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.requirements.vertexCount);
             bgfx::setTexture(0, sprite2DSampler_, texture);
+            bgfx::setTexture(1, sprite2DNormalSampler_, normalTexture);
             bgfx::setUniform(sprite2DLightPositionsUniform_, lightPositionsAndRadii.data(),
                              static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
             bgfx::setUniform(sprite2DLightColorsUniform_, lightColors.data(),
                              static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
             bgfx::setUniform(sprite2DLightParamsUniform_, lightParams.data());
+            bgfx::setUniform(sprite2DNormalParamsUniform_, normalParams.data());
             bgfx::setUniform(sprite2DShadowSegmentsUniform_, shadowSegments.data(),
                              static_cast<u16>(Sprite2DLightingDesc::MaximumShadowSegmentCount));
             const u32 firstIndex = batchBegin * 6U;
@@ -2888,11 +2976,14 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle sprite2DNormalSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DLightPositionsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DLightColorsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DLightParamsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle sprite2DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DShadowSegmentsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle sprite2DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiImageQuadProgram_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle uiSolidWhiteTexture_ = BGFX_INVALID_HANDLE;

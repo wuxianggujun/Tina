@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 
 namespace Tina::Scene {
 namespace {
@@ -72,10 +73,34 @@ struct ShadowOccluder2DCandidate final {
     Render::Sprite2DShadowSegment segment{};
 };
 
+[[nodiscard]] float snapCameraCoordinate(float value, float pixelsPerMeter) noexcept
+{
+    const double snapped = std::round(static_cast<double>(value) * pixelsPerMeter) / pixelsPerMeter;
+    return static_cast<float>(snapped);
+}
+
+[[nodiscard]] bool pointLightIntersectsCamera(
+    const Render::Sprite2DPointLight& light,
+    const Render::RenderCamera2DInput& camera) noexcept
+{
+    const double deltaX = static_cast<double>(light.positionX) - camera.centerX;
+    const double deltaY = static_cast<double>(light.positionY) - camera.centerY;
+    const double cosine = std::cos(static_cast<double>(camera.rotationRadians));
+    const double sine = std::sin(static_cast<double>(camera.rotationRadians));
+    const double cameraX = deltaX * cosine + deltaY * sine;
+    const double cameraY = -deltaX * sine + deltaY * cosine;
+    const double outsideX =
+        std::max(std::abs(cameraX) - static_cast<double>(camera.worldWidth) * 0.5, 0.0);
+    const double outsideY =
+        std::max(std::abs(cameraY) - static_cast<double>(camera.worldHeight) * 0.5, 0.0);
+    return std::hypot(outsideX, outsideY) <= static_cast<double>(light.radiusMeters);
+}
+
 [[nodiscard]] Core::Status publishPointLights2D(
     World& world,
     Render::RenderSceneWriter& writer,
-    float ambientLightScale) noexcept
+    float ambientLightScale,
+    const Render::RenderCamera2DInput* cullingCamera) noexcept
 {
     if (!std::isfinite(ambientLightScale) || ambientLightScale < 0.0F) {
         return Core::failure(
@@ -97,11 +122,6 @@ struct ShadowOccluder2DCandidate final {
         if (!component->active) {
             continue;
         }
-        if (lightCount >= candidates.size()) {
-            return Core::failure(
-                SceneErrorCode::TooManyActivePointLights2D,
-                "Scene extract exceeded the fixed active PointLight2D limit");
-        }
         const WorldTransform* transform = world.worldTransform(entity);
         if (!isValid(*component) || transform == nullptr || !isValid(*transform)) {
             return Core::failure(
@@ -117,18 +137,37 @@ struct ShadowOccluder2DCandidate final {
                 SceneErrorCode::InvalidComponent,
                 "Scene PointLight2D extraction overflowed");
         }
+    }
 
+    for (const EntityId entity : world.liveEntities()) {
+        const PointLight2D* component = world.pointLight2D(entity);
+        if (component == nullptr || !component->active) {
+            continue;
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        const float colorR = component->color.red * component->intensity;
+        const float colorG = component->color.green * component->intensity;
+        const float colorB = component->color.blue * component->intensity;
+        const Render::Sprite2DPointLight light{
+            .positionX = transform->position.x,
+            .positionY = transform->position.y,
+            .radiusMeters = component->radiusMeters,
+            .sourceRadiusMeters = component->sourceRadiusMeters,
+            .colorR = colorR,
+            .colorG = colorG,
+            .colorB = colorB,
+        };
+        if (cullingCamera != nullptr && !pointLightIntersectsCamera(light, *cullingCamera)) {
+            continue;
+        }
+        if (lightCount >= candidates.size()) {
+            return Core::failure(
+                SceneErrorCode::TooManyActivePointLights2D,
+                "Scene extract exceeded the fixed visible PointLight2D limit");
+        }
         candidates[lightCount] = PointLight2DCandidate{
             .stableKey = stableEntityKey(entity),
-            .light =
-                Render::Sprite2DPointLight{
-                    .positionX = transform->position.x,
-                    .positionY = transform->position.y,
-                    .radiusMeters = component->radiusMeters,
-                    .colorR = colorR,
-                    .colorG = colorG,
-                    .colorB = colorB,
-                },
+            .light = light,
         };
         ++lightCount;
     }
@@ -294,11 +333,16 @@ struct ShadowOccluder2DCandidate final {
         return Core::success();
     }
 
-    std::sort(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(lightCount),
-              [](const DirectionalLightCandidate& left,
-                 const DirectionalLightCandidate& right) noexcept {
-                  return left.stableKey < right.stableKey;
-              });
+    // Sort only the live prefix. Sorting the whole fixed array confuses GCC's
+    // bounds analysis when lightCount is a runtime usize under Maximum*Count.
+    if (lightCount > 1)
+    {
+        std::sort(candidates.data(), candidates.data() + lightCount,
+                  [](const DirectionalLightCandidate& left,
+                     const DirectionalLightCandidate& right) noexcept {
+                      return left.stableKey < right.stableKey;
+                  });
+    }
     std::array<Render::Mesh3DDirectionalLight,
                Render::Mesh3DLightingDesc::MaximumDirectionalLightCount>
         lights{};
@@ -326,6 +370,7 @@ Core::Status extractRenderSceneFromWorld(
 
     EntityId activeCameraEntity{};
     usize activeCameraCount = 0;
+    std::optional<Render::RenderCamera2DInput> resolvedCamera2D;
     for (const EntityId entity : world.liveEntities()) {
         const Camera2D* camera = world.camera2D(entity);
         if (camera == nullptr || !camera->active) {
@@ -379,6 +424,13 @@ Core::Status extractRenderSceneFromWorld(
                 return Core::failure(std::move(resolved.error()).withContext(
                     "extractRenderSceneFromWorld", "Camera2D projection resolve"));
             }
+            resolvedCamera2D = *resolved;
+            if (resolvedCamera2D->pixelSnap != Render::RenderPixelSnapPolicy::Disabled) {
+                resolvedCamera2D->centerX =
+                    snapCameraCoordinate(resolvedCamera2D->centerX, resolvedCamera2D->actualPixelsPerMeter);
+                resolvedCamera2D->centerY =
+                    snapCameraCoordinate(resolvedCamera2D->centerY, resolvedCamera2D->actualPixelsPerMeter);
+            }
             if (const Core::Status status = writer.setCamera2D(*resolved); !status) {
                 return status;
             }
@@ -411,6 +463,25 @@ Core::Status extractRenderSceneFromWorld(
             return Core::failure(
                 SceneErrorCode::UnresolvedSprite,
                 "Scene SpriteRenderer2D asset has no render binding");
+        }
+        Render::FrameResourceRef normalTexture{};
+        if (sprite->normalTexture) {
+            if (!params.normalTextureBindingResolver) {
+                return Core::failure(
+                    SceneErrorCode::UnresolvedSprite,
+                    "Scene SpriteRenderer2D has no normal texture resolver");
+            }
+            auto resolvedNormal =
+                params.normalTextureBindingResolver(sprite->normalTexture, frameResources);
+            if (!resolvedNormal) {
+                return Core::failure(std::move(resolvedNormal.error()));
+            }
+            if (!resolvedNormal->hasValue()) {
+                return Core::failure(
+                    SceneErrorCode::UnresolvedSprite,
+                    "Scene SpriteRenderer2D normal texture has no render binding");
+            }
+            normalTexture = *resolvedNormal;
         }
         const WorldTransform* transform = world.worldTransform(entity);
         if (transform == nullptr || !isValid(*transform)) {
@@ -459,6 +530,7 @@ Core::Status extractRenderSceneFromWorld(
 
         const Render::RenderSprite2DInput input{
             .texture = *texture,
+            .normalTexture = normalTexture,
             .stableEntityKey = stableEntityKey(entity),
             .centerX = centerX,
             .centerY = centerY,
@@ -552,7 +624,11 @@ Core::Status extractRenderSceneFromWorld(
     }
 
     if (const Core::Status status =
-            publishPointLights2D(world, writer, params.ambientLight2DScale);
+            publishPointLights2D(
+                world,
+                writer,
+                params.ambientLight2DScale,
+                resolvedCamera2D ? &*resolvedCamera2D : nullptr);
         !status) {
         return status;
     }

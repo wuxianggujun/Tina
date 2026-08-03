@@ -421,6 +421,11 @@ TEST_F(PrimaryWindowUICapabilityTest, MotionFacadeBeginsBackgroundTransitionAndE
         .duration = Core::Duration{0.100},
         .easing = UI::UIEasing::EaseOut,
     };
+    ASSERT_TRUE(tree->setStyleBackgroundColorTransition(spec).has_value());
+    auto configuredStyleTransition = tree->styleBackgroundColorTransition();
+    ASSERT_TRUE(configuredStyleTransition.has_value()) << configuredStyleTransition.error().message;
+    EXPECT_EQ(configuredStyleTransition->duration, spec.duration);
+    EXPECT_EQ(configuredStyleTransition->easing, spec.easing);
     ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
     ASSERT_TRUE(tree->beginBackgroundColorTransition(*node, UI::rgba8(100, 0, 0, 255), spec).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
@@ -432,6 +437,12 @@ TEST_F(PrimaryWindowUICapabilityTest, MotionFacadeBeginsBackgroundTransitionAndE
     Core::Status expired = tree->beginBackgroundColorTransition(*node, UI::rgba8(0, 100, 0, 255), spec);
     ASSERT_FALSE(expired.has_value());
     EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredStyle = tree->setStyleBackgroundColorTransition(spec);
+    ASSERT_FALSE(expiredStyle.has_value());
+    EXPECT_EQ(expiredStyle.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredStyleGet = tree->styleBackgroundColorTransition();
+    ASSERT_FALSE(expiredStyleGet.has_value());
+    EXPECT_EQ(expiredStyleGet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, InvalidStyleColorTokenFailureIsSticky)

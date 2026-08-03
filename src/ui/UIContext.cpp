@@ -399,6 +399,13 @@ struct UIContext::Impl final {
     const Core::IMonotonicClock* motionClock = nullptr;
     Core::SteadyMonotonicClock motionDefaultClock{};
     bool reducedMotionEnabled = false;
+    // Default duration 0 = instant stylesheet BoxFill resolve (historical path).
+    UITransitionSpec styleBackgroundColorTransitionSpec{
+        .property = UIAnimatableProperty::BackgroundColor,
+        .duration = Core::Duration{0.0},
+        .delay = Core::Duration{0.0},
+        .easing = UIEasing::EaseOut,
+    };
     // Residual presentation after tracks complete (still paint-only; not hit).
     std::pmr::vector<float> presentationOpacityByNodeIndex;
     std::pmr::vector<u8> presentationOpacityValidByNodeIndex;
@@ -409,6 +416,7 @@ struct UIContext::Impl final {
         styleClassesByNodeIndex;
     std::pmr::vector<u8> styleClassCountsByNodeIndex;
     std::pmr::vector<UIStyleState> styleStatesByNodeIndex;
+    std::pmr::vector<u8> resolvedStyleInitializedByNodeIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> resolvedBoxFillCacheByNodeIndex;
     // Winning ColorToken dependency for reverse invalidation. Zero means the
     // node is not linked. Heads/next/prev use 1-based node indices so 0 is NIL.
@@ -614,7 +622,8 @@ struct UIContext::Impl final {
           presentationOffsetYByNodeIndex(&resource),
           presentationOffsetValidByNodeIndex(&resource),
           styleClassesByNodeIndex(&resource), styleClassCountsByNodeIndex(&resource),
-          styleStatesByNodeIndex(&resource), resolvedBoxFillCacheByNodeIndex(&resource),
+          styleStatesByNodeIndex(&resource),
+          resolvedStyleInitializedByNodeIndex(&resource), resolvedBoxFillCacheByNodeIndex(&resource),
           resolvedStyleColorTokenByNodeIndex(&resource),
           styleTokenDependencyNextByNodeIndex(&resource),
           styleTokenDependencyPrevByNodeIndex(&resource),
@@ -726,6 +735,7 @@ struct UIContext::Impl final {
         impl->styleClassesByNodeIndex.resize(normalized.nodeCapacity);
         impl->styleClassCountsByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->styleStatesByNodeIndex.resize(normalized.nodeCapacity, UIStyleState::None);
+        impl->resolvedStyleInitializedByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->resolvedBoxFillCacheByNodeIndex.resize(normalized.nodeCapacity);
         impl->resolvedStyleColorTokenByNodeIndex.resize(normalized.nodeCapacity);
         impl->styleTokenDependencyNextByNodeIndex.resize(normalized.nodeCapacity, 0);
@@ -2244,6 +2254,24 @@ struct UIContext::Impl final {
             styleRolesByNodeIndex[nodeIndex], classes, states);
     }
 
+    [[nodiscard]] std::span<const UIStyleClassId> styleClassesFor(u32 nodeIndex) const noexcept
+    {
+        return std::span<const UIStyleClassId>(styleClassesByNodeIndex[nodeIndex].data(),
+                                               styleClassCountsByNodeIndex[nodeIndex]);
+    }
+
+    [[nodiscard]] bool styleBackgroundTransitionEnabled() const noexcept
+    {
+        return styleBackgroundColorTransitionSpec.duration.count() > 0.0;
+    }
+
+    [[nodiscard]] bool needsStyleBackgroundMotionReservation(UIStyleRoleId role,
+                                                             std::span<const UIStyleClassId> classes) const noexcept
+    {
+        return styleBackgroundTransitionEnabled() &&
+               styleSheetStorage.hasStatefulBoxFillCandidateValidated(role, classes);
+    }
+
     void unlinkTokenDependencyList(u32 nodeIndex, std::pmr::vector<UIStyleTokenId>& tokenByNode,
                                    std::pmr::vector<u32>& nextByNode, std::pmr::vector<u32>& prevByNode,
                                    std::pmr::vector<u32>& headByToken) noexcept
@@ -2409,6 +2437,9 @@ struct UIContext::Impl final {
         }
 
         const UINodeId node = idForIndex(nodeIndex);
+        const bool hadResolvedStyle = resolvedStyleInitializedByNodeIndex[nodeIndex] != 0;
+        const UIStyleState previousStates = styleStatesByNodeIndex[nodeIndex];
+        const UIPremultipliedRgba8Color previousFill = resolvedBoxFillCacheByNodeIndex[nodeIndex];
         styleStatesByNodeIndex[nodeIndex] = states;
         UIPremultipliedRgba8Color resolvedFill = resolveBuiltinBoxFillColor(
             node, nodeIndex, localSolidFillCacheByIndex[nodeIndex]);
@@ -2426,6 +2457,30 @@ struct UIContext::Impl final {
             if (resolution.color.has_value())
             {
                 resolvedFill = premultiply(*resolution.color);
+            }
+            // Optional paint-only motion when interaction state changes the
+            // stylesheet BoxFill color. Style binding has already reserved the
+            // track, so activation failure is an internal invariant violation.
+            const bool stateChanged = previousStates != states;
+            const bool colorChanged = previousFill != resolvedFill;
+            const bool canAnimate =
+                hadResolvedStyle && stateChanged && colorChanged && !reducedMotionEnabled &&
+                styleBackgroundTransitionEnabled() && motionTrackStorage.hasPersistentReservation(
+                                                          node, UIAnimatableProperty::BackgroundColor);
+            if (canAnimate)
+            {
+                const auto presentation = motionTrackStorage.presentationFor(node);
+                const UIStraightSrgba8Color startColor = presentation.hasBackgroundColor
+                                                             ? presentation.backgroundColor
+                                                             : unpremultiplyColor(previousFill);
+                const UIStraightSrgba8Color targetColor =
+                    resolution.color.has_value() ? *resolution.color : unpremultiplyColor(resolvedFill);
+                if (Core::Status motionStatus = motionTrackStorage.activateReservedStyleColor(
+                        node, startColor, targetColor, styleBackgroundColorTransitionSpec, motionNow());
+                    !motionStatus)
+                {
+                    std::terminate();
+                }
             }
             resolvedBoxFillCacheByNodeIndex[nodeIndex] = resolvedFill;
             setResolvedStyleColorTokenDependency(nodeIndex, resolution.colorToken);
@@ -2446,6 +2501,7 @@ struct UIContext::Impl final {
             resolvedImageTintValidByNodeIndex[nodeIndex] = 1;
             setResolvedImageTintTokenDependency(nodeIndex, resolution.imageTintToken);
         }
+        resolvedStyleInitializedByNodeIndex[nodeIndex] = 1;
         return resolution.candidateRuleCount;
     }
 
@@ -4157,6 +4213,7 @@ struct UIContext::Impl final {
         if (index < styleStatesByNodeIndex.size())
         {
             styleStatesByNodeIndex[index] = UIStyleState::None;
+            resolvedStyleInitializedByNodeIndex[index] = 0;
             resolvedBoxFillCacheByNodeIndex[index] = {};
             unlinkStyleTokenDependency(index);
             unlinkImageTintTokenDependency(index);
@@ -4182,7 +4239,6 @@ struct UIContext::Impl final {
         canvasCommandStorage.release(index);
         imageContentStorage.release(index);
         behaviorStateStorage.release(index);
-        motionTrackStorage.releaseNode(idForIndex(index));
         if (index < presentationOpacityValidByNodeIndex.size())
         {
             presentationOpacityByNodeIndex[index] = 1.0F;
@@ -5261,6 +5317,78 @@ struct UIContext::Impl final {
         return reducedMotionEnabled;
     }
 
+    [[nodiscard]] Core::Status setStyleBackgroundColorTransition(const UITransitionSpec& spec)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (spec.property != UIAnimatableProperty::BackgroundColor)
+        {
+            return fail(UIErrorCode::InvalidStyle, "Style background transition only supports BackgroundColor");
+        }
+        if (!isValidUIEasing(spec.easing))
+        {
+            return fail(UIErrorCode::InvalidStyle, "Style background transition easing is invalid");
+        }
+        if (spec.duration.count() < 0.0 || spec.delay.count() < 0.0 || !std::isfinite(spec.duration.count()) ||
+            !std::isfinite(spec.delay.count()))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "Style background transition duration/delay must be finite and non-negative");
+        }
+        const bool wasEnabled = styleBackgroundTransitionEnabled();
+        const bool willEnable = spec.duration.count() > 0.0;
+        if (!wasEnabled && willEnable)
+        {
+            usize requiredSlots = 0;
+            for (u32 index = 0; index < idsByIndex.size(); ++index)
+            {
+                const UINodeId node = idForIndex(index);
+                if (!contains(node) ||
+                    !styleSheetStorage.hasStatefulBoxFillCandidateValidated(styleRolesByNodeIndex[index],
+                                                                            styleClassesFor(index)) ||
+                    motionTrackStorage.hasTrack(node, UIAnimatableProperty::BackgroundColor))
+                {
+                    continue;
+                }
+                ++requiredSlots;
+            }
+            if (requiredSlots > motionTrackStorage.availableCount())
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI style background transitions exceed the reserved motion track capacity");
+            }
+            for (u32 index = 0; index < idsByIndex.size(); ++index)
+            {
+                const UINodeId node = idForIndex(index);
+                if (!contains(node) || !styleSheetStorage.hasStatefulBoxFillCandidateValidated(
+                                           styleRolesByNodeIndex[index], styleClassesFor(index)))
+                {
+                    continue;
+                }
+                if (Core::Status reserved =
+                        motionTrackStorage.reservePersistent(node, UIAnimatableProperty::BackgroundColor);
+                    !reserved)
+                {
+                    std::terminate();
+                }
+            }
+        } else if (wasEnabled && !willEnable)
+        {
+            motionTrackStorage.releaseAllPersistentReservations(UIAnimatableProperty::BackgroundColor);
+        }
+
+        styleBackgroundColorTransitionSpec = spec;
+        return Core::success();
+    }
+
+    [[nodiscard]] UITransitionSpec styleBackgroundColorTransition() const noexcept
+    {
+        return styleBackgroundColorTransitionSpec;
+    }
+
     void applyCompletedMotion(const Detail::UIMotionTrackStorage::Completed& completed) noexcept
     {
         if (!contains(completed.node))
@@ -5268,6 +5396,16 @@ struct UIContext::Impl final {
             return;
         }
         const u32 index = completed.node.index();
+        if (completed.completionMode == Detail::UIMotionTrackStorage::CompletionMode::StylePresentationOnly)
+        {
+            if (!dirtyQueueStorage.isQueued(index))
+            {
+                dirtyQueueStorage.enqueue(completed.node);
+            }
+            dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+            return;
+        }
+
         switch (completed.property)
         {
         case UIAnimatableProperty::BackgroundColor:
@@ -5475,7 +5613,7 @@ struct UIContext::Impl final {
                 .valueKind = Detail::UIMotionTrackStorage::ValueKind::Color,
                 .color = target,
             });
-            motionTrackStorage.releaseProperty(node, property);
+            motionTrackStorage.cancelActiveProperty(node, property);
             return Core::success();
         }
         if (Core::Status status = motionTrackStorage.beginOrRetargetColor(
@@ -5544,7 +5682,7 @@ struct UIContext::Impl final {
                 .valueKind = Detail::UIMotionTrackStorage::ValueKind::Scalar,
                 .scalar = targetOpacity,
             });
-            motionTrackStorage.releaseProperty(node, UIAnimatableProperty::Opacity);
+            motionTrackStorage.cancelActiveProperty(node, UIAnimatableProperty::Opacity);
             return Core::success();
         }
         if (Core::Status status = motionTrackStorage.beginOrRetargetScalar(
@@ -5594,7 +5732,7 @@ struct UIContext::Impl final {
                 .valueKind = Detail::UIMotionTrackStorage::ValueKind::Scalar,
                 .scalar = targetRadius,
             });
-            motionTrackStorage.releaseProperty(node, UIAnimatableProperty::CornerRadius);
+            motionTrackStorage.cancelActiveProperty(node, UIAnimatableProperty::CornerRadius);
             return Core::success();
         }
         if (Core::Status status = motionTrackStorage.beginOrRetargetScalar(
@@ -5645,7 +5783,7 @@ struct UIContext::Impl final {
                 .valueKind = Detail::UIMotionTrackStorage::ValueKind::Offset,
                 .offset = target,
             });
-            motionTrackStorage.releaseProperty(node, UIAnimatableProperty::VisualOffset);
+            motionTrackStorage.cancelActiveProperty(node, UIAnimatableProperty::VisualOffset);
             return Core::success();
         }
         if (Core::Status status = motionTrackStorage.beginOrRetargetOffset(
@@ -5905,8 +6043,10 @@ struct UIContext::Impl final {
         return status;
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createNode(BuiltinElementKind kind,
-                                                    UIElementBehavior behaviors)
+    [[nodiscard]] Core::Result<UINodeId> createNode(
+        BuiltinElementKind kind, UIElementBehavior behaviors,
+        std::optional<UIStyleRoleId> authoredStyleRole = std::nullopt,
+        std::span<const UIStyleClassId> authoredStyleClasses = {})
     {
         if (activeComponentBuildReservation == nullptr)
         {
@@ -5929,6 +6069,15 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::CapacityExceeded,
                         "UI component node reservation has been exhausted");
+        }
+
+        const UIStyleRoleId styleRole = authoredStyleRole.value_or(defaultStyleRoleForKind(kind));
+        const bool reserveStyleMotion =
+            needsStyleBackgroundMotionReservation(styleRole, authoredStyleClasses);
+        if (reserveStyleMotion && motionTrackStorage.availableCount() == 0)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI style background transition reservation capacity has been exhausted");
         }
 
         auto idResult = nodes.tryEmplace();
@@ -5969,8 +6118,16 @@ struct UIContext::Impl final {
             activeComponentBuildReservation->remaining.behaviors =
                 toBehaviorSlotBudget(activeComponentBuildReservation->behaviors);
         }
-        const UIStyleRoleId styleRole = defaultStyleRoleForKind(kind);
         styleRolesByNodeIndex[node.index()] = styleRole;
+        if (reserveStyleMotion)
+        {
+            if (Core::Status reserved =
+                    motionTrackStorage.reservePersistent(node, UIAnimatableProperty::BackgroundColor);
+                !reserved)
+            {
+                std::terminate();
+            }
+        }
         const auto semanticsDefaults = defaultSemanticsForKind(kind);
         semanticsStatesByNodeIndex[node.index()] = SemanticsState{
             .mode = semanticsDefaults.mode,
@@ -6092,6 +6249,27 @@ struct UIContext::Impl final {
         }
         layoutStylesByIndex[node.index()] = normalizedLayout;
         enabledByNodeIndex[node.index()] = descriptor.enabled ? 1 : 0;
+        const bool needsStyleMotion =
+            needsStyleBackgroundMotionReservation(descriptor.visual.styleRole, descriptor.visual.styleClasses);
+        const bool hasStyleMotion =
+            motionTrackStorage.hasPersistentReservation(node, UIAnimatableProperty::BackgroundColor);
+        if (needsStyleMotion && !hasStyleMotion)
+        {
+            if (motionTrackStorage.availableCount() == 0)
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI style background transition reservation capacity has been exhausted");
+            }
+            if (Core::Status reserved =
+                    motionTrackStorage.reservePersistent(node, UIAnimatableProperty::BackgroundColor);
+                !reserved)
+            {
+                std::terminate();
+            }
+        } else if (!needsStyleMotion && hasStyleMotion)
+        {
+            motionTrackStorage.releasePersistentReservation(node, UIAnimatableProperty::BackgroundColor);
+        }
         const u16 previousBindings = themeBindingsByNodeIndex[node.index()];
         const u16 nextBindings = capacityConfig.applyDefaultProductChrome
                                      ? defaultThemeBindingsFor(descriptor.visual.styleRole)
@@ -6294,9 +6472,13 @@ struct UIContext::Impl final {
 
         Core::Result<UINodeId> nodeResult =
             kind == BuiltinElementKind::ListView
-                ? createListViewComposite(parent, descriptor.listView)
-                : kind == BuiltinElementKind::TreeView ? createTreeViewComposite(parent, descriptor.treeView)
-                                                 : createChild(parent, kind, descriptor.behaviors);
+                ? createListViewComposite(parent, descriptor.listView, descriptor.visual.styleRole,
+                                          descriptor.visual.styleClasses)
+                : kind == BuiltinElementKind::TreeView
+                      ? createTreeViewComposite(parent, descriptor.treeView, descriptor.visual.styleRole,
+                                                descriptor.visual.styleClasses)
+                      : createChild(parent, kind, descriptor.behaviors, descriptor.visual.styleRole,
+                                    descriptor.visual.styleClasses);
         if (!nodeResult)
         {
             return Core::failure(nodeResult.error());
@@ -6358,7 +6540,9 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Result<UINodeId>
     createChild(UINodeId parent, BuiltinElementKind kind,
-                std::optional<UIElementBehavior> authoredBehaviors = std::nullopt)
+                std::optional<UIElementBehavior> authoredBehaviors = std::nullopt,
+                std::optional<UIStyleRoleId> authoredStyleRole = std::nullopt,
+                std::span<const UIStyleClassId> authoredStyleClasses = {})
     {
         if (kind == BuiltinElementKind::Root)
         {
@@ -6424,8 +6608,8 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidParent, "UI parent depth cannot be represented");
         }
 
-        auto nodeResult = createNode(kind,
-                                     authoredBehaviors.value_or(defaultBehaviorsForKind(kind)));
+        auto nodeResult = createNode(kind, authoredBehaviors.value_or(defaultBehaviorsForKind(kind)),
+                                     authoredStyleRole, authoredStyleClasses);
         if (!nodeResult)
         {
             return Core::failure(nodeResult.error());
@@ -6455,7 +6639,10 @@ struct UIContext::Impl final {
         return node;
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createListViewComposite(UINodeId parent, UIListViewCreateConfig config)
+    [[nodiscard]] Core::Result<UINodeId>
+    createListViewComposite(UINodeId parent, UIListViewCreateConfig config,
+                            UIStyleRoleId authoredStyleRole,
+                            std::span<const UIStyleClassId> authoredStyleClasses)
     {
         auto normalized = Detail::normalizeListViewCreateConfig(config);
         if (!normalized)
@@ -6469,7 +6656,8 @@ struct UIContext::Impl final {
                         "UI ListView row pool exceeds the remaining node capacity");
         }
 
-        auto listResult = createChild(parent, BuiltinElementKind::ListView);
+        auto listResult = createChild(parent, BuiltinElementKind::ListView, std::nullopt,
+                                      authoredStyleRole, authoredStyleClasses);
         if (!listResult)
         {
             return Core::failure(listResult.error());
@@ -6500,7 +6688,10 @@ struct UIContext::Impl final {
         return listView;
     }
 
-    [[nodiscard]] Core::Result<UINodeId> createTreeViewComposite(UINodeId parent, UITreeViewCreateConfig config)
+    [[nodiscard]] Core::Result<UINodeId>
+    createTreeViewComposite(UINodeId parent, UITreeViewCreateConfig config,
+                            UIStyleRoleId authoredStyleRole,
+                            std::span<const UIStyleClassId> authoredStyleClasses)
     {
         auto normalized = Detail::normalizeTreeViewCreateConfig(config);
         if (!normalized)
@@ -6513,7 +6704,8 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::CapacityExceeded, "UI TreeView row pool exceeds the remaining node capacity");
         }
 
-        auto treeResult = createChild(parent, BuiltinElementKind::TreeView);
+        auto treeResult = createChild(parent, BuiltinElementKind::TreeView, std::nullopt,
+                                      authoredStyleRole, authoredStyleClasses);
         if (!treeResult)
         {
             return Core::failure(treeResult.error());
@@ -6962,6 +7154,7 @@ struct UIContext::Impl final {
             deactivateAllRoutedPointerListenersForNode(currentIndex);
             deactivateButtonActionForNode(currentIndex);
             sliderChangeCallbackRegistry.clearNode(currentIndex, true);
+            motionTrackStorage.releaseNode(node);
             idsByIndex[currentIndex] = {};
             static_cast<void>(nodes.erase(node.storageId()));
             resetNodeSideData(currentIndex);
@@ -7457,6 +7650,16 @@ struct UIContext::Impl final {
         {
             return Core::success();
         }
+        const bool needsStyleMotion = needsStyleBackgroundMotionReservation(role, styleClassesFor(index));
+        const bool hasStyleMotion =
+            motionTrackStorage.hasPersistentReservation(node, UIAnimatableProperty::BackgroundColor);
+        if (needsStyleMotion && !hasStyleMotion &&
+            !motionTrackStorage.hasTrack(node, UIAnimatableProperty::BackgroundColor) &&
+            motionTrackStorage.availableCount() == 0)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI style role requires an unavailable background transition reservation");
+        }
         const u16 previousBindings = themeBindingsByNodeIndex[index];
         const u16 supportedBindings =
             capacityConfig.applyDefaultProductChrome ? defaultThemeBindingsFor(role) : 0;
@@ -7476,6 +7679,20 @@ struct UIContext::Impl final {
         if (Core::Status capacity = preflightThemeDirtyQueue(); !capacity)
         {
             return capacity;
+        }
+
+        motionTrackStorage.cancelActiveProperty(node, UIAnimatableProperty::BackgroundColor);
+        if (needsStyleMotion && !hasStyleMotion)
+        {
+            if (Core::Status reserved =
+                    motionTrackStorage.reservePersistent(node, UIAnimatableProperty::BackgroundColor);
+                !reserved)
+            {
+                std::terminate();
+            }
+        } else if (!needsStyleMotion && hasStyleMotion)
+        {
+            motionTrackStorage.releasePersistentReservation(node, UIAnimatableProperty::BackgroundColor);
         }
 
         styleRolesByNodeIndex[index] = role;
@@ -7607,20 +7824,13 @@ struct UIContext::Impl final {
 
         const UIBoxPaint normalizedPaint = Detail::normalizeBoxPaint(paint);
         UIBoxPaint& currentPaint = boxPaintsByIndex[node.index()];
-        if (currentPaint == normalizedPaint)
+        const bool hasLocalOverride =
+            (styleOverridesByNodeIndex[node.index()] &
+             static_cast<u16>(UIStyleOverride::BoxPaint)) != 0;
+        const bool hasActiveBackgroundMotion =
+            motionTrackStorage.findActive(node, UIAnimatableProperty::BackgroundColor) != nullptr;
+        if (currentPaint == normalizedPaint && hasLocalOverride && !hasActiveBackgroundMotion)
         {
-            if ((styleOverridesByNodeIndex[node.index()] &
-                 static_cast<u16>(UIStyleOverride::BoxPaint)) != 0)
-            {
-                return Core::success();
-            }
-            if (Core::Status dirtyStatus =
-                    markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
-                !dirtyStatus)
-            {
-                return dirtyStatus;
-            }
-            detachThemeBinding(node.index(), ThemeBindingBoxPaint);
             return Core::success();
         }
         if (Core::Status dirtyStatus =
@@ -7629,7 +7839,11 @@ struct UIContext::Impl final {
         {
             return dirtyStatus;
         }
-        currentPaint = normalizedPaint;
+        motionTrackStorage.cancelActiveProperty(node, UIAnimatableProperty::BackgroundColor);
+        if (currentPaint != normalizedPaint)
+        {
+            currentPaint = normalizedPaint;
+        }
         detachThemeBinding(node.index(), ThemeBindingBoxPaint);
         return Core::success();
     }
@@ -15783,6 +15997,8 @@ struct UIContext::Impl final {
             .motion =
                 {
                     .trackCapacity = motionTrackStorage.capacity(),
+                    .reservedTrackCount = motionTrackStorage.reservedCount(),
+                    .reservedTrackHighWater = motionTrackStorage.reservedHighWater(),
                     .activeTrackCount = motionTrackStorage.activeCount(),
                     .trackHighWater = motionTrackStorage.highWater(),
                     .lastSampledTrackCount = motionTrackStorage.lastSampledCount(),
@@ -17226,6 +17442,16 @@ Core::Status UIContext::setReducedMotion(bool enabled)
 bool UIContext::reducedMotion() const noexcept
 {
     return m_impl->reducedMotion();
+}
+
+Core::Status UIContext::setStyleBackgroundColorTransition(const UITransitionSpec& spec)
+{
+    return m_impl->setStyleBackgroundColorTransition(spec);
+}
+
+UITransitionSpec UIContext::styleBackgroundColorTransition() const noexcept
+{
+    return m_impl->styleBackgroundColorTransition();
 }
 
 Core::Status UIContext::beginBackgroundColorTransition(

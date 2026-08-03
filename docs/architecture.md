@@ -199,12 +199,14 @@ point/spot light、light culling、通用 pass system 与通用 GPU submission f
 submit/present 的 CPU 借用期；Texture/Mesh 则使用独立 readback completion marker，并已把 AssetLease
 合并到 backend retirement，二者不能互相作为完成证据。
 
-2D World 的 `SpriteRenderer2D` 与 standalone `ParticleSystem2D`/`Trail2D` 已只保存 copyable weak Sprite
-`AssetHandle`；TileMap emit 保存 weak Tileset `AssetHandle`；3D `MeshRenderer3D` 保存 weak StaticMesh/
+2D World 的 `SpriteRenderer2D` 保存 copyable weak Sprite handle 与 optional weak normal Texture2D handle，
+standalone `ParticleSystem2D`/`Trail2D` 只保存 weak Sprite `AssetHandle`；TileMap emit 保存 weak Tileset
+`AssetHandle`；3D `MeshRenderer3D` 保存 weak StaticMesh/
 Material handle。通用 allocation-free `AssetFrameResourceResolver` 位于窄 `AssetTypes` 边界；2D Scene
 与3D mesh/material extraction 都直接使用该通用类型；所有路径都只在当前调用借用 resolver 与
 `FrameResourceSink`，不再保留按渲染用途重命名的迁移 alias。
-产品 2D resolver 薄调用 `Sprite2DBindingRegistry::internSpriteFrameResource()/internTilesetFrameResource()`，
+产品 2D base resolver 薄调用 `Sprite2DBindingRegistry::internSpriteFrameResource()/internTilesetFrameResource()`，
+normal resolver 则用同一 registry 的 Texture2D frame-resource seam 独立 intern normal binding；
 3D resolver 调用 `Mesh3DBindingRegistry::internMeshFrameResource()/internMaterialFrameResource()`。registry
 在 Asset owner thread 验证 Handle kind、CPU payload、Cooked Texture2D dependency 与 live binding，再把
 binding intern 为 packet-local ref，让 resource pin 覆盖 submit/present CPU 借用期。device 只有在 backend
@@ -239,8 +241,8 @@ hover/pressed/focus/disabled 反馈，尚无时间插值动画；`makeSliderElem
 Focusable/Focus semantics 已与私有 keyboard-focus trait 对齐，Slider 可参与 Tab/空间导航与显式焦点；
 `UI-STATE-FEEDBACK` 的 Dark/Light 产品视觉证据已完成。RangeInput 通过独立 capability command 在 focused
 Slider 上消费 Arrow/D-pad 调值，不复用通用空间焦点状态机。Image、Component 与
-StyleClass/pseudo-state 与 startup-only ColorToken value 的产品/性能/契约切片均已落地；后续补运行期 token
-更新（含 reverse dependency）、Image tint/opacity 等属性面与 paint-only Motion，具体取舍见
+StyleClass/pseudo-state、ColorToken reverse-dependency 运行期更新、stylesheet imageTint 与 paint-only Motion
+的产品/性能/契约切片均已落地；更广 Style 属性面、完整 keyframe timeline 与 layout animation 仍未开放，具体取舍见
 [UI 框架设计](ui-framework.md)。
 
 文本使用严格 UTF-8；MSVC target 强制 `/utf-8`。可选 FreeType 负责 rasterization，UI/Render 通过 R8

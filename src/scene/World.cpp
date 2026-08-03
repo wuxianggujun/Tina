@@ -1054,7 +1054,7 @@ Core::Status World::setPointLight2D(EntityId entity, PointLight2D light) noexcep
     if (!isValid(light)) {
         return Core::failure(
             SceneErrorCode::InvalidComponent,
-            "Scene PointLight2D has invalid color, intensity, or radius");
+            "Scene PointLight2D has invalid color, intensity, influence radius, or source radius");
     }
     EntityRecord* entityRecord = record(entity);
     if (entityRecord == nullptr) {

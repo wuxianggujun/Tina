@@ -21,7 +21,14 @@ using SetEnabledResult = decltype(std::declval<Tina::UI::UITreeUpdater&>().setEn
     std::declval<Tina::UI::UINodeId>(), true));
 using IsEnabledResult = decltype(std::declval<const Tina::UI::UITreeUpdater&>().isEnabled(
     std::declval<Tina::UI::UINodeId>()));
+using SetStyleTransitionResult = decltype(
+    std::declval<Tina::UI::UIContext&>().setStyleBackgroundColorTransition(
+        std::declval<const Tina::UI::UITransitionSpec&>()));
+using StyleTransitionResult = decltype(
+    std::declval<const Tina::UI::UIContext&>().styleBackgroundColorTransition());
 static_assert(std::is_same_v<SetEnabledResult, Tina::Core::Status>);
 static_assert(std::is_same_v<IsEnabledResult, Tina::Core::Result<bool>>);
+static_assert(std::is_same_v<SetStyleTransitionResult, Tina::Core::Status>);
+static_assert(std::is_same_v<StyleTransitionResult, Tina::UI::UITransitionSpec>);
 static_assert(Tina::UI::UIContextCapacityConfig::DefaultNodeCapacity == 4096);
 static_assert(Tina::UI::UIContextCapacityConfig::DefaultRootCapacity == 64);

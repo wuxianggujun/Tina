@@ -103,24 +103,25 @@ UI mutation -> dirty/layout -> committed hit/paint/semantics
 
 UI 不调用 bgfx。Render 不读取 UI 节点对象，只同步消费当前 submit 调用内的后端无关数据。
 当前 UI 是 per-window owner-thread retained Element tree，输入读取上一份 committed hit，
-structure/layout/hit/paint/semantics 候选全部成功后原子发布。Button 已有即时 hover/pressed/focus/disabled
-反馈，但 Motion 尚未实现。Image/Icon 与 NineSlice 的 authoring、committed paint、root-scoped resolve/pin、
+structure/layout/hit/paint/semantics 候选全部成功后原子发布。Button 已有 hover/pressed/focus/disabled
+反馈；fixed-capacity paint-only Motion、reduced-motion 与 stylesheet `BackgroundColor` transition 已落地。
+Image/Icon 与 NineSlice 的 authoring、committed paint、root-scoped resolve/pin、
 RGBA ImageQuad/backend、产品/失效/尺寸矩阵与 `ui_image_nineslice_v1` 性能证据已经落地；Component/Behavior
 的全池 reservation/counter 与 `ui_component_build_v1` 也已关闭；强类型 StyleClass、node-local pseudo-state、
-startup-only ColorToken registry/value、literal/token-backed BoxFill stylesheet、Runtime startup facade 与
-`ui_style_state_v1` 与运行期 reverse-dependency token 更新已落地。下一阶段继续扩展 Image tint/opacity 等
-属性面与 paint-only Motion，具体边界见
+startup-only ColorToken registry/value、literal/token-backed BoxFill stylesheet、Runtime startup facade、
+`ui_style_state_v1`、运行期 reverse-dependency token 更新、stylesheet imageTint 与产品 Visual 门禁已落地。
+完整 keyframe timeline、layout animation 与更广属性面仍未开放，具体边界见
 [UI 框架设计](ui-framework.md)。
 
 ## 当前产品完成度
 
 | 产品面 | 已有 | 仍缺 |
 | --- | --- | --- |
-| 2D | Catalog TileMap v3 stream root + deferred TileMapChunk、固定容量 Camera/layer demand/cancel/unload、retain-window demand-recency LRU、resident generation dirty cache；稳定 layer/object ID、对象 101/102 消费、角色/碰撞、Physics2D Box/Circle/Capsule + sensor + Distance joint、SpriteAnimationClip/Animator；World Sprite、standalone Particle/Trail 与 TileMap emit 保存 weak AssetHandle 并借用共享 resolver；全部 Sprite2D item 使用 packet-local `FrameResourceRef`；owner-thread fixed-capacity Sprite registry 唯一拥有 resident Lease/GPU/binding 并交给 AssetSystem retirement；advanced input、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | TileMap 优先级 IO/editor/自动 gameplay 生成/旧 schema migration、完整 FX asset/editor/GPU simulation、更多 shape/joint、2D lighting/navigation |
+| 2D | Catalog TileMap v3 stream root + deferred TileMapChunk、固定容量 Camera/layer demand/cancel/unload、retain-window demand-recency LRU、resident generation dirty cache；稳定 layer/object ID、对象 101/102 消费、角色/碰撞、Physics2D Box/Circle/Capsule + sensor + Distance joint、SpriteAnimationClip/Animator；World Sprite、standalone Particle/Trail 与 TileMap emit 保存 weak AssetHandle 并借用共享 resolver；Sprite2D base/optional-normal 使用 packet-local `FrameResourceRef`；owner-thread fixed-capacity Sprite registry 唯一拥有 resident Lease/GPU/binding 并交给 AssetSystem retirement；frame-scoped PointLight2D + ShadowOccluder2D 硬/finite-source 软阴影、resolved/pixel-snapped Camera2D culling 与 derivative-TBN normal map；advanced input、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | TileMap 优先级 IO/editor/自动 gameplay 生成/旧 schema migration、完整 FX asset/editor/GPU simulation、更多 shape/joint、跨 GPU lighting exact golden、navigation |
 | 3D | multi-mesh/multi-prim SPLIT cook、Resources-owned AssetStore、Prefab/Scene weak Mesh/Material Handle、engine-provided/State-owned fixed-capacity Mesh3D registry、packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 采样、material factors、World DirectionalLight3D→逐帧 RenderScene snapshot、URI 安全、Texture/Mesh retirement marker | 完整 PBR/IBL/shadow、point/spot light、light culling、通用 pass system |
-| UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、Focus Scope/Modal/Pointer Capture、ScrollView、Dropdown/Popup、虚拟 ListView/TreeView；Element/recipe authoring、完整预算 Component transaction、六类 Behavior side store 与 node/text/canvas/Behavior reservation/counter、统一 RoundedRect；Image/Icon content、Canvas Image/NineSlice、root-scoped resolver/pin、RGBA ImageQuad、产品/失效/尺寸矩阵与固定 workload；StyleClass、node-local pseudo-state、ColorToken registry/value 与 reverse-dependency 运行期更新、literal/token-backed BoxFill stylesheet、Runtime startup facade 与固定 workload；Slider Focusable/Focus semantics、RangeInput Arrow/D-pad 独立调值 command 与 Dark/Light 交互状态矩阵已关闭；accessibility action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns、HWND 桥接与跨进程 action gate | Image tint/opacity 等属性面、Style Visual 门禁与 paint-only Motion；多行/grapheme/BiDi/复杂 shaping、完整 IME 候选窗、Narrator/Inspect 金标、AT-SPI |
+| UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、Focus Scope/Modal/Pointer Capture、ScrollView、Dropdown/Popup、虚拟 ListView/TreeView；Element/recipe authoring、完整预算 Component transaction、六类 Behavior side store 与 node/text/canvas/Behavior reservation/counter、统一 RoundedRect；Image/Icon content、Canvas Image/NineSlice、root-scoped resolver/pin、RGBA ImageQuad、产品/失效/尺寸矩阵与固定 workload；StyleClass、node-local pseudo-state、ColorToken registry/value 与 reverse-dependency 运行期更新、literal/token-backed BoxFill/imageTint stylesheet、Runtime startup facade 与固定 workload；fixed-capacity paint-only Motion、Style BackgroundColor reservation/activation、reduced-motion；Slider Focusable/Focus semantics、RangeInput Arrow/D-pad 独立调值 command 与 Dark/Light 交互状态矩阵已关闭；accessibility action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns、HWND 桥接与跨进程 action gate | 更广 Style 属性面、完整 keyframe timeline/layout animation；多行/grapheme/BiDi/复杂 shaping、完整 IME 候选窗、Narrator/Inspect 金标、AT-SPI |
 | Runtime | State 栈/commands、四相位阻断、`blocksGameplayInputBelow` 空 snapshot、FramePin/CPU ledger、固定步长、bounded Task shutdown + Host-enforced TaskSystem deadline | 通用 GPU submission fence、多 World、Runtime 内置 Asset/World |
-| 性能 | `tina_bench` schema v1 + provisional 结论；UI 50,000 节点深树 structure/layout/hit/paint 非递归回归，Popup publication 为线性步骤；UI clean/dirty/route/virtual collection、Image/NineSlice、完整 Component 与 Style workload | 完整 dirty-range pruning、固定门禁机 hard gate、多进程 MAD、Motion workload |
+| 性能 | `tina_bench` schema v1 + provisional 结论；UI 50,000 节点深树 structure/layout/hit/paint 非递归回归，Popup publication 为线性步骤；UI clean/dirty/route/virtual collection、Image/NineSlice、完整 Component/Style/Motion workload | 完整 dirty-range pruning、固定门禁机 hard gate、多进程 MAD |
 
 ## 游戏侧正确姿势（摘要）
 

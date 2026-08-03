@@ -2,6 +2,7 @@
 # AssetIds match samples/2d_tilemap_bgfx idBytes(seed) with trailing seed^0xA5.
 # Texture is a 2x1 atlas: left floor (orange), right wall (cyan).
 # Character texture is a separate 3x1 atlas: idle, walk alternate, wall hit.
+# Character normals use an independent aligned 3x1 Texture2D atlas.
 # AudioClip idBytes(4): 880 Hz sine, 480 frames @ 48 kHz mono (~10 ms product SFX).
 platform WindowsX64
 texture2d 010000000000000000000000000000a4 2 1 F08C28FF 28C8DCFF
@@ -33,6 +34,7 @@ endlayer
 endtilemap
 audioclip 040000000000000000000000000000a1 48000 1 480 sine 880
 texture2d 050000000000000000000000000000a0 3 1 FFE45AFF FF9F43FF FF4D6DFF
+texture2d 0d0000000000000000000000000000a8 3 1 8080FFFF C060E8FF 4090E8FF
 sprite 060000000000000000000000000000a3 050000000000000000000000000000a0 0 0 0.33333334 1 0.5 0.5 1
 sprite 070000000000000000000000000000a2 050000000000000000000000000000a0 0.33333334 0 0.66666669 1 0.5 0.5 1
 sprite 080000000000000000000000000000ad 050000000000000000000000000000a0 0.66666669 0 1 1 0.5 0.5 1

@@ -68,13 +68,28 @@ bgfx 只在当前 submit 中临时覆盖持久 device fallback，不污染后续
 1×1 白；未绑定 MR 图时 metallic=0、roughness=1；未绑定 normal 图时只用几何法线。诚实限制：当前
 只有 directional Scene component；无 point/spot light、light culling、IBL 或 shadow。
 
-Sprite2D lighting（`2D-LIGHT-N2`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 world-space point
-light、0..32个 world-space shadow segment、正半径、非负 RGB 与 ambient；shadow endpoint 必须 finite，
+Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
+light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、
+非负 RGB 与 ambient；shadow endpoint 必须 finite，
 且 segment 不得退化为同一点。`setSprite2DLighting()` 深拷贝调用方 span，重复/非法描述使 build
 原子失败；未配置 snapshot 时 bgfx 使用 ambient=1 的既有 unlit 输出。配置后 fragment shader 以 world
-position 计算线性径向衰减，并以 fragment→light 与 segment 相交测试清零被遮挡的点光贡献；每个连续
+position 计算线性径向衰减。source radius=0 时以 fragment→light 与 segment 相交测试清零被遮挡的点光贡献；
+正值时把 segment 裁剪到归一化深度 `(0.001,0.999)`，投影到 finite line-source 区间并按覆盖率连续缩放
+visibility，多 segment 以 multiplicative transmittance 合成；每个连续
 texture batch 都重新提交完整 uniform arrays。ambient、sorting layer → order → ordinal 与
-premultiplied-alpha 合成保持不变。当前没有 soft shadow、normal map、light culling 或 HDR/tone mapping。
+premultiplied-alpha 合成保持不变。Scene extraction 在 descriptor 之前以 resolved、pixel-snapped Camera2D
+执行旋转相机空间的精确 circle-vs-rectangle culling，只有 camera-affecting light 占用8个 committed 槽；
+第9盏仍显式失败。没有 resolved camera 时保留未裁剪上限，shadow segment 始终不裁剪。soft shadow 保持
+`8×32` 固定循环，不增加 uniform 数组或多重采样；多 segment 重叠是乘法近似，不是精确 area-light union。
+每个 Sprite2D item 还可携带 optional packet-local normal Texture2D ref。Null/bgfx 在任何 submit 副作用前
+对 base/normal ref 同步执行 owner/generation/kind/binding-range preflight；连续 batch identity 是
+`(baseTexture, normalTexture)`，normal 不参与透明排序。bgfx slot 1 绑定 batch normal 或 device-owned flat-normal
+texture，以 batch-local uniform 控制分支；fragment shader 用 world-position/UV derivatives 构造 TBN，因此
+rotation、signed scale、atlas UV 与 flip 无需额外矩阵。normal 只调制 point-light contribution，ambient、shadow
+visibility、attenuation 与 premultiplied alpha 保持原契约；无 normal 走原有分支，RGBA8 `(128,128,255)` 的
+flat normal 相对 Lambert factor 精确为1。当前仍无 HDR/tone mapping。product-2d schema 19 以
+`authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1` 提供集成证据，继承双
+ShadowOccluder2D 与 soft/hard 差分，并以 `normalMappedSpriteCount=1/0` 的 normal on/off 可重复像素差分关闭 N5。
 
 ## RenderScene
 
@@ -93,8 +108,8 @@ beginFrame(surface facts)
 当前能力包括：
 
 - Camera2D projection、viewport、pixel snap 与 world picking；
-- Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻兼容 batch；
-- optional self-contained Sprite2D lighting snapshot、最多8个 point light、32个 shadow segment 与 ambient；
+- Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻 `(baseTexture, normalTexture)` batch；
+- optional self-contained Sprite2D lighting snapshot、最多8个 committed point light、32个 shadow segment 与 ambient；
 - PerspectiveCamera3D、frustum culling、Opaque3D depth/state 与 stable batch；
 - optional self-contained Mesh3D lighting snapshot、重复设置/非法描述的事务失败与统计；
 - framebuffer 0x0 suspended 路径；

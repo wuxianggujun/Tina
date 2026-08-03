@@ -409,6 +409,24 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::reducedMotion() const
     return m_state->reducedMotion(m_epoch, m_phase);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setStyleBackgroundColorTransition(const UI::UITransitionSpec& spec)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setStyleBackgroundColorTransition");
+    }
+    return m_state->setStyleBackgroundColorTransition(m_epoch, m_phase, spec);
+}
+
+Core::Result<UI::UITransitionSpec> PrimaryWindowUITreeUpdater::styleBackgroundColorTransition() const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITransitionSpec>("PrimaryWindowUITreeUpdater::styleBackgroundColorTransition");
+    }
+    return m_state->styleBackgroundColorTransition(m_epoch, m_phase);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::beginBackgroundColorTransition(
     UI::UINodeId node, UI::UIStraightSrgba8Color target, const UI::UITransitionSpec& spec)
 {

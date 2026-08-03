@@ -32,7 +32,10 @@ Physics2D、Audio 与 Asset GoogleTest executable；测试数量随功能增长�
 - 20控件 showcase：Dropdown/List/Tree/Scroll 自动交互、Dark/Light 换肤与 root 生命周期；
 - Windows UIA：Invoke/Toggle/RangeValue/Value control patterns 已经通过 owner-thread action seam 接入，
   `RunUi002UiaGate.ps1` 可从独立进程连接真实 showcase HWND；
-- product-2d schema 16：两盏 `PointLight2D` 与两条 `ShadowOccluder2D` 逐次随 Render extraction 发布，并保留 Scene Explorer
+- product-2d schema 19：继承两盏 committed `PointLight2D`、两条 `ShadowOccluder2D`、
+  authored=3/committed=2/culled=1 与 soft=2/hard=0 四跑差分；增加独立 aligned normal atlas、
+  `normalMappedSpriteCount=1/0`、`texturesUploaded=3`、3张 Texture2D owner/retirement 与 normal on/off 四跑；
+  逐次随 Render extraction 发布，并保留 Scene Explorer
   13个 logical item/12个 materialized slot、最终 key `402`、滚动、Theme 与 Tree/TreeItem selected semantics；
 - product-3d schema 5：3个 World DirectionalLight3D 连续逐帧发布、Asset ListView/Scene TreeView、
   2次 collection step、最终 keys `2003/4`；
@@ -117,7 +120,14 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 
 # External Windows UIA HWND client gate; Narrator/Inspect remains a separate manual gate
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunUi002UiaGate.ps1
+
+# Same-host/backend Sprite2D differential gates (also invoked by RunProduct2dGate.ps1)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dShadowVisualGate.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dNormalMapVisualGate.ps1
 ```
+
+normal-map gate 固定四跑（on×2 + off×2）；两种模式都保持 `texturesUploaded=3` 与完整 owner/retirement
+生命周期，同时证明模式内可重复、on/off 差分。
 
 完整图成功时 sample 标签必须为 `productGate=bgfx-physics-freetype-audio`。
 

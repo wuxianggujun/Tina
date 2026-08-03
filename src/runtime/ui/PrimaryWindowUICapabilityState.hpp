@@ -109,6 +109,10 @@ class PrimaryWindowUICapabilityState final {
     imageTint(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId node);
     [[nodiscard]] Core::Status setReducedMotion(u64 epoch, PrimaryWindowUIPhase phase, bool enabled);
     [[nodiscard]] Core::Result<bool> reducedMotion(u64 epoch, PrimaryWindowUIPhase phase);
+    [[nodiscard]] Core::Status setStyleBackgroundColorTransition(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                 const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Result<UI::UITransitionSpec> styleBackgroundColorTransition(u64 epoch,
+                                                                                    PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Status beginBackgroundColorTransition(
         u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, UI::UIStraightSrgba8Color target,
         const UI::UITransitionSpec& spec);

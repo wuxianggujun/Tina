@@ -57,9 +57,9 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 | 组件 | 用途 | 关键约束 |
 | --- | --- | --- |
 | `Camera2D` | FixedWorldHeight/PixelPerfect 投影、viewport、pixel snap | 每帧最多一个 active 2D camera；surface 0x0 时跳过 |
-| `SpriteRenderer2D` | weak Sprite `AssetHandle`、尺寸/pivot/UV override、颜色与排序 | World 只校验结构；visible extract 必须解析为当前 packet texture ref；UV finite 且严格递增 |
-| `PointLight2D` | linear RGB color、非负 intensity、正 world-space radius、active 标志 | Entity world position 是灯光中心；每帧最多8个 active light，按稳定 Entity identity 发布 |
-| `ShadowOccluder2D` | 一条 local-space 线段与 active 标志 | 应用已发布 XY scale/rotation/position；每帧最多32个 active segment，按稳定 Entity identity 发布 |
+| `SpriteRenderer2D` | weak Sprite `AssetHandle`、optional weak normal Texture2D `AssetHandle`、尺寸/pivot/UV override、颜色与排序 | World 只校验结构；visible extract 必须解析 base，非空 normal 独立解析为当前 packet Texture2D ref；UV finite 且严格递增 |
+| `PointLight2D` | linear RGB color、非负 intensity、正影响半径、0..影响半径内的 source radius、active 标志 | Entity world position 是灯光中心；source radius=0 为硬阴影、正值启用连续 penumbra；有 resolved Camera2D 时每帧最多提交8个 camera-affecting light，无相机/0x0 surface 时对全部 active light 保留同一上限 |
+| `ShadowOccluder2D` | 一条 local-space 线段与 active 标志 | 应用已发布 XY scale/rotation/position；每帧最多32个 active segment，按稳定 Entity identity 发布且不做 camera culling |
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
 | `MeshRenderer3D` | weak mesh/material `AssetHandle`、bounds、base color、可见性 | World 只校验结构；visible extract 通过两个 kind-specific resolver 解析非0 key |
 | `DirectionalLight3D` | linear RGB color、非负 intensity、active 标志 | Entity world local `+Z` 指向光源；每帧最多4个 active light，按稳定 Entity identity 发布 |
@@ -106,9 +106,9 @@ writer 与当前 packet sink 中事务式写入：
 ```text
 updateWorldTransforms
   -> resolve active Camera2D and/or PerspectiveCamera3D
-  -> borrowed resolver asks Asset registry to intern current Sprite texture binding
+  -> borrowed resolvers ask Asset registry to intern current Sprite base/optional-normal texture bindings
   -> emit visible SpriteRenderer2D items
-  -> collect active PointLight2D + ShadowOccluder2D and deep-copy the Sprite2D lighting snapshot
+  -> validate/cull active PointLight2D, collect all active ShadowOccluder2D, then deep-copy lighting
   -> collect active DirectionalLight3D and deep-copy the frame lighting snapshot
   -> borrowed kind-specific resolvers ask Mesh3D registry to intern current mesh/material bindings
   -> emit visible MeshRenderer3D items
@@ -118,8 +118,10 @@ updateWorldTransforms
 2D sprite 使用 world position/scale、Z rotation、pivot/size/UV override，并由 RenderScene 执行排序、
 culling、batch 规划与 pixel snap。`ExtractRenderSceneParams::spriteBindingResolver` 是只在本次调用有效的
 borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/generation、Sprite kind 与 binding，
-并返回有效 packet-local texture ref。缺 resolver、空/stale/cross-store/wrong-kind/unbound handle 或空 ref统一
-产生 `UnresolvedSprite`；hidden sprite 不调用 resolver。`MeshRenderer3D` 同样只保存 weak mesh/material
+并返回有效 packet-local base texture ref。组件 normal handle 非空时，`normalTextureBindingResolver` 独立验证
+weak Texture2D handle 并返回 packet-local normal ref；任一解析失败都在 `addSprite2D()` 前返回
+`UnresolvedSprite`，不提交半成品。hidden sprite 不调用两个 resolver，normal binding 不改变排序。
+`MeshRenderer3D` 同样只保存 weak mesh/material
 `AssetHandle` 与 world pose/scale、local bounds、material color 等语义字段。extraction 分别借用
 `mesh3DBindingResolver`/`material3DBindingResolver`，按预期 AssetKind intern 非空 packet-local ref；任一
 handle/resolver/binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden mesh
@@ -127,12 +129,23 @@ handle/resolver/binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续�
 将 color×intensity 与 `ExtractRenderSceneParams::ambientLightScale` 写入固定4槽的 self-contained
 RenderScene snapshot。没有灯组件时保留低层 device fallback；存在组件但全部 inactive 时发布 ambient-only
 snapshot，避免重新启用 fallback 方向光。超过上限返回 `TooManyActiveDirectionalLights`，不静默裁剪。
-`PointLight2D` 使用已发布 world position、显式 world-space radius 与 color×intensity，按稳定 Entity identity
-排序后写入固定8槽 Sprite2D snapshot；没有组件时保留 unlit path，inactive-only 发布 ambient-only。
-超过上限返回 `TooManyActivePointLights2D`。`ShadowOccluder2D` 的 local 端点应用已发布 XY scale、rotation、
-position 后，按稳定 Entity identity 写入固定32槽 world-space segment；超容量返回
-`TooManyActiveShadowOccluders2D`，非法或投影退化返回 `InvalidComponent`。遮挡只影响相交点光贡献，
-不改变 ambient 或 Sprite 透明排序；没有 PointLight2D 时不单独发布 occluder snapshot。
+`PointLight2D` 使用已发布 world position、显式 world-space influence/source radii 与 color×intensity。
+source radius 必须 finite、非负且不大于 influence radius；它不改变 N3 culling 外圆。Extraction 先验证每个
+active component、`WorldTransform` 和 color×intensity，因此非法灯即使位于视口外也返回
+`InvalidComponent`，不会被 culling 隐藏。有非0 surface 上 resolved Camera2D 时，灯心转换到旋转相机
+局部空间，以 circle-vs-rectangle 精确相交测试裁剪；相机中心使用与 committed Camera2D 一致的 pixel snap，
+边界相切仍可见。只有 camera-affecting light 按稳定 Entity identity 排序并占用固定8槽，第9盏仍返回
+`TooManyActivePointLights2D`，不做 top-K 或静默丢弃。没有 active Camera2D 或 surface 0x0 时不裁剪，
+全部 active light 继续受同一8槽上限约束。没有灯组件时保留 unlit path，inactive-only 发布 ambient-only。
+`ShadowOccluder2D` 的 local 端点应用已发布 XY scale、rotation、position 后，按稳定 Entity identity 写入
+固定32槽 world-space segment；超容量返回 `TooManyActiveShadowOccluders2D`，非法或投影退化返回
+`InvalidComponent`。Occluder 不做 camera culling，因为视口外 segment 仍可能遮挡边界光线。source radius=0
+走既有 hard-ray intersection；正值把遮挡段按归一化 receiver→light 深度投影到 finite source 区间，连续计算
+单段覆盖率，并用 multiplicative transmittance 合成多段。该固定 `8×32` 成本近似不宣称精确 area-light
+interval union；ambient 与 Sprite 透明排序不变，没有 PointLight2D 时不单独发布 occluder snapshot。
+product-2d schema 19 固定创建3盏 active light，其中1盏永久离屏；提交结果保持
+`authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1`，并继承 schema 16 的
+双 ShadowOccluder2D 逐帧 snapshot 证据；默认 committed soft light count=2，`--force-hard-shadows` 为0。
 Scene 不保存 resolver、FrameResourceSink/ref、AssetLease、Cooked payload 或 GPU handle。
 
 A2 提供的产品 resolver 最初把 Sprite Handle 转交 `Sprite2DBindingRegistry::resolveSprite()`，由 Asset 层沿

@@ -147,6 +147,8 @@ class PrimaryWindowUITreeUpdater final {
     // Paint-only Motion (UI-MOTION-001). Host samples on commitLayout; M==0 is free.
     [[nodiscard]] Core::Status setReducedMotion(bool enabled);
     [[nodiscard]] Core::Result<bool> reducedMotion() const;
+    [[nodiscard]] Core::Status setStyleBackgroundColorTransition(const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Result<UI::UITransitionSpec> styleBackgroundColorTransition() const;
     [[nodiscard]] Core::Status beginBackgroundColorTransition(
         UI::UINodeId node, UI::UIStraightSrgba8Color target, const UI::UITransitionSpec& spec);
     [[nodiscard]] Core::Status beginBorderColorTransition(

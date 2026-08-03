@@ -27,6 +27,11 @@ class UIMotionTrackStorage final {
         Offset,
     };
 
+    enum class CompletionMode : u8 {
+        CommitProperty = 0,
+        StylePresentationOnly,
+    };
+
     struct Scalar2 final {
         float x = 0.0F;
         float y = 0.0F;
@@ -49,6 +54,9 @@ class UIMotionTrackStorage final {
         Core::Duration duration{0.0};
         Core::Duration delay{0.0};
         UIEasing easing = UIEasing::Linear;
+        CompletionMode completionMode = CompletionMode::CommitProperty;
+        bool occupied = false;
+        bool persistentReservation = false;
         bool active = false;
         u32 nextActive = InvalidSlot;
         u32 prevActive = InvalidSlot;
@@ -61,6 +69,7 @@ class UIMotionTrackStorage final {
         UIStraightSrgba8Color color{};
         float scalar = 0.0F;
         Scalar2 offset{};
+        CompletionMode completionMode = CompletionMode::CommitProperty;
     };
 
     // Presentation snapshot for one node after active-track sampling.
@@ -82,6 +91,9 @@ class UIMotionTrackStorage final {
     UIMotionTrackStorage(usize trackCapacity, std::pmr::memory_resource& resource);
 
     [[nodiscard]] usize capacity() const noexcept;
+    [[nodiscard]] usize availableCount() const noexcept;
+    [[nodiscard]] usize reservedCount() const noexcept;
+    [[nodiscard]] usize reservedHighWater() const noexcept;
     [[nodiscard]] usize activeCount() const noexcept;
     [[nodiscard]] usize highWater() const noexcept;
     [[nodiscard]] usize lastSampledCount() const noexcept;
@@ -96,6 +108,15 @@ class UIMotionTrackStorage final {
     [[nodiscard]] Core::Status beginOrRetargetOffset(
         UINodeId node, UIAnimatableProperty property, Scalar2 start, Scalar2 target,
         const UITransitionSpec& spec, Core::MonotonicTimePoint now);
+    [[nodiscard]] Core::Status reservePersistent(UINodeId node, UIAnimatableProperty property);
+    [[nodiscard]] Core::Status activateReservedStyleColor(UINodeId node, UIStraightSrgba8Color start,
+                                                          UIStraightSrgba8Color target, const UITransitionSpec& spec,
+                                                          Core::MonotonicTimePoint now);
+    [[nodiscard]] bool hasPersistentReservation(UINodeId node, UIAnimatableProperty property) const noexcept;
+    [[nodiscard]] bool hasTrack(UINodeId node, UIAnimatableProperty property) const noexcept;
+    void releasePersistentReservation(UINodeId node, UIAnimatableProperty property) noexcept;
+    void releaseAllPersistentReservations(UIAnimatableProperty property) noexcept;
+    void cancelActiveProperty(UINodeId node, UIAnimatableProperty property) noexcept;
 
     void snapAllActive() noexcept;
     void releaseNode(UINodeId node) noexcept;
@@ -109,6 +130,8 @@ class UIMotionTrackStorage final {
     [[nodiscard]] NodePresentation presentationFor(UINodeId node) const noexcept;
 
   private:
+    [[nodiscard]] const Track* findOccupied(UINodeId node, UIAnimatableProperty property) const noexcept;
+    [[nodiscard]] Track* findOccupied(UINodeId node, UIAnimatableProperty property) noexcept;
     void unlinkActive(u32 slotIndex) noexcept;
     void linkActive(u32 slotIndex) noexcept;
     [[nodiscard]] u32 allocateSlot() noexcept;
@@ -121,9 +144,12 @@ class UIMotionTrackStorage final {
     std::pmr::vector<Track> tracks_;
     std::pmr::vector<u32> freeList_;
     u32 freeHead_ = InvalidSlot;
+    usize availableCount_ = 0;
     u32 activeHead_ = InvalidSlot;
     usize activeCount_ = 0;
     usize highWater_ = 0;
+    usize reservedCount_ = 0;
+    usize reservedHighWater_ = 0;
     usize lastSampledCount_ = 0;
     std::pmr::vector<Completed> lastCompleted_;
 };

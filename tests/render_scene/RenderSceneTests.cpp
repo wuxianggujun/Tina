@@ -297,6 +297,35 @@ TEST(RenderSceneBuilderTest, UsesEntityThenInsertionOrderForEqualLayers)
     EXPECT_LT(committed->sprites2D()[0].insertionOrder, committed->sprites2D()[1].insertionOrder);
 }
 
+TEST(RenderSceneBuilderTest, CopiesOptionalNormalTextureWithoutChangingSpriteSortOrder)
+{
+    FrameResourceScope resources;
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    ASSERT_TRUE(builder.writer().setCamera2D(camera()));
+
+    RenderSprite2DInput last = sprite(resources, 30, 30, 0.0F, 0.0F, 2, 7);
+    last.normalTexture = resources.texture(300);
+    ASSERT_TRUE(builder.writer().addSprite2D(last));
+
+    RenderSprite2DInput first = sprite(resources, 10, 10, 0.0F, 0.0F, 2, 7);
+    first.normalTexture = resources.texture(100);
+    ASSERT_TRUE(builder.writer().addSprite2D(first));
+    first.normalTexture = resources.texture(999);
+
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 20, 20, 0.0F, 0.0F, 2, 7)));
+
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value()) << committed.error().message;
+    ASSERT_EQ(committed->sprites2D().size(), 3U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[0].texture), 10U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[0].normalTexture), 100U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[1].texture), 20U);
+    EXPECT_FALSE(committed->sprites2D()[1].normalTexture.hasValue());
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[2].texture), 30U);
+    EXPECT_EQ(resources.bindingKey(committed->sprites2D()[2].normalTexture), 300U);
+}
+
 TEST(RenderSceneBuilderTest, RequiresOneCameraForWorldSpritesAndRejectsDuplicates)
 {
     FrameResourceScope resources;
@@ -420,6 +449,7 @@ TEST(RenderSceneBuilderTest, Sprite2DLightingCopiesIntoTheCommittedFrameSnapshot
             .positionX = 1.0F,
             .positionY = 2.0F,
             .radiusMeters = 3.0F,
+            .sourceRadiusMeters = 0.5F,
             .colorR = 0.5F,
             .colorG = 0.6F,
             .colorB = 0.7F,
@@ -451,6 +481,7 @@ TEST(RenderSceneBuilderTest, Sprite2DLightingCopiesIntoTheCommittedFrameSnapshot
     const RenderSprite2DLighting& lighting = *committed->sprite2DLighting();
     ASSERT_EQ(lighting.pointLights().size(), 2U);
     EXPECT_FLOAT_EQ(lighting.pointLights()[0].colorR, 0.5F);
+    EXPECT_FLOAT_EQ(lighting.pointLights()[0].sourceRadiusMeters, 0.5F);
     EXPECT_FLOAT_EQ(lighting.pointLights()[1].positionX, -4.0F);
     ASSERT_EQ(lighting.shadowSegments().size(), 2U);
     EXPECT_FLOAT_EQ(lighting.shadowSegments()[0].startX, -1.0F);
@@ -472,6 +503,29 @@ TEST(RenderSceneBuilderTest, InvalidOrDuplicateSprite2DLightingFailsTheBuildAtom
     auto invalid = builder.writer().setSprite2DLighting({.pointLights = invalidLights});
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, RenderErrorCode::InvalidSprite2DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array invalidSourceRadius{
+        Sprite2DPointLight{.radiusMeters = 1.0F, .sourceRadiusMeters = 1.1F},
+    };
+    auto invalidSource =
+        builder.writer().setSprite2DLighting({.pointLights = invalidSourceRadius});
+    ASSERT_FALSE(invalidSource);
+    EXPECT_EQ(invalidSource.error().code, RenderErrorCode::InvalidSprite2DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array nonFiniteSourceRadius{
+        Sprite2DPointLight{
+            .radiusMeters = 1.0F,
+            .sourceRadiusMeters = std::numeric_limits<float>::quiet_NaN(),
+        },
+    };
+    auto nonFiniteSource =
+        builder.writer().setSprite2DLighting({.pointLights = nonFiniteSourceRadius});
+    ASSERT_FALSE(nonFiniteSource);
+    EXPECT_EQ(nonFiniteSource.error().code, RenderErrorCode::InvalidSprite2DLighting);
     EXPECT_FALSE(builder.commit().has_value());
 
     ASSERT_TRUE(builder.beginFrame());

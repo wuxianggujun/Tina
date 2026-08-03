@@ -70,6 +70,9 @@ struct SpriteUvRect final {
 // semantic fields only; it never owns an AssetLease or backend/GPU handle.
 struct SpriteRenderer2D final {
     Asset::AssetHandle sprite{};
+    // Optional weak Texture2D asset. Extraction resolves it independently from
+    // the Sprite asset and never retains a lease or backend binding here.
+    Asset::AssetHandle normalTexture{};
     SpriteOverrideFlags overrides = SpriteOverrideFlags::None;
     Vec2 sizeOverrideMeters{1.0F, 1.0F};
     // Pivot in [0,1] relative to sprite extents; geometric center is adjusted

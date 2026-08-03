@@ -500,6 +500,14 @@ class UIContext final {
     [[nodiscard]] Core::Status setMotionClock(const Core::IMonotonicClock* clock);
     [[nodiscard]] Core::Status setReducedMotion(bool enabled);
     [[nodiscard]] bool reducedMotion() const noexcept;
+    // When duration > 0, stylesheet BoxFill color changes driven by interaction
+    // state (hover/press/focus/...) begin a paint-only BackgroundColor transition
+    // instead of snapping. Duration 0 keeps the historical instant resolve path.
+    // Matching nodes reserve one persistent track during style binding. Enabling
+    // this after nodes exist preflights all reservations atomically; capacity
+    // failure preserves the previous spec and never reaches input routing.
+    [[nodiscard]] Core::Status setStyleBackgroundColorTransition(const UITransitionSpec& spec);
+    [[nodiscard]] UITransitionSpec styleBackgroundColorTransition() const noexcept;
     [[nodiscard]] Core::Status beginBackgroundColorTransition(
         UINodeId node, UIStraightSrgba8Color target, const UITransitionSpec& spec);
     [[nodiscard]] Core::Status beginBorderColorTransition(

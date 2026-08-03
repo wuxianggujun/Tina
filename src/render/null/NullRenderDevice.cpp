@@ -29,6 +29,18 @@ namespace {
                 RenderErrorCode::InvalidFrameResource,
                 "NullRender Sprite2D texture ref is stale, cross-packet, wrong-kind, or out of binding range");
         }
+        if (sprite.normalTexture)
+        {
+            const FrameResourceDescriptor* normalDescriptor =
+                frame.resources.resolve(sprite.normalTexture, FrameResourceKind::Texture2D);
+            if (normalDescriptor == nullptr ||
+                normalDescriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "NullRender Sprite2D normal texture ref is stale, cross-packet, wrong-kind, or out of binding range");
+            }
+        }
     }
     return Core::success();
 }

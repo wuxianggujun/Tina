@@ -36,6 +36,25 @@ class DeviceCapture final {
     {
         lastSubmittedWorldSceneStatistics_ = scene.statistics();
         hasLastSubmittedWorldSceneStatistics_ = true;
+        lastSubmittedSoftShadowPointLight2DCount_ = 0;
+        lastSubmittedNormalMappedSpriteCount_ = 0;
+        if (scene.sprite2DLighting().has_value())
+        {
+            for (const Render::Sprite2DPointLight& light : scene.sprite2DLighting()->pointLights())
+            {
+                if (light.sourceRadiusMeters > 0.0F)
+                {
+                    ++lastSubmittedSoftShadowPointLight2DCount_;
+                }
+            }
+        }
+        for (const Render::RenderSprite2DItem& sprite : scene.sprites2D())
+        {
+            if (sprite.normalTexture.hasValue())
+            {
+                ++lastSubmittedNormalMappedSpriteCount_;
+            }
+        }
         if (lastSubmittedWorldSceneStatistics_.sprite2DLightingConfigured)
         {
             ++sprite2DLightingFrameCount_;
@@ -49,6 +68,14 @@ class DeviceCapture final {
     {
         return sprite2DLightingFrameCount_;
     }
+    [[nodiscard]] Core::u32 lastSubmittedSoftShadowPointLight2DCount() const noexcept
+    {
+        return lastSubmittedSoftShadowPointLight2DCount_;
+    }
+    [[nodiscard]] Core::u32 lastSubmittedNormalMappedSpriteCount() const noexcept
+    {
+        return lastSubmittedNormalMappedSpriteCount_;
+    }
 
   private:
     Render::IRenderDevice* device_ = nullptr;
@@ -58,6 +85,8 @@ class DeviceCapture final {
     bool hasLastSubmittedWorldSceneStatistics_ = false;
     Render::RenderSceneStatistics lastSubmittedWorldSceneStatistics_{};
     Core::u64 sprite2DLightingFrameCount_ = 0;
+    Core::u32 lastSubmittedSoftShadowPointLight2DCount_ = 0;
+    Core::u32 lastSubmittedNormalMappedSpriteCount_ = 0;
 };
 
 class CapturingRenderDevice final : public Render::IRenderDevice {

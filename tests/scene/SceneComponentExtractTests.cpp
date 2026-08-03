@@ -196,6 +196,51 @@ struct TestSpriteBindings final {
     u32 resolveCalls = 0;
 };
 
+struct TestNormalTextureBindings final {
+    struct Binding final {
+        Asset::AssetHandle texture{};
+        u32 key = 0;
+    };
+
+    [[nodiscard]] Asset::AssetFrameResourceResolver resolver() noexcept
+    {
+        return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolve};
+    }
+
+    void bind(Asset::AssetHandle texture, u32 key) noexcept
+    {
+        bindings[bindingCount++] = Binding{.texture = texture, .key = key};
+    }
+
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolve(
+        void* userData,
+        Asset::AssetHandle texture,
+        Render::FrameResourceSink& frameResources) noexcept
+    {
+        auto& self = *static_cast<TestNormalTextureBindings*>(userData);
+        ++self.resolveCalls;
+        if (self.store == nullptr || !texture ||
+            self.store->assetKind(texture) != AssetFormat::AssetKind::Texture2D ||
+            self.store->state(texture) == Asset::AssetLogicalState::Unloaded)
+        {
+            return Render::FrameResourceRef{};
+        }
+        for (usize index = 0; index < self.bindingCount; ++index)
+        {
+            if (self.bindings[index].texture == texture)
+            {
+                return internTestTexture(frameResources, self.bindings[index].key);
+            }
+        }
+        return Render::FrameResourceRef{};
+    }
+
+    Asset::AssetStore* store = nullptr;
+    std::array<Binding, 4> bindings{};
+    usize bindingCount = 0;
+    u32 resolveCalls = 0;
+};
+
 class SceneSpriteAssetTest : public testing::Test {
   protected:
     void SetUp() override
@@ -216,6 +261,7 @@ class SceneSpriteAssetTest : public testing::Test {
         secondSprite_ = *second;
         thirdSprite_ = *third;
         wrongKind_ = *wrongKind;
+        normalTexture_ = *wrongKind;
     }
 
     [[nodiscard]] Asset::AssetStore& store() noexcept
@@ -229,6 +275,7 @@ class SceneSpriteAssetTest : public testing::Test {
     Asset::AssetHandle secondSprite_{};
     Asset::AssetHandle thirdSprite_{};
     Asset::AssetHandle wrongKind_{};
+    Asset::AssetHandle normalTexture_{};
 };
 
 [[nodiscard]] Core::Status extractSingleSprite(
@@ -394,6 +441,7 @@ TEST_F(SceneSpriteAssetTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
             EXPECT_EQ(item.alpha, 68U);
             EXPECT_EQ(item.sortingLayer, -2);
             EXPECT_EQ(item.orderInLayer, 9);
+            EXPECT_FALSE(item.normalTexture.hasValue());
         }
         EXPECT_NE(textureBindingKey(item.texture), 3U);
     }
@@ -480,6 +528,179 @@ TEST_F(SceneSpriteAssetTest, HiddenSpriteSkipsBindingResolution)
     const Core::Status status = extractSingleSprite({}, bindings.resolver(), false);
     ASSERT_TRUE(status) << (status ? "" : status.error().message);
     EXPECT_EQ(bindings.resolveCalls, 0U);
+}
+
+TEST_F(SceneSpriteAssetTest, ResolvesOptionalNormalTextureIntoCommittedSprite)
+{
+    World world = makeWorld();
+    const EntityId cameraEntity = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(cameraEntity, fixedCamera()));
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.normalTexture = normalTexture_;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    spriteBindings.bind(firstSprite_, 7);
+    TestNormalTextureBindings normalBindings{.store = &store()};
+    normalBindings.bind(normalTexture_, 71);
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 800, .pixelHeight = 600},
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .normalTextureBindingResolver = normalBindings.resolver(),
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_EQ(view->sprites2D().size(), 1U);
+    EXPECT_EQ(textureBindingKey(view->sprites2D()[0].texture), 7U);
+    EXPECT_EQ(textureBindingKey(view->sprites2D()[0].normalTexture), 71U);
+    EXPECT_EQ(spriteBindings.resolveCalls, 1U);
+    EXPECT_EQ(normalBindings.resolveCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, MissingNormalResolverRejectsBeforeSubmittingSprite)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.normalTexture = normalTexture_;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    spriteBindings.bind(firstSprite_, 7);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{.spriteBindingResolver = spriteBindings.resolver()});
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(spriteBindings.resolveCalls, 1U);
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    EXPECT_TRUE(view->sprites2D().empty());
+}
+
+TEST_F(SceneSpriteAssetTest, StaleNormalTextureIsUnresolved)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.normalTexture = normalTexture_;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+    ASSERT_TRUE(store().unload(normalTexture_));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    spriteBindings.bind(firstSprite_, 7);
+    TestNormalTextureBindings normalBindings{.store = &store()};
+    normalBindings.bind(normalTexture_, 71);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .normalTextureBindingResolver = normalBindings.resolver(),
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(normalBindings.resolveCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, WrongKindNormalTextureIsUnresolved)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.normalTexture = secondSprite_;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    spriteBindings.bind(firstSprite_, 7);
+    TestNormalTextureBindings normalBindings{.store = &store()};
+    normalBindings.bind(secondSprite_, 71);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .normalTextureBindingResolver = normalBindings.resolver(),
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(normalBindings.resolveCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, EmptyNormalTextureBindingIsUnresolved)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.normalTexture = normalTexture_;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    spriteBindings.bind(firstSprite_, 7);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .normalTextureBindingResolver = Asset::AssetFrameResourceResolver{
+                .resolve = &resolveToEmpty,
+            },
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+}
+
+TEST_F(SceneSpriteAssetTest, HiddenSpriteSkipsNormalTextureResolution)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.normalTexture = normalTexture_;
+    sprite.visible = false;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    TestNormalTextureBindings normalBindings{.store = &store()};
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .normalTextureBindingResolver = normalBindings.resolver(),
+        }));
+    EXPECT_EQ(spriteBindings.resolveCalls, 0U);
+    EXPECT_EQ(normalBindings.resolveCalls, 0U);
 }
 
 TEST_F(SceneSpriteAssetTest, WriterFailureIsReturnedAfterSuccessfulResolution)
@@ -854,6 +1075,7 @@ TEST(ScenePointLight2DTest, SetsClearsQueriesAndRejectsInvalidComponent)
         .color = {.red = 0.25F, .green = 0.5F, .blue = 0.75F},
         .intensity = 2.0F,
         .radiusMeters = 6.0F,
+        .sourceRadiusMeters = 1.25F,
     };
     ASSERT_TRUE(world.setPointLight2D(entity, light));
     ASSERT_NE(world.pointLight2D(entity), nullptr);
@@ -864,6 +1086,20 @@ TEST(ScenePointLight2DTest, SetsClearsQueriesAndRejectsInvalidComponent)
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
     EXPECT_FLOAT_EQ(world.pointLight2D(entity)->radiusMeters, 6.0F);
+    EXPECT_FLOAT_EQ(world.pointLight2D(entity)->sourceRadiusMeters, 1.25F);
+
+    light.radiusMeters = 6.0F;
+    light.sourceRadiusMeters = -0.1F;
+    invalid = world.setPointLight2D(entity, light);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_FLOAT_EQ(world.pointLight2D(entity)->sourceRadiusMeters, 1.25F);
+
+    light.sourceRadiusMeters = 6.1F;
+    invalid = world.setPointLight2D(entity, light);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_FLOAT_EQ(world.pointLight2D(entity)->sourceRadiusMeters, 1.25F);
 
     ASSERT_TRUE(world.clearPointLight2D(entity));
     EXPECT_EQ(world.pointLight2D(entity), nullptr);
@@ -921,6 +1157,7 @@ TEST(ScenePointLight2DTest, ExtractsStableWorldPositionsColorsRadiusAndAmbientIn
         .color = {.red = 0.5F, .green = 0.25F, .blue = 0.125F},
         .intensity = 2.0F,
         .radiusMeters = 5.0F,
+        .sourceRadiusMeters = 0.75F,
     }));
     ASSERT_TRUE(world.setPointLight2D(second, PointLight2D{
         .color = {.red = 0.1F, .green = 0.2F, .blue = 0.3F},
@@ -969,12 +1206,14 @@ TEST(ScenePointLight2DTest, ExtractsStableWorldPositionsColorsRadiusAndAmbientIn
     EXPECT_FLOAT_EQ(lights[0].positionX, 1.0F);
     EXPECT_FLOAT_EQ(lights[0].positionY, 2.0F);
     EXPECT_FLOAT_EQ(lights[0].radiusMeters, 5.0F);
+    EXPECT_FLOAT_EQ(lights[0].sourceRadiusMeters, 0.75F);
     EXPECT_FLOAT_EQ(lights[0].colorR, 1.0F);
     EXPECT_FLOAT_EQ(lights[0].colorG, 0.5F);
     EXPECT_FLOAT_EQ(lights[0].colorB, 0.25F);
     EXPECT_FLOAT_EQ(lights[1].positionX, -3.0F);
     EXPECT_FLOAT_EQ(lights[1].positionY, 4.0F);
     EXPECT_FLOAT_EQ(lights[1].radiusMeters, 7.0F);
+    EXPECT_FLOAT_EQ(lights[1].sourceRadiusMeters, 0.0F);
     EXPECT_FLOAT_EQ(lights[1].colorR, 0.3F);
     EXPECT_FLOAT_EQ(lights[1].colorG, 0.6F);
     EXPECT_FLOAT_EQ(lights[1].colorB, 0.9F);
@@ -1038,6 +1277,285 @@ TEST(ScenePointLight2DTest, EnforcesCapacityAndPublishesInactiveAmbientOnly)
         });
     ASSERT_FALSE(invalidAmbient);
     EXPECT_EQ(invalidAmbient.error().code, SceneErrorCode::InvalidComponent);
+    builder->rollback();
+}
+
+TEST(ScenePointLight2DTest, CullsOffscreenLightsBeforeApplyingVisibleCapacity)
+{
+    constexpr usize offscreenCount = Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U;
+    World world = makeWorld(offscreenCount + 5U);
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
+
+    for (usize index = 0; index < offscreenCount; ++index) {
+        const EntityId light =
+            world.createEntity(translated(100.0F + static_cast<float>(index), 0.0F)).value();
+        ASSERT_TRUE(world.setPointLight2D(light, PointLight2D{.radiusMeters = 1.0F}));
+    }
+    const EntityId centered = world.createEntity().value();
+    const EntityId tangent = world.createEntity(translated(6.0F, 0.0F)).value();
+    const EntityId outside = world.createEntity(translated(6.01F, 0.0F)).value();
+    ASSERT_TRUE(world.setPointLight2D(centered, PointLight2D{.radiusMeters = 1.0F}));
+    ASSERT_TRUE(world.setPointLight2D(tangent, PointLight2D{.radiusMeters = 1.0F}));
+    ASSERT_TRUE(world.setPointLight2D(outside, PointLight2D{.radiusMeters = 1.0F}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_TRUE(view->sprite2DLighting().has_value());
+    const auto lights = view->sprite2DLighting()->pointLights();
+    ASSERT_EQ(lights.size(), 2U);
+    EXPECT_FLOAT_EQ(lights[0].positionX, 0.0F);
+    EXPECT_FLOAT_EQ(lights[1].positionX, 6.0F);
+}
+
+TEST(ScenePointLight2DTest, CullsPointLightsInRotatedCameraSpace)
+{
+    World world = makeWorld();
+    LocalTransform cameraTransform{};
+    cameraTransform.rotation = rotationAroundZ(std::numbers::pi_v<float> * 0.5F);
+    const EntityId camera = world.createEntity(cameraTransform).value();
+    ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
+
+    const EntityId alongWideAxis = world.createEntity(translated(0.0F, 9.0F)).value();
+    const EntityId outsideNarrowAxis = world.createEntity(translated(9.0F, 0.0F)).value();
+    ASSERT_TRUE(world.setPointLight2D(alongWideAxis, PointLight2D{.radiusMeters = 1.0F}));
+    ASSERT_TRUE(world.setPointLight2D(outsideNarrowAxis, PointLight2D{.radiusMeters = 1.0F}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 200, .pixelHeight = 100},
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_TRUE(view->sprite2DLighting().has_value());
+    const auto lights = view->sprite2DLighting()->pointLights();
+    ASSERT_EQ(lights.size(), 1U);
+    EXPECT_FLOAT_EQ(lights[0].positionX, 0.0F);
+    EXPECT_FLOAT_EQ(lights[0].positionY, 9.0F);
+}
+
+TEST(ScenePointLight2DTest, CullingUsesTheCommittedPixelSnappedCameraCenter)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity(translated(0.49F, 0.0F)).value();
+    Camera2D cameraComponent = fixedCamera(10.0F);
+    cameraComponent.pixelSnap = Render::RenderPixelSnapPolicy::CameraTranslation;
+    ASSERT_TRUE(world.setCamera2D(camera, cameraComponent));
+
+    const EntityId light = world.createEntity(translated(5.75F, 0.0F)).value();
+    ASSERT_TRUE(world.setPointLight2D(light, PointLight2D{.radiusMeters = 0.5F}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 10, .pixelHeight = 10},
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_TRUE(view->camera2D().has_value());
+    EXPECT_FLOAT_EQ(view->camera2D()->centerX, 0.0F);
+    ASSERT_TRUE(view->sprite2DLighting().has_value());
+    EXPECT_TRUE(view->sprite2DLighting()->pointLights().empty());
+}
+
+TEST(ScenePointLight2DTest, RejectsTheNinthCameraAffectingPointLight)
+{
+    constexpr usize visibleCount = Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U;
+    World world = makeWorld(visibleCount + 1U);
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
+
+    for (usize index = 0; index < visibleCount; ++index) {
+        const EntityId light =
+            world.createEntity(translated(static_cast<float>(index) - 4.0F, 0.0F)).value();
+        ASSERT_TRUE(world.setPointLight2D(light, PointLight2D{.radiusMeters = 1.0F}));
+    }
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
+        });
+
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActivePointLights2D);
+    builder->rollback();
+}
+
+TEST(ScenePointLight2DTest, ValidatesOffscreenPointLightsBeforeCulling)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
+    const EntityId light = world.createEntity(translated(100.0F, 0.0F)).value();
+    ASSERT_TRUE(world.setPointLight2D(light, PointLight2D{
+        .color = {
+            .red = std::numeric_limits<float>::max(),
+            .green = 1.0F,
+            .blue = 1.0F,
+        },
+        .intensity = 2.0F,
+        .radiusMeters = 1.0F,
+    }));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
+        });
+
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::InvalidComponent);
+    builder->rollback();
+}
+
+TEST(ScenePointLight2DTest, RejectsCorruptOffscreenSourceRadiusBeforeCulling)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
+    const EntityId light = world.createEntity(translated(100.0F, 0.0F)).value();
+    ASSERT_TRUE(world.setPointLight2D(light, PointLight2D{.radiusMeters = 1.0F}));
+    auto* corruptLight = const_cast<PointLight2D*>(world.pointLight2D(light));
+    ASSERT_NE(corruptLight, nullptr);
+    corruptLight->sourceRadiusMeters = 2.0F;
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
+        });
+
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::InvalidComponent);
+    builder->rollback();
+}
+
+TEST(ScenePointLight2DTest, InvalidComponentTakesPriorityOverVisibleCapacity)
+{
+    constexpr usize visibleCount = Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U;
+    World world = makeWorld(visibleCount + 3U);
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
+
+    for (usize index = 0; index < visibleCount; ++index) {
+        const EntityId light =
+            world.createEntity(translated(static_cast<float>(index) - 4.0F, 0.0F)).value();
+        ASSERT_TRUE(world.setPointLight2D(light, PointLight2D{.radiusMeters = 1.0F}));
+    }
+    const EntityId offscreen = world.createEntity(translated(100.0F, 0.0F)).value();
+    ASSERT_TRUE(world.setPointLight2D(offscreen, PointLight2D{.radiusMeters = 1.0F}));
+    const EntityId invalid = world.createEntity(translated(101.0F, 0.0F)).value();
+    ASSERT_TRUE(world.setPointLight2D(invalid, PointLight2D{.radiusMeters = 1.0F}));
+    auto* corruptLight = const_cast<PointLight2D*>(world.pointLight2D(invalid));
+    ASSERT_NE(corruptLight, nullptr);
+    corruptLight->sourceRadiusMeters = 2.0F;
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
+        });
+
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::InvalidComponent);
+    builder->rollback();
+}
+
+TEST(ScenePointLight2DTest, SuspendedSurfaceKeepsTheUnculledCapacityContract)
+{
+    constexpr usize activeCount = Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U;
+    World world = makeWorld(activeCount + 1U);
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
+
+    for (usize index = 0; index < activeCount; ++index) {
+        const EntityId light =
+            world.createEntity(translated(100.0F + static_cast<float>(index), 0.0F)).value();
+        ASSERT_TRUE(world.setPointLight2D(light, PointLight2D{.radiusMeters = 1.0F}));
+    }
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 0, .pixelHeight = 0},
+        });
+
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActivePointLights2D);
     builder->rollback();
 }
 

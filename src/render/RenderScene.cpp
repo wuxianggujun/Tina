@@ -597,6 +597,7 @@ Core::Status RenderSceneBuilder::addSprite2D(const RenderSprite2DInput& sprite)
 
     std::construct_at(&m_sprites[m_spriteCount], RenderSprite2DItem{
         .texture = sprite.texture,
+        .normalTexture = sprite.normalTexture,
         .stableEntityKey = sprite.stableEntityKey,
         .insertionOrder = m_spriteCount,
         .centerX = sprite.centerX,

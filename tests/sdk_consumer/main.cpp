@@ -74,6 +74,28 @@ class ConsumerState final : public Tina::IGameState {
         {
             return status;
         }
+        const Tina::UI::UITransitionSpec styleTransition{
+            .property = Tina::UI::UIAnimatableProperty::BackgroundColor,
+            .duration = Tina::Core::Duration{0.100},
+            .easing = Tina::UI::UIEasing::EaseOut,
+        };
+        if (Tina::Core::Status status = tree->setStyleBackgroundColorTransition(styleTransition); !status)
+        {
+            return status;
+        }
+        auto configuredTransition = tree->styleBackgroundColorTransition();
+        if (!configuredTransition)
+        {
+            return Tina::Core::failure(std::move(configuredTransition.error()));
+        }
+        if (configuredTransition->property != styleTransition.property ||
+            configuredTransition->duration != styleTransition.duration ||
+            configuredTransition->delay != styleTransition.delay ||
+            configuredTransition->easing != styleTransition.easing)
+        {
+            return Tina::Core::failure(Tina::UI::UIErrorCode::InvalidStyle,
+                                       "Installed Tina GameSDK style transition did not round-trip");
+        }
         const std::array classes{*styleClass};
         Tina::UI::UIElementDescriptor panel = Tina::UI::makePanelElement();
         panel.visual.styleRole = Tina::UI::UIStyleRoleId::PanelSurface;

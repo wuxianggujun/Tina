@@ -849,6 +849,33 @@ Core::Result<bool> PrimaryWindowUICapabilityState::reducedMotion(u64 epoch, Prim
     return context_->reducedMotion();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setStyleBackgroundColorTransition(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                               const UI::UITransitionSpec& spec)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setStyleBackgroundColorTransition";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->setStyleBackgroundColorTransition(spec);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITransitionSpec>
+PrimaryWindowUICapabilityState::styleBackgroundColorTransition(u64 epoch, PrimaryWindowUIPhase phase)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::styleBackgroundColorTransition";
+    if (Core::Status status = validate(epoch, phase, false, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return context_->styleBackgroundColorTransition();
+}
+
 Core::Status PrimaryWindowUICapabilityState::beginBackgroundColorTransition(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, UI::UIStraightSrgba8Color target,
     const UI::UITransitionSpec& spec)

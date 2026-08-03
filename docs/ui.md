@@ -17,7 +17,7 @@
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
 | Paint | box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
-| Motion | **Done：** 可伪造 clock + fixed-capacity paint-only tracks；Runtime phase facade；showcase 主题切换 card BackgroundColor transition（`motionBegins`）；`ui_motion_v1`。hover/pressed 默认仍即时切色，除非显式 begin*Transition |
+| Motion | **Done：** 可伪造 clock + fixed-capacity paint-only tracks；Runtime phase facade；显式 begin*Transition；stylesheet `BackgroundColor` transition 在 Style 绑定阶段持久预留、pseudo-state 变化时激活；showcase 主题切换 card transition（`motionBegins`）；`ui_motion_v1` |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |
@@ -122,7 +122,7 @@ snapshot 均不改变。这些公开接口也不代表正式发布 ABI 已冻结
 | 自定义 Canvas | 可用首版 | backend-neutral `SolidRect`、`Image`、Stretch-only `NineSlice`；只保存 AssetId/图片元数据，不能提交 shader、GPU handle 或任意 paint callback |
 | 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override，在首个 retained node 前注册强类型 StyleClass/ColorToken、安装 node-local pseudo-state + literal/token-backed BoxFill rule，并在 owner thread/有效 Runtime phase 更新 ColorToken（reverse-dependency `O(affected)`）；尚无通用 selector / descendant 匹配 |
 | 自定义交互 | 部分可用 | 可组合标准 Activate/Toggle/RangeInput capability、挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
-| 安装后作为外部 SDK 使用 | 主要切片可用 | backend-neutral `Tina::GameSDK`、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype 与 AudioMiniaudio 已有安装 consumer；Windows/Linux gate 会物理移动 prefix 后再 configure/link/run；待跨发行版 artifact transfer 与正式 ABI 策略 |
+| 安装后作为外部 SDK 使用 | 主要切片可用 | backend-neutral `Tina::GameSDK`、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype 与 AudioMiniaudio 已有安装 consumer；Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer gate 已通过；待正式 ABI 策略 |
 
 `UIElementBehavior` 在公开头中表现为正交 flags。Activate/Toggle/RangeInput/TextInput/Scroll/Select 已迁移到私有固定容量 side store：
 创建时按 capability 对六个 pool 原子预检并发布 slot，destroy/事务回滚会释放并复用 slot；Activate action、
@@ -220,12 +220,14 @@ Down/Up 之间变化不会泄漏半个 transition。read-only 或边界值目标
 
 ### 状态反馈与 Motion
 
-Button 已有真实点击反馈，但它当前是**即时状态切换**，不是动画：
+Button 已有真实点击反馈。默认 Theme/control paint 仍是**即时状态切换**；当 Context 显式配置
+stylesheet `BackgroundColor` transition，匹配 stateful BoxFill rule 的节点会使用 paint-only 动画：
 
 - hover/focus/pressed/disabled 选择各自背景色，pressed 优先于 hover/focus；
 - pressed 时交换亮/暗边框并把 shadow offset 收为零，形成按下深度；
 - Pointer、Keyboard、Gamepad 与 UIA 最终复用默认 action/callback，不等待视觉效果结束；
-- 状态改变只使后续 paint snapshot 采用新值，没有 animation clock、duration、easing、tween 或 timeline。
+- 未配置 stylesheet transition 时，状态改变只使后续 paint snapshot 采用新值；配置后使用 monotonic clock、
+  duration/delay/easing，并在再次变化时从当前 presentation value retarget；仍没有 keyframe timeline。
 
 现有控件的状态视觉还没有统一成通用 VisualState，各控件仍由既有输入状态直接解析 paint。Checkbox 的
 外 indicator 与 RadioButton indicator 已使用同一 hover tracking，采用 pressed > hover > focus > normal
@@ -238,8 +240,11 @@ focus > selected；虚拟 row 不保存第二份状态。TextEdit 通过独立 `
 normal 解析；selection/caret 颜色也由同一 paint 提供。Primary Up/cancel、disable、Hidden/Collapsed、destroy
 与 Modal scope change 均沿既有状态清理和原子 commit 路径移除 stale focus/pressed feedback。
 
-首版 Motion 应保持 fixed-capacity 且只覆盖 paint-only 属性：背景/边框/文字颜色、opacity、统一圆角和
-visual offset。建议 Button hover 80-120ms、press 40-60ms、release 80-120ms，支持 reduced-motion；
+首版 Motion 保持 fixed-capacity 且只覆盖 paint-only 属性：背景/边框/文字颜色、opacity、统一圆角和
+visual offset。声明 transition 的匹配节点在 Style 绑定/候选阶段持久预留 BackgroundColor track；启用时
+对已有节点先做全量容量预检，容量不足保留旧 spec，输入状态变化只激活已预留槽。reserved 与 active
+分别统计 count/high-water；reduced-motion 直接落到 target，不进入 active list。建议 Button hover
+80-120ms、press 40-60ms、release 80-120ms；
 动画不得延迟 callback、改变真实 hit rect、隐式延期 `destroy()`，也不得为 active Motion 建立第二套游戏
 update loop。完整 keyframe timeline、spring/inertia 与 layout animation 不属于首版。
 
@@ -543,21 +548,21 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 | `UI-002` | Windows UIA：tip 跨进程 gate 证据已固化（2026-08-03）；待 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
-| `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone、`ui_image_nineslice_v1`、完整 `ui_component_build_v1` 与 `ui_style_state_v1` 已落地；后续补 Motion workload；固定机前时间结论只报 provisional |
+| `UI-PERF-001` | Done；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合、`ui_image_nineslice_v1`、完整 `ui_component_build_v1`、`ui_style_state_v1` 与 `ui_motion_v1` 已落地；固定机前时间结论只报 provisional |
 | `UI-COMPONENT-001` | Done；Runtime phase-scoped bounded transaction、六类 fixed-capacity Behavior side store、node/text/canvas/各 Behavior pool 统一 reservation/counter 与 `ui_component_build_v1` 已落地 |
-| `UI-STYLE-001` | InProgress；强类型 StyleClass/ColorToken、startup registry/value、运行期 reverse-dependency token getter/setter、node-local pseudo-state selector、literal/token-backed BoxFill rule、预编译 stylesheet、Runtime facade 与固定 workload 已落地；待 Image tint/opacity 等属性面与 Integration/Visual 门禁；不做完整 CSS |
-| `UI-MOTION-001` | Done；fixed-capacity paint-only transition、monotonic clock、retarget、reduced-motion 与 `ui_motion_v1` |
+| `UI-STYLE-001` | Done；强类型 StyleClass/ColorToken、startup registry/value、运行期 reverse-dependency token getter/setter、node-local pseudo-state selector、literal/token-backed BoxFill/imageTint rule、预编译 stylesheet、Runtime facade、固定 workload 与 Integration/Visual 门禁已落地；不做完整 CSS |
+| `UI-MOTION-001` | Done；fixed-capacity paint-only transition、monotonic clock、retarget、reduced-motion、Style BackgroundColor persistent reservation/activation 与 `ui_motion_v1` |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |
 | `UI-FLOW-001` | Deferred：有真实页面栈需求后再增加 Activatable Screen、Layer Stack、Action Router 与输入设备提示 |
 | `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
-| `SDK-001` | GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装与 moved-prefix 切片已落地；待跨发行版 artifact transfer 与正式 ABI/兼容策略；新增公共 UI 切片后同步扩展 consumer 覆盖 |
+| `SDK-001` | GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装、moved-prefix 与 Ubuntu producer → Debian consumer gate 已落地；待正式 ABI/兼容策略；新增公共 UI 切片后同步扩展 consumer 覆盖 |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
 Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；UI-002-SPI 与
 可选 `tina_ui_uia` 属性、fragment、control pattern 与 action 切片已落地；UI-004 的 Focus Scope/Modal/Pointer Capture 与 UI-005 的
 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView 已完成。外部 Narrator 真机门禁与 UI-003
 跨 GPU/DPI 金标仍不能标成 Done。ADR 0022 的 Element composition 主体已完成；Image/Icon、
-Component/Behavior、StyleClass/pseudo-state 与 ColorToken 运行期更新切片均已汇合，下一条 UI lane 是固定容量
-Image tint/opacity 等属性面与产品视觉门禁，随后再做 paint-only Motion。不再重复列已删除的
+Component/Behavior、StyleClass/pseudo-state、ColorToken 运行期更新、stylesheet imageTint、产品视觉门禁与
+paint-only Motion 均已汇合。完整 keyframe timeline/layout animation 与更广 Style 属性面仍是独立后续项。不再重复列已删除的
 `UIWidgetKind` 迁移，也不把尚未实现的目标 API 写成当前能力。

@@ -255,8 +255,9 @@ wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与
 snapshot；同类 lighting 重复设置或非法描述使当前 build 原子失败。Sprite2D snapshot 最多保存8个
 world-space point light、32个 world-space shadow segment 与 ambient，且不改变透明 Sprite 的既有排序。
 commit 后返回 borrowed view。
-`RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的
-`FrameResourceRef`；`RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
+`RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的 required `FrameResourceRef`；
+`normalTexture` 是 optional packet-local Texture2D ref，invalid 表示无 normal map；
+`RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
 backend 在同步 submit 中分别按 `Texture2D`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
 `UIDisplayList` 支持 SolidQuad/Glyph/ImageQuad、SolidQuad 像素 corner radius 与 axis-aligned clip；
 ImageQuad 携带 normalized UV、premultiplied tint、packet-local Texture2D ref 与 Linear/Nearest sampling，
@@ -312,7 +313,7 @@ source-pixel 与 destination-logical insets，首版只支持 Stretch。命令�
 entry，小目标按两侧 destination inset 比例压缩并消除零面积 patch；paint/DisplayList 容量不足不截断。
 逐角半径与 rounded clip 仍是后续扩展。startup-only 强类型 StyleClass/ColorToken、node-local state、
 literal/token-backed BoxFill stylesheet，以及运行期 ColorToken getter/setter 与固定 reverse-dependency
-更新路径已开放；Image tint/opacity 与其他属性面仍由 `UI-STYLE-001` 跟踪。token update 按依赖链
+更新路径与 stylesheet imageTint 已开放；更广 opacity/其他属性面仍未开放。token update 按依赖链
 `O(affected links)` 预检并发布 Paint dirty，不是
 `O(affected)`。
 
@@ -328,8 +329,10 @@ resolver 选择 TextEdit/ScrollView/Dropdown，并要求匹配现有 `BuiltinEle
 `InvalidElementDescriptor`。当前可在首个 retained node 前通过 `UIContext` 或 `GameStateEnter` 的
 `PrimaryWindowUIRootBuilder` 注册 StyleClass/ColorToken 并安装 node-local literal/token-backed BoxFill rules；
 `UIContext` 与 phase-scoped `PrimaryWindowUITreeUpdater` 提供 `styleColorToken()` / `setStyleColorToken()`；
-setter 先预检 dirty queue，失败时保持 token/dirty/committed 不变。仍**不支持**注册 Widget subclass、新
-Behavior/state machine、通用 selector、Motion/timeline 或 GPU paint callback。
+setter 先预检 dirty queue，失败时保持 token/dirty/committed 不变。`UIContext` 与 phase-scoped facade
+已提供 fixed-capacity paint-only Motion、reduced-motion 及 stylesheet `BackgroundColor` transition；仍
+**不支持**注册 Widget subclass、新 Behavior/state machine、通用 selector、完整 keyframe timeline、
+layout animation 或 GPU paint callback。
 因此“可组合业务 UI”不等于“已有开放控件插件
 ABI”。目标边界见 [UI 框架设计](ui-framework.md)和 Accepted
 [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。正式外部使用仍以 `SDK-001` 的安装 package 与
@@ -390,12 +393,14 @@ SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material weak `AssetHandle`。
 
-`SpriteRenderer2D` 只复制 weak `AssetHandle` 和渲染语义字段，不持有 `AssetLease`/Cooked payload/GPU
-handle。`ExtractRenderSceneParams::spriteBindingResolver` 是 allocation-free 的 borrowed function-pointer
+`SpriteRenderer2D` 只复制 required weak Sprite `AssetHandle`、optional weak normal Texture2D `AssetHandle`
+和渲染语义字段，不持有 `AssetLease`/Cooked payload/GPU handle。
+`ExtractRenderSceneParams::spriteBindingResolver` 是 allocation-free 的 borrowed function-pointer
 view，仅在一次 extraction 调用内有效；它接收当前 `FrameResourceSink`，visible sprite 必须由它按 Store
-owner/generation、Sprite kind 与 binding 状态解析并 intern 为 packet-local texture ref。缺 resolver、
-空/stale/cross-store/wrong-kind/unbound handle 或空 ref 统一返回 `SceneErrorCode::UnresolvedSprite`；hidden
-sprite 不解析。Scene 不保存 resolver、sink、ref 或任何 Asset owner。
+owner/generation、Sprite kind 与 binding 状态解析并 intern 为 packet-local base texture ref。非空 normal
+handle 由 `normalTextureBindingResolver` 独立按 Texture2D kind 解析；缺 resolver、stale/wrong-kind/unbound
+handle 或空 ref 都在 `addSprite2D()` 前返回 `SceneErrorCode::UnresolvedSprite`，不发布半个 item。hidden
+sprite 不解析任一 handle。Scene 不保存 resolver、sink、ref 或任何 Asset owner。
 
 `MeshRenderer3D` 只复制 weak mesh/material `AssetHandle` 与渲染语义字段。extract params 分别提供
 `mesh3DBindingResolver` 和 `material3DBindingResolver`，只在本次 extraction 调用有效；visible mesh 必须
@@ -408,14 +413,20 @@ resolver，hidden mesh 不解析。`PrefabMeshBinding` 只完成 AssetId→Handl
 `ExtractRenderSceneParams::ambientLightScale` 写入当前帧 RenderScene lighting snapshot。超容量显式返回
 `TooManyActiveDirectionalLights`，不做静默裁剪；Scene 不持有 device lighting 状态。
 
-`PointLight2D` 保存 linear color、非负 intensity、正 world-space `radiusMeters` 与 active 标志；Entity 的
-world position 是光源中心，transform scale 不缩放半径。extraction 按稳定 Entity identity 收集最多8个
-active light，把 world position、radius、color×intensity 与
-`ExtractRenderSceneParams::ambientLight2DScale` 写入 Sprite2D frame snapshot。超容量返回
-`TooManyActivePointLights2D`；未声明组件保留既有 unlit path，全部 inactive 则发布 ambient-only snapshot。
+`PointLight2D` 保存 linear color、非负 intensity、正 world-space `radiusMeters`、finite
+`sourceRadiusMeters` 与 active 标志；`0 <= sourceRadiusMeters <= radiusMeters`，默认0精确保留 point-source
+硬阴影，正值只控制 penumbra。Entity 的 world position 是光源中心，transform scale 不缩放两个半径。
+extraction 先校验全部 active light，再在非0 surface
+上按 resolved、pixel-snapped Camera2D 做旋转相机空间的精确 circle-vs-rectangle culling，按稳定 Entity
+identity 收集最多8个 camera-affecting light，把 world position、radius、color×intensity 与
+`ExtractRenderSceneParams::ambientLight2DScale` 写入 Sprite2D frame snapshot。第9盏 camera-affecting light
+返回 `TooManyActivePointLights2D`，不做 top-K；无 active Camera2D 或0x0 surface 时不裁剪并对全部 active
+light 保留同一上限。未声明组件保留既有 unlit path，全部 inactive 则发布 ambient-only snapshot。
 `ShadowOccluder2D` 保存一条非退化 local-space 线段与 active 标志。extraction 对端点应用已发布 transform
 的 XY scale、rotation、position，按稳定 Entity identity 收集最多32条 world-space segment；超容量返回
-`TooManyActiveShadowOccluders2D`，非法/投影退化结果返回 `InvalidComponent`。遮挡只清零相交点光贡献，
+`TooManyActiveShadowOccluders2D`，非法/投影退化结果返回 `InvalidComponent`。Occluder 不做 camera culling，
+因为视口外 segment 仍可能遮挡边界光线。source radius 为0时，相交 segment 清零对应点光贡献；正值时
+按 receiver→light 深度把 segment 投影到 finite source 区间并连续缩放可见度，多段使用固定成本乘法透射近似。
 不改变 ambient、premultiplied alpha 或 Sprite 排序；没有 PointLight2D 时不单独发布 occluder snapshot。
 
 `ParticleSystem2D` 与 `Trail2D` 是独立 Scene owners，不属于 World/ECS，也不依赖完整 AssetSystem 或
@@ -617,12 +628,13 @@ Invoke/Toggle/RangeValue/Value patterns。
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
-- stylesheet Image tint/opacity 等完整属性面与 paint-only Motion；ColorToken reverse-dependency 更新已落地；
+- stylesheet 更广 opacity 等属性面、完整 keyframe timeline 与 layout animation；imageTint、paint-only Motion
+  与 ColorToken reverse-dependency 更新已落地；
 - Activatable Screen/Layer Stack/Action Router 和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
-- 安装 SDK 的跨发行版 artifact transfer 与正式发布 ABI/兼容策略；同一
-  OS/toolchain 内的 moved-prefix relocatability 已由 Windows/Linux consumer gate 覆盖。
+- 安装 SDK 的正式发布 ABI/兼容策略；Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer
+  的跨发行版 artifact transfer gate 已覆盖当前源码契约。
 
 任务状态见 [Backlog](backlog.md)。修改公开头后必须构建 header-isolation/consumer、扫描第三方 token，
 并按 [测试说明](testing.md) 运行受影响 executable 与 sample。

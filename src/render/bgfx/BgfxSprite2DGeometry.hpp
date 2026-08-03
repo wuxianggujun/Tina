@@ -22,13 +22,15 @@ struct BgfxSprite2DFrameRequirements final {
     u32 batchCount = 0;
 };
 
-// Validates every packet-local Sprite2D texture ref without touching geometry
-// output or backend state. This also applies to suspended (non-drawing) frames.
+// Validates every required base texture and non-empty optional normal texture ref
+// without touching geometry output or backend state. This also applies to
+// suspended (non-drawing) frames.
 [[nodiscard]] Core::Status validateSprite2DFrameResources(
     RenderSceneView scene, FrameResourceTableView resources) noexcept;
 
-// Validates the Sprite2D contract, including every packet-local texture ref,
-// before the backend commits surface state or allocates transient geometry.
+// Validates the Sprite2D contract, including every packet-local texture ref and
+// contiguous (base texture, normal texture) batch identity, before the backend
+// commits surface state or allocates transient geometry.
 [[nodiscard]] Core::Result<BgfxSprite2DFrameRequirements>
 checkedSprite2DFrame(RenderSceneView scene, FrameResourceTableView resources);
 

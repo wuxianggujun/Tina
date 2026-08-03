@@ -95,12 +95,15 @@ static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
 
     u32 batchCount = 0;
     FrameResourceRef previousTexture{};
+    FrameResourceRef previousNormalTexture{};
     for (const RenderSprite2DItem& sprite : sprites)
     {
-        if (batchCount == 0 || sprite.texture != previousTexture)
+        if (batchCount == 0 || sprite.texture != previousTexture ||
+            sprite.normalTexture != previousNormalTexture)
         {
             ++batchCount;
             previousTexture = sprite.texture;
+            previousNormalTexture = sprite.normalTexture;
         }
     }
 
@@ -182,6 +185,18 @@ Core::Status validateSprite2DFrameResources(
         {
             return Core::failure(RenderErrorCode::InvalidFrameResource,
                                  "Sprite2D texture ref is stale, cross-packet, wrong-kind, or out of binding range");
+        }
+        if (sprite.normalTexture)
+        {
+            const FrameResourceDescriptor* normalDescriptor =
+                resources.resolve(sprite.normalTexture, FrameResourceKind::Texture2D);
+            if (normalDescriptor == nullptr ||
+                normalDescriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "Sprite2D normal texture ref is stale, cross-packet, wrong-kind, or out of binding range");
+            }
         }
     }
     return Core::success();

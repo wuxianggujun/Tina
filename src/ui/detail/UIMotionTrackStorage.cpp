@@ -55,7 +55,7 @@ namespace {
 } // namespace
 
 UIMotionTrackStorage::UIMotionTrackStorage(usize trackCapacity, std::pmr::memory_resource& resource)
-    : tracks_(&resource), freeList_(&resource), lastCompleted_(&resource)
+    : tracks_(&resource), freeList_(&resource), availableCount_(trackCapacity), lastCompleted_(&resource)
 {
     tracks_.resize(trackCapacity);
     freeList_.resize(trackCapacity, InvalidSlot);
@@ -73,6 +73,21 @@ UIMotionTrackStorage::UIMotionTrackStorage(usize trackCapacity, std::pmr::memory
 usize UIMotionTrackStorage::capacity() const noexcept
 {
     return tracks_.size();
+}
+
+usize UIMotionTrackStorage::availableCount() const noexcept
+{
+    return availableCount_;
+}
+
+usize UIMotionTrackStorage::reservedCount() const noexcept
+{
+    return reservedCount_;
+}
+
+usize UIMotionTrackStorage::reservedHighWater() const noexcept
+{
+    return reservedHighWater_;
 }
 
 usize UIMotionTrackStorage::activeCount() const noexcept
@@ -98,17 +113,28 @@ u32 UIMotionTrackStorage::allocateSlot() noexcept
     const u32 slot = freeHead_;
     freeHead_ = freeList_[slot];
     freeList_[slot] = InvalidSlot;
+    --availableCount_;
     return slot;
 }
 
 void UIMotionTrackStorage::freeSlot(u32 slotIndex) noexcept
 {
-    if (slotIndex >= tracks_.size()) {
+    if (slotIndex >= tracks_.size() || !tracks_[slotIndex].occupied)
+    {
         return;
+    }
+    if (tracks_[slotIndex].active)
+    {
+        unlinkActive(slotIndex);
+    }
+    if (tracks_[slotIndex].persistentReservation && reservedCount_ > 0)
+    {
+        --reservedCount_;
     }
     tracks_[slotIndex] = {};
     freeList_[slotIndex] = freeHead_;
     freeHead_ = slotIndex;
+    ++availableCount_;
 }
 
 void UIMotionTrackStorage::unlinkActive(u32 slotIndex) noexcept
@@ -174,6 +200,20 @@ UIMotionTrackStorage::findActive(UINodeId node, UIAnimatableProperty property) n
         static_cast<const UIMotionTrackStorage*>(this)->findActive(node, property));
 }
 
+const UIMotionTrackStorage::Track* UIMotionTrackStorage::findOccupied(UINodeId node,
+                                                                      UIAnimatableProperty property) const noexcept
+{
+    const auto iterator = std::find_if(tracks_.begin(), tracks_.end(), [node, property](const Track& track) {
+        return track.occupied && track.node == node && track.property == property;
+    });
+    return iterator == tracks_.end() ? nullptr : &*iterator;
+}
+
+UIMotionTrackStorage::Track* UIMotionTrackStorage::findOccupied(UINodeId node, UIAnimatableProperty property) noexcept
+{
+    return const_cast<Track*>(static_cast<const UIMotionTrackStorage*>(this)->findOccupied(node, property));
+}
+
 Core::Status UIMotionTrackStorage::beginOrRetargetCommon(
     UINodeId node, UIAnimatableProperty property, ValueKind kind, const UITransitionSpec& spec,
     Core::MonotonicTimePoint now, Track*& outTrack)
@@ -190,11 +230,13 @@ Core::Status UIMotionTrackStorage::beginOrRetargetCommon(
                              "UI motion property value kind mismatch");
     }
 
-    if (Track* existing = findActive(node, property); existing != nullptr) {
+    if (Track* existing = findOccupied(node, property); existing != nullptr) {
         existing->startTime = now;
         existing->duration = spec.duration;
         existing->delay = spec.delay;
         existing->easing = spec.easing;
+        existing->completionMode = CompletionMode::CommitProperty;
+        linkActive(static_cast<u32>(existing - tracks_.data()));
         outTrack = existing;
         return Core::success();
     }
@@ -206,6 +248,7 @@ Core::Status UIMotionTrackStorage::beginOrRetargetCommon(
     }
     Track& track = tracks_[slot];
     track = {};
+    track.occupied = true;
     track.node = node;
     track.property = property;
     track.valueKind = kind;
@@ -275,6 +318,139 @@ Core::Status UIMotionTrackStorage::beginOrRetargetOffset(
     return Core::success();
 }
 
+Core::Status UIMotionTrackStorage::reservePersistent(UINodeId node, UIAnimatableProperty property)
+{
+    if (!node.hasValue())
+    {
+        return Core::failure(UIErrorCode::InvalidNode, "UI motion reservation requires a live node");
+    }
+    if (!isPaintOnlyAnimatableProperty(property))
+    {
+        return Core::failure(UIErrorCode::InvalidStyle, "UI motion reservation requires a paint-only property");
+    }
+    if (Track* existing = findOccupied(node, property); existing != nullptr)
+    {
+        if (!existing->persistentReservation)
+        {
+            existing->persistentReservation = true;
+            ++reservedCount_;
+            reservedHighWater_ = (std::max)(reservedHighWater_, reservedCount_);
+        }
+        return Core::success();
+    }
+
+    const u32 slot = allocateSlot();
+    if (slot == InvalidSlot)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, "UI motion track capacity has been exhausted");
+    }
+    Track& track = tracks_[slot];
+    track = {};
+    track.node = node;
+    track.property = property;
+    track.valueKind = valueKindForProperty(property);
+    track.occupied = true;
+    track.persistentReservation = true;
+    ++reservedCount_;
+    reservedHighWater_ = (std::max)(reservedHighWater_, reservedCount_);
+    return Core::success();
+}
+
+Core::Status UIMotionTrackStorage::activateReservedStyleColor(UINodeId node, UIStraightSrgba8Color start,
+                                                              UIStraightSrgba8Color target,
+                                                              const UITransitionSpec& spec,
+                                                              Core::MonotonicTimePoint now)
+{
+    if (Core::Status valid = validateSpec(spec, UIAnimatableProperty::BackgroundColor); !valid)
+    {
+        return valid;
+    }
+    Track* track = findOccupied(node, UIAnimatableProperty::BackgroundColor);
+    if (track == nullptr || !track->persistentReservation || track->valueKind != ValueKind::Color)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded,
+                             "UI style motion track was not reserved during style binding");
+    }
+    track->startColor = start;
+    track->targetColor = target;
+    track->presentationColor = start;
+    track->startTime = now;
+    track->duration = spec.duration;
+    track->delay = spec.delay;
+    track->easing = spec.easing;
+    track->completionMode = CompletionMode::StylePresentationOnly;
+    linkActive(static_cast<u32>(track - tracks_.data()));
+    return Core::success();
+}
+
+bool UIMotionTrackStorage::hasPersistentReservation(UINodeId node, UIAnimatableProperty property) const noexcept
+{
+    const Track* track = findOccupied(node, property);
+    return track != nullptr && track->persistentReservation;
+}
+
+bool UIMotionTrackStorage::hasTrack(UINodeId node, UIAnimatableProperty property) const noexcept
+{
+    return findOccupied(node, property) != nullptr;
+}
+
+void UIMotionTrackStorage::releasePersistentReservation(UINodeId node, UIAnimatableProperty property) noexcept
+{
+    Track* track = findOccupied(node, property);
+    if (track == nullptr || !track->persistentReservation)
+    {
+        return;
+    }
+    track->persistentReservation = false;
+    if (reservedCount_ > 0)
+    {
+        --reservedCount_;
+    }
+    if (!track->active)
+    {
+        freeSlot(static_cast<u32>(track - tracks_.data()));
+    }
+}
+
+void UIMotionTrackStorage::releaseAllPersistentReservations(UIAnimatableProperty property) noexcept
+{
+    for (u32 slot = 0; slot < tracks_.size(); ++slot)
+    {
+        Track& track = tracks_[slot];
+        if (!track.occupied || !track.persistentReservation || track.property != property)
+        {
+            continue;
+        }
+        track.persistentReservation = false;
+        if (reservedCount_ > 0)
+        {
+            --reservedCount_;
+        }
+        if (!track.active)
+        {
+            freeSlot(slot);
+        }
+    }
+}
+
+void UIMotionTrackStorage::cancelActiveProperty(UINodeId node, UIAnimatableProperty property) noexcept
+{
+    Track* track = findOccupied(node, property);
+    if (track == nullptr)
+    {
+        return;
+    }
+    const u32 slot = static_cast<u32>(track - tracks_.data());
+    if (track->active)
+    {
+        unlinkActive(slot);
+    }
+    if (!track->persistentReservation)
+    {
+        freeSlot(slot);
+    }
+}
+
 void UIMotionTrackStorage::snapAllActive() noexcept
 {
     lastCompleted_.clear();
@@ -285,6 +461,7 @@ void UIMotionTrackStorage::snapAllActive() noexcept
             .node = track.node,
             .property = track.property,
             .valueKind = track.valueKind,
+            .completionMode = track.completionMode,
         };
         switch (track.valueKind) {
         case ValueKind::Color:
@@ -304,7 +481,10 @@ void UIMotionTrackStorage::snapAllActive() noexcept
             lastCompleted_.push_back(completed);
         }
         unlinkActive(slot);
-        freeSlot(slot);
+        if (!track.persistentReservation)
+        {
+            freeSlot(slot);
+        }
         slot = next;
     }
     lastSampledCount_ = 0;
@@ -315,35 +495,33 @@ void UIMotionTrackStorage::releaseNode(UINodeId node) noexcept
     if (!node.hasValue()) {
         return;
     }
-    for (u32 slot = activeHead_; slot != InvalidSlot;) {
+    for (u32 slot = 0; slot < tracks_.size(); ++slot)
+    {
         Track& track = tracks_[slot];
-        const u32 next = track.nextActive;
-        if (track.node == node) {
-            unlinkActive(slot);
+        if (track.occupied && track.node == node)
+        {
             freeSlot(slot);
         }
-        slot = next;
     }
 }
 
 void UIMotionTrackStorage::releaseProperty(UINodeId node, UIAnimatableProperty property) noexcept
 {
-    if (!node.hasValue()) {
+    if (!node.hasValue())
+    {
         return;
     }
-    for (u32 slot = activeHead_; slot != InvalidSlot;) {
+    for (u32 slot = 0; slot < tracks_.size(); ++slot)
+    {
         Track& track = tracks_[slot];
-        const u32 next = track.nextActive;
-        if (track.node == node && track.property == property) {
-            unlinkActive(slot);
+        if (track.occupied && track.node == node && track.property == property)
+        {
             freeSlot(slot);
         }
-        slot = next;
     }
 }
 
-std::span<const UIMotionTrackStorage::Completed>
-UIMotionTrackStorage::lastCompleted() const noexcept
+std::span<const UIMotionTrackStorage::Completed> UIMotionTrackStorage::lastCompleted() const noexcept
 {
     return lastCompleted_;
 }
@@ -362,6 +540,7 @@ usize UIMotionTrackStorage::sample(Core::MonotonicTimePoint now) noexcept
             .node = track.node,
             .property = track.property,
             .valueKind = track.valueKind,
+            .completionMode = track.completionMode,
         };
         switch (track.valueKind) {
         case ValueKind::Color:
@@ -396,7 +575,10 @@ usize UIMotionTrackStorage::sample(Core::MonotonicTimePoint now) noexcept
                 lastCompleted_.push_back(completed);
             }
             unlinkActive(slot);
-            freeSlot(slot);
+            if (!track.persistentReservation)
+            {
+                freeSlot(slot);
+            }
         }
         slot = next;
     }

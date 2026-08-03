@@ -184,8 +184,8 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 
 ### 还不可以
 
-- 依赖跨发行版 artifact transfer 或正式 ABI/兼容策略；AudioMiniaudio 安装 adapter 与
-  Windows/Linux moved-prefix consumer 已可用；
+- 依赖正式 ABI/兼容策略；AudioMiniaudio 安装 adapter、Windows/Linux moved-prefix consumer 与
+  Ubuntu producer → Debian consumer 跨发行版 gate 已可用；
 - 注册任意新 Widget class 或 Behavior state machine；
 - 从 UI 持有 AssetHandle/Lease、FrameResourceRef 或 texture/bgfx handle；
 - 声明完整 timeline/keyframe 或 layout animation（paint-only color/opacity/radius/visual-offset transition 已可用）；
@@ -348,7 +348,7 @@ enum class UIStyleState : u16 {
 };
 ```
 
-`UI-STYLE-001` 当前为 `InProgress`。已落地的 foundation/context 切片包括：强类型
+`UI-STYLE-001` 已完成。已落地的 foundation/context 切片包括：强类型
 `UIStyleClassId`/`UIStyleTokenId` 与 node-local state mask、startup-only ColorToken registry/value、公开
 literal/token-backed `UIStyleBoxFillRule`，以及私有 fixed-capacity 双缓冲 compiler。compiler 按
 `(role,class)` 建 bucket、二分查找并做 required-state subset 匹配；同一匹配链 later rule wins，token rule
@@ -374,8 +374,8 @@ literal/token-backed sheet 安装契约；`UIContext` 与 phase-scoped `PrimaryW
 cache 在每节点记录 winning ColorToken，destroy/local override 时 unlink，token setter 只遍历依赖节点做
 dirty-queue 预检与 Paint dirty，不再对 live tree 做两遍 `O(N)` resolve。`ui_style_state_v1` 已补齐
 4096-node/256-rule 固定 workload、单节点 resolve counter、token/bucket/class-link high-water、clean commit
-  零工作与稳定 checksum。Image tint/opacity、属性 dirty metadata、showcase Integration 与
-  `RunUiStyleVisualGate.ps1` Visual ROI 已落地。
+  零工作与稳定 checksum。stylesheet imageTint、属性 dirty metadata、showcase Integration 与
+  `RunUiStyleVisualGate.ps1` Visual ROI 已落地；更广 opacity 属性面不属于已冻结的首版范围。
 
 第一版 selector 只支持当前节点的 `role + class + state mask`，不支持 descendant、`nth-child`、运行时
 CSS parser 或任意 specificity。推荐优先级：
@@ -622,6 +622,11 @@ Runtime 将 monotonic time、delta 和 reduced-motion 传给每窗口 UI commit 
 transition 保存 node/property/start/target/time，状态再次变化时从当前 presentation value retarget。首版
 不插值布局属性，不改变 hit/semantics，不延迟 callback。
 
+已落地的 stylesheet `BackgroundColor` transition 遵守 ADR 0023：匹配 stateful BoxFill candidate 的节点
+在 Style 绑定阶段持久预留 track；运行期启用会先对已有节点做原子容量预检，pseudo-state 变化只激活
+已预留槽。reserved 与 active 分开计数/high-water，完成后 reservation 保留到 role 变更、node destroy 或
+transition 关闭；reduced-motion 直接发布 target，不占 active list。
+
 ## 性能模型与合入门槛
 
 这套设计的目标不是承诺“新增功能零成本”，而是让新增成本可界定、可统计、可在固定 workload 上比较。
@@ -710,28 +715,28 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 
 1. `UI-STATE-FEEDBACK`：源码、测试与 Dark/Light 产品视觉证据已关闭；
 2. ADR 0023 已接受，容量单位、失败语义和性能 workload 已冻结；
-3. `UI-PERF-001`：static/paint-dirty/route/virtual-collection 与通用 counter/checksum 首个 milestone
-   已完成，任务转为 `InProgress` 并解锁 Image/Component；后续每个垂直切片继续扩展同一协议；
+3. `UI-PERF-001` Done：static/paint-dirty/route/virtual-collection 与通用 counter/checksum 首个 milestone
+   完成后，Image/Component/Style/Motion 均已扩展同一协议；
 4. `UI-IMAGE-001` 与 `UI-COMPONENT-001` 两个并行分支均已完成；前者不依赖 Behavior side store：
    - A Done：Image/Icon content、atlas/tint/fit/sampling、root-scoped resolve/pin、RGBA ImageQuad 和 Image semantics；
    - B Done：同源 NineSlice、1..9 quad 原子展开、小 destination/inset/clip/fractional-DPI 规则；
    - C Done：icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light/atlas/sampling、missing/unavailable/resource invalidation、6-case DPI-like size matrix 与 `ui_image_nineslice_v1` benchmark 全部关闭；
 5. `UI-COMPONENT-001` Done：Runtime bounded transaction、六类 Behavior side store、node/text/canvas/Behavior
    统一 reservation/counter 与冻结的 `ui_component_build_v1` 已落地；
-  6. `UI-STYLE-001` InProgress：fixed-capacity style kernel、Context class/token capacity 与 startup install、
+6. `UI-STYLE-001` Done：fixed-capacity style kernel、Context class/token capacity 与 startup install、
     ColorToken registry/value 与运行期 reverse-dependency getter/setter、每节点最多 4 个 class link、retained
     state + literal/token-backed resolved BoxFill paint cache、Runtime facade，以及 `ui_style_state_v1` 已落地；
-    Image tint/opacity、stylesheet imageTint token、showcase Integration、属性 dirty metadata
-    （`UIStylePropertyKind` + Context 分发）、Visual ROI 门禁 `RunUiStyleVisualGate.ps1` 已落地；
-    下一主线 `UI-MOTION-001`；
-7. `UI-MOTION-001` Done：paint-only transition（color/opacity/radius/visual-offset）+ `ui_motion_v1`。
+   stylesheet imageTint token、showcase Integration、属性 dirty metadata
+   （`UIStylePropertyKind` + Context 分发）、Visual ROI 门禁 `RunUiStyleVisualGate.ps1` 已落地；
+7. `UI-MOTION-001` Done：paint-only transition（color/opacity/radius/visual-offset）、Style BackgroundColor
+   persistent reservation/activation + `ui_motion_v1`。
 
 独立或后置 lane：
 
 - `UI-RANGE-INPUT-KEYBOARD` 已关闭：它只依赖 Slider Focusable 子切片与 Runtime input route，不依赖
   ADR 0023；capability-shaped 调值 command 与 fixed-capacity exact-control Down/Up latch 不复用空间焦点状态；
-- `SDK-001` 的 GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装与
-  Windows/Linux moved-prefix 切片已落地，待跨发行版 artifact transfer 与正式 ABI/兼容策略；此后每个新增公共 UI 切片同步增加
+- `SDK-001` 的 GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装、
+  Windows/Linux moved-prefix 与 Ubuntu producer → Debian consumer gate 已落地，待正式 ABI/兼容策略；此后每个新增公共 UI 切片同步增加
   consumer 覆盖；
 - `UI-FLOW-001` 只有真实页面栈需求后才增加 Activatable Screen/Layer Stack/Action Router；
 - `UI-BEHAVIOR-SPI-001` 只有标准 Behavior 无法满足有证据的插件场景时才冻结高级 SPI。

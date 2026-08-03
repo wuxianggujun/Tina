@@ -20,6 +20,7 @@ param(
     [string]$ConfigurePreset = 'windows-msvc-vnext-bgfx-product-2d',
     [int]$SampleFrames = 300,
     [int]$ShadowVisualFrames = 300,
+    [int]$NormalMapVisualFrames = 300,
     [switch]$SkipConfigure,
     [switch]$SkipBuild,
     [string]$OutJson = '',
@@ -140,10 +141,14 @@ if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
 $requiredProductEvidence = @(
-    'evidenceSchema\":16',
+    'evidenceSchema\":19',
     'sprite2DLightingConfigured\":true',
+    'authoredPointLight2DCount\":3',
     'pointLight2DCount\":2',
+    'culledPointLight2DCount\":1',
     'shadowOccluder2DCount\":2',
+    'softShadowPointLight2DCount\":2',
+    'normalMappedSpriteCount\":1',
     'sceneLightingFrames\":[1-9][0-9]*',
     'uiThemeDemoRequested\":true',
     'uiThemeSwitches\":2',
@@ -162,13 +167,14 @@ $requiredProductEvidence = @(
     'accessibilityHasTree\":true',
     'accessibilityHasTreeItem\":true',
     'accessibilityTreeSelectionVerified\":true',
-    'spriteBindingTextures\":2',
-    'spriteTextureLeasesAcquired\":2',
-    'spriteTextureRetirementsAccepted\":2',
+    'texturesUploaded\":3',
+    'spriteBindingTextures\":3',
+    'spriteTextureLeasesAcquired\":3',
+    'spriteTextureRetirementsAccepted\":3',
     'spriteBindingRegistryReleased\":true',
-    'spriteTextureHandlesInvalidated\":2',
-    'spriteTextureRetirementRecords\":2',
-    'spriteTextureRetirementReleased\":2',
+    'spriteTextureHandlesInvalidated\":3',
+    'spriteTextureRetirementRecords\":3',
+    'spriteTextureRetirementReleased\":3',
     'spriteTextureRetirementLive\":0',
     'spriteBindingResolverHits\":[1-9][0-9]*',
     'tileMapSpriteBindingResolverHits\":[1-9][0-9]*',
@@ -236,6 +242,20 @@ if ($shadowVisualExit -ne 0) {
     Add-Step -Name 'shadowVisual' -ExitCode $shadowVisualExit -Detail $shadowVisualOut.Trim()
 }
 Add-Step -Name 'shadowVisual' -ExitCode 0 -Detail $shadowVisualOut.Trim()
+
+$normalMapVisualScript = Join-Path $SourceRoot 'tools\windows\RunProduct2dNormalMapVisualGate.ps1'
+if (-not (Test-Path -LiteralPath $normalMapVisualScript -PathType Leaf)) {
+    Add-Step -Name 'normalMapVisual' -ExitCode 1 -Detail "missing script: $normalMapVisualScript"
+}
+$normalMapVisualOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $normalMapVisualScript `
+    -SourceRoot $SourceRoot `
+    -BinDir $BinDir `
+    -SampleFrames $NormalMapVisualFrames 2>&1 | Out-String
+$normalMapVisualExit = $LASTEXITCODE
+if ($normalMapVisualExit -ne 0) {
+    Add-Step -Name 'normalMapVisual' -ExitCode $normalMapVisualExit -Detail $normalMapVisualOut.Trim()
+}
+Add-Step -Name 'normalMapVisual' -ExitCode 0 -Detail $normalMapVisualOut.Trim()
 
 $report.finishedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 $report.sampleStdout = $sampleOut.Trim()

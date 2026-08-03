@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-  Run the product-2d soft-shadow differential GPU visual gate.
+  Run the product-2d normal-map differential GPU visual gate.
 
 .DESCRIPTION
-  Runs the same deterministic product scene twice with finite-source soft shadows and
-  twice with point-source hard shadows. Each mode must be internally repeatable, while
-  the soft and hard RGBA8 fingerprints must differ.
+  Runs the deterministic product scene twice with character normal mapping enabled
+  and twice with only the character SpriteRenderer2D normalTexture handle cleared.
+  Each mode must be internally repeatable, while enabled and disabled RGBA8 and
+  structural evidence fingerprints must differ.
 
-  This is a same-host/backend differential gate. It proves that committed shadow
-  segments affect captured GPU pixels without claiming a cross-GPU exact golden.
+  The independent normal atlas is cooked, loaded, uploaded, registered, and retired
+  in both modes. This is same-host/backend differential evidence, not a cross-GPU golden.
 #>
 [CmdletBinding()]
 param(
@@ -45,15 +46,15 @@ if (-not (Test-Path -LiteralPath $samplePath -PathType Leaf)) {
 }
 $expectedProductGate = 'bgfx-physics-freetype-audio'
 
-function Invoke-ShadowProbeRun {
+function Invoke-NormalMapProbeRun {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][bool]$ForceHardShadows
+        [Parameter(Mandatory = $true)][bool]$DisableNormalMaps
     )
 
     $arguments = @("--frames=$SampleFrames", '--frame-delay-ms=0')
-    if ($ForceHardShadows) {
-        $arguments += '--force-hard-shadows'
+    if ($DisableNormalMaps) {
+        $arguments += '--disable-normal-maps'
     }
     $outputLines = @(& $samplePath @arguments 2>&1)
     $exitCode = $LASTEXITCODE
@@ -70,7 +71,7 @@ function Invoke-ShadowProbeRun {
         throw "$Name did not emit product success JSON: $stdout"
     }
     $evidence = $jsonLine | ConvertFrom-Json
-    $expectedSoftShadowLightCount = if ($ForceHardShadows) { 0 } else { 2 }
+    $expectedNormalMappedSpriteCount = if ($DisableNormalMaps) { 0 } else { 1 }
 
     $errors = New-Object System.Collections.Generic.List[string]
     if ([string]$evidence.productGate -ne $expectedProductGate) {
@@ -83,31 +84,9 @@ function Invoke-ShadowProbeRun {
     if ([int]$evidence.evidenceSchema -ne 19) {
         [void]$errors.Add("evidenceSchema expected=19 actual=$($evidence.evidenceSchema)")
     }
-    if (-not [bool]$evidence.sprite2DLightingConfigured) {
-        [void]$errors.Add('sprite2DLightingConfigured must be true')
-    }
-    if ([int]$evidence.pointLight2DCount -ne 2) {
-        [void]$errors.Add("pointLight2DCount expected=2 actual=$($evidence.pointLight2DCount)")
-    }
-    if ([int]$evidence.authoredPointLight2DCount -ne 3) {
+    if ([int]$evidence.normalMappedSpriteCount -ne $expectedNormalMappedSpriteCount) {
         [void]$errors.Add(
-            "authoredPointLight2DCount expected=3 actual=$($evidence.authoredPointLight2DCount)")
-    }
-    if ([int]$evidence.culledPointLight2DCount -ne 1) {
-        [void]$errors.Add(
-            "culledPointLight2DCount expected=1 actual=$($evidence.culledPointLight2DCount)")
-    }
-    if ([int]$evidence.shadowOccluder2DCount -ne 2) {
-        [void]$errors.Add(
-            "shadowOccluder2DCount expected=2 actual=$($evidence.shadowOccluder2DCount)")
-    }
-    if ([int]$evidence.softShadowPointLight2DCount -ne $expectedSoftShadowLightCount) {
-        [void]$errors.Add(
-            "softShadowPointLight2DCount expected=$expectedSoftShadowLightCount actual=$($evidence.softShadowPointLight2DCount)")
-    }
-    if ([int]$evidence.normalMappedSpriteCount -ne 1) {
-        [void]$errors.Add(
-            "normalMappedSpriteCount expected=1 actual=$($evidence.normalMappedSpriteCount)")
+            "normalMappedSpriteCount expected=$expectedNormalMappedSpriteCount actual=$($evidence.normalMappedSpriteCount)")
     }
     foreach ($field in @(
             'texturesUploaded',
@@ -128,12 +107,25 @@ function Invoke-ShadowProbeRun {
         [void]$errors.Add(
             "spriteTextureRetirementLive expected=0 actual=$($evidence.spriteTextureRetirementLive)")
     }
-    if ([int64]$evidence.sceneLightingFrames -ne [int64]$evidence.renderExtractions) {
-        [void]$errors.Add(
-            "sceneLightingFrames must equal renderExtractions actual=$($evidence.sceneLightingFrames)/$($evidence.renderExtractions)")
+    if (-not [bool]$evidence.sprite2DLightingConfigured) {
+        [void]$errors.Add('sprite2DLightingConfigured must be true')
     }
-    if ([int64]$evidence.renderExtractions -lt 1) {
-        [void]$errors.Add('renderExtractions must be greater than zero')
+    foreach ($expectedCount in @(
+            @{ Field = 'authoredPointLight2DCount'; Value = 3 },
+            @{ Field = 'pointLight2DCount'; Value = 2 },
+            @{ Field = 'culledPointLight2DCount'; Value = 1 },
+            @{ Field = 'shadowOccluder2DCount'; Value = 2 },
+            @{ Field = 'softShadowPointLight2DCount'; Value = 2 })) {
+        $field = [string]$expectedCount.Field
+        $value = [int]$expectedCount.Value
+        if ([int]$evidence.$field -ne $value) {
+            [void]$errors.Add("$field expected=$value actual=$($evidence.$field)")
+        }
+    }
+    if ([int64]$evidence.sceneLightingFrames -ne [int64]$evidence.renderExtractions -or
+        [int64]$evidence.renderExtractions -lt 1) {
+        [void]$errors.Add(
+            "sceneLightingFrames must equal non-zero renderExtractions actual=$($evidence.sceneLightingFrames)/$($evidence.renderExtractions)")
     }
     if (-not [bool]$evidence.pixelCaptureOk) {
         [void]$errors.Add('pixelCaptureOk must be true')
@@ -162,14 +154,10 @@ function Invoke-ShadowProbeRun {
         name = $Name
         productGate = [string]$evidence.productGate
         frames = [int64]$evidence.frames
-        hardShadowsForced = $ForceHardShadows
-        authoredPointLight2DCount = [int]$evidence.authoredPointLight2DCount
-        pointLight2DCount = [int]$evidence.pointLight2DCount
-        culledPointLight2DCount = [int]$evidence.culledPointLight2DCount
-        shadowOccluder2DCount = [int]$evidence.shadowOccluder2DCount
-        softShadowPointLight2DCount = [int]$evidence.softShadowPointLight2DCount
-        sceneLightingFrames = [int64]$evidence.sceneLightingFrames
-        renderExtractions = [int64]$evidence.renderExtractions
+        normalMapsDisabled = $DisableNormalMaps
+        normalMappedSpriteCount = [int]$evidence.normalMappedSpriteCount
+        texturesUploaded = [int]$evidence.texturesUploaded
+        spriteBindingTextures = [int]$evidence.spriteBindingTextures
         width = [int]$evidence.pixelCaptureWidth
         height = [int]$evidence.pixelCaptureHeight
         bytes = [int64]$evidence.pixelCaptureBytes
@@ -178,61 +166,61 @@ function Invoke-ShadowProbeRun {
     }
 }
 
-$softA = Invoke-ShadowProbeRun -Name 'soft-shadow-a' -ForceHardShadows $false
-$softB = Invoke-ShadowProbeRun -Name 'soft-shadow-b' -ForceHardShadows $false
-$hardA = Invoke-ShadowProbeRun -Name 'hard-shadow-a' -ForceHardShadows $true
-$hardB = Invoke-ShadowProbeRun -Name 'hard-shadow-b' -ForceHardShadows $true
-$runs = @($softA, $softB, $hardA, $hardB)
+$onA = Invoke-NormalMapProbeRun -Name 'normal-map-on-a' -DisableNormalMaps $false
+$onB = Invoke-NormalMapProbeRun -Name 'normal-map-on-b' -DisableNormalMaps $false
+$offA = Invoke-NormalMapProbeRun -Name 'normal-map-off-a' -DisableNormalMaps $true
+$offB = Invoke-NormalMapProbeRun -Name 'normal-map-off-b' -DisableNormalMaps $true
+$runs = @($onA, $onB, $offA, $offB)
 
 $dimensionsMatch = $true
 foreach ($run in $runs) {
-    if ($run.width -ne $softA.width -or $run.height -ne $softA.height -or $run.bytes -ne $softA.bytes) {
+    if ($run.width -ne $onA.width -or $run.height -ne $onA.height -or $run.bytes -ne $onA.bytes) {
         $dimensionsMatch = $false
         break
     }
 }
-$softRepeatable = $softA.pixelFingerprint -eq $softB.pixelFingerprint
-$hardRepeatable = $hardA.pixelFingerprint -eq $hardB.pixelFingerprint
-$pixelDifferential = $softA.pixelFingerprint -ne $hardA.pixelFingerprint
+$onRepeatable = $onA.pixelFingerprint -eq $onB.pixelFingerprint
+$offRepeatable = $offA.pixelFingerprint -eq $offB.pixelFingerprint
+$pixelDifferential = $onA.pixelFingerprint -ne $offA.pixelFingerprint
 $evidenceRepeatable =
-    $softA.evidenceFingerprint -eq $softB.evidenceFingerprint -and
-    $hardA.evidenceFingerprint -eq $hardB.evidenceFingerprint
-$modeEvidenceDifferential = $softA.evidenceFingerprint -ne $hardA.evidenceFingerprint
+    $onA.evidenceFingerprint -eq $onB.evidenceFingerprint -and
+    $offA.evidenceFingerprint -eq $offB.evidenceFingerprint
+$modeEvidenceDifferential = $onA.evidenceFingerprint -ne $offA.evidenceFingerprint
 
 $failures = New-Object System.Collections.Generic.List[string]
 if (-not $dimensionsMatch) { [void]$failures.Add('capture dimensions differ between probe runs') }
-if (-not $softRepeatable) { [void]$failures.Add('soft-shadow pixel fingerprint is not repeatable') }
-if (-not $hardRepeatable) { [void]$failures.Add('hard-shadow pixel fingerprint is not repeatable') }
-if (-not $pixelDifferential) { [void]$failures.Add('soft and hard shadow pixels are identical') }
+if (-not $onRepeatable) { [void]$failures.Add('normal-map-on pixel fingerprint is not repeatable') }
+if (-not $offRepeatable) { [void]$failures.Add('normal-map-off pixel fingerprint is not repeatable') }
+if (-not $pixelDifferential) { [void]$failures.Add('normal-map-on and normal-map-off pixels are identical') }
 if (-not $evidenceRepeatable) { [void]$failures.Add('structural evidence is not repeatable') }
-if (-not $modeEvidenceDifferential) { [void]$failures.Add('shadow mode did not change structural evidence') }
+if (-not $modeEvidenceDifferential) { [void]$failures.Add('normal-map mode did not change structural evidence') }
 if ($failures.Count -ne 0) {
-    throw "product-2d shadow visual gate failed: $($failures -join '; ')"
+    throw "product-2d normal-map visual gate failed: $($failures -join '; ')"
 }
 
 $report = [ordered]@{
-    schema = 2
-    gate = 'product-2d-soft-shadow-differential'
+    schema = 1
+    gate = 'product-2d-normal-map-differential'
     head = (git rev-parse HEAD 2>$null)
     sourceRoot = $SourceRoot
     binDir = $BinDir
     expectedProductGate = $expectedProductGate
     sampleFrames = $SampleFrames
-    captureDimensions = @($softA.width, $softA.height)
-    softShadowFingerprint = $softA.pixelFingerprint
-    hardShadowFingerprint = $hardA.pixelFingerprint
-    softShadowEvidenceFingerprint = $softA.evidenceFingerprint
-    hardShadowEvidenceFingerprint = $hardA.evidenceFingerprint
+    captureDimensions = @($onA.width, $onA.height)
+    normalMapOnFingerprint = $onA.pixelFingerprint
+    normalMapOffFingerprint = $offA.pixelFingerprint
+    normalMapOnEvidenceFingerprint = $onA.evidenceFingerprint
+    normalMapOffEvidenceFingerprint = $offA.evidenceFingerprint
     dimensionsMatch = $dimensionsMatch
-    softShadowRepeatable = $softRepeatable
-    hardShadowRepeatable = $hardRepeatable
+    normalMapOnRepeatable = $onRepeatable
+    normalMapOffRepeatable = $offRepeatable
     pixelDifferential = $pixelDifferential
     evidenceRepeatable = $evidenceRepeatable
     modeEvidenceDifferential = $modeEvidenceDifferential
     runs = $runs
     limitations = @(
         'Same-host/backend differential evidence; not a cross-GPU exact golden',
-        'The two modes differ only by PointLight2D source radius in an otherwise identical deterministic scene'
+        'The two modes differ only by clearing SpriteRenderer2D.normalTexture; normal atlas lifecycle remains identical'
     )
     ok = $true
 }
@@ -246,5 +234,5 @@ if (-not [string]::IsNullOrWhiteSpace($OutJson)) {
 }
 
 Write-Output ($report | ConvertTo-Json -Depth 6 -Compress)
-Write-Host "product-2d soft-shadow visual gate ok soft=$($softA.pixelFingerprint) hard=$($hardA.pixelFingerprint)"
+Write-Host "product-2d normal-map visual gate ok on=$($onA.pixelFingerprint) off=$($offA.pixelFingerprint)"
 exit 0

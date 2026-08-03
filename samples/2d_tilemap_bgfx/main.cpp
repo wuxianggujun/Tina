@@ -114,8 +114,8 @@ inline constexpr u32 ExpectedTileMapStreamChunks = 2;
 inline constexpr u32 ExpectedAudioClipFrames = 480;
 inline constexpr u32 ExpectedCatalogRecipeAssets =
     5 + ExpectedCharacterAnimationClips + ExpectedCharacterAnimationSprites + ExpectedSceneCrateSprites +
-    ExpectedTileMapStreamChunks;
-inline constexpr u32 ExpectedUploadedTextures = 2;
+    ExpectedTileMapStreamChunks + 1; // independent character normal atlas
+inline constexpr u32 ExpectedUploadedTextures = 3;
 inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
 inline constexpr u32 ProductParticleCapacity = 12;
 inline constexpr u32 ProductParticleEmitted = 10;
@@ -126,9 +126,16 @@ inline constexpr u64 ProductParticleStableKeyBase = 0x100000000ULL;
 inline constexpr u32 ProductTrailCapacity = 8;
 inline constexpr u32 ProductTrailSegments = 3;
 inline constexpr u64 ProductTrailStableKeyBase = 0x200000000ULL;
-inline constexpr u32 ProductPointLight2DCount = 2;
+inline constexpr u32 ProductAuthoredPointLight2DCount = 3;
+inline constexpr u32 ProductCommittedPointLight2DCount = 2;
+inline constexpr u32 ProductCulledPointLight2DCount =
+    ProductAuthoredPointLight2DCount - ProductCommittedPointLight2DCount;
 inline constexpr u32 ProductShadowOccluder2DCount = 2;
+inline constexpr u32 ProductSoftShadowPointLight2DCount = 2;
 inline constexpr float ProductAmbientLight2DScale = 0.28F;
+inline constexpr u32 ProductEvidenceSchema = 19;
+inline constexpr float ProductWarmLightSourceRadiusMeters = 0.45F;
+inline constexpr float ProductCoolLightSourceRadiusMeters = 0.6F;
 inline constexpr Tina::InputActionId MoveLeftAction{1};
 inline constexpr Tina::InputActionId MoveRightAction{2};
 inline constexpr Tina::InputActionId SelectTileAction{3};
@@ -205,6 +212,11 @@ struct SampleOptions final {
     bool uiTreeDemo = false;
     // Differential GPU visual gate: keep the same World topology but disable shadow contribution.
     bool disableShadowOccluders = false;
+    // Differential GPU visual gate: preserve all occluders while forcing point-source hard shadows.
+    bool forceHardShadows = false;
+    // Differential GPU visual gate: keep the normal atlas lifecycle intact but
+    // clear the character SpriteRenderer2D normalTexture handle.
+    bool disableNormalMaps = false;
     // Optional controlled product gate: seed one map cell selection after enter
     // without synthesizing OS pointer events (GLFW smoke stays hermetic).
     bool seedTileSelection = false;
@@ -343,9 +355,13 @@ struct LifecycleCounters final {
     u64 trailBreaks = 0;
     std::string fxInitialFingerprint{};
     bool sprite2DLightingConfigured = false;
+    u32 authoredPointLight2DCount = 0;
     u32 pointLight2DCount = 0;
+    u32 culledPointLight2DCount = 0;
     u32 shadowOccluder2DCount = 0;
+    u32 softShadowPointLight2DCount = 0;
     u64 sceneLightingFrames = 0;
+    u32 normalMappedSpriteCount = 0;
     // M11-B0: surface-driven Camera2D projection (FixedWorldHeight).
     u32 surfacePixelWidth = 960;
     u32 surfacePixelHeight = 540;
@@ -636,6 +652,16 @@ void writeError(const Tina::Core::Error& error)
             options.disableShadowOccluders = true;
             continue;
         }
+        if (argument == "--force-hard-shadows")
+        {
+            options.forceHardShadows = true;
+            continue;
+        }
+        if (argument == "--disable-normal-maps")
+        {
+            options.disableNormalMaps = true;
+            continue;
+        }
         if (argument.starts_with("--seed-tile-selection="))
         {
             const auto text = argument.substr(std::string_view{"--seed-tile-selection="}.size());
@@ -728,6 +754,7 @@ struct TileMapResources final {
     std::unique_ptr<Tina::Asset::AssetSystem> system{};
     Tina::Asset::AssetHandle tileTextureHandle{};
     Tina::Asset::AssetHandle characterTextureHandle{};
+    Tina::Asset::AssetHandle characterNormalTextureHandle{};
     Tina::Asset::AssetHandle crateSpriteHandle{};
     Tina::Asset::AssetHandle tilesetHandle{};
     Tina::Asset::AssetHandle tileMapHandle{};
@@ -1127,6 +1154,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     Tina::Asset::AssetSystem& system,
     Tina::Core::AssetId clipId,
     Tina::Core::AssetId expectedTextureId,
+    Tina::Asset::AssetHandle normalTexture,
     Tina::Scene::Vec2 characterSize,
     ResolvedCharacterAnimationClip& output)
 {
@@ -1201,6 +1229,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
             resolvedFrames.push_back(Tina::Scene::SpriteAnimationFrame2D{
                 .sprite = Tina::Scene::SpriteRenderer2D{
                     .sprite = *spriteHandle,
+                    .normalTexture = normalTexture,
                     .overrides = Tina::Scene::SpriteOverrideFlags::Size |
                                  Tina::Scene::SpriteOverrideFlags::Pivot |
                                  Tina::Scene::SpriteOverrideFlags::UvRect,
@@ -1236,6 +1265,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     LifecycleCounters& counters,
     Tina::Asset::AssetSystem& system,
     Tina::Core::AssetId characterTextureId,
+    Tina::Asset::AssetHandle characterNormalTexture,
     Tina::Core::AssetId idleClipId,
     Tina::Core::AssetId walkClipId,
     Tina::Core::AssetId hitWallClipId)
@@ -1248,19 +1278,22 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     const auto& config = resources.controller->config();
     const Tina::Scene::Vec2 characterSize{config.halfWidth * 2.0F, config.halfHeight * 2.0F};
     if (auto status = resolveCharacterAnimationClip(
-            system, idleClipId, characterTextureId, characterSize, resources.idleAnimation);
+            system, idleClipId, characterTextureId, characterNormalTexture, characterSize,
+            resources.idleAnimation);
         !status)
     {
         return status;
     }
     if (auto status = resolveCharacterAnimationClip(
-            system, walkClipId, characterTextureId, characterSize, resources.walkAnimation);
+            system, walkClipId, characterTextureId, characterNormalTexture, characterSize,
+            resources.walkAnimation);
         !status)
     {
         return status;
     }
     if (auto status = resolveCharacterAnimationClip(
-            system, hitWallClipId, characterTextureId, characterSize, resources.hitWallAnimation);
+            system, hitWallClipId, characterTextureId, characterNormalTexture, characterSize,
+            resources.hitWallAnimation);
         !status)
     {
         return status;
@@ -1362,7 +1395,10 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
 
 // Bootstrap Scene World for product extract (camera + character [+ crate]).
 // Called once after controller (and optional physics) are ready in prepareCatalog.
-[[nodiscard]] Tina::Core::Status prepareSceneWorld(TileMapResources& resources, bool disableShadowOccluders)
+[[nodiscard]] Tina::Core::Status prepareSceneWorld(
+    TileMapResources& resources,
+    bool disableShadowOccluders,
+    bool forceHardShadows)
 {
     if (!resources.controller || !resources.characterAnimator)
     {
@@ -1419,6 +1455,8 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                 .color = {.red = 1.0F, .green = 0.48F, .blue = 0.18F},
                 .intensity = 0.9F,
                 .radiusMeters = 5.0F,
+                .sourceRadiusMeters =
+                    forceHardShadows ? 0.0F : ProductWarmLightSourceRadiusMeters,
             });
         !status)
     {
@@ -1474,6 +1512,25 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                 .color = {.red = 0.16F, .green = 0.52F, .blue = 1.0F},
                 .intensity = 0.85F,
                 .radiusMeters = 5.5F,
+                .sourceRadiusMeters =
+                    forceHardShadows ? 0.0F : ProductCoolLightSourceRadiusMeters,
+            });
+        !status)
+    {
+        return status;
+    }
+
+    auto offscreenLightEntity = world->createEntity(sceneTranslation(1000.0F, 1000.0F));
+    if (!offscreenLightEntity)
+    {
+        return Tina::Core::failure(std::move(offscreenLightEntity.error()));
+    }
+    if (const auto status = world->setPointLight2D(
+            *offscreenLightEntity,
+            Tina::Scene::PointLight2D{
+                .color = {.red = 0.4F, .green = 1.0F, .blue = 0.45F},
+                .intensity = 0.75F,
+                .radiusMeters = 4.0F,
             });
         !status)
     {
@@ -1511,8 +1568,12 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     return Tina::Core::success();
 }
 
-[[nodiscard]] Tina::Core::Status prepareCatalog(TileMapResources& resources, LifecycleCounters& counters,
-                                                 bool disableShadowOccluders)
+[[nodiscard]] Tina::Core::Status prepareCatalog(
+    TileMapResources& resources,
+    LifecycleCounters& counters,
+    bool disableShadowOccluders,
+    bool forceHardShadows,
+    bool disableNormalMaps)
 {
     // Stable product ids must match samples/2d_tilemap_bgfx/catalog/sample_2d.recipe.
     const auto tileTextureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
@@ -1520,6 +1581,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     const auto tileMapId = *Tina::Core::AssetId::fromBytes(idBytes(3U));
     const auto audioClipId = *Tina::Core::AssetId::fromBytes(idBytes(4U));
     const auto characterTextureId = *Tina::Core::AssetId::fromBytes(idBytes(5U));
+    const auto characterNormalTextureId = *Tina::Core::AssetId::fromBytes(idBytes(13U));
     const auto idleClipId = *Tina::Core::AssetId::fromBytes(idBytes(9U));
     const auto walkClipId = *Tina::Core::AssetId::fromBytes(idBytes(10U));
     const auto hitWallClipId = *Tina::Core::AssetId::fromBytes(idBytes(11U));
@@ -1582,7 +1644,8 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
         return bindStatus;
     }
     auto loaded = system->load(
-        std::array{tileMapId, audioClipId, idleClipId, walkClipId, hitWallClipId, crateSpriteId});
+        std::array{tileMapId, audioClipId, idleClipId, walkClipId, hitWallClipId, crateSpriteId,
+                   characterNormalTextureId});
     if (!loaded)
     {
         return Tina::Core::failure(std::move(loaded.error()));
@@ -1592,16 +1655,19 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     auto tilesetHandle = system->find(tilesetId);
     auto tileTextureHandle = system->find(tileTextureId);
     auto characterTextureHandle = system->find(characterTextureId);
+    auto characterNormalTextureHandle = system->find(characterNormalTextureId);
     auto crateSpriteHandle = system->find(crateSpriteId);
-    if (!tileMapHandle || !tilesetHandle || !tileTextureHandle || !characterTextureHandle || !crateSpriteHandle)
+    if (!tileMapHandle || !tilesetHandle || !tileTextureHandle || !characterTextureHandle ||
+        !characterNormalTextureHandle || !crateSpriteHandle)
     {
         return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle,
-                                   "tilemap/tileset/texture/sprite dependencies are not loaded");
+                                   "tilemap/tileset/base/normal texture/sprite dependencies are not loaded");
     }
     resources.tileMapHandle = *tileMapHandle;
     resources.tilesetHandle = *tilesetHandle;
     resources.tileTextureHandle = *tileTextureHandle;
     resources.characterTextureHandle = *characterTextureHandle;
+    resources.characterNormalTextureHandle = *characterNormalTextureHandle;
     resources.crateSpriteHandle = *crateSpriteHandle;
 
     // Resolve AudioClip by id (load() return order is plan order, not request order).
@@ -1691,8 +1757,11 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     });
     resources.controller->teleport(resources.characterSpawnX, resources.characterSpawnY, true);
 
-    if (const auto status = prepareCharacterAnimations(resources, counters, *resources.system, characterTextureId,
-                                                       idleClipId, walkClipId, hitWallClipId);
+    const Tina::Asset::AssetHandle characterNormalTexture =
+        disableNormalMaps ? Tina::Asset::AssetHandle{} : resources.characterNormalTextureHandle;
+    if (const auto status = prepareCharacterAnimations(
+            resources, counters, *resources.system, characterTextureId, characterNormalTexture,
+            idleClipId, walkClipId, hitWallClipId);
         !status)
     {
         return status;
@@ -1835,9 +1904,19 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     counters.audioFromCatalogLease = true;
 
     // M8-C1: Scene World for camera/character/(crate) extract path.
-    if (const auto status = prepareSceneWorld(resources, disableShadowOccluders); !status)
+    if (const auto status =
+            prepareSceneWorld(resources, disableShadowOccluders, forceHardShadows);
+        !status)
     {
         return status;
+    }
+    for (const Tina::Scene::EntityId entity : resources.sceneWorld->liveEntities())
+    {
+        const Tina::Scene::PointLight2D* light = resources.sceneWorld->pointLight2D(entity);
+        if (light != nullptr && light->active)
+        {
+            ++counters.authoredPointLight2DCount;
+        }
     }
     catalogCleanup.release();
     return Tina::Core::success();
@@ -1914,10 +1993,13 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
         const auto* tileTextureFile = resources_->system->tryGet(resources_->tileTextureHandle);
         const auto* characterTextureFile = resources_->system->tryGet(resources_->characterTextureHandle);
-        if (tileTextureFile == nullptr || characterTextureFile == nullptr)
+        const auto* characterNormalTextureFile =
+            resources_->system->tryGet(resources_->characterNormalTextureHandle);
+        if (tileTextureFile == nullptr || characterTextureFile == nullptr ||
+            characterNormalTextureFile == nullptr)
         {
             return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
-                                       "tile or character texture CPU payload is missing");
+                                       "tile, character, or character normal texture CPU payload is missing");
         }
         auto tileTexture = Tina::Asset::uploadTexture2DFromCooked(*device, *tileTextureFile);
         if (!tileTexture)
@@ -1943,6 +2025,20 @@ class TileMapBgfxState final : public Tina::IGameState {
                 std::terminate();
             }
         });
+        auto characterNormalTexture =
+            Tina::Asset::uploadTexture2DFromCooked(*device, *characterNormalTextureFile);
+        if (!characterNormalTexture)
+        {
+            return Tina::Core::failure(std::move(characterNormalTexture.error()));
+        }
+        Tina::Render::GpuTextureId characterNormalGpuTexture = *characterNormalTexture;
+        auto characterNormalTextureCleanup =
+            Tina::Core::makeScopeExit([device, &characterNormalGpuTexture]() noexcept {
+                if (characterNormalGpuTexture && !device->destroyTexture2D(characterNormalGpuTexture))
+                {
+                    std::terminate();
+                }
+            });
 
         auto spriteBindings = Tina::Asset::Sprite2DBindingRegistry::Create(
             *resources_->system, *device,
@@ -1958,6 +2054,10 @@ class TileMapBgfxState final : public Tina::IGameState {
         worldSpriteBindingResolverContext_ = SpriteBindingResolverContext{
             .registry = &*spriteBindings_,
             .counters = counters_,
+        };
+        normalTextureBindingResolverContext_ = NormalTextureBindingResolverContext{
+            .assets = resources_->system.get(),
+            .resolver = spriteBindings_->texture2DFrameResourceResolver(),
         };
         tileMapSpriteBindingResolverContext_ = TilesetBindingResolverContext{
             .registry = &*spriteBindings_,
@@ -2002,7 +2102,22 @@ class TileMapBgfxState final : public Tina::IGameState {
         characterTextureCleanup.release();
         ++counters_->spriteBindingTextures;
         ++counters_->spriteTextureLeasesAcquired;
-        counters_->texturesUploaded += 2U;
+
+        auto characterNormalBinding = spriteBindings_->registerTextureBinding(
+            resources_->characterNormalTextureHandle, characterNormalGpuTexture);
+        if (!characterNormalBinding)
+        {
+            return Tina::Core::failure(std::move(characterNormalBinding.error()));
+        }
+        if (characterNormalGpuTexture)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Sprite2D registry did not adopt the character normal GPU texture");
+        }
+        characterNormalTextureCleanup.release();
+        ++counters_->spriteBindingTextures;
+        ++counters_->spriteTextureLeasesAcquired;
+        counters_->texturesUploaded += ExpectedUploadedTextures;
 
         const Tina::Scene::SpriteRenderer2D* effectSprite =
             resources_->characterAnimator ? resources_->characterAnimator->currentSprite() : nullptr;
@@ -3332,6 +3447,10 @@ class TileMapBgfxState final : public Tina::IGameState {
                         .userData = &worldSpriteBindingResolverContext_,
                         .resolve = &TileMapBgfxState::resolveSpriteBinding,
                     },
+                    .normalTextureBindingResolver = Tina::Asset::AssetFrameResourceResolver{
+                        .userData = &normalTextureBindingResolverContext_,
+                        .resolve = &TileMapBgfxState::resolveNormalTextureBinding,
+                    },
                     .ambientLight2DScale = ProductAmbientLight2DScale,
                 });
             !status)
@@ -3919,6 +4038,11 @@ class TileMapBgfxState final : public Tina::IGameState {
         LifecycleCounters* counters = nullptr;
     };
 
+    struct NormalTextureBindingResolverContext final {
+        Tina::Asset::AssetSystem* assets = nullptr;
+        Tina::Render::Texture2DFrameResourceResolver resolver{};
+    };
+
     [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef> resolveSpriteBinding(
         void* userData,
         Tina::Asset::AssetHandle spriteHandle,
@@ -3969,9 +4093,46 @@ class TileMapBgfxState final : public Tina::IGameState {
         return texture;
     }
 
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolveNormalTextureBinding(
+        void* userData,
+        Tina::Asset::AssetHandle textureHandle,
+        Tina::Render::FrameResourceSink& frameResources) noexcept
+    {
+        auto* context = static_cast<NormalTextureBindingResolverContext*>(userData);
+        if (context == nullptr || context->assets == nullptr || !context->resolver.hasValue() ||
+            !textureHandle)
+        {
+            return Tina::Render::FrameResourceRef{};
+        }
+        const Tina::Asset::AssetStore& store = context->assets->store();
+        if (store.assetKind(textureHandle) != Tina::AssetFormat::AssetKind::Texture2D)
+        {
+            return Tina::Render::FrameResourceRef{};
+        }
+        const Tina::Core::AssetId textureId = store.assetId(textureHandle);
+        if (!textureId)
+        {
+            return Tina::Render::FrameResourceRef{};
+        }
+        auto resolved = context->resolver.resolve(
+            context->resolver.userData, textureId, frameResources);
+        if (!resolved)
+        {
+            return Tina::Core::failure(std::move(resolved.error()));
+        }
+        if (!resolved->has_value())
+        {
+            return Tina::Render::FrameResourceRef{};
+        }
+        return resolved->value().resource;
+    }
+
     void releaseSpriteBindings() noexcept
     {
         worldSpriteBindingResolverContext_.registry = nullptr;
+        normalTextureBindingResolverContext_.assets = nullptr;
+        normalTextureBindingResolverContext_.resolver = {};
         tileMapSpriteBindingResolverContext_.registry = nullptr;
         particleSpriteBindingResolverContext_.registry = nullptr;
         trailSpriteBindingResolverContext_.registry = nullptr;
@@ -4015,6 +4176,7 @@ class TileMapBgfxState final : public Tina::IGameState {
     Tina::UI::UIAccessibilityTree accessibilityTree_{};
     Tina::UI::UIAccessibilityProbeProvider accessibilityProbe_{};
     mutable SpriteBindingResolverContext worldSpriteBindingResolverContext_{};
+    mutable NormalTextureBindingResolverContext normalTextureBindingResolverContext_{};
     mutable TilesetBindingResolverContext tileMapSpriteBindingResolverContext_{};
     mutable SpriteBindingResolverContext particleSpriteBindingResolverContext_{};
     mutable SpriteBindingResolverContext trailSpriteBindingResolverContext_{};
@@ -4180,7 +4342,13 @@ int main(int argc, char** argv)
     counters.uiThemeDemoRequested = options->uiThemeDemo;
     counters.uiTreeDemoRequested = options->uiTreeDemo;
     TileMapResources resources{};
-    if (const auto status = prepareCatalog(resources, counters, options->disableShadowOccluders); !status)
+    if (const auto status = prepareCatalog(
+            resources,
+            counters,
+            options->disableShadowOccluders,
+            options->forceHardShadows,
+            options->disableNormalMaps);
+        !status)
     {
         writeError(status.error());
         return 1;
@@ -4218,6 +4386,14 @@ int main(int argc, char** argv)
         counters.pointLight2DCount = statistics->pointLight2DCount;
         counters.shadowOccluder2DCount = statistics->shadowOccluder2DCount;
         counters.sceneLightingFrames = capture.sprite2DLightingFrameCount();
+        counters.softShadowPointLight2DCount =
+            capture.lastSubmittedSoftShadowPointLight2DCount();
+    }
+    counters.normalMappedSpriteCount = capture.lastSubmittedNormalMappedSpriteCount();
+    if (counters.authoredPointLight2DCount >= counters.pointLight2DCount)
+    {
+        counters.culledPointLight2DCount =
+            counters.authoredPointLight2DCount - counters.pointLight2DCount;
     }
 
     // M11-D1: prefer capture taken on the final present; fall back to post-run capture.
@@ -4278,7 +4454,8 @@ int main(int argc, char** argv)
         }
     }
     for (const Tina::Asset::AssetHandle handle :
-         std::array{resources.tileTextureHandle, resources.characterTextureHandle})
+         std::array{resources.tileTextureHandle, resources.characterTextureHandle,
+                    resources.characterNormalTextureHandle})
     {
         if (resources.system->state(handle) == Tina::Asset::AssetLogicalState::Unloaded &&
             resources.system->tryGet(handle) == nullptr)
@@ -4357,11 +4534,19 @@ int main(int argc, char** argv)
         product300EffectsValid;
     const u32 expectedShadowOccluder2DCount =
         options->disableShadowOccluders ? 0U : ProductShadowOccluder2DCount;
+    const u32 expectedSoftShadowPointLight2DCount =
+        options->forceHardShadows ? 0U : ProductSoftShadowPointLight2DCount;
     const bool lighting2DValid =
         counters.sprite2DLightingConfigured &&
-        counters.pointLight2DCount == ProductPointLight2DCount &&
+        counters.authoredPointLight2DCount == ProductAuthoredPointLight2DCount &&
+        counters.pointLight2DCount == ProductCommittedPointLight2DCount &&
+        counters.culledPointLight2DCount == ProductCulledPointLight2DCount &&
         counters.shadowOccluder2DCount == expectedShadowOccluder2DCount &&
+        counters.softShadowPointLight2DCount == expectedSoftShadowPointLight2DCount &&
         counters.sceneLightingFrames == counters.renderExtractions;
+    const u32 expectedNormalMappedSpriteCount = options->disableNormalMaps ? 0U : 1U;
+    const bool normalMappingValid =
+        counters.normalMappedSpriteCount == expectedNormalMappedSpriteCount;
 
     const bool audioValid =
         counters.audioEnginePresent && counters.audioOneShotQueued && counters.audioStartedObserved &&
@@ -4423,6 +4608,7 @@ int main(int argc, char** argv)
 
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
               cameraFollowValid && chunkDirtyValid && tileMapStreamValid && effectsValid && lighting2DValid &&
+              normalMappingValid &&
               audioValid && audioDeviceValid &&
               characterAnimationValid && spriteBindingsValid && treeViewValid &&
               counters.catalogFromRecipeFile &&
@@ -4485,7 +4671,7 @@ int main(int argc, char** argv)
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
     evidenceBytes.reserve(512);
-    appendLeU32(evidenceBytes, 16U); // schema
+    appendLeU32(evidenceBytes, ProductEvidenceSchema);
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
@@ -4520,11 +4706,15 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, ProductTrailCapacity);
     appendLeU64(evidenceBytes, ProductTrailSegments);
     appendLeU64(evidenceBytes, ProductTrailStableKeyBase);
-    appendLeU32(evidenceBytes, ProductPointLight2DCount);
+    appendLeU32(evidenceBytes, counters.authoredPointLight2DCount);
+    appendLeU32(evidenceBytes, counters.pointLight2DCount);
+    appendLeU32(evidenceBytes, counters.culledPointLight2DCount);
     appendLeU32(evidenceBytes, counters.shadowOccluder2DCount);
+    appendLeU32(evidenceBytes, counters.softShadowPointLight2DCount);
     appendF32Bits(evidenceBytes, ProductAmbientLight2DScale);
     appendLeU32(evidenceBytes, counters.sprite2DLightingConfigured ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.sceneLightingFrames);
+    appendLeU32(evidenceBytes, counters.normalMappedSpriteCount);
     for (const char byte : counters.fxInitialFingerprint)
     {
         evidenceBytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(byte)));
@@ -4641,9 +4831,14 @@ int main(int argc, char** argv)
                   << ",\"totalSprites\":" << counters.lastTotalSprites
                   << ",\"sprite2DLightingConfigured\":"
                   << (counters.sprite2DLightingConfigured ? "true" : "false")
+                  << ",\"authoredPointLight2DCount\":" << counters.authoredPointLight2DCount
                   << ",\"pointLight2DCount\":" << counters.pointLight2DCount
+                  << ",\"culledPointLight2DCount\":" << counters.culledPointLight2DCount
                   << ",\"shadowOccluder2DCount\":" << counters.shadowOccluder2DCount
+                  << ",\"softShadowPointLight2DCount\":"
+                  << counters.softShadowPointLight2DCount
                   << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
+                  << ",\"normalMappedSpriteCount\":" << counters.normalMappedSpriteCount
                   << ",\"particleCapacity\":" << ProductParticleCapacity
                   << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
                   << ",\"particleEmitted\":" << counters.particleEmitted
@@ -4828,9 +5023,14 @@ int main(int argc, char** argv)
               << ",\"spritesPerFrame\":" << expectedTotalSprites
               << ",\"sprite2DLightingConfigured\":"
               << (counters.sprite2DLightingConfigured ? "true" : "false")
+              << ",\"authoredPointLight2DCount\":" << counters.authoredPointLight2DCount
               << ",\"pointLight2DCount\":" << counters.pointLight2DCount
+              << ",\"culledPointLight2DCount\":" << counters.culledPointLight2DCount
               << ",\"shadowOccluder2DCount\":" << counters.shadowOccluder2DCount
+              << ",\"softShadowPointLight2DCount\":"
+              << counters.softShadowPointLight2DCount
               << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
+              << ",\"normalMappedSpriteCount\":" << counters.normalMappedSpriteCount
               << ",\"particleCapacity\":" << ProductParticleCapacity
               << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
               << ",\"particleEmitted\":" << counters.particleEmitted
@@ -5052,7 +5252,7 @@ int main(int argc, char** argv)
               << ",\"accessibilityTreeSelectionVerified\":"
               << (counters.accessibilityTreeSelectionVerified ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":16"
+              << ",\"evidenceSchema\":" << ProductEvidenceSchema
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
