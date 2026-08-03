@@ -17,6 +17,7 @@ Does **not** replace cross-distro artifact transfer or ADR 0024 ABI approval.
 | GameSDK | `out/build/windows-msvc-vnext` | `{"status":"ok","consumer":"installed-tina-sdk"}` | `artifacts/gates/sdk-001-gamesdk-consumer-20260803.log` |
 | PlatformGlfw | `out/build/windows-msvc-vnext-platform` | `{"status":"ok","consumer":"installed-tina-platform-glfw",...}` | `artifacts/gates/sdk-001-platform-glfw-consumer-20260803.log` |
 | DesktopBootstrap | `out/build/windows-msvc-vnext-bgfx` | `{"status":"ok","consumer":"installed-tina-desktop-bootstrap"}` | `artifacts/gates/sdk-001-desktop-bootstrap-consumer-20260803.log` |
+| AudioMiniaudio | `out/build/windows-msvc-vnext-audio-miniaudio` | `{"status":"ok","consumer":"installed-tina-audio-miniaudio"}` | `artifacts/gates/sdk-001-audio-miniaudio-consumer-20260803.log` |
 
 ### Commands
 
@@ -28,6 +29,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 -Consumer PlatformGlfw -Configuration Debug
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 -Consumer DesktopBootstrap -Configuration Debug
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer AudioMiniaudio -Configuration Debug
 ```
 
 ### Proven

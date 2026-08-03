@@ -28,7 +28,9 @@ param(
     # When set, regenerate checked-in per-size baselines (commit only after local review).
     [switch]$WriteBaselines,
     # Skip baseline compare even when a baseline file exists for the case.
-    [switch]$NoBaselineCompare
+    [switch]$NoBaselineCompare,
+    # playfield/particle chrome can jitter frame-to-frame; 28 is tight for tip matrix.
+    [double]$AvgRgbTolerance = 40.0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -135,6 +137,7 @@ foreach ($s in $sizes) {
         -ExpectedLogicalWidth $w `
         -ExpectedLogicalHeight $h `
         -BaselinePath $baselineRel `
+        -AvgRgbTolerance $AvgRgbTolerance `
         -WarmupMs 900 `
         -CaptureCount 3 `
         -RequiredConsecutiveUsefulCaptures 2 `

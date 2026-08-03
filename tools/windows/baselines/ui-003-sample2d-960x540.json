@@ -53,13 +53,13 @@
                                 ],
                      "samples":  700,
                      "avgRgb":  [
-                                    27.28,
-                                    40.63,
-                                    52.62
+                                    56.94,
+                                    83.15,
+                                    83.23
                                 ],
-                     "dominantColor":  "121D2B",
-                     "dominantRatio":  0.8571,
-                     "uniqueSampleColors":  31
+                     "dominantColor":  "111A26",
+                     "dominantRatio":  0.6429,
+                     "uniqueSampleColors":  8
                  },
                  {
                      "name":  "scene_explorer",
@@ -71,13 +71,13 @@
                                 ],
                      "samples":  625,
                      "avgRgb":  [
-                                    59.98,
-                                    71.34,
-                                    78.04
+                                    91.34,
+                                    105.16,
+                                    111.08
                                 ],
-                     "dominantColor":  "474D53",
-                     "dominantRatio":  0.5488,
-                     "uniqueSampleColors":  40
+                     "dominantColor":  "464B50",
+                     "dominantRatio":  0.4032,
+                     "uniqueSampleColors":  17
                  },
                  {
                      "name":  "settings_panel",
@@ -89,13 +89,13 @@
                                 ],
                      "samples":  650,
                      "avgRgb":  [
-                                    28.08,
-                                    53.62,
-                                    56.09
+                                    46.72,
+                                    69.16,
+                                    70.99
                                 ],
-                     "dominantColor":  "0A131D",
-                     "dominantRatio":  0.2323,
-                     "uniqueSampleColors":  57
+                     "dominantColor":  "09121B",
+                     "dominantRatio":  0.2662,
+                     "uniqueSampleColors":  26
                  },
                  {
                      "name":  "progress_bar",
@@ -107,13 +107,13 @@
                                 ],
                      "samples":  720,
                      "avgRgb":  [
-                                    43.1,
-                                    56.26,
-                                    70.69
+                                    90.17,
+                                    101.27,
+                                    112.93
                                 ],
                      "dominantColor":  "192737",
-                     "dominantRatio":  0.5778,
-                     "uniqueSampleColors":  50
+                     "dominantRatio":  0.6042,
+                     "uniqueSampleColors":  4
                  },
                  {
                      "name":  "playfield_lower",
@@ -125,13 +125,13 @@
                                 ],
                      "samples":  625,
                      "avgRgb":  [
-                                    122.98,
-                                    116.41,
-                                    77.65
+                                    59.01,
+                                    56.4,
+                                    43.49
                                 ],
                      "dominantColor":  "102A43",
-                     "dominantRatio":  0.3408,
-                     "uniqueSampleColors":  58
+                     "dominantRatio":  0.3712,
+                     "uniqueSampleColors":  174
                  }
              ],
     "notes":  [
