@@ -55,6 +55,8 @@ constexpr std::array<u16, 36> CubeIndices{{
 
 static_assert(std::is_standard_layout_v<BgfxOpaque3DVertex>);
 static_assert(sizeof(BgfxOpaque3DVertex) == sizeof(float) * 8U);
+static_assert(std::is_standard_layout_v<BgfxOpaque3DTangentVertex>);
+static_assert(sizeof(BgfxOpaque3DTangentVertex) == sizeof(float) * 12U);
 static_assert(std::is_standard_layout_v<BgfxOpaque3DInstanceData>);
 static_assert(sizeof(BgfxOpaque3DInstanceData) == sizeof(float) * 20U);
 
@@ -62,6 +64,7 @@ static_assert(sizeof(BgfxOpaque3DInstanceData) == sizeof(float) * 20U);
 {
     return std::ranges::all_of(item.columnMajorWorldTransform,
                                [](float value) noexcept { return std::isfinite(value); }) &&
+           std::isfinite(opaque3DModelLinearDeterminant(item.columnMajorWorldTransform)) &&
            std::isfinite(item.baseColorFactor.red) && std::isfinite(item.baseColorFactor.green) &&
            std::isfinite(item.baseColorFactor.blue) && std::isfinite(item.baseColorFactor.alpha);
 }
@@ -82,6 +85,19 @@ std::span<const BgfxOpaque3DVertex> canonicalCubeVertices() noexcept
 std::span<const u16> canonicalCubeIndices() noexcept
 {
     return CubeIndices;
+}
+
+float opaque3DModelLinearDeterminant(
+    const std::array<float, 16>& columnMajorWorldTransform) noexcept
+{
+    const float crossX = columnMajorWorldTransform[1] * columnMajorWorldTransform[6] -
+                         columnMajorWorldTransform[2] * columnMajorWorldTransform[5];
+    const float crossY = columnMajorWorldTransform[2] * columnMajorWorldTransform[4] -
+                         columnMajorWorldTransform[0] * columnMajorWorldTransform[6];
+    const float crossZ = columnMajorWorldTransform[0] * columnMajorWorldTransform[5] -
+                         columnMajorWorldTransform[1] * columnMajorWorldTransform[4];
+    return crossX * columnMajorWorldTransform[8] + crossY * columnMajorWorldTransform[9] +
+           crossZ * columnMajorWorldTransform[10];
 }
 
 Core::Status validateOpaque3DFrameResources(

@@ -855,6 +855,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
             .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
             .end();
+        opaque3DTangentVertexLayout_.begin()
+            .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::Tangent, 4, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+            .end();
+        if (opaque3DVertexLayout_.getStride() != sizeof(BgfxOpaque3DVertex) ||
+            opaque3DTangentVertexLayout_.getStride() != sizeof(BgfxOpaque3DTangentVertex))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx created an unexpected Opaque3D vertex stride");
+        }
 
         auto uiProgram = ShaderDetail::createUITexturedQuadProgram();
         if (!uiProgram)
@@ -1830,6 +1842,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             slot.vertexCount = 0;
             slot.indexCount = 0;
+            slot.vertexFormat = BgfxOpaque3DVertexFormat::P3N3UV2;
             slot.retirementPhase = RetirementPhase::None;
             slot.completionPin.release();
             ++completed;
@@ -2038,6 +2051,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
             bgfx::VertexBufferHandle vb = opaque3DVertexBuffer_;
             bgfx::IndexBufferHandle ib = opaque3DIndexBuffer_;
+            bool meshHasTangents = false;
             // meshKey=1 defaults to built-in cube; other keys require setMesh3DBinding.
             if (const auto binding = mesh3DBindings_.find(meshKey); binding != mesh3DBindings_.end())
             {
@@ -2050,6 +2064,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                     {
                         vb = slot.vertexBuffer;
                         ib = slot.indexBuffer;
+                        meshHasTangents = hasVertexTangents(slot.vertexFormat);
                     }
                 }
             }
@@ -2113,7 +2128,9 @@ class BgfxRenderDevice final : public IRenderDevice {
             // ambient from the current frame snapshot or device fallback; w = MR map bound flag.
             const std::array<float, 4> mrParams{
                 binding.metallicFactor, binding.roughnessFactor, ambientScale, mrMapBound};
-            const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
+            // x = normal map bound; y follows the selected mesh format, so P3N3UV2 keeps the fallback.
+            const std::array<float, 4> normalParams{
+                normalMapBound, meshHasTangents ? 1.0F : 0.0F, 0.0F, 0.0F};
 
             bgfx::setVertexBuffer(0, vb);
             bgfx::setIndexBuffer(ib);
@@ -2449,10 +2466,12 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
-    // M11-E2: upload cooked/product StaticMesh (P3_N3_UV2 + U16) into private VB/IB.
-    [[nodiscard]] Core::Result<GpuMeshId> createStaticMeshP3N3UV2(const StaticMeshUploadDesc& desc) override
+    template <typename UploadDesc>
+    [[nodiscard]] Core::Result<GpuMeshId> createStaticMesh(
+        const UploadDesc& desc, u32 floatsPerVertex, const bgfx::VertexLayout& vertexLayout,
+        BgfxOpaque3DVertexFormat vertexFormat, std::string_view operation)
     {
-        if (auto status = validateApiThread("BgfxRenderDevice::createStaticMeshP3N3UV2"); !status)
+        if (auto status = validateApiThread(operation); !status)
         {
             return Core::failure(std::move(status.error()));
         }
@@ -2460,9 +2479,16 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
         }
-        if (desc.vertexCount == 0 || desc.indexCount == 0 || (desc.indexCount % 3U) != 0U ||
-            desc.vertices.size() != static_cast<usize>(desc.vertexCount) * 8U ||
-            desc.indices.size() != desc.indexCount)
+
+        constexpr u32 MaxUploadBytes = (std::numeric_limits<u32>::max)();
+        const usize vertexStrideBytes = static_cast<usize>(floatsPerVertex) * sizeof(float);
+        if (floatsPerVertex == 0U || desc.vertexCount == 0 || desc.indexCount == 0 ||
+            (desc.indexCount % 3U) != 0U ||
+            desc.vertexCount > (std::numeric_limits<usize>::max)() / floatsPerVertex ||
+            desc.vertices.size() != static_cast<usize>(desc.vertexCount) * floatsPerVertex ||
+            desc.indices.size() != desc.indexCount ||
+            desc.vertexCount > MaxUploadBytes / vertexStrideBytes ||
+            desc.indexCount > MaxUploadBytes / sizeof(u16))
         {
             return Core::failure(RenderErrorCode::InvalidMeshUpload, "invalid StaticMesh upload descriptor");
         }
@@ -2473,6 +2499,28 @@ class BgfxRenderDevice final : public IRenderDevice {
                 return Core::failure(RenderErrorCode::InvalidMeshUpload, "StaticMesh vertices must be finite");
             }
         }
+        if (hasVertexTangents(vertexFormat))
+        {
+            constexpr float MinimumTangentLengthSquared = 1.0e-12F;
+            for (usize vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
+            {
+                const usize tangentOffset = vertexIndex * floatsPerVertex + 6U;
+                const float tangentX = desc.vertices[tangentOffset];
+                const float tangentY = desc.vertices[tangentOffset + 1U];
+                const float tangentZ = desc.vertices[tangentOffset + 2U];
+                const float tangentHandedness = desc.vertices[tangentOffset + 3U];
+                const float tangentLengthSquared =
+                    tangentX * tangentX + tangentY * tangentY + tangentZ * tangentZ;
+                if (!std::isfinite(tangentLengthSquared) ||
+                    tangentLengthSquared <= MinimumTangentLengthSquared ||
+                    (tangentHandedness != -1.0F && tangentHandedness != 1.0F))
+                {
+                    return Core::failure(
+                        RenderErrorCode::InvalidMeshUpload,
+                        "StaticMesh vertex tangents require non-zero xyz and -1 or +1 handedness");
+                }
+            }
+        }
         for (const u16 index : desc.indices)
         {
             if (static_cast<u32>(index) >= desc.vertexCount)
@@ -2481,11 +2529,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
         }
 
-        const u32 vertexBytes = desc.vertexCount * static_cast<u32>(sizeof(float) * 8U);
+        const u32 vertexBytes = static_cast<u32>(static_cast<usize>(desc.vertexCount) * vertexStrideBytes);
         const u32 indexBytes = desc.indexCount * static_cast<u32>(sizeof(u16));
         const bgfx::Memory* vertexMemory = bgfx::copy(desc.vertices.data(), vertexBytes);
-        const bgfx::VertexBufferHandle vb =
-            bgfx::createVertexBuffer(vertexMemory, opaque3DVertexLayout_);
+        const bgfx::VertexBufferHandle vb = bgfx::createVertexBuffer(vertexMemory, vertexLayout);
         if (!bgfx::isValid(vb))
         {
             return Core::failure(RenderErrorCode::InvalidMeshUpload, "bgfx rejected StaticMesh vertex buffer");
@@ -2499,31 +2546,70 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
 
         u32 slotIndex = (std::numeric_limits<u32>::max)();
-        for (u32 i = 0; i < static_cast<u32>(meshes_.size()); ++i)
+        for (u32 index = 0; index < static_cast<u32>(meshes_.size()); ++index)
         {
-            if (meshes_[i].identity.canReuse(
-                    meshes_[i].live,
-                    meshes_[i].retirementPhase != RetirementPhase::None))
+            if (meshes_[index].identity.canReuse(
+                    meshes_[index].live,
+                    meshes_[index].retirementPhase != RetirementPhase::None))
             {
-                slotIndex = i;
+                slotIndex = index;
                 break;
             }
         }
         if (slotIndex == (std::numeric_limits<u32>::max)())
         {
+            if (meshes_.size() >= (std::numeric_limits<u32>::max)())
+            {
+                bgfx::destroy(ib);
+                bgfx::destroy(vb);
+                return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                     "StaticMesh GPU slot index space is exhausted");
+            }
             slotIndex = static_cast<u32>(meshes_.size());
-            meshes_.push_back(MeshSlot{});
+            try
+            {
+                meshes_.push_back(MeshSlot{});
+            }
+            catch (const std::bad_alloc&)
+            {
+                bgfx::destroy(ib);
+                bgfx::destroy(vb);
+                return Core::failure(Core::CoreErrorCode::OutOfMemory);
+            }
+            catch (const std::length_error&)
+            {
+                bgfx::destroy(ib);
+                bgfx::destroy(vb);
+                return Core::failure(Core::CoreErrorCode::CapacityExceeded);
+            }
         }
+
         MeshSlot& slot = meshes_[slotIndex];
         slot.vertexBuffer = vb;
         slot.indexBuffer = ib;
         slot.vertexCount = desc.vertexCount;
         slot.indexCount = desc.indexCount;
+        slot.vertexFormat = vertexFormat;
         slot.live = true;
         slot.retirementPhase = RetirementPhase::None;
         ++statistics_.liveResources;
         ++statistics_.liveResources;
         return GpuMeshId{resourceOwnerId(), slotIndex, slot.identity.value()};
+    }
+
+    // M11-E2: upload existing cooked/product StaticMesh (P3_N3_UV2 + U16) into private VB/IB.
+    [[nodiscard]] Core::Result<GpuMeshId> createStaticMeshP3N3UV2(const StaticMeshUploadDesc& desc) override
+    {
+        return createStaticMesh(desc, 8U, opaque3DVertexLayout_, BgfxOpaque3DVertexFormat::P3N3UV2,
+                                "BgfxRenderDevice::createStaticMeshP3N3UV2");
+    }
+
+    [[nodiscard]] Core::Result<GpuMeshId>
+    createStaticMeshP3N3T4UV2(const StaticMeshP3N3T4UV2UploadDesc& desc) override
+    {
+        return createStaticMesh(desc, 12U, opaque3DTangentVertexLayout_,
+                                BgfxOpaque3DVertexFormat::P3N3T4UV2,
+                                "BgfxRenderDevice::createStaticMeshP3N3T4UV2");
     }
 
     [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
@@ -2588,6 +2674,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             slot.vertexCount = 0;
             slot.indexCount = 0;
+            slot.vertexFormat = BgfxOpaque3DVertexFormat::P3N3UV2;
             slot.retirementPhase = RetirementPhase::None;
             ++statistics_.completedGpuRetirements;
             return Core::success();
@@ -3122,6 +3209,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     u64 nextSubmissionIndex_ = 0;
     bgfx::VertexLayout transientByteLayout_{};
     bgfx::VertexLayout opaque3DVertexLayout_{};
+    bgfx::VertexLayout opaque3DTangentVertexLayout_{};
     bgfx::VertexLayout sprite2DVertexLayout_{};
     bgfx::VertexLayout uiVertexLayout_{};
     bgfx::ProgramHandle opaque3DProgram_ = BGFX_INVALID_HANDLE;
@@ -3183,6 +3271,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         BgfxMeshResourceSlotGeneration identity{};
         u32 vertexCount = 0;
         u32 indexCount = 0;
+        BgfxOpaque3DVertexFormat vertexFormat = BgfxOpaque3DVertexFormat::P3N3UV2;
         bool live = false;
         RetirementPhase retirementPhase = RetirementPhase::None;
         FramePin completionPin{};

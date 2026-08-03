@@ -192,6 +192,37 @@ TEST(BgfxOpaque3DGeometryTest, CanonicalCubeUsesP3N3UV2AndOutwardWinding)
     }
 }
 
+TEST(BgfxOpaque3DGeometryTest, TangentVertexLayoutMatchesP3N3T4UV2)
+{
+    EXPECT_FALSE(hasVertexTangents(BgfxOpaque3DVertexFormat::P3N3UV2));
+    EXPECT_TRUE(hasVertexTangents(BgfxOpaque3DVertexFormat::P3N3T4UV2));
+    EXPECT_TRUE(std::is_standard_layout_v<BgfxOpaque3DTangentVertex>);
+    EXPECT_EQ(sizeof(BgfxOpaque3DTangentVertex), 48U);
+    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, positionX), 0U);
+    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, normalX), 12U);
+    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, tangentX), 24U);
+    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, tangentHandedness), 36U);
+    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, textureU), 40U);
+}
+
+TEST(BgfxOpaque3DGeometryTest, SignedModelScaleCorrectsVertexTangentHandedness)
+{
+    std::array<float, 16> reflectedScale{
+        -2.0F, 0.0F, 0.0F, 0.0F,
+        0.0F, 3.0F, 0.0F, 0.0F,
+        0.0F, 0.0F, 4.0F, 0.0F,
+        0.0F, 0.0F, 0.0F, 1.0F,
+    };
+    const float reflectedDeterminant = opaque3DModelLinearDeterminant(reflectedScale);
+    ASSERT_LT(reflectedDeterminant, 0.0F);
+    EXPECT_FLOAT_EQ((reflectedDeterminant < 0.0F ? -1.0F : 1.0F) * 1.0F, -1.0F);
+
+    reflectedScale[5] = -3.0F;
+    const float orientationPreservingDeterminant = opaque3DModelLinearDeterminant(reflectedScale);
+    ASSERT_GT(orientationPreservingDeterminant, 0.0F);
+    EXPECT_FLOAT_EQ((orientationPreservingDeterminant < 0.0F ? -1.0F : 1.0F) * -1.0F, -1.0F);
+}
+
 TEST(BgfxOpaque3DGeometryTest, InstanceDataLayoutMatchesFiveShaderVec4Attributes)
 {
     EXPECT_TRUE(std::is_standard_layout_v<BgfxOpaque3DInstanceData>);

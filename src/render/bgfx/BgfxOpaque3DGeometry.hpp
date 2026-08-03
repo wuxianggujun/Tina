@@ -12,6 +12,16 @@ inline constexpr u32 Opaque3DmeshKey = 1;
 inline constexpr u32 Opaque3DmaterialKey = 1;
 inline constexpr u32 Opaque3DFixtureSubmeshIndex = 0;
 
+enum class BgfxOpaque3DVertexFormat : u8 {
+    P3N3UV2,
+    P3N3T4UV2,
+};
+
+[[nodiscard]] constexpr bool hasVertexTangents(BgfxOpaque3DVertexFormat format) noexcept
+{
+    return format == BgfxOpaque3DVertexFormat::P3N3T4UV2;
+}
+
 struct BgfxOpaque3DVertex final {
     float positionX = 0.0F;
     float positionY = 0.0F;
@@ -19,6 +29,21 @@ struct BgfxOpaque3DVertex final {
     float normalX = 0.0F;
     float normalY = 0.0F;
     float normalZ = 0.0F;
+    float textureU = 0.0F;
+    float textureV = 0.0F;
+};
+
+struct BgfxOpaque3DTangentVertex final {
+    float positionX = 0.0F;
+    float positionY = 0.0F;
+    float positionZ = 0.0F;
+    float normalX = 0.0F;
+    float normalY = 0.0F;
+    float normalZ = 0.0F;
+    float tangentX = 0.0F;
+    float tangentY = 0.0F;
+    float tangentZ = 0.0F;
+    float tangentHandedness = 1.0F;
     float textureU = 0.0F;
     float textureV = 0.0F;
 };
@@ -35,6 +60,11 @@ struct BgfxOpaque3DFrameRequirements final {
 
 [[nodiscard]] std::span<const BgfxOpaque3DVertex> canonicalCubeVertices() noexcept;
 [[nodiscard]] std::span<const u16> canonicalCubeIndices() noexcept;
+
+// Matches dot(cross(modelColumn0, modelColumn1), modelColumn2) in the vertex
+// shader. Its sign corrects vertex-tangent handedness for reflected models.
+[[nodiscard]] float opaque3DModelLinearDeterminant(
+    const std::array<float, 16>& columnMajorWorldTransform) noexcept;
 
 // Validates every packet-local Mesh3D geometry/material ref without touching
 // geometry output or backend state. This also applies to suspended frames.

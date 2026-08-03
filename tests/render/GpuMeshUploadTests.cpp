@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace Tina::Tests {
@@ -21,6 +22,25 @@ namespace {
     };
     indices = {0, 1, 2};
     return Render::StaticMeshUploadDesc{
+        .vertexCount = 3,
+        .indexCount = 3,
+        .vertices = vertices,
+        .indices = indices,
+    };
+}
+
+[[nodiscard]] Render::StaticMeshP3N3T4UV2UploadDesc
+makeTangentUnitTriangleDesc(std::array<float, 36>& vertices,
+                            std::array<std::uint16_t, 3>& indices) noexcept
+{
+    // One triangle: 3 verts * 12 floats (P3_N3_T4_UV2).
+    vertices = {
+        0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F,
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F,
+        0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F,
+    };
+    indices = {0, 1, 2};
+    return Render::StaticMeshP3N3T4UV2UploadDesc{
         .vertexCount = 3,
         .indexCount = 3,
         .vertices = vertices,
@@ -88,6 +108,89 @@ TEST(NullRenderDeviceMeshTest, RejectsBadUpload)
     });
     ASSERT_FALSE(mesh.has_value());
     EXPECT_EQ(mesh.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+}
+
+TEST(NullRenderDeviceMeshTest, TangentLayoutUsesIndependentValidatedUploadPath)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+
+    std::array<float, 36> vertices{};
+    std::array<std::uint16_t, 3> indices{};
+    const auto desc = makeTangentUnitTriangleDesc(vertices, indices);
+    auto mesh = (*device)->createStaticMeshP3N3T4UV2(desc);
+    ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
+    EXPECT_EQ((*device)->statistics().liveResources, 1U);
+    ASSERT_TRUE((*device)->setMesh3DBinding(2U, *mesh).has_value());
+
+    std::array<float, 24> wrongStrideVertices{};
+    auto wrongStride = (*device)->createStaticMeshP3N3T4UV2(Render::StaticMeshP3N3T4UV2UploadDesc{
+        .vertexCount = 3,
+        .indexCount = 3,
+        .vertices = wrongStrideVertices,
+        .indices = indices,
+    });
+    ASSERT_FALSE(wrongStride.has_value());
+    EXPECT_EQ(wrongStride.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+    EXPECT_EQ((*device)->statistics().liveResources, 1U);
+
+    vertices[6] = (std::numeric_limits<float>::infinity)();
+    auto nonFinite = (*device)->createStaticMeshP3N3T4UV2(desc);
+    ASSERT_FALSE(nonFinite.has_value());
+    EXPECT_EQ(nonFinite.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+    vertices[6] = 1.0F;
+
+    vertices[6] = 1.0e-7F;
+    auto nearZeroTangent = (*device)->createStaticMeshP3N3T4UV2(desc);
+    ASSERT_FALSE(nearZeroTangent.has_value());
+    EXPECT_EQ(nearZeroTangent.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+    vertices[6] = 1.0F;
+
+    vertices[9] = 0.5F;
+    auto invalidHandedness = (*device)->createStaticMeshP3N3T4UV2(desc);
+    ASSERT_FALSE(invalidHandedness.has_value());
+    EXPECT_EQ(invalidHandedness.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+    vertices[9] = 1.0F;
+
+    const std::array<std::uint16_t, 3> outOfRangeIndices{0, 1, 3};
+    auto outOfRange = (*device)->createStaticMeshP3N3T4UV2(Render::StaticMeshP3N3T4UV2UploadDesc{
+        .vertexCount = 3,
+        .indexCount = 3,
+        .vertices = vertices,
+        .indices = outOfRangeIndices,
+    });
+    ASSERT_FALSE(outOfRange.has_value());
+    EXPECT_EQ(outOfRange.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+    EXPECT_EQ((*device)->statistics().liveResources, 1U);
+
+    Core::u32 releases = 0;
+    Render::FramePin completionPin{Render::FramePinKind::AssetLease, 11, &releases, &countPinRelease};
+    ASSERT_TRUE((*device)->retireStaticMesh(*mesh, completionPin).has_value());
+    EXPECT_FALSE(completionPin.hasValue());
+    EXPECT_EQ(releases, 1U);
+    EXPECT_EQ((*device)->statistics().liveResources, 0U);
+    EXPECT_EQ((*device)->statistics().completedGpuRetirements, 1U);
+
+    auto staleBinding = (*device)->setMesh3DBinding(3U, *mesh);
+    ASSERT_FALSE(staleBinding.has_value());
+    EXPECT_EQ(staleBinding.error().code, Render::RenderErrorCode::MeshNotFound);
+    Render::FramePin stalePin{Render::FramePinKind::AssetLease, 12, &releases, &countPinRelease};
+    auto staleRetirement = (*device)->retireStaticMesh(*mesh, stalePin);
+    ASSERT_FALSE(staleRetirement.has_value());
+    EXPECT_TRUE(stalePin.hasValue());
+    EXPECT_EQ(releases, 1U);
+    stalePin.release();
+
+    vertices[9] = -1.0F;
+    auto replacement = (*device)->createStaticMeshP3N3T4UV2(desc);
+    ASSERT_TRUE(replacement.has_value()) << replacement.error().message;
+    ASSERT_TRUE((*device)->destroyStaticMesh(*replacement).has_value());
+    auto staleDestroy = (*device)->destroyStaticMesh(*replacement);
+    ASSERT_FALSE(staleDestroy.has_value());
+    EXPECT_EQ(staleDestroy.error().code, Render::RenderErrorCode::MeshNotFound);
+    EXPECT_EQ(releases, 2U);
+    EXPECT_EQ((*device)->statistics().liveResources, 0U);
+    EXPECT_EQ((*device)->statistics().completedGpuRetirements, 2U);
 }
 
 TEST(NullRenderDeviceMeshTest, RejectsZeroMeshKeyBinding)
