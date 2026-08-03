@@ -3,7 +3,7 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos
 #include <bgfx_shader.sh>
 
 // Experimental Opaque3D metallic-roughness hybrid (RENDER-001).
-// Honesty: up to four directional + eight point lights and constant ambient; no IBL/shadows.
+// Honesty: up to four directional + eight point + eight spot lights and constant ambient; no IBL/shadows.
 // Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
 // s_texNormal: tangent-space RGB normal (no mesh tangents; TBN from derivatives).
@@ -20,6 +20,12 @@ uniform vec4 u_lightColors[4];
 uniform vec4 u_pointLightPosRadius[8];
 // rgb = point-light color * intensity; w unused.
 uniform vec4 u_pointLightColors[8];
+// xyz = world-space position, w = positive influence radius; zero radius disables the slot.
+uniform vec4 u_spotLightPosRadius[8];
+// xyz = normalized world-space direction from light, w = inner cone cosine.
+uniform vec4 u_spotLightDirInner[8];
+// rgb = spot-light color * intensity, w = outer cone cosine.
+uniform vec4 u_spotLightColorOuter[8];
 // x = metallic factor, y = roughness factor, z = ambient scale, w = 1 if MR map bound.
 uniform vec4 u_mrParams;
 // x = 1 if normal map bound, yzw unused.
@@ -106,6 +112,27 @@ void main()
 			{
 				lit += shadeLight(N, V, safeNormalize(lightOffset),
 					u_pointLightColors[pointLightIndex].rgb * attenuation,
+					albedo, F0, metallic, roughness);
+			}
+		}
+	}
+	for (int spotLightIndex = 0; spotLightIndex < 8; ++spotLightIndex)
+	{
+		float influenceRadius = u_spotLightPosRadius[spotLightIndex].w;
+		if (influenceRadius > 0.0)
+		{
+			vec3 fragmentFromLight = v_worldPos - u_spotLightPosRadius[spotLightIndex].xyz;
+			float lightDistance = length(fragmentFromLight);
+			float radialAttenuation = max(1.0 - lightDistance / influenceRadius, 0.0);
+			float coneCosine = dot(safeNormalize(fragmentFromLight),
+				u_spotLightDirInner[spotLightIndex].xyz);
+			float angularAttenuation = smoothstep(u_spotLightColorOuter[spotLightIndex].w,
+				u_spotLightDirInner[spotLightIndex].w, coneCosine);
+			float attenuation = radialAttenuation * angularAttenuation;
+			if (attenuation > 0.0)
+			{
+				lit += shadeLight(N, V, safeNormalize(-fragmentFromLight),
+					u_spotLightColorOuter[spotLightIndex].rgb * attenuation,
 					albedo, F0, metallic, roughness);
 			}
 		}

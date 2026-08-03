@@ -221,6 +221,92 @@ TEST(NullRenderDeviceLightingTest, AcceptsBoundedPointLightsAndRejectsInvalidVal
     }));
 }
 
+TEST(NullRenderDeviceLightingTest, AcceptsBoundedSpotLightsAndRejectsInvalidValues)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    const std::array spotLights{
+        Render::Mesh3DSpotLight{
+            .positionX = 1.0F,
+            .positionY = 2.0F,
+            .positionZ = 3.0F,
+            .influenceRadius = 6.0F,
+            .directionFromLightX = 0.0F,
+            .directionFromLightY = -2.0F,
+            .directionFromLightZ = 1.0F,
+            .innerConeCosine = 0.9F,
+            .outerConeCosine = 0.7F,
+            .colorR = 0.8F,
+            .colorG = 0.6F,
+            .colorB = 0.4F,
+        },
+        Render::Mesh3DSpotLight{
+            .positionX = -1.0F,
+            .positionY = 0.5F,
+            .positionZ = 2.0F,
+            .influenceRadius = 9.0F,
+            .directionFromLightX = 1.0F,
+            .directionFromLightY = -1.0F,
+            .directionFromLightZ = 0.0F,
+            .innerConeCosine = 0.8F,
+            .outerConeCosine = 0.4F,
+            .colorR = 0.2F,
+            .colorG = 0.3F,
+            .colorB = 0.5F,
+        },
+    };
+    ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = spotLights,
+        .ambientScale = 0.2F,
+    }));
+
+    auto invalidSpotLights = spotLights;
+    invalidSpotLights[0].directionFromLightX = 0.0F;
+    invalidSpotLights[0].directionFromLightY = 0.0F;
+    invalidSpotLights[0].directionFromLightZ = 0.0F;
+    auto directionFailure = (*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = invalidSpotLights,
+        .ambientScale = 0.2F,
+    });
+    ASSERT_FALSE(directionFailure);
+    EXPECT_EQ(directionFailure.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
+
+    invalidSpotLights = spotLights;
+    invalidSpotLights[0].innerConeCosine = invalidSpotLights[0].outerConeCosine;
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = invalidSpotLights,
+        .ambientScale = 0.2F,
+    }));
+
+    invalidSpotLights = spotLights;
+    invalidSpotLights[1].outerConeCosine = -1.1F;
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = invalidSpotLights,
+        .ambientScale = 0.2F,
+    }));
+
+    invalidSpotLights = spotLights;
+    invalidSpotLights[1].influenceRadius = std::numeric_limits<float>::infinity();
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = invalidSpotLights,
+        .ambientScale = 0.2F,
+    }));
+
+    invalidSpotLights = spotLights;
+    invalidSpotLights[0].colorB = -0.1F;
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = invalidSpotLights,
+        .ambientScale = 0.2F,
+    }));
+
+    std::array<Render::Mesh3DSpotLight, Render::Mesh3DLightingDesc::MaximumSpotLightCount + 1U>
+        tooManySpotLights{};
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = tooManySpotLights,
+        .ambientScale = 0.2F,
+    }));
+}
+
 TEST(NullRenderDeviceTextureTest, MaterialBundleUpdatesComposeAndClearIsIdempotent)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});

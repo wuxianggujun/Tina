@@ -7,6 +7,7 @@
 #include <tina/render/UIDisplayList.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
 
+#include <array>
 #include <limits>
 
 namespace Tina::Tests {
@@ -258,6 +259,58 @@ TEST(NullRenderDeviceTest, EnforcesSubmitPresentPairsAndContiguousFrameIndices)
     EXPECT_EQ(statistics.submitted, 2U);
     EXPECT_EQ(statistics.presented, 2U);
     EXPECT_EQ(statistics.liveResources, 0U);
+}
+
+TEST(NullRenderDeviceTest, RejectsInvalidSpotLightSnapshotBeforeConsumingFrameState)
+{
+    auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{});
+    ASSERT_TRUE(builderResult.has_value()) << builderResult.error().message;
+    Render::RenderSceneBuilder builder = std::move(*builderResult);
+    ASSERT_TRUE(builder.beginFrame());
+
+    const std::array spotLights{
+        Render::Mesh3DSpotLight{
+            .positionX = 1.0F,
+            .positionY = 2.0F,
+            .positionZ = 3.0F,
+            .influenceRadius = 8.0F,
+            .directionFromLightX = 0.0F,
+            .directionFromLightY = -1.0F,
+            .directionFromLightZ = 0.0F,
+            .innerConeCosine = 0.9F,
+            .outerConeCosine = 0.7F,
+            .colorR = 1.0F,
+            .colorG = 0.8F,
+            .colorB = 0.6F,
+        },
+    };
+    ASSERT_TRUE(builder.writer().setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = spotLights,
+        .ambientScale = 0.2F,
+    }));
+    auto scene = builder.commit();
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+    ASSERT_TRUE(scene->mesh3DLighting().has_value());
+
+    auto committedSpotLights = scene->mesh3DLighting()->spotLights();
+    ASSERT_EQ(committedSpotLights.size(), 1U);
+    auto* corruptedSpotLight = const_cast<Render::Mesh3DSpotLight*>(committedSpotLights.data());
+    corruptedSpotLight->outerConeCosine = corruptedSpotLight->innerConeCosine;
+
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+    auto invalid = device->submitFrame(Render::RenderFrame{
+        .frameIndex = 0,
+        .primaryWorldScene = *scene,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+    EXPECT_EQ(device->statistics().skippedSuspendedSurfaceFrames, 0U);
+
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().submitted, 1U);
 }
 
 TEST(NullRenderDeviceTest, RejectsAnyCrossPacketSpriteTextureBeforeConsumingFrameOrStatistics)

@@ -17,6 +17,11 @@ Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noex
         return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
                              "Mesh3D point light count exceeds the fixed device limit");
     }
+    if (lighting.spotLights.size() > Mesh3DLightingDesc::MaximumSpotLightCount)
+    {
+        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                             "Mesh3D spot light count exceeds the fixed device limit");
+    }
     if (!std::isfinite(lighting.ambientScale) || lighting.ambientScale < 0.0F)
     {
         return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
@@ -57,6 +62,35 @@ Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noex
             return Core::failure(
                 RenderErrorCode::InvalidMesh3DLighting,
                 "Mesh3D point light position/radius/RGB must be finite with a positive radius and non-negative RGB");
+        }
+    }
+
+    for (const Mesh3DSpotLight& light : lighting.spotLights)
+    {
+        if (!std::isfinite(light.positionX) || !std::isfinite(light.positionY) ||
+            !std::isfinite(light.positionZ) || !std::isfinite(light.influenceRadius) ||
+            light.influenceRadius <= 0.0F || !std::isfinite(light.directionFromLightX) ||
+            !std::isfinite(light.directionFromLightY) || !std::isfinite(light.directionFromLightZ) ||
+            !std::isfinite(light.innerConeCosine) || !std::isfinite(light.outerConeCosine) ||
+            light.innerConeCosine < -1.0F || light.innerConeCosine > 1.0F ||
+            light.outerConeCosine < -1.0F || light.outerConeCosine > 1.0F ||
+            light.innerConeCosine <= light.outerConeCosine || !std::isfinite(light.colorR) ||
+            !std::isfinite(light.colorG) || !std::isfinite(light.colorB) || light.colorR < 0.0F ||
+            light.colorG < 0.0F || light.colorB < 0.0F)
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidMesh3DLighting,
+                "Mesh3D spot light position/radius/direction/cone/RGB must be finite with a positive radius, cone cosines in [-1,1] ordered inner > outer, and non-negative RGB");
+        }
+
+        const float directionLengthSquared =
+            light.directionFromLightX * light.directionFromLightX +
+            light.directionFromLightY * light.directionFromLightY +
+            light.directionFromLightZ * light.directionFromLightZ;
+        if (!std::isfinite(directionLengthSquared) || directionLengthSquared <= 1.0e-12F)
+        {
+            return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                                 "Mesh3D spot light direction must have a finite non-zero length");
         }
     }
 

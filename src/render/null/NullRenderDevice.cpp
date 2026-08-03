@@ -519,6 +519,35 @@ class NullRenderDevice final : public IRenderDevice {
             pointLights_[lightIndex] =
                 lightIndex < pointLightCount_ ? lighting.pointLights[lightIndex] : Mesh3DPointLight{};
         }
+        spotLightCount_ = lighting.spotLights.size();
+        for (std::size_t lightIndex = 0; lightIndex < spotLights_.size(); ++lightIndex)
+        {
+            if (lightIndex >= spotLightCount_)
+            {
+                spotLights_[lightIndex] = {};
+                continue;
+            }
+
+            const Mesh3DSpotLight& source = lighting.spotLights[lightIndex];
+            const float lengthSquared = source.directionFromLightX * source.directionFromLightX +
+                                        source.directionFromLightY * source.directionFromLightY +
+                                        source.directionFromLightZ * source.directionFromLightZ;
+            const float inverseLength = 1.0F / std::sqrt(lengthSquared);
+            spotLights_[lightIndex] = Mesh3DSpotLight{
+                .positionX = source.positionX,
+                .positionY = source.positionY,
+                .positionZ = source.positionZ,
+                .influenceRadius = source.influenceRadius,
+                .directionFromLightX = source.directionFromLightX * inverseLength,
+                .directionFromLightY = source.directionFromLightY * inverseLength,
+                .directionFromLightZ = source.directionFromLightZ * inverseLength,
+                .innerConeCosine = source.innerConeCosine,
+                .outerConeCosine = source.outerConeCosine,
+                .colorR = source.colorR,
+                .colorG = source.colorG,
+                .colorB = source.colorB,
+            };
+        }
         ambientScale_ = lighting.ambientScale;
         return Core::success();
     }
@@ -657,6 +686,8 @@ class NullRenderDevice final : public IRenderDevice {
     std::size_t directionalLightCount_ = 1;
     std::array<Mesh3DPointLight, Mesh3DLightingDesc::MaximumPointLightCount> pointLights_{};
     std::size_t pointLightCount_ = 0;
+    std::array<Mesh3DSpotLight, Mesh3DLightingDesc::MaximumSpotLightCount> spotLights_{};
+    std::size_t spotLightCount_ = 0;
     float ambientScale_ = 0.18F;
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;

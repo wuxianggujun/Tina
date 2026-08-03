@@ -244,6 +244,8 @@ using Mesh3DDirectionalLightUniformStorage =
     std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U>;
 using Mesh3DPointLightUniformStorage =
     std::array<float, Mesh3DLightingDesc::MaximumPointLightCount * 4U>;
+using Mesh3DSpotLightUniformStorage =
+    std::array<float, Mesh3DLightingDesc::MaximumSpotLightCount * 4U>;
 using Sprite2DLightUniformStorage =
     std::array<float, Sprite2DLightingDesc::MaximumPointLightCount * 4U>;
 using Sprite2DShadowUniformStorage =
@@ -254,12 +256,18 @@ void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
                           Mesh3DDirectionalLightUniformStorage& directionalColors,
                           Mesh3DPointLightUniformStorage& pointPositionsAndRadii,
                           Mesh3DPointLightUniformStorage& pointColors,
+                          Mesh3DSpotLightUniformStorage& spotPositionsAndRadii,
+                          Mesh3DSpotLightUniformStorage& spotDirectionsAndInnerCosines,
+                          Mesh3DSpotLightUniformStorage& spotColorsAndOuterCosines,
                           float& ambientScale) noexcept
 {
     directions.fill(0.0F);
     directionalColors.fill(0.0F);
     pointPositionsAndRadii.fill(0.0F);
     pointColors.fill(0.0F);
+    spotPositionsAndRadii.fill(0.0F);
+    spotDirectionsAndInnerCosines.fill(0.0F);
+    spotColorsAndOuterCosines.fill(0.0F);
     for (std::size_t lightIndex = 0; lightIndex < lighting.directionalLights.size(); ++lightIndex)
     {
         const Mesh3DDirectionalLight& source = lighting.directionalLights[lightIndex];
@@ -289,6 +297,27 @@ void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
         pointColors[base + 1U] = source.colorG;
         pointColors[base + 2U] = source.colorB;
         pointColors[base + 3U] = 1.0F;
+    }
+    for (std::size_t lightIndex = 0; lightIndex < lighting.spotLights.size(); ++lightIndex)
+    {
+        const Mesh3DSpotLight& source = lighting.spotLights[lightIndex];
+        const float lengthSquared = source.directionFromLightX * source.directionFromLightX +
+                                    source.directionFromLightY * source.directionFromLightY +
+                                    source.directionFromLightZ * source.directionFromLightZ;
+        const float inverseLength = 1.0F / std::sqrt(lengthSquared);
+        const std::size_t base = lightIndex * 4U;
+        spotPositionsAndRadii[base + 0U] = source.positionX;
+        spotPositionsAndRadii[base + 1U] = source.positionY;
+        spotPositionsAndRadii[base + 2U] = source.positionZ;
+        spotPositionsAndRadii[base + 3U] = source.influenceRadius;
+        spotDirectionsAndInnerCosines[base + 0U] = source.directionFromLightX * inverseLength;
+        spotDirectionsAndInnerCosines[base + 1U] = source.directionFromLightY * inverseLength;
+        spotDirectionsAndInnerCosines[base + 2U] = source.directionFromLightZ * inverseLength;
+        spotDirectionsAndInnerCosines[base + 3U] = source.innerConeCosine;
+        spotColorsAndOuterCosines[base + 0U] = source.colorR;
+        spotColorsAndOuterCosines[base + 1U] = source.colorG;
+        spotColorsAndOuterCosines[base + 2U] = source.colorB;
+        spotColorsAndOuterCosines[base + 3U] = source.outerConeCosine;
     }
     ambientScale = lighting.ambientScale;
 }
@@ -1021,6 +1050,36 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        opaque3DSpotLightPositionsUniform_ = bgfx::createUniform(
+            "u_spotLightPosRadius", bgfx::UniformType::Vec4,
+            static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+        if (!bgfx::isValid(opaque3DSpotLightPositionsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D spot light position/radius array uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DSpotLightDirectionsUniform_ = bgfx::createUniform(
+            "u_spotLightDirInner", bgfx::UniformType::Vec4,
+            static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+        if (!bgfx::isValid(opaque3DSpotLightDirectionsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D spot light direction/inner-cone array uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DSpotLightColorsUniform_ = bgfx::createUniform(
+            "u_spotLightColorOuter", bgfx::UniformType::Vec4,
+            static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+        if (!bgfx::isValid(opaque3DSpotLightColorsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D spot light color/outer-cone array uniform");
+        }
+        ++statistics_.liveResources;
+
         opaque3DMrParamsUniform_ = bgfx::createUniform("u_mrParams", bgfx::UniformType::Vec4);
         if (!bgfx::isValid(opaque3DMrParamsUniform_))
         {
@@ -1403,6 +1462,24 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DPointLightColorsUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(opaque3DSpotLightPositionsUniform_))
+            {
+                bgfx::destroy(opaque3DSpotLightPositionsUniform_);
+                opaque3DSpotLightPositionsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSpotLightDirectionsUniform_))
+            {
+                bgfx::destroy(opaque3DSpotLightDirectionsUniform_);
+                opaque3DSpotLightDirectionsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSpotLightColorsUniform_))
+            {
+                bgfx::destroy(opaque3DSpotLightColorsUniform_);
+                opaque3DSpotLightColorsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(opaque3DMrParamsUniform_))
             {
                 bgfx::destroy(opaque3DMrParamsUniform_);
@@ -1564,7 +1641,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             // sprite2DProgram, base/normal samplers, lighting/normal uniforms,
             // sprite2DDefaultTexture, sprite2DDefaultNormalTexture,
             // opaque3DProgram, opaque3DSampler, opaque3DMrSampler,
-            // opaque3D directional/point light arrays + MrParams uniforms, opaque3DDefaultTexture,
+            // opaque3D directional/point/spot light arrays + MrParams uniforms, opaque3DDefaultTexture,
             // opaque3DDefaultMrTexture, opaque3DVertexBuffer, opaque3DIndexBuffer
             // retirement marker source/readback (+ dynamic mesh/texture slots).
             if (statistics_.liveResources != 0)
@@ -1910,20 +1987,34 @@ class BgfxRenderDevice final : public IRenderDevice {
         const Mesh3DPointLightUniformStorage* pointLightPositionsAndRadii =
             &mesh3DPointLightPositionsAndRadii_;
         const Mesh3DPointLightUniformStorage* pointLightColors = &mesh3DPointLightColors_;
+        const Mesh3DSpotLightUniformStorage* spotLightPositionsAndRadii =
+            &mesh3DSpotLightPositionsAndRadii_;
+        const Mesh3DSpotLightUniformStorage* spotLightDirectionsAndInnerCosines =
+            &mesh3DSpotLightDirectionsAndInnerCosines_;
+        const Mesh3DSpotLightUniformStorage* spotLightColorsAndOuterCosines =
+            &mesh3DSpotLightColorsAndOuterCosines_;
         float ambientScale = mesh3DAmbientScale_;
         Mesh3DDirectionalLightUniformStorage frameLightDirections{};
         Mesh3DDirectionalLightUniformStorage frameLightColors{};
         Mesh3DPointLightUniformStorage framePointLightPositionsAndRadii{};
         Mesh3DPointLightUniformStorage framePointLightColors{};
+        Mesh3DSpotLightUniformStorage frameSpotLightPositionsAndRadii{};
+        Mesh3DSpotLightUniformStorage frameSpotLightDirectionsAndInnerCosines{};
+        Mesh3DSpotLightUniformStorage frameSpotLightColorsAndOuterCosines{};
         if (scene.mesh3DLighting().has_value())
         {
             encodeMesh3DLighting(scene.mesh3DLighting()->descriptor(), frameLightDirections,
                                  frameLightColors, framePointLightPositionsAndRadii,
-                                 framePointLightColors, ambientScale);
+                                 framePointLightColors, frameSpotLightPositionsAndRadii,
+                                 frameSpotLightDirectionsAndInnerCosines,
+                                 frameSpotLightColorsAndOuterCosines, ambientScale);
             lightDirections = &frameLightDirections;
             lightColors = &frameLightColors;
             pointLightPositionsAndRadii = &framePointLightPositionsAndRadii;
             pointLightColors = &framePointLightColors;
+            spotLightPositionsAndRadii = &frameSpotLightPositionsAndRadii;
+            spotLightDirectionsAndInnerCosines = &frameSpotLightDirectionsAndInnerCosines;
+            spotLightColorsAndOuterCosines = &frameSpotLightColorsAndOuterCosines;
         }
 
         bgfx::setScissor();
@@ -2038,6 +2129,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                              static_cast<u16>(Mesh3DLightingDesc::MaximumPointLightCount));
             bgfx::setUniform(opaque3DPointLightColorsUniform_, pointLightColors->data(),
                              static_cast<u16>(Mesh3DLightingDesc::MaximumPointLightCount));
+            bgfx::setUniform(opaque3DSpotLightPositionsUniform_, spotLightPositionsAndRadii->data(),
+                             static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+            bgfx::setUniform(opaque3DSpotLightDirectionsUniform_, spotLightDirectionsAndInnerCosines->data(),
+                             static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+            bgfx::setUniform(opaque3DSpotLightColorsUniform_, spotLightColorsAndOuterCosines->data(),
+                             static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
             bgfx::setUniform(opaque3DMrParamsUniform_, mrParams.data());
             bgfx::setUniform(opaque3DNormalParamsUniform_, normalParams.data());
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
@@ -2765,6 +2862,8 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         encodeMesh3DLighting(lighting, mesh3DLightDirections_, mesh3DLightColors_,
                              mesh3DPointLightPositionsAndRadii_, mesh3DPointLightColors_,
+                             mesh3DSpotLightPositionsAndRadii_, mesh3DSpotLightDirectionsAndInnerCosines_,
+                             mesh3DSpotLightColorsAndOuterCosines_,
                              mesh3DAmbientScale_);
         return Core::success();
     }
@@ -3033,6 +3132,9 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle opaque3DLightColorsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DPointLightPositionsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DPointLightColorsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSpotLightPositionsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSpotLightDirectionsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSpotLightColorsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
@@ -3094,6 +3196,9 @@ class BgfxRenderDevice final : public IRenderDevice {
         1.0F, 0.98F, 0.92F, 1.0F};
     Mesh3DPointLightUniformStorage mesh3DPointLightPositionsAndRadii_{};
     Mesh3DPointLightUniformStorage mesh3DPointLightColors_{};
+    Mesh3DSpotLightUniformStorage mesh3DSpotLightPositionsAndRadii_{};
+    Mesh3DSpotLightUniformStorage mesh3DSpotLightDirectionsAndInnerCosines_{};
+    Mesh3DSpotLightUniformStorage mesh3DSpotLightColorsAndOuterCosines_{};
     float mesh3DAmbientScale_ = 0.18F;
 
     bool frameOpen_ = false;
