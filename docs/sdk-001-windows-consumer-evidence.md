@@ -40,6 +40,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 - Missing-component / isolation configure probes
 - External consumer link + one-frame smoke JSON
 
+## 2026-08-03 Linux Docker consumer (same tip series)
+
+| Consumer | Image | Result |
+| --- | --- | --- |
+| GameSDK | `tina-linux-gcc13:test-001` | ok → `installed-tina-sdk` (`artifacts/gates/sdk-001-linux-gcc13-consumer-20260803-tip.json`) |
+
+See [docker-tip-evidence-20260803.md](docker-tip-evidence-20260803.md).
+
 ### Still open for SDK-001 Done
 
 - Cross-distro `RunSdkCrossDistroGate.ps1` full producer→consumer exit 0

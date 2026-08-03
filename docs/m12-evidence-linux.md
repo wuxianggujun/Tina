@@ -124,3 +124,19 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 
 
 **TEST-001 主验收（GCC Null/GLFW + Clang sanitizer）在 Docker 复现路径上已关闭。**
 可选后置：Wayland、真显示器、Linux product-2d。
+
+## 2026-08-03 tip `b8360c2d` — Docker 再证
+
+Docker Desktop 重启后复跑（`-SkipImageBuild`，沿用既有镜像）。WSL/Docker 共享 build tree 时若
+`CMakeCache` 的 `CMAKE_HOME_DIRECTORY` 与当前挂载源路径不一致，门禁脚本会只删 cache 再 configure
+（见 `tools/linux/cmake-cache-source-guard.sh`），**不做 clean wipe**。
+
+| Gate | JSON | 结果 |
+| --- | --- | --- |
+| GCC13 Null | `artifacts/gates/test-001-linux-gcc13-null-20260803-tip.json` | ok；ui_tests **589**、runtime_ui **115**、ui_render **22** |
+| GCC13 Platform | `artifacts/gates/test-001-linux-gcc13-platform-20260803-tip.json` | ok；glfw **34/34** + sample_platform 60f (Xvfb) |
+| Clang22 Null | `artifacts/gates/test-001-linux-clang22-null-20260803-tip.json` | ok；同 Null 套件规模 |
+| Clang22 Sanitize | `artifacts/gates/test-001-linux-clang22-sanitize-20260803-tip.json` | ok；ASan/UBSan/LSan |
+| SDK GameSDK consumer | `artifacts/gates/sdk-001-linux-gcc13-consumer-20260803-tip.json` | ok；`installed-tina-sdk` |
+
+详表：[docker-tip-evidence-20260803.md](docker-tip-evidence-20260803.md)。

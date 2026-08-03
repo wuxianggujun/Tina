@@ -4,6 +4,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
+# shellcheck source=cmake-cache-source-guard.sh
+source "${ROOT}/tools/linux/cmake-cache-source-guard.sh"
 
 : "${VCPKG_ROOT:?VCPKG_ROOT must be set}"
 
@@ -24,11 +26,14 @@ echo "LSAN_OPTIONS=${LSAN_OPTIONS}"
 echo "VCPKG_ROOT=${VCPKG_ROOT}"
 echo "HEAD=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 
+BUILD_DIR="${ROOT}/out/build/linux-clang22-vnext-sanitize"
+tina_guard_cmake_cache_source "${BUILD_DIR}" "${ROOT}"
+
 cmake --preset linux-clang22-vnext-sanitize
 cmake --build --preset linux-clang22-vnext-sanitize-debug \
   --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_sample_null
 
-BIN="${ROOT}/out/build/linux-clang22-vnext-sanitize/bin"
+BIN="${BUILD_DIR}/bin"
 fail=0
 run_one() {
   local name="$1"

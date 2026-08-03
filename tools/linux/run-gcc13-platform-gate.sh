@@ -4,6 +4,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
+# shellcheck source=cmake-cache-source-guard.sh
+source "${ROOT}/tools/linux/cmake-cache-source-guard.sh"
 
 : "${VCPKG_ROOT:?VCPKG_ROOT must be set}"
 
@@ -17,11 +19,14 @@ echo "VCPKG_ROOT=${VCPKG_ROOT}"
 echo "HEAD=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 echo "DISPLAY=${DISPLAY:-unset}"
 
+BUILD_DIR="${ROOT}/out/build/linux-gcc13-vnext-platform"
+tina_guard_cmake_cache_source "${BUILD_DIR}" "${ROOT}"
+
 cmake --preset linux-gcc13-vnext-platform
 cmake --build --preset linux-gcc13-vnext-platform-debug \
   --target tina_tests tina_platform_glfw_tests tina_sample_platform
 
-BIN="${ROOT}/out/build/linux-gcc13-vnext-platform/bin"
+BIN="${BUILD_DIR}/bin"
 fail=0
 run_one() {
   local name="$1"
