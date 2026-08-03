@@ -8,6 +8,7 @@
 #include <tina/scene/PointLight2D.hpp>
 #include <tina/scene/PointLight3D.hpp>
 #include <tina/scene/ShadowOccluder2D.hpp>
+#include <tina/scene/SpotLight3D.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/SpriteAnimator2D.hpp>

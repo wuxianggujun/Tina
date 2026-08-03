@@ -775,13 +775,16 @@ Core::Status RenderSceneBuilder::setMesh3DLighting(const Mesh3DLightingDesc& lig
     RenderMesh3DLighting snapshot;
     snapshot.m_directionalLightCount = static_cast<u32>(lighting.directionalLights.size());
     snapshot.m_pointLightCount = static_cast<u32>(lighting.pointLights.size());
+    snapshot.m_spotLightCount = static_cast<u32>(lighting.spotLights.size());
     snapshot.m_ambientScale = lighting.ambientScale;
     std::ranges::copy(lighting.directionalLights, snapshot.m_directionalLights.begin());
     std::ranges::copy(lighting.pointLights, snapshot.m_pointLights.begin());
+    std::ranges::copy(lighting.spotLights, snapshot.m_spotLights.begin());
     m_mesh3DLighting = snapshot;
     m_candidateStatistics.mesh3DLightingConfigured = true;
     m_candidateStatistics.directionalLightCount = snapshot.m_directionalLightCount;
     m_candidateStatistics.pointLight3DCount = snapshot.m_pointLightCount;
+    m_candidateStatistics.spotLight3DCount = snapshot.m_spotLightCount;
     return Core::success();
 }
 

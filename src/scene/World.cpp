@@ -36,6 +36,8 @@ struct World::EntityRecord final {
     DirectionalLight3D directionalLight3D{};
     bool hasPointLight3D = false;
     PointLight3D pointLight3D{};
+    bool hasSpotLight3D = false;
+    SpotLight3D spotLight3D{};
 };
 
 struct World::Impl final {
@@ -1432,6 +1434,63 @@ Core::Status World::clearPointLight3D(EntityId entity) noexcept
     return Core::success();
 }
 
+Core::Status World::setSpotLight3D(EntityId entity, SpotLight3D light) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(light)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene SpotLight3D has invalid color, intensity, influence radius, or cone angles");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for SpotLight3D");
+    }
+    entityRecord->spotLight3D = light;
+    entityRecord->hasSpotLight3D = true;
+    return Core::success();
+}
+
+Core::Status World::clearSpotLight3D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for SpotLight3D clear");
+    }
+    entityRecord->hasSpotLight3D = false;
+    entityRecord->spotLight3D = {};
+    return Core::success();
+}
+
 const PerspectiveCamera3D* World::perspectiveCamera3D(EntityId entity) const noexcept
 {
     if (m_impl == nullptr || !m_impl->isOwnerThread()) {
@@ -1478,6 +1537,18 @@ const PointLight3D* World::pointLight3D(EntityId entity) const noexcept
         return nullptr;
     }
     return &entityRecord->pointLight3D;
+}
+
+const SpotLight3D* World::spotLight3D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasSpotLight3D) {
+        return nullptr;
+    }
+    return &entityRecord->spotLight3D;
 }
 
 std::span<const EntityId> World::liveEntities() const noexcept

@@ -220,13 +220,30 @@ struct Mesh3DPointLight final {
     float colorB = 1.0F;
 };
 
+struct Mesh3DSpotLight final {
+    float positionX = 0.0F;
+    float positionY = 0.0F;
+    float positionZ = 0.0F;
+    float influenceRadius = 1.0F;
+    float directionFromLightX = 0.0F;
+    float directionFromLightY = 0.0F;
+    float directionFromLightZ = -1.0F;
+    float innerConeCosine = 0.9396926F;
+    float outerConeCosine = 0.8660254F;
+    float colorR = 1.0F;
+    float colorG = 1.0F;
+    float colorB = 1.0F;
+};
+
 struct Mesh3DLightingDesc final {
     static constexpr std::size_t MaximumDirectionalLightCount = 4;
     static constexpr std::size_t MaximumPointLightCount = 8;
+    static constexpr std::size_t MaximumSpotLightCount = 8;
 
     // Consumed synchronously by the receiving writer/device; no span is retained.
     std::span<const Mesh3DDirectionalLight> directionalLights{};
     std::span<const Mesh3DPointLight> pointLights{};
+    std::span<const Mesh3DSpotLight> spotLights{};
     float ambientScale = 0.18F;
 };
 
@@ -246,6 +263,11 @@ class RenderMesh3DLighting final {
         return {m_pointLights.data(), m_pointLightCount};
     }
 
+    [[nodiscard]] constexpr std::span<const Mesh3DSpotLight> spotLights() const noexcept
+    {
+        return {m_spotLights.data(), m_spotLightCount};
+    }
+
     [[nodiscard]] constexpr float ambientScale() const noexcept
     {
         return m_ambientScale;
@@ -256,6 +278,7 @@ class RenderMesh3DLighting final {
         return {
             .directionalLights = directionalLights(),
             .pointLights = pointLights(),
+            .spotLights = spotLights(),
             .ambientScale = m_ambientScale,
         };
     }
@@ -268,6 +291,8 @@ class RenderMesh3DLighting final {
     u32 m_directionalLightCount = 0;
     std::array<Mesh3DPointLight, Mesh3DLightingDesc::MaximumPointLightCount> m_pointLights{};
     u32 m_pointLightCount = 0;
+    std::array<Mesh3DSpotLight, Mesh3DLightingDesc::MaximumSpotLightCount> m_spotLights{};
+    u32 m_spotLightCount = 0;
     float m_ambientScale = 0.18F;
 };
 
@@ -400,6 +425,7 @@ struct RenderSceneStatistics final {
     bool mesh3DLightingConfigured = false;
     u32 directionalLightCount = 0;
     u32 pointLight3DCount = 0;
+    u32 spotLight3DCount = 0;
 };
 
 struct RenderSceneBuilderStatistics final {

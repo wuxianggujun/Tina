@@ -8,6 +8,7 @@
 #include <tina/scene/PointLight3D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/ShadowOccluder2D.hpp>
+#include <tina/scene/SpotLight3D.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
 
@@ -70,6 +71,11 @@ struct PointLight3DCandidate final {
     Render::Mesh3DPointLight light{};
 };
 
+struct SpotLight3DCandidate final {
+    u64 stableKey = 0;
+    Render::Mesh3DSpotLight light{};
+};
+
 struct PointLight2DCandidate final {
     u64 stableKey = 0;
     Render::Sprite2DPointLight light{};
@@ -103,8 +109,11 @@ struct ShadowOccluder2DCandidate final {
     return std::hypot(outsideX, outsideY) <= static_cast<double>(light.radiusMeters);
 }
 
-[[nodiscard]] bool pointLightIntersectsPerspectiveCamera(
-    const Render::Mesh3DPointLight& light,
+[[nodiscard]] bool influenceSphereIntersectsPerspectiveCamera(
+    float positionX,
+    float positionY,
+    float positionZ,
+    float influenceRadius,
     const Render::RenderPerspectiveCamera& camera) noexcept
 {
     const Vec3 cameraPosition{camera.positionX, camera.positionY, camera.positionZ};
@@ -116,11 +125,11 @@ struct ShadowOccluder2DCandidate final {
         forward.x * up.y - forward.y * up.x,
     };
     const Vec3 relative =
-        Vec3{light.positionX, light.positionY, light.positionZ} - cameraPosition;
+        Vec3{positionX, positionY, positionZ} - cameraPosition;
     const double x = static_cast<double>(dot(relative, right));
     const double y = static_cast<double>(dot(relative, up));
     const double depth = static_cast<double>(dot(relative, forward));
-    const double radius = static_cast<double>(light.influenceRadius);
+    const double radius = static_cast<double>(influenceRadius);
 
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(depth) ||
         !std::isfinite(radius) || depth + radius < camera.nearPlaneMeters ||
@@ -433,7 +442,12 @@ struct ShadowOccluder2DCandidate final {
             .colorB = component->color.blue * component->intensity,
         };
         if (cullingCamera != nullptr &&
-            !pointLightIntersectsPerspectiveCamera(light, *cullingCamera)) {
+            !influenceSphereIntersectsPerspectiveCamera(
+                light.positionX,
+                light.positionY,
+                light.positionZ,
+                light.influenceRadius,
+                *cullingCamera)) {
             continue;
         }
         if (pointLightCount >= pointCandidates.size()) {
@@ -448,7 +462,94 @@ struct ShadowOccluder2DCandidate final {
         ++pointLightCount;
     }
 
-    if (!hasDirectionalLight && !hasPointLight) {
+    std::array<SpotLight3DCandidate, Render::Mesh3DLightingDesc::MaximumSpotLightCount>
+        spotCandidates{};
+    usize spotLightCount = 0;
+    bool hasSpotLight = false;
+    for (const EntityId entity : world.liveEntities()) {
+        const SpotLight3D* component = world.spotLight3D(entity);
+        if (component == nullptr) {
+            continue;
+        }
+        hasSpotLight = true;
+        if (!component->active) {
+            continue;
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        if (!isValid(*component) || transform == nullptr || !isValid(*transform)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene active SpotLight3D or its WorldTransform is invalid");
+        }
+
+        const Vec3 directionFromLight =
+            rotate(normalized(transform->rotation), Vec3{0.0F, 0.0F, -1.0F});
+        const float colorR = component->color.red * component->intensity;
+        const float colorG = component->color.green * component->intensity;
+        const float colorB = component->color.blue * component->intensity;
+        const float innerConeCosine = static_cast<float>(std::cos(
+            static_cast<double>(component->innerConeHalfAngleDegrees) * std::numbers::pi / 180.0));
+        const float outerConeCosine = static_cast<float>(std::cos(
+            static_cast<double>(component->outerConeHalfAngleDegrees) * std::numbers::pi / 180.0));
+        const float directionLengthSquared = dot(directionFromLight, directionFromLight);
+        if (!isFinite(directionFromLight) || !std::isfinite(directionLengthSquared) ||
+            directionLengthSquared <= 0.0F || !std::isfinite(colorR) ||
+            !std::isfinite(colorG) || !std::isfinite(colorB) ||
+            !std::isfinite(innerConeCosine) || !std::isfinite(outerConeCosine)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene SpotLight3D extraction overflowed");
+        }
+    }
+
+    for (const EntityId entity : world.liveEntities()) {
+        const SpotLight3D* component = world.spotLight3D(entity);
+        if (component == nullptr || !component->active) {
+            continue;
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        const Vec3 directionFromLight =
+            rotate(normalized(transform->rotation), Vec3{0.0F, 0.0F, -1.0F});
+        const Render::Mesh3DSpotLight light{
+            .positionX = transform->position.x,
+            .positionY = transform->position.y,
+            .positionZ = transform->position.z,
+            .influenceRadius = component->influenceRadiusMeters,
+            .directionFromLightX = directionFromLight.x,
+            .directionFromLightY = directionFromLight.y,
+            .directionFromLightZ = directionFromLight.z,
+            .innerConeCosine = static_cast<float>(std::cos(
+                static_cast<double>(component->innerConeHalfAngleDegrees) *
+                std::numbers::pi / 180.0)),
+            .outerConeCosine = static_cast<float>(std::cos(
+                static_cast<double>(component->outerConeHalfAngleDegrees) *
+                std::numbers::pi / 180.0)),
+            .colorR = component->color.red * component->intensity,
+            .colorG = component->color.green * component->intensity,
+            .colorB = component->color.blue * component->intensity,
+        };
+        if (cullingCamera != nullptr &&
+            !influenceSphereIntersectsPerspectiveCamera(
+                light.positionX,
+                light.positionY,
+                light.positionZ,
+                light.influenceRadius,
+                *cullingCamera)) {
+            continue;
+        }
+        if (spotLightCount >= spotCandidates.size()) {
+            return Core::failure(
+                SceneErrorCode::TooManyActiveSpotLights3D,
+                "Scene extract exceeded the fixed camera-affecting SpotLight3D limit");
+        }
+        spotCandidates[spotLightCount] = SpotLight3DCandidate{
+            .stableKey = stableEntityKey(entity),
+            .light = light,
+        };
+        ++spotLightCount;
+    }
+
+    if (!hasDirectionalLight && !hasPointLight && !hasSpotLight) {
         return Core::success();
     }
     if (pointLightCount > 1) {
@@ -463,11 +564,25 @@ struct ShadowOccluder2DCandidate final {
     for (usize index = 0; index < pointLightCount; ++index) {
         pointLights[index] = pointCandidates[index].light;
     }
+    if (spotLightCount > 1) {
+        std::sort(spotCandidates.data(), spotCandidates.data() + spotLightCount,
+                  [](const SpotLight3DCandidate& left,
+                     const SpotLight3DCandidate& right) noexcept {
+                      return left.stableKey < right.stableKey;
+                  });
+    }
+    std::array<Render::Mesh3DSpotLight, Render::Mesh3DLightingDesc::MaximumSpotLightCount>
+        spotLights{};
+    for (usize index = 0; index < spotLightCount; ++index) {
+        spotLights[index] = spotCandidates[index].light;
+    }
     return writer.setMesh3DLighting(Render::Mesh3DLightingDesc{
         .directionalLights =
             std::span<const Render::Mesh3DDirectionalLight>{lights.data(), lightCount},
         .pointLights =
             std::span<const Render::Mesh3DPointLight>{pointLights.data(), pointLightCount},
+        .spotLights =
+            std::span<const Render::Mesh3DSpotLight>{spotLights.data(), spotLightCount},
         .ambientScale = ambientLightScale,
     });
 }

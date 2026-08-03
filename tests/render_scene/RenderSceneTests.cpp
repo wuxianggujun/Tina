@@ -618,14 +618,44 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
             .colorB = 0.4F,
         },
     };
+    std::array spotLights{
+        Mesh3DSpotLight{
+            .positionX = 7.0F,
+            .positionY = 8.0F,
+            .positionZ = 9.0F,
+            .influenceRadius = 6.0F,
+            .directionFromLightX = -1.0F,
+            .directionFromLightY = 0.0F,
+            .directionFromLightZ = 0.0F,
+            .innerConeCosine = 0.9F,
+            .outerConeCosine = 0.8F,
+            .colorR = 0.4F,
+            .colorG = 0.5F,
+            .colorB = 0.6F,
+        },
+        Mesh3DSpotLight{
+            .positionX = -7.0F,
+            .influenceRadius = 3.0F,
+            .directionFromLightY = -1.0F,
+            .directionFromLightZ = 0.0F,
+            .innerConeCosine = 0.95F,
+            .outerConeCosine = 0.7F,
+            .colorR = 0.1F,
+            .colorG = 0.2F,
+            .colorB = 0.3F,
+        },
+    };
     ASSERT_TRUE(builder.writer().setMesh3DLighting({
         .directionalLights = lights,
         .pointLights = pointLights,
+        .spotLights = spotLights,
         .ambientScale = 0.25F,
     }));
     lights[0].colorR = 9.0F;
     pointLights[0].positionX = 99.0F;
     pointLights[1].colorB = 99.0F;
+    spotLights[0].positionX = 99.0F;
+    spotLights[1].outerConeCosine = 99.0F;
 
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value());
@@ -639,10 +669,16 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
     EXPECT_FLOAT_EQ(lighting.pointLights()[0].influenceRadius, 5.0F);
     EXPECT_FLOAT_EQ(lighting.pointLights()[1].colorB, 0.4F);
     EXPECT_EQ(lighting.descriptor().pointLights.data(), lighting.pointLights().data());
+    ASSERT_EQ(lighting.spotLights().size(), 2U);
+    EXPECT_FLOAT_EQ(lighting.spotLights()[0].positionX, 7.0F);
+    EXPECT_FLOAT_EQ(lighting.spotLights()[0].directionFromLightX, -1.0F);
+    EXPECT_FLOAT_EQ(lighting.spotLights()[1].outerConeCosine, 0.7F);
+    EXPECT_EQ(lighting.descriptor().spotLights.data(), lighting.spotLights().data());
     EXPECT_FLOAT_EQ(lighting.ambientScale(), 0.25F);
     EXPECT_TRUE(committed->statistics().mesh3DLightingConfigured);
     EXPECT_EQ(committed->statistics().directionalLightCount, 2U);
     EXPECT_EQ(committed->statistics().pointLight3DCount, 2U);
+    EXPECT_EQ(committed->statistics().spotLight3DCount, 2U);
     EXPECT_FALSE(committed->empty());
 }
 
@@ -660,6 +696,41 @@ TEST(RenderSceneBuilderTest, InvalidOrDuplicateMesh3DLightingFailsTheBuildAtomic
     auto invalid = builder.writer().setMesh3DLighting({.directionalLights = invalidLights});
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array invalidSpotLights{
+        Mesh3DSpotLight{
+            .directionFromLightX = 0.0F,
+            .directionFromLightY = 0.0F,
+            .directionFromLightZ = 0.0F,
+        },
+    };
+    auto invalidSpot =
+        builder.writer().setMesh3DLighting({.spotLights = invalidSpotLights});
+    ASSERT_FALSE(invalidSpot);
+    EXPECT_EQ(invalidSpot.error().code, RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array invalidSpotCone{
+        Mesh3DSpotLight{
+            .innerConeCosine = 0.7F,
+            .outerConeCosine = 0.8F,
+        },
+    };
+    invalidSpot = builder.writer().setMesh3DLighting({.spotLights = invalidSpotCone});
+    ASSERT_FALSE(invalidSpot);
+    EXPECT_EQ(invalidSpot.error().code, RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array<Mesh3DSpotLight, Mesh3DLightingDesc::MaximumSpotLightCount + 1U>
+        tooManySpotLights{};
+    auto tooManySpots =
+        builder.writer().setMesh3DLighting({.spotLights = tooManySpotLights});
+    ASSERT_FALSE(tooManySpots);
+    EXPECT_EQ(tooManySpots.error().code, RenderErrorCode::InvalidMesh3DLighting);
     EXPECT_FALSE(builder.commit().has_value());
 
     ASSERT_TRUE(builder.beginFrame());

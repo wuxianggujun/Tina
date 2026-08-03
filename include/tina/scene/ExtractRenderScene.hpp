@@ -50,7 +50,12 @@ struct ExtractRenderSceneParams final {
 //   before culling. With one active PerspectiveCamera3D on a non-zero surface,
 //   exact sphere-vs-perspective-frustum culling runs before the eight-slot limit.
 //   Without such a camera, including a suspended surface, all active point lights
-//   retain the same fixed capacity. Directional and point lights share one snapshot.
+//   retain the same fixed capacity.
+// - Active SpotLight3D components use WorldTransform position and local -Z direction,
+//   validate all active lights before culling, and reuse influence-sphere perspective
+//   frustum culling before their independent eight-slot limit. No resolved perspective
+//   camera, including a suspended surface, keeps all active spot lights capacity-bound.
+//   Directional, point, and spot lights share one committed snapshot.
 // - Active PointLight2D components are validated before culling. With one resolved
 //   Camera2D on a non-zero surface, exact circle-vs-rotated-camera-rectangle culling
 //   uses the same pixel-snapped center that RenderScene commits; boundary contact is
