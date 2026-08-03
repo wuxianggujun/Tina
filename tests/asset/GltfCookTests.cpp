@@ -123,6 +123,140 @@ namespace {
     return bytes;
 }
 
+[[nodiscard]] std::vector<unsigned char> tangentTriangleBufferBytes(bool includeAuthoredTangents)
+{
+    const std::size_t indexOffset = includeAuthoredTangents ? 144U : 96U;
+    std::vector<unsigned char> bytes(includeAuthoredTangents ? 152U : 104U, 0U);
+    const std::array<float, 9> positions{0, 0, 0, 1, 0, 0, 0, 1, 0};
+    const std::array<float, 9> normals{0, 0, 1, 0, 0, 1, 0, 0, 1};
+    const std::array<float, 6> texcoords{0, 0, 1, 0, 0, 1};
+    std::memcpy(bytes.data() + 0U, positions.data(), sizeof(positions));
+    std::memcpy(bytes.data() + 36U, normals.data(), sizeof(normals));
+    std::memcpy(bytes.data() + 72U, texcoords.data(), sizeof(texcoords));
+    if (includeAuthoredTangents)
+    {
+        const std::array<float, 12> tangents{0, 1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1};
+        std::memcpy(bytes.data() + 96U, tangents.data(), sizeof(tangents));
+    }
+    bytes[indexOffset + 2U] = 1U;
+    bytes[indexOffset + 4U] = 2U;
+    return bytes;
+}
+
+[[nodiscard]] std::string tangentTriangleGltfJson(bool includeAuthoredTangents)
+{
+    if (includeAuthoredTangents)
+    {
+        return R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{
+    "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2, "TANGENT": 3},
+    "indices": 4, "mode": 4
+  }]}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+     "max": [1, 1, 0], "min": [0, 0, 0]},
+    {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5126, "count": 3, "type": "VEC4"},
+    {"bufferView": 4, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 48},
+    {"buffer": 0, "byteOffset": 144, "byteLength": 6}
+  ],
+  "buffers": [{"byteLength": 152, "uri": "geometry.bin"}]
+})json";
+    }
+    return R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{
+    "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+    "indices": 3, "mode": 4
+  }]}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+     "max": [1, 1, 0], "min": [0, 0, 0]},
+    {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6}
+  ],
+  "buffers": [{"byteLength": 104, "uri": "geometry.bin"}]
+})json";
+}
+
+[[nodiscard]] std::vector<unsigned char> tangentDiscontinuityBufferBytes()
+{
+    std::vector<unsigned char> bytes(172U, 0U);
+    const std::array<float, 15> positions{
+        0, 0, 0,
+        1, 0, 0,
+        0, 1, 0,
+        -1, 0, 0,
+        0, 1, 0,
+    };
+    const std::array<float, 15> normals{
+        0, 0, 1,
+        0, 0, 1,
+        0, 0, 1,
+        0, 0, 1,
+        0, 0, 1,
+    };
+    const std::array<float, 10> texcoords{
+        0, 0,
+        1, 0,
+        0, 1,
+        1, 0,
+        0, 1,
+    };
+    const std::array<Core::u16, 6> indices{0, 1, 2, 0, 4, 3};
+    std::memcpy(bytes.data() + 0U, positions.data(), sizeof(positions));
+    std::memcpy(bytes.data() + 60U, normals.data(), sizeof(normals));
+    std::memcpy(bytes.data() + 120U, texcoords.data(), sizeof(texcoords));
+    std::memcpy(bytes.data() + 160U, indices.data(), sizeof(indices));
+    return bytes;
+}
+
+[[nodiscard]] std::string tangentDiscontinuityGltfJson()
+{
+    return R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{
+    "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+    "indices": 3, "mode": 4
+  }]}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 5, "type": "VEC3",
+     "max": [1, 1, 0], "min": [-1, 0, 0]},
+    {"bufferView": 1, "componentType": 5126, "count": 5, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5126, "count": 5, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5123, "count": 6, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 60},
+    {"buffer": 0, "byteOffset": 60, "byteLength": 60},
+    {"buffer": 0, "byteOffset": 120, "byteLength": 40},
+    {"buffer": 0, "byteOffset": 160, "byteLength": 12}
+  ],
+  "buffers": [{"byteLength": 172, "uri": "geometry.bin"}]
+})json";
+}
+
 void writeTextFile(const std::filesystem::path& path, std::string_view text)
 {
     std::ofstream output(path, std::ios::binary);
@@ -249,8 +383,10 @@ TEST(GltfCookTests, CooksMinimalTriangleToMeshMaterialPrefab)
             sawMesh = true;
             auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
             ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+            EXPECT_EQ(view->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3UV2);
             EXPECT_EQ(view->vertexCount, 3U);
             EXPECT_EQ(view->indexCount, 3U);
+            EXPECT_EQ(view->vertices.size(), 3U * AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex);
         }
         else if (asset.assetKind == AssetFormat::AssetKind::Material)
         {
@@ -271,6 +407,130 @@ TEST(GltfCookTests, CooksMinimalTriangleToMeshMaterialPrefab)
 
     const auto catalogRoot = dir / "catalog";
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+}
+
+TEST(GltfCookTests, PreservesAuthoredTangents)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_authored_tangents";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "triangle.gltf";
+    writeTextFile(gltfPath, tangentTriangleGltfJson(true));
+    writeBinaryFile(dir / "geometry.bin", tangentTriangleBufferBytes(true));
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind != AssetFormat::AssetKind::StaticMesh)
+        {
+            continue;
+        }
+        auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
+        ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        ASSERT_EQ(view->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3T4UV2);
+        ASSERT_EQ(view->vertices.size(),
+                  3U * AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex);
+        EXPECT_FLOAT_EQ(view->vertices[6], 0.0F);
+        EXPECT_FLOAT_EQ(view->vertices[7], 1.0F);
+        EXPECT_FLOAT_EQ(view->vertices[8], 0.0F);
+        EXPECT_FLOAT_EQ(view->vertices[9], -1.0F);
+        EXPECT_FLOAT_EQ(view->vertices[10], 0.0F);
+        EXPECT_FLOAT_EQ(view->vertices[11], 0.0F);
+        return;
+    }
+    FAIL() << "cooked request did not contain a StaticMesh";
+}
+
+TEST(GltfCookTests, RejectsInvalidAuthoredTangentHandedness)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_invalid_authored_tangent";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "triangle.gltf";
+    writeTextFile(gltfPath, tangentTriangleGltfJson(true));
+    auto bytes = tangentTriangleBufferBytes(true);
+    const float invalidHandedness = 0.5F;
+    std::memcpy(bytes.data() + 96U + 3U * sizeof(float), &invalidHandedness, sizeof(float));
+    writeBinaryFile(dir / "geometry.bin", bytes);
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("TANGENT w"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, GeneratesMissingTangentsWithMikkTSpace)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_generated_tangents";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "triangle.gltf";
+    writeTextFile(gltfPath, tangentTriangleGltfJson(false));
+    writeBinaryFile(dir / "geometry.bin", tangentTriangleBufferBytes(false));
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind != AssetFormat::AssetKind::StaticMesh)
+        {
+            continue;
+        }
+        auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
+        ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        ASSERT_EQ(view->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3T4UV2);
+        ASSERT_EQ(view->vertices.size(),
+                  3U * AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex);
+        for (std::size_t vertex = 0; vertex < view->vertexCount; ++vertex)
+        {
+            const std::size_t base = vertex * AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex;
+            const float tangentLength = std::sqrt(view->vertices[base + 6U] * view->vertices[base + 6U] +
+                                                  view->vertices[base + 7U] * view->vertices[base + 7U] +
+                                                  view->vertices[base + 8U] * view->vertices[base + 8U]);
+            EXPECT_NEAR(tangentLength, 1.0F, 1.0e-4F);
+            EXPECT_NEAR(std::abs(view->vertices[base + 9U]), 1.0F, 1.0e-4F);
+        }
+        return;
+    }
+    FAIL() << "cooked request did not contain a StaticMesh";
+}
+
+TEST(GltfCookTests, SplitsSharedVertexAcrossMikkTangentHandednessDiscontinuity)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_tangent_discontinuity";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "mirrored_uv.gltf";
+    writeTextFile(gltfPath, tangentDiscontinuityGltfJson());
+    writeBinaryFile(dir / "geometry.bin", tangentDiscontinuityBufferBytes());
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind != AssetFormat::AssetKind::StaticMesh)
+        {
+            continue;
+        }
+        auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
+        ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        ASSERT_EQ(view->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3T4UV2);
+        ASSERT_EQ(view->indexCount, 6U);
+        ASSERT_GT(view->vertexCount, 5U);
+        ASSERT_NE(view->indices[0], view->indices[3]);
+        const std::size_t first = static_cast<std::size_t>(view->indices[0]) *
+                                  AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex;
+        const std::size_t mirrored = static_cast<std::size_t>(view->indices[3]) *
+                                     AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex;
+        EXPECT_FLOAT_EQ(view->vertices[first + 9U], -view->vertices[mirrored + 9U]);
+        return;
+    }
+    FAIL() << "cooked request did not contain a StaticMesh";
 }
 
 // Two TRIANGLES meshes, two scene roots referencing each mesh.
@@ -1145,6 +1405,7 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
             ++meshCount;
             auto mesh = AssetFormat::parseStaticMeshPayload(asset.payload);
             ASSERT_TRUE(mesh.has_value()) << (mesh ? "" : mesh.error().message);
+            EXPECT_EQ(mesh->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3T4UV2);
             EXPECT_GT(mesh->vertexCount, 0U);
             EXPECT_GT(mesh->indexCount, 0U);
         }

@@ -99,7 +99,7 @@ target_include_directories(tina_asset PRIVATE
 )
 target_link_libraries(tina_asset
     PUBLIC Tina::Core Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render
-    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
+    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>" mikktspace::mikktspace
 )
 if (TINA_BUILD_PHYSICS2D)
     target_link_libraries(tina_asset PUBLIC Tina::Physics2D)

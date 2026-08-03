@@ -2,8 +2,9 @@ include_guard(GLOBAL)
 
 # All package names and imported targets in this file come from the pinned vcpkg registry in
 # vcpkg.json. A vNext-only Null configure deliberately discovers none of the Legacy packages.
-# xxHash is a root dependency: Core PRIVATE ContentHash digest needs it even when Legacy is OFF.
+# xxHash and MikkTSpace are root dependencies for Core hashing and the Asset Cooker.
 find_package(xxHash CONFIG REQUIRED)
+find_package(mikktspace CONFIG REQUIRED)
 
 if (TINA_BUILD_PHYSICS2D)
     find_package(box2d CONFIG REQUIRED)

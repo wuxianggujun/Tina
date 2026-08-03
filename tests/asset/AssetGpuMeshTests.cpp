@@ -71,5 +71,39 @@ TEST(AssetGpuMeshTests, RejectsZeroMeshKey)
     ASSERT_FALSE(status.has_value());
 }
 
+TEST(AssetGpuMeshTests, UploadsTangentStaticMeshToNullDevice)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto meshId = *Core::AssetId::fromBytes(idBytes(3U));
+    const std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{
+        AssetFormat::StaticMeshSubmeshDesc{.firstIndex = 0, .indexCount = 3}};
+    const std::array<float, 3 * AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex> vertices{
+        0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0,
+        0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1,
+    };
+    const std::array<Core::u16, 3> indices{0, 1, 2};
+    auto cooked = AssetFormat::writeCookedStaticMeshAsset(meshId, AssetFormat::StaticMeshPayloadDesc{
+        .vertexLayout = AssetFormat::StaticMeshVertexLayout::P3N3T4UV2,
+        .boundsCenterX = 0.5F,
+        .boundsCenterY = 0.5F,
+        .boundsRadius = 0.7072F,
+        .submeshes = submeshes,
+        .vertices = vertices,
+        .indices = indices,
+    });
+    ASSERT_TRUE(cooked.has_value()) << (cooked ? "" : cooked.error().message);
+    auto file = makeCookedAssetFileFromBytes(
+        std::pmr::vector<std::byte>(cooked->begin(), cooked->end(), &memory),
+        CookedAssetFileLoadConfig{.memoryResource = &memory});
+    ASSERT_TRUE(file.has_value()) << (file ? "" : file.error().message);
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+
+    auto gpu = uploadStaticMeshFromCooked(**device, *file);
+    ASSERT_TRUE(gpu.has_value()) << (gpu ? "" : gpu.error().message);
+    EXPECT_TRUE((*device)->destroyStaticMesh(*gpu).has_value());
+}
+
 } // namespace
 } // namespace Tina::Asset

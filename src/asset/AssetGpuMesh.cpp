@@ -17,12 +17,26 @@ Core::Result<Render::GpuMeshId> uploadStaticMeshFromCooked(Render::IRenderDevice
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "StaticMesh payload is empty");
     }
-    return device.createStaticMeshP3N3UV2(Render::StaticMeshUploadDesc{
-        .vertexCount = view->vertexCount,
-        .indexCount = view->indexCount,
-        .vertices = view->vertices,
-        .indices = view->indices,
-    });
+    switch (view->vertexLayout)
+    {
+    case AssetFormat::StaticMeshVertexLayout::P3N3UV2:
+        return device.createStaticMeshP3N3UV2(Render::StaticMeshUploadDesc{
+            .vertexCount = view->vertexCount,
+            .indexCount = view->indexCount,
+            .vertices = view->vertices,
+            .indices = view->indices,
+        });
+    case AssetFormat::StaticMeshVertexLayout::P3N3T4UV2:
+        return device.createStaticMeshP3N3T4UV2(Render::StaticMeshP3N3T4UV2UploadDesc{
+            .vertexCount = view->vertexCount,
+            .indexCount = view->indexCount,
+            .vertices = view->vertices,
+            .indices = view->indices,
+        });
+    default:
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "StaticMesh payload uses an unsupported vertex layout");
+    }
 }
 
 Core::Status uploadAndBindStaticMeshForMeshKey(Render::IRenderDevice& device, const CookedAssetFile& meshAsset,

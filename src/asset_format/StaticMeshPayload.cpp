@@ -88,6 +88,19 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     return true;
 }
 
+[[nodiscard]] u32 floatsPerVertex(StaticMeshVertexLayout layout) noexcept
+{
+    switch (layout)
+    {
+    case StaticMeshVertexLayout::P3N3UV2:
+        return StaticMeshWire::P3N3UV2FloatsPerVertex;
+    case StaticMeshVertexLayout::P3N3T4UV2:
+        return StaticMeshWire::P3N3T4UV2FloatsPerVertex;
+    default:
+        return 0;
+    }
+}
+
 [[nodiscard]] Core::Status validateMeshGeometry(u32 vertexCount, u32 indexCount, u16 submeshCount) noexcept
 {
     if (vertexCount == 0 || vertexCount > StaticMeshWire::MaxVertexCount)
@@ -138,13 +151,33 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     return Core::success();
 }
 
-[[nodiscard]] Core::Status validateVertices(std::span<const float> vertices) noexcept
+[[nodiscard]] Core::Status validateVertices(StaticMeshVertexLayout layout,
+                                            std::span<const float> vertices) noexcept
 {
     for (const float value : vertices)
     {
         if (!std::isfinite(value))
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "static mesh vertices must be finite");
+        }
+    }
+    if (layout == StaticMeshVertexLayout::P3N3T4UV2)
+    {
+        for (usize base = 0; base < vertices.size(); base += StaticMeshWire::P3N3T4UV2FloatsPerVertex)
+        {
+            const float lengthSquared = vertices[base + 6U] * vertices[base + 6U] +
+                                        vertices[base + 7U] * vertices[base + 7U] +
+                                        vertices[base + 8U] * vertices[base + 8U];
+            if (!(lengthSquared > 1.0e-12F))
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "static mesh tangent xyz must be normalizable");
+            }
+            if (vertices[base + 9U] != -1.0F && vertices[base + 9U] != 1.0F)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "static mesh tangent handedness must be -1 or +1");
+            }
         }
     }
     return Core::success();
@@ -154,7 +187,8 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 
 Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMeshPayloadDesc& desc)
 {
-    if (desc.vertexLayout != StaticMeshVertexLayout::P3N3UV2)
+    const u32 vertexStrideFloats = floatsPerVertex(desc.vertexLayout);
+    if (vertexStrideFloats == 0)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh vertex layout");
     }
@@ -169,11 +203,20 @@ Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMes
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "static mesh bounds invalid");
     }
 
-    if (desc.vertices.size() % StaticMeshWire::FloatsPerVertex != 0U)
+    if (desc.vertices.size() % vertexStrideFloats != 0U)
     {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "static mesh vertex float count not multiple of 8");
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "static mesh vertex float count does not match vertex layout");
     }
-    const u32 vertexCount = static_cast<u32>(desc.vertices.size() / StaticMeshWire::FloatsPerVertex);
+    const usize vertexCountWide = desc.vertices.size() / vertexStrideFloats;
+    if (vertexCountWide > StaticMeshWire::MaxVertexCount ||
+        desc.indices.size() > StaticMeshWire::MaxIndexCount ||
+        desc.submeshes.size() > StaticMeshWire::MaxSubmeshes)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "static mesh geometry exceeds format limits");
+    }
+    const u32 vertexCount = static_cast<u32>(vertexCountWide);
     const u32 indexCount = static_cast<u32>(desc.indices.size());
     const u16 submeshCount = static_cast<u16>(desc.submeshes.size());
 
@@ -185,7 +228,7 @@ Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMes
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = validateVertices(desc.vertices); !status)
+    if (Core::Status status = validateVertices(desc.vertexLayout, desc.vertices); !status)
     {
         return Core::failure(status.error());
     }
@@ -195,7 +238,9 @@ Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMes
     }
 
     u32 vertexBytes = 0;
-    if (!checkedMultiply(vertexCount, StaticMeshWire::BytesPerVertex, vertexBytes))
+    u32 vertexStrideBytes = 0;
+    if (!checkedMultiply(vertexStrideFloats, static_cast<u32>(sizeof(float)), vertexStrideBytes) ||
+        !checkedMultiply(vertexCount, vertexStrideBytes, vertexBytes))
     {
         return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "static mesh vertex bytes overflow");
     }
@@ -275,7 +320,8 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh schema version");
     }
-    if (view.vertexLayout != StaticMeshVertexLayout::P3N3UV2)
+    const u32 vertexStrideFloats = floatsPerVertex(view.vertexLayout);
+    if (vertexStrideFloats == 0)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh vertex layout");
     }
@@ -300,7 +346,9 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
         return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "static mesh submesh bytes overflow");
     }
     u32 vertexBytes = 0;
-    if (!checkedMultiply(view.vertexCount, StaticMeshWire::BytesPerVertex, vertexBytes))
+    u32 vertexStrideBytes = 0;
+    if (!checkedMultiply(vertexStrideFloats, static_cast<u32>(sizeof(float)), vertexStrideBytes) ||
+        !checkedMultiply(view.vertexCount, vertexStrideBytes, vertexBytes))
     {
         return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "static mesh vertex bytes overflow");
     }
@@ -347,8 +395,8 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
     }
     const auto* vertexPtr = reinterpret_cast<const float*>(payload.data() + vertexOffset);
     view.vertices =
-        std::span<const float>{vertexPtr, static_cast<usize>(view.vertexCount) * StaticMeshWire::FloatsPerVertex};
-    if (Core::Status status = validateVertices(view.vertices); !status)
+        std::span<const float>{vertexPtr, static_cast<usize>(view.vertexCount) * vertexStrideFloats};
+    if (Core::Status status = validateVertices(view.vertexLayout, view.vertices); !status)
     {
         return Core::failure(status.error());
     }
