@@ -16,7 +16,7 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
-| UI-002 | 收口 Windows UIA 产品验收：固化真实 HWND 跨进程 action gate 证据，并完成 Narrator/Inspect 人工金标 | action seam、UIA control patterns 与自动 gate 已落地；现在补齐外部验收，避免实现继续领先于产品证据 |
+| UI-002 | 收口 Windows UIA：tip 跨进程 gate 证据已固化；完成 Narrator/Inspect 人工金标后关闭 | 自动 HWND client gate + unit 已在 tip 复现；只剩操作员读屏/Inspect 清单 |
 
 Now 的退出条件：UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
 人工记录明确；没有未解释的 Accepted ADR/实现冲突。Linux AT-SPI 作为独立后置项，不阻塞 Windows
@@ -28,7 +28,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | --- | --- |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
-| UI-PERF-001 | InProgress；UI 静态、单节点 dirty、route、虚拟集合首个 milestone，以及 Image/Icon/NineSlice、完整 Component 与 Style workload 已落地，后续扩展 Motion counter/checksum |
+| UI-PERF-001 | Done；含 `ui_motion_v1` 在内的 UI workload 集已齐 |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-COMPONENT-001 | Done；标准 Behavior 独立 side store、phase-scoped bounded transaction、全池 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | UI-IMAGE-001 | Done；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |

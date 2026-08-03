@@ -540,7 +540,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构�
 
 | ID | 范围 |
 | --- | --- |
-| `UI-002` | Windows UIA 产品验收：真实 HWND 跨进程属性/action gate 已有，待固化证据并完成 Narrator/Inspect 人工金标 |
+| `UI-002` | Windows UIA：tip 跨进程 gate 证据已固化（2026-08-03）；待 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | `UI-PERF-001` | InProgress；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合首个 milestone、`ui_image_nineslice_v1`、完整 `ui_component_build_v1` 与 `ui_style_state_v1` 已落地；后续补 Motion workload；固定机前时间结论只报 provisional |

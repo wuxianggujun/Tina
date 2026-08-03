@@ -65,7 +65,7 @@
 
 | 偏差 | 事实 | 处理方式 |
 | --- | --- | --- |
-| UI 平台证据 | Semantics + probe + accessibility action seam + `tina_ui_uia` 映射/HostBridge + EngineHost 自动 HWND 接线已有；Invoke/Toggle/RangeValue/Value patterns 与跨进程 HWND client gate 已实现，Narrator/Inspect 人工金标与 AT-SPI 后置 | Windows 收口见 UI-002，Linux adapter 见 UI-002-LINUX；勿把自动 gate 写成合规读屏门禁 |
+| UI 平台证据 | Semantics + probe + action seam + UIA patterns/HostBridge/EngineHost 接线已有；tip 跨进程 HWND client gate 证据已固化（2026-08-03）；Narrator/Inspect 人工金标与 AT-SPI 后置 | Windows 收口见 UI-002，Linux 见 UI-002-LINUX；勿把自动 gate 写成合规读屏门禁 |
 | UI 深树复杂度 | 50,000 节点 structure commit/destroy、layout、hit、paint publication 已有非递归回归；Popup publication 不再逐节点回溯祖先，当前步骤为线性 | 这是当前实现事实，不替代完整 dirty-range pruning 或固定机 PERF hard gate |
 | Linux 状态 | tip Docker：GCC13 Null/Platform + Clang22 Null/sanitizer 已有证据 | 见 [m12-evidence-linux.md](m12-evidence-linux.md)；TEST-001 Done |
 | UI route vs policy | `blocksUIUpdateBelow` 不回改当帧 UI route（route 在 stack 前） | 文档已标明；若需真挡 UI 输入另开切片 |

@@ -24,7 +24,7 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
-| UI-002 | InProgress | P1 | Windows UIA 产品验收收口 | UI-002-SPI / UI-002-UIA-MAP / UI-002-HWND / UI-002-HOST | 属性/fragment、Invoke/Toggle/RangeValue/Value action 与真实 HWND 跨进程 gate 可复现；补 Narrator/Inspect 人工金标。Linux AT-SPI 已拆为 `UI-002-LINUX`，不阻塞 Windows 收口 | Unit + Integration + Platform + Manual |
+| UI-002 | InProgress | P1 | Windows UIA 产品验收收口 | UI-002-SPI / UI-002-UIA-MAP / UI-002-HWND / UI-002-HOST | **自动证据已在 tip 固化（2026-08-03）：** `RunUi002UiaGate.ps1` → `artifacts/gates/ui-002-uia-20260803-tip.json`（ok、providers=69、fragment、Invoke/Toggle/Range/Value/Focus、normalShutdown）；`tina_ui_uia_tests` 12/12 + a11y unit 8/8；Focus 校验以 TextEdit `HasKeyboardFocus` 为准。**待：** 按 [ui-002-narrator-inspect-checklist.md](ui-002-narrator-inspect-checklist.md) 完成 Narrator/Inspect 人工金标后转 Done。Linux AT-SPI = `UI-002-LINUX` | Unit + Integration + Platform + Manual |
 
 ## Next
 

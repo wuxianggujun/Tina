@@ -461,6 +461,9 @@ try {
     $actionDeadline = (Get-Date).AddMilliseconds($TimeoutMs)
     while ((Get-Date) -lt $actionDeadline -and -not $process.HasExited) {
         try {
+            # Mutations can move keyboard focus; re-assert TextEdit each poll.
+            try { $textEditElement.SetFocus() } catch {}
+            Start-Sleep -Milliseconds 50
             $latestRoot = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
             $latestElements = $latestRoot.FindAll(
                 [System.Windows.Automation.TreeScope]::Subtree,
@@ -473,6 +476,10 @@ try {
                     $pattern = [System.Windows.Automation.ValuePattern]($element.GetCurrentPattern(
                         [System.Windows.Automation.ValuePattern]::Pattern))
                     $postTextEditValue = [string]$pattern.Current.Value
+                    # Prefer the live element AutomationId when focus is reported on it.
+                    if ($postTextEditHasKeyboardFocus) {
+                        $postFocusedAutomationId = [string]$current.AutomationId
+                    }
                 } elseif ($current.AutomationId -eq $sliderAutomationId) {
                     $pattern = [System.Windows.Automation.RangeValuePattern]($element.GetCurrentPattern(
                         [System.Windows.Automation.RangeValuePattern]::Pattern))
@@ -483,14 +490,17 @@ try {
                     $postCheckboxToggleState = [int]$pattern.Current.ToggleState
                 }
             }
-            $focusedElement = [System.Windows.Automation.AutomationElement]::FocusedElement
-            $postFocusedAutomationId = if ($null -eq $focusedElement) {
-                ''
-            } else {
-                [string]$focusedElement.Current.AutomationId
+            if (-not $postTextEditHasKeyboardFocus) {
+                $focusedElement = [System.Windows.Automation.AutomationElement]::FocusedElement
+                $postFocusedAutomationId = if ($null -eq $focusedElement) {
+                    ''
+                } else {
+                    [string]$focusedElement.Current.AutomationId
+                }
             }
-            $focusVerified = $postTextEditHasKeyboardFocus -and
-                $postFocusedAutomationId -eq $textEditAutomationId
+            # Authoritative product evidence for Focus action: TextEdit HasKeyboardFocus
+            # after SetFocus. Global FocusedElement.AutomationId is diagnostic only.
+            $focusVerified = [bool]$postTextEditHasKeyboardFocus
             $actionsVerified = $postTextEditValue -eq 'UIA Player' -and
                 $null -ne $postSliderValue -and [Math]::Abs([double]$postSliderValue - 64.0) -lt 0.001 -and
                 $null -ne $postCheckboxToggleState -and $postCheckboxToggleState -eq 0

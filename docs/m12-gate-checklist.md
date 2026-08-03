@@ -12,7 +12,7 @@
 | --- | --- | --- | --- |
 | G0 | 非 clean 构建可复现 | Verified | Windows 现有 build tree 可增量 configure/build；日常门禁禁止 wipe |
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
-| G2 | UI 产品 | Partial | 20控件 showcase、虚拟 List/Tree、2D/3D 产品集合、Text/Glyph 与主题/交互层次均有结构化和视觉证据；Windows UIA action/control patterns 与跨进程外部 HWND gate 已有，剩余为 Narrator/Inspect 人工金标、Linux AT-SPI（UI-002-LINUX）与跨 DPI/GPU golden |
+| G2 | UI 产品 | Partial | 20控件 showcase、虚拟 List/Tree、2D/3D 产品集合、Text/Glyph 与主题/交互层次均有结构化和视觉证据；Windows UIA tip 跨进程 gate 已固化（2026-08-03，`ui-002-uia-evidence-windows.md`）；剩余 Narrator/Inspect 人工金标、Linux AT-SPI（UI-002-LINUX）与跨 DPI/GPU golden |
 | G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、base/MR/normal 贴图采样、World 逐帧有界 directional-light snapshot（sample 3灯）、Texture/Mesh backend retirement marker 与 stale-safe teardown 已落地；仅完整 PBR/IBL/shadow/light system 后置 |
 | G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency 已完成；不可信 glTF 输入的单 handle/fd 快照、最终路径 containment 与资源预算矩阵已通过 Windows/Linux 门禁；完整 PBR 属于独立 Render 后置项 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
@@ -47,8 +47,9 @@ Physics2D、Audio 与 Asset GoogleTest executable；测试数量随功能增长�
   精确为143 px（x=700..842），第一项 Radio 有 selected 内块（x=706..721）、第二项没有，未混入标题栏；
   延长 warmup 后仍只有 `PrintWindow` 首次调用为白帧，后续稳定，因此判定为 capture 瞬态而非持续 UI 异常。
 
-ProgressBar/RadioButton 与 UI-005 集合控件已完成产品接入；G2 仍因 Narrator/Inspect 人工金标、
-UI-002-LINUX 的 AT-SPI 真机验收与跨 DPI/GPU golden 保持 Partial。自动 UIA gate 不能冒充读屏人工金标。
+ProgressBar/RadioButton 与 UI-005 集合控件已完成产品接入；G2 的自动 HWND UIA gate 已在 tip 固化，仍因
+Narrator/Inspect 人工金标、UI-002-LINUX 的 AT-SPI 真机验收与跨 DPI/GPU golden 保持 Partial。
+自动 UIA gate 不能冒充读屏人工金标。
 
 ## 3D 与 Cooker 边界
 

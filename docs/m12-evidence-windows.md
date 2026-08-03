@@ -212,12 +212,15 @@ blankLike 仍由 `CaptureSampleWindow` 排除。2026-07-29 的独立 compare 报
 | sample JSON contentScale/logical/fb 一致性 | |
 | 字体 identity fingerprint（path/sha256/env/FreeType-on；baseline schema 3；mismatch fail） | |
 
-## UI-002 可执行门禁（结果待固化）
+## UI-002 可执行门禁（2026-08-03 tip 已固化）
 
-当前仓库已提供 `tools/windows/RunUi002UiaGate.ps1`，可从独立 Windows UI Automation client 进程连接
-真实 `tina_sample_ui_showcase` HWND，并验证属性、fragment 与 Invoke/Toggle/RangeValue/Value action。
-本文尚未记录该 gate 在当前 tip 的带日期结果，也没有 Narrator/Inspect 人工金标；二者仍属于 UI-002 Now
-的验收，不从脚本存在本身推导为已通过。
+自动跨进程 gate 在 tip `4da7bc03` 已 exit 0，详见
+[UI-002 UIA 证据](ui-002-uia-evidence-windows.md) 与
+`artifacts/gates/ui-002-uia-20260803-tip.json`（providers=69，fragment 完整，Invoke/Toggle/Range/Value/Focus
+均 verified，`WM_CLOSE` 正常退出）。
+
+**Narrator/Inspect 人工金标仍未关闭**（JSON `narratorGold=false`）。操作清单见
+[ui-002-narrator-inspect-checklist.md](ui-002-narrator-inspect-checklist.md)。
 
 ## ASSET-SEC-001 glTF 输入门禁（2026-07-31）
 

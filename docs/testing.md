@@ -304,7 +304,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunUi002UiaG
 ```
 
 该 gate 不替代 Narrator/Inspect 人工金标，也不证明 Linux AT-SPI。已有 build 可使用
-`-SkipConfigure -SkipBuild`，并通过 `-OutJson` 固化结构化证据。
+`-SkipConfigure -SkipBuild`，并通过 `-OutJson` 固化结构化证据。tip 自动结果见
+[ui-002-uia-evidence-windows.md](ui-002-uia-evidence-windows.md)；人工步骤见
+[ui-002-narrator-inspect-checklist.md](ui-002-narrator-inspect-checklist.md)。
+
+Focus 产品证据以 TextEdit 的 `HasKeyboardFocus`（`SetFocus` 之后）为准；全局
+`FocusedElement.AutomationId` 仅作诊断，部分主机在节点已聚焦时仍返回空 id。
 
 ## 改动到门禁映射
 
