@@ -1837,14 +1837,14 @@ TEST(ScenePointLight3DTest, ExtractsStablePositionsColorsAndCoexistsWithDirectio
     EXPECT_EQ(view->mesh3DLighting()->directionalLights().size(), 1U);
     const auto lights = view->mesh3DLighting()->pointLights();
     ASSERT_EQ(lights.size(), 2U);
-    EXPECT_FLOAT_EQ(lights[0].worldPositionX, 1.0F);
-    EXPECT_FLOAT_EQ(lights[0].worldPositionY, 2.0F);
-    EXPECT_FLOAT_EQ(lights[0].worldPositionZ, -3.0F);
+    EXPECT_FLOAT_EQ(lights[0].positionX, 1.0F);
+    EXPECT_FLOAT_EQ(lights[0].positionY, 2.0F);
+    EXPECT_FLOAT_EQ(lights[0].positionZ, -3.0F);
     EXPECT_FLOAT_EQ(lights[0].influenceRadius, 7.0F);
     EXPECT_FLOAT_EQ(lights[0].colorR, 1.0F);
     EXPECT_FLOAT_EQ(lights[0].colorG, 0.5F);
     EXPECT_FLOAT_EQ(lights[0].colorB, 0.25F);
-    EXPECT_FLOAT_EQ(lights[1].worldPositionX, -4.0F);
+    EXPECT_FLOAT_EQ(lights[1].positionX, -4.0F);
     EXPECT_FLOAT_EQ(lights[1].colorR, 0.3F);
     EXPECT_FLOAT_EQ(lights[1].colorG, 0.6F);
     EXPECT_FLOAT_EQ(lights[1].colorB, 0.9F);
@@ -1902,10 +1902,10 @@ TEST(ScenePointLight3DTest, CullsInfluenceSpheresAgainstPerspectiveFrustumBefore
     ASSERT_TRUE(view->mesh3DLighting().has_value());
     const auto lights = view->mesh3DLighting()->pointLights();
     ASSERT_EQ(lights.size(), 3U);
-    EXPECT_FLOAT_EQ(lights[0].worldPositionX, 0.0F);
-    EXPECT_FLOAT_EQ(lights[0].worldPositionZ, -5.0F);
-    EXPECT_FLOAT_EQ(lights[1].worldPositionX, 6.4F);
-    EXPECT_FLOAT_EQ(lights[2].worldPositionZ, -11.0F);
+    EXPECT_FLOAT_EQ(lights[0].positionX, 0.0F);
+    EXPECT_FLOAT_EQ(lights[0].positionZ, -5.0F);
+    EXPECT_FLOAT_EQ(lights[1].positionX, 6.4F);
+    EXPECT_FLOAT_EQ(lights[2].positionZ, -11.0F);
 }
 
 TEST(ScenePointLight3DTest, UsesPerspectiveCameraWorldRotationForCulling)
@@ -1940,7 +1940,7 @@ TEST(ScenePointLight3DTest, UsesPerspectiveCameraWorldRotationForCulling)
     ASSERT_TRUE(view.has_value());
     const auto lights = view->mesh3DLighting()->pointLights();
     ASSERT_EQ(lights.size(), 1U);
-    EXPECT_FLOAT_EQ(lights[0].worldPositionX, -5.0F);
+    EXPECT_FLOAT_EQ(lights[0].positionX, -5.0F);
 }
 
 TEST(ScenePointLight3DTest, RejectsTheNinthCameraAffectingLightAndIgnoresInactiveLights)

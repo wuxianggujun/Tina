@@ -3,7 +3,7 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos
 #include <bgfx_shader.sh>
 
 // Experimental Opaque3D metallic-roughness hybrid (RENDER-001).
-// Honesty: up to four directional lights + constant ambient; no IBL/shadows.
+// Honesty: up to four directional + eight point lights and constant ambient; no IBL/shadows.
 // Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
 // s_texNormal: tangent-space RGB normal (no mesh tangents; TBN from derivatives).
@@ -16,6 +16,10 @@ SAMPLER2D(s_texNormal, 2);
 uniform vec4 u_lightDirs[4];
 // rgb = light color * intensity; w unused.
 uniform vec4 u_lightColors[4];
+// xyz = world-space position, w = positive influence radius; zero radius disables the slot.
+uniform vec4 u_pointLightPosRadius[8];
+// rgb = point-light color * intensity; w unused.
+uniform vec4 u_pointLightColors[8];
 // x = metallic factor, y = roughness factor, z = ambient scale, w = 1 if MR map bound.
 uniform vec4 u_mrParams;
 // x = 1 if normal map bound, yzw unused.
@@ -26,7 +30,7 @@ vec3 safeNormalize(vec3 value)
 	return value * inversesqrt(max(dot(value, value), 0.00000001));
 }
 
-vec3 shadeDirectional(vec3 N, vec3 V, vec3 L, vec3 lightRgb, vec3 albedo, vec3 F0, float metallic,
+vec3 shadeLight(vec3 N, vec3 V, vec3 L, vec3 lightRgb, vec3 albedo, vec3 F0, float metallic,
 	float roughness)
 {
 	float NdotL = max(dot(N, L), 0.0);
@@ -86,8 +90,24 @@ void main()
 	{
 		if (u_lightDirs[lightIndex].w > 0.5)
 		{
-			lit += shadeDirectional(N, V, safeNormalize(u_lightDirs[lightIndex].xyz),
+			lit += shadeLight(N, V, safeNormalize(u_lightDirs[lightIndex].xyz),
 				u_lightColors[lightIndex].rgb, albedo, F0, metallic, roughness);
+		}
+	}
+	for (int pointLightIndex = 0; pointLightIndex < 8; ++pointLightIndex)
+	{
+		float influenceRadius = u_pointLightPosRadius[pointLightIndex].w;
+		if (influenceRadius > 0.0)
+		{
+			vec3 lightOffset = u_pointLightPosRadius[pointLightIndex].xyz - v_worldPos;
+			float lightDistance = length(lightOffset);
+			float attenuation = max(1.0 - lightDistance / influenceRadius, 0.0);
+			if (attenuation > 0.0)
+			{
+				lit += shadeLight(N, V, safeNormalize(lightOffset),
+					u_pointLightColors[pointLightIndex].rgb * attenuation,
+					albedo, F0, metallic, roughness);
+			}
 		}
 	}
 

@@ -211,9 +211,9 @@ struct Mesh3DDirectionalLight final {
 };
 
 struct Mesh3DPointLight final {
-    float worldPositionX = 0.0F;
-    float worldPositionY = 0.0F;
-    float worldPositionZ = 0.0F;
+    float positionX = 0.0F;
+    float positionY = 0.0F;
+    float positionZ = 0.0F;
     float influenceRadius = 1.0F;
     float colorR = 1.0F;
     float colorG = 1.0F;

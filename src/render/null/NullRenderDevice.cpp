@@ -516,9 +516,8 @@ class NullRenderDevice final : public IRenderDevice {
         pointLightCount_ = lighting.pointLights.size();
         for (std::size_t lightIndex = 0; lightIndex < pointLights_.size(); ++lightIndex)
         {
-            pointLights_[lightIndex] = lightIndex < pointLightCount_
-                ? lighting.pointLights[lightIndex]
-                : Mesh3DPointLight{};
+            pointLights_[lightIndex] =
+                lightIndex < pointLightCount_ ? lighting.pointLights[lightIndex] : Mesh3DPointLight{};
         }
         ambientScale_ = lighting.ambientScale;
         return Core::success();

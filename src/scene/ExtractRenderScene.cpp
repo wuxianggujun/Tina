@@ -112,7 +112,7 @@ struct ShadowOccluder2DCandidate final {
     const Vec3 up{camera.upX, camera.upY, camera.upZ};
     const Vec3 right = cross(forward, up);
     const Vec3 relative =
-        Vec3{light.worldPositionX, light.worldPositionY, light.worldPositionZ} - cameraPosition;
+        Vec3{light.positionX, light.positionY, light.positionZ} - cameraPosition;
     const double x = static_cast<double>(dot(relative, right));
     const double y = static_cast<double>(dot(relative, up));
     const double depth = static_cast<double>(dot(relative, forward));
@@ -420,9 +420,9 @@ struct ShadowOccluder2DCandidate final {
         }
         const WorldTransform* transform = world.worldTransform(entity);
         const Render::Mesh3DPointLight light{
-            .worldPositionX = transform->position.x,
-            .worldPositionY = transform->position.y,
-            .worldPositionZ = transform->position.z,
+            .positionX = transform->position.x,
+            .positionY = transform->position.y,
+            .positionZ = transform->position.z,
             .influenceRadius = component->influenceRadiusMeters,
             .colorR = component->color.red * component->intensity,
             .colorG = component->color.green * component->intensity,

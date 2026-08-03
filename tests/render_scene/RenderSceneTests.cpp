@@ -602,16 +602,16 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
     };
     std::array pointLights{
         Mesh3DPointLight{
-            .worldPositionX = 1.0F,
-            .worldPositionY = 2.0F,
-            .worldPositionZ = 3.0F,
+            .positionX = 1.0F,
+            .positionY = 2.0F,
+            .positionZ = 3.0F,
             .influenceRadius = 5.0F,
             .colorR = 0.7F,
             .colorG = 0.6F,
             .colorB = 0.5F,
         },
         Mesh3DPointLight{
-            .worldPositionX = -4.0F,
+            .positionX = -4.0F,
             .influenceRadius = 2.0F,
             .colorR = 0.2F,
             .colorG = 0.3F,
@@ -624,7 +624,7 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
         .ambientScale = 0.25F,
     }));
     lights[0].colorR = 9.0F;
-    pointLights[0].worldPositionX = 99.0F;
+    pointLights[0].positionX = 99.0F;
     pointLights[1].colorB = 99.0F;
 
     auto committed = builder.commit();
@@ -635,7 +635,7 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
     EXPECT_FLOAT_EQ(lighting.directionalLights()[0].colorR, 0.5F);
     EXPECT_FLOAT_EQ(lighting.directionalLights()[1].directionTowardLightX, -1.0F);
     ASSERT_EQ(lighting.pointLights().size(), 2U);
-    EXPECT_FLOAT_EQ(lighting.pointLights()[0].worldPositionX, 1.0F);
+    EXPECT_FLOAT_EQ(lighting.pointLights()[0].positionX, 1.0F);
     EXPECT_FLOAT_EQ(lighting.pointLights()[0].influenceRadius, 5.0F);
     EXPECT_FLOAT_EQ(lighting.pointLights()[1].colorB, 0.4F);
     EXPECT_EQ(lighting.descriptor().pointLights.data(), lighting.pointLights().data());

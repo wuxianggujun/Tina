@@ -161,52 +161,63 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
 }
 
-TEST(NullRenderDeviceLightingTest, AcceptsAndValidatesBoundedPointLights)
+TEST(NullRenderDeviceLightingTest, AcceptsBoundedPointLightsAndRejectsInvalidValues)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
-
     const std::array pointLights{
         Render::Mesh3DPointLight{
-            .worldPositionX = 1.0F,
-            .worldPositionY = 2.0F,
-            .worldPositionZ = -3.0F,
+            .positionX = 1.0F,
+            .positionY = 2.0F,
+            .positionZ = 3.0F,
             .influenceRadius = 4.0F,
+            .colorR = 0.8F,
+            .colorG = 0.6F,
+            .colorB = 0.4F,
+        },
+        Render::Mesh3DPointLight{
+            .positionX = -1.0F,
+            .positionY = 0.5F,
+            .positionZ = 2.0F,
+            .influenceRadius = 8.0F,
             .colorR = 0.2F,
             .colorG = 0.3F,
-            .colorB = 0.4F,
+            .colorB = 0.5F,
         },
     };
     ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
         .pointLights = pointLights,
-        .ambientScale = 0.1F,
+        .ambientScale = 0.2F,
     }));
 
-    auto invalidRadius = pointLights;
-    invalidRadius[0].influenceRadius = 0.0F;
-    auto radiusFailure = (*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
-        .pointLights = invalidRadius,
+    auto invalidPointLights = pointLights;
+    invalidPointLights[0].influenceRadius = 0.0F;
+    auto pointRadiusFailure = (*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .pointLights = invalidPointLights,
+        .ambientScale = 0.2F,
     });
-    ASSERT_FALSE(radiusFailure);
-    EXPECT_EQ(radiusFailure.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
+    ASSERT_FALSE(pointRadiusFailure);
+    EXPECT_EQ(pointRadiusFailure.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
 
-    auto invalidPosition = pointLights;
-    invalidPosition[0].worldPositionZ = std::numeric_limits<float>::infinity();
+    invalidPointLights = pointLights;
+    invalidPointLights[1].colorG = -0.1F;
     ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
-        .pointLights = invalidPosition,
+        .pointLights = invalidPointLights,
+        .ambientScale = 0.2F,
     }));
 
-    auto invalidColor = pointLights;
-    invalidColor[0].colorG = -0.1F;
+    invalidPointLights = pointLights;
+    invalidPointLights[0].positionZ = std::numeric_limits<float>::infinity();
     ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
-        .pointLights = invalidColor,
+        .pointLights = invalidPointLights,
+        .ambientScale = 0.2F,
     }));
 
-    const std::array<Render::Mesh3DPointLight,
-                     Render::Mesh3DLightingDesc::MaximumPointLightCount + 1U>
+    std::array<Render::Mesh3DPointLight, Render::Mesh3DLightingDesc::MaximumPointLightCount + 1U>
         tooManyPointLights{};
     ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
         .pointLights = tooManyPointLights,
+        .ambientScale = 0.2F,
     }));
 }
 
