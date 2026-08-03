@@ -484,20 +484,35 @@ class EditorShellState final : public Tina::IGameState {
         }
         UI::UILayoutStyle viewportStyle = percentSize(100.0F, 100.0F);
         viewportStyle.flexItem.grow = 1.0F;
+        viewportStyle.flexContainer.direction = UI::UIFlexDirection::Column;
+        viewportStyle.flexContainer.gap.row = 8.0F;
+        viewportStyle.padding = {
+            .left = 16.0F,
+            .top = 16.0F,
+            .right = 16.0F,
+            .bottom = 16.0F,
+        };
         if (auto status = tree->setLayoutStyle(*viewport, viewportStyle); !status) {
             return status;
         }
-        auto viewportHint = tree->createElement(
-            *viewport,
-            UI::makeLabelElement("No live Scene/TileMap bind. Fill comes from stylesheet token."));
-        if (!viewportHint) {
-            return Tina::Core::failure(std::move(viewportHint.error()));
-        }
-        UI::UILayoutStyle viewportHintStyle{};
-        viewportHintStyle.size.width = UI::UILayoutLength::Percent(100.0F);
-        viewportHintStyle.size.height = UI::UILayoutLength::Px(24.0F);
-        if (auto status = tree->setLayoutStyle(*viewportHint, viewportHintStyle); !status) {
-            return status;
+        // Multiple labels so the empty center is not a silent black void in screenshots.
+        const std::array viewportHintTexts{
+            std::string_view{"Viewport placeholder (read-only shell)"},
+            std::string_view{"No live Scene / TileMap / Camera bind"},
+            std::string_view{"Panel fill from stylesheet ColorToken"},
+            std::string_view{"Not 2D-EDITOR product tooling"},
+        };
+        for (const std::string_view hintText : viewportHintTexts) {
+            auto viewportHint = tree->createElement(*viewport, UI::makeLabelElement(hintText));
+            if (!viewportHint) {
+                return Tina::Core::failure(std::move(viewportHint.error()));
+            }
+            UI::UILayoutStyle viewportHintStyle{};
+            viewportHintStyle.size.width = UI::UILayoutLength::Percent(100.0F);
+            viewportHintStyle.size.height = UI::UILayoutLength::Px(22.0F);
+            if (auto status = tree->setLayoutStyle(*viewportHint, viewportHintStyle); !status) {
+                return status;
+            }
         }
 
         UI::UIElementDescriptor rightDesc = UI::makePanelElement();
