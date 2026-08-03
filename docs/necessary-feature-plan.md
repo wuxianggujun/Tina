@@ -203,8 +203,9 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 
 N4 当时明确保留的边界：这不是完整 PBR/light system；后续 `RENDER-001-SCENE-LIGHTS`、
 `RENDER-001-POINT-LIGHTS` 与 `RENDER-001-SPOT-LIGHTS` 已补 directional/point/spot World component、逐帧
-RenderScene snapshot、容量前 influence-sphere culling 与 backend shading；IBL、shadow、vertex tangents、
-skin/animation 与通用 pass scheduler 仍未完成。
+RenderScene snapshot、容量前 influence-sphere culling 与 backend shading；`RENDER-001-VERTEX-TANGENTS`
+后续已关闭 authored/generated tangent 与 backend TBN 路径；IBL、shadow、skin/animation 与通用 pass
+scheduler 仍未完成。
 
 ### 验收
 

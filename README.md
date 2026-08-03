@@ -22,7 +22,7 @@ The current retained UI still lives in `include/tina/ui` and `src/ui`. Reference
 - `tina_sample_2d` and `tina_sample_3d` are the product smoke entry points.
 
 Public headers and the Game SDK do not expose bgfx, GLFW, Box2D, miniaudio, FreeType, cgltf,
-stb_image, or xxHash types.
+stb_image, MikkTSpace, or xxHash types.
 
 ## Windows quick start
 

@@ -6,6 +6,7 @@ set(Tina_VERSION "@PROJECT_VERSION@")
 set_and_check(Tina_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 
 find_dependency(xxHash CONFIG)
+find_dependency(mikktspace CONFIG)
 if(@TINA_PACKAGE_WITH_PHYSICS2D@)
     find_dependency(box2d CONFIG)
 endif()

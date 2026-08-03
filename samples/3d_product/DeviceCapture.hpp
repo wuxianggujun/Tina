@@ -94,6 +94,11 @@ class DeviceCapture final {
     {
         return cameraAspectChanges_;
     }
+    void recordTangentMeshUpload() noexcept { ++tangentMeshesUploaded_; }
+    [[nodiscard]] Core::u64 tangentMeshesUploaded() const noexcept
+    {
+        return tangentMeshesUploaded_;
+    }
 
   private:
     Render::IRenderDevice* device_ = nullptr;
@@ -106,6 +111,7 @@ class DeviceCapture final {
     Core::u32 spotLight3DCount_ = 0;
     float submittedCameraAspectRatio_ = 0.0F;
     Core::u64 cameraAspectChanges_ = 0;
+    Core::u64 tangentMeshesUploaded_ = 0;
     bool lightingCountsStable_ = true;
 };
 
@@ -183,6 +189,16 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     createStaticMeshP3N3UV2(const Render::StaticMeshUploadDesc& desc) override
     {
         return inner_->createStaticMeshP3N3UV2(desc);
+    }
+    [[nodiscard]] Core::Result<Render::GpuMeshId> createStaticMeshP3N3T4UV2(
+        const Render::StaticMeshP3N3T4UV2UploadDesc& desc) override
+    {
+        auto mesh = inner_->createStaticMeshP3N3T4UV2(desc);
+        if (mesh && capture_ != nullptr)
+        {
+            capture_->recordTangentMeshUpload();
+        }
+        return mesh;
     }
     [[nodiscard]] Core::Status destroyStaticMesh(Render::GpuMeshId mesh) noexcept override
     {

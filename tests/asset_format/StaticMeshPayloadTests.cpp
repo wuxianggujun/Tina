@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace Tina::AssetFormat {
@@ -135,6 +136,30 @@ TEST(StaticMeshPayloadTests, RejectsInvalidTangentHandedness)
         const std::size_t base = vertex * StaticMeshWire::P3N3T4UV2FloatsPerVertex;
         vertices[base + 6U] = 1.0F;
         vertices[base + 9U] = 0.5F;
+    }
+    const std::array<Core::u16, 3> indices{0, 1, 2};
+
+    auto written = writeStaticMeshPayloadBytes(StaticMeshPayloadDesc{
+        .vertexLayout = StaticMeshVertexLayout::P3N3T4UV2,
+        .boundsRadius = 1.0F,
+        .submeshes = submeshes,
+        .vertices = vertices,
+        .indices = indices,
+    });
+    ASSERT_FALSE(written.has_value());
+    EXPECT_EQ(written.error().code, AssetFormatErrorCode::InvalidLayout);
+}
+
+TEST(StaticMeshPayloadTests, RejectsNonFiniteTangentLengthSquared)
+{
+    const std::array<StaticMeshSubmeshDesc, 1> submeshes{
+        StaticMeshSubmeshDesc{.firstIndex = 0, .indexCount = 3}};
+    std::array<float, 3 * StaticMeshWire::P3N3T4UV2FloatsPerVertex> vertices{};
+    for (std::size_t vertex = 0; vertex < 3U; ++vertex)
+    {
+        const std::size_t base = vertex * StaticMeshWire::P3N3T4UV2FloatsPerVertex;
+        vertices[base + 6U] = std::numeric_limits<float>::max();
+        vertices[base + 9U] = 1.0F;
     }
     const std::array<Core::u16, 3> indices{0, 1, 2};
 

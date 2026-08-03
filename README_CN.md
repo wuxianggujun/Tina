@@ -21,7 +21,8 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 - `tina_sample_2d` 是 Catalog/TileMap/UI/Audio/Physics2D 产品门禁，`tina_sample_3d` 是
   glTF/Prefab/Scene/Render 产品门禁。
 
-Game SDK 与公开头不暴露 bgfx、GLFW、Box2D、miniaudio、FreeType、cgltf、stb_image 或 xxHash 类型。
+Game SDK 与公开头不暴露 bgfx、GLFW、Box2D、miniaudio、FreeType、cgltf、stb_image、MikkTSpace
+或 xxHash 类型。
 
 ## 快速开始
 

@@ -213,7 +213,7 @@ void setGeneratedTangent(const SMikkTSpaceContext* context, const float tangent[
     }
     const float lengthSquared =
         tangent[0] * tangent[0] + tangent[1] * tangent[1] + tangent[2] * tangent[2];
-    if (!(lengthSquared > 1.0e-12F))
+    if (!std::isfinite(lengthSquared) || !(lengthSquared > 1.0e-12F))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              authored ? "authored TANGENT xyz must be normalizable"

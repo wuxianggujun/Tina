@@ -13,7 +13,8 @@
 | Linux Clang | Clang 22.x + GCC/libstdc++ 15.x | chainload toolchain；sanitizer 使用独立 preset |
 
 项目不使用 C++ Modules；CMake 显式关闭 Modules dependency scan。依赖由 vcpkg manifest/baseline
-管理，bgfx 源码由 `thirdparty/bgfx.cmake` 锁定。`TINA_BUILD_LEGACY=ON` 会立即失败。
+管理；`xxHash` 与 `mikktspace` 是 backend-neutral SDK 的必需 package，bgfx 源码由
+`thirdparty/bgfx.cmake` 锁定。`TINA_BUILD_LEGACY=ON` 会立即失败。
 
 ```powershell
 cmake --version
@@ -184,8 +185,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 ```
 
 这些门禁证明 Windows/Linux headless/Null SDK、独立 PlatformGlfw、AudioMiniaudio 和
-DesktopBootstrap/RenderBgfx 闭包，并在 Windows 覆盖可选 UIFreetype/Vorbis/Opus 图。`xxHash`、`glfw3`、
-`Freetype`、`Threads` 与可选 codec package 继续由 consumer toolchain 解析；
+DesktopBootstrap/RenderBgfx 闭包，并在 Windows 覆盖可选 UIFreetype/Vorbis/Opus 图。`xxHash`、
+`mikktspace`、`glfw3`、`Freetype`、`Threads` 与可选 codec package 继续由 consumer toolchain 解析；
 RenderBgfx 在 Tina prefix 中安装最小 `bgfx`/`bx`/`bimg` runtime package，不包含 shaderc、图片 codec 或
 离线工具。每个 consumer gate 都先安装到 staging prefix，再物理移动到不同名的
 relocated prefix；原 prefix 消失后，package 路径扫描、`find_package`、链接和运行只允许使用新位置。

@@ -7,8 +7,9 @@ pass 绘制，并叠加可交互、可换肤的 retained UI。它证明 multi-me
 
 也可通过 CLI 加载**磁盘上的外部** `.gltf`/`.glb`（用户模型）：同样只走 cooker，Runtime 不解析源
 glTF。默认产品门禁使用仓库 **complete PBR fixture**
-（`tests/fixtures/gltf/complete_pbr/complete_pbr.gltf`：双 mesh、NORMAL/UV、baseColor+MR+normal 贴图、
-不同 metallic/roughness）；未编译进 fixture 路径时回退到最小内建 glTF。外部 `--gltf=` 仍为 opt-in。
+（`tests/fixtures/gltf/complete_pbr/complete_pbr.gltf`：双 mesh、NORMAL/UV、MikkTSpace 生成 tangent、
+baseColor+MR+normal 贴图、不同 metallic/roughness）；未编译进 fixture 路径时回退到最小内建 glTF。
+外部 `--gltf=` 仍为 opt-in。
 
 Cooker 与产品 sample 支持一个 glTF 中多个 mesh（sample 槽位上限 128）：distinct Mesh/Material
 AssetId、registry 分配的独立 binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与
@@ -56,11 +57,12 @@ List/Tree 展示真实产品数据，不是装饰性控件。
 标准 Button/Checkbox/Slider/ProgressBar 保持 create-time Theme 继承；标题、面板、accent 与状态文字是
 有意的局部层级覆盖，由 `applyTheme()` 集中重算。交互 callback 只记录 pending intent，实际 Theme、
 Checkbox、Slider 与 ProgressBar 提交统一发生在 `updateUI()`，避免事件路由期间重入 retained tree。
-`--ui-theme-demo` 在产品门禁中执行 Dark→Light→Dark 和2次 collection step；当前退出 schema 8 验证
+`--ui-theme-demo` 在产品门禁中执行 Dark→Light→Dark 和2次 collection step；当前退出 schema 9 验证
 两次换肤、最终 Dark、继承 chrome、7 Panel/13 Label、ListView/TreeView 各1个、Tree expansion
 changes `2`、最终 stable keys `2003/4`、progress 终值、root 释放，以及300帧 Scene lighting publication；
 lighting 证据固定3个 directional light，PointLight3D 与 SpotLight3D 均为
-authored/committed/culled=`3/2/1`，且提交计数稳定；
+authored/committed/culled=`3/2/1`，且提交计数稳定；同时要求2个 complete-PBR mesh 均以
+P3N3T4UV2 上传；
 同时记录 logical/framebuffer extent、窗口 metrics event、最终提交相机 aspect 与 responsive UI authoring。
 
 完整 Windows 同轮门禁使用 FreeType 图，直接运行模块测试而不是 CTest：
@@ -131,11 +133,11 @@ EngineHost 仍是唯一组合根。
 
 | 层 | 当前实现 |
 | --- | --- |
-| Cooker | glTF 2.0 JSON/GLB；每个 primitive 为 TRIANGLES；POSITION float3，NORMAL/TEXCOORD_0 可选；multi-mesh 与 **multi-primitive SPLIT**（每 prim 一个 StaticMesh+Material；Prefab 展开为 transform 父节点 + 子 draw 节点）输出 distinct AssetId；scene node 转 Prefab hierarchy/dependency |
-| Cooked 数据 | StaticMesh v1 使用 P3N3UV2、UInt16 index、bounds/submesh；Material v2 为 Opaque `UnlitBaseColor` + cooked PBR factors（metallic/roughness）与可选 baseColor/MR/normal Texture2D deps；Prefab v1 保存稳定 node id、父索引、local transform 与 Mesh/Material AssetId |
+| Cooker | glTF 2.0 JSON/GLB；每个 primitive 为 TRIANGLES；POSITION float3，NORMAL/TEXCOORD_0/TANGENT 可选；authored TANGENT 优先，缺 TANGENT 且具备 NORMAL+UV 时以 MikkTSpace 生成；multi-mesh 与 **multi-primitive SPLIT**（每 prim 一个 StaticMesh+Material；Prefab 展开为 transform 父节点 + 子 draw 节点）输出 distinct AssetId；scene node 转 Prefab hierarchy/dependency |
+| Cooked 数据 | StaticMesh v1 按 `vertexLayout` 使用兼容 P3N3UV2 或 P3N3T4UV2、UInt16 index、bounds/submesh；Material v2 为 Opaque `UnlitBaseColor` + cooked PBR factors（metallic/roughness）与可选 baseColor/MR/normal Texture2D deps；Prefab v1 保存稳定 node id、父索引、local transform 与 Mesh/Material AssetId |
 | Scene | `PerspectiveCamera3D`、`MeshRenderer3D`、`DirectionalLight3D`、`PointLight3D`、`SpotLight3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
 | Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling、稳定排序与相邻实例 batch；最多4个 active directional、8个 camera-affecting point 与8个 camera-affecting spot lights 按稳定 Entity identity 排序，point/spot influence sphere 在容量检查前裁剪，位置/radius/direction/cone/color×intensity 与 ambient 复制进当前帧 snapshot |
-| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、experimental MR hybrid **采样** baseColor（`s_texColor`）、可选 MR 贴图（`s_texMR`）与 normal 贴图（`s_texNormal`）；当前帧 Scene lighting 覆盖 device fallback，uniform arrays 每帧编码一次并供所有 mesh batch 复用 |
+| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、experimental MR hybrid **采样** baseColor（`s_texColor`）、可选 MR 贴图（`s_texMR`）与 normal 贴图（`s_texNormal`）；P3N3T4UV2 使用 authored/generated tangent TBN 并修正 signed model scale，P3N3UV2 保留 derivative fallback；当前帧 Scene lighting 覆盖 device fallback，uniform arrays 每帧编码一次并供所有 mesh batch 复用 |
 
 世界坐标为右手、Y-up、局部 `-Z` forward、单位米。Camera 公共字段使用 degree，并要求
 `0 < near < far`、有限数值和有效 normalized viewport；aspect 每帧从 primary surface 解析，不写回
@@ -185,11 +187,11 @@ entry pin 覆盖 active packet，Mesh/Texture 通过 AssetSystem retirement ledg
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→AssetSystem→weak Handle Prefab/Scene→Mesh3D registry→packet-local geometry/material ref→bgfx；Mesh/Material/共享 Texture 统一 owner、原子 material bundle + Opaque3D experimental MR、3个 World DirectionalLight3D，PointLight3D 与 SpotLight3D 各2个可见+1个裁剪的逐帧 snapshot、成熟 retained controls、虚拟化产品数据与事务换肤 | 完整 PBR/IBL/shadow/pass scheduler |
+| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→weak Handle Prefab/Scene→Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；Mesh/Material/共享 Texture 统一 owner、原子 material bundle + Opaque3D experimental MR、3个 World DirectionalLight3D，PointLight3D 与 SpotLight3D 各2个可见+1个裁剪的逐帧 snapshot、成熟 retained controls、虚拟化产品数据与事务换肤 | 完整 PBR/IBL/shadow/pass scheduler |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
-`sceneExtract`、`evidenceSchema=8`、mesh/material handle 发布数、`meshBindingsRegistered=2`、
+`sceneExtract`、`evidenceSchema=9`、`tangentMeshesUploaded=2`、mesh/material handle 发布数、`meshBindingsRegistered=2`、
 `materialBindingsRegistered=2`、`meshBindingsReleased=2`、`materialBindingsReleased=2`、
 `texturesUploaded=3`、`meshesUploaded=2`、`meshRetirementsAccepted=2`、
 `textureRetirementsAccepted=3`、对应 retirement records 全部 `Released` 且 live=0、
@@ -233,6 +235,6 @@ Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwi
   （PERF-001 首切片），但不替代 3D 视觉门禁；
 - Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
 
-下一步只在可执行 Backlog 中维护：`RENDER-001` 剩余（IBL、shadow、pass scheduling、vertex tangents），
+下一步只在可执行 Backlog 中维护：`RENDER-001` 剩余（IBL、shadow、pass scheduling），
 Texture/Mesh backend retirement 已使用 readback completion marker；通用 GPU submission fence 不在当前
 Runtime 契约内。详见 [Rendering](rendering.md) 与 [Backlog](backlog.md)。

@@ -168,7 +168,7 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
             const float lengthSquared = vertices[base + 6U] * vertices[base + 6U] +
                                         vertices[base + 7U] * vertices[base + 7U] +
                                         vertices[base + 8U] * vertices[base + 8U];
-            if (!(lengthSquared > 1.0e-12F))
+            if (!std::isfinite(lengthSquared) || !(lengthSquared > 1.0e-12F))
             {
                 return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                      "static mesh tangent xyz must be normalizable");

@@ -1872,6 +1872,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
     const u32 expectedMeshes = resources.meshSlotCount;
+    const u64 tangentMeshesUploaded = capture.tangentMeshesUploaded();
     auto& assetSystem = *resources.assetSystem;
     for (const Tina::Asset::AssetRetirementRecord& record : assetSystem.retirement().records())
     {
@@ -1963,6 +1964,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         counters.sceneLightingFrames != options.targetFrameCount || counters.stateEnters != 1 ||
         counters.stateExits != 1 || counters.applicationShutdowns != 1 || !uiValid ||
         counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMeshes || !texturesOk ||
+        (resources.completePbrFixture && tangentMeshesUploaded != expectedMeshes) ||
         counters.meshAssetHandlesPublished != expectedMeshes
         || counters.materialAssetHandlesPublished != expectedMeshes
         || counters.meshBindingsRegistered != expectedMeshes
@@ -2005,6 +2007,7 @@ class Product3DApplication final : public Tina::IGameApplication {
                      "\"message\":\"lifecycle counters did not match\","
                      "\"frames\":"
                   << counters.frameUpdates << ",\"meshesUploaded\":" << counters.meshesUploaded
+                  << ",\"tangentMeshesUploaded\":" << tangentMeshesUploaded
                   << ",\"materialsLoaded\":" << counters.materialsLoaded
                   << ",\"meshAssetHandlesPublished\":" << counters.meshAssetHandlesPublished
                   << ",\"materialAssetHandlesPublished\":" << counters.materialAssetHandlesPublished
@@ -2097,13 +2100,14 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":8,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":9,\"frames\":"
               << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
               << (multiMesh ? "true" : "false") << ",\"materialTextureBound\":"
               << (counters.materialTextureBound ? "true" : "false") << ",\"texturesUploaded\":"
               << counters.texturesUploaded << ",\"meshesUploaded\":" << counters.meshesUploaded
+              << ",\"tangentMeshesUploaded\":" << tangentMeshesUploaded
               << ",\"materialsLoaded\":" << counters.materialsLoaded << ",\"prefabNodes\":" << counters.prefabNodes
               << ",\"meshAssetHandlesPublished\":" << counters.meshAssetHandlesPublished
               << ",\"materialAssetHandlesPublished\":" << counters.materialAssetHandlesPublished

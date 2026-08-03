@@ -462,6 +462,25 @@ TEST(GltfCookTests, RejectsInvalidAuthoredTangentHandedness)
         << request.error().message;
 }
 
+TEST(GltfCookTests, RejectsOverflowingAuthoredTangentLength)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_overflowing_authored_tangent";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "triangle.gltf";
+    writeTextFile(gltfPath, tangentTriangleGltfJson(true));
+    auto bytes = tangentTriangleBufferBytes(true);
+    const float overflowingComponent = (std::numeric_limits<float>::max)();
+    std::memcpy(bytes.data() + 96U, &overflowingComponent, sizeof(float));
+    writeBinaryFile(dir / "geometry.bin", bytes);
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("TANGENT xyz"), std::string::npos)
+        << request.error().message;
+}
+
 TEST(GltfCookTests, GeneratesMissingTangentsWithMikkTSpace)
 {
     const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_generated_tangents";

@@ -10,7 +10,7 @@ event queue、通用 GPU submission fence、完整 PBR 等）列在末尾。Stat
 | --- | --- | --- | --- |
 | Game API | 普通游戏/样例 | `Tina::DesktopBootstrap` + Runtime/Scene/Asset/UI 等 Tina 模块 | 不接触具体 backend owner/native handle |
 | Module API/SPI | Tina 模块与高级集成 | `include/tina/<module>`、`runtime/spi`、`integration` | 只暴露 Tina-owned 类型和窄 factory |
-| Backend Private | GLFW/bgfx/FreeType/miniaudio/Box2D/cgltf/stb_image | `src/...` adapter 实现 | 第三方类型、宏、链接保持 PRIVATE |
+| Backend Private | GLFW/bgfx/FreeType/miniaudio/Box2D/cgltf/stb_image/MikkTSpace | `src/...` adapter/Cooker 实现 | 第三方类型与宏不进入公共头；实现链接留在最窄 target |
 
 当前 backend-neutral/Null SDK 可通过安装前缀中的版本化 `TinaConfig.cmake` 使用：
 
@@ -41,7 +41,8 @@ target_link_libraries(audio_tool PRIVATE Tina::AudioMiniaudio)
 ```
 
 `Tina::GameSDK` 聚合下表中的 backend-neutral Runtime、Scene、Asset、UI、Audio 等稳定模块；安装 package
-声明 `xxHash`（以及启用 Physics2D 时的 `box2d`）依赖。Windows 与 Linux 外部 headless
+声明 `xxHash`、Asset Cooker 使用的 `mikktspace`（以及启用 Physics2D 时的 `box2d`）依赖；这些
+package target 只关闭静态库链接闭包，不把第三方类型暴露到 Tina 公共头。Windows 与 Linux 外部 headless
 consumer 已经只通过安装前缀完成 configure/build/run，并复用同一安装头第三方 token 扫描。`PlatformGlfw`
 component 通过 `find_dependency(glfw3 3.4 CONFIG)` 解析实现闭包并加载独立 adapter export；未请求该
 component 时不会加载 GLFW 依赖或定义 `Tina::PlatformGlfw`。Windows 与 Linux/Xvfb consumer 会创建隐藏窗口、
@@ -231,7 +232,7 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 - RGBA8 Texture2D create/destroy、非消费式 `validateTexture2D()` live/generation 校验、通用 Texture2D 非0 key
   binding（invalid `GpuTextureId` 清除 binding），以及 device-instance
   `createTexture2DBinding()` allocator；
-- P3N3UV2/U16 StaticMesh create/destroy、Mesh3D key binding 与独立 device-instance
+- P3N3UV2/U16 与 P3N3T4UV2/U16 StaticMesh create/destroy、Mesh3D key binding 与独立 device-instance
   `createMesh3DBinding()` allocator；
 - 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
   `set/clearMesh3DMaterialBinding()` texture/factor bundle；细粒度 material setter 是低层 direct SPI；
@@ -570,7 +571,9 @@ metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtim
 MR hybrid；engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors，
 direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional + 0..8 point + 0..8 spot lights，
 World directional/point/spot component 每帧提取到 RenderScene，point/spot influence sphere 在容量检查前
-按相机裁剪。IBL/shadow 尚未完成。
+按相机裁剪。StaticMesh v1 由 `vertexLayout` 区分兼容 P3N3UV2 与 P3N3T4UV2：glTF authored
+`TANGENT` 优先，否则 NORMAL+TEXCOORD_0 primitive 由 Cooker 使用 MikkTSpace 生成；缺少 NORMAL/UV
+继续使用旧布局。Opaque3D 优先使用 vertex tangent TBN，并保留旧布局 derivative fallback。IBL/shadow 尚未完成。
 
 ## Audio 与 Physics
 

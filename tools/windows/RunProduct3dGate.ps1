@@ -7,7 +7,7 @@
   Asset, Render, and retained UI GoogleTest executables directly, then run the
   tina_sample_3d 300-frame product smoke with automated Dark -> Light -> Dark
   switching plus ListView/TreeView collection interaction. The final JSON is
-  validated as evidence schema 8.
+  validated as evidence schema 9.
 
   Does not use CTest. Does not clean-first wipe. Exits non-zero on first failure.
 
@@ -156,7 +156,7 @@ $expectedResolverHits = [long]$SampleFrames * 2
 $expectedFields = [ordered]@{
     status                              = 'ok'
     sample                              = 'tina_sample_3d'
-    evidenceSchema                      = 8
+    evidenceSchema                      = 9
     frames                              = $SampleFrames
     gltfCooked                          = $true
     cookedStaticMesh                    = $true
@@ -168,6 +168,7 @@ $expectedFields = [ordered]@{
     materialTextureBound                = $true
     texturesUploaded                    = 3
     meshesUploaded                      = 2
+    tangentMeshesUploaded               = 2
     materialsLoaded                     = 2
     prefabNodes                         = 2
     meshAssetHandlesPublished           = 2
@@ -292,7 +293,7 @@ if ($evidenceErrors.Count -ne 0) {
     Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$($sampleOut.Trim())")
 }
 
-Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=8 frames=$SampleFrames resize=surface-aspect-responsive-ui lights=directional-point-spot-culled theme=dark-light-dark collections=list-tree"
+Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=9 frames=$SampleFrames mesh-layout=p3n3t4uv2 resize=surface-aspect-responsive-ui lights=directional-point-spot-culled theme=dark-light-dark collections=list-tree"
 Add-Step -Name 'tina_sample_3d' -ExitCode 0 -Detail "frames=$SampleFrames pixelFingerprint=$($evidence.pixelFingerprint)"
 
 $report.finishedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
@@ -309,5 +310,5 @@ if ($OutJson) {
     Write-Output "wrote $OutJson"
 }
 
-Write-Output "product-3d gate ok schema=8 frames=$SampleFrames theme=dark-light-dark collections=list-tree"
+Write-Output "product-3d gate ok schema=9 frames=$SampleFrames mesh-layout=p3n3t4uv2 theme=dark-light-dark collections=list-tree"
 exit 0
