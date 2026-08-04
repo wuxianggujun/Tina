@@ -10,7 +10,9 @@
 #define BGFX_SAMPLER_MIN_POINT UINT64_C(0x00000004)
 #define BGFX_SAMPLER_MAG_POINT UINT64_C(0x00000008)
 #define BGFX_SAMPLER_COMPARE_LEQUAL UINT64_C(0x00000010)
+#define BGFX_SAMPLER_W_CLAMP UINT64_C(0x00000020)
 #define BGFX_TEXTURE_RT UINT64_C(0x00000100)
+#define BGFX_TEXTURE_NONE UINT64_C(0)
 #define BGFX_INVALID_HANDLE { tina_test_bgfx::InvalidHandle }
 
 namespace tina_test_bgfx {
@@ -19,6 +21,8 @@ struct TextureFormat final {
     enum Enum : std::uint8_t {
         R8 = 1,
         D16 = 2,
+        RGBA16F = 3,
+        RG16F = 4,
     };
 };
 
@@ -47,6 +51,7 @@ struct TextureCreateCall final {
     std::uint64_t flags = 0;
     bool initialMemoryProvided = false;
     std::vector<std::uint8_t> initialPixels;
+    bool cubeMap = false;
 };
 
 struct TextureUpdateCall final {
@@ -58,6 +63,8 @@ struct TextureUpdateCall final {
     std::uint16_t width = 0;
     std::uint16_t height = 0;
     std::vector<std::uint8_t> pixels;
+    bool cubeMap = false;
+    std::uint8_t side = 0;
 };
 
 struct TextureRecord final {
@@ -87,6 +94,8 @@ struct State final {
     std::uint16_t nextFrameBuffer = 1;
     std::uint32_t copyCalls = 0;
     std::uint32_t failCopyCall = 0;
+    std::uint32_t textureCreateCalls = 0;
+    std::uint32_t rejectTextureCreateCall = 0;
     bool rejectTextureCreate = false;
     bool rejectTextureValidation = false;
     bool rejectFrameBufferCreate = false;
@@ -147,6 +156,7 @@ inline void reset() noexcept
     std::uint64_t flags,
     const Memory* memory)
 {
+    ++Contract::state.textureCreateCalls;
     Contract::TextureCreateCall call{
         .width = width,
         .height = height,
@@ -160,7 +170,8 @@ inline void reset() noexcept
     Contract::state.textureCreates.push_back(call);
 
     TextureHandle handle{};
-    if (!Contract::state.rejectTextureCreate)
+    if (!Contract::state.rejectTextureCreate &&
+        Contract::state.rejectTextureCreateCall != Contract::state.textureCreateCalls)
     {
         handle.idx = Contract::state.nextTexture++;
         Contract::state.textures.push_back(Contract::TextureRecord{
@@ -171,6 +182,38 @@ inline void reset() noexcept
     }
 
     delete memory;
+    return handle;
+}
+
+[[nodiscard]] inline TextureHandle createTextureCube(
+    std::uint16_t size,
+    bool hasMips,
+    std::uint16_t layers,
+    TextureFormat::Enum format,
+    std::uint64_t flags)
+{
+    ++Contract::state.textureCreateCalls;
+    Contract::TextureCreateCall call{
+        .width = size,
+        .height = size,
+        .hasMips = hasMips,
+        .layers = layers,
+        .format = format,
+        .flags = flags,
+        .cubeMap = true,
+    };
+    Contract::state.textureCreates.push_back(call);
+
+    TextureHandle handle{};
+    if (!Contract::state.rejectTextureCreate &&
+        Contract::state.rejectTextureCreateCall != Contract::state.textureCreateCalls)
+    {
+        handle.idx = Contract::state.nextTexture++;
+        Contract::state.textures.push_back(Contract::TextureRecord{
+            .handle = handle,
+            .mutableStorage = true,
+        });
+    }
     return handle;
 }
 
@@ -233,6 +276,47 @@ inline void updateTexture2D(
     Contract::state.textureUpdates.push_back(call);
 
     if (Contract::TextureRecord* record = Contract::findTexture(texture); record != nullptr)
+    {
+        if (record->mutableStorage && !record->destroyed)
+        {
+            record->pixels = call.pixels;
+        }
+        else
+        {
+            ++Contract::state.immutableUpdateRejects;
+        }
+    }
+
+    delete memory;
+}
+
+inline void updateTextureCube(
+    TextureHandle texture,
+    std::uint16_t layer,
+    std::uint8_t side,
+    std::uint8_t mip,
+    std::uint16_t x,
+    std::uint16_t y,
+    std::uint16_t width,
+    std::uint16_t height,
+    const Memory* memory)
+{
+    Contract::TextureUpdateCall call{
+        .texture = texture,
+        .layer = layer,
+        .mip = mip,
+        .x = x,
+        .y = y,
+        .width = width,
+        .height = height,
+        .pixels = memory != nullptr ? memory->bytes : std::vector<std::uint8_t>{},
+        .cubeMap = true,
+        .side = side,
+    };
+    Contract::state.textureUpdates.push_back(call);
+
+    if (Contract::TextureRecord* record = Contract::findTexture(texture);
+        record != nullptr)
     {
         if (record->mutableStorage && !record->destroyed)
         {

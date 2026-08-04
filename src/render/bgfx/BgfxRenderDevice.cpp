@@ -1,6 +1,7 @@
 #include "BgfxRenderDevice.hpp"
 #include "BgfxDirectionalShadowMath.hpp"
 #include "BgfxDirectionalShadowResources.hpp"
+#include "BgfxEnvironmentMapResources.hpp"
 #include "BgfxOpaque3DGeometry.hpp"
 #include "BgfxOpaque3DShader.hpp"
 #include "BgfxResourceSlotGeneration.hpp"
@@ -2437,9 +2438,9 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             const EnvironmentMapSlot& environment =
                 environmentMaps_[mesh3DImageBasedLighting_->environmentMap.index];
-            iblDiffuse = environment.diffuseIrradiance;
-            iblSpecular = environment.prefilteredSpecular;
-            iblBrdf = environment.brdfLut;
+            iblDiffuse = environment.resources.diffuseIrradiance;
+            iblSpecular = environment.resources.prefilteredSpecular;
+            iblBrdf = environment.resources.brdfLut;
             iblParams = {
                 mesh3DImageBasedLighting_->intensity,
                 static_cast<float>(environment.specularMipCount - 1U),
@@ -2856,72 +2857,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
         }
-        if (auto status = validateEnvironmentMapUploadDesc(desc); !status)
+        auto nativeResources = createEnvironmentMapResources(desc);
+        if (!nativeResources)
         {
-            return Core::failure(std::move(status.error()));
-        }
-
-        constexpr u64 SamplerFlags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_U_CLAMP |
-                                     BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_W_CLAMP;
-        bgfx::TextureHandle diffuse = bgfx::createTextureCube(
-            desc.diffuseFaceSize, false, 1, bgfx::TextureFormat::RGBA16F, SamplerFlags);
-        if (!bgfx::isValid(diffuse))
-        {
-            return Core::failure(RenderErrorCode::InvalidEnvironmentMapUpload,
-                                 "bgfx rejected the diffuse irradiance cubemap");
-        }
-
-        bgfx::TextureHandle specular = bgfx::createTextureCube(
-            desc.specularFaceSize, true, 1, bgfx::TextureFormat::RGBA16F, SamplerFlags);
-        if (!bgfx::isValid(specular))
-        {
-            bgfx::destroy(diffuse);
-            return Core::failure(RenderErrorCode::InvalidEnvironmentMapUpload,
-                                 "bgfx rejected the prefiltered specular cubemap");
-        }
-
-        bgfx::TextureHandle brdf = bgfx::createTexture2D(
-            desc.brdfWidth, desc.brdfHeight, false, 1, bgfx::TextureFormat::RG16F,
-            BGFX_TEXTURE_NONE | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
-            bgfx::copy(desc.brdfRg16FloatPixels.data(),
-                       static_cast<u32>(desc.brdfRg16FloatPixels.size())));
-        if (!bgfx::isValid(brdf))
-        {
-            bgfx::destroy(specular);
-            bgfx::destroy(diffuse);
-            return Core::failure(RenderErrorCode::InvalidEnvironmentMapUpload,
-                                 "bgfx rejected the BRDF integration LUT");
-        }
-
-        constexpr usize FaceCount = 6U;
-        constexpr usize Rgba16FloatBytesPerPixel = 8U;
-        const usize diffuseFaceBytes = static_cast<usize>(desc.diffuseFaceSize) *
-                                       desc.diffuseFaceSize * Rgba16FloatBytesPerPixel;
-        for (u8 face = 0; face < FaceCount; ++face)
-        {
-            const auto pixels = desc.diffuseRgba16FloatPixels.subspan(
-                static_cast<usize>(face) * diffuseFaceBytes, diffuseFaceBytes);
-            bgfx::updateTextureCube(
-                diffuse, 0, face, 0, 0, 0, desc.diffuseFaceSize, desc.diffuseFaceSize,
-                bgfx::copy(pixels.data(), static_cast<u32>(pixels.size())));
-        }
-
-        usize specularOffset = 0;
-        u16 mipExtent = desc.specularFaceSize;
-        for (u8 mip = 0; mip < desc.specularMipCount; ++mip)
-        {
-            const usize faceBytes = static_cast<usize>(mipExtent) * mipExtent *
-                                    Rgba16FloatBytesPerPixel;
-            for (u8 face = 0; face < FaceCount; ++face)
-            {
-                const auto pixels = desc.specularRgba16FloatPixels.subspan(
-                    specularOffset, faceBytes);
-                bgfx::updateTextureCube(
-                    specular, 0, face, mip, 0, 0, mipExtent, mipExtent,
-                    bgfx::copy(pixels.data(), static_cast<u32>(pixels.size())));
-                specularOffset += faceBytes;
-            }
-            mipExtent = static_cast<u16>((std::max)(1U, static_cast<u32>(mipExtent) / 2U));
+            return Core::failure(std::move(nativeResources.error()));
         }
 
         u32 slotIndex = (std::numeric_limits<u32>::max)();
@@ -2939,9 +2878,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             if (environmentMaps_.size() >= (std::numeric_limits<u32>::max)())
             {
-                bgfx::destroy(brdf);
-                bgfx::destroy(specular);
-                bgfx::destroy(diffuse);
+                destroyEnvironmentMapResources(*nativeResources);
                 return Core::failure(Core::CoreErrorCode::CapacityExceeded,
                                      "EnvironmentMap GPU slot index space is exhausted");
             }
@@ -2952,28 +2889,22 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             catch (const std::bad_alloc&)
             {
-                bgfx::destroy(brdf);
-                bgfx::destroy(specular);
-                bgfx::destroy(diffuse);
+                destroyEnvironmentMapResources(*nativeResources);
                 return Core::failure(Core::CoreErrorCode::OutOfMemory);
             }
             catch (const std::length_error&)
             {
-                bgfx::destroy(brdf);
-                bgfx::destroy(specular);
-                bgfx::destroy(diffuse);
+                destroyEnvironmentMapResources(*nativeResources);
                 return Core::failure(Core::CoreErrorCode::CapacityExceeded);
             }
         }
 
         EnvironmentMapSlot& slot = environmentMaps_[slotIndex];
-        slot.diffuseIrradiance = diffuse;
-        slot.prefilteredSpecular = specular;
-        slot.brdfLut = brdf;
+        slot.resources = *nativeResources;
         slot.specularMipCount = desc.specularMipCount;
         slot.live = true;
         slot.retirementPhase = RetirementPhase::None;
-        statistics_.liveResources += 3U;
+        statistics_.liveResources += BgfxEnvironmentMapNativeTextureCount;
         return GpuEnvironmentMapId{resourceOwnerId(), slotIndex, slot.identity.value()};
     }
 
@@ -3325,30 +3256,17 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         const EnvironmentMapSlot& slot = environmentMaps_[environmentMap.index];
         return slot.live && slot.identity.value() == environmentMap.generation &&
-               bgfx::isValid(slot.diffuseIrradiance) &&
-               bgfx::isValid(slot.prefilteredSpecular) && bgfx::isValid(slot.brdfLut);
+               slot.resources.valid();
     }
 
     void destroyEnvironmentMapNativeResources(EnvironmentMapSlot& slot) noexcept
     {
-        if (bgfx::isValid(slot.diffuseIrradiance))
+        if (!slot.resources.valid())
         {
-            bgfx::destroy(slot.diffuseIrradiance);
-            slot.diffuseIrradiance = BGFX_INVALID_HANDLE;
-            --statistics_.liveResources;
+            std::terminate();
         }
-        if (bgfx::isValid(slot.prefilteredSpecular))
-        {
-            bgfx::destroy(slot.prefilteredSpecular);
-            slot.prefilteredSpecular = BGFX_INVALID_HANDLE;
-            --statistics_.liveResources;
-        }
-        if (bgfx::isValid(slot.brdfLut))
-        {
-            bgfx::destroy(slot.brdfLut);
-            slot.brdfLut = BGFX_INVALID_HANDLE;
-            --statistics_.liveResources;
-        }
+        destroyEnvironmentMapResources(slot.resources);
+        statistics_.liveResources -= BgfxEnvironmentMapNativeTextureCount;
     }
 
     [[nodiscard]] Mesh3DMaterialBindingDesc materialBindingOrDefault(u32 materialKey) const noexcept
@@ -3979,9 +3897,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     std::unordered_map<u32, GpuTextureId> texture2DBindings_{};
 
     struct EnvironmentMapSlot final {
-        bgfx::TextureHandle diffuseIrradiance = BGFX_INVALID_HANDLE;
-        bgfx::TextureHandle prefilteredSpecular = BGFX_INVALID_HANDLE;
-        bgfx::TextureHandle brdfLut = BGFX_INVALID_HANDLE;
+        BgfxEnvironmentMapResources resources{};
         BgfxTextureResourceSlotGeneration identity{};
         u16 specularMipCount = 0;
         bool live = false;
