@@ -150,6 +150,27 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->retireTexture2D(texture, completionPin);
     }
+    [[nodiscard]] Core::Result<Render::GpuEnvironmentMapId>
+    createEnvironmentMap(const Render::EnvironmentMapUploadDesc& desc) override
+    {
+        return inner_->createEnvironmentMap(desc);
+    }
+    [[nodiscard]] Core::Status validateEnvironmentMap(
+        Render::GpuEnvironmentMapId environmentMap) const noexcept override
+    {
+        return inner_->validateEnvironmentMap(environmentMap);
+    }
+    [[nodiscard]] Core::Status destroyEnvironmentMap(
+        Render::GpuEnvironmentMapId environmentMap) noexcept override
+    {
+        return inner_->destroyEnvironmentMap(environmentMap);
+    }
+    [[nodiscard]] Core::Status retireEnvironmentMap(
+        Render::GpuEnvironmentMapId environmentMap,
+        Render::FramePin& completionPin) noexcept override
+    {
+        return inner_->retireEnvironmentMap(environmentMap, completionPin);
+    }
     [[nodiscard]] Core::Status setTexture2DBinding(Core::u32 spriteKey,
                                                    Render::GpuTextureId texture) noexcept override
     {
@@ -213,6 +234,15 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Core::Status setMesh3DLighting(const Render::Mesh3DLightingDesc& lighting) noexcept override
     {
         return inner_->setMesh3DLighting(lighting);
+    }
+    [[nodiscard]] Core::Status setMesh3DImageBasedLighting(
+        const Render::Mesh3DImageBasedLightingDesc& lighting) noexcept override
+    {
+        return inner_->setMesh3DImageBasedLighting(lighting);
+    }
+    [[nodiscard]] Core::Status clearMesh3DImageBasedLighting() noexcept override
+    {
+        return inner_->clearMesh3DImageBasedLighting();
     }
 
   private:

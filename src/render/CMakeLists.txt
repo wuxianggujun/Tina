@@ -18,6 +18,7 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/null/NullRenderDeviceFactory.hpp
     Camera2DPick.cpp
     Camera2DProjection.cpp
+    EnvironmentMapUpload.cpp
     Mesh3DLighting.cpp
     RenderPassScheduler.cpp
     RenderSurfaceStateTracker.cpp

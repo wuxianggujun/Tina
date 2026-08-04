@@ -238,6 +238,85 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Result<GpuEnvironmentMapId>
+    createEnvironmentMap(const EnvironmentMapUploadDesc& desc) override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (auto status = validateEnvironmentMapUploadDesc(desc); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (environmentMaps_.size() >= (std::numeric_limits<u32>::max)())
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                 "EnvironmentMap logical slot index space is exhausted");
+        }
+
+        const u32 index = static_cast<u32>(environmentMaps_.size());
+        try
+        {
+            environmentMaps_.push_back(EnvironmentMapSlot{.generation = 1, .live = true});
+        }
+        catch (const std::bad_alloc&)
+        {
+            return Core::failure(Core::CoreErrorCode::OutOfMemory);
+        }
+        catch (const std::length_error&)
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded);
+        }
+        ++statistics_.liveResources;
+        return GpuEnvironmentMapId{resourceOwnerId(), index, 1};
+    }
+
+    [[nodiscard]] Core::Status
+    validateEnvironmentMap(GpuEnvironmentMapId environmentMap) const noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!environmentMap || !isLiveEnvironmentMap(environmentMap))
+        {
+            return Core::failure(
+                RenderErrorCode::EnvironmentMapNotFound,
+                "EnvironmentMap handle is invalid, stale, or belongs to another device");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status
+    destroyEnvironmentMap(GpuEnvironmentMapId environmentMap) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!environmentMap || !isLiveEnvironmentMap(environmentMap))
+        {
+            return Core::failure(RenderErrorCode::EnvironmentMapNotFound,
+                                 "EnvironmentMap handle is invalid or already destroyed");
+        }
+
+        EnvironmentMapSlot& slot = environmentMaps_[environmentMap.index];
+        slot.live = false;
+        ++slot.generation;
+        if (mesh3DImageBasedLighting_.has_value() &&
+            mesh3DImageBasedLighting_->environmentMap == environmentMap)
+        {
+            mesh3DImageBasedLighting_.reset();
+        }
+        if (statistics_.liveResources > 0)
+        {
+            --statistics_.liveResources;
+        }
+        ++statistics_.completedGpuRetirements;
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status setTexture2DBinding(u32 deviceBindingKey,
                                                    GpuTextureId texture) noexcept override
     {
@@ -529,6 +608,38 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setMesh3DImageBasedLighting(
+        const Mesh3DImageBasedLightingDesc& lighting) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!lighting.environmentMap || !isLiveEnvironmentMap(lighting.environmentMap))
+        {
+            return Core::failure(RenderErrorCode::EnvironmentMapNotFound,
+                                 "Mesh3D IBL requires a live EnvironmentMap handle");
+        }
+        if (!std::isfinite(lighting.intensity) || lighting.intensity < 0.0F ||
+            !std::isfinite(lighting.rotationRadians))
+        {
+            return Core::failure(RenderErrorCode::InvalidEnvironmentMapUpload,
+                                 "Mesh3D IBL parameters must be finite and intensity non-negative");
+        }
+        mesh3DImageBasedLighting_ = lighting;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearMesh3DImageBasedLighting() noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        mesh3DImageBasedLighting_.reset();
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status setMesh3DMaterialMetallicRoughnessTextureBinding(
         u32 materialKey, GpuTextureId texture) noexcept override
     {
@@ -566,6 +677,8 @@ class NullRenderDevice final : public IRenderDevice {
         frameOpen_ = false;
         textureBindings_.clear();
         textures_.clear();
+        mesh3DImageBasedLighting_.reset();
+        environmentMaps_.clear();
         meshBindings_.clear();
         materialBindings_.clear();
         meshes_.clear();
@@ -685,6 +798,14 @@ class NullRenderDevice final : public IRenderDevice {
                             textures_[texture.index].generation == texture.generation);
     }
 
+    [[nodiscard]] bool isLiveEnvironmentMap(GpuEnvironmentMapId environmentMap) const noexcept
+    {
+        return environmentMap.owner == resourceOwnerId() &&
+               environmentMap.index < environmentMaps_.size() &&
+               environmentMaps_[environmentMap.index].live &&
+               environmentMaps_[environmentMap.index].generation == environmentMap.generation;
+    }
+
     [[nodiscard]] Mesh3DMaterialBindingDesc materialBindingOrDefault(u32 materialKey) const noexcept
     {
         const auto existing = materialBindings_.find(materialKey);
@@ -721,11 +842,17 @@ class NullRenderDevice final : public IRenderDevice {
         u32 indexCount = 0;
         bool live = false;
     };
+    struct EnvironmentMapSlot final {
+        u32 generation = 1;
+        bool live = false;
+    };
 
     Detail::RenderSurfaceStateTracker surfaceStateTracker_;
     RenderStatistics statistics_{};
     std::vector<TextureSlot> textures_{};
     std::unordered_map<u32, GpuTextureId> textureBindings_{};
+    std::vector<EnvironmentMapSlot> environmentMaps_{};
+    std::optional<Mesh3DImageBasedLightingDesc> mesh3DImageBasedLighting_{};
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> meshBindings_{};
     std::unordered_map<u32, Mesh3DMaterialBindingDesc> materialBindings_{};

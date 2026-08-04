@@ -59,5 +59,8 @@ inline constexpr Core::ErrorCode FrameResourceCapacityExceeded{Core::ErrorDomain
 inline constexpr Core::ErrorCode FrameResourceIdentityExhausted{Core::ErrorDomain::Render, 51};
 inline constexpr Core::ErrorCode RenderSceneLightingConflict{Core::ErrorDomain::Render, 52};
 inline constexpr Core::ErrorCode InvalidSprite2DLighting{Core::ErrorDomain::Render, 53};
+inline constexpr Core::ErrorCode EnvironmentMapUploadUnsupported{Core::ErrorDomain::Render, 54};
+inline constexpr Core::ErrorCode InvalidEnvironmentMapUpload{Core::ErrorDomain::Render, 55};
+inline constexpr Core::ErrorCode EnvironmentMapNotFound{Core::ErrorDomain::Render, 56};
 
 } // namespace Tina::Render::RenderErrorCode

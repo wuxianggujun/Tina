@@ -2,6 +2,7 @@
 
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
+#include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/SpriteAnimationClipPayload.hpp>
@@ -21,6 +22,9 @@ namespace Tina::Asset {
 
 [[nodiscard]] Core::Result<AssetFormat::Texture2DPayloadView>
 parseTexture2DFromCooked(const CookedAssetFile& file);
+
+[[nodiscard]] Core::Result<AssetFormat::EnvironmentMapPayloadView>
+parseEnvironmentMapFromCooked(const CookedAssetFile& file);
 
 [[nodiscard]] Core::Result<AssetFormat::SpritePayloadView>
 parseSpriteFromCooked(const CookedAssetFile& file);

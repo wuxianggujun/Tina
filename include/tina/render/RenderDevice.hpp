@@ -66,6 +66,36 @@ struct GpuTextureId final {
     [[nodiscard]] friend constexpr bool operator==(const GpuTextureId&, const GpuTextureId&) = default;
 };
 
+// One backend-owned IBL resource: diffuse irradiance cubemap, prefiltered
+// specular cubemap, and BRDF integration LUT. The three native textures share
+// one generation identity and retire atomically.
+struct GpuEnvironmentMapId final {
+    inline static constexpr u32 InvalidIndex = (std::numeric_limits<u32>::max)();
+    inline static constexpr u32 UnscopedOwner = (std::numeric_limits<u32>::max)();
+
+    u32 owner = 0;
+    u32 index = InvalidIndex;
+    u32 generation = 0;
+
+    constexpr GpuEnvironmentMapId() noexcept = default;
+    constexpr GpuEnvironmentMapId(u32 indexValue, u32 generationValue) noexcept
+        : owner(UnscopedOwner), index(indexValue), generation(generationValue)
+    {
+    }
+    constexpr GpuEnvironmentMapId(u32 ownerValue, u32 indexValue, u32 generationValue) noexcept
+        : owner(ownerValue), index(indexValue), generation(generationValue)
+    {
+    }
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return owner != 0 && index != InvalidIndex && generation != 0;
+    }
+    [[nodiscard]] constexpr explicit operator bool() const noexcept { return hasValue(); }
+    [[nodiscard]] friend constexpr bool operator==(const GpuEnvironmentMapId&,
+                                                   const GpuEnvironmentMapId&) = default;
+};
+
 // Backend-owned GPU static mesh handle. Owner rejects cross-device use,
 // generation rejects stale slot reuse. Product-3D path (M11-E2).
 struct GpuMeshId final {
@@ -106,6 +136,23 @@ struct Texture2DUploadDesc final {
     std::span<const std::byte> rgba8Pixels{};
 };
 
+struct EnvironmentMapUploadDesc final {
+    u16 diffuseFaceSize = 0;
+    u16 specularFaceSize = 0;
+    u16 specularMipCount = 0;
+    u16 brdfWidth = 0;
+    u16 brdfHeight = 0;
+    // RGBA16F cube faces use +X, -X, +Y, -Y, +Z, -Z order. Diffuse has one
+    // level. Specular is mip-major and must contain the complete chain to 1x1.
+    std::span<const std::byte> diffuseRgba16FloatPixels{};
+    std::span<const std::byte> specularRgba16FloatPixels{};
+    // Row-major RG16F split-sum BRDF integration LUT.
+    std::span<const std::byte> brdfRg16FloatPixels{};
+};
+
+[[nodiscard]] Core::Status
+validateEnvironmentMapUploadDesc(const EnvironmentMapUploadDesc& desc) noexcept;
+
 // Interleaved P3_N3_T4_UV2 floats (12 per vertex) + U16 triangle indices.
 // tangent.xyz is non-zero and tangent.w is exactly -1 or +1.
 struct StaticMeshUploadDesc final {
@@ -124,6 +171,15 @@ struct Mesh3DMaterialBindingDesc final {
 
     [[nodiscard]] friend constexpr bool operator==(const Mesh3DMaterialBindingDesc&,
                                                    const Mesh3DMaterialBindingDesc&) = default;
+};
+
+struct Mesh3DImageBasedLightingDesc final {
+    GpuEnvironmentMapId environmentMap{};
+    float intensity = 1.0F;
+    float rotationRadians = 0.0F;
+
+    [[nodiscard]] friend constexpr bool operator==(const Mesh3DImageBasedLightingDesc&,
+                                                   const Mesh3DImageBasedLightingDesc&) = default;
 };
 
 enum class RenderFrameSubmissionKind : u8 {
@@ -200,6 +256,37 @@ class IRenderDevice {
                                                        FramePin& completionPin) noexcept
     {
         auto status = destroyTexture2D(texture);
+        if (status)
+        {
+            completionPin.release();
+        }
+        return status;
+    }
+    [[nodiscard]] virtual Core::Result<GpuEnvironmentMapId>
+    createEnvironmentMap(const EnvironmentMapUploadDesc& desc)
+    {
+        static_cast<void>(desc);
+        return Core::failure(RenderErrorCode::EnvironmentMapUploadUnsupported,
+                             "This render device does not support EnvironmentMap upload");
+    }
+    [[nodiscard]] virtual Core::Status
+    validateEnvironmentMap(GpuEnvironmentMapId environmentMap) const noexcept
+    {
+        static_cast<void>(environmentMap);
+        return Core::failure(RenderErrorCode::EnvironmentMapUploadUnsupported,
+                             "This render device does not support EnvironmentMap validation");
+    }
+    [[nodiscard]] virtual Core::Status
+    destroyEnvironmentMap(GpuEnvironmentMapId environmentMap) noexcept
+    {
+        static_cast<void>(environmentMap);
+        return Core::failure(RenderErrorCode::EnvironmentMapUploadUnsupported,
+                             "This render device does not support EnvironmentMap destroy");
+    }
+    [[nodiscard]] virtual Core::Status retireEnvironmentMap(
+        GpuEnvironmentMapId environmentMap, FramePin& completionPin) noexcept
+    {
+        auto status = destroyEnvironmentMap(environmentMap);
         if (status)
         {
             completionPin.release();
@@ -419,6 +506,18 @@ class IRenderDevice {
         static_cast<void>(lighting);
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Mesh3D lighting");
+    }
+    [[nodiscard]] virtual Core::Status setMesh3DImageBasedLighting(
+        const Mesh3DImageBasedLightingDesc& lighting) noexcept
+    {
+        static_cast<void>(lighting);
+        return Core::failure(RenderErrorCode::EnvironmentMapUploadUnsupported,
+                             "This render device does not support Mesh3D image-based lighting");
+    }
+    [[nodiscard]] virtual Core::Status clearMesh3DImageBasedLighting() noexcept
+    {
+        return Core::failure(RenderErrorCode::EnvironmentMapUploadUnsupported,
+                             "This render device does not support clearing Mesh3D image-based lighting");
     }
 
   protected:

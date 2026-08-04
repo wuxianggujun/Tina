@@ -20,6 +20,22 @@ Core::Result<AssetFormat::Texture2DPayloadView> parseTexture2DFromCooked(const C
     return AssetFormat::parseTexture2DPayload(file.payload());
 }
 
+Core::Result<AssetFormat::EnvironmentMapPayloadView>
+parseEnvironmentMapFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::EnvironmentMap ||
+        file.header().assetTypeVersion != AssetFormat::EnvironmentMapWire::SchemaVersion)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "cooked asset is not a supported EnvironmentMap");
+    }
+    return AssetFormat::parseEnvironmentMapPayload(file.payload());
+}
+
 Core::Result<AssetFormat::SpritePayloadView> parseSpriteFromCooked(const CookedAssetFile& file)
 {
     if (!file)

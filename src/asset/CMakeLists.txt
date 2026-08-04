@@ -9,6 +9,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetTypedViews.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetSpriteRender.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuTexture.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuEnvironmentMap.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuMesh.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/Mesh3DBindingRegistry.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/Sprite2DBindingRegistry.hpp
@@ -42,6 +43,7 @@ set(TINA_ASSET_SOURCES
     AssetTypedViews.cpp
     AssetSpriteRender.cpp
     AssetGpuTexture.cpp
+    AssetGpuEnvironmentMap.cpp
     AssetGpuMesh.cpp
     Mesh3DBindingRegistry.cpp
     Sprite2DBindingRegistry.cpp
