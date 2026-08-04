@@ -604,6 +604,7 @@ class NullRenderDevice final : public IRenderDevice {
                 .colorB = source.colorB,
             };
         }
+        cascadedDirectionalShadow_ = lighting.cascadedDirectionalShadow;
         ambientScale_ = lighting.ambientScale;
         return Core::success();
     }
@@ -870,6 +871,7 @@ class NullRenderDevice final : public IRenderDevice {
     std::size_t pointLightCount_ = 0;
     std::array<Mesh3DSpotLight, Mesh3DLightingDesc::MaximumSpotLightCount> spotLights_{};
     std::size_t spotLightCount_ = 0;
+    std::optional<Mesh3DCascadedDirectionalShadow> cascadedDirectionalShadow_{};
     float ambientScale_ = 0.18F;
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;

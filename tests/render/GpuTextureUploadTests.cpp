@@ -117,6 +117,7 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
     };
     ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
         .directionalLights = lights,
+        .cascadedDirectionalShadow = Render::Mesh3DCascadedDirectionalShadow{},
         .ambientScale = 0.2F,
     }));
     ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
@@ -146,19 +147,21 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
         .ambientScale = -0.1F,
     }));
 
-    auto invalidShadowDistance = lights;
-    invalidShadowDistance[0].castsShadows = true;
-    invalidShadowDistance[0].shadowDistanceMeters = 0.0F;
+    const auto invalidShadowDistance = Render::Mesh3DCascadedDirectionalShadow{
+        .maximumDistanceMeters = 0.0F,
+    };
     ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
-        .directionalLights = invalidShadowDistance,
+        .directionalLights = lights,
+        .cascadedDirectionalShadow = invalidShadowDistance,
         .ambientScale = 0.2F,
     }));
 
-    auto tooManyShadowCasters = lights;
-    tooManyShadowCasters[0].castsShadows = true;
-    tooManyShadowCasters[1].castsShadows = true;
+    const auto invalidShadowIndex = Render::Mesh3DCascadedDirectionalShadow{
+        .directionalLightIndex = static_cast<u32>(lights.size()),
+    };
     ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
-        .directionalLights = tooManyShadowCasters,
+        .directionalLights = lights,
+        .cascadedDirectionalShadow = invalidShadowIndex,
         .ambientScale = 0.2F,
     }));
 

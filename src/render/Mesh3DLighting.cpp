@@ -28,7 +28,6 @@ Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noex
                              "Mesh3D ambient scale must be finite and non-negative");
     }
 
-    std::size_t directionalShadowCasterCount = 0;
     for (const Mesh3DDirectionalLight& light : lighting.directionalLights)
     {
         if (!std::isfinite(light.directionTowardLightX) ||
@@ -50,22 +49,26 @@ Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noex
             return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
                                  "Mesh3D directional light direction must have a finite non-zero length");
         }
-        if (!std::isfinite(light.shadowDistanceMeters) || light.shadowDistanceMeters <= 0.0F ||
-            light.shadowDistanceMeters > Mesh3DLightingDesc::MaximumDirectionalShadowDistanceMeters ||
-            !std::isfinite(light.shadowDepthBias) || light.shadowDepthBias < 0.0F ||
-            light.shadowDepthBias > Mesh3DLightingDesc::MaximumDirectionalShadowDepthBias ||
-            !std::isfinite(light.shadowNormalBiasMeters) || light.shadowNormalBiasMeters < 0.0F ||
-            light.shadowNormalBiasMeters > Mesh3DLightingDesc::MaximumDirectionalShadowNormalBiasMeters)
+    }
+
+    if (lighting.cascadedDirectionalShadow.has_value())
+    {
+        const Mesh3DCascadedDirectionalShadow& shadow = *lighting.cascadedDirectionalShadow;
+        if (shadow.directionalLightIndex >= lighting.directionalLights.size())
+        {
+            return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                                 "Mesh3D cascaded shadow references a missing directional light");
+        }
+        if (!std::isfinite(shadow.maximumDistanceMeters) || shadow.maximumDistanceMeters <= 0.0F ||
+            shadow.maximumDistanceMeters > Mesh3DCascadedDirectionalShadow::MaximumDistanceMeters ||
+            !std::isfinite(shadow.depthBias) || shadow.depthBias < 0.0F ||
+            shadow.depthBias > Mesh3DCascadedDirectionalShadow::MaximumDepthBias ||
+            !std::isfinite(shadow.normalBiasMeters) || shadow.normalBiasMeters < 0.0F ||
+            shadow.normalBiasMeters > Mesh3DCascadedDirectionalShadow::MaximumNormalBiasMeters)
         {
             return Core::failure(
                 RenderErrorCode::InvalidMesh3DLighting,
-                "Mesh3D directional shadow distance and bias values must be finite and bounded");
-        }
-        directionalShadowCasterCount += light.castsShadows ? 1U : 0U;
-        if (directionalShadowCasterCount > Mesh3DLightingDesc::MaximumDirectionalShadowCasterCount)
-        {
-            return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
-                                 "Mesh3D lighting supports at most one directional shadow caster");
+                "Mesh3D cascaded directional shadow distance and bias values must be finite and bounded");
         }
     }
 

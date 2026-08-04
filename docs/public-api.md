@@ -1,7 +1,7 @@
 # Public API
 
 本文描述当前 `include/tina` 公共面和 CMake target。它不是未来 SDK 愿望清单；尚未存在的能力（通用
-event queue、通用 GPU submission fence、CSM 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
+event queue、通用 GPU submission fence、point/spot shadow 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
 首切片**已经存在**。
 
 ## 分层
@@ -578,9 +578,10 @@ NORMAL+TEXCOORD_0 primitive 由 Cooker 使用 MikkTSpace 生成；缺少 NORMAL/
 mip 链的 RGBA16F prefiltered specular cubemap 与 RG16F BRDF LUT；`uploadEnvironmentMapFromCooked()` 只把
 typed view 交给 `createEnvironmentMap()`。三张 native texture 共享一个 `GpuEnvironmentMapId`，create/validate/
 destroy/retire 与 failure rollback 均为一个事务。`Mesh3DImageBasedLightingDesc` 绑定 live handle、非负 intensity
-与 world-Y rotation，`clearMesh3DImageBasedLighting()` 显式恢复无 IBL 状态。最多一个 directional light 可投射 1024×1024 D16、3×3 PCF 阴影；
-`shadowDistanceMeters`、`shadowDepthBias`、`shadowNormalBiasMeters` 与 `castsShadows` 随帧 snapshot 深拷贝。
-级联及 point/spot shadow 尚未完成。
+与 world-Y rotation，`clearMesh3DImageBasedLighting()` 显式恢复无 IBL 状态。一个 directional light 可投射固定4级联
+2048×2048 D16 atlas 阴影（2×2、每 tile 1024×1024）；optional `CascadedDirectionalShadow3D` 的 `maximumDistanceMeters`、`depthBias`
+与 `normalBiasMeters` 随帧 snapshot 深拷贝，Render 侧以排序后的 `directionalLightIndex` 关联灯光。
+point/spot shadow 与可配置 atlas 尚未完成。
 
 ## Audio 与 Physics
 
@@ -650,7 +651,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
-- CSM、point/spot shadow 与可配置 shadow atlas；
+- point/spot shadow 与可配置 shadow atlas；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；

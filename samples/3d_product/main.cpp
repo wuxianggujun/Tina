@@ -178,7 +178,8 @@ struct LifecycleCounters final {
     bool materialMrTextureBound = false;
     bool materialNormalTextureBound = false;
     u32 directionalLightCount = 0;
-    u32 directionalShadowCasterCount = 0;
+    u32 cascadedDirectionalShadowCount = 0;
+    u32 cascadedDirectionalShadowCascadeCount = 0;
     u32 authoredPointLight3DCount = 0;
     u32 pointLight3DCount = 0;
     u32 culledPointLight3DCount = 0;
@@ -1410,13 +1411,13 @@ class Product3DState final : public Tina::IGameState {
         struct ProductDirectionalLight final {
             Tina::Scene::Vec3 directionTowardLight{};
             Tina::Render::RenderLinearColor color{};
-            bool castsShadows = false;
+            bool hasCascadedShadow = false;
         };
         constexpr std::array ProductLights{
             ProductDirectionalLight{
                 .directionTowardLight = {0.35F, 0.9F, 0.4F},
                 .color = {.red = 1.0F, .green = 0.98F, .blue = 0.92F},
-                .castsShadows = true,
+                .hasCascadedShadow = true,
             },
             ProductDirectionalLight{
                 .directionTowardLight = {-0.55F, 0.25F, -0.35F},
@@ -1440,10 +1441,14 @@ class Product3DState final : public Tina::IGameState {
                     *lightEntity,
                     Tina::Scene::DirectionalLight3D{
                         .color = light.color,
-                        .shadowDistanceMeters = 45.0F,
-                        .shadowDepthBias = 0.0015F,
-                        .shadowNormalBiasMeters = 0.025F,
-                        .castsShadows = light.castsShadows,
+                        .cascadedShadow = light.hasCascadedShadow
+                            ? std::optional<Tina::Scene::CascadedDirectionalShadow3D>{
+                                  Tina::Scene::CascadedDirectionalShadow3D{
+                                      .maximumDistanceMeters = 45.0F,
+                                      .depthBias = 0.0015F,
+                                      .normalBiasMeters = 0.025F,
+                                  }}
+                            : std::nullopt,
                     });
                 !status)
             {
@@ -1451,7 +1456,9 @@ class Product3DState final : public Tina::IGameState {
             }
         }
         counters_->directionalLightCount = static_cast<u32>(ProductLights.size());
-        counters_->directionalShadowCasterCount = 1U;
+        counters_->cascadedDirectionalShadowCount = 1U;
+        counters_->cascadedDirectionalShadowCascadeCount =
+            Tina::Render::Mesh3DCascadedDirectionalShadow::CascadeCount;
         counters_->lightingConfigured = true;
 
         const Tina::Asset::CookedAssetFile* prefabFile =
@@ -2055,7 +2062,9 @@ class Product3DApplication final : public Tina::IGameApplication {
         capture.get() == nullptr || capture.get()->statistics().liveResources == 0;
     counters.submittedLightingFrames = capture.submittedLightingFrames();
     counters.submittedDirectionalLightCount = capture.directionalLightCount();
-    const u32 submittedDirectionalShadowCasterCount = capture.directionalShadowCasterCount();
+    const u32 submittedCascadedDirectionalShadowCount = capture.cascadedDirectionalShadowCount();
+    const u32 submittedCascadedDirectionalShadowCascadeCount =
+        capture.cascadedDirectionalShadowCascadeCount();
     counters.submittedCameraAspectRatio = capture.submittedCameraAspectRatio();
     counters.cameraAspectChanges = capture.cameraAspectChanges();
     counters.pointLight3DCount = capture.pointLight3DCount();
@@ -2219,7 +2228,12 @@ class Product3DApplication final : public Tina::IGameApplication {
         !counters.meshBound || !counters.materialTextureBound || counters.catalogCooked != 1 || !counters.gltfCooked ||
         !counters.prefabInstantiated || counters.prefabNodes == 0 || counters.prefabInstances == 0 ||
         !counters.lightingConfigured || counters.directionalLightCount != 3U ||
-        counters.directionalShadowCasterCount != 1U || submittedDirectionalShadowCasterCount != 1U ||
+        counters.cascadedDirectionalShadowCount != 1U ||
+        submittedCascadedDirectionalShadowCount != 1U ||
+        counters.cascadedDirectionalShadowCascadeCount !=
+            Tina::Render::Mesh3DCascadedDirectionalShadow::CascadeCount ||
+        submittedCascadedDirectionalShadowCascadeCount !=
+            Tina::Render::Mesh3DCascadedDirectionalShadow::CascadeCount ||
         counters.authoredPointLight3DCount != 3U || counters.pointLight3DCount != 2U ||
         counters.culledPointLight3DCount != 1U ||
         counters.authoredSpotLight3DCount != 3U || counters.spotLight3DCount != 2U ||
@@ -2287,9 +2301,14 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"materialTextureBound\":" << (counters.materialTextureBound ? "true" : "false")
                   << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
                   << ",\"directionalLightCount\":" << counters.directionalLightCount
-                  << ",\"directionalShadowCasterCount\":" << counters.directionalShadowCasterCount
-                  << ",\"submittedDirectionalShadowCasterCount\":"
-                  << submittedDirectionalShadowCasterCount
+                  << ",\"cascadedDirectionalShadowCount\":"
+                  << counters.cascadedDirectionalShadowCount
+                  << ",\"submittedCascadedDirectionalShadowCount\":"
+                  << submittedCascadedDirectionalShadowCount
+                  << ",\"cascadedDirectionalShadowCascadeCount\":"
+                  << counters.cascadedDirectionalShadowCascadeCount
+                  << ",\"submittedCascadedDirectionalShadowCascadeCount\":"
+                  << submittedCascadedDirectionalShadowCascadeCount
                   << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
                   << ",\"pointLight3DCount\":" << counters.pointLight3DCount
                   << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount
@@ -2362,7 +2381,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":11,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":12,\"frames\":"
               << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"cookedEnvironmentMap\":true,"
@@ -2413,9 +2432,14 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"materialNormalTextureBound\":" << (counters.materialNormalTextureBound ? "true" : "false")
               << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
               << ",\"directionalLightCount\":" << counters.directionalLightCount
-              << ",\"directionalShadowCasterCount\":" << counters.directionalShadowCasterCount
-              << ",\"submittedDirectionalShadowCasterCount\":"
-              << submittedDirectionalShadowCasterCount
+              << ",\"cascadedDirectionalShadowCount\":"
+              << counters.cascadedDirectionalShadowCount
+              << ",\"submittedCascadedDirectionalShadowCount\":"
+              << submittedCascadedDirectionalShadowCount
+              << ",\"cascadedDirectionalShadowCascadeCount\":"
+              << counters.cascadedDirectionalShadowCascadeCount
+              << ",\"submittedCascadedDirectionalShadowCascadeCount\":"
+              << submittedCascadedDirectionalShadowCascadeCount
               << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
               << ",\"pointLight3DCount\":" << counters.pointLight3DCount
               << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount

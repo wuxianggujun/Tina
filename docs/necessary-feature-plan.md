@@ -204,9 +204,9 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 N4 当时明确保留的边界：这不是完整 PBR/light system；后续 `RENDER-001-SCENE-LIGHTS`、
 `RENDER-001-POINT-LIGHTS` 与 `RENDER-001-SPOT-LIGHTS` 已补 directional/point/spot World component、逐帧
 RenderScene snapshot、容量前 influence-sphere culling 与 backend shading；`RENDER-001-VERTEX-TANGENTS`
-后续已关闭 authored/generated tangent 与唯一 backend TBN 路径，并完成单 directional caster shadow 与
+后续已关闭 authored/generated tangent 与唯一 backend TBN 路径，并完成固定4级联 directional CSM、
 deterministic pass scheduler、Cook-Torrance GGX direct light 与 cooked EnvironmentMap split-sum IBL；
-CSM、point/spot shadow、skin/animation 仍未完成。
+point/spot shadow、可配置 atlas、skin/animation 仍未完成。
 
 ### 验收
 

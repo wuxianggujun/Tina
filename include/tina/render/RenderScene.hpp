@@ -208,10 +208,21 @@ struct Mesh3DDirectionalLight final {
     float colorR = 1.0F;
     float colorG = 1.0F;
     float colorB = 1.0F;
-    float shadowDistanceMeters = 50.0F;
-    float shadowDepthBias = 0.0015F;
-    float shadowNormalBiasMeters = 0.02F;
-    bool castsShadows = false;
+};
+
+struct Mesh3DCascadedDirectionalShadow final {
+    static constexpr u32 CascadeCount = 4;
+    static constexpr float MaximumDistanceMeters = 500.0F;
+    static constexpr float MaximumDepthBias = 0.05F;
+    static constexpr float MaximumNormalBiasMeters = 1.0F;
+
+    u32 directionalLightIndex = 0;
+    float maximumDistanceMeters = 50.0F;
+    float depthBias = 0.0015F;
+    float normalBiasMeters = 0.02F;
+
+    friend constexpr bool operator==(const Mesh3DCascadedDirectionalShadow&,
+                                     const Mesh3DCascadedDirectionalShadow&) noexcept = default;
 };
 
 struct Mesh3DPointLight final {
@@ -243,15 +254,12 @@ struct Mesh3DLightingDesc final {
     static constexpr std::size_t MaximumDirectionalLightCount = 4;
     static constexpr std::size_t MaximumPointLightCount = 8;
     static constexpr std::size_t MaximumSpotLightCount = 8;
-    static constexpr std::size_t MaximumDirectionalShadowCasterCount = 1;
-    static constexpr float MaximumDirectionalShadowDistanceMeters = 500.0F;
-    static constexpr float MaximumDirectionalShadowDepthBias = 0.05F;
-    static constexpr float MaximumDirectionalShadowNormalBiasMeters = 1.0F;
 
     // Consumed synchronously by the receiving writer/device; no span is retained.
     std::span<const Mesh3DDirectionalLight> directionalLights{};
     std::span<const Mesh3DPointLight> pointLights{};
     std::span<const Mesh3DSpotLight> spotLights{};
+    std::optional<Mesh3DCascadedDirectionalShadow> cascadedDirectionalShadow{};
     float ambientScale = 0.18F;
 };
 
@@ -281,12 +289,19 @@ class RenderMesh3DLighting final {
         return m_ambientScale;
     }
 
+    [[nodiscard]] constexpr const std::optional<Mesh3DCascadedDirectionalShadow>&
+    cascadedDirectionalShadow() const noexcept
+    {
+        return m_cascadedDirectionalShadow;
+    }
+
     [[nodiscard]] constexpr Mesh3DLightingDesc descriptor() const noexcept
     {
         return {
             .directionalLights = directionalLights(),
             .pointLights = pointLights(),
             .spotLights = spotLights(),
+            .cascadedDirectionalShadow = m_cascadedDirectionalShadow,
             .ambientScale = m_ambientScale,
         };
     }
@@ -301,6 +316,7 @@ class RenderMesh3DLighting final {
     u32 m_pointLightCount = 0;
     std::array<Mesh3DSpotLight, Mesh3DLightingDesc::MaximumSpotLightCount> m_spotLights{};
     u32 m_spotLightCount = 0;
+    std::optional<Mesh3DCascadedDirectionalShadow> m_cascadedDirectionalShadow{};
     float m_ambientScale = 0.18F;
 };
 
