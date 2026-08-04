@@ -3,6 +3,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetSystemTests.cpp
     AssetSystemPumpTests.cpp
     AssetSystemAsyncPumpTests.cpp
+    AssetSystemCatalogReloadTests.cpp
     AssetGpuUploadTests.cpp
     AssetRetirementTests.cpp
     AssetGpuRetirementTests.cpp

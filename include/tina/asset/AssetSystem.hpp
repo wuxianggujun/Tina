@@ -79,6 +79,12 @@ class AssetSystem final {
 
     [[nodiscard]] Core::Status bindCatalog(std::string_view catalogRootUtf8, CatalogSnapshot catalog);
 
+    // Replaces the immutable CatalogSnapshot only at an owner-thread idle boundary. Idle requires
+    // no queued/in-flight work, resident handles, tracked GPU uploads, or live retirement records.
+    // The existing catalog and root remain bound if validation, idle preflight, or allocation fails.
+    [[nodiscard]] Core::Status reloadCatalogWhenIdle(std::string_view catalogRootUtf8,
+                                                      CatalogSnapshot catalog);
+
     // openCatalogPackage(root, openConfig) then bindCatalog. Uses config.memoryResource for open.
     [[nodiscard]] Core::Status openAndBindCatalog(std::string_view catalogRootUtf8,
                                                   CatalogPackageOpenConfig openConfig = {});

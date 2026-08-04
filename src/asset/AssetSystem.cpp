@@ -246,6 +246,46 @@ Core::Status AssetSystem::bindCatalog(std::string_view catalogRootUtf8, CatalogS
     return Core::success();
 }
 
+Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8, CatalogSnapshot catalog)
+{
+    if (std::this_thread::get_id() != m_ownerThread)
+    {
+        return Core::failure(AssetErrorCode::WrongOwnerThread,
+                             "catalog reload must run on the AssetSystem owner thread");
+    }
+    if (!catalog)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog snapshot is empty");
+    }
+    if (catalogRootUtf8.empty() || catalogRootUtf8.find('\0') != std::string_view::npos)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog root path is invalid");
+    }
+    if (!m_queue.empty() || m_inFlight.load(std::memory_order_acquire) != 0U || m_store.activeCount() != 0U ||
+        !m_index.empty() || (m_gpuUpload != nullptr && m_gpuUpload->trackedCount() != 0U) ||
+        m_retirement.liveCount() != 0U)
+    {
+        return Core::failure(AssetErrorCode::CatalogReloadBusy,
+                             "catalog reload requires an idle AssetSystem");
+    }
+
+    try
+    {
+        std::pmr::string nextRoot{m_memoryResource};
+        nextRoot.assign(catalogRootUtf8.begin(), catalogRootUtf8.end());
+
+        // Both strings use m_memoryResource; swap and CatalogSnapshot move assignment are noexcept
+        // after all fallible validation/allocation has completed.
+        m_catalogRoot.swap(nextRoot);
+        m_catalog = std::move(catalog);
+        return Core::success();
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed, "catalog reload root allocation failed");
+    }
+}
+
 Core::Status AssetSystem::openAndBindCatalog(std::string_view catalogRootUtf8, CatalogPackageOpenConfig openConfig)
 {
     if (m_memoryResource == nullptr)

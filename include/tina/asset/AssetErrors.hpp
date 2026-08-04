@@ -30,5 +30,7 @@ inline constexpr Core::ErrorCode SpriteBindingNotFound{Core::ErrorDomain::Asset,
 inline constexpr Core::ErrorCode Mesh3DBindingCapacityExceeded{Core::ErrorDomain::Asset, 34};
 inline constexpr Core::ErrorCode Mesh3DBindingConflict{Core::ErrorDomain::Asset, 35};
 inline constexpr Core::ErrorCode Mesh3DBindingNotFound{Core::ErrorDomain::Asset, 36};
+inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Asset, 37};
+inline constexpr Core::ErrorCode CatalogReloadBusy{Core::ErrorDomain::Asset, 38};
 
 } // namespace Tina::Asset::AssetErrorCode
