@@ -17,13 +17,13 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
 | UI-002 | 收口 Windows UIA：tip 跨进程 gate 证据已固化；完成 Narrator/Inspect 人工金标后关闭 | 自动 HWND client gate + unit 已在 tip 复现；只剩操作员读屏/Inspect 清单 |
-| ASSET-002 | 分阶段建立热重载与增量 Cooker；先完成 immutable Catalog change planning | 先冻结稳定分类、传递依赖、容量与失败原子性，再接触 live Handle/Lease/GPU owner |
+| ASSET-002 | 分阶段建立热重载与增量 Cooker；已完成 immutable Catalog change planning 与 idle-safe root reload | root API 同步 open/validate package、调用 change planner，并仅在 owner-thread 且 pending/in-flight、active handle、GPU upload、retirement 均为空时原子提交；后续再接 source/package detection、staging recook 与 live Handle/Lease/GPU owner 迁移 |
 
 Now 的退出条件：UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
 人工记录明确；没有未解释的 Accepted ADR/实现冲突。Linux AT-SPI 作为独立后置项，不阻塞 Windows
 UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；即时反馈与 Motion 的文档边界保持明确。
-ASSET-002 当前只完成 pure planner；退出 Now 前还需要 source/package detection、staging validation 与 live
-commit/retirement 事务，不把“能比较 Catalog”写成“热重载已完成”。
+ASSET-002 当前完成 pure planner 与保守的 idle-safe root reload；退出 Now 前还需要 source/package detection、staging
+validation、增量 recook 与 live Handle/Lease/GPU owner 迁移事务，不把“空闲时可切换 root”写成“完整增量热重载已完成”。
 
 ## Next：产品验收、性能基线与对外可用
 
