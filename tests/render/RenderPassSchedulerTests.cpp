@@ -169,7 +169,7 @@ TEST(RenderPassSchedulerTest, PartialOpaqueViewportClearsPrimarySurfaceBeforeSha
         .mesh3DItemCapacity = 1, .mesh3DBatchCapacity = 1});
     ASSERT_TRUE(sceneBuilderResult.has_value()) << sceneBuilderResult.error().message;
     RenderSceneBuilder sceneBuilder = std::move(*sceneBuilderResult);
-    ASSERT_TRUE(sceneBuilder.beginFrame());
+    ASSERT_TRUE(sceneBuilder.beginFrame(RenderSceneFrameParameters{.primarySurfaceAspectRatio = 4.0F / 3.0F}));
     ASSERT_TRUE(sceneBuilder.writer().setPerspectiveCamera(RenderPerspectiveCameraInput{
         .stableCameraKey = 1,
         .nearPlaneMeters = 0.1F,
