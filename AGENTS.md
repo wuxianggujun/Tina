@@ -47,6 +47,10 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 - 直接跑 GoogleTest executable，不用 CTest。
 - FreeType 字体：`-DTINA_UI_FONT_PATH=...` 或环境变量 `TINA_UI_FONT_PATH`（见 `cmake/TinaUiFont.cmake`）。
 - 不要提交 `.agents/`、`.tmp_*`；用户未要求不要提交 `AGENTS.md`。
+- 多 worktree 默认先在功能分支完成编码并提交，再合并到核心集成 worktree，最后复用核心 worktree 的
+  常驻 `out/build/<preset>` 做集中增量验证；不要在每个功能 worktree 重复构建 bgfx/shaderc/产品图。
+- 禁止不同 worktree 共用同一个 CMake `binaryDir`；preset 基于 `${sourceDir}`，cache 与生成项目绑定
+  源码绝对路径。只有确需合并前验证的高风险切片才创建该 worktree 自己的临时 build tree。
 
 ## 核心约定
 

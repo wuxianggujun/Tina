@@ -12,6 +12,10 @@ CTest 测试。测试进程任一返回非0即失败。
 5. 测试数量是易变证据；架构状态不以固定数量定义。
 6. sample exit 0 只证明生命周期/结构化断言；画面正确必须另有 Visual 证据。
 7. sanitizer、真实 backend、字体和 accessibility 结果不能由 Null 单元测试替代。
+8. 多 worktree 开发先提交并合并功能分支，再在核心集成 worktree 的常驻 build tree 集中验证；不要在
+   每个功能 worktree 重复构建 bgfx、shaderc 或完整产品图。
+9. 不得跨 worktree 共用 `binaryDir`。Preset 路径基于 `${sourceDir}`，CMake cache 和生成项目绑定源码
+   绝对路径；需要隔离验证时使用该 worktree 自己的临时 build tree。
 
 ## Windows UI 快速门禁
 

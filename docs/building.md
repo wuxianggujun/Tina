@@ -55,6 +55,31 @@ powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 `TINA_BUILD_PLATFORM_GLFW` 和 `TINA_BUILD_RENDER_BGFX` 必须与相应 manifest feature 同时启用；
 CMake 会拒绝不匹配组合。
 
+## Worktree 与常驻构建树
+
+Preset 的 `binaryDir` 使用 `${sourceDir}/out/build/...`。每个 Git worktree 的 `sourceDir` 不同，因此
+每个 worktree 都会得到独立的 CMake cache、对象文件、第三方库和 `shaderc`；Git 只共享对象数据库，
+不会共享构建产物。禁止让两个 worktree 指向同一个 `binaryDir`，因为 `CMakeCache.txt`、生成项目和依赖
+追踪记录绑定了源码绝对路径。
+
+多 worktree 功能开发默认采用以下顺序：
+
+1. 功能 worktree 只完成代码、定向静态检查、`git diff --check` 和必要的轻量验证，不默认配置或构建
+   bgfx、shader toolchain、完整产品图。
+2. 功能分支提交后先合并到核心集成 worktree；确认提交已可达后删除已合并 worktree 和临时分支。
+3. 只在核心集成 worktree 的常驻 `out/build/<preset>` 中执行增量 configure/build/test，从而复用已经
+   生成的 vcpkg、bgfx、shaderc、对象文件和测试 executable。
+4. 多个功能切片并行开发时，先全部合并，再按受影响 target 运行一次集中验证；不要在每个 worktree
+   重复运行同一套完整 gate。
+
+只有无法通过代码审查、header isolation 或 backend-neutral 单测降低风险的独立高风险切片，才允许在
+功能 worktree 创建专属 build tree。该 build tree 仍不得与核心 worktree 共用，并应在 worktree 回收时
+一并视为临时资源。
+
+修改 `CMakeLists.txt`、preset 或 toolchain 后，核心 worktree 的下一次构建可能触发 CMake regenerate。
+先构建最小受影响 target，并观察依赖图；若已有 `shaderc`/第三方库却开始大范围重编，先停止并检查
+regenerate、编译命令或依赖追踪变化，不把重型工具链重编当作默认步骤。
+
 ## Windows 日常 UI 增量构建
 
 日常 UI 开发优先使用固定脚本，不手写 MSBuild native 参数：
