@@ -91,6 +91,12 @@ Platform poll
   -> latch presented Camera2D for next-frame world picking
 ```
 
+Tracy Profile 构建会为整帧与主要阶段发布稳定的静态 zone，包括 Platform poll/event dispatch、输入
+route/mapping、State 命令提交、Audio completion、UI layout/DisplayList 构建以及 Render submit/present。
+四类 State callback zone 位于真实的 top-down dispatch 内，因此每个实际执行的 State 都有独立 zone。
+None 构建中这些 annotation 完全编译消失；profile capture 只用于定位阶段与 callback 热点，不替代
+benchmark baseline。
+
 Fixed simulation 默认 60 Hz，单帧最多追赶 4 步。真实 delta、接受/拒绝的真实时间、variable
 `updateDelta`、丢弃的 simulation delta 与 interpolation 分开记录。Simulation Action 只在目标 fixed
 tick 消费一次；0 步帧不丢 edge，多步追赶不重复消费。Frame Action 只进入 `updateFrame()`。

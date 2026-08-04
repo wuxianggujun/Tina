@@ -724,9 +724,13 @@ class EngineHostImplementation final {
 
         for (;;)
         {
+            TINA_TRACE_ZONE("Runtime.Frame");
             auto pollResult =
                 invokeResultBoundary("IPlatformBackend::pollFrame", RuntimeErrorCode::LifecycleInvariantViolation,
-                                     [&] { return m_modules.platform->pollFrame(); });
+                                     [&] {
+                                         TINA_TRACE_ZONE("Runtime.Platform.Poll");
+                                         return m_modules.platform->pollFrame();
+                                     });
             if (!pollResult)
             {
                 return failAfterStartupCommit(gameApplication, std::move(pollResult.error()), frameIndex,
@@ -827,13 +831,16 @@ class EngineHostImplementation final {
                 .fixedStepCount = framePlan.stepCount,
             };
 
-            if (auto eventStatus = m_platformEventDispatcher.dispatch(
-                    platformFrame->platformEvents(), platformFrame->windows(), platformFrame->gamepads());
-                !eventStatus)
             {
-                auto error = std::move(eventStatus.error());
-                error.addContext("PlatformEventDispatcher::dispatch");
-                return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+                TINA_TRACE_ZONE("Runtime.Platform.DispatchEvents");
+                if (auto eventStatus = m_platformEventDispatcher.dispatch(
+                        platformFrame->platformEvents(), platformFrame->windows(), platformFrame->gamepads());
+                    !eventStatus)
+                {
+                    auto error = std::move(eventStatus.error());
+                    error.addContext("PlatformEventDispatcher::dispatch");
+                    return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+                }
             }
 
             auto uiContextResult = m_primaryWindowUi.selectForFrame(*platformFrame);
@@ -844,21 +851,24 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
             }
 
-            auto uiRouteResult = m_uiInputRouteProducer->produce(*uiContextResult, *platformFrame);
-            if (!uiRouteResult)
             {
-                auto error = std::move(uiRouteResult.error());
-                error.addContext("UIInputRouteProducer::produce");
-                return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
-            }
-            if (auto mappingStatus = m_actionMapper->mapFrame(*platformFrame, uiRouteResult->consumption,
-                                                              uiRouteResult->claims, frameIndex, simulationTick,
-                                                              &m_lastPresentedCamera2D);
-                !mappingStatus)
-            {
-                auto error = std::move(mappingStatus.error());
-                error.addContext("ActionMapper::mapFrame");
-                return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+                TINA_TRACE_ZONE("Runtime.Input.RouteAndMap");
+                auto uiRouteResult = m_uiInputRouteProducer->produce(*uiContextResult, *platformFrame);
+                if (!uiRouteResult)
+                {
+                    auto error = std::move(uiRouteResult.error());
+                    error.addContext("UIInputRouteProducer::produce");
+                    return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+                }
+                if (auto mappingStatus = m_actionMapper->mapFrame(*platformFrame, uiRouteResult->consumption,
+                                                                  uiRouteResult->claims, frameIndex, simulationTick,
+                                                                  &m_lastPresentedCamera2D);
+                    !mappingStatus)
+                {
+                    auto error = std::move(mappingStatus.error());
+                    error.addContext("ActionMapper::mapFrame");
+                    return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+                }
             }
 
             for (u32 fixedStepIndex = 0; fixedStepIndex < framePlan.stepCount; ++fixedStepIndex)
@@ -895,6 +905,7 @@ class EngineHostImplementation final {
                 auto fixedDispatch = m_gameStateStack.forEachDispatch(
                     GameStateDispatchPhase::FixedUpdate,
                     [&](IGameState& state, const GameStatePolicy&, usize depthFromTop) -> Core::Status {
+                        TINA_TRACE_ZONE("Runtime.GameState.FixedUpdate");
                         // ADR 0014: blocksGameplayInputBelow suppresses action state for layers below.
                         const SimulationActionSnapshot& actionsForState =
                             m_gameStateStack.gameplayInputBlockedForDepth(depthFromTop)
@@ -994,7 +1005,10 @@ class EngineHostImplementation final {
             {
                 auto audioPump =
                     invokeResultBoundary("AudioEngine::pumpCompletions", RuntimeErrorCode::LifecycleInvariantViolation,
-                                         [&] { return audio->pumpCompletions(/*budget=*/0); });
+                                         [&] {
+                                             TINA_TRACE_ZONE("Runtime.Audio.PumpCompletions");
+                                             return audio->pumpCompletions(/*budget=*/0);
+                                         });
                 if (!audioPump)
                 {
                     return failAfterStartupCommit(gameApplication, std::move(audioPump.error()), frameIndex,
@@ -1027,6 +1041,7 @@ class EngineHostImplementation final {
             auto extractionResult = m_gameStateStack.forEachDispatch(
                 GameStateDispatchPhase::RenderExtract,
                 [&](IGameState& state, const GameStatePolicy&, usize) -> Core::Status {
+                    TINA_TRACE_ZONE("Runtime.GameState.ExtractRenderScene");
                     return invokeResultBoundary("IGameState::extractRenderScene",
                                                 RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return state.extractRenderScene(extractionContext); });
@@ -1057,6 +1072,7 @@ class EngineHostImplementation final {
             auto uiResult = m_gameStateStack.forEachDispatch(
                 GameStateDispatchPhase::UIUpdate,
                 [&](IGameState& state, const GameStatePolicy&, usize) -> Core::Status {
+                    TINA_TRACE_ZONE("Runtime.GameState.UpdateUI");
                     return invokeResultBoundary("IGameState::updateUI", RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return state.updateUI(uiContext); });
                 });
@@ -1074,11 +1090,14 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(uiResult.error()), frameIndex, simulationTick);
             }
 
-            if (auto layoutStatus = m_primaryWindowUILayout.commitForFrame(*uiContextResult, *platformFrame);
-                !layoutStatus)
             {
-                return failAfterStartupCommit(gameApplication, std::move(layoutStatus.error()), frameIndex,
-                                              simulationTick);
+                TINA_TRACE_ZONE("Runtime.UI.CommitLayout");
+                if (auto layoutStatus = m_primaryWindowUILayout.commitForFrame(*uiContextResult, *platformFrame);
+                    !layoutStatus)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(layoutStatus.error()), frameIndex,
+                                                  simulationTick);
+                }
             }
             if (auto uiaStatus = publishPrimaryWindowUia(*uiContextResult); !uiaStatus)
             {
@@ -1086,14 +1105,18 @@ class EngineHostImplementation final {
                                               simulationTick);
             }
 
-            auto uiDisplayResult =
-                m_primaryWindowUIDisplay.buildForFrame(
+            Render::UIDisplayListView primaryWindowUIDisplayList{};
+            {
+                TINA_TRACE_ZONE("Runtime.UI.BuildDisplayList");
+                auto uiDisplayResult = m_primaryWindowUIDisplay.buildForFrame(
                     *uiContextResult, *platformFrame, primaryWindowSurface,
                     m_primaryWindowUICapability, m_renderFramePacket.resourceSink());
-            if (!uiDisplayResult)
-            {
-                return failAfterStartupCommit(gameApplication, std::move(uiDisplayResult.error()), frameIndex,
-                                              simulationTick);
+                if (!uiDisplayResult)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(uiDisplayResult.error()), frameIndex,
+                                                  simulationTick);
+                }
+                primaryWindowUIDisplayList = uiDisplayResult->displayList;
             }
 
             std::optional<Render::UIGlyphAtlasPageView> glyphAtlasPage;
@@ -1190,13 +1213,16 @@ class EngineHostImplementation final {
                 .interpolation = frameTiming.interpolation,
                 .primaryWindowSurface = primaryWindowSurface,
                 .resources = m_renderFramePacket.resourceTableView(),
-                .primaryWindowUIDisplayList = uiDisplayResult->displayList,
+                .primaryWindowUIDisplayList = primaryWindowUIDisplayList,
                 .primaryWindowUIGlyphAtlas = glyphAtlasPage,
                 .primaryWorldScene = *renderSceneResult,
             };
             auto submitResult =
                 invokeResultBoundary("IRenderDevice::submitFrame", RuntimeErrorCode::LifecycleInvariantViolation,
-                                     [&] { return m_modules.renderDevice->submitFrame(renderFrame); });
+                                     [&] {
+                                         TINA_TRACE_ZONE("Runtime.Render.Submit");
+                                         return m_modules.renderDevice->submitFrame(renderFrame);
+                                     });
             if (!submitResult)
             {
                 return failAfterStartupCommit(gameApplication, std::move(submitResult.error()), frameIndex,
@@ -1234,7 +1260,10 @@ class EngineHostImplementation final {
 
                 auto presentResult =
                     invokeResultBoundary("IRenderDevice::present", RuntimeErrorCode::LifecycleInvariantViolation,
-                                         [&] { return m_modules.renderDevice->present(); });
+                                         [&] {
+                                             TINA_TRACE_ZONE("Runtime.Render.Present");
+                                             return m_modules.renderDevice->present();
+                                         });
                 if (!presentResult)
                 {
                     return failAfterStartupCommit(gameApplication, std::move(presentResult.error()), frameIndex,
@@ -1367,6 +1396,7 @@ class EngineHostImplementation final {
     // Returns true when a structural transition changed the stack (including emptying it).
     [[nodiscard]] Core::Result<bool> commitPendingGameStateCommands(UI::UIContext* uiContext)
     {
+        TINA_TRACE_ZONE("Runtime.GameState.CommitCommands");
         bool structuralChanged = false;
         if (m_pendingCommands.policyChangeRequested)
         {
