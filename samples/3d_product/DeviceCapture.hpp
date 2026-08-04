@@ -4,6 +4,7 @@
 #include <tina/render/RenderDevice.hpp>
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace Tina::Sample3D {
@@ -45,6 +46,7 @@ class DeviceCapture final {
         }
         Core::u32 cascadedDirectionalShadowCount = 0;
         Core::u32 cascadedDirectionalShadowCascadeCount = 0;
+        std::optional<Render::Mesh3DSpotLightShadow> spotLightShadow;
         if (scene.mesh3DLighting().has_value())
         {
             if (scene.mesh3DLighting()->cascadedDirectionalShadow().has_value())
@@ -53,12 +55,14 @@ class DeviceCapture final {
                 cascadedDirectionalShadowCascadeCount =
                     Render::Mesh3DCascadedDirectionalShadow::CascadeCount;
             }
+            spotLightShadow = scene.mesh3DLighting()->spotLightShadow();
         }
         if (submittedLightingFrames_ == 0)
         {
             directionalLightCount_ = statistics.directionalLightCount;
             cascadedDirectionalShadowCount_ = cascadedDirectionalShadowCount;
             cascadedDirectionalShadowCascadeCount_ = cascadedDirectionalShadowCascadeCount;
+            spotLightShadow_ = spotLightShadow;
             pointLight3DCount_ = statistics.pointLight3DCount;
             spotLight3DCount_ = statistics.spotLight3DCount;
             submittedCameraAspectRatio_ = camera->aspectRatio;
@@ -68,6 +72,7 @@ class DeviceCapture final {
             if (directionalLightCount_ != statistics.directionalLightCount ||
                 cascadedDirectionalShadowCount_ != cascadedDirectionalShadowCount ||
                 cascadedDirectionalShadowCascadeCount_ != cascadedDirectionalShadowCascadeCount ||
+                spotLightShadow_ != spotLightShadow ||
                 pointLight3DCount_ != statistics.pointLight3DCount ||
                 spotLight3DCount_ != statistics.spotLight3DCount)
             {
@@ -96,6 +101,10 @@ class DeviceCapture final {
     [[nodiscard]] Core::u32 cascadedDirectionalShadowCascadeCount() const noexcept
     {
         return cascadedDirectionalShadowCascadeCount_;
+    }
+    [[nodiscard]] Core::u32 spotLightShadowCount() const noexcept
+    {
+        return spotLightShadow_.has_value() ? 1U : 0U;
     }
     [[nodiscard]] Core::u32 pointLight3DCount() const noexcept
     {
@@ -174,6 +183,7 @@ class DeviceCapture final {
     Core::u32 directionalLightCount_ = 0;
     Core::u32 cascadedDirectionalShadowCount_ = 0;
     Core::u32 cascadedDirectionalShadowCascadeCount_ = 0;
+    std::optional<Render::Mesh3DSpotLightShadow> spotLightShadow_{};
     Core::u32 pointLight3DCount_ = 0;
     Core::u32 spotLight3DCount_ = 0;
     float submittedCameraAspectRatio_ = 0.0F;

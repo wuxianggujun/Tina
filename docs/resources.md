@@ -238,8 +238,8 @@ hierarchy 与 Mesh/Material AssetId。当前 Opaque3D 已采样 baseColor/MR/nor
 4+8+8灯 snapshot；point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull；
 Opaque3D 只使用 vertex tangent TBN，并以 Cook-Torrance GGX 计算 direct light。EnvironmentMap v1 使用32B
 little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完整 mip 链，BRDF LUT 为 RG16F；Runtime
-不做 convolution，只上传 cooked bytes 并以 intensity/world-Y rotation 绑定 split-sum IBL。固定4级联 directional CSM
-与确定性 pass scheduler 已完成，point/spot shadow 与可配置 atlas 仍属 `RENDER-001`。glTF importer 的实际限制见
+不做 convolution，只上传 cooked bytes 并以 intensity/world-Y rotation 绑定 split-sum IBL。固定4级联 directional CSM、
+固定单 SpotLight shadow 与确定性 pass scheduler 已完成，point shadow 与可配置 atlas 仍属 `RENDER-001`。glTF importer 的实际限制见
 [3D 产品架构](game-3d.md)。
 
 ## 文件与安全边界

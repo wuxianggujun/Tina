@@ -654,7 +654,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 超过固定4灯上限显式 `TooManyActiveDirectionalLights`；inactive-only 发布 ambient-only snapshot；
 - `RenderSceneWriter::setMesh3DLighting()` 深拷贝调用方 span，重复/非法描述使 build 原子失败；
 - Null/bgfx submit preflight；bgfx frame snapshot 临时覆盖 device fallback，且每帧只编码一次 uniform arrays；
-- product-3d 当前 schema 12 继承 `directionalLightCount=3`、`sceneLightingFrames=300`。
+- product-3d 当前 schema 13 继承 `directionalLightCount=3`、`sceneLightingFrames=300`。
 
 直接验证入口为 `tina_scene_tests`、`tina_render_scene_tests`、`tina_render_bgfx_tests` 与
 `tina_sample_3d --frames=300 --frame-delay-ms=0 --ui-theme=dark --ui-theme-demo`。公开新头还由
@@ -669,7 +669,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 有效 PerspectiveCamera3D 下的 sphere-frustum center/tangent/outside、相机 world rotation 与容量前 culling；
 - 第9个 camera-affecting light 显式 `TooManyActivePointLights3D`，无相机/0x0 surface 保留未裁剪容量；
 - RenderScene snapshot 深拷贝与统计、Null/bgfx preflight、bgfx 8槽 position/radius + color uniform 与线性径向衰减；
-- product-3d 当前 schema 12 继承 `authoredPointLight3DCount=3`、`pointLight3DCount=2`、
+- product-3d 当前 schema 13 继承 `authoredPointLight3DCount=3`、`pointLight3DCount=2`、
   `culledPointLight3DCount=1`、`submittedLightingFrames=300` 与 `lightingCountsStable=true`。
 
 开发阶段先定向运行 `ScenePointLight3DTest.*`、RenderScene Mesh3D lighting 与 Null/bgfx lighting filters，
@@ -686,7 +686,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 第9个 camera-affecting light 显式 `TooManyActiveSpotLights3D`，无相机/0x0 surface 保留未裁剪容量；
 - RenderScene snapshot 深拷贝与统计、Null/bgfx preflight、bgfx 8槽 position/radius、direction/inner、
   color/outer uniform，以及 shader 的线性径向×平滑角度衰减；
-- product-3d 当前 schema 12 继承 schema 8 固化的 `authoredSpotLight3DCount=3`、`spotLight3DCount=2`、
+- product-3d 当前 schema 13 继承 schema 8 固化的 `authoredSpotLight3DCount=3`、`spotLight3DCount=2`、
   `culledSpotLight3DCount=1` 与 `lightingCountsStable=true`。
 
 开发阶段先定向运行 `SceneSpotLight3DTest.*`、RenderScene Mesh3D lighting 与 Null/bgfx lighting filters，
@@ -702,7 +702,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 缺 NORMAL/UV primitive 显式 cook 失败，不发布不完整 StaticMesh；
 - Asset upload 只有 `createStaticMesh(StaticMeshUploadDesc)`，Null/bgfx 对唯一 stride、index range、generation/retirement 使用同一契约；
 - Opaque3D vertex tangent TBN 与 signed model scale handedness 由 shader/backend test 覆盖，不存在 derivative fallback；
-- product-3d schema 12 要求 complete-PBR fixture `tangentMeshesUploaded=2`。
+- product-3d schema 13 要求 complete-PBR fixture `tangentMeshesUploaded=2`。
 
 统一验证阶段先定向运行 StaticMesh payload、`GltfCookTests.*Tangent*`、GPU mesh upload/bgfx shader filters，
 再构建 `tina_sample_3d` 做30帧 smoke；完整 TEST-003 gate 最后执行。
@@ -713,7 +713,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - Scene extraction 在稳定 directional-light 排序后深拷贝 `directionalLightIndex`；scheduler 固定生成4个 `CascadedDirectionalShadowDepth` pass（`cascadeIndex=0..3`），并证明 atlas clear 不消费 primary-surface clear；
 - bgfx projection math 覆盖四个 camera slice、backend homogeneous depth/origin；resource contract 覆盖 2048² sampled D16 atlas（2×2、每 tile 1024²）的失败回滚与销毁；
 - shader contract 覆盖独立 depth program、receiver normal/depth bias、shadowed directional slot 与 3×3 PCF；
-- product-3d schema 12 只证明 `cascadedDirectionalShadowCount=1`、`submittedCascadedDirectionalShadowCount=1` 及 authored/submitted cascade constant=`4`；GPU 四级联实绘由 bgfx contract 与最终产品视觉 gate 证明。
+- product-3d schema 13 继承 `cascadedDirectionalShadowCount=1`、`submittedCascadedDirectionalShadowCount=1` 及 authored/submitted cascade constant=`4`；GPU 四级联实绘由 bgfx contract 与最终产品视觉 gate 证明。
+
+## Fixed SpotLight3D shadow
+
+`RENDER-001-SPOT-SHADOW` 的最小门禁覆盖：
+
+- Scene `SpotLightShadow3D` 与 Render `Mesh3DSpotLightShadow` 校验 finite near/depth/normal bias，且
+  `0 < nearPlaneMeters < influenceRadiusMeters`；非法 component/descriptor 保持事务原子性；
+- Scene extraction 先完成 camera culling 与稳定 spot-light 排序，再映射 `spotLightIndex`；最多一个
+  camera-affecting shadow config，第二个显式失败；
+- scheduler 固定在4个 CSM pass 后、Opaque3D 前生成一个 `SpotLightShadowDepth` pass，独立 shadow map clear
+  不消费 primary-surface clear；
+- bgfx projection/resource contract 覆盖完整公开 cone 合法域、固定 1024×1024 sampled D16 map、失败回滚
+  与销毁；shader contract 覆盖独立 depth pass、匹配 spot slot、normal/depth bias 与3×3 PCF；
+- product-3d schema 13 要求 `authoredSpotLightShadowCount=1`、`submittedSpotLightShadowCount=1`，并由
+  `DeviceCapture` 比较 committed descriptor，证明整个提交区间保持稳定。
+
+开发阶段只跑 Scene/RenderScene/scheduler/Null/bgfx shadow filters 与30帧 product smoke；完整 TEST-003
+只在合并后的核心常驻 build tree 执行一次。
 
 ## Opaque3D PBR 与 IBL
 
@@ -726,7 +744,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
   retirement marker 与 shutdown ledger；
 - shader contract 固化 Cook-Torrance GGX direct light、diffuse irradiance、roughness specular LOD、BRDF LUT
   split-sum、intensity 与 world-Y rotation，同时保留 directional 3×3 PCF；
-- product-3d schema 12 的 `--ibl=on` 要求 `cookedEnvironmentMap=true`、上传/IBL bind/clear/retire=
+- product-3d schema 13 的 `--ibl=on` 要求 `cookedEnvironmentMap=true`、上传/IBL bind/clear/retire=
   `1/1/1/1`；`--ibl=off` 仍要求上传/retire=`1/1`，但 bind/clear=`0/0`，两种模式都固定
   diffuse/specular/mips/BRDF=`2/4/3/4×4`；
 - Windows product gate 另以30帧执行 on×2 + off×2，同模式 RGBA8 fingerprint 必须稳定，on/off fingerprint
@@ -828,7 +846,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；Sprite2D base/optional-normal extraction 使用 packet-local `FrameResourceRef`；schema 19 继承双灯双遮挡、逐帧 lighting、authored/committed/culled=`3/2/1`、soft=2 及 soft/hard 同机可重复差分，增加 normal count=`1/0` 与 normal on/off 四跑差分，同时保留 Dark→Light→Dark、Tree stable-key selection/scroll/semantics、三份 Registry Lease/GPU/binding owner handoff/retirement、weak texture handle 失效、ledger Released、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、跨 GPU lighting golden、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；evidence schema 12、`tangentMeshesUploaded=2`、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、固定4级联 CSM config authored/submitted=`1`、实时 framebuffer aspect、响应式 right rail/footer、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、point/spot shadow、可配置 atlas、跨 GPU golden |
+| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；evidence schema 13、`tangentMeshesUploaded=2`、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、固定4级联 CSM config authored/submitted=`1`、固定 SpotLight shadow authored/submitted=`1`、实时 framebuffer aspect、响应式 right rail/footer、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、point shadow、可配置 atlas、跨 GPU golden |
 
 `tina_sample_2d` 是唯一产品 2D target；中间迁移名 `tina_sample_2d_tilemap_bgfx` 已删除。
 
@@ -849,7 +867,8 @@ multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E�
 mesh/material AssetId、Prefab dependency、AssetId→Handle→registry-owned binding→packet-local ref 与双 mesh
 binding 可验证。Opaque3D 已做
 baseColor/MR/normal 贴图 **采样**、authored/MikkTSpace vertex tangent、material factors、Cook-Torrance GGX、
-cooked EnvironmentMap split-sum IBL、World directional/point/spot lights 的逐帧 snapshot 与固定4级联 CSM；point/spot shadow 与可配置 atlas 仍后置。
+cooked EnvironmentMap split-sum IBL、World directional/point/spot lights 的逐帧 snapshot、固定4级联 CSM 与
+固定单 SpotLight shadow；point shadow 与可配置 atlas 仍后置。
 
 `ASSET-SEC-001` 的定向门禁是 `GltfCookTests.*`：覆盖主/外部文件 64MiB 上限、短 buffer、strict UTF-8
 与 percent-decoded traversal、root 内和逃逸 symlink/junction、bufferView/accessor/count/overflow、PNG
@@ -1013,11 +1032,11 @@ Windows 同轮 product-3d 拓扑由 `tools/windows/RunProduct3dGate.ps1` 固化�
 `windows-msvc-vnext-bgfx-ui-freetype`，直接构建并运行 Core、Scene、AssetFormat、Asset、bgfx Render、
 UI、Runtime UI、UI Render bridge 与 FreeType 测试，再执行300帧
 `--ui-theme=dark --ui-theme-demo --ibl=on`。
-schema 12 同时断言双 mesh、`tangentMeshesUploaded=2`、固定4级联 CSM config authored/submitted=`1` 且
+schema 13 同时断言双 mesh、`tangentMeshesUploaded=2`、固定4级联 CSM config authored/submitted=`1` 且
 cascade constant=`4`；这些字段只证明配置与固定级联数，GPU 四级联实绘由 bgfx contract 与最终产品视觉 gate 证明；另断言
 一份 cooked EnvironmentMap 的上传/IBL bind/clear/retire 与2/4/3/4×4尺寸、3个跨 Material 共享 PBR Texture、packet-local resolver 600/600、Mesh/Texture
 retirement records Released、3个 directional light、PointLight3D/SpotLight3D 各自
-authored/committed/culled=`3/2/1`、
+authored/committed/culled=`3/2/1`、固定 SpotLight shadow authored/submitted=`1/1` 且 committed descriptor 跨帧稳定、
 `sceneLightingFrames=300`/`submittedLightingFrames=300`/registry 生命周期、7 Panel/13 Label、Button/Checkbox/Slider/ProgressBar/
 ListView/TreeView 创建、2次 collection step、stable keys、继承 chrome、Dark→Light→Dark、100% progress、
 final-present capture、实时 framebuffer camera aspect、responsive UI authoring 与 ledger 归零。开发期 resize

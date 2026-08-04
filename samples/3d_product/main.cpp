@@ -186,6 +186,7 @@ struct LifecycleCounters final {
     u32 authoredSpotLight3DCount = 0;
     u32 spotLight3DCount = 0;
     u32 culledSpotLight3DCount = 0;
+    u32 authoredSpotLightShadowCount = 0;
     u64 submittedLightingFrames = 0;
     u32 submittedDirectionalLightCount = 0;
     u64 windowMetricsEvents = 0;
@@ -1683,6 +1684,7 @@ class Product3DState final : public Tina::IGameState {
             float intensity = 1.0F;
             float innerConeHalfAngleDegrees = 16.0F;
             float outerConeHalfAngleDegrees = 30.0F;
+            bool castsShadow = false;
         };
         const float spotInfluenceRadius = (std::max)(radius * 2.25F, 3.0F);
         const Tina::Scene::Vec3 sceneCenter{centerX, centerY, centerZ};
@@ -1695,6 +1697,7 @@ class Product3DState final : public Tina::IGameState {
                 .intensity = 0.9F,
                 .innerConeHalfAngleDegrees = 14.0F,
                 .outerConeHalfAngleDegrees = 28.0F,
+                .castsShadow = true,
             },
             ProductSpotLight{
                 .position = {centerX + radius * 1.25F, centerY + radius * 0.65F,
@@ -1723,15 +1726,19 @@ class Product3DState final : public Tina::IGameState {
             {
                 return Tina::Core::failure(std::move(lightEntity.error()));
             }
-            if (auto status = world_->setSpotLight3D(
-                    *lightEntity,
-                    Tina::Scene::SpotLight3D{
-                        .color = light.color,
-                        .intensity = light.intensity,
-                        .influenceRadiusMeters = spotInfluenceRadius,
-                        .innerConeHalfAngleDegrees = light.innerConeHalfAngleDegrees,
-                        .outerConeHalfAngleDegrees = light.outerConeHalfAngleDegrees,
-                    });
+            Tina::Scene::SpotLight3D component{
+                .color = light.color,
+                .intensity = light.intensity,
+                .influenceRadiusMeters = spotInfluenceRadius,
+                .innerConeHalfAngleDegrees = light.innerConeHalfAngleDegrees,
+                .outerConeHalfAngleDegrees = light.outerConeHalfAngleDegrees,
+            };
+            if (light.castsShadow)
+            {
+                component.shadow = Tina::Scene::SpotLightShadow3D{};
+                ++counters_->authoredSpotLightShadowCount;
+            }
+            if (auto status = world_->setSpotLight3D(*lightEntity, component);
                 !status)
             {
                 return status;
@@ -2065,6 +2072,7 @@ class Product3DApplication final : public Tina::IGameApplication {
     const u32 submittedCascadedDirectionalShadowCount = capture.cascadedDirectionalShadowCount();
     const u32 submittedCascadedDirectionalShadowCascadeCount =
         capture.cascadedDirectionalShadowCascadeCount();
+    const u32 submittedSpotLightShadowCount = capture.spotLightShadowCount();
     counters.submittedCameraAspectRatio = capture.submittedCameraAspectRatio();
     counters.cameraAspectChanges = capture.cameraAspectChanges();
     counters.pointLight3DCount = capture.pointLight3DCount();
@@ -2234,6 +2242,7 @@ class Product3DApplication final : public Tina::IGameApplication {
             Tina::Render::Mesh3DCascadedDirectionalShadow::CascadeCount ||
         submittedCascadedDirectionalShadowCascadeCount !=
             Tina::Render::Mesh3DCascadedDirectionalShadow::CascadeCount ||
+        counters.authoredSpotLightShadowCount != 1U || submittedSpotLightShadowCount != 1U ||
         counters.authoredPointLight3DCount != 3U || counters.pointLight3DCount != 2U ||
         counters.culledPointLight3DCount != 1U ||
         counters.authoredSpotLight3DCount != 3U || counters.spotLight3DCount != 2U ||
@@ -2309,6 +2318,9 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << counters.cascadedDirectionalShadowCascadeCount
                   << ",\"submittedCascadedDirectionalShadowCascadeCount\":"
                   << submittedCascadedDirectionalShadowCascadeCount
+                  << ",\"authoredSpotLightShadowCount\":"
+                  << counters.authoredSpotLightShadowCount
+                  << ",\"submittedSpotLightShadowCount\":" << submittedSpotLightShadowCount
                   << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
                   << ",\"pointLight3DCount\":" << counters.pointLight3DCount
                   << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount
@@ -2381,7 +2393,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":12,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":13,\"frames\":"
               << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"cookedEnvironmentMap\":true,"
@@ -2440,6 +2452,9 @@ class Product3DApplication final : public Tina::IGameApplication {
               << counters.cascadedDirectionalShadowCascadeCount
               << ",\"submittedCascadedDirectionalShadowCascadeCount\":"
               << submittedCascadedDirectionalShadowCascadeCount
+              << ",\"authoredSpotLightShadowCount\":"
+              << counters.authoredSpotLightShadowCount
+              << ",\"submittedSpotLightShadowCount\":" << submittedSpotLightShadowCount
               << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
               << ",\"pointLight3DCount\":" << counters.pointLight3DCount
               << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount

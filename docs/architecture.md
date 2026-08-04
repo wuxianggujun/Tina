@@ -200,8 +200,8 @@ PerspectiveCamera3D frustum cull，spot light 额外提交 world local `-Z` 出�
 product-3d 从 primary-window metrics 取得实时 framebuffer extent，因此相机 aspect、light frustum 与 bgfx view rect
 使用同一 surface；UI 则按 logical extent 以 right/end/stretch 约束重排，不按 client 尺寸全局缩放。产品
 EnvironmentMap cooked asset 绑定 diffuse irradiance/specular prefilter cubemap 与 BRDF LUT，并由统一
-`GpuEnvironmentMapId` 负责 create/validate/bind/clear/retire；固定4级联 directional CSM 与 deterministic pass scheduler
-已完成，point/spot shadow、可配置 atlas 与通用 GPU submission fence 仍未完成。Frame packet 的 FramePin 只覆盖同步
+`GpuEnvironmentMapId` 负责 create/validate/bind/clear/retire；固定4级联 directional CSM、固定单 SpotLight shadow
+与 deterministic pass scheduler 已完成，point shadow、可配置 atlas 与通用 GPU submission fence 仍未完成。Frame packet 的 FramePin 只覆盖同步
 submit/present 的 CPU 借用期；Texture/Mesh/EnvironmentMap 则使用独立 readback completion marker。
 Texture/Mesh retirement 同时保留 AssetLease，EnvironmentMap 由产品显式 GPU owner 负责；两类 GPU retirement
 都不能用 CPU FramePin 作为完成证据。

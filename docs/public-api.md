@@ -1,7 +1,7 @@
 # Public API
 
 本文描述当前 `include/tina` 公共面和 CMake target。它不是未来 SDK 愿望清单；尚未存在的能力（通用
-event queue、通用 GPU submission fence、point/spot shadow 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
+event queue、通用 GPU submission fence、point shadow 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
 首切片**已经存在**。
 
 ## 分层
@@ -581,7 +581,10 @@ destroy/retire 与 failure rollback 均为一个事务。`Mesh3DImageBasedLighti
 与 world-Y rotation，`clearMesh3DImageBasedLighting()` 显式恢复无 IBL 状态。一个 directional light 可投射固定4级联
 2048×2048 D16 atlas 阴影（2×2、每 tile 1024×1024）；optional `CascadedDirectionalShadow3D` 的 `maximumDistanceMeters`、`depthBias`
 与 `normalBiasMeters` 随帧 snapshot 深拷贝，Render 侧以排序后的 `directionalLightIndex` 关联灯光。
-point/spot shadow 与可配置 atlas 尚未完成。
+`SpotLight3D::shadow` 可携带 `SpotLightShadow3D`；`nearPlaneMeters` 必须正且小于该灯 influence radius，
+depth/normal bias 必须有限且有界。每帧最多一个 camera-affecting spot shadow，Scene 在 culling 与稳定排序后
+把它深拷贝为 `Mesh3DSpotLightShadow`，以 `spotLightIndex` 关联 Render 灯槽。point shadow 与可配置 atlas
+尚未完成。
 
 ## Audio 与 Physics
 
@@ -651,7 +654,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
-- point/spot shadow 与可配置 shadow atlas；
+- point shadow 与可配置 shadow atlas；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
