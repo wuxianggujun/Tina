@@ -61,6 +61,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/UploadTicketTests.cpp
     render/FramePinPacketTests.cpp
     render/GpuTextureUploadTests.cpp
+    render/EnvironmentMapUploadTests.cpp
     render/GpuMeshUploadTests.cpp
     render/RenderPassSchedulerTests.cpp
     render/UIDisplayListTests.cpp
