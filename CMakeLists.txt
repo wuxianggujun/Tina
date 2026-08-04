@@ -254,13 +254,14 @@ endif()
 include(Dependencies)
 include(TinaUiFont)
 
+if(TINA_TRACE_BACKEND STREQUAL "tracy")
+    add_subdirectory(src/trace/tracy)
+endif()
+
 if(TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
     add_subdirectory(thirdparty)
 endif()
 
-if (TINA_TRACE_BACKEND STREQUAL "tracy")
-    add_subdirectory(src/trace/tracy)
-endif ()
 add_subdirectory(src/core)
 add_subdirectory(src/integration)
 add_subdirectory(src/platform)

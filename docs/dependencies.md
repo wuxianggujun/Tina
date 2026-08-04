@@ -74,12 +74,15 @@ TINA_BUILD_LEGACY=OFF only
 `TINA_BUILD_LEGACY=ON` 必须在 configure 阶段 FATAL。全部 preset 与输出路径见[构建说明](building.md)，
 这里不复制 preset 清单。
 
-不存在 `TINA_PROFILE_BACKEND`、`TINA_PROFILE_TRACY_*`、`profile-tracy` feature、
-`tina_profile_config` 或 `tina_profile_tracy` target。Core 当前 PUBLIC 传播
-`TINA_TRACE_BACKEND_NONE=1`，这只是选择无第三方依赖的编译期 None frontend：
-`TINA_TRACE_ZONE(nameLiteral)` 不求值参数、不构造对象、不调用函数、不分配内存且不使用全局状态。
-ADR 0002 保留 Tracy 作为未来定位工具方向，但 Tracy dependency/adapter/session 尚未接入，当前不提供
-capture；Metrics 也仍只有设计。`tina_bench` schema v1 已存在，target 在
+`TINA_TRACE_BACKEND` 是唯一 backend 选择，支持默认 `none` 与开发定位用 `tracy`。Tracy 图要求
+`profile-tracy` manifest feature，解析 Tracy 0.13.1，并只在私有 `tina_trace_tracy` / `Tina::TraceTracy`
+adapter implementation TU 中包含 Tracy header 和链接 client。Tracy 图的 Core/Game SDK 公共面只传播
+backend-neutral `TINA_TRACE_BACKEND_ENABLED=1`，不暴露 Tracy token 或类型。None 下
+`TINA_TRACE_ZONE(nameLiteral)` 不求值参数、
+不构造对象、不调用函数、不分配内存且不使用全局状态。
+
+当前没有 Tina-owned Tracy session/capture control API；capture 由 Tracy 工具连接开发构建完成。Metrics
+仍只有设计。`tina_bench` schema v1 已存在，target 在
 `TINA_BUILD_BENCHMARKS=ON` 或 examples 图中存在；固定机 hard gate 与多进程 MAD 由
 `PERF-002` 跟踪，不得把共享机 provisional 结果写成发布门禁。
 

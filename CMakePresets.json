@@ -65,6 +65,16 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-profile-tracy",
+      "displayName": "Windows x64 vNext Profile (MSVC 2026 + Tracy 0.13.1)",
+      "inherits": "windows-msvc-vnext",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-profile-tracy",
+      "cacheVariables": {
+        "TINA_TRACE_BACKEND": "tracy",
+        "VCPKG_MANIFEST_FEATURES": "tests;profile-tracy"
+      }
+    },
+    {
       "name": "windows-msvc-vnext-audio-miniaudio",
       "displayName": "Windows x64 vNext Audio miniaudio adapter (MSVC 2026 + C++23)",
       "inherits": "windows-msvc-vnext",
@@ -336,6 +346,12 @@
     {
       "name": "windows-vnext-physics2d-debug",
       "configurePreset": "windows-msvc-vnext-physics2d",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-profile-tracy-debug",
+      "configurePreset": "windows-msvc-vnext-profile-tracy",
       "configuration": "Debug",
       "jobs": 2
     },

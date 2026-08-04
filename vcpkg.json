@@ -10,6 +10,16 @@
     "xxhash"
   ],
   "features": {
+    "profile-tracy": {
+      "description": "Build the optional Tina Tracy profiling adapter.",
+      "dependencies": [
+        {
+          "name": "tracy",
+          "default-features": false,
+          "version>=": "0.13.1"
+        }
+      ]
+    },
     "physics2d": {
       "description": "Build the optional Tina vNext Box2D physics module.",
       "dependencies": [

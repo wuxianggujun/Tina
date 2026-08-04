@@ -58,6 +58,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | --- | --- |
 | `Tina::GameSDK` | backend-neutral Game SDK 聚合 target；不包含 Desktop/backend adapter |
 | `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、diagnostics、compile-time Trace frontend |
+| `Tina::TraceTracy` | optional private Tracy 0.13.1 Trace adapter；只在 Tracy Profile package 中存在 |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |

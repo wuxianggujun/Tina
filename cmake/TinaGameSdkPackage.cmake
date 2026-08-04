@@ -74,6 +74,13 @@ function(tina_configure_game_sdk_package)
         set(TINA_PACKAGE_WITH_UI_UIA ON)
     endif()
 
+    set(TINA_PACKAGE_WITH_TRACE_TRACY OFF)
+    if(TARGET tina_trace_tracy)
+        list(APPEND tina_sdk_export_targets tina_trace_tracy)
+        tina_configure_game_sdk_target(tina_trace_tracy TraceTracy)
+        set(TINA_PACKAGE_WITH_TRACE_TRACY ON)
+    endif()
+
     set(TINA_PACKAGE_WITH_PLATFORM_GLFW OFF)
     if(TARGET tina_platform_glfw)
         tina_configure_game_sdk_target(tina_platform_glfw PlatformGlfw)

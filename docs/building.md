@@ -34,6 +34,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 | Preset | 图 | Manifest features |
 | --- | --- | --- |
 | `windows-msvc-vnext` | Null/Core/Asset/Scene/UI 基础图 | `tests` |
+| `windows-msvc-vnext-profile-tracy` | Null 基础图 + Tracy 0.13.1 开发定位 | `tests;profile-tracy` |
 | `windows-msvc-vnext-platform` | GLFW + NullRender | `tests;platform-glfw` |
 | `windows-msvc-vnext-bgfx` | GLFW + bgfx + Desktop/产品样例 | `tests;platform-glfw`（默认 preset 继承） |
 | `windows-msvc-vnext-physics2d` | Null + Box2D | `tests;physics2d` |
@@ -395,5 +396,5 @@ LSAN_OPTIONS=exitcode=23 ./out/build/linux-clang22-vnext-sanitize/bin/tina_tests
 | `TINA_BUILD_PHYSICS2D` | OFF | 可选 Box2D 模块 |
 | `TINA_ENABLE_SANITIZERS` | OFF | Unix GCC/Clang ASan/UBSan |
 | `TINA_BUILD_BENCHMARKS` | OFF | 打开时构建 `tina_bench`；examples 开启时也会构建 |
-| `TINA_TRACE_BACKEND` | `none` | 编译期 Trace backend；当前其他值在 configure 阶段 FATAL |
+| `TINA_TRACE_BACKEND` | `none` | 编译期 Trace backend；支持 `none` / `tracy`，后者要求 `profile-tracy` manifest feature |
 | `TINA_UI_FONT_PATH` | 空 | 可选字体文件 |
