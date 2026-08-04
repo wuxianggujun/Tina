@@ -24,6 +24,7 @@ struct RenderPassPlan final {
 
 class RenderPassSchedule final {
   public:
+    // Optional full-surface clear plus Opaque3D, Sprite2D and UI.
     static constexpr u32 MaximumPassCount = 4;
 
     [[nodiscard]] constexpr std::span<const RenderPassPlan> passes() const noexcept
@@ -41,9 +42,11 @@ class RenderPassSchedule final {
 };
 
 // Builds the deterministic pass order shared by all render backends. The first
-// enabled content pass owns the surface color/depth clear; an active surface
-// with no content receives one explicit clear-only pass. Suspended surfaces
-// produce an empty schedule and must skip submit/present.
+// enabled full-surface primary-surface content pass owns the color/depth clear.
+// When the first primary-surface content pass uses a partial viewport, a
+// full-surface clear pass precedes it; an active surface with no content also
+// receives one clear-only pass.
+// Suspended surfaces produce an empty schedule and must skip submit/present.
 [[nodiscard]] Core::Result<RenderPassSchedule>
 buildRenderPassSchedule(const RenderFrame& frame) noexcept;
 

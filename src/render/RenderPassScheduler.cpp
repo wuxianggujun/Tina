@@ -4,6 +4,15 @@
 
 namespace Tina::Render {
 
+namespace {
+
+[[nodiscard]] bool coversWholeSurface(const RenderNormalizedViewport& viewport) noexcept
+{
+    return viewport.x == 0.0F && viewport.y == 0.0F && viewport.width == 1.0F && viewport.height == 1.0F;
+}
+
+} // namespace
+
 Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& frame) noexcept
 {
     if (!frame.primaryWindowSurface.has_value())
@@ -37,7 +46,23 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
         return true;
     };
 
-    bool ownsClear = true;
+    const bool hasOpaqueContent = frame.primaryWorldScene.perspectiveCamera().has_value() &&
+                                  !frame.primaryWorldScene.meshes3D().empty();
+    const bool hasSpriteContent = frame.primaryWorldScene.camera2D().has_value() &&
+                                  !frame.primaryWorldScene.sprites2D().empty();
+    const bool firstSurfaceContentNeedsFullSurfaceClear =
+        (hasOpaqueContent &&
+         !coversWholeSurface(frame.primaryWorldScene.perspectiveCamera()->normalizedViewport)) ||
+        (!hasOpaqueContent && hasSpriteContent &&
+         !coversWholeSurface(frame.primaryWorldScene.camera2D()->normalizedViewport));
+
+    bool ownsClear = !firstSurfaceContentNeedsFullSurfaceClear;
+    if (firstSurfaceContentNeedsFullSurfaceClear && !append(RenderPassKind::Clear, true, true))
+    {
+        return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
+                             "Render pass schedule exceeded its fixed pass capacity");
+    }
+
     const auto appendContent = [&append, &ownsClear](RenderPassKind kind) noexcept {
         const bool clearColor = ownsClear;
         const bool clearDepth = ownsClear;
@@ -45,14 +70,12 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
         return append(kind, clearColor, clearDepth);
     };
 
-    if (frame.primaryWorldScene.perspectiveCamera().has_value() &&
-        !frame.primaryWorldScene.meshes3D().empty() && !appendContent(RenderPassKind::Opaque3D))
+    if (hasOpaqueContent && !appendContent(RenderPassKind::Opaque3D))
     {
         return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
                              "Render pass schedule exceeded its fixed pass capacity");
     }
-    if (frame.primaryWorldScene.camera2D().has_value() && !frame.primaryWorldScene.sprites2D().empty() &&
-        !appendContent(RenderPassKind::Sprite2D))
+    if (hasSpriteContent && !appendContent(RenderPassKind::Sprite2D))
     {
         return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
                              "Render pass schedule exceeded its fixed pass capacity");
