@@ -20,6 +20,7 @@ set_target_properties(tina_render_bgfx_ui_atlas_contract_test_object PROPERTIES 
 
 add_executable(tina_render_bgfx_tests
     BgfxOpaque3DGeometryTests.cpp
+    BgfxDirectionalShadowMathTests.cpp
     BgfxResourceSlotGenerationTests.cpp
     BgfxRetirementTimelineTests.cpp
     BgfxRenderDeviceFactoryTests.cpp

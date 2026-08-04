@@ -43,6 +43,8 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxRenderDevice.hpp
         bgfx/BgfxOpaque3DGeometry.cpp
         bgfx/BgfxOpaque3DGeometry.hpp
+        bgfx/BgfxDirectionalShadowMath.cpp
+        bgfx/BgfxDirectionalShadowMath.hpp
         bgfx/BgfxOpaque3DShader.cpp
         bgfx/BgfxOpaque3DShader.hpp
         bgfx/BgfxResourceSlotGeneration.hpp
