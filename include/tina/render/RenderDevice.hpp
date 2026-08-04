@@ -106,22 +106,9 @@ struct Texture2DUploadDesc final {
     std::span<const std::byte> rgba8Pixels{};
 };
 
-// Interleaved P3_N3_UV2 floats (8 per vertex) + U16 triangle indices.
-// Matches AssetFormat::StaticMeshVertexLayout::P3N3UV2 / Opaque3D fixture layout.
-struct StaticMeshUploadDesc final {
-    u32 vertexCount = 0;
-    u32 indexCount = 0;
-    std::span<const float> vertices{}; // size == vertexCount * 8
-    std::span<const u16> indices{};    // size == indexCount, multiple of 3
-};
-
-// Explicit layout name for call sites that distinguish the existing P3N3UV2 path.
-// StaticMeshUploadDesc remains available for existing callers.
-using StaticMeshP3N3UV2UploadDesc = StaticMeshUploadDesc;
-
 // Interleaved P3_N3_T4_UV2 floats (12 per vertex) + U16 triangle indices.
-// tangent.xyz is a non-zero vertex tangent and tangent.w is exactly -1 or +1.
-struct StaticMeshP3N3T4UV2UploadDesc final {
+// tangent.xyz is non-zero and tangent.w is exactly -1 or +1.
+struct StaticMeshUploadDesc final {
     u32 vertexCount = 0;
     u32 indexCount = 0;
     std::span<const float> vertices{}; // size == vertexCount * 12
@@ -267,19 +254,12 @@ class IRenderDevice {
     }
 
     // Optional StaticMesh GPU path (M11-E2 / RENDER-001-VERTEX-TANGENTS).
-    // Null records logical meshes; bgfx creates real VB/IB for either explicit layout.
-    [[nodiscard]] virtual Core::Result<GpuMeshId> createStaticMeshP3N3UV2(const StaticMeshUploadDesc& desc)
+    // Null records logical meshes; bgfx creates a P3N3T4UV2 VB and U16 IB.
+    [[nodiscard]] virtual Core::Result<GpuMeshId> createStaticMesh(const StaticMeshUploadDesc& desc)
     {
         static_cast<void>(desc);
         return Core::failure(RenderErrorCode::MeshUploadUnsupported,
                              "This render device does not support StaticMesh upload");
-    }
-    [[nodiscard]] virtual Core::Result<GpuMeshId>
-    createStaticMeshP3N3T4UV2(const StaticMeshP3N3T4UV2UploadDesc& desc)
-    {
-        static_cast<void>(desc);
-        return Core::failure(RenderErrorCode::MeshUploadUnsupported,
-                             "This render device does not support tangent StaticMesh upload");
     }
     [[nodiscard]] virtual Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept
     {

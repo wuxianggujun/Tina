@@ -12,28 +12,7 @@ inline constexpr u32 Opaque3DmeshKey = 1;
 inline constexpr u32 Opaque3DmaterialKey = 1;
 inline constexpr u32 Opaque3DFixtureSubmeshIndex = 0;
 
-enum class BgfxOpaque3DVertexFormat : u8 {
-    P3N3UV2,
-    P3N3T4UV2,
-};
-
-[[nodiscard]] constexpr bool hasVertexTangents(BgfxOpaque3DVertexFormat format) noexcept
-{
-    return format == BgfxOpaque3DVertexFormat::P3N3T4UV2;
-}
-
 struct BgfxOpaque3DVertex final {
-    float positionX = 0.0F;
-    float positionY = 0.0F;
-    float positionZ = 0.0F;
-    float normalX = 0.0F;
-    float normalY = 0.0F;
-    float normalZ = 0.0F;
-    float textureU = 0.0F;
-    float textureV = 0.0F;
-};
-
-struct BgfxOpaque3DTangentVertex final {
     float positionX = 0.0F;
     float positionY = 0.0F;
     float positionZ = 0.0F;

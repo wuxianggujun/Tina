@@ -160,14 +160,9 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
         return inner_->capturePrimaryFrameRgba8();
     }
     [[nodiscard]] Core::Result<Render::GpuMeshId>
-    createStaticMeshP3N3UV2(const Render::StaticMeshUploadDesc& desc) override
+    createStaticMesh(const Render::StaticMeshUploadDesc& desc) override
     {
-        return inner_->createStaticMeshP3N3UV2(desc);
-    }
-    [[nodiscard]] Core::Result<Render::GpuMeshId> createStaticMeshP3N3T4UV2(
-        const Render::StaticMeshP3N3T4UV2UploadDesc& desc) override
-    {
-        return inner_->createStaticMeshP3N3T4UV2(desc);
+        return inner_->createStaticMesh(desc);
     }
     [[nodiscard]] Core::Status destroyStaticMesh(Render::GpuMeshId mesh) noexcept override
     {

@@ -46,7 +46,7 @@ struct MountPointReparseData final {
 namespace Tina::Asset {
 namespace {
 
-// Minimal glTF 2.0 triangle with POSITION + indices (no external buffers).
+// Minimal glTF 2.0 triangle with required POSITION/NORMAL/TEXCOORD_0 + indices.
 // Unit right triangle in XY.
 [[nodiscard]] std::string minimalTriangleGltfJson()
 {
@@ -58,8 +58,8 @@ namespace {
   "nodes": [{"mesh": 0}],
   "meshes": [{
     "primitives": [{
-      "attributes": {"POSITION": 0},
-      "indices": 1,
+      "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+      "indices": 3,
       "mode": 4,
       "material": 0
     }]
@@ -80,6 +80,18 @@ namespace {
     },
     {
       "bufferView": 1,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
       "componentType": 5123,
       "count": 3,
       "type": "SCALAR"
@@ -87,11 +99,13 @@ namespace {
   ],
   "bufferViews": [
     {"buffer": 0, "byteOffset": 0, "byteLength": 36},
-    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6}
   ],
   "buffers": [{
-    "byteLength": 44,
-    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAA"
+    "byteLength": 104,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA="
   }]
 })json";
 }
@@ -102,24 +116,34 @@ namespace {
   "asset": {"version": "2.0"},
   "scenes": [{"nodes": [0]}],
   "nodes": [{"mesh": 0}],
-  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "mode": 4}]}],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3, "mode": 4}]}],
   "accessors": [
     {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
-    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
+    {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}
   ],
   "bufferViews": [
     {"buffer": 0, "byteOffset": 0, "byteLength": 36},
-    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6}
   ],
-  "buffers": [{"byteLength": 44, "uri": ")json"} + std::string{uri} + R"json("}]
+  "buffers": [{"byteLength": 104, "uri": ")json"} + std::string{uri} + R"json("}]
 })json";
 }
 
-[[nodiscard]] std::array<unsigned char, 44> externalTriangleBufferBytes()
+[[nodiscard]] std::array<unsigned char, 104> externalTriangleBufferBytes()
 {
-    std::array<unsigned char, 44> bytes{};
-    bytes[38] = 1;
-    bytes[40] = 2;
+    std::array<unsigned char, 104> bytes{};
+    const std::array<float, 9> positions{0, 0, 0, 1, 0, 0, 0, 1, 0};
+    const std::array<float, 9> normals{0, 0, 1, 0, 0, 1, 0, 0, 1};
+    const std::array<float, 6> texcoords{0, 0, 1, 0, 0, 1};
+    std::memcpy(bytes.data(), positions.data(), sizeof(positions));
+    std::memcpy(bytes.data() + 36U, normals.data(), sizeof(normals));
+    std::memcpy(bytes.data() + 72U, texcoords.data(), sizeof(texcoords));
+    bytes[98] = 1;
+    bytes[100] = 2;
     return bytes;
 }
 
@@ -383,10 +407,9 @@ TEST(GltfCookTests, CooksMinimalTriangleToMeshMaterialPrefab)
             sawMesh = true;
             auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
             ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
-            EXPECT_EQ(view->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3UV2);
             EXPECT_EQ(view->vertexCount, 3U);
             EXPECT_EQ(view->indexCount, 3U);
-            EXPECT_EQ(view->vertices.size(), 3U * AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex);
+            EXPECT_EQ(view->vertices.size(), 3U * AssetFormat::StaticMeshWire::FloatsPerVertex);
         }
         else if (asset.assetKind == AssetFormat::AssetKind::Material)
         {
@@ -429,9 +452,7 @@ TEST(GltfCookTests, PreservesAuthoredTangents)
         }
         auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
         ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
-        ASSERT_EQ(view->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3T4UV2);
-        ASSERT_EQ(view->vertices.size(),
-                  3U * AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex);
+        ASSERT_EQ(view->vertices.size(), 3U * AssetFormat::StaticMeshWire::FloatsPerVertex);
         EXPECT_FLOAT_EQ(view->vertices[6], 0.0F);
         EXPECT_FLOAT_EQ(view->vertices[7], 1.0F);
         EXPECT_FLOAT_EQ(view->vertices[8], 0.0F);
@@ -501,12 +522,10 @@ TEST(GltfCookTests, GeneratesMissingTangentsWithMikkTSpace)
         }
         auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
         ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
-        ASSERT_EQ(view->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3T4UV2);
-        ASSERT_EQ(view->vertices.size(),
-                  3U * AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex);
+        ASSERT_EQ(view->vertices.size(), 3U * AssetFormat::StaticMeshWire::FloatsPerVertex);
         for (std::size_t vertex = 0; vertex < view->vertexCount; ++vertex)
         {
-            const std::size_t base = vertex * AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex;
+            const std::size_t base = vertex * AssetFormat::StaticMeshWire::FloatsPerVertex;
             const float tangentLength = std::sqrt(view->vertices[base + 6U] * view->vertices[base + 6U] +
                                                   view->vertices[base + 7U] * view->vertices[base + 7U] +
                                                   view->vertices[base + 8U] * view->vertices[base + 8U]);
@@ -516,6 +535,44 @@ TEST(GltfCookTests, GeneratesMissingTangentsWithMikkTSpace)
         return;
     }
     FAIL() << "cooked request did not contain a StaticMesh";
+}
+
+TEST(GltfCookTests, RejectsPrimitiveWithoutRequiredNormal)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_missing_normal";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    std::string json = tangentTriangleGltfJson(false);
+    const std::string normalAttribute = "\"NORMAL\": 1, ";
+    const std::size_t attributeOffset = json.find(normalAttribute);
+    ASSERT_NE(attributeOffset, std::string::npos);
+    json.erase(attributeOffset, normalAttribute.size());
+    writeTextFile(dir / "triangle.gltf", json);
+    writeBinaryFile(dir / "geometry.bin", tangentTriangleBufferBytes(false));
+
+    auto request = cookGltfFileToCatalogRequest((dir / "triangle.gltf").string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("NORMAL"), std::string::npos) << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsPrimitiveWithoutRequiredTexcoord)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_missing_texcoord";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    std::string json = tangentTriangleGltfJson(false);
+    const std::string texcoordAttribute = ", \"TEXCOORD_0\": 2";
+    const std::size_t attributeOffset = json.find(texcoordAttribute);
+    ASSERT_NE(attributeOffset, std::string::npos);
+    json.erase(attributeOffset, texcoordAttribute.size());
+    writeTextFile(dir / "triangle.gltf", json);
+    writeBinaryFile(dir / "geometry.bin", tangentTriangleBufferBytes(false));
+
+    auto request = cookGltfFileToCatalogRequest((dir / "triangle.gltf").string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("TEXCOORD_0"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, SplitsSharedVertexAcrossMikkTangentHandednessDiscontinuity)
@@ -538,14 +595,13 @@ TEST(GltfCookTests, SplitsSharedVertexAcrossMikkTangentHandednessDiscontinuity)
         }
         auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
         ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
-        ASSERT_EQ(view->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3T4UV2);
         ASSERT_EQ(view->indexCount, 6U);
         ASSERT_GT(view->vertexCount, 5U);
         ASSERT_NE(view->indices[0], view->indices[3]);
         const std::size_t first = static_cast<std::size_t>(view->indices[0]) *
-                                  AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex;
+                                  AssetFormat::StaticMeshWire::FloatsPerVertex;
         const std::size_t mirrored = static_cast<std::size_t>(view->indices[3]) *
-                                     AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex;
+                                     AssetFormat::StaticMeshWire::FloatsPerVertex;
         EXPECT_FLOAT_EQ(view->vertices[first + 9U], -view->vertices[mirrored + 9U]);
         return;
     }
@@ -556,9 +612,7 @@ TEST(GltfCookTests, SplitsSharedVertexAcrossMikkTangentHandednessDiscontinuity)
 [[nodiscard]] std::string twoMeshGltfJson()
 {
     // Mesh0: triangle at origin; Mesh1: second triangle translated in node TRS.
-    // Shared buffer layout: 6*float3 positions + 6*u16 indices.
-    // Positions: (0,0,0)(1,0,0)(0,1,0) and (0,0,0)(1,0,0)(0,1,0) again.
-    // Base64 for 72 bytes pos + 12 bytes indices = 84 bytes padded.
+    // Both mesh definitions share one complete vertex/index stream.
     return R"json({
   "asset": {"version": "2.0"},
   "scenes": [{"nodes": [0, 1]}],
@@ -567,8 +621,8 @@ TEST(GltfCookTests, SplitsSharedVertexAcrossMikkTangentHandednessDiscontinuity)
     {"mesh": 1, "translation": [2.0, 0.0, 0.0]}
   ],
   "meshes": [
-    {"primitives": [{"attributes": {"POSITION": 0}, "indices": 2, "mode": 4, "material": 0}]},
-    {"primitives": [{"attributes": {"POSITION": 1}, "indices": 3, "mode": 4, "material": 1}]}
+    {"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3, "mode": 4, "material": 0}]},
+    {"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3, "mode": 4, "material": 1}]}
   ],
   "materials": [
     {"pbrMetallicRoughness": {"baseColorFactor": [1.0, 0.2, 0.2, 1.0]}},
@@ -580,19 +634,20 @@ TEST(GltfCookTests, SplitsSharedVertexAcrossMikkTangentHandednessDiscontinuity)
       "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
     },
     {
-      "bufferView": 0, "byteOffset": 36, "componentType": 5126, "count": 3, "type": "VEC3",
-      "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
+      "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"
     },
-    {"bufferView": 1, "byteOffset": 0, "componentType": 5123, "count": 3, "type": "SCALAR"},
-    {"bufferView": 1, "byteOffset": 6, "componentType": 5123, "count": 3, "type": "SCALAR"}
+    {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}
   ],
   "bufferViews": [
-    {"buffer": 0, "byteOffset": 0, "byteLength": 72},
-    {"buffer": 0, "byteOffset": 72, "byteLength": 12}
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6}
   ],
   "buffers": [{
-    "byteLength": 84,
-    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAAAAAAAAEAAAACAAAA"
+    "byteLength": 104,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA="
   }]
 })json";
 }
@@ -670,8 +725,8 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
   "nodes": [{"mesh": 0}],
   "meshes": [{
     "primitives": [{
-      "attributes": {"POSITION": 0, "TEXCOORD_0": 1},
-      "indices": 2,
+      "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+      "indices": 3,
       "mode": 4,
       "material": 0
     }]
@@ -692,20 +747,24 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
       "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
     },
     {
-      "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC2"
+      "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"
     },
     {
-      "bufferView": 2, "componentType": 5123, "count": 3, "type": "SCALAR"
+      "bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"
+    },
+    {
+      "bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"
     }
   ],
   "bufferViews": [
     {"buffer": 0, "byteOffset": 0, "byteLength": 36},
-    {"buffer": 0, "byteOffset": 36, "byteLength": 24},
-    {"buffer": 0, "byteOffset": 60, "byteLength": 6}
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6}
   ],
   "buffers": [{
-    "byteLength": 68,
-    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAAAAAAAgD8BAAAAAgAAAA=="
+    "byteLength": 104,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA="
   }]
 })json";
 }
@@ -791,8 +850,8 @@ TEST(GltfCookTests, CooksMetallicRoughnessAndNormalTextureDeps)
   "nodes": [{"mesh": 0}],
   "meshes": [{
     "primitives": [{
-      "attributes": {"POSITION": 0, "TEXCOORD_0": 1},
-      "indices": 2,
+      "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+      "indices": 3,
       "mode": 4,
       "material": 0
     }]
@@ -815,20 +874,24 @@ TEST(GltfCookTests, CooksMetallicRoughnessAndNormalTextureDeps)
       "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
     },
     {
-      "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC2"
+      "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"
     },
     {
-      "bufferView": 2, "componentType": 5123, "count": 3, "type": "SCALAR"
+      "bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"
+    },
+    {
+      "bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"
     }
   ],
   "bufferViews": [
     {"buffer": 0, "byteOffset": 0, "byteLength": 36},
-    {"buffer": 0, "byteOffset": 36, "byteLength": 24},
-    {"buffer": 0, "byteOffset": 60, "byteLength": 6}
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6}
   ],
   "buffers": [{
-    "byteLength": 68,
-    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAAAAAAAgD8BAAAAAgAAAA=="
+    "byteLength": 104,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA="
   }]
 })json";
     }
@@ -1261,15 +1324,15 @@ TEST(GltfCookTests, RejectsDecodedImageByteBombFromHeaderBeforeDecode)
 // Cooker SPLITs into two StaticMesh + two Material; Prefab expands to transform parent + 2 children.
 [[nodiscard]] std::string multiPrimitiveMeshGltfJson()
 {
-    // Shared buffer: 6*float3 positions + 6*u16 indices (two independent triangles).
+    // Both primitives share one complete vertex/index stream.
     return R"json({
   "asset": {"version": "2.0"},
   "scenes": [{"nodes": [0]}],
   "nodes": [{"mesh": 0, "translation": [1.0, 0.0, 0.0]}],
   "meshes": [{
     "primitives": [
-      {"attributes": {"POSITION": 0}, "indices": 2, "mode": 4, "material": 0},
-      {"attributes": {"POSITION": 1}, "indices": 3, "mode": 4, "material": 1}
+      {"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3, "mode": 4, "material": 0},
+      {"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3, "mode": 4, "material": 1}
     ]
   }],
   "materials": [
@@ -1282,19 +1345,20 @@ TEST(GltfCookTests, RejectsDecodedImageByteBombFromHeaderBeforeDecode)
       "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
     },
     {
-      "bufferView": 0, "byteOffset": 36, "componentType": 5126, "count": 3, "type": "VEC3",
-      "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
+      "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"
     },
-    {"bufferView": 1, "byteOffset": 0, "componentType": 5123, "count": 3, "type": "SCALAR"},
-    {"bufferView": 1, "byteOffset": 6, "componentType": 5123, "count": 3, "type": "SCALAR"}
+    {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}
   ],
   "bufferViews": [
-    {"buffer": 0, "byteOffset": 0, "byteLength": 72},
-    {"buffer": 0, "byteOffset": 72, "byteLength": 12}
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6}
   ],
   "buffers": [{
-    "byteLength": 84,
-    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAAAAAAAAEAAAACAAAA"
+    "byteLength": 104,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA="
   }]
 })json";
 }
@@ -1424,7 +1488,6 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
             ++meshCount;
             auto mesh = AssetFormat::parseStaticMeshPayload(asset.payload);
             ASSERT_TRUE(mesh.has_value()) << (mesh ? "" : mesh.error().message);
-            EXPECT_EQ(mesh->vertexLayout, AssetFormat::StaticMeshVertexLayout::P3N3T4UV2);
             EXPECT_GT(mesh->vertexCount, 0U);
             EXPECT_GT(mesh->indexCount, 0U);
         }

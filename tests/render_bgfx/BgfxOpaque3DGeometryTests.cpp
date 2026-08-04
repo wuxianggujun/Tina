@@ -156,13 +156,15 @@ committedSingleMeshScene(RenderSceneBuilder& builder,
     return builder.commit();
 }
 
-TEST(BgfxOpaque3DGeometryTest, CanonicalCubeUsesP3N3UV2AndOutwardWinding)
+TEST(BgfxOpaque3DGeometryTest, CanonicalCubeUsesP3N3T4UV2AndOutwardWinding)
 {
     EXPECT_TRUE(std::is_standard_layout_v<BgfxOpaque3DVertex>);
-    EXPECT_EQ(sizeof(BgfxOpaque3DVertex), 32U);
+    EXPECT_EQ(sizeof(BgfxOpaque3DVertex), 48U);
     EXPECT_EQ(offsetof(BgfxOpaque3DVertex, positionX), 0U);
     EXPECT_EQ(offsetof(BgfxOpaque3DVertex, normalX), 12U);
-    EXPECT_EQ(offsetof(BgfxOpaque3DVertex, textureU), 24U);
+    EXPECT_EQ(offsetof(BgfxOpaque3DVertex, tangentX), 24U);
+    EXPECT_EQ(offsetof(BgfxOpaque3DVertex, tangentHandedness), 36U);
+    EXPECT_EQ(offsetof(BgfxOpaque3DVertex, textureU), 40U);
 
     const auto vertices = canonicalCubeVertices();
     const auto indices = canonicalCubeIndices();
@@ -189,20 +191,10 @@ TEST(BgfxOpaque3DGeometryTest, CanonicalCubeUsesP3N3UV2AndOutwardWinding)
         EXPECT_GT(crossX * a.normalX + crossY * a.normalY + crossZ * a.normalZ, 0.0F);
         EXPECT_NEAR(a.normalX * a.normalX + a.normalY * a.normalY + a.normalZ * a.normalZ,
                     1.0F, 1.0e-6F);
+        EXPECT_NEAR(a.tangentX * a.tangentX + a.tangentY * a.tangentY + a.tangentZ * a.tangentZ,
+                    1.0F, 1.0e-6F);
+        EXPECT_EQ(std::abs(a.tangentHandedness), 1.0F);
     }
-}
-
-TEST(BgfxOpaque3DGeometryTest, TangentVertexLayoutMatchesP3N3T4UV2)
-{
-    EXPECT_FALSE(hasVertexTangents(BgfxOpaque3DVertexFormat::P3N3UV2));
-    EXPECT_TRUE(hasVertexTangents(BgfxOpaque3DVertexFormat::P3N3T4UV2));
-    EXPECT_TRUE(std::is_standard_layout_v<BgfxOpaque3DTangentVertex>);
-    EXPECT_EQ(sizeof(BgfxOpaque3DTangentVertex), 48U);
-    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, positionX), 0U);
-    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, normalX), 12U);
-    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, tangentX), 24U);
-    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, tangentHandedness), 36U);
-    EXPECT_EQ(offsetof(BgfxOpaque3DTangentVertex, textureU), 40U);
 }
 
 TEST(BgfxOpaque3DGeometryTest, SignedModelScaleCorrectsVertexTangentHandedness)

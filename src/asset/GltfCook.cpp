@@ -117,7 +117,6 @@ enum class GltfTextureChannel : Core::u8 {
 struct CookedMeshPieces final {
     std::vector<float> vertices{};
     std::vector<Core::u16> indices{};
-    AssetFormat::StaticMeshVertexLayout vertexLayout = AssetFormat::StaticMeshVertexLayout::P3N3UV2;
     AssetFormat::StaticMeshSubmeshDesc submesh{};
     float boundsCenterX = 0.0F;
     float boundsCenterY = 0.0F;
@@ -137,6 +136,8 @@ struct TangentGenerationData final {
     std::span<const Core::u16> indices{};
     std::span<float> cornerTangents{};
 };
+
+inline constexpr std::size_t MikkInputFloatsPerVertex = 8U;
 
 [[nodiscard]] TangentGenerationData& tangentGenerationData(const SMikkTSpaceContext* context) noexcept
 {
@@ -164,7 +165,7 @@ void tangentPosition(const SMikkTSpaceContext* context, float output[], int face
 {
     const auto& data = tangentGenerationData(context);
     const std::size_t base = tangentCornerVertexIndex(data, face, vertex) *
-                             AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex;
+                             MikkInputFloatsPerVertex;
     output[0] = data.vertices[base + 0U];
     output[1] = data.vertices[base + 1U];
     output[2] = data.vertices[base + 2U];
@@ -174,7 +175,7 @@ void tangentNormal(const SMikkTSpaceContext* context, float output[], int face, 
 {
     const auto& data = tangentGenerationData(context);
     const std::size_t base = tangentCornerVertexIndex(data, face, vertex) *
-                             AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex;
+                             MikkInputFloatsPerVertex;
     output[0] = data.vertices[base + 3U];
     output[1] = data.vertices[base + 4U];
     output[2] = data.vertices[base + 5U];
@@ -184,7 +185,7 @@ void tangentTexcoord(const SMikkTSpaceContext* context, float output[], int face
 {
     const auto& data = tangentGenerationData(context);
     const std::size_t base = tangentCornerVertexIndex(data, face, vertex) *
-                             AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex;
+                             MikkInputFloatsPerVertex;
     output[0] = data.vertices[base + 6U];
     output[1] = data.vertices[base + 7U];
 }
@@ -321,8 +322,8 @@ struct TangentVertexKeyHash final {
                              "MikkTSpace failed to generate mesh tangents");
     }
 
-    constexpr std::size_t sourceStride = AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex;
-    constexpr std::size_t tangentStride = AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex;
+    constexpr std::size_t sourceStride = MikkInputFloatsPerVertex;
+    constexpr std::size_t tangentStride = AssetFormat::StaticMeshWire::FloatsPerVertex;
     constexpr std::size_t maxProductVertices = (std::numeric_limits<Core::u16>::max)();
     TangentMeshPieces output{};
     output.vertices.reserve((std::min)(indices.size(), maxProductVertices) * tangentStride);
@@ -399,13 +400,15 @@ struct TangentVertexKeyHash final {
     const cgltf_accessor* normals = findAttribute(prim, cgltf_attribute_type_normal);
     const cgltf_accessor* texcoords = findAttribute(prim, cgltf_attribute_type_texcoord);
     const cgltf_accessor* authoredTangents = findAttribute(prim, cgltf_attribute_type_tangent);
-    if (auto status = validateOptionalAttribute(normals, cgltf_type_vec3, positions->count, "NORMAL"); !status)
+    if (normals == nullptr || normals->type != cgltf_type_vec3 || normals->count != positions->count)
     {
-        return Core::failure(status.error());
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "NORMAL accessor matching POSITION is required");
     }
-    if (auto status = validateOptionalAttribute(texcoords, cgltf_type_vec2, positions->count, "TEXCOORD_0"); !status)
+    if (texcoords == nullptr || texcoords->type != cgltf_type_vec2 || texcoords->count != positions->count)
     {
-        return Core::failure(status.error());
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "TEXCOORD_0 accessor matching POSITION is required");
     }
     if (auto status = validateOptionalAttribute(authoredTangents, cgltf_type_vec4, positions->count, "TANGENT");
         !status)
@@ -417,34 +420,27 @@ struct TangentVertexKeyHash final {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "authored TANGENT must use FLOAT components");
     }
-    if (authoredTangents != nullptr && (normals == nullptr || texcoords == nullptr))
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "authored TANGENT requires NORMAL and TEXCOORD_0");
-    }
-
     CookedMeshPieces out{};
     out.vertices.resize(static_cast<std::size_t>(positions->count) *
-                        AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex);
+                        MikkInputFloatsPerVertex);
     for (cgltf_size i = 0; i < positions->count; ++i)
     {
         float p[3]{};
-        float n[3]{0.0F, 1.0F, 0.0F};
-        float uv[2]{0.0F, 0.0F};
+        float n[3]{};
+        float uv[2]{};
         if (!cgltf_accessor_read_float(positions, i, p, 3))
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to read POSITION");
         }
-        if (normals != nullptr && !cgltf_accessor_read_float(normals, i, n, 3))
+        if (!cgltf_accessor_read_float(normals, i, n, 3))
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to read NORMAL");
         }
-        if (texcoords != nullptr && !cgltf_accessor_read_float(texcoords, i, uv, 2))
+        if (!cgltf_accessor_read_float(texcoords, i, uv, 2))
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to read TEXCOORD_0");
         }
-        const std::size_t base = static_cast<std::size_t>(i) *
-                                 AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex;
+        const std::size_t base = static_cast<std::size_t>(i) * MikkInputFloatsPerVertex;
         out.vertices[base + 0] = p[0];
         out.vertices[base + 1] = p[1];
         out.vertices[base + 2] = p[2];
@@ -487,60 +483,51 @@ struct TangentVertexKeyHash final {
         }
     }
 
-    if (normals != nullptr && texcoords != nullptr)
+    std::vector<float> tangents;
+    if (authoredTangents != nullptr)
     {
-        std::vector<float> tangents;
-        if (authoredTangents != nullptr)
+        tangents.resize(static_cast<std::size_t>(positions->count) * 4U);
+        for (cgltf_size i = 0; i < positions->count; ++i)
         {
-            tangents.resize(static_cast<std::size_t>(positions->count) * 4U);
-            for (cgltf_size i = 0; i < positions->count; ++i)
+            if (!cgltf_accessor_read_float(authoredTangents, i,
+                                           tangents.data() + static_cast<std::size_t>(i) * 4U, 4))
             {
-                if (!cgltf_accessor_read_float(authoredTangents, i,
-                                               tangents.data() + static_cast<std::size_t>(i) * 4U, 4))
-                {
-                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to read TANGENT");
-                }
-                if (auto status = normalizeTangent(tangents.data() + static_cast<std::size_t>(i) * 4U, true);
-                    !status)
-                {
-                    return Core::failure(status.error());
-                }
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to read TANGENT");
             }
-            std::vector<float> tangentVertices(
-                static_cast<std::size_t>(positions->count) *
-                AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex);
-            for (cgltf_size i = 0; i < positions->count; ++i)
+            if (auto status = normalizeTangent(tangents.data() + static_cast<std::size_t>(i) * 4U, true);
+                !status)
             {
-                const std::size_t source = static_cast<std::size_t>(i) *
-                                           AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex;
-                const std::size_t tangent = static_cast<std::size_t>(i) * 4U;
-                const std::size_t target = static_cast<std::size_t>(i) *
-                                           AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex;
-                std::copy_n(out.vertices.data() + source, 6U, tangentVertices.data() + target);
-                std::copy_n(tangents.data() + tangent, 4U, tangentVertices.data() + target + 6U);
-                std::copy_n(out.vertices.data() + source + 6U, 2U, tangentVertices.data() + target + 10U);
+                return Core::failure(status.error());
             }
-            out.vertices = std::move(tangentVertices);
         }
-        else
+        std::vector<float> tangentVertices(static_cast<std::size_t>(positions->count) *
+                                           AssetFormat::StaticMeshWire::FloatsPerVertex);
+        for (cgltf_size i = 0; i < positions->count; ++i)
         {
-            auto generated = generateTangentMeshWithMikkTSpace(out.vertices, out.indices);
-            if (!generated)
-            {
-                return Core::failure(std::move(generated.error()));
-            }
-            out.vertices = std::move(generated->vertices);
-            out.indices = std::move(generated->indices);
+            const std::size_t source = static_cast<std::size_t>(i) * MikkInputFloatsPerVertex;
+            const std::size_t tangent = static_cast<std::size_t>(i) * 4U;
+            const std::size_t target =
+                static_cast<std::size_t>(i) * AssetFormat::StaticMeshWire::FloatsPerVertex;
+            std::copy_n(out.vertices.data() + source, 6U, tangentVertices.data() + target);
+            std::copy_n(tangents.data() + tangent, 4U, tangentVertices.data() + target + 6U);
+            std::copy_n(out.vertices.data() + source + 6U, 2U, tangentVertices.data() + target + 10U);
         }
-        out.vertexLayout = AssetFormat::StaticMeshVertexLayout::P3N3T4UV2;
+        out.vertices = std::move(tangentVertices);
+    }
+    else
+    {
+        auto generated = generateTangentMeshWithMikkTSpace(out.vertices, out.indices);
+        if (!generated)
+        {
+            return Core::failure(std::move(generated.error()));
+        }
+        out.vertices = std::move(generated->vertices);
+        out.indices = std::move(generated->indices);
     }
 
     float minX = out.vertices[0], minY = out.vertices[1], minZ = out.vertices[2];
     float maxX = minX, maxY = minY, maxZ = minZ;
-    const std::size_t vertexStride =
-        out.vertexLayout == AssetFormat::StaticMeshVertexLayout::P3N3T4UV2
-            ? AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex
-            : AssetFormat::StaticMeshWire::P3N3UV2FloatsPerVertex;
+    constexpr std::size_t vertexStride = AssetFormat::StaticMeshWire::FloatsPerVertex;
     const std::size_t outputVertexCount = out.vertices.size() / vertexStride;
     for (std::size_t i = 0; i < outputVertexCount; ++i)
     {
@@ -1317,7 +1304,6 @@ namespace {
             ++nextPrimSlot;
 
             AssetFormat::StaticMeshPayloadDesc meshDesc{
-                .vertexLayout = pieces->vertexLayout,
                 .indexType = AssetFormat::StaticMeshIndexType::U16,
                 .boundsCenterX = pieces->boundsCenterX,
                 .boundsCenterY = pieces->boundsCenterY,

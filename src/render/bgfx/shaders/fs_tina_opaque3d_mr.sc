@@ -7,8 +7,7 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent, v_shadowCoord
 // One directional light may consume the fixed backend shadow map.
 // Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
-// s_texNormal: tangent-space RGB normal. Vertex-tangent meshes use their TBN;
-// existing P3N3UV2 meshes retain the derivative cotangent-frame fallback.
+// s_texNormal: tangent-space RGB normal using the required vertex tangent TBN.
 
 SAMPLER2D(s_texColor, 0);
 SAMPLER2D(s_texMR, 1);
@@ -31,7 +30,7 @@ uniform vec4 u_spotLightDirInner[8];
 uniform vec4 u_spotLightColorOuter[8];
 // x = metallic factor, y = roughness factor, z = ambient scale, w = 1 if MR map bound.
 uniform vec4 u_mrParams;
-// x = 1 if normal map bound, y = 1 if the current mesh has vertex tangents, zw unused.
+// x = 1 if normal map bound, yzw unused.
 uniform vec4 u_normalParams;
 // x = receiver depth bias, y = receiver normal bias, z = shadow texel size,
 // w = shadowed directional-light slot + 1 (zero disables sampling).
@@ -102,28 +101,9 @@ void main()
 	vec3 N = safeNormalize(v_normal);
 	if (u_normalParams.x > 0.5)
 	{
-		vec3 T;
-		vec3 B;
-		if (u_normalParams.y > 0.5)
-		{
-			T = safeNormalize(v_tangent.xyz - N * dot(N, v_tangent.xyz));
-			float tangentHandedness = v_tangent.w < 0.0 ? -1.0 : 1.0;
-			B = cross(N, T) * tangentHandedness;
-		}
-		else
-		{
-			vec3 dp1 = dFdx(v_worldPos);
-			vec3 dp2 = dFdy(v_worldPos);
-			vec2 duv1 = dFdx(v_texcoord0);
-			vec2 duv2 = dFdy(v_texcoord0);
-			vec3 dp2perp = cross(dp2, N);
-			vec3 dp1perp = cross(N, dp1);
-			T = dp2perp * duv1.x + dp1perp * duv2.x;
-			B = dp2perp * duv1.y + dp1perp * duv2.y;
-			float invMax = inversesqrt(max(max(dot(T, T), dot(B, B)), 0.00000001));
-			T *= invMax;
-			B *= invMax;
-		}
+		vec3 T = safeNormalize(v_tangent.xyz - N * dot(N, v_tangent.xyz));
+		float tangentHandedness = v_tangent.w < 0.0 ? -1.0 : 1.0;
+		vec3 B = cross(N, T) * tangentHandedness;
 		vec3 mapN = texture2D(s_texNormal, v_texcoord0).xyz * 2.0 - 1.0;
 		// glTF: green channel often OpenGL-style; keep as authored.
 		vec3 mappedN = T * mapN.x + B * mapN.y + N * mapN.z;

@@ -12,26 +12,8 @@
 namespace Tina::Tests {
 namespace {
 
-[[nodiscard]] Render::StaticMeshUploadDesc makeUnitTriangleDesc(std::array<float, 24>& vertices,
+[[nodiscard]] Render::StaticMeshUploadDesc makeUnitTriangleDesc(std::array<float, 36>& vertices,
                                                                 std::array<std::uint16_t, 3>& indices) noexcept
-{
-    // One triangle: 3 verts * 8 floats (P3_N3_UV2).
-    vertices = {
-        0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F,
-        0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F,
-    };
-    indices = {0, 1, 2};
-    return Render::StaticMeshUploadDesc{
-        .vertexCount = 3,
-        .indexCount = 3,
-        .vertices = vertices,
-        .indices = indices,
-    };
-}
-
-[[nodiscard]] Render::StaticMeshP3N3T4UV2UploadDesc
-makeTangentUnitTriangleDesc(std::array<float, 36>& vertices,
-                            std::array<std::uint16_t, 3>& indices) noexcept
 {
     // One triangle: 3 verts * 12 floats (P3_N3_T4_UV2).
     vertices = {
@@ -40,7 +22,7 @@ makeTangentUnitTriangleDesc(std::array<float, 36>& vertices,
         0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F,
     };
     indices = {0, 1, 2};
-    return Render::StaticMeshP3N3T4UV2UploadDesc{
+    return Render::StaticMeshUploadDesc{
         .vertexCount = 3,
         .indexCount = 3,
         .vertices = vertices,
@@ -62,13 +44,13 @@ TEST(NullRenderDeviceMeshTest, CreateBindDestroyLifecycle)
     ASSERT_TRUE(device.has_value());
     ASSERT_TRUE(foreignDevice.has_value());
 
-    std::array<float, 24> vertices{};
+    std::array<float, 36> vertices{};
     std::array<std::uint16_t, 3> indices{};
     const auto desc = makeUnitTriangleDesc(vertices, indices);
 
-    auto mesh = (*device)->createStaticMeshP3N3UV2(desc);
+    auto mesh = (*device)->createStaticMesh(desc);
     ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
-    auto foreignMesh = (*foreignDevice)->createStaticMeshP3N3UV2(desc);
+    auto foreignMesh = (*foreignDevice)->createStaticMesh(desc);
     ASSERT_TRUE(foreignMesh.has_value()) << foreignMesh.error().message;
     EXPECT_EQ(mesh->index, foreignMesh->index);
     EXPECT_EQ(mesh->generation, foreignMesh->generation);
@@ -98,9 +80,9 @@ TEST(NullRenderDeviceMeshTest, RejectsBadUpload)
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
 
-    std::array<float, 8> vertices{0, 0, 0, 0, 1, 0, 0, 0};
+    std::array<float, 12> vertices{0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0};
     std::array<std::uint16_t, 3> badIndices{0, 1, 2}; // index 1/2 out of range for 1 vertex
-    auto mesh = (*device)->createStaticMeshP3N3UV2(Render::StaticMeshUploadDesc{
+    auto mesh = (*device)->createStaticMesh(Render::StaticMeshUploadDesc{
         .vertexCount = 1,
         .indexCount = 3,
         .vertices = vertices,
@@ -110,21 +92,21 @@ TEST(NullRenderDeviceMeshTest, RejectsBadUpload)
     EXPECT_EQ(mesh.error().code, Render::RenderErrorCode::InvalidMeshUpload);
 }
 
-TEST(NullRenderDeviceMeshTest, TangentLayoutUsesIndependentValidatedUploadPath)
+TEST(NullRenderDeviceMeshTest, TangentLayoutUsesValidatedUploadPath)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
 
     std::array<float, 36> vertices{};
     std::array<std::uint16_t, 3> indices{};
-    const auto desc = makeTangentUnitTriangleDesc(vertices, indices);
-    auto mesh = (*device)->createStaticMeshP3N3T4UV2(desc);
+    const auto desc = makeUnitTriangleDesc(vertices, indices);
+    auto mesh = (*device)->createStaticMesh(desc);
     ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
     EXPECT_EQ((*device)->statistics().liveResources, 1U);
     ASSERT_TRUE((*device)->setMesh3DBinding(2U, *mesh).has_value());
 
     std::array<float, 24> wrongStrideVertices{};
-    auto wrongStride = (*device)->createStaticMeshP3N3T4UV2(Render::StaticMeshP3N3T4UV2UploadDesc{
+    auto wrongStride = (*device)->createStaticMesh(Render::StaticMeshUploadDesc{
         .vertexCount = 3,
         .indexCount = 3,
         .vertices = wrongStrideVertices,
@@ -135,25 +117,25 @@ TEST(NullRenderDeviceMeshTest, TangentLayoutUsesIndependentValidatedUploadPath)
     EXPECT_EQ((*device)->statistics().liveResources, 1U);
 
     vertices[6] = (std::numeric_limits<float>::infinity)();
-    auto nonFinite = (*device)->createStaticMeshP3N3T4UV2(desc);
+    auto nonFinite = (*device)->createStaticMesh(desc);
     ASSERT_FALSE(nonFinite.has_value());
     EXPECT_EQ(nonFinite.error().code, Render::RenderErrorCode::InvalidMeshUpload);
     vertices[6] = 1.0F;
 
     vertices[6] = 1.0e-7F;
-    auto nearZeroTangent = (*device)->createStaticMeshP3N3T4UV2(desc);
+    auto nearZeroTangent = (*device)->createStaticMesh(desc);
     ASSERT_FALSE(nearZeroTangent.has_value());
     EXPECT_EQ(nearZeroTangent.error().code, Render::RenderErrorCode::InvalidMeshUpload);
     vertices[6] = 1.0F;
 
     vertices[9] = 0.5F;
-    auto invalidHandedness = (*device)->createStaticMeshP3N3T4UV2(desc);
+    auto invalidHandedness = (*device)->createStaticMesh(desc);
     ASSERT_FALSE(invalidHandedness.has_value());
     EXPECT_EQ(invalidHandedness.error().code, Render::RenderErrorCode::InvalidMeshUpload);
     vertices[9] = 1.0F;
 
     const std::array<std::uint16_t, 3> outOfRangeIndices{0, 1, 3};
-    auto outOfRange = (*device)->createStaticMeshP3N3T4UV2(Render::StaticMeshP3N3T4UV2UploadDesc{
+    auto outOfRange = (*device)->createStaticMesh(Render::StaticMeshUploadDesc{
         .vertexCount = 3,
         .indexCount = 3,
         .vertices = vertices,
@@ -182,7 +164,7 @@ TEST(NullRenderDeviceMeshTest, TangentLayoutUsesIndependentValidatedUploadPath)
     stalePin.release();
 
     vertices[9] = -1.0F;
-    auto replacement = (*device)->createStaticMeshP3N3T4UV2(desc);
+    auto replacement = (*device)->createStaticMesh(desc);
     ASSERT_TRUE(replacement.has_value()) << replacement.error().message;
     ASSERT_TRUE((*device)->destroyStaticMesh(*replacement).has_value());
     auto staleDestroy = (*device)->destroyStaticMesh(*replacement);
@@ -198,10 +180,10 @@ TEST(NullRenderDeviceMeshTest, RejectsZeroMeshKeyBinding)
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
 
-    std::array<float, 24> vertices{};
+    std::array<float, 36> vertices{};
     std::array<std::uint16_t, 3> indices{};
     const auto desc = makeUnitTriangleDesc(vertices, indices);
-    auto mesh = (*device)->createStaticMeshP3N3UV2(desc);
+    auto mesh = (*device)->createStaticMesh(desc);
     ASSERT_TRUE(mesh.has_value());
 
     auto bad = (*device)->setMesh3DBinding(0U, *mesh);
@@ -220,16 +202,16 @@ TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysStartAtTwoAndAreNeverConsumed
     ASSERT_FALSE(invalid.has_value());
     EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidMeshUpload);
 
-    std::array<float, 24> vertices{};
+    std::array<float, 36> vertices{};
     std::array<std::uint16_t, 3> indices{};
-    auto staleMesh = (*device)->createStaticMeshP3N3UV2(makeUnitTriangleDesc(vertices, indices));
+    auto staleMesh = (*device)->createStaticMesh(makeUnitTriangleDesc(vertices, indices));
     ASSERT_TRUE(staleMesh.has_value()) << staleMesh.error().message;
     ASSERT_TRUE((*device)->destroyStaticMesh(*staleMesh).has_value());
     auto staleBinding = (*device)->createMesh3DBinding(*staleMesh);
     ASSERT_FALSE(staleBinding.has_value());
     EXPECT_EQ(staleBinding.error().code, Render::RenderErrorCode::MeshNotFound);
 
-    auto mesh = (*device)->createStaticMeshP3N3UV2(makeUnitTriangleDesc(vertices, indices));
+    auto mesh = (*device)->createStaticMesh(makeUnitTriangleDesc(vertices, indices));
     ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
 
     auto first = (*device)->createMesh3DBinding(*mesh);
@@ -254,9 +236,9 @@ TEST(NullRenderDeviceMeshTest, RetirementPinCompletesImmediatelyAndIsNotConsumed
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
 
-    std::array<float, 24> vertices{};
+    std::array<float, 36> vertices{};
     std::array<std::uint16_t, 3> indices{};
-    auto mesh = (*device)->createStaticMeshP3N3UV2(makeUnitTriangleDesc(vertices, indices));
+    auto mesh = (*device)->createStaticMesh(makeUnitTriangleDesc(vertices, indices));
     ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
 
     Core::u32 releases = 0;

@@ -88,19 +88,6 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     return true;
 }
 
-[[nodiscard]] u32 floatsPerVertex(StaticMeshVertexLayout layout) noexcept
-{
-    switch (layout)
-    {
-    case StaticMeshVertexLayout::P3N3UV2:
-        return StaticMeshWire::P3N3UV2FloatsPerVertex;
-    case StaticMeshVertexLayout::P3N3T4UV2:
-        return StaticMeshWire::P3N3T4UV2FloatsPerVertex;
-    default:
-        return 0;
-    }
-}
-
 [[nodiscard]] Core::Status validateMeshGeometry(u32 vertexCount, u32 indexCount, u16 submeshCount) noexcept
 {
     if (vertexCount == 0 || vertexCount > StaticMeshWire::MaxVertexCount)
@@ -151,8 +138,7 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     return Core::success();
 }
 
-[[nodiscard]] Core::Status validateVertices(StaticMeshVertexLayout layout,
-                                            std::span<const float> vertices) noexcept
+[[nodiscard]] Core::Status validateVertices(std::span<const float> vertices) noexcept
 {
     for (const float value : vertices)
     {
@@ -161,23 +147,20 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "static mesh vertices must be finite");
         }
     }
-    if (layout == StaticMeshVertexLayout::P3N3T4UV2)
+    for (usize base = 0; base < vertices.size(); base += StaticMeshWire::FloatsPerVertex)
     {
-        for (usize base = 0; base < vertices.size(); base += StaticMeshWire::P3N3T4UV2FloatsPerVertex)
+        const float lengthSquared = vertices[base + 6U] * vertices[base + 6U] +
+                                    vertices[base + 7U] * vertices[base + 7U] +
+                                    vertices[base + 8U] * vertices[base + 8U];
+        if (!std::isfinite(lengthSquared) || !(lengthSquared > 1.0e-12F))
         {
-            const float lengthSquared = vertices[base + 6U] * vertices[base + 6U] +
-                                        vertices[base + 7U] * vertices[base + 7U] +
-                                        vertices[base + 8U] * vertices[base + 8U];
-            if (!std::isfinite(lengthSquared) || !(lengthSquared > 1.0e-12F))
-            {
-                return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                                     "static mesh tangent xyz must be normalizable");
-            }
-            if (vertices[base + 9U] != -1.0F && vertices[base + 9U] != 1.0F)
-            {
-                return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                                     "static mesh tangent handedness must be -1 or +1");
-            }
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "static mesh tangent xyz must be normalizable");
+        }
+        if (vertices[base + 9U] != -1.0F && vertices[base + 9U] != 1.0F)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "static mesh tangent handedness must be -1 or +1");
         }
     }
     return Core::success();
@@ -187,11 +170,7 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 
 Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMeshPayloadDesc& desc)
 {
-    const u32 vertexStrideFloats = floatsPerVertex(desc.vertexLayout);
-    if (vertexStrideFloats == 0)
-    {
-        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh vertex layout");
-    }
+    constexpr u32 vertexStrideFloats = StaticMeshWire::FloatsPerVertex;
     if (desc.indexType != StaticMeshIndexType::U16)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh index type");
@@ -228,7 +207,7 @@ Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMes
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = validateVertices(desc.vertexLayout, desc.vertices); !status)
+    if (Core::Status status = validateVertices(desc.vertices); !status)
     {
         return Core::failure(status.error());
     }
@@ -266,7 +245,7 @@ Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMes
     {
         std::vector<std::byte> bytes(total, std::byte{0});
         writeU16(bytes, 0U, StaticMeshWire::SchemaVersion);
-        writeU16(bytes, 2U, static_cast<u16>(desc.vertexLayout));
+        writeU16(bytes, 2U, StaticMeshWire::VertexLayout);
         writeU16(bytes, 4U, static_cast<u16>(desc.indexType));
         writeU16(bytes, 6U, submeshCount);
         writeU32(bytes, 8U, vertexCount);
@@ -306,7 +285,7 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
 
     StaticMeshPayloadView view{};
     view.schemaVersion = readU16(payload, 0U);
-    view.vertexLayout = static_cast<StaticMeshVertexLayout>(readU16(payload, 2U));
+    const u16 encodedVertexLayout = readU16(payload, 2U);
     view.indexType = static_cast<StaticMeshIndexType>(readU16(payload, 4U));
     view.submeshCount = readU16(payload, 6U);
     view.vertexCount = readU32(payload, 8U);
@@ -320,11 +299,11 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh schema version");
     }
-    const u32 vertexStrideFloats = floatsPerVertex(view.vertexLayout);
-    if (vertexStrideFloats == 0)
+    if (encodedVertexLayout != StaticMeshWire::VertexLayout)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh vertex layout");
     }
+    constexpr u32 vertexStrideFloats = StaticMeshWire::FloatsPerVertex;
     if (view.indexType != StaticMeshIndexType::U16)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh index type");
@@ -396,7 +375,7 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
     const auto* vertexPtr = reinterpret_cast<const float*>(payload.data() + vertexOffset);
     view.vertices =
         std::span<const float>{vertexPtr, static_cast<usize>(view.vertexCount) * vertexStrideFloats};
-    if (Core::Status status = validateVertices(view.vertexLayout, view.vertices); !status)
+    if (Core::Status status = validateVertices(view.vertices); !status)
     {
         return Core::failure(status.error());
     }
@@ -442,17 +421,35 @@ StaticMeshPayloadDesc makeCanonicalUnitCubeMeshDesc(std::span<StaticMeshSubmeshD
     // Matches BgfxOpaque3DGeometry canonical cube (half-extent 1, 24 verts / 36 indices).
     static constexpr float kVertices[] = {
         // +Z
-        -1, -1, 1, 0, 0, 1, 0, 1, 1, -1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, -1, 1, 1, 0, 0, 1, 0, 0,
+        -1, -1, 1, 0, 0, 1, 1, 0, 0, -1, 0, 1,
+        1, -1, 1, 0, 0, 1, 1, 0, 0, -1, 1, 1,
+        1, 1, 1, 0, 0, 1, 1, 0, 0, -1, 1, 0,
+        -1, 1, 1, 0, 0, 1, 1, 0, 0, -1, 0, 0,
         // -Z
-        1, -1, -1, 0, 0, -1, 0, 1, -1, -1, -1, 0, 0, -1, 1, 1, -1, 1, -1, 0, 0, -1, 1, 0, 1, 1, -1, 0, 0, -1, 0, 0,
+        1, -1, -1, 0, 0, -1, -1, 0, 0, -1, 0, 1,
+        -1, -1, -1, 0, 0, -1, -1, 0, 0, -1, 1, 1,
+        -1, 1, -1, 0, 0, -1, -1, 0, 0, -1, 1, 0,
+        1, 1, -1, 0, 0, -1, -1, 0, 0, -1, 0, 0,
         // +X
-        1, -1, 1, 1, 0, 0, 0, 1, 1, -1, -1, 1, 0, 0, 1, 1, 1, 1, -1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0,
+        1, -1, 1, 1, 0, 0, 0, 0, -1, -1, 0, 1,
+        1, -1, -1, 1, 0, 0, 0, 0, -1, -1, 1, 1,
+        1, 1, -1, 1, 0, 0, 0, 0, -1, -1, 1, 0,
+        1, 1, 1, 1, 0, 0, 0, 0, -1, -1, 0, 0,
         // -X
-        -1, -1, -1, -1, 0, 0, 0, 1, -1, -1, 1, -1, 0, 0, 1, 1, -1, 1, 1, -1, 0, 0, 1, 0, -1, 1, -1, -1, 0, 0, 0, 0,
+        -1, -1, -1, -1, 0, 0, 0, 0, 1, -1, 0, 1,
+        -1, -1, 1, -1, 0, 0, 0, 0, 1, -1, 1, 1,
+        -1, 1, 1, -1, 0, 0, 0, 0, 1, -1, 1, 0,
+        -1, 1, -1, -1, 0, 0, 0, 0, 1, -1, 0, 0,
         // +Y
-        -1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, -1, 0, 1, 0, 1, 0, -1, 1, -1, 0, 1, 0, 0, 0,
+        -1, 1, 1, 0, 1, 0, 1, 0, 0, -1, 0, 1,
+        1, 1, 1, 0, 1, 0, 1, 0, 0, -1, 1, 1,
+        1, 1, -1, 0, 1, 0, 1, 0, 0, -1, 1, 0,
+        -1, 1, -1, 0, 1, 0, 1, 0, 0, -1, 0, 0,
         // -Y
-        -1, -1, -1, 0, -1, 0, 0, 1, 1, -1, -1, 0, -1, 0, 1, 1, 1, -1, 1, 0, -1, 0, 1, 0, -1, -1, 1, 0, -1, 0, 0, 0,
+        -1, -1, -1, 0, -1, 0, 1, 0, 0, -1, 0, 1,
+        1, -1, -1, 0, -1, 0, 1, 0, 0, -1, 1, 1,
+        1, -1, 1, 0, -1, 0, 1, 0, 0, -1, 1, 0,
+        -1, -1, 1, 0, -1, 0, 1, 0, 0, -1, 0, 0,
     };
     static constexpr u16 kIndices[] = {
         0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15,
@@ -467,7 +464,6 @@ StaticMeshPayloadDesc makeCanonicalUnitCubeMeshDesc(std::span<StaticMeshSubmeshD
     std::memcpy(vertexStorage.data(), kVertices, sizeof(kVertices));
     std::memcpy(indexStorage.data(), kIndices, sizeof(kIndices));
     submeshStorage[0] = StaticMeshSubmeshDesc{.firstIndex = 0, .indexCount = 36, .materialSlot = 0, .reserved = 0};
-    desc.vertexLayout = StaticMeshVertexLayout::P3N3UV2;
     desc.indexType = StaticMeshIndexType::U16;
     desc.boundsCenterX = 0.0F;
     desc.boundsCenterY = 0.0F;

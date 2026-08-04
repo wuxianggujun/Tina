@@ -10,11 +10,10 @@
 namespace Tina::AssetFormat {
 
 // StaticMesh cooked payload schema v1 (little-endian, after CookedAsset header/deps).
-// Product layouts support the original P3_N3_UV2 vertex and a tangent-bearing
-// P3_N3_T4_UV2 vertex. The schema remains v1; vertexLayout selects the stride.
+// Product vertices use the single P3_N3_T4_UV2 layout.
 // Layout:
 //   u16 schemaVersion (=1)
-//   u16 vertexLayout  (1 = P3N3UV2, 2 = P3N3T4UV2)
+//   u16 vertexLayout  (=2, P3N3T4UV2)
 //   u16 indexType     (1 = U16)
 //   u16 submeshCount  (1..MaxSubmeshes)
 //   u32 vertexCount
@@ -22,7 +21,7 @@ namespace Tina::AssetFormat {
 //   f32 boundsCenterX/Y/Z
 //   f32 boundsRadius
 //   StaticMeshSubmeshWire[submeshCount]  (16B each)
-//   f32 vertices[vertexCount * stride]   // layout-defined interleaved vertices
+//   f32 vertices[vertexCount * 12]       // interleaved P3N3T4UV2 vertices
 //   u16 indices[indexCount]              // 2-byte aligned after vertices
 //
 // M11-E0 / product-3D foundation: format only (no glTF, no GPU upload in this header).
@@ -33,18 +32,10 @@ inline constexpr Core::u32 SubmeshBytes = 16;
 inline constexpr Core::u16 MaxSubmeshes = 64;
 inline constexpr Core::u32 MaxVertexCount = 1'048'576;
 inline constexpr Core::u32 MaxIndexCount = 4'194'304;
-inline constexpr Core::u16 P3N3UV2FloatsPerVertex = 8;
-inline constexpr Core::u16 P3N3T4UV2FloatsPerVertex = 12;
-// Source-compatible aliases for callers that explicitly author the original layout.
-inline constexpr Core::u16 FloatsPerVertex = P3N3UV2FloatsPerVertex;
+inline constexpr Core::u16 VertexLayout = 2;
+inline constexpr Core::u16 FloatsPerVertex = 12;
 inline constexpr Core::u32 BytesPerVertex = FloatsPerVertex * sizeof(float);
 } // namespace StaticMeshWire
-
-enum class StaticMeshVertexLayout : Core::u16 {
-    Invalid = 0,
-    P3N3UV2 = 1,
-    P3N3T4UV2 = 2,
-};
 
 enum class StaticMeshIndexType : Core::u16 {
     Invalid = 0,
@@ -66,23 +57,19 @@ struct StaticMeshSubmeshView final {
 };
 
 struct StaticMeshPayloadDesc final {
-    StaticMeshVertexLayout vertexLayout = StaticMeshVertexLayout::P3N3UV2;
     StaticMeshIndexType indexType = StaticMeshIndexType::U16;
     float boundsCenterX = 0.0F;
     float boundsCenterY = 0.0F;
     float boundsCenterZ = 0.0F;
     float boundsRadius = 1.0F;
     std::span<const StaticMeshSubmeshDesc> submeshes{};
-    // Interleaved floats selected by vertexLayout:
-    // P3N3UV2:     [px,py,pz,nx,ny,nz,u,v]
-    // P3N3T4UV2:   [px,py,pz,nx,ny,nz,tx,ty,tz,tw,u,v]
+    // P3N3T4UV2: [px,py,pz,nx,ny,nz,tx,ty,tz,tw,u,v]
     std::span<const float> vertices{};
     std::span<const Core::u16> indices{};
 };
 
 struct StaticMeshPayloadView final {
     Core::u16 schemaVersion = 0;
-    StaticMeshVertexLayout vertexLayout = StaticMeshVertexLayout::Invalid;
     StaticMeshIndexType indexType = StaticMeshIndexType::Invalid;
     Core::u16 submeshCount = 0;
     Core::u32 vertexCount = 0;

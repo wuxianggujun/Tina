@@ -265,15 +265,9 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Result<GpuMeshId> createStaticMeshP3N3UV2(const StaticMeshUploadDesc& desc) override
+    [[nodiscard]] Core::Result<GpuMeshId> createStaticMesh(const StaticMeshUploadDesc& desc) override
     {
-        return createStaticMeshRecord(desc, 8U, false);
-    }
-
-    [[nodiscard]] Core::Result<GpuMeshId>
-    createStaticMeshP3N3T4UV2(const StaticMeshP3N3T4UV2UploadDesc& desc) override
-    {
-        return createStaticMeshRecord(desc, 12U, true);
+        return createStaticMeshRecord(desc);
     }
 
     [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
@@ -579,20 +573,19 @@ class NullRenderDevice final : public IRenderDevice {
     }
 
   private:
-    template <typename UploadDesc>
-    [[nodiscard]] Core::Result<GpuMeshId> createStaticMeshRecord(
-        const UploadDesc& desc, std::size_t floatsPerVertex, bool hasTangents)
+    [[nodiscard]] Core::Result<GpuMeshId> createStaticMeshRecord(const StaticMeshUploadDesc& desc)
     {
         if (stopped_)
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
         }
         constexpr std::size_t MaxUploadBytes = (std::numeric_limits<u32>::max)();
-        const std::size_t vertexStrideBytes = floatsPerVertex * sizeof(float);
-        if (floatsPerVertex == 0U || desc.vertexCount == 0 || desc.indexCount == 0 ||
+        constexpr std::size_t FloatsPerVertex = 12U;
+        const std::size_t vertexStrideBytes = FloatsPerVertex * sizeof(float);
+        if (desc.vertexCount == 0 || desc.indexCount == 0 ||
             (desc.indexCount % 3U) != 0U ||
-            desc.vertexCount > (std::numeric_limits<std::size_t>::max)() / floatsPerVertex ||
-            desc.vertices.size() != static_cast<std::size_t>(desc.vertexCount) * floatsPerVertex ||
+            desc.vertexCount > (std::numeric_limits<std::size_t>::max)() / FloatsPerVertex ||
+            desc.vertices.size() != static_cast<std::size_t>(desc.vertexCount) * FloatsPerVertex ||
             desc.indices.size() != desc.indexCount ||
             desc.vertexCount > MaxUploadBytes / vertexStrideBytes ||
             desc.indexCount > MaxUploadBytes / sizeof(u16))
@@ -606,26 +599,23 @@ class NullRenderDevice final : public IRenderDevice {
                 return Core::failure(RenderErrorCode::InvalidMeshUpload, "StaticMesh vertices must be finite");
             }
         }
-        if (hasTangents)
+        constexpr float MinimumTangentLengthSquared = 1.0e-12F;
+        for (std::size_t vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
         {
-            constexpr float MinimumTangentLengthSquared = 1.0e-12F;
-            for (std::size_t vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
+            const std::size_t tangentOffset = vertexIndex * FloatsPerVertex + 6U;
+            const float tangentX = desc.vertices[tangentOffset];
+            const float tangentY = desc.vertices[tangentOffset + 1U];
+            const float tangentZ = desc.vertices[tangentOffset + 2U];
+            const float tangentHandedness = desc.vertices[tangentOffset + 3U];
+            const float tangentLengthSquared =
+                tangentX * tangentX + tangentY * tangentY + tangentZ * tangentZ;
+            if (!std::isfinite(tangentLengthSquared) ||
+                tangentLengthSquared <= MinimumTangentLengthSquared ||
+                (tangentHandedness != -1.0F && tangentHandedness != 1.0F))
             {
-                const std::size_t tangentOffset = vertexIndex * floatsPerVertex + 6U;
-                const float tangentX = desc.vertices[tangentOffset];
-                const float tangentY = desc.vertices[tangentOffset + 1U];
-                const float tangentZ = desc.vertices[tangentOffset + 2U];
-                const float tangentHandedness = desc.vertices[tangentOffset + 3U];
-                const float tangentLengthSquared =
-                    tangentX * tangentX + tangentY * tangentY + tangentZ * tangentZ;
-                if (!std::isfinite(tangentLengthSquared) ||
-                    tangentLengthSquared <= MinimumTangentLengthSquared ||
-                    (tangentHandedness != -1.0F && tangentHandedness != 1.0F))
-                {
-                    return Core::failure(
-                        RenderErrorCode::InvalidMeshUpload,
-                        "StaticMesh vertex tangents require non-zero xyz and -1 or +1 handedness");
-                }
+                return Core::failure(
+                    RenderErrorCode::InvalidMeshUpload,
+                    "StaticMesh vertex tangents require non-zero xyz and -1 or +1 handedness");
             }
         }
         for (const u16 index : desc.indices)
@@ -647,7 +637,6 @@ class NullRenderDevice final : public IRenderDevice {
             meshes_.push_back(MeshSlot{.generation = 1,
                                        .vertexCount = desc.vertexCount,
                                        .indexCount = desc.indexCount,
-                                       .hasTangents = hasTangents,
                                        .live = true});
         }
         catch (const std::bad_alloc&)
@@ -730,7 +719,6 @@ class NullRenderDevice final : public IRenderDevice {
         u32 generation = 1;
         u32 vertexCount = 0;
         u32 indexCount = 0;
-        bool hasTangents = false;
         bool live = false;
     };
 

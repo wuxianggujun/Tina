@@ -1603,7 +1603,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid staticmesh asset id");
             }
             std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
-            std::array<float, 24 * 8> vertices{};
+            std::array<float, 24 * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{};
             std::array<Core::u16, 36> indices{};
             const AssetFormat::StaticMeshPayloadDesc desc =
                 AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);

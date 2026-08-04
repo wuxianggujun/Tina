@@ -27,7 +27,7 @@ TEST(AssetGpuMeshTests, UploadTypedStaticMeshToNullDevice)
     const auto meshId = *Core::AssetId::fromBytes(idBytes(1U));
 
     std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
-    std::array<float, 24 * 8> vertices{};
+    std::array<float, 24 * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{};
     std::array<Core::u16, 36> indices{};
     const auto desc = AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
     ASSERT_FALSE(desc.vertices.empty());
@@ -56,7 +56,7 @@ TEST(AssetGpuMeshTests, RejectsZeroMeshKey)
     std::pmr::unsynchronized_pool_resource memory;
     const auto meshId = *Core::AssetId::fromBytes(idBytes(2U));
     std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
-    std::array<float, 24 * 8> vertices{};
+    std::array<float, 24 * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{};
     std::array<Core::u16, 36> indices{};
     const auto desc = AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
     auto cooked = AssetFormat::writeCookedStaticMeshAsset(meshId, desc);
@@ -71,20 +71,19 @@ TEST(AssetGpuMeshTests, RejectsZeroMeshKey)
     ASSERT_FALSE(status.has_value());
 }
 
-TEST(AssetGpuMeshTests, UploadsTangentStaticMeshToNullDevice)
+TEST(AssetGpuMeshTests, UploadsStaticMeshToNullDevice)
 {
     std::pmr::unsynchronized_pool_resource memory;
     const auto meshId = *Core::AssetId::fromBytes(idBytes(3U));
     const std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{
         AssetFormat::StaticMeshSubmeshDesc{.firstIndex = 0, .indexCount = 3}};
-    const std::array<float, 3 * AssetFormat::StaticMeshWire::P3N3T4UV2FloatsPerVertex> vertices{
+    const std::array<float, 3 * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{
         0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
         1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0,
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1,
     };
     const std::array<Core::u16, 3> indices{0, 1, 2};
     auto cooked = AssetFormat::writeCookedStaticMeshAsset(meshId, AssetFormat::StaticMeshPayloadDesc{
-        .vertexLayout = AssetFormat::StaticMeshVertexLayout::P3N3T4UV2,
         .boundsCenterX = 0.5F,
         .boundsCenterY = 0.5F,
         .boundsRadius = 0.7072F,
