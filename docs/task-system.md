@@ -55,9 +55,9 @@ IO 与 CPU 队列分离，避免慢磁盘占满 CPU worker。普通 preset 的 I
 Bounded backend 使用 backend-neutral `TINA_TRACE_ZONE` 标注 `Task.IOWorker.Lifetime`、
 `Task.CPUWorker.Lifetime`、`Task.Worker.Execute`、`Task.Main.Pump` 与 `Task.Main.Execute`。worker lifetime
 zone 表达线程角色和完整存活区间；每个出队的 IO/CPU work 以及每个由 `pumpMain()` 执行的 Main work
-都有独立 execution zone。名称均为静态 literal，不从 callable、队列或线程动态拼接，也不引入 TLS 或
-TaskSystem 全局状态。None backend 下这些标注完全编译消失；Tracy Profile backend 仅用于定位，不能
-替代 benchmark 回归协议。
+都有独立 execution zone。名称均为静态 literal，不从 callable、队列或线程动态拼接，也不引入
+Tina-owned TLS 或 TaskSystem 全局状态。None backend 下这些标注完全编译消失；Tracy Profile backend
+仅用于定位，不能替代 benchmark 回归协议。
 
 ## 不变量
 

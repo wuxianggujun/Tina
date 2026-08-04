@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
-project(TinaSdkMissingComponentConsumer LANGUAGES NONE)
+
+if(NOT DEFINED TINA_EXPECT_TRACE_TRACY)
+    message(FATAL_ERROR "TINA_EXPECT_TRACE_TRACY must describe the producer trace backend")
+endif()
+
+if(TINA_EXPECT_TRACE_TRACY)
+    project(TinaSdkMissingComponentConsumer LANGUAGES CXX)
+else()
+    project(TinaSdkMissingComponentConsumer LANGUAGES NONE)
+endif()
 
 if(NOT DEFINED TINA_EXPECT_MISSING_COMPONENTS OR TINA_EXPECT_MISSING_COMPONENTS STREQUAL "")
     message(FATAL_ERROR "TINA_EXPECT_MISSING_COMPONENTS must name at least one unavailable component")

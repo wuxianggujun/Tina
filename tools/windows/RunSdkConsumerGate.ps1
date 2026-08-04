@@ -187,6 +187,7 @@ $missingComponents = if($isDesktopBootstrapConsumer) {
 $missingComponentConfigureArguments = @(
     "-S", (Join-Path $sourceDirectory "tests/sdk_consumer_missing_component"),
     "-B", $missingComponentBuildDirectory,
+    "-DTINA_EXPECT_TRACE_TRACY=$expectTraceTracyCacheValue",
     "-DTINA_EXPECT_MISSING_COMPONENTS=$missingComponents"
 ) + $commonConfigureArguments
 & cmake @missingComponentConfigureArguments
