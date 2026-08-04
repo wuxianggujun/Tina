@@ -70,11 +70,20 @@ option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
 
 set(TINA_TRACE_BACKEND "none" CACHE STRING "Compile-time Tina trace backend")
-set_property(CACHE TINA_TRACE_BACKEND PROPERTY STRINGS "none")
-if (NOT TINA_TRACE_BACKEND STREQUAL "none")
+set_property(CACHE TINA_TRACE_BACKEND PROPERTY STRINGS "none" "tracy")
+if (NOT TINA_TRACE_BACKEND STREQUAL "none" AND
+    NOT TINA_TRACE_BACKEND STREQUAL "tracy")
     message(FATAL_ERROR
         "Unsupported TINA_TRACE_BACKEND='${TINA_TRACE_BACKEND}'. "
-        "Only the 'none' backend is currently supported.")
+        "Supported backends are 'none' and 'tracy'.")
+endif ()
+
+if (TINA_TRACE_BACKEND STREQUAL "tracy")
+    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+        NOT "profile-tracy" IN_LIST VCPKG_MANIFEST_FEATURES)
+        message(FATAL_ERROR
+            "TINA_TRACE_BACKEND=tracy requires the vcpkg manifest feature 'profile-tracy'.")
+    endif ()
 endif ()
 
 if (TINA_BUILD_PLATFORM_GLFW)
@@ -249,6 +258,9 @@ if(TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
     add_subdirectory(thirdparty)
 endif()
 
+if (TINA_TRACE_BACKEND STREQUAL "tracy")
+    add_subdirectory(src/trace/tracy)
+endif ()
 add_subdirectory(src/core)
 add_subdirectory(src/integration)
 add_subdirectory(src/platform)

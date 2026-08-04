@@ -11,14 +11,14 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 | Error | C++23 `std::expected` 的 `Result<T>`/`Status`、稳定 domain/code、origin、native code、UTF-8 context chain |
 | Time | `Duration`、`MonotonicTimePoint`、`IMonotonicClock`、`SteadyMonotonicClock`、`FixedStepAccumulator` |
 | Diagnostics | `TINA_ASSERT`、`LogLevel/LogRecord`、`DiagnosticChannel`、Engine-owned `Diagnostics` 与私有 console sink |
-| Trace | backend-neutral `TINA_TRACE_ZONE(nameLiteral)` 编译期 frontend；当前唯一 backend 为 None |
+| Trace | backend-neutral `TINA_TRACE_ZONE(nameLiteral)` 编译期 frontend；None + 可选 Tracy Profile backend |
 | Memory | `MemoryTag`、`MemoryTracker`、`CountingMemoryResource`、owning `FrameArena` |
 | ID | `GenerationId/GenerationPool`、`AssetId` |
 | Hash | 128-bit `ContentHash` 与 PRIVATE XXH3-128 digest adapter |
 | IO/Text | strict UTF-8 helpers、有界 `readFile`、`createParentDirectories`、`writeFile` 与 atomic sibling replace |
 
 不在当前 Core 的能力：通用线程池、Asset job、Runtime event queue、全局 allocator 替换、MetricsRegistry、
-Tracy session/adapter、CrashContext、callstack 符号化和通用 Tina STL。
+Trace session/capture 控制面、CrashContext、callstack 符号化和通用 Tina STL。
 
 ## Result 与失败边界
 
@@ -83,18 +83,26 @@ ContentHash。
 `DiagnosticChannel`。当前默认 sink 同步输出到 console；级别短路不写 sink，sink 失败计数且不递归，
 shutdown 后 channel 写入为 no-op。
 
-当前没有 file sink、异步日志队列、MetricsRegistry、Tracy adapter 或 CrashContext。日志不得
+当前没有 file sink、异步日志队列、MetricsRegistry、Trace session/capture 控制面或 CrashContext。日志不得
 包含 token、密钥、用户正文和不必要的绝对路径；Audio callback/异常信号路径不调用普通日志。
 
 ## Trace
 
-`<tina/core/trace/Trace.hpp>` 提供唯一 frontend 宏 `TINA_TRACE_ZONE(nameLiteral)`。Core 当前公开传播
-`TINA_TRACE_BACKEND_NONE=1`，None backend 把宏展开为不引用参数的空语句：参数不求值，不构造 zone
-对象，不调用函数，不分配内存，也不读取或创建全局状态。
+`<tina/core/trace/Trace.hpp>` 提供唯一 frontend 宏 `TINA_TRACE_ZONE(nameLiteral)`。根构建的
+`TINA_TRACE_BACKEND` 只接受 `none` 或 `tracy`；`Tina::Core` 只向 consumer PUBLIC 传播 backend-neutral 的
+None/Enabled frontend 定义，不传播具体 profiler 名称。None backend 把宏展开为不引用参数的空语句：
+参数不求值，不构造 zone 对象，不调用函数，不分配内存，也不读取或创建全局状态。
+
+Tracy backend 要求 vcpkg manifest feature `profile-tracy`。公共头仍只含 Tina-owned inline RAII zone：
+`max_align_t` 对齐的固定 64-byte opaque storage 经 `Detail::constructZone/destroyZone` 进入
+`Tina::TraceTracy` adapter；第三方 header、类型和 client implementation 留在 adapter 内。宏使用
+`__COUNTER__` 生成唯一局部对象，并把 string literal 的静态长度与 `SourceLocation` 传给 adapter，
+不执行运行时字符串扫描或分配。首切片不提供 session/capture 控制面。
 
 Runtime 已在 `GameStateDispatchPhase::FrameUpdate` 的逐 State dispatch 内使用
-`TINA_TRACE_ZONE("Runtime.GameState.UpdateFrame")`。这是编译期 frontend 的真实 consumer，但当前没有
-Tracy dependency、adapter、session 或 capture 能力；不能把该 annotation 描述为可采集的 profiler 事件。
+`TINA_TRACE_ZONE("Runtime.GameState.UpdateFrame")`。None 构建中它完全编译消失；Tracy Profile 构建中，
+同一 annotation 由可选 adapter 发布为 zone。普通 benchmark 仍使用 None，不能把 profiler capture
+当作稳定性能 baseline。
 
 ## 时间与文本
 

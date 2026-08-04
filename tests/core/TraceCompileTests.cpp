@@ -4,6 +4,8 @@
 
 namespace Tina::Tests {
 
+#if defined(TINA_TRACE_BACKEND_NONE)
+
 namespace {
 
 struct TraceBitFieldValue {
@@ -26,5 +28,21 @@ TEST(TraceCompileTest, NoneBackendDoesNotEvaluateZoneArgument)
 
     EXPECT_EQ(evaluationCount, 0);
 }
+
+#elif defined(TINA_TRACE_BACKEND_ENABLED)
+
+TEST(TraceCompileTest, EnabledBackendSupportsNestedZones)
+{
+    TINA_TRACE_ZONE("Tests.Trace.Outer");
+    {
+        TINA_TRACE_ZONE("Tests.Trace.Inner");
+    }
+
+    SUCCEED();
+}
+
+#else
+#error "TraceCompileTests requires a selected Tina trace backend"
+#endif
 
 } // namespace Tina::Tests

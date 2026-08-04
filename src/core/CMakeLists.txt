@@ -56,10 +56,14 @@ target_link_libraries(tina_core
         "$<BUILD_INTERFACE:Tina::ProjectOptions>"
         xxHash::xxhash
 )
-target_compile_definitions(tina_core
-    PUBLIC
-        TINA_TRACE_BACKEND_NONE=1
-    PRIVATE
-        TINA_CORE_BUILDING
-)
+if (TINA_TRACE_BACKEND STREQUAL "tracy")
+    target_link_libraries(tina_core PUBLIC Tina::TraceTracy)
+    target_compile_definitions(tina_core
+        PUBLIC
+            TINA_TRACE_BACKEND_ENABLED=1
+    )
+else ()
+    target_compile_definitions(tina_core PUBLIC TINA_TRACE_BACKEND_NONE=1)
+endif ()
+target_compile_definitions(tina_core PRIVATE TINA_CORE_BUILDING)
 set_target_properties(tina_core PROPERTIES CXX_EXTENSIONS OFF)
