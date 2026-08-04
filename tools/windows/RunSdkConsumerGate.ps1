@@ -83,6 +83,12 @@ $generatorPlatform = Get-CMakeCacheValue "CMAKE_GENERATOR_PLATFORM"
 $toolchainFile = Get-CMakeCacheValue "CMAKE_TOOLCHAIN_FILE"
 $vcpkgInstalledDirectory = Get-CMakeCacheValue "VCPKG_INSTALLED_DIR"
 $vcpkgTargetTriplet = Get-CMakeCacheValue "VCPKG_TARGET_TRIPLET"
+$traceBackend = Get-CMakeCacheValue "TINA_TRACE_BACKEND"
+if($traceBackend -ne "none" -and $traceBackend -ne "tracy") {
+    throw "Unsupported TINA_TRACE_BACKEND in producer cache: '$traceBackend'"
+}
+$expectTraceTracy = $traceBackend -eq "tracy"
+$expectTraceTracyCacheValue = if($expectTraceTracy) { "TRUE" } else { "FALSE" }
 
 $buildDirectoryPrefix = $resolvedBuildDirectory.TrimEnd([System.IO.Path]::DirectorySeparatorChar) +
     [System.IO.Path]::DirectorySeparatorChar
@@ -189,15 +195,18 @@ if($LASTEXITCODE -ne 0) { throw "Installed SDK missing-component probe failed wi
 $componentIsolationConfigureArguments = @(
     "-S", (Join-Path $sourceDirectory "tests/sdk_consumer_component_isolation"),
     "-B", $componentIsolationBuildDirectory,
+    "-DTINA_EXPECT_TRACE_TRACY=$expectTraceTracyCacheValue",
     "-DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_bgfx=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_Freetype=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_miniaudio=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_Vorbis=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_Opus=TRUE",
-    "-DCMAKE_DISABLE_FIND_PACKAGE_OpusFile=TRUE",
-    "-DCMAKE_DISABLE_FIND_PACKAGE_Threads=TRUE"
+    "-DCMAKE_DISABLE_FIND_PACKAGE_OpusFile=TRUE"
 ) + $commonConfigureArguments
+if(-not $expectTraceTracy) {
+    $componentIsolationConfigureArguments += "-DCMAKE_DISABLE_FIND_PACKAGE_Threads=TRUE"
+}
 & cmake @componentIsolationConfigureArguments
 if($LASTEXITCODE -ne 0) { throw "Installed SDK component-isolation probe failed with exit code $LASTEXITCODE" }
 
