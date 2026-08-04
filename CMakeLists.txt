@@ -74,7 +74,7 @@ set_property(CACHE TINA_TRACE_BACKEND PROPERTY STRINGS "none")
 if (NOT TINA_TRACE_BACKEND STREQUAL "none")
     message(FATAL_ERROR
         "Unsupported TINA_TRACE_BACKEND='${TINA_TRACE_BACKEND}'. "
-        "TRACE-001-A0 supports only 'none'.")
+        "Only the 'none' backend is currently supported.")
 endif ()
 
 if (TINA_BUILD_PLATFORM_GLFW)
