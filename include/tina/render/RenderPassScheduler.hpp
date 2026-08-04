@@ -11,21 +11,28 @@ namespace Tina::Render {
 
 enum class RenderPassKind : u8 {
     Clear,
+    DirectionalShadowDepth,
     Opaque3D,
     Sprite2D,
     UI,
 };
 
+enum class RenderPassTarget : u8 {
+    PrimarySurface,
+    DirectionalShadowMap,
+};
+
 struct RenderPassPlan final {
     RenderPassKind kind = RenderPassKind::Clear;
+    RenderPassTarget target = RenderPassTarget::PrimarySurface;
     bool clearColor = false;
     bool clearDepth = false;
 };
 
 class RenderPassSchedule final {
   public:
-    // Optional full-surface clear plus Opaque3D, Sprite2D and UI.
-    static constexpr u32 MaximumPassCount = 4;
+    // Optional full-surface clear plus shadow depth, Opaque3D, Sprite2D and UI.
+    static constexpr u32 MaximumPassCount = 5;
 
     [[nodiscard]] constexpr std::span<const RenderPassPlan> passes() const noexcept
     {
@@ -43,6 +50,8 @@ class RenderPassSchedule final {
 
 // Builds the deterministic pass order shared by all render backends. The first
 // enabled full-surface primary-surface content pass owns the color/depth clear.
+// A directional shadow caster inserts one backend-owned offscreen depth pass;
+// its clear never consumes primary-surface clear ownership.
 // When the first primary-surface content pass uses a partial viewport, a
 // full-surface clear pass precedes it; an active surface with no content also
 // receives one clear-only pass.

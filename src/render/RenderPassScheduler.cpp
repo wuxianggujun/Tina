@@ -33,13 +33,15 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
     }
 
     RenderPassSchedule schedule{};
-    const auto append = [&schedule](RenderPassKind kind, bool clearColor, bool clearDepth) noexcept {
+    const auto append = [&schedule](RenderPassKind kind, RenderPassTarget target,
+                                    bool clearColor, bool clearDepth) noexcept {
         if (schedule.m_passCount >= RenderPassSchedule::MaximumPassCount)
         {
             return false;
         }
         schedule.m_passes[schedule.m_passCount++] = RenderPassPlan{
             .kind = kind,
+            .target = target,
             .clearColor = clearColor,
             .clearDepth = clearDepth,
         };
@@ -50,6 +52,15 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
                                   !frame.primaryWorldScene.meshes3D().empty();
     const bool hasSpriteContent = frame.primaryWorldScene.camera2D().has_value() &&
                                   !frame.primaryWorldScene.sprites2D().empty();
+    bool hasDirectionalShadow = false;
+    if (hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value())
+    {
+        for (const Mesh3DDirectionalLight& light :
+             frame.primaryWorldScene.mesh3DLighting()->directionalLights())
+        {
+            hasDirectionalShadow = hasDirectionalShadow || light.castsShadows;
+        }
+    }
     const bool firstSurfaceContentNeedsFullSurfaceClear =
         (hasOpaqueContent &&
          !coversWholeSurface(frame.primaryWorldScene.perspectiveCamera()->normalizedViewport)) ||
@@ -57,7 +68,8 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
          !coversWholeSurface(frame.primaryWorldScene.camera2D()->normalizedViewport));
 
     bool ownsClear = !firstSurfaceContentNeedsFullSurfaceClear;
-    if (firstSurfaceContentNeedsFullSurfaceClear && !append(RenderPassKind::Clear, true, true))
+    if (firstSurfaceContentNeedsFullSurfaceClear &&
+        !append(RenderPassKind::Clear, RenderPassTarget::PrimarySurface, true, true))
     {
         return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
                              "Render pass schedule exceeded its fixed pass capacity");
@@ -67,9 +79,16 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
         const bool clearColor = ownsClear;
         const bool clearDepth = ownsClear;
         ownsClear = false;
-        return append(kind, clearColor, clearDepth);
+        return append(kind, RenderPassTarget::PrimarySurface, clearColor, clearDepth);
     };
 
+    if (hasDirectionalShadow &&
+        !append(RenderPassKind::DirectionalShadowDepth,
+                RenderPassTarget::DirectionalShadowMap, false, true))
+    {
+        return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
+                             "Render pass schedule exceeded its fixed pass capacity");
+    }
     if (hasOpaqueContent && !appendContent(RenderPassKind::Opaque3D))
     {
         return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
@@ -85,7 +104,8 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
         return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
                              "Render pass schedule exceeded its fixed pass capacity");
     }
-    if (schedule.empty() && !append(RenderPassKind::Clear, true, true))
+    if (schedule.empty() &&
+        !append(RenderPassKind::Clear, RenderPassTarget::PrimarySurface, true, true))
     {
         return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
                              "Render pass schedule exceeded its fixed pass capacity");

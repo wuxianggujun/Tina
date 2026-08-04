@@ -1617,10 +1617,22 @@ TEST(SceneDirectionalLightTest, SetsClearsQueriesAndRejectsInvalidComponent)
     DirectionalLight3D light{
         .color = {.red = 0.25F, .green = 0.5F, .blue = 0.75F},
         .intensity = 2.0F,
+        .shadowDistanceMeters = 80.0F,
+        .shadowDepthBias = 0.002F,
+        .shadowNormalBiasMeters = 0.03F,
+        .castsShadows = true,
     };
     ASSERT_TRUE(world.setDirectionalLight3D(entity, light));
     ASSERT_NE(world.directionalLight3D(entity), nullptr);
     EXPECT_EQ(*world.directionalLight3D(entity), light);
+
+    DirectionalLight3D invalidShadow = light;
+    invalidShadow.shadowDistanceMeters =
+        Render::Mesh3DLightingDesc::MaximumDirectionalShadowDistanceMeters + 1.0F;
+    auto invalidShadowStatus = world.setDirectionalLight3D(entity, invalidShadow);
+    ASSERT_FALSE(invalidShadowStatus);
+    EXPECT_EQ(invalidShadowStatus.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_FLOAT_EQ(world.directionalLight3D(entity)->shadowDistanceMeters, 80.0F);
 
     light.intensity = std::numeric_limits<float>::quiet_NaN();
     auto invalid = world.setDirectionalLight3D(entity, light);
@@ -1658,6 +1670,10 @@ TEST(SceneDirectionalLightTest, ExtractsStableWorldDirectionsColorsAndAmbientInt
     ASSERT_TRUE(world.setDirectionalLight3D(first, DirectionalLight3D{
         .color = {.red = 0.5F, .green = 0.25F, .blue = 0.125F},
         .intensity = 2.0F,
+        .shadowDistanceMeters = 72.0F,
+        .shadowDepthBias = 0.002F,
+        .shadowNormalBiasMeters = 0.04F,
+        .castsShadows = true,
     }));
     ASSERT_TRUE(world.setDirectionalLight3D(second, DirectionalLight3D{
         .color = {.red = 0.1F, .green = 0.2F, .blue = 0.3F},
@@ -1688,13 +1704,37 @@ TEST(SceneDirectionalLightTest, ExtractsStableWorldDirectionsColorsAndAmbientInt
     EXPECT_FLOAT_EQ(lights[0].colorR, 1.0F);
     EXPECT_FLOAT_EQ(lights[0].colorG, 0.5F);
     EXPECT_FLOAT_EQ(lights[0].colorB, 0.25F);
+    EXPECT_TRUE(lights[0].castsShadows);
+    EXPECT_FLOAT_EQ(lights[0].shadowDistanceMeters, 72.0F);
+    EXPECT_FLOAT_EQ(lights[0].shadowDepthBias, 0.002F);
+    EXPECT_FLOAT_EQ(lights[0].shadowNormalBiasMeters, 0.04F);
     EXPECT_NEAR(lights[1].directionTowardLightX, 1.0F, 1.0e-5F);
     EXPECT_NEAR(lights[1].directionTowardLightY, 0.0F, 1.0e-5F);
     EXPECT_NEAR(lights[1].directionTowardLightZ, 0.0F, 1.0e-5F);
     EXPECT_FLOAT_EQ(lights[1].colorR, 0.3F);
     EXPECT_FLOAT_EQ(lights[1].colorG, 0.6F);
     EXPECT_FLOAT_EQ(lights[1].colorB, 0.9F);
+    EXPECT_FALSE(lights[1].castsShadows);
     EXPECT_FLOAT_EQ(view->mesh3DLighting()->ambientScale(), 0.3F);
+}
+
+TEST(SceneDirectionalLightTest, RejectsMoreThanOneDirectionalShadowCaster)
+{
+    World world = makeWorld();
+    const EntityId first = world.createEntity().value();
+    const EntityId second = world.createEntity().value();
+    ASSERT_TRUE(world.setDirectionalLight3D(first, DirectionalLight3D{.castsShadows = true}));
+    ASSERT_TRUE(world.setDirectionalLight3D(second, DirectionalLight3D{.castsShadows = true}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    auto status = extractRenderSceneFromWorld(world, builder->writer(), packet.resourceSink());
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
+    builder->rollback();
 }
 
 TEST(SceneDirectionalLightTest, RejectsMoreThanTheFixedActiveLightLimit)

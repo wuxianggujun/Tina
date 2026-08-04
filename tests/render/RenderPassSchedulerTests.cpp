@@ -45,7 +45,7 @@ TEST(RenderPassSchedulerTest, ClearOnlyOwnsBothAttachmentsWhenThereIsNoContent)
     EXPECT_TRUE(schedule->passes()[0].clearDepth);
 }
 
-TEST(RenderPassSchedulerTest, ContentOrderIsOpaqueThenSpriteThenUi)
+TEST(RenderPassSchedulerTest, ContentOrderIsShadowThenOpaqueThenSpriteThenUi)
 {
     auto frame = frameWithSurface();
     RenderFramePacket resources;
@@ -72,6 +72,12 @@ TEST(RenderPassSchedulerTest, ContentOrderIsOpaqueThenSpriteThenUi)
         .worldTransform = RenderTransform3DInput{.pose = RenderPose3DInput{.positionZ = -2.0F}},
         .localBounds = RenderBoundingSphereInput{.radius = 0.5F},
     }));
+    const std::array directionalLights{
+        Mesh3DDirectionalLight{.castsShadows = true},
+    };
+    ASSERT_TRUE(sceneBuilder.writer().setMesh3DLighting(Mesh3DLightingDesc{
+        .directionalLights = directionalLights,
+    }));
     auto scene = sceneBuilder.commit();
     ASSERT_TRUE(scene.has_value()) << scene.error().message;
     frame.primaryWorldScene = *scene;
@@ -92,16 +98,21 @@ TEST(RenderPassSchedulerTest, ContentOrderIsOpaqueThenSpriteThenUi)
 
     const auto schedule = buildRenderPassSchedule(frame);
     ASSERT_TRUE(schedule.has_value()) << schedule.error().message;
-    ASSERT_EQ(schedule->passes().size(), 3U);
-    EXPECT_EQ(schedule->passes()[0].kind, RenderPassKind::Opaque3D);
-    EXPECT_EQ(schedule->passes()[1].kind, RenderPassKind::Sprite2D);
-    EXPECT_EQ(schedule->passes()[2].kind, RenderPassKind::UI);
-    EXPECT_TRUE(schedule->passes()[0].clearColor);
+    ASSERT_EQ(schedule->passes().size(), 4U);
+    EXPECT_EQ(schedule->passes()[0].kind, RenderPassKind::DirectionalShadowDepth);
+    EXPECT_EQ(schedule->passes()[0].target, RenderPassTarget::DirectionalShadowMap);
+    EXPECT_FALSE(schedule->passes()[0].clearColor);
     EXPECT_TRUE(schedule->passes()[0].clearDepth);
-    EXPECT_FALSE(schedule->passes()[1].clearColor);
-    EXPECT_FALSE(schedule->passes()[1].clearDepth);
+    EXPECT_EQ(schedule->passes()[1].kind, RenderPassKind::Opaque3D);
+    EXPECT_EQ(schedule->passes()[1].target, RenderPassTarget::PrimarySurface);
+    EXPECT_EQ(schedule->passes()[2].kind, RenderPassKind::Sprite2D);
+    EXPECT_EQ(schedule->passes()[3].kind, RenderPassKind::UI);
+    EXPECT_TRUE(schedule->passes()[1].clearColor);
+    EXPECT_TRUE(schedule->passes()[1].clearDepth);
     EXPECT_FALSE(schedule->passes()[2].clearColor);
     EXPECT_FALSE(schedule->passes()[2].clearDepth);
+    EXPECT_FALSE(schedule->passes()[3].clearColor);
+    EXPECT_FALSE(schedule->passes()[3].clearDepth);
 }
 
 TEST(RenderPassSchedulerTest, PartialFirstContentViewportGetsFullSurfaceClearPass)
@@ -139,6 +150,56 @@ TEST(RenderPassSchedulerTest, PartialFirstContentViewportGetsFullSurfaceClearPas
     EXPECT_EQ(schedule->passes()[1].kind, RenderPassKind::Sprite2D);
     EXPECT_FALSE(schedule->passes()[1].clearColor);
     EXPECT_FALSE(schedule->passes()[1].clearDepth);
+}
+
+TEST(RenderPassSchedulerTest, PartialOpaqueViewportClearsPrimarySurfaceBeforeShadowPass)
+{
+    auto frame = frameWithSurface();
+    RenderFramePacket resources;
+    ASSERT_TRUE(resources.beginFrame(0));
+    auto sceneBuilderResult = RenderSceneBuilder::Create(RenderSceneCapacity{
+        .mesh3DItemCapacity = 1, .mesh3DBatchCapacity = 1});
+    ASSERT_TRUE(sceneBuilderResult.has_value()) << sceneBuilderResult.error().message;
+    RenderSceneBuilder sceneBuilder = std::move(*sceneBuilderResult);
+    ASSERT_TRUE(sceneBuilder.beginFrame());
+    ASSERT_TRUE(sceneBuilder.writer().setPerspectiveCamera(RenderPerspectiveCameraInput{
+        .stableCameraKey = 1,
+        .nearPlaneMeters = 0.1F,
+        .farPlaneMeters = 100.0F,
+        .normalizedViewport = RenderNormalizedViewport{.x = 0.25F, .width = 0.5F},
+    }));
+    ASSERT_TRUE(sceneBuilder.writer().addMesh3D(RenderMesh3DInput{
+        .mesh = internTestResource(resources, FrameResourceKind::Mesh3DGeometry, 1),
+        .material = internTestResource(resources, FrameResourceKind::Mesh3DMaterial, 2),
+        .stableEntityKey = 1,
+        .worldTransform = RenderTransform3DInput{.pose = RenderPose3DInput{.positionZ = -2.0F}},
+        .localBounds = RenderBoundingSphereInput{.radius = 0.5F},
+    }));
+    const std::array directionalLights{
+        Mesh3DDirectionalLight{.castsShadows = true},
+    };
+    ASSERT_TRUE(sceneBuilder.writer().setMesh3DLighting(Mesh3DLightingDesc{
+        .directionalLights = directionalLights,
+    }));
+    auto scene = sceneBuilder.commit();
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+    frame.primaryWorldScene = *scene;
+
+    const auto schedule = buildRenderPassSchedule(frame);
+    ASSERT_TRUE(schedule.has_value()) << schedule.error().message;
+    ASSERT_EQ(schedule->passes().size(), 3U);
+    EXPECT_EQ(schedule->passes()[0].kind, RenderPassKind::Clear);
+    EXPECT_EQ(schedule->passes()[0].target, RenderPassTarget::PrimarySurface);
+    EXPECT_TRUE(schedule->passes()[0].clearColor);
+    EXPECT_TRUE(schedule->passes()[0].clearDepth);
+    EXPECT_EQ(schedule->passes()[1].kind, RenderPassKind::DirectionalShadowDepth);
+    EXPECT_EQ(schedule->passes()[1].target, RenderPassTarget::DirectionalShadowMap);
+    EXPECT_FALSE(schedule->passes()[1].clearColor);
+    EXPECT_TRUE(schedule->passes()[1].clearDepth);
+    EXPECT_EQ(schedule->passes()[2].kind, RenderPassKind::Opaque3D);
+    EXPECT_EQ(schedule->passes()[2].target, RenderPassTarget::PrimarySurface);
+    EXPECT_FALSE(schedule->passes()[2].clearColor);
+    EXPECT_FALSE(schedule->passes()[2].clearDepth);
 }
 
 TEST(RenderPassSchedulerTest, SuspendedSurfaceSkipsAllPasses)

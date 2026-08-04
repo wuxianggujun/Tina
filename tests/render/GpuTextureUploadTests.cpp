@@ -146,6 +146,22 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
         .ambientScale = -0.1F,
     }));
 
+    auto invalidShadowDistance = lights;
+    invalidShadowDistance[0].castsShadows = true;
+    invalidShadowDistance[0].shadowDistanceMeters = 0.0F;
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = invalidShadowDistance,
+        .ambientScale = 0.2F,
+    }));
+
+    auto tooManyShadowCasters = lights;
+    tooManyShadowCasters[0].castsShadows = true;
+    tooManyShadowCasters[1].castsShadows = true;
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = tooManyShadowCasters,
+        .ambientScale = 0.2F,
+    }));
+
     std::array<Render::Mesh3DDirectionalLight, Render::Mesh3DLightingDesc::MaximumDirectionalLightCount + 1U>
         tooManyLights{};
     ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{

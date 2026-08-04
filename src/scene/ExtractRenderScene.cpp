@@ -375,6 +375,10 @@ struct ShadowOccluder2DCandidate final {
                     .colorR = colorR,
                     .colorG = colorG,
                     .colorB = colorB,
+                    .shadowDistanceMeters = component->shadowDistanceMeters,
+                    .shadowDepthBias = component->shadowDepthBias,
+                    .shadowNormalBiasMeters = component->shadowNormalBiasMeters,
+                    .castsShadows = component->castsShadows,
                 },
         };
         ++lightCount;

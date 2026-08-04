@@ -208,6 +208,10 @@ struct Mesh3DDirectionalLight final {
     float colorR = 1.0F;
     float colorG = 1.0F;
     float colorB = 1.0F;
+    float shadowDistanceMeters = 50.0F;
+    float shadowDepthBias = 0.0015F;
+    float shadowNormalBiasMeters = 0.02F;
+    bool castsShadows = false;
 };
 
 struct Mesh3DPointLight final {
@@ -239,6 +243,10 @@ struct Mesh3DLightingDesc final {
     static constexpr std::size_t MaximumDirectionalLightCount = 4;
     static constexpr std::size_t MaximumPointLightCount = 8;
     static constexpr std::size_t MaximumSpotLightCount = 8;
+    static constexpr std::size_t MaximumDirectionalShadowCasterCount = 1;
+    static constexpr float MaximumDirectionalShadowDistanceMeters = 500.0F;
+    static constexpr float MaximumDirectionalShadowDepthBias = 0.05F;
+    static constexpr float MaximumDirectionalShadowNormalBiasMeters = 1.0F;
 
     // Consumed synchronously by the receiving writer/device; no span is retained.
     std::span<const Mesh3DDirectionalLight> directionalLights{};

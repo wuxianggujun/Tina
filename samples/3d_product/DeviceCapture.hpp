@@ -43,9 +43,19 @@ class DeviceCapture final {
         {
             return;
         }
+        Core::u32 directionalShadowCasterCount = 0;
+        if (scene.mesh3DLighting().has_value())
+        {
+            for (const Render::Mesh3DDirectionalLight& light :
+                 scene.mesh3DLighting()->directionalLights())
+            {
+                directionalShadowCasterCount += light.castsShadows ? 1U : 0U;
+            }
+        }
         if (submittedLightingFrames_ == 0)
         {
             directionalLightCount_ = statistics.directionalLightCount;
+            directionalShadowCasterCount_ = directionalShadowCasterCount;
             pointLight3DCount_ = statistics.pointLight3DCount;
             spotLight3DCount_ = statistics.spotLight3DCount;
             submittedCameraAspectRatio_ = camera->aspectRatio;
@@ -53,6 +63,7 @@ class DeviceCapture final {
         else
         {
             if (directionalLightCount_ != statistics.directionalLightCount ||
+                directionalShadowCasterCount_ != directionalShadowCasterCount ||
                 pointLight3DCount_ != statistics.pointLight3DCount ||
                 spotLight3DCount_ != statistics.spotLight3DCount)
             {
@@ -73,6 +84,10 @@ class DeviceCapture final {
     [[nodiscard]] Core::u32 directionalLightCount() const noexcept
     {
         return directionalLightCount_;
+    }
+    [[nodiscard]] Core::u32 directionalShadowCasterCount() const noexcept
+    {
+        return directionalShadowCasterCount_;
     }
     [[nodiscard]] Core::u32 pointLight3DCount() const noexcept
     {
@@ -107,6 +122,7 @@ class DeviceCapture final {
     Render::Rgba8FrameCapture lastCapture_{};
     Core::u64 submittedLightingFrames_ = 0;
     Core::u32 directionalLightCount_ = 0;
+    Core::u32 directionalShadowCasterCount_ = 0;
     Core::u32 pointLight3DCount_ = 0;
     Core::u32 spotLight3DCount_ = 0;
     float submittedCameraAspectRatio_ = 0.0F;
