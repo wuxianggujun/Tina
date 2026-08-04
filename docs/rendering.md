@@ -2,17 +2,20 @@
 
 Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在于 `tina_render_bgfx` 私有
 实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，以及 EngineHost 侧
-`RenderFramePacket` + FramePin + packet-local `FrameResourceRef` table + present-return CPU completion。Opaque3D 产品着色为 **experimental
-metallic-roughness hybrid**：Scene extraction 每帧提交0..4个 directional + 0..8个 point + 0..8个 spot lights + ambient 的自包含
-`RenderScene` snapshot；`setMesh3DLighting()` 仍是低层 device fallback/direct SPI。当前已有 PointLight3D 与 SpotLight3D、PerspectiveCamera3D influence-sphere culling，以及单 directional caster 的 shadow map 和确定性 pass scheduler；仍无 IBL、级联阴影或通用 GPU submission fence；
-Texture2D/StaticMesh 已有独立、backend-proven 的 GPU resource retirement completion。
+`RenderFramePacket` + FramePin + packet-local `FrameResourceRef` table + present-return CPU completion。Opaque3D 使用
+metallic-roughness Cook-Torrance GGX：Scene extraction 每帧提交0..4个 directional + 0..8个 point + 0..8个
+spot lights + ambient 的自包含 `RenderScene` snapshot；可选 `Mesh3DImageBasedLightingDesc` 再绑定一份 cooked
+diffuse irradiance cubemap、prefiltered specular cubemap 与 BRDF LUT。`setMesh3DLighting()` 仍是低层 device
+fallback/direct SPI。当前已有 PointLight3D 与 SpotLight3D、PerspectiveCamera3D influence-sphere culling，以及
+单 directional caster 的 shadow map 和确定性 pass scheduler；仍无级联阴影或通用 GPU submission fence；
+Texture2D/StaticMesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource retirement completion。
 
 ## Target 边界
 
 | Target | 当前职责 |
 | --- | --- |
 | `tina_render` | `IRenderDevice`、RenderSurface、RenderFrame、RenderScene、UI DisplayList、GPU generation IDs、Null backend |
-| `tina_render_bgfx` | WindowSurface/bgfx 生命周期、Sprite2D、Opaque3D、UI solid/glyph pass、GPU texture/mesh storage |
+| `tina_render_bgfx` | WindowSurface/bgfx 生命周期、Sprite2D、Opaque3D PBR/IBL、UI solid/glyph pass、GPU texture/mesh/environment storage |
 | `tina_ui_render_integration` | committed UI paint → Render `UIDisplayList` |
 | `tina_window_surface_integration` | Platform native surface → Render 的 move-only handoff |
 
@@ -55,7 +58,7 @@ submission ticket 并释放 frame pin。该完成点只表示 Host/backend 已�
 handoff 与 `bgfx::frame()` 假 fence token 已删除。GPU resource retirement 走下文独立 marker，不复用该
 CPU ticket，也不把普通 frame number 描述为 fence。
 
-Opaque3D（experimental MR hybrid）：产品 registry 通过单次 `setMesh3DMaterialBinding()` 原子提交
+Opaque3D metallic-roughness PBR：产品 registry 通过单次 `setMesh3DMaterialBinding()` 原子提交
 baseColor/MR/normal 与 Cooked Material v2 metallic/roughness factor；细粒度 setter 仅保留为低层 direct
 SPI。submit 时分别绑定 `s_texColor`、`s_texMR`（glTF 打包：G=roughness、B=metallic）与
 `s_texNormal`。`Mesh3DLightingDesc` 是唯一 lighting 描述模型：writer/device 均同步消费0..4个
@@ -64,15 +67,19 @@ backend-neutral directional light、0..8个 point light、0..8个 spot light 与
 `RenderSceneWriter::setMesh3DLighting()` 将调用方 span 深拷贝进固定4+8+8槽的 committed frame snapshot；
 bgfx 只在当前 submit 中临时覆盖持久 device fallback，不污染后续帧。World 未声明灯组件时不发布 snapshot；
 已声明但全部 inactive 时发布0灯 + ambient snapshot，显式覆盖 fallback。
-着色 = baseColor × 贴图 ×（bounded directional Lambert + linear radial point-light Lambert + radial×angular spot-light Lambert + Blinn-Phong 近似 specular + ambient）；未绑定 baseColor 用
-1×1 白；未绑定 MR 图时 metallic=0、roughness=1；未绑定 normal 图时只用几何法线。P3N3T4UV2
+direct lighting 对 directional/point/spot radiance 统一使用 GGX NDF、Smith geometry、Schlick Fresnel 与
+energy-conserving diffuse；point/spot 继续应用既有径向/角度衰减。`GpuEnvironmentMapId` 以一个 generation
+identity 原子拥有 RGBA16F diffuse cubemap、带完整 mip 链的 RGBA16F specular cubemap 和 RG16F BRDF LUT。
+`setMesh3DImageBasedLighting()` 只接受同 device live handle、非负 intensity 与 finite world-Y rotation；shader
+按 roughness 选择 specular LOD，并以 split-sum 合成 diffuse/specular IBL。未绑定 IBL 时保留 frame ambient
+fallback；未绑定 baseColor 用1×1白，未绑定 MR 图时 metallic=0、roughness=1，未绑定 normal 图时只用几何法线。P3N3T4UV2
 mesh 由 vertex shader 输出 tangent/handedness，fragment shader 构造正交 TBN；signed model scale 会修正
 handedness。StaticMesh 只有 P3N3T4UV2 一种布局，不存在旧布局运行时分支。诚实限制：当前
 DirectionalLight3D/PointLight3D/SpotLight3D 均可进入 Scene snapshot；point/spot 使用 world position/influence
 radius，在有效 PerspectiveCamera3D 与非0 surface 时做 sphere-frustum culling；spot 额外提交 world-space
 出光方向与 inner/outer cone cosine。最多一个 directional light 可通过 `castsShadows` 启用阴影，并携带
 `shadowDistanceMeters`、`shadowDepthBias` 与 `shadowNormalBiasMeters`。bgfx 使用独立 1024×1024 D16
-framebuffer、camera-slice light projection 与 3×3 PCF；仍无 IBL、CSM、point/spot shadow 或可配置 shadow atlas。
+framebuffer、camera-slice light projection 与 3×3 PCF；仍无 CSM、point/spot shadow 或可配置 shadow atlas。
 
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、
@@ -218,11 +225,11 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - native WindowSurface 初始化、resize/suspend、submit/present/shutdown；
 - transient frame budget 与容量失败；
 - Sprite2D textured quad pass + frame-scoped 0..8 point lights；
-- Opaque3D experimental metallic-roughness hybrid mesh/depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；每帧只编码一次 uniform arrays）；
+- Opaque3D metallic-roughness Cook-Torrance GGX mesh/depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；可选 split-sum IBL；每帧只编码一次 uniform arrays）；
 - 确定性 `Clear -> DirectionalShadowDepth -> Opaque3D -> Sprite2D -> UI` scheduler；shadow depth 使用独立 framebuffer，不取得 primary-surface clear ownership；
 - UI solid/glyph pass；
-- Texture2D/StaticMesh generation storage、唯一 P3N3T4UV2 layout 与 key binding；
-- Texture2D/StaticMesh backend-proven retirement marker、suspend flush 与 shutdown hard drain；
+- Texture2D/StaticMesh/EnvironmentMap generation storage、唯一 P3N3T4UV2 layout 与 key binding；
+- Texture2D/StaticMesh/EnvironmentMap backend-proven retirement marker、suspend flush 与 shutdown hard drain；
 - present 后 primary framebuffer capture；
 - D3D11/OpenGL/Vulkan 对应 embedded shader 选择（按构建与平台可用性）。
 
@@ -230,8 +237,8 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 StaticMesh/Material/Prefab 的 **双 mesh** engine-provided、State-owned registry binding（3D-001 / N15），
 N16.4 再统一其 Lease/GPU/binding owner 与 packet-local resource ref；Material 通过原子 bundle 提交
 baseColor/MR/normal/factors；当前 Scene `DirectionalLight3D`/`PointLight3D`/`SpotLight3D` 每帧提取到
-RenderScene snapshot，point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull，bgfx
-Opaque3D 以 experimental MR hybrid 着色。complete-PBR fixture 的 NORMAL+UV primitive 由 Cooker 生成
+RenderScene snapshot，point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull；产品
+Catalog 另加载 deterministic RGBA16F/RG16F EnvironmentMap 并绑定 split-sum IBL。complete-PBR fixture 的 NORMAL+UV primitive 由 Cooker 生成
 MikkTSpace tangent 并走唯一 P3N3T4UV2 upload；缺少 NORMAL 或 TEXCOORD_0 的 primitive 在 Cooker 阶段显式失败。
 
 ## Surface 与线程
@@ -255,10 +262,11 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```
 
-测试映射与 Visual 证据规则见 [测试说明](testing.md)。`RENDER-001` 已落地 experimental MR +
+测试映射与 Visual 证据规则见 [测试说明](testing.md)。`RENDER-001` 已落地 Cook-Torrance GGX、
 MR/normal/factors、有界4 directional + 8 point + 8 spot-light 描述、Scene component 到逐帧 RenderScene snapshot，
+以及 cooked diffuse/specular/BRDF split-sum IBL，
 以及 authored/MikkTSpace P3N3T4UV2 tangent 到 signed-scale-correct TBN 的完整路径；
 产品 sample 的3个 directional entity，以及 PointLight3D/SpotLight3D 各自
 authored/committed/culled=`3/2/1` 连续300帧稳定提交。
-完整 PBR / IBL、级联及 point/spot shadow、通用 GPU submission fence 与跨 DPI/GPU
-visual gate（`UI-003`）仍后置；Texture/Mesh resource retirement 已不属于这些后置项。
+级联及 point/spot shadow、通用 GPU submission fence 与跨 DPI/GPU
+visual gate（`UI-003`）仍后置；Texture/Mesh/EnvironmentMap resource retirement 已不属于这些后置项。

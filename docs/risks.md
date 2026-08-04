@@ -30,7 +30,7 @@
 | --- | --- | --- |
 | R-GLTF-01 | 外部 glTF URI 经 symlink/junction/reparse、替换竞态或 size/count/dimension 资源炸弹逃逸 authoring root/预算 | 主/外部文件单 handle/fd 快照、最终路径 containment、读取前后 identity/size/time 校验与完整 checked budget 已落地；Windows/Linux `GltfCookTests` 24/24，Windows完整 Asset 218/218，失败不返回部分 cook request |
 | R-TASK-01 | Desktop 默认 CPU domain 被 0 worker 静默禁用 | Desktop 已解析为 `max(1, hw-1)`；直接工厂 `cpuWorkerCount=0` 仍明确表示 IO-only，TASK-001 Done |
-| R-LIFE-01 | RenderFrame 在途引用因 Asset unload、Atlas eviction 或 Surface close 失效 | owning `RenderFramePacket`/FramePin/CPU completion 已落地；Texture/Mesh 使用独立 readback marker 与 AssetLease-backed retirement，失败/skip/shutdown 有明确 drain/abandon |
+| R-LIFE-01 | RenderFrame 在途引用因 Asset unload、Atlas eviction 或 Surface close 失效 | owning `RenderFramePacket`/FramePin/CPU completion 已落地；Texture/Mesh 使用独立 readback marker 与 AssetLease-backed retirement，EnvironmentMap 使用同类 marker 与显式产品 owner，失败/skip/shutdown 有明确 drain/abandon |
 | R-3D-01 | Cooker 单测被误当成 multi-mesh 产品 E2E | 两个 mesh AssetId 已分别完成 cook、upload/bind、Prefab resolve、extract/draw 与账本归零的 product-3d 门禁 |
 | R-LINUX-01 | 当前 tip 缺少 Linux toolchain/sanitizer 证据 | TEST-001 已完成 Docker GCC13 Null/Platform 与 Clang22 Null/ASan/UBSan/LSan 复验；Wayland/真显示器是独立扩展 |
 | R-LEGACY-01 | Legacy 依赖或兼容层继续进入产品图 | vcpkg `legacy` feature、EASTL StringUtils、Clock/FrameTimer compatibility 已删除；`TINA_BUILD_LEGACY=ON` 保持 FATAL |

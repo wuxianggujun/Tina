@@ -1,7 +1,7 @@
 # Public API
 
 本文描述当前 `include/tina` 公共面和 CMake target。它不是未来 SDK 愿望清单；尚未存在的能力（通用
-event queue、通用 GPU submission fence、完整 PBR 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
+event queue、通用 GPU submission fence、CSM 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
 首切片**已经存在**。
 
 ## 分层
@@ -236,19 +236,20 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
   `createMesh3DBinding()` allocator；
 - 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
   `set/clearMesh3DMaterialBinding()` texture/factor bundle；细粒度 material setter 是低层 direct SPI；
-- experimental Opaque3D `Mesh3DLightingDesc`（同步消费0..4 directional + 0..8 point + 0..8 spot lights + 非负 ambient）；
-  `IRenderDevice::setMesh3DLighting()` 是低层 fallback/direct SPI；
+- Opaque3D Cook-Torrance GGX direct-light `Mesh3DLightingDesc`（同步消费0..4 directional + 0..8 point +
+  0..8 spot lights + 非负 ambient）；`IRenderDevice::setMesh3DLighting()` 是低层 fallback/direct SPI；
+- `EnvironmentMap` create/validate/destroy/retire、`Mesh3DImageBasedLightingDesc` bind 与显式 clear；
 - primary framebuffer RGBA8 capture。
 
 `validateTexture2D()` 成功只证明该 handle 的 owner/index/generation 当前能在目标 device 的 Texture2D
 storage 中解析；wrong-owner/stale/invalid 失败不消费 handle，也不修改 backend 状态。
-`GpuTextureId`/`GpuMeshId` 是 RenderDevice owner-scoped generation handle，不是 AssetHandle。当前
+`GpuTextureId`/`GpuMeshId`/`GpuEnvironmentMapId` 是 RenderDevice owner-scoped generation handle，不是 AssetHandle。当前
 `RenderFrame` 的
 Surface/resource table/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。
 `FrameResourceRef` 是 packet-local owner/generation/index token；table resolve 对 cross-packet、stale、越界与
 wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与 submission completion ledger（成功 present 返回后关闭 CPU 借用，见
 `include/tina/render/FramePin.hpp`）。`SubmissionTicket` 不可复制且绑定签发 ledger，packet 取得唯一所有权
-后负责 complete/abandon。它不代表 GPU execution/retirement；Texture2D/StaticMesh 使用独立的
+后负责 complete/abandon。它不代表 GPU execution/retirement；Texture2D/StaticMesh/EnvironmentMap 使用独立的
 `retire*` + backend marker，不能把两类 completion 混用。
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
@@ -472,7 +473,7 @@ Scene target 使用。
 
 ## Asset 与 Cooked
 
-`AssetFormat` 定义 versioned manifest/cooked wire format 和 Texture2D/StaticMesh/Material/Prefab/TileMap/
+`AssetFormat` 定义 versioned manifest/cooked wire format 和 Texture2D/StaticMesh/Material/Prefab/EnvironmentMap/TileMap/
 TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源 glTF/WAV/image；cgltf/stb_image 与源文件解析只在
 Cooker/tool。
 
@@ -540,7 +541,7 @@ fail closed 返回当前低层 key；产品 extraction 使用 `internSpriteFrame
 Scene 语义 alias 已删除；2D Sprite 与3D mesh/material resolver 都直接使用同一个通用 frame-resource
 seam。
 
-`GpuTextureId`/`GpuMeshId` 携带非零 RenderDevice owner + index + generation；Null/bgfx 的 bind、validate、
+`GpuTextureId`/`GpuMeshId`/`GpuEnvironmentMapId` 携带非零 RenderDevice owner + index + generation；Null/bgfx 的 bind、validate、
 destroy/retire 都校验 owner，因此即使两个 live device 恰好具有相同 index/generation，cross-device handle
 也会 fail closed。handle 仍可复制，registry 的唯一 GPU owner 与 handoff 契约继续禁止 alias cleanup。
 
@@ -567,15 +568,19 @@ Texture retirement 失败。Mesh/Texture retirement 通过 AssetSystem 的 lease
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
-metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtime Opaque3D 为 experimental
-MR hybrid；engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors，
+metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtime Opaque3D 使用 Cook-Torrance
+GGX；engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors，
 direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional + 0..8 point + 0..8 spot lights，
 World directional/point/spot component 每帧提取到 RenderScene，point/spot influence sphere 在容量检查前
 按相机裁剪。StaticMesh v1 固定为 P3N3T4UV2：glTF authored `TANGENT` 优先，否则
 NORMAL+TEXCOORD_0 primitive 由 Cooker 使用 MikkTSpace 生成；缺少 NORMAL/UV 显式失败。Opaque3D
-只使用 vertex tangent TBN。最多一个 directional light 可投射 1024×1024 D16、3×3 PCF 阴影；
+只使用 vertex tangent TBN。`EnvironmentMap` cooked v1 固定封装 RGBA16F diffuse irradiance cubemap、带完整
+mip 链的 RGBA16F prefiltered specular cubemap 与 RG16F BRDF LUT；`uploadEnvironmentMapFromCooked()` 只把
+typed view 交给 `createEnvironmentMap()`。三张 native texture 共享一个 `GpuEnvironmentMapId`，create/validate/
+destroy/retire 与 failure rollback 均为一个事务。`Mesh3DImageBasedLightingDesc` 绑定 live handle、非负 intensity
+与 world-Y rotation，`clearMesh3DImageBasedLighting()` 显式恢复无 IBL 状态。最多一个 directional light 可投射 1024×1024 D16、3×3 PCF 阴影；
 `shadowDistanceMeters`、`shadowDepthBias`、`shadowNormalBiasMeters` 与 `castsShadows` 随帧 snapshot 深拷贝。
-IBL、级联及 point/spot shadow 尚未完成。
+级联及 point/spot shadow 尚未完成。
 
 ## Audio 与 Physics
 
@@ -620,7 +625,7 @@ Jolt/Physics3D 尚未接入。
 | `AssetLease` | 强 CPU payload owner | lease reset/destroy |
 | `AudioVoiceId` | `AudioEngine` generation owner | 显式 destroy、engine shutdown/generation reuse；one-shot/stream terminal completion pump 后自动 retire |
 | `TileMapStream::map()` | `TileMapStream` 借用 | stream move/shutdown/destroy；borrower 必须先销毁 |
-| `GpuTextureId/GpuMeshId` | RenderDevice | retire/destroy 时逻辑失效；有外部 pin 时由 completion marker（或 shutdown hard drain）证明完成，无 pin fallback 交给 backend deferred destroy |
+| `GpuTextureId/GpuMeshId/GpuEnvironmentMapId` | RenderDevice | retire/destroy 时逻辑失效；有外部 pin 时由 completion marker（或 shutdown hard drain）证明完成，无 pin fallback 交给 backend deferred destroy |
 | PlatformFrame view | Platform | 下一次 poll/build |
 | Phase context/writer | Runtime callback | callback 返回 |
 | committed UI view | UIContext | 下一次对应 commit/context destroy |
@@ -644,8 +649,8 @@ Invoke/Toggle/RangeValue/Value patterns。
 
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
-- 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh retirement）；
-- 完整 PBR/IBL、CSM、point/spot shadow 与可配置 shadow atlas；
+- 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
+- CSM、point/spot shadow 与可配置 shadow atlas；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；

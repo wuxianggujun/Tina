@@ -44,8 +44,8 @@ Catalog package
 | Cooker | recipe、writer、发布前 typed/package validation、staging 后原子发布；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
-| GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh backend retirement marker；AssetLease pin 与 retirement ledger |
-| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab 3D、AudioClip 均有 Cooked 产品 consumer |
+| GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
+| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked 产品 consumer |
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
 `ParticleSystem2D`/`Trail2D` 与 3D `MeshRenderer3D` 复制 weak handle，并在 extraction 时显式借用产品 resolver；A2
@@ -86,6 +86,9 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
   唯一拥有 StaticMesh `AssetLease`/`GpuMeshId`/binding，Material entry 拥有 Material `AssetLease`/binding，
   Texture entry 按 AssetId 去重拥有共享 Texture2D `AssetLease`/`GpuTextureId`；Material v2 writer 要求同一
   Material 内的 required Texture2D dependency 按 baseColor/MR/normal role 顺序严格递增且唯一；
+- `GpuEnvironmentMapId` 是 RenderDevice-owned 聚合 GPU owner；一次拥有 diffuse/specular cubemap 与 BRDF LUT，
+  三张 native texture 事务创建并以同一 generation validate/clear/retire。产品3D Resources 持有 Catalog 加载后的
+  owning `CookedAssetFile`，State 上传并绑定唯一 GPU owner，失败回滚和 `onExit` 都显式 retirement；
 - `TileMapStream` 持有 root/tileset lease 与 demanded chunk handle/lease；必须先把 `AssetSystem` 和 stream
   放到最终地址，再创建借用 `stream.map()` 的 collision adapter，且 stream 必须先于 AssetSystem 析构；
 - `UploadTicket` 当前只由 Null ledger 完整实现，用于验证 staging 与逻辑状态；
@@ -185,7 +188,7 @@ RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetS
 | 领域 | 已有 schema/parser/writer |
 | --- | --- |
 | 2D | `Texture2D`、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` v3 root、`TileMapChunk` v1 |
-| 3D | `StaticMesh`、`Material`、`Prefab` |
+| 3D | `StaticMesh`、`Material`、`Prefab`、`EnvironmentMap` |
 | Audio | `AudioClip` float32 PCM |
 
 SpriteAnimationClip v1 保存 Once/Loop/PingPong、逐帧正有限 duration 与 required Sprite dependency
@@ -230,11 +233,13 @@ StaticMesh v1 固定为 P3N3T4UV2 + UInt16 index，不携带运行时 layout 分
 Material v2（40B）为 Opaque `UnlitBaseColor`，携带
 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`，以及可选 Texture2D dependency 标志
 （baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab 保存 node
-hierarchy 与 Mesh/Material AssetId。当前 Opaque3D 是 experimental MR hybrid，已采样 baseColor/MR/normal、
+hierarchy 与 Mesh/Material AssetId。当前 Opaque3D 已采样 baseColor/MR/normal、
 应用 material factors，并从 World DirectionalLight3D/PointLight3D/SpotLight3D 发布逐帧有界
 4+8+8灯 snapshot；point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull；
-Opaque3D 只使用 vertex tangent TBN；这不是完整 PBR。单 directional caster shadow 与确定性 pass
-scheduler 已完成，IBL、级联及 point/spot shadow 仍属 `RENDER-001`。glTF importer 的实际限制见
+Opaque3D 只使用 vertex tangent TBN，并以 Cook-Torrance GGX 计算 direct light。EnvironmentMap v1 使用32B
+little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完整 mip 链，BRDF LUT 为 RG16F；Runtime
+不做 convolution，只上传 cooked bytes 并以 intensity/world-Y rotation 绑定 split-sum IBL。单 directional caster
+shadow 与确定性 pass scheduler 已完成，级联及 point/spot shadow 仍属 `RENDER-001`。glTF importer 的实际限制见
 [3D 产品架构](game-3d.md)。
 
 ## 文件与安全边界
@@ -258,7 +263,7 @@ scheduler 已完成，IBL、级联及 point/spot shadow 仍属 `RENDER-001`。gl
 
 ## 当前限制与下一步
 
-- owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh
+- owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - hot reload、增量 Cooker、通用 Asset cache/LRU、Bundle/Patch 与 network Asset 尚未实现，见
   `ASSET-002`；

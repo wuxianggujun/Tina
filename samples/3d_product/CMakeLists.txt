@@ -3,6 +3,8 @@ add_executable(tina_sample_3d
     DeviceCapture.hpp
     Product3DUI.cpp
     Product3DUI.hpp
+    ProductEnvironmentMapFixture.cpp
+    ProductEnvironmentMapFixture.hpp
 )
 
 target_compile_features(tina_sample_3d PRIVATE cxx_std_23)

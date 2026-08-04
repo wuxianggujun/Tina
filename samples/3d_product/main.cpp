@@ -1,3 +1,4 @@
+#include <tina/asset/AssetGpuEnvironmentMap.hpp>
 #include <tina/asset/AssetGpuMesh.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetStore.hpp>
@@ -38,6 +39,7 @@
 
 #include "DeviceCapture.hpp"
 #include "Product3DUI.hpp"
+#include "ProductEnvironmentMapFixture.hpp"
 #include "SampleTempDirectory.hpp"
 
 #include <algorithm>
@@ -155,6 +157,8 @@ struct LifecycleCounters final {
     u64 meshAssetHandlesInvalidated = 0;
     u64 materialAssetHandlesInvalidated = 0;
     u64 textureAssetHandlesInvalidated = 0;
+    bool cookedEnvironmentMap = false;
+    bool imageBasedLightingConfigured = false;
     bool meshBound = false;
     bool materialTextureBound = false;
     bool materialFactorsBound = false;
@@ -241,6 +245,8 @@ struct Product3DResources final {
     std::filesystem::path catalogRoot{};
     Tina::Asset::AssetHandle prefabAsset{};
     Tina::Core::AssetId prefabId{};
+    std::optional<Tina::Asset::CookedAssetFile> environmentMapAsset{};
+    Tina::Core::AssetId environmentMapId{};
     std::array<ProductMeshSlot, MaxProductMeshSlots> meshes{};
     std::array<ProductTextureAsset, MaxProductMeshSlots * 3U> textures{};
     u32 meshSlotCount = 0;
@@ -794,6 +800,28 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
                                  asset.dependencies.end());
     }
 
+    resources.environmentMapId = Tina::Sample3D::productEnvironmentMapAssetId();
+    const bool environmentIdCollision =
+        std::ranges::any_of(request->assets, [&resources](const Tina::Asset::CatalogCookAssetSpec& asset) {
+            return asset.assetId == resources.environmentMapId;
+        });
+    if (environmentIdCollision)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::AlreadyExists,
+                                   "product EnvironmentMap AssetId collides with cooked glTF output");
+    }
+    auto environmentPayload = Tina::Sample3D::makeProductEnvironmentMapPayload();
+    if (!environmentPayload)
+    {
+        return Tina::Core::failure(std::move(environmentPayload.error()));
+    }
+    request->assets.push_back(Tina::Asset::CatalogCookAssetSpec{
+        .assetKind = Tina::AssetFormat::AssetKind::EnvironmentMap,
+        .assetId = resources.environmentMapId,
+        .assetTypeVersion = Tina::AssetFormat::EnvironmentMapWire::SchemaVersion,
+        .payload = std::move(*environmentPayload),
+    });
+
     if (auto status = Tina::Asset::cookAndPublishCatalogPackage(toUtf8(resources.catalogRoot), *request); !status)
     {
         Tina::Core::Error error = std::move(status.error());
@@ -831,6 +859,30 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     {
         return Tina::Core::failure(std::move(catalog.error()));
     }
+
+    auto environmentMapAsset = Tina::Asset::loadCookedAssetFromCatalog(
+        toUtf8(resources.catalogRoot), *catalog, resources.environmentMapId,
+        Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
+    if (!environmentMapAsset)
+    {
+        return Tina::Core::failure(std::move(environmentMapAsset.error()));
+    }
+    auto environmentMap = Tina::Asset::parseEnvironmentMapFromCooked(*environmentMapAsset);
+    if (!environmentMap)
+    {
+        return Tina::Core::failure(std::move(environmentMap.error()));
+    }
+    if (environmentMap->diffuseFaceSize != Tina::Sample3D::ProductEnvironmentDiffuseFaceSize ||
+        environmentMap->specularFaceSize != Tina::Sample3D::ProductEnvironmentSpecularFaceSize ||
+        environmentMap->specularMipCount != Tina::Sample3D::ProductEnvironmentSpecularMipCount ||
+        environmentMap->brdfWidth != Tina::Sample3D::ProductEnvironmentBrdfSize ||
+        environmentMap->brdfHeight != Tina::Sample3D::ProductEnvironmentBrdfSize)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "cooked product EnvironmentMap dimensions changed during publication");
+    }
+    resources.environmentMapAsset.emplace(std::move(*environmentMapAsset));
+    counters.cookedEnvironmentMap = true;
 
     for (u32 slot = 0; slot < slotCount; ++slot)
     {
@@ -1088,6 +1140,31 @@ class Product3DState final : public Tina::IGameState {
             prefabEntities_.clear();
             releaseProductGpuResources();
         });
+
+        if (!resources_->environmentMapAsset.has_value())
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "cooked product EnvironmentMap is missing");
+        }
+        auto uploadedEnvironment =
+            Tina::Asset::uploadEnvironmentMapFromCooked(*device, *resources_->environmentMapAsset);
+        if (!uploadedEnvironment)
+        {
+            return Tina::Core::failure(std::move(uploadedEnvironment.error()));
+        }
+        environmentMap_ = *uploadedEnvironment;
+        if (auto status = device->setMesh3DImageBasedLighting(
+                Tina::Render::Mesh3DImageBasedLightingDesc{
+                    .environmentMap = environmentMap_,
+                    .intensity = Tina::Sample3D::ProductEnvironmentIntensity,
+                    .rotationRadians = Tina::Sample3D::ProductEnvironmentRotationRadians,
+                });
+            !status)
+        {
+            return status;
+        }
+        imageBasedLightingBound_ = true;
+        counters_->imageBasedLightingConfigured = true;
 
         for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
         {
@@ -1718,6 +1795,29 @@ class Product3DState final : public Tina::IGameState {
 
     void releaseProductGpuResources() noexcept
     {
+        Tina::Render::IRenderDevice* device = capture_ != nullptr ? capture_->get() : nullptr;
+        if (environmentMap_)
+        {
+            if (device == nullptr)
+            {
+                std::terminate();
+            }
+            if (imageBasedLightingBound_)
+            {
+                if (auto status = device->clearMesh3DImageBasedLighting(); !status)
+                {
+                    std::terminate();
+                }
+                imageBasedLightingBound_ = false;
+            }
+            Tina::Render::FramePin completionPin{};
+            if (auto status = device->retireEnvironmentMap(environmentMap_, completionPin); !status)
+            {
+                std::terminate();
+            }
+            environmentMap_ = {};
+        }
+
         if (!mesh3DBindings_.has_value())
         {
             return;
@@ -1747,6 +1847,8 @@ class Product3DState final : public Tina::IGameState {
     Tina::Sample3D::Product3DUI ui_;
     std::optional<Tina::PlatformEventSubscription> platformEvents_{};
     std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};
+    Tina::Render::GpuEnvironmentMapId environmentMap_{};
+    bool imageBasedLightingBound_ = false;
     mutable std::optional<Tina::Scene::World> world_{};
     Tina::Platform::LogicalExtent logicalExtent_{DefaultWindowLogicalWidth, DefaultWindowLogicalHeight};
     Tina::Platform::FramebufferExtent framebufferExtent_{DefaultWindowLogicalWidth, DefaultWindowLogicalHeight};
@@ -1884,6 +1986,10 @@ class Product3DApplication final : public Tina::IGameApplication {
     }
     const u32 expectedMeshes = resources.meshSlotCount;
     const u64 tangentMeshesUploaded = capture.tangentMeshesUploaded();
+    const u64 environmentMapsUploaded = capture.environmentMapsUploaded();
+    const u64 imageBasedLightingBindings = capture.imageBasedLightingBindings();
+    const u64 imageBasedLightingClears = capture.imageBasedLightingClears();
+    const u64 environmentMapRetirements = capture.environmentMapRetirements();
     auto& assetSystem = *resources.assetSystem;
     for (const Tina::Asset::AssetRetirementRecord& record : assetSystem.retirement().records())
     {
@@ -1992,6 +2098,14 @@ class Product3DApplication final : public Tina::IGameApplication {
         || counters.meshAssetHandlesInvalidated != expectedMeshes
         || counters.materialAssetHandlesInvalidated != expectedMeshes
         || counters.textureAssetHandlesInvalidated != counters.texturesUploaded
+        || !counters.cookedEnvironmentMap || !counters.imageBasedLightingConfigured
+        || environmentMapsUploaded != 1U || imageBasedLightingBindings != 1U
+        || imageBasedLightingClears != 1U || environmentMapRetirements != 1U
+        || capture.environmentDiffuseFaceSize() != Tina::Sample3D::ProductEnvironmentDiffuseFaceSize
+        || capture.environmentSpecularFaceSize() != Tina::Sample3D::ProductEnvironmentSpecularFaceSize
+        || capture.environmentSpecularMipCount() != Tina::Sample3D::ProductEnvironmentSpecularMipCount
+        || capture.environmentBrdfWidth() != Tina::Sample3D::ProductEnvironmentBrdfSize
+        || capture.environmentBrdfHeight() != Tina::Sample3D::ProductEnvironmentBrdfSize
         || counters.meshFrameResourceResolverHits == 0
         || counters.materialFrameResourceResolverHits == 0
         || assetStoreActiveCount != 1U || !prefabAssetResident ||
@@ -2042,6 +2156,22 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"assetStoreActiveCount\":" << assetStoreActiveCount
                   << ",\"prefabAssetResident\":" << (prefabAssetResident ? "true" : "false")
                   << ",\"texturesUploaded\":" << counters.texturesUploaded
+                  << ",\"cookedEnvironmentMap\":"
+                  << (counters.cookedEnvironmentMap ? "true" : "false")
+                  << ",\"environmentMapsUploaded\":" << environmentMapsUploaded
+                  << ",\"imageBasedLightingConfigured\":"
+                  << (counters.imageBasedLightingConfigured ? "true" : "false")
+                  << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings
+                  << ",\"imageBasedLightingClears\":" << imageBasedLightingClears
+                  << ",\"environmentMapRetirementsAccepted\":" << environmentMapRetirements
+                  << ",\"environmentMapDiffuseFaceSize\":"
+                  << capture.environmentDiffuseFaceSize()
+                  << ",\"environmentMapSpecularFaceSize\":"
+                  << capture.environmentSpecularFaceSize()
+                  << ",\"environmentMapSpecularMipCount\":"
+                  << capture.environmentSpecularMipCount()
+                  << ",\"environmentMapBrdfWidth\":" << capture.environmentBrdfWidth()
+                  << ",\"environmentMapBrdfHeight\":" << capture.environmentBrdfHeight()
                   << ",\"meshBound\":" << (counters.meshBound ? "true" : "false")
                   << ",\"materialTextureBound\":" << (counters.materialTextureBound ? "true" : "false")
                   << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
@@ -2115,14 +2245,26 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":10,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":11,\"frames\":"
               << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
+                 "\"cookedEnvironmentMap\":true,"
                  "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
               << (multiMesh ? "true" : "false") << ",\"materialTextureBound\":"
               << (counters.materialTextureBound ? "true" : "false") << ",\"texturesUploaded\":"
               << counters.texturesUploaded << ",\"meshesUploaded\":" << counters.meshesUploaded
               << ",\"tangentMeshesUploaded\":" << tangentMeshesUploaded
+              << ",\"environmentMapsUploaded\":" << environmentMapsUploaded
+              << ",\"imageBasedLightingConfigured\":"
+              << (counters.imageBasedLightingConfigured ? "true" : "false")
+              << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings
+              << ",\"imageBasedLightingClears\":" << imageBasedLightingClears
+              << ",\"environmentMapRetirementsAccepted\":" << environmentMapRetirements
+              << ",\"environmentMapDiffuseFaceSize\":" << capture.environmentDiffuseFaceSize()
+              << ",\"environmentMapSpecularFaceSize\":" << capture.environmentSpecularFaceSize()
+              << ",\"environmentMapSpecularMipCount\":" << capture.environmentSpecularMipCount()
+              << ",\"environmentMapBrdfWidth\":" << capture.environmentBrdfWidth()
+              << ",\"environmentMapBrdfHeight\":" << capture.environmentBrdfHeight()
               << ",\"materialsLoaded\":" << counters.materialsLoaded << ",\"prefabNodes\":" << counters.prefabNodes
               << ",\"meshAssetHandlesPublished\":" << counters.meshAssetHandlesPublished
               << ",\"materialAssetHandlesPublished\":" << counters.materialAssetHandlesPublished

@@ -223,7 +223,7 @@ AudioEngine
 | `blocksGameplayInputBelow` → 下层空 Action snapshot | Done（Host dispatch，非 ActionMapper 内） |
 | `blocksUIUpdateBelow` 仅挡 `updateUI` | Done；不回改当帧 UI route |
 | `2D-INPUT-ADV` unified digital/analog Action + transactional rebind | Done；本轮测试结果以最终验证记录为准 |
-| `RenderFramePacket` + `FramePin` + packet-local `FrameResourceRef` table + present-return CPU ledger | Done；资源表固定容量/同帧去重，旧 ref 在 complete/skip/abandon 后 fail closed；Texture/Mesh retirement 使用 Render/Asset 独立 marker |
+| `RenderFramePacket` + `FramePin` + packet-local `FrameResourceRef` table + present-return CPU ledger | Done；资源表固定容量/同帧去重，旧 ref 在 complete/skip/abandon 后 fail closed；Texture/Mesh/EnvironmentMap retirement 使用独立 backend marker |
 | `RUNTIME-SHUTDOWN-DEADLINE` bounded Task shutdown + Host-enforced TaskSystem deadline | Done；Task invalid/timeout/retry 与 Host Task-shutdown deadline/death tests 已通过 |
 | Runtime 拥有 AssetSystem/World | 否；仍由产品 State/样例持有 |
 | 通用 Event Queue、多 World/editor orchestration、pass scheduler | 未做；需 ADR/Backlog 后开 |

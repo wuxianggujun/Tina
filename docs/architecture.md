@@ -192,17 +192,19 @@ Prefab 依赖 AssetId（多 prim 展开父+子节点）。`tina_sample_3d` 把 C
 `AssetStore`；Prefab 按 AssetId 写入 weak mesh/material handle，Scene extraction 再分别解析 packet-local ref，
 覆盖 multi-mesh cook -> upload/bind -> Prefab resolve -> extract/draw 的产品 E2E。相对文件或
 bufferView 的 baseColor/MR/normal 贴图可 cook 为 RGBA8 Texture2D 并成为 Material dependency；产品路径
-完成外部 URI/size policy、GPU binding 与 experimental metallic-roughness 采样（material factors、
+完成外部 URI/size policy、GPU binding 与 Cook-Torrance GGX metallic-roughness shading（material factors、
 `Mesh3DLightingDesc` 有界0..4 directional + 0..8 point + 0..8 spot lights）。`DirectionalLight3D`/
 `PointLight3D`/`SpotLight3D` 由 World 拥有，并在每帧 Scene extraction 中按稳定 Entity identity 复制为
 self-contained RenderScene snapshot；PointLight3D/SpotLight3D influence sphere 在各自8灯容量检查前按 active
 PerspectiveCamera3D frustum cull，spot light 额外提交 world local `-Z` 出光方向与 inner/outer cone cosine。
 product-3d 从 primary-window metrics 取得实时 framebuffer extent，因此相机 aspect、light frustum 与 bgfx view rect
-使用同一 surface；UI 则按 logical extent 以 right/end/stretch 约束重排，不按 client 尺寸全局缩放。完整 PBR、
-IBL、CSM、point/spot shadow 与通用 GPU submission fence 仍未完成；单 directional caster shadow 与
-deterministic pass scheduler 已完成。Frame packet 的 FramePin 只覆盖同步
-submit/present 的 CPU 借用期；Texture/Mesh 则使用独立 readback completion marker，并已把 AssetLease
-合并到 backend retirement，二者不能互相作为完成证据。
+使用同一 surface；UI 则按 logical extent 以 right/end/stretch 约束重排，不按 client 尺寸全局缩放。产品
+EnvironmentMap cooked asset 绑定 diffuse irradiance/specular prefilter cubemap 与 BRDF LUT，并由统一
+`GpuEnvironmentMapId` 负责 create/validate/bind/clear/retire；CSM、point/spot shadow 与通用 GPU submission
+fence 仍未完成，单 directional caster shadow 与 deterministic pass scheduler 已完成。Frame packet 的 FramePin 只覆盖同步
+submit/present 的 CPU 借用期；Texture/Mesh/EnvironmentMap 则使用独立 readback completion marker。
+Texture/Mesh retirement 同时保留 AssetLease，EnvironmentMap 由产品显式 GPU owner 负责；两类 GPU retirement
+都不能用 CPU FramePin 作为完成证据。
 
 2D World 的 `SpriteRenderer2D` 保存 copyable weak Sprite handle 与 optional weak normal Texture2D handle，
 standalone `ParticleSystem2D`/`Trail2D` 只保存 weak Sprite `AssetHandle`；TileMap emit 保存 weak Tileset

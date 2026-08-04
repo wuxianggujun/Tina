@@ -114,6 +114,48 @@ class DeviceCapture final {
     {
         return tangentMeshesUploaded_;
     }
+    void recordEnvironmentMapUpload(const Render::EnvironmentMapUploadDesc& desc) noexcept
+    {
+        ++environmentMapsUploaded_;
+        environmentDiffuseFaceSize_ = desc.diffuseFaceSize;
+        environmentSpecularFaceSize_ = desc.specularFaceSize;
+        environmentSpecularMipCount_ = desc.specularMipCount;
+        environmentBrdfWidth_ = desc.brdfWidth;
+        environmentBrdfHeight_ = desc.brdfHeight;
+    }
+    void recordImageBasedLightingBinding() noexcept { ++imageBasedLightingBindings_; }
+    void recordImageBasedLightingClear() noexcept { ++imageBasedLightingClears_; }
+    void recordEnvironmentMapRetirement() noexcept { ++environmentMapRetirements_; }
+    [[nodiscard]] Core::u64 environmentMapsUploaded() const noexcept
+    {
+        return environmentMapsUploaded_;
+    }
+    [[nodiscard]] Core::u64 imageBasedLightingBindings() const noexcept
+    {
+        return imageBasedLightingBindings_;
+    }
+    [[nodiscard]] Core::u64 imageBasedLightingClears() const noexcept
+    {
+        return imageBasedLightingClears_;
+    }
+    [[nodiscard]] Core::u64 environmentMapRetirements() const noexcept
+    {
+        return environmentMapRetirements_;
+    }
+    [[nodiscard]] Core::u16 environmentDiffuseFaceSize() const noexcept
+    {
+        return environmentDiffuseFaceSize_;
+    }
+    [[nodiscard]] Core::u16 environmentSpecularFaceSize() const noexcept
+    {
+        return environmentSpecularFaceSize_;
+    }
+    [[nodiscard]] Core::u16 environmentSpecularMipCount() const noexcept
+    {
+        return environmentSpecularMipCount_;
+    }
+    [[nodiscard]] Core::u16 environmentBrdfWidth() const noexcept { return environmentBrdfWidth_; }
+    [[nodiscard]] Core::u16 environmentBrdfHeight() const noexcept { return environmentBrdfHeight_; }
 
   private:
     Render::IRenderDevice* device_ = nullptr;
@@ -128,6 +170,15 @@ class DeviceCapture final {
     float submittedCameraAspectRatio_ = 0.0F;
     Core::u64 cameraAspectChanges_ = 0;
     Core::u64 tangentMeshesUploaded_ = 0;
+    Core::u64 environmentMapsUploaded_ = 0;
+    Core::u64 imageBasedLightingBindings_ = 0;
+    Core::u64 imageBasedLightingClears_ = 0;
+    Core::u64 environmentMapRetirements_ = 0;
+    Core::u16 environmentDiffuseFaceSize_ = 0;
+    Core::u16 environmentSpecularFaceSize_ = 0;
+    Core::u16 environmentSpecularMipCount_ = 0;
+    Core::u16 environmentBrdfWidth_ = 0;
+    Core::u16 environmentBrdfHeight_ = 0;
     bool lightingCountsStable_ = true;
 };
 
@@ -195,7 +246,12 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Core::Result<Render::GpuEnvironmentMapId>
     createEnvironmentMap(const Render::EnvironmentMapUploadDesc& desc) override
     {
-        return inner_->createEnvironmentMap(desc);
+        auto environmentMap = inner_->createEnvironmentMap(desc);
+        if (environmentMap && capture_ != nullptr)
+        {
+            capture_->recordEnvironmentMapUpload(desc);
+        }
+        return environmentMap;
     }
     [[nodiscard]] Core::Status validateEnvironmentMap(
         Render::GpuEnvironmentMapId environmentMap) const noexcept override
@@ -211,7 +267,12 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
         Render::GpuEnvironmentMapId environmentMap,
         Render::FramePin& completionPin) noexcept override
     {
-        return inner_->retireEnvironmentMap(environmentMap, completionPin);
+        auto status = inner_->retireEnvironmentMap(environmentMap, completionPin);
+        if (status && capture_ != nullptr)
+        {
+            capture_->recordEnvironmentMapRetirement();
+        }
+        return status;
     }
     [[nodiscard]] Core::Status setTexture2DBinding(Core::u32 spriteKey,
                                                    Render::GpuTextureId texture) noexcept override
@@ -285,11 +346,21 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Core::Status setMesh3DImageBasedLighting(
         const Render::Mesh3DImageBasedLightingDesc& lighting) noexcept override
     {
-        return inner_->setMesh3DImageBasedLighting(lighting);
+        auto status = inner_->setMesh3DImageBasedLighting(lighting);
+        if (status && capture_ != nullptr)
+        {
+            capture_->recordImageBasedLightingBinding();
+        }
+        return status;
     }
     [[nodiscard]] Core::Status clearMesh3DImageBasedLighting() noexcept override
     {
-        return inner_->clearMesh3DImageBasedLighting();
+        auto status = inner_->clearMesh3DImageBasedLighting();
+        if (status && capture_ != nullptr)
+        {
+            capture_->recordImageBasedLightingClear();
+        }
+        return status;
     }
 
   private:

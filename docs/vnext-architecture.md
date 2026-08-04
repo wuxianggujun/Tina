@@ -90,7 +90,7 @@ Platform poll/validate
 - owning Runtime event/completion phase；
 - TaskGroup barrier 与 deterministic merge；
 - GPU upload budget；
-- 通用 GPU submission fence（不与当前 Texture/Mesh retirement marker 混称）。
+- 通用 GPU submission fence（不与当前 Texture/Mesh/EnvironmentMap retirement marker 混称）。
 
 这些新增阶段必须有唯一 owner、容量、失败语义与 reset/retire 点，不能通过一个通用 EventBus 或裸
 pointer 把生命周期问题藏起来。
@@ -116,10 +116,10 @@ publication 也已消除逐节点祖先回溯，当前步骤保持线性；完�
 
 - Scene：generation World、Transform、2D/3D component 与 extraction 已完成；command buffer/多 World
   orchestration 后置。
-- Asset：Catalog/Cooked、AssetId、Handle/Lease、IO Task/Main completion、typed payload、Texture/Mesh
+- Asset：Catalog/Cooked、AssetId、Handle/Lease、IO Task/Main completion、typed payload、Texture/Mesh/EnvironmentMap
   upload、retirement ledger 与 AssetLease completion pin 已有；hot reload/增量 Cooker 后置。
-- Render：Null/bgfx、Sprite2D/Opaque3D/UI Glyph、Texture2D/StaticMesh binding、owning packet 与 readback
-  retirement marker 已有；通用 pass scheduler 与完整 PBR 后置。
+- Render：Null/bgfx、Sprite2D/Opaque3D Cook-Torrance GGX/IBL、UI Glyph、Texture2D/StaticMesh/EnvironmentMap
+  binding、owning packet 与 readback retirement marker 已有；CSM 与 point/spot shadow 后置。
 - Physics：Box2D 2D 产品路径已有；Jolt 3D 未接入。
 
 multi-mesh glTF Cooker 已生成 distinct AssetId/Prefab dependency；`3D-001` 产品 sample 已关闭两个 mesh 的
@@ -137,7 +137,7 @@ upload/bind/extract/draw E2E。
 | AssetHandle | Asset registry | 弱 lookup，可失效 |
 | AssetLease | Asset payload | 强保活 CPU payload |
 | GPU handle | RenderDevice | generation backend owner |
-| FramePin/packet | Runtime packet/ledger | present-return CPU complete 已落地；Texture/Mesh 使用独立 readback marker retirement；通用 GPU submission fence 后置 |
+| FramePin/packet | Runtime packet/ledger | present-return CPU complete 已落地；Texture/Mesh/EnvironmentMap 使用独立 readback marker retirement；通用 GPU submission fence 后置 |
 
 任何 borrowed view 都必须注明精确失效点。不能用“一律不能跨帧”代替 committed UI view、Platform
 view、phase writer 和 Lease 各自不同的规则。
@@ -156,8 +156,8 @@ TaskGroup barrier、Runtime-owned Asset/Audio lease drain 与通用 GPU completi
 | --- | --- |
 | `TASK-001` | **Done**：Desktop 交互 CPU worker 默认 |
 | `RUNTIME-001` | **Done**：stack/commands/唯一提交点、四相位 policy、`blocksGameplayInputBelow` 空 snapshot 与产品暂停 overlay |
-| `RUNTIME-002` | FramePin + present-return CPU completion **Done**；RENDER-FENCE 的 Asset/Texture/Mesh readback retirement 亦已完成，通用 submission fence 非当前契约 |
-| `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling + 单 directional shadow/pass scheduler **Done**；完整 PBR/IBL、CSM 与 point/spot shadow 后置 |
+| `RUNTIME-002` | FramePin + present-return CPU completion **Done**；RENDER-FENCE 的 Asset/Texture/Mesh/EnvironmentMap readback retirement 亦已完成，通用 submission fence 非当前契约 |
+| `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling + Cook-Torrance GGX/cooked EnvironmentMap IBL + 单 directional shadow/pass scheduler **Done**；CSM 与 point/spot shadow 后置 |
 | `UI-002` / `UI-002-LINUX` / `UI-003` | action seam、Windows UIA patterns/HWND 产品接线与跨进程 gate 已有；Narrator/Inspect、AT-SPI 与 OS 级 DPI/跨 GPU 视觉矩阵仍开放 |
 | `UI-004` / `UI-005` | **Done**：Focus Scope/Modal/Pointer Capture，以及 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView |
 | `TEXT-001` | 多行编辑、grapheme/shaping 与完整 IME 候选窗仍开放 |

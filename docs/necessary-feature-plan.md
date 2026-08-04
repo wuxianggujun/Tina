@@ -23,7 +23,7 @@
 | N1 | 2D-TILEMAP-LAYERS | 已完成 | 有序 tile/object layer、稳定 ID、visibility/properties、显式渲染和碰撞 layer 选择已贯通 Cooked、runtime、sample 与测试 |
 | N2 | 2D-PHYSICS-EXPAND | 已完成 | backend-neutral 多 shape、sensor enter/exit、distance joint、独立 generation handle 与级联 retirement 已覆盖；Box2D 保持 PRIVATE |
 | N3 | 2D-INPUT-ADV | 已完成 | Runtime 单一 unified binding 已覆盖 analog deadzone/缩放/合成、运行时 rebind、UI consume/claim 后输入不穿透 |
-| N4 | 3D RENDER-001 | 已完成 | Opaque3D 使用唯一有界 0..4 directional-light 提交；Null/bgfx/shader/sample/test 同步，完整 PBR 边界保持明确 |
+| N4 | 3D RENDER-001 | 已完成 | Opaque3D 使用唯一有界 0..4 directional-light 提交；后续 directional/point/spot、Cook-Torrance GGX 与 cooked EnvironmentMap IBL 切片亦已关闭 |
 | N5 | RENDER-FENCE | 已完成 | CPU submission completion 与 GPU resource retirement 已分离；bgfx readback marker、AssetLease pin、suspend/shutdown drain 与测试已贯通 |
 | N6 | 2D-TILEMAP-STREAM | 已完成 | TileMap v3 root/TileMapChunk v1、deferred dependency、固定容量 Camera/layer demand/cancel/unload、resident generation dirty cache 与产品 sample 已贯通 |
 | N7 | 2D-AUDIO-ADV | 已完成 | voice gain/pitch/pan、可取消 fade、线性重采样、one-shot retirement，以及 bounded PCM streaming 的原子 submit、EOF/underrun/cancel、terminal backpressure 与 shutdown 已贯通测试和产品 sample |
@@ -205,7 +205,8 @@ N4 当时明确保留的边界：这不是完整 PBR/light system；后续 `REND
 `RENDER-001-POINT-LIGHTS` 与 `RENDER-001-SPOT-LIGHTS` 已补 directional/point/spot World component、逐帧
 RenderScene snapshot、容量前 influence-sphere culling 与 backend shading；`RENDER-001-VERTEX-TANGENTS`
 后续已关闭 authored/generated tangent 与唯一 backend TBN 路径，并完成单 directional caster shadow 与
-deterministic pass scheduler；IBL、CSM、point/spot shadow、skin/animation 仍未完成。
+deterministic pass scheduler、Cook-Torrance GGX direct light 与 cooked EnvironmentMap split-sum IBL；
+CSM、point/spot shadow、skin/animation 仍未完成。
 
 ### 验收
 
@@ -229,7 +230,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
   suspended skip 直接释放，失败/shutdown abandon。
 - 删除 `SubmissionCompletionMode`、`BgfxSubmissionCompletionLedger`、deferred handoff、dynamic_cast 与
   `lastPresentFrameToken()`；`bgfx::frame()` 只推进 backend 帧，不再冒充 fence token。
-- `submitFrame()` 的 borrowed view 继续要求同步消费；GPU Texture/Mesh 资源所有权由 bgfx backend 管理。
+- `submitFrame()` 的 borrowed view 继续要求同步消费；GPU Texture/Mesh/EnvironmentMap 资源所有权由 bgfx backend 管理。
 - `IRenderDevice::retireTexture2D/retireStaticMesh` 成功才消费 `FramePin`；generation 与 binding 立即失效，
   native handle 等 backend-proven completion 后销毁。Null 同步完成，统计统一暴露 pending/completed。
 - bgfx 在所有资源引用 view 之后提交 1×1 blit + readback marker，只以 `readTexture()` 返回的 ready frame
