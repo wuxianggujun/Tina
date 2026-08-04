@@ -722,8 +722,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
   retirement marker 与 shutdown ledger；
 - shader contract 固化 Cook-Torrance GGX direct light、diffuse irradiance、roughness specular LOD、BRDF LUT
   split-sum、intensity 与 world-Y rotation，同时保留 directional 3×3 PCF；
-- product-3d schema 11 要求 `cookedEnvironmentMap=true`、上传/IBL bind/clear/retire=`1/1/1/1`，并固定
-  diffuse/specular/mips/BRDF=`2/4/3/4×4`。
+- product-3d schema 11 的 `--ibl=on` 要求 `cookedEnvironmentMap=true`、上传/IBL bind/clear/retire=
+  `1/1/1/1`；`--ibl=off` 仍要求上传/retire=`1/1`，但 bind/clear=`0/0`，两种模式都固定
+  diffuse/specular/mips/BRDF=`2/4/3/4×4`；
+- Windows product gate 另以30帧执行 on×2 + off×2，同模式 RGBA8 fingerprint 必须稳定，on/off fingerprint
+  必须不同，避免仅凭 API 调用计数把未影响最终像素的 IBL 判为通过。
 
 功能切片收口时先运行 EnvironmentMap AssetFormat/Asset/Null/bgfx/shader filters，再跑30帧 product smoke；
 最后才执行完整 TEST-003，不在每个实现步骤重复全量测试。
@@ -1004,7 +1007,8 @@ N4 另以 committed soft count=2 和 soft/hard 四跑差分覆盖连续 penumbra
 
 Windows 同轮 product-3d 拓扑由 `tools/windows/RunProduct3dGate.ps1` 固化（TEST-003）：默认使用
 `windows-msvc-vnext-bgfx-ui-freetype`，直接构建并运行 Core、Scene、AssetFormat、Asset、bgfx Render、
-UI、Runtime UI、UI Render bridge 与 FreeType 测试，再执行300帧 `--ui-theme=dark --ui-theme-demo`。
+UI、Runtime UI、UI Render bridge 与 FreeType 测试，再执行300帧
+`--ui-theme=dark --ui-theme-demo --ibl=on`。
 schema 11 同时断言双 mesh、`tangentMeshesUploaded=2`、directional shadow caster authored/submitted=`1`、
 一份 cooked EnvironmentMap 的上传/IBL bind/clear/retire 与2/4/3/4×4尺寸、3个跨 Material 共享 PBR Texture、packet-local resolver 600/600、Mesh/Texture
 retirement records Released、3个 directional light、PointLight3D/SpotLight3D 各自
@@ -1018,6 +1022,9 @@ final-present capture、实时 framebuffer camera aspect、responsive UI authori
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 --width=1280 --height=720
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 --width=1440 --height=900
 ```
+
+完整 gate 还以默认 `IblComparisonFrames=30` 执行 `--ibl=on` 两次和 `--ibl=off` 两次；每次都由 sample
+自校验 EnvironmentMap upload/retire 与条件 bind/clear，脚本再要求同模式 fingerprint 稳定且 on/off 不同。
 
 本次实际两轮验收命令（两轮均为脚本默认 `windows-msvc-vnext-bgfx-ui-freetype` topology）：
 

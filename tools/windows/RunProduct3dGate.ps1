@@ -7,7 +7,8 @@
   Asset, Render, and retained UI GoogleTest executables directly, then run the
   tina_sample_3d 300-frame product smoke with automated Dark -> Light -> Dark
   switching plus ListView/TreeView collection interaction. The final JSON is
-  validated as evidence schema 11.
+  validated as evidence schema 11. Short IBL on/on and off/off runs additionally
+  prove machine-local pixel stability within each mode and a visible A/B change.
 
   Does not use CTest. Does not clean-first wipe. Exits non-zero on first failure.
 
@@ -15,6 +16,10 @@
   Directory containing the selected build preset's executables. Relative paths
   are resolved from SourceRoot. Pass this explicitly when custom presets use a
   different binary directory.
+
+.PARAMETER IblComparisonFrames
+  Frame count for each short IBL on/off repeatability probe. The default keeps
+  the four differential runs bounded while allowing the frame pipeline to settle.
 #>
 [CmdletBinding()]
 param(
@@ -22,6 +27,7 @@ param(
     [string]$BuildPreset = 'windows-vnext-bgfx-ui-freetype-debug',
     [string]$ConfigurePreset = 'windows-msvc-vnext-bgfx-ui-freetype',
     [int]$SampleFrames = 300,
+    [int]$IblComparisonFrames = 30,
     [switch]$SkipConfigure,
     [switch]$SkipBuild,
     [string]$OutJson = '',
@@ -32,6 +38,9 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($SampleFrames -lt 3) {
     throw 'SampleFrames must be at least 3 because --ui-theme-demo has two scheduled transitions'
+}
+if ($IblComparisonFrames -lt 1) {
+    throw 'IblComparisonFrames must be at least 1'
 }
 
 if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
@@ -88,6 +97,7 @@ $report = [ordered]@{
     buildPreset     = $BuildPreset
     binDir          = $BinDir
     sampleFrames    = $SampleFrames
+    iblComparisonFrames = $IblComparisonFrames
     head            = (git rev-parse HEAD 2>$null)
     steps           = @()
     ok              = $false
@@ -134,23 +144,46 @@ $samplePath = Join-Path $BinDir 'tina_sample_3d.exe'
 if (-not (Test-Path -LiteralPath $samplePath -PathType Leaf)) {
     Add-Step -Name 'tina_sample_3d' -ExitCode 1 -Detail "missing executable: $samplePath"
 }
-$sampleOut = & $samplePath "--frames=$SampleFrames" '--frame-delay-ms=0' '--ui-theme=dark' '--ui-theme-demo' 2>&1 | Out-String
-$sampleExit = $LASTEXITCODE
-if ($sampleExit -ne 0) {
-    Add-Step -Name 'tina_sample_3d' -ExitCode $sampleExit -Detail $sampleOut.Trim()
+
+function Invoke-ProductSampleEvidence {
+    param(
+        [Parameter(Mandatory = $true)][string]$StepName,
+        [Parameter(Mandatory = $true)][ValidateSet('on', 'off')][string]$IblMode,
+        [Parameter(Mandatory = $true)][int]$Frames,
+        [switch]$ThemeDemo
+    )
+
+    $arguments = @("--frames=$Frames", '--frame-delay-ms=0', '--ui-theme=dark', "--ibl=$IblMode")
+    if ($ThemeDemo) {
+        $arguments += '--ui-theme-demo'
+    }
+    $stdout = & $samplePath @arguments 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        Add-Step -Name $StepName -ExitCode $exitCode -Detail $stdout.Trim()
+    }
+
+    $jsonLine = $stdout -split '\r?\n' |
+        Where-Object { $_ -match '^\s*\{"status":"(ok|error)"' } |
+        Select-Object -Last 1
+    if ([string]::IsNullOrWhiteSpace($jsonLine)) {
+        Add-Step -Name $StepName -ExitCode 1 -Detail "sample emitted no structured JSON; output=$($stdout.Trim())"
+    }
+    try {
+        $evidence = $jsonLine | ConvertFrom-Json
+    } catch {
+        Add-Step -Name $StepName -ExitCode 1 -Detail "invalid JSON: $jsonLine"
+    }
+    return [pscustomobject]@{
+        Evidence = $evidence
+        Stdout   = $stdout.Trim()
+    }
 }
 
-$jsonLine = $sampleOut -split '\r?\n' |
-    Where-Object { $_ -match '^\s*\{"status":"(ok|error)"' } |
-    Select-Object -Last 1
-if ([string]::IsNullOrWhiteSpace($jsonLine)) {
-    Add-Step -Name 'productEvidence' -ExitCode 1 -Detail "sample emitted no structured JSON; output=$($sampleOut.Trim())"
-}
-try {
-    $evidence = $jsonLine | ConvertFrom-Json
-} catch {
-    Add-Step -Name 'productEvidence' -ExitCode 1 -Detail "invalid JSON: $jsonLine"
-}
+$sampleRun = Invoke-ProductSampleEvidence -StepName 'tina_sample_3d' -IblMode 'on' `
+    -Frames $SampleFrames -ThemeDemo
+$evidence = $sampleRun.Evidence
+$sampleOut = $sampleRun.Stdout
 
 $expectedResolverHits = [long]$SampleFrames * 2
 $expectedFields = [ordered]@{
@@ -171,6 +204,7 @@ $expectedFields = [ordered]@{
     tangentMeshesUploaded               = 2
     cookedEnvironmentMap                = $true
     environmentMapsUploaded             = 1
+    imageBasedLightingMode              = 'on'
     imageBasedLightingConfigured        = $true
     imageBasedLightingBindings          = 1
     imageBasedLightingClears            = 1
@@ -303,15 +337,94 @@ if ($null -eq $evidence.PSObject.Properties['pixelFingerprint'] -or
     $evidenceErrors.Add("pixelFingerprint must be 32 lowercase hexadecimal characters")
 }
 if ($evidenceErrors.Count -ne 0) {
-    Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$($sampleOut.Trim())")
+    Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$sampleOut")
 }
 
 Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=11 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=cooked-rgba16f-rg16f resize=surface-aspect-responsive-ui lights=directional-point-spot-culled theme=dark-light-dark collections=list-tree"
 Add-Step -Name 'tina_sample_3d' -ExitCode 0 -Detail "frames=$SampleFrames pixelFingerprint=$($evidence.pixelFingerprint)"
 
+$iblComparisonEvidence = [ordered]@{
+    on  = @()
+    off = @()
+}
+foreach ($mode in @('on', 'off')) {
+    for ($iteration = 1; $iteration -le 2; ++$iteration) {
+        $stepName = "ibl-$mode-$iteration"
+        $run = Invoke-ProductSampleEvidence -StepName $stepName -IblMode $mode -Frames $IblComparisonFrames
+        $modeEvidence = $run.Evidence
+        $expectedConfigured = $mode -eq 'on'
+        $expectedTransitions = if ($expectedConfigured) { 1 } else { 0 }
+        $modeErrors = [System.Collections.Generic.List[string]]::new()
+        $modeExpectedFields = [ordered]@{
+            status                            = 'ok'
+            sample                            = 'tina_sample_3d'
+            evidenceSchema                    = 11
+            frames                            = $IblComparisonFrames
+            cookedEnvironmentMap              = $true
+            environmentMapsUploaded           = 1
+            imageBasedLightingMode            = $mode
+            imageBasedLightingConfigured      = $expectedConfigured
+            imageBasedLightingBindings        = $expectedTransitions
+            imageBasedLightingClears          = $expectedTransitions
+            environmentMapRetirementsAccepted = 1
+            pixelCaptureOk                    = $true
+            renderResourceLedgerBalanced      = $true
+        }
+        foreach ($name in $modeExpectedFields.Keys) {
+            $property = $modeEvidence.PSObject.Properties[$name]
+            if ($null -eq $property) {
+                $modeErrors.Add("missing $name")
+                continue
+            }
+            $expected = $modeExpectedFields[$name]
+            if ($property.Value -ne $expected) {
+                $modeErrors.Add("$name expected=$expected actual=$($property.Value)")
+            }
+        }
+        if ($null -eq $modeEvidence.PSObject.Properties['pixelFingerprint'] -or
+            [string]$modeEvidence.pixelFingerprint -notmatch '^[0-9a-f]{32}$') {
+            $modeErrors.Add('pixelFingerprint must be 32 lowercase hexadecimal characters')
+        }
+        if ($modeErrors.Count -ne 0) {
+            Add-Step -Name $stepName -ExitCode 1 `
+                -Detail (($modeErrors -join '; ') + "; output=$($run.Stdout)")
+        }
+        $iblComparisonEvidence[$mode] += $modeEvidence
+        Add-Step -Name $stepName -ExitCode 0 `
+            -Detail "frames=$IblComparisonFrames pixelFingerprint=$($modeEvidence.pixelFingerprint)"
+    }
+}
+
+$iblOnFingerprints = @($iblComparisonEvidence.on | ForEach-Object { [string]$_.pixelFingerprint })
+$iblOffFingerprints = @($iblComparisonEvidence.off | ForEach-Object { [string]$_.pixelFingerprint })
+$iblPixelErrors = [System.Collections.Generic.List[string]]::new()
+if ($iblOnFingerprints[0] -ne $iblOnFingerprints[1]) {
+    $iblPixelErrors.Add("IBL on fingerprint unstable: $($iblOnFingerprints -join ',')")
+}
+if ($iblOffFingerprints[0] -ne $iblOffFingerprints[1]) {
+    $iblPixelErrors.Add("IBL off fingerprint unstable: $($iblOffFingerprints -join ',')")
+}
+if ($iblOnFingerprints[0] -eq $iblOffFingerprints[0]) {
+    $iblPixelErrors.Add("IBL on/off fingerprints must differ: $($iblOnFingerprints[0])")
+}
+if ($iblPixelErrors.Count -ne 0) {
+    Add-Step -Name 'iblPixelComparison' -ExitCode 1 -Detail ($iblPixelErrors -join '; ')
+}
+Add-Step -Name 'iblPixelComparison' -ExitCode 0 `
+    -Detail "frames=$IblComparisonFrames on=$($iblOnFingerprints[0]) off=$($iblOffFingerprints[0]) stable=true different=true"
+
 $report.finishedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 $report.sampleEvidence = $evidence
-$report.sampleStdout = $sampleOut.Trim()
+$report.sampleStdout = $sampleOut
+$report.iblPixelComparison = [ordered]@{
+    frames          = $IblComparisonFrames
+    onFingerprints = $iblOnFingerprints
+    offFingerprints = $iblOffFingerprints
+    stable          = $true
+    different       = $true
+    onEvidence      = $iblComparisonEvidence.on
+    offEvidence     = $iblComparisonEvidence.off
+}
 $report.ok = $true
 
 if ($OutJson) {
@@ -323,5 +436,5 @@ if ($OutJson) {
     Write-Output "wrote $OutJson"
 }
 
-Write-Output "product-3d gate ok schema=11 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=cooked-rgba16f-rg16f theme=dark-light-dark collections=list-tree"
+Write-Output "product-3d gate ok schema=11 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=on-off-pixel-differential theme=dark-light-dark collections=list-tree"
 exit 0

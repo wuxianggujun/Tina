@@ -111,6 +111,16 @@ inline constexpr u32 MaxProductMeshSlots = 128;
     });
 }
 
+enum class ImageBasedLightingMode {
+    On,
+    Off,
+};
+
+[[nodiscard]] constexpr std::string_view imageBasedLightingModeName(ImageBasedLightingMode mode) noexcept
+{
+    return mode == ImageBasedLightingMode::On ? "on" : "off";
+}
+
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
@@ -121,6 +131,7 @@ struct SampleOptions final {
     // Empty = capture-only; non-empty = require an exact machine-local pixel match.
     std::string expectPixelFingerprint{};
     Tina::Sample3D::Product3DUITheme initialUiTheme = Tina::Sample3D::Product3DUITheme::Dark;
+    ImageBasedLightingMode imageBasedLightingMode = ImageBasedLightingMode::On;
     bool uiThemeDemo = false;
     bool help = false;
 };
@@ -408,6 +419,7 @@ void printUsage()
         << "  --gltf <path>           same as --gltf=<path>\n"
         << "  --ui-theme=dark|light   select the initial retained UI theme (default dark)\n"
         << "  --ui-theme-demo         exercise initial -> alternate -> initial theme in UI phase\n"
+        << "  --ibl=on|off            bind or leave unbound the uploaded EnvironmentMap (default on)\n"
         << "  --expect-pixel-fingerprint=<32 lowercase hex chars>\n"
         << "                           require an exact machine-local RGBA8 frame match\n"
         << "  --help, -h              print this help\n"
@@ -431,6 +443,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     constexpr std::string_view HeightPrefix = "--height=";
     constexpr std::string_view GltfPrefix = "--gltf=";
     constexpr std::string_view UiThemePrefix = "--ui-theme=";
+    constexpr std::string_view ImageBasedLightingPrefix = "--ibl=";
     constexpr std::string_view PixelFingerprintPrefix = "--expect-pixel-fingerprint=";
     SampleOptions options;
     bool hasFrames = false;
@@ -439,6 +452,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     bool hasHeight = false;
     bool hasGltf = false;
     bool hasUiTheme = false;
+    bool hasImageBasedLightingMode = false;
     bool hasPixelFingerprint = false;
 
     for (int index = 1; index < argumentCount; ++index)
@@ -514,6 +528,18 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         else if (argument == "--ui-theme-demo")
         {
             options.uiThemeDemo = true;
+        }
+        else if (argument.starts_with(ImageBasedLightingPrefix))
+        {
+            const std::string_view mode = argument.substr(ImageBasedLightingPrefix.size());
+            if (hasImageBasedLightingMode || (mode != "on" && mode != "off"))
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--ibl must appear once with on or off");
+            }
+            options.imageBasedLightingMode =
+                mode == "on" ? ImageBasedLightingMode::On : ImageBasedLightingMode::Off;
+            hasImageBasedLightingMode = true;
         }
         else if (argument.starts_with(PixelFingerprintPrefix))
         {
@@ -1153,18 +1179,21 @@ class Product3DState final : public Tina::IGameState {
             return Tina::Core::failure(std::move(uploadedEnvironment.error()));
         }
         environmentMap_ = *uploadedEnvironment;
-        if (auto status = device->setMesh3DImageBasedLighting(
-                Tina::Render::Mesh3DImageBasedLightingDesc{
-                    .environmentMap = environmentMap_,
-                    .intensity = Tina::Sample3D::ProductEnvironmentIntensity,
-                    .rotationRadians = Tina::Sample3D::ProductEnvironmentRotationRadians,
-                });
-            !status)
+        if (options_.imageBasedLightingMode == ImageBasedLightingMode::On)
         {
-            return status;
+            if (auto status = device->setMesh3DImageBasedLighting(
+                    Tina::Render::Mesh3DImageBasedLightingDesc{
+                        .environmentMap = environmentMap_,
+                        .intensity = Tina::Sample3D::ProductEnvironmentIntensity,
+                        .rotationRadians = Tina::Sample3D::ProductEnvironmentRotationRadians,
+                    });
+                !status)
+            {
+                return status;
+            }
+            imageBasedLightingBound_ = true;
+            counters_->imageBasedLightingConfigured = true;
         }
-        imageBasedLightingBound_ = true;
-        counters_->imageBasedLightingConfigured = true;
 
         for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
         {
@@ -2050,6 +2079,9 @@ class Product3DApplication final : public Tina::IGameApplication {
     const bool pixelGoldenChecked = !options.expectPixelFingerprint.empty();
     const bool pixelGoldenMatched =
         !pixelGoldenChecked || counters.pixelFingerprint == options.expectPixelFingerprint;
+    const bool imageBasedLightingEnabled =
+        options.imageBasedLightingMode == ImageBasedLightingMode::On;
+    const u64 expectedImageBasedLightingTransitions = imageBasedLightingEnabled ? 1U : 0U;
     const auto& ui = counters.ui;
     const bool expectedInitialThemeLight = options.initialUiTheme == Tina::Sample3D::Product3DUITheme::Light;
     const bool unattendedThemeValid =
@@ -2098,9 +2130,12 @@ class Product3DApplication final : public Tina::IGameApplication {
         || counters.meshAssetHandlesInvalidated != expectedMeshes
         || counters.materialAssetHandlesInvalidated != expectedMeshes
         || counters.textureAssetHandlesInvalidated != counters.texturesUploaded
-        || !counters.cookedEnvironmentMap || !counters.imageBasedLightingConfigured
-        || environmentMapsUploaded != 1U || imageBasedLightingBindings != 1U
-        || imageBasedLightingClears != 1U || environmentMapRetirements != 1U
+        || !counters.cookedEnvironmentMap
+        || counters.imageBasedLightingConfigured != imageBasedLightingEnabled
+        || environmentMapsUploaded != 1U
+        || imageBasedLightingBindings != expectedImageBasedLightingTransitions
+        || imageBasedLightingClears != expectedImageBasedLightingTransitions
+        || environmentMapRetirements != 1U
         || capture.environmentDiffuseFaceSize() != Tina::Sample3D::ProductEnvironmentDiffuseFaceSize
         || capture.environmentSpecularFaceSize() != Tina::Sample3D::ProductEnvironmentSpecularFaceSize
         || capture.environmentSpecularMipCount() != Tina::Sample3D::ProductEnvironmentSpecularMipCount
@@ -2159,6 +2194,8 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"cookedEnvironmentMap\":"
                   << (counters.cookedEnvironmentMap ? "true" : "false")
                   << ",\"environmentMapsUploaded\":" << environmentMapsUploaded
+                  << ",\"imageBasedLightingMode\":\""
+                  << imageBasedLightingModeName(options.imageBasedLightingMode) << "\""
                   << ",\"imageBasedLightingConfigured\":"
                   << (counters.imageBasedLightingConfigured ? "true" : "false")
                   << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings
@@ -2255,6 +2292,8 @@ class Product3DApplication final : public Tina::IGameApplication {
               << counters.texturesUploaded << ",\"meshesUploaded\":" << counters.meshesUploaded
               << ",\"tangentMeshesUploaded\":" << tangentMeshesUploaded
               << ",\"environmentMapsUploaded\":" << environmentMapsUploaded
+              << ",\"imageBasedLightingMode\":\""
+              << imageBasedLightingModeName(options.imageBasedLightingMode) << "\""
               << ",\"imageBasedLightingConfigured\":"
               << (counters.imageBasedLightingConfigured ? "true" : "false")
               << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings

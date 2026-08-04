@@ -165,11 +165,12 @@ Mesh/Material AssetId 转成 weak `AssetHandle`。任一步失败都会逆序销
    Resources-owned `AssetStore`；EnvironmentMap 作为 Resources-owned `CookedAssetFile` 单独加载，
    slot/Prefab/Scene 仍只保存 weak handle；
 5. 上传 mesh/texture/environment，并向 State-owned `Mesh3DBindingRegistry` 事务移交 StaticMesh 与去重后的 Texture
-   GPU owner，再原子注册 Material bundle；device-instance mesh/material allocator 都从2开始生成单调不复用
-   key，分别保留内置 key 1；
+   GPU owner，再原子注册 Material bundle；`--ibl=on` 绑定 EnvironmentMap，`--ibl=off` 保持未绑定但不跳过
+   cook/load/upload；device-instance mesh/material allocator 都从2开始生成单调不复用 key，分别保留内置 key 1；
 6. Prefab resolver 按 node AssetId 映射到对应 mesh/material handle 与 per-mesh bounds/color；每帧 Scene
    resolver 再通过 registry 按 live handle、严格 AssetKind 与 texture dependency intern 当前 frame ref；
-7. 实例化、extract、提交；退出时先销毁 World，再 clear/retire EnvironmentMap，并由 registry 按 Material→共享 Texture→Mesh 顺序 retirement。
+7. 实例化、extract、提交；退出时先销毁 World，on 模式 clear IBL 后与 off 模式共同 retire EnvironmentMap，
+   再由 registry 按 Material→共享 Texture→Mesh 顺序 retirement。
    active frame、backend 或 ledger 失败保留完整 Entry 供重试，Registry 析构前必须全空。
 
 当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding、两个 Material 共享3个 Texture owner，以及
@@ -194,7 +195,7 @@ entry pin 覆盖 active packet，Mesh/Texture 通过 AssetSystem retirement ledg
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
 `sceneExtract`、`evidenceSchema=11`、`tangentMeshesUploaded=2`、`cookedEnvironmentMap=true`、
-`environmentMapsUploaded=1`、IBL bind/clear=`1/1`、EnvironmentMap retirement accepted=`1`、
+`imageBasedLightingMode=on`、`environmentMapsUploaded=1`、IBL bind/clear=`1/1`、EnvironmentMap retirement accepted=`1`、
 diffuse/specular/mips/BRDF=`2/4/3/4×4`、`directionalShadowCasterCount=1`、
 `submittedDirectionalShadowCasterCount=1`、mesh/material handle 发布数、`meshBindingsRegistered=2`、
 `materialBindingsRegistered=2`、`meshBindingsReleased=2`、`materialBindingsReleased=2`、
@@ -213,6 +214,9 @@ Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwi
 `pixelCaptureOk`、非零 capture 尺寸/字节数与 `pixelFingerprint`。同机 exact 视觉回归把首次 fingerprint
 传给 `--expect-pixel-fingerprint=<32 lowercase hex>`，并要求
 `pixelGoldenChecked/pixelGoldenMatched` 均为 true；该值不得跨 GPU/driver/backend 作为通用金标。
+TEST-003 还用短帧 on×2/off×2 A/B 运行证明同模式 fingerprint 稳定且 on/off 不同；off 的结构化证据要求
+EnvironmentMap upload/retire=`1/1`、IBL bind/clear=`0/0`，从而把“资源生命周期闭环”和“IBL 确实改变像素”
+分别取证。
 测试数量不是永久契约；实际命令和门禁矩阵统一见[测试说明](testing.md)。
 
 ## 当前限制
