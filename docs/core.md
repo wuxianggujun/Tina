@@ -97,7 +97,8 @@ Tracy backend 要求 vcpkg manifest feature `profile-tracy`。公共头仍只含
 `max_align_t` 对齐的固定 64-byte opaque storage 经 `Detail::constructZone/destroyZone` 进入
 `Tina::TraceTracy` adapter；第三方 header、类型和 client implementation 留在 adapter 内。宏使用
 `__COUNTER__` 生成唯一局部对象，并把 string literal 的静态长度与 `SourceLocation` 传给 adapter，
-不执行运行时字符串扫描或分配。首切片不提供 session/capture 控制面。
+zone name 不执行运行时字符串扫描或分配。adapter 当前从 `SourceLocation` 读取 file/function metadata。
+首切片不提供 session/capture 控制面。
 
 Runtime 已在 `GameStateDispatchPhase::FrameUpdate` 的逐 State dispatch 内使用
 `TINA_TRACE_ZONE("Runtime.GameState.UpdateFrame")`。None 构建中它完全编译消失；Tracy Profile 构建中，

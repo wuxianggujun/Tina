@@ -41,7 +41,8 @@ target_link_libraries(audio_tool PRIVATE Tina::AudioMiniaudio)
 ```
 
 `Tina::GameSDK` 聚合下表中的 backend-neutral Runtime、Scene、Asset、UI、Audio 等稳定模块；安装 package
-声明 `xxHash`、Asset Cooker 使用的 `mikktspace`（以及启用 Physics2D 时的 `box2d`）依赖；这些
+声明 `xxHash`、Asset Cooker 使用的 `mikktspace`（以及启用 Physics2D 时的 `box2d`）依赖；Tracy Profile
+package 还解析由 Core 固定选择的 Tracy 0.13.1 内部链接闭包。这些
 package target 只关闭静态库链接闭包，不把第三方类型暴露到 Tina 公共头。Windows 与 Linux 外部 headless
 consumer 已经只通过安装前缀完成 configure/build/run，并复用同一安装头第三方 token 扫描。`PlatformGlfw`
 component 通过 `find_dependency(glfw3 3.4 CONFIG)` 解析实现闭包并加载独立 adapter export；未请求该
@@ -58,7 +59,6 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | --- | --- |
 | `Tina::GameSDK` | backend-neutral Game SDK 聚合 target；不包含 Desktop/backend adapter |
 | `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、diagnostics、compile-time Trace frontend |
-| `Tina::TraceTracy` | optional private Tracy 0.13.1 Trace adapter；只在 Tracy Profile package 中存在 |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
@@ -77,7 +77,8 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 
 Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
 `Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；安装 package 按构建图
-条件导出四个 adapter 和 `Tina::DesktopBootstrap`。
+条件导出四个 adapter 和 `Tina::DesktopBootstrap`。`Tina::TraceTracy` 只作为 Tracy Profile package 内
+`Tina::Core` 的静态链接闭包存在，不是可请求 component，也不进入 `Tina_ADAPTER_TARGETS`。
 
 ## Core 约定
 

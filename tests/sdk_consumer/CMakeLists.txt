@@ -33,3 +33,12 @@ add_executable(tina_sdk_consumer main.cpp)
 target_compile_features(tina_sdk_consumer PRIVATE cxx_std_23)
 target_link_libraries(tina_sdk_consumer PRIVATE Tina::GameSDK)
 set_target_properties(tina_sdk_consumer PROPERTIES CXX_EXTENSIONS OFF)
+
+if(WIN32 AND TARGET Tracy::TracyClient)
+    add_custom_command(TARGET tina_sdk_consumer POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:Tracy::TracyClient>"
+            "$<TARGET_FILE_DIR:tina_sdk_consumer>/$<TARGET_FILE_NAME:Tracy::TracyClient>"
+        VERBATIM
+    )
+endif()

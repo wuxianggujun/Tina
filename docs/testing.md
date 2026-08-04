@@ -81,6 +81,26 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 测试数量随功能增长，不作为永久契约；本轮必须直接运行对应 GoogleTest executable，并以最终 gate
 JSON 与退出码记录结果。
 
+## Tracy Profile 定向门禁
+
+Trace backend 只在专用 Profile tree 验证，不改写常驻 Null tree，也不在功能 worktree 重建依赖：
+
+```powershell
+cmake --preset windows-msvc-vnext-profile-tracy
+cmake --build --preset windows-vnext-profile-tracy-debug `
+  --target tina_tests --parallel 2 -- /nr:false
+out\build\windows-msvc-vnext-profile-tracy\bin\Debug\tina_tests.exe `
+  --gtest_filter="TraceCompileTest.*:GameStatePolicyDispatchTest.*" --gtest_color=yes
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunSdkConsumerGate.ps1 `
+  -BuildDirectory out\build\windows-msvc-vnext-profile-tracy -Configuration Debug
+```
+
+Tracy 图必须编译并运行 nested zone，同时保留 Runtime State dispatch consumer；relocated GameSDK consumer
+必须从安装头编译、链接 Tracy 静态闭包并正常退出。随后在既有 `windows-msvc-vnext` tree 增量构建
+`tina_tests` 并运行 `TraceCompileTest.*`，复证 None 不求值/不构造/不调用契约。正式 benchmark 继续使用
+None，不能用 Profile capture 充当稳定回归 baseline。
+
 ## 安装 SDK consumer 门禁
 
 ```powershell
@@ -139,7 +159,9 @@ component 必须被拒绝；未请求 `PlatformGlfw` 时不得加载 GLFW depend
 `Tina::DesktopBootstrap`，必须发现 `Tina::PlatformGlfw` 与 `Tina::RenderBgfx`；FreeType 图还必须发现
 `Tina::UIFreetype`。隐藏窗口运行一帧后必须输出
 `{"status":"ok","consumer":"installed-tina-desktop-bootstrap"}`。GameSDK-only isolation probe 禁用
-GLFW/bgfx/FreeType/miniaudio/codec/Threads 查找后仍须配置成功，且不得出现任何 adapter target。
+GLFW/bgfx/FreeType/miniaudio/codec/Threads 查找后仍须配置成功，且不得出现任何可请求的 Desktop/Audio
+adapter target。Tracy Profile package 可解析 Core 固定选择的 Tracy 链接闭包，但 `Tina::TraceTracy` 不是
+component，也不得进入 `Tina_ADAPTER_TARGETS`。
 AudioMiniaudio consumer 只链接 `Tina::AudioMiniaudio`，验证内置 codec capability、null backend callback 与
 shutdown，并输出 `{"status":"ok","consumer":"installed-tina-audio-miniaudio"}`；codec 图还必须从
 consumer toolchain 解析 `Vorbis`、`Opus` 与 `OpusFile` dependency closure。每个门禁必须将安装树从
