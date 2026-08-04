@@ -11,13 +11,14 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 | Error | C++23 `std::expected` 的 `Result<T>`/`Status`、稳定 domain/code、origin、native code、UTF-8 context chain |
 | Time | `Duration`、`MonotonicTimePoint`、`IMonotonicClock`、`SteadyMonotonicClock`、`FixedStepAccumulator` |
 | Diagnostics | `TINA_ASSERT`、`LogLevel/LogRecord`、`DiagnosticChannel`、Engine-owned `Diagnostics` 与私有 console sink |
+| Trace | backend-neutral `TINA_TRACE_ZONE(nameLiteral)` 编译期 frontend；当前唯一 backend 为 None |
 | Memory | `MemoryTag`、`MemoryTracker`、`CountingMemoryResource`、owning `FrameArena` |
 | ID | `GenerationId/GenerationPool`、`AssetId` |
 | Hash | 128-bit `ContentHash` 与 PRIVATE XXH3-128 digest adapter |
 | IO/Text | strict UTF-8 helpers、有界 `readFile`、`createParentDirectories`、`writeFile` 与 atomic sibling replace |
 
 不在当前 Core 的能力：通用线程池、Asset job、Runtime event queue、全局 allocator 替换、MetricsRegistry、
-Trace/Tracy session、CrashContext、callstack 符号化和通用 Tina STL。
+Tracy session/adapter、CrashContext、callstack 符号化和通用 Tina STL。
 
 ## Result 与失败边界
 
@@ -82,8 +83,18 @@ ContentHash。
 `DiagnosticChannel`。当前默认 sink 同步输出到 console；级别短路不写 sink，sink 失败计数且不递归，
 shutdown 后 channel 写入为 no-op。
 
-当前没有 file sink、异步日志队列、MetricsRegistry、TraceZone/Tracy adapter 或 CrashContext。日志不得
+当前没有 file sink、异步日志队列、MetricsRegistry、Tracy adapter 或 CrashContext。日志不得
 包含 token、密钥、用户正文和不必要的绝对路径；Audio callback/异常信号路径不调用普通日志。
+
+## Trace
+
+`<tina/core/trace/Trace.hpp>` 提供唯一 frontend 宏 `TINA_TRACE_ZONE(nameLiteral)`。Core 当前公开传播
+`TINA_TRACE_BACKEND_NONE=1`，None backend 把宏展开为不引用参数的空语句：参数不求值，不构造 zone
+对象，不调用函数，不分配内存，也不读取或创建全局状态。
+
+Runtime 已在 `GameStateDispatchPhase::FrameUpdate` 的逐 State dispatch 内使用
+`TINA_TRACE_ZONE("Runtime.GameState.UpdateFrame")`。这是编译期 frontend 的真实 consumer，但当前没有
+Tracy dependency、adapter、session 或 capture 能力；不能把该 annotation 描述为可采集的 profiler 事件。
 
 ## 时间与文本
 

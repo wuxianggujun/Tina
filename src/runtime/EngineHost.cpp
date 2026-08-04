@@ -17,6 +17,7 @@
 
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/diagnostics/Diagnostics.hpp>
+#include <tina/core/trace/Trace.hpp>
 
 #include "input/ActionMapper.hpp"
 #include "input/LastPresentedCamera2DLatch.hpp"
@@ -938,6 +939,7 @@ class EngineHostImplementation final {
             auto updateResult = m_gameStateStack.forEachDispatch(
                 GameStateDispatchPhase::FrameUpdate,
                 [&](IGameState& state, const GameStatePolicy&, usize depthFromTop) -> Core::Status {
+                    TINA_TRACE_ZONE("Runtime.GameState.UpdateFrame");
                     const bool suppressGameplay =
                         m_gameStateStack.gameplayInputBlockedForDepth(depthFromTop);
                     const FrameActionSnapshot& actionsForState =

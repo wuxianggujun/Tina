@@ -57,7 +57,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | Target | 公共角色 |
 | --- | --- |
 | `Tina::GameSDK` | backend-neutral Game SDK 聚合 target；不包含 Desktop/backend adapter |
-| `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、diagnostics |
+| `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、diagnostics、compile-time Trace frontend |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
@@ -84,9 +84,15 @@ Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`�
 - `Error` 提供稳定 domain/code、UTF-8 message、origin、native code 与 context；
 - 公共文本/路径是 strict UTF-8；Windows 转换留在 adapter；
 - generation ID 与 `AssetId`/`ContentHash` 是不同类型，不隐式转换；
-- callback-only view/span/string_view 必须注明失效点。
+- callback-only view/span/string_view 必须注明失效点；
+- `<tina/core/trace/Trace.hpp>` 只提供 `TINA_TRACE_ZONE(nameLiteral)`；当前 None backend 不求值参数、
+  不构造对象、不调用函数、不分配内存且没有全局状态。
 
 公开头不允许依赖传递 include 才能编译；每个重要头有 header-isolation translation unit。
+
+Trace frontend 是可供 Runtime/Game SDK consumer 编译的 Tina-owned 公共面，不暴露 Tracy token 或类型。
+当前没有 Tracy adapter、session 或 capture 能力；`TINA_TRACE_ZONE` 在 None backend 下只表达可移植的
+annotation 位置，不表示运行时已经产生 profiler 事件。
 
 ## Engine 与游戏入口
 
