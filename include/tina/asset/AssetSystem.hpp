@@ -3,6 +3,7 @@
 #include <tina/asset/AssetGpuUpload.hpp>
 #include <tina/asset/AssetRetirement.hpp>
 #include <tina/asset/AssetStore.hpp>
+#include <tina/asset/CatalogChangePlan.hpp>
 #include <tina/asset/CatalogLoadPlan.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
@@ -61,6 +62,11 @@ struct AssetPumpStats final {
     Core::u32 gpuFailed = 0;
 };
 
+struct CatalogReloadConfig final {
+    CatalogPackageOpenConfig package{};
+    CatalogChangePlanConfig changePlan{};
+};
+
 // Catalog-bound CPU/GPU-logical asset facade.
 // - load/loadOne: synchronous plan→load→publish (+ optional Null GPU upload pump)
 // - request/pump: Queued→Loading→ReadyCpu→(UploadQueued→ReadyGpu)
@@ -79,11 +85,11 @@ class AssetSystem final {
 
     [[nodiscard]] Core::Status bindCatalog(std::string_view catalogRootUtf8, CatalogSnapshot catalog);
 
-    // Replaces the immutable CatalogSnapshot only at an owner-thread idle boundary. Idle requires
-    // no queued/in-flight work, resident handles, tracked GPU uploads, or live retirement records.
-    // The existing catalog and root remain bound if validation, idle preflight, or allocation fails.
+    // Opens, validates, plans, and replaces the immutable CatalogSnapshot only at an owner-thread
+    // idle boundary. Idle requires no queued/in-flight work, resident handles, tracked GPU uploads,
+    // or live retirement records. The existing catalog and root remain bound if any step fails.
     [[nodiscard]] Core::Status reloadCatalogWhenIdle(std::string_view catalogRootUtf8,
-                                                      CatalogSnapshot catalog);
+                                                      CatalogReloadConfig config = {});
 
     // openCatalogPackage(root, openConfig) then bindCatalog. Uses config.memoryResource for open.
     [[nodiscard]] Core::Status openAndBindCatalog(std::string_view catalogRootUtf8,
@@ -170,6 +176,9 @@ class AssetSystem final {
                 bool requireTyped2dPayloads);
 
     void forgetHandle(AssetHandle handle) noexcept;
+    [[nodiscard]] bool isCatalogReloadIdle() const noexcept;
+    [[nodiscard]] Core::Status commitCatalogWhenIdle(std::string_view catalogRootUtf8,
+                                                      CatalogSnapshot catalog);
     [[nodiscard]] std::optional<Core::u32> findIndex(Core::AssetId assetId) const noexcept;
     [[nodiscard]] Core::Status insertIndex(Core::AssetId assetId, AssetHandle handle);
     void eraseIndexAt(Core::u32 index) noexcept;

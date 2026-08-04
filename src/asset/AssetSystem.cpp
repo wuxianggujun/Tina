@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -227,31 +228,10 @@ Core::Result<AssetSystem> AssetSystem::Create(AssetSystemConfig config)
 
 Core::Status AssetSystem::bindCatalog(std::string_view catalogRootUtf8, CatalogSnapshot catalog)
 {
-    if (!catalog)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog snapshot is empty");
-    }
-    if (catalogRootUtf8.empty())
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog root path is invalid");
-    }
-    try
-    {
-        m_catalogRoot.assign(catalogRootUtf8.begin(), catalogRootUtf8.end());
-    } catch (const std::bad_alloc&)
-    {
-        return Core::failure(AssetErrorCode::AllocationFailed, "catalog root allocation failed");
-    }
-    m_catalog = std::move(catalog);
-    return Core::success();
-}
-
-Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8, CatalogSnapshot catalog)
-{
     if (std::this_thread::get_id() != m_ownerThread)
     {
         return Core::failure(AssetErrorCode::WrongOwnerThread,
-                             "catalog reload must run on the AssetSystem owner thread");
+                             "catalog binding must run on the AssetSystem owner thread");
     }
     if (!catalog)
     {
@@ -261,12 +241,40 @@ Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog root path is invalid");
     }
-    if (!m_queue.empty() || m_inFlight.load(std::memory_order_acquire) != 0U || m_store.activeCount() != 0U ||
-        !m_index.empty() || (m_gpuUpload != nullptr && m_gpuUpload->trackedCount() != 0U) ||
-        m_retirement.liveCount() != 0U)
+    if (m_catalog && !isCatalogReloadIdle())
     {
         return Core::failure(AssetErrorCode::CatalogReloadBusy,
-                             "catalog reload requires an idle AssetSystem");
+                             "replacing a bound catalog requires an idle AssetSystem");
+    }
+    return commitCatalogWhenIdle(catalogRootUtf8, std::move(catalog));
+}
+
+bool AssetSystem::isCatalogReloadIdle() const noexcept
+{
+    return m_queue.empty() && m_inFlight.load(std::memory_order_acquire) == 0U && m_store.activeCount() == 0U &&
+           m_index.empty() && (m_gpuUpload == nullptr || m_gpuUpload->trackedCount() == 0U) &&
+           m_retirement.liveCount() == 0U;
+}
+
+Core::Status AssetSystem::commitCatalogWhenIdle(std::string_view catalogRootUtf8, CatalogSnapshot catalog)
+{
+    if (std::this_thread::get_id() != m_ownerThread)
+    {
+        return Core::failure(AssetErrorCode::WrongOwnerThread,
+                             "catalog commit must run on the AssetSystem owner thread");
+    }
+    if (!catalog)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog snapshot is empty");
+    }
+    if (catalogRootUtf8.empty() || catalogRootUtf8.find('\0') != std::string_view::npos)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog root path is invalid");
+    }
+    if (!isCatalogReloadIdle())
+    {
+        return Core::failure(AssetErrorCode::CatalogReloadBusy,
+                             "catalog commit requires an idle AssetSystem");
     }
 
     try
@@ -284,6 +292,78 @@ Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8
     {
         return Core::failure(AssetErrorCode::AllocationFailed, "catalog reload root allocation failed");
     }
+}
+
+Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8, CatalogReloadConfig config)
+{
+    if (std::this_thread::get_id() != m_ownerThread)
+    {
+        return Core::failure(AssetErrorCode::WrongOwnerThread,
+                             "catalog reload must run on the AssetSystem owner thread");
+    }
+    if (!m_catalog)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "catalog reload requires an existing bound catalog");
+    }
+    if (!isCatalogReloadIdle())
+    {
+        return Core::failure(AssetErrorCode::CatalogReloadBusy,
+                             "catalog reload requires an idle AssetSystem");
+    }
+
+    if (config.package.manifest.catalog.memoryResource == nullptr)
+    {
+        config.package.manifest.catalog.memoryResource = m_memoryResource;
+    }
+    if (config.package.manifest.catalog.maxEntries == 0U)
+    {
+        config.package.manifest.catalog.maxEntries = 1024U;
+    }
+    if (config.package.manifest.catalog.maxDependencies == 0U)
+    {
+        config.package.manifest.catalog.maxDependencies = 4096U;
+    }
+    if (config.package.manifest.catalog.maxDependenciesPerAsset == 0U)
+    {
+        config.package.manifest.catalog.maxDependenciesPerAsset = 64U;
+    }
+    if (config.package.validation.file.memoryResource == nullptr)
+    {
+        config.package.validation.file.memoryResource = m_memoryResource;
+    }
+    if (m_requireTyped2dPayloads)
+    {
+        config.package.validation.verifyContent = true;
+        config.package.validation.verifyTypedPayload = true;
+    }
+
+    auto replacement = openCatalogPackage(catalogRootUtf8, config.package);
+    if (!replacement)
+    {
+        return Core::failure(std::move(replacement.error()).withContext("AssetSystem::reloadCatalogWhenIdle", "open"));
+    }
+
+    if (config.changePlan.memoryResource == nullptr)
+    {
+        config.changePlan.memoryResource = m_memoryResource;
+    }
+    if (config.changePlan.maxChanges == 0U)
+    {
+        if (m_catalog->entryCount() > (std::numeric_limits<Core::u32>::max)() - replacement->entryCount())
+        {
+            return Core::failure(AssetErrorCode::CatalogCapacityExceeded,
+                                 "catalog reload change count overflow");
+        }
+        config.changePlan.maxChanges = m_catalog->entryCount() + replacement->entryCount();
+    }
+    auto plan = planCatalogChanges(*m_catalog, *replacement, config.changePlan);
+    if (!plan)
+    {
+        return Core::failure(std::move(plan.error()).withContext("AssetSystem::reloadCatalogWhenIdle", "plan"));
+    }
+
+    return commitCatalogWhenIdle(catalogRootUtf8, std::move(*replacement));
 }
 
 Core::Status AssetSystem::openAndBindCatalog(std::string_view catalogRootUtf8, CatalogPackageOpenConfig openConfig)

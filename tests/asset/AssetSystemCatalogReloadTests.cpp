@@ -8,6 +8,7 @@
 
 #include <memory_resource>
 #include <string>
+#include <thread>
 
 namespace Tina::Asset {
 namespace {
@@ -55,6 +56,7 @@ TEST(AssetSystemCatalogReloadTests, ReloadsAtomicallyWhenStoreIsIdle)
 {
     TrackingMemoryResource resource;
     const auto package = writeTextureMaterialPackage("tina_asset_system_idle_reload_success");
+    const auto replacementPackage = writeTextureMaterialPackage("tina_asset_system_idle_reload_success_new");
     auto system = makeSystem(resource);
     ASSERT_TRUE(system.has_value()) << system.error().message;
 
@@ -62,20 +64,20 @@ TEST(AssetSystemCatalogReloadTests, ReloadsAtomicallyWhenStoreIsIdle)
     ASSERT_TRUE(initialCatalog.has_value()) << initialCatalog.error().message;
     ASSERT_TRUE(system->bindCatalog(toUtf8(package.root), std::move(*initialCatalog)).has_value());
 
-    auto replacementCatalog = openCatalog(resource, package);
-    ASSERT_TRUE(replacementCatalog.has_value()) << replacementCatalog.error().message;
-    ASSERT_TRUE(system->reloadCatalogWhenIdle("replacement-root", std::move(*replacementCatalog)).has_value());
+    ASSERT_TRUE(system->reloadCatalogWhenIdle(toUtf8(replacementPackage.root)).has_value());
     ASSERT_NE(system->catalog(), nullptr);
-    EXPECT_EQ(system->catalogRoot(), "replacement-root");
+    EXPECT_EQ(system->catalogRoot(), toUtf8(replacementPackage.root));
     EXPECT_EQ(system->catalog()->entryCount(), 2U);
 
     removePackage(package);
+    removePackage(replacementPackage);
 }
 
 TEST(AssetSystemCatalogReloadTests, BusyReloadPreservesCatalogAndRoot)
 {
     TrackingMemoryResource resource;
     const auto package = writeTextureMaterialPackage("tina_asset_system_idle_reload_busy");
+    const auto replacementPackage = writeTextureMaterialPackage("tina_asset_system_idle_reload_busy_new");
     auto system = makeSystem(resource);
     ASSERT_TRUE(system.has_value()) << system.error().message;
 
@@ -85,9 +87,13 @@ TEST(AssetSystemCatalogReloadTests, BusyReloadPreservesCatalogAndRoot)
     auto loaded = system->loadOne(package.textureId);
     ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
 
-    auto replacementCatalog = openCatalog(resource, package);
+    auto replacementCatalog = openCatalog(resource, replacementPackage);
     ASSERT_TRUE(replacementCatalog.has_value()) << replacementCatalog.error().message;
-    auto status = system->reloadCatalogWhenIdle("replacement-root", std::move(*replacementCatalog));
+    auto directBindStatus = system->bindCatalog(toUtf8(replacementPackage.root), std::move(*replacementCatalog));
+    ASSERT_FALSE(directBindStatus.has_value());
+    EXPECT_EQ(directBindStatus.error().code, AssetErrorCode::CatalogReloadBusy);
+
+    auto status = system->reloadCatalogWhenIdle(toUtf8(replacementPackage.root));
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, AssetErrorCode::CatalogReloadBusy);
     EXPECT_EQ(system->catalogRoot(), toUtf8(package.root));
@@ -96,12 +102,14 @@ TEST(AssetSystemCatalogReloadTests, BusyReloadPreservesCatalogAndRoot)
 
     ASSERT_TRUE(system->unload(*loaded).has_value());
     removePackage(package);
+    removePackage(replacementPackage);
 }
 
-TEST(AssetSystemCatalogReloadTests, InvalidReplacementLeavesExistingBindingUntouched)
+TEST(AssetSystemCatalogReloadTests, ValidationFailureLeavesExistingBindingUntouched)
 {
     TrackingMemoryResource resource;
     const auto package = writeTextureMaterialPackage("tina_asset_system_idle_reload_invalid");
+    const auto invalidPackage = writeTextureMaterialPackage("tina_asset_system_idle_reload_invalid_new", false);
     auto system = makeSystem(resource);
     ASSERT_TRUE(system.has_value()) << system.error().message;
 
@@ -110,13 +118,37 @@ TEST(AssetSystemCatalogReloadTests, InvalidReplacementLeavesExistingBindingUntou
     ASSERT_TRUE(system->bindCatalog(toUtf8(package.root), std::move(*initialCatalog)).has_value());
     const auto originalRoot = system->catalogRoot();
 
-    auto status = system->reloadCatalogWhenIdle("replacement-root", CatalogSnapshot{});
+    auto status = system->reloadCatalogWhenIdle(toUtf8(invalidPackage.root));
     ASSERT_FALSE(status.has_value());
-    EXPECT_EQ(status.error().code, AssetErrorCode::InvalidCatalogConfig);
+    EXPECT_EQ(status.error().code, Core::CoreErrorCode::NotFound);
     EXPECT_EQ(system->catalogRoot(), originalRoot);
     ASSERT_NE(system->catalog(), nullptr);
     EXPECT_EQ(system->catalog()->entryCount(), 2U);
 
+    removePackage(package);
+    removePackage(invalidPackage);
+}
+
+TEST(AssetSystemCatalogReloadTests, RejectsReloadFromNonOwnerThread)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTextureMaterialPackage("tina_asset_system_idle_reload_owner");
+    auto system = makeSystem(resource);
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    auto initialCatalog = openCatalog(resource, package);
+    ASSERT_TRUE(initialCatalog.has_value()) << initialCatalog.error().message;
+    ASSERT_TRUE(system->bindCatalog(toUtf8(package.root), std::move(*initialCatalog)).has_value());
+
+    Core::Status status = Core::success();
+    std::thread worker([&]() {
+        status = system->reloadCatalogWhenIdle(toUtf8(package.root));
+    });
+    worker.join();
+
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, AssetErrorCode::WrongOwnerThread);
+    EXPECT_EQ(system->catalogRoot(), toUtf8(package.root));
     removePackage(package);
 }
 
