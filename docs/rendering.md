@@ -7,7 +7,7 @@ metallic-roughness Cook-Torrance GGX：Scene extraction 每帧提交0..4个 dire
 spot lights + ambient 的自包含 `RenderScene` snapshot；可选 `Mesh3DImageBasedLightingDesc` 再绑定一份 cooked
 diffuse irradiance cubemap、prefiltered specular cubemap 与 BRDF LUT。`setMesh3DLighting()` 仍是低层 device
 fallback/direct SPI。当前已有 PointLight3D 与 SpotLight3D、PerspectiveCamera3D influence-sphere culling，以及
-单 directional caster 的 shadow map 和确定性 pass scheduler；仍无级联阴影或通用 GPU submission fence；
+固定4级联 directional CSM 和确定性 pass scheduler；仍无 point/spot shadow、可配置 atlas 或通用 GPU submission fence；
 Texture2D/StaticMesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource retirement completion。
 
 ## Target 边界
@@ -77,9 +77,12 @@ mesh 由 vertex shader 输出 tangent/handedness，fragment shader 构造正交 
 handedness。StaticMesh 只有 P3N3T4UV2 一种布局，不存在旧布局运行时分支。诚实限制：当前
 DirectionalLight3D/PointLight3D/SpotLight3D 均可进入 Scene snapshot；point/spot 使用 world position/influence
 radius，在有效 PerspectiveCamera3D 与非0 surface 时做 sphere-frustum culling；spot 额外提交 world-space
-出光方向与 inner/outer cone cosine。最多一个 directional light 可通过 `castsShadows` 启用阴影，并携带
-`shadowDistanceMeters`、`shadowDepthBias` 与 `shadowNormalBiasMeters`。bgfx 使用独立 1024×1024 D16
-framebuffer、camera-slice light projection 与 3×3 PCF；仍无 CSM、point/spot shadow 或可配置 shadow atlas。
+出光方向与 inner/outer cone cosine。一个 directional light 可携带 optional `CascadedDirectionalShadow3D`；
+它以 `maximumDistanceMeters`、`depthBias` 与 `normalBiasMeters` 描述固定4级联阴影。Render snapshot
+映射为 `Mesh3DCascadedDirectionalShadow`，以排序后的 `directionalLightIndex` 关联灯光。bgfx 使用独立
+2048×2048 D16 `DirectionalShadowAtlas`，按2×2切为四个1024×1024 tile，并执行 camera-slice projection
+与每级联3×3 PCF；级联 pass 不消费
+primary-surface clear ownership。point/spot shadow 与可配置 atlas 仍后置。
 
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、
@@ -226,7 +229,7 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - transient frame budget 与容量失败；
 - Sprite2D textured quad pass + frame-scoped 0..8 point lights；
 - Opaque3D metallic-roughness Cook-Torrance GGX mesh/depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；可选 split-sum IBL；每帧只编码一次 uniform arrays）；
-- 确定性 `Clear -> DirectionalShadowDepth -> Opaque3D -> Sprite2D -> UI` scheduler；shadow depth 使用独立 framebuffer，不取得 primary-surface clear ownership；
+- 确定性 `Clear -> CascadedDirectionalShadowDepth[0..3] -> Opaque3D -> Sprite2D -> UI` scheduler；四级联使用独立 `DirectionalShadowAtlas`，不取得 primary-surface clear ownership；
 - UI solid/glyph pass；
 - Texture2D/StaticMesh/EnvironmentMap generation storage、唯一 P3N3T4UV2 layout 与 key binding；
 - Texture2D/StaticMesh/EnvironmentMap backend-proven retirement marker、suspend flush 与 shutdown hard drain；
@@ -268,5 +271,5 @@ MR/normal/factors、有界4 directional + 8 point + 8 spot-light 描述、Scene 
 以及 authored/MikkTSpace P3N3T4UV2 tangent 到 signed-scale-correct TBN 的完整路径；
 产品 sample 的3个 directional entity，以及 PointLight3D/SpotLight3D 各自
 authored/committed/culled=`3/2/1` 连续300帧稳定提交。
-级联及 point/spot shadow、通用 GPU submission fence 与跨 DPI/GPU
+point/spot shadow、可配置 shadow atlas、通用 GPU submission fence 与跨 DPI/GPU
 visual gate（`UI-003`）仍后置；Texture/Mesh/EnvironmentMap resource retirement 已不属于这些后置项。

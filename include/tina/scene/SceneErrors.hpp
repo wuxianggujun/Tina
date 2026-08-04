@@ -27,6 +27,7 @@ inline constexpr Core::ErrorCode TooManyActivePointLights2D{Core::ErrorDomain::S
 inline constexpr Core::ErrorCode TooManyActiveShadowOccluders2D{Core::ErrorDomain::Scene, 19};
 inline constexpr Core::ErrorCode TooManyActivePointLights3D{Core::ErrorDomain::Scene, 20};
 inline constexpr Core::ErrorCode TooManyActiveSpotLights3D{Core::ErrorDomain::Scene, 21};
+inline constexpr Core::ErrorCode TooManyActiveCascadedDirectionalShadows{Core::ErrorDomain::Scene, 22};
 
 } // namespace SceneErrorCode
 

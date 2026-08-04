@@ -313,6 +313,42 @@ TEST(NullRenderDeviceTest, RejectsInvalidSpotLightSnapshotBeforeConsumingFrameSt
     EXPECT_EQ(device->statistics().submitted, 1U);
 }
 
+TEST(NullRenderDeviceTest, RejectsInvalidCascadedShadowSnapshotBeforeConsumingFrameState)
+{
+    auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{});
+    ASSERT_TRUE(builderResult.has_value()) << builderResult.error().message;
+    Render::RenderSceneBuilder builder = std::move(*builderResult);
+    ASSERT_TRUE(builder.beginFrame());
+
+    const std::array directionalLights{Render::Mesh3DDirectionalLight{}};
+    ASSERT_TRUE(builder.writer().setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = directionalLights,
+        .cascadedDirectionalShadow = Render::Mesh3DCascadedDirectionalShadow{},
+    }));
+    auto scene = builder.commit();
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+    ASSERT_TRUE(scene->mesh3DLighting().has_value());
+    ASSERT_TRUE(scene->mesh3DLighting()->cascadedDirectionalShadow().has_value());
+
+    auto* corruptedShadow = const_cast<Render::Mesh3DCascadedDirectionalShadow*>(
+        &*scene->mesh3DLighting()->cascadedDirectionalShadow());
+    corruptedShadow->directionalLightIndex = 1U;
+
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+    auto invalid = device->submitFrame(Render::RenderFrame{
+        .frameIndex = 0,
+        .primaryWorldScene = *scene,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().submitted, 1U);
+}
+
 TEST(NullRenderDeviceTest, RejectsAnyCrossPacketSpriteTextureBeforeConsumingFrameOrStatistics)
 {
     u32 firstReleaseCount = 0;

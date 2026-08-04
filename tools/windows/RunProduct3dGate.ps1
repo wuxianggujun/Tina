@@ -7,7 +7,7 @@
   Asset, Render, and retained UI GoogleTest executables directly, then run the
   tina_sample_3d 300-frame product smoke with automated Dark -> Light -> Dark
   switching plus ListView/TreeView collection interaction. The final JSON is
-  validated as evidence schema 11. Short IBL on/on and off/off runs additionally
+  validated as evidence schema 12. Short IBL on/on and off/off runs additionally
   prove machine-local pixel stability within each mode and a visible A/B change.
 
   Does not use CTest. Does not clean-first wipe. Exits non-zero on first failure.
@@ -209,7 +209,7 @@ $expectedResolverHits = [long]$SampleFrames * 2
 $expectedFields = [ordered]@{
     status                              = 'ok'
     sample                              = 'tina_sample_3d'
-    evidenceSchema                      = 11
+    evidenceSchema                      = 12
     frames                              = $SampleFrames
     gltfCooked                          = $true
     cookedStaticMesh                    = $true
@@ -265,8 +265,10 @@ $expectedFields = [ordered]@{
     materialNormalTextureBound          = $true
     lightingConfigured                  = $true
     directionalLightCount               = 3
-    directionalShadowCasterCount        = 1
-    submittedDirectionalShadowCasterCount = 1
+    cascadedDirectionalShadowCount      = 1
+    submittedCascadedDirectionalShadowCount = 1
+    cascadedDirectionalShadowCascadeCount = 4
+    submittedCascadedDirectionalShadowCascadeCount = 4
     authoredPointLight3DCount           = 3
     pointLight3DCount                    = 2
     culledPointLight3DCount              = 1
@@ -371,7 +373,7 @@ if ($evidenceErrors.Count -ne 0) {
     Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$sampleOut")
 }
 
-Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=11 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=cooked-rgba16f-rg16f resize=surface-aspect-responsive-ui lights=directional-point-spot-culled theme=dark-light-dark collections=list-tree"
+Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=12 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=cooked-rgba16f-rg16f resize=surface-aspect-responsive-ui lights=directional-point-spot-culled csm=4-cascades theme=dark-light-dark collections=list-tree"
 Add-Step -Name 'tina_sample_3d' -ExitCode 0 -Detail "frames=$SampleFrames pixelFingerprint=$($evidence.pixelFingerprint)"
 
 $iblComparisonEvidence = [ordered]@{
@@ -394,7 +396,7 @@ foreach ($mode in @('on', 'off')) {
         $modeExpectedFields = [ordered]@{
             status                            = 'ok'
             sample                            = 'tina_sample_3d'
-            evidenceSchema                    = 11
+            evidenceSchema                    = 12
             frames                            = $IblComparisonFrames
             cookedEnvironmentMap              = $true
             environmentMapsUploaded           = 1
@@ -403,6 +405,10 @@ foreach ($mode in @('on', 'off')) {
             imageBasedLightingBindings        = $expectedTransitions
             imageBasedLightingClears          = $expectedTransitions
             environmentMapRetirementsAccepted = 1
+            cascadedDirectionalShadowCount      = 1
+            submittedCascadedDirectionalShadowCount = 1
+            cascadedDirectionalShadowCascadeCount = 4
+            submittedCascadedDirectionalShadowCascadeCount = 4
             pixelCaptureOk                    = $true
             sceneRgbPixelCount                = 191880
             sceneRgbOutputRequested           = $true
@@ -525,5 +531,5 @@ if ($OutJson) {
     Write-Output "wrote $OutJson"
 }
 
-Write-Output "product-3d gate ok schema=11 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=on-off-pixel-differential theme=dark-light-dark collections=list-tree"
+Write-Output "product-3d gate ok schema=12 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=on-off-pixel-differential csm=4-cascades theme=dark-light-dark collections=list-tree"
 exit 0

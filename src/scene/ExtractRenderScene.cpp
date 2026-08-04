@@ -64,6 +64,7 @@ namespace {
 struct DirectionalLightCandidate final {
     u64 stableKey = 0;
     Render::Mesh3DDirectionalLight light{};
+    std::optional<CascadedDirectionalShadow3D> cascadedShadow{};
 };
 
 struct PointLight3DCandidate final {
@@ -375,11 +376,8 @@ struct ShadowOccluder2DCandidate final {
                     .colorR = colorR,
                     .colorG = colorG,
                     .colorB = colorB,
-                    .shadowDistanceMeters = component->shadowDistanceMeters,
-                    .shadowDepthBias = component->shadowDepthBias,
-                    .shadowNormalBiasMeters = component->shadowNormalBiasMeters,
-                    .castsShadows = component->castsShadows,
                 },
+            .cascadedShadow = component->cascadedShadow,
         };
         ++lightCount;
     }
@@ -397,8 +395,24 @@ struct ShadowOccluder2DCandidate final {
     std::array<Render::Mesh3DDirectionalLight,
                Render::Mesh3DLightingDesc::MaximumDirectionalLightCount>
         lights{};
+    std::optional<Render::Mesh3DCascadedDirectionalShadow> cascadedDirectionalShadow;
     for (usize index = 0; index < lightCount; ++index) {
         lights[index] = candidates[index].light;
+        if (!candidates[index].cascadedShadow.has_value()) {
+            continue;
+        }
+        if (cascadedDirectionalShadow.has_value()) {
+            return Core::failure(
+                SceneErrorCode::TooManyActiveCascadedDirectionalShadows,
+                "Scene extract supports at most one active CascadedDirectionalShadow3D");
+        }
+        const CascadedDirectionalShadow3D& source = *candidates[index].cascadedShadow;
+        cascadedDirectionalShadow = Render::Mesh3DCascadedDirectionalShadow{
+            .directionalLightIndex = static_cast<u32>(index),
+            .maximumDistanceMeters = source.maximumDistanceMeters,
+            .depthBias = source.depthBias,
+            .normalBiasMeters = source.normalBiasMeters,
+        };
     }
 
     std::array<PointLight3DCandidate, Render::Mesh3DLightingDesc::MaximumPointLightCount>
@@ -583,6 +597,7 @@ struct ShadowOccluder2DCandidate final {
             std::span<const Render::Mesh3DPointLight>{pointLights.data(), pointLightCount},
         .spotLights =
             std::span<const Render::Mesh3DSpotLight>{spotLights.data(), spotLightCount},
+        .cascadedDirectionalShadow = cascadedDirectionalShadow,
         .ambientScale = ambientLightScale,
     });
 }
