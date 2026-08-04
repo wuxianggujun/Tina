@@ -26,6 +26,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | TRACE-002 | InProgress | P1 | 接入 Tracy 0.13.1 可选 Profile backend | TRACE-001 + [ADR 0002](adr/0002-tracy-and-benchmark.md) | `TINA_TRACE_BACKEND=none\|tracy` 唯一选择并要求 `profile-tracy` manifest feature；None 继续在预处理阶段完全丢弃参数；Tracy zone 只经 Tina-owned 64-byte opaque RAII bridge 进入 PRIVATE adapter，公共头不出现第三方 token/type/include；nested zone、Runtime consumer 与 public-header token scan 通过。session/capture 控制面不在本切片 | Unit + Integration + Consumer |
 | UI-002 | InProgress | P1 | Windows UIA 产品验收收口 | UI-002-SPI / UI-002-UIA-MAP / UI-002-HWND / UI-002-HOST | **自动证据已在 tip 固化（2026-08-03）：** `RunUi002UiaGate.ps1` → `artifacts/gates/ui-002-uia-20260803-tip.json`（ok、providers=69、fragment、Invoke/Toggle/Range/Value/Focus、normalShutdown）；`tina_ui_uia_tests` 12/12 + a11y unit 8/8；Focus 校验以 TextEdit `HasKeyboardFocus` 为准。**待：** 按 [ui-002-narrator-inspect-checklist.md](ui-002-narrator-inspect-checklist.md) 完成 Narrator/Inspect 人工金标后转 Done。Linux AT-SPI = `UI-002-LINUX` | Unit + Integration + Platform + Manual |
+| ASSET-002 | InProgress | P2 | 热重载与增量 Cooker | immutable Catalog + AssetId/Lease/retirement 契约 | **A 已实现：** old/new `CatalogSnapshot` 纯 change planner，稳定分类 Added/Removed/Modified/Affected，按新 Catalog reverse dependency 传递影响，显式 PMR/`maxChanges`，失败不返回部分 plan。**待：** source/package change detection、增量 recook/staging validation、live Catalog commit 与 Handle/Lease/GPU retirement 事务；不引入旧 cooked 兼容分支 | Unit |
 
 ## Next
 
@@ -46,7 +47,6 @@
 | UI-002-LINUX | Deferred | P2 | Windows UI-002 稳定后实现 Linux AT-SPI adapter 与真实辅助技术验收 | AT-SPI backend 不暴露平台类型到 Game SDK；真实 AT client 可发现、读取并执行支持的 action；生命周期与 stale node 门禁通过 |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | TEXT-001 | Deferred | P2 | 多行 TextEdit、grapheme/shaping、候选窗定位 | 中英混排、组合输入、selection 与平台 IME 矩阵通过 |
-| ASSET-002 | Deferred | P2 | 热重载与增量 Cooker | 不破坏 AssetId/Lease/retirement 契约，失败不发布半包 |
 | UI-PAINT-002 | Deferred | P2 | 逐角半径、圆角子树 clip 与 backdrop | 不重复已完成的统一 RoundedRect；clip/blur 有 backend-neutral 描述、容量预检与跨 DPI/backend 视觉门禁 |
 | UI-FLOW-001 | Deferred | P2 | 游戏页面 Activatable Screen、Layer Stack、Action Router 与输入设备提示 | 复用唯一 Element/Focus/Modal/Input 路径；页面激活、返回栈、多本地用户与 gameplay suppression 契约明确 |
 | UI-BEHAVIOR-SPI-001 | Deferred | P3 | 标准 Behavior + routed listener 不足时的 startup-only 自定义 Behavior SPI | 只有真实插件场景证明 `UI-COMPONENT-001` 无法表达后才进入；固定 state arena、最大 dirty effects、callback 不取得 Context/Renderer/allocator |

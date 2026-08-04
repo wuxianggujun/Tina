@@ -17,6 +17,7 @@ authoring source / recipe / glTF
 Catalog package
   -> AssetFormat borrowed wire views
   -> Asset owning CatalogSnapshot / CookedAssetFile
+  -> optional old/new CatalogChangePlan
   -> load plan + AssetSystem
   -> AssetStore Handle/Lease state
   -> optional Sprite2DBindingRegistry (borrow AssetSystem + RenderDevice)
@@ -39,7 +40,7 @@ Catalog package
 | --- | --- |
 | Wire format | Cooked Asset/Manifest v1、little-endian、严格 magic/schema/enum/count/offset/alignment/padding 校验 |
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
-| Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验 |
+| Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验；old/new snapshot 确定性 change plan |
 | Package | 确定性 object path、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
 | Cooker | recipe、writer、发布前 typed/package validation、staging 后原子发布；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，并把 packet-local ref 借给 extraction |
@@ -63,6 +64,23 @@ Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 T
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
+
+## Catalog 变更规划
+
+`planCatalogChanges(oldCatalog, newCatalog, config)` 是 `ASSET-002` 的纯规划边界，不修改两个 immutable
+snapshot，也不替换 live `AssetSystem`。输出 `CatalogChangePlan` 每个 `AssetId` 最多一行，并按
+`AssetId` 全局升序稳定排列：旧 Catalog 独有为 `Removed`，新 Catalog 独有为 `Added`；同一 ID 的
+`ContentHash`、Asset kind、type version、cooked file bytes 或依赖 ID/kind/flags 任一变化为 `Modified`。
+
+planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传递闭包；自身没有直接变化、但依赖
+任一变化节点的条目标为 `Affected`。直接分类优先，因此同一条目不会同时是 `Modified` 和 `Affected`；
+仅 `Removed` 不会在已经验证的新 Catalog 中产生悬空影响边。调用方必须显式提供 PMR 与 `maxChanges`，
+结果和 scratch storage 都使用该 PMR；容量或分配失败只返回 `Core::Error`，不发布部分 plan。结果 PMR
+必须覆盖 `CatalogChangePlan` 生命周期。
+
+这一步只回答“两个已验证 Catalog 有什么变化、哪些新条目需要后续处理”。文件监听、source import
+metadata、增量 recook、staging package 验证、live Handle/Lease/GPU retirement 编排以及最终 Catalog
+commit 都不属于 planner，必须由后续事务切片完成。
 
 ## 身份、视图与所有权
 
@@ -265,8 +283,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
-- hot reload、增量 Cooker、通用 Asset cache/LRU、Bundle/Patch 与 network Asset 尚未实现，见
-  `ASSET-002`；
+- `ASSET-002` 已有 immutable Catalog change planner；文件监听、增量 Cooker、staging package 到 live
+  Catalog/Handle/Lease/GPU retirement 的事务提交仍未实现。通用 Asset cache/LRU、Bundle/Patch 与
+  network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重
   resolve/pin，并复用 Sprite/UI 共用 `Texture2D` kind/binding；Canvas NineSlice 展开后的1..9个 quad

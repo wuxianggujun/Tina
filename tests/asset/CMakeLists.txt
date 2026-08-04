@@ -7,6 +7,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetRetirementTests.cpp
     AssetGpuRetirementTests.cpp
     AssetSystemGpuPipelineTests.cpp
+    CatalogChangePlanTests.cpp
     CatalogSnapshotTests.cpp
     CatalogCookTests.cpp
     GltfCookTests.cpp
@@ -61,6 +62,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/TileChunkDirtyCacheHeader.cpp
     header_isolation/CharacterController2DHeader.cpp
     header_isolation/CatalogCookHeader.cpp
+    header_isolation/CatalogChangePlanHeader.cpp
     header_isolation/CatalogFileHeader.cpp
     header_isolation/CatalogLoadOrderHeader.cpp
     header_isolation/CatalogLoadPlanHeader.cpp

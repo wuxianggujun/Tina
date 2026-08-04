@@ -493,6 +493,12 @@ symlink/junction 保持可用，逃逸、读取期间身份/size/time 变化或�
 预算失败都返回 `Core::Error`，不返回部分 `CatalogCookRequest`。调用方随后仍须经 `cookCatalogPackage` 与
 原子 publish；该 API 不让 Runtime 直接消费 source URI，也不暴露 cgltf/stb/native handle。
 
+`planCatalogChanges(oldCatalog, newCatalog, config)` 比较两个已验证、immutable `CatalogSnapshot`，返回按
+`AssetId` 排序且每 ID 唯一的 `Added`/`Removed`/`Modified`/`Affected` 行。`Modified` 覆盖 entry metadata
+和完整 dependency contract；`Affected` 是新 Catalog 中对 Added/Modified 的 reverse-dependency 传递闭包，
+直接变化优先。调用方显式提供 PMR 与 `maxChanges`，该 PMR 必须覆盖结果生命周期；容量或分配失败不返回
+部分 plan。planner 不绑定 Catalog、不使 Handle 失效，也不取得 AssetSystem/Lease/GPU owner。
+
 TileMap 的唯一当前 root wire contract 是 schema v3。`TileMapPayloadView` 按 authoring 顺序通过
 `layerAt()/findLayer(TileMapLayerId)` 暴露 tile/object layer；稳定 layer/object ID 都是 map-wide 非零唯一
 `u32`。layer 与 object 都有独立 visibility；name/properties 是 strict UTF-8 borrowed views；object kind
