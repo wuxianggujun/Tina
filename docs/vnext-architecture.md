@@ -157,7 +157,7 @@ TaskGroup barrier、Runtime-owned Asset/Audio lease drain 与通用 GPU completi
 | `TASK-001` | **Done**：Desktop 交互 CPU worker 默认 |
 | `RUNTIME-001` | **Done**：stack/commands/唯一提交点、四相位 policy、`blocksGameplayInputBelow` 空 snapshot 与产品暂停 overlay |
 | `RUNTIME-002` | FramePin + present-return CPU completion **Done**；RENDER-FENCE 的 Asset/Texture/Mesh readback retirement 亦已完成，通用 submission fence 非当前契约 |
-| `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling **Done**；完整 PBR/IBL/shadow 后置 |
+| `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling + 单 directional shadow/pass scheduler **Done**；完整 PBR/IBL、CSM 与 point/spot shadow 后置 |
 | `UI-002` / `UI-002-LINUX` / `UI-003` | action seam、Windows UIA patterns/HWND 产品接线与跨进程 gate 已有；Narrator/Inspect、AT-SPI 与 OS 级 DPI/跨 GPU 视觉矩阵仍开放 |
 | `UI-004` / `UI-005` | **Done**：Focus Scope/Modal/Pointer Capture，以及 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView |
 | `TEXT-001` | 多行编辑、grapheme/shaping 与完整 IME 候选窗仍开放 |

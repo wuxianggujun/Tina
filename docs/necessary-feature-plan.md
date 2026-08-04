@@ -190,7 +190,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
   + ambient，不宣称能量守恒 PBR。
 - `tina_sample_3d` 一次提交3个 lights，并输出 `lightingConfigured=true`、
   `directionalLightCount=3`；旧 key/fill JSON 字段已删除。
-- Cooked StaticMesh 仍为 P3N3UV2；本切片未伪装成 tangent/PBR schema 升级。
+- 当时 Cooked StaticMesh 仍只有 position/normal/UV；后续已由唯一 tangent schema 取代。
 
 ### 完成结果
 
@@ -204,8 +204,8 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 N4 当时明确保留的边界：这不是完整 PBR/light system；后续 `RENDER-001-SCENE-LIGHTS`、
 `RENDER-001-POINT-LIGHTS` 与 `RENDER-001-SPOT-LIGHTS` 已补 directional/point/spot World component、逐帧
 RenderScene snapshot、容量前 influence-sphere culling 与 backend shading；`RENDER-001-VERTEX-TANGENTS`
-后续已关闭 authored/generated tangent 与 backend TBN 路径；IBL、shadow、skin/animation 与通用 pass
-scheduler 仍未完成。
+后续已关闭 authored/generated tangent 与唯一 backend TBN 路径，并完成单 directional caster shadow 与
+deterministic pass scheduler；IBL、CSM、point/spot shadow、skin/animation 仍未完成。
 
 ### 验收
 

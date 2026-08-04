@@ -54,7 +54,7 @@
 
 | 领域 | 后置范围 | 重新开启条件 |
 | --- | --- | --- |
-| Render | 完整 PBR/IBL/shadow、通用 pass scheduler、自研 RHI | experimental MR 产品路径稳定且有 profile/视觉需求 |
+| Render | 完整 PBR/IBL、CSM、point/spot shadow、自研 RHI | experimental MR + 单 directional shadow 产品路径稳定且有 profile/视觉需求 |
 | Physics | Jolt 3D adapter | 有明确 3D gameplay 场景与性能预算 |
 | UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；逐角半径/圆角子树 clip/backdrop；Activatable Screen/Layer Stack；startup-only 自定义 Behavior SPI | 分别由 `TEXT-001`、`UI-PAINT-002`、`UI-FLOW-001`、`UI-BEHAVIOR-SPI-001` 跟踪；只有真实产品或插件需求并先冻结容量、失败与性能边界后才重新开启 |
 | Asset | 热重载、增量 Cooker、在线编辑 | Cooked schema、Lease/retirement 与产品打包稳定 |

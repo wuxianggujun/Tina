@@ -232,7 +232,7 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 - RGBA8 Texture2D create/destroy、非消费式 `validateTexture2D()` live/generation 校验、通用 Texture2D 非0 key
   binding（invalid `GpuTextureId` 清除 binding），以及 device-instance
   `createTexture2DBinding()` allocator；
-- P3N3UV2/U16 与 P3N3T4UV2/U16 StaticMesh create/destroy、Mesh3D key binding 与独立 device-instance
+- 唯一 P3N3T4UV2/U16 StaticMesh `createStaticMesh`/destroy、Mesh3D key binding 与独立 device-instance
   `createMesh3DBinding()` allocator；
 - 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
   `set/clearMesh3DMaterialBinding()` texture/factor bundle；细粒度 material setter 是低层 direct SPI；
@@ -571,9 +571,11 @@ metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtim
 MR hybrid；engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors，
 direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional + 0..8 point + 0..8 spot lights，
 World directional/point/spot component 每帧提取到 RenderScene，point/spot influence sphere 在容量检查前
-按相机裁剪。StaticMesh v1 由 `vertexLayout` 区分兼容 P3N3UV2 与 P3N3T4UV2：glTF authored
-`TANGENT` 优先，否则 NORMAL+TEXCOORD_0 primitive 由 Cooker 使用 MikkTSpace 生成；缺少 NORMAL/UV
-继续使用旧布局。Opaque3D 优先使用 vertex tangent TBN，并保留旧布局 derivative fallback。IBL/shadow 尚未完成。
+按相机裁剪。StaticMesh v1 固定为 P3N3T4UV2：glTF authored `TANGENT` 优先，否则
+NORMAL+TEXCOORD_0 primitive 由 Cooker 使用 MikkTSpace 生成；缺少 NORMAL/UV 显式失败。Opaque3D
+只使用 vertex tangent TBN。最多一个 directional light 可投射 1024×1024 D16、3×3 PCF 阴影；
+`shadowDistanceMeters`、`shadowDepthBias`、`shadowNormalBiasMeters` 与 `castsShadows` 随帧 snapshot 深拷贝。
+IBL、级联及 point/spot shadow 尚未完成。
 
 ## Audio 与 Physics
 
@@ -643,7 +645,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh retirement）；
-- 完整 PBR/IBL/shadow 与通用 pass scheduler；
+- 完整 PBR/IBL、CSM、point/spot shadow 与可配置 shadow atlas；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；

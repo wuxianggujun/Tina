@@ -225,16 +225,16 @@ resident 数据误当成 cache hit。
 产品消费闭环，不能把它们列为已完成资源类型。FreeType 字体仍通过显式 `TINA_UI_FONT_PATH`/fixture
 接入，详见 [UI](ui.md)。
 
-StaticMesh v1 由 `vertexLayout` 区分 P3N3UV2/P3N3T4UV2 + UInt16 index；glTF authored `TANGENT`
-优先，具备 NORMAL+UV 但缺 tangent 时由 PRIVATE MikkTSpace 生成，缺 NORMAL/UV 则保留旧布局。
+StaticMesh v1 固定为 P3N3T4UV2 + UInt16 index，不携带运行时 layout 分支；glTF authored `TANGENT`
+优先，具备 NORMAL+UV 但缺 tangent 时由 PRIVATE MikkTSpace 生成，缺 NORMAL/UV 的 primitive 显式失败。
 Material v2（40B）为 Opaque `UnlitBaseColor`，携带
 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`，以及可选 Texture2D dependency 标志
 （baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab 保存 node
 hierarchy 与 Mesh/Material AssetId。当前 Opaque3D 是 experimental MR hybrid，已采样 baseColor/MR/normal、
 应用 material factors，并从 World DirectionalLight3D/PointLight3D/SpotLight3D 发布逐帧有界
 4+8+8灯 snapshot；point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull；
-Opaque3D 优先使用 vertex tangent TBN，并为旧布局保留 derivative fallback；这不是
-完整 PBR，IBL/shadow 与通用 pass scheduler 仍属 `RENDER-001`。glTF importer 的实际限制见
+Opaque3D 只使用 vertex tangent TBN；这不是完整 PBR。单 directional caster shadow 与确定性 pass
+scheduler 已完成，IBL、级联及 point/spot shadow 仍属 `RENDER-001`。glTF importer 的实际限制见
 [3D 产品架构](game-3d.md)。
 
 ## 文件与安全边界

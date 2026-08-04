@@ -199,7 +199,8 @@ self-contained RenderScene snapshot；PointLight3D/SpotLight3D influence sphere 
 PerspectiveCamera3D frustum cull，spot light 额外提交 world local `-Z` 出光方向与 inner/outer cone cosine。
 product-3d 从 primary-window metrics 取得实时 framebuffer extent，因此相机 aspect、light frustum 与 bgfx view rect
 使用同一 surface；UI 则按 logical extent 以 right/end/stretch 约束重排，不按 client 尺寸全局缩放。完整 PBR、
-IBL/shadow、通用 pass system 与通用 GPU submission fence 仍未完成。Frame packet 的 FramePin 只覆盖同步
+IBL、CSM、point/spot shadow 与通用 GPU submission fence 仍未完成；单 directional caster shadow 与
+deterministic pass scheduler 已完成。Frame packet 的 FramePin 只覆盖同步
 submit/present 的 CPU 借用期；Texture/Mesh 则使用独立 readback completion marker，并已把 AssetLease
 合并到 backend retirement，二者不能互相作为完成证据。
 

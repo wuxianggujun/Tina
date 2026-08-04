@@ -650,7 +650,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 超过固定4灯上限显式 `TooManyActiveDirectionalLights`；inactive-only 发布 ambient-only snapshot；
 - `RenderSceneWriter::setMesh3DLighting()` 深拷贝调用方 span，重复/非法描述使 build 原子失败；
 - Null/bgfx submit preflight；bgfx frame snapshot 临时覆盖 device fallback，且每帧只编码一次 uniform arrays；
-- product-3d 当前 schema 9 继承 `directionalLightCount=3`、`sceneLightingFrames=300`。
+- product-3d 当前 schema 10 继承 `directionalLightCount=3`、`sceneLightingFrames=300`。
 
 直接验证入口为 `tina_scene_tests`、`tina_render_scene_tests`、`tina_render_bgfx_tests` 与
 `tina_sample_3d --frames=300 --frame-delay-ms=0 --ui-theme=dark --ui-theme-demo`。公开新头还由
@@ -665,7 +665,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 有效 PerspectiveCamera3D 下的 sphere-frustum center/tangent/outside、相机 world rotation 与容量前 culling；
 - 第9个 camera-affecting light 显式 `TooManyActivePointLights3D`，无相机/0x0 surface 保留未裁剪容量；
 - RenderScene snapshot 深拷贝与统计、Null/bgfx preflight、bgfx 8槽 position/radius + color uniform 与线性径向衰减；
-- product-3d 当前 schema 9 继承 `authoredPointLight3DCount=3`、`pointLight3DCount=2`、
+- product-3d 当前 schema 10 继承 `authoredPointLight3DCount=3`、`pointLight3DCount=2`、
   `culledPointLight3DCount=1`、`submittedLightingFrames=300` 与 `lightingCountsStable=true`。
 
 开发阶段先定向运行 `ScenePointLight3DTest.*`、RenderScene Mesh3D lighting 与 Null/bgfx lighting filters，
@@ -682,7 +682,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 第9个 camera-affecting light 显式 `TooManyActiveSpotLights3D`，无相机/0x0 surface 保留未裁剪容量；
 - RenderScene snapshot 深拷贝与统计、Null/bgfx preflight、bgfx 8槽 position/radius、direction/inner、
   color/outer uniform，以及 shader 的线性径向×平滑角度衰减；
-- product-3d 当前 schema 9 继承 schema 8 固化的 `authoredSpotLight3DCount=3`、`spotLight3DCount=2`、
+- product-3d 当前 schema 10 继承 schema 8 固化的 `authoredSpotLight3DCount=3`、`spotLight3DCount=2`、
   `culledSpotLight3DCount=1` 与 `lightingCountsStable=true`。
 
 开发阶段先定向运行 `SceneSpotLight3DTest.*`、RenderScene Mesh3D lighting 与 Null/bgfx lighting filters，
@@ -693,15 +693,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 
 `RENDER-001-VERTEX-TANGENTS` 的最小门禁覆盖：
 
-- StaticMesh payload v1 对 P3N3UV2（8 floats/vertex）与 P3N3T4UV2（12 floats/vertex）按 layout 严格校验；
+- StaticMesh payload v1 固定校验 P3N3T4UV2（12 floats/vertex）与 UInt16 index，不接受其他 stride/layout；
 - glTF authored `TANGENT` 读取、校验并规范化，NORMAL+TEXCOORD_0 缺 tangent 时由 MikkTSpace 生成；
-- 缺 NORMAL/UV primitive 继续输出 P3N3UV2，保持既有 Cooked/Runtime 兼容路径；
-- Asset upload 按 layout 分派，Null/bgfx 对新 stride、index range、generation/retirement 使用同一契约；
-- Opaque3D tangent TBN、signed model scale handedness 与 P3N3UV2 derivative fallback 均由 shader/backend test 覆盖；
-- product-3d schema 9 要求 complete-PBR fixture `tangentMeshesUploaded=2`。
+- 缺 NORMAL/UV primitive 显式 cook 失败，不发布不完整 StaticMesh；
+- Asset upload 只有 `createStaticMesh(StaticMeshUploadDesc)`，Null/bgfx 对唯一 stride、index range、generation/retirement 使用同一契约；
+- Opaque3D vertex tangent TBN 与 signed model scale handedness 由 shader/backend test 覆盖，不存在 derivative fallback；
+- product-3d schema 10 要求 complete-PBR fixture `tangentMeshesUploaded=2`。
 
 统一验证阶段先定向运行 StaticMesh payload、`GltfCookTests.*Tangent*`、GPU mesh upload/bgfx shader filters，
 再构建 `tina_sample_3d` 做30帧 smoke；完整 TEST-003 gate 最后执行。
+
+`RENDER-001-DIRECTIONAL-SHADOW` 的最小门禁覆盖：
+
+- Scene component 与 `Mesh3DLightingDesc` 校验有限、有界 shadow distance/depth bias/normal bias，且最多一个 caster；
+- Scene extraction 深拷贝 shadow 参数；scheduler 固定 shadow depth 位于 Opaque3D 前，并证明 offscreen clear 不消费 primary-surface clear；
+- bgfx projection math 覆盖 camera slice、backend homogeneous depth/origin；resource contract 覆盖 1024² sampled D16 framebuffer 的失败回滚与销毁；
+- shader contract 覆盖独立 depth program、receiver normal/depth bias、shadowed directional slot 与 3×3 PCF；
+- product-3d schema 10 要求 `directionalShadowCasterCount=1` 与 `submittedDirectionalShadowCasterCount=1`。
 
 ## Scene ShadowOccluder2D
 
@@ -796,7 +804,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；Sprite2D base/optional-normal extraction 使用 packet-local `FrameResourceRef`；schema 19 继承双灯双遮挡、逐帧 lighting、authored/committed/culled=`3/2/1`、soft=2 及 soft/hard 同机可重复差分，增加 normal count=`1/0` 与 normal on/off 四跑差分，同时保留 Dark→Light→Dark、Tree stable-key selection/scroll/semantics、三份 Registry Lease/GPU/binding owner handoff/retirement、weak texture handle 失效、ledger Released、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、跨 GPU lighting golden、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；evidence schema 9、`tangentMeshesUploaded=2`、实时 framebuffer aspect、响应式 right rail/footer、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、完整 PBR/IBL/shadow、跨 GPU golden |
+| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；evidence schema 10、`tangentMeshesUploaded=2`、directional shadow caster authored/submitted=`1`、实时 framebuffer aspect、响应式 right rail/footer、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、完整 PBR/IBL、CSM、point/spot shadow、跨 GPU golden |
 
 `tina_sample_2d` 是唯一产品 2D target；中间迁移名 `tina_sample_2d_tilemap_bgfx` 已删除。
 
@@ -817,7 +825,7 @@ multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E�
 mesh/material AssetId、Prefab dependency、AssetId→Handle→registry-owned binding→packet-local ref 与双 mesh
 binding 可验证。Opaque3D 已做
 baseColor/MR/normal 贴图 **采样**、authored/MikkTSpace vertex tangent、material factors 与 World directional/point/spot lights 的逐帧 snapshot；
-完整 PBR/IBL/shadow 仍后置。
+完整 PBR/IBL、CSM 与 point/spot shadow 仍后置。
 
 `ASSET-SEC-001` 的定向门禁是 `GltfCookTests.*`：覆盖主/外部文件 64MiB 上限、短 buffer、strict UTF-8
 与 percent-decoded traversal、root 内和逃逸 symlink/junction、bufferView/accessor/count/overflow、PNG
@@ -980,7 +988,7 @@ N4 另以 committed soft count=2 和 soft/hard 四跑差分覆盖连续 penumbra
 Windows 同轮 product-3d 拓扑由 `tools/windows/RunProduct3dGate.ps1` 固化（TEST-003）：默认使用
 `windows-msvc-vnext-bgfx-ui-freetype`，直接构建并运行 Core、Scene、AssetFormat、Asset、bgfx Render、
 UI、Runtime UI、UI Render bridge 与 FreeType 测试，再执行300帧 `--ui-theme=dark --ui-theme-demo`。
-schema 9 同时断言双 mesh、`tangentMeshesUploaded=2`、3个跨 Material 共享 PBR Texture、packet-local resolver 600/600、Mesh/Texture
+schema 10 同时断言双 mesh、`tangentMeshesUploaded=2`、directional shadow caster authored/submitted=`1`、3个跨 Material 共享 PBR Texture、packet-local resolver 600/600、Mesh/Texture
 retirement records Released、3个 directional light、PointLight3D/SpotLight3D 各自
 authored/committed/culled=`3/2/1`、
 `sceneLightingFrames=300`/`submittedLightingFrames=300`/registry 生命周期、7 Panel/13 Label、Button/Checkbox/Slider/ProgressBar/
