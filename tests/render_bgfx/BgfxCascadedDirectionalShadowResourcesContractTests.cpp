@@ -8,28 +8,29 @@
 
 namespace Tina::Render::Bgfx {
 
-inline constexpr u16 BgfxDirectionalShadowMapExtentContractTest = 1024;
+inline constexpr u16 BgfxCascadedDirectionalShadowAtlasExtentContractTest = 2048;
+inline constexpr u16 BgfxCascadedDirectionalShadowTileExtentContractTest = 1024;
 
-struct BgfxDirectionalShadowResourcesContractTest final {
-    tina_test_bgfx::TextureHandle depthTexture = BGFX_INVALID_HANDLE;
+struct BgfxCascadedDirectionalShadowResourcesContractTest final {
+    tina_test_bgfx::TextureHandle depthAtlas = BGFX_INVALID_HANDLE;
     tina_test_bgfx::FrameBufferHandle frameBuffer = BGFX_INVALID_HANDLE;
 
     [[nodiscard]] bool valid() const noexcept
     {
-        return tina_test_bgfx::isValid(depthTexture) &&
+        return tina_test_bgfx::isValid(depthAtlas) &&
                tina_test_bgfx::isValid(frameBuffer);
     }
 };
 
-[[nodiscard]] Core::Result<BgfxDirectionalShadowResourcesContractTest>
-createDirectionalShadowResourcesContractTest();
+[[nodiscard]] Core::Result<BgfxCascadedDirectionalShadowResourcesContractTest>
+createCascadedDirectionalShadowResourcesContractTest();
 
-void destroyDirectionalShadowResourcesContractTest(
-    BgfxDirectionalShadowResourcesContractTest& resources) noexcept;
+void destroyCascadedDirectionalShadowResourcesContractTest(
+    BgfxCascadedDirectionalShadowResourcesContractTest& resources) noexcept;
 
 namespace {
 
-class BgfxDirectionalShadowResourcesTest : public testing::Test {
+class BgfxCascadedDirectionalShadowResourcesTest : public testing::Test {
   protected:
     void SetUp() override
     {
@@ -37,18 +38,21 @@ class BgfxDirectionalShadowResourcesTest : public testing::Test {
     }
 };
 
-TEST_F(BgfxDirectionalShadowResourcesTest, CreatesSampledD16TextureAndNonOwningFramebuffer)
+TEST_F(BgfxCascadedDirectionalShadowResourcesTest,
+       CreatesSampledD16TwoByTwoAtlasAndNonOwningFramebuffer)
 {
     constexpr u64 ExpectedFlags = BGFX_TEXTURE_RT | BGFX_SAMPLER_COMPARE_LEQUAL |
                                   BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
 
-    auto resources = createDirectionalShadowResourcesContractTest();
+    auto resources = createCascadedDirectionalShadowResourcesContractTest();
 
     ASSERT_TRUE(resources.has_value()) << resources.error().message;
+    EXPECT_EQ(BgfxCascadedDirectionalShadowTileExtentContractTest * 2U,
+              BgfxCascadedDirectionalShadowAtlasExtentContractTest);
     ASSERT_EQ(tina_test_bgfx::Contract::state.textureCreates.size(), 1U);
     const auto& texture = tina_test_bgfx::Contract::state.textureCreates.front();
-    EXPECT_EQ(texture.width, BgfxDirectionalShadowMapExtentContractTest);
-    EXPECT_EQ(texture.height, BgfxDirectionalShadowMapExtentContractTest);
+    EXPECT_EQ(texture.width, BgfxCascadedDirectionalShadowAtlasExtentContractTest);
+    EXPECT_EQ(texture.height, BgfxCascadedDirectionalShadowAtlasExtentContractTest);
     EXPECT_FALSE(texture.hasMips);
     EXPECT_EQ(texture.layers, 1U);
     EXPECT_EQ(texture.format, tina_test_bgfx::TextureFormat::D16);
@@ -56,18 +60,17 @@ TEST_F(BgfxDirectionalShadowResourcesTest, CreatesSampledD16TextureAndNonOwningF
     EXPECT_FALSE(texture.initialMemoryProvided);
 
     ASSERT_EQ(tina_test_bgfx::Contract::state.frameBufferCreates.size(), 1U);
-    const auto& frameBuffer =
-        tina_test_bgfx::Contract::state.frameBufferCreates.front();
+    const auto& frameBuffer = tina_test_bgfx::Contract::state.frameBufferCreates.front();
     ASSERT_EQ(frameBuffer.attachments.size(), 1U);
-    EXPECT_EQ(frameBuffer.attachments.front().idx, resources->depthTexture.idx);
+    EXPECT_EQ(frameBuffer.attachments.front().idx, resources->depthAtlas.idx);
     EXPECT_FALSE(frameBuffer.destroyTextures);
 }
 
-TEST_F(BgfxDirectionalShadowResourcesTest, FramebufferFailureRollsBackDepthTexture)
+TEST_F(BgfxCascadedDirectionalShadowResourcesTest, FramebufferFailureRollsBackDepthAtlas)
 {
     tina_test_bgfx::Contract::state.rejectFrameBufferCreate = true;
 
-    auto resources = createDirectionalShadowResourcesContractTest();
+    auto resources = createCascadedDirectionalShadowResourcesContractTest();
 
     ASSERT_FALSE(resources.has_value());
     EXPECT_EQ(resources.error().code, RenderErrorCode::DeviceInitializationFailed);
@@ -77,12 +80,12 @@ TEST_F(BgfxDirectionalShadowResourcesTest, FramebufferFailureRollsBackDepthTextu
     EXPECT_TRUE(tina_test_bgfx::Contract::state.textures.front().destroyed);
 }
 
-TEST_F(BgfxDirectionalShadowResourcesTest, DestroyReleasesFramebufferBeforeTexture)
+TEST_F(BgfxCascadedDirectionalShadowResourcesTest, DestroyReleasesFramebufferBeforeDepthAtlas)
 {
-    auto resources = createDirectionalShadowResourcesContractTest();
+    auto resources = createCascadedDirectionalShadowResourcesContractTest();
     ASSERT_TRUE(resources.has_value()) << resources.error().message;
 
-    destroyDirectionalShadowResourcesContractTest(*resources);
+    destroyCascadedDirectionalShadowResourcesContractTest(*resources);
 
     ASSERT_EQ(tina_test_bgfx::Contract::state.destroyedResources.size(), 2U);
     EXPECT_EQ(tina_test_bgfx::Contract::state.destroyedResources[0].kind,
@@ -90,7 +93,7 @@ TEST_F(BgfxDirectionalShadowResourcesTest, DestroyReleasesFramebufferBeforeTextu
     EXPECT_EQ(tina_test_bgfx::Contract::state.destroyedResources[1].kind,
               tina_test_bgfx::Contract::DestroyedResourceKind::Texture);
     EXPECT_FALSE(tina_test_bgfx::isValid(resources->frameBuffer));
-    EXPECT_FALSE(tina_test_bgfx::isValid(resources->depthTexture));
+    EXPECT_FALSE(tina_test_bgfx::isValid(resources->depthAtlas));
 }
 
 } // namespace

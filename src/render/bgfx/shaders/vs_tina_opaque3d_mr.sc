@@ -1,11 +1,7 @@
 $input a_position, a_normal, a_tangent, a_texcoord0, i_data0, i_data1, i_data2, i_data3, i_data4
-$output v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent, v_shadowCoord
+$output v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent
 
 #include <bgfx_shader.sh>
-
-uniform mat4 u_shadowMtx;
-// x = receiver depth bias, y = receiver normal bias, z = texel size, w = shadowed light slot + 1.
-uniform vec4 u_shadowParams;
 
 void main()
 {
@@ -14,8 +10,6 @@ void main()
 	gl_Position = mul(u_viewProj, worldPosition);
 	// Product slice assumes near-uniform scale; no inverse-transpose normal matrix.
 	v_normal = normalize(mul(model, vec4(a_normal, 0.0)).xyz);
-	vec3 shadowWorldPosition = worldPosition.xyz + v_normal * u_shadowParams.y;
-	v_shadowCoord = mul(u_shadowMtx, vec4(shadowWorldPosition, 1.0));
 	vec3 worldTangent = mul(model, vec4(a_tangent.xyz, 0.0)).xyz;
 	float tangentLengthSquared = dot(worldTangent, worldTangent);
 	worldTangent *= inversesqrt(max(tangentLengthSquared, 0.00000001));

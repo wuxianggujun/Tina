@@ -46,10 +46,10 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxEnvironmentMapResources.hpp
         bgfx/BgfxOpaque3DGeometry.cpp
         bgfx/BgfxOpaque3DGeometry.hpp
-        bgfx/BgfxDirectionalShadowMath.cpp
-        bgfx/BgfxDirectionalShadowMath.hpp
-        bgfx/BgfxDirectionalShadowResources.cpp
-        bgfx/BgfxDirectionalShadowResources.hpp
+        bgfx/BgfxCascadedDirectionalShadowMath.cpp
+        bgfx/BgfxCascadedDirectionalShadowMath.hpp
+        bgfx/BgfxCascadedDirectionalShadowResources.cpp
+        bgfx/BgfxCascadedDirectionalShadowResources.hpp
         bgfx/BgfxOpaque3DShader.cpp
         bgfx/BgfxOpaque3DShader.hpp
         bgfx/BgfxResourceSlotGeneration.hpp
@@ -123,10 +123,10 @@ if(TINA_BUILD_RENDER_BGFX)
     )
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx
-        tina_opaque3d_shadow
-        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_shadow.sc"
-        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_shadow.sc"
-        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_shadow.def.sc"
+        tina_opaque3d_csm_depth
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_csm_depth.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_csm_depth.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_csm_depth.def.sc"
     )
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx

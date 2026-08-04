@@ -6,18 +6,18 @@
 
 #include "fs_tina_opaque3d_mr_glsl.bin.h"
 #include "fs_tina_opaque3d_mr_spv.bin.h"
-#include "fs_tina_opaque3d_shadow_glsl.bin.h"
-#include "fs_tina_opaque3d_shadow_spv.bin.h"
+#include "fs_tina_opaque3d_csm_depth_glsl.bin.h"
+#include "fs_tina_opaque3d_csm_depth_spv.bin.h"
 #include "vs_tina_opaque3d_mr_glsl.bin.h"
 #include "vs_tina_opaque3d_mr_spv.bin.h"
-#include "vs_tina_opaque3d_shadow_glsl.bin.h"
-#include "vs_tina_opaque3d_shadow_spv.bin.h"
+#include "vs_tina_opaque3d_csm_depth_glsl.bin.h"
+#include "vs_tina_opaque3d_csm_depth_spv.bin.h"
 
 #if BX_PLATFORM_WINDOWS
 #include "fs_tina_opaque3d_mr_dxbc.bin.h"
-#include "fs_tina_opaque3d_shadow_dxbc.bin.h"
+#include "fs_tina_opaque3d_csm_depth_dxbc.bin.h"
 #include "vs_tina_opaque3d_mr_dxbc.bin.h"
-#include "vs_tina_opaque3d_shadow_dxbc.bin.h"
+#include "vs_tina_opaque3d_csm_depth_dxbc.bin.h"
 #endif
 
 namespace Tina::Render::Bgfx::ShaderDetail {
@@ -51,30 +51,30 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
         },
     },
     {
-        "vs_tina_opaque3d_shadow",
+        "vs_tina_opaque3d_csm_depth",
         {
 #if BX_PLATFORM_WINDOWS
-            {bgfx::RendererType::Direct3D11, vs_tina_opaque3d_shadow_dxbc,
-             sizeof(vs_tina_opaque3d_shadow_dxbc)},
+            {bgfx::RendererType::Direct3D11, vs_tina_opaque3d_csm_depth_dxbc,
+             sizeof(vs_tina_opaque3d_csm_depth_dxbc)},
 #endif
-            {bgfx::RendererType::OpenGL, vs_tina_opaque3d_shadow_glsl,
-             sizeof(vs_tina_opaque3d_shadow_glsl)},
-            {bgfx::RendererType::Vulkan, vs_tina_opaque3d_shadow_spv,
-             sizeof(vs_tina_opaque3d_shadow_spv)},
+            {bgfx::RendererType::OpenGL, vs_tina_opaque3d_csm_depth_glsl,
+             sizeof(vs_tina_opaque3d_csm_depth_glsl)},
+            {bgfx::RendererType::Vulkan, vs_tina_opaque3d_csm_depth_spv,
+             sizeof(vs_tina_opaque3d_csm_depth_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
         },
     },
     {
-        "fs_tina_opaque3d_shadow",
+        "fs_tina_opaque3d_csm_depth",
         {
 #if BX_PLATFORM_WINDOWS
-            {bgfx::RendererType::Direct3D11, fs_tina_opaque3d_shadow_dxbc,
-             sizeof(fs_tina_opaque3d_shadow_dxbc)},
+            {bgfx::RendererType::Direct3D11, fs_tina_opaque3d_csm_depth_dxbc,
+             sizeof(fs_tina_opaque3d_csm_depth_dxbc)},
 #endif
-            {bgfx::RendererType::OpenGL, fs_tina_opaque3d_shadow_glsl,
-             sizeof(fs_tina_opaque3d_shadow_glsl)},
-            {bgfx::RendererType::Vulkan, fs_tina_opaque3d_shadow_spv,
-             sizeof(fs_tina_opaque3d_shadow_spv)},
+            {bgfx::RendererType::OpenGL, fs_tina_opaque3d_csm_depth_glsl,
+             sizeof(fs_tina_opaque3d_csm_depth_glsl)},
+            {bgfx::RendererType::Vulkan, fs_tina_opaque3d_csm_depth_spv,
+             sizeof(fs_tina_opaque3d_csm_depth_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
         },
     },
@@ -128,11 +128,11 @@ Core::Result<bgfx::ProgramHandle> createOpaque3DMrProgram()
                                  "createOpaque3DMrProgram");
 }
 
-Core::Result<bgfx::ProgramHandle> createOpaque3DShadowProgram()
+Core::Result<bgfx::ProgramHandle> createOpaque3DCascadedShadowDepthProgram()
 {
-    return createEmbeddedProgram("vs_tina_opaque3d_shadow",
-                                 "fs_tina_opaque3d_shadow",
-                                 "createOpaque3DShadowProgram");
+    return createEmbeddedProgram("vs_tina_opaque3d_csm_depth",
+                                 "fs_tina_opaque3d_csm_depth",
+                                 "createOpaque3DCascadedShadowDepthProgram");
 }
 
 } // namespace Tina::Render::Bgfx::ShaderDetail

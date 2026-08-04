@@ -18,26 +18,27 @@ target_link_libraries(tina_render_bgfx_ui_atlas_contract_test_object PRIVATE
 )
 set_target_properties(tina_render_bgfx_ui_atlas_contract_test_object PROPERTIES CXX_EXTENSIONS OFF)
 
-add_library(tina_render_bgfx_directional_shadow_contract_test_object OBJECT
-    ${PROJECT_SOURCE_DIR}/src/render/bgfx/BgfxDirectionalShadowResources.cpp
+add_library(tina_render_bgfx_cascaded_directional_shadow_contract_test_object OBJECT
+    ${PROJECT_SOURCE_DIR}/src/render/bgfx/BgfxCascadedDirectionalShadowResources.cpp
 )
-target_compile_features(tina_render_bgfx_directional_shadow_contract_test_object PRIVATE cxx_std_23)
-target_compile_definitions(tina_render_bgfx_directional_shadow_contract_test_object PRIVATE
+target_compile_features(tina_render_bgfx_cascaded_directional_shadow_contract_test_object PRIVATE cxx_std_23)
+target_compile_definitions(tina_render_bgfx_cascaded_directional_shadow_contract_test_object PRIVATE
     bgfx=tina_test_bgfx
-    BgfxDirectionalShadowMapExtent=BgfxDirectionalShadowMapExtentContractTest
-    BgfxDirectionalShadowResources=BgfxDirectionalShadowResourcesContractTest
-    createDirectionalShadowResources=createDirectionalShadowResourcesContractTest
-    destroyDirectionalShadowResources=destroyDirectionalShadowResourcesContractTest
+    BgfxCascadedDirectionalShadowAtlasExtent=BgfxCascadedDirectionalShadowAtlasExtentContractTest
+    BgfxCascadedDirectionalShadowTileExtent=BgfxCascadedDirectionalShadowTileExtentContractTest
+    BgfxCascadedDirectionalShadowResources=BgfxCascadedDirectionalShadowResourcesContractTest
+    createCascadedDirectionalShadowResources=createCascadedDirectionalShadowResourcesContractTest
+    destroyCascadedDirectionalShadowResources=destroyCascadedDirectionalShadowResourcesContractTest
 )
-target_include_directories(tina_render_bgfx_directional_shadow_contract_test_object BEFORE PRIVATE
+target_include_directories(tina_render_bgfx_cascaded_directional_shadow_contract_test_object BEFORE PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/fakes
     ${PROJECT_SOURCE_DIR}/src/render/bgfx
 )
-target_link_libraries(tina_render_bgfx_directional_shadow_contract_test_object PRIVATE
+target_link_libraries(tina_render_bgfx_cascaded_directional_shadow_contract_test_object PRIVATE
     Tina::ProjectOptions
     Tina::Core
 )
-set_target_properties(tina_render_bgfx_directional_shadow_contract_test_object PROPERTIES
+set_target_properties(tina_render_bgfx_cascaded_directional_shadow_contract_test_object PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
@@ -65,8 +66,8 @@ set_target_properties(tina_render_bgfx_environment_map_contract_test_object PROP
 
 add_executable(tina_render_bgfx_tests
     BgfxOpaque3DGeometryTests.cpp
-    BgfxDirectionalShadowMathTests.cpp
-    BgfxDirectionalShadowResourcesContractTests.cpp
+    BgfxCascadedDirectionalShadowMathTests.cpp
+    BgfxCascadedDirectionalShadowResourcesContractTests.cpp
     BgfxEnvironmentMapResourcesContractTests.cpp
     BgfxResourceSlotGenerationTests.cpp
     BgfxRetirementTimelineTests.cpp
@@ -77,7 +78,7 @@ add_executable(tina_render_bgfx_tests
     BgfxUIAtlasTextureContractTests.cpp
     BgfxUIDisplayGeometryTests.cpp
     $<TARGET_OBJECTS:tina_render_bgfx_ui_atlas_contract_test_object>
-    $<TARGET_OBJECTS:tina_render_bgfx_directional_shadow_contract_test_object>
+    $<TARGET_OBJECTS:tina_render_bgfx_cascaded_directional_shadow_contract_test_object>
     $<TARGET_OBJECTS:tina_render_bgfx_environment_map_contract_test_object>
 )
 
