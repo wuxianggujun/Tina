@@ -2,6 +2,7 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AssetFormat.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AssetFormatErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AudioClipPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/EnvironmentMapPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/MaterialPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/PrefabPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SpriteAnimationClipPayload.hpp
@@ -17,6 +18,7 @@ add_library(tina_asset_format STATIC
     ${TINA_ASSET_FORMAT_PUBLIC_HEADERS}
     AssetFormat.cpp
     AudioClipPayload.cpp
+    EnvironmentMapPayload.cpp
     MaterialPayload.cpp
     PrefabPayload.cpp
     SpriteAnimationClipPayload.cpp

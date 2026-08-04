@@ -54,6 +54,7 @@ enum class AssetKind : Core::u16 {
     AudioClip = 10,
     SpriteAnimationClip = 11,
     TileMapChunk = 12,
+    EnvironmentMap = 13,
 };
 
 enum class TargetPlatform : Core::u16 {

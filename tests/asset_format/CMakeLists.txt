@@ -1,6 +1,7 @@
 set(TINA_ASSET_FORMAT_TEST_SOURCES
     AssetFormatTests.cpp
     AudioClipPayloadTests.cpp
+    EnvironmentMapPayloadTests.cpp
     MaterialPayloadTests.cpp
     PrefabPayloadTests.cpp
     SpriteAnimationClipPayloadTests.cpp
@@ -11,6 +12,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     header_isolation/AssetFormatErrorsHeader.cpp
     header_isolation/AssetFormatHeader.cpp
     header_isolation/AudioClipPayloadHeader.cpp
+    header_isolation/EnvironmentMapPayloadHeader.cpp
     header_isolation/MaterialPayloadHeader.cpp
     header_isolation/PrefabPayloadHeader.cpp
     header_isolation/SpriteAnimationClipPayloadHeader.cpp

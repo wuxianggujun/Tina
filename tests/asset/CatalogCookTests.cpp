@@ -3,6 +3,7 @@
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageLoad.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
+#include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/io/WriteFile.hpp>
 
@@ -724,6 +725,79 @@ TEST(CatalogCookTests, RecipeFileRoundTrip)
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
     EXPECT_EQ(catalog->entryCount(), 2U);
     EXPECT_EQ(catalog->dependencyCount(), 1U);
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(CatalogCookTests, GenericEnvironmentMapRecipeUsesCurrentPayloadVersion)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto environmentId = *Core::AssetId::fromBytes(idBytes(13U));
+    const auto environmentHex = environmentId.canonicalText();
+    std::vector<std::byte> diffuse(48U, std::byte{0x11});
+    std::vector<std::byte> specular(48U, std::byte{0x22});
+    std::vector<std::byte> brdf(4U, std::byte{0x33});
+    auto payload = AssetFormat::writeEnvironmentMapPayloadBytes(AssetFormat::EnvironmentMapPayloadDesc{
+        .diffuseFaceSize = 1,
+        .specularFaceSize = 1,
+        .specularMipCount = 1,
+        .brdfWidth = 1,
+        .brdfHeight = 1,
+        .diffusePixels = diffuse,
+        .specularPixels = specular,
+        .brdfPixels = brdf,
+    });
+    ASSERT_TRUE(payload.has_value()) << payload.error().message;
+
+    const auto dir = std::filesystem::temp_directory_path() / "tina_environment_map_recipe";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto payloadPath = dir / "environment.bin";
+    ASSERT_TRUE(Core::writeFile(toUtf8(payloadPath), *payload).has_value());
+
+    std::string recipe = "platform WindowsX64\nasset EnvironmentMap ";
+    recipe.append(environmentHex.data(), environmentHex.size());
+    recipe += " environment.bin\n";
+    auto request = parseCatalogCookRecipe(recipe, toUtf8(dir));
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 1U);
+    EXPECT_EQ(request->assets[0].assetKind, AssetFormat::AssetKind::EnvironmentMap);
+    EXPECT_EQ(request->assets[0].assetTypeVersion, AssetFormat::EnvironmentMapWire::SchemaVersion);
+    EXPECT_EQ(request->assets[0].payload, *payload);
+
+    const auto outRoot = dir / "out";
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(outRoot), *request).has_value());
+    auto catalog = openCatalogPackage(
+        toUtf8(outRoot),
+        CatalogPackageOpenConfig{
+            .manifest =
+                CatalogFileLoadConfig{
+                    .catalog =
+                        CatalogConfig{
+                            .maxEntries = 4,
+                            .maxDependencies = 4,
+                            .maxDependenciesPerAsset = 4,
+                            .memoryResource = &memory,
+                        },
+                },
+            .validateOnOpen = true,
+            .validation =
+                CatalogPackageValidationConfig{
+                    .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                    .verifyContent = true,
+                },
+        });
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    auto asset = loadCookedAssetFromCatalog(toUtf8(outRoot), *catalog, environmentId,
+                                            CookedAssetFileLoadConfig{.memoryResource = &memory});
+    ASSERT_TRUE(asset.has_value()) << asset.error().message;
+    EXPECT_EQ(asset->header().assetKind, AssetFormat::AssetKind::EnvironmentMap);
+    EXPECT_EQ(asset->header().assetTypeVersion, AssetFormat::EnvironmentMapWire::SchemaVersion);
+    auto environment = AssetFormat::parseEnvironmentMapPayload(asset->payload());
+    ASSERT_TRUE(environment.has_value()) << environment.error().message;
+    EXPECT_EQ(environment->diffuseFaceSize, 1U);
+    EXPECT_EQ(environment->brdfPixels.front(), std::byte{0x33});
 
     std::filesystem::remove_all(dir, ec);
 }

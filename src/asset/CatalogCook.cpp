@@ -6,6 +6,7 @@
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
+#include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/SpriteAnimationClipPayload.hpp>
@@ -147,6 +148,11 @@ struct CookedPackage final {
         out = AssetFormat::AssetKind::SpriteAnimationClip;
         return true;
     }
+    if (name == "EnvironmentMap")
+    {
+        out = AssetFormat::AssetKind::EnvironmentMap;
+        return true;
+    }
     return false;
 }
 
@@ -174,6 +180,8 @@ struct CookedPackage final {
         return AssetFormat::PrefabWire::SchemaVersion;
     case AssetFormat::AssetKind::AudioClip:
         return AssetFormat::AudioClipWire::SchemaVersion;
+    case AssetFormat::AssetKind::EnvironmentMap:
+        return AssetFormat::EnvironmentMapWire::SchemaVersion;
     default:
         return 1U;
     }
