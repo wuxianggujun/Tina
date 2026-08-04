@@ -75,6 +75,7 @@ struct PointLight3DCandidate final {
 struct SpotLight3DCandidate final {
     u64 stableKey = 0;
     Render::Mesh3DSpotLight light{};
+    std::optional<SpotLightShadow3D> shadow{};
 };
 
 struct PointLight2DCandidate final {
@@ -559,6 +560,7 @@ struct ShadowOccluder2DCandidate final {
         spotCandidates[spotLightCount] = SpotLight3DCandidate{
             .stableKey = stableEntityKey(entity),
             .light = light,
+            .shadow = component->shadow,
         };
         ++spotLightCount;
     }
@@ -587,8 +589,24 @@ struct ShadowOccluder2DCandidate final {
     }
     std::array<Render::Mesh3DSpotLight, Render::Mesh3DLightingDesc::MaximumSpotLightCount>
         spotLights{};
+    std::optional<Render::Mesh3DSpotLightShadow> spotLightShadow;
     for (usize index = 0; index < spotLightCount; ++index) {
         spotLights[index] = spotCandidates[index].light;
+        if (!spotCandidates[index].shadow.has_value()) {
+            continue;
+        }
+        if (spotLightShadow.has_value()) {
+            return Core::failure(
+                SceneErrorCode::TooManyActiveSpotLightShadows,
+                "Scene extract supports at most one camera-affecting SpotLightShadow3D");
+        }
+        const SpotLightShadow3D& source = *spotCandidates[index].shadow;
+        spotLightShadow = Render::Mesh3DSpotLightShadow{
+            .spotLightIndex = static_cast<u32>(index),
+            .nearPlaneMeters = source.nearPlaneMeters,
+            .depthBias = source.depthBias,
+            .normalBiasMeters = source.normalBiasMeters,
+        };
     }
     return writer.setMesh3DLighting(Render::Mesh3DLightingDesc{
         .directionalLights =
@@ -598,6 +616,7 @@ struct ShadowOccluder2DCandidate final {
         .spotLights =
             std::span<const Render::Mesh3DSpotLight>{spotLights.data(), spotLightCount},
         .cascadedDirectionalShadow = cascadedDirectionalShadow,
+        .spotLightShadow = spotLightShadow,
         .ambientScale = ambientLightScale,
     });
 }

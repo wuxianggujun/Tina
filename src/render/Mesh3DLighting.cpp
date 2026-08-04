@@ -115,6 +115,28 @@ Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noex
         }
     }
 
+    if (lighting.spotLightShadow.has_value())
+    {
+        const Mesh3DSpotLightShadow& shadow = *lighting.spotLightShadow;
+        if (shadow.spotLightIndex >= lighting.spotLights.size())
+        {
+            return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                                 "Mesh3D spot shadow references a missing spot light");
+        }
+        const Mesh3DSpotLight& light = lighting.spotLights[shadow.spotLightIndex];
+        if (light.outerConeCosine <= 0.0F || !std::isfinite(shadow.nearPlaneMeters) ||
+            shadow.nearPlaneMeters <= 0.0F ||
+            shadow.nearPlaneMeters >= light.influenceRadius || !std::isfinite(shadow.depthBias) ||
+            shadow.depthBias < 0.0F || shadow.depthBias > Mesh3DSpotLightShadow::MaximumDepthBias ||
+            !std::isfinite(shadow.normalBiasMeters) || shadow.normalBiasMeters < 0.0F ||
+            shadow.normalBiasMeters > Mesh3DSpotLightShadow::MaximumNormalBiasMeters)
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidMesh3DLighting,
+                "Mesh3D spot shadow requires a positive outer cone cosine plus finite, bounded near plane and bias values inside the referenced light radius");
+        }
+    }
+
     return Core::success();
 }
 

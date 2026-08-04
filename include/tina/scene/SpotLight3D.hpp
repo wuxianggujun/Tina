@@ -4,8 +4,27 @@
 
 #include <cmath>
 #include <numbers>
+#include <optional>
 
 namespace Tina::Scene {
+
+struct SpotLightShadow3D final {
+    float nearPlaneMeters = 0.05F;
+    float depthBias = 0.0015F;
+    float normalBiasMeters = 0.02F;
+
+    friend constexpr bool operator==(const SpotLightShadow3D&,
+                                     const SpotLightShadow3D&) noexcept = default;
+};
+
+[[nodiscard]] inline bool isValid(const SpotLightShadow3D& shadow) noexcept
+{
+    return std::isfinite(shadow.nearPlaneMeters) && shadow.nearPlaneMeters > 0.0F &&
+           std::isfinite(shadow.depthBias) && shadow.depthBias >= 0.0F &&
+           shadow.depthBias <= Render::Mesh3DSpotLightShadow::MaximumDepthBias &&
+           std::isfinite(shadow.normalBiasMeters) && shadow.normalBiasMeters >= 0.0F &&
+           shadow.normalBiasMeters <= Render::Mesh3DSpotLightShadow::MaximumNormalBiasMeters;
+}
 
 // Scene-owned spot light. WorldTransform position supplies the light center,
 // while WorldTransform local -Z supplies the world-space emission direction.
@@ -16,6 +35,7 @@ struct SpotLight3D final {
     float influenceRadiusMeters = 4.0F;
     float innerConeHalfAngleDegrees = 20.0F;
     float outerConeHalfAngleDegrees = 30.0F;
+    std::optional<SpotLightShadow3D> shadow{};
     bool active = true;
 
     friend constexpr bool operator==(const SpotLight3D&, const SpotLight3D&) noexcept = default;
@@ -42,7 +62,9 @@ struct SpotLight3D final {
            light.innerConeHalfAngleDegrees >= 0.0F &&
            light.innerConeHalfAngleDegrees < light.outerConeHalfAngleDegrees &&
            light.outerConeHalfAngleDegrees < 90.0F && std::isfinite(innerConeCosine) &&
-           std::isfinite(outerConeCosine) && innerConeCosine > outerConeCosine;
+           std::isfinite(outerConeCosine) && innerConeCosine > outerConeCosine &&
+           (!light.shadow.has_value() ||
+            (isValid(*light.shadow) && light.shadow->nearPlaneMeters < light.influenceRadiusMeters));
 }
 
 } // namespace Tina::Scene

@@ -349,6 +349,42 @@ TEST(NullRenderDeviceTest, RejectsInvalidCascadedShadowSnapshotBeforeConsumingFr
     EXPECT_EQ(device->statistics().submitted, 1U);
 }
 
+TEST(NullRenderDeviceTest, RejectsInvalidSpotShadowSnapshotBeforeConsumingFrameState)
+{
+    auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{});
+    ASSERT_TRUE(builderResult.has_value()) << builderResult.error().message;
+    Render::RenderSceneBuilder builder = std::move(*builderResult);
+    ASSERT_TRUE(builder.beginFrame());
+
+    const std::array spotLights{Render::Mesh3DSpotLight{.influenceRadius = 4.0F}};
+    ASSERT_TRUE(builder.writer().setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = spotLights,
+        .spotLightShadow = Render::Mesh3DSpotLightShadow{},
+    }));
+    auto scene = builder.commit();
+    ASSERT_TRUE(scene.has_value()) << scene.error().message;
+    ASSERT_TRUE(scene->mesh3DLighting().has_value());
+    ASSERT_TRUE(scene->mesh3DLighting()->spotLightShadow().has_value());
+
+    auto* corruptedShadow = const_cast<Render::Mesh3DSpotLightShadow*>(
+        &*scene->mesh3DLighting()->spotLightShadow());
+    corruptedShadow->nearPlaneMeters = spotLights[0].influenceRadius;
+
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+    auto invalid = device->submitFrame(Render::RenderFrame{
+        .frameIndex = 0,
+        .primaryWorldScene = *scene,
+    });
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().submitted, 1U);
+}
+
 TEST(NullRenderDeviceTest, RejectsAnyCrossPacketSpriteTextureBeforeConsumingFrameOrStatistics)
 {
     u32 firstReleaseCount = 0;

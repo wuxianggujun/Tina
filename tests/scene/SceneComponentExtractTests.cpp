@@ -2123,6 +2123,11 @@ TEST(SceneSpotLight3DTest, SetsClearsQueriesAndRejectsInvalidConeTransactionally
         .influenceRadiusMeters = 6.0F,
         .innerConeHalfAngleDegrees = 15.0F,
         .outerConeHalfAngleDegrees = 35.0F,
+        .shadow = SpotLightShadow3D{
+            .nearPlaneMeters = 0.1F,
+            .depthBias = 0.002F,
+            .normalBiasMeters = 0.03F,
+        },
     };
     ASSERT_TRUE(world.setSpotLight3D(entity, light));
     ASSERT_NE(world.spotLight3D(entity), nullptr);
@@ -2131,6 +2136,20 @@ TEST(SceneSpotLight3DTest, SetsClearsQueriesAndRejectsInvalidConeTransactionally
     const SpotLight3D validLight = light;
     light.innerConeHalfAngleDegrees = -0.1F;
     auto invalid = world.setSpotLight3D(entity, light);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_EQ(*world.spotLight3D(entity), validLight);
+
+    light = validLight;
+    light.shadow->nearPlaneMeters = light.influenceRadiusMeters;
+    invalid = world.setSpotLight3D(entity, light);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_EQ(*world.spotLight3D(entity), validLight);
+
+    light = validLight;
+    light.shadow->depthBias = Render::Mesh3DSpotLightShadow::MaximumDepthBias + 0.001F;
+    invalid = world.setSpotLight3D(entity, light);
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
     EXPECT_EQ(*world.spotLight3D(entity), validLight);
@@ -2203,6 +2222,11 @@ TEST(SceneSpotLight3DTest, ExtractsStableWorldDirectionsConeCosinesAndCoexistsWi
         .influenceRadiusMeters = 2.0F,
         .innerConeHalfAngleDegrees = 10.0F,
         .outerConeHalfAngleDegrees = 45.0F,
+        .shadow = SpotLightShadow3D{
+            .nearPlaneMeters = 0.1F,
+            .depthBias = 0.002F,
+            .normalBiasMeters = 0.04F,
+        },
     }));
     ASSERT_TRUE(world.setSpotLight3D(inactive, SpotLight3D{.active = false}));
     ASSERT_TRUE(world.setDirectionalLight3D(directional, DirectionalLight3D{}));
@@ -2245,8 +2269,65 @@ TEST(SceneSpotLight3DTest, ExtractsStableWorldDirectionsConeCosinesAndCoexistsWi
     EXPECT_FLOAT_EQ(lights[1].colorR, 0.3F);
     EXPECT_FLOAT_EQ(lights[1].colorG, 0.6F);
     EXPECT_FLOAT_EQ(lights[1].colorB, 0.9F);
+    ASSERT_TRUE(view->mesh3DLighting()->spotLightShadow().has_value());
+    const Render::Mesh3DSpotLightShadow& shadow =
+        *view->mesh3DLighting()->spotLightShadow();
+    EXPECT_EQ(shadow.spotLightIndex, 1U);
+    EXPECT_FLOAT_EQ(shadow.nearPlaneMeters, 0.1F);
+    EXPECT_FLOAT_EQ(shadow.depthBias, 0.002F);
+    EXPECT_FLOAT_EQ(shadow.normalBiasMeters, 0.04F);
     EXPECT_FLOAT_EQ(view->mesh3DLighting()->ambientScale(), 0.3F);
     EXPECT_EQ(view->statistics().spotLight3DCount, 2U);
+}
+
+TEST(SceneSpotLight3DTest, RejectsMoreThanOneCameraAffectingShadowAfterCulling)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+
+    const EntityId first = world.createEntity(translated(-0.5F, 0.0F, -5.0F)).value();
+    const EntityId second = world.createEntity(translated(0.5F, 0.0F, -5.0F)).value();
+    const EntityId offscreen = world.createEntity(translated(100.0F, 0.0F, -5.0F)).value();
+    ASSERT_TRUE(world.setSpotLight3D(first, SpotLight3D{.shadow = SpotLightShadow3D{}}));
+    ASSERT_TRUE(world.setSpotLight3D(second, SpotLight3D{.shadow = SpotLightShadow3D{}}));
+    ASSERT_TRUE(world.setSpotLight3D(offscreen, SpotLight3D{.shadow = SpotLightShadow3D{}}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 1.0F,
+    }));
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    Render::RenderSceneWriter writer = builder->writer();
+    auto status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActiveSpotLightShadows);
+    builder->rollback();
+
+    ASSERT_TRUE(world.setSpotLight3D(second, SpotLight3D{}));
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 1.0F,
+    }));
+    Render::RenderSceneWriter retryWriter = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        retryWriter,
+        packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
+        }));
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_TRUE(view->mesh3DLighting()->spotLightShadow().has_value());
+    EXPECT_EQ(view->mesh3DLighting()->spotLightShadow()->spotLightIndex, 0U);
 }
 
 TEST(SceneSpotLight3DTest, CullsInfluenceSpheresBeforeCapacity)

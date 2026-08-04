@@ -5,3 +5,4 @@ static_assert(
 static_assert(
     Tina::Scene::SceneErrorCode::ConstructionFailed.domain == Tina::Core::ErrorDomain::Scene);
 static_assert(Tina::Scene::SceneErrorCode::ConstructionFailed.value == 11U);
+static_assert(Tina::Scene::SceneErrorCode::TooManyActiveSpotLightShadows.value == 23U);

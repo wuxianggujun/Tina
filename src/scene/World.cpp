@@ -1452,7 +1452,7 @@ Core::Status World::setSpotLight3D(EntityId entity, SpotLight3D light) noexcept
     if (!isValid(light)) {
         return Core::failure(
             SceneErrorCode::InvalidComponent,
-            "Scene SpotLight3D has invalid color, intensity, influence radius, or cone angles");
+            "Scene SpotLight3D has invalid color, intensity, influence radius, cone angles, or shadow");
     }
     EntityRecord* entityRecord = record(entity);
     if (entityRecord == nullptr) {

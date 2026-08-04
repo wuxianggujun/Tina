@@ -45,7 +45,7 @@ TEST(RenderPassSchedulerTest, ClearOnlyOwnsBothAttachmentsWhenThereIsNoContent)
     EXPECT_TRUE(schedule->passes()[0].clearDepth);
 }
 
-TEST(RenderPassSchedulerTest, ContentOrderIsShadowThenOpaqueThenSpriteThenUi)
+TEST(RenderPassSchedulerTest, ContentOrderIsDirectionalThenSpotShadowThenOpaqueThenSpriteThenUi)
 {
     auto frame = frameWithSurface();
     RenderFramePacket resources;
@@ -76,9 +76,12 @@ TEST(RenderPassSchedulerTest, ContentOrderIsShadowThenOpaqueThenSpriteThenUi)
         Mesh3DDirectionalLight{},
     };
     const Mesh3DCascadedDirectionalShadow cascadedShadow{};
+    const std::array spotLights{Mesh3DSpotLight{.influenceRadius = 4.0F}};
     ASSERT_TRUE(sceneBuilder.writer().setMesh3DLighting(Mesh3DLightingDesc{
         .directionalLights = directionalLights,
+        .spotLights = spotLights,
         .cascadedDirectionalShadow = cascadedShadow,
+        .spotLightShadow = Mesh3DSpotLightShadow{},
     }));
     auto scene = sceneBuilder.commit();
     ASSERT_TRUE(scene.has_value()) << scene.error().message;
@@ -100,7 +103,7 @@ TEST(RenderPassSchedulerTest, ContentOrderIsShadowThenOpaqueThenSpriteThenUi)
 
     const auto schedule = buildRenderPassSchedule(frame);
     ASSERT_TRUE(schedule.has_value()) << schedule.error().message;
-    ASSERT_EQ(schedule->passes().size(), 7U);
+    ASSERT_EQ(schedule->passes().size(), 8U);
     for (u32 cascadeIndex = 0; cascadeIndex < Mesh3DCascadedDirectionalShadow::CascadeCount;
          ++cascadeIndex)
     {
@@ -111,16 +114,20 @@ TEST(RenderPassSchedulerTest, ContentOrderIsShadowThenOpaqueThenSpriteThenUi)
         EXPECT_FALSE(pass.clearColor);
         EXPECT_TRUE(pass.clearDepth);
     }
-    EXPECT_EQ(schedule->passes()[4].kind, RenderPassKind::Opaque3D);
-    EXPECT_EQ(schedule->passes()[4].resource, RenderPassResource::PrimarySurface);
-    EXPECT_EQ(schedule->passes()[5].kind, RenderPassKind::Sprite2D);
-    EXPECT_EQ(schedule->passes()[6].kind, RenderPassKind::UI);
-    EXPECT_TRUE(schedule->passes()[4].clearColor);
+    EXPECT_EQ(schedule->passes()[4].kind, RenderPassKind::SpotLightShadowDepth);
+    EXPECT_EQ(schedule->passes()[4].resource, RenderPassResource::SpotLightShadowMap);
+    EXPECT_FALSE(schedule->passes()[4].clearColor);
     EXPECT_TRUE(schedule->passes()[4].clearDepth);
-    EXPECT_FALSE(schedule->passes()[5].clearColor);
-    EXPECT_FALSE(schedule->passes()[5].clearDepth);
+    EXPECT_EQ(schedule->passes()[5].kind, RenderPassKind::Opaque3D);
+    EXPECT_EQ(schedule->passes()[5].resource, RenderPassResource::PrimarySurface);
+    EXPECT_EQ(schedule->passes()[6].kind, RenderPassKind::Sprite2D);
+    EXPECT_EQ(schedule->passes()[7].kind, RenderPassKind::UI);
+    EXPECT_TRUE(schedule->passes()[5].clearColor);
+    EXPECT_TRUE(schedule->passes()[5].clearDepth);
     EXPECT_FALSE(schedule->passes()[6].clearColor);
     EXPECT_FALSE(schedule->passes()[6].clearDepth);
+    EXPECT_FALSE(schedule->passes()[7].clearColor);
+    EXPECT_FALSE(schedule->passes()[7].clearDepth);
 }
 
 TEST(RenderPassSchedulerTest, PartialFirstContentViewportGetsFullSurfaceClearPass)

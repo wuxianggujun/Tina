@@ -57,6 +57,9 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
     const bool hasCascadedDirectionalShadow =
         hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
         frame.primaryWorldScene.mesh3DLighting()->cascadedDirectionalShadow().has_value();
+    const bool hasSpotLightShadow =
+        hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
+        frame.primaryWorldScene.mesh3DLighting()->spotLightShadow().has_value();
     const bool firstSurfaceContentNeedsFullSurfaceClear =
         (hasOpaqueContent &&
          !coversWholeSurface(frame.primaryWorldScene.perspectiveCamera()->normalizedViewport)) ||
@@ -90,6 +93,14 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
             return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
                                  "Render pass schedule exceeded its fixed pass capacity");
         }
+    }
+    if (hasSpotLightShadow &&
+        !append(RenderPassKind::SpotLightShadowDepth,
+                RenderPassResource::SpotLightShadowMap,
+                false, true))
+    {
+        return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
+                             "Render pass schedule exceeded its fixed pass capacity");
     }
     if (hasOpaqueContent && !appendContent(RenderPassKind::Opaque3D))
     {

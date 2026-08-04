@@ -250,6 +250,21 @@ struct Mesh3DSpotLight final {
     float colorB = 1.0F;
 };
 
+struct Mesh3DSpotLightShadow final {
+    static constexpr float MaximumDepthBias = 0.05F;
+    static constexpr float MaximumNormalBiasMeters = 1.0F;
+
+    // The referenced light must have outerConeCosine > 0 so its shadow
+    // perspective projection remains below 180 degrees.
+    u32 spotLightIndex = 0;
+    float nearPlaneMeters = 0.05F;
+    float depthBias = 0.0015F;
+    float normalBiasMeters = 0.02F;
+
+    friend constexpr bool operator==(const Mesh3DSpotLightShadow&,
+                                     const Mesh3DSpotLightShadow&) noexcept = default;
+};
+
 struct Mesh3DLightingDesc final {
     static constexpr std::size_t MaximumDirectionalLightCount = 4;
     static constexpr std::size_t MaximumPointLightCount = 8;
@@ -260,6 +275,7 @@ struct Mesh3DLightingDesc final {
     std::span<const Mesh3DPointLight> pointLights{};
     std::span<const Mesh3DSpotLight> spotLights{};
     std::optional<Mesh3DCascadedDirectionalShadow> cascadedDirectionalShadow{};
+    std::optional<Mesh3DSpotLightShadow> spotLightShadow{};
     float ambientScale = 0.18F;
 };
 
@@ -295,6 +311,12 @@ class RenderMesh3DLighting final {
         return m_cascadedDirectionalShadow;
     }
 
+    [[nodiscard]] constexpr const std::optional<Mesh3DSpotLightShadow>&
+    spotLightShadow() const noexcept
+    {
+        return m_spotLightShadow;
+    }
+
     [[nodiscard]] constexpr Mesh3DLightingDesc descriptor() const noexcept
     {
         return {
@@ -302,6 +324,7 @@ class RenderMesh3DLighting final {
             .pointLights = pointLights(),
             .spotLights = spotLights(),
             .cascadedDirectionalShadow = m_cascadedDirectionalShadow,
+            .spotLightShadow = m_spotLightShadow,
             .ambientScale = m_ambientScale,
         };
     }
@@ -317,6 +340,7 @@ class RenderMesh3DLighting final {
     std::array<Mesh3DSpotLight, Mesh3DLightingDesc::MaximumSpotLightCount> m_spotLights{};
     u32 m_spotLightCount = 0;
     std::optional<Mesh3DCascadedDirectionalShadow> m_cascadedDirectionalShadow{};
+    std::optional<Mesh3DSpotLightShadow> m_spotLightShadow{};
     float m_ambientScale = 0.18F;
 };
 

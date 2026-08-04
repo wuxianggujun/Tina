@@ -12,6 +12,7 @@ namespace Tina::Render {
 enum class RenderPassKind : u8 {
     Clear,
     CascadedDirectionalShadowDepth,
+    SpotLightShadowDepth,
     Opaque3D,
     Sprite2D,
     UI,
@@ -20,6 +21,7 @@ enum class RenderPassKind : u8 {
 enum class RenderPassResource : u8 {
     PrimarySurface,
     DirectionalShadowAtlas,
+    SpotLightShadowMap,
 };
 
 struct RenderPassPlan final {
@@ -32,8 +34,9 @@ struct RenderPassPlan final {
 
 class RenderPassSchedule final {
   public:
-    // Optional full-surface clear plus four shadow cascades, Opaque3D, Sprite2D and UI.
-    static constexpr u32 MaximumPassCount = 8;
+    // Optional full-surface clear plus four shadow cascades, one spot shadow,
+    // Opaque3D, Sprite2D and UI.
+    static constexpr u32 MaximumPassCount = 9;
 
     [[nodiscard]] constexpr std::span<const RenderPassPlan> passes() const noexcept
     {
@@ -51,8 +54,9 @@ class RenderPassSchedule final {
 
 // Builds the deterministic pass order shared by all render backends. The first
 // enabled full-surface primary-surface content pass owns the color/depth clear.
-// A cascaded directional shadow inserts four backend-owned atlas depth passes;
-// their clears never consume primary-surface clear ownership.
+// Cascaded directional and spot shadows insert backend-owned depth passes;
+// their clears never consume primary-surface clear ownership. The spot pass is
+// ordered after all directional cascades and before Opaque3D.
 // When the first primary-surface content pass uses a partial viewport, a
 // full-surface clear pass precedes it; an active surface with no content also
 // receives one clear-only pass.
