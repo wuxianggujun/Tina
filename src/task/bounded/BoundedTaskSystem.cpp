@@ -1,5 +1,6 @@
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 
+#include <tina/core/trace/Trace.hpp>
 #include <tina/task/TaskErrors.hpp>
 
 #include <atomic>
@@ -152,6 +153,8 @@ class BoundedTaskSystem final : public ITaskSystem {
 
     [[nodiscard]] Core::Result<Core::u32> pumpMain(Core::u32 budget) override
     {
+        TINA_TRACE_ZONE("Task.Main.Pump");
+
         Core::u32 processed = 0;
         while (true)
         {
@@ -171,6 +174,7 @@ class BoundedTaskSystem final : public ITaskSystem {
             }
             if (work)
             {
+                TINA_TRACE_ZONE("Task.Main.Execute");
                 work();
             }
             ++processed;
@@ -263,11 +267,13 @@ class BoundedTaskSystem final : public ITaskSystem {
 
     void ioWorkerLoop()
     {
+        TINA_TRACE_ZONE("Task.IOWorker.Lifetime");
         workerLoop(m_ioQueue, m_ioCv, m_activeIo);
     }
 
     void cpuWorkerLoop()
     {
+        TINA_TRACE_ZONE("Task.CPUWorker.Lifetime");
         workerLoop(m_cpuQueue, m_cpuCv, m_activeCpu);
     }
 
@@ -291,6 +297,7 @@ class BoundedTaskSystem final : public ITaskSystem {
             {
                 if (work)
                 {
+                    TINA_TRACE_ZONE("Task.Worker.Execute");
                     work();
                 }
             } catch (...)
