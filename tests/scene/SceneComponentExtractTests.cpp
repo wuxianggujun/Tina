@@ -1729,9 +1729,10 @@ TEST(SceneDirectionalLightTest, RejectsMoreThanOneDirectionalShadowCaster)
     auto builder = Render::RenderSceneBuilder::Create();
     ASSERT_TRUE(builder.has_value());
     ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
     Render::RenderFramePacket packet;
     ASSERT_TRUE(packet.beginFrame(0));
-    auto status = extractRenderSceneFromWorld(world, builder->writer(), packet.resourceSink());
+    auto status = extractRenderSceneFromWorld(world, writer, packet.resourceSink());
     ASSERT_FALSE(status);
     EXPECT_EQ(status.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
     builder->rollback();

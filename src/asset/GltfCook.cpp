@@ -303,7 +303,7 @@ struct TangentVertexKeyHash final {
         .indices = indices,
         .cornerTangents = cornerTangents,
     };
-    const SMikkTSpaceInterface interface{
+    SMikkTSpaceInterface interface{
         .m_getNumFaces = &tangentFaceCount,
         .m_getNumVerticesOfFace = &tangentVerticesPerFace,
         .m_getPosition = &tangentPosition,

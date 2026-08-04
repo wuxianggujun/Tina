@@ -219,6 +219,51 @@ TEST_F(BgfxEnvironmentMapResourcesTest, BrdfCreateFailureRollsBackSpecularThenDi
     EXPECT_TRUE(tina_test_bgfx::Contract::state.textureUpdates.empty());
 }
 
+TEST_F(BgfxEnvironmentMapResourcesTest, BrdfCopyFailureRollsBackBothCubemaps)
+{
+    tina_test_bgfx::Contract::state.failCopyCall = 1;
+
+    auto resources = createEnvironmentMapResourcesContractTest(desc_);
+
+    ASSERT_FALSE(resources.has_value());
+    EXPECT_EQ(resources.error().code, Core::CoreErrorCode::OutOfMemory);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureCreates.size(), 2U);
+    ASSERT_EQ(tina_test_bgfx::Contract::state.textureDestroys.size(), 2U);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureDestroys[0].idx, 2U);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureDestroys[1].idx, 1U);
+    EXPECT_TRUE(tina_test_bgfx::Contract::state.textureUpdates.empty());
+}
+
+TEST_F(BgfxEnvironmentMapResourcesTest, DiffuseCopyFailureRollsBackAllTextures)
+{
+    tina_test_bgfx::Contract::state.failCopyCall = 2;
+
+    auto resources = createEnvironmentMapResourcesContractTest(desc_);
+
+    ASSERT_FALSE(resources.has_value());
+    EXPECT_EQ(resources.error().code, Core::CoreErrorCode::OutOfMemory);
+    ASSERT_EQ(tina_test_bgfx::Contract::state.textureDestroys.size(), 3U);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureDestroys[0].idx, 3U);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureDestroys[1].idx, 2U);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureDestroys[2].idx, 1U);
+    EXPECT_TRUE(tina_test_bgfx::Contract::state.textureUpdates.empty());
+}
+
+TEST_F(BgfxEnvironmentMapResourcesTest, SpecularCopyFailureRollsBackPartiallyUploadedTextures)
+{
+    tina_test_bgfx::Contract::state.failCopyCall = 8;
+
+    auto resources = createEnvironmentMapResourcesContractTest(desc_);
+
+    ASSERT_FALSE(resources.has_value());
+    EXPECT_EQ(resources.error().code, Core::CoreErrorCode::OutOfMemory);
+    ASSERT_EQ(tina_test_bgfx::Contract::state.textureDestroys.size(), 3U);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureDestroys[0].idx, 3U);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureDestroys[1].idx, 2U);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureDestroys[2].idx, 1U);
+    EXPECT_EQ(tina_test_bgfx::Contract::state.textureUpdates.size(), 6U);
+}
+
 TEST_F(BgfxEnvironmentMapResourcesTest, DestroyReleasesBrdfSpecularDiffuseAndIsIdempotent)
 {
     auto resources = createEnvironmentMapResourcesContractTest(desc_);

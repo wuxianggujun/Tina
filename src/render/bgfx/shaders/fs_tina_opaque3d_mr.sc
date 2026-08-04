@@ -50,6 +50,22 @@ vec3 safeNormalize(vec3 value)
 	return value * inversesqrt(max(dot(value, value), 0.00000001));
 }
 
+vec3 srgbToLinear(vec3 color)
+{
+	vec3 nonNegative = max(color, vec3_splat(0.0));
+	vec3 low = nonNegative / 12.92;
+	vec3 high = pow((nonNegative + 0.055) / 1.055, vec3_splat(2.4));
+	return mix(low, high, step(vec3_splat(0.04045), nonNegative));
+}
+
+vec3 linearToSrgb(vec3 color)
+{
+	vec3 nonNegative = max(color, vec3_splat(0.0));
+	vec3 low = nonNegative * 12.92;
+	vec3 high = 1.055 * pow(nonNegative, vec3_splat(1.0 / 2.4)) - 0.055;
+	return mix(low, high, step(vec3_splat(0.0031308), nonNegative));
+}
+
 float distributionGgx(vec3 N, vec3 H, float roughness)
 {
 	float alpha = roughness * roughness;
@@ -125,14 +141,14 @@ vec3 shadeImageBasedLighting(vec3 N, vec3 V, vec3 albedo, vec3 F0, float metalli
 		* max(u_iblParams.x, 0.0);
 }
 
-float sampleDirectionalShadow()
+float sampleDirectionalShadow(vec4 shadowVarying)
 {
-	if (u_shadowParams.w < 0.5 || v_shadowCoord.w <= 0.0)
+	if (u_shadowParams.w < 0.5 || shadowVarying.w <= 0.0)
 	{
 		return 1.0;
 	}
 
-	vec3 shadowCoord = v_shadowCoord.xyz / v_shadowCoord.w;
+	vec3 shadowCoord = shadowVarying.xyz / shadowVarying.w;
 	bool outside = any(lessThan(shadowCoord, vec3_splat(0.0)))
 		|| any(greaterThan(shadowCoord, vec3_splat(1.0)));
 	if (outside)
@@ -158,7 +174,7 @@ float sampleDirectionalShadow()
 void main()
 {
 	vec4 texel = texture2D(s_texColor, v_texcoord0);
-	vec4 baseColor = v_color0 * texel;
+	vec4 baseColor = vec4(v_color0.rgb * srgbToLinear(texel.rgb), v_color0.a * texel.a);
 
 	float metallic = clamp(u_mrParams.x, 0.0, 1.0);
 	float roughness = clamp(u_mrParams.y, 0.04, 1.0);
@@ -197,7 +213,7 @@ void main()
 			float visibility = 1.0;
 			if (abs(u_shadowParams.w - float(lightIndex + 1)) < 0.5)
 			{
-				visibility = sampleDirectionalShadow();
+				visibility = sampleDirectionalShadow(v_shadowCoord);
 			}
 			lit += visibility * shadeLight(N, V, safeNormalize(u_lightDirs[lightIndex].xyz),
 				u_lightColors[lightIndex].rgb, albedo, F0, metallic, roughness);
@@ -251,5 +267,5 @@ void main()
 		lit += albedo * ambientScale * (1.0 - metallic * 0.6) + F0 * (ambientScale * 0.25);
 	}
 
-	gl_FragColor = vec4(lit, baseColor.a);
+	gl_FragColor = vec4(linearToSrgb(lit), baseColor.a);
 }

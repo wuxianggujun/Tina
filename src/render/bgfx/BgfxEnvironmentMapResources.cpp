@@ -46,11 +46,18 @@ createEnvironmentMapResources(const EnvironmentMapUploadDesc& desc)
                              "bgfx rejected the prefiltered specular cubemap");
     }
 
+    const bgfx::Memory* brdfMemory =
+        bgfx::copy(desc.brdfRg16FloatPixels.data(),
+                   static_cast<u32>(desc.brdfRg16FloatPixels.size()));
+    if (brdfMemory == nullptr)
+    {
+        destroyEnvironmentMapResources(resources);
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "bgfx failed to allocate the EnvironmentMap BRDF upload memory");
+    }
     resources.brdfLut = bgfx::createTexture2D(
         desc.brdfWidth, desc.brdfHeight, false, 1, bgfx::TextureFormat::RG16F,
-        EnvironmentBrdfSamplerFlags,
-        bgfx::copy(desc.brdfRg16FloatPixels.data(),
-                   static_cast<u32>(desc.brdfRg16FloatPixels.size())));
+        EnvironmentBrdfSamplerFlags, brdfMemory);
     if (!bgfx::isValid(resources.brdfLut))
     {
         destroyEnvironmentMapResources(resources);
@@ -64,10 +71,17 @@ createEnvironmentMapResources(const EnvironmentMapUploadDesc& desc)
     {
         const auto pixels = desc.diffuseRgba16FloatPixels.subspan(
             static_cast<usize>(face) * diffuseFaceBytes, diffuseFaceBytes);
+        const bgfx::Memory* faceMemory =
+            bgfx::copy(pixels.data(), static_cast<u32>(pixels.size()));
+        if (faceMemory == nullptr)
+        {
+            destroyEnvironmentMapResources(resources);
+            return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                                 "bgfx failed to allocate diffuse cubemap upload memory");
+        }
         bgfx::updateTextureCube(
             resources.diffuseIrradiance, 0, face, 0, 0, 0,
-            desc.diffuseFaceSize, desc.diffuseFaceSize,
-            bgfx::copy(pixels.data(), static_cast<u32>(pixels.size())));
+            desc.diffuseFaceSize, desc.diffuseFaceSize, faceMemory);
     }
 
     usize specularOffset = 0;
@@ -80,10 +94,17 @@ createEnvironmentMapResources(const EnvironmentMapUploadDesc& desc)
         {
             const auto pixels = desc.specularRgba16FloatPixels.subspan(
                 specularOffset, faceBytes);
+            const bgfx::Memory* faceMemory =
+                bgfx::copy(pixels.data(), static_cast<u32>(pixels.size()));
+            if (faceMemory == nullptr)
+            {
+                destroyEnvironmentMapResources(resources);
+                return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                                     "bgfx failed to allocate specular cubemap upload memory");
+            }
             bgfx::updateTextureCube(
                 resources.prefilteredSpecular, 0, face, mip, 0, 0,
-                mipExtent, mipExtent,
-                bgfx::copy(pixels.data(), static_cast<u32>(pixels.size())));
+                mipExtent, mipExtent, faceMemory);
             specularOffset += faceBytes;
         }
         mipExtent = static_cast<u16>((std::max)(1U, static_cast<u32>(mipExtent) / 2U));

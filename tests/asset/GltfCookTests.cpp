@@ -110,6 +110,68 @@ namespace {
 })json";
 }
 
+[[nodiscard]] std::string externalImageTriangleGltfJson(std::string_view imageUri)
+{
+    return std::string{R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{
+    "primitives": [{
+      "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+      "indices": 3,
+      "mode": 4,
+      "material": 0
+    }]
+  }],
+  "materials": [{
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {"index": 0}
+    }
+  }],
+  "textures": [{"source": 0}],
+  "images": [{"uri": ")json"} + std::string{imageUri} + R"json("}],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3",
+      "max": [1.0, 1.0, 0.0],
+      "min": [0.0, 0.0, 0.0]
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5123,
+      "count": 3,
+      "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6}
+  ],
+  "buffers": [{
+    "byteLength": 104,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA="
+  }]
+})json";
+}
+
 [[nodiscard]] std::string externalBufferTriangleGltfJson(std::string_view uri)
 {
     return std::string{R"json({
@@ -943,28 +1005,7 @@ TEST(GltfCookTests, RejectsExternalImagePathTraversal)
     {
         std::ofstream out(gltfPath, std::ios::binary);
         ASSERT_TRUE(out.good());
-        out << R"json({
-  "asset": {"version": "2.0"},
-  "scenes": [{"nodes": [0]}],
-  "nodes": [{"mesh": 0}],
-  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "mode": 4, "material": 0}]}],
-  "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
-  "textures": [{"source": 0}],
-  "images": [{"uri": "../secret.png"}],
-  "accessors": [
-    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
-     "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]},
-    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
-  ],
-  "bufferViews": [
-    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
-    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
-  ],
-  "buffers": [{
-    "byteLength": 44,
-    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAA"
-  }]
-})json";
+        out << externalImageTriangleGltfJson("../secret.png");
     }
 
     auto request = cookGltfFileToCatalogRequest(gltfPath.string());
@@ -983,28 +1024,7 @@ TEST(GltfCookTests, RejectsAbsoluteExternalImageUri)
     {
         std::ofstream out(gltfPath, std::ios::binary);
         ASSERT_TRUE(out.good());
-        out << R"json({
-  "asset": {"version": "2.0"},
-  "scenes": [{"nodes": [0]}],
-  "nodes": [{"mesh": 0}],
-  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "mode": 4, "material": 0}]}],
-  "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
-  "textures": [{"source": 0}],
-  "images": [{"uri": "file:///C:/Windows/System32/drivers/etc/hosts"}],
-  "accessors": [
-    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
-     "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]},
-    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
-  ],
-  "bufferViews": [
-    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
-    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
-  ],
-  "buffers": [{
-    "byteLength": 44,
-    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAA"
-  }]
-})json";
+        out << externalImageTriangleGltfJson("file:///C:/Windows/System32/drivers/etc/hosts");
     }
 
     auto request = cookGltfFileToCatalogRequest(gltfPath.string());
@@ -1541,9 +1561,9 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
 }
 #endif
 
-TEST(GltfCookTests, CooksKhronosMetalRoughSpheresNoTexturesWhenPresent)
+TEST(GltfCookTests, RejectsKhronosMetalRoughSpheresWithoutRequiredTexcoordsWhenPresent)
 {
-    // Optional large multi-mesh MR grid from Khronos Sample Models (vendored under tests/fixtures).
+    // This optional Khronos fixture intentionally omits TEXCOORD_0 because it has no textures.
 #if !defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
     GTEST_SKIP() << "TINA_COMPLETE_PBR_GLTF_FIXTURE not defined; cannot locate fixtures tree";
 #else
@@ -1555,35 +1575,9 @@ TEST(GltfCookTests, CooksKhronosMetalRoughSpheresNoTexturesWhenPresent)
     }
 
     auto request = cookGltfFileToCatalogRequest(path.string());
-    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
-
-    std::size_t meshCount = 0;
-    std::size_t materialCount = 0;
-    for (const auto& asset : request->assets)
-    {
-        if (asset.assetKind == AssetFormat::AssetKind::StaticMesh)
-        {
-            ++meshCount;
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Material)
-        {
-            ++materialCount;
-            auto mat = AssetFormat::parseMaterialPayload(asset.payload);
-            ASSERT_TRUE(mat.has_value());
-            EXPECT_GE(mat->metallicFactor, 0.0F);
-            EXPECT_LE(mat->metallicFactor, 1.0F);
-            EXPECT_GE(mat->roughnessFactor, 0.0F);
-            EXPECT_LE(mat->roughnessFactor, 1.0F);
-        }
-    }
-    EXPECT_GT(meshCount, 8U);
-    EXPECT_EQ(meshCount, materialCount);
-
-    const auto catalogRoot =
-        std::filesystem::temp_directory_path() / "tina_gltf_metal_rough_spheres_catalog";
-    std::error_code ec;
-    std::filesystem::remove_all(catalogRoot, ec);
-    ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("TEXCOORD_0"), std::string::npos)
+        << request.error().message;
 #endif
 }
 

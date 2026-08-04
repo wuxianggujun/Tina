@@ -1024,7 +1024,9 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 ```
 
 完整 gate 还以默认 `IblComparisonFrames=30` 执行 `--ibl=on` 两次和 `--ibl=off` 两次；每次都由 sample
-自校验 EnvironmentMap upload/retire 与条件 bind/clear，脚本再要求同模式 fingerprint 稳定且 on/off 不同。
+自校验 EnvironmentMap upload/retire 与条件 bind/clear。脚本要求同模式全帧及中央 3D RGB ROI fingerprint/
+通道总量稳定、on/off ROI fingerprint 不同，并通过自动回收的临时 raw RGB capture 计算逐像素 L1；L1 至少
+达到 ROI 每像素 1 个 code value。alpha、顶部标题、右侧 inspector 与底部状态栏不参与 IBL 可见性结论。
 
 本次实际两轮验收命令（两轮均为脚本默认 `windows-msvc-vnext-bgfx-ui-freetype` topology）：
 

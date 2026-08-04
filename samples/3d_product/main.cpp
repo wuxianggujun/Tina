@@ -130,6 +130,8 @@ struct SampleOptions final {
     std::string gltfPath{};
     // Empty = capture-only; non-empty = require an exact machine-local pixel match.
     std::string expectPixelFingerprint{};
+    // Optional gate-only raw RGB output for exact cross-run ROI comparison.
+    std::string sceneRgbOutputPath{};
     Tina::Sample3D::Product3DUITheme initialUiTheme = Tina::Sample3D::Product3DUITheme::Dark;
     ImageBasedLightingMode imageBasedLightingMode = ImageBasedLightingMode::On;
     bool uiThemeDemo = false;
@@ -205,13 +207,24 @@ struct LifecycleCounters final {
     u32 pixelCaptureHeight = 0;
     u64 pixelCaptureBytes = 0;
     std::string pixelFingerprint{};
+    u64 sceneRgbPixelCount = 0;
+    std::array<u64, 3> sceneRgbChannelSums{};
+    std::string sceneRgbFingerprint{};
+    bool sceneRgbOutputWritten = false;
 };
 
 using DeviceCapture = Tina::Sample3D::DeviceCapture;
 
-void recordPixelCapture(LifecycleCounters& counters, const Tina::Render::Rgba8FrameCapture& capture)
+void recordPixelCapture(LifecycleCounters& counters,
+                        const Tina::Render::Rgba8FrameCapture& capture,
+                        std::string_view sceneRgbOutputPath)
 {
     if (capture.empty())
+    {
+        return;
+    }
+    const u64 expectedCaptureBytes = static_cast<u64>(capture.width) * capture.height * 4U;
+    if (capture.byteCount() != expectedCaptureBytes || capture.width < 4U || capture.height < 4U)
     {
         return;
     }
@@ -220,11 +233,55 @@ void recordPixelCapture(LifecycleCounters& counters, const Tina::Render::Rgba8Fr
     {
         return;
     }
+
+    // Central product viewport, excluding the header, right inspector, and footer UI.
+    const u32 sceneLeft = capture.width / 4U;
+    const u32 sceneRight = static_cast<u32>(static_cast<u64>(capture.width) * 2U / 3U);
+    const u32 sceneTop = capture.height / 4U;
+    const u32 sceneBottom = static_cast<u32>(static_cast<u64>(capture.height) * 3U / 4U);
+    const u64 scenePixelCount = static_cast<u64>(sceneRight - sceneLeft) * (sceneBottom - sceneTop);
+    std::vector<std::byte> sceneRgbPixels(static_cast<std::size_t>(scenePixelCount * 3U));
+    std::array<u64, 3> sceneRgbChannelSums{};
+    std::size_t destination = 0;
+    for (u32 y = sceneTop; y < sceneBottom; ++y)
+    {
+        for (u32 x = sceneLeft; x < sceneRight; ++x)
+        {
+            const std::size_t source =
+                static_cast<std::size_t>((static_cast<u64>(y) * capture.width + x) * 4U);
+            for (std::size_t channel = 0; channel < sceneRgbChannelSums.size(); ++channel)
+            {
+                const std::byte value = capture.rgba8Pixels[source + channel];
+                sceneRgbPixels[destination++] = value;
+                sceneRgbChannelSums[channel] += std::to_integer<unsigned char>(value);
+            }
+        }
+    }
+    auto sceneRgbHash = Tina::Core::digestContentHashV1(sceneRgbPixels);
+    if (!sceneRgbHash.has_value() || !sceneRgbHash->hasValue())
+    {
+        return;
+    }
+
     counters.pixelCaptureOk = true;
     counters.pixelCaptureWidth = capture.width;
     counters.pixelCaptureHeight = capture.height;
     counters.pixelCaptureBytes = static_cast<u64>(capture.byteCount());
     counters.pixelFingerprint = contentHashToHex(*pixelHash);
+    counters.sceneRgbPixelCount = scenePixelCount;
+    counters.sceneRgbChannelSums = sceneRgbChannelSums;
+    counters.sceneRgbFingerprint = contentHashToHex(*sceneRgbHash);
+    if (!sceneRgbOutputPath.empty())
+    {
+        std::ofstream output(std::filesystem::path{sceneRgbOutputPath},
+                             std::ios::binary | std::ios::trunc);
+        if (output.good())
+        {
+            output.write(reinterpret_cast<const char*>(sceneRgbPixels.data()),
+                         static_cast<std::streamsize>(sceneRgbPixels.size()));
+            counters.sceneRgbOutputWritten = output.good();
+        }
+    }
 }
 
 struct ProductMeshSlot final {
@@ -422,6 +479,7 @@ void printUsage()
         << "  --ibl=on|off            bind or leave unbound the uploaded EnvironmentMap (default on)\n"
         << "  --expect-pixel-fingerprint=<32 lowercase hex chars>\n"
         << "                           require an exact machine-local RGBA8 frame match\n"
+        << "  --scene-rgb-output=<path> write the captured central RGB ROI as raw bytes\n"
         << "  --help, -h              print this help\n"
         << "\n"
         << "External path is opt-in. Runtime never parses glTF; only the cooker (cgltf) does.\n"
@@ -445,6 +503,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     constexpr std::string_view UiThemePrefix = "--ui-theme=";
     constexpr std::string_view ImageBasedLightingPrefix = "--ibl=";
     constexpr std::string_view PixelFingerprintPrefix = "--expect-pixel-fingerprint=";
+    constexpr std::string_view SceneRgbOutputPrefix = "--scene-rgb-output=";
     SampleOptions options;
     bool hasFrames = false;
     bool hasDelay = false;
@@ -454,6 +513,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     bool hasUiTheme = false;
     bool hasImageBasedLightingMode = false;
     bool hasPixelFingerprint = false;
+    bool hasSceneRgbOutput = false;
 
     for (int index = 1; index < argumentCount; ++index)
     {
@@ -557,6 +617,17 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             }
             options.expectPixelFingerprint.assign(fingerprint);
             hasPixelFingerprint = true;
+        }
+        else if (argument.starts_with(SceneRgbOutputPrefix))
+        {
+            const std::string_view path = argument.substr(SceneRgbOutputPrefix.size());
+            if (hasSceneRgbOutput || path.empty())
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--scene-rgb-output must appear once with a non-empty path");
+            }
+            options.sceneRgbOutputPath.assign(path);
+            hasSceneRgbOutput = true;
         }
         else if (argument == "--gltf")
         {
@@ -1969,14 +2040,14 @@ class Product3DApplication final : public Tina::IGameApplication {
     counters.pixelCaptureAttempted = true;
     if (capture.hasLastCapture() && capture.lastCapture() != nullptr)
     {
-        recordPixelCapture(counters, *capture.lastCapture());
+        recordPixelCapture(counters, *capture.lastCapture(), options.sceneRgbOutputPath);
     }
     else if (Tina::Render::IRenderDevice* device = capture.get(); device != nullptr)
     {
         auto captured = device->capturePrimaryFrameRgba8();
         if (captured.has_value())
         {
-            recordPixelCapture(counters, *captured);
+            recordPixelCapture(counters, *captured, options.sceneRgbOutputPath);
         }
     }
 
@@ -2079,6 +2150,7 @@ class Product3DApplication final : public Tina::IGameApplication {
     const bool pixelGoldenChecked = !options.expectPixelFingerprint.empty();
     const bool pixelGoldenMatched =
         !pixelGoldenChecked || counters.pixelFingerprint == options.expectPixelFingerprint;
+    const bool sceneRgbOutputRequested = !options.sceneRgbOutputPath.empty();
     const bool imageBasedLightingEnabled =
         options.imageBasedLightingMode == ImageBasedLightingMode::On;
     const u64 expectedImageBasedLightingTransitions = imageBasedLightingEnabled ? 1U : 0U;
@@ -2162,6 +2234,8 @@ class Product3DApplication final : public Tina::IGameApplication {
         counters.pixelCaptureWidth != counters.framebufferPixelWidth ||
         counters.pixelCaptureHeight != counters.framebufferPixelHeight ||
         counters.pixelCaptureBytes == 0 || counters.pixelFingerprint.empty() ||
+        counters.sceneRgbPixelCount == 0 || counters.sceneRgbFingerprint.empty() ||
+        (sceneRgbOutputRequested && !counters.sceneRgbOutputWritten) ||
         !pixelGoldenMatched)
     {
         std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\","
@@ -2276,6 +2350,12 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
                   << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
                   << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
+                  << ",\"sceneRgbPixelCount\":" << counters.sceneRgbPixelCount
+                  << ",\"sceneRgbChannelSums\":[" << counters.sceneRgbChannelSums[0] << ','
+                  << counters.sceneRgbChannelSums[1] << ',' << counters.sceneRgbChannelSums[2] << ']'
+                  << ",\"sceneRgbFingerprint\":\"" << counters.sceneRgbFingerprint << "\""
+                  << ",\"sceneRgbOutputRequested\":" << (sceneRgbOutputRequested ? "true" : "false")
+                  << ",\"sceneRgbOutputWritten\":" << (counters.sceneRgbOutputWritten ? "true" : "false")
                   << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
                   << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
                   << ",\"expectPixelFingerprint\":\"" << options.expectPixelFingerprint << "\"}\n";
@@ -2403,6 +2483,12 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
               << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
               << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
+              << ",\"sceneRgbPixelCount\":" << counters.sceneRgbPixelCount
+              << ",\"sceneRgbChannelSums\":[" << counters.sceneRgbChannelSums[0] << ','
+              << counters.sceneRgbChannelSums[1] << ',' << counters.sceneRgbChannelSums[2] << ']'
+              << ",\"sceneRgbFingerprint\":\"" << counters.sceneRgbFingerprint << "\""
+              << ",\"sceneRgbOutputRequested\":" << (sceneRgbOutputRequested ? "true" : "false")
+              << ",\"sceneRgbOutputWritten\":" << (counters.sceneRgbOutputWritten ? "true" : "false")
               << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
               << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
               << ",\"expectPixelFingerprint\":\"" << options.expectPixelFingerprint << "\"}\n";

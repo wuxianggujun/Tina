@@ -150,33 +150,53 @@ function Invoke-ProductSampleEvidence {
         [Parameter(Mandatory = $true)][string]$StepName,
         [Parameter(Mandatory = $true)][ValidateSet('on', 'off')][string]$IblMode,
         [Parameter(Mandatory = $true)][int]$Frames,
-        [switch]$ThemeDemo
+        [switch]$ThemeDemo,
+        [switch]$CaptureSceneRgb
     )
 
     $arguments = @("--frames=$Frames", '--frame-delay-ms=0', '--ui-theme=dark', "--ibl=$IblMode")
     if ($ThemeDemo) {
         $arguments += '--ui-theme-demo'
     }
-    $stdout = & $samplePath @arguments 2>&1 | Out-String
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) {
-        Add-Step -Name $StepName -ExitCode $exitCode -Detail $stdout.Trim()
-    }
-
-    $jsonLine = $stdout -split '\r?\n' |
-        Where-Object { $_ -match '^\s*\{"status":"(ok|error)"' } |
-        Select-Object -Last 1
-    if ([string]::IsNullOrWhiteSpace($jsonLine)) {
-        Add-Step -Name $StepName -ExitCode 1 -Detail "sample emitted no structured JSON; output=$($stdout.Trim())"
+    $sceneRgbPath = ''
+    $sceneRgbBytes = $null
+    if ($CaptureSceneRgb) {
+        $sceneRgbPath = [System.IO.Path]::GetTempFileName()
+        $arguments += "--scene-rgb-output=$sceneRgbPath"
     }
     try {
-        $evidence = $jsonLine | ConvertFrom-Json
-    } catch {
-        Add-Step -Name $StepName -ExitCode 1 -Detail "invalid JSON: $jsonLine"
-    }
-    return [pscustomobject]@{
-        Evidence = $evidence
-        Stdout   = $stdout.Trim()
+        $stdout = & $samplePath @arguments 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            Add-Step -Name $StepName -ExitCode $exitCode -Detail $stdout.Trim()
+        }
+
+        $jsonLine = $stdout -split '\r?\n' |
+            Where-Object { $_ -match '^\s*\{"status":"(ok|error)"' } |
+            Select-Object -Last 1
+        if ([string]::IsNullOrWhiteSpace($jsonLine)) {
+            Add-Step -Name $StepName -ExitCode 1 -Detail "sample emitted no structured JSON; output=$($stdout.Trim())"
+        }
+        try {
+            $evidence = $jsonLine | ConvertFrom-Json
+        } catch {
+            Add-Step -Name $StepName -ExitCode 1 -Detail "invalid JSON: $jsonLine"
+        }
+        if ($CaptureSceneRgb) {
+            if (-not (Test-Path -LiteralPath $sceneRgbPath -PathType Leaf)) {
+                Add-Step -Name $StepName -ExitCode 1 -Detail 'sample did not write the requested scene RGB capture'
+            }
+            $sceneRgbBytes = [System.IO.File]::ReadAllBytes($sceneRgbPath)
+        }
+        return [pscustomobject]@{
+            Evidence      = $evidence
+            Stdout        = $stdout.Trim()
+            SceneRgbBytes = $sceneRgbBytes
+        }
+    } finally {
+        if (-not [string]::IsNullOrEmpty($sceneRgbPath)) {
+            Remove-Item -LiteralPath $sceneRgbPath -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -303,6 +323,9 @@ $expectedFields = [ordered]@{
     pixelCaptureWidth                   = 1280
     pixelCaptureHeight                  = 720
     pixelCaptureBytes                   = 3686400
+    sceneRgbPixelCount                  = 191880
+    sceneRgbOutputRequested             = $false
+    sceneRgbOutputWritten               = $false
     pixelGoldenChecked                  = $false
     pixelGoldenMatched                  = $true
 }
@@ -336,6 +359,14 @@ if ($null -eq $evidence.PSObject.Properties['pixelFingerprint'] -or
     [string]$evidence.pixelFingerprint -notmatch '^[0-9a-f]{32}$') {
     $evidenceErrors.Add("pixelFingerprint must be 32 lowercase hexadecimal characters")
 }
+if ($null -eq $evidence.PSObject.Properties['sceneRgbFingerprint'] -or
+    [string]$evidence.sceneRgbFingerprint -notmatch '^[0-9a-f]{32}$') {
+    $evidenceErrors.Add("sceneRgbFingerprint must be 32 lowercase hexadecimal characters")
+}
+if ($null -eq $evidence.PSObject.Properties['sceneRgbChannelSums'] -or
+    @($evidence.sceneRgbChannelSums).Count -ne 3) {
+    $evidenceErrors.Add("sceneRgbChannelSums must contain exactly three values")
+}
 if ($evidenceErrors.Count -ne 0) {
     Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$sampleOut")
 }
@@ -347,10 +378,15 @@ $iblComparisonEvidence = [ordered]@{
     on  = @()
     off = @()
 }
+$iblComparisonSceneRgb = [ordered]@{
+    on  = @()
+    off = @()
+}
 foreach ($mode in @('on', 'off')) {
     for ($iteration = 1; $iteration -le 2; ++$iteration) {
         $stepName = "ibl-$mode-$iteration"
-        $run = Invoke-ProductSampleEvidence -StepName $stepName -IblMode $mode -Frames $IblComparisonFrames
+        $run = Invoke-ProductSampleEvidence -StepName $stepName -IblMode $mode `
+            -Frames $IblComparisonFrames -CaptureSceneRgb
         $modeEvidence = $run.Evidence
         $expectedConfigured = $mode -eq 'on'
         $expectedTransitions = if ($expectedConfigured) { 1 } else { 0 }
@@ -368,6 +404,9 @@ foreach ($mode in @('on', 'off')) {
             imageBasedLightingClears          = $expectedTransitions
             environmentMapRetirementsAccepted = 1
             pixelCaptureOk                    = $true
+            sceneRgbPixelCount                = 191880
+            sceneRgbOutputRequested           = $true
+            sceneRgbOutputWritten             = $true
             renderResourceLedgerBalanced      = $true
         }
         foreach ($name in $modeExpectedFields.Keys) {
@@ -385,11 +424,20 @@ foreach ($mode in @('on', 'off')) {
             [string]$modeEvidence.pixelFingerprint -notmatch '^[0-9a-f]{32}$') {
             $modeErrors.Add('pixelFingerprint must be 32 lowercase hexadecimal characters')
         }
+        if ($null -eq $modeEvidence.PSObject.Properties['sceneRgbFingerprint'] -or
+            [string]$modeEvidence.sceneRgbFingerprint -notmatch '^[0-9a-f]{32}$') {
+            $modeErrors.Add('sceneRgbFingerprint must be 32 lowercase hexadecimal characters')
+        }
+        if ($null -eq $modeEvidence.PSObject.Properties['sceneRgbChannelSums'] -or
+            @($modeEvidence.sceneRgbChannelSums).Count -ne 3) {
+            $modeErrors.Add('sceneRgbChannelSums must contain exactly three values')
+        }
         if ($modeErrors.Count -ne 0) {
             Add-Step -Name $stepName -ExitCode 1 `
                 -Detail (($modeErrors -join '; ') + "; output=$($run.Stdout)")
         }
         $iblComparisonEvidence[$mode] += $modeEvidence
+        $iblComparisonSceneRgb[$mode] += ,$run.SceneRgbBytes
         Add-Step -Name $stepName -ExitCode 0 `
             -Detail "frames=$IblComparisonFrames pixelFingerprint=$($modeEvidence.pixelFingerprint)"
     }
@@ -397,6 +445,8 @@ foreach ($mode in @('on', 'off')) {
 
 $iblOnFingerprints = @($iblComparisonEvidence.on | ForEach-Object { [string]$_.pixelFingerprint })
 $iblOffFingerprints = @($iblComparisonEvidence.off | ForEach-Object { [string]$_.pixelFingerprint })
+$iblOnSceneFingerprints = @($iblComparisonEvidence.on | ForEach-Object { [string]$_.sceneRgbFingerprint })
+$iblOffSceneFingerprints = @($iblComparisonEvidence.off | ForEach-Object { [string]$_.sceneRgbFingerprint })
 $iblPixelErrors = [System.Collections.Generic.List[string]]::new()
 if ($iblOnFingerprints[0] -ne $iblOnFingerprints[1]) {
     $iblPixelErrors.Add("IBL on fingerprint unstable: $($iblOnFingerprints -join ',')")
@@ -404,14 +454,49 @@ if ($iblOnFingerprints[0] -ne $iblOnFingerprints[1]) {
 if ($iblOffFingerprints[0] -ne $iblOffFingerprints[1]) {
     $iblPixelErrors.Add("IBL off fingerprint unstable: $($iblOffFingerprints -join ',')")
 }
-if ($iblOnFingerprints[0] -eq $iblOffFingerprints[0]) {
-    $iblPixelErrors.Add("IBL on/off fingerprints must differ: $($iblOnFingerprints[0])")
+if ($iblOnSceneFingerprints[0] -ne $iblOnSceneFingerprints[1]) {
+    $iblPixelErrors.Add("IBL on scene RGB fingerprint unstable: $($iblOnSceneFingerprints -join ',')")
+}
+if ($iblOffSceneFingerprints[0] -ne $iblOffSceneFingerprints[1]) {
+    $iblPixelErrors.Add("IBL off scene RGB fingerprint unstable: $($iblOffSceneFingerprints -join ',')")
+}
+if ($iblOnSceneFingerprints[0] -eq $iblOffSceneFingerprints[0]) {
+    $iblPixelErrors.Add("IBL on/off scene RGB fingerprints must differ: $($iblOnSceneFingerprints[0])")
+}
+$iblOnRgb = [byte[]]$iblComparisonSceneRgb.on[0]
+$iblOffRgb = [byte[]]$iblComparisonSceneRgb.off[0]
+$expectedSceneRgbBytes = [long]$iblComparisonEvidence.on[0].sceneRgbPixelCount * 3
+if ($iblOnRgb.LongLength -ne $expectedSceneRgbBytes -or
+    $iblOffRgb.LongLength -ne $expectedSceneRgbBytes) {
+    $iblPixelErrors.Add("IBL scene RGB byte count mismatch: expected=$expectedSceneRgbBytes on=$($iblOnRgb.LongLength) off=$($iblOffRgb.LongLength)")
+}
+for ($channel = 0; $channel -lt 3; ++$channel) {
+    $onFirst = [long]$iblComparisonEvidence.on[0].sceneRgbChannelSums[$channel]
+    $onSecond = [long]$iblComparisonEvidence.on[1].sceneRgbChannelSums[$channel]
+    $offFirst = [long]$iblComparisonEvidence.off[0].sceneRgbChannelSums[$channel]
+    $offSecond = [long]$iblComparisonEvidence.off[1].sceneRgbChannelSums[$channel]
+    if ($onFirst -ne $onSecond) {
+        $iblPixelErrors.Add("IBL on scene RGB channel $channel sum unstable: $onFirst,$onSecond")
+    }
+    if ($offFirst -ne $offSecond) {
+        $iblPixelErrors.Add("IBL off scene RGB channel $channel sum unstable: $offFirst,$offSecond")
+    }
+}
+$iblRgbL1Delta = [long]0
+if ($iblPixelErrors.Count -eq 0) {
+    for ($index = 0; $index -lt $iblOnRgb.Length; ++$index) {
+        $iblRgbL1Delta += [Math]::Abs([int]$iblOnRgb[$index] - [int]$iblOffRgb[$index])
+    }
+}
+$minimumIblRgbL1Delta = [long]$iblComparisonEvidence.on[0].sceneRgbPixelCount
+if ($iblRgbL1Delta -lt $minimumIblRgbL1Delta) {
+    $iblPixelErrors.Add("IBL scene RGB L1 delta too small: expected>=$minimumIblRgbL1Delta actual=$iblRgbL1Delta")
 }
 if ($iblPixelErrors.Count -ne 0) {
     Add-Step -Name 'iblPixelComparison' -ExitCode 1 -Detail ($iblPixelErrors -join '; ')
 }
 Add-Step -Name 'iblPixelComparison' -ExitCode 0 `
-    -Detail "frames=$IblComparisonFrames on=$($iblOnFingerprints[0]) off=$($iblOffFingerprints[0]) stable=true different=true"
+    -Detail "frames=$IblComparisonFrames sceneOn=$($iblOnSceneFingerprints[0]) sceneOff=$($iblOffSceneFingerprints[0]) rgbL1Delta=$iblRgbL1Delta minimum=$minimumIblRgbL1Delta stable=true different=true"
 
 $report.finishedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 $report.sampleEvidence = $evidence
@@ -420,6 +505,10 @@ $report.iblPixelComparison = [ordered]@{
     frames          = $IblComparisonFrames
     onFingerprints = $iblOnFingerprints
     offFingerprints = $iblOffFingerprints
+    onSceneRgbFingerprints = $iblOnSceneFingerprints
+    offSceneRgbFingerprints = $iblOffSceneFingerprints
+    rgbL1Delta = $iblRgbL1Delta
+    minimumRgbL1Delta = $minimumIblRgbL1Delta
     stable          = $true
     different       = $true
     onEvidence      = $iblComparisonEvidence.on

@@ -1562,7 +1562,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 if (slot.live || slot.retirementPhase != RetirementPhase::None)
                 {
-                    destroyEnvironmentMapNativeResources(slot);
+                    destroyEnvironmentMapNativeResources(slot.resources);
                     slot.specularMipCount = 0;
                     if (slot.live)
                     {
@@ -2110,7 +2110,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 continue;
             }
-            destroyEnvironmentMapNativeResources(slot);
+            destroyEnvironmentMapNativeResources(slot.resources);
             slot.specularMipCount = 0;
             slot.retirementPhase = RetirementPhase::None;
             slot.completionPin.release();
@@ -2969,7 +2969,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         if (disposition == RetirementDetail::RetirementDisposition::DestroyImmediately)
         {
-            destroyEnvironmentMapNativeResources(slot);
+            destroyEnvironmentMapNativeResources(slot.resources);
             slot.specularMipCount = 0;
             slot.retirementPhase = RetirementPhase::None;
             ++statistics_.completedGpuRetirements;
@@ -3259,13 +3259,13 @@ class BgfxRenderDevice final : public IRenderDevice {
                slot.resources.valid();
     }
 
-    void destroyEnvironmentMapNativeResources(EnvironmentMapSlot& slot) noexcept
+    void destroyEnvironmentMapNativeResources(BgfxEnvironmentMapResources& resources) noexcept
     {
-        if (!slot.resources.valid())
+        if (!resources.valid())
         {
             std::terminate();
         }
-        destroyEnvironmentMapResources(slot.resources);
+        destroyEnvironmentMapResources(resources);
         statistics_.liveResources -= BgfxEnvironmentMapNativeTextureCount;
     }
 

@@ -206,6 +206,7 @@ mesh/material/texture weak handle invalidation 数分别为2/2/3、`bindingRegis
 `lightingConfigured=true`、`directionalLightCount=3`、point/spot authored/committed/culled 均为 `3/2/1`、
 `sceneLightingFrames=300`、
 `cameraAspectMatchesSurface=true`、`uiResponsiveLayoutVerified=true`、logical/framebuffer extent、
+中央 3D RGB ROI fingerprint/像素数/通道总量及临时 raw capture 逐像素 L1、
 `uiPanelsCreated=7`、`uiLabelsCreated=13`、
 Button/Checkbox/Slider/ProgressBar/ListView/TreeView 各创建1个、`uiThemeSwitches=2`、
 `uiAutomatedThemeSteps=2`、`uiAutomatedCollectionSteps=2`、`uiTreeExpansionChanges=2`、
