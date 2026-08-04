@@ -18,6 +18,7 @@
 
 #include <tina/core/error/Error.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderPassScheduler.hpp>
 
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
@@ -1238,6 +1239,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         PreparedOpaque3D preparedOpaque3D{};
         PreparedSprite2D preparedSprite2D{};
         PreparedUIDisplayList preparedUI{};
+        RenderPassSchedule passSchedule{};
         if (framePlan->shouldSubmit())
         {
             auto opaque3DPreflight = preflightOpaque3D(frame.primaryWorldScene, frame.resources);
@@ -1281,6 +1283,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 return Core::failure(std::move(status.error()));
             }
+            auto scheduled = buildRenderPassSchedule(frame);
+            if (!scheduled)
+            {
+                return Core::failure(std::move(scheduled.error()));
+            }
+            passSchedule = *scheduled;
         }
         if (auto status = surfaceStateTracker_.validateAndCommit(frame.primaryWindowSurface); !status)
         {
@@ -1303,7 +1311,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
 
         submitPrimaryFrame(committedSurfaceState_, frame.primaryWorldScene, frame.resources, preparedOpaque3D,
-                           preparedSprite2D, frame.primaryWindowUIDisplayList, preparedUI);
+                           preparedSprite2D, frame.primaryWindowUIDisplayList, preparedUI, passSchedule);
         frameOpen_ = true;
         ++statistics_.submitted;
         return RenderFrameSubmission::Submitted(nextSubmissionIndex_++);
@@ -1888,7 +1896,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::touch(kSurfaceClearView);
     }
 
-    void configureOpaque3DView(const RenderSurfaceState& surface, const RenderPerspectiveCamera& camera) noexcept
+    void configureOpaque3DView(const RenderSurfaceState& surface, const RenderPerspectiveCamera& camera,
+                               bool clearColor, bool clearDepth) noexcept
     {
         const BgfxViewRect rect = viewportRect(surface, camera.normalizedViewport);
         if (rect.width == 0 || rect.height == 0)
@@ -1896,7 +1905,9 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
         bgfx::setViewRect(kOpaque3DView, rect.x, rect.y, rect.width, rect.height);
-        bgfx::setViewClear(kOpaque3DView, BGFX_CLEAR_NONE, kClearRgba, 1.0F, 0);
+        const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
+                                                (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
+        bgfx::setViewClear(kOpaque3DView, clearFlags, kClearRgba, 1.0F, 0);
         bgfx::setViewMode(kOpaque3DView, bgfx::ViewMode::Sequential);
 
         const bx::Vec3 eye{camera.positionX, camera.positionY, camera.positionZ};
@@ -1917,7 +1928,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::touch(kOpaque3DView);
     }
 
-    void configureSprite2DView(const RenderSurfaceState& surface, const RenderCamera2D& camera) noexcept
+    void configureSprite2DView(const RenderSurfaceState& surface, const RenderCamera2D& camera,
+                               bool clearColor, bool clearDepth) noexcept
     {
         const BgfxViewRect rect = viewportRect(surface, camera.normalizedViewport);
         if (rect.width == 0 || rect.height == 0)
@@ -1925,7 +1937,9 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
         bgfx::setViewRect(kSprite2DView, rect.x, rect.y, rect.width, rect.height);
-        bgfx::setViewClear(kSprite2DView, BGFX_CLEAR_NONE, kClearRgba, 1.0F, 0);
+        const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
+                                                (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
+        bgfx::setViewClear(kSprite2DView, clearFlags, kClearRgba, 1.0F, 0);
         bgfx::setViewMode(kSprite2DView, bgfx::ViewMode::Sequential);
 
         const float cosine = std::cos(camera.rotationRadians);
@@ -1957,11 +1971,13 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::touch(kSprite2DView);
     }
 
-    void configureUIView(const RenderSurfaceState& surface) noexcept
+    void configureUIView(const RenderSurfaceState& surface, bool clearColor, bool clearDepth) noexcept
     {
         bgfx::setViewRect(kUIView, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
                           static_cast<u16>(surface.framebufferExtent.height));
-        bgfx::setViewClear(kUIView, BGFX_CLEAR_NONE, kClearRgba, 1.0F, 0);
+        const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
+                                                (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
+        bgfx::setViewClear(kUIView, clearFlags, kClearRgba, 1.0F, 0);
         bgfx::setViewMode(kUIView, bgfx::ViewMode::Sequential);
 
         float projection[16]{};
@@ -3182,21 +3198,29 @@ class BgfxRenderDevice final : public IRenderDevice {
     void submitPrimaryFrame(const RenderSurfaceState& surface, RenderSceneView scene,
                             FrameResourceTableView resources, PreparedOpaque3D preparedOpaque3D,
                             PreparedSprite2D preparedSprite2D, UIDisplayListView displayList,
-                            PreparedUIDisplayList preparedUI) noexcept
+                            PreparedUIDisplayList preparedUI, const RenderPassSchedule& schedule) noexcept
     {
-        configureSurfaceClearView(surface);
-        if (scene.perspectiveCamera().has_value())
+        for (const RenderPassPlan& pass : schedule.passes())
         {
-            configureOpaque3DView(surface, *scene.perspectiveCamera());
-            submitOpaque3D(scene, resources, preparedOpaque3D);
+            switch (pass.kind)
+            {
+            case RenderPassKind::Clear:
+                configureSurfaceClearView(surface);
+                break;
+            case RenderPassKind::Opaque3D:
+                configureOpaque3DView(surface, *scene.perspectiveCamera(), pass.clearColor, pass.clearDepth);
+                submitOpaque3D(scene, resources, preparedOpaque3D);
+                break;
+            case RenderPassKind::Sprite2D:
+                configureSprite2DView(surface, *scene.camera2D(), pass.clearColor, pass.clearDepth);
+                submitSprite2D(scene, resources, preparedSprite2D);
+                break;
+            case RenderPassKind::UI:
+                configureUIView(surface, pass.clearColor, pass.clearDepth);
+                submitUI(surface, displayList, resources, preparedUI);
+                break;
+            }
         }
-        if (scene.camera2D().has_value())
-        {
-            configureSprite2DView(surface, *scene.camera2D());
-            submitSprite2D(scene, resources, preparedSprite2D);
-        }
-        configureUIView(surface);
-        submitUI(surface, displayList, resources, preparedUI);
     }
 
     Detail::RenderSurfaceStateTracker surfaceStateTracker_;

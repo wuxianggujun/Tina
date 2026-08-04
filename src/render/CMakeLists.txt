@@ -9,6 +9,7 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrame.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrameCapture.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFramePacket.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/RenderPassScheduler.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderScene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderSurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/UIDisplayList.hpp
@@ -18,6 +19,7 @@ add_library(tina_render STATIC
     Camera2DPick.cpp
     Camera2DProjection.cpp
     Mesh3DLighting.cpp
+    RenderPassScheduler.cpp
     RenderSurfaceStateTracker.cpp
     RenderSurfaceStateTracker.hpp
     RenderScene.cpp

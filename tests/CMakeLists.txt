@@ -47,6 +47,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     platform/PlatformBackendTests.cpp
     render/header_isolation/RenderDeviceHeader.cpp
     render/header_isolation/RenderFrameHeader.cpp
+    render/header_isolation/RenderPassSchedulerHeader.cpp
     render/header_isolation/RenderSceneHeader.cpp
     render/header_isolation/RenderSurfaceHeader.cpp
     render/header_isolation/UIDisplayListHeader.cpp
@@ -61,6 +62,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/FramePinPacketTests.cpp
     render/GpuTextureUploadTests.cpp
     render/GpuMeshUploadTests.cpp
+    render/RenderPassSchedulerTests.cpp
     render/UIDisplayListTests.cpp
     runtime/header_isolation/EngineCompositionFactoriesHeader.cpp
     runtime/header_isolation/EngineConfigHeader.cpp
