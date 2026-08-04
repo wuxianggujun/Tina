@@ -28,6 +28,7 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/FixedStepAccumulator.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/MonotonicClock.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/Utf8.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/trace/Trace.hpp
     diagnostics/Assert.cpp
     diagnostics/Diagnostics.cpp
     hash/ContentHashDigest.cpp
@@ -55,5 +56,10 @@ target_link_libraries(tina_core
         "$<BUILD_INTERFACE:Tina::ProjectOptions>"
         xxHash::xxhash
 )
-target_compile_definitions(tina_core PRIVATE TINA_CORE_BUILDING)
+target_compile_definitions(tina_core
+    PUBLIC
+        TINA_TRACE_BACKEND_NONE=1
+    PRIVATE
+        TINA_CORE_BUILDING
+)
 set_target_properties(tina_core PROPERTIES CXX_EXTENSIONS OFF)

@@ -1,4 +1,5 @@
 #include <tina/core/time/MonotonicClock.hpp>
+#include <tina/core/trace/Trace.hpp>
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
 #include <tina/runtime/EngineConfig.hpp>
@@ -159,6 +160,8 @@ class ConsumerApplication final : public Tina::IGameApplication {
 
 int main()
 {
+    TINA_TRACE_ZONE("SdkConsumer.Main");
+
     auto host = Tina::EngineHost::Create(Tina::EngineConfig::Defaults(), createFactories());
     if (!host)
     {

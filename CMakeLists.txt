@@ -69,6 +69,14 @@ option(TINA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSani
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
 
+set(TINA_TRACE_BACKEND "none" CACHE STRING "Compile-time Tina trace backend")
+set_property(CACHE TINA_TRACE_BACKEND PROPERTY STRINGS "none")
+if (NOT TINA_TRACE_BACKEND STREQUAL "none")
+    message(FATAL_ERROR
+        "Unsupported TINA_TRACE_BACKEND='${TINA_TRACE_BACKEND}'. "
+        "TRACE-001-A0 supports only 'none'.")
+endif ()
+
 if (TINA_BUILD_PLATFORM_GLFW)
     if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
         NOT "platform-glfw" IN_LIST VCPKG_MANIFEST_FEATURES)

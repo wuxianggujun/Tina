@@ -24,6 +24,7 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/MemoryTrackerHeader.cpp
     core/header_isolation/MonotonicClockHeader.cpp
     core/header_isolation/ResultHeader.cpp
+    core/header_isolation/TraceHeader.cpp
     core/header_isolation/Utf8Header.cpp
     core/PublicHeaderIsolationTests.cpp
     core/ResultTests.cpp
@@ -32,6 +33,7 @@ set(TINA_CORE_TEST_SOURCES
     core/MemoryTrackerTests.cpp
     core/ScopeExitTests.cpp
     core/TimeTests.cpp
+    core/TraceCompileTests.cpp
     core/TypesTests.cpp
     core/Utf8Tests.cpp
     core/TypesWindowsAfterTests.cpp

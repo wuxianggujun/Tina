@@ -22,6 +22,7 @@
 #include <tina/core/memory/MemoryTracker.hpp>
 #include <tina/core/time/FixedStepAccumulator.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
+#include <tina/core/trace/Trace.hpp>
 
 #include <expected>
 #include <type_traits>
@@ -37,6 +38,7 @@ TEST(PublicHeaderIsolationTest, PublicCoreSurfaceUsesOnlyTheInstalledIncludeRoot
     static_assert(Core::ProcessBitCount == sizeof(void*) * 8U);
     static_assert(Core::MemoryTagCount == 13U);
     static_assert(!Core::GenerationId<IsolationGenerationTag>{}.hasValue());
+    static_assert(TINA_TRACE_BACKEND_NONE == 1);
     SUCCEED();
 }
 
