@@ -1,6 +1,8 @@
 #include "BgfxRenderDevice.hpp"
 #include "BgfxCascadedDirectionalShadowMath.hpp"
 #include "BgfxCascadedDirectionalShadowResources.hpp"
+#include "BgfxSpotLightShadowMath.hpp"
+#include "BgfxSpotLightShadowResources.hpp"
 #include "BgfxEnvironmentMapResources.hpp"
 #include "BgfxOpaque3DGeometry.hpp"
 #include "BgfxOpaque3DShader.hpp"
@@ -199,17 +201,18 @@ constexpr std::array<bgfx::ViewId, BgfxCascadedDirectionalShadowCascadeCount>
     kCascadedDirectionalShadowViews{1, 2, 3, 4};
 static_assert(BgfxCascadedDirectionalShadowCascadeCount ==
               Mesh3DCascadedDirectionalShadow::CascadeCount);
-constexpr bgfx::ViewId kOpaque3DView = 5;
-constexpr bgfx::ViewId kSprite2DView = 6;
-constexpr bgfx::ViewId kUIView = 7;
+constexpr bgfx::ViewId kSpotLightShadowView = 5;
+constexpr bgfx::ViewId kOpaque3DView = 6;
+constexpr bgfx::ViewId kSprite2DView = 7;
+constexpr bgfx::ViewId kUIView = 8;
 // Must remain after every view that can reference a retireable resource.
-constexpr bgfx::ViewId kRetirementMarkerView = 8;
+constexpr bgfx::ViewId kRetirementMarkerView = 9;
 constexpr u32 kDefaultResetFlags = BGFX_RESET_VSYNC;
 constexpr u32 kClearRgba = 0x102a43ff;
 constexpr usize kIndicesPerSolidQuad = 6;
 constexpr u64 kOpaque3DState =
     BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS;
-constexpr u64 kCascadedDirectionalShadowDepthState =
+constexpr u64 kOpaque3DShadowDepthState =
     BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS;
 constexpr u64 kSprite2DPremultipliedAlphaState =
     BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
@@ -247,6 +250,13 @@ struct PreparedOpaque3D final {
         float normalBiasMeters = 0.0F;
     };
     std::optional<CascadedDirectionalShadow> cascadedDirectionalShadow{};
+    struct SpotLightShadow final {
+        BgfxSpotLightShadowProjection projection{};
+        u16 spotLightIndex = 0;
+        float depthBias = 0.0F;
+        float normalBiasMeters = 0.0F;
+    };
+    std::optional<SpotLightShadow> spotLightShadow{};
 };
 
 struct PreparedSprite2D final {
@@ -661,39 +671,64 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources)
         return prepared;
     }
 
-    const auto& cascadedShadow =
-        scene.mesh3DLighting()->cascadedDirectionalShadow();
-    if (!cascadedShadow.has_value())
+    const RenderMesh3DLighting& lighting = *scene.mesh3DLighting();
+    if (const auto& cascadedShadow = lighting.cascadedDirectionalShadow();
+        cascadedShadow.has_value())
     {
-        return prepared;
+        const Mesh3DCascadedDirectionalShadow& shadow = *cascadedShadow;
+        const std::span<const Mesh3DDirectionalLight> directionalLights =
+            lighting.directionalLights();
+        if (shadow.directionalLightIndex >= directionalLights.size())
+        {
+            std::terminate();
+        }
+        auto projection = computeCascadedDirectionalShadowProjection(
+            BgfxCascadedDirectionalShadowInput{
+                .camera = *scene.perspectiveCamera(),
+                .light = directionalLights[shadow.directionalLightIndex],
+                .maximumDistanceMeters = shadow.maximumDistanceMeters,
+            },
+            caps->homogeneousDepth,
+            caps->originBottomLeft);
+        if (!projection)
+        {
+            return Core::failure(std::move(projection.error()));
+        }
+        prepared.cascadedDirectionalShadow = PreparedOpaque3D::CascadedDirectionalShadow{
+            .projection = *projection,
+            .directionalLightIndex = static_cast<u16>(shadow.directionalLightIndex),
+            .depthBias = shadow.depthBias,
+            .normalBiasMeters = shadow.normalBiasMeters,
+        };
     }
 
-    const Mesh3DCascadedDirectionalShadow& shadow =
-        *cascadedShadow;
-    const std::span<const Mesh3DDirectionalLight> directionalLights =
-        scene.mesh3DLighting()->directionalLights();
-    if (shadow.directionalLightIndex >= directionalLights.size())
+    if (const auto& spotLightShadow = lighting.spotLightShadow();
+        spotLightShadow.has_value())
     {
-        std::terminate();
+        const Mesh3DSpotLightShadow& shadow = *spotLightShadow;
+        const std::span<const Mesh3DSpotLight> spotLights = lighting.spotLights();
+        if (shadow.spotLightIndex >= spotLights.size())
+        {
+            std::terminate();
+        }
+        auto projection = computeSpotLightShadowProjection(
+            BgfxSpotLightShadowInput{
+                .light = spotLights[shadow.spotLightIndex],
+                .nearPlaneMeters = shadow.nearPlaneMeters,
+            },
+            caps->homogeneousDepth,
+            caps->originBottomLeft);
+        if (!projection)
+        {
+            return Core::failure(std::move(projection.error()));
+        }
+        prepared.spotLightShadow = PreparedOpaque3D::SpotLightShadow{
+            .projection = *projection,
+            .spotLightIndex = static_cast<u16>(shadow.spotLightIndex),
+            .depthBias = shadow.depthBias,
+            .normalBiasMeters = shadow.normalBiasMeters,
+        };
     }
-    auto projection = computeCascadedDirectionalShadowProjection(
-        BgfxCascadedDirectionalShadowInput{
-            .camera = *scene.perspectiveCamera(),
-            .light = directionalLights[shadow.directionalLightIndex],
-            .maximumDistanceMeters = shadow.maximumDistanceMeters,
-        },
-        caps->homogeneousDepth,
-        caps->originBottomLeft);
-    if (!projection)
-    {
-        return Core::failure(std::move(projection.error()));
-    }
-    prepared.cascadedDirectionalShadow = PreparedOpaque3D::CascadedDirectionalShadow{
-        .projection = *projection,
-        .directionalLightIndex = static_cast<u16>(shadow.directionalLightIndex),
-        .depthBias = shadow.depthBias,
-        .normalBiasMeters = shadow.normalBiasMeters,
-    };
     return prepared;
 }
 
@@ -1111,6 +1146,41 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(std::move(cascadedDirectionalShadowResources.error()));
         }
         cascadedDirectionalShadowResources_ = *cascadedDirectionalShadowResources;
+        statistics_.liveResources += 2U;
+
+        opaque3DSpotShadowMapSampler_ =
+            bgfx::createUniform("s_spotShadowMap", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(opaque3DSpotShadowMapSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D spot shadow-map sampler uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DSpotShadowMatrixUniform_ =
+            bgfx::createUniform("u_spotShadowMatrix", bgfx::UniformType::Mat4);
+        if (!bgfx::isValid(opaque3DSpotShadowMatrixUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D spot shadow matrix uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DSpotShadowParamsUniform_ =
+            bgfx::createUniform("u_spotShadowParams", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DSpotShadowParamsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D spot shadow params uniform");
+        }
+        ++statistics_.liveResources;
+
+        auto spotLightShadowResources = createSpotLightShadowResources();
+        if (!spotLightShadowResources)
+        {
+            return Core::failure(std::move(spotLightShadowResources.error()));
+        }
+        spotLightShadowResources_ = *spotLightShadowResources;
         statistics_.liveResources += 2U;
 
         opaque3DSampler_ = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
@@ -1630,6 +1700,29 @@ class BgfxRenderDevice final : public IRenderDevice {
                 static_cast<u64>(bgfx::isValid(cascadedDirectionalShadowResources_.depthAtlas));
             destroyCascadedDirectionalShadowResources(cascadedDirectionalShadowResources_);
             statistics_.liveResources -= cascadedDirectionalShadowResourceCount;
+            const u64 spotLightShadowResourceCount =
+                static_cast<u64>(bgfx::isValid(spotLightShadowResources_.frameBuffer)) +
+                static_cast<u64>(bgfx::isValid(spotLightShadowResources_.depthMap));
+            destroySpotLightShadowResources(spotLightShadowResources_);
+            statistics_.liveResources -= spotLightShadowResourceCount;
+            if (bgfx::isValid(opaque3DSpotShadowMapSampler_))
+            {
+                bgfx::destroy(opaque3DSpotShadowMapSampler_);
+                opaque3DSpotShadowMapSampler_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSpotShadowMatrixUniform_))
+            {
+                bgfx::destroy(opaque3DSpotShadowMatrixUniform_);
+                opaque3DSpotShadowMatrixUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSpotShadowParamsUniform_))
+            {
+                bgfx::destroy(opaque3DSpotShadowParamsUniform_);
+                opaque3DSpotShadowParamsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(opaque3DCsmDepthProgram_))
             {
                 bgfx::destroy(opaque3DCsmDepthProgram_);
@@ -1917,7 +2010,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             // sprite2DProgram, base/normal samplers, lighting/normal uniforms,
             // sprite2DDefaultTexture, sprite2DDefaultNormalTexture,
             // opaque3DProgram/shadowProgram, material/shadow/IBL samplers and uniforms,
-            // directional shadow depth texture/framebuffer, opaque3DMrSampler,
+            // directional/spot shadow depth textures/framebuffers, opaque3DMrSampler,
             // opaque3D directional/point/spot light arrays + MrParams uniforms, opaque3DDefaultTexture,
             // opaque3DDefaultMr/Normal/IBL textures, opaque3DVertexBuffer, opaque3DIndexBuffer,
             // retirement marker source/readback (+ dynamic mesh/texture/environment slots).
@@ -2212,6 +2305,25 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::touch(view);
     }
 
+    void configureSpotLightShadowView(
+        const PreparedOpaque3D::SpotLightShadow& shadow,
+        bool clearDepth) noexcept
+    {
+        bgfx::setViewRect(kSpotLightShadowView, 0, 0,
+                          BgfxSpotLightShadowMapExtent,
+                          BgfxSpotLightShadowMapExtent);
+        bgfx::setViewFrameBuffer(kSpotLightShadowView,
+                                 spotLightShadowResources_.frameBuffer);
+        bgfx::setViewClear(kSpotLightShadowView,
+                           clearDepth ? BGFX_CLEAR_DEPTH : BGFX_CLEAR_NONE,
+                           0, 1.0F, 0);
+        bgfx::setViewMode(kSpotLightShadowView, bgfx::ViewMode::Sequential);
+        bgfx::setViewTransform(kSpotLightShadowView,
+                               shadow.projection.lightView.data(),
+                               shadow.projection.lightProjection.data());
+        bgfx::touch(kSpotLightShadowView);
+    }
+
     void configureOpaque3DView(const RenderSurfaceState& surface, const RenderPerspectiveCamera& camera,
                                bool clearColor, bool clearDepth) noexcept
     {
@@ -2363,16 +2475,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
     }
 
-    void submitCascadedDirectionalShadowDepth(
+    void submitOpaque3DShadowDepth(
         RenderSceneView scene,
         FrameResourceTableView resources,
         const PreparedOpaque3D& prepared,
         bgfx::InstanceDataBuffer& instanceBuffer,
-        usize cascadeIndex) noexcept
+        bgfx::ViewId view) noexcept
     {
-        if (prepared.requirements.instanceCount == 0 ||
-            !prepared.cascadedDirectionalShadow.has_value() ||
-            cascadeIndex >= BgfxCascadedDirectionalShadowCascadeCount)
+        if (prepared.requirements.instanceCount == 0)
         {
             std::terminate();
         }
@@ -2395,16 +2505,45 @@ class BgfxRenderDevice final : public IRenderDevice {
                 continue;
             }
 
-            const u64 shadowState = kCascadedDirectionalShadowDepthState |
+            const u64 shadowState = kOpaque3DShadowDepthState |
                 (batch.doubleSided ? 0 : BGFX_STATE_CULL_CW);
             bgfx::setState(shadowState);
             bgfx::setVertexBuffer(0, geometry->vertexBuffer);
             bgfx::setIndexBuffer(geometry->indexBuffer);
             bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem,
                                         batch.itemCount);
-            bgfx::submit(kCascadedDirectionalShadowViews[cascadeIndex],
-                         opaque3DCsmDepthProgram_);
+            bgfx::submit(view, opaque3DCsmDepthProgram_);
         }
+    }
+
+    void submitCascadedDirectionalShadowDepth(
+        RenderSceneView scene,
+        FrameResourceTableView resources,
+        const PreparedOpaque3D& prepared,
+        bgfx::InstanceDataBuffer& instanceBuffer,
+        usize cascadeIndex) noexcept
+    {
+        if (!prepared.cascadedDirectionalShadow.has_value() ||
+            cascadeIndex >= BgfxCascadedDirectionalShadowCascadeCount)
+        {
+            std::terminate();
+        }
+        submitOpaque3DShadowDepth(scene, resources, prepared, instanceBuffer,
+                                  kCascadedDirectionalShadowViews[cascadeIndex]);
+    }
+
+    void submitSpotLightShadowDepth(
+        RenderSceneView scene,
+        FrameResourceTableView resources,
+        const PreparedOpaque3D& prepared,
+        bgfx::InstanceDataBuffer& instanceBuffer) noexcept
+    {
+        if (!prepared.spotLightShadow.has_value())
+        {
+            std::terminate();
+        }
+        submitOpaque3DShadowDepth(scene, resources, prepared, instanceBuffer,
+                                  kSpotLightShadowView);
     }
 
     void submitOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
@@ -2477,6 +2616,23 @@ class BgfxRenderDevice final : public IRenderDevice {
             csmParams[0] = shadow.depthBias;
             csmParams[1] = shadow.normalBiasMeters;
             csmParams[3] = static_cast<float>(shadow.directionalLightIndex) + 1.0F;
+        }
+
+        std::array<float, 16> spotShadowMatrix{};
+        bx::mtxIdentity(spotShadowMatrix.data());
+        std::array<float, 4> spotShadowParams{
+            0.0F,
+            0.0F,
+            1.0F / static_cast<float>(BgfxSpotLightShadowMapExtent),
+            0.0F,
+        };
+        if (prepared.spotLightShadow.has_value())
+        {
+            const auto& shadow = *prepared.spotLightShadow;
+            spotShadowMatrix = shadow.projection.samplingTransform;
+            spotShadowParams[0] = shadow.depthBias;
+            spotShadowParams[1] = shadow.normalBiasMeters;
+            spotShadowParams[3] = static_cast<float>(shadow.spotLightIndex) + 1.0F;
         }
 
         bgfx::TextureHandle iblDiffuse = opaque3DDefaultIblCube_;
@@ -2593,6 +2749,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setTexture(4, opaque3DIblDiffuseSampler_, iblDiffuse);
             bgfx::setTexture(5, opaque3DIblSpecularSampler_, iblSpecular);
             bgfx::setTexture(6, opaque3DIblBrdfSampler_, iblBrdf);
+            bgfx::setTexture(7, opaque3DSpotShadowMapSampler_,
+                             spotLightShadowResources_.depthMap);
             bgfx::setUniform(opaque3DLightDirectionsUniform_, lightDirections->data(),
                              static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
             bgfx::setUniform(opaque3DLightColorsUniform_, lightColors->data(),
@@ -2613,6 +2771,8 @@ class BgfxRenderDevice final : public IRenderDevice {
                              static_cast<u16>(csmMatrices.size()));
             bgfx::setUniform(opaque3DCsmSplitDepthsUniform_, csmSplitDepths.data());
             bgfx::setUniform(opaque3DCsmParamsUniform_, csmParams.data());
+            bgfx::setUniform(opaque3DSpotShadowMatrixUniform_, spotShadowMatrix.data());
+            bgfx::setUniform(opaque3DSpotShadowParamsUniform_, spotShadowParams.data());
             bgfx::setUniform(opaque3DIblParamsUniform_, iblParams.data());
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
         }
@@ -3857,6 +4017,18 @@ class BgfxRenderDevice final : public IRenderDevice {
                     cascadeIndex);
                 break;
             }
+            case RenderPassKind::SpotLightShadowDepth:
+                requireResource(RenderPassResource::SpotLightShadowMap);
+                if (pass.clearColor || !pass.clearDepth ||
+                    !preparedOpaque3D.spotLightShadow.has_value())
+                {
+                    std::terminate();
+                }
+                configureSpotLightShadowView(
+                    *preparedOpaque3D.spotLightShadow, pass.clearDepth);
+                submitSpotLightShadowDepth(
+                    scene, resources, preparedOpaque3D, opaque3DInstanceBuffer);
+                break;
             case RenderPassKind::Opaque3D:
                 requireResource(RenderPassResource::PrimarySurface);
                 configureOpaque3DView(surface, *scene.perspectiveCamera(), pass.clearColor, pass.clearDepth);
@@ -3895,11 +4067,15 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle opaque3DCsmMatricesUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DCsmSplitDepthsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DCsmParamsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSpotShadowMapSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSpotShadowMatrixUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSpotShadowParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DIblDiffuseSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DIblSpecularSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DIblBrdfSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DIblParamsUniform_ = BGFX_INVALID_HANDLE;
     BgfxCascadedDirectionalShadowResources cascadedDirectionalShadowResources_{};
+    BgfxSpotLightShadowResources spotLightShadowResources_{};
     bgfx::UniformHandle opaque3DSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DNormalSampler_ = BGFX_INVALID_HANDLE;
