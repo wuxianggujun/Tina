@@ -1,11 +1,10 @@
-$input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent, v_shadowCoord
+$input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent
 
 #include <bgfx_shader.sh>
 
 // Opaque3D metallic-roughness PBR (RENDER-001-IBL).
-// Up to four directional + eight point + eight spot lights, one directional
-// shadow, and one prefiltered image-based lighting environment.
-// One directional light may consume the fixed backend shadow map.
+// Up to four directional + eight point + eight spot lights, one four-cascade
+// directional shadow atlas, and one prefiltered image-based lighting environment.
 // Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
 // s_texNormal: tangent-space RGB normal using the required vertex tangent TBN.
@@ -13,7 +12,7 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent, v_shadowCoord
 SAMPLER2D(s_texColor, 0);
 SAMPLER2D(s_texMR, 1);
 SAMPLER2D(s_texNormal, 2);
-SAMPLER2DSHADOW(s_shadowMap, 3);
+SAMPLER2DSHADOW(s_csmAtlas, 3);
 SAMPLERCUBE(s_iblDiffuse, 4);
 SAMPLERCUBE(s_iblSpecular, 5);
 SAMPLER2D(s_iblBrdf, 6);
@@ -36,9 +35,12 @@ uniform vec4 u_spotLightColorOuter[8];
 uniform vec4 u_mrParams;
 // x = 1 if normal map bound, yzw unused.
 uniform vec4 u_normalParams;
-// x = receiver depth bias, y = receiver normal bias, z = shadow texel size,
+uniform mat4 u_csmMatrices[4];
+// Positive view-space far depth for cascades 0..3.
+uniform vec4 u_csmSplitDepths;
+// x = receiver depth bias, y = receiver normal bias, z = atlas texel size,
 // w = shadowed directional-light slot + 1 (zero disables sampling).
-uniform vec4 u_shadowParams;
+uniform vec4 u_csmParams;
 // x = IBL intensity, y = maximum authored specular mip, z = 1 when enabled,
 // w = environment rotation around world +Y in radians.
 uniform vec4 u_iblParams;
@@ -141,33 +143,79 @@ vec3 shadeImageBasedLighting(vec3 N, vec3 V, vec3 albedo, vec3 F0, float metalli
 		* max(u_iblParams.x, 0.0);
 }
 
-float sampleDirectionalShadow(vec4 shadowVarying)
+float sampleCascadedDirectionalShadow(vec3 worldPosition, vec3 worldNormal)
 {
-	if (u_shadowParams.w < 0.5 || shadowVarying.w <= 0.0)
+	if (u_csmParams.w < 0.5)
 	{
 		return 1.0;
 	}
 
+	float viewDepth = -mul(u_view, vec4(worldPosition, 1.0)).z;
+	if (viewDepth <= 0.0 || viewDepth > u_csmSplitDepths.w)
+	{
+		return 1.0;
+	}
+
+	int cascadeIndex = 0;
+	if (viewDepth > u_csmSplitDepths.x)
+	{
+		cascadeIndex = 1;
+	}
+	if (viewDepth > u_csmSplitDepths.y)
+	{
+		cascadeIndex = 2;
+	}
+	if (viewDepth > u_csmSplitDepths.z)
+	{
+		cascadeIndex = 3;
+	}
+
+	vec3 biasedWorldPosition = worldPosition + worldNormal * max(u_csmParams.y, 0.0);
+	vec4 biasedWorld = vec4(biasedWorldPosition, 1.0);
+	vec4 shadowVarying = mul(u_csmMatrices[0], biasedWorld);
+	if (cascadeIndex == 1)
+	{
+		shadowVarying = mul(u_csmMatrices[1], biasedWorld);
+	}
+	else if (cascadeIndex == 2)
+	{
+		shadowVarying = mul(u_csmMatrices[2], biasedWorld);
+	}
+	else if (cascadeIndex == 3)
+	{
+		shadowVarying = mul(u_csmMatrices[3], biasedWorld);
+	}
+	if (shadowVarying.w <= 0.0)
+	{
+		return 1.0;
+	}
 	vec3 shadowCoord = shadowVarying.xyz / shadowVarying.w;
-	bool outside = any(lessThan(shadowCoord, vec3_splat(0.0)))
-		|| any(greaterThan(shadowCoord, vec3_splat(1.0)));
+	vec2 tileMinimum = vec2(
+		(cascadeIndex == 1 || cascadeIndex == 3) ? 0.5 : 0.0,
+		cascadeIndex >= 2 ? 0.5 : 0.0);
+	vec2 tileMaximum = tileMinimum + vec2_splat(0.5);
+	bool outside = any(lessThan(shadowCoord.xy, tileMinimum))
+		|| any(greaterThan(shadowCoord.xy, tileMaximum))
+		|| shadowCoord.z < 0.0 || shadowCoord.z > 1.0;
 	if (outside)
 	{
 		return 1.0;
 	}
 
-	float compareDepth = shadowCoord.z - max(u_shadowParams.x, 0.0);
-	vec2 texel = vec2_splat(u_shadowParams.z);
+	float compareDepth = shadowCoord.z - max(u_csmParams.x, 0.0);
+	vec2 texel = vec2_splat(u_csmParams.z);
+	vec2 sampleMinimum = tileMinimum + texel * 0.5;
+	vec2 sampleMaximum = tileMaximum - texel * 0.5;
 	float visibility = 0.0;
-	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2(-1.0, -1.0), compareDepth));
-	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 0.0, -1.0), compareDepth));
-	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 1.0, -1.0), compareDepth));
-	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2(-1.0,  0.0), compareDepth));
-	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy, compareDepth));
-	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 1.0,  0.0), compareDepth));
-	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2(-1.0,  1.0), compareDepth));
-	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 0.0,  1.0), compareDepth));
-	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 1.0,  1.0), compareDepth));
+	for (int sampleY = -1; sampleY <= 1; ++sampleY)
+	{
+		for (int sampleX = -1; sampleX <= 1; ++sampleX)
+		{
+			vec2 sampleUv = clamp(shadowCoord.xy + texel * vec2(float(sampleX), float(sampleY)),
+				sampleMinimum, sampleMaximum);
+			visibility += shadow2D(s_csmAtlas, vec3(sampleUv, compareDepth));
+		}
+	}
 	return visibility / 9.0;
 }
 
@@ -186,7 +234,8 @@ void main()
 		metallic = clamp(mrSample.b * u_mrParams.x, 0.0, 1.0);
 	}
 
-	vec3 N = safeNormalize(v_normal);
+	vec3 geometricNormal = safeNormalize(v_normal);
+	vec3 N = geometricNormal;
 	if (u_normalParams.x > 0.5)
 	{
 		vec3 T = safeNormalize(v_tangent.xyz - N * dot(N, v_tangent.xyz));
@@ -211,9 +260,9 @@ void main()
 		if (u_lightDirs[lightIndex].w > 0.5)
 		{
 			float visibility = 1.0;
-			if (abs(u_shadowParams.w - float(lightIndex + 1)) < 0.5)
+			if (abs(u_csmParams.w - float(lightIndex + 1)) < 0.5)
 			{
-				visibility = sampleDirectionalShadow(v_shadowCoord);
+				visibility = sampleCascadedDirectionalShadow(v_worldPos, geometricNormal);
 			}
 			lit += visibility * shadeLight(N, V, safeNormalize(u_lightDirs[lightIndex].xyz),
 				u_lightColors[lightIndex].rgb, albedo, F0, metallic, roughness);
