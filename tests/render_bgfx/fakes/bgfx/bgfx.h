@@ -9,18 +9,26 @@
 #define BGFX_SAMPLER_V_CLAMP UINT64_C(0x00000002)
 #define BGFX_SAMPLER_MIN_POINT UINT64_C(0x00000004)
 #define BGFX_SAMPLER_MAG_POINT UINT64_C(0x00000008)
+#define BGFX_SAMPLER_COMPARE_LEQUAL UINT64_C(0x00000010)
+#define BGFX_TEXTURE_RT UINT64_C(0x00000100)
+#define BGFX_INVALID_HANDLE { tina_test_bgfx::InvalidHandle }
 
 namespace tina_test_bgfx {
 
 struct TextureFormat final {
     enum Enum : std::uint8_t {
         R8 = 1,
+        D16 = 2,
     };
 };
 
 inline constexpr std::uint16_t InvalidHandle = (std::numeric_limits<std::uint16_t>::max)();
 
 struct TextureHandle final {
+    std::uint16_t idx = InvalidHandle;
+};
+
+struct FrameBufferHandle final {
     std::uint16_t idx = InvalidHandle;
 };
 
@@ -59,15 +67,36 @@ struct TextureRecord final {
     std::vector<std::uint8_t> pixels;
 };
 
+struct FrameBufferCreateCall final {
+    std::vector<TextureHandle> attachments;
+    bool destroyTextures = false;
+};
+
+enum class DestroyedResourceKind : std::uint8_t {
+    Texture,
+    FrameBuffer,
+};
+
+struct DestroyedResource final {
+    DestroyedResourceKind kind = DestroyedResourceKind::Texture;
+    std::uint16_t index = InvalidHandle;
+};
+
 struct State final {
     std::uint16_t nextTexture = 1;
+    std::uint16_t nextFrameBuffer = 1;
     std::uint32_t copyCalls = 0;
     std::uint32_t failCopyCall = 0;
     bool rejectTextureCreate = false;
+    bool rejectTextureValidation = false;
+    bool rejectFrameBufferCreate = false;
     std::uint32_t immutableUpdateRejects = 0;
     std::vector<TextureCreateCall> textureCreates;
     std::vector<TextureUpdateCall> textureUpdates;
+    std::vector<FrameBufferCreateCall> frameBufferCreates;
     std::vector<TextureHandle> textureDestroys;
+    std::vector<FrameBufferHandle> frameBufferDestroys;
+    std::vector<DestroyedResource> destroyedResources;
     std::vector<TextureRecord> textures;
 };
 
@@ -150,6 +179,37 @@ inline void reset() noexcept
     return texture.idx != InvalidHandle;
 }
 
+[[nodiscard]] inline bool isValid(FrameBufferHandle frameBuffer) noexcept
+{
+    return frameBuffer.idx != InvalidHandle;
+}
+
+[[nodiscard]] inline bool isTextureValid(
+    std::uint16_t,
+    bool,
+    std::uint16_t,
+    TextureFormat::Enum,
+    std::uint64_t) noexcept
+{
+    return !Contract::state.rejectTextureValidation;
+}
+
+[[nodiscard]] inline FrameBufferHandle createFrameBuffer(
+    std::uint8_t attachmentCount,
+    const TextureHandle* attachments,
+    bool destroyTextures)
+{
+    Contract::state.frameBufferCreates.push_back(Contract::FrameBufferCreateCall{
+        .attachments = std::vector<TextureHandle>(attachments, attachments + attachmentCount),
+        .destroyTextures = destroyTextures,
+    });
+    if (Contract::state.rejectFrameBufferCreate)
+    {
+        return {};
+    }
+    return FrameBufferHandle{Contract::state.nextFrameBuffer++};
+}
+
 inline void updateTexture2D(
     TextureHandle texture,
     std::uint16_t layer,
@@ -190,10 +250,19 @@ inline void updateTexture2D(
 inline void destroy(TextureHandle texture) noexcept
 {
     Contract::state.textureDestroys.push_back(texture);
+    Contract::state.destroyedResources.push_back(
+        {.kind = Contract::DestroyedResourceKind::Texture, .index = texture.idx});
     if (Contract::TextureRecord* record = Contract::findTexture(texture); record != nullptr)
     {
         record->destroyed = true;
     }
+}
+
+inline void destroy(FrameBufferHandle frameBuffer) noexcept
+{
+    Contract::state.frameBufferDestroys.push_back(frameBuffer);
+    Contract::state.destroyedResources.push_back(
+        {.kind = Contract::DestroyedResourceKind::FrameBuffer, .index = frameBuffer.idx});
 }
 
 } // namespace tina_test_bgfx

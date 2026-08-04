@@ -45,6 +45,8 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxOpaque3DGeometry.hpp
         bgfx/BgfxDirectionalShadowMath.cpp
         bgfx/BgfxDirectionalShadowMath.hpp
+        bgfx/BgfxDirectionalShadowResources.cpp
+        bgfx/BgfxDirectionalShadowResources.hpp
         bgfx/BgfxOpaque3DShader.cpp
         bgfx/BgfxOpaque3DShader.hpp
         bgfx/BgfxResourceSlotGeneration.hpp
@@ -115,6 +117,13 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_mr.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_mr.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_mr.def.sc"
+    )
+    tina_add_bgfx_embedded_shader(
+        tina_render_bgfx
+        tina_opaque3d_shadow
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_shadow.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_shadow.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_shadow.def.sc"
     )
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx

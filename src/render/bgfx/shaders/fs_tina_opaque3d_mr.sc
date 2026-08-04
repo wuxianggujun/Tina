@@ -1,9 +1,10 @@
-$input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent
+$input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent, v_shadowCoord
 
 #include <bgfx_shader.sh>
 
 // Experimental Opaque3D metallic-roughness hybrid (RENDER-001).
-// Honesty: up to four directional + eight point + eight spot lights and constant ambient; no IBL/shadows.
+// Honesty: up to four directional + eight point + eight spot lights and constant ambient; no IBL.
+// One directional light may consume the fixed backend shadow map.
 // Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
 // s_texNormal: tangent-space RGB normal. Vertex-tangent meshes use their TBN;
@@ -12,6 +13,7 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent
 SAMPLER2D(s_texColor, 0);
 SAMPLER2D(s_texMR, 1);
 SAMPLER2D(s_texNormal, 2);
+SAMPLER2DSHADOW(s_shadowMap, 3);
 
 // xyz = world-space direction toward light; w = 1 when the slot is active.
 uniform vec4 u_lightDirs[4];
@@ -31,6 +33,9 @@ uniform vec4 u_spotLightColorOuter[8];
 uniform vec4 u_mrParams;
 // x = 1 if normal map bound, y = 1 if the current mesh has vertex tangents, zw unused.
 uniform vec4 u_normalParams;
+// x = receiver depth bias, y = receiver normal bias, z = shadow texel size,
+// w = shadowed directional-light slot + 1 (zero disables sampling).
+uniform vec4 u_shadowParams;
 
 vec3 safeNormalize(vec3 value)
 {
@@ -47,6 +52,36 @@ vec3 shadeLight(vec3 N, vec3 V, vec3 L, vec3 lightRgb, vec3 albedo, vec3 F0, flo
 	float shininess = exp2(10.0 * (1.0 - roughness) + 1.0);
 	float specular = pow(NdotH, shininess) * NdotL;
 	return lightRgb * (diffuse + F0 * specular);
+}
+
+float sampleDirectionalShadow()
+{
+	if (u_shadowParams.w < 0.5 || v_shadowCoord.w <= 0.0)
+	{
+		return 1.0;
+	}
+
+	vec3 shadowCoord = v_shadowCoord.xyz / v_shadowCoord.w;
+	bool outside = any(lessThan(shadowCoord, vec3_splat(0.0)))
+		|| any(greaterThan(shadowCoord, vec3_splat(1.0)));
+	if (outside)
+	{
+		return 1.0;
+	}
+
+	float compareDepth = shadowCoord.z - max(u_shadowParams.x, 0.0);
+	vec2 texel = vec2_splat(u_shadowParams.z);
+	float visibility = 0.0;
+	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2(-1.0, -1.0), compareDepth));
+	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 0.0, -1.0), compareDepth));
+	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 1.0, -1.0), compareDepth));
+	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2(-1.0,  0.0), compareDepth));
+	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy, compareDepth));
+	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 1.0,  0.0), compareDepth));
+	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2(-1.0,  1.0), compareDepth));
+	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 0.0,  1.0), compareDepth));
+	visibility += shadow2D(s_shadowMap, vec3(shadowCoord.xy + texel * vec2( 1.0,  1.0), compareDepth));
+	return visibility / 9.0;
 }
 
 void main()
@@ -107,7 +142,12 @@ void main()
 	{
 		if (u_lightDirs[lightIndex].w > 0.5)
 		{
-			lit += shadeLight(N, V, safeNormalize(u_lightDirs[lightIndex].xyz),
+			float visibility = 1.0;
+			if (abs(u_shadowParams.w - float(lightIndex + 1)) < 0.5)
+			{
+				visibility = sampleDirectionalShadow();
+			}
+			lit += visibility * shadeLight(N, V, safeNormalize(u_lightDirs[lightIndex].xyz),
 				u_lightColors[lightIndex].rgb, albedo, F0, metallic, roughness);
 		}
 	}

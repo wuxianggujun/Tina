@@ -3,6 +3,8 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/render/RenderScene.hpp>
 
+#include <array>
+
 namespace Tina::Render::Bgfx {
 
 struct BgfxDirectionalShadowBounds final {
@@ -21,8 +23,16 @@ struct BgfxDirectionalShadowBounds final {
 struct BgfxDirectionalShadowBoundsInput final {
     RenderPerspectiveCamera camera{};
     Mesh3DDirectionalLight light{};
-    float shadowDistance = 50.0F;
+    float shadowDistanceMeters = 50.0F;
     float depthPadding = 10.0F;
+};
+
+struct BgfxDirectionalShadowProjection final {
+    BgfxDirectionalShadowBounds bounds{};
+    std::array<float, 16> lightView{};
+    std::array<float, 16> lightProjection{};
+    // World position -> shadow texture UV/depth, including backend crop rules.
+    std::array<float, 16> samplingTransform{};
 };
 
 // Computes the light-space orthographic bounds for the current camera slice.
@@ -30,5 +40,10 @@ struct BgfxDirectionalShadowBoundsInput final {
 // owned by bgfx; callers build the final matrix from these finite bounds.
 [[nodiscard]] Core::Result<BgfxDirectionalShadowBounds>
 computeDirectionalShadowBounds(const BgfxDirectionalShadowBoundsInput& input) noexcept;
+
+[[nodiscard]] Core::Result<BgfxDirectionalShadowProjection>
+computeDirectionalShadowProjection(const BgfxDirectionalShadowBoundsInput& input,
+                                   bool homogeneousDepth,
+                                   bool originBottomLeft) noexcept;
 
 } // namespace Tina::Render::Bgfx

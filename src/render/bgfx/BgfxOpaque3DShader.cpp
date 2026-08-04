@@ -6,12 +6,18 @@
 
 #include "fs_tina_opaque3d_mr_glsl.bin.h"
 #include "fs_tina_opaque3d_mr_spv.bin.h"
+#include "fs_tina_opaque3d_shadow_glsl.bin.h"
+#include "fs_tina_opaque3d_shadow_spv.bin.h"
 #include "vs_tina_opaque3d_mr_glsl.bin.h"
 #include "vs_tina_opaque3d_mr_spv.bin.h"
+#include "vs_tina_opaque3d_shadow_glsl.bin.h"
+#include "vs_tina_opaque3d_shadow_spv.bin.h"
 
 #if BX_PLATFORM_WINDOWS
 #include "fs_tina_opaque3d_mr_dxbc.bin.h"
+#include "fs_tina_opaque3d_shadow_dxbc.bin.h"
 #include "vs_tina_opaque3d_mr_dxbc.bin.h"
+#include "vs_tina_opaque3d_shadow_dxbc.bin.h"
 #endif
 
 namespace Tina::Render::Bgfx::ShaderDetail {
@@ -41,6 +47,34 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
             {bgfx::RendererType::OpenGL, fs_tina_opaque3d_mr_glsl,
              sizeof(fs_tina_opaque3d_mr_glsl)},
             {bgfx::RendererType::Vulkan, fs_tina_opaque3d_mr_spv, sizeof(fs_tina_opaque3d_mr_spv)},
+            {bgfx::RendererType::Count, nullptr, 0},
+        },
+    },
+    {
+        "vs_tina_opaque3d_shadow",
+        {
+#if BX_PLATFORM_WINDOWS
+            {bgfx::RendererType::Direct3D11, vs_tina_opaque3d_shadow_dxbc,
+             sizeof(vs_tina_opaque3d_shadow_dxbc)},
+#endif
+            {bgfx::RendererType::OpenGL, vs_tina_opaque3d_shadow_glsl,
+             sizeof(vs_tina_opaque3d_shadow_glsl)},
+            {bgfx::RendererType::Vulkan, vs_tina_opaque3d_shadow_spv,
+             sizeof(vs_tina_opaque3d_shadow_spv)},
+            {bgfx::RendererType::Count, nullptr, 0},
+        },
+    },
+    {
+        "fs_tina_opaque3d_shadow",
+        {
+#if BX_PLATFORM_WINDOWS
+            {bgfx::RendererType::Direct3D11, fs_tina_opaque3d_shadow_dxbc,
+             sizeof(fs_tina_opaque3d_shadow_dxbc)},
+#endif
+            {bgfx::RendererType::OpenGL, fs_tina_opaque3d_shadow_glsl,
+             sizeof(fs_tina_opaque3d_shadow_glsl)},
+            {bgfx::RendererType::Vulkan, fs_tina_opaque3d_shadow_spv,
+             sizeof(fs_tina_opaque3d_shadow_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
         },
     },
@@ -92,6 +126,13 @@ Core::Result<bgfx::ProgramHandle> createOpaque3DMrProgram()
 {
     return createEmbeddedProgram("vs_tina_opaque3d_mr", "fs_tina_opaque3d_mr",
                                  "createOpaque3DMrProgram");
+}
+
+Core::Result<bgfx::ProgramHandle> createOpaque3DShadowProgram()
+{
+    return createEmbeddedProgram("vs_tina_opaque3d_shadow",
+                                 "fs_tina_opaque3d_shadow",
+                                 "createOpaque3DShadowProgram");
 }
 
 } // namespace Tina::Render::Bgfx::ShaderDetail
