@@ -21,6 +21,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkDirtyCache.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CharacterController2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogCook.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogChangePlan.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/GltfCook.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadOrder.hpp
@@ -55,6 +56,7 @@ set(TINA_ASSET_SOURCES
     TileChunkDirtyCache.cpp
     CharacterController2D.cpp
     CatalogCook.cpp
+    CatalogChangePlan.cpp
     GltfFileSnapshot.cpp
     GltfCook.cpp
     CatalogFile.cpp
