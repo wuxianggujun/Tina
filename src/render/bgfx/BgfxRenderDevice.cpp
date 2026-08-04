@@ -1203,6 +1203,70 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        opaque3DIblDiffuseSampler_ = bgfx::createUniform("s_iblDiffuse", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(opaque3DIblDiffuseSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D diffuse IBL sampler uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DIblSpecularSampler_ = bgfx::createUniform("s_iblSpecular", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(opaque3DIblSpecularSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D specular IBL sampler uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DIblBrdfSampler_ = bgfx::createUniform("s_iblBrdf", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(opaque3DIblBrdfSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D BRDF LUT sampler uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DIblParamsUniform_ = bgfx::createUniform("u_iblParams", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DIblParamsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D IBL params uniform");
+        }
+        ++statistics_.liveResources;
+
+        constexpr u64 IblSamplerFlags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_U_CLAMP |
+                                        BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_W_CLAMP;
+        opaque3DDefaultIblCube_ = bgfx::createTextureCube(
+            1, false, 1, bgfx::TextureFormat::RGBA16F, IblSamplerFlags);
+        if (!bgfx::isValid(opaque3DDefaultIblCube_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D default IBL cubemap");
+        }
+        constexpr std::array<u8, 8> BlackRgba16FloatPixel{};
+        for (u8 face = 0; face < 6U; ++face)
+        {
+            bgfx::updateTextureCube(
+                opaque3DDefaultIblCube_, 0, face, 0, 0, 0, 1, 1,
+                bgfx::copy(BlackRgba16FloatPixel.data(),
+                           static_cast<u32>(BlackRgba16FloatPixel.size())));
+        }
+        ++statistics_.liveResources;
+
+        constexpr std::array<u8, 4> ZeroRg16FloatPixel{};
+        opaque3DDefaultIblBrdfLut_ = bgfx::createTexture2D(
+            1, 1, false, 1, bgfx::TextureFormat::RG16F,
+            BGFX_TEXTURE_NONE | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
+            bgfx::copy(ZeroRg16FloatPixel.data(),
+                       static_cast<u32>(ZeroRg16FloatPixel.size())));
+        if (!bgfx::isValid(opaque3DDefaultIblBrdfLut_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D default BRDF LUT");
+        }
+        ++statistics_.liveResources;
+
         // Default 1x1 white so baseColorFactor remains visible without a material bind.
         constexpr std::array<u8, 4> OpaqueWhitePixel{255, 255, 255, 255};
         const bgfx::Memory* opaqueWhiteMemory =
@@ -1492,6 +1556,20 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             mesh3DBindings_.clear();
             mesh3DMaterialBindings_.clear();
+            mesh3DImageBasedLighting_.reset();
+            for (EnvironmentMapSlot& slot : environmentMaps_)
+            {
+                if (slot.live || slot.retirementPhase != RetirementPhase::None)
+                {
+                    destroyEnvironmentMapNativeResources(slot);
+                    slot.specularMipCount = 0;
+                    if (slot.live)
+                    {
+                        slot.live = false;
+                        slot.identity.advanceAfterRelease();
+                    }
+                }
+            }
             for (MeshSlot& slot : meshes_)
             {
                 if (slot.live || slot.retirementPhase != RetirementPhase::None)
@@ -1554,6 +1632,30 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DShadowParamsUniform_);
                 opaque3DShadowParamsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DIblDiffuseSampler_))
+            {
+                bgfx::destroy(opaque3DIblDiffuseSampler_);
+                opaque3DIblDiffuseSampler_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DIblSpecularSampler_))
+            {
+                bgfx::destroy(opaque3DIblSpecularSampler_);
+                opaque3DIblSpecularSampler_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DIblBrdfSampler_))
+            {
+                bgfx::destroy(opaque3DIblBrdfSampler_);
+                opaque3DIblBrdfSampler_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DIblParamsUniform_))
+            {
+                bgfx::destroy(opaque3DIblParamsUniform_);
+                opaque3DIblParamsUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(opaque3DProgram_))
@@ -1650,6 +1752,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DDefaultNormalTexture_);
                 opaque3DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DDefaultIblCube_))
+            {
+                bgfx::destroy(opaque3DDefaultIblCube_);
+                opaque3DDefaultIblCube_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DDefaultIblBrdfLut_))
+            {
+                bgfx::destroy(opaque3DDefaultIblBrdfLut_);
+                opaque3DDefaultIblBrdfLut_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             mesh3DMaterialBindings_.clear();
@@ -1776,11 +1890,11 @@ class BgfxRenderDevice final : public IRenderDevice {
             // uiSolidQuadProgram, uiSolidWhiteTexture, uiTexColorUniform,
             // sprite2DProgram, base/normal samplers, lighting/normal uniforms,
             // sprite2DDefaultTexture, sprite2DDefaultNormalTexture,
-            // opaque3DProgram/shadowProgram, samplers, shadow matrix/params,
+            // opaque3DProgram/shadowProgram, material/shadow/IBL samplers and uniforms,
             // directional shadow depth texture/framebuffer, opaque3DMrSampler,
             // opaque3D directional/point/spot light arrays + MrParams uniforms, opaque3DDefaultTexture,
-            // opaque3DDefaultMrTexture, opaque3DVertexBuffer, opaque3DIndexBuffer
-            // retirement marker source/readback (+ dynamic mesh/texture slots).
+            // opaque3DDefaultMr/Normal/IBL textures, opaque3DVertexBuffer, opaque3DIndexBuffer,
+            // retirement marker source/readback (+ dynamic mesh/texture/environment slots).
             if (statistics_.liveResources != 0)
             {
                 char path[512]{};
@@ -1831,6 +1945,15 @@ class BgfxRenderDevice final : public IRenderDevice {
                     ++shutdownCompleted;
                 }
             }
+            for (EnvironmentMapSlot& slot : environmentMaps_)
+            {
+                if (slot.retirementPhase != RetirementPhase::None)
+                {
+                    slot.completionPin.release();
+                    slot.retirementPhase = RetirementPhase::None;
+                    ++shutdownCompleted;
+                }
+            }
             if (shutdownCompleted > statistics_.pendingGpuRetirements)
             {
                 std::terminate();
@@ -1841,6 +1964,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             retirementMarkerSupported_ = false;
             textures_.clear();
             meshes_.clear();
+            environmentMaps_.clear();
         }
 
         lease_ = Integration::NativeWindowSurfaceLease{};
@@ -1914,6 +2038,14 @@ class BgfxRenderDevice final : public IRenderDevice {
                 ++waitingCount;
             }
         }
+        for (EnvironmentMapSlot& slot : environmentMaps_)
+        {
+            if (slot.retirementPhase == RetirementPhase::Queued)
+            {
+                slot.retirementPhase = RetirementPhase::Waiting;
+                ++waitingCount;
+            }
+        }
         if (waitingCount != retirementTimeline_.waitingCount())
         {
             std::terminate();
@@ -1967,6 +2099,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             slot.vertexCount = 0;
             slot.indexCount = 0;
+            slot.retirementPhase = RetirementPhase::None;
+            slot.completionPin.release();
+            ++completed;
+        }
+        for (EnvironmentMapSlot& slot : environmentMaps_)
+        {
+            if (slot.retirementPhase != RetirementPhase::Waiting)
+            {
+                continue;
+            }
+            destroyEnvironmentMapNativeResources(slot);
+            slot.specularMipCount = 0;
             slot.retirementPhase = RetirementPhase::None;
             slot.completionPin.release();
             ++completed;
@@ -2284,6 +2428,26 @@ class BgfxRenderDevice final : public IRenderDevice {
                               1.0F;
         }
 
+        bgfx::TextureHandle iblDiffuse = opaque3DDefaultIblCube_;
+        bgfx::TextureHandle iblSpecular = opaque3DDefaultIblCube_;
+        bgfx::TextureHandle iblBrdf = opaque3DDefaultIblBrdfLut_;
+        std::array<float, 4> iblParams{};
+        if (mesh3DImageBasedLighting_.has_value() &&
+            isLiveEnvironmentMap(mesh3DImageBasedLighting_->environmentMap))
+        {
+            const EnvironmentMapSlot& environment =
+                environmentMaps_[mesh3DImageBasedLighting_->environmentMap.index];
+            iblDiffuse = environment.diffuseIrradiance;
+            iblSpecular = environment.prefilteredSpecular;
+            iblBrdf = environment.brdfLut;
+            iblParams = {
+                mesh3DImageBasedLighting_->intensity,
+                static_cast<float>(environment.specularMipCount - 1U),
+                1.0F,
+                mesh3DImageBasedLighting_->rotationRadians,
+            };
+        }
+
         bgfx::setScissor();
         for (const RenderMesh3DBatch& batch : scene.mesh3DBatches())
         {
@@ -2375,6 +2539,9 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setTexture(2, opaque3DNormalSampler_, normalTexture);
             bgfx::setTexture(3, opaque3DShadowSampler_,
                              directionalShadowResources_.depthTexture);
+            bgfx::setTexture(4, opaque3DIblDiffuseSampler_, iblDiffuse);
+            bgfx::setTexture(5, opaque3DIblSpecularSampler_, iblSpecular);
+            bgfx::setTexture(6, opaque3DIblBrdfSampler_, iblBrdf);
             bgfx::setUniform(opaque3DLightDirectionsUniform_, lightDirections->data(),
                              static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
             bgfx::setUniform(opaque3DLightColorsUniform_, lightColors->data(),
@@ -2394,6 +2561,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setUniform(opaque3DShadowMatrixUniform_,
                              shadowSamplingTransform.data());
             bgfx::setUniform(opaque3DShadowParamsUniform_, shadowParams.data());
+            bgfx::setUniform(opaque3DIblParamsUniform_, iblParams.data());
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
         }
     }
@@ -2677,6 +2845,213 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Result<GpuEnvironmentMapId>
+    createEnvironmentMap(const EnvironmentMapUploadDesc& desc) override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::createEnvironmentMap"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (auto status = validateEnvironmentMapUploadDesc(desc); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+
+        constexpr u64 SamplerFlags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_U_CLAMP |
+                                     BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_W_CLAMP;
+        bgfx::TextureHandle diffuse = bgfx::createTextureCube(
+            desc.diffuseFaceSize, false, 1, bgfx::TextureFormat::RGBA16F, SamplerFlags);
+        if (!bgfx::isValid(diffuse))
+        {
+            return Core::failure(RenderErrorCode::InvalidEnvironmentMapUpload,
+                                 "bgfx rejected the diffuse irradiance cubemap");
+        }
+
+        bgfx::TextureHandle specular = bgfx::createTextureCube(
+            desc.specularFaceSize, true, 1, bgfx::TextureFormat::RGBA16F, SamplerFlags);
+        if (!bgfx::isValid(specular))
+        {
+            bgfx::destroy(diffuse);
+            return Core::failure(RenderErrorCode::InvalidEnvironmentMapUpload,
+                                 "bgfx rejected the prefiltered specular cubemap");
+        }
+
+        bgfx::TextureHandle brdf = bgfx::createTexture2D(
+            desc.brdfWidth, desc.brdfHeight, false, 1, bgfx::TextureFormat::RG16F,
+            BGFX_TEXTURE_NONE | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
+            bgfx::copy(desc.brdfRg16FloatPixels.data(),
+                       static_cast<u32>(desc.brdfRg16FloatPixels.size())));
+        if (!bgfx::isValid(brdf))
+        {
+            bgfx::destroy(specular);
+            bgfx::destroy(diffuse);
+            return Core::failure(RenderErrorCode::InvalidEnvironmentMapUpload,
+                                 "bgfx rejected the BRDF integration LUT");
+        }
+
+        constexpr usize FaceCount = 6U;
+        constexpr usize Rgba16FloatBytesPerPixel = 8U;
+        const usize diffuseFaceBytes = static_cast<usize>(desc.diffuseFaceSize) *
+                                       desc.diffuseFaceSize * Rgba16FloatBytesPerPixel;
+        for (u8 face = 0; face < FaceCount; ++face)
+        {
+            const auto pixels = desc.diffuseRgba16FloatPixels.subspan(
+                static_cast<usize>(face) * diffuseFaceBytes, diffuseFaceBytes);
+            bgfx::updateTextureCube(
+                diffuse, 0, face, 0, 0, 0, desc.diffuseFaceSize, desc.diffuseFaceSize,
+                bgfx::copy(pixels.data(), static_cast<u32>(pixels.size())));
+        }
+
+        usize specularOffset = 0;
+        u16 mipExtent = desc.specularFaceSize;
+        for (u8 mip = 0; mip < desc.specularMipCount; ++mip)
+        {
+            const usize faceBytes = static_cast<usize>(mipExtent) * mipExtent *
+                                    Rgba16FloatBytesPerPixel;
+            for (u8 face = 0; face < FaceCount; ++face)
+            {
+                const auto pixels = desc.specularRgba16FloatPixels.subspan(
+                    specularOffset, faceBytes);
+                bgfx::updateTextureCube(
+                    specular, 0, face, mip, 0, 0, mipExtent, mipExtent,
+                    bgfx::copy(pixels.data(), static_cast<u32>(pixels.size())));
+                specularOffset += faceBytes;
+            }
+            mipExtent = static_cast<u16>((std::max)(1U, static_cast<u32>(mipExtent) / 2U));
+        }
+
+        u32 slotIndex = (std::numeric_limits<u32>::max)();
+        for (u32 index = 0; index < static_cast<u32>(environmentMaps_.size()); ++index)
+        {
+            if (environmentMaps_[index].identity.canReuse(
+                    environmentMaps_[index].live,
+                    environmentMaps_[index].retirementPhase != RetirementPhase::None))
+            {
+                slotIndex = index;
+                break;
+            }
+        }
+        if (slotIndex == (std::numeric_limits<u32>::max)())
+        {
+            if (environmentMaps_.size() >= (std::numeric_limits<u32>::max)())
+            {
+                bgfx::destroy(brdf);
+                bgfx::destroy(specular);
+                bgfx::destroy(diffuse);
+                return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                     "EnvironmentMap GPU slot index space is exhausted");
+            }
+            slotIndex = static_cast<u32>(environmentMaps_.size());
+            try
+            {
+                environmentMaps_.push_back(EnvironmentMapSlot{});
+            }
+            catch (const std::bad_alloc&)
+            {
+                bgfx::destroy(brdf);
+                bgfx::destroy(specular);
+                bgfx::destroy(diffuse);
+                return Core::failure(Core::CoreErrorCode::OutOfMemory);
+            }
+            catch (const std::length_error&)
+            {
+                bgfx::destroy(brdf);
+                bgfx::destroy(specular);
+                bgfx::destroy(diffuse);
+                return Core::failure(Core::CoreErrorCode::CapacityExceeded);
+            }
+        }
+
+        EnvironmentMapSlot& slot = environmentMaps_[slotIndex];
+        slot.diffuseIrradiance = diffuse;
+        slot.prefilteredSpecular = specular;
+        slot.brdfLut = brdf;
+        slot.specularMipCount = desc.specularMipCount;
+        slot.live = true;
+        slot.retirementPhase = RetirementPhase::None;
+        statistics_.liveResources += 3U;
+        return GpuEnvironmentMapId{resourceOwnerId(), slotIndex, slot.identity.value()};
+    }
+
+    [[nodiscard]] Core::Status
+    validateEnvironmentMap(GpuEnvironmentMapId environmentMap) const noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::validateEnvironmentMap"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!isLiveEnvironmentMap(environmentMap))
+        {
+            return Core::failure(RenderErrorCode::EnvironmentMapNotFound,
+                                 "EnvironmentMap handle is invalid, stale, or belongs to another device");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status
+    destroyEnvironmentMap(GpuEnvironmentMapId environmentMap) noexcept override
+    {
+        FramePin completionPin;
+        return retireEnvironmentMap(environmentMap, completionPin);
+    }
+
+    [[nodiscard]] Core::Status retireEnvironmentMap(
+        GpuEnvironmentMapId environmentMap, FramePin& completionPin) noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::retireEnvironmentMap"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        const auto disposition = RetirementDetail::selectRetirementDisposition(
+            retirementMarkerSupported_, completionPin.hasValue());
+        if (disposition == RetirementDetail::RetirementDisposition::RejectExternalPin)
+        {
+            return Core::failure(RenderErrorCode::GpuRetirementUnsupported,
+                                 "This bgfx backend cannot retain an external retirement pin");
+        }
+        if (!isLiveEnvironmentMap(environmentMap))
+        {
+            return Core::failure(RenderErrorCode::EnvironmentMapNotFound,
+                                 "EnvironmentMap handle is invalid, stale, or destroyed");
+        }
+
+        EnvironmentMapSlot& slot = environmentMaps_[environmentMap.index];
+        slot.live = false;
+        slot.identity.advanceAfterRelease();
+        if (mesh3DImageBasedLighting_.has_value() &&
+            mesh3DImageBasedLighting_->environmentMap == environmentMap)
+        {
+            mesh3DImageBasedLighting_.reset();
+        }
+
+        if (disposition == RetirementDetail::RetirementDisposition::DestroyImmediately)
+        {
+            destroyEnvironmentMapNativeResources(slot);
+            slot.specularMipCount = 0;
+            slot.retirementPhase = RetirementPhase::None;
+            ++statistics_.completedGpuRetirements;
+            return Core::success();
+        }
+
+        slot.retirementPhase = RetirementPhase::Queued;
+        slot.completionPin = std::move(completionPin);
+        retirementTimeline_.queue();
+        ++statistics_.pendingGpuRetirements;
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status setTexture2DBinding(u32 deviceBindingKey,
                                                    GpuTextureId texture) noexcept override
     {
@@ -2941,6 +3316,41 @@ class BgfxRenderDevice final : public IRenderDevice {
                             textures_[texture.index].identity.value() == texture.generation);
     }
 
+    [[nodiscard]] bool isLiveEnvironmentMap(GpuEnvironmentMapId environmentMap) const noexcept
+    {
+        if (!environmentMap || environmentMap.owner != resourceOwnerId() ||
+            environmentMap.index >= environmentMaps_.size())
+        {
+            return false;
+        }
+        const EnvironmentMapSlot& slot = environmentMaps_[environmentMap.index];
+        return slot.live && slot.identity.value() == environmentMap.generation &&
+               bgfx::isValid(slot.diffuseIrradiance) &&
+               bgfx::isValid(slot.prefilteredSpecular) && bgfx::isValid(slot.brdfLut);
+    }
+
+    void destroyEnvironmentMapNativeResources(EnvironmentMapSlot& slot) noexcept
+    {
+        if (bgfx::isValid(slot.diffuseIrradiance))
+        {
+            bgfx::destroy(slot.diffuseIrradiance);
+            slot.diffuseIrradiance = BGFX_INVALID_HANDLE;
+            --statistics_.liveResources;
+        }
+        if (bgfx::isValid(slot.prefilteredSpecular))
+        {
+            bgfx::destroy(slot.prefilteredSpecular);
+            slot.prefilteredSpecular = BGFX_INVALID_HANDLE;
+            --statistics_.liveResources;
+        }
+        if (bgfx::isValid(slot.brdfLut))
+        {
+            bgfx::destroy(slot.brdfLut);
+            slot.brdfLut = BGFX_INVALID_HANDLE;
+            --statistics_.liveResources;
+        }
+    }
+
     [[nodiscard]] Mesh3DMaterialBindingDesc materialBindingOrDefault(u32 materialKey) const noexcept
     {
         const auto existing = mesh3DMaterialBindings_.find(materialKey);
@@ -3170,6 +3580,46 @@ class BgfxRenderDevice final : public IRenderDevice {
                              mesh3DSpotLightPositionsAndRadii_, mesh3DSpotLightDirectionsAndInnerCosines_,
                              mesh3DSpotLightColorsAndOuterCosines_,
                              mesh3DAmbientScale_);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMesh3DImageBasedLighting(
+        const Mesh3DImageBasedLightingDesc& lighting) noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::setMesh3DImageBasedLighting"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!std::isfinite(lighting.intensity) || lighting.intensity < 0.0F ||
+            !std::isfinite(lighting.rotationRadians))
+        {
+            return Core::failure(RenderErrorCode::InvalidEnvironmentMapUpload,
+                                 "Mesh3D IBL intensity must be non-negative and all scalars finite");
+        }
+        if (!isLiveEnvironmentMap(lighting.environmentMap))
+        {
+            return Core::failure(RenderErrorCode::EnvironmentMapNotFound,
+                                 "Mesh3D IBL requires a live EnvironmentMap from this device");
+        }
+        mesh3DImageBasedLighting_ = lighting;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearMesh3DImageBasedLighting() noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::clearMesh3DImageBasedLighting"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        mesh3DImageBasedLighting_.reset();
         return Core::success();
     }
 
@@ -3469,6 +3919,10 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle opaque3DShadowSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DShadowMatrixUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DShadowParamsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DIblDiffuseSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DIblSpecularSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DIblBrdfSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DIblParamsUniform_ = BGFX_INVALID_HANDLE;
     BgfxDirectionalShadowResources directionalShadowResources_{};
     bgfx::UniformHandle opaque3DSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrSampler_ = BGFX_INVALID_HANDLE;
@@ -3485,6 +3939,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::TextureHandle opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultMrTexture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle opaque3DDefaultIblCube_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle opaque3DDefaultIblBrdfLut_ = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle opaque3DVertexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
@@ -3521,6 +3977,19 @@ class BgfxRenderDevice final : public IRenderDevice {
     };
     std::vector<TextureSlot> textures_{};
     std::unordered_map<u32, GpuTextureId> texture2DBindings_{};
+
+    struct EnvironmentMapSlot final {
+        bgfx::TextureHandle diffuseIrradiance = BGFX_INVALID_HANDLE;
+        bgfx::TextureHandle prefilteredSpecular = BGFX_INVALID_HANDLE;
+        bgfx::TextureHandle brdfLut = BGFX_INVALID_HANDLE;
+        BgfxTextureResourceSlotGeneration identity{};
+        u16 specularMipCount = 0;
+        bool live = false;
+        RetirementPhase retirementPhase = RetirementPhase::None;
+        FramePin completionPin{};
+    };
+    std::vector<EnvironmentMapSlot> environmentMaps_{};
+    std::optional<Mesh3DImageBasedLightingDesc> mesh3DImageBasedLighting_{};
 
     struct MeshSlot final {
         bgfx::VertexBufferHandle vertexBuffer = BGFX_INVALID_HANDLE;

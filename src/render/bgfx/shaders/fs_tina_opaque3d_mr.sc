@@ -2,8 +2,9 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent, v_shadowCoord
 
 #include <bgfx_shader.sh>
 
-// Experimental Opaque3D metallic-roughness hybrid (RENDER-001).
-// Honesty: up to four directional + eight point + eight spot lights and constant ambient; no IBL.
+// Opaque3D metallic-roughness PBR (RENDER-001-IBL).
+// Up to four directional + eight point + eight spot lights, one directional
+// shadow, and one prefiltered image-based lighting environment.
 // One directional light may consume the fixed backend shadow map.
 // Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
@@ -13,6 +14,9 @@ SAMPLER2D(s_texColor, 0);
 SAMPLER2D(s_texMR, 1);
 SAMPLER2D(s_texNormal, 2);
 SAMPLER2DSHADOW(s_shadowMap, 3);
+SAMPLERCUBE(s_iblDiffuse, 4);
+SAMPLERCUBE(s_iblSpecular, 5);
+SAMPLER2D(s_iblBrdf, 6);
 
 // xyz = world-space direction toward light; w = 1 when the slot is active.
 uniform vec4 u_lightDirs[4];
@@ -35,22 +39,90 @@ uniform vec4 u_normalParams;
 // x = receiver depth bias, y = receiver normal bias, z = shadow texel size,
 // w = shadowed directional-light slot + 1 (zero disables sampling).
 uniform vec4 u_shadowParams;
+// x = IBL intensity, y = maximum authored specular mip, z = 1 when enabled,
+// w = environment rotation around world +Y in radians.
+uniform vec4 u_iblParams;
+
+#define TINA_PI 3.14159265359
 
 vec3 safeNormalize(vec3 value)
 {
 	return value * inversesqrt(max(dot(value, value), 0.00000001));
 }
 
-vec3 shadeLight(vec3 N, vec3 V, vec3 L, vec3 lightRgb, vec3 albedo, vec3 F0, float metallic,
+float distributionGgx(vec3 N, vec3 H, float roughness)
+{
+	float alpha = roughness * roughness;
+	float alphaSquared = alpha * alpha;
+	float NdotH = max(dot(N, H), 0.0);
+	float denominator = NdotH * NdotH * (alphaSquared - 1.0) + 1.0;
+	return alphaSquared / max(TINA_PI * denominator * denominator, 0.0000001);
+}
+
+float geometrySchlickGgx(float NdotDirection, float roughness)
+{
+	float r = roughness + 1.0;
+	float k = r * r / 8.0;
+	return NdotDirection / max(NdotDirection * (1.0 - k) + k, 0.0000001);
+}
+
+float geometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
+{
+	return geometrySchlickGgx(max(dot(N, V), 0.0), roughness)
+		* geometrySchlickGgx(max(dot(N, L), 0.0), roughness);
+}
+
+vec3 fresnelSchlick(float cosine, vec3 F0)
+{
+	return F0 + (1.0 - F0) * pow(clamp(1.0 - cosine, 0.0, 1.0), 5.0);
+}
+
+vec3 fresnelSchlickRoughness(float cosine, vec3 F0, float roughness)
+{
+	return F0 + (max(vec3_splat(1.0 - roughness), F0) - F0)
+		* pow(clamp(1.0 - cosine, 0.0, 1.0), 5.0);
+}
+
+vec3 shadeLight(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, vec3 F0, float metallic,
 	float roughness)
 {
+	vec3 H = safeNormalize(V + L);
+	float NdotV = max(dot(N, V), 0.0);
 	float NdotL = max(dot(N, L), 0.0);
-	vec3 H = safeNormalize(L + V);
-	float NdotH = max(dot(N, H), 0.0);
-	vec3 diffuse = albedo * (1.0 - metallic) * NdotL;
-	float shininess = exp2(10.0 * (1.0 - roughness) + 1.0);
-	float specular = pow(NdotH, shininess) * NdotL;
-	return lightRgb * (diffuse + F0 * specular);
+	float HdotV = max(dot(H, V), 0.0);
+	float distribution = distributionGgx(N, H, roughness);
+	float geometry = geometrySmith(N, V, L, roughness);
+	vec3 fresnel = fresnelSchlick(HdotV, F0);
+	vec3 specular = distribution * geometry * fresnel
+		/ max(4.0 * NdotV * NdotL, 0.0000001);
+	vec3 diffuseWeight = (1.0 - fresnel) * (1.0 - metallic);
+	return (diffuseWeight * albedo / TINA_PI + specular) * radiance * NdotL;
+}
+
+vec3 rotateEnvironmentDirection(vec3 direction)
+{
+	float angle = u_iblParams.w;
+	float sine = sin(angle);
+	float cosine = cos(angle);
+	return vec3(cosine * direction.x - sine * direction.z,
+		direction.y,
+		sine * direction.x + cosine * direction.z);
+}
+
+vec3 shadeImageBasedLighting(vec3 N, vec3 V, vec3 albedo, vec3 F0, float metallic,
+	float roughness)
+{
+	float NdotV = max(dot(N, V), 0.0);
+	vec3 fresnel = fresnelSchlickRoughness(NdotV, F0, roughness);
+	vec3 diffuseWeight = (1.0 - fresnel) * (1.0 - metallic);
+	vec3 irradiance = textureCube(s_iblDiffuse, rotateEnvironmentDirection(N)).rgb;
+	vec3 diffuse = irradiance * albedo;
+	vec3 reflection = reflect(-V, N);
+	vec3 prefiltered = textureCubeLod(s_iblSpecular,
+		rotateEnvironmentDirection(reflection), roughness * max(u_iblParams.y, 0.0)).rgb;
+	vec2 brdf = texture2D(s_iblBrdf, vec2(NdotV, roughness)).rg;
+	return (diffuseWeight * diffuse + prefiltered * (fresnel * brdf.x + brdf.y))
+		* max(u_iblParams.x, 0.0);
 }
 
 float sampleDirectionalShadow()
@@ -169,9 +241,15 @@ void main()
 		}
 	}
 
-	float ambientScale = max(u_mrParams.z, 0.0);
-	vec3 ambient = albedo * ambientScale * (1.0 - metallic * 0.6) + F0 * (ambientScale * 0.25);
-	lit += ambient;
+	if (u_iblParams.z > 0.5)
+	{
+		lit += shadeImageBasedLighting(N, V, albedo, F0, metallic, roughness);
+	}
+	else
+	{
+		float ambientScale = max(u_mrParams.z, 0.0);
+		lit += albedo * ambientScale * (1.0 - metallic * 0.6) + F0 * (ambientScale * 0.25);
+	}
 
 	gl_FragColor = vec4(lit, baseColor.a);
 }
