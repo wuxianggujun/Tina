@@ -310,7 +310,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1
 ```
 
-主 gate 在模块测试与 schema 20、`texturesUploaded=3` 产品 sample 后，依次运行 soft/hard shadow
+主 gate 在模块测试与 schema 21、`texturesUploaded=3` 产品 sample 后，依次运行 soft/hard shadow
 差分与 normal-map on/off 四跑（on×2 + off×2）差分。只复验可见差分时可直接运行；两者都是同
 host/backend 证据，不是跨 GPU exact golden：
 

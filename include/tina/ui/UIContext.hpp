@@ -310,6 +310,7 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UIFlowScreenId> replaceFlowScreen(UIFlowScreenId screen);
     [[nodiscard]] Core::Result<UIFlowScreenId> activeFlowScreen(UIFlowLayerId layer) const;
     [[nodiscard]] Core::Result<bool> isFlowScreenActive(UIFlowScreenId screen) const;
+    [[nodiscard]] Core::Result<UIFlowInputDeviceState> flowInputDeviceState() const;
     [[nodiscard]] Core::Status setFlowScreenAction(UIFlowScreenId screen, UIFlowAction action,
                                                    UIFlowActionCallback callback);
     [[nodiscard]] Core::Status clearFlowScreenAction(UIFlowScreenId screen, UIFlowAction action);
@@ -606,6 +607,13 @@ class UIContext final {
     routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
                     UIFlowAction action, UIFlowActionSource source, bool pressed,
                     const Platform::DigitalControlIdentity& control);
+    // Runtime integration records meaningful per-window input transitions in
+    // source order. Releases and analog drift are intentionally not observed.
+    [[nodiscard]] Core::Status
+    observeFlowInputDevice(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                           UIFlowInputDevice device,
+                           std::optional<Platform::GamepadId> gamepad = std::nullopt);
+    [[nodiscard]] UIFlowInputDeviceState flowInputDeviceState() const noexcept;
     // Cycles keyboard focus among visible Targetable Button/Checkbox/RadioButton/TextEdit nodes in paint
     // order. reverse=true moves backward (Shift+Tab). A committed Contain
     // Focus Scope, including Modal, keeps traversal inside its subtree.

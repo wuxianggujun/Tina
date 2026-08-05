@@ -19,6 +19,12 @@ namespace Tina::Runtime::Input {
 namespace {
 
 constexpr usize BitsPerConsumptionWord = sizeof(u64) * 8U;
+constexpr double PointerDeviceSwitchDistanceSquared = 4.0;
+
+struct FlowInputDeviceObservation final {
+    UI::UIFlowInputDevice device = UI::UIFlowInputDevice::KeyboardMouse;
+    std::optional<Platform::GamepadId> gamepad{};
+};
 
 [[nodiscard]] Core::Status invariantFailure(std::string_view message)
 {
@@ -28,6 +34,72 @@ constexpr usize BitsPerConsumptionWord = sizeof(u64) * 8U;
 [[nodiscard]] constexpr usize consumptionWordCount(usize transitionCount) noexcept
 {
     return (transitionCount + BitsPerConsumptionWord - 1U) / BitsPerConsumptionWord;
+}
+
+[[nodiscard]] std::optional<FlowInputDeviceObservation> flowInputDeviceObservation(
+    const Platform::InputTransitionPayload& payload, Platform::WindowId ownerWindow,
+    const UI::UIFlowInputDeviceState& current) noexcept
+{
+    if (const auto* key = std::get_if<Platform::KeyTransition>(&payload);
+        key != nullptr && key->window == ownerWindow &&
+        key->state == Platform::DigitalTransition::Down)
+    {
+        return FlowInputDeviceObservation{};
+    }
+    if (const auto* button = std::get_if<Platform::PointerButtonTransition>(&payload);
+        button != nullptr && button->window == ownerWindow &&
+        button->state == Platform::DigitalTransition::Down)
+    {
+        return FlowInputDeviceObservation{};
+    }
+    if (const auto* move = std::get_if<Platform::PointerMoveTransition>(&payload);
+        move != nullptr && move->window == ownerWindow &&
+        move->deltaX * move->deltaX + move->deltaY * move->deltaY >=
+            PointerDeviceSwitchDistanceSquared)
+    {
+        return FlowInputDeviceObservation{};
+    }
+    if (const auto* wheel = std::get_if<Platform::PointerWheelTransition>(&payload);
+        wheel != nullptr && wheel->window == ownerWindow &&
+        (wheel->deltaX != 0.0 || wheel->deltaY != 0.0))
+    {
+        return FlowInputDeviceObservation{};
+    }
+    if (const auto* button = std::get_if<Platform::GamepadButtonTransition>(&payload);
+        button != nullptr && button->routedWindow == ownerWindow &&
+        button->state == Platform::DigitalTransition::Down)
+    {
+        return FlowInputDeviceObservation{
+            .device = UI::UIFlowInputDevice::Gamepad,
+            .gamepad = button->gamepad,
+        };
+    }
+    if (const auto* text = std::get_if<Platform::TextInputTransition>(&payload);
+        text != nullptr && text->window == ownerWindow)
+    {
+        return FlowInputDeviceObservation{};
+    }
+    if (const auto* composition = std::get_if<Platform::TextCompositionTransition>(&payload);
+        composition != nullptr && composition->window == ownerWindow &&
+        composition->stage != Platform::TextCompositionStage::Cancelled)
+    {
+        return FlowInputDeviceObservation{};
+    }
+    if (const auto* cancel = std::get_if<Platform::InputCancelTransition>(&payload);
+        cancel != nullptr && cancel->routedWindow == ownerWindow &&
+        cancel->gamepad.has_value() && current.device == UI::UIFlowInputDevice::Gamepad &&
+        current.gamepad == cancel->gamepad)
+    {
+        return FlowInputDeviceObservation{};
+    }
+    if (const auto* reset = std::get_if<Platform::InputStreamReset>(&payload);
+        reset != nullptr && (!reset->routedWindow.has_value() ||
+                             *reset->routedWindow == ownerWindow) &&
+        current.device == UI::UIFlowInputDevice::Gamepad)
+    {
+        return FlowInputDeviceObservation{};
+    }
+    return std::nullopt;
 }
 
 [[nodiscard]] bool isValidDigitalTransition(Platform::DigitalTransition state) noexcept
@@ -509,6 +581,21 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
     bool anyConsumed = false;
     for (usize ordinal = 0; ordinal < transitions.size(); ++ordinal)
     {
+        if (const auto observation = flowInputDeviceObservation(
+                transitions[ordinal].payload, context->ownerWindow(),
+                context->flowInputDeviceState());
+            observation.has_value())
+        {
+            Core::Status observed = context->observeFlowInputDevice(
+                platformFrame.id(), transitions[ordinal].sequence,
+                observation->device, observation->gamepad);
+            if (!observed)
+            {
+                Core::Error error = std::move(observed.error());
+                error.addContext("UIInputRouteProducer::produce(flow-input-device)");
+                return Core::failure(std::move(error));
+            }
+        }
         if (const auto* cancel =
                 std::get_if<Platform::InputCancelTransition>(
                     &transitions[ordinal].payload);

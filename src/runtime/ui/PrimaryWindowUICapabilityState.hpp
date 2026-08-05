@@ -77,6 +77,9 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<bool>
     isFlowScreenActive(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
                        UI::UIFlowScreenId screen);
+    [[nodiscard]] Core::Result<UI::UIFlowInputDeviceState>
+    flowInputDeviceState(u64 epoch, PrimaryWindowUIPhase phase,
+                         const UI::UITreeUpdater& updater);
     [[nodiscard]] Core::Status
     setFlowScreenAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                         UI::UIFlowScreenId screen, UI::UIFlowAction action,

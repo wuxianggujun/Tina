@@ -546,6 +546,7 @@ struct UIContext::Impl final {
     usize flowActionInvocationCount = 0;
     usize flowActionCallbackOperationDepth = 0;
     usize flowCapacityFailureCount = 0;
+    UIFlowInputDeviceState observedFlowInputDevice{};
     std::pmr::vector<UIStyleRoleId> styleRolesByNodeIndex;
     Detail::UIStyleSheetStorage styleSheetStorage;
     Detail::UIMotionTrackStorage motionTrackStorage;
@@ -14658,6 +14659,48 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status observeFlowInputDevice(
+        Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+        UIFlowInputDevice device, std::optional<Platform::GamepadId> gamepad)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        if (!platformFrame.hasValue() || sourceSequence == 0 ||
+            sourceSequence <= observedFlowInputDevice.sourceSequence)
+        {
+            return fail(UIErrorCode::InvalidFlowOperation,
+                        "UI Flow input-device observation must be strictly ordered");
+        }
+        if ((device == UIFlowInputDevice::KeyboardMouse && gamepad.has_value()) ||
+            (device == UIFlowInputDevice::Gamepad &&
+             (!gamepad.has_value() || !gamepad->hasValue())))
+        {
+            return fail(UIErrorCode::InvalidFlowOperation,
+                        "UI Flow input-device observation has an invalid Gamepad identity");
+        }
+
+        const bool changed = device != observedFlowInputDevice.device ||
+                             gamepad != observedFlowInputDevice.gamepad;
+        if (changed && observedFlowInputDevice.revision ==
+                           (std::numeric_limits<u64>::max)())
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI Flow input-device revision is exhausted");
+        }
+
+        observedFlowInputDevice.device = device;
+        observedFlowInputDevice.gamepad = gamepad;
+        observedFlowInputDevice.platformFrame = platformFrame;
+        observedFlowInputDevice.sourceSequence = sourceSequence;
+        if (changed)
+        {
+            ++observedFlowInputDevice.revision;
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Result<UIFlowActionRouteResult>
     routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
                     UIFlowAction action, UIFlowActionSource source, bool pressed,
@@ -17234,6 +17277,19 @@ Core::Result<bool> UITreeUpdater::isFlowScreenActive(UIFlowScreenId screen) cons
     return m_context->isFlowScreenActiveFromUpdater(m_root, screen);
 }
 
+Core::Result<UIFlowInputDeviceState> UITreeUpdater::flowInputDeviceState() const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    if (!m_context->isAliveInRoot(m_root, m_root))
+    {
+        return fail(UIErrorCode::InvalidNode, "UI tree updater root is stale");
+    }
+    return m_context->flowInputDeviceState();
+}
+
 Core::Status UITreeUpdater::setFlowScreenAction(UIFlowScreenId screen, UIFlowAction action,
                                                 UIFlowActionCallback callback)
 {
@@ -18535,6 +18591,22 @@ UIContext::routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSe
 {
     return m_impl->routeFlowAction(platformFrame, sourceSequence, action, source, pressed,
                                    control);
+}
+
+Core::Status UIContext::observeFlowInputDevice(
+    Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+    UIFlowInputDevice device, std::optional<Platform::GamepadId> gamepad)
+{
+    return m_impl->observeFlowInputDevice(platformFrame, sourceSequence, device, gamepad);
+}
+
+UIFlowInputDeviceState UIContext::flowInputDeviceState() const noexcept
+{
+    if (!m_impl->isOwnerThread())
+    {
+        return {};
+    }
+    return m_impl->observedFlowInputDevice;
 }
 
 Core::Result<UIContext::UIDefaultFocusStepResult> UIContext::routeDefaultActionFocusStep(bool reverse)

@@ -94,7 +94,7 @@ bgfx 对每个 fragment 计算线性径向衰减。`sourceRadiusMeters=0` 时 fr
 积分或重叠区间 union。
 ambient、上述透明排序、连续 texture batch 与 premultiplied alpha 不变。没有 PointLight2D 组件时维持
 原 unlit 输出，inactive-only 可显式发布 ambient-only。产品 sample 固定创建暖/冷两盏相机内灯、1盏
-永久离屏 active light 与两条遮挡线并逐帧发布；当前 schema 20 继承 schema 19 并断言 `authoredPointLight2DCount=3`、
+永久离屏 active light 与两条遮挡线并逐帧发布；当前 schema 21 继承 schema 19 并断言 `authoredPointLight2DCount=3`、
 `pointLight2DCount=2`、`culledPointLight2DCount=1` 与默认 `softShadowPointLight2DCount=2`，同时继承
 schema 16 的双灯双遮挡 evidence。`RunProduct2dShadowVisualGate.ps1` 对 soft/hard 各重复两次并证明两种
 RGBA8 fingerprint 稳定且不同。角色 Sprite 另带独立3×1 normal atlas；`RunProduct2dNormalMapVisualGate.ps1`
@@ -276,7 +276,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=15`（含2个 cooked chunk 与独立 normal atlas）、`texturesUploaded=3`；
-- `evidenceSchema=20`，继承 schema 19 的 normal-map 产品证据，并要求 `sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
+- `evidenceSchema=21`，继承 schema 20 的 UI Flow 与 schema 19 的 normal-map 产品证据，并要求 `sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
   `pointLight2DCount=2`、`culledPointLight2DCount=1`，并继承 schema 16 的双灯双遮挡证据；
   `shadowOccluder2DCount=2`、`softShadowPointLight2DCount=2`、
   `normalMappedSpriteCount=1`、`sceneLightingFrames=renderExtractions`，并保留 `uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
@@ -287,7 +287,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - `uiFlowLayersRegistered=1`、`uiFlowScreensRegistered=2`；300 帧产品路径要求
   `uiFlowScreenPushes=2`、`uiFlowScreenPops=1`、`pauseUIScreenActivated=true`、
   `baseUIScreenRestored=true`、`uiFlowActionsRegistered=1`、`uiFlowActionsCleared=1`；无人输入 gate 还要求
-  `uiFlowBackActionInvocations=0`、`pauseAutoResumeRequests=1`、`pauseResumeRequestedByAction=false`；
+  `uiFlowBackActionInvocations=0`、`pauseInputDeviceHintUpdates=1`、`pauseInputDeviceRevision=0`、
+  `pauseInputHintKeyboardMouse=true`、`pauseInputHintGamepad=false`、`pauseAutoResumeRequests=1`、
+  `pauseResumeRequestedByAction=false`；
 - `spriteBindingTextures=3`、`spriteTextureLeasesAcquired=3`、
   `spriteTextureRetirementsAccepted=3`、`spriteBindingRegistryReleased=true`、
   `spriteTextureHandlesInvalidated=3`、`spriteTextureRetirementRecords=3`、

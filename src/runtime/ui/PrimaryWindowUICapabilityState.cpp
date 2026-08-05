@@ -526,6 +526,24 @@ PrimaryWindowUICapabilityState::isFlowScreenActive(u64 epoch, PrimaryWindowUIPha
     return *result;
 }
 
+Core::Result<UI::UIFlowInputDeviceState>
+PrimaryWindowUICapabilityState::flowInputDeviceState(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::flowInputDeviceState";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.flowInputDeviceState();
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setFlowScreenAction(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
     UI::UIFlowScreenId screen, UI::UIFlowAction action, UI::UIFlowActionCallback callback)

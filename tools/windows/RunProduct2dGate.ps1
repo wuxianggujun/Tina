@@ -141,7 +141,7 @@ if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
 $requiredProductEvidence = @(
-    'evidenceSchema\":20',
+    'evidenceSchema\":21',
     'sprite2DLightingConfigured\":true',
     'authoredPointLight2DCount\":3',
     'pointLight2DCount\":2',
@@ -171,6 +171,10 @@ $requiredProductEvidence = @(
     'uiFlowActionsRegistered\":1',
     'uiFlowActionsCleared\":1',
     'uiFlowBackActionInvocations\":0',
+    'pauseInputDeviceHintUpdates\":1',
+    'pauseInputDeviceRevision\":0',
+    'pauseInputHintKeyboardMouse\":true',
+    'pauseInputHintGamepad\":false',
     'pauseAutoResumeRequests\":1',
     'pauseResumeRequestedByAction\":false',
     'pauseUIScreenActivated\":true',

@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <memory>
 #include <new>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -79,9 +80,8 @@ class UIFlowScreenId final {
     UINodeId m_node{};
 };
 
-// The first product slice intentionally freezes only the conventional Back
-// action used by Pause. Local-user routing and device prompts remain separate
-// follow-up contracts.
+// The action router intentionally freezes only the conventional Back action
+// used by Pause. Wider product actions remain a separate follow-up contract.
 enum class UIFlowAction : u8 {
     Back,
 };
@@ -89,6 +89,26 @@ enum class UIFlowAction : u8 {
 enum class UIFlowActionSource : u8 {
     Keyboard,
     Gamepad,
+};
+
+// Per-window, single-local-user input category used by product action prompts.
+// Keyboard and pointer share one category because Desktop prompts normally
+// present them as one control scheme. Multi-user assignment remains outside
+// this contract.
+enum class UIFlowInputDevice : u8 {
+    KeyboardMouse,
+    Gamepad,
+};
+
+struct UIFlowInputDeviceState final {
+    UIFlowInputDevice device = UIFlowInputDevice::KeyboardMouse;
+    std::optional<Platform::GamepadId> gamepad{};
+    Platform::PlatformFrameId platformFrame{};
+    u64 sourceSequence = 0;
+    // Changes only when the device category or active Gamepad identity changes.
+    u64 revision = 0;
+
+    auto operator<=>(const UIFlowInputDeviceState&) const = default;
 };
 
 struct UIFlowActionEvent final {

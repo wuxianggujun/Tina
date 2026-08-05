@@ -219,5 +219,109 @@ TEST_F(UIInputRouteProducerTest, OpenDropdownDismissesBeforeFlowBack)
     EXPECT_EQ(invocationCount, 1U);
 }
 
+TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDisconnect)
+{
+    auto producer = createProducer();
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    auto keyboardDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {230},
+            .transitions = {keyDown(window, Platform::Key::A)},
+            .heldKeys = {Platform::Key::A},
+        });
+    ASSERT_TRUE(keyboardDown.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardDown).has_value());
+    EXPECT_EQ(tree.context->flowInputDeviceState().device,
+              UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 0U);
+
+    auto gamepadDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {231},
+            .transitions = {gamepadButtonDown(window, gamepad)},
+            .heldKeys = {Platform::Key::A},
+            .gamepadSnapshots = {heldSouthSnapshot(gamepad, 231)},
+        });
+    ASSERT_TRUE(gamepadDown.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadDown).has_value());
+    EXPECT_EQ(tree.context->flowInputDeviceState().device,
+              UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(tree.context->flowInputDeviceState().gamepad, gamepad);
+    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 1U);
+
+    auto keyboardRelease = buildFrame(
+        *builder, window,
+        {
+            .frameId = {232},
+            .transitions = {keyUp(window, Platform::Key::A)},
+            .gamepadSnapshots = {heldSouthSnapshot(gamepad, 232)},
+        });
+    ASSERT_TRUE(keyboardRelease.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardRelease).has_value());
+    EXPECT_EQ(tree.context->flowInputDeviceState().device,
+              UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 1U);
+
+    auto pointerWheelFrame = buildFrame(
+        *builder, window,
+        {
+            .frameId = {233},
+            .transitions = {pointerWheel(window, 10.0, 10.0, 0.0, 1.0)},
+            .gamepadSnapshots = {heldSouthSnapshot(gamepad, 233)},
+        });
+    ASSERT_TRUE(pointerWheelFrame.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *pointerWheelFrame).has_value());
+    EXPECT_EQ(tree.context->flowInputDeviceState().device,
+              UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 2U);
+
+    auto gamepadRelease = buildFrame(
+        *builder, window,
+        {
+            .frameId = {234},
+            .transitions = {gamepadButtonUp(window, gamepad)},
+            .gamepadSnapshots = {releasedSouthSnapshot(gamepad, 234)},
+        });
+    ASSERT_TRUE(gamepadRelease.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadRelease).has_value());
+    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 2U);
+
+    auto secondGamepadDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {235},
+            .transitions = {gamepadButtonDown(window, gamepad)},
+            .gamepadSnapshots = {heldSouthSnapshot(gamepad, 235)},
+        });
+    ASSERT_TRUE(secondGamepadDown.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *secondGamepadDown).has_value());
+    EXPECT_EQ(tree.context->flowInputDeviceState().device,
+              UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 3U);
+
+    auto disconnect = buildFrame(
+        *builder, window,
+        {
+            .frameId = {236},
+            .transitions = {Platform::InputCancelTransition{
+                .routedWindow = window,
+                .reason = Platform::InputCancelReason::DeviceDisconnected,
+                .gamepad = gamepad,
+            }},
+        });
+    ASSERT_TRUE(disconnect.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *disconnect).has_value());
+    const UI::UIFlowInputDeviceState finalState =
+        tree.context->flowInputDeviceState();
+    EXPECT_EQ(finalState.device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_FALSE(finalState.gamepad.has_value());
+    EXPECT_EQ(finalState.revision, 4U);
+}
+
 } // namespace
 } // namespace Tina::Tests

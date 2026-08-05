@@ -560,9 +560,12 @@ fixed-inline callback，因此 action 注册上限就是 `flowScreenCapacity`，
 Dropdown 处理 dismiss，再将 Keyboard Escape / Gamepad East 的 Down 路由给 committed layout 中最上层 active
 Screen；callback 只记录 intent。被处理 Down 的精确 control 会锁存，匹配 Up 在 Screen pop/destroy 后仍消费，
 避免同一数字 transition 穿透 gameplay；重复 Down 不重复 callback。无 active Screen 或未注册 callback 时不消费。
-路由稳态无分配，每次 Back 最多反向扫描一次 bounded committed layout。首个 consumer 是 2D Pause State：
-基础页面与暂停 Modal 分属两个 Screen，Back intent 在 `updateUI` pop Screen，下一帧再 pop GameState；多本地用户、
-设备提示和 Back 之外的 action-id 仍属于后续子切片。
+路由稳态无分配，每次 Back 最多反向扫描一次 bounded committed layout。per-window 单用户
+`UIFlowInputDeviceState` 将 Keyboard/Pointer 归为 `KeyboardMouse`，Gamepad button Down 切到对应 Gamepad；
+release、手柄 axis drift 不切换，断连/stream reset 回落键鼠。状态以 revision 发布，Runtime phase facade 可查询。
+首个 consumer 是 2D Pause State：基础页面与暂停 Modal 分属两个 Screen，提示标签在
+`ESC TO RESUME` / `B TO RESUME` 间按 revision 更新；Back intent 在 `updateUI` pop Screen，下一帧再 pop
+GameState。多本地用户和 Back 之外的 action-id 仍属于后续子切片。
 
 ## 相关后续任务（状态以 Backlog 为准）
 
@@ -576,7 +579,7 @@ Screen；callback 只记录 intent。被处理 Down 的精确 control 会锁存�
 | `UI-STYLE-001` | Done；强类型 StyleClass/ColorToken、startup registry/value、运行期 reverse-dependency token getter/setter、node-local pseudo-state selector、literal/token-backed BoxFill/imageTint rule、预编译 stylesheet、Runtime facade、固定 workload 与 Integration/Visual 门禁已落地；不做完整 CSS |
 | `UI-MOTION-001` | Done；fixed-capacity paint-only transition、monotonic clock、retarget、reduced-motion、Style BackgroundColor persistent reservation/activation 与 `ui_motion_v1` |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |
-| `UI-FLOW-001` | InProgress：固定容量 Activatable Screen/Layer Stack、Pause Back Action Router 与 2D 产品接入已落地；多本地用户、输入设备提示和更宽 action 集待后续子切片 |
+| `UI-FLOW-001` | InProgress：固定容量 Activatable Screen/Layer Stack、Pause Back Action Router、单用户输入设备提示与 2D 产品接入已落地；多本地用户和更宽 action 集待后续子切片 |
 | `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
 | `SDK-001` | GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装、moved-prefix 与 Ubuntu producer → Debian consumer gate 已落地；待正式 ABI/兼容策略；新增公共 UI 切片后同步扩展 consumer 覆盖 |

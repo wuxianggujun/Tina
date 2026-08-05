@@ -134,7 +134,9 @@ inline constexpr u32 ProductCulledPointLight2DCount =
 inline constexpr u32 ProductShadowOccluder2DCount = 2;
 inline constexpr u32 ProductSoftShadowPointLight2DCount = 2;
 inline constexpr float ProductAmbientLight2DScale = 0.28F;
-inline constexpr u32 ProductEvidenceSchema = 20;
+inline constexpr u32 ProductEvidenceSchema = 21;
+inline constexpr std::string_view PauseKeyboardMouseHint = "ESC TO RESUME";
+inline constexpr std::string_view PauseGamepadHint = "B TO RESUME";
 inline constexpr float ProductWarmLightSourceRadiusMeters = 0.45F;
 inline constexpr float ProductCoolLightSourceRadiusMeters = 0.6F;
 inline constexpr Tina::InputActionId MoveLeftAction{1};
@@ -307,6 +309,10 @@ struct LifecycleCounters final {
     u64 uiFlowActionsRegistered = 0;
     u64 uiFlowActionsCleared = 0;
     u64 uiFlowBackActionInvocations = 0;
+    u64 pauseInputDeviceHintUpdates = 0;
+    u64 pauseInputDeviceRevision = 0;
+    bool pauseInputHintKeyboardMouse = false;
+    bool pauseInputHintGamepad = false;
     u64 pauseAutoResumeRequests = 0;
     bool pauseResumeRequestedByAction = false;
     bool pauseUIScreenActivated = false;
@@ -475,7 +481,7 @@ struct LifecycleCounters final {
 };
 
 inline constexpr u32 ExpectedUIPanelCount = 4;
-inline constexpr u32 ExpectedUITextLabelCount = 11;
+inline constexpr u32 ExpectedUITextLabelCount = 12;
 inline constexpr u32 ExpectedUITextEditCount = 1;
 inline constexpr u32 ExpectedUIButtonCount = 1;
 inline constexpr u32 ExpectedUIProgressBarCount = 1;
@@ -1939,9 +1945,10 @@ class PauseOverlayState final : public Tina::IGameState {
   public:
     PauseOverlayState(LifecycleCounters& counters, Tina::UI::UIRootOwner& uiRoot,
                       Tina::UI::UIFlowLayerId flowLayer, Tina::UI::UIFlowScreenId baseScreen,
-                      Tina::UI::UIFlowScreenId pauseScreen) noexcept
+                      Tina::UI::UIFlowScreenId pauseScreen,
+                      Tina::UI::UINodeId pauseInputHint) noexcept
         : counters_(&counters), uiRoot_(&uiRoot), flowLayer_(flowLayer), baseScreen_(baseScreen),
-          pauseScreen_(pauseScreen)
+          pauseScreen_(pauseScreen), pauseInputHint_(pauseInputHint)
     {
     }
 
@@ -1956,6 +1963,16 @@ class PauseOverlayState final : public Tina::IGameState {
         if (!tree)
         {
             return Tina::Core::failure(std::move(tree.error()));
+        }
+        auto inputDevice = tree->flowInputDeviceState();
+        if (!inputDevice)
+        {
+            return Tina::Core::failure(std::move(inputDevice.error()));
+        }
+        if (auto status = tree->setText(pauseInputHint_, inputDeviceHintText(inputDevice->device));
+            !status)
+        {
+            return status;
         }
         if (auto status = tree->pushFlowScreen(pauseScreen_); !status)
         {
@@ -1989,6 +2006,7 @@ class PauseOverlayState final : public Tina::IGameState {
         }
         ++counters_->uiFlowScreenPushes;
         ++counters_->uiFlowActionsRegistered;
+        recordInputDeviceHint(*inputDevice);
         counters_->pauseUIScreenActivated = true;
         ++counters_->pauseOverlayPushes;
         return Tina::Core::success();
@@ -2029,7 +2047,7 @@ class PauseOverlayState final : public Tina::IGameState {
 
     Tina::Core::Status updateUI(Tina::UIUpdateContext& context) override
     {
-        if (pauseScreenPopped_ || !resumeRequested_)
+        if (pauseScreenPopped_)
         {
             return Tina::Core::success();
         }
@@ -2037,6 +2055,27 @@ class PauseOverlayState final : public Tina::IGameState {
         if (!tree)
         {
             return Tina::Core::failure(std::move(tree.error()));
+        }
+        auto inputDevice = tree->flowInputDeviceState();
+        if (!inputDevice)
+        {
+            return Tina::Core::failure(std::move(inputDevice.error()));
+        }
+        if (!inputDeviceHintPublished_ ||
+            inputDevice->revision != publishedInputDeviceRevision_ ||
+            inputDevice->device != publishedInputDevice_)
+        {
+            if (auto status = tree->setText(
+                    pauseInputHint_, inputDeviceHintText(inputDevice->device));
+                !status)
+            {
+                return status;
+            }
+            recordInputDeviceHint(*inputDevice);
+        }
+        if (!resumeRequested_)
+        {
+            return Tina::Core::success();
         }
         auto popped = tree->popFlowScreen(flowLayer_);
         if (!popped)
@@ -2071,11 +2110,37 @@ class PauseOverlayState final : public Tina::IGameState {
     }
 
   private:
+    [[nodiscard]] static constexpr std::string_view
+    inputDeviceHintText(Tina::UI::UIFlowInputDevice device) noexcept
+    {
+        return device == Tina::UI::UIFlowInputDevice::Gamepad
+                   ? PauseGamepadHint
+                   : PauseKeyboardMouseHint;
+    }
+
+    void recordInputDeviceHint(const Tina::UI::UIFlowInputDeviceState& state) noexcept
+    {
+        publishedInputDevice_ = state.device;
+        publishedInputDeviceRevision_ = state.revision;
+        inputDeviceHintPublished_ = true;
+        ++counters_->pauseInputDeviceHintUpdates;
+        counters_->pauseInputDeviceRevision = state.revision;
+        counters_->pauseInputHintKeyboardMouse =
+            state.device == Tina::UI::UIFlowInputDevice::KeyboardMouse;
+        counters_->pauseInputHintGamepad =
+            state.device == Tina::UI::UIFlowInputDevice::Gamepad;
+    }
+
     LifecycleCounters* counters_ = nullptr;
     Tina::UI::UIRootOwner* uiRoot_ = nullptr;
     Tina::UI::UIFlowLayerId flowLayer_{};
     Tina::UI::UIFlowScreenId baseScreen_{};
     Tina::UI::UIFlowScreenId pauseScreen_{};
+    Tina::UI::UINodeId pauseInputHint_{};
+    Tina::UI::UIFlowInputDevice publishedInputDevice_ =
+        Tina::UI::UIFlowInputDevice::KeyboardMouse;
+    u64 publishedInputDeviceRevision_ = 0;
+    bool inputDeviceHintPublished_ = false;
     bool resumeRequested_ = false;
     bool pauseScreenPopped_ = false;
 };
@@ -2320,6 +2385,19 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(pauseTitle.error()));
         }
+        auto pauseInputHint = tree->createElement(
+            *pauseModal,
+            UI::makeLabelElement(
+                PauseKeyboardMouseHint,
+                absolutePanelStyle(Tina::UI::UILayoutLength::Percent(10.0F),
+                                   Tina::UI::UILayoutLength::Percent(70.0F),
+                                   Tina::UI::UILayoutLength::Percent(80.0F),
+                                   Tina::UI::UILayoutLength::Percent(18.0F))));
+        if (!pauseInputHint)
+        {
+            return Tina::Core::failure(std::move(pauseInputHint.error()));
+        }
+        uiPauseInputHint_ = *pauseInputHint;
 
         auto flowLayer = tree->registerFlowLayer(*flowLayerNode);
         if (!flowLayer)
@@ -2356,7 +2434,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         counters_->uiFlowLayersRegistered = 1;
         counters_->uiFlowScreensRegistered = 2;
         counters_->uiFlowScreenPushes = 1;
-        ++counters_->uiTextLabelsCreated;
+        counters_->uiTextLabelsCreated += 2U;
 
         // Product controls inherit this Theme. Panels and title text keep a small
         // set of intentional hierarchy overrides which applyUITheme() refreshes.
@@ -3557,7 +3635,8 @@ class TileMapBgfxState final : public Tina::IGameState {
             && counters_->frameUpdates + 12U == options_.targetFrameCount)
         {
             if (auto status = context.requestPush(std::make_unique<PauseOverlayState>(
-                    *counters_, uiRoot_, uiFlowLayer_, uiBaseScreen_, uiPauseScreen_));
+                    *counters_, uiRoot_, uiFlowLayer_, uiBaseScreen_, uiPauseScreen_,
+                    uiPauseInputHint_));
                 !status)
             {
                 return status;
@@ -4356,6 +4435,7 @@ class TileMapBgfxState final : public Tina::IGameState {
     Tina::UI::UIFlowLayerId uiFlowLayer_{};
     Tina::UI::UIFlowScreenId uiBaseScreen_{};
     Tina::UI::UIFlowScreenId uiPauseScreen_{};
+    Tina::UI::UINodeId uiPauseInputHint_{};
     std::array<Tina::UI::UINodeId, ExpectedUIPanelCount> uiPanelNodes_{};
     std::array<Tina::UI::UINodeId, 2> uiTitleNodes_{};
     Tina::UI::UINodeId uiThemeButton_{};
@@ -4865,6 +4945,8 @@ int main(int argc, char** argv)
              && counters.uiFlowScreenPushes == 2 && counters.uiFlowScreenPops == 1
              && counters.uiFlowActionsRegistered == 1 && counters.uiFlowActionsCleared == 1
              && counters.uiFlowBackActionInvocations + counters.pauseAutoResumeRequests == 1
+             && counters.pauseInputDeviceHintUpdates >= 1
+             && counters.pauseInputHintKeyboardMouse != counters.pauseInputHintGamepad
              && counters.pauseResumeRequestedByAction ==
                     (counters.uiFlowBackActionInvocations == 1)
              && counters.pauseUIScreenActivated && counters.baseUIScreenRestored;
@@ -4874,7 +4956,10 @@ int main(int argc, char** argv)
         ok = ok && counters.pauseOverlayPushes == 0 && counters.pauseOverlayPops == 0
              && counters.uiFlowScreenPushes == 1 && counters.uiFlowScreenPops == 0
              && counters.uiFlowActionsRegistered == 0 && counters.uiFlowActionsCleared == 0
-             && counters.uiFlowBackActionInvocations == 0 && counters.pauseAutoResumeRequests == 0
+             && counters.uiFlowBackActionInvocations == 0
+             && counters.pauseInputDeviceHintUpdates == 0
+             && !counters.pauseInputHintKeyboardMouse && !counters.pauseInputHintGamepad
+             && counters.pauseAutoResumeRequests == 0
              && !counters.pauseResumeRequestedByAction
              && !counters.pauseUIScreenActivated && !counters.baseUIScreenRestored;
     }
@@ -4965,6 +5050,10 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.uiFlowActionsRegistered);
     appendLeU64(evidenceBytes, counters.uiFlowActionsCleared);
     appendLeU64(evidenceBytes, counters.uiFlowBackActionInvocations);
+    appendLeU64(evidenceBytes, counters.pauseInputDeviceHintUpdates);
+    appendLeU64(evidenceBytes, counters.pauseInputDeviceRevision);
+    appendLeU32(evidenceBytes, counters.pauseInputHintKeyboardMouse ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.pauseInputHintGamepad ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.pauseAutoResumeRequests);
     appendLeU32(evidenceBytes, counters.pauseResumeRequestedByAction ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.pauseUIScreenActivated ? 1U : 0U);
@@ -5129,6 +5218,12 @@ int main(int argc, char** argv)
                   << ",\"uiFlowActionsRegistered\":" << counters.uiFlowActionsRegistered
                   << ",\"uiFlowActionsCleared\":" << counters.uiFlowActionsCleared
                   << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
+                  << ",\"pauseInputDeviceHintUpdates\":" << counters.pauseInputDeviceHintUpdates
+                  << ",\"pauseInputDeviceRevision\":" << counters.pauseInputDeviceRevision
+                  << ",\"pauseInputHintKeyboardMouse\":"
+                  << (counters.pauseInputHintKeyboardMouse ? "true" : "false")
+                  << ",\"pauseInputHintGamepad\":"
+                  << (counters.pauseInputHintGamepad ? "true" : "false")
                   << ",\"pauseAutoResumeRequests\":" << counters.pauseAutoResumeRequests
                   << ",\"pauseResumeRequestedByAction\":"
                   << (counters.pauseResumeRequestedByAction ? "true" : "false")
@@ -5338,6 +5433,12 @@ int main(int argc, char** argv)
               << ",\"uiFlowActionsRegistered\":" << counters.uiFlowActionsRegistered
               << ",\"uiFlowActionsCleared\":" << counters.uiFlowActionsCleared
               << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
+              << ",\"pauseInputDeviceHintUpdates\":" << counters.pauseInputDeviceHintUpdates
+              << ",\"pauseInputDeviceRevision\":" << counters.pauseInputDeviceRevision
+              << ",\"pauseInputHintKeyboardMouse\":"
+              << (counters.pauseInputHintKeyboardMouse ? "true" : "false")
+              << ",\"pauseInputHintGamepad\":"
+              << (counters.pauseInputHintGamepad ? "true" : "false")
               << ",\"pauseAutoResumeRequests\":" << counters.pauseAutoResumeRequests
               << ",\"pauseResumeRequestedByAction\":"
               << (counters.pauseResumeRequestedByAction ? "true" : "false")

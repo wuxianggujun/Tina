@@ -305,8 +305,11 @@ paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟�
 Screen 在 publication 中视为 `Collapsed`，作者样式保持不变。`UIContextCapacityConfig` 的
 `flowLayerCapacity/flowScreenCapacity` 固定注册上限，`UIContextStatistics::flow` 发布 capacity/count/high-water
 与失败/action 计数。`UIContext::routeFlowAction()` 供 Runtime 在 Action mapping 前把 Escape/Gamepad East 的
-Down/Up 路由到 topmost committed active Screen；处理过的 Down/Up 不再进入 gameplay。该切片不包含多本地用户、
-输入设备提示或 Back 之外的 action-id。
+Down/Up 路由到 topmost committed active Screen；处理过的 Down/Up 不再进入 gameplay。
+`UIFlowInputDeviceState` 与 `flowInputDeviceState()` 暴露 per-window 单用户 `KeyboardMouse/Gamepad` 类别、
+active Gamepad、Platform frame/sequence 与仅在类别/identity 改变时递增的 revision；Runtime 通过
+`observeFlowInputDevice()` 按已验证 transition 顺序更新，release 与 axis drift 不切换。该切片不包含
+多本地用户或 Back 之外的 action-id。
 
 `UIImageSource` 只保存 Texture2D `AssetId`、source pixel rect、texture pixel extent 与 intrinsic logical size；
 `UIImageContent` 增加 Fill/Contain/Cover/None、alignment、tint 和 Linear/Nearest sampling。
@@ -777,7 +780,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
 - stylesheet 更广 opacity 等属性面、完整 keyframe timeline 与 layout animation；imageTint、paint-only Motion
   与 ColorToken reverse-dependency 更新已落地；
-- Back 之外的产品 action、多本地用户路由和输入设备提示；
+- Back 之外的产品 action与多本地用户路由；单用户输入设备提示已落地；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
 - 安装 SDK 的正式发布 ABI/兼容策略；Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer

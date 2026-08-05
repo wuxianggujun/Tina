@@ -1,5 +1,7 @@
 #include "UILayoutTestSupport.hpp"
 
+#include <tina/core/id/GenerationPool.hpp>
+
 namespace Tina::Tests {
 namespace {
 
@@ -336,6 +338,61 @@ TEST_F(UILayoutTest, FlowBackActionRoutesOnceAndClaimsItsReleaseAcrossScreenPop)
     EXPECT_EQ(statistics.registeredActionCount, 0U);
     EXPECT_EQ(statistics.actionHighWater, 1U);
     EXPECT_EQ(statistics.actionInvocationCount, 1U);
+}
+
+TEST_F(UILayoutTest, FlowInputDeviceObservationIsOrderedAndRevisioned)
+{
+    auto context = makeContext({
+        .nodeCapacity = 2,
+        .rootCapacity = 1,
+    });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    auto updater = createUpdater(*context, root);
+
+    using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
+    auto poolResult = GamepadPool::Create(1);
+    ASSERT_TRUE(poolResult.has_value());
+    GamepadPool pool = std::move(*poolResult);
+    auto gamepad = pool.tryEmplace(1);
+    ASSERT_TRUE(gamepad.has_value());
+
+    EXPECT_EQ(context->flowInputDeviceState(), UI::UIFlowInputDeviceState{});
+    assertOk(context->observeFlowInputDevice(
+        {1}, 10, UI::UIFlowInputDevice::Gamepad, *gamepad));
+    UI::UIFlowInputDeviceState state = context->flowInputDeviceState();
+    EXPECT_EQ(state.device, UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(state.gamepad, *gamepad);
+    EXPECT_EQ(state.platformFrame, Platform::PlatformFrameId{1});
+    EXPECT_EQ(state.sourceSequence, 10U);
+    EXPECT_EQ(state.revision, 1U);
+    auto updaterState = updater.flowInputDeviceState();
+    ASSERT_TRUE(updaterState.has_value());
+    EXPECT_EQ(*updaterState, state);
+
+    assertOk(context->observeFlowInputDevice(
+        {2}, 11, UI::UIFlowInputDevice::Gamepad, *gamepad));
+    EXPECT_EQ(context->flowInputDeviceState().revision, 1U);
+
+    const Core::Status invalid = context->observeFlowInputDevice(
+        {3}, 12, UI::UIFlowInputDevice::KeyboardMouse, *gamepad);
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, UI::UIErrorCode::InvalidFlowOperation);
+    EXPECT_EQ(context->flowInputDeviceState().sourceSequence, 11U);
+
+    assertOk(context->observeFlowInputDevice(
+        {3}, 12, UI::UIFlowInputDevice::KeyboardMouse));
+    state = context->flowInputDeviceState();
+    EXPECT_EQ(state.device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_FALSE(state.gamepad.has_value());
+    EXPECT_EQ(state.revision, 2U);
+
+    const Core::Status regressed = context->observeFlowInputDevice(
+        {4}, 12, UI::UIFlowInputDevice::KeyboardMouse);
+    ASSERT_FALSE(regressed.has_value());
+    EXPECT_EQ(regressed.error().code, UI::UIErrorCode::InvalidFlowOperation);
+    EXPECT_EQ(context->flowInputDeviceState(), state);
 }
 
 } // namespace

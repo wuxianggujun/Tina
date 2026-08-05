@@ -54,8 +54,12 @@
 callback，注册总量受 `flowScreenCapacity` 约束；Dropdown dismiss 优先，随后仅向 committed layout 中最上层的
 active Screen 路由 `Escape` / Gamepad East。被处理的 Down 锁存精确 physical control，对应 Up 即使 Screen
 已 pop 也继续消费；callback 只记录 intent，树与 State mutation 在合法 frame phase 完成。无 active Screen、
-无 callback 或 callback 未处理前的输入不会从 gameplay 隐藏。该切片不创建第二棵 UI 树，不冻结多本地用户、
-设备提示或任意 action-id 系统；路由只做一次 committed layout 反向线性扫描，稳态无分配。
+无 callback 或 callback 未处理前的输入不会从 gameplay 隐藏。第三个产品切片增加 per-window 单本地用户
+`UIFlowInputDeviceState`：Keyboard/Pointer 合并为 `KeyboardMouse`，有意义的 Down、wheel、明显 pointer move
+与 Gamepad button Down 按 Platform sequence 更新；release、手柄轴漂移不切换，active Gamepad 断连回落键鼠。
+2D Pause 用 revision 驱动真实 `ESC TO RESUME` / `B TO RESUME` 标签。该切片不创建第二棵 UI 树，不冻结
+多本地用户或任意 action-id 系统；Back 路由只做一次 committed layout 反向线性扫描，设备观察为 O(1)，
+二者稳态无分配。
 验收面固定为 `tina_ui_tests --gtest_filter=*Flow*`、
 `tina_runtime_ui_tests --gtest_filter=*FlowBack*:*Dropdown*FlowBack*` 与 `tina_sample_2d --frames=60`；
 完整 product gate 留到同一功能批次最终收口，不作为每次源码编辑的前置步骤。
@@ -66,7 +70,7 @@ active Screen 路由 `Escape` / Gamepad East。被处理的 Down 锁存精确 ph
 | --- | --- | --- |
 | Render | 自研 RHI | bgfx backend 出现无法满足且有 profile/产品证据的明确需求 |
 | Physics | Jolt 3D adapter | 有明确 3D gameplay 场景与性能预算 |
-| UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；逐角半径/圆角子树 clip/backdrop；Back 之外的 action-id、多本地用户与输入设备提示；startup-only 自定义 Behavior SPI | 分别由 `TEXT-001`、`UI-PAINT-002`、`UI-FLOW-001` 后续子切片、`UI-BEHAVIOR-SPI-001` 跟踪；只有真实产品或插件需求并先冻结容量、失败与性能边界后才重新开启 |
+| UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；逐角半径/圆角子树 clip/backdrop；Back 之外的 action-id 与多本地用户；startup-only 自定义 Behavior SPI | 分别由 `TEXT-001`、`UI-PAINT-002`、`UI-FLOW-001` 后续子切片、`UI-BEHAVIOR-SPI-001` 跟踪；只有真实产品或插件需求并先冻结容量、失败与性能边界后才重新开启 |
 | Asset | 热重载、增量 Cooker、在线编辑 | Cooked schema、Lease/retirement 与产品打包稳定 |
 | Task | work stealing、fiber、lock-free 重写 | profile 证明共享有界队列是瓶颈，并新增 ADR |
 | Runtime | 多 World/editor orchestration | 有明确产品/editor 场景，并先冻结 World owner、State TaskGroup barrier 与跨 World 提交/关闭语义 |

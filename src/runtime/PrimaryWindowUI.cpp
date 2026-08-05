@@ -275,6 +275,17 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isFlowScreenActive(UI::UIFlowScre
     return m_state->isFlowScreenActive(m_epoch, m_phase, m_updater, screen);
 }
 
+Core::Result<UI::UIFlowInputDeviceState>
+PrimaryWindowUITreeUpdater::flowInputDeviceState() const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIFlowInputDeviceState>(
+            "PrimaryWindowUITreeUpdater::flowInputDeviceState");
+    }
+    return m_state->flowInputDeviceState(m_epoch, m_phase, m_updater);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setFlowScreenAction(
     UI::UIFlowScreenId screen, UI::UIFlowAction action, UI::UIFlowActionCallback callback)
 {
