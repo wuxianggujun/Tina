@@ -502,6 +502,12 @@ owning immutable `CatalogSnapshot`，此后 staging root 必须保持 immutable�
 validation 失败可保留私有 partial stage 供诊断，但不会触碰 live root。已有目录返回 `AlreadyExists` 且不修改
 其中内容。`publishCatalogPackage()` 仍是 manifest-last 的 best-effort 原地写入，不是多文件替换事务。
 
+`cookAndStageIncrementalCatalogPackage(stagingRoot, baselineRoot, baseline, cleanAssetIds, dirtyRequest, config)`
+只接受已完整验证的 baseline snapshot，并在此前不存在且解析后位于 baseline 外部的 staging root 组装候选包。clean object 从 baseline owning read
+后逐字节复制，不使用 hardlink；dirty asset 使用唯一现行格式 cook。API 在创建 stage 前拒绝重复/冲突 AssetId、平台
+不一致、缺失或错误 kind 依赖、cycle 与无效 TileMap 跨 unit 引用，随后重建 manifest、写入并强制 full content
+validation。成功返回 immutable `CatalogSnapshot`；API 不移动或修改 live root。
+
 `captureCatalogPackageRevision(root, config)` 对完整 manifest bytes 计算固定大小 `ContentHash` revision；
 `pollCatalogPackageChange(root, baseline, config)` 返回 `Unchanged|Changed` 与 candidate revision。检测器只观察
 manifest commit marker，不扫描 object/source，不启动线程，也不会自动推进 baseline。调用方只有在 candidate
@@ -516,7 +522,8 @@ owned output AssetId/kind，并以 Catalog manifest digest + byte size 绑定产
 primary 都直接失败；项目开发期不提供旧 import-state 兼容分支。
 
 `validateSourceImportCatalogBinding(metadata, revision)` 在复用任何旧 cooked object 前确认 import state 与当前
-Catalog manifest 一致；不一致要求 full recook。`planSourceImports(baseline, candidate, config)` 纯比较两个已验证
+Catalog manifest 一致；`validateSourceImportCatalogOutputs(metadata, catalog)` 进一步要求每个 output `(AssetId, kind)`
+与 Catalog entry 一一对应且不存在未归属 entry；任一不一致均禁止复用。`planSourceImports(baseline, candidate, config)` 纯比较两个已验证
 metadata view，按 stable UnitId 输出 `Added`/`Removed`/`Reimport`。target、importer kind/version、settings、source
 membership/path/content/byte size/read extent、primary edge 或 output AssetId/kind 任一变化都会使匹配 unit 整体 `Reimport`；
 同一 source 可被多个 unit 引用，其 fingerprint 变化会标记所有消费者。结果使用调用方 PMR/`maxChanges`，失败
@@ -528,10 +535,12 @@ membership/path/content/byte size/read extent、primary edge 或 output AssetId/
 分别收集 recipe/WAV/generic payload 与 glTF/GLB/external buffer/image provenance。一个 authoring document 当前
 对应一个 stable unit，outputs 覆盖本次 request 的全部资产。`commitSourceImportCandidate()` 生成唯一当前 schema
 并 atomic replace；`tina_assetc` 只在对应 package 完整验证并取得 manifest revision 后调用它。
-`probeCatalogRecipeSourceImportState()` / `probeGltfSourceImportState()` 在 Cooker 前读取 current-only state，验证唯一 unit
-的 current importer contract、Catalog binding、primary 与全部 source fingerprint。返回 `Clean` 时可整包复用；
-`Dirty`/`NoBaseline` 要求 full recook，旧 schema 只形成 cache miss，不进入兼容 parser。当前 API 不启动 watcher，
-也不执行多 unit dirty-unit recook。
+`probeSourceImportUnits()` 对完整预期 UnitId 集合协调 per-unit probe，分别保留 clean unit 并统计 removed unit；
+`probeCatalogRecipeSourceImportState()` / `probeGltfSourceImportState()` 是单描述 wrapper，走同一 batch 逻辑。
+`composeSourceImportCandidate()` 把 baseline clean unit 与本次 recooked candidate 合成唯一 current-schema graph，拒绝
+source fingerprint 冲突、重复 UnitId/output owner 与 target platform 不一致。`tina_assetc` 据此只运行 dirty/added
+importer，再通过 incremental stage API 复制 clean object、移除 removed output 并完整验证 fresh stage。当前 API 不启动 watcher，
+也不物理替换仍在使用的 live root。
 
 `planCatalogChanges(oldCatalog, newCatalog, config)` 比较两个已验证、immutable `CatalogSnapshot`，返回按
 `AssetId` 排序且每 ID 唯一的 `Added`/`Removed`/`Modified`/`Affected` 行。`Modified` 覆盖 entry metadata

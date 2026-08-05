@@ -403,11 +403,6 @@ probeSourceImportUnit(const AssetFormat::SourceImportMetadataView& baseline,
     {
         return dirty(SourceImportProbeReason::CatalogRevisionChanged);
     }
-    if (baseline.header().unitCount != 1U)
-    {
-        return dirty(SourceImportProbeReason::UnitSetChanged);
-    }
-
     const auto unitIndex = findUnitIndex(baseline, desc.expected.unitId);
     if (!unitIndex)
     {
@@ -535,6 +530,85 @@ probeSourceImportUnit(const AssetFormat::SourceImportMetadataView& baseline,
     };
 }
 
+Core::Result<SourceImportBatchProbeResult>
+probeSourceImportUnits(const AssetFormat::SourceImportMetadataView& baseline,
+                       AssetFormat::SourceImportManifestRevision currentCatalogRevision,
+                       std::span<const SourceImportUnitProbeDesc> descs)
+{
+    if (!baseline || !validCatalogRevision(currentCatalogRevision) || descs.empty())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "source import batch probe input is invalid");
+    }
+
+    try
+    {
+        std::vector<AssetFormat::SourceImportUnitId> expectedIds;
+        expectedIds.reserve(descs.size());
+        for (const auto& desc : descs)
+        {
+            if (const auto status = validateProbeDesc(desc); !status)
+            {
+                return Core::failure(status.error());
+            }
+            expectedIds.push_back(desc.expected.unitId);
+        }
+        std::sort(expectedIds.begin(), expectedIds.end());
+        if (std::adjacent_find(expectedIds.begin(), expectedIds.end()) != expectedIds.end())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "source import batch contains duplicate unit ids");
+        }
+
+        SourceImportBatchProbeResult result{};
+        result.units.reserve(descs.size());
+        if (baseline.header().manifestRevision != currentCatalogRevision)
+        {
+            result.units.assign(descs.size(), dirty(SourceImportProbeReason::CatalogRevisionChanged));
+            result.dirtyUnitCount = static_cast<Core::u32>(descs.size());
+            return result;
+        }
+
+        for (Core::u32 unitIndex = 0; unitIndex < baseline.header().unitCount; ++unitIndex)
+        {
+            const auto unit = baseline.unit(unitIndex);
+            if (!unit)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "source import batch baseline unit is missing");
+            }
+            if (!std::binary_search(expectedIds.begin(), expectedIds.end(), unit->unitId))
+            {
+                ++result.removedUnitCount;
+            }
+        }
+
+        for (const auto& desc : descs)
+        {
+            auto unit = probeSourceImportUnit(baseline, currentCatalogRevision, desc);
+            if (!unit)
+            {
+                return Core::failure(std::move(unit.error()));
+            }
+            if (unit->state == SourceImportProbeState::Clean)
+            {
+                ++result.cleanUnitCount;
+                result.cleanObjectCount += unit->cleanObjectCount;
+            }
+            else
+            {
+                ++result.dirtyUnitCount;
+            }
+            result.units.push_back(*unit);
+        }
+        return result;
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "source import batch probe allocation failed");
+    }
+}
+
 Core::Result<SourceImportProbeResult>
 probeSourceImportState(std::string_view stateUtf8Path,
                        AssetFormat::SourceImportManifestRevision currentCatalogRevision,
@@ -549,8 +623,22 @@ probeSourceImportState(std::string_view stateUtf8Path,
     {
         return Core::failure(status.error());
     }
-    return withSourceImportState(stateUtf8Path, [&](const auto& baseline) {
-        return probeSourceImportUnit(baseline, currentCatalogRevision, desc);
+    return withSourceImportState(stateUtf8Path, [&](const auto& baseline) -> Core::Result<SourceImportProbeResult> {
+        if (baseline.header().unitCount != 1U)
+        {
+            return dirty(SourceImportProbeReason::UnitSetChanged);
+        }
+        const std::array descriptions{desc};
+        auto batch = probeSourceImportUnits(baseline, currentCatalogRevision, descriptions);
+        if (!batch)
+        {
+            return Core::failure(std::move(batch.error()));
+        }
+        if (batch->removedUnitCount != 0U)
+        {
+            return dirty(SourceImportProbeReason::UnitSetChanged);
+        }
+        return batch->units.front();
     });
 }
 
@@ -566,13 +654,27 @@ Core::Result<SourceImportProbeResult> probeCatalogRecipeSourceImportState(
                              "source import probe Catalog revision is invalid");
     }
     return withSourceImportState(stateUtf8Path, [&](const auto& baseline) -> Core::Result<SourceImportProbeResult> {
+        if (baseline.header().unitCount != 1U)
+        {
+            return dirty(SourceImportProbeReason::UnitSetChanged);
+        }
         auto desc = makeCatalogRecipeSourceImportProbeDesc(
             sourceRootUtf8, primarySourceUtf8Path, baseline.header().targetPlatform);
         if (!desc)
         {
             return Core::failure(std::move(desc.error()));
         }
-        return probeSourceImportUnit(baseline, currentCatalogRevision, *desc);
+        const std::array descriptions{*desc};
+        auto batch = probeSourceImportUnits(baseline, currentCatalogRevision, descriptions);
+        if (!batch)
+        {
+            return Core::failure(std::move(batch.error()));
+        }
+        if (batch->removedUnitCount != 0U)
+        {
+            return dirty(SourceImportProbeReason::UnitSetChanged);
+        }
+        return batch->units.front();
     });
 }
 

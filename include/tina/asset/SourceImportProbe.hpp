@@ -6,8 +6,10 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/core/hash/ContentHash.hpp>
 
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Tina::Asset {
 
@@ -88,6 +90,15 @@ struct SourceImportProbeResult final {
     Core::u32 cleanObjectCount = 0;
 };
 
+struct SourceImportBatchProbeResult final {
+    // One result per input description, in caller order.
+    std::vector<SourceImportProbeResult> units{};
+    Core::u32 cleanUnitCount = 0;
+    Core::u32 dirtyUnitCount = 0;
+    Core::u32 removedUnitCount = 0;
+    Core::u32 cleanObjectCount = 0;
+};
+
 // These helpers are the single current importer-contract source for both the Cooker and clean
 // probe. normalizedPrimarySourcePath is the canonical source-root-relative metadata locator.
 [[nodiscard]] Core::Result<SourceImportUnitContract>
@@ -116,6 +127,13 @@ makeGltfSourceImportProbeDesc(std::string_view sourceRootUtf8,
 probeSourceImportUnit(const AssetFormat::SourceImportMetadataView& baseline,
                       AssetFormat::SourceImportManifestRevision currentCatalogRevision,
                       const SourceImportUnitProbeDesc& desc);
+
+// Probes an intended unit set against one baseline. Expected UnitIds must be unique. Units absent
+// from the intended set are counted as removed; matching units may still remain clean and reusable.
+[[nodiscard]] Core::Result<SourceImportBatchProbeResult>
+probeSourceImportUnits(const AssetFormat::SourceImportMetadataView& baseline,
+                       AssetFormat::SourceImportManifestRevision currentCatalogRevision,
+                       std::span<const SourceImportUnitProbeDesc> descs);
 
 // Reads and validates the current-only state file. A missing state path is NoBaseline; malformed or
 // unreadable state is an error. The returned metadata view never escapes this call.

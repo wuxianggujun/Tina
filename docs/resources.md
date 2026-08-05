@@ -82,8 +82,8 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 `AssetSystem::reloadCatalogWhenIdle()` 已在其上增加保守的 root 事务：强制完整打开/验证候选 package，生成
 change plan，并仅在 owner thread 且 queue、IO、Store、GPU upload 与 retirement 全部 idle 时原子替换
 root/Catalog。fresh staging package 的完整生成/验证、manifest revision caller-driven polling、tool-side source
-provenance capture、验证后 state commit 与单 unit clean whole-package reuse 已具备；OS watcher、多 unit
-clean/dirty object executor，以及 live Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
+provenance capture、验证后 state commit、多 unit clean/dirty fresh-stage executor 与 all-clean 零改写复用已具备；
+OS watcher 以及 live Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
 
 `captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
 `pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
@@ -111,14 +111,18 @@ glTF 入口收集主 glTF/GLB、external buffer 的声明消费前缀与 externa
 buffer 与 bufferView image 不制造伪外部 source。每个 authoring document 当前形成一个 unit，显式 authoring root
 产生 canonical root-relative path；request-only 产品入口只是同一内部实现的薄投影，不保留第二套旧读取链。
 
-`tina_assetc --source-root <root> --import-state <state>` 在 recipe/glTF 模式启用该链路。执行 Cooker 前，工具先核对
-现有 manifest revision、单 import unit 的 current importer contract、primary locator 与所有已记录 source fingerprint：
+`tina_assetc --source-root <root> --import-state <state>` 在 recipe/glTF 模式启用该链路，`--recipe`/`--gltf`
+可重复并混合为一个 batch。执行 Cooker 前，工具先核对现有 manifest revision、完整 output ownership，以及每个预期
+import unit 的 current importer contract、primary locator 与所有已记录 source fingerprint：
 `WholeFile` 要求完整 size/hash 一致，`Prefix` 只重读先前实际消费的 byte 数。全部 clean 时整包复用，返回
 `cookMode=clean-reuse`，不解析 recipe/cgltf，不读取 cooked object，也不重写 manifest/object/state；旧 schema、
-revision/contract/source 变化则进入 `full-recook`。完整 recook 后仍先完整打开/验证 Catalog package，再捕获 revision，
-最后用 sibling-temp + rename 原子替换 state；任一步失败都不提交候选 state。state 必须位于 tool cache，不能放进
-部署 Catalog root。当前完成的是单 unit clean whole-package reuse；仍没有 OS watcher、dirty-unit executor 与多 unit
-clean/dirty object 拼装，因此不能描述为完整自动增量 Cooker 已完成。
+revision/contract/source 变化，或 unit Added/Removed 时，只有 dirty/added unit 运行 importer；clean unit 的 cooked bytes
+从已完整验证的 baseline 逐字节复制，removed unit 不进入候选包。mixed 结果只能写入调用方指定且此前不存在的
+`--stage-out`，重建完整 manifest 并 full validate 后，才把与该 stage revision 绑定的 state 写到
+`--stage-import-state`；stage root 必须位于 live root 外部，candidate state 必须此前不存在且位于 live/stage root 外部。
+该过程不修改 `--out` live root 或旧 state，也不把 fresh stage 物理替换成固定 live 目录；Runtime
+通过 `reloadCatalogWhenIdle(stageRoot)` 接受 immutable stage。state 必须位于 tool cache，不能放进部署 Catalog root。
+当前仍没有 OS watcher 与 active Handle/Lease/GPU owner 增量迁移，因此不能描述为完整自动热重载已完成。
 
 ## 身份、视图与所有权
 
@@ -310,6 +314,8 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 - `cookAndStageCatalogPackage()` 只在此前不存在的私有 root 写入，并在返回前强制完整验证；验证成功后通过
   AssetSystem root 切换发布。`publishCatalogPackage()` 只是 manifest-last 的 best-effort 原地写入，不提供
   多文件事务保证；
+- `cookAndStageIncrementalCatalogPackage()` 把 baseline clean object 逐字节复制到 fresh stage，并只 cook dirty
+  request；clean/dirty ID、平台、依赖图、TileMap 跨 unit 引用与完整 package validation 任一步失败都不触碰 live root；
 - glTF/GLB 主路径与 percent-decoded 外部 URI 必须是 strict UTF-8 且不含 NUL；外部 URI 拒绝 scheme、
   绝对/rooted path 与 `..`；
 - 主文件、外部 buffer/image 均只从一次打开的 handle/fd 读取内存快照。外部文件以打开后的最终路径
@@ -327,8 +333,8 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - `ASSET-002` 已有 manifest revision polling、immutable Catalog change planner、fresh staging package 生成/验证与
   idle-safe root/Catalog commit，并已建立 current-only source import metadata wire、Catalog binding 与纯 import
-  planner；真实 importer provenance capture、validated state commit 与单 unit clean whole-package reuse 已接入。
-  OS watcher、多 unit clean/dirty object executor，以及 active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
+  planner；真实 importer provenance capture、validated state commit、多 unit mixed fresh-stage executor 与 all-clean
+  零改写复用已接入。OS watcher 以及 active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重

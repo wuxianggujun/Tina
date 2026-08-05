@@ -5,6 +5,7 @@
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageLoad.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
+#include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -297,6 +298,154 @@ TEST(CatalogCookTests, StagedCatalogsFeedDeterministicChangePlanning)
 
     removeDirectory(baselineRoot);
     removeDirectory(changedRoot);
+}
+
+TEST(CatalogCookTests, IncrementalStageCopiesCleanBytesAndCooksDirtyAssets)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto baselineRoot = std::filesystem::temp_directory_path() / "tina_catalog_incremental_baseline";
+    const auto stageRoot = std::filesystem::temp_directory_path() / "tina_catalog_incremental_stage";
+    removeDirectory(baselineRoot);
+    removeDirectory(stageRoot);
+
+    auto baseline = cookAndStageCatalogPackage(toUtf8(baselineRoot), makeTextureMaterialRequest(),
+                                               makeStageConfig(memory));
+    ASSERT_TRUE(baseline.has_value()) << baseline.error().message;
+
+    auto dirtyRequest = makeTextureMaterialRequest();
+    dirtyRequest.assets.erase(dirtyRequest.assets.begin());
+    dirtyRequest.assets.front().payload = {std::byte{'n'}, std::byte{'e'}, std::byte{'w'}};
+    const std::array cleanAssetIds{textureId};
+    auto staged = cookAndStageIncrementalCatalogPackage(
+        toUtf8(stageRoot), toUtf8(baselineRoot), *baseline, cleanAssetIds, dirtyRequest,
+        makeStageConfig(memory));
+    ASSERT_TRUE(staged.has_value()) << staged.error().message;
+    EXPECT_EQ(staged->entryCount(), 2U);
+    EXPECT_EQ(staged->dependencyCount(), 1U);
+
+    auto loadConfig = makeStageConfig(memory).validation.validation.file;
+    auto baselineTexture = loadCookedAssetFromCatalog(toUtf8(baselineRoot), *baseline, textureId,
+                                                       loadConfig);
+    auto stagedTexture = loadCookedAssetFromCatalog(toUtf8(stageRoot), *staged, textureId, loadConfig);
+    ASSERT_TRUE(baselineTexture.has_value()) << baselineTexture.error().message;
+    ASSERT_TRUE(stagedTexture.has_value()) << stagedTexture.error().message;
+    ASSERT_EQ(baselineTexture->bytes().size(), stagedTexture->bytes().size());
+    EXPECT_TRUE(std::equal(baselineTexture->bytes().begin(), baselineTexture->bytes().end(),
+                           stagedTexture->bytes().begin()));
+
+    auto stagedMaterial = loadCookedAssetFromCatalog(toUtf8(stageRoot), *staged, materialId, loadConfig);
+    ASSERT_TRUE(stagedMaterial.has_value()) << stagedMaterial.error().message;
+    ASSERT_EQ(stagedMaterial->payload().size(), 3U);
+    EXPECT_EQ(stagedMaterial->payload()[0], std::byte{'n'});
+
+    removeDirectory(baselineRoot);
+    removeDirectory(stageRoot);
+}
+
+TEST(CatalogCookTests, IncrementalStageRejectsCleanDirtyAssetIdCollisionBeforeCreatingRoot)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto baselineRoot = std::filesystem::temp_directory_path() / "tina_catalog_incremental_dup_base";
+    const auto stageRoot = std::filesystem::temp_directory_path() / "tina_catalog_incremental_dup_stage";
+    removeDirectory(baselineRoot);
+    removeDirectory(stageRoot);
+
+    auto baseline = cookAndStageCatalogPackage(toUtf8(baselineRoot), makeTextureMaterialRequest(),
+                                               makeStageConfig(memory));
+    ASSERT_TRUE(baseline.has_value()) << baseline.error().message;
+    const std::array cleanAssetIds{textureId};
+
+    auto staged = cookAndStageIncrementalCatalogPackage(
+        toUtf8(stageRoot), toUtf8(baselineRoot), *baseline, cleanAssetIds,
+        makeTextureMaterialRequest(std::byte{'u'}), makeStageConfig(memory));
+    ASSERT_FALSE(staged.has_value());
+    EXPECT_EQ(staged.error().code, AssetErrorCode::InvalidCatalogConfig);
+    EXPECT_FALSE(std::filesystem::exists(stageRoot));
+
+    removeDirectory(baselineRoot);
+}
+
+TEST(CatalogCookTests, IncrementalStageRejectsBaselinePlatformMismatchBeforeCreatingRoot)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto baselineRoot = std::filesystem::temp_directory_path() / "tina_catalog_incremental_platform_base";
+    const auto stageRoot = std::filesystem::temp_directory_path() / "tina_catalog_incremental_platform_stage";
+    removeDirectory(baselineRoot);
+    removeDirectory(stageRoot);
+
+    auto baseline = cookAndStageCatalogPackage(toUtf8(baselineRoot), makeTextureMaterialRequest(),
+                                               makeStageConfig(memory));
+    ASSERT_TRUE(baseline.has_value()) << baseline.error().message;
+    auto dirtyRequest = makeTextureMaterialRequest();
+    dirtyRequest.assets.erase(dirtyRequest.assets.begin());
+    dirtyRequest.targetPlatform = AssetFormat::TargetPlatform::LinuxX64;
+    const std::array cleanAssetIds{textureId};
+
+    auto staged = cookAndStageIncrementalCatalogPackage(
+        toUtf8(stageRoot), toUtf8(baselineRoot), *baseline, cleanAssetIds, dirtyRequest,
+        makeStageConfig(memory));
+    ASSERT_FALSE(staged.has_value());
+    EXPECT_EQ(staged.error().code, AssetErrorCode::CatalogEntryMismatch);
+    EXPECT_FALSE(std::filesystem::exists(stageRoot));
+
+    removeDirectory(baselineRoot);
+}
+
+TEST(CatalogCookTests, IncrementalStageRejectsStageInsideBaselinePackage)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto baselineRoot = std::filesystem::temp_directory_path() / "tina_catalog_incremental_nested_base";
+    const auto stageRoot = baselineRoot / "candidate";
+    removeDirectory(baselineRoot);
+
+    auto baseline = cookAndStageCatalogPackage(toUtf8(baselineRoot), makeTextureMaterialRequest(),
+                                               makeStageConfig(memory));
+    ASSERT_TRUE(baseline.has_value()) << baseline.error().message;
+    auto dirtyRequest = makeTextureMaterialRequest();
+    dirtyRequest.assets.erase(dirtyRequest.assets.begin());
+    const std::array cleanAssetIds{textureId};
+
+    auto staged = cookAndStageIncrementalCatalogPackage(
+        toUtf8(stageRoot), toUtf8(baselineRoot), *baseline, cleanAssetIds, dirtyRequest,
+        makeStageConfig(memory));
+    ASSERT_FALSE(staged.has_value());
+    EXPECT_EQ(staged.error().code, AssetErrorCode::InvalidCatalogConfig);
+    EXPECT_FALSE(std::filesystem::exists(stageRoot));
+
+    removeDirectory(baselineRoot);
+}
+
+TEST(CatalogCookTests, IncrementalStageRejectsMissingDependencyBeforeCreatingRoot)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto missingId = *Core::AssetId::fromBytes(idBytes(9U));
+    const auto baselineRoot = std::filesystem::temp_directory_path() / "tina_catalog_incremental_dep_base";
+    const auto stageRoot = std::filesystem::temp_directory_path() / "tina_catalog_incremental_dep_stage";
+    removeDirectory(baselineRoot);
+    removeDirectory(stageRoot);
+
+    auto baseline = cookAndStageCatalogPackage(toUtf8(baselineRoot), makeTextureMaterialRequest(),
+                                               makeStageConfig(memory));
+    ASSERT_TRUE(baseline.has_value()) << baseline.error().message;
+    auto dirtyRequest = makeTextureMaterialRequest();
+    dirtyRequest.assets.erase(dirtyRequest.assets.begin());
+    dirtyRequest.assets.front().dependencies.front().assetId = missingId;
+    const std::array cleanAssetIds{textureId};
+
+    auto staged = cookAndStageIncrementalCatalogPackage(
+        toUtf8(stageRoot), toUtf8(baselineRoot), *baseline, cleanAssetIds, dirtyRequest,
+        makeStageConfig(memory));
+    ASSERT_FALSE(staged.has_value());
+    EXPECT_EQ(staged.error().code, AssetFormat::AssetFormatErrorCode::MissingDependency);
+    EXPECT_FALSE(std::filesystem::exists(stageRoot));
+
+    removeDirectory(baselineRoot);
 }
 
 TEST(CatalogCookTests, InlineTexture2dAndSpriteRecipe)

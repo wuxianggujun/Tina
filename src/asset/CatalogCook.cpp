@@ -5,6 +5,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackagePublish.hpp>
+#include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset/SourceImportProbe.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
@@ -28,6 +29,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cwctype>
 #include <filesystem>
 #include <memory_resource>
 #include <new>
@@ -43,6 +45,24 @@ struct CookedPackage final {
     CatalogCookResult summary{};
     std::vector<CatalogPackageObjectBlob> objectViews{};
     std::vector<std::vector<std::byte>> objectStorage{};
+};
+
+struct CookAssetValidationView final {
+    AssetFormat::AssetKind assetKind = AssetFormat::AssetKind::Invalid;
+    Core::AssetId assetId{};
+    Core::u16 assetTypeVersion = 0;
+    std::span<const std::byte> payload{};
+    std::span<const AssetFormat::CookedAssetWriteDependency> dependencies{};
+};
+
+struct IncrementalCookEntry final {
+    AssetFormat::AssetKind assetKind = AssetFormat::AssetKind::Invalid;
+    Core::AssetId assetId{};
+    Core::u16 assetTypeVersion = 0;
+    Core::ContentHash contentHash{};
+    std::span<const std::byte> payload{};
+    std::span<const std::byte> objectBytes{};
+    std::vector<AssetFormat::CookedAssetWriteDependency> dependencies{};
 };
 
 struct RecipeSourceCaptureContext final {
@@ -865,17 +885,83 @@ parseSpriteAnimationInline(const std::vector<std::string>& tokens)
     };
 }
 
-[[nodiscard]] const CatalogCookAssetSpec*
-findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetId) noexcept
+[[nodiscard]] const CookAssetValidationView*
+findCookAsset(std::span<const CookAssetValidationView> assets, Core::AssetId assetId) noexcept
 {
     const auto found = std::lower_bound(
         assets.begin(), assets.end(), assetId,
-        [](const CatalogCookAssetSpec& candidate, Core::AssetId id) { return candidate.assetId < id; });
+        [](const CookAssetValidationView& candidate, Core::AssetId id) { return candidate.assetId < id; });
     return found != assets.end() && found->assetId == assetId ? &*found : nullptr;
 }
 
-[[nodiscard]] Core::Status validateTileMapCookAsset(const CatalogCookAssetSpec& tileMapAsset,
-                                                     std::span<const CatalogCookAssetSpec> assets)
+[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
+                                       const std::filesystem::path& right) noexcept
+{
+#if defined(_WIN32)
+    const auto& leftText = left.native();
+    const auto& rightText = right.native();
+    return leftText.size() == rightText.size() &&
+           std::equal(leftText.begin(), leftText.end(), rightText.begin(),
+                      [](wchar_t leftCharacter, wchar_t rightCharacter) {
+                          return std::towlower(leftCharacter) == std::towlower(rightCharacter);
+                      });
+#else
+    return left == right;
+#endif
+}
+
+[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
+                                          const std::filesystem::path& ancestor) noexcept
+{
+    auto candidatePart = candidate.begin();
+    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
+         ++ancestorPart, ++candidatePart)
+    {
+        if (candidatePart == candidate.end() || !pathComponentEquals(*candidatePart, *ancestorPart))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] Core::Status validateStageOutsideBaseline(std::string_view stagingRootUtf8,
+                                                        std::string_view baselineRootUtf8)
+{
+    try
+    {
+        std::error_code errorCode;
+        const auto stage = std::filesystem::weakly_canonical(
+            Detail::pathFromUtf8Bytes(stagingRootUtf8), errorCode);
+        if (errorCode)
+        {
+            return Core::failure(makeStageFilesystemError("failed to resolve staging root", errorCode));
+        }
+        const auto baseline = std::filesystem::weakly_canonical(
+            Detail::pathFromUtf8Bytes(baselineRootUtf8), errorCode);
+        if (errorCode)
+        {
+            return Core::failure(makeStageFilesystemError("failed to resolve baseline root", errorCode));
+        }
+        if (pathIsSameOrDescendant(stage.lexically_normal(), baseline.lexically_normal()))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "staging root must be outside the baseline package");
+        }
+        return Core::success();
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "catalog package path validation allocation failed");
+    } catch (const std::filesystem::filesystem_error& exception)
+    {
+        return Core::failure(makeStageFilesystemError(
+            "catalog package path validation failed", exception.code()));
+    }
+}
+
+[[nodiscard]] Core::Status validateTileMapCookAsset(const CookAssetValidationView& tileMapAsset,
+                                                     std::span<const CookAssetValidationView> assets)
 {
     if (tileMapAsset.assetTypeVersion != AssetFormat::TileMapWire::SchemaVersion)
     {
@@ -919,7 +1005,7 @@ findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetI
                              "tilemap cook asset requires exactly one required Tileset dependency");
     }
 
-    const CatalogCookAssetSpec* tilesetAsset = findCookAsset(assets, tilesetDependency->assetId);
+    const CookAssetValidationView* tilesetAsset = findCookAsset(assets, tilesetDependency->assetId);
     if (tilesetAsset == nullptr || tilesetAsset->assetKind != AssetFormat::AssetKind::Tileset ||
         tilesetAsset->assetTypeVersion != AssetFormat::TilesetWire::SchemaVersion)
     {
@@ -979,7 +1065,7 @@ findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetI
                 return Core::failure(AssetErrorCode::CatalogEntryMismatch,
                                      "tilemap chunk ref is missing a deferred chunk dependency");
             }
-            const CatalogCookAssetSpec* chunkAsset = findCookAsset(assets, ref->chunkAssetId);
+            const CookAssetValidationView* chunkAsset = findCookAsset(assets, ref->chunkAssetId);
             if (chunkAsset == nullptr || chunkAsset->assetKind != AssetFormat::AssetKind::TileMapChunk ||
                 chunkAsset->assetTypeVersion != AssetFormat::TileMapChunkWire::SchemaVersion)
             {
@@ -1021,7 +1107,8 @@ findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetI
     return Core::success();
 }
 
-[[nodiscard]] Core::Result<CookedPackage> cookPackageInternal(const CatalogCookRequest& request)
+[[nodiscard]] Core::Result<CookedPackage> cookPackageInternal(const CatalogCookRequest& request,
+                                                               bool validateTileMaps = true)
 {
     if (request.assets.empty())
     {
@@ -1055,13 +1142,29 @@ findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetI
             }
         }
     }
+    std::vector<CookAssetValidationView> validationViews;
+    validationViews.reserve(sorted.size());
     for (const CatalogCookAssetSpec& asset : sorted)
     {
-        if (asset.assetKind == AssetFormat::AssetKind::TileMap)
+        validationViews.push_back(CookAssetValidationView{
+            .assetKind = asset.assetKind,
+            .assetId = asset.assetId,
+            .assetTypeVersion = asset.assetTypeVersion,
+            .payload = asset.payload,
+            .dependencies = asset.dependencies,
+        });
+    }
+    if (validateTileMaps)
+    {
+        for (const CookAssetValidationView& asset : validationViews)
         {
-            if (auto status = validateTileMapCookAsset(asset, sorted); !status)
+            if (asset.assetKind == AssetFormat::AssetKind::TileMap)
             {
-                return Core::failure(std::move(status.error()).withContext("cookCatalogPackage", "validateTileMap"));
+                if (auto status = validateTileMapCookAsset(asset, validationViews); !status)
+                {
+                    return Core::failure(
+                        std::move(status.error()).withContext("cookCatalogPackage", "validateTileMap"));
+                }
             }
         }
     }
@@ -1194,6 +1297,323 @@ cookAndStageCatalogPackage(std::string_view stagingRootUtf8, const CatalogCookRe
         return Core::failure(std::move(catalog.error()).withContext("cookAndStageCatalogPackage", "validate"));
     }
     return std::move(*catalog);
+}
+
+Core::Result<CatalogSnapshot>
+cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
+                                      std::string_view baselineRootUtf8,
+                                      const CatalogSnapshot& baseline,
+                                      std::span<const Core::AssetId> cleanAssetIds,
+                                      const CatalogCookRequest& dirtyRequest,
+                                      CatalogPackageStageConfig config)
+{
+    if (config.validation.manifest.catalog.memoryResource == nullptr ||
+        config.validation.validation.file.memoryResource == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "incremental catalog staging requires validation memory resources");
+    }
+    if (stagingRootUtf8.empty() || !Core::isStrictUtf8WithoutNul(stagingRootUtf8))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "incremental catalog staging root is invalid");
+    }
+    if (dirtyRequest.targetPlatform == AssetFormat::TargetPlatform::Invalid)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "incremental catalog staging requires target platform");
+    }
+    if (!cleanAssetIds.empty() &&
+        (!baseline || baselineRootUtf8.empty() || !Core::isStrictUtf8WithoutNul(baselineRootUtf8)))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "incremental catalog staging requires a valid baseline package");
+    }
+    if (cleanAssetIds.empty() && dirtyRequest.assets.empty())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "incremental catalog staging requires at least one clean or dirty asset");
+    }
+    if (!baselineRootUtf8.empty())
+    {
+        if (const auto status = validateStageOutsideBaseline(stagingRootUtf8, baselineRootUtf8);
+            !status)
+        {
+            return Core::failure(status.error());
+        }
+    }
+
+    try
+    {
+        std::vector<Core::AssetId> sortedCleanIds(cleanAssetIds.begin(), cleanAssetIds.end());
+        std::sort(sortedCleanIds.begin(), sortedCleanIds.end());
+        for (std::size_t index = 0; index < sortedCleanIds.size(); ++index)
+        {
+            if (!sortedCleanIds[index])
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "clean catalog asset id is invalid");
+            }
+            if (index > 0U && !(sortedCleanIds[index - 1U] < sortedCleanIds[index]))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "duplicate clean AssetId in incremental catalog request");
+            }
+        }
+
+        std::optional<CookedPackage> dirtyPackage;
+        if (!dirtyRequest.assets.empty())
+        {
+            auto cooked = cookPackageInternal(dirtyRequest, false);
+            if (!cooked)
+            {
+                return Core::failure(
+                    std::move(cooked.error()).withContext("cookAndStageIncrementalCatalogPackage", "cookDirty"));
+            }
+            dirtyPackage.emplace(std::move(*cooked));
+        }
+
+        std::vector<std::vector<std::byte>> cleanObjectStorage;
+        cleanObjectStorage.reserve(sortedCleanIds.size());
+        std::vector<IncrementalCookEntry> entries;
+        entries.reserve(sortedCleanIds.size() + dirtyRequest.assets.size());
+
+        auto cleanLoadConfig = config.validation.validation.file;
+        cleanLoadConfig.verifyContentHash = true;
+        for (const Core::AssetId cleanAssetId : sortedCleanIds)
+        {
+            const auto entryIndex = baseline.find(cleanAssetId);
+            if (!entryIndex)
+            {
+                return Core::failure(Core::CoreErrorCode::NotFound,
+                                     "clean AssetId is not present in the baseline catalog");
+            }
+            const auto baselineEntry = baseline.entry(*entryIndex);
+            if (!baselineEntry)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "baseline catalog entry is missing after find");
+            }
+
+            auto cleanObject = loadCookedAssetFromCatalog(baselineRootUtf8, baseline, cleanAssetId,
+                                                           cleanLoadConfig);
+            if (!cleanObject)
+            {
+                return Core::failure(std::move(cleanObject.error()).withContext(
+                    "cookAndStageIncrementalCatalogPackage", "loadCleanObject"));
+            }
+            if (cleanObject->header().targetPlatform != dirtyRequest.targetPlatform)
+            {
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "clean and dirty catalog target platforms do not match");
+            }
+            if (cleanObject->header().dependencyCount != baselineEntry->dependencyCount)
+            {
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "clean cooked object dependencies do not match the baseline catalog");
+            }
+
+            std::vector<AssetFormat::CookedAssetWriteDependency> dependencies;
+            dependencies.reserve(baselineEntry->dependencyCount);
+            for (Core::u32 dependencyIndex = 0; dependencyIndex < baselineEntry->dependencyCount;
+                 ++dependencyIndex)
+            {
+                const auto baselineDependency = baseline.dependency(*entryIndex, dependencyIndex);
+                const auto objectDependency = cleanObject->dependency(dependencyIndex);
+                if (!baselineDependency || !objectDependency ||
+                    baselineDependency->assetId != objectDependency->assetId ||
+                    baselineDependency->expectedKind != objectDependency->expectedKind ||
+                    baselineDependency->flags != objectDependency->flags)
+                {
+                    return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                         "clean cooked object dependencies do not match the baseline catalog");
+                }
+                dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                    .assetId = baselineDependency->assetId,
+                    .expectedKind = baselineDependency->expectedKind,
+                    .flags = baselineDependency->flags,
+                });
+            }
+
+            cleanObjectStorage.emplace_back(cleanObject->bytes().begin(), cleanObject->bytes().end());
+            auto retainedObject = AssetFormat::parseCookedAssetView(cleanObjectStorage.back());
+            if (!retainedObject)
+            {
+                return Core::failure(std::move(retainedObject.error()).withContext(
+                    "cookAndStageIncrementalCatalogPackage", "retainCleanObject"));
+            }
+            entries.push_back(IncrementalCookEntry{
+                .assetKind = baselineEntry->assetKind,
+                .assetId = baselineEntry->assetId,
+                .assetTypeVersion = baselineEntry->assetTypeVersion,
+                .contentHash = baselineEntry->contentHash,
+                .payload = retainedObject->payload(),
+                .objectBytes = cleanObjectStorage.back(),
+                .dependencies = std::move(dependencies),
+            });
+        }
+
+        if (dirtyPackage)
+        {
+            for (const CatalogPackageObjectBlob& object : dirtyPackage->objectViews)
+            {
+                auto view = AssetFormat::parseCookedAssetView(object.bytes);
+                if (!view)
+                {
+                    return Core::failure(std::move(view.error()).withContext(
+                        "cookAndStageIncrementalCatalogPackage", "parseDirtyObject"));
+                }
+                std::vector<AssetFormat::CookedAssetWriteDependency> dependencies;
+                dependencies.reserve(view->header().dependencyCount);
+                for (Core::u32 dependencyIndex = 0; dependencyIndex < view->header().dependencyCount;
+                     ++dependencyIndex)
+                {
+                    const auto dependency = view->dependency(dependencyIndex);
+                    if (!dependency)
+                    {
+                        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                             "dirty cooked object dependency is missing after parse");
+                    }
+                    dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                        .assetId = dependency->assetId,
+                        .expectedKind = dependency->expectedKind,
+                        .flags = dependency->flags,
+                    });
+                }
+                entries.push_back(IncrementalCookEntry{
+                    .assetKind = view->header().assetKind,
+                    .assetId = view->header().assetId,
+                    .assetTypeVersion = view->header().assetTypeVersion,
+                    .contentHash = view->header().contentHash,
+                    .payload = view->payload(),
+                    .objectBytes = object.bytes,
+                    .dependencies = std::move(dependencies),
+                });
+            }
+        }
+
+        std::sort(entries.begin(), entries.end(), [](const IncrementalCookEntry& left,
+                                                     const IncrementalCookEntry& right) {
+            return left.assetId < right.assetId;
+        });
+        for (std::size_t index = 0; index < entries.size(); ++index)
+        {
+            if (index > 0U && !(entries[index - 1U].assetId < entries[index].assetId))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "clean and dirty incremental assets contain duplicate AssetId");
+            }
+            for (std::size_t dependencyIndex = 1; dependencyIndex < entries[index].dependencies.size();
+                 ++dependencyIndex)
+            {
+                if (!(entries[index].dependencies[dependencyIndex - 1U].assetId <
+                      entries[index].dependencies[dependencyIndex].assetId))
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "incremental catalog dependency AssetIds must be strictly increasing");
+                }
+            }
+        }
+
+        std::vector<CookAssetValidationView> validationViews;
+        validationViews.reserve(entries.size());
+        for (const IncrementalCookEntry& entry : entries)
+        {
+            validationViews.push_back(CookAssetValidationView{
+                .assetKind = entry.assetKind,
+                .assetId = entry.assetId,
+                .assetTypeVersion = entry.assetTypeVersion,
+                .payload = entry.payload,
+                .dependencies = entry.dependencies,
+            });
+        }
+        for (const CookAssetValidationView& entry : validationViews)
+        {
+            if (entry.assetKind == AssetFormat::AssetKind::TileMap)
+            {
+                if (auto status = validateTileMapCookAsset(entry, validationViews); !status)
+                {
+                    return Core::failure(std::move(status.error()).withContext(
+                        "cookAndStageIncrementalCatalogPackage", "validateTileMap"));
+                }
+            }
+        }
+
+        std::vector<AssetFormat::CookedManifestWriteEntry> manifestEntries;
+        manifestEntries.reserve(entries.size());
+        std::vector<CatalogPackageObjectBlob> objectViews;
+        objectViews.reserve(entries.size());
+        for (const IncrementalCookEntry& entry : entries)
+        {
+            manifestEntries.push_back(AssetFormat::CookedManifestWriteEntry{
+                .assetId = entry.assetId,
+                .contentHash = entry.contentHash,
+                .assetKind = entry.assetKind,
+                .assetTypeVersion = entry.assetTypeVersion,
+                .cookedFileBytes = entry.objectBytes.size(),
+                .dependencies = entry.dependencies,
+            });
+            objectViews.push_back(CatalogPackageObjectBlob{
+                .assetKind = entry.assetKind,
+                .assetId = entry.assetId,
+                .bytes = entry.objectBytes,
+            });
+        }
+
+        auto manifestBytes = AssetFormat::writeCookedManifestBytes(AssetFormat::CookedManifestWriteDesc{
+            .targetPlatform = dirtyRequest.targetPlatform,
+            .entries = manifestEntries,
+        });
+        if (!manifestBytes)
+        {
+            return Core::failure(std::move(manifestBytes.error()).withContext(
+                "cookAndStageIncrementalCatalogPackage", "writeManifest"));
+        }
+
+        auto manifestView = AssetFormat::parseCookedManifestView(
+            *manifestBytes, config.validation.manifest.manifestLimits);
+        if (!manifestView)
+        {
+            return Core::failure(std::move(manifestView.error()).withContext(
+                "cookAndStageIncrementalCatalogPackage", "parseManifest"));
+        }
+        {
+            auto graph = CatalogSnapshot::Create(*manifestView, config.validation.manifest.catalog);
+            if (!graph)
+            {
+                return Core::failure(std::move(graph.error()).withContext(
+                    "cookAndStageIncrementalCatalogPackage", "validateDependencies"));
+            }
+        }
+
+        if (Core::Status created = createFreshStageRoot(stagingRootUtf8); !created)
+        {
+            return Core::failure(std::move(created.error()).withContext(
+                "cookAndStageIncrementalCatalogPackage", "createStage"));
+        }
+        auto published = publishCatalogPackage(stagingRootUtf8, DefaultCatalogManifestRelativePath,
+                                               *manifestBytes, objectViews);
+        if (!published)
+        {
+            return Core::failure(std::move(published.error()).withContext(
+                "cookAndStageIncrementalCatalogPackage", "publish"));
+        }
+
+        config.validation.manifestRelativePath = DefaultCatalogManifestRelativePath;
+        config.validation.validateOnOpen = true;
+        config.validation.validation.verifyContent = true;
+        auto catalog = openCatalogPackage(stagingRootUtf8, config.validation);
+        if (!catalog)
+        {
+            return Core::failure(std::move(catalog.error()).withContext(
+                "cookAndStageIncrementalCatalogPackage", "validate"));
+        }
+        return std::move(*catalog);
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "incremental catalog staging allocation failed");
+    }
 }
 
 namespace {

@@ -310,5 +310,40 @@ TEST(SourceImportProbeTests, GltfSecondaryMustRemainBelowOpenedPrimaryDirectory)
     removeDirectory(temp);
 }
 
+TEST(SourceImportProbeTests, BatchKeepsMatchingUnitCleanAndCountsRemovedUnits)
+{
+    const auto temp = std::filesystem::temp_directory_path() / "tina_source_probe_batch";
+    removeDirectory(temp);
+    const auto sourceRoot = temp / "sources";
+    const auto recipePath = sourceRoot / "main.recipe";
+    constexpr std::array RecipeBytes{std::byte{'r'}, std::byte{'e'}, std::byte{'c'}};
+    ASSERT_TRUE(Core::writeFile(toUtf8(recipePath), RecipeBytes).has_value());
+
+    auto desc = makeCatalogRecipeSourceImportProbeDesc(
+        toUtf8(sourceRoot), toUtf8(recipePath), AssetFormat::TargetPlatform::WindowsX64);
+    ASSERT_TRUE(desc.has_value()) << desc.error().message;
+    const std::vector sources{
+        SourceSpec{.path = "main.recipe",
+                   .consumedBytes = std::vector<std::byte>(RecipeBytes.begin(), RecipeBytes.end()),
+                   .primary = true},
+    };
+    const auto metadataBytes = makeMetadata(desc->expected, sources,
+                                            AssetFormat::TargetPlatform::WindowsX64,
+                                            revision(), true);
+    auto baseline = AssetFormat::parseSourceImportMetadataView(metadataBytes);
+    ASSERT_TRUE(baseline.has_value()) << baseline.error().message;
+
+    const std::array descriptions{*desc};
+    auto batch = probeSourceImportUnits(*baseline, revision(), descriptions);
+    ASSERT_TRUE(batch.has_value()) << batch.error().message;
+    ASSERT_EQ(batch->units.size(), 1U);
+    EXPECT_EQ(batch->units[0].state, SourceImportProbeState::Clean);
+    EXPECT_EQ(batch->cleanUnitCount, 1U);
+    EXPECT_EQ(batch->dirtyUnitCount, 0U);
+    EXPECT_EQ(batch->removedUnitCount, 1U);
+    EXPECT_EQ(batch->cleanObjectCount, 2U);
+    removeDirectory(temp);
+}
+
 } // namespace
 } // namespace Tina::Asset

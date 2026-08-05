@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/asset/CatalogSnapshot.hpp>
 #include <tina/asset_format/SourceImportMetadataFormat.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -38,6 +39,12 @@ struct SourceImportPlanConfig final {
 [[nodiscard]] Core::Status validateSourceImportCatalogBinding(
     const AssetFormat::SourceImportMetadataView& metadata,
     AssetFormat::SourceImportManifestRevision catalogRevision);
+
+// Requires every import-state output to match one Catalog entry by AssetId and kind, with no
+// unowned Catalog entries. Parsed current-schema metadata already guarantees unique output owners.
+[[nodiscard]] Core::Status validateSourceImportCatalogOutputs(
+    const AssetFormat::SourceImportMetadataView& metadata,
+    const CatalogSnapshot& catalog);
 
 // Compares two validated, immutable tool-side import graphs. Matching units become Reimport when
 // their importer contract, settings, source membership/content, target platform, or output contract

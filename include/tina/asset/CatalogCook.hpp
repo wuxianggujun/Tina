@@ -57,6 +57,20 @@ struct CatalogPackageStageConfig final {
 cookAndStageCatalogPackage(std::string_view stagingRootUtf8, const CatalogCookRequest& request,
                            CatalogPackageStageConfig config);
 
+// Assembles a complete package in a fresh staging root from unchanged baseline objects plus dirty
+// assets cooked with the current format. cleanAssetIds must be unique and present in the fully
+// validated baseline snapshot. stagingRootUtf8 must resolve outside baselineRootUtf8. Clean object
+// bytes are read from baselineRootUtf8 and copied exactly; they are never linked and the baseline
+// root is never modified. Dirty and clean ids must be disjoint, all objects must use
+// dirtyRequest.targetPlatform, and the rebuilt dependency graph must be valid.
+[[nodiscard]] Core::Result<CatalogSnapshot>
+cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
+                                      std::string_view baselineRootUtf8,
+                                      const CatalogSnapshot& baseline,
+                                      std::span<const Core::AssetId> cleanAssetIds,
+                                      const CatalogCookRequest& dirtyRequest,
+                                      CatalogPackageStageConfig config);
+
 // Minimal line recipe format (UTF-8):
 //   # comment
 //   platform WindowsX64

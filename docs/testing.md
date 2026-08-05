@@ -882,15 +882,23 @@ out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --recipe <recipe> `
   --source-root <authoringRoot> --import-state <toolCache>\import-state.tmeta
+# 无 import-state 的重复 cook 同样通过 fresh stage 保持旧输出不变
+out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --stage-out <candidateRoot>
+out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> `
+  --recipe <recipeA> --recipe <recipeB> --source-root <authoringRoot> `
+  --import-state <toolCache>\import-state.tmeta `
+  --stage-out <candidateRoot> --stage-import-state <toolCache>\candidate.tmeta
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
 ```
 
-ASSET-002 clean whole-package reuse 只需构建 `tina_asset_format_tests`、`tina_asset_tests`、`tina_assetc`，直接运行
-`SourceImportMetadataFormatTests.*:SourceImportCaptureTests.*:SourceImportPlanTests.*:SourceImportProbeTests.*` filter。
-CLI 对同一 recipe/glTF 连续执行两次：首跑必须为 `full-recook`，第二跑必须为 `clean-reuse`；第二跑前后比较
+ASSET-002 multi-unit mixed fresh-stage 只需构建 `tina_asset_format_tests`、`tina_asset_tests`、`tina_assetc`，直接运行
+`SourceImportMetadataFormatTests.*:SourceImportCaptureTests.*:SourceImportPlanTests.*:SourceImportProbeTests.*:SourceImportExecutorTests.*:CatalogCookTests.Incremental*`
+filter。CLI 对同一 recipe/glTF batch 连续执行两次：首跑必须为 `full-recook`，第二跑必须为 `clean-reuse`；第二跑前后比较
 manifest/object/state 的 bytes 与 mtime，均应不变。修改 WholeFile 任意 byte、Prefix 已消费范围内 byte、importer
-contract 或 manifest revision 后必须回到 full recook；只在 Prefix 已消费范围后追加 bytes 仍应 clean。该切片不要求
+contract 后，只允许对应 unit recook 并写入 fresh stage；未变 unit 的 object bytes 必须相同。Added/Removed unit 必须更新
+完整 manifest/state ownership，stage full validation 失败不得修改 baseline package/state。旧 schema 或 manifest revision
+失配必须 full recook；只在 Prefix 已消费范围后追加 bytes 仍应 clean。该切片不要求
 运行完整 `tina_asset_tests`、Scene/sample 或 shader/bgfx target。
 
 multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct

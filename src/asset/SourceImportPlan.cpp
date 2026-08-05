@@ -100,6 +100,40 @@ Core::Status validateSourceImportCatalogBinding(
     return Core::success();
 }
 
+Core::Status validateSourceImportCatalogOutputs(
+    const AssetFormat::SourceImportMetadataView& metadata,
+    const CatalogSnapshot& catalog)
+{
+    if (!metadata || !catalog)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "source import output validation input is invalid");
+    }
+    if (metadata.header().outputCount != catalog.entryCount())
+    {
+        return Core::failure(AssetErrorCode::SourceImportCatalogMismatch,
+                             "source import outputs do not cover the Catalog");
+    }
+
+    for (Core::u32 outputIndex = 0; outputIndex < metadata.header().outputCount; ++outputIndex)
+    {
+        const auto output = metadata.output(outputIndex);
+        if (!output)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "source import output is missing");
+        }
+        const auto entryIndex = catalog.find(output->assetId);
+        const auto entry = entryIndex ? catalog.entry(*entryIndex) : std::nullopt;
+        if (!entry || entry->assetKind != output->assetKind)
+        {
+            return Core::failure(AssetErrorCode::SourceImportCatalogMismatch,
+                                 "source import output does not match the Catalog");
+        }
+    }
+    return Core::success();
+}
+
 Core::Result<SourceImportPlan>
 planSourceImports(const AssetFormat::SourceImportMetadataView& baseline,
                   const AssetFormat::SourceImportMetadataView& candidate,
