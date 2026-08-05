@@ -556,13 +556,19 @@ importer，再通过 incremental stage API 复制 clean object、移除 removed 
 直接变化优先。调用方显式提供 PMR 与 `maxChanges`，该 PMR 必须覆盖结果生命周期；容量或分配失败不返回
 部分 plan。planner 不绑定 Catalog、不使 Handle 失效，也不取得 AssetSystem/Lease/GPU owner。
 
-`AssetSystem::reloadCatalogWhenIdle(root, config)` 是同步、owner-thread-only 的 root reload API。它强制完整打开并
-验证新的 Catalog package（reload 路径不会接受关闭 on-disk/content validation），使用 `config.changePlan` 调用
-上述 planner，并仅在 AssetSystem idle boundary 提交：pending
-queue、in-flight IO、active handles、tracked GPU uploads、以及 retirement records 都必须为空。成功后 root 与
-immutable Catalog 一起原子替换；open、validation、planning 或 commit 分配失败都保留旧 root/Catalog。已有 Catalog
-时，`bindCatalog()` 同样受 idle 门禁约束，不能绕过 reload API；非 owner thread 返回 `WrongOwnerThread`，非空工作
-状态返回 `CatalogReloadBusy`。该 API 是保守的完整 Catalog 切换，不执行 active Handle/Lease/GPU owner 的增量迁移。
+`AssetSystem::reloadCatalog(root, config)` 是同步、owner-thread-only 的 resident CPU migration API。它强制完整打开并
+验证新的 Catalog package（reload 路径不会接受关闭 on-disk/content validation），使用 `config.changePlan` 生成变化，
+再为当前 resident 的 Modified/Affected asset 及其新增依赖预加载 replacement generation。所有 candidate 读取、Store
+双驻留容量、`maxResidentMigrations`、新 index/root/result 分配成功后，才无分配地原子切换 root、immutable Catalog 与
+AssetId lookup。返回 `CatalogReloadResult`，其中 change plan 与按 AssetId 排序的 resident migration 将旧 weak Handle
+映射到 `Replaced|Removed|LoadedDependency` 的新 generation；旧 `AssetLease` 继续读取旧 payload，释放最后一个 lease 后
+旧 generation 才物理回收。任一步失败都会卸掉 staged generation 并保留旧 root/Catalog/index/Handle。
+
+reload 允许 active resident Handle/Lease，但 pending queue、in-flight IO、tracked GPU upload 与 retirement record 必须为空；
+非 owner thread 返回 `WrongOwnerThread`，非 quiescent 工作状态返回 `CatalogReloadBusy`。Store capacity 必须显式保留
+replacement generation 的双驻留 headroom，容量不足返回 `CatalogCapacityExceeded`。已有 Catalog 时，低层
+`bindCatalog()` 仍受完整 idle 门禁约束，不能绕过 migration API。当前结果映射尚未原子替换 Sprite/Mesh registry 的
+GPU binding owner；该 GPU prepare/commit 是 ASSET-002 剩余切片。
 
 TileMap 的唯一当前 root wire contract 是 schema v3。`TileMapPayloadView` 按 authoring 顺序通过
 `layerAt()/findLayer(TileMapLayerId)` 暴露 tile/object layer；稳定 layer/object ID 都是 map-wide 非零唯一

@@ -907,6 +907,11 @@ baseline、目标 manifest write/rename/delete/replace、同目录 sibling 过�
 结构化配置/路径失败；该切片不构建 `tina_assetc`、sample、shader 或 bgfx target。overflow 由平台实现映射为
 `RescanRequired`，host 收到该状态后必须重新 capture revision，不能直接接受 candidate。
 
+ASSET-002 resident CPU migration 只运行 `AssetSystemCatalogReloadTests.*`。门禁覆盖 Modified Texture + Affected Material
+同时换代、稳定旧→新 Handle 映射、旧 Lease 保留旧 payload、新 index 指向 candidate payload、最后 lease 释放回收旧
+generation，以及 validation/change-plan/result-capacity/Store 双驻留 headroom/queued work 的失败原子性。该切片不运行
+完整 Asset、sample、shader 或 bgfx target；Sprite/Mesh registry GPU owner prepare/commit 在后续独立 focused gate 验证。
+
 multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct
 mesh/material AssetId、Prefab dependency、AssetId→Handle→registry-owned binding→packet-local ref 与双 mesh
 binding 可验证。Opaque3D 已做

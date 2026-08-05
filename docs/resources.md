@@ -79,11 +79,12 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 必须覆盖 `CatalogChangePlan` 生命周期。
 
 这一步只回答“两个已验证 Catalog 有什么变化、哪些新条目需要后续处理”，planner 本身不提交状态。
-`AssetSystem::reloadCatalogWhenIdle()` 已在其上增加保守的 root 事务：强制完整打开/验证候选 package，生成
-change plan，并仅在 owner thread 且 queue、IO、Store、GPU upload 与 retirement 全部 idle 时原子替换
-root/Catalog。fresh staging package 的完整生成/验证、manifest revision caller-driven polling、tool-side source
+`AssetSystem::reloadCatalog()` 在其上增加 resident CPU migration 事务：强制完整打开/验证候选 package，生成
+change plan，对当前 resident 的 Modified/Affected asset 与新增依赖预加载新 generation，并仅在 owner thread 且
+queue、IO、GPU upload 与 retirement quiescent 时原子替换 root/Catalog/AssetId index。旧 weak Handle 由返回的
+resident migration 映射到新 generation；旧 `AssetLease` 继续保活旧 payload 直到释放。fresh staging package 的完整生成/验证、manifest revision caller-driven polling、tool-side source
 provenance capture、验证后 state commit、多 unit clean/dirty fresh-stage executor 与 all-clean 零改写复用已具备；
-manifest OS watcher hint 也已具备；live Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
+manifest OS watcher hint 也已具备；Sprite/Mesh registry 的 live GPU owner prepare/commit 仍必须由后续事务切片完成。
 
 `captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
 `pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
@@ -129,8 +130,10 @@ revision/contract/source 变化，或 unit Added/Removed 时，只有 dirty/adde
 `--stage-out`，重建完整 manifest 并 full validate 后，才把与该 stage revision 绑定的 state 写到
 `--stage-import-state`；stage root 必须位于 live root 外部，candidate state 必须此前不存在且位于 live/stage root 外部。
 该过程不修改 `--out` live root 或旧 state，也不把 fresh stage 物理替换成固定 live 目录；Runtime
-通过 `reloadCatalogWhenIdle(stageRoot)` 接受 immutable stage。state 必须位于 tool cache，不能放进部署 Catalog root。
-当前仍没有 active Handle/Lease/GPU owner 增量迁移，因此不能描述为完整自动热重载已完成。
+通过 `reloadCatalog(stageRoot)` 接受 immutable stage。state 必须位于 tool cache，不能放进部署 Catalog root。
+reload 要求 Store 为 replacement generation 保留双驻留 headroom；任何读取、容量、结果分配或索引 staging 失败都会
+卸掉 candidate generation 并保持旧 root/Catalog/index/Handle。当前仍没有 Sprite/Mesh registry active GPU owner 的
+原子 prepare/commit，因此不能描述为完整自动热重载已完成。
 
 ## 身份、视图与所有权
 
@@ -339,10 +342,10 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
-- `ASSET-002` 已有 manifest OS watcher hint、revision polling、immutable Catalog change planner、fresh staging package 生成/验证与
+- `ASSET-002` 已有 manifest OS watcher hint、revision polling、immutable Catalog change planner、resident CPU Handle/Lease migration、fresh staging package 生成/验证与
   idle-safe root/Catalog commit，并已建立 current-only source import metadata wire、Catalog binding 与纯 import
   planner；真实 importer provenance capture、validated state commit、多 unit mixed fresh-stage executor 与 all-clean
-  零改写复用已接入。active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
+  零改写复用已接入。Sprite/Mesh registry active GPU owner prepare/commit 仍未实现。通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重

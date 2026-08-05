@@ -111,6 +111,37 @@ void releaseAssetLeaseRetirementPin(void* userData) noexcept
     return false;
 }
 
+struct StagedCatalogResident final {
+    Core::AssetId assetId{};
+    AssetHandle handle{};
+};
+
+[[nodiscard]] const CatalogChange* findCatalogChange(std::span<const CatalogChange> changes,
+                                                     Core::AssetId assetId) noexcept
+{
+    const auto it = std::lower_bound(
+        changes.begin(), changes.end(), assetId,
+        [](const CatalogChange& change, Core::AssetId candidate) {
+            return change.assetId < candidate;
+        });
+    return it != changes.end() && it->assetId == assetId ? std::addressof(*it) : nullptr;
+}
+
+[[nodiscard]] const StagedCatalogResident*
+findStagedResident(std::span<const StagedCatalogResident> staged, Core::AssetId assetId) noexcept
+{
+    const auto it = std::find_if(staged.begin(), staged.end(), [assetId](const auto& resident) {
+        return resident.assetId == assetId;
+    });
+    return it == staged.end() ? nullptr : std::addressof(*it);
+}
+
+[[nodiscard]] bool canReuseResidentState(AssetLogicalState state) noexcept
+{
+    return state == AssetLogicalState::ReadyCpu || state == AssetLogicalState::UploadQueued ||
+           state == AssetLogicalState::ReadyGpu;
+}
+
 } // namespace
 
 AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
@@ -255,6 +286,14 @@ bool AssetSystem::isCatalogReloadIdle() const noexcept
            (m_gpuUpload == nullptr || m_gpuUpload->trackedCount() == 0U) && m_retirement.liveCount() == 0U;
 }
 
+bool AssetSystem::isCatalogMigrationQuiescent() const noexcept
+{
+    return m_queue.empty() && m_asyncRequests.empty() &&
+           m_inFlight.load(std::memory_order_acquire) == 0U &&
+           (m_gpuUpload == nullptr || m_gpuUpload->trackedCount() == 0U) &&
+           m_retirement.liveCount() == 0U;
+}
+
 void AssetSystem::prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
                                            bool requireFullValidation) const noexcept
 {
@@ -329,7 +368,8 @@ Core::Status AssetSystem::commitCatalogWhenIdle(std::string_view catalogRootUtf8
     }
 }
 
-Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8, CatalogReloadConfig config)
+Core::Result<CatalogReloadResult>
+AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig config)
 {
     if (std::this_thread::get_id() != m_ownerThread)
     {
@@ -341,10 +381,10 @@ Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "catalog reload requires an existing bound catalog");
     }
-    if (!isCatalogReloadIdle())
+    if (!isCatalogMigrationQuiescent())
     {
         return Core::failure(AssetErrorCode::CatalogReloadBusy,
-                             "catalog reload requires an idle AssetSystem");
+                             "catalog reload requires quiescent IO, upload, and retirement owners");
     }
 
     prepareCatalogOpenConfig(config.package, true);
@@ -352,7 +392,8 @@ Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8
     auto replacement = openCatalogPackage(catalogRootUtf8, config.package);
     if (!replacement)
     {
-        return Core::failure(std::move(replacement.error()).withContext("AssetSystem::reloadCatalogWhenIdle", "open"));
+        return Core::failure(
+            std::move(replacement.error()).withContext("AssetSystem::reloadCatalog", "open"));
     }
 
     if (config.changePlan.memoryResource == nullptr)
@@ -362,10 +403,248 @@ Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8
     auto plan = planCatalogChanges(m_catalog, *replacement, config.changePlan);
     if (!plan)
     {
-        return Core::failure(std::move(plan.error()).withContext("AssetSystem::reloadCatalogWhenIdle", "plan"));
+        return Core::failure(
+            std::move(plan.error()).withContext("AssetSystem::reloadCatalog", "plan"));
     }
 
-    return commitCatalogWhenIdle(catalogRootUtf8, std::move(*replacement));
+    std::pmr::vector<Core::AssetId> reloadRoots{m_memoryResource};
+    std::pmr::vector<CatalogLoadPlanEntry> candidateLoads{m_memoryResource};
+    std::pmr::vector<StagedCatalogResident> staged{m_memoryResource};
+    std::pmr::vector<CatalogResidentMigration> migrations{config.changePlan.memoryResource};
+    std::pmr::vector<IndexEntry> nextIndex{m_memoryResource};
+    std::pmr::string nextRoot{m_memoryResource};
+
+    const auto rollbackStaged = [&]() noexcept {
+        for (const auto& resident : staged)
+        {
+            (void)m_store.unload(resident.handle);
+        }
+        staged.clear();
+    };
+
+    try
+    {
+        nextRoot.assign(catalogRootUtf8.begin(), catalogRootUtf8.end());
+        reloadRoots.reserve(m_index.size());
+        Core::usize removedResidentCount = 0U;
+        for (const auto& resident : m_index)
+        {
+            const CatalogChange* change = findCatalogChange(plan->changes, resident.assetId);
+            if (change == nullptr)
+            {
+                continue;
+            }
+            if (change->kind == CatalogChangeKind::Removed)
+            {
+                ++removedResidentCount;
+            }
+            else
+            {
+                reloadRoots.push_back(resident.assetId);
+            }
+        }
+
+        if (!reloadRoots.empty())
+        {
+            auto loads = planCatalogLoads(
+                *replacement, reloadRoots,
+                CatalogLoadPlanConfig{.memoryResource = m_memoryResource});
+            if (!loads)
+            {
+                return Core::failure(std::move(loads.error()).withContext(
+                    "AssetSystem::reloadCatalog", "residentLoadPlan"));
+            }
+            candidateLoads = std::move(*loads);
+        }
+
+        Core::usize stagedCount = 0U;
+        Core::u64 stagedCookedFileBytes = 0U;
+        for (const auto& row : candidateLoads)
+        {
+            const auto currentIndex = findIndex(row.assetId);
+            const CatalogChange* change = findCatalogChange(plan->changes, row.assetId);
+            const bool reusable = currentIndex && change == nullptr &&
+                                  canReuseResidentState(m_store.state(m_index[*currentIndex].handle));
+            if (!reusable)
+            {
+                ++stagedCount;
+                if (row.cookedFileBytes >
+                    (std::numeric_limits<Core::u64>::max)() - stagedCookedFileBytes)
+                {
+                    return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                         "catalog reload staged byte budget overflow");
+                }
+                stagedCookedFileBytes += row.cookedFileBytes;
+            }
+        }
+        if (stagedCount > m_store.availableCount())
+        {
+            return Core::failure(
+                AssetErrorCode::CatalogCapacityExceeded,
+                "catalog reload requires double-residency headroom for replacement generations");
+        }
+        if (m_batch.maxTotalCookedFileBytes != 0U &&
+            stagedCookedFileBytes > m_batch.maxTotalCookedFileBytes)
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                 "catalog reload exceeds maxTotalCookedFileBytes budget");
+        }
+        const Core::usize projectedMigrationCount = stagedCount + removedResidentCount;
+        if (projectedMigrationCount > config.maxResidentMigrations)
+        {
+            return Core::failure(AssetErrorCode::CatalogCapacityExceeded,
+                                 "catalog resident migration capacity exceeded");
+        }
+
+        staged.reserve(stagedCount);
+        nextIndex.reserve(m_index.size() + stagedCount);
+        migrations.reserve(projectedMigrationCount);
+        for (const auto& row : candidateLoads)
+        {
+            const auto currentIndex = findIndex(row.assetId);
+            const CatalogChange* change = findCatalogChange(plan->changes, row.assetId);
+            const bool reusable = currentIndex && change == nullptr &&
+                                  canReuseResidentState(m_store.state(m_index[*currentIndex].handle));
+            if (reusable)
+            {
+                continue;
+            }
+
+            auto cooked = loadCookedAssetFromCatalog(catalogRootUtf8, *replacement, row.assetId,
+                                                      m_batch.file);
+            if (!cooked)
+            {
+                rollbackStaged();
+                return Core::failure(std::move(cooked.error()).withContext(
+                    "AssetSystem::reloadCatalog", "stageResident"));
+            }
+            auto handle = m_store.publish(std::move(*cooked));
+            if (!handle)
+            {
+                rollbackStaged();
+                return Core::failure(std::move(handle.error()).withContext(
+                    "AssetSystem::reloadCatalog", "publishStagedResident"));
+            }
+            staged.push_back(StagedCatalogResident{
+                .assetId = row.assetId,
+                .handle = *handle,
+            });
+        }
+
+        for (const auto& resident : m_index)
+        {
+            const CatalogChange* change = findCatalogChange(plan->changes, resident.assetId);
+            const StagedCatalogResident* replacementResident =
+                findStagedResident(staged, resident.assetId);
+            if (change != nullptr && change->kind == CatalogChangeKind::Removed)
+            {
+                migrations.push_back(CatalogResidentMigration{
+                    .assetId = resident.assetId,
+                    .kind = CatalogResidentMigrationKind::Removed,
+                    .previous = resident.handle,
+                });
+                continue;
+            }
+            if (replacementResident != nullptr)
+            {
+                migrations.push_back(CatalogResidentMigration{
+                    .assetId = resident.assetId,
+                    .kind = CatalogResidentMigrationKind::Replaced,
+                    .previous = resident.handle,
+                    .current = replacementResident->handle,
+                });
+                nextIndex.push_back(IndexEntry{
+                    .assetId = resident.assetId,
+                    .handle = replacementResident->handle,
+                });
+                continue;
+            }
+            nextIndex.push_back(resident);
+        }
+        for (const auto& resident : staged)
+        {
+            if (findIndex(resident.assetId))
+            {
+                continue;
+            }
+            migrations.push_back(CatalogResidentMigration{
+                .assetId = resident.assetId,
+                .kind = CatalogResidentMigrationKind::LoadedDependency,
+                .current = resident.handle,
+            });
+            nextIndex.push_back(IndexEntry{
+                .assetId = resident.assetId,
+                .handle = resident.handle,
+            });
+        }
+        const auto indexLess = [](const IndexEntry& left, const IndexEntry& right) {
+            return left.assetId < right.assetId;
+        };
+        const auto migrationLess = [](const CatalogResidentMigration& left,
+                                      const CatalogResidentMigration& right) {
+            return left.assetId < right.assetId;
+        };
+        std::sort(nextIndex.begin(), nextIndex.end(), indexLess);
+        std::sort(migrations.begin(), migrations.end(), migrationLess);
+        const auto duplicateIndex =
+            std::adjacent_find(nextIndex.begin(), nextIndex.end(), [](const auto& left,
+                                                                     const auto& right) {
+                return left.assetId == right.assetId;
+            });
+        if (duplicateIndex != nextIndex.end())
+        {
+            rollbackStaged();
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "catalog reload produced duplicate resident AssetId");
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        rollbackStaged();
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "catalog resident migration allocation failed");
+    }
+
+    for (const auto& migration : migrations)
+    {
+        if (!migration.previous)
+        {
+            continue;
+        }
+        if (m_store.assetId(migration.previous) != migration.assetId ||
+            m_store.state(migration.previous) == AssetLogicalState::Unloaded ||
+            m_store.state(migration.previous) == AssetLogicalState::UnloadPending)
+        {
+            rollbackStaged();
+            return Core::failure(AssetErrorCode::InvalidHandle,
+                                 "catalog reload resident preflight found a stale handle");
+        }
+    }
+
+    // Every operation below is non-allocating after complete candidate/index/result staging.
+    for (const auto& migration : migrations)
+    {
+        if (migration.previous)
+        {
+            const auto status = m_store.unload(migration.previous);
+            if (!status)
+            {
+                std::terminate();
+            }
+        }
+    }
+    m_index.swap(nextIndex);
+    m_catalogRoot.swap(nextRoot);
+    m_catalog = std::move(*replacement);
+    for (const auto& resident : staged)
+    {
+        noteReadyCpu(resident.handle);
+    }
+
+    return CatalogReloadResult{
+        .changes = std::move(*plan),
+        .residentMigrations = std::move(migrations),
+    };
 }
 
 Core::Status AssetSystem::openAndBindCatalog(std::string_view catalogRootUtf8, CatalogPackageOpenConfig openConfig)

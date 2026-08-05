@@ -357,7 +357,8 @@ manifest/state/source：全部不变时 JSON 返回 `cookMode=clean-reuse`、`un
 `full-recook`；部分 unit dirty/added/removed 返回 `incremental-recook`。已有 baseline 的非 clean 执行必须提供 fresh
 `--stage-out` 与独立 `--stage-import-state`：clean object 原样复制，只有 dirty/added unit 运行 importer，removed output
 不进入候选。候选 package/state 完整验证并互相绑定，但工具不覆盖 `--out` live root；Runtime 使用
-`reloadCatalogWhenIdle(stageRoot)` 接受 stage。不运行旧 schema 迁移。
+`reloadCatalog(stageRoot)` 完整验证 stage，并在 resident replacement generation、结果与新 index 全部 staging 成功后
+提交；Store capacity 必须预留双驻留 headroom。不运行旧 schema 迁移。
 
 ## Linux Null 与 sanitizer
 

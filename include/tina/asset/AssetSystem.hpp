@@ -68,6 +68,25 @@ struct CatalogReloadConfig final {
     CatalogChangePlanConfig changePlan{
         .maxChanges = (std::numeric_limits<Core::u32>::max)(),
     };
+    Core::u32 maxResidentMigrations = (std::numeric_limits<Core::u32>::max)();
+};
+
+enum class CatalogResidentMigrationKind : Core::u8 {
+    Replaced = 0,
+    Removed = 1,
+    LoadedDependency = 2,
+};
+
+struct CatalogResidentMigration final {
+    Core::AssetId assetId{};
+    CatalogResidentMigrationKind kind = CatalogResidentMigrationKind::Replaced;
+    AssetHandle previous{};
+    AssetHandle current{};
+};
+
+struct CatalogReloadResult final {
+    CatalogChangePlan changes{};
+    std::pmr::vector<CatalogResidentMigration> residentMigrations{};
 };
 
 // Catalog-bound CPU/GPU-logical asset facade.
@@ -88,11 +107,13 @@ class AssetSystem final {
 
     [[nodiscard]] Core::Status bindCatalog(std::string_view catalogRootUtf8, CatalogSnapshot catalog);
 
-    // Opens, validates, plans, and replaces the immutable CatalogSnapshot only at an owner-thread
-    // idle boundary. Idle requires no queued/in-flight work, resident handles, tracked GPU uploads,
-    // or live retirement records. The existing catalog and root remain bound if any step fails.
-    [[nodiscard]] Core::Status reloadCatalogWhenIdle(std::string_view catalogRootUtf8,
-                                                      CatalogReloadConfig config = {});
+    // Opens and fully validates a candidate package, then stages replacement generations for
+    // resident Modified/Affected assets and newly required dependencies. Commit swaps the
+    // Catalog/root/index only after every fallible step succeeds. Previous leases retain their
+    // old payload; residentMigrations maps stale weak handles to their new generations.
+    // Queued/in-flight work, tracked uploads, and live retirement records remain a busy boundary.
+    [[nodiscard]] Core::Result<CatalogReloadResult>
+    reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig config = {});
 
     // openCatalogPackage(root, openConfig) then bindCatalog. Uses config.memoryResource for open.
     [[nodiscard]] Core::Status openAndBindCatalog(std::string_view catalogRootUtf8,
@@ -180,6 +201,7 @@ class AssetSystem final {
 
     void forgetHandle(AssetHandle handle) noexcept;
     [[nodiscard]] bool isCatalogReloadIdle() const noexcept;
+    [[nodiscard]] bool isCatalogMigrationQuiescent() const noexcept;
     void prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
                                   bool requireFullValidation) const noexcept;
     [[nodiscard]] Core::Status commitCatalogWhenIdle(std::string_view catalogRootUtf8,
