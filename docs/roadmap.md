@@ -17,15 +17,10 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
 | UI-002 | 收口 Windows UIA：tip 跨进程 gate 证据已固化；完成 Narrator/Inspect 人工金标后关闭 | 自动 HWND client gate + unit 已在 tip 复现；只剩操作员读屏/Inspect 清单 |
-| ASSET-002 | 分阶段建立热重载与增量 Cooker；已完成 manifest OS watcher hint + revision polling、immutable Catalog change planning、fresh stage validation、resident CPU Handle/Lease migration、current-only source import state/planner、importer provenance capture + validated state commit，以及多 unit mixed clean/dirty fresh-stage executor | watcher 先 arm 再捕获 baseline，native hint 不替代 revision poll/full validation；resident candidate 以双驻留 generation staging，失败不动旧 root/index/Handle，旧 Lease 保留旧 payload；tool-side state 绑定 Catalog revision 并精确校验 output ownership；mixed 路径只 cook dirty/added unit；后续再接 Sprite/Mesh registry GPU owner prepare/commit |
 
 Now 的退出条件：UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
 人工记录明确；没有未解释的 Accepted ADR/实现冲突。Linux AT-SPI 作为独立后置项，不阻塞 Windows
 UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；即时反馈与 Motion 的文档边界保持明确。
-ASSET-002 当前完成 package manifest OS watcher hint + revision polling、Catalog/import pure planner、resident CPU Handle/Lease migration、current-only import-state wire、importer
-provenance capture + validated state commit、多 unit mixed clean/dirty fresh-stage executor、all-clean 零改写复用、fresh stage
-full validation；退出 Now 前还需要 Sprite/Mesh registry active GPU owner prepare/commit，
-不把“CPU generation 已切换”写成“完整 GPU 增量热重载已完成”。
 
 ## Next：产品验收、性能基线与对外可用
 
@@ -88,6 +83,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 阶段/任务 | 完成结果 |
 | --- | --- |
+| ASSET-002 | manifest watcher hint + revision polling、immutable Catalog/import planner、fresh-stage validation、current-only import state/provenance、mixed dirty-unit executor 与 all-clean 零改写复用已落地；`reloadCatalog()` 以双驻留 CPU generation staging 和显式 Sprite/Mesh participant prepare/commit 原子发布 Catalog/index/active GPU binding，active frame 与 prepare failure 在发布前全局回滚，旧 Lease/GPU owner 保持可重试 retirement |
 | UI-RANGE-INPUT-KEYBOARD | capability-shaped Decrease/Increase command、Keyboard Arrow/Gamepad D-pad Runtime 映射与 fixed-capacity exact-control Down/Up latch 已落地；Slider 调值复用 Pointer/UIA 的量化 mutation/callback，read-only/边界值不修改、不误触发空间焦点且 Gameplay transition 保持可见 |
 | UI-STATE-FEEDBACK | Slider、Checkbox/RadioButton、List/Tree 与 TextEdit 复用唯一交互/焦点状态源并完成 stale-state 清理；Windows MSVC/bgfx/FreeType Dark/Light 产品门禁22项差分检查全部通过，证据见 [UI-STATE-FEEDBACK Windows Evidence](ui-state-feedback-evidence-windows.md) |
 | UI-ELEMENT-AUTHORING / ADR 0022 | authoring 统一为 descriptor/recipe `createElement()`；Flex/Overlay、committed content placement、显式 Semantics/Merge/Exclude、Theme role/override reset、固定容量 build transaction 与 bounded Canvas `SolidRect` 已落地；公开 `UIWidgetKind`/create-by-kind surface 删除；UI/Runtime UI/UI-Render/FreeType/UIA/bgfx 直接测试、Showcase Dark/Light smoke/capture、2D/3D smoke 与 UI-003 baseline gate 通过 |
@@ -151,6 +147,6 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | UI accessibility | 平台中立 action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns 与真实 showcase HWND 跨进程自动 gate 已落地；gate 可输出属性/fragment、action 结果和正常关闭的 schema 1 JSON | 固化当前 tip 的带日期 gate 结果并完成 Windows Narrator/Inspect 人工金标；Linux AT-SPI 由 `UI-002-LINUX` 独立跟踪 |
 | 3D product | 双 mesh + authored/MikkTSpace tangent + 唯一 P3N3T4UV2 + Resources-owned AssetSystem + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material resolver、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、World DirectionalLight3D/PointLight3D/SpotLight3D→逐帧 RenderScene snapshot、point/spot influence-sphere culling、固定4级联 CSM、固定单 SpotLight shadow 与 deterministic pass scheduler 已有证据；schema 13 继承实时 surface/camera aspect、responsive right rail/footer、3个 directional light、CSM config authored/submitted=`1` 与 cascade constant=`4`、SpotLight shadow authored/submitted=`1/1` 与跨帧稳定 descriptor，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 连续300帧稳定提交、IBL upload/bind/clear/retire、2份 tangent mesh upload、2 Mesh/2 Material/3 Texture handoff、weak handle 失效、ledger Released、Asset ListView/Scene TreeView 与 Dark→Light→Dark | RENDER-001 的 point shadow 与可配置 shadow atlas |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion、Texture/Mesh AssetLease-backed retirement 与 EnvironmentMap GPU-owner readback retirement，以及 Task timeout/retry + Host-enforced TaskSystem worker-exit/join deadline 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |
-| Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v3 root/TileMapChunk v1 + eager Tileset/deferred chunk dependency/localId 发布前验证及 retain-window LRU 已完成 | 更完整资源炸弹矩阵、TileMap priority IO/editor、热重载与增量 Cooker |
+| Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v3 root/TileMapChunk v1 + eager Tileset/deferred chunk dependency/localId 发布前验证及 retain-window LRU；ASSET-002 watcher/revision、增量 Cooker 与 CPU/GPU resident reload transaction 已完成 | 更完整资源炸弹矩阵、TileMap priority IO/editor、Asset cache/LRU、Bundle/Patch 与 network Asset |
 | Audio | `2D-AUDIO-ADV / N7` 已完成；Windows product-2d 以 owner-thread deterministic mix 验证 bounded stream，miniaudio callback/mixer 与 lifecycle 由 adapter tests 验证 | Linux、真实设备质量/延迟/切换与 callback benchmark |
 | Legacy retirement | 产品源码/target 删除完成；vcpkg legacy feature、EASTL/compatibility 与剩余迁移 shim 扫尾完成 | 仅保留 `TINA_BUILD_LEGACY=ON` FATAL 拒绝开关 |

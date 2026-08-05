@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory_resource>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -208,6 +209,80 @@ inline void writeBytes(const std::filesystem::path& path, const Bytes& bytes)
     std::ofstream output(path, std::ios::binary);
     output.write(static_cast<const char*>(static_cast<const void*>(bytes.data())),
                  static_cast<std::streamsize>(bytes.size()));
+}
+
+struct CookedPackageAsset final {
+    Core::AssetId assetId{};
+    AssetFormat::AssetKind assetKind = AssetFormat::AssetKind::Invalid;
+    Bytes cookedBytes{};
+    std::vector<AssetFormat::CookedAssetWriteDependency> dependencies{};
+};
+
+struct CookedPackage final {
+    std::filesystem::path root{};
+    std::vector<CookedPackageAsset> assets{};
+};
+
+[[nodiscard]] inline CookedPackage
+writeCookedPackage(std::filesystem::path directoryName,
+                   std::vector<CookedPackageAsset> assets)
+{
+    CookedPackage package{
+        .root = std::filesystem::temp_directory_path() / std::move(directoryName),
+        .assets = std::move(assets),
+    };
+    std::error_code cleanupError;
+    std::filesystem::remove_all(package.root, cleanupError);
+    std::sort(package.assets.begin(), package.assets.end(),
+              [](const CookedPackageAsset& left, const CookedPackageAsset& right) {
+                  return left.assetId < right.assetId;
+              });
+
+    std::vector<AssetFormat::CookedManifestWriteEntry> entries;
+    entries.reserve(package.assets.size());
+    for (const CookedPackageAsset& asset : package.assets)
+    {
+        auto view = AssetFormat::parseCookedAssetView(asset.cookedBytes);
+        EXPECT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        if (!view)
+        {
+            return package;
+        }
+        EXPECT_EQ(view->header().assetId, asset.assetId);
+        EXPECT_EQ(view->header().assetKind, asset.assetKind);
+        entries.push_back(AssetFormat::CookedManifestWriteEntry{
+            .assetId = asset.assetId,
+            .contentHash = view->header().contentHash,
+            .assetKind = asset.assetKind,
+            .assetTypeVersion = view->header().assetTypeVersion,
+            .cookedFileBytes = asset.cookedBytes.size(),
+            .dependencies = asset.dependencies,
+        });
+
+        auto artifact = AssetFormat::makeCookedArtifactPath(asset.assetKind, asset.assetId);
+        EXPECT_TRUE(artifact.has_value()) << (artifact ? "" : artifact.error().message);
+        if (!artifact)
+        {
+            return package;
+        }
+        writeBytes(package.root / Tina::TestSupport::pathFromUtf8Bytes(artifact->view()),
+                   asset.cookedBytes);
+    }
+
+    auto manifest = AssetFormat::writeCookedManifestBytes(
+        AssetFormat::CookedManifestWriteDesc{.entries = entries});
+    EXPECT_TRUE(manifest.has_value()) << (manifest ? "" : manifest.error().message);
+    if (manifest)
+    {
+        writeBytes(package.root / "manifest.tmnft", *manifest);
+    }
+    return package;
+}
+
+inline void removePackage(const CookedPackage& package)
+{
+    std::error_code errorCode;
+    std::filesystem::remove_all(package.root, errorCode);
 }
 
 [[nodiscard]] inline std::string toUtf8(const std::filesystem::path& path)

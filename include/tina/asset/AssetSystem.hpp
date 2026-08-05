@@ -27,6 +27,9 @@
 
 namespace Tina::Asset {
 
+class Sprite2DBindingRegistry;
+class Mesh3DBindingRegistry;
+
 struct AssetSystemConfig final {
     Core::usize storeCapacity = 0;
     std::pmr::memory_resource* memoryResource = nullptr;
@@ -63,12 +66,22 @@ struct AssetPumpStats final {
     Core::u32 gpuFailed = 0;
 };
 
+// Optional owner-thread GPU registry participants for catalog reload. The
+// spans and pointed-to registries are borrowed only for one reload call.
+struct CatalogReloadBindings final {
+    std::span<Sprite2DBindingRegistry*> sprite2D{};
+    std::span<Mesh3DBindingRegistry*> mesh3D{};
+};
+
 struct CatalogReloadConfig final {
     CatalogPackageOpenConfig package{};
     CatalogChangePlanConfig changePlan{
         .maxChanges = (std::numeric_limits<Core::u32>::max)(),
     };
     Core::u32 maxResidentMigrations = (std::numeric_limits<Core::u32>::max)();
+    // Optional owner-thread GPU registries. They must belong to this
+    // AssetSystem and are prepared before the Catalog/index swap.
+    CatalogReloadBindings bindings{};
 };
 
 enum class CatalogResidentMigrationKind : Core::u8 {

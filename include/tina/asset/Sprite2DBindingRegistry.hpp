@@ -11,12 +11,15 @@
 #include <tina/render/Texture2DFrameResourceResolver.hpp>
 
 #include <memory_resource>
+#include <limits>
+#include <span>
 #include <thread>
 #include <vector>
 
 namespace Tina::Asset {
 
 class AssetSystem;
+struct CatalogResidentMigration;
 
 inline constexpr Core::usize DefaultSprite2DBindingCapacity = 64;
 inline constexpr Core::usize MaximumSprite2DBindingCapacity = 4096;
@@ -53,6 +56,10 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] explicit operator bool() const noexcept;
     [[nodiscard]] Core::usize capacity() const noexcept;
     [[nodiscard]] Core::usize bindingCount() const noexcept;
+    // Old owners replaced by AssetSystem::reloadCatalog() remain retryable until
+    // backend retirement succeeds.
+    [[nodiscard]] Core::usize pendingRetirementCount() const noexcept;
+    [[nodiscard]] Core::Status drainPendingRetirements() noexcept;
 
     // On success gpuTexture is cleared and the registry owns its GPU lifetime.
     // Every failure preserves gpuTexture and releases any temporary AssetLease.
@@ -90,6 +97,10 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] Render::Texture2DFrameResourceResolver texture2DFrameResourceResolver() noexcept;
 
   private:
+    friend class AssetSystem;
+
+    inline static constexpr Core::u32 InvalidEntryIndex = (std::numeric_limits<Core::u32>::max)();
+
     struct Entry final {
         AssetHandle textureAsset{};
         Core::AssetId textureAssetId{};
@@ -99,8 +110,26 @@ class Sprite2DBindingRegistry final {
         Core::u32 frameBorrowCount = 0;
     };
 
+    struct PreparedEntry final {
+        Core::u32 entryIndex = InvalidEntryIndex;
+        Entry replacement{};
+        bool remove = false;
+    };
+
+    struct PendingRetirement final {
+        AssetLease lease{};
+        Render::GpuTextureId gpuTexture{};
+    };
+
     Sprite2DBindingRegistry(AssetSystem& assets, Render::IRenderDevice& device, std::pmr::vector<Entry> entries,
+                            std::pmr::vector<PreparedEntry> preparedEntries,
+                            std::pmr::vector<PendingRetirement> pendingRetirements,
                             Core::usize capacity) noexcept;
+
+    [[nodiscard]] Core::Status prepareCatalogReload(
+        AssetSystem& owner, std::span<const CatalogResidentMigration> migrations) noexcept;
+    void commitPreparedCatalogReload() noexcept;
+    void abortPreparedCatalogReload() noexcept;
 
     [[nodiscard]] bool isOwnerThread() const noexcept;
     [[nodiscard]] Entry* findExact(AssetHandle textureAsset) noexcept;
@@ -132,8 +161,12 @@ class Sprite2DBindingRegistry final {
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;
     std::pmr::vector<Entry> m_entries{};
+    std::pmr::vector<PreparedEntry> m_preparedEntries{};
+    std::pmr::vector<PendingRetirement> m_pendingRetirements{};
     Core::usize m_capacity = 0;
     Core::usize m_bindingCount = 0;
+    Core::usize m_preparedCount = 0;
+    Core::usize m_pendingRetirementCount = 0;
     std::thread::id m_ownerThread{};
 };
 

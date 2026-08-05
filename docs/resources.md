@@ -79,12 +79,15 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 必须覆盖 `CatalogChangePlan` 生命周期。
 
 这一步只回答“两个已验证 Catalog 有什么变化、哪些新条目需要后续处理”，planner 本身不提交状态。
-`AssetSystem::reloadCatalog()` 在其上增加 resident CPU migration 事务：强制完整打开/验证候选 package，生成
-change plan，对当前 resident 的 Modified/Affected asset 与新增依赖预加载新 generation，并仅在 owner thread 且
-queue、IO、GPU upload 与 retirement quiescent 时原子替换 root/Catalog/AssetId index。旧 weak Handle 由返回的
-resident migration 映射到新 generation；旧 `AssetLease` 继续保活旧 payload 直到释放。fresh staging package 的完整生成/验证、manifest revision caller-driven polling、tool-side source
-provenance capture、验证后 state commit、多 unit clean/dirty fresh-stage executor 与 all-clean 零改写复用已具备；
-manifest OS watcher hint 也已具备；Sprite/Mesh registry 的 live GPU owner prepare/commit 仍必须由后续事务切片完成。
+`AssetSystem::reloadCatalog()` 在其上增加 resident CPU generation 与 active GPU owner 的联合事务：强制完整打开/验证
+候选 package，生成 change plan，对当前 resident 的 Modified/Affected asset 与新增依赖预加载新 generation，再 prepare
+调用方通过 `CatalogReloadConfig::bindings` 显式提供的 Sprite/Mesh registry。所有 participant 成功后，才在 owner thread
+且 queue、IO、GPU upload 与 retirement quiescent 时无分配地替换 root/Catalog/AssetId index 并 commit registry；后一个
+participant 失败会逆序 abort 已 prepare participant、退休临时 GPU owner，并卸掉 staged CPU generation。旧 weak Handle
+由返回的 resident migration 映射到新 generation；旧 `AssetLease` 继续保活旧 payload 直到释放。被替换的 GPU owner 在
+commit 后进入 fixed-capacity pending retirement，backend 暂时拒绝时由 `drainPendingRetirements()` 显式重试。fresh staging
+package 的完整生成/验证、manifest revision caller-driven polling、tool-side source provenance capture、验证后 state commit、
+多 unit clean/dirty fresh-stage executor、all-clean 零改写复用与 manifest OS watcher hint 均已具备。
 
 `captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
 `pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
@@ -132,8 +135,9 @@ revision/contract/source 变化，或 unit Added/Removed 时，只有 dirty/adde
 该过程不修改 `--out` live root 或旧 state，也不把 fresh stage 物理替换成固定 live 目录；Runtime
 通过 `reloadCatalog(stageRoot)` 接受 immutable stage。state 必须位于 tool cache，不能放进部署 Catalog root。
 reload 要求 Store 为 replacement generation 保留双驻留 headroom；任何读取、容量、结果分配或索引 staging 失败都会
-卸掉 candidate generation 并保持旧 root/Catalog/index/Handle。当前仍没有 Sprite/Mesh registry active GPU owner 的
-原子 prepare/commit，因此不能描述为完整自动热重载已完成。
+卸掉 candidate generation 并保持旧 root/Catalog/index/Handle。`AssetSystem` 不全局登记 registry；调用方必须把所有仍需
+跨 reload 继续服务的 active Sprite/Mesh registry 放入 `config.bindings`。遗漏 participant 不会被隐式发现；watcher hint、
+revision baseline 接受与 reload 调度也仍由 host 显式编排。
 
 ## 身份、视图与所有权
 
@@ -199,7 +203,9 @@ binding intern 到当前 packet，首次登记保留 entry borrow pin，同帧�
 backend 接受后会先原子失效 GPU generation 并清除所有引用 binding，再由 completion pin 延长 Lease；
 `retireAllTextureBindings()` 先全表 borrow preflight，再允许成功前缀提交。registry 析构要求所有 Entry
 已经显式 retirement，否则 fail-fast。产品 State 只通过 registry retirement 关闭两张纹理，不再保留
-第二份裸 GPU owner 或执行 direct unbind/destroy。
+第二份裸 GPU owner 或执行 direct unbind/destroy。Catalog reload participant 会先检查 active frame borrow，再为
+Replaced Texture 上传并创建 replacement binding；Removed entry 只在全局 commit 后移除。prepare/其他 participant
+失败保持旧 Entry，commit 后旧 owner 进入可重试 pending retirement。
 
 ### Mesh3D binding registry
 
@@ -219,7 +225,10 @@ borrow 阻止 Mesh/Material retirement。Material retirement 先清除 backend b
 Lease，再减少共享 Texture 引用；有 live Material 引用的 Texture 不能退休。Mesh/Texture retirement 直接
 调用 AssetSystem 的 lease-consuming transaction，backend/ledger failure 保留完整 Entry 供重试。
 `retireAllBindings()` 先对全部 Mesh/Material borrow 做无突变 preflight，再按 Material→Texture→Mesh 顺序
-提交；已成功前缀不会回滚，失败项及后续 owner 留待重试。Registry 析构要求三组 Entry 全空。
+提交；已成功前缀不会回滚，失败项及后续 owner 留待重试。Catalog reload participant 联合 prepare Mesh、Material
+与共享 Texture；Material 新增的 resident Texture dependency 可占用 free/removed slot，所有 replacement bundle 成功后
+才随 Catalog commit 发布。旧 Material→Texture→Mesh owner 按该顺序进入可重试 retirement。Registry 析构要求三组
+Entry 与 pending retirement 全空。
 
 ## AssetSystem 状态流
 
@@ -342,11 +351,11 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
-- `ASSET-002` 已有 manifest OS watcher hint、revision polling、immutable Catalog change planner、resident CPU Handle/Lease migration、fresh staging package 生成/验证与
-  idle-safe root/Catalog commit，并已建立 current-only source import metadata wire、Catalog binding 与纯 import
-  planner；真实 importer provenance capture、validated state commit、多 unit mixed fresh-stage executor 与 all-clean
-  零改写复用已接入。Sprite/Mesh registry active GPU owner prepare/commit 仍未实现。通用
-  Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
+- `ASSET-002` 已完成 manifest OS watcher hint、revision polling、immutable Catalog change planner、fresh staging
+  package 生成/验证、resident CPU Handle/Lease migration、Sprite/Mesh active GPU owner participant transaction，以及
+  current-only source import metadata/planner、真实 importer provenance capture、validated state commit、多 unit mixed
+  fresh-stage executor 与 all-clean 零改写复用。watcher/revision/reload/baseline acceptance 仍由 host 显式编排；通用
+  Asset cache/LRU、Bundle/Patch 与 network Asset 是独立后续项；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重
   resolve/pin，并复用 Sprite/UI 共用 `Texture2D` kind/binding；Canvas NineSlice 展开后的1..9个 quad

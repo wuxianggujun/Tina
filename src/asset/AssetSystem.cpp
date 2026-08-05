@@ -5,6 +5,8 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogLoadPlan.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
+#include <tina/asset/Mesh3DBindingRegistry.hpp>
+#include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/task/TaskErrors.hpp>
@@ -387,6 +389,38 @@ AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig
                              "catalog reload requires quiescent IO, upload, and retirement owners");
     }
 
+    const auto validateParticipants = [](auto participants, const char* label) -> Core::Status {
+        for (Core::usize left = 0; left < participants.size(); ++left)
+        {
+            if (participants[left] == nullptr)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, label);
+            }
+            for (Core::usize right = left + 1U; right < participants.size(); ++right)
+            {
+                if (participants[left] == participants[right])
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, label);
+                }
+            }
+        }
+        return Core::success();
+    };
+    if (auto status = validateParticipants(
+            config.bindings.sprite2D,
+            "catalog reload Sprite2D participants contain a null or duplicate registry");
+        !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = validateParticipants(
+            config.bindings.mesh3D,
+            "catalog reload Mesh3D participants contain a null or duplicate registry");
+        !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+
     prepareCatalogOpenConfig(config.package, true);
 
     auto replacement = openCatalogPackage(catalogRootUtf8, config.package);
@@ -621,6 +655,43 @@ AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig
         }
     }
 
+    Core::usize preparedSpriteCount = 0;
+    Core::usize preparedMeshCount = 0;
+    const auto abortPreparedBindings = [&]() noexcept {
+        while (preparedMeshCount != 0)
+        {
+            config.bindings.mesh3D[--preparedMeshCount]->abortPreparedCatalogReload();
+        }
+        while (preparedSpriteCount != 0)
+        {
+            config.bindings.sprite2D[--preparedSpriteCount]->abortPreparedCatalogReload();
+        }
+    };
+    for (; preparedSpriteCount < config.bindings.sprite2D.size(); ++preparedSpriteCount)
+    {
+        if (auto status = config.bindings.sprite2D[preparedSpriteCount]->prepareCatalogReload(
+                *this, migrations);
+            !status)
+        {
+            abortPreparedBindings();
+            rollbackStaged();
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::reloadCatalog", "prepareSprite2D"));
+        }
+    }
+    for (; preparedMeshCount < config.bindings.mesh3D.size(); ++preparedMeshCount)
+    {
+        if (auto status = config.bindings.mesh3D[preparedMeshCount]->prepareCatalogReload(
+                *this, migrations);
+            !status)
+        {
+            abortPreparedBindings();
+            rollbackStaged();
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::reloadCatalog", "prepareMesh3D"));
+        }
+    }
+
     // Every operation below is non-allocating after complete candidate/index/result staging.
     for (const auto& migration : migrations)
     {
@@ -639,6 +710,22 @@ AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig
     for (const auto& resident : staged)
     {
         noteReadyCpu(resident.handle);
+    }
+    for (Sprite2DBindingRegistry* registry : config.bindings.sprite2D)
+    {
+        registry->commitPreparedCatalogReload();
+    }
+    for (Mesh3DBindingRegistry* registry : config.bindings.mesh3D)
+    {
+        registry->commitPreparedCatalogReload();
+    }
+    for (Sprite2DBindingRegistry* registry : config.bindings.sprite2D)
+    {
+        (void)registry->drainPendingRetirements();
+    }
+    for (Mesh3DBindingRegistry* registry : config.bindings.mesh3D)
+    {
+        (void)registry->drainPendingRetirements();
     }
 
     return CatalogReloadResult{

@@ -556,19 +556,26 @@ importer，再通过 incremental stage API 复制 clean object、移除 removed 
 直接变化优先。调用方显式提供 PMR 与 `maxChanges`，该 PMR 必须覆盖结果生命周期；容量或分配失败不返回
 部分 plan。planner 不绑定 Catalog、不使 Handle 失效，也不取得 AssetSystem/Lease/GPU owner。
 
-`AssetSystem::reloadCatalog(root, config)` 是同步、owner-thread-only 的 resident CPU migration API。它强制完整打开并
-验证新的 Catalog package（reload 路径不会接受关闭 on-disk/content validation），使用 `config.changePlan` 生成变化，
-再为当前 resident 的 Modified/Affected asset 及其新增依赖预加载 replacement generation。所有 candidate 读取、Store
-双驻留容量、`maxResidentMigrations`、新 index/root/result 分配成功后，才无分配地原子切换 root、immutable Catalog 与
-AssetId lookup。返回 `CatalogReloadResult`，其中 change plan 与按 AssetId 排序的 resident migration 将旧 weak Handle
-映射到 `Replaced|Removed|LoadedDependency` 的新 generation；旧 `AssetLease` 继续读取旧 payload，释放最后一个 lease 后
-旧 generation 才物理回收。任一步失败都会卸掉 staged generation 并保留旧 root/Catalog/index/Handle。
+`AssetSystem::reloadCatalog(root, config)` 是同步、owner-thread-only 的 resident CPU generation + active GPU owner
+transaction。它强制完整打开并验证新的 Catalog package（reload 路径不会接受关闭 on-disk/content validation），使用
+`config.changePlan` 生成变化，再为当前 resident 的 Modified/Affected asset 及其新增依赖预加载 replacement generation。
+`config.bindings.sprite2D/mesh3D` 是仅在本次调用借用的 registry pointer spans；每个 participant 必须非空、唯一、属于
+当前 AssetSystem 并共享 owner thread。Sprite participant 先 prepare，Mesh participant 后 prepare；失败按 Mesh→Sprite
+逆序 abort。所有 candidate 读取、Store 双驻留容量、`maxResidentMigrations`、新 index/root/result 分配与 participant
+prepare 成功后，才无分配地原子切换 root、immutable Catalog、AssetId lookup 与 registry binding。返回
+`CatalogReloadResult`，其中 change plan 与按 AssetId 排序的 resident migration 将旧 weak Handle 映射到
+`Replaced|Removed|LoadedDependency` 的新 generation；旧 `AssetLease` 继续读取旧 payload，释放最后一个 lease 后旧
+generation 才物理回收。任一步失败都会卸掉 staged generation、abort replacement GPU owner，并保留旧
+root/Catalog/index/Handle/registry Entry。
 
 reload 允许 active resident Handle/Lease，但 pending queue、in-flight IO、tracked GPU upload 与 retirement record 必须为空；
 非 owner thread 返回 `WrongOwnerThread`，非 quiescent 工作状态返回 `CatalogReloadBusy`。Store capacity 必须显式保留
 replacement generation 的双驻留 headroom，容量不足返回 `CatalogCapacityExceeded`。已有 Catalog 时，低层
-`bindCatalog()` 仍受完整 idle 门禁约束，不能绕过 migration API。当前结果映射尚未原子替换 Sprite/Mesh registry 的
-GPU binding owner；该 GPU prepare/commit 是 ASSET-002 剩余切片。
+`bindCatalog()` 仍受完整 idle 门禁约束，不能绕过 migration API。active frame borrow 会在 publish 前拒绝整个事务。
+commit 后 replacement 立即成为唯一 active binding，旧 GPU owner 进入 registry fixed-capacity pending retirement；
+best-effort drain 被 backend 拒绝时不回滚已经发布的 Catalog，而由 `pendingRetirementCount()` 与
+`drainPendingRetirements()` 保留可重试 owner。AssetSystem 不自动发现 registry，调用方必须显式传入所有需跨 reload
+继续服务的 active participant。
 
 TileMap 的唯一当前 root wire contract 是 schema v3。`TileMapPayloadView` 按 authoring 顺序通过
 `layerAt()/findLayer(TileMapLayerId)` 暴露 tile/object layer；稳定 layer/object ID 都是 map-wide 非零唯一
@@ -619,6 +626,9 @@ Lease/Entry。拥有语义下 exact duplicate 也是 conflict；已有 key 通�
 `AssetSystem::retireTexture2D()`。Render retirement 成功会原子失效 texture generation 并清除所有引用
 binding；失败零突变，Entry 可重试。`retireAllTextureBindings()` 先全表检查 frame borrow，再逐 Entry
 handoff；它允许已成功前缀提交，失败项与后续项保留供重试。Registry 析构要求 Entry 已空，否则 fail-fast。
+作为 Catalog reload participant 时，registry 在 publish 前为 Replaced Texture 上传并创建 replacement binding，
+Removed entry 仅做 staged removal；active frame borrow、upload/binding 或后续 participant 失败都保持旧 Entry。
+commit 后旧 Lease/GPU owner 转入 fixed-capacity pending retirement，backend reject 保留 owner 供显式 drain 重试。
 `resolveSprite()` 与 `resolveTileset()` 分别沿 Cooked Sprite/Tileset 的唯一 required Texture2D dependency
 fail closed 返回当前低层 key；产品 extraction 使用 `internSpriteFrameResource()` /
 `internTilesetFrameResource()` 将 binding 登记到当前 sink。同帧重复 descriptor 返回同一 ref，首次 pin
@@ -649,8 +659,10 @@ Material 内的 role dependency 仍由 Material v2 严格顺序与唯一性约�
 binding 登记为 packet-local `Mesh3DGeometry` / `Mesh3DMaterial` ref。首次 intern 的 Entry borrow pin 阻止
 active frame retirement。Material retirement 清除 bundle 并减少 Texture 引用；有 live Material 引用时
 Texture retirement 失败。Mesh/Texture retirement 通过 AssetSystem 的 lease-consuming transaction 提交，
-失败保留 Entry；`retireAllBindings()` 按 Material→Texture→Mesh 关闭，Registry 析构要求全空。调用方不再
-持有第二份 GPU owner、registered flag 或持久 device key。
+失败保留 Entry；Catalog reload participant 联合 prepare Mesh、Material 与共享 Texture，并可为 replacement Material
+取得新 `LoadedDependency` Texture owner、复用 removed/free slot。全局 commit 后旧 owner 按
+Material→Texture→Mesh 顺序进入可重试 retirement；`retireAllBindings()` 使用相同关闭顺序，Registry 析构要求 active
+与 pending storage 全空。调用方不再持有第二份 GPU owner、registered flag 或持久 device key。
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含

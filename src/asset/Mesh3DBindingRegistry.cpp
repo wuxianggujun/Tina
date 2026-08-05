@@ -1,13 +1,17 @@
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/AssetGpuMesh.hpp>
+#include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
 
+#include <algorithm>
 #include <exception>
+#include <memory>
 #include <new>
 #include <utility>
 
@@ -25,7 +29,9 @@ namespace {
 
 Mesh3DBindingRegistry::~Mesh3DBindingRegistry() noexcept
 {
-    if (m_meshBindingCount != 0 || m_materialBindingCount != 0 || m_textureOwnerCount != 0)
+    if (m_meshBindingCount != 0 || m_materialBindingCount != 0 || m_textureOwnerCount != 0 ||
+        m_preparedMeshCount != 0 || m_preparedMaterialCount != 0 || m_preparedTextureCount != 0 ||
+        m_pendingMeshCount != 0 || m_pendingMaterialCount != 0 || m_pendingTextureCount != 0)
     {
         // Releasing CPU leases here would silently leak their GPU owners.
         std::terminate();
@@ -51,11 +57,20 @@ Mesh3DBindingRegistry::Mesh3DBindingRegistry(
     std::pmr::vector<MeshEntry> meshEntries,
     std::pmr::vector<MaterialEntry> materialEntries,
     std::pmr::vector<TextureEntry> textureEntries,
+    std::pmr::vector<PreparedMeshEntry> preparedMeshes,
+    std::pmr::vector<PreparedMaterialEntry> preparedMaterials,
+    std::pmr::vector<PreparedTextureEntry> preparedTextures,
+    std::pmr::vector<PendingMeshRetirement> pendingMeshes,
+    std::pmr::vector<PendingMaterialRetirement> pendingMaterials,
+    std::pmr::vector<PendingTextureRetirement> pendingTextures,
     Core::usize meshCapacity, Core::usize materialCapacity,
     Core::usize textureCapacity) noexcept
     : m_assets(&assets), m_store(&assets.store()), m_device(&device),
       m_meshEntries(std::move(meshEntries)), m_materialEntries(std::move(materialEntries)),
-      m_textureEntries(std::move(textureEntries)), m_meshCapacity(meshCapacity),
+      m_textureEntries(std::move(textureEntries)), m_preparedMeshes(std::move(preparedMeshes)),
+      m_preparedMaterials(std::move(preparedMaterials)), m_preparedTextures(std::move(preparedTextures)),
+      m_pendingMeshes(std::move(pendingMeshes)), m_pendingMaterials(std::move(pendingMaterials)),
+      m_pendingTextures(std::move(pendingTextures)), m_meshCapacity(meshCapacity),
       m_materialCapacity(materialCapacity), m_textureCapacity(textureCapacity),
       m_ownerThread(std::this_thread::get_id())
 {
@@ -68,12 +83,24 @@ Mesh3DBindingRegistry::Mesh3DBindingRegistry(Mesh3DBindingRegistry&& other) noex
       m_meshEntries(std::move(other.m_meshEntries)),
       m_materialEntries(std::move(other.m_materialEntries)),
       m_textureEntries(std::move(other.m_textureEntries)),
+      m_preparedMeshes(std::move(other.m_preparedMeshes)),
+      m_preparedMaterials(std::move(other.m_preparedMaterials)),
+      m_preparedTextures(std::move(other.m_preparedTextures)),
+      m_pendingMeshes(std::move(other.m_pendingMeshes)),
+      m_pendingMaterials(std::move(other.m_pendingMaterials)),
+      m_pendingTextures(std::move(other.m_pendingTextures)),
       m_meshCapacity(std::exchange(other.m_meshCapacity, 0)),
       m_materialCapacity(std::exchange(other.m_materialCapacity, 0)),
       m_textureCapacity(std::exchange(other.m_textureCapacity, 0)),
       m_meshBindingCount(std::exchange(other.m_meshBindingCount, 0)),
       m_materialBindingCount(std::exchange(other.m_materialBindingCount, 0)),
       m_textureOwnerCount(std::exchange(other.m_textureOwnerCount, 0)),
+      m_preparedMeshCount(std::exchange(other.m_preparedMeshCount, 0)),
+      m_preparedMaterialCount(std::exchange(other.m_preparedMaterialCount, 0)),
+      m_preparedTextureCount(std::exchange(other.m_preparedTextureCount, 0)),
+      m_pendingMeshCount(std::exchange(other.m_pendingMeshCount, 0)),
+      m_pendingMaterialCount(std::exchange(other.m_pendingMaterialCount, 0)),
+      m_pendingTextureCount(std::exchange(other.m_pendingTextureCount, 0)),
       m_ownerThread(std::exchange(other.m_ownerThread, {}))
 {
 }
@@ -96,15 +123,33 @@ Core::Result<Mesh3DBindingRegistry> Mesh3DBindingRegistry::Create(
         std::pmr::vector<MeshEntry> meshEntries{memoryResource};
         std::pmr::vector<MaterialEntry> materialEntries{memoryResource};
         std::pmr::vector<TextureEntry> textureEntries{memoryResource};
+        std::pmr::vector<PreparedMeshEntry> preparedMeshes{memoryResource};
+        std::pmr::vector<PreparedMaterialEntry> preparedMaterials{memoryResource};
+        std::pmr::vector<PreparedTextureEntry> preparedTextures{memoryResource};
+        std::pmr::vector<PendingMeshRetirement> pendingMeshes{memoryResource};
+        std::pmr::vector<PendingMaterialRetirement> pendingMaterials{memoryResource};
+        std::pmr::vector<PendingTextureRetirement> pendingTextures{memoryResource};
         meshEntries.resize(config.meshCapacity);
         materialEntries.resize(config.materialCapacity);
         textureEntries.resize(config.textureCapacity);
+        preparedMeshes.resize(config.meshCapacity);
+        preparedMaterials.resize(config.materialCapacity);
+        preparedTextures.resize(config.textureCapacity);
+        pendingMeshes.resize(config.meshCapacity);
+        pendingMaterials.resize(config.materialCapacity);
+        pendingTextures.resize(config.textureCapacity);
         return Mesh3DBindingRegistry{
             assets,
             device,
             std::move(meshEntries),
             std::move(materialEntries),
             std::move(textureEntries),
+            std::move(preparedMeshes),
+            std::move(preparedMaterials),
+            std::move(preparedTextures),
+            std::move(pendingMeshes),
+            std::move(pendingMaterials),
+            std::move(pendingTextures),
             config.meshCapacity,
             config.materialCapacity,
             config.textureCapacity,
@@ -129,6 +174,808 @@ Core::usize Mesh3DBindingRegistry::textureCapacity() const noexcept { return m_t
 Core::usize Mesh3DBindingRegistry::meshBindingCount() const noexcept { return m_meshBindingCount; }
 Core::usize Mesh3DBindingRegistry::materialBindingCount() const noexcept { return m_materialBindingCount; }
 Core::usize Mesh3DBindingRegistry::textureOwnerCount() const noexcept { return m_textureOwnerCount; }
+
+Core::usize Mesh3DBindingRegistry::pendingRetirementCount() const noexcept
+{
+    return m_pendingMeshCount + m_pendingMaterialCount + m_pendingTextureCount;
+}
+
+const CatalogResidentMigration* Mesh3DBindingRegistry::findMigration(
+    std::span<const CatalogResidentMigration> migrations, Core::AssetId assetId) const noexcept
+{
+    const auto it = std::find_if(
+        migrations.begin(), migrations.end(),
+        [assetId](const CatalogResidentMigration& migration) { return migration.assetId == assetId; });
+    return it == migrations.end() ? nullptr : std::addressof(*it);
+}
+
+Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
+    AssetSystem& owner, std::span<const CatalogResidentMigration> migrations) noexcept
+{
+    if (!isOwnerThread())
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Mesh3DBindingRegistry migration must run on its owner thread");
+    }
+    if (m_assets != &owner)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "Mesh3DBindingRegistry belongs to another AssetSystem");
+    }
+    if (m_preparedMeshCount != 0 || m_preparedMaterialCount != 0 || m_preparedTextureCount != 0)
+    {
+        return Core::failure(AssetErrorCode::CatalogReloadBusy,
+                             "Mesh3DBindingRegistry already has a prepared catalog migration");
+    }
+    if (auto status = drainPendingRetirements(); !status)
+    {
+        return Core::failure(std::move(status.error()).withContext(
+            "Mesh3DBindingRegistry::prepareCatalogReload", "pendingRetirement"));
+    }
+
+    const auto resetPrepared = [&]() noexcept {
+        abortPreparedCatalogReload();
+    };
+    const auto validateMigrationSet = [&]() -> Core::Status {
+        for (Core::usize left = 0; left < migrations.size(); ++left)
+        {
+            if (!migrations[left].assetId)
+            {
+                return Core::failure(AssetErrorCode::InvalidHandle,
+                                     "catalog GPU migration contains an invalid AssetId");
+            }
+            for (Core::usize right = left + 1U; right < migrations.size(); ++right)
+            {
+                if (migrations[left].assetId == migrations[right].assetId)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "catalog GPU migration contains duplicate AssetIds");
+                }
+            }
+        }
+        return Core::success();
+    };
+    if (auto status = validateMigrationSet(); !status)
+    {
+        return status;
+    }
+
+    Core::usize oldMeshCount = 0;
+    Core::usize oldMaterialCount = 0;
+    Core::usize oldTextureCount = 0;
+    for (Core::u32 index = 0; index < static_cast<Core::u32>(m_meshEntries.size()); ++index)
+    {
+        const MeshEntry& entry = m_meshEntries[index];
+        if (entry.bindingKey == 0)
+        {
+            continue;
+        }
+        const auto* migration = findMigration(migrations, entry.assetId);
+        if (migration == nullptr)
+        {
+            continue;
+        }
+        if (entry.frameBorrowCount != 0)
+        {
+            return Core::failure(AssetErrorCode::AssetNotReady,
+                                 "Mesh3D geometry binding is still borrowed by an active frame resource");
+        }
+        if (migration->kind == CatalogResidentMigrationKind::LoadedDependency ||
+            migration->previous != entry.asset)
+        {
+            return Core::failure(AssetErrorCode::InvalidHandle,
+                                 "Mesh3DBindingRegistry mesh migration does not match its active handle");
+        }
+        if (migration->kind == CatalogResidentMigrationKind::Removed)
+        {
+            if (migration->current)
+            {
+                return Core::failure(AssetErrorCode::InvalidHandle,
+                                     "removed StaticMesh migration unexpectedly has a current handle");
+            }
+        }
+        else if (migration->kind != CatalogResidentMigrationKind::Replaced || !migration->current ||
+                 migration->current == entry.asset ||
+                 m_store->assetKind(migration->current) != AssetFormat::AssetKind::StaticMesh ||
+                 m_store->assetId(migration->current) != entry.assetId ||
+                 !hasRenderableCpuPayload(*m_store, migration->current) ||
+                 m_store->tryGet(migration->current) == nullptr)
+        {
+            return Core::failure(AssetErrorCode::InvalidHandle,
+                                 "replacement StaticMesh migration has an invalid generation");
+        }
+        ++oldMeshCount;
+    }
+    for (Core::u32 index = 0; index < static_cast<Core::u32>(m_materialEntries.size()); ++index)
+    {
+        const MaterialEntry& entry = m_materialEntries[index];
+        if (entry.bindingKey == 0)
+        {
+            continue;
+        }
+        const auto* migration = findMigration(migrations, entry.assetId);
+        if (migration == nullptr)
+        {
+            continue;
+        }
+        if (entry.frameBorrowCount != 0)
+        {
+            return Core::failure(AssetErrorCode::AssetNotReady,
+                                 "Mesh3D material binding is still borrowed by an active frame resource");
+        }
+        if (migration->kind == CatalogResidentMigrationKind::LoadedDependency ||
+            migration->previous != entry.asset)
+        {
+            return Core::failure(AssetErrorCode::InvalidHandle,
+                                 "Mesh3DBindingRegistry material migration does not match its active handle");
+        }
+        if (migration->kind == CatalogResidentMigrationKind::Removed)
+        {
+            if (migration->current)
+            {
+                return Core::failure(AssetErrorCode::InvalidHandle,
+                                     "removed Material migration unexpectedly has a current handle");
+            }
+        }
+        else if (migration->kind != CatalogResidentMigrationKind::Replaced || !migration->current ||
+                 migration->current == entry.asset ||
+                 m_store->assetKind(migration->current) != AssetFormat::AssetKind::Material ||
+                 m_store->assetId(migration->current) != entry.assetId ||
+                 !hasRenderableCpuPayload(*m_store, migration->current) ||
+                 m_store->tryGet(migration->current) == nullptr)
+        {
+            return Core::failure(AssetErrorCode::InvalidHandle,
+                                 "replacement Material migration has an invalid generation");
+        }
+        ++oldMaterialCount;
+    }
+    for (Core::u32 index = 0; index < static_cast<Core::u32>(m_textureEntries.size()); ++index)
+    {
+        const TextureEntry& entry = m_textureEntries[index];
+        if (!entry.gpuTexture)
+        {
+            continue;
+        }
+        const auto* migration = findMigration(migrations, entry.assetId);
+        if (migration == nullptr)
+        {
+            continue;
+        }
+        if (migration->kind == CatalogResidentMigrationKind::LoadedDependency ||
+            migration->previous != entry.asset)
+        {
+            return Core::failure(AssetErrorCode::InvalidHandle,
+                                 "Mesh3DBindingRegistry texture migration does not match its active handle");
+        }
+        if (migration->kind == CatalogResidentMigrationKind::Removed)
+        {
+            if (migration->current)
+            {
+                return Core::failure(AssetErrorCode::InvalidHandle,
+                                     "removed Texture2D migration unexpectedly has a current handle");
+            }
+        }
+        else if (migration->kind != CatalogResidentMigrationKind::Replaced || !migration->current ||
+                 migration->current == entry.asset ||
+                 m_store->assetKind(migration->current) != AssetFormat::AssetKind::Texture2D ||
+                 m_store->assetId(migration->current) != entry.assetId ||
+                 !hasRenderableCpuPayload(*m_store, migration->current) ||
+                 m_store->tryGet(migration->current) == nullptr)
+        {
+            return Core::failure(AssetErrorCode::InvalidHandle,
+                                 "replacement Texture2D migration has an invalid generation");
+        }
+        ++oldTextureCount;
+    }
+
+    try
+    {
+        // Reserve fixed action slots before touching any GPU owner. Removed
+        // texture slots can be reused by a newly required material dependency.
+        for (Core::u32 index = 0; index < static_cast<Core::u32>(m_meshEntries.size()); ++index)
+        {
+            const MeshEntry& entry = m_meshEntries[index];
+            const auto* migration = entry.bindingKey == 0 ? nullptr : findMigration(migrations, entry.assetId);
+            if (migration == nullptr)
+            {
+                continue;
+            }
+            if (m_preparedMeshCount >= m_preparedMeshes.size())
+            {
+                resetPrepared();
+                return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
+                                     "Mesh3DBindingRegistry has no prepared StaticMesh slot");
+            }
+            m_preparedMeshes[m_preparedMeshCount++] = PreparedMeshEntry{
+                .entryIndex = index,
+                .replacement = migration->kind == CatalogResidentMigrationKind::Replaced
+                                   ? MeshEntry{.asset = migration->current, .assetId = entry.assetId}
+                                   : MeshEntry{},
+                .remove = migration->kind == CatalogResidentMigrationKind::Removed,
+            };
+        }
+        for (Core::u32 index = 0; index < static_cast<Core::u32>(m_materialEntries.size()); ++index)
+        {
+            const MaterialEntry& entry = m_materialEntries[index];
+            const auto* migration = entry.bindingKey == 0 ? nullptr : findMigration(migrations, entry.assetId);
+            if (migration == nullptr)
+            {
+                continue;
+            }
+            if (m_preparedMaterialCount >= m_preparedMaterials.size())
+            {
+                resetPrepared();
+                return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
+                                     "Mesh3DBindingRegistry has no prepared Material slot");
+            }
+            m_preparedMaterials[m_preparedMaterialCount++] = PreparedMaterialEntry{
+                .entryIndex = index,
+                .replacement = migration->kind == CatalogResidentMigrationKind::Replaced
+                                   ? MaterialEntry{.asset = migration->current, .assetId = entry.assetId}
+                                   : MaterialEntry{},
+                .remove = migration->kind == CatalogResidentMigrationKind::Removed,
+            };
+        }
+        for (Core::u32 index = 0; index < static_cast<Core::u32>(m_textureEntries.size()); ++index)
+        {
+            const TextureEntry& entry = m_textureEntries[index];
+            const auto* migration = entry.gpuTexture ? findMigration(migrations, entry.assetId) : nullptr;
+            if (migration == nullptr)
+            {
+                continue;
+            }
+            if (m_preparedTextureCount >= m_preparedTextures.size())
+            {
+                resetPrepared();
+                return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
+                                     "Mesh3DBindingRegistry has no prepared Texture2D slot");
+            }
+            m_preparedTextures[m_preparedTextureCount++] = PreparedTextureEntry{
+                .entryIndex = index,
+                .replacement = migration->kind == CatalogResidentMigrationKind::Replaced
+                                   ? TextureEntry{.asset = migration->current, .assetId = entry.assetId}
+                                   : TextureEntry{},
+                .remove = migration->kind == CatalogResidentMigrationKind::Removed,
+            };
+        }
+
+        // A changed resident material may acquire a newly loaded Texture2D
+        // dependency that had no previous registry owner. Stage one owner in a
+        // removed slot first, then consume an actually free slot.
+        for (Core::usize materialIndex = 0; materialIndex < m_preparedMaterialCount; ++materialIndex)
+        {
+            const PreparedMaterialEntry& preparedMaterial = m_preparedMaterials[materialIndex];
+            if (preparedMaterial.remove)
+            {
+                continue;
+            }
+            const CookedAssetFile* file = m_store->tryGet(preparedMaterial.replacement.asset);
+            if (file == nullptr)
+            {
+                resetPrepared();
+                return Core::failure(AssetErrorCode::AssetNotReady,
+                                     "replacement Material payload is unavailable");
+            }
+            for (Core::u32 dependencyIndex = 0; dependencyIndex < file->header().dependencyCount;
+                 ++dependencyIndex)
+            {
+                const auto dependency = file->dependency(dependencyIndex);
+                if (!dependency || dependency->expectedKind != AssetFormat::AssetKind::Texture2D ||
+                    dependency->flags != AssetFormat::DependencyFlags::Required)
+                {
+                    resetPrepared();
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "replacement Material has an invalid required Texture2D dependency");
+                }
+                if (findCandidateTextureByAssetId(dependency->assetId).entry != nullptr)
+                {
+                    continue;
+                }
+
+                AssetHandle candidateHandle{};
+                if (const auto* dependencyMigration = findMigration(migrations, dependency->assetId);
+                    dependencyMigration != nullptr)
+                {
+                    if (dependencyMigration->kind == CatalogResidentMigrationKind::Removed ||
+                        !dependencyMigration->current)
+                    {
+                        resetPrepared();
+                        return Core::failure(
+                            AssetErrorCode::InvalidCatalogConfig,
+                            "replacement Material references a removed Texture2D dependency");
+                    }
+                    candidateHandle = dependencyMigration->current;
+                }
+                else if (const auto current = m_assets->find(dependency->assetId))
+                {
+                    candidateHandle = *current;
+                }
+                if (!candidateHandle ||
+                    m_store->assetKind(candidateHandle) != AssetFormat::AssetKind::Texture2D ||
+                    m_store->assetId(candidateHandle) != dependency->assetId ||
+                    !hasRenderableCpuPayload(*m_store, candidateHandle) ||
+                    m_store->tryGet(candidateHandle) == nullptr)
+                {
+                    resetPrepared();
+                    return Core::failure(AssetErrorCode::AssetNotReady,
+                                         "replacement Material dependency has no resident Texture2D generation");
+                }
+
+                Core::u32 targetIndex = findFreePreparedTextureSlot();
+                if (targetIndex == InvalidTextureIndex)
+                {
+                    resetPrepared();
+                    return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
+                                         "Mesh3DBindingRegistry has no Texture2D slot for replacement dependency");
+                }
+                bool reusedPreparedRemoval = false;
+                for (Core::usize preparedIndex = 0; preparedIndex < m_preparedTextureCount; ++preparedIndex)
+                {
+                    auto& candidate = m_preparedTextures[preparedIndex];
+                    if (candidate.entryIndex == targetIndex && candidate.remove)
+                    {
+                        candidate.remove = false;
+                        candidate.replacement = TextureEntry{
+                            .asset = candidateHandle,
+                            .assetId = dependency->assetId,
+                        };
+                        reusedPreparedRemoval = true;
+                        break;
+                    }
+                }
+                if (!reusedPreparedRemoval)
+                {
+                    if (m_preparedTextureCount >= m_preparedTextures.size())
+                    {
+                        resetPrepared();
+                        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
+                                             "Mesh3DBindingRegistry has no prepared Texture2D slot");
+                    }
+                    m_preparedTextures[m_preparedTextureCount++] = PreparedTextureEntry{
+                        .entryIndex = targetIndex,
+                        .replacement = TextureEntry{
+                            .asset = candidateHandle,
+                            .assetId = dependency->assetId,
+                        },
+                    };
+                }
+            }
+        }
+
+        // A material binding embeds the concrete GPU texture ids. Any texture
+        // slot replacement therefore requires the referencing material to be
+        // prepared in the same transaction.
+        for (Core::u32 materialIndex = 0;
+             materialIndex < static_cast<Core::u32>(m_materialEntries.size()); ++materialIndex)
+        {
+            const MaterialEntry& material = m_materialEntries[materialIndex];
+            if (material.bindingKey == 0)
+            {
+                continue;
+            }
+            const bool materialPrepared = std::any_of(
+                m_preparedMaterials.begin(),
+                m_preparedMaterials.begin() + static_cast<std::ptrdiff_t>(m_preparedMaterialCount),
+                [materialIndex](const PreparedMaterialEntry& candidate) {
+                    return candidate.entryIndex == materialIndex;
+                });
+            if (materialPrepared)
+            {
+                continue;
+            }
+            for (Core::u32 role = 0; role < material.textureCount; ++role)
+            {
+                const bool texturePrepared = std::any_of(
+                    m_preparedTextures.begin(),
+                    m_preparedTextures.begin() + static_cast<std::ptrdiff_t>(m_preparedTextureCount),
+                    [&material, role](const PreparedTextureEntry& candidate) {
+                        return candidate.entryIndex == material.textureIndices[role];
+                    });
+                if (texturePrepared)
+                {
+                    resetPrepared();
+                    return Core::failure(
+                        AssetErrorCode::InvalidCatalogConfig,
+                        "Texture2D migration is missing its dependent Material migration");
+                }
+            }
+        }
+
+        const Core::usize newMeshCount = std::count_if(
+            m_preparedMeshes.begin(), m_preparedMeshes.begin() + static_cast<std::ptrdiff_t>(m_preparedMeshCount),
+            [](const PreparedMeshEntry& entry) { return !entry.remove; });
+        const Core::usize newMaterialCount = std::count_if(
+            m_preparedMaterials.begin(),
+            m_preparedMaterials.begin() + static_cast<std::ptrdiff_t>(m_preparedMaterialCount),
+            [](const PreparedMaterialEntry& entry) { return !entry.remove; });
+        const Core::usize newTextureCount = std::count_if(
+            m_preparedTextures.begin(),
+            m_preparedTextures.begin() + static_cast<std::ptrdiff_t>(m_preparedTextureCount),
+            [](const PreparedTextureEntry& entry) { return !entry.remove; });
+        const auto pendingHeadroom = [](Core::usize storageSize, Core::usize pending,
+                                        Core::usize oldCount, Core::usize newCount) noexcept {
+            return pending <= storageSize &&
+                   std::max(oldCount, newCount) <= storageSize - pending;
+        };
+        if (oldMeshCount > m_meshBindingCount || oldMaterialCount > m_materialBindingCount ||
+            oldTextureCount > m_textureOwnerCount ||
+            !pendingHeadroom(m_pendingMeshes.size(), m_pendingMeshCount, oldMeshCount, newMeshCount) ||
+            !pendingHeadroom(m_pendingMaterials.size(), m_pendingMaterialCount, oldMaterialCount,
+                             newMaterialCount) ||
+            !pendingHeadroom(m_pendingTextures.size(), m_pendingTextureCount, oldTextureCount,
+                             newTextureCount) ||
+            m_meshBindingCount - oldMeshCount + newMeshCount > m_meshCapacity ||
+            m_materialBindingCount - oldMaterialCount + newMaterialCount > m_materialCapacity ||
+            m_textureOwnerCount - oldTextureCount + newTextureCount > m_textureCapacity)
+        {
+            resetPrepared();
+            return Core::failure(AssetErrorCode::CatalogCapacityExceeded,
+                                 "Mesh3DBindingRegistry lacks catalog migration headroom");
+        }
+
+        // Stage Texture owners first because material preparation resolves them.
+        for (Core::usize index = 0; index < m_preparedTextureCount; ++index)
+        {
+            auto& prepared = m_preparedTextures[index];
+            if (prepared.remove)
+            {
+                continue;
+            }
+            const CookedAssetFile* file = m_store->tryGet(prepared.replacement.asset);
+            if (file == nullptr || m_store->assetKind(prepared.replacement.asset) != AssetFormat::AssetKind::Texture2D ||
+                !hasRenderableCpuPayload(*m_store, prepared.replacement.asset))
+            {
+                resetPrepared();
+                return Core::failure(AssetErrorCode::AssetNotReady,
+                                     "replacement Texture2D payload is unavailable");
+            }
+            auto lease = m_assets->acquire(prepared.replacement.asset);
+            if (!lease)
+            {
+                resetPrepared();
+                return Core::failure(std::move(lease.error()).withContext(
+                    "Mesh3DBindingRegistry::prepareCatalogReload", "textureLease"));
+            }
+            auto gpu = uploadTexture2DFromCooked(*m_device, *file);
+            if (!gpu)
+            {
+                resetPrepared();
+                return Core::failure(std::move(gpu.error()).withContext(
+                    "Mesh3DBindingRegistry::prepareCatalogReload", "textureUpload"));
+            }
+            prepared.replacement.lease = std::move(*lease);
+            prepared.replacement.gpuTexture = *gpu;
+        }
+
+        for (Core::usize index = 0; index < m_preparedMeshCount; ++index)
+        {
+            auto& prepared = m_preparedMeshes[index];
+            if (prepared.remove)
+            {
+                continue;
+            }
+            const auto* file = m_store->tryGet(prepared.replacement.asset);
+            if (!prepared.replacement.asset || file == nullptr ||
+                m_store->assetKind(prepared.replacement.asset) != AssetFormat::AssetKind::StaticMesh ||
+                !hasRenderableCpuPayload(*m_store, prepared.replacement.asset))
+            {
+                resetPrepared();
+                return Core::failure(AssetErrorCode::AssetNotReady,
+                                     "replacement StaticMesh payload is unavailable");
+            }
+            auto lease = m_assets->acquire(prepared.replacement.asset);
+            if (!lease)
+            {
+                resetPrepared();
+                return Core::failure(std::move(lease.error()).withContext(
+                    "Mesh3DBindingRegistry::prepareCatalogReload", "meshLease"));
+            }
+            auto gpu = uploadStaticMeshFromCooked(*m_device, *file);
+            if (!gpu)
+            {
+                resetPrepared();
+                return Core::failure(std::move(gpu.error()).withContext(
+                    "Mesh3DBindingRegistry::prepareCatalogReload", "meshUpload"));
+            }
+            auto key = m_device->createMesh3DBinding(*gpu);
+            if (!key)
+            {
+                // Keep the uploaded owner in the prepared slot so the common
+                // abort path can hand it to retryable retirement.
+                prepared.replacement.lease = std::move(*lease);
+                prepared.replacement.gpuMesh = *gpu;
+                resetPrepared();
+                return Core::failure(std::move(key.error()).withContext(
+                    "Mesh3DBindingRegistry::prepareCatalogReload", "meshBinding"));
+            }
+            prepared.replacement.lease = std::move(*lease);
+            prepared.replacement.gpuMesh = *gpu;
+            prepared.replacement.bindingKey = *key;
+        }
+
+        for (Core::usize index = 0; index < m_preparedMaterialCount; ++index)
+        {
+            auto& prepared = m_preparedMaterials[index];
+            if (prepared.remove)
+            {
+                continue;
+            }
+            auto validated = validatePreparedMaterialBinding(prepared.replacement.asset);
+            if (!validated)
+            {
+                resetPrepared();
+                return Core::failure(std::move(validated.error()).withContext(
+                    "Mesh3DBindingRegistry::prepareCatalogReload", "materialValidate"));
+            }
+            auto lease = m_assets->acquire(prepared.replacement.asset);
+            if (!lease)
+            {
+                resetPrepared();
+                return Core::failure(std::move(lease.error()).withContext(
+                    "Mesh3DBindingRegistry::prepareCatalogReload", "materialLease"));
+            }
+            auto key = m_device->createMesh3DMaterialBinding(validated->renderBinding);
+            if (!key)
+            {
+                prepared.replacement.lease = std::move(*lease);
+                resetPrepared();
+                return Core::failure(std::move(key.error()).withContext(
+                    "Mesh3DBindingRegistry::prepareCatalogReload", "materialBinding"));
+            }
+            prepared.replacement.lease = std::move(*lease);
+            prepared.replacement.textureIndices = validated->textureIndices;
+            prepared.replacement.textureCount = validated->textureCount;
+            prepared.replacement.bindingKey = *key;
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        resetPrepared();
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "Mesh3DBindingRegistry catalog migration allocation failed");
+    }
+    return Core::success();
+}
+
+void Mesh3DBindingRegistry::commitPreparedCatalogReload() noexcept
+{
+    for (Core::usize index = 0; index < m_preparedMaterialCount; ++index)
+    {
+        auto& prepared = m_preparedMaterials[index];
+        if (prepared.entryIndex >= m_materialEntries.size())
+        {
+            std::terminate();
+        }
+        auto& active = m_materialEntries[prepared.entryIndex];
+        if (active.bindingKey == 0 || active.frameBorrowCount != 0 ||
+            m_pendingMaterialCount >= m_pendingMaterials.size() ||
+            (!prepared.remove &&
+             (prepared.replacement.bindingKey == 0 || !prepared.replacement.lease)))
+        {
+            std::terminate();
+        }
+        auto& pending = m_pendingMaterials[m_pendingMaterialCount++];
+        pending.lease = std::move(active.lease);
+        pending.bindingKey = active.bindingKey;
+        if (prepared.remove)
+        {
+            active = MaterialEntry{};
+            --m_materialBindingCount;
+        }
+        else
+        {
+            active = std::move(prepared.replacement);
+        }
+        prepared = PreparedMaterialEntry{};
+    }
+    for (Core::usize index = 0; index < m_preparedTextureCount; ++index)
+    {
+        auto& prepared = m_preparedTextures[index];
+        if (prepared.entryIndex >= m_textureEntries.size() ||
+            (prepared.remove && !m_textureEntries[prepared.entryIndex].gpuTexture) ||
+            (!prepared.remove &&
+             (!prepared.replacement.gpuTexture || !prepared.replacement.lease)))
+        {
+            std::terminate();
+        }
+        auto& active = m_textureEntries[prepared.entryIndex];
+        if (active.gpuTexture && m_pendingTextureCount >= m_pendingTextures.size())
+        {
+            std::terminate();
+        }
+        if (active.gpuTexture)
+        {
+            auto& pending = m_pendingTextures[m_pendingTextureCount++];
+            pending.lease = std::move(active.lease);
+            pending.gpuTexture = active.gpuTexture;
+            active.gpuTexture = {};
+            --m_textureOwnerCount;
+        }
+        if (prepared.remove)
+        {
+            active = TextureEntry{};
+        }
+        else
+        {
+            active = std::move(prepared.replacement);
+            ++m_textureOwnerCount;
+        }
+        prepared = PreparedTextureEntry{};
+    }
+    for (Core::usize index = 0; index < m_preparedMeshCount; ++index)
+    {
+        auto& prepared = m_preparedMeshes[index];
+        if (prepared.entryIndex >= m_meshEntries.size())
+        {
+            std::terminate();
+        }
+        auto& active = m_meshEntries[prepared.entryIndex];
+        if (active.bindingKey == 0 || active.frameBorrowCount != 0 ||
+            m_pendingMeshCount >= m_pendingMeshes.size() ||
+            (!prepared.remove &&
+             (prepared.replacement.bindingKey == 0 || !prepared.replacement.gpuMesh ||
+              !prepared.replacement.lease)))
+        {
+            std::terminate();
+        }
+        auto& pending = m_pendingMeshes[m_pendingMeshCount++];
+        pending.lease = std::move(active.lease);
+        pending.gpuMesh = active.gpuMesh;
+        if (prepared.remove)
+        {
+            active = MeshEntry{};
+            --m_meshBindingCount;
+        }
+        else
+        {
+            active = std::move(prepared.replacement);
+        }
+        prepared = PreparedMeshEntry{};
+    }
+
+    for (auto& texture : m_textureEntries)
+    {
+        if (texture.gpuTexture)
+        {
+            texture.materialReferenceCount = 0;
+        }
+    }
+    for (const auto& material : m_materialEntries)
+    {
+        if (!material.bindingKey)
+        {
+            continue;
+        }
+        for (Core::u32 role = 0; role < material.textureCount; ++role)
+        {
+            if (material.textureIndices[role] >= m_textureEntries.size() ||
+                !m_textureEntries[material.textureIndices[role]].gpuTexture)
+            {
+                std::terminate();
+            }
+            auto& texture = m_textureEntries[material.textureIndices[role]];
+            if (texture.materialReferenceCount == (std::numeric_limits<Core::u32>::max)())
+            {
+                std::terminate();
+            }
+            ++texture.materialReferenceCount;
+        }
+    }
+    m_preparedMeshCount = 0;
+    m_preparedMaterialCount = 0;
+    m_preparedTextureCount = 0;
+}
+
+void Mesh3DBindingRegistry::abortPreparedCatalogReload() noexcept
+{
+    for (Core::usize index = 0; index < m_preparedMaterialCount; ++index)
+    {
+        auto& prepared = m_preparedMaterials[index];
+        if (prepared.replacement.bindingKey != 0)
+        {
+            if (m_pendingMaterialCount >= m_pendingMaterials.size())
+            {
+                std::terminate();
+            }
+            auto& pending = m_pendingMaterials[m_pendingMaterialCount++];
+            pending.lease = std::move(prepared.replacement.lease);
+            pending.bindingKey = prepared.replacement.bindingKey;
+            prepared.replacement.bindingKey = 0;
+        }
+        prepared = PreparedMaterialEntry{};
+    }
+    for (Core::usize index = 0; index < m_preparedTextureCount; ++index)
+    {
+        auto& prepared = m_preparedTextures[index];
+        if (prepared.replacement.gpuTexture)
+        {
+            if (m_pendingTextureCount >= m_pendingTextures.size())
+            {
+                std::terminate();
+            }
+            auto& pending = m_pendingTextures[m_pendingTextureCount++];
+            pending.lease = std::move(prepared.replacement.lease);
+            pending.gpuTexture = prepared.replacement.gpuTexture;
+            prepared.replacement.gpuTexture = {};
+        }
+        prepared = PreparedTextureEntry{};
+    }
+    for (Core::usize index = 0; index < m_preparedMeshCount; ++index)
+    {
+        auto& prepared = m_preparedMeshes[index];
+        if (prepared.replacement.gpuMesh)
+        {
+            if (m_pendingMeshCount >= m_pendingMeshes.size())
+            {
+                std::terminate();
+            }
+            auto& pending = m_pendingMeshes[m_pendingMeshCount++];
+            pending.lease = std::move(prepared.replacement.lease);
+            pending.gpuMesh = prepared.replacement.gpuMesh;
+            prepared.replacement.gpuMesh = {};
+        }
+        prepared = PreparedMeshEntry{};
+    }
+    m_preparedMeshCount = 0;
+    m_preparedMaterialCount = 0;
+    m_preparedTextureCount = 0;
+    (void)drainPendingRetirements();
+}
+
+Core::Status Mesh3DBindingRegistry::drainPendingRetirements() noexcept
+{
+    if (!isOwnerThread())
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "Mesh3DBindingRegistry retirement must run on its owner thread");
+    }
+    while (m_pendingMaterialCount != 0)
+    {
+        auto& pending = m_pendingMaterials[m_pendingMaterialCount - 1U];
+        if (auto status = m_device->clearMesh3DMaterialBinding(pending.bindingKey); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "Mesh3DBindingRegistry::drainPendingRetirements", "material"));
+        }
+        if (pending.lease)
+        {
+            const auto state = m_store->state(pending.lease.handle());
+            if (state != AssetLogicalState::UnloadPending && state != AssetLogicalState::Unloaded)
+            {
+                if (auto status = m_assets->unload(pending.lease.handle()); !status)
+                {
+                    return Core::failure(std::move(status.error()).withContext(
+                        "Mesh3DBindingRegistry::drainPendingRetirements", "materialAsset"));
+                }
+            }
+        }
+        pending = PendingMaterialRetirement{};
+        --m_pendingMaterialCount;
+    }
+    while (m_pendingTextureCount != 0)
+    {
+        auto& pending = m_pendingTextures[m_pendingTextureCount - 1U];
+        if (auto status = m_assets->retireTexture2D(*m_device, pending.lease, pending.gpuTexture); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "Mesh3DBindingRegistry::drainPendingRetirements", "texture"));
+        }
+        pending = PendingTextureRetirement{};
+        --m_pendingTextureCount;
+    }
+    while (m_pendingMeshCount != 0)
+    {
+        auto& pending = m_pendingMeshes[m_pendingMeshCount - 1U];
+        if (auto status = m_assets->retireStaticMesh(*m_device, pending.lease, pending.gpuMesh); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "Mesh3DBindingRegistry::drainPendingRetirements", "mesh"));
+        }
+        pending = PendingMeshRetirement{};
+        --m_pendingMeshCount;
+    }
+    return Core::success();
+}
 
 Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBinding(
     AssetHandle meshAsset, Render::GpuMeshId& gpuMesh) noexcept
@@ -481,6 +1328,10 @@ Core::Status Mesh3DBindingRegistry::retireAllBindings() noexcept
         return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
                              "Mesh3DBindingRegistry retirement must run on its owner thread");
     }
+    if (auto status = drainPendingRetirements(); !status)
+    {
+        return status;
+    }
     for (const MeshEntry& entry : m_meshEntries)
     {
         if (entry.bindingKey != 0 && entry.frameBorrowCount != 0)
@@ -534,7 +1385,7 @@ Core::Status Mesh3DBindingRegistry::retireAllBindings() noexcept
                 "Mesh3DBindingRegistry::retireAllBindings", "mesh"));
         }
     }
-    return Core::success();
+    return drainPendingRetirements();
 }
 
 Core::Result<Render::FrameResourceRef> Mesh3DBindingRegistry::internMeshFrameResource(
@@ -815,9 +1666,111 @@ Core::u32 Mesh3DBindingRegistry::textureIndex(const TextureEntry& entry) const n
     return static_cast<Core::u32>(&entry - m_textureEntries.data());
 }
 
+Core::u32 Mesh3DBindingRegistry::findPreparedTextureByAssetId(Core::AssetId assetId) const noexcept
+{
+    for (Core::usize index = 0; index < m_preparedTextureCount; ++index)
+    {
+        const PreparedTextureEntry& prepared = m_preparedTextures[index];
+        if (!prepared.remove && prepared.replacement.assetId == assetId)
+        {
+            return prepared.entryIndex;
+        }
+    }
+    return InvalidTextureIndex;
+}
+
+Mesh3DBindingRegistry::CandidateTextureEntry
+Mesh3DBindingRegistry::findCandidateTextureByAssetId(Core::AssetId assetId) const noexcept
+{
+    const Core::u32 preparedEntryIndex = findPreparedTextureByAssetId(assetId);
+    if (preparedEntryIndex != InvalidTextureIndex)
+    {
+        for (Core::usize index = 0; index < m_preparedTextureCount; ++index)
+        {
+            const PreparedTextureEntry& prepared = m_preparedTextures[index];
+            if (!prepared.remove && prepared.entryIndex == preparedEntryIndex &&
+                prepared.replacement.assetId == assetId)
+            {
+                return CandidateTextureEntry{
+                    .entry = std::addressof(prepared.replacement),
+                    .entryIndex = preparedEntryIndex,
+                };
+            }
+        }
+    }
+
+    for (Core::u32 entryIndex = 0;
+         entryIndex < static_cast<Core::u32>(m_textureEntries.size()); ++entryIndex)
+    {
+        const bool hasPreparedAction = std::any_of(
+            m_preparedTextures.begin(),
+            m_preparedTextures.begin() + static_cast<std::ptrdiff_t>(m_preparedTextureCount),
+            [entryIndex](const PreparedTextureEntry& prepared) {
+                return prepared.entryIndex == entryIndex;
+            });
+        const TextureEntry& active = m_textureEntries[entryIndex];
+        if (!hasPreparedAction && active.gpuTexture && active.assetId == assetId)
+        {
+            return CandidateTextureEntry{
+                .entry = std::addressof(active),
+                .entryIndex = entryIndex,
+            };
+        }
+    }
+    return {};
+}
+
+Core::u32 Mesh3DBindingRegistry::findFreePreparedTextureSlot() const noexcept
+{
+    for (Core::usize index = 0; index < m_preparedTextureCount; ++index)
+    {
+        const PreparedTextureEntry& prepared = m_preparedTextures[index];
+        if (prepared.remove && prepared.entryIndex < m_textureEntries.size())
+        {
+            return prepared.entryIndex;
+        }
+    }
+
+    for (Core::u32 entryIndex = 0;
+         entryIndex < static_cast<Core::u32>(m_textureEntries.size()); ++entryIndex)
+    {
+        if (m_textureEntries[entryIndex].gpuTexture)
+        {
+            continue;
+        }
+        const bool alreadyPrepared = std::any_of(
+            m_preparedTextures.begin(),
+            m_preparedTextures.begin() + static_cast<std::ptrdiff_t>(m_preparedTextureCount),
+            [entryIndex](const PreparedTextureEntry& prepared) {
+                return prepared.entryIndex == entryIndex;
+            });
+        if (!alreadyPrepared)
+        {
+            return entryIndex;
+        }
+    }
+    return InvalidTextureIndex;
+}
+
 Core::Result<Mesh3DBindingRegistry::ValidatedMaterialBinding>
 Mesh3DBindingRegistry::validateMaterialBinding(AssetHandle materialAsset) const noexcept
 {
+    return validateMaterialBindingImpl(materialAsset, false);
+}
+
+Core::Result<Mesh3DBindingRegistry::ValidatedMaterialBinding>
+Mesh3DBindingRegistry::validatePreparedMaterialBinding(AssetHandle materialAsset) const noexcept
+{
+    return validateMaterialBindingImpl(materialAsset, true);
+}
+
+Core::Result<Mesh3DBindingRegistry::ValidatedMaterialBinding>
+Mesh3DBindingRegistry::validateMaterialBindingImpl(AssetHandle materialAsset,
+                                                   bool usePreparedTextures) const noexcept
+{
+    const char* operation = usePreparedTextures
+                                ? "Mesh3DBindingRegistry::prepareCatalogReload"
+                                : "Mesh3DBindingRegistry::registerMaterialBinding";
     if (!materialAsset || m_store->assetKind(materialAsset) != AssetFormat::AssetKind::Material)
     {
         return Core::failure(AssetErrorCode::InvalidHandle,
@@ -838,7 +1791,7 @@ Mesh3DBindingRegistry::validateMaterialBinding(AssetHandle materialAsset) const 
     if (!material)
     {
         return Core::failure(std::move(material.error()).withContext(
-            "Mesh3DBindingRegistry::registerMaterialBinding", "Material payload"));
+            operation, "Material payload"));
     }
 
     std::array<Core::AssetId, 3> dependencyIds{};
@@ -879,26 +1832,39 @@ Mesh3DBindingRegistry::validateMaterialBinding(AssetHandle materialAsset) const 
         {
             return Core::success();
         }
-        const TextureEntry* texture = findTextureByAssetId(dependencyIds[dependencyIndex++]);
-        if (texture == nullptr || !isLiveTextureEntry(*texture))
+        const Core::AssetId dependencyAssetId = dependencyIds[dependencyIndex++];
+        CandidateTextureEntry candidate{};
+        if (usePreparedTextures)
+        {
+            candidate = findCandidateTextureByAssetId(dependencyAssetId);
+        }
+        else if (const TextureEntry* texture = findTextureByAssetId(dependencyAssetId);
+                 texture != nullptr)
+        {
+            candidate = CandidateTextureEntry{
+                .entry = texture,
+                .entryIndex = textureIndex(*texture),
+            };
+        }
+        if (candidate.entry == nullptr || candidate.entryIndex >= m_textureEntries.size() ||
+            !isLiveTextureEntry(*candidate.entry))
         {
             auto failure = Core::failure(
                 AssetErrorCode::AssetNotReady,
                 "Material texture dependency has no live shared GPU owner");
             return Core::failure(std::move(failure.error()).withContext(
-                "Mesh3DBindingRegistry::registerMaterialBinding", role));
+                operation, role));
         }
-        const Core::u32 index = textureIndex(*texture);
         for (Core::u32 prior = 0; prior < validated.textureCount; ++prior)
         {
-            if (validated.textureIndices[prior] == index)
+            if (validated.textureIndices[prior] == candidate.entryIndex)
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                      "Material texture roles must use distinct cooked dependencies");
             }
         }
-        validated.textureIndices[validated.textureCount++] = index;
-        gpuTexture = texture->gpuTexture;
+        validated.textureIndices[validated.textureCount++] = candidate.entryIndex;
+        gpuTexture = candidate.entry->gpuTexture;
         return Core::success();
     };
 
