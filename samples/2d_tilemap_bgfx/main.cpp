@@ -1967,7 +1967,8 @@ class PauseOverlayState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(tree.error()));
         }
-        auto inputDevice = tree->flowInputDeviceState();
+        auto inputDevice =
+            tree->flowInputDeviceState(Tina::UI::UIFlowPrimaryLocalUser);
         if (!inputDevice)
         {
             return Tina::Core::failure(std::move(inputDevice.error()));
@@ -2083,7 +2084,8 @@ class PauseOverlayState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(tree.error()));
         }
-        auto inputDevice = tree->flowInputDeviceState();
+        auto inputDevice =
+            tree->flowInputDeviceState(Tina::UI::UIFlowPrimaryLocalUser);
         if (!inputDevice)
         {
             return Tina::Core::failure(std::move(inputDevice.error()));

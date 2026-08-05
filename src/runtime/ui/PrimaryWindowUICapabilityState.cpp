@@ -526,9 +526,65 @@ PrimaryWindowUICapabilityState::isFlowScreenActive(u64 epoch, PrimaryWindowUIPha
     return *result;
 }
 
+Core::Status PrimaryWindowUICapabilityState::assignFlowGamepad(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    Platform::GamepadId gamepad, UI::UIFlowLocalUserId localUser)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::assignFlowGamepad";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.assignFlowGamepad(gamepad, localUser);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearFlowGamepadAssignment(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    Platform::GamepadId gamepad)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::clearFlowGamepadAssignment";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearFlowGamepadAssignment(gamepad);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIFlowLocalUserId>
+PrimaryWindowUICapabilityState::flowLocalUserForGamepad(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    Platform::GamepadId gamepad)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::flowLocalUserForGamepad";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.flowLocalUserForGamepad(gamepad);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
 Core::Result<UI::UIFlowInputDeviceState>
 PrimaryWindowUICapabilityState::flowInputDeviceState(
-    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater)
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UIFlowLocalUserId localUser)
 {
     constexpr std::string_view Operation =
         "PrimaryWindowUITreeUpdater::flowInputDeviceState";
@@ -536,7 +592,7 @@ PrimaryWindowUICapabilityState::flowInputDeviceState(
     {
         return Core::failure(std::move(status.error()));
     }
-    auto result = updater.flowInputDeviceState();
+    auto result = updater.flowInputDeviceState(localUser);
     if (!result)
     {
         return Core::failure(rememberFirstError(std::move(result.error()), Operation));

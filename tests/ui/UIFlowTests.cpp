@@ -2,6 +2,8 @@
 
 #include <tina/core/id/GenerationPool.hpp>
 
+#include <array>
+
 namespace Tina::Tests {
 namespace {
 
@@ -308,18 +310,21 @@ TEST_F(UILayoutTest, FlowBackActionRoutesOnceAndClaimsItsReleaseAcrossScreenPop)
         .window = context->ownerWindow(),
         .key = Platform::Key::Escape,
     };
-    auto down = context->routeFlowAction({1}, 1, UI::UIFlowAction::Back,
-                                         UI::UIFlowActionSource::Keyboard, true, escape);
+    auto down = context->routeFlowAction(
+        {1}, 1, UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Back,
+        UI::UIFlowActionSource::Keyboard, true, escape);
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
     EXPECT_TRUE(down->invoked);
     EXPECT_EQ(down->screen, *screen);
     EXPECT_EQ(invocationCount, 1U);
     EXPECT_EQ(lastEvent.screen, *screen);
+    EXPECT_EQ(lastEvent.localUser, UI::UIFlowPrimaryLocalUser);
     EXPECT_EQ(lastEvent.source, UI::UIFlowActionSource::Keyboard);
 
-    auto repeatedDown = context->routeFlowAction({2}, 2, UI::UIFlowAction::Back,
-                                                 UI::UIFlowActionSource::Keyboard, true, escape);
+    auto repeatedDown = context->routeFlowAction(
+        {2}, 2, UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Back,
+        UI::UIFlowActionSource::Keyboard, true, escape);
     ASSERT_TRUE(repeatedDown.has_value());
     EXPECT_TRUE(repeatedDown->consumed);
     EXPECT_FALSE(repeatedDown->invoked);
@@ -328,8 +333,9 @@ TEST_F(UILayoutTest, FlowBackActionRoutesOnceAndClaimsItsReleaseAcrossScreenPop)
     auto popped = updater.popFlowScreen(*layer);
     ASSERT_TRUE(popped.has_value());
     EXPECT_EQ(*popped, *screen);
-    auto release = context->routeFlowAction({3}, 3, UI::UIFlowAction::Back,
-                                            UI::UIFlowActionSource::Keyboard, false, escape);
+    auto release = context->routeFlowAction(
+        {3}, 3, UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Back,
+        UI::UIFlowActionSource::Keyboard, false, escape);
     ASSERT_TRUE(release.has_value());
     EXPECT_TRUE(release->consumed);
     EXPECT_FALSE(release->invoked);
@@ -410,7 +416,7 @@ TEST_F(UILayoutTest, FlowActionsUseIndependentSlotsAndBoundedCapacity)
         .key = Platform::Key::Enter,
     };
     auto confirmDown = context->routeFlowAction(
-        {1}, 1, UI::UIFlowAction::Confirm,
+        {1}, 1, UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Confirm,
         UI::UIFlowActionSource::Keyboard, true, enter);
     ASSERT_TRUE(confirmDown.has_value());
     EXPECT_TRUE(confirmDown->consumed);
@@ -418,9 +424,10 @@ TEST_F(UILayoutTest, FlowActionsUseIndependentSlotsAndBoundedCapacity)
     EXPECT_EQ(confirmInvocations, 1U);
     EXPECT_EQ(backInvocations, 0U);
     EXPECT_EQ(confirmEvent.action, UI::UIFlowAction::Confirm);
+    EXPECT_EQ(confirmEvent.localUser, UI::UIFlowPrimaryLocalUser);
 
     auto confirmRelease = context->routeFlowAction(
-        {2}, 2, UI::UIFlowAction::Confirm,
+        {2}, 2, UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Confirm,
         UI::UIFlowActionSource::Keyboard, false, enter);
     ASSERT_TRUE(confirmRelease.has_value());
     EXPECT_TRUE(confirmRelease->consumed);
@@ -431,16 +438,17 @@ TEST_F(UILayoutTest, FlowActionsUseIndependentSlotsAndBoundedCapacity)
         .key = Platform::Key::P,
     };
     auto menuDown = context->routeFlowAction(
-        {3}, 3, UI::UIFlowAction::Menu,
+        {3}, 3, UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Menu,
         UI::UIFlowActionSource::Keyboard, true, menuKey);
     ASSERT_TRUE(menuDown.has_value());
     EXPECT_TRUE(menuDown->consumed);
     EXPECT_TRUE(menuDown->invoked);
     EXPECT_EQ(menuInvocations, 1U);
     EXPECT_EQ(menuEvent.action, UI::UIFlowAction::Menu);
+    EXPECT_EQ(menuEvent.localUser, UI::UIFlowPrimaryLocalUser);
 
     auto menuRelease = context->routeFlowAction(
-        {4}, 4, UI::UIFlowAction::Menu,
+        {4}, 4, UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Menu,
         UI::UIFlowActionSource::Keyboard, false, menuKey);
     ASSERT_TRUE(menuRelease.has_value());
     EXPECT_TRUE(menuRelease->consumed);
@@ -474,41 +482,297 @@ TEST_F(UILayoutTest, FlowInputDeviceObservationIsOrderedAndRevisioned)
     auto gamepad = pool.tryEmplace(1);
     ASSERT_TRUE(gamepad.has_value());
 
-    EXPECT_EQ(context->flowInputDeviceState(), UI::UIFlowInputDeviceState{});
+    auto initialState =
+        context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(initialState.has_value());
+    EXPECT_EQ(*initialState, UI::UIFlowInputDeviceState{});
     assertOk(context->observeFlowInputDevice(
-        {1}, 10, UI::UIFlowInputDevice::Gamepad, *gamepad));
-    UI::UIFlowInputDeviceState state = context->flowInputDeviceState();
+        {1}, 10, UI::UIFlowPrimaryLocalUser,
+        UI::UIFlowInputDevice::Gamepad, *gamepad));
+    auto stateResult =
+        context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(stateResult.has_value());
+    UI::UIFlowInputDeviceState state = *stateResult;
     EXPECT_EQ(state.device, UI::UIFlowInputDevice::Gamepad);
     EXPECT_EQ(state.gamepad, *gamepad);
     EXPECT_EQ(state.platformFrame, Platform::PlatformFrameId{1});
     EXPECT_EQ(state.sourceSequence, 10U);
     EXPECT_EQ(state.revision, 1U);
-    auto updaterState = updater.flowInputDeviceState();
+    auto updaterState =
+        updater.flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
     ASSERT_TRUE(updaterState.has_value());
     EXPECT_EQ(*updaterState, state);
 
     assertOk(context->observeFlowInputDevice(
-        {2}, 11, UI::UIFlowInputDevice::Gamepad, *gamepad));
-    EXPECT_EQ(context->flowInputDeviceState().revision, 1U);
+        {2}, 11, UI::UIFlowPrimaryLocalUser,
+        UI::UIFlowInputDevice::Gamepad, *gamepad));
+    stateResult = context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(stateResult.has_value());
+    EXPECT_EQ(stateResult->revision, 1U);
 
     const Core::Status invalid = context->observeFlowInputDevice(
-        {3}, 12, UI::UIFlowInputDevice::KeyboardMouse, *gamepad);
+        {3}, 12, UI::UIFlowPrimaryLocalUser,
+        UI::UIFlowInputDevice::KeyboardMouse, *gamepad);
     ASSERT_FALSE(invalid.has_value());
     EXPECT_EQ(invalid.error().code, UI::UIErrorCode::InvalidFlowOperation);
-    EXPECT_EQ(context->flowInputDeviceState().sourceSequence, 11U);
+    stateResult = context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(stateResult.has_value());
+    EXPECT_EQ(stateResult->sourceSequence, 11U);
 
     assertOk(context->observeFlowInputDevice(
-        {3}, 12, UI::UIFlowInputDevice::KeyboardMouse));
-    state = context->flowInputDeviceState();
+        {3}, 12, UI::UIFlowPrimaryLocalUser,
+        UI::UIFlowInputDevice::KeyboardMouse));
+    stateResult = context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(stateResult.has_value());
+    state = *stateResult;
     EXPECT_EQ(state.device, UI::UIFlowInputDevice::KeyboardMouse);
     EXPECT_FALSE(state.gamepad.has_value());
     EXPECT_EQ(state.revision, 2U);
 
     const Core::Status regressed = context->observeFlowInputDevice(
-        {4}, 12, UI::UIFlowInputDevice::KeyboardMouse);
+        {4}, 12, UI::UIFlowPrimaryLocalUser,
+        UI::UIFlowInputDevice::KeyboardMouse);
     ASSERT_FALSE(regressed.has_value());
     EXPECT_EQ(regressed.error().code, UI::UIErrorCode::InvalidFlowOperation);
-    EXPECT_EQ(context->flowInputDeviceState(), state);
+    stateResult = context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(stateResult.has_value());
+    EXPECT_EQ(*stateResult, state);
+}
+
+TEST_F(UILayoutTest, FlowLocalUsersIsolateGamepadAssignmentsAndInputDeviceState)
+{
+    auto context = makeContext({
+        .nodeCapacity = 4,
+        .rootCapacity = 1,
+        .flowLayerCapacity = 1,
+        .flowScreenCapacity = 1,
+    });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    auto updater = createUpdater(*context, root);
+
+    auto layerNode =
+        updater.createElement(root.rootNodeId(), UI::makePanelElement());
+    ASSERT_TRUE(layerNode.has_value());
+    auto screenNode = updater.createElement(*layerNode, UI::makePanelElement());
+    ASSERT_TRUE(screenNode.has_value());
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 120.0F)));
+    assertOk(updater.setLayoutStyle(*layerNode, fixedSize(200.0F, 120.0F)));
+    assertOk(updater.setLayoutStyle(*screenNode, fixedSize(200.0F, 120.0F)));
+    auto layer = updater.registerFlowLayer(*layerNode);
+    ASSERT_TRUE(layer.has_value());
+    auto screen = updater.registerFlowScreen(*layer, *screenNode);
+    ASSERT_TRUE(screen.has_value());
+    assertOk(updater.pushFlowScreen(*screen));
+
+    std::array<UI::UIFlowActionEvent, 2> events{};
+    usize eventCount = 0;
+    assertOk(updater.setFlowScreenAction(
+        *screen, UI::UIFlowAction::Confirm,
+        UI::UIFlowActionCallback{
+            [&events, &eventCount](const UI::UIFlowActionEvent& event) noexcept {
+                if (eventCount < events.size())
+                {
+                    events[eventCount] = event;
+                }
+                ++eventCount;
+            }}));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+
+    using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
+    auto poolResult = GamepadPool::Create(1);
+    ASSERT_TRUE(poolResult.has_value());
+    GamepadPool pool = std::move(*poolResult);
+    auto gamepad = pool.tryEmplace(1);
+    ASSERT_TRUE(gamepad.has_value());
+
+    constexpr UI::UIFlowLocalUserId User2{2};
+    constexpr UI::UIFlowLocalUserId User3{3};
+    auto initialOwner = updater.flowLocalUserForGamepad(*gamepad);
+    ASSERT_TRUE(initialOwner.has_value());
+    EXPECT_EQ(*initialOwner, UI::UIFlowPrimaryLocalUser);
+
+    assertOk(updater.assignFlowGamepad(*gamepad, User2));
+    auto assignedOwner = updater.flowLocalUserForGamepad(*gamepad);
+    ASSERT_TRUE(assignedOwner.has_value());
+    EXPECT_EQ(*assignedOwner, User2);
+    assertOk(context->observeFlowInputDevice(
+        {1}, 10, User2, UI::UIFlowInputDevice::Gamepad, *gamepad));
+
+    auto primaryState =
+        context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    auto user2State = context->flowInputDeviceState(User2);
+    ASSERT_TRUE(primaryState.has_value());
+    ASSERT_TRUE(user2State.has_value());
+    EXPECT_EQ(primaryState->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_EQ(primaryState->revision, 0U);
+    EXPECT_EQ(user2State->localUser, User2);
+    EXPECT_EQ(user2State->device, UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(user2State->gamepad, *gamepad);
+    EXPECT_EQ(user2State->revision, 1U);
+
+    const Platform::DigitalControlIdentity south =
+        Platform::GamepadButtonControlIdentity{
+            .routedWindow = context->ownerWindow(),
+            .gamepad = *gamepad,
+            .button = Platform::GamepadButton::South,
+        };
+    auto down = context->routeFlowAction(
+        {2}, 11, User2, UI::UIFlowAction::Confirm,
+        UI::UIFlowActionSource::Gamepad, true, south);
+    ASSERT_TRUE(down.has_value());
+    EXPECT_TRUE(down->consumed);
+    EXPECT_TRUE(down->invoked);
+    ASSERT_EQ(eventCount, 1U);
+    EXPECT_EQ(events[0].localUser, User2);
+
+    assertOk(updater.assignFlowGamepad(*gamepad, User3));
+    user2State = context->flowInputDeviceState(User2);
+    auto user3State = context->flowInputDeviceState(User3);
+    ASSERT_TRUE(user2State.has_value());
+    ASSERT_TRUE(user3State.has_value());
+    EXPECT_EQ(user2State->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_FALSE(user2State->gamepad.has_value());
+    EXPECT_EQ(user2State->revision, 2U);
+    EXPECT_EQ(user3State->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_EQ(user3State->revision, 0U);
+
+    auto release = context->routeFlowAction(
+        {3}, 12, User3, UI::UIFlowAction::Confirm,
+        UI::UIFlowActionSource::Gamepad, false, south);
+    ASSERT_TRUE(release.has_value());
+    EXPECT_TRUE(release->consumed);
+    EXPECT_FALSE(release->invoked);
+    EXPECT_EQ(eventCount, 1U);
+
+    assertOk(context->observeFlowInputDevice(
+        {4}, 13, User3, UI::UIFlowInputDevice::Gamepad, *gamepad));
+    auto secondDown = context->routeFlowAction(
+        {4}, 13, User3, UI::UIFlowAction::Confirm,
+        UI::UIFlowActionSource::Gamepad, true, south);
+    ASSERT_TRUE(secondDown.has_value());
+    EXPECT_TRUE(secondDown->consumed);
+    EXPECT_TRUE(secondDown->invoked);
+    ASSERT_EQ(eventCount, 2U);
+    EXPECT_EQ(events[1].localUser, User3);
+
+    assertOk(updater.clearFlowGamepadAssignment(*gamepad));
+    auto clearedOwner = updater.flowLocalUserForGamepad(*gamepad);
+    user3State = context->flowInputDeviceState(User3);
+    ASSERT_TRUE(clearedOwner.has_value());
+    ASSERT_TRUE(user3State.has_value());
+    EXPECT_EQ(*clearedOwner, UI::UIFlowPrimaryLocalUser);
+    EXPECT_EQ(user3State->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_FALSE(user3State->gamepad.has_value());
+    EXPECT_EQ(user3State->revision, 2U);
+}
+
+TEST_F(UILayoutTest, FlowInvalidLocalUserIsRejected)
+{
+    auto context = makeContext({
+        .nodeCapacity = 2,
+        .rootCapacity = 1,
+    });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    auto updater = createUpdater(*context, root);
+
+    using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
+    auto poolResult = GamepadPool::Create(1);
+    ASSERT_TRUE(poolResult.has_value());
+    GamepadPool pool = std::move(*poolResult);
+    auto gamepad = pool.tryEmplace(1);
+    ASSERT_TRUE(gamepad.has_value());
+
+    constexpr UI::UIFlowLocalUserId InvalidZero{};
+    constexpr UI::UIFlowLocalUserId InvalidOverflow{
+        static_cast<u32>(UI::UIFlowLocalUserCapacity + 1U)};
+    constexpr UI::UIFlowLocalUserId User2{2};
+
+    const Core::Status zeroAssignment =
+        updater.assignFlowGamepad(*gamepad, InvalidZero);
+    ASSERT_FALSE(zeroAssignment.has_value());
+    EXPECT_EQ(zeroAssignment.error().code, UI::UIErrorCode::InvalidFlowLocalUser);
+
+    const Core::Status overflowAssignment =
+        updater.assignFlowGamepad(*gamepad, InvalidOverflow);
+    ASSERT_FALSE(overflowAssignment.has_value());
+    EXPECT_EQ(overflowAssignment.error().code,
+              UI::UIErrorCode::InvalidFlowLocalUser);
+
+    auto invalidState = context->flowInputDeviceState(InvalidOverflow);
+    ASSERT_FALSE(invalidState.has_value());
+    EXPECT_EQ(invalidState.error().code, UI::UIErrorCode::InvalidFlowLocalUser);
+
+    const Core::Status invalidObservation = context->observeFlowInputDevice(
+        {1}, 1, InvalidZero, UI::UIFlowInputDevice::KeyboardMouse);
+    ASSERT_FALSE(invalidObservation.has_value());
+    EXPECT_EQ(invalidObservation.error().code,
+              UI::UIErrorCode::InvalidFlowLocalUser);
+
+    const Platform::DigitalControlIdentity escape = Platform::KeyControlIdentity{
+        .window = context->ownerWindow(),
+        .key = Platform::Key::Escape,
+    };
+    auto nonPrimaryKeyboard = context->routeFlowAction(
+        {1}, 1, User2, UI::UIFlowAction::Back,
+        UI::UIFlowActionSource::Keyboard, true, escape);
+    ASSERT_FALSE(nonPrimaryKeyboard.has_value());
+    EXPECT_EQ(nonPrimaryKeyboard.error().code,
+              UI::UIErrorCode::InvalidFlowLocalUser);
+
+    assertOk(updater.assignFlowGamepad(*gamepad, User2));
+    const Platform::DigitalControlIdentity south =
+        Platform::GamepadButtonControlIdentity{
+            .routedWindow = context->ownerWindow(),
+            .gamepad = *gamepad,
+            .button = Platform::GamepadButton::South,
+        };
+    auto wrongGamepadUser = context->routeFlowAction(
+        {2}, 2, UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Confirm,
+        UI::UIFlowActionSource::Gamepad, true, south);
+    ASSERT_FALSE(wrongGamepadUser.has_value());
+    EXPECT_EQ(wrongGamepadUser.error().code,
+              UI::UIErrorCode::InvalidFlowLocalUser);
+}
+
+TEST_F(UILayoutTest, FlowGamepadAssignmentUsesFullGenerationIdentity)
+{
+    auto context = makeContext({
+        .nodeCapacity = 2,
+        .rootCapacity = 1,
+    });
+    ASSERT_NE(context, nullptr);
+
+    using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
+    auto poolResult = GamepadPool::Create(1);
+    ASSERT_TRUE(poolResult.has_value());
+    GamepadPool pool = std::move(*poolResult);
+    auto first = pool.tryEmplace(1);
+    ASSERT_TRUE(first.has_value());
+
+    constexpr UI::UIFlowLocalUserId User2{2};
+    constexpr UI::UIFlowLocalUserId User3{3};
+    assertOk(context->assignFlowGamepad(*first, User2));
+    EXPECT_EQ(pool.erase(*first), Core::GenerationEraseResult::Erased);
+    auto replacement = pool.tryEmplace(2);
+    ASSERT_TRUE(replacement.has_value());
+    ASSERT_EQ(replacement->index(), first->index());
+    ASSERT_NE(*replacement, *first);
+
+    auto replacementOwner = context->flowLocalUserForGamepad(*replacement);
+    ASSERT_TRUE(replacementOwner.has_value());
+    EXPECT_EQ(*replacementOwner, UI::UIFlowPrimaryLocalUser);
+
+    assertOk(context->assignFlowGamepad(*replacement, User3));
+    auto currentOwner = context->flowLocalUserForGamepad(*replacement);
+    auto staleOwner = context->flowLocalUserForGamepad(*first);
+    ASSERT_TRUE(currentOwner.has_value());
+    ASSERT_TRUE(staleOwner.has_value());
+    EXPECT_EQ(*currentOwner, User3);
+    EXPECT_EQ(*staleOwner, UI::UIFlowPrimaryLocalUser);
 }
 
 } // namespace

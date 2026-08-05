@@ -93,16 +93,48 @@ enum class UIFlowActionSource : u8 {
     Gamepad,
 };
 
-// Per-window, single-local-user input category used by product action prompts.
-// Keyboard and pointer share one category because Desktop prompts normally
-// present them as one control scheme. Multi-user assignment remains outside
-// this contract.
+// Stable per-window local-user identity. User 1 owns keyboard/pointer input;
+// Gamepads may be assigned to any fixed slot and otherwise fall back to user 1.
+class UIFlowLocalUserId final {
+  public:
+    constexpr UIFlowLocalUserId() noexcept = default;
+    explicit constexpr UIFlowLocalUserId(u32 value) noexcept : m_value(value) {}
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return m_value != 0;
+    }
+
+    [[nodiscard]] constexpr u32 value() const noexcept
+    {
+        return m_value;
+    }
+
+    explicit constexpr operator bool() const noexcept
+    {
+        return hasValue();
+    }
+
+    auto operator<=>(const UIFlowLocalUserId&) const = default;
+
+  private:
+    u32 m_value = 0;
+};
+
+inline constexpr UIFlowLocalUserId UIFlowPrimaryLocalUser{1};
+inline constexpr usize UIFlowLocalUserCapacity =
+    Platform::PlatformFrameBuilder::MaximumGamepadSlots;
+
+// Per-local-user input category used by product action prompts. Keyboard and
+// pointer share one category because Desktop prompts normally present them as
+// one control scheme.
 enum class UIFlowInputDevice : u8 {
     KeyboardMouse,
     Gamepad,
 };
 
 struct UIFlowInputDeviceState final {
+    UIFlowLocalUserId localUser = UIFlowPrimaryLocalUser;
     UIFlowInputDevice device = UIFlowInputDevice::KeyboardMouse;
     std::optional<Platform::GamepadId> gamepad{};
     Platform::PlatformFrameId platformFrame{};
@@ -115,6 +147,7 @@ struct UIFlowInputDeviceState final {
 
 struct UIFlowActionEvent final {
     UIFlowScreenId screen{};
+    UIFlowLocalUserId localUser = UIFlowPrimaryLocalUser;
     UIFlowAction action = UIFlowAction::Back;
     UIFlowActionSource source = UIFlowActionSource::Keyboard;
     Platform::PlatformFrameId platformFrame{};

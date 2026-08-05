@@ -123,7 +123,13 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UIFlowScreenId> replaceFlowScreen(UI::UIFlowScreenId screen);
     [[nodiscard]] Core::Result<UI::UIFlowScreenId> activeFlowScreen(UI::UIFlowLayerId layer) const;
     [[nodiscard]] Core::Result<bool> isFlowScreenActive(UI::UIFlowScreenId screen) const;
-    [[nodiscard]] Core::Result<UI::UIFlowInputDeviceState> flowInputDeviceState() const;
+    [[nodiscard]] Core::Status assignFlowGamepad(Platform::GamepadId gamepad,
+                                                 UI::UIFlowLocalUserId localUser);
+    [[nodiscard]] Core::Status clearFlowGamepadAssignment(Platform::GamepadId gamepad);
+    [[nodiscard]] Core::Result<UI::UIFlowLocalUserId>
+    flowLocalUserForGamepad(Platform::GamepadId gamepad) const;
+    [[nodiscard]] Core::Result<UI::UIFlowInputDeviceState>
+    flowInputDeviceState(UI::UIFlowLocalUserId localUser) const;
     [[nodiscard]] Core::Status setFlowScreenAction(UI::UIFlowScreenId screen,
                                                    UI::UIFlowAction action,
                                                    UI::UIFlowActionCallback callback);

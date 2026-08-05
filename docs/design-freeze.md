@@ -56,13 +56,19 @@ dismiss 优先于 Back；已聚焦控件默认 Activate 优先于 Confirm；Text
 文本输入。随后才向 committed layout 中最上层 active Screen 路由 Escape/Gamepad East、Enter/Keypad
 Enter/Gamepad South 或 P/Gamepad Start。被处理的 Down 锁存精确 physical control，对应 Up 即使 Screen 已 pop
 也继续消费；callback 只记录 intent，树与 State mutation 在合法 frame phase 完成。无 active Screen、无 callback
-或 callback 未处理前的输入不会从 gameplay 隐藏。第三个产品切片增加 per-window 单本地用户
-`UIFlowInputDeviceState`：Keyboard/Pointer 合并为 `KeyboardMouse`，有意义的 Down、wheel、明显 pointer move
-与 Gamepad button Down 按 Platform sequence 更新；release、手柄轴漂移不切换，active Gamepad 断连回落键鼠。
-2D Pause 用 revision 驱动真实 `ESC / ENTER / P TO RESUME` / `B / A / START TO RESUME` 标签；Base Screen
-的 Menu 打开 Pause，Pause Screen 的 Back/Confirm/Menu 恢复游戏。该切片不创建第二棵 UI 树，不冻结多本地
-用户或任意 action-id 系统；每个 action 路由只做一次 committed layout 反向线性扫描，设备观察为 O(1)，
-二者稳态无分配。
+或 callback 未处理前的输入不会从 gameplay 隐藏。最终切片冻结 per-window、固定 16 槽的
+`UIFlowLocalUserId`：有效值为 `1..16`，`UIFlowPrimaryLocalUser=1`；Keyboard/Pointer 永远属于 Primary，
+Gamepad 可通过 `assignFlowGamepad()` 显式分配，未分配时回落 Primary。分配表保存完整 generation
+`GamepadId`，槽复用不会继承旧用户。`UIFlowActionEvent` 携带 local user；`UIFlowInputDeviceState` 按用户隔离，
+Keyboard/Pointer 合并为 `KeyboardMouse`，有意义的 Down、wheel、明显 pointer move 与 Gamepad button Down
+按各用户的 Platform sequence 更新，release 与手柄轴漂移不切换。Gamepad 重分配或清除只回落受影响用户的
+设备提示并递增 revision，但保留已经锁存的 physical Down/Up，因此重分配后的匹配 Up 仍被消费；Gamepad
+断连清除对应 assignment/latch，完整 stream reset 清除全部 assignment/latch，并将受影响设备状态回落键鼠。
+Layer/Screen 栈、focus、Modal 与 retained tree 仍是窗口级唯一状态，不复制每用户 UI 树。2D Pause 读取 Primary
+revision，驱动真实 `ESC / ENTER / P TO RESUME` / `B / A / START TO RESUME` 标签；Base Screen 的 Menu 打开
+Pause，Pause Screen 的 Back/Confirm/Menu 恢复游戏。该能力不冻结任意 action-id 系统；普通设备观察、分配
+查询和路由状态更新为 O(1)，完整 reset 只扫描固定 16 槽，每个 action 最多反向扫描一次 bounded committed
+layout，全部稳态无分配。
 验收面固定为 `tina_ui_tests --gtest_filter=*Flow*`、
 `tina_runtime_ui_tests --gtest_filter=*Flow*` 与 `tina_sample_2d --frames=300`；
 完整 product gate 留到同一功能批次最终收口，不作为每次源码编辑的前置步骤。
@@ -73,7 +79,7 @@ Enter/Gamepad South 或 P/Gamepad Start。被处理的 Down 锁存精确 physica
 | --- | --- | --- |
 | Render | 自研 RHI | bgfx backend 出现无法满足且有 profile/产品证据的明确需求 |
 | Physics | Jolt 3D adapter | 有明确 3D gameplay 场景与性能预算 |
-| UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；逐角半径/圆角子树 clip/backdrop；Back/Confirm/Menu 之外的任意 action-id 与多本地用户；startup-only 自定义 Behavior SPI | 分别由 `TEXT-001`、`UI-PAINT-002`、`UI-FLOW-001` 后续子切片、`UI-BEHAVIOR-SPI-001` 跟踪；只有真实产品或插件需求并先冻结容量、失败与性能边界后才重新开启 |
+| UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；逐角半径/圆角子树 clip/backdrop；Back/Confirm/Menu 之外的任意 action-id；startup-only 自定义 Behavior SPI | 分别由 `TEXT-001`、`UI-PAINT-002`、独立后续 Flow 扩展、`UI-BEHAVIOR-SPI-001` 跟踪；只有真实产品或插件需求并先冻结容量、失败与性能边界后才重新开启 |
 | Asset | 热重载、增量 Cooker、在线编辑 | Cooked schema、Lease/retirement 与产品打包稳定 |
 | Task | work stealing、fiber、lock-free 重写 | profile 证明共享有界队列是瓶颈，并新增 ADR |
 | Runtime | 多 World/editor orchestration | 有明确产品/editor 场景，并先冻结 World owner、State TaskGroup barrier 与跨 World 提交/关闭语义 |

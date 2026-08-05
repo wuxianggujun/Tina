@@ -310,7 +310,13 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UIFlowScreenId> replaceFlowScreen(UIFlowScreenId screen);
     [[nodiscard]] Core::Result<UIFlowScreenId> activeFlowScreen(UIFlowLayerId layer) const;
     [[nodiscard]] Core::Result<bool> isFlowScreenActive(UIFlowScreenId screen) const;
-    [[nodiscard]] Core::Result<UIFlowInputDeviceState> flowInputDeviceState() const;
+    [[nodiscard]] Core::Status assignFlowGamepad(Platform::GamepadId gamepad,
+                                                 UIFlowLocalUserId localUser);
+    [[nodiscard]] Core::Status clearFlowGamepadAssignment(Platform::GamepadId gamepad);
+    [[nodiscard]] Core::Result<UIFlowLocalUserId>
+    flowLocalUserForGamepad(Platform::GamepadId gamepad) const;
+    [[nodiscard]] Core::Result<UIFlowInputDeviceState>
+    flowInputDeviceState(UIFlowLocalUserId localUser) const;
     [[nodiscard]] Core::Status setFlowScreenAction(UIFlowScreenId screen, UIFlowAction action,
                                                    UIFlowActionCallback callback);
     [[nodiscard]] Core::Status clearFlowScreenAction(UIFlowScreenId screen, UIFlowAction action);
@@ -605,15 +611,25 @@ class UIContext final {
     // the matching Up remains consumed even if the Screen has since been popped.
     [[nodiscard]] Core::Result<UIFlowActionRouteResult>
     routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
-                    UIFlowAction action, UIFlowActionSource source, bool pressed,
+                    UIFlowLocalUserId localUser, UIFlowAction action,
+                    UIFlowActionSource source, bool pressed,
                     const Platform::DigitalControlIdentity& control);
-    // Runtime integration records meaningful per-window input transitions in
-    // source order. Releases and analog drift are intentionally not observed.
+    // Runtime integration records meaningful per-local-user input transitions
+    // in source order. Releases and analog drift are intentionally not observed.
     [[nodiscard]] Core::Status
     observeFlowInputDevice(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
-                           UIFlowInputDevice device,
+                           UIFlowLocalUserId localUser, UIFlowInputDevice device,
                            std::optional<Platform::GamepadId> gamepad = std::nullopt);
-    [[nodiscard]] UIFlowInputDeviceState flowInputDeviceState() const noexcept;
+    // Assignments are per-window and fixed-capacity. An unassigned Gamepad maps
+    // to UIFlowPrimaryLocalUser. Reassignment preserves an already latched
+    // physical Down/Up pair while resetting stale device-prompt state.
+    [[nodiscard]] Core::Status assignFlowGamepad(Platform::GamepadId gamepad,
+                                                 UIFlowLocalUserId localUser);
+    [[nodiscard]] Core::Status clearFlowGamepadAssignment(Platform::GamepadId gamepad);
+    [[nodiscard]] Core::Result<UIFlowLocalUserId>
+    flowLocalUserForGamepad(Platform::GamepadId gamepad) const;
+    [[nodiscard]] Core::Result<UIFlowInputDeviceState>
+    flowInputDeviceState(UIFlowLocalUserId localUser) const;
     // Cycles keyboard focus among visible Targetable Button/Checkbox/RadioButton/TextEdit nodes in paint
     // order. reverse=true moves backward (Shift+Tab). A committed Contain
     // Focus Scope, including Modal, keeps traversal inside its subtree.

@@ -38,5 +38,6 @@ inline constexpr Core::ErrorCode InvalidFlowLayer{Core::ErrorDomain::UI, 29};
 inline constexpr Core::ErrorCode InvalidFlowScreen{Core::ErrorDomain::UI, 30};
 inline constexpr Core::ErrorCode InvalidFlowOperation{Core::ErrorDomain::UI, 31};
 inline constexpr Core::ErrorCode InvalidFlowAction{Core::ErrorDomain::UI, 32};
+inline constexpr Core::ErrorCode InvalidFlowLocalUser{Core::ErrorDomain::UI, 33};
 
 } // namespace Tina::UI::UIErrorCode

@@ -77,9 +77,18 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<bool>
     isFlowScreenActive(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
                        UI::UIFlowScreenId screen);
+    [[nodiscard]] Core::Status
+    assignFlowGamepad(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                      Platform::GamepadId gamepad, UI::UIFlowLocalUserId localUser);
+    [[nodiscard]] Core::Status
+    clearFlowGamepadAssignment(u64 epoch, PrimaryWindowUIPhase phase,
+                               UI::UITreeUpdater& updater, Platform::GamepadId gamepad);
+    [[nodiscard]] Core::Result<UI::UIFlowLocalUserId>
+    flowLocalUserForGamepad(u64 epoch, PrimaryWindowUIPhase phase,
+                            const UI::UITreeUpdater& updater, Platform::GamepadId gamepad);
     [[nodiscard]] Core::Result<UI::UIFlowInputDeviceState>
     flowInputDeviceState(u64 epoch, PrimaryWindowUIPhase phase,
-                         const UI::UITreeUpdater& updater);
+                         const UI::UITreeUpdater& updater, UI::UIFlowLocalUserId localUser);
     [[nodiscard]] Core::Status
     setFlowScreenAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                         UI::UIFlowScreenId screen, UI::UIFlowAction action,

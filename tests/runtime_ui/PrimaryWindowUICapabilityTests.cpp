@@ -18,6 +18,7 @@ namespace {
 
 using CapabilityState = Runtime::Detail::PrimaryWindowUICapabilityState;
 using CapabilityPhase = Runtime::Detail::PrimaryWindowUIPhase;
+using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 class PrimaryWindowUICapabilityTest : public testing::Test {
@@ -2012,6 +2013,56 @@ TEST_F(PrimaryWindowUICapabilityTest, MovedFromFacadesReportExpired)
     auto root = movedBuilder.createRoot();
     ASSERT_TRUE(root.has_value()) << root.error().message;
     EXPECT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+}
+
+TEST_F(PrimaryWindowUICapabilityTest,
+       FlowLocalUserFacadeAssignsQueriesAndExpiresWithPhase)
+{
+    auto gamepadPoolResult = GamepadPool::Create(1);
+    ASSERT_TRUE(gamepadPoolResult.has_value())
+        << gamepadPoolResult.error().message;
+    GamepadPool gamepadPool = std::move(*gamepadPoolResult);
+    auto gamepad = gamepadPool.tryEmplace(1);
+    ASSERT_TRUE(gamepad.has_value()) << gamepad.error().message;
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    constexpr UI::UIFlowLocalUserId User2{2};
+    auto initialOwner = tree->flowLocalUserForGamepad(*gamepad);
+    auto initialState = tree->flowInputDeviceState(User2);
+    ASSERT_TRUE(initialOwner.has_value()) << initialOwner.error().message;
+    ASSERT_TRUE(initialState.has_value()) << initialState.error().message;
+    EXPECT_EQ(*initialOwner, UI::UIFlowPrimaryLocalUser);
+    EXPECT_EQ(initialState->localUser, User2);
+    EXPECT_EQ(initialState->device, UI::UIFlowInputDevice::KeyboardMouse);
+
+    ASSERT_TRUE(tree->assignFlowGamepad(*gamepad, User2).has_value());
+    auto assignedOwner = tree->flowLocalUserForGamepad(*gamepad);
+    ASSERT_TRUE(assignedOwner.has_value()) << assignedOwner.error().message;
+    EXPECT_EQ(*assignedOwner, User2);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    auto expiredOwner = tree->flowLocalUserForGamepad(*gamepad);
+    ASSERT_FALSE(expiredOwner.has_value());
+    EXPECT_EQ(expiredOwner.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredState = tree->flowInputDeviceState(User2);
+    ASSERT_FALSE(expiredState.has_value());
+    EXPECT_EQ(expiredState.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredClear = tree->clearFlowGamepadAssignment(*gamepad);
+    ASSERT_FALSE(expiredClear.has_value());
+    EXPECT_EQ(expiredClear.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 } // namespace

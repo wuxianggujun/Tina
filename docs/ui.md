@@ -19,7 +19,7 @@
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | **Done：** 可伪造 clock + fixed-capacity paint-only tracks；Runtime phase facade；显式 begin*Transition；stylesheet `BackgroundColor` transition 在 Style 绑定阶段持久预留、pseudo-state 变化时激活；showcase 主题切换 card transition（`motionBegins`）；`ui_motion_v1` |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |
 | Runtime | startup root builder、phase-scoped tree updater 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
 | Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture、100k virtual collection、Image/NineSlice 与完整 Component build schema-v1 provisional workload |
@@ -543,7 +543,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [构建说明](building.md)与
 [测试说明](testing.md)。
 
-## UI Flow 首切片
+## UI Flow
 
 `UI-FLOW-001` 复用唯一 retained tree。`UIFlowLayerId` 与 `UIFlowScreenId` 只是现有 `UINodeId` 的强类型
 身份：Layer 必须是 updater root 的直接子节点，Screen 必须是 Layer 的直接子节点。Screen 注册后默认
@@ -562,13 +562,25 @@ fixed-inline callback，注册总量受 `flowScreenCapacity` 限制，无 heap f
 P Down 优先进入文本，其他 P / Gamepad Start 路由 Menu。callback 只记录
 intent。被处理 Down 的精确 control 会锁存，匹配 Up 在 Screen pop/destroy 后仍消费，避免同一数字 transition
 穿透 gameplay；重复 Down 不重复 callback。无 active Screen 或未注册 callback 时不消费。路由稳态无分配，
-每次 action 最多反向扫描一次 bounded committed layout。per-window 单用户
-`UIFlowInputDeviceState` 将 Keyboard/Pointer 归为 `KeyboardMouse`，Gamepad button Down 切到对应 Gamepad；
-release、手柄 axis drift 不切换，断连/stream reset 回落键鼠。状态以 revision 发布，Runtime phase facade 可查询。
-首个 consumer 是 2D Pause State：基础页面与暂停 Modal 分属两个 Screen，提示标签在
+每次 action 最多反向扫描一次 bounded committed layout。
+
+多本地用户继续复用同一窗口 UI 树，而不是建立 per-user Screen 栈或 focus。`UIFlowLocalUserId` 的有效值固定为
+`1..16`，`UIFlowPrimaryLocalUser=1`；Keyboard、Pointer、Text/IME 设备观察固定属于 Primary。Gamepad 使用完整
+generation `GamepadId` 作为 assignment identity，可由 `UIContext`、`UITreeUpdater` 或 Runtime phase facade 的
+`assignFlowGamepad()` / `clearFlowGamepadAssignment()` 管理；未分配 Gamepad 由
+`flowLocalUserForGamepad()` 解析为 Primary。`UIFlowActionEvent::localUser` 报告实际路由用户。
+
+`flowInputDeviceState(localUser)` 按用户发布 `KeyboardMouse/Gamepad`、active Gamepad、Platform frame/sequence 与
+revision。Gamepad button Down 只更新其当前用户，release 和 axis drift 不切换。重分配/清除会让引用该 Gamepad
+的旧用户提示回落键鼠并递增 revision，但不会清除 Flow physical-control latch，因此匹配 Up 在 assignment 改变后
+仍成对消费；断连会清除该 Gamepad assignment/default-action/Flow latch，完整 stream reset 清除全部 assignment
+与 latch，并回落所有 Gamepad 状态。普通查询、观察和 assignment 为 O(1)，reset 最多扫描固定 16 个用户槽，
+稳态无分配。
+
+首个产品 consumer 是 2D Pause State：基础页面与暂停 Modal 分属两个 Screen，当前读取 Primary 用户提示，标签在
 `ESC / ENTER / P TO RESUME` / `B / A / START TO RESUME` 间按 revision 更新；Base Menu intent 在合法
 State phase push Pause，Pause Back/Confirm/Menu intent 在 `updateUI` pop Screen，下一帧再 pop GameState。
-多本地用户和 Back/Confirm/Menu 之外的任意 action-id 仍属于后续子切片。
+Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 
 ## 相关后续任务（状态以 Backlog 为准）
 
@@ -582,7 +594,7 @@ State phase push Pause，Pause Back/Confirm/Menu intent 在 `updateUI` pop Scree
 | `UI-STYLE-001` | Done；强类型 StyleClass/ColorToken、startup registry/value、运行期 reverse-dependency token getter/setter、node-local pseudo-state selector、literal/token-backed BoxFill/imageTint rule、预编译 stylesheet、Runtime facade、固定 workload 与 Integration/Visual 门禁已落地；不做完整 CSS |
 | `UI-MOTION-001` | Done；fixed-capacity paint-only transition、monotonic clock、retarget、reduced-motion、Style BackgroundColor persistent reservation/activation 与 `ui_motion_v1` |
 | `UI-PAINT-002` | 逐角半径、圆角子树 clip 与 backdrop；已完成的统一 RoundedRect 不再重复列为缺口 |
-| `UI-FLOW-001` | InProgress：固定容量 Activatable Screen/Layer Stack、Back/Confirm/Menu Action Router、单用户输入设备提示与 2D 产品接入已落地；只剩多本地用户待后续子切片 |
+| `UI-FLOW-001` | Done：固定容量 Activatable Screen/Layer Stack、Back/Confirm/Menu Action Router、16 槽本地用户、完整 generation Gamepad assignment、per-user 设备 revision、断连/reset 清理与 2D 产品接入已落地 |
 | `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
 | `SDK-001` | GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装、moved-prefix 与 Ubuntu producer → Debian consumer gate 已落地；待正式 ABI/兼容策略；新增公共 UI 切片后同步扩展 consumer 覆盖 |

@@ -275,15 +275,52 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isFlowScreenActive(UI::UIFlowScre
     return m_state->isFlowScreenActive(m_epoch, m_phase, m_updater, screen);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::assignFlowGamepad(
+    Platform::GamepadId gamepad, UI::UIFlowLocalUserId localUser)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::assignFlowGamepad");
+    }
+    return m_state->assignFlowGamepad(m_epoch, m_phase, m_updater, gamepad,
+                                      localUser);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearFlowGamepadAssignment(
+    Platform::GamepadId gamepad)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>(
+            "PrimaryWindowUITreeUpdater::clearFlowGamepadAssignment");
+    }
+    return m_state->clearFlowGamepadAssignment(m_epoch, m_phase, m_updater,
+                                               gamepad);
+}
+
+Core::Result<UI::UIFlowLocalUserId>
+PrimaryWindowUITreeUpdater::flowLocalUserForGamepad(
+    Platform::GamepadId gamepad) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIFlowLocalUserId>(
+            "PrimaryWindowUITreeUpdater::flowLocalUserForGamepad");
+    }
+    return m_state->flowLocalUserForGamepad(m_epoch, m_phase, m_updater,
+                                            gamepad);
+}
+
 Core::Result<UI::UIFlowInputDeviceState>
-PrimaryWindowUITreeUpdater::flowInputDeviceState() const
+PrimaryWindowUITreeUpdater::flowInputDeviceState(
+    UI::UIFlowLocalUserId localUser) const
 {
     if (m_state == nullptr)
     {
         return expiredFacade<UI::UIFlowInputDeviceState>(
             "PrimaryWindowUITreeUpdater::flowInputDeviceState");
     }
-    return m_state->flowInputDeviceState(m_epoch, m_phase, m_updater);
+    return m_state->flowInputDeviceState(m_epoch, m_phase, m_updater, localUser);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setFlowScreenAction(

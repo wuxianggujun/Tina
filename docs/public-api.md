@@ -306,11 +306,22 @@ Screen 在 publication 中视为 `Collapsed`，作者样式保持不变。`UICon
 `flowLayerCapacity/flowScreenCapacity` 固定注册上限，`UIContextStatistics::flow` 发布 capacity/count/high-water
 与失败/action 计数；callback 注册总量同样受 `flowScreenCapacity` 限制。`UIContext::routeFlowAction()` 供
 Runtime 将 Escape/Gamepad East 的 Back，以及未被聚焦控件默认 Activate 消费的 Enter/Keypad Enter/Gamepad
-South Confirm，以及 TextEdit 未优先消费的 P/Gamepad Start Menu，路由到 topmost committed active Screen；处理过的 Down/Up 不再进入 gameplay。
-`UIFlowInputDeviceState` 与 `flowInputDeviceState()` 暴露 per-window 单用户 `KeyboardMouse/Gamepad` 类别、
-active Gamepad、Platform frame/sequence 与仅在类别/identity 改变时递增的 revision；Runtime 通过
-`observeFlowInputDevice()` 按已验证 transition 顺序更新，release 与 axis drift 不切换。该切片不包含
-多本地用户或 Back/Confirm/Menu 之外的任意 action-id。
+South Confirm，以及 TextEdit 未优先消费的 P/Gamepad Start Menu，路由到 topmost committed active Screen；
+处理过的 Down/Up 不再进入 gameplay。`UIFlowActionEvent::localUser` 报告实际来源用户。
+
+`UIFlowLocalUserId` 是窗口内强类型用户身份，有效范围固定为 `1..16`，
+`UIFlowPrimaryLocalUser=1`、`UIFlowLocalUserCapacity=16`。Keyboard/Pointer/Text/IME 固定属于 Primary；Gamepad
+可通过 `assignFlowGamepad(gamepad, localUser)` / `clearFlowGamepadAssignment(gamepad)` 显式分配，
+`flowLocalUserForGamepad(gamepad)` 对未分配身份返回 Primary。assignment 保存完整 generation `GamepadId`，
+不因 Platform 槽复用继承旧用户。`UIContext`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供对应入口，
+Runtime facade 继续受 phase epoch 限制。
+
+`UIFlowInputDeviceState` 与 `flowInputDeviceState(localUser)` 按用户暴露 `KeyboardMouse/Gamepad` 类别、active
+Gamepad、Platform frame/sequence 与仅在类别/identity 改变时递增的 revision；Runtime 通过
+`observeFlowInputDevice(..., localUser, ...)` 按各用户的已验证 transition 顺序更新，release 与 axis drift 不切换。
+重分配/清除只回落引用该 Gamepad 的用户状态并保留已锁存 Flow Down/Up；断连清除对应 assignment/latch，完整
+stream reset 清除全部 assignment/latch。Layer/Screen 栈、focus 与 Modal 仍是窗口级唯一状态。本契约尚不包含
+Back/Confirm/Menu 之外的任意 action-id。
 
 `UIImageSource` 只保存 Texture2D `AssetId`、source pixel rect、texture pixel extent 与 intrinsic logical size；
 `UIImageContent` 增加 Fill/Contain/Cover/None、alignment、tint 和 Linear/Nearest sampling。
@@ -768,7 +779,7 @@ Jolt/Physics3D 尚未接入。
 **已存在（勿再文档成“没有”）：** `GameStateStack` 与 structural commands；相位 `blocks*Below` 与
 `blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / present-return CPU
 submission ledger；Focus Scope/Modal/持久 Pointer Capture；ScrollView/Dropdown/Popup/虚拟
-ListView/TreeView；`UIFlowLayerId`/`UIFlowScreenId` 与固定容量 Screen stack；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
+ListView/TreeView；`UIFlowLayerId`/`UIFlowScreenId`、固定容量 Screen stack、16 槽 `UIFlowLocalUserId` 与 Gamepad assignment；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
 Invoke/Toggle/RangeValue/Value patterns。
 
 **仍不存在或未完成：**
@@ -781,7 +792,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
 - stylesheet 更广 opacity 等属性面、完整 keyframe timeline 与 layout animation；imageTint、paint-only Motion
   与 ColorToken reverse-dependency 更新已落地；
-- Back/Confirm/Menu 之外的任意产品 action-id 与多本地用户路由；单用户输入设备提示已落地；
+- Back/Confirm/Menu 之外的任意产品 action-id；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
 - 安装 SDK 的正式发布 ABI/兼容策略；Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer

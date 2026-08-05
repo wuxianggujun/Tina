@@ -546,6 +546,11 @@ struct UIFlowActionSlot final {
     bool registered = false;
 };
 
+struct UIFlowGamepadAssignment final {
+    Platform::GamepadId gamepad{};
+    UIFlowLocalUserId localUser{};
+};
+
 struct UIFlowNodeState final {
     UIFlowNodeKind kind = UIFlowNodeKind::None;
     UINodeId layer{};
@@ -619,7 +624,11 @@ struct UIContext::Impl final {
     usize flowActionInvocationCount = 0;
     usize flowActionCallbackOperationDepth = 0;
     usize flowCapacityFailureCount = 0;
-    UIFlowInputDeviceState observedFlowInputDevice{};
+    std::array<UIFlowInputDeviceState, UIFlowLocalUserCapacity>
+        observedFlowInputDevices{};
+    std::array<UIFlowGamepadAssignment,
+               Platform::PlatformFrameBuilder::MaximumGamepadSlots>
+        flowGamepadAssignments{};
     std::pmr::vector<UIStyleRoleId> styleRolesByNodeIndex;
     Detail::UIStyleSheetStorage styleSheetStorage;
     Detail::UIMotionTrackStorage motionTrackStorage;
@@ -905,6 +914,11 @@ struct UIContext::Impl final {
           committedSemanticsTextBuffers{std::pmr::vector<char>(&resource), std::pmr::vector<char>(&resource)},
           componentBuildReservationsByNodeIndex(&resource)
     {
+        for (usize index = 0; index < observedFlowInputDevices.size(); ++index)
+        {
+            observedFlowInputDevices[index].localUser =
+                UIFlowLocalUserId{static_cast<u32>(index + 1U)};
+        }
     }
 
     [[nodiscard]] static Core::Result<std::unique_ptr<Impl>>
@@ -14699,6 +14713,192 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] static bool isValidFlowLocalUser(UIFlowLocalUserId localUser) noexcept
+    {
+        return localUser.hasValue() && localUser.value() <= UIFlowLocalUserCapacity;
+    }
+
+    [[nodiscard]] static usize flowLocalUserIndex(UIFlowLocalUserId localUser) noexcept
+    {
+        return static_cast<usize>(localUser.value() - 1U);
+    }
+
+    [[nodiscard]] Core::Status validateFlowLocalUser(UIFlowLocalUserId localUser) const
+    {
+        if (!isValidFlowLocalUser(localUser))
+        {
+            return fail(UIErrorCode::InvalidFlowLocalUser,
+                        "UI Flow local user is outside the fixed local-user capacity");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status validateFlowGamepad(Platform::GamepadId gamepad) const
+    {
+        if (!gamepad.hasValue() || gamepad.index() >= flowGamepadAssignments.size())
+        {
+            return fail(UIErrorCode::InvalidFlowOperation,
+                        "UI Flow Gamepad identity is outside the Platform slot capacity");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] UIFlowLocalUserId
+    flowLocalUserForGamepadUnchecked(Platform::GamepadId gamepad) const noexcept
+    {
+        const UIFlowGamepadAssignment& assignment =
+            flowGamepadAssignments[gamepad.index()];
+        return assignment.gamepad == gamepad ? assignment.localUser
+                                              : UIFlowPrimaryLocalUser;
+    }
+
+    [[nodiscard]] Core::Status fallbackFlowInputDevicesForGamepads(
+        Platform::GamepadId first,
+        std::optional<Platform::GamepadId> second = std::nullopt)
+    {
+        const auto matches = [first, second](const UIFlowInputDeviceState& state) noexcept {
+            return state.device == UIFlowInputDevice::Gamepad &&
+                   state.gamepad.has_value() &&
+                   (*state.gamepad == first ||
+                    (second.has_value() && *state.gamepad == *second));
+        };
+        for (const UIFlowInputDeviceState& state : observedFlowInputDevices)
+        {
+            if (matches(state) && state.revision == (std::numeric_limits<u64>::max)())
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI Flow input-device revision is exhausted");
+            }
+        }
+        for (UIFlowInputDeviceState& state : observedFlowInputDevices)
+        {
+            if (!matches(state))
+            {
+                continue;
+            }
+            state.device = UIFlowInputDevice::KeyboardMouse;
+            state.gamepad.reset();
+            ++state.revision;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status fallbackAllFlowInputDevices()
+    {
+        for (const UIFlowInputDeviceState& state : observedFlowInputDevices)
+        {
+            if (state.device == UIFlowInputDevice::Gamepad &&
+                state.revision == (std::numeric_limits<u64>::max)())
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI Flow input-device revision is exhausted");
+            }
+        }
+        for (UIFlowInputDeviceState& state : observedFlowInputDevices)
+        {
+            if (state.device != UIFlowInputDevice::Gamepad)
+            {
+                continue;
+            }
+            state.device = UIFlowInputDevice::KeyboardMouse;
+            state.gamepad.reset();
+            ++state.revision;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status assignFlowGamepad(
+        Platform::GamepadId gamepad, UIFlowLocalUserId localUser)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        if (Core::Status validUser = validateFlowLocalUser(localUser); !validUser)
+        {
+            return validUser;
+        }
+        if (Core::Status validGamepad = validateFlowGamepad(gamepad); !validGamepad)
+        {
+            return validGamepad;
+        }
+
+        UIFlowGamepadAssignment& assignment = flowGamepadAssignments[gamepad.index()];
+        if (assignment.gamepad == gamepad && assignment.localUser == localUser)
+        {
+            return Core::success();
+        }
+        const std::optional<Platform::GamepadId> replacedGamepad =
+            assignment.gamepad.hasValue()
+                ? std::optional<Platform::GamepadId>{assignment.gamepad}
+                : std::nullopt;
+        if (Core::Status fallback =
+                fallbackFlowInputDevicesForGamepads(gamepad, replacedGamepad);
+            !fallback)
+        {
+            return fallback;
+        }
+        assignment = UIFlowGamepadAssignment{
+            .gamepad = gamepad,
+            .localUser = localUser,
+        };
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status
+    clearFlowGamepadAssignment(Platform::GamepadId gamepad)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        if (Core::Status validGamepad = validateFlowGamepad(gamepad); !validGamepad)
+        {
+            return validGamepad;
+        }
+
+        UIFlowGamepadAssignment& assignment = flowGamepadAssignments[gamepad.index()];
+        if (assignment.gamepad != gamepad)
+        {
+            return Core::success();
+        }
+        if (Core::Status fallback = fallbackFlowInputDevicesForGamepads(gamepad);
+            !fallback)
+        {
+            return fallback;
+        }
+        assignment = {};
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIFlowLocalUserId>
+    flowLocalUserForGamepad(Platform::GamepadId gamepad) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status validGamepad = validateFlowGamepad(gamepad); !validGamepad)
+        {
+            return Core::failure(validGamepad.error());
+        }
+        return flowLocalUserForGamepadUnchecked(gamepad);
+    }
+
+    [[nodiscard]] Core::Result<UIFlowInputDeviceState>
+    flowInputDeviceState(UIFlowLocalUserId localUser) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status validUser = validateFlowLocalUser(localUser); !validUser)
+        {
+            return Core::failure(validUser.error());
+        }
+        return observedFlowInputDevices[flowLocalUserIndex(localUser)];
+    }
+
     [[nodiscard]] Core::Status cancelDefaultActionInteraction(Platform::WindowId routedWindow,
                                                               std::optional<Platform::GamepadId> gamepad)
     {
@@ -14714,6 +14914,37 @@ struct UIContext::Impl final {
         if (routedWindow != ownerWindow)
         {
             return fail(UIErrorCode::WrongOwnerWindow, "UI default-action cancellation belongs to another Window");
+        }
+
+        if (gamepad.has_value())
+        {
+            if (Core::Status validGamepad = validateFlowGamepad(*gamepad);
+                !validGamepad)
+            {
+                return validGamepad;
+            }
+            if (Core::Status fallback = fallbackFlowInputDevicesForGamepads(*gamepad);
+                !fallback)
+            {
+                return fallback;
+            }
+            UIFlowGamepadAssignment& assignment =
+                flowGamepadAssignments[gamepad->index()];
+            if (assignment.gamepad == *gamepad)
+            {
+                assignment = {};
+            }
+        }
+        else
+        {
+            if (Core::Status fallback = fallbackAllFlowInputDevices(); !fallback)
+            {
+                return fallback;
+            }
+            for (UIFlowGamepadAssignment& assignment : flowGamepadAssignments)
+            {
+                assignment = {};
+            }
         }
 
         dropdownCommandPressLatch.clear();
@@ -14747,12 +14978,19 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Status observeFlowInputDevice(
         Platform::PlatformFrameId platformFrame, u64 sourceSequence,
-        UIFlowInputDevice device, std::optional<Platform::GamepadId> gamepad)
+        UIFlowLocalUserId localUser, UIFlowInputDevice device,
+        std::optional<Platform::GamepadId> gamepad)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
             return ownerThread;
         }
+        if (Core::Status validUser = validateFlowLocalUser(localUser); !validUser)
+        {
+            return validUser;
+        }
+        UIFlowInputDeviceState& observedFlowInputDevice =
+            observedFlowInputDevices[flowLocalUserIndex(localUser)];
         if (!platformFrame.hasValue() || sourceSequence == 0 ||
             sourceSequence <= observedFlowInputDevice.sourceSequence)
         {
@@ -14765,6 +15003,19 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidFlowOperation,
                         "UI Flow input-device observation has an invalid Gamepad identity");
+        }
+        if (device == UIFlowInputDevice::Gamepad)
+        {
+            if (Core::Status validGamepad = validateFlowGamepad(*gamepad);
+                !validGamepad)
+            {
+                return validGamepad;
+            }
+            if (flowLocalUserForGamepadUnchecked(*gamepad) != localUser)
+            {
+                return fail(UIErrorCode::InvalidFlowLocalUser,
+                            "UI Flow Gamepad observation does not match its local-user assignment");
+            }
         }
 
         const bool changed = device != observedFlowInputDevice.device ||
@@ -14789,7 +15040,8 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Result<UIFlowActionRouteResult>
     routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
-                    UIFlowAction action, UIFlowActionSource source, bool pressed,
+                    UIFlowLocalUserId localUser, UIFlowAction action,
+                    UIFlowActionSource source, bool pressed,
                     const Platform::DigitalControlIdentity& control)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
@@ -14807,10 +15059,31 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidFlowAction,
                         "UI Flow action requires a platform frame and source sequence");
         }
+        if (Core::Status validUser = validateFlowLocalUser(localUser); !validUser)
+        {
+            return Core::failure(validUser.error());
+        }
         if (Core::Status valid = flowActionPressState.validate(action, source, control);
             !valid)
         {
             return Core::failure(valid.error());
+        }
+        if (source == UIFlowActionSource::Keyboard &&
+            localUser != UIFlowPrimaryLocalUser)
+        {
+            return fail(UIErrorCode::InvalidFlowLocalUser,
+                        "UI Flow keyboard actions belong to the primary local user");
+        }
+        if (source == UIFlowActionSource::Gamepad)
+        {
+            const auto* button =
+                std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+            if (button == nullptr ||
+                flowLocalUserForGamepadUnchecked(button->gamepad) != localUser)
+            {
+                return fail(UIErrorCode::InvalidFlowLocalUser,
+                            "UI Flow Gamepad action does not match its local-user assignment");
+            }
         }
 
         const bool alreadyPressed = flowActionPressState.isPressed(action, control);
@@ -14873,6 +15146,7 @@ struct UIContext::Impl final {
         });
         callback(UIFlowActionEvent{
             .screen = UIFlowScreenId{targetScreen},
+            .localUser = localUser,
             .action = action,
             .source = source,
             .platformFrame = platformFrame,
@@ -17371,17 +17645,63 @@ Core::Result<bool> UITreeUpdater::isFlowScreenActive(UIFlowScreenId screen) cons
     return m_context->isFlowScreenActiveFromUpdater(m_root, screen);
 }
 
-Core::Result<UIFlowInputDeviceState> UITreeUpdater::flowInputDeviceState() const
+Core::Status UITreeUpdater::assignFlowGamepad(Platform::GamepadId gamepad,
+                                              UIFlowLocalUserId localUser)
 {
     if (m_context == nullptr)
     {
-        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
     }
     if (!m_context->isAliveInRoot(m_root, m_root))
     {
         return fail(UIErrorCode::InvalidNode, "UI tree updater root is stale");
     }
-    return m_context->flowInputDeviceState();
+    return m_context->assignFlowGamepad(gamepad, localUser);
+}
+
+Core::Status UITreeUpdater::clearFlowGamepadAssignment(Platform::GamepadId gamepad)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    if (!m_context->isAliveInRoot(m_root, m_root))
+    {
+        return fail(UIErrorCode::InvalidNode, "UI tree updater root is stale");
+    }
+    return m_context->clearFlowGamepadAssignment(gamepad);
+}
+
+Core::Result<UIFlowLocalUserId>
+UITreeUpdater::flowLocalUserForGamepad(Platform::GamepadId gamepad) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    if (!m_context->isAliveInRoot(m_root, m_root))
+    {
+        return fail(UIErrorCode::InvalidNode, "UI tree updater root is stale");
+    }
+    return m_context->flowLocalUserForGamepad(gamepad);
+}
+
+Core::Result<UIFlowInputDeviceState>
+UITreeUpdater::flowInputDeviceState(UIFlowLocalUserId localUser) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    if (!m_context->isAliveInRoot(m_root, m_root))
+    {
+        return fail(UIErrorCode::InvalidNode, "UI tree updater root is stale");
+    }
+    return m_context->flowInputDeviceState(localUser);
 }
 
 Core::Status UITreeUpdater::setFlowScreenAction(UIFlowScreenId screen, UIFlowAction action,
@@ -18680,27 +19000,44 @@ UIContext::routeDefaultActionRelease(Platform::PlatformFrameId platformFrame, u6
 
 Core::Result<UIFlowActionRouteResult>
 UIContext::routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
-                           UIFlowAction action, UIFlowActionSource source, bool pressed,
+                           UIFlowLocalUserId localUser, UIFlowAction action,
+                           UIFlowActionSource source, bool pressed,
                            const Platform::DigitalControlIdentity& control)
 {
-    return m_impl->routeFlowAction(platformFrame, sourceSequence, action, source, pressed,
-                                   control);
+    return m_impl->routeFlowAction(platformFrame, sourceSequence, localUser, action,
+                                   source, pressed, control);
 }
 
 Core::Status UIContext::observeFlowInputDevice(
     Platform::PlatformFrameId platformFrame, u64 sourceSequence,
-    UIFlowInputDevice device, std::optional<Platform::GamepadId> gamepad)
+    UIFlowLocalUserId localUser, UIFlowInputDevice device,
+    std::optional<Platform::GamepadId> gamepad)
 {
-    return m_impl->observeFlowInputDevice(platformFrame, sourceSequence, device, gamepad);
+    return m_impl->observeFlowInputDevice(platformFrame, sourceSequence, localUser,
+                                          device, gamepad);
 }
 
-UIFlowInputDeviceState UIContext::flowInputDeviceState() const noexcept
+Core::Status UIContext::assignFlowGamepad(Platform::GamepadId gamepad,
+                                          UIFlowLocalUserId localUser)
 {
-    if (!m_impl->isOwnerThread())
-    {
-        return {};
-    }
-    return m_impl->observedFlowInputDevice;
+    return m_impl->assignFlowGamepad(gamepad, localUser);
+}
+
+Core::Status UIContext::clearFlowGamepadAssignment(Platform::GamepadId gamepad)
+{
+    return m_impl->clearFlowGamepadAssignment(gamepad);
+}
+
+Core::Result<UIFlowLocalUserId>
+UIContext::flowLocalUserForGamepad(Platform::GamepadId gamepad) const
+{
+    return m_impl->flowLocalUserForGamepad(gamepad);
+}
+
+Core::Result<UIFlowInputDeviceState>
+UIContext::flowInputDeviceState(UIFlowLocalUserId localUser) const
+{
+    return m_impl->flowInputDeviceState(localUser);
 }
 
 Core::Result<UIContext::UIDefaultFocusStepResult> UIContext::routeDefaultActionFocusStep(bool reverse)

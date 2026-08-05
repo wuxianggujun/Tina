@@ -60,6 +60,7 @@ TEST_F(UIInputRouteProducerTest, FlowBackConsumesKeyboardAndGamepadDownUpPairs)
     EXPECT_TRUE(escapeDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 1U);
     EXPECT_EQ(events[0].screen, *screen);
+    EXPECT_EQ(events[0].localUser, UI::UIFlowPrimaryLocalUser);
     EXPECT_EQ(events[0].source, UI::UIFlowActionSource::Keyboard);
 
     auto popped = tree.updater.popFlowScreen(*layer);
@@ -92,6 +93,7 @@ TEST_F(UIInputRouteProducerTest, FlowBackConsumesKeyboardAndGamepadDownUpPairs)
     ASSERT_TRUE(eastDownOutput.has_value());
     EXPECT_TRUE(eastDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 2U);
+    EXPECT_EQ(events[1].localUser, UI::UIFlowPrimaryLocalUser);
     EXPECT_EQ(events[1].source, UI::UIFlowActionSource::Gamepad);
 
     auto eastUp = buildFrame(
@@ -164,6 +166,7 @@ TEST_F(UIInputRouteProducerTest, FlowConfirmClaimsUnfocusedAcceptAndYieldsToFocu
     EXPECT_TRUE(enterDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 1U);
     EXPECT_EQ(events[0].action, UI::UIFlowAction::Confirm);
+    EXPECT_EQ(events[0].localUser, UI::UIFlowPrimaryLocalUser);
     EXPECT_EQ(events[0].source, UI::UIFlowActionSource::Keyboard);
 
     auto popped = tree.updater.popFlowScreen(*layer);
@@ -194,6 +197,7 @@ TEST_F(UIInputRouteProducerTest, FlowConfirmClaimsUnfocusedAcceptAndYieldsToFocu
     EXPECT_TRUE(southDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 2U);
     EXPECT_EQ(events[1].action, UI::UIFlowAction::Confirm);
+    EXPECT_EQ(events[1].localUser, UI::UIFlowPrimaryLocalUser);
     EXPECT_EQ(events[1].source, UI::UIFlowActionSource::Gamepad);
 
     auto southUp = buildFrame(
@@ -277,6 +281,7 @@ TEST_F(UIInputRouteProducerTest, FlowMenuClaimsPAndStartButYieldsPrintablePToTex
     EXPECT_TRUE(keyDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 1U);
     EXPECT_EQ(events[0].action, UI::UIFlowAction::Menu);
+    EXPECT_EQ(events[0].localUser, UI::UIFlowPrimaryLocalUser);
     EXPECT_EQ(events[0].source, UI::UIFlowActionSource::Keyboard);
 
     auto keyUpFrame = buildFrame(
@@ -306,6 +311,7 @@ TEST_F(UIInputRouteProducerTest, FlowMenuClaimsPAndStartButYieldsPrintablePToTex
     EXPECT_TRUE(startDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 2U);
     EXPECT_EQ(events[1].action, UI::UIFlowAction::Menu);
+    EXPECT_EQ(events[1].localUser, UI::UIFlowPrimaryLocalUser);
     EXPECT_EQ(events[1].source, UI::UIFlowActionSource::Gamepad);
 
     auto startUp = buildFrame(
@@ -475,9 +481,11 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
         });
     ASSERT_TRUE(keyboardDown.has_value());
     ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardDown).has_value());
-    EXPECT_EQ(tree.context->flowInputDeviceState().device,
-              UI::UIFlowInputDevice::KeyboardMouse);
-    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 0U);
+    auto primaryState =
+        tree.context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(primaryState.has_value());
+    EXPECT_EQ(primaryState->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_EQ(primaryState->revision, 0U);
 
     auto gamepadDown = buildFrame(
         *builder, window,
@@ -489,10 +497,12 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
         });
     ASSERT_TRUE(gamepadDown.has_value());
     ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadDown).has_value());
-    EXPECT_EQ(tree.context->flowInputDeviceState().device,
-              UI::UIFlowInputDevice::Gamepad);
-    EXPECT_EQ(tree.context->flowInputDeviceState().gamepad, gamepad);
-    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 1U);
+    primaryState =
+        tree.context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(primaryState.has_value());
+    EXPECT_EQ(primaryState->device, UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(primaryState->gamepad, gamepad);
+    EXPECT_EQ(primaryState->revision, 1U);
 
     auto keyboardRelease = buildFrame(
         *builder, window,
@@ -503,9 +513,11 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
         });
     ASSERT_TRUE(keyboardRelease.has_value());
     ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardRelease).has_value());
-    EXPECT_EQ(tree.context->flowInputDeviceState().device,
-              UI::UIFlowInputDevice::Gamepad);
-    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 1U);
+    primaryState =
+        tree.context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(primaryState.has_value());
+    EXPECT_EQ(primaryState->device, UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(primaryState->revision, 1U);
 
     auto pointerWheelFrame = buildFrame(
         *builder, window,
@@ -516,9 +528,11 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
         });
     ASSERT_TRUE(pointerWheelFrame.has_value());
     ASSERT_TRUE(producer->produce(tree.context.get(), *pointerWheelFrame).has_value());
-    EXPECT_EQ(tree.context->flowInputDeviceState().device,
-              UI::UIFlowInputDevice::KeyboardMouse);
-    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 2U);
+    primaryState =
+        tree.context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(primaryState.has_value());
+    EXPECT_EQ(primaryState->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_EQ(primaryState->revision, 2U);
 
     auto gamepadRelease = buildFrame(
         *builder, window,
@@ -529,7 +543,10 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
         });
     ASSERT_TRUE(gamepadRelease.has_value());
     ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadRelease).has_value());
-    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 2U);
+    primaryState =
+        tree.context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(primaryState.has_value());
+    EXPECT_EQ(primaryState->revision, 2U);
 
     auto secondGamepadDown = buildFrame(
         *builder, window,
@@ -540,9 +557,11 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
         });
     ASSERT_TRUE(secondGamepadDown.has_value());
     ASSERT_TRUE(producer->produce(tree.context.get(), *secondGamepadDown).has_value());
-    EXPECT_EQ(tree.context->flowInputDeviceState().device,
-              UI::UIFlowInputDevice::Gamepad);
-    EXPECT_EQ(tree.context->flowInputDeviceState().revision, 3U);
+    primaryState =
+        tree.context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(primaryState.has_value());
+    EXPECT_EQ(primaryState->device, UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(primaryState->revision, 3U);
 
     auto disconnect = buildFrame(
         *builder, window,
@@ -559,11 +578,230 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
         });
     ASSERT_TRUE(disconnect.has_value());
     ASSERT_TRUE(producer->produce(tree.context.get(), *disconnect).has_value());
-    const UI::UIFlowInputDeviceState finalState =
-        tree.context->flowInputDeviceState();
-    EXPECT_EQ(finalState.device, UI::UIFlowInputDevice::KeyboardMouse);
-    EXPECT_FALSE(finalState.gamepad.has_value());
-    EXPECT_EQ(finalState.revision, 4U);
+    auto finalState =
+        tree.context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    ASSERT_TRUE(finalState.has_value());
+    EXPECT_EQ(finalState->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_FALSE(finalState->gamepad.has_value());
+    EXPECT_EQ(finalState->revision, 4U);
+}
+
+TEST_F(UIInputRouteProducerTest,
+       FlowAssignedGamepadRoutesLocalUserAndKeepsReleaseLatchedAfterReassignment)
+{
+    auto producer = createProducer();
+    RouteTree tree = createRouteTree(
+        window,
+        {
+            .nodeCapacity = 8,
+            .rootCapacity = 1,
+            .routePathCapacity = 8,
+            .routedPointerListenerCapacity = 16,
+            .flowLayerCapacity = 1,
+            .flowScreenCapacity = 1,
+        });
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    auto layerNode =
+        tree.updater.createElement(tree.root.rootNodeId(), UI::makePanelElement());
+    ASSERT_TRUE(layerNode.has_value());
+    auto screenNode = tree.updater.createElement(*layerNode, UI::makePanelElement());
+    ASSERT_TRUE(screenNode.has_value());
+    expectOk(tree.updater.setLayoutStyle(*layerNode, fixedSize(100.0F, 100.0F)));
+    expectOk(tree.updater.setLayoutStyle(*screenNode, fixedSize(100.0F, 100.0F)));
+    auto layer = tree.updater.registerFlowLayer(*layerNode);
+    ASSERT_TRUE(layer.has_value());
+    auto screen = tree.updater.registerFlowScreen(*layer, *screenNode);
+    ASSERT_TRUE(screen.has_value());
+    expectOk(tree.updater.pushFlowScreen(*screen));
+
+    std::array<UI::UIFlowActionEvent, 2> events{};
+    usize eventCount = 0;
+    expectOk(tree.updater.setFlowScreenAction(
+        *screen, UI::UIFlowAction::Confirm,
+        UI::UIFlowActionCallback{
+            [&events, &eventCount](const UI::UIFlowActionEvent& event) noexcept {
+                if (eventCount < events.size())
+                {
+                    events[eventCount] = event;
+                }
+                ++eventCount;
+            }}));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    constexpr UI::UIFlowLocalUserId User2{2};
+    constexpr UI::UIFlowLocalUserId User3{3};
+    expectOk(tree.updater.assignFlowGamepad(gamepad, User2));
+
+    auto firstDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {240},
+            .transitions = {gamepadButtonDown(window, gamepad)},
+            .gamepadSnapshots = {heldSouthSnapshot(gamepad, 240)},
+        });
+    ASSERT_TRUE(firstDown.has_value());
+    auto firstDownOutput = producer->produce(tree.context.get(), *firstDown);
+    ASSERT_TRUE(firstDownOutput.has_value());
+    EXPECT_TRUE(firstDownOutput->consumption.isConsumed(0));
+    ASSERT_EQ(eventCount, 1U);
+    EXPECT_EQ(events[0].localUser, User2);
+    EXPECT_EQ(events[0].source, UI::UIFlowActionSource::Gamepad);
+
+    expectOk(tree.updater.assignFlowGamepad(gamepad, User3));
+    auto user2State = tree.context->flowInputDeviceState(User2);
+    ASSERT_TRUE(user2State.has_value());
+    EXPECT_EQ(user2State->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_FALSE(user2State->gamepad.has_value());
+    EXPECT_EQ(user2State->revision, 2U);
+
+    auto release = buildFrame(
+        *builder, window,
+        {
+            .frameId = {241},
+            .transitions = {gamepadButtonUp(window, gamepad)},
+            .gamepadSnapshots = {releasedSouthSnapshot(gamepad, 241)},
+        });
+    ASSERT_TRUE(release.has_value());
+    auto releaseOutput = producer->produce(tree.context.get(), *release);
+    ASSERT_TRUE(releaseOutput.has_value());
+    EXPECT_TRUE(releaseOutput->consumption.isConsumed(0));
+    EXPECT_EQ(eventCount, 1U);
+
+    auto secondDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {242},
+            .transitions = {gamepadButtonDown(window, gamepad)},
+            .gamepadSnapshots = {heldSouthSnapshot(gamepad, 242)},
+        });
+    ASSERT_TRUE(secondDown.has_value());
+    auto secondDownOutput = producer->produce(tree.context.get(), *secondDown);
+    ASSERT_TRUE(secondDownOutput.has_value());
+    EXPECT_TRUE(secondDownOutput->consumption.isConsumed(0));
+    ASSERT_EQ(eventCount, 2U);
+    EXPECT_EQ(events[1].localUser, User3);
+    EXPECT_EQ(events[1].source, UI::UIFlowActionSource::Gamepad);
+
+    auto user3State = tree.context->flowInputDeviceState(User3);
+    ASSERT_TRUE(user3State.has_value());
+    EXPECT_EQ(user3State->device, UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(user3State->gamepad, gamepad);
+    EXPECT_EQ(user3State->revision, 1U);
+
+    auto reset = buildFrame(
+        *builder, window,
+        {
+            .frameId = {243},
+            .transitions = {Platform::InputStreamReset{
+                .routedWindow = window,
+                .reason = Platform::InputResetReason::BackendRecovery,
+            }},
+        });
+    ASSERT_TRUE(reset.has_value());
+    auto resetOutput = producer->produce(tree.context.get(), *reset);
+    ASSERT_TRUE(resetOutput.has_value());
+    EXPECT_FALSE(resetOutput->consumption.isConsumed(0));
+
+    user3State = tree.context->flowInputDeviceState(User3);
+    auto resetOwner = tree.updater.flowLocalUserForGamepad(gamepad);
+    ASSERT_TRUE(user3State.has_value());
+    ASSERT_TRUE(resetOwner.has_value());
+    EXPECT_EQ(user3State->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_FALSE(user3State->gamepad.has_value());
+    EXPECT_EQ(user3State->platformFrame, Platform::PlatformFrameId{243});
+    EXPECT_EQ(user3State->revision, 2U);
+    EXPECT_EQ(*resetOwner, UI::UIFlowPrimaryLocalUser);
+
+    auto staleRelease = buildFrame(
+        *builder, window,
+        {
+            .frameId = {244},
+            .transitions = {gamepadButtonUp(window, gamepad)},
+            .gamepadSnapshots = {releasedSouthSnapshot(gamepad, 244)},
+        });
+    ASSERT_TRUE(staleRelease.has_value());
+    auto staleReleaseOutput =
+        producer->produce(tree.context.get(), *staleRelease);
+    ASSERT_TRUE(staleReleaseOutput.has_value());
+    EXPECT_FALSE(staleReleaseOutput->consumption.isConsumed(0));
+    EXPECT_EQ(eventCount, 2U);
+}
+
+TEST_F(UIInputRouteProducerTest,
+       FlowDisconnectFallsBackOnlyTheAssignedLocalUser)
+{
+    auto producer = createProducer();
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    constexpr UI::UIFlowLocalUserId User2{2};
+    expectOk(tree.updater.assignFlowGamepad(gamepad, User2));
+
+    auto keyboardDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {250},
+            .transitions = {keyDown(window, Platform::Key::A)},
+            .heldKeys = {Platform::Key::A},
+        });
+    ASSERT_TRUE(keyboardDown.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardDown).has_value());
+
+    auto gamepadDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {251},
+            .transitions = {gamepadButtonDown(window, gamepad)},
+            .heldKeys = {Platform::Key::A},
+            .gamepadSnapshots = {heldSouthSnapshot(gamepad, 251)},
+        });
+    ASSERT_TRUE(gamepadDown.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadDown).has_value());
+
+    auto primaryBefore =
+        tree.context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    auto user2Before = tree.context->flowInputDeviceState(User2);
+    ASSERT_TRUE(primaryBefore.has_value());
+    ASSERT_TRUE(user2Before.has_value());
+    EXPECT_EQ(primaryBefore->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_EQ(primaryBefore->sourceSequence, 1U);
+    EXPECT_EQ(primaryBefore->revision, 0U);
+    EXPECT_EQ(user2Before->device, UI::UIFlowInputDevice::Gamepad);
+    EXPECT_EQ(user2Before->gamepad, gamepad);
+    EXPECT_EQ(user2Before->revision, 1U);
+
+    auto disconnect = buildFrame(
+        *builder, window,
+        {
+            .frameId = {252},
+            .transitions = {Platform::InputCancelTransition{
+                .routedWindow = window,
+                .reason = Platform::InputCancelReason::DeviceDisconnected,
+                .gamepad = gamepad,
+            }},
+            .platformEvents = {Platform::GamepadDisconnectedEvent{
+                .gamepad = gamepad,
+            }},
+        });
+    ASSERT_TRUE(disconnect.has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *disconnect).has_value());
+
+    auto primaryAfter =
+        tree.context->flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
+    auto user2After = tree.context->flowInputDeviceState(User2);
+    auto ownerAfter = tree.updater.flowLocalUserForGamepad(gamepad);
+    ASSERT_TRUE(primaryAfter.has_value());
+    ASSERT_TRUE(user2After.has_value());
+    ASSERT_TRUE(ownerAfter.has_value());
+    EXPECT_EQ(*primaryAfter, *primaryBefore);
+    EXPECT_EQ(user2After->device, UI::UIFlowInputDevice::KeyboardMouse);
+    EXPECT_FALSE(user2After->gamepad.has_value());
+    EXPECT_EQ(user2After->platformFrame, Platform::PlatformFrameId{252});
+    EXPECT_EQ(user2After->revision, 2U);
+    EXPECT_EQ(*ownerAfter, UI::UIFlowPrimaryLocalUser);
 }
 
 } // namespace

@@ -741,13 +741,15 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 - `SDK-001` 的 GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装、
   Windows/Linux moved-prefix 与 Ubuntu producer → Debian consumer gate 已落地，待正式 ABI/兼容策略；此后每个新增公共 UI 切片同步增加
   consumer 覆盖；
-- `UI-FLOW-001` 已因 2D Pause 页面栈进入 InProgress：首切片复用 retained node，提供固定容量
+- `UI-FLOW-001` Done：首切片复用 retained node，提供固定容量
   Layer/Screen 注册、push/pop/replace、栈顶 publication、失败原子性与生命周期回收；第二切片已增加
   topmost Screen 的 Back callback、Dropdown-first Escape/Gamepad East 路由与 Down/Up gameplay suppression；
-  第三切片增加单用户 `KeyboardMouse/Gamepad` revision、断连回落与 2D Pause 真实提示；第四切片增加
+  第三切片增加设备 revision、断连回落与 2D Pause 真实提示；第四切片增加
   Confirm callback、focused-control-first Enter/Keypad Enter/Gamepad South 路由；第五切片增加 Menu callback、
   TextEdit-first printable P、P/Gamepad Start 路由、Base Menu 打开 Pause、Pause Menu 恢复，以及
-  `ESC / ENTER / P`、`B / A / START` 产品提示；只剩多本地用户继续后置；
+  `ESC / ENTER / P`、`B / A / START` 产品提示；最终切片增加固定 16 槽 `UIFlowLocalUserId`、Primary=1、
+  键鼠固定 Primary、完整 generation Gamepad assignment、per-user 设备状态、action event 用户来源、
+  重分配 release latch 保留与断连/reset assignment/latch 清理；Screen 栈与 focus 继续保持窗口级唯一；
 - `UI-BEHAVIOR-SPI-001` 只有标准 Behavior 无法满足有证据的插件场景时才冻结高级 SPI。
 
 详细状态和验收条件只在 [Backlog](backlog.md)维护。

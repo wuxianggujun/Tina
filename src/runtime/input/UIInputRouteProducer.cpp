@@ -22,6 +22,7 @@ constexpr usize BitsPerConsumptionWord = sizeof(u64) * 8U;
 constexpr double PointerDeviceSwitchDistanceSquared = 4.0;
 
 struct FlowInputDeviceObservation final {
+    UI::UIFlowLocalUserId localUser = UI::UIFlowPrimaryLocalUser;
     UI::UIFlowInputDevice device = UI::UIFlowInputDevice::KeyboardMouse;
     std::optional<Platform::GamepadId> gamepad{};
 };
@@ -36,70 +37,80 @@ struct FlowInputDeviceObservation final {
     return (transitionCount + BitsPerConsumptionWord - 1U) / BitsPerConsumptionWord;
 }
 
-[[nodiscard]] std::optional<FlowInputDeviceObservation> flowInputDeviceObservation(
-    const Platform::InputTransitionPayload& payload, Platform::WindowId ownerWindow,
-    const UI::UIFlowInputDeviceState& current) noexcept
+[[nodiscard]] Core::Result<std::optional<FlowInputDeviceObservation>>
+flowInputDeviceObservation(const Platform::InputTransitionPayload& payload,
+                           UI::UIContext& context)
 {
+    const Platform::WindowId ownerWindow = context.ownerWindow();
     if (const auto* key = std::get_if<Platform::KeyTransition>(&payload);
         key != nullptr && key->window == ownerWindow &&
         key->state == Platform::DigitalTransition::Down)
     {
-        return FlowInputDeviceObservation{};
+        return std::optional<FlowInputDeviceObservation>{FlowInputDeviceObservation{}};
     }
     if (const auto* button = std::get_if<Platform::PointerButtonTransition>(&payload);
         button != nullptr && button->window == ownerWindow &&
         button->state == Platform::DigitalTransition::Down)
     {
-        return FlowInputDeviceObservation{};
+        return std::optional<FlowInputDeviceObservation>{FlowInputDeviceObservation{}};
     }
     if (const auto* move = std::get_if<Platform::PointerMoveTransition>(&payload);
         move != nullptr && move->window == ownerWindow &&
         move->deltaX * move->deltaX + move->deltaY * move->deltaY >=
             PointerDeviceSwitchDistanceSquared)
     {
-        return FlowInputDeviceObservation{};
+        return std::optional<FlowInputDeviceObservation>{FlowInputDeviceObservation{}};
     }
     if (const auto* wheel = std::get_if<Platform::PointerWheelTransition>(&payload);
         wheel != nullptr && wheel->window == ownerWindow &&
         (wheel->deltaX != 0.0 || wheel->deltaY != 0.0))
     {
-        return FlowInputDeviceObservation{};
+        return std::optional<FlowInputDeviceObservation>{FlowInputDeviceObservation{}};
     }
     if (const auto* button = std::get_if<Platform::GamepadButtonTransition>(&payload);
         button != nullptr && button->routedWindow == ownerWindow &&
         button->state == Platform::DigitalTransition::Down)
     {
-        return FlowInputDeviceObservation{
+        auto localUser = context.flowLocalUserForGamepad(button->gamepad);
+        if (!localUser)
+        {
+            return Core::failure(std::move(localUser.error()));
+        }
+        return std::optional<FlowInputDeviceObservation>{FlowInputDeviceObservation{
+            .localUser = *localUser,
             .device = UI::UIFlowInputDevice::Gamepad,
             .gamepad = button->gamepad,
-        };
+        }};
     }
     if (const auto* text = std::get_if<Platform::TextInputTransition>(&payload);
         text != nullptr && text->window == ownerWindow)
     {
-        return FlowInputDeviceObservation{};
+        return std::optional<FlowInputDeviceObservation>{FlowInputDeviceObservation{}};
     }
     if (const auto* composition = std::get_if<Platform::TextCompositionTransition>(&payload);
         composition != nullptr && composition->window == ownerWindow &&
         composition->stage != Platform::TextCompositionStage::Cancelled)
     {
-        return FlowInputDeviceObservation{};
+        return std::optional<FlowInputDeviceObservation>{FlowInputDeviceObservation{}};
     }
-    if (const auto* cancel = std::get_if<Platform::InputCancelTransition>(&payload);
-        cancel != nullptr && cancel->routedWindow == ownerWindow &&
-        cancel->gamepad.has_value() && current.device == UI::UIFlowInputDevice::Gamepad &&
-        current.gamepad == cancel->gamepad)
+    return std::optional<FlowInputDeviceObservation>{};
+}
+
+[[nodiscard]] Core::Result<UI::UIFlowActionRouteResult> routeGamepadFlowAction(
+    UI::UIContext& context, Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence, UI::UIFlowAction action,
+    const Platform::GamepadButtonTransition& transition,
+    const Platform::DigitalControlIdentity& control)
+{
+    auto localUser = context.flowLocalUserForGamepad(transition.gamepad);
+    if (!localUser)
     {
-        return FlowInputDeviceObservation{};
+        return Core::failure(std::move(localUser.error()));
     }
-    if (const auto* reset = std::get_if<Platform::InputStreamReset>(&payload);
-        reset != nullptr && (!reset->routedWindow.has_value() ||
-                             *reset->routedWindow == ownerWindow) &&
-        current.device == UI::UIFlowInputDevice::Gamepad)
-    {
-        return FlowInputDeviceObservation{};
-    }
-    return std::nullopt;
+    return context.routeFlowAction(
+        platformFrame, sourceSequence, *localUser, action,
+        UI::UIFlowActionSource::Gamepad,
+        transition.state == Platform::DigitalTransition::Down, control);
 }
 
 [[nodiscard]] bool isValidDigitalTransition(Platform::DigitalTransition state) noexcept
@@ -581,14 +592,20 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
     bool anyConsumed = false;
     for (usize ordinal = 0; ordinal < transitions.size(); ++ordinal)
     {
-        if (const auto observation = flowInputDeviceObservation(
-                transitions[ordinal].payload, context->ownerWindow(),
-                context->flowInputDeviceState());
-            observation.has_value())
+        auto observation =
+            flowInputDeviceObservation(transitions[ordinal].payload, *context);
+        if (!observation)
+        {
+            Core::Error error = std::move(observation.error());
+            error.addContext("UIInputRouteProducer::produce(resolve-flow-input-device)");
+            return Core::failure(std::move(error));
+        }
+        if (observation->has_value())
         {
             Core::Status observed = context->observeFlowInputDevice(
                 platformFrame.id(), transitions[ordinal].sequence,
-                observation->device, observation->gamepad);
+                (**observation).localUser, (**observation).device,
+                (**observation).gamepad);
             if (!observed)
             {
                 Core::Error error = std::move(observed.error());
@@ -611,6 +628,37 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 }
             } else if (cancel->gamepad.has_value()
                        && cancel->routedWindow == context->ownerWindow()) {
+                auto localUser =
+                    context->flowLocalUserForGamepad(*cancel->gamepad);
+                if (!localUser)
+                {
+                    Core::Error error = std::move(localUser.error());
+                    error.addContext(
+                        "UIInputRouteProducer::produce(cancel-flow-local-user)");
+                    return Core::failure(std::move(error));
+                }
+                auto inputDevice = context->flowInputDeviceState(*localUser);
+                if (!inputDevice)
+                {
+                    Core::Error error = std::move(inputDevice.error());
+                    error.addContext(
+                        "UIInputRouteProducer::produce(cancel-flow-input-device)");
+                    return Core::failure(std::move(error));
+                }
+                if (inputDevice->device == UI::UIFlowInputDevice::Gamepad &&
+                    inputDevice->gamepad == cancel->gamepad)
+                {
+                    Core::Status observed = context->observeFlowInputDevice(
+                        platformFrame.id(), transitions[ordinal].sequence,
+                        *localUser, UI::UIFlowInputDevice::KeyboardMouse);
+                    if (!observed)
+                    {
+                        Core::Error error = std::move(observed.error());
+                        error.addContext(
+                            "UIInputRouteProducer::produce(cancel-flow-input-device-fallback)");
+                        return Core::failure(std::move(error));
+                    }
+                }
                 Core::Status cancelStatus =
                     context->cancelDefaultActionInteraction(
                         cancel->routedWindow,
@@ -629,11 +677,48 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             reset != nullptr) {
             if (!reset->routedWindow.has_value()
                 || *reset->routedWindow == context->ownerWindow()) {
+                for (usize userIndex = 0;
+                     userIndex < UI::UIFlowLocalUserCapacity; ++userIndex)
+                {
+                    const UI::UIFlowLocalUserId localUser{
+                        static_cast<u32>(userIndex + 1U)};
+                    auto inputDevice = context->flowInputDeviceState(localUser);
+                    if (!inputDevice)
+                    {
+                        Core::Error error = std::move(inputDevice.error());
+                        error.addContext(
+                            "UIInputRouteProducer::produce(reset-flow-input-device)");
+                        return Core::failure(std::move(error));
+                    }
+                    if (inputDevice->device != UI::UIFlowInputDevice::Gamepad)
+                    {
+                        continue;
+                    }
+                    Core::Status observed = context->observeFlowInputDevice(
+                        platformFrame.id(), transitions[ordinal].sequence,
+                        localUser, UI::UIFlowInputDevice::KeyboardMouse);
+                    if (!observed)
+                    {
+                        Core::Error error = std::move(observed.error());
+                        error.addContext(
+                            "UIInputRouteProducer::produce(reset-flow-input-device-fallback)");
+                        return Core::failure(std::move(error));
+                    }
+                }
                 Core::Status cancelStatus =
                     context->cancelPointerInteraction(context->ownerWindow());
                 if (!cancelStatus) {
                     Core::Error error = std::move(cancelStatus.error());
                     error.addContext("UIInputRouteProducer::produce(reset)");
+                    return Core::failure(std::move(error));
+                }
+                cancelStatus = context->cancelDefaultActionInteraction(
+                    context->ownerWindow());
+                if (!cancelStatus)
+                {
+                    Core::Error error = std::move(cancelStatus.error());
+                    error.addContext(
+                        "UIInputRouteProducer::produce(reset-default-action)");
                     return Core::failure(std::move(error));
                 }
             }
@@ -786,7 +871,8 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 .key = key->key,
             };
             auto routed = context->routeFlowAction(
-                platformFrame.id(), transitions[ordinal].sequence, UI::UIFlowAction::Back,
+                platformFrame.id(), transitions[ordinal].sequence,
+                UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Back,
                 UI::UIFlowActionSource::Keyboard,
                 key->state == Platform::DigitalTransition::Down, control);
             if (!routed)
@@ -814,10 +900,9 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     .gamepad = gamepad->gamepad,
                     .button = gamepad->button,
                 };
-            auto routed = context->routeFlowAction(
-                platformFrame.id(), transitions[ordinal].sequence, UI::UIFlowAction::Back,
-                UI::UIFlowActionSource::Gamepad,
-                gamepad->state == Platform::DigitalTransition::Down, control);
+            auto routed = routeGamepadFlowAction(
+                *context, platformFrame.id(), transitions[ordinal].sequence,
+                UI::UIFlowAction::Back, *gamepad, control);
             if (!routed)
             {
                 Core::Error error = std::move(routed.error());
@@ -850,7 +935,8 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     .key = key->key,
                 };
                 auto routed = context->routeFlowAction(
-                    platformFrame.id(), transitions[ordinal].sequence, UI::UIFlowAction::Menu,
+                    platformFrame.id(), transitions[ordinal].sequence,
+                    UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Menu,
                     UI::UIFlowActionSource::Keyboard, pressed, control);
                 if (!routed)
                 {
@@ -878,10 +964,9 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     .gamepad = gamepad->gamepad,
                     .button = gamepad->button,
                 };
-            auto routed = context->routeFlowAction(
-                platformFrame.id(), transitions[ordinal].sequence, UI::UIFlowAction::Menu,
-                UI::UIFlowActionSource::Gamepad,
-                gamepad->state == Platform::DigitalTransition::Down, control);
+            auto routed = routeGamepadFlowAction(
+                *context, platformFrame.id(), transitions[ordinal].sequence,
+                UI::UIFlowAction::Menu, *gamepad, control);
             if (!routed)
             {
                 Core::Error error = std::move(routed.error());
@@ -1192,8 +1277,8 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             {
                 auto flowRelease = context->routeFlowAction(
                     platformFrame.id(), transitions[ordinal].sequence,
-                    UI::UIFlowAction::Confirm, UI::UIFlowActionSource::Keyboard,
-                    false, control);
+                    UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Confirm,
+                    UI::UIFlowActionSource::Keyboard, false, control);
                 if (!flowRelease)
                 {
                     Core::Error error = std::move(flowRelease.error());
@@ -1237,8 +1322,8 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             {
                 auto flow = context->routeFlowAction(
                     platformFrame.id(), transitions[ordinal].sequence,
-                    UI::UIFlowAction::Confirm, UI::UIFlowActionSource::Keyboard,
-                    true, control);
+                    UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Confirm,
+                    UI::UIFlowActionSource::Keyboard, true, control);
                 if (!flow)
                 {
                     Core::Error error = std::move(flow.error());
@@ -1269,10 +1354,9 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             const bool pressed = gamepad->state == Platform::DigitalTransition::Down;
             if (!pressed)
             {
-                auto flowRelease = context->routeFlowAction(
-                    platformFrame.id(), transitions[ordinal].sequence,
-                    UI::UIFlowAction::Confirm, UI::UIFlowActionSource::Gamepad,
-                    false, control);
+                auto flowRelease = routeGamepadFlowAction(
+                    *context, platformFrame.id(), transitions[ordinal].sequence,
+                    UI::UIFlowAction::Confirm, *gamepad, control);
                 if (!flowRelease)
                 {
                     Core::Error error = std::move(flowRelease.error());
@@ -1314,10 +1398,9 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (pressed)
             {
-                auto flow = context->routeFlowAction(
-                    platformFrame.id(), transitions[ordinal].sequence,
-                    UI::UIFlowAction::Confirm, UI::UIFlowActionSource::Gamepad,
-                    true, control);
+                auto flow = routeGamepadFlowAction(
+                    *context, platformFrame.id(), transitions[ordinal].sequence,
+                    UI::UIFlowAction::Confirm, *gamepad, control);
                 if (!flow)
                 {
                     Core::Error error = std::move(flow.error());
