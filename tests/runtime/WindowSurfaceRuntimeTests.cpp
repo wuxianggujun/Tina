@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -39,6 +40,7 @@ struct WindowSurfaceRuntimeProbe final {
     usize leaseCountAtPlatformShutdown = 99;
     bool lifecycleOrderingViolation = false;
     bool renderFactorySawInitialSurface = false;
+    std::optional<Render::ShadowMapExtentConfig> renderFactoryShadowMapExtents;
     bool switchedWindowWasValid = false;
     bool gameShutdown = false;
 };
@@ -482,6 +484,7 @@ enum class WindowSurfaceFactoryFailure : u8 {
             -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
             probe.events.emplace_back("factory.render");
             probe.renderFactorySawInitialSurface = params.initialPrimaryWindowSurface.has_value();
+            probe.renderFactoryShadowMapExtents = params.shadowMapExtents;
             if (failure == WindowSurfaceFactoryFailure::RenderFactory)
             {
                 return Core::failure(Core::CoreErrorCode::Internal, "The scripted WindowSurface render factory failed");
@@ -513,10 +516,20 @@ TEST(WindowSurfaceRuntimeTest, PublishesAfterRenderCreationAndSeparatesEngineFra
             std::make_unique<SurfaceProbeSubmissionCompletionLedger>(probe);
         return ledger;
     };
-    auto host = EngineHost::Create(EngineConfig::Defaults(), std::move(factories));
+    auto config = EngineConfig::Defaults();
+    config.shadowMapExtents = Render::ShadowMapExtentConfig{
+        .directionalCascadeTileExtent = 2048,
+        .spotLightMapExtent = 512,
+        .pointLightFaceExtent = 1024,
+    };
+    auto host = EngineHost::Create(config, std::move(factories));
     ASSERT_TRUE(host.has_value());
     ASSERT_NE(*host, nullptr);
     EXPECT_TRUE(probe.renderFactorySawInitialSurface);
+    ASSERT_TRUE(probe.renderFactoryShadowMapExtents.has_value());
+    EXPECT_EQ(probe.renderFactoryShadowMapExtents->directionalCascadeTileExtent, 2048U);
+    EXPECT_EQ(probe.renderFactoryShadowMapExtents->spotLightMapExtent, 512U);
+    EXPECT_EQ(probe.renderFactoryShadowMapExtents->pointLightFaceExtent, 1024U);
     EXPECT_LT(eventPosition(probe, "factory.render"), eventPosition(probe, "platform.publish-window"));
 
     PassiveGameApplication gameApplication{probe};

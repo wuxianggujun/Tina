@@ -179,6 +179,7 @@ EngineConfig EngineConfig::Defaults()
         .primaryWindowUICapacities = UI::UIContextCapacityConfig{},
         .primaryWindowUIDisplayListCapacities = PrimaryWindowUIDisplayListCapacityConfig{},
         .renderSceneCapacities = Render::RenderSceneCapacity{},
+        .shadowMapExtents = Render::ShadowMapExtentConfig{},
         .inputActions = InputActionMapConfig{},
         .platformEventSubscriptions = PlatformEventSubscriptionConfig{},
         .fixedSimulation = Core::FixedStepConfig{},
@@ -235,6 +236,13 @@ Core::Status EngineConfig::validate() const
     {
         Core::Error error{ConfigurationErrorCode::InvalidEngineConfig, "renderSceneCapacities is invalid"};
         error.addContext("EngineConfig::validate", renderSceneCapacityStatus.error().message);
+        return Core::failure(std::move(error));
+    }
+    if (auto shadowMapStatus = Render::validateShadowMapExtentConfig(shadowMapExtents);
+        !shadowMapStatus)
+    {
+        Core::Error error{ConfigurationErrorCode::InvalidEngineConfig, "shadowMapExtents is invalid"};
+        error.addContext("EngineConfig::validate", shadowMapStatus.error().message);
         return Core::failure(std::move(error));
     }
     if (platformEventSubscriptions.subscriberCapacity == 0 ||

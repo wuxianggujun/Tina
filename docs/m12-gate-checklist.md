@@ -13,7 +13,7 @@
 | G0 | 非 clean 构建可复现 | Verified | Windows 现有 build tree 可增量 configure/build；日常门禁禁止 wipe |
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
 | G2 | UI 产品 | Partial | 20控件 showcase、虚拟 List/Tree、2D/3D 产品集合、Text/Glyph 与主题/交互层次均有结构化和视觉证据；Windows UIA tip 跨进程 gate 已固化（2026-08-03，`ui-002-uia-evidence-windows.md`）；剩余 Narrator/Inspect 人工金标、Linux AT-SPI（UI-002-LINUX）与跨 DPI/GPU golden |
-| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、base/MR/normal 贴图采样、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、World 逐帧有界 directional/point/spot-light snapshot（sample directional=3，point/spot authored/committed/culled 均为`3/2/1`）、point/spot influence-sphere culling、固定4级联 directional CSM、固定单 SpotLight shadow、固定单 PointLight 六面全向 shadow、deterministic pass scheduler、Texture/Mesh/EnvironmentMap backend retirement marker 与 stale-safe teardown 已落地；可配置 atlas 后置 |
+| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、base/MR/normal 贴图采样、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、World 逐帧有界 directional/point/spot-light snapshot（sample directional=3，point/spot authored/committed/culled 均为`3/2/1`）、point/spot influence-sphere culling、固定4级联 directional CSM、固定单 SpotLight shadow、固定单 PointLight 六面全向 shadow、三类 startup-only 可配置 D16 extent、deterministic pass scheduler、Texture/Mesh/EnvironmentMap backend retirement marker 与 stale-safe teardown 已落地；跨 GPU golden 与 transparent/post 仍后置 |
 | G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency、EnvironmentMap cooked payload/publication/typed parse 已完成；不可信 glTF 输入的单 handle/fd 快照、最终路径 containment 与资源预算矩阵已通过 Windows/Linux 门禁 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
 | G6 | 平台矩阵 | Strong | tip Docker：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 sanitizer 均 exit 0（见 [Linux 证据](m12-evidence-linux.md)） |
@@ -64,7 +64,7 @@ Narrator/Inspect 人工金标、UI-002-LINUX 的 AT-SPI 真机验收与跨 DPI/G
 | baseColorTexture cook | Done | 相对文件或 bufferView 的 PNG/JPEG 解码为 RGBA8 Texture2D，Material 发布 required dependency，相同 image 去重 |
 | multi-primitive mesh (SPLIT) | Done | 每 TRIANGLES prim → StaticMesh+Material；Prefab 展开父+子节点；非三角 prim 结构化失败 |
 | multi-mesh product bind/draw | Done | sample 通过 engine-provided、State-owned registry 注册多个 mesh/material binding，以 packet-local ref 解析并由 registry retirement；见 3D-001 / N15 / N16.4 |
-| PBR/其他纹理通道 | Partial | metallic-roughness/normal、Cook-Torrance GGX、cooked EnvironmentMap split-sum IBL、固定4级联 CSM、固定单 SpotLight shadow 与固定单 PointLight 六面全向 shadow 已进 Material/Render 产品门禁；emissive/occlusion 等扩展通道与可配置 atlas 后置 |
+| PBR/其他纹理通道 | Partial | metallic-roughness/normal、Cook-Torrance GGX、cooked EnvironmentMap split-sum IBL、固定4级联 CSM、固定单 SpotLight shadow、固定单 PointLight 六面全向 shadow 与三类 startup-only 可配置 D16 extent 已进 Material/Render 产品门禁；emissive/occlusion 等扩展通道后置 |
 | 外部文件安全矩阵 | Done | 主/外部文件单 handle/fd snapshot；root 内 symlink/junction 正向、逃逸拒绝；strict UTF-8/percent-decode、替换检测、64MiB 单文件及 accessor/bufferView/image dimension/count/overflow 与 decode/output budgets 均 fail closed；Windows/Linux `GltfCookTests` 24/24 |
 
 3D 视觉证据分为两层：`tina_sample_3d` 在最后一次 present 后读取 primary framebuffer，stdout JSON 必须
@@ -82,7 +82,7 @@ fingerprint 或 PNG hash。
 M12 只跟踪 Legacy 产品图删除及其替代产品证据；不再把已关闭的 `TEST-001`、`TEST-002`、`3D-001` 和
 `CLEAN-001`～`CLEAN-003` 重新列为待办。当前未关闭的功能和验证风险以 [Backlog](backlog.md) 为唯一
 明细；本历史门禁不复制易漂移的 Now/Next 任务快照。Linux AT-SPI 已拆为 Later 的 `UI-002-LINUX`，
-`RENDER-FENCE` 已完成，`RENDER-001` 保持 Deferred。
+`RENDER-FENCE` 与 `RENDER-001` 已完成。
 
 ## Windows 快速复验
 

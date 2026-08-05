@@ -6,6 +6,8 @@
 ## 当前结论
 
 - `EngineHost` 是唯一非全局组合根；`run()` 只能在创建线程调用一次。
+- `EngineConfig::shadowMapExtents` 在任何 module factory 前校验，并一次性传播到 independent 或
+  WindowSurface `RenderDeviceCreateParams`；设备生命周期内不可热改。
 - `IGameApplication` 只通过 `createInitialState()` 创建首个 State，并在已提交游戏结束时接收
   `onShutdown()`。
 - Runtime 持有私有 `GameStateStack`（定容 8）；初始 State 经 onEnter 成功后 push。

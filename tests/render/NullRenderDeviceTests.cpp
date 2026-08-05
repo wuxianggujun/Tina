@@ -179,6 +179,18 @@ void releaseTestPin(void* userData) noexcept
 
 } // namespace
 
+TEST(NullRenderDeviceTest, RejectsInvalidShadowMapExtentConfiguration)
+{
+    Render::RenderDeviceCreateParams params{};
+    params.shadowMapExtents.pointLightFaceExtent = 384;
+
+    auto result = Render::createNullRenderDevice(params);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code,
+              Render::RenderErrorCode::InvalidShadowMapExtentConfig);
+}
+
 TEST(NullRenderDeviceTest, RejectsStructurallyInvalidInitialWindowSurface)
 {
     const auto expectRejected = [](const Render::RenderSurfaceState& surface) {

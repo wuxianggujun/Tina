@@ -11,7 +11,7 @@ constexpr u64 ShadowMapTextureFlags = BGFX_TEXTURE_RT | BGFX_SAMPLER_COMPARE_LEQ
 } // namespace
 
 Core::Result<BgfxSpotLightShadowResources>
-createSpotLightShadowResources()
+createSpotLightShadowResources(u16 mapExtent)
 {
     if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D16,
                               ShadowMapTextureFlags))
@@ -23,8 +23,8 @@ createSpotLightShadowResources()
 
     BgfxSpotLightShadowResources resources{};
     resources.depthMap = bgfx::createTexture2D(
-        BgfxSpotLightShadowMapExtent,
-        BgfxSpotLightShadowMapExtent,
+        mapExtent,
+        mapExtent,
         false,
         1,
         bgfx::TextureFormat::D16,

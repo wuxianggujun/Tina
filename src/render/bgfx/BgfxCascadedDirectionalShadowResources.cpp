@@ -11,7 +11,7 @@ constexpr u64 ShadowAtlasTextureFlags = BGFX_TEXTURE_RT | BGFX_SAMPLER_COMPARE_L
 } // namespace
 
 Core::Result<BgfxCascadedDirectionalShadowResources>
-createCascadedDirectionalShadowResources()
+createCascadedDirectionalShadowResources(u16 tileExtent)
 {
     if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D16,
                               ShadowAtlasTextureFlags))
@@ -21,10 +21,11 @@ createCascadedDirectionalShadowResources()
             "The active bgfx renderer cannot create a sampled D16 cascaded directional shadow atlas");
     }
 
+    const u16 atlasExtent = static_cast<u16>(tileExtent * 2U);
     BgfxCascadedDirectionalShadowResources resources{};
     resources.depthAtlas = bgfx::createTexture2D(
-        BgfxCascadedDirectionalShadowAtlasExtent,
-        BgfxCascadedDirectionalShadowAtlasExtent,
+        atlasExtent,
+        atlasExtent,
         false,
         1,
         bgfx::TextureFormat::D16,

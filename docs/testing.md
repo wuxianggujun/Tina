@@ -733,11 +733,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 
 - Scene `CascadedDirectionalShadow3D` 与 `Mesh3DLightingDesc::cascadedDirectionalShadow` 校验有限、有界 maximum distance/depth bias/normal bias，且最多一个级联配置；
 - Scene extraction 在稳定 directional-light 排序后深拷贝 `directionalLightIndex`；scheduler 固定生成4个 `CascadedDirectionalShadowDepth` pass（`cascadeIndex=0..3`），并证明 atlas clear 不消费 primary-surface clear；
-- bgfx projection math 覆盖四个 camera slice、backend homogeneous depth/origin；resource contract 覆盖 2048² sampled D16 atlas（2×2、每 tile 1024²）的失败回滚与销毁；
+- bgfx projection math 覆盖四个 camera slice、backend homogeneous depth/origin；resource contract 以非默认 cascade tile 覆盖2×2 sampled D16 atlas、失败回滚与销毁；view rect 与 PCF texel size 由同一 immutable device config 驱动；
 - shader contract 覆盖独立 depth program、receiver normal/depth bias、shadowed directional slot 与 3×3 PCF；
 - product-3d schema 14 继承 `cascadedDirectionalShadowCount=1`、`submittedCascadedDirectionalShadowCount=1` 及 authored/submitted cascade constant=`4`；GPU 四级联实绘由 bgfx contract 与最终产品视觉 gate 证明。
 
-## Fixed SpotLight3D shadow
+## SpotLight3D shadow
 
 `RENDER-001-SPOT-SHADOW` 的最小门禁覆盖：
 
@@ -747,15 +747,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
   camera-affecting shadow config，第二个显式失败；
 - scheduler 固定在4个 CSM pass 后、Opaque3D 前生成一个 `SpotLightShadowDepth` pass，独立 shadow map clear
   不消费 primary-surface clear；
-- bgfx projection/resource contract 覆盖完整公开 cone 合法域、固定 1024×1024 sampled D16 map、失败回滚
-  与销毁；shader contract 覆盖独立 depth pass、匹配 spot slot、normal/depth bias 与3×3 PCF；
+- bgfx projection/resource contract 覆盖完整公开 cone 合法域、非默认配置尺寸的 sampled D16 map、失败回滚
+  与销毁；view rect 与 PCF texel size 由同一 immutable device config 驱动，shader contract 覆盖独立 depth pass、匹配 spot slot、normal/depth bias 与3×3 PCF；
 - product-3d schema 14 要求 `authoredSpotLightShadowCount=1`、`submittedSpotLightShadowCount=1`，并由
   `DeviceCapture` 比较 committed descriptor，证明整个提交区间保持稳定。
 
 开发阶段只跑 Scene/RenderScene/scheduler/Null/bgfx shadow filters 与30帧 product smoke；完整 TEST-003
 只在合并后的核心常驻 build tree 执行一次。
 
-## Fixed PointLight3D shadow
+## PointLight3D shadow
 
 `RENDER-001-POINT-SHADOW` 的最小门禁覆盖：
 
@@ -765,14 +765,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
   camera-affecting shadow config，第二个显式 `TooManyActivePointLightShadows`；
 - scheduler 固定在4个 CSM、1个 Spot pass 后、Opaque3D 前生成六个 `PointLightShadowDepth` pass，面序
   `+X/-X/+Y/-Y/+Z/-Z`，独立 shadow-map clear 不消费 primary-surface clear；
-- bgfx projection/resource contract 覆盖固定六张 512×512 sampled D16 map、失败原子回滚与销毁；shader
-  contract 覆盖 dominant-axis 面选择、匹配 point slot、normal/depth bias 与3×3 PCF；
+- bgfx projection/resource contract 以非默认配置覆盖六张同尺寸的 sampled D16 map、失败原子回滚与销毁；
+  view rect 与 PCF texel size 由同一 immutable device config 驱动，shader contract 覆盖 dominant-axis 面选择、匹配 point slot、normal/depth bias 与3×3 PCF；
 - product-3d schema 14 默认要求 `authoredPointLightShadowCount=1`、
   `submittedPointLightShadowCount=1`；`--point-shadow=off` 要求两者为0。Windows gate 复用 IBL-on
   baseline，要求 on/off 中央 3D RGB ROI fingerprint 不同且逐像素 L1 大于0。
 
 开发阶段只跑 PointLight Scene/RenderScene/scheduler/Null/bgfx filters 与30帧 product smoke；完整 TEST-003
 只在合并后的核心常驻 build tree 执行一次。
+
+## Shadow map extent configuration
+
+`ShadowMapExtentConfigTest` 覆盖默认值、`[128,4096]` 边界、非2次幂与越界值；Null/bgfx direct factory
+在接触 surface/backend 前拒绝非法配置。`EngineConfigTest`、`EngineHostCreationTest` 与
+`WindowSurfaceRuntimeTest` 分别验证 Host 预检及 independent/window-surface factory 传播；三类 bgfx
+resource contract 使用非默认尺寸证明 D16 resource 接线，view rect 与3×3 PCF texel size 在 device 内只读取
+同一 immutable config。开发期只构建
+`tina_tests` 与 `tina_render_bgfx_tests` 并运行对应 filters。
 
 ## Opaque3D PBR 与 IBL
 
@@ -887,7 +896,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；Sprite2D base/optional-normal extraction 使用 packet-local `FrameResourceRef`；schema 19 继承双灯双遮挡、逐帧 lighting、authored/committed/culled=`3/2/1`、soft=2 及 soft/hard 同机可重复差分，增加 normal count=`1/0` 与 normal on/off 四跑差分，同时保留 Dark→Light→Dark、Tree stable-key selection/scroll/semantics、三份 Registry Lease/GPU/binding owner handoff/retirement、weak texture handle 失效、ledger Released、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、跨 GPU lighting golden、priority IO/editor/自动 gameplay 生成、更多 shape/joint、Linux |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；evidence schema 14、`tangentMeshesUploaded=2`、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、固定4级联 CSM config authored/submitted=`1`、固定 SpotLight/PointLight shadow authored/submitted=`1/1`、point-shadow on/off ROI 像素差分、实时 framebuffer aspect、响应式 right rail/footer、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、可配置 atlas、跨 GPU golden |
+| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；evidence schema 14、`tangentMeshesUploaded=2`、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、固定4级联 CSM config authored/submitted=`1`、固定 SpotLight/PointLight shadow authored/submitted=`1/1`、startup-only shadow extent、point-shadow on/off ROI 像素差分、实时 framebuffer aspect、响应式 right rail/footer、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、跨 GPU golden |
 
 `tina_sample_2d` 是唯一产品 2D target；中间迁移名 `tina_sample_2d_tilemap_bgfx` 已删除。
 
@@ -939,7 +948,7 @@ mesh/material AssetId、Prefab dependency、AssetId→Handle→registry-owned bi
 binding 可验证。Opaque3D 已做
 baseColor/MR/normal 贴图 **采样**、authored/MikkTSpace vertex tangent、material factors、Cook-Torrance GGX、
 cooked EnvironmentMap split-sum IBL、World directional/point/spot lights 的逐帧 snapshot、固定4级联 CSM、
-固定单 SpotLight shadow 与固定单 PointLight 全向 shadow；可配置 atlas 仍后置。
+固定单 SpotLight shadow 与固定单 PointLight 全向 shadow；三类 D16 extent 已支持 startup-only 配置。
 
 `ASSET-SEC-001` 的定向门禁是 `GltfCookTests.*`：覆盖主/外部文件 64MiB 上限、短 buffer、strict UTF-8
 与 percent-decoded traversal、root 内和逃逸 symlink/junction、bufferView/accessor/count/overflow、PNG

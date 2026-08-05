@@ -541,6 +541,7 @@ struct RuntimeProbe final {
     InjectedOutcome failureOutcome = InjectedOutcome::ReturnError;
     std::optional<InjectedOutcome> initialMetricsFailure;
     std::optional<Core::Duration> taskShutdownDeadline;
+    std::optional<Render::ShadowMapExtentConfig> renderFactoryShadowMapExtents;
     bool taskShutdownTimesOut = false;
     bool failIfOwnerDestroyedAfterTaskTimeout = false;
     bool taskShutdownTimedOut = false;
@@ -1263,7 +1264,9 @@ EngineCompositionFactories makeRuntimeFactories(RuntimeProbe& probe)
         return taskSystem;
     };
     platformRender.createRenderDevice =
-        [&probe](const Render::RenderDeviceCreateParams&) -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
+        [&probe](const Render::RenderDeviceCreateParams& params)
+            -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
+        probe.renderFactoryShadowMapExtents = params.shadowMapExtents;
         std::unique_ptr<Render::IRenderDevice> renderDevice = std::make_unique<ProbeRenderDevice>(probe);
         return renderDevice;
     };
@@ -2245,6 +2248,12 @@ TEST(EngineConfigTest, DefaultsAreValidAndUseSixtyHertzWithFourCatchUpSteps)
               PrimaryWindowUIDisplayListCapacityConfig::DefaultClipCapacity);
     EXPECT_EQ(config.primaryWindowUIDisplayListCapacities.batchCapacity,
               PrimaryWindowUIDisplayListCapacityConfig::DefaultBatchCapacity);
+    EXPECT_EQ(config.shadowMapExtents.directionalCascadeTileExtent,
+              Render::ShadowMapExtentConfig::DefaultDirectionalCascadeTileExtent);
+    EXPECT_EQ(config.shadowMapExtents.spotLightMapExtent,
+              Render::ShadowMapExtentConfig::DefaultSpotLightMapExtent);
+    EXPECT_EQ(config.shadowMapExtents.pointLightFaceExtent,
+              Render::ShadowMapExtentConfig::DefaultPointLightFaceExtent);
     EXPECT_DOUBLE_EQ(config.fixedSimulation.fixedDelta.count(), 1.0 / 60.0);
     EXPECT_EQ(config.fixedSimulation.maximumStepsPerFrame, 4U);
     EXPECT_DOUBLE_EQ(config.gameplayTimeScale, 1.0);
@@ -2301,6 +2310,17 @@ TEST(EngineConfigTest, RejectsInvalidPrimaryWindowUIDisplayListCapacities)
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
     }
+}
+
+TEST(EngineConfigTest, RejectsInvalidShadowMapExtents)
+{
+    auto config = EngineConfig::Defaults();
+    config.shadowMapExtents.directionalCascadeTileExtent = 384;
+
+    const Core::Status result = config.validate();
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
 }
 
 TEST(EngineConfigTest, RejectsInvalidTextTimingAndScale)
@@ -2537,6 +2557,25 @@ TEST(EngineHostCreationTest, InvalidRenderSceneCapacityIsRejectedBeforeAnyFactor
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
     EXPECT_TRUE(events.empty());
+}
+
+TEST(EngineHostCreationTest, PassesShadowMapExtentsToIndependentRenderFactory)
+{
+    RuntimeProbe runtime;
+    auto config = EngineConfig::Defaults();
+    config.shadowMapExtents = Render::ShadowMapExtentConfig{
+        .directionalCascadeTileExtent = 2048,
+        .spotLightMapExtent = 512,
+        .pointLightFaceExtent = 1024,
+    };
+
+    auto host = createRuntimeHost(runtime, config);
+
+    ASSERT_TRUE(host.has_value()) << host.error().message;
+    ASSERT_TRUE(runtime.renderFactoryShadowMapExtents.has_value());
+    EXPECT_EQ(runtime.renderFactoryShadowMapExtents->directionalCascadeTileExtent, 2048U);
+    EXPECT_EQ(runtime.renderFactoryShadowMapExtents->spotLightMapExtent, 512U);
+    EXPECT_EQ(runtime.renderFactoryShadowMapExtents->pointLightFaceExtent, 1024U);
 }
 
 TEST(EngineHostCreationTest, DestroyingReadyHostWithoutRunShutsModulesDownInReverseOrder)

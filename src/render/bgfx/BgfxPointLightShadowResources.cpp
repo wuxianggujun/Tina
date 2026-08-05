@@ -22,7 +22,7 @@ bool BgfxPointLightShadowResources::valid() const noexcept
            });
 }
 
-Core::Result<BgfxPointLightShadowResources> createPointLightShadowResources()
+Core::Result<BgfxPointLightShadowResources> createPointLightShadowResources(u16 faceExtent)
 {
     if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D16,
                               ShadowMapTextureFlags))
@@ -36,7 +36,7 @@ Core::Result<BgfxPointLightShadowResources> createPointLightShadowResources()
     for (usize faceIndex = 0; faceIndex < resources.depthMaps.size(); ++faceIndex)
     {
         resources.depthMaps[faceIndex] = bgfx::createTexture2D(
-            BgfxPointLightShadowMapExtent, BgfxPointLightShadowMapExtent, false, 1,
+            faceExtent, faceExtent, false, 1,
             bgfx::TextureFormat::D16, ShadowMapTextureFlags, nullptr);
         if (!bgfx::isValid(resources.depthMaps[faceIndex]))
         {

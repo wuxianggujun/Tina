@@ -12,6 +12,7 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderPassScheduler.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderScene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderSurface.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/ShadowMapExtentConfig.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/UIDisplayList.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/UploadTicket.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/WorldPointerSample.hpp
@@ -26,6 +27,7 @@ add_library(tina_render STATIC
     RenderScene.cpp
     Sprite2DLighting.cpp
     Sprite2DShadowMath.hpp
+    ShadowMapExtentConfig.cpp
     UIDisplayList.cpp
     UploadTicket.cpp
     null/NullRenderDevice.cpp

@@ -22,7 +22,8 @@ snapshot；point/spot influence sphere 在容量检查前按 PerspectiveCamera3D
 创建3个 directional、3个 point 和3个 spot light entity（point/spot 均为2个提交、1个裁剪）、使用 ambient `0.16`，并在 prefab instantiate 后按
 mesh AABB **自动框定相机**。首个 directional light 启用固定4级联 CSM，稳定排序后的首个可见 spot light
 启用固定单灯阴影，首个可见 point light 启用固定六面全向阴影；`IRenderDevice::setMesh3DLighting()` 仍是
-低层 direct/fallback SPI。可配置 shadow atlas 仍属 `RENDER-001` 后续。
+低层 direct/fallback SPI。三类 shadow resource extent 由 startup-only `EngineConfig::shadowMapExtents`
+配置，默认 directional cascade tile/spot map/point face 为 `1024/1024/512`。
 
 ## CLI（`tina_sample_3d`）
 
@@ -141,7 +142,7 @@ EngineHost 仍是唯一组合根。
 | Cooked 数据 | StaticMesh v1 固定为 P3N3T4UV2、UInt16 index、bounds/submesh；Material v2 为 Opaque `UnlitBaseColor` + cooked PBR factors（metallic/roughness）与可选 baseColor/MR/normal Texture2D deps；Prefab v2 在 node payload 中保存稳定 id、父索引、local transform 与 Mesh/Material AssetId，Catalog dependency 仅为 canonical 引用集合；EnvironmentMap v1 封装 RGBA16F diffuse/specular cubemap 与 RG16F BRDF LUT |
 | Scene | `PerspectiveCamera3D`、`MeshRenderer3D`、`DirectionalLight3D`、`PointLight3D`、`SpotLight3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
 | Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling、稳定排序与相邻实例 batch；最多4个 active directional、8个 camera-affecting point 与8个 camera-affecting spot lights 按稳定 Entity identity 排序，point/spot influence sphere 在容量检查前裁剪；最多一个 optional `CascadedDirectionalShadow3D`、一个 camera-affecting `SpotLightShadow3D` 与一个 camera-affecting `PointLightShadow3D`，分别在稳定灯光排序后映射 Render light index 并复制进当前帧 snapshot |
-| bgfx | deterministic pass schedule、color/depth clear、独立 2048×2048 D16 directional shadow atlas（2×2、每 tile 1024×1024）、固定 1024×1024 D16 spot shadow map 与按 `+X/-X/+Y/-Y/+Z/-Z` 排列的六张 512×512 D16 point shadow map；三类 receiver 均使用3×3 PCF，pass 顺序固定为 CSM×4→Spot×1→Point×6→Opaque3D；Perspective view、depth write/less、back-face culling、instance buffer、内置 tangent Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、Cook-Torrance GGX **采样** baseColor（`s_texColor`）、可选 MR 贴图（`s_texMR`）与 normal 贴图（`s_texNormal`），并以 diffuse irradiance + roughness LOD prefiltered specular + BRDF LUT 合成 IBL；唯一 P3N3T4UV2 使用 authored/generated tangent TBN 并修正 signed model scale；当前帧 Scene lighting 覆盖 device fallback，uniform arrays 每帧编码一次并供所有 mesh batch 复用 |
+| bgfx | deterministic pass schedule、color/depth clear、独立2×2 D16 directional shadow atlas（默认每 tile 1024×1024）、默认1024×1024 D16 spot shadow map 与按 `+X/-X/+Y/-Y/+Z/-Z` 排列的六张默认512×512 D16 point shadow map；三类尺寸均由 startup-only 配置驱动，receiver 使用对应 texel size 的3×3 PCF，pass 顺序固定为 CSM×4→Spot×1→Point×6→Opaque3D；Perspective view、depth write/less、back-face culling、instance buffer、内置 tangent Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、Cook-Torrance GGX **采样** baseColor（`s_texColor`）、可选 MR 贴图（`s_texMR`）与 normal 贴图（`s_texNormal`），并以 diffuse irradiance + roughness LOD prefiltered specular + BRDF LUT 合成 IBL；唯一 P3N3T4UV2 使用 authored/generated tangent TBN 并修正 signed model scale；当前帧 Scene lighting 覆盖 device fallback，uniform arrays 每帧编码一次并供所有 mesh batch 复用 |
 
 世界坐标为右手、Y-up、局部 `-Z` forward、单位米。Camera 公共字段使用 degree，并要求
 `0 < near < far`、有限数值和有效 normalized viewport；aspect 每帧从 primary surface 解析，不写回
@@ -194,7 +195,7 @@ entry pin 覆盖 active packet，Mesh/Texture 通过 AssetSystem retirement ledg
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→weak Handle Prefab/Scene→Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；Mesh/Material/共享 Texture 统一 owner、原子 material bundle + Cook-Torrance GGX、cooked EnvironmentMap split-sum IBL、3个 World DirectionalLight3D（1个固定4级联 CSM），PointLight3D 与 SpotLight3D 各2个可见+1个裁剪的逐帧 snapshot、首个可见 PointLight/SpotLight 的固定 shadow、deterministic pass scheduler、成熟 retained controls、虚拟化产品数据与事务换肤 | 可配置 shadow atlas |
+| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→weak Handle Prefab/Scene→Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；Mesh/Material/共享 Texture 统一 owner、原子 material bundle + Cook-Torrance GGX、cooked EnvironmentMap split-sum IBL、3个 World DirectionalLight3D（1个固定4级联 CSM），PointLight3D 与 SpotLight3D 各2个可见+1个裁剪的逐帧 snapshot、首个可见 PointLight/SpotLight 的固定 shadow、startup-only shadow extent 与 deterministic pass scheduler、成熟 retained controls、虚拟化产品数据与事务换肤 | transparent/post、跨 GPU golden |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
@@ -238,7 +239,7 @@ EnvironmentMap upload/retire=`1/1`、IBL bind/clear=`0/0`，从而把“资源�
   产品着色为 Cook-Torrance GGX（有界0..4 directional、0..8 point、0..8 spot lights + ambient fallback + baseColor/可选 MR/normal
   贴图），并可绑定一个 cooked split-sum IBL environment；已有 directional、point 与 spot Scene component，PointLight3D 使用线性径向衰减，
   SpotLight3D 使用径向与角度平滑衰减，二者都使用 influence sphere-frustum culling；已有固定4级联
-  directional CSM、固定单 SpotLight shadow 与固定单 PointLight 全向 shadow，尚无可配置 shadow atlas、transparent 或 post；
+  directional CSM、固定单 SpotLight shadow 与固定单 PointLight 全向 shadow；三类 D16 extent 已支持 startup-only 配置，尚无 transparent 或 post；
 - glTF Cooker 读取完整 `pbrMetallicRoughness` 与可选 `normalTexture`；主/外部文件使用单 handle/fd
   bounded snapshot，外部相对 URI 在 percent-decode 与 strict UTF-8 校验后按最终路径强制 authoring-root
   containment，拒绝 `..`/scheme/rooted path、逃逸 symlink/junction、读取期间替换以及 file/count/range/
@@ -254,6 +255,6 @@ EnvironmentMap upload/retire=`1/1`、IBL bind/clear=`0/0`，从而把“资源�
   （PERF-001 首切片），但不替代 3D 视觉门禁；
 - Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
 
-下一步只在可执行 Backlog 中维护：`RENDER-001` 仅剩可配置 shadow atlas，
+下一步只在可执行 Backlog 中维护：`RENDER-001` 已由 startup-only shadow extent 配置闭环，
 Texture/Mesh/EnvironmentMap backend retirement 已使用 readback completion marker；通用 GPU submission fence 不在当前
 Runtime 契约内。详见 [Rendering](rendering.md) 与 [Backlog](backlog.md)。

@@ -8,7 +8,7 @@
 
 namespace Tina::Render::Bgfx {
 
-inline constexpr u16 BgfxSpotLightShadowMapExtentContractTest = 1024;
+inline constexpr u16 ConfiguredSpotLightShadowMapExtent = 2048;
 
 struct BgfxSpotLightShadowResourcesContractTest final {
     tina_test_bgfx::TextureHandle depthMap = BGFX_INVALID_HANDLE;
@@ -22,7 +22,7 @@ struct BgfxSpotLightShadowResourcesContractTest final {
 };
 
 [[nodiscard]] Core::Result<BgfxSpotLightShadowResourcesContractTest>
-createSpotLightShadowResourcesContractTest();
+createSpotLightShadowResourcesContractTest(u16 mapExtent);
 
 void destroySpotLightShadowResourcesContractTest(
     BgfxSpotLightShadowResourcesContractTest& resources) noexcept;
@@ -43,13 +43,14 @@ TEST_F(BgfxSpotLightShadowResourcesTest,
     constexpr u64 ExpectedFlags = BGFX_TEXTURE_RT | BGFX_SAMPLER_COMPARE_LEQUAL |
                                   BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
 
-    auto resources = createSpotLightShadowResourcesContractTest();
+    auto resources = createSpotLightShadowResourcesContractTest(
+        ConfiguredSpotLightShadowMapExtent);
 
     ASSERT_TRUE(resources.has_value()) << resources.error().message;
     ASSERT_EQ(tina_test_bgfx::Contract::state.textureCreates.size(), 1U);
     const auto& texture = tina_test_bgfx::Contract::state.textureCreates.front();
-    EXPECT_EQ(texture.width, BgfxSpotLightShadowMapExtentContractTest);
-    EXPECT_EQ(texture.height, BgfxSpotLightShadowMapExtentContractTest);
+    EXPECT_EQ(texture.width, ConfiguredSpotLightShadowMapExtent);
+    EXPECT_EQ(texture.height, ConfiguredSpotLightShadowMapExtent);
     EXPECT_FALSE(texture.hasMips);
     EXPECT_EQ(texture.layers, 1U);
     EXPECT_EQ(texture.format, tina_test_bgfx::TextureFormat::D16);
@@ -67,7 +68,8 @@ TEST_F(BgfxSpotLightShadowResourcesTest, TextureValidationFailureCreatesNothing)
 {
     tina_test_bgfx::Contract::state.rejectTextureValidation = true;
 
-    auto resources = createSpotLightShadowResourcesContractTest();
+    auto resources = createSpotLightShadowResourcesContractTest(
+        ConfiguredSpotLightShadowMapExtent);
 
     ASSERT_FALSE(resources.has_value());
     EXPECT_EQ(resources.error().code, RenderErrorCode::DeviceInitializationFailed);
@@ -79,7 +81,8 @@ TEST_F(BgfxSpotLightShadowResourcesTest, TextureCreateFailureDoesNotDestroyInval
 {
     tina_test_bgfx::Contract::state.rejectTextureCreate = true;
 
-    auto resources = createSpotLightShadowResourcesContractTest();
+    auto resources = createSpotLightShadowResourcesContractTest(
+        ConfiguredSpotLightShadowMapExtent);
 
     ASSERT_FALSE(resources.has_value());
     EXPECT_EQ(resources.error().code, RenderErrorCode::DeviceInitializationFailed);
@@ -91,7 +94,8 @@ TEST_F(BgfxSpotLightShadowResourcesTest, FramebufferFailureRollsBackDepthMap)
 {
     tina_test_bgfx::Contract::state.rejectFrameBufferCreate = true;
 
-    auto resources = createSpotLightShadowResourcesContractTest();
+    auto resources = createSpotLightShadowResourcesContractTest(
+        ConfiguredSpotLightShadowMapExtent);
 
     ASSERT_FALSE(resources.has_value());
     EXPECT_EQ(resources.error().code, RenderErrorCode::DeviceInitializationFailed);
@@ -103,7 +107,8 @@ TEST_F(BgfxSpotLightShadowResourcesTest, FramebufferFailureRollsBackDepthMap)
 
 TEST_F(BgfxSpotLightShadowResourcesTest, DestroyReleasesFramebufferBeforeDepthMap)
 {
-    auto resources = createSpotLightShadowResourcesContractTest();
+    auto resources = createSpotLightShadowResourcesContractTest(
+        ConfiguredSpotLightShadowMapExtent);
     ASSERT_TRUE(resources.has_value()) << resources.error().message;
 
     destroySpotLightShadowResourcesContractTest(*resources);

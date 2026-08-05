@@ -11,7 +11,7 @@
 namespace Tina::Render::Bgfx {
 
 inline constexpr usize BgfxPointLightShadowFaceCount = 6U;
-inline constexpr u16 BgfxPointLightShadowMapExtentContractTest = 512;
+inline constexpr u16 ConfiguredPointLightShadowFaceExtent = 1024;
 
 struct BgfxPointLightShadowResourcesContractTest final {
     BgfxPointLightShadowResourcesContractTest() noexcept
@@ -33,7 +33,7 @@ struct BgfxPointLightShadowResourcesContractTest final {
 };
 
 [[nodiscard]] Core::Result<BgfxPointLightShadowResourcesContractTest>
-createPointLightShadowResourcesContractTest();
+createPointLightShadowResourcesContractTest(u16 faceExtent);
 
 void destroyPointLightShadowResourcesContractTest(
     BgfxPointLightShadowResourcesContractTest& resources) noexcept;
@@ -50,7 +50,8 @@ TEST_F(BgfxPointLightShadowResourcesTest, CreatesSixSampledD16MapsAndFramebuffer
     constexpr u64 ExpectedFlags = BGFX_TEXTURE_RT | BGFX_SAMPLER_COMPARE_LEQUAL |
                                   BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
 
-    auto resources = createPointLightShadowResourcesContractTest();
+    auto resources = createPointLightShadowResourcesContractTest(
+        ConfiguredPointLightShadowFaceExtent);
 
     ASSERT_TRUE(resources.has_value()) << resources.error().message;
     ASSERT_EQ(tina_test_bgfx::Contract::state.textureCreates.size(), 6U);
@@ -58,8 +59,8 @@ TEST_F(BgfxPointLightShadowResourcesTest, CreatesSixSampledD16MapsAndFramebuffer
     for (usize faceIndex = 0; faceIndex < BgfxPointLightShadowFaceCount; ++faceIndex)
     {
         const auto& texture = tina_test_bgfx::Contract::state.textureCreates[faceIndex];
-        EXPECT_EQ(texture.width, BgfxPointLightShadowMapExtentContractTest);
-        EXPECT_EQ(texture.height, BgfxPointLightShadowMapExtentContractTest);
+        EXPECT_EQ(texture.width, ConfiguredPointLightShadowFaceExtent);
+        EXPECT_EQ(texture.height, ConfiguredPointLightShadowFaceExtent);
         EXPECT_EQ(texture.format, tina_test_bgfx::TextureFormat::D16);
         EXPECT_EQ(texture.flags, ExpectedFlags);
         const auto& frameBuffer =
@@ -75,7 +76,8 @@ TEST_F(BgfxPointLightShadowResourcesTest, FirstFramebufferFailureRollsBackDepthM
 {
     tina_test_bgfx::Contract::state.rejectFrameBufferCreate = true;
 
-    auto resources = createPointLightShadowResourcesContractTest();
+    auto resources = createPointLightShadowResourcesContractTest(
+        ConfiguredPointLightShadowFaceExtent);
 
     ASSERT_FALSE(resources.has_value());
     EXPECT_EQ(resources.error().code, RenderErrorCode::DeviceInitializationFailed);
@@ -85,7 +87,8 @@ TEST_F(BgfxPointLightShadowResourcesTest, FirstFramebufferFailureRollsBackDepthM
 
 TEST_F(BgfxPointLightShadowResourcesTest, DestroyReleasesAllFramebuffersBeforeMaps)
 {
-    auto resources = createPointLightShadowResourcesContractTest();
+    auto resources = createPointLightShadowResourcesContractTest(
+        ConfiguredPointLightShadowFaceExtent);
     ASSERT_TRUE(resources.has_value()) << resources.error().message;
 
     destroyPointLightShadowResourcesContractTest(*resources);

@@ -5,6 +5,7 @@
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/platform/Window.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/render/ShadowMapExtentConfig.hpp>
 #include <tina/runtime/InputActionMap.hpp>
 #include <tina/runtime/PlatformEvents.hpp>
 #include <tina/ui/UIContextConfig.hpp>
@@ -33,6 +34,7 @@ struct EngineConfig final {
     UI::UIContextCapacityConfig primaryWindowUICapacities{};
     PrimaryWindowUIDisplayListCapacityConfig primaryWindowUIDisplayListCapacities{};
     Render::RenderSceneCapacity renderSceneCapacities{};
+    Render::ShadowMapExtentConfig shadowMapExtents{};
     InputActionMapConfig inputActions;
     PlatformEventSubscriptionConfig platformEventSubscriptions{};
     Core::FixedStepConfig fixedSimulation;

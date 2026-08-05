@@ -74,6 +74,17 @@ TEST(BgfxRenderDeviceFactoryTest, RejectsMissingInitialSurfaceOrLeaseBeforeBgfxI
     EXPECT_EQ(noLease.error().code, RenderErrorCode::InvalidNativeWindowBinding);
 }
 
+TEST(BgfxRenderDeviceFactoryTest, RejectsInvalidShadowMapExtentsBeforeSurfaceValidation)
+{
+    RenderDeviceCreateParams params{};
+    params.shadowMapExtents.spotLightMapExtent = 384;
+
+    auto result = createBgfxRenderDevice(params, {});
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, RenderErrorCode::InvalidShadowMapExtentConfig);
+}
+
 TEST(BgfxRenderDeviceFactoryTest, SurfaceIdentityMismatchReleasesTheConsumedLease)
 {
     auto pool = createSurfacePool();

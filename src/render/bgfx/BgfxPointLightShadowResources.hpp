@@ -11,8 +11,6 @@
 
 namespace Tina::Render::Bgfx {
 
-inline constexpr u16 BgfxPointLightShadowMapExtent = 512;
-
 struct BgfxPointLightShadowResources final {
     BgfxPointLightShadowResources() noexcept
     {
@@ -33,7 +31,7 @@ struct BgfxPointLightShadowResources final {
 };
 
 [[nodiscard]] Core::Result<BgfxPointLightShadowResources>
-createPointLightShadowResources();
+createPointLightShadowResources(u16 faceExtent);
 
 void destroyPointLightShadowResources(BgfxPointLightShadowResources& resources) noexcept;
 

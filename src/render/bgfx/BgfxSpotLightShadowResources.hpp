@@ -7,8 +7,6 @@
 
 namespace Tina::Render::Bgfx {
 
-inline constexpr u16 BgfxSpotLightShadowMapExtent = 1024;
-
 struct BgfxSpotLightShadowResources final {
     bgfx::TextureHandle depthMap = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle frameBuffer = BGFX_INVALID_HANDLE;
@@ -20,7 +18,7 @@ struct BgfxSpotLightShadowResources final {
 };
 
 [[nodiscard]] Core::Result<BgfxSpotLightShadowResources>
-createSpotLightShadowResources();
+createSpotLightShadowResources(u16 mapExtent);
 
 void destroySpotLightShadowResources(
     BgfxSpotLightShadowResources& resources) noexcept;

@@ -62,5 +62,6 @@ inline constexpr Core::ErrorCode InvalidSprite2DLighting{Core::ErrorDomain::Rend
 inline constexpr Core::ErrorCode EnvironmentMapUploadUnsupported{Core::ErrorDomain::Render, 54};
 inline constexpr Core::ErrorCode InvalidEnvironmentMapUpload{Core::ErrorDomain::Render, 55};
 inline constexpr Core::ErrorCode EnvironmentMapNotFound{Core::ErrorDomain::Render, 56};
+inline constexpr Core::ErrorCode InvalidShadowMapExtentConfig{Core::ErrorDomain::Render, 57};
 
 } // namespace Tina::Render::RenderErrorCode

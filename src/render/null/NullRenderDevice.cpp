@@ -887,6 +887,10 @@ class NullRenderDevice final : public IRenderDevice {
 
 Core::Result<std::unique_ptr<IRenderDevice>> createNullRenderDevice(const RenderDeviceCreateParams& params)
 {
+    if (auto status = validateShadowMapExtentConfig(params.shadowMapExtents); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     auto surfaceStateTracker = Detail::RenderSurfaceStateTracker::create(params.initialPrimaryWindowSurface);
     if (!surfaceStateTracker)
     {

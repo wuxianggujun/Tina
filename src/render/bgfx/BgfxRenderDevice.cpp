@@ -914,9 +914,10 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
 class BgfxRenderDevice final : public IRenderDevice {
   public:
     BgfxRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker, Integration::NativeWindowSurfaceLease lease,
-                     RenderSurfaceState initialSurface) noexcept
+                     RenderSurfaceState initialSurface, ShadowMapExtentConfig shadowMapExtents) noexcept
         : surfaceStateTracker_(std::move(surfaceStateTracker)), lease_(std::move(lease)),
-          ownerThread_(std::this_thread::get_id()), committedSurfaceState_(initialSurface)
+          ownerThread_(std::this_thread::get_id()), committedSurfaceState_(initialSurface),
+          shadowMapExtents_(shadowMapExtents)
     {
     }
 
@@ -1193,7 +1194,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         ++statistics_.liveResources;
 
         auto cascadedDirectionalShadowResources =
-            createCascadedDirectionalShadowResources();
+            createCascadedDirectionalShadowResources(
+                shadowMapExtents_.directionalCascadeTileExtent);
         if (!cascadedDirectionalShadowResources)
         {
             return Core::failure(std::move(cascadedDirectionalShadowResources.error()));
@@ -1228,7 +1230,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
-        auto spotLightShadowResources = createSpotLightShadowResources();
+        auto spotLightShadowResources =
+            createSpotLightShadowResources(shadowMapExtents_.spotLightMapExtent);
         if (!spotLightShadowResources)
         {
             return Core::failure(std::move(spotLightShadowResources.error()));
@@ -1269,7 +1272,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
-        auto pointLightShadowResources = createPointLightShadowResources();
+        auto pointLightShadowResources =
+            createPointLightShadowResources(shadowMapExtents_.pointLightFaceExtent);
         if (!pointLightShadowResources)
         {
             return Core::failure(std::move(pointLightShadowResources.error()));
@@ -2416,14 +2420,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         const bgfx::ViewId view = kCascadedDirectionalShadowViews[cascadeIndex];
         const u16 tileX = static_cast<u16>((cascadeIndex % 2U) *
-                                           BgfxCascadedDirectionalShadowTileExtent);
+                                           shadowMapExtents_.directionalCascadeTileExtent);
         const u16 tileY = static_cast<u16>((cascadeIndex / 2U) *
-                                           BgfxCascadedDirectionalShadowTileExtent);
+                                           shadowMapExtents_.directionalCascadeTileExtent);
         const BgfxCascadedDirectionalShadowCascade& cascade =
             shadow.projection.cascades[cascadeIndex];
         bgfx::setViewRect(view, tileX, tileY,
-                          BgfxCascadedDirectionalShadowTileExtent,
-                          BgfxCascadedDirectionalShadowTileExtent);
+                          shadowMapExtents_.directionalCascadeTileExtent,
+                          shadowMapExtents_.directionalCascadeTileExtent);
         bgfx::setViewFrameBuffer(view,
                                  cascadedDirectionalShadowResources_.frameBuffer);
         bgfx::setViewClear(view,
@@ -2440,8 +2444,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         bool clearDepth) noexcept
     {
         bgfx::setViewRect(kSpotLightShadowView, 0, 0,
-                          BgfxSpotLightShadowMapExtent,
-                          BgfxSpotLightShadowMapExtent);
+                          shadowMapExtents_.spotLightMapExtent,
+                          shadowMapExtents_.spotLightMapExtent);
         bgfx::setViewFrameBuffer(kSpotLightShadowView,
                                  spotLightShadowResources_.frameBuffer);
         bgfx::setViewClear(kSpotLightShadowView,
@@ -2465,8 +2469,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         const bgfx::ViewId view = kPointLightShadowViews[faceIndex];
         const BgfxPointLightShadowFace& face = shadow.projection.faces[faceIndex];
-        bgfx::setViewRect(view, 0, 0, BgfxPointLightShadowMapExtent,
-                          BgfxPointLightShadowMapExtent);
+        bgfx::setViewRect(view, 0, 0, shadowMapExtents_.pointLightFaceExtent,
+                          shadowMapExtents_.pointLightFaceExtent);
         bgfx::setViewFrameBuffer(view, pointLightShadowResources_.frameBuffers[faceIndex]);
         bgfx::setViewClear(view, clearDepth ? BGFX_CLEAR_DEPTH : BGFX_CLEAR_NONE,
                            0, 1.0F, 0);
@@ -2767,7 +2771,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         std::array<float, 4> csmParams{
             0.0F,
             0.0F,
-            1.0F / static_cast<float>(BgfxCascadedDirectionalShadowAtlasExtent),
+            1.0F / static_cast<float>(shadowMapExtents_.directionalAtlasExtent()),
             0.0F,
         };
         if (prepared.cascadedDirectionalShadow.has_value())
@@ -2790,7 +2794,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         std::array<float, 4> spotShadowParams{
             0.0F,
             0.0F,
-            1.0F / static_cast<float>(BgfxSpotLightShadowMapExtent),
+            1.0F / static_cast<float>(shadowMapExtents_.spotLightMapExtent),
             0.0F,
         };
         if (prepared.spotLightShadow.has_value())
@@ -2811,7 +2815,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         std::array<float, 4> pointShadowParams{
             0.0F,
             0.0F,
-            1.0F / static_cast<float>(BgfxPointLightShadowMapExtent),
+            1.0F / static_cast<float>(shadowMapExtents_.pointLightFaceExtent),
             0.0F,
         };
         if (prepared.pointLightShadow.has_value())
@@ -4272,6 +4276,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     Integration::NativeWindowSurfaceLease lease_;
     std::thread::id ownerThread_{};
     RenderSurfaceState committedSurfaceState_{};
+    ShadowMapExtentConfig shadowMapExtents_{};
     RenderSurfaceExtent appliedBackbuffer_ = BgfxSurfaceFramePlanner::BootstrapBackbufferExtent;
     RenderStatistics statistics_{};
     u64 nextFrameIndex_ = 0;
@@ -4423,6 +4428,10 @@ class BgfxRenderDevice final : public IRenderDevice {
 Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const RenderDeviceCreateParams& params,
                                                                     Integration::NativeWindowSurfaceLease lease)
 {
+    if (auto status = validateShadowMapExtentConfig(params.shadowMapExtents); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     if (!params.initialPrimaryWindowSurface.has_value())
     {
         return Core::failure(RenderErrorCode::InvalidSurfaceState,
@@ -4455,7 +4464,8 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const Render
     try
     {
         auto renderDevice = std::unique_ptr<BgfxRenderDevice>(
-            new BgfxRenderDevice(std::move(*surfaceStateTracker), std::move(lease), initialSurface));
+            new BgfxRenderDevice(std::move(*surfaceStateTracker), std::move(lease), initialSurface,
+                                 params.shadowMapExtents));
 
         if (auto status = renderDevice->initialize(nativeBinding->platformData); !status)
         {

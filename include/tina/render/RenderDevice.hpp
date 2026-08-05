@@ -5,6 +5,7 @@
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/RenderFrame.hpp>
 #include <tina/render/RenderFrameCapture.hpp>
+#include <tina/render/ShadowMapExtentConfig.hpp>
 
 #include <atomic>
 #include <cstddef>
@@ -20,6 +21,7 @@ namespace Tina::Render {
 
 struct RenderDeviceCreateParams final {
     std::optional<RenderSurfaceState> initialPrimaryWindowSurface;
+    ShadowMapExtentConfig shadowMapExtents{};
 };
 
 struct RenderStatistics final {

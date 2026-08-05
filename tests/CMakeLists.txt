@@ -52,6 +52,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/header_isolation/RenderPassSchedulerHeader.cpp
     render/header_isolation/RenderSceneHeader.cpp
     render/header_isolation/RenderSurfaceHeader.cpp
+    render/header_isolation/ShadowMapExtentConfigHeader.cpp
     render/header_isolation/UIDisplayListHeader.cpp
     render/header_isolation/UploadTicketHeader.cpp
     render/header_isolation/FramePinHeader.cpp
@@ -66,6 +67,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/EnvironmentMapUploadTests.cpp
     render/GpuMeshUploadTests.cpp
     render/RenderPassSchedulerTests.cpp
+    render/ShadowMapExtentConfigTests.cpp
     render/UIDisplayListTests.cpp
     runtime/header_isolation/EngineCompositionFactoriesHeader.cpp
     runtime/header_isolation/EngineConfigHeader.cpp

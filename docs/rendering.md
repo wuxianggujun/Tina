@@ -7,7 +7,7 @@ metallic-roughness Cook-Torrance GGX：Scene extraction 每帧提交0..4个 dire
 spot lights + ambient 的自包含 `RenderScene` snapshot；可选 `Mesh3DImageBasedLightingDesc` 再绑定一份 cooked
 diffuse irradiance cubemap、prefiltered specular cubemap 与 BRDF LUT。`setMesh3DLighting()` 仍是低层 device
 fallback/direct SPI。当前已有 PointLight3D 与 SpotLight3D、PerspectiveCamera3D influence-sphere culling，以及
-固定4级联 directional CSM、固定单 SpotLight shadow、固定单 PointLight 全向 shadow 和确定性 pass scheduler；仍无可配置 atlas 或通用 GPU submission fence；
+固定4级联 directional CSM、单 SpotLight shadow、单 PointLight 全向 shadow、startup-only shadow extent 配置和确定性 pass scheduler；仍无通用 GPU submission fence；
 Texture2D/StaticMesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource retirement completion。
 
 ## Target 边界
@@ -81,17 +81,23 @@ radius，在有效 PerspectiveCamera3D 与非0 surface 时做 sphere-frustum cul
 收紧完整 FOV，也不静默 clamp。一个 directional light 可携带 optional `CascadedDirectionalShadow3D`；
 它以 `maximumDistanceMeters`、`depthBias` 与 `normalBiasMeters` 描述固定4级联阴影。Render snapshot
 映射为 `Mesh3DCascadedDirectionalShadow`，以排序后的 `directionalLightIndex` 关联灯光。bgfx 使用独立
-2048×2048 D16 `DirectionalShadowAtlas`，按2×2切为四个1024×1024 tile，并执行 camera-slice projection
+2×2 D16 `DirectionalShadowAtlas`（默认2048×2048、每 tile 1024×1024），并执行 camera-slice projection
 与每级联3×3 PCF；级联 pass 不消费
 primary-surface clear ownership。最多一个 camera-affecting spot light 可携带 optional `SpotLightShadow3D`；
 它以正且小于 influence radius 的 near plane、depth bias 与 normal bias 描述。Render snapshot 在 spot lights
-稳定排序后映射 `spotLightIndex`，bgfx 在四个 CSM pass 后执行一个固定 1024×1024 sampled D16 depth pass，
+稳定排序后映射 `spotLightIndex`，bgfx 在四个 CSM pass 后执行一个 sampled D16 depth pass（默认1024×1024），
 receiver 仅对匹配的 spot slot 应用3×3 PCF。最多一个 camera-affecting point light 可携带 optional
 `PointLightShadow3D`；它使用同样有界的 near/depth/normal bias，并在 point lights culling 与稳定排序后映射
-`pointLightIndex`。bgfx 固定拥有六张 512×512 sampled D16 map，按 `+X/-X/+Y/-Y/+Z/-Z` 提交六个
+`pointLightIndex`。bgfx 拥有六张相同尺寸的 sampled D16 map（默认512×512），按 `+X/-X/+Y/-Y/+Z/-Z` 提交六个
 depth pass；receiver 以 dominant axis 选择面，只对匹配的 point slot 应用3×3 PCF。固定顺序为
 CSM×4 → Spot×1 → Point×6 → Opaque3D，所有 shadow pass 都不消费 primary-surface clear。第二个可见
-point shadow 或非法 near/depth/normal bias 在 Scene publish 前 fail closed；可配置 atlas 仍后置。
+point shadow 或非法 near/depth/normal bias 在 Scene publish 前 fail closed。
+
+`EngineConfig::shadowMapExtents` 是 device-lifetime 不可变启动配置，并原样传播到
+`RenderDeviceCreateParams`。`directionalCascadeTileExtent`、`spotLightMapExtent` 与
+`pointLightFaceExtent` 必须是 `[128,4096]` 内的2次幂；directional atlas 始终为2×2 tile。
+EngineHost 在创建任何 module factory 前 fail closed，Null/bgfx 直接 factory 也独立校验。bgfx 的 D16
+资源创建、shadow view rect 与3×3 PCF texel size 使用同一份实际 extent；不支持热改或旧固定尺寸分支。
 
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、
@@ -238,7 +244,7 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - transient frame budget 与容量失败；
 - Sprite2D textured quad pass + frame-scoped 0..8 point lights；
 - Opaque3D metallic-roughness Cook-Torrance GGX mesh/depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；可选 split-sum IBL；每帧只编码一次 uniform arrays）；
-- 确定性 `Clear -> CascadedDirectionalShadowDepth[0..3] -> SpotLightShadowDepth -> Opaque3D -> Sprite2D -> UI` scheduler；四级联使用独立 `DirectionalShadowAtlas`，SpotLight 使用独立固定 shadow map，两者都不取得 primary-surface clear ownership；
+- 确定性 `Clear -> CascadedDirectionalShadowDepth[0..3] -> SpotLightShadowDepth -> PointLightShadowDepth[0..5] -> Opaque3D -> Sprite2D -> UI` scheduler；三类 shadow resource 使用 startup-only 配置 extent，且都不取得 primary-surface clear ownership；
 - UI solid/glyph pass；
 - Texture2D/StaticMesh/EnvironmentMap generation storage、唯一 P3N3T4UV2 layout 与 key binding；
 - Texture2D/StaticMesh/EnvironmentMap backend-proven retirement marker、suspend flush 与 shutdown hard drain；
@@ -281,5 +287,6 @@ MR/normal/factors、有界4 directional + 8 point + 8 spot-light 描述、Scene 
 产品 sample 的3个 directional entity，以及 PointLight3D/SpotLight3D 各自
 authored/committed/culled=`3/2/1` 连续300帧稳定提交，并由首个可见 SpotLight 与 PointLight 分别提交固定
 单灯 shadow。product-3d schema 14 固化两类 authored/submitted=`1/1`，PointLight shadow 另由 on/off
-中央 3D RGB ROI fingerprint 与正逐像素 L1 差分证明实际影响像素。可配置 shadow atlas、通用 GPU submission fence 与跨 DPI/GPU
-visual gate（`UI-003`）仍后置；Texture/Mesh/EnvironmentMap resource retirement 已不属于这些后置项。
+中央 3D RGB ROI fingerprint 与正逐像素 L1 差分证明实际影响像素。startup-only shadow extent 配置已闭环；
+通用 GPU submission fence 与跨 DPI/GPU visual gate（`UI-003`）仍后置；Texture/Mesh/EnvironmentMap
+resource retirement 已不属于这些后置项。
