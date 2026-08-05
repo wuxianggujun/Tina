@@ -16,6 +16,17 @@
 管理；`xxHash` 与 `mikktspace` 是 backend-neutral SDK 的必需 package，bgfx 源码由
 `thirdparty/bgfx.cmake` 锁定。`TINA_BUILD_LEGACY=ON` 会立即失败。
 
+## 增量构建与验证层级
+
+- 小功能/单一切片：复用常驻 build tree，只构建改动直接影响的 target，并只运行新增用例及直接回归的
+  `--gtest_filter`；没有改 CMake/preset/toolchain 时不主动重新 configure，不运行完整产品图。
+- 垂直切片闭环：在上述精确测试后，只补对应 sample 的短或约定帧数 smoke。若多个小切片连续影响同一
+  target，合并后集中执行一次，不为每个小提交重复构建和测试。
+- 大功能/里程碑：仅在 Backlog 项关闭、跨模块公共契约或共享基础设施变化、release candidate、正式证据
+  归档时，运行相关 executable 全集与完整 product/platform/sanitizer gate。
+
+完整门禁命令是里程碑入口，不是日常默认命令。选择范围的详细规则见 [testing.md](testing.md)。
+
 ```powershell
 cmake --version
 cmake --list-presets
@@ -310,7 +321,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1
 ```
 
-主 gate 在模块测试与 schema 22、`texturesUploaded=3` 产品 sample 后，依次运行 soft/hard shadow
+主 gate 在模块测试与 schema 23、`texturesUploaded=3` 产品 sample 后，依次运行 soft/hard shadow
 差分与 normal-map on/off 四跑（on×2 + off×2）差分。只复验可见差分时可直接运行；两者都是同
 host/backend 证据，不是跨 GPU exact golden：
 

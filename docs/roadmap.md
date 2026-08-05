@@ -30,7 +30,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
 | UI-PERF-001 | Done；含 `ui_motion_v1` 在内的 UI workload 集已齐 |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
-| UI-FLOW-001 | InProgress；固定容量 Layer/Screen 栈、Pause Back/Confirm Action Router、单用户输入设备提示已接入 2D 产品，后续推进多本地用户与额外 action |
+| UI-FLOW-001 | InProgress；固定容量 Layer/Screen 栈、Back/Confirm/Menu Action Router、单用户输入设备提示已接入 2D 产品，只剩多本地用户路由 |
 | UI-COMPONENT-001 | Done；标准 Behavior 独立 side store、phase-scoped bounded transaction、全池 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | UI-IMAGE-001 | Done；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
 | UI-STYLE-001 | Done；StyleClass/ColorToken、reverse-dependency、imageTint、dirty metadata、showcase Integration、`RunUiStyleVisualGate.ps1` 已落地 |
@@ -58,7 +58,8 @@ UI-FLOW-001 InProgress
   -> Pause Back/Confirm Action Router implemented
   -> single-user input-device hints + 2D Pause prompt implemented
   -> Pause Confirm routing + focused-control precedence implemented
-  -> multi-local-user routing / additional product actions pending
+  -> Base/Pause Menu routing + TextEdit-first printable P implemented
+  -> multi-local-user routing pending
 SDK-001 (independent packaging lane; does not wait for UI-FLOW-001)
 ```
 
@@ -77,7 +78,7 @@ UI 切片同步扩展 consumer gate，不等待 UI Flow 的后续输入路由能
 
 - Jolt 3D physics adapter；
 - 逐角半径、圆角子树 clip、backdrop 与更完整的视觉效果；
-- Back/Confirm 之外的产品 action 与多本地用户路由；
+- Back/Confirm/Menu 之外的任意产品 action-id 与多本地用户路由；
 - 仅在标准 Behavior 不足时评估 startup-only 自定义 Behavior SPI；
 - 多行 TextEdit、grapheme/shaping 与完整 IME 候选窗；
 - Linux AT-SPI adapter 与真实辅助技术验收；
@@ -148,7 +149,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 门禁 | 当前结论 | 下一关闭点 |
 | --- | --- | --- |
-| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle 已完成；Sprite2D base/optional-normal 都使用 packet-local `FrameResourceRef`，fixed-capacity registry 唯一拥有 resident Lease/GPU/binding；schema 22 继承 schema 19 的 normal-map、双灯双遮挡、authored/committed/culled=`3/2/1` 与 soft/hard 差分，并增加 UI Flow base/pause Screen push/pop、Back/Confirm、单用户设备 revision 与 Pause 提示；同时保留 Dark→Light→Dark、Scene Explorer TreeView stable-key selection/scroll/theme/semantics、`texturesUploaded=3`、3份 owner/retirement handoff、weak handle 失效、ledger Released 与四类 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | 跨 GPU lighting exact golden、TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 均为独立后续项 |
+| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v3 sample 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；retain-window LRU、Physics sensor/joint、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle 已完成；Sprite2D base/optional-normal 都使用 packet-local `FrameResourceRef`，fixed-capacity registry 唯一拥有 resident Lease/GPU/binding；schema 23 继承 schema 19 的 normal-map、双灯双遮挡、authored/committed/culled=`3/2/1` 与 soft/hard 差分，并增加 UI Flow base/pause Screen push/pop、Back/Confirm/Menu、单用户设备 revision 与 Pause 提示；同时保留 Dark→Light→Dark、Scene Explorer TreeView stable-key selection/scroll/theme/semantics、`texturesUploaded=3`、3份 owner/retirement handoff、weak handle 失效、ledger Released 与四类 resolver hits，FX fingerprint schema 2 使用稳定 AssetId | 跨 GPU lighting exact golden、TileMap priority IO/editor/自动 gameplay 生成、完整 FX asset/editor/GPU simulation 均为独立后续项 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
 | UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 反馈、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction、Canvas `SolidRect` 与统一 RoundedRect 已关闭；Image/Icon 的 root-scoped resolve/pin/RGBA ImageQuad 链路与 Canvas NineSlice 原子展开已完成；Showcase 已接入 icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light atlas/sampling 视觉和逐帧结构化证据，以 lifecycle mode 覆盖 atlas invalidation、unavailable 与 missing resolver 连续 skip，并以 6-case size matrix 覆盖 Dark/Light × 1x/1.25x/1.5x client footprint；`ui_image_nineslice_v1` 关闭 `Q=5096/U=64/B=1000`、resolve/pin/dedupe/high-water/allocation/checksum；Component 完成全池 reservation/counter 与 `ui_component_build_v1`；Style/Motion 完成 imageTint、Visual gate、persistent BackgroundColor reservation/activation 与 `ui_motion_v1` | OS 级 DPI 与跨 GPU 金标由 `UI-003` 跟踪；完整 keyframe timeline/layout animation 为独立后续项 |
 | UI accessibility | 平台中立 action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns 与真实 showcase HWND 跨进程自动 gate 已落地；gate 可输出属性/fragment、action 结果和正常关闭的 schema 1 JSON | 固化当前 tip 的带日期 gate 结果并完成 Windows Narrator/Inspect 人工金标；Linux AT-SPI 由 `UI-002-LINUX` 独立跟踪 |

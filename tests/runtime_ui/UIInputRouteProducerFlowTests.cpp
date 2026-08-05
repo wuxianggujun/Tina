@@ -231,6 +231,124 @@ TEST_F(UIInputRouteProducerTest, FlowConfirmClaimsUnfocusedAcceptAndYieldsToFocu
     EXPECT_EQ(eventCount, 2U);
 }
 
+TEST_F(UIInputRouteProducerTest, FlowMenuClaimsPAndStartButYieldsPrintablePToTextEdit)
+{
+    auto producer = createProducer();
+    RouteTree tree = createTextEditRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    auto layerNode = tree.updater.createElement(tree.root.rootNodeId(), UI::makePanelElement());
+    ASSERT_TRUE(layerNode.has_value());
+    auto screenNode = tree.updater.createElement(*layerNode, UI::makePanelElement());
+    ASSERT_TRUE(screenNode.has_value());
+    expectOk(tree.updater.setLayoutStyle(*layerNode, fixedSize(100.0F, 100.0F)));
+    expectOk(tree.updater.setLayoutStyle(*screenNode, fixedSize(100.0F, 100.0F)));
+    auto layer = tree.updater.registerFlowLayer(*layerNode);
+    ASSERT_TRUE(layer.has_value());
+    auto screen = tree.updater.registerFlowScreen(*layer, *screenNode);
+    ASSERT_TRUE(screen.has_value());
+    expectOk(tree.updater.pushFlowScreen(*screen));
+
+    std::array<UI::UIFlowActionEvent, 2> events{};
+    usize eventCount = 0;
+    expectOk(tree.updater.setFlowScreenAction(
+        *screen, UI::UIFlowAction::Menu,
+        UI::UIFlowActionCallback{
+            [&events, &eventCount](const UI::UIFlowActionEvent& event) noexcept {
+                if (eventCount < events.size())
+                {
+                    events[eventCount] = event;
+                }
+                ++eventCount;
+            }}));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    auto keyDownFrame = buildFrame(
+        *builder, window,
+        {
+            .frameId = {209},
+            .transitions = {keyDown(window, Platform::Key::P)},
+            .heldKeys = {Platform::Key::P},
+        });
+    ASSERT_TRUE(keyDownFrame.has_value());
+    auto keyDownOutput = producer->produce(tree.context.get(), *keyDownFrame);
+    ASSERT_TRUE(keyDownOutput.has_value());
+    EXPECT_TRUE(keyDownOutput->consumption.isConsumed(0));
+    ASSERT_EQ(eventCount, 1U);
+    EXPECT_EQ(events[0].action, UI::UIFlowAction::Menu);
+    EXPECT_EQ(events[0].source, UI::UIFlowActionSource::Keyboard);
+
+    auto keyUpFrame = buildFrame(
+        *builder, window,
+        {
+            .frameId = {210},
+            .transitions = {keyUp(window, Platform::Key::P)},
+        });
+    ASSERT_TRUE(keyUpFrame.has_value());
+    auto keyUpOutput = producer->produce(tree.context.get(), *keyUpFrame);
+    ASSERT_TRUE(keyUpOutput.has_value());
+    EXPECT_TRUE(keyUpOutput->consumption.isConsumed(0));
+
+    Platform::GamepadSnapshot startHeld{.gamepad = gamepad, .revision = 211};
+    startHeld.heldButtons.set(static_cast<usize>(Platform::GamepadButton::Start));
+    auto startDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {211},
+            .transitions = {gamepadButton(window, gamepad, Platform::GamepadButton::Start,
+                                          Platform::DigitalTransition::Down)},
+            .gamepadSnapshots = {startHeld},
+        });
+    ASSERT_TRUE(startDown.has_value());
+    auto startDownOutput = producer->produce(tree.context.get(), *startDown);
+    ASSERT_TRUE(startDownOutput.has_value());
+    EXPECT_TRUE(startDownOutput->consumption.isConsumed(0));
+    ASSERT_EQ(eventCount, 2U);
+    EXPECT_EQ(events[1].action, UI::UIFlowAction::Menu);
+    EXPECT_EQ(events[1].source, UI::UIFlowActionSource::Gamepad);
+
+    auto startUp = buildFrame(
+        *builder, window,
+        {
+            .frameId = {212},
+            .transitions = {gamepadButton(window, gamepad, Platform::GamepadButton::Start,
+                                          Platform::DigitalTransition::Up)},
+            .gamepadSnapshots = {
+                Platform::GamepadSnapshot{.gamepad = gamepad, .revision = 212}},
+        });
+    ASSERT_TRUE(startUp.has_value());
+    auto startUpOutput = producer->produce(tree.context.get(), *startUp);
+    ASSERT_TRUE(startUpOutput.has_value());
+    EXPECT_TRUE(startUpOutput->consumption.isConsumed(0));
+
+    expectOk(tree.context->requestFocus(tree.target));
+    auto focusedKeyDown = buildFrame(
+        *builder, window,
+        {
+            .frameId = {213},
+            .transitions = {keyDown(window, Platform::Key::P)},
+            .heldKeys = {Platform::Key::P},
+        });
+    ASSERT_TRUE(focusedKeyDown.has_value());
+    auto focusedKeyDownOutput = producer->produce(tree.context.get(), *focusedKeyDown);
+    ASSERT_TRUE(focusedKeyDownOutput.has_value());
+    EXPECT_TRUE(focusedKeyDownOutput->consumption.isConsumed(0));
+    EXPECT_EQ(eventCount, 2U);
+
+    auto focusedKeyUp = buildFrame(
+        *builder, window,
+        {
+            .frameId = {214},
+            .transitions = {keyUp(window, Platform::Key::P)},
+        });
+    ASSERT_TRUE(focusedKeyUp.has_value());
+    auto focusedKeyUpOutput = producer->produce(tree.context.get(), *focusedKeyUp);
+    ASSERT_TRUE(focusedKeyUpOutput.has_value());
+    EXPECT_TRUE(focusedKeyUpOutput->consumption.isConsumed(0));
+    EXPECT_EQ(eventCount, 2U);
+}
+
 TEST_F(UIInputRouteProducerTest, FlowBackWithoutRegisteredActionRemainsVisibleToGameplay)
 {
     auto producer = createProducer();

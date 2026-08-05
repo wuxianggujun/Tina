@@ -135,6 +135,7 @@ TEST_F(UILayoutTest, FlowStackDirtyCapacityFailureLeavesTheActiveScreenUnchanged
     assertOk(updater.setLayoutStyle(root.rootNodeId(), percentSize(100.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(*layerNode, percentSize(100.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(*firstNode, percentSize(100.0F, 100.0F)));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
     assertOk(updater.setLayoutStyle(*secondNode, percentSize(100.0F, 100.0F)));
     assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
 
@@ -340,13 +341,13 @@ TEST_F(UILayoutTest, FlowBackActionRoutesOnceAndClaimsItsReleaseAcrossScreenPop)
     EXPECT_EQ(statistics.actionInvocationCount, 1U);
 }
 
-TEST_F(UILayoutTest, FlowConfirmActionUsesIndependentSlotAndBoundedCapacity)
+TEST_F(UILayoutTest, FlowActionsUseIndependentSlotsAndBoundedCapacity)
 {
     auto context = makeContext({
         .nodeCapacity = 6,
         .rootCapacity = 1,
         .flowLayerCapacity = 1,
-        .flowScreenCapacity = 2,
+        .flowScreenCapacity = 3,
     });
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
@@ -373,7 +374,9 @@ TEST_F(UILayoutTest, FlowConfirmActionUsesIndependentSlotAndBoundedCapacity)
 
     usize backInvocations = 0;
     usize confirmInvocations = 0;
+    usize menuInvocations = 0;
     UI::UIFlowActionEvent confirmEvent{};
+    UI::UIFlowActionEvent menuEvent{};
     assertOk(updater.setFlowScreenAction(
         *screen, UI::UIFlowAction::Back,
         UI::UIFlowActionCallback{
@@ -386,6 +389,13 @@ TEST_F(UILayoutTest, FlowConfirmActionUsesIndependentSlotAndBoundedCapacity)
             [&confirmInvocations, &confirmEvent](const UI::UIFlowActionEvent& event) noexcept {
                 ++confirmInvocations;
                 confirmEvent = event;
+            }}));
+    assertOk(updater.setFlowScreenAction(
+        *screen, UI::UIFlowAction::Menu,
+        UI::UIFlowActionCallback{
+            [&menuInvocations, &menuEvent](const UI::UIFlowActionEvent& event) noexcept {
+                ++menuInvocations;
+                menuEvent = event;
             }}));
     const Core::Status exhausted = updater.setFlowScreenAction(
         *secondScreen, UI::UIFlowAction::Back,
@@ -416,12 +426,33 @@ TEST_F(UILayoutTest, FlowConfirmActionUsesIndependentSlotAndBoundedCapacity)
     EXPECT_TRUE(confirmRelease->consumed);
     EXPECT_FALSE(confirmRelease->invoked);
 
+    const Platform::DigitalControlIdentity menuKey = Platform::KeyControlIdentity{
+        .window = context->ownerWindow(),
+        .key = Platform::Key::P,
+    };
+    auto menuDown = context->routeFlowAction(
+        {3}, 3, UI::UIFlowAction::Menu,
+        UI::UIFlowActionSource::Keyboard, true, menuKey);
+    ASSERT_TRUE(menuDown.has_value());
+    EXPECT_TRUE(menuDown->consumed);
+    EXPECT_TRUE(menuDown->invoked);
+    EXPECT_EQ(menuInvocations, 1U);
+    EXPECT_EQ(menuEvent.action, UI::UIFlowAction::Menu);
+
+    auto menuRelease = context->routeFlowAction(
+        {4}, 4, UI::UIFlowAction::Menu,
+        UI::UIFlowActionSource::Keyboard, false, menuKey);
+    ASSERT_TRUE(menuRelease.has_value());
+    EXPECT_TRUE(menuRelease->consumed);
+    EXPECT_FALSE(menuRelease->invoked);
+
+    assertOk(updater.clearFlowScreenAction(*screen, UI::UIFlowAction::Menu));
     assertOk(updater.clearFlowScreenAction(*screen, UI::UIFlowAction::Confirm));
     assertOk(updater.clearFlowScreenAction(*screen, UI::UIFlowAction::Back));
     const UI::UIFlowStatistics statistics = context->statistics().flow;
     EXPECT_EQ(statistics.registeredActionCount, 0U);
-    EXPECT_EQ(statistics.actionHighWater, 2U);
-    EXPECT_EQ(statistics.actionInvocationCount, 1U);
+    EXPECT_EQ(statistics.actionHighWater, 3U);
+    EXPECT_EQ(statistics.actionInvocationCount, 2U);
     EXPECT_EQ(statistics.capacityFailureCount, 1U);
 }
 

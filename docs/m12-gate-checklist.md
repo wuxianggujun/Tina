@@ -32,7 +32,7 @@ Physics2D、Audio 与 Asset GoogleTest executable；测试数量随功能增长�
 - 20控件 showcase：Dropdown/List/Tree/Scroll 自动交互、Dark/Light 换肤与 root 生命周期；
 - Windows UIA：Invoke/Toggle/RangeValue/Value control patterns 已经通过 owner-thread action seam 接入，
   `RunUi002UiaGate.ps1` 可从独立进程连接真实 showcase HWND；
-- product-2d schema 22：继承 schema 19 的 normal-map 证据、两盏 committed `PointLight2D`、两条 `ShadowOccluder2D`，并增加 UI Flow Pause Screen、Back/Confirm、单用户设备 revision 与 Pause 提示；
+- product-2d schema 23：继承 schema 19 的 normal-map 证据、两盏 committed `PointLight2D`、两条 `ShadowOccluder2D`，并增加 UI Flow Base/Pause Screen、Back/Confirm/Menu、单用户设备 revision 与 Pause 提示；
   authored=3/committed=2/culled=1 与 soft=2/hard=0 四跑差分；增加独立 aligned normal atlas、
   `normalMappedSpriteCount=1/0`、`texturesUploaded=3`、3张 Texture2D owner/retirement 与 normal on/off 四跑；
   逐次随 Render extraction 发布，并保留 Scene Explorer

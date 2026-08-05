@@ -349,7 +349,7 @@ enum class UIFlowNodeKind : u8 {
     Screen,
 };
 
-inline constexpr usize FlowActionSlotCount = 2;
+inline constexpr usize FlowActionSlotCount = 3;
 
 [[nodiscard]] constexpr usize flowActionSlotIndex(UIFlowAction action) noexcept
 {
@@ -359,6 +359,8 @@ inline constexpr usize FlowActionSlotCount = 2;
         return 0;
     case UIFlowAction::Confirm:
         return 1;
+    case UIFlowAction::Menu:
+        return 2;
     }
     return FlowActionSlotCount;
 }
@@ -516,6 +518,10 @@ class UIFlowActionPressState final {
         {
             return 2;
         }
+        if (action == UIFlowAction::Menu && key == Platform::Key::P)
+        {
+            return 3;
+        }
         return std::nullopt;
     }
 
@@ -523,11 +529,12 @@ class UIFlowActionPressState final {
         UIFlowAction action, Platform::GamepadButton button) noexcept
     {
         return (action == UIFlowAction::Back && button == Platform::GamepadButton::East) ||
-               (action == UIFlowAction::Confirm && button == Platform::GamepadButton::South);
+               (action == UIFlowAction::Confirm && button == Platform::GamepadButton::South) ||
+               (action == UIFlowAction::Menu && button == Platform::GamepadButton::Start);
     }
 
     Platform::WindowId ownerWindow_{};
-    std::array<bool, 3> keyboardPresses_{};
+    std::array<bool, 4> keyboardPresses_{};
     std::array<
         std::array<Platform::GamepadId, Platform::PlatformFrameBuilder::MaximumGamepadSlots>,
         FlowActionSlotCount>

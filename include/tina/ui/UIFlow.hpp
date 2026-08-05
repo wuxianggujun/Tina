@@ -85,6 +85,7 @@ class UIFlowScreenId final {
 enum class UIFlowAction : u8 {
     Back,
     Confirm,
+    Menu,
 };
 
 enum class UIFlowActionSource : u8 {

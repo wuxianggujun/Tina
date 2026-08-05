@@ -152,7 +152,7 @@ active component、`WorldTransform` 和 color×intensity，因此非法灯即使
 走既有 hard-ray intersection；正值把遮挡段按归一化 receiver→light 深度投影到 finite source 区间，连续计算
 单段覆盖率，并用 multiplicative transmittance 合成多段。该固定 `8×32` 成本近似不宣称精确 area-light
 interval union；ambient 与 Sprite 透明排序不变，没有 PointLight2D 时不单独发布 occluder snapshot。
-product-2d schema 22 继承 schema 19 的 normal-map 证据，并固定创建3盏 active light，其中1盏永久离屏；提交结果保持
+product-2d schema 23 继承 schema 19 的 normal-map 证据，并固定创建3盏 active light，其中1盏永久离屏；提交结果保持
 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1`，并继承 schema 16 的
 双 ShadowOccluder2D 逐帧 snapshot 证据；默认 committed soft light count=2，`--force-hard-shadows` 为0。
 Scene 不保存 resolver、FrameResourceSink/ref、AssetLease、Cooked payload 或 GPU handle。

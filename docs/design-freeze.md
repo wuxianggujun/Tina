@@ -50,16 +50,18 @@
 
 固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-002），不单独占 Proposed 行。
 `UI-FLOW-001` 复用现有 retained node：Layer 是 root 直接子节点，Screen 是 Layer 直接子节点，固定容量栈
-只发布栈顶 Screen。第二个产品切片冻结 Pause `Back` Action，第四个产品切片加入 `Confirm`；每个 action
-拥有一个 fixed-inline callback，注册总量受 `flowScreenCapacity` 约束。Dropdown dismiss 优先于 Back；已聚焦
-控件默认 Activate 优先于 Confirm，随后才向 committed layout 中最上层 active Screen 路由 Escape/Gamepad East
-或 Enter/Keypad Enter/Gamepad South。被处理的 Down 锁存精确 physical control，对应 Up 即使 Screen 已 pop
+只发布栈顶 Screen。第二个产品切片冻结 Pause `Back` Action，第四个产品切片加入 `Confirm`，第五个产品
+切片加入 `Menu`；每个 action 拥有一个 fixed-inline callback，注册总量受 `flowScreenCapacity` 约束。Dropdown
+dismiss 优先于 Back；已聚焦控件默认 Activate 优先于 Confirm；TextEdit 聚焦时可打印的 `P` Down 优先进入
+文本输入。随后才向 committed layout 中最上层 active Screen 路由 Escape/Gamepad East、Enter/Keypad
+Enter/Gamepad South 或 P/Gamepad Start。被处理的 Down 锁存精确 physical control，对应 Up 即使 Screen 已 pop
 也继续消费；callback 只记录 intent，树与 State mutation 在合法 frame phase 完成。无 active Screen、无 callback
 或 callback 未处理前的输入不会从 gameplay 隐藏。第三个产品切片增加 per-window 单本地用户
 `UIFlowInputDeviceState`：Keyboard/Pointer 合并为 `KeyboardMouse`，有意义的 Down、wheel、明显 pointer move
 与 Gamepad button Down 按 Platform sequence 更新；release、手柄轴漂移不切换，active Gamepad 断连回落键鼠。
-2D Pause 用 revision 驱动真实 `ESC / ENTER TO RESUME` / `B / A TO RESUME` 标签。该切片不创建第二棵
-UI 树，不冻结多本地用户或任意 action-id 系统；每个 action 路由只做一次 committed layout 反向线性扫描，设备观察为 O(1)，
+2D Pause 用 revision 驱动真实 `ESC / ENTER / P TO RESUME` / `B / A / START TO RESUME` 标签；Base Screen
+的 Menu 打开 Pause，Pause Screen 的 Back/Confirm/Menu 恢复游戏。该切片不创建第二棵 UI 树，不冻结多本地
+用户或任意 action-id 系统；每个 action 路由只做一次 committed layout 反向线性扫描，设备观察为 O(1)，
 二者稳态无分配。
 验收面固定为 `tina_ui_tests --gtest_filter=*Flow*`、
 `tina_runtime_ui_tests --gtest_filter=*Flow*` 与 `tina_sample_2d --frames=300`；
@@ -71,7 +73,7 @@ UI 树，不冻结多本地用户或任意 action-id 系统；每个 action 路�
 | --- | --- | --- |
 | Render | 自研 RHI | bgfx backend 出现无法满足且有 profile/产品证据的明确需求 |
 | Physics | Jolt 3D adapter | 有明确 3D gameplay 场景与性能预算 |
-| UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；逐角半径/圆角子树 clip/backdrop；Back/Confirm 之外的 action-id 与多本地用户；startup-only 自定义 Behavior SPI | 分别由 `TEXT-001`、`UI-PAINT-002`、`UI-FLOW-001` 后续子切片、`UI-BEHAVIOR-SPI-001` 跟踪；只有真实产品或插件需求并先冻结容量、失败与性能边界后才重新开启 |
+| UI | 多行编辑、grapheme/BiDi/复杂 shaping、完整 IME 候选窗；逐角半径/圆角子树 clip/backdrop；Back/Confirm/Menu 之外的任意 action-id 与多本地用户；startup-only 自定义 Behavior SPI | 分别由 `TEXT-001`、`UI-PAINT-002`、`UI-FLOW-001` 后续子切片、`UI-BEHAVIOR-SPI-001` 跟踪；只有真实产品或插件需求并先冻结容量、失败与性能边界后才重新开启 |
 | Asset | 热重载、增量 Cooker、在线编辑 | Cooked schema、Lease/retirement 与产品打包稳定 |
 | Task | work stealing、fiber、lock-free 重写 | profile 证明共享有界队列是瓶颈，并新增 ADR |
 | Runtime | 多 World/editor orchestration | 有明确产品/editor 场景，并先冻结 World owner、State TaskGroup barrier 与跨 World 提交/关闭语义 |

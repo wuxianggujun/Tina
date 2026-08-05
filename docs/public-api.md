@@ -301,16 +301,16 @@ paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟�
 `UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供 `registerFlowLayer()`、`registerFlowScreen()`、
 `pushFlowScreen()`、`popFlowScreen()`、`replaceFlowScreen()`、`activeFlowScreen()` 和
 `isFlowScreenActive()`，并以 `setFlowScreenAction()` / `clearFlowScreenAction()` 为 Screen 注册
-`UIFlowAction::Back/Confirm` fixed-inline callback。Layer/Screen 复用现有 retained node 与 root ownership，不增加平行 UI ABI；非栈顶
+`UIFlowAction::Back/Confirm/Menu` fixed-inline callback。Layer/Screen 复用现有 retained node 与 root ownership，不增加平行 UI ABI；非栈顶
 Screen 在 publication 中视为 `Collapsed`，作者样式保持不变。`UIContextCapacityConfig` 的
 `flowLayerCapacity/flowScreenCapacity` 固定注册上限，`UIContextStatistics::flow` 发布 capacity/count/high-water
 与失败/action 计数；callback 注册总量同样受 `flowScreenCapacity` 限制。`UIContext::routeFlowAction()` 供
 Runtime 将 Escape/Gamepad East 的 Back，以及未被聚焦控件默认 Activate 消费的 Enter/Keypad Enter/Gamepad
-South Confirm，路由到 topmost committed active Screen；处理过的 Down/Up 不再进入 gameplay。
+South Confirm，以及 TextEdit 未优先消费的 P/Gamepad Start Menu，路由到 topmost committed active Screen；处理过的 Down/Up 不再进入 gameplay。
 `UIFlowInputDeviceState` 与 `flowInputDeviceState()` 暴露 per-window 单用户 `KeyboardMouse/Gamepad` 类别、
 active Gamepad、Platform frame/sequence 与仅在类别/identity 改变时递增的 revision；Runtime 通过
 `observeFlowInputDevice()` 按已验证 transition 顺序更新，release 与 axis drift 不切换。该切片不包含
-多本地用户或 Back/Confirm 之外的 action-id。
+多本地用户或 Back/Confirm/Menu 之外的任意 action-id。
 
 `UIImageSource` 只保存 Texture2D `AssetId`、source pixel rect、texture pixel extent 与 intrinsic logical size；
 `UIImageContent` 增加 Fill/Contain/Cover/None、alignment、tint 和 Linear/Nearest sampling。
@@ -781,7 +781,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
 - stylesheet 更广 opacity 等属性面、完整 keyframe timeline 与 layout animation；imageTint、paint-only Motion
   与 ColorToken reverse-dependency 更新已落地；
-- Back/Confirm 之外的产品 action 与多本地用户路由；单用户输入设备提示已落地；
+- Back/Confirm/Menu 之外的任意产品 action-id 与多本地用户路由；单用户输入设备提示已落地；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
 - 安装 SDK 的正式发布 ABI/兼容策略；Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer

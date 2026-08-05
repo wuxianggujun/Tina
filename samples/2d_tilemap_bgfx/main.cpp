@@ -134,9 +134,9 @@ inline constexpr u32 ProductCulledPointLight2DCount =
 inline constexpr u32 ProductShadowOccluder2DCount = 2;
 inline constexpr u32 ProductSoftShadowPointLight2DCount = 2;
 inline constexpr float ProductAmbientLight2DScale = 0.28F;
-inline constexpr u32 ProductEvidenceSchema = 22;
-inline constexpr std::string_view PauseKeyboardMouseHint = "ESC / ENTER TO RESUME";
-inline constexpr std::string_view PauseGamepadHint = "B / A TO RESUME";
+inline constexpr u32 ProductEvidenceSchema = 23;
+inline constexpr std::string_view PauseKeyboardMouseHint = "ESC / ENTER / P TO RESUME";
+inline constexpr std::string_view PauseGamepadHint = "B / A / START TO RESUME";
 inline constexpr float ProductWarmLightSourceRadiusMeters = 0.45F;
 inline constexpr float ProductCoolLightSourceRadiusMeters = 0.6F;
 inline constexpr Tina::InputActionId MoveLeftAction{1};
@@ -310,6 +310,8 @@ struct LifecycleCounters final {
     u64 uiFlowActionsCleared = 0;
     u64 uiFlowBackActionInvocations = 0;
     u64 uiFlowConfirmActionInvocations = 0;
+    u64 uiFlowMenuActionInvocations = 0;
+    u64 pauseOpenActionInvocations = 0;
     u64 pauseInputDeviceHintUpdates = 0;
     u64 pauseInputDeviceRevision = 0;
     bool pauseInputHintKeyboardMouse = false;
@@ -2013,8 +2015,23 @@ class PauseOverlayState final : public Tina::IGameState {
             static_cast<void>(tree->popFlowScreen(flowLayer_));
             return status;
         }
+        if (auto status = tree->setFlowScreenAction(
+                pauseScreen_, Tina::UI::UIFlowAction::Menu,
+                Tina::UI::UIFlowActionCallback{
+                    [this](const Tina::UI::UIFlowActionEvent& event) noexcept {
+                        requestResumeFromAction(event);
+                    }});
+            !status)
+        {
+            static_cast<void>(tree->clearFlowScreenAction(
+                pauseScreen_, Tina::UI::UIFlowAction::Confirm));
+            static_cast<void>(tree->clearFlowScreenAction(
+                pauseScreen_, Tina::UI::UIFlowAction::Back));
+            static_cast<void>(tree->popFlowScreen(flowLayer_));
+            return status;
+        }
         ++counters_->uiFlowScreenPushes;
-        counters_->uiFlowActionsRegistered += 2U;
+        counters_->uiFlowActionsRegistered += 3U;
         recordInputDeviceHint(*inputDevice);
         counters_->pauseUIScreenActivated = true;
         ++counters_->pauseOverlayPushes;
@@ -2046,7 +2063,8 @@ class PauseOverlayState final : public Tina::IGameState {
             return context.requestPop();
         }
         ++counters_->pauseOverlayFrames;
-        if (!resumeRequested_ && counters_->pauseOverlayFrames >= 3U)
+        ++pauseFrameCount_;
+        if (!resumeRequested_ && pauseFrameCount_ >= 3U)
         {
             resumeRequested_ = true;
             ++counters_->pauseAutoResumeRequests;
@@ -2107,7 +2125,13 @@ class PauseOverlayState final : public Tina::IGameState {
         {
             return status;
         }
-        counters_->uiFlowActionsCleared += 2U;
+        if (auto status = tree->clearFlowScreenAction(
+                pauseScreen_, Tina::UI::UIFlowAction::Menu);
+            !status)
+        {
+            return status;
+        }
+        counters_->uiFlowActionsCleared += 3U;
         auto active = tree->activeFlowScreen(flowLayer_);
         if (!active)
         {
@@ -2140,6 +2164,10 @@ class PauseOverlayState final : public Tina::IGameState {
         else if (event.action == Tina::UI::UIFlowAction::Confirm)
         {
             ++counters_->uiFlowConfirmActionInvocations;
+        }
+        else if (event.action == Tina::UI::UIFlowAction::Menu)
+        {
+            ++counters_->uiFlowMenuActionInvocations;
         }
     }
 
@@ -2176,6 +2204,7 @@ class PauseOverlayState final : public Tina::IGameState {
     bool inputDeviceHintPublished_ = false;
     bool resumeRequested_ = false;
     bool pauseScreenPopped_ = false;
+    u64 pauseFrameCount_ = 0;
 };
 
 class TileMapBgfxState final : public Tina::IGameState {
@@ -2461,12 +2490,24 @@ class TileMapBgfxState final : public Tina::IGameState {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "Base UI Screen did not become active during startup");
         }
+        if (auto status = tree->setFlowScreenAction(
+                *baseScreen, Tina::UI::UIFlowAction::Menu,
+                Tina::UI::UIFlowActionCallback{
+                    [this](const Tina::UI::UIFlowActionEvent& event) noexcept {
+                        requestPauseFromAction(event);
+                    }});
+            !status)
+        {
+            return status;
+        }
         uiFlowLayer_ = *flowLayer;
         uiBaseScreen_ = *baseScreen;
         uiPauseScreen_ = *pauseScreen;
+        baseMenuActionRegistered_ = true;
         counters_->uiFlowLayersRegistered = 1;
         counters_->uiFlowScreensRegistered = 2;
         counters_->uiFlowScreenPushes = 1;
+        counters_->uiFlowActionsRegistered = 1;
         counters_->uiTextLabelsCreated += 2U;
 
         // Product controls inherit this Theme. Panels and title text keep a small
@@ -3041,6 +3082,11 @@ class TileMapBgfxState final : public Tina::IGameState {
 #endif
         if (uiRoot_)
         {
+            if (baseMenuActionRegistered_)
+            {
+                ++counters_->uiFlowActionsCleared;
+                baseMenuActionRegistered_ = false;
+            }
             uiRoot_.reset();
             ++counters_->uiRootsReleased;
         }
@@ -3663,9 +3709,19 @@ class TileMapBgfxState final : public Tina::IGameState {
         // Late-run pause overlay (RUNTIME-001 product evidence). Requires long enough smoke so
         // walk/physics still complete on base before the push. Short --frames=30 skips this.
         constexpr u64 kMinFramesForPauseDemo = 60;
-        if (options_.targetFrameCount >= kMinFramesForPauseDemo && !counters_->pauseOverlayPushQueued
-            && counters_->pauseOverlayPushes == 0
-            && counters_->frameUpdates + 12U == options_.targetFrameCount)
+        if (counters_->pauseOverlayPushQueued &&
+            counters_->pauseOverlayPushes == counters_->pauseOverlayPops &&
+            counters_->pauseOverlayPushes != 0)
+        {
+            counters_->pauseOverlayPushQueued = false;
+        }
+        const bool autoPauseRequested =
+            options_.targetFrameCount >= kMinFramesForPauseDemo &&
+            counters_->pauseOverlayPushes == 0 &&
+            counters_->frameUpdates + 12U == options_.targetFrameCount;
+        if (!counters_->pauseOverlayPushQueued &&
+            counters_->pauseOverlayPushes == counters_->pauseOverlayPops &&
+            (pauseMenuRequested_ || autoPauseRequested))
         {
             if (auto status = context.requestPush(std::make_unique<PauseOverlayState>(
                     *counters_, uiRoot_, uiFlowLayer_, uiBaseScreen_, uiPauseScreen_,
@@ -3674,6 +3730,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 return status;
             }
+            pauseMenuRequested_ = false;
             counters_->pauseOverlayPushQueued = true;
         }
 
@@ -4101,6 +4158,28 @@ class TileMapBgfxState final : public Tina::IGameState {
     }
 
   private:
+    void requestPauseFromAction(const Tina::UI::UIFlowActionEvent& event) noexcept
+    {
+        if (event.action != Tina::UI::UIFlowAction::Menu || pauseMenuRequested_)
+        {
+            return;
+        }
+        if (counters_->pauseOverlayPushQueued &&
+            counters_->pauseOverlayPushes == counters_->pauseOverlayPops &&
+            counters_->pauseOverlayPushes != 0)
+        {
+            counters_->pauseOverlayPushQueued = false;
+        }
+        if (counters_->pauseOverlayPushQueued ||
+            counters_->pauseOverlayPushes != counters_->pauseOverlayPops)
+        {
+            return;
+        }
+        pauseMenuRequested_ = true;
+        ++counters_->uiFlowMenuActionInvocations;
+        ++counters_->pauseOpenActionInvocations;
+    }
+
     [[nodiscard]] Tina::UI::UITreeViewDataSource sceneTreeDataSource() noexcept
     {
         return Tina::UI::UITreeViewDataSource{
@@ -4469,6 +4548,8 @@ class TileMapBgfxState final : public Tina::IGameState {
     Tina::UI::UIFlowScreenId uiBaseScreen_{};
     Tina::UI::UIFlowScreenId uiPauseScreen_{};
     Tina::UI::UINodeId uiPauseInputHint_{};
+    bool baseMenuActionRegistered_ = false;
+    bool pauseMenuRequested_ = false;
     std::array<Tina::UI::UINodeId, ExpectedUIPanelCount> uiPanelNodes_{};
     std::array<Tina::UI::UINodeId, 2> uiTitleNodes_{};
     Tina::UI::UINodeId uiThemeButton_{};
@@ -4920,7 +5001,13 @@ int main(int argc, char** argv)
     const bool audioDeviceValid = true;
 #endif
 
-    bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
+    const bool flowMenuCountersValid =
+        counters.uiFlowMenuActionInvocations >= counters.pauseOpenActionInvocations;
+    const u64 pauseMenuResumeActionInvocations = flowMenuCountersValid
+                                                     ? counters.uiFlowMenuActionInvocations -
+                                                           counters.pauseOpenActionInvocations
+                                                     : 0;
+    bool ok = flowMenuCountersValid && selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
               cameraFollowValid && chunkDirtyValid && tileMapStreamValid && effectsValid && lighting2DValid &&
               normalMappingValid &&
               audioValid && audioDeviceValid &&
@@ -4976,15 +5063,17 @@ int main(int argc, char** argv)
         ok = ok && counters.pauseOverlayPushes == 1 && counters.pauseOverlayPops == 1
              && counters.pauseOverlayFrames >= 1 && counters.pauseOverlayFrames <= 3
              && counters.uiFlowScreenPushes == 2 && counters.uiFlowScreenPops == 1
-             && counters.uiFlowActionsRegistered == 2 && counters.uiFlowActionsCleared == 2
+             && counters.uiFlowActionsRegistered == 4 && counters.uiFlowActionsCleared == 4
              && counters.uiFlowBackActionInvocations +
                     counters.uiFlowConfirmActionInvocations +
+                    pauseMenuResumeActionInvocations +
                     counters.pauseAutoResumeRequests == 1
              && counters.pauseInputDeviceHintUpdates >= 1
              && counters.pauseInputHintKeyboardMouse != counters.pauseInputHintGamepad
              && counters.pauseResumeRequestedByAction ==
                     (counters.uiFlowBackActionInvocations +
-                         counters.uiFlowConfirmActionInvocations ==
+                         counters.uiFlowConfirmActionInvocations +
+                         pauseMenuResumeActionInvocations ==
                      1)
              && counters.pauseUIScreenActivated && counters.baseUIScreenRestored;
     }
@@ -4992,9 +5081,11 @@ int main(int argc, char** argv)
     {
         ok = ok && counters.pauseOverlayPushes == 0 && counters.pauseOverlayPops == 0
              && counters.uiFlowScreenPushes == 1 && counters.uiFlowScreenPops == 0
-             && counters.uiFlowActionsRegistered == 0 && counters.uiFlowActionsCleared == 0
+             && counters.uiFlowActionsRegistered == 1 && counters.uiFlowActionsCleared == 1
              && counters.uiFlowBackActionInvocations == 0
              && counters.uiFlowConfirmActionInvocations == 0
+             && counters.uiFlowMenuActionInvocations == 0
+             && counters.pauseOpenActionInvocations == 0
              && counters.pauseInputDeviceHintUpdates == 0
              && !counters.pauseInputHintKeyboardMouse && !counters.pauseInputHintGamepad
              && counters.pauseAutoResumeRequests == 0
@@ -5089,6 +5180,8 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.uiFlowActionsCleared);
     appendLeU64(evidenceBytes, counters.uiFlowBackActionInvocations);
     appendLeU64(evidenceBytes, counters.uiFlowConfirmActionInvocations);
+    appendLeU64(evidenceBytes, counters.uiFlowMenuActionInvocations);
+    appendLeU64(evidenceBytes, counters.pauseOpenActionInvocations);
     appendLeU64(evidenceBytes, counters.pauseInputDeviceHintUpdates);
     appendLeU64(evidenceBytes, counters.pauseInputDeviceRevision);
     appendLeU32(evidenceBytes, counters.pauseInputHintKeyboardMouse ? 1U : 0U);
@@ -5259,6 +5352,10 @@ int main(int argc, char** argv)
                   << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
                   << ",\"uiFlowConfirmActionInvocations\":"
                   << counters.uiFlowConfirmActionInvocations
+                  << ",\"uiFlowMenuActionInvocations\":"
+                  << counters.uiFlowMenuActionInvocations
+                  << ",\"pauseOpenActionInvocations\":"
+                  << counters.pauseOpenActionInvocations
                   << ",\"pauseInputDeviceHintUpdates\":" << counters.pauseInputDeviceHintUpdates
                   << ",\"pauseInputDeviceRevision\":" << counters.pauseInputDeviceRevision
                   << ",\"pauseInputHintKeyboardMouse\":"
@@ -5476,6 +5573,10 @@ int main(int argc, char** argv)
               << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
               << ",\"uiFlowConfirmActionInvocations\":"
               << counters.uiFlowConfirmActionInvocations
+              << ",\"uiFlowMenuActionInvocations\":"
+              << counters.uiFlowMenuActionInvocations
+              << ",\"pauseOpenActionInvocations\":"
+              << counters.pauseOpenActionInvocations
               << ",\"pauseInputDeviceHintUpdates\":" << counters.pauseInputDeviceHintUpdates
               << ",\"pauseInputDeviceRevision\":" << counters.pauseInputDeviceRevision
               << ",\"pauseInputHintKeyboardMouse\":"
