@@ -5,6 +5,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     MaterialPayloadTests.cpp
     PrefabPayloadTests.cpp
     SpriteAnimationClipPayloadTests.cpp
+    SourceImportMetadataFormatTests.cpp
     StaticMeshPayloadTests.cpp
     TextureSpritePayloadTests.cpp
     TileMapTilesetPayloadTests.cpp
@@ -17,6 +18,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     header_isolation/PrefabPayloadHeader.cpp
     header_isolation/SpriteAnimationClipPayloadHeader.cpp
     header_isolation/SpritePayloadHeader.cpp
+    header_isolation/SourceImportMetadataFormatHeader.cpp
     header_isolation/StaticMeshPayloadHeader.cpp
     header_isolation/Texture2DPayloadHeader.cpp
     header_isolation/TilesetPayloadHeader.cpp
