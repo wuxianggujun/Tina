@@ -344,7 +344,10 @@ UTF-8，并拒绝绝对路径与 `..` 逃逸。glTF Cooker 把 authoring 输入�
 读取，外部最终路径必须位于主文件最终 authoring root 下。root 内 symlink/junction 可用，逃逸链接、
 读取期间替换、超出 file/count/range/parser/decode/output 预算均结构化失败，不产生可发布的半包。显式
 `--source-root` + `--import-state` 会记录实际消费 bytes 的 provenance，并只在 package 完整验证后原子提交
-tool-side state；state 路径不得位于部署 Catalog root。
+tool-side state；state 路径不得位于部署 Catalog root。同一命令第二次执行会在解析 recipe/cgltf 前 probe 当前
+manifest/state/source：全部不变时 JSON 返回 `cookMode=clean-reuse`、`unitsRecooked=0`、`objectsCooked=0`、
+`importStateCommitted=false`，且 manifest/object/state 均不改写。旧 state schema、revision 或 source 变化返回
+`cookMode=full-recook` 并生成唯一现行 state，不运行旧 schema 迁移。
 
 ## Linux Null 与 sanitizer
 

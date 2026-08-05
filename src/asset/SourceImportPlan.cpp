@@ -34,7 +34,8 @@ using Core::u32;
         const auto newPath = candidate.sourcePath(newInput->sourceIndex);
         if (!oldSource || !newSource || !oldPath || !newPath || *oldPath != *newPath ||
             oldSource->contentHash != newSource->contentHash ||
-            oldSource->fileBytes != newSource->fileBytes)
+            oldSource->fileBytes != newSource->fileBytes ||
+            oldSource->readExtent != newSource->readExtent)
         {
             return false;
         }

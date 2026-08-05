@@ -17,10 +17,12 @@ struct FileSnapshot final {
 
 // Opens once, validates the opened file's final path, then reads from that same handle.
 // requestedBytes == 0 reads the complete file; otherwise the file may contain trailing bytes.
+// allowShorterFile is probe-only: it returns a stable short snapshot so size drift can be Dirty.
 [[nodiscard]] Core::Result<FileSnapshot> readFileSnapshot(
     const std::filesystem::path& requestedPath,
     const std::filesystem::path* containmentRoot,
     std::uint64_t maxFileBytes,
-    std::uint64_t requestedBytes = 0) noexcept;
+    std::uint64_t requestedBytes = 0,
+    bool allowShorterFile = false) noexcept;
 
 } // namespace Tina::Asset::GltfDetail

@@ -1029,10 +1029,13 @@ TEST(GltfCookTests, CapturesPrimaryExternalBufferPrefixAndExternalImage)
     ASSERT_TRUE(imageHash.has_value());
     EXPECT_EQ(primary->fileBytes, json.size());
     EXPECT_EQ(primary->contentHash, *primaryHash);
+    EXPECT_EQ(primary->readExtent, AssetFormat::SourceImportReadExtent::WholeFile);
     EXPECT_EQ(geometry->fileBytes, declaredGeometry.size());
     EXPECT_EQ(geometry->contentHash, *geometryHash);
+    EXPECT_EQ(geometry->readExtent, AssetFormat::SourceImportReadExtent::Prefix);
     EXPECT_EQ(image->fileBytes, png.size());
     EXPECT_EQ(image->contentHash, *imageHash);
+    EXPECT_EQ(image->readExtent, AssetFormat::SourceImportReadExtent::WholeFile);
 
     const auto& unit = cooked->sourceImports.units[0];
     EXPECT_EQ(unit.importerKind, SourceImporterKind::Gltf);
@@ -1079,6 +1082,8 @@ TEST(GltfCookTests, EmbeddedGlbBufferAndBufferViewImageRemainPrimarySource)
     ASSERT_EQ(cooked->sourceImports.sources.size(), 1U);
     EXPECT_EQ(cooked->sourceImports.sources[0].path, "scene.glb");
     EXPECT_EQ(cooked->sourceImports.sources[0].fileBytes, glb.size());
+    EXPECT_EQ(cooked->sourceImports.sources[0].readExtent,
+              AssetFormat::SourceImportReadExtent::WholeFile);
     ASSERT_EQ(cooked->sourceImports.units.size(), 1U);
     ASSERT_EQ(cooked->sourceImports.units[0].inputs.size(), 1U);
     EXPECT_TRUE(AssetFormat::hasSourceImportInputFlag(

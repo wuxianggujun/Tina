@@ -109,12 +109,19 @@ Core::Result<std::string> normalizeSourceImportPath(const SourceImportCaptureCon
 Core::Result<Core::u32> captureSourceImportBytes(SourceImportCandidate& candidate,
                                                 const SourceImportCaptureConfig& config,
                                                 std::string_view sourceUtf8Path,
+                                                AssetFormat::SourceImportReadExtent readExtent,
                                                 std::span<const std::byte> consumedBytes)
 {
     if (config.maxSources == 0 || config.maxSources > AssetFormat::SourceImportWire::MaxSources)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "source import capture limit is invalid");
+    }
+    if (readExtent < AssetFormat::SourceImportReadExtent::WholeFile ||
+        readExtent > AssetFormat::SourceImportReadExtent::Prefix)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "source import read extent is invalid or unsupported");
     }
     auto path = normalizeSourceImportPath(config, sourceUtf8Path);
     if (!path)
@@ -139,10 +146,11 @@ Core::Result<Core::u32> captureSourceImportBytes(SourceImportCandidate& candidat
         {
             continue;
         }
-        if (existing.contentHash != *digest || existing.fileBytes != consumedBytes.size())
+        if (existing.contentHash != *digest || existing.fileBytes != consumedBytes.size() ||
+            existing.readExtent != readExtent)
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "one source import path produced inconsistent consumed bytes");
+                                 "one source import path produced an inconsistent read observation");
         }
         return index;
     }
@@ -158,6 +166,7 @@ Core::Result<Core::u32> captureSourceImportBytes(SourceImportCandidate& candidat
             .path = std::move(*path),
             .contentHash = *digest,
             .fileBytes = static_cast<Core::u64>(consumedBytes.size()),
+            .readExtent = readExtent,
         });
         return static_cast<Core::u32>(candidate.sources.size() - 1U);
     } catch (const std::bad_alloc&)
@@ -259,6 +268,7 @@ writeSourceImportCandidateBytes(const SourceImportCandidate& candidate,
                 .path = source.path,
                 .contentHash = source.contentHash,
                 .fileBytes = source.fileBytes,
+                .readExtent = source.readExtent,
             });
         }
 

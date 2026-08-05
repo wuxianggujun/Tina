@@ -70,14 +70,18 @@ namespace {
 
 [[nodiscard]] Core::Result<std::size_t> bytesToRead(std::uint64_t fileSize,
                                                     std::uint64_t maxFileBytes,
-                                                    std::uint64_t requestedBytes)
+                                                    std::uint64_t requestedBytes,
+                                                    bool allowShorterFile)
 {
-    if (fileSize == 0 || fileSize > maxFileBytes || requestedBytes > fileSize)
+    if ((fileSize == 0 && !(allowShorterFile && requestedBytes > 0)) ||
+        fileSize > maxFileBytes ||
+        (!allowShorterFile && requestedBytes > fileSize))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF source file size is outside the configured limit");
     }
-    const std::uint64_t readBytes = requestedBytes == 0 ? fileSize : requestedBytes;
+    const std::uint64_t readBytes =
+        requestedBytes == 0 ? fileSize : (std::min)(requestedBytes, fileSize);
     if (readBytes > static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)()))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -133,7 +137,8 @@ private:
     const std::filesystem::path& requestedPath,
     const std::filesystem::path* containmentRoot,
     std::uint64_t maxFileBytes,
-    std::uint64_t requestedBytes)
+    std::uint64_t requestedBytes,
+    bool allowShorterFile)
 {
     UniqueHandle file{CreateFileW(requestedPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr)};
@@ -167,7 +172,7 @@ private:
                              "failed to query glTF source file size");
     }
     const std::uint64_t fileSize = static_cast<std::uint64_t>(size.QuadPart);
-    auto readSize = bytesToRead(fileSize, maxFileBytes, requestedBytes);
+    auto readSize = bytesToRead(fileSize, maxFileBytes, requestedBytes, allowShorterFile);
     if (!readSize)
     {
         return Core::failure(std::move(readSize.error()));
@@ -262,7 +267,8 @@ private:
     const std::filesystem::path& requestedPath,
     const std::filesystem::path* containmentRoot,
     std::uint64_t maxFileBytes,
-    std::uint64_t requestedBytes)
+    std::uint64_t requestedBytes,
+    bool allowShorterFile)
 {
     UniqueFd file{::open(requestedPath.c_str(), O_RDONLY | O_CLOEXEC)};
     if (file.get() < 0)
@@ -289,7 +295,7 @@ private:
     }
 
     const std::uint64_t fileSize = static_cast<std::uint64_t>(info.st_size);
-    auto readSize = bytesToRead(fileSize, maxFileBytes, requestedBytes);
+    auto readSize = bytesToRead(fileSize, maxFileBytes, requestedBytes, allowShorterFile);
     if (!readSize)
     {
         return Core::failure(std::move(readSize.error()));
@@ -333,7 +339,8 @@ private:
     const std::filesystem::path& requestedPath,
     const std::filesystem::path* containmentRoot,
     std::uint64_t maxFileBytes,
-    std::uint64_t requestedBytes)
+    std::uint64_t requestedBytes,
+    bool allowShorterFile)
 {
     std::error_code ec;
     const std::filesystem::path finalPath = std::filesystem::canonical(requestedPath, ec);
@@ -348,7 +355,7 @@ private:
         return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
                              "failed to query glTF source file size");
     }
-    auto readSize = bytesToRead(fileSize, maxFileBytes, requestedBytes);
+    auto readSize = bytesToRead(fileSize, maxFileBytes, requestedBytes, allowShorterFile);
     if (!readSize)
     {
         return Core::failure(std::move(readSize.error()));
@@ -373,7 +380,8 @@ private:
 Core::Result<FileSnapshot> readFileSnapshot(const std::filesystem::path& requestedPath,
                                             const std::filesystem::path* containmentRoot,
                                             std::uint64_t maxFileBytes,
-                                            std::uint64_t requestedBytes) noexcept
+                                            std::uint64_t requestedBytes,
+                                            bool allowShorterFile) noexcept
 {
     if (requestedPath.empty() || maxFileBytes == 0 || requestedBytes > maxFileBytes)
     {
@@ -382,7 +390,8 @@ Core::Result<FileSnapshot> readFileSnapshot(const std::filesystem::path& request
     }
     try
     {
-        return readPlatformFileSnapshot(requestedPath, containmentRoot, maxFileBytes, requestedBytes);
+        return readPlatformFileSnapshot(requestedPath, containmentRoot, maxFileBytes,
+                                        requestedBytes, allowShorterFile);
     }
     catch (const std::bad_alloc&)
     {

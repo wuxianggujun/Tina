@@ -82,8 +82,8 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 `AssetSystem::reloadCatalogWhenIdle()` 已在其上增加保守的 root 事务：强制完整打开/验证候选 package，生成
 change plan，并仅在 owner thread 且 queue、IO、Store、GPU upload 与 retirement 全部 idle 时原子替换
 root/Catalog。fresh staging package 的完整生成/验证、manifest revision caller-driven polling、tool-side source
-provenance capture 与验证后 state commit 已具备；OS watcher、dirty-unit recook/clean object 复用，以及 live
-Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
+provenance capture、验证后 state commit 与单 unit clean whole-package reuse 已具备；OS watcher、多 unit
+clean/dirty object executor，以及 live Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
 
 `captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
 `pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
@@ -92,27 +92,33 @@ full package validation 负责；source dependency detection 必须基于独立 
 
 ## Source import state 与变更规划
 
-Cooker/tool 现在有独立的 `TINAIMPT` schema `1.0` import-state wire；它不扩展 Runtime Catalog manifest，避免
+Cooker/tool 现在有独立的 `TINAIMPT` schema `1.1` import-state wire；它不扩展 Runtime Catalog manifest，避免
 把 source path 或 importer 状态带进发布包。metadata 以 stable `SourceImportUnitId` 表示一次 import owner，记录
-target/importer version/settings hash、按规范化 root-relative UTF-8 path 排序的 source fingerprint、恰好一个
+target/importer version/settings hash、按规范化 root-relative UTF-8 path 排序的 source fingerprint/read extent、恰好一个
 primary input、以及该 unit 唯一拥有且按 AssetId 排序的 outputs。header 保存完整 Catalog manifest digest 与 byte
-size；`validateSourceImportCatalogBinding()` 不匹配即拒绝旧 object 复用并要求 current-schema full recook。
+size；`validateSourceImportCatalogBinding()` 不匹配即拒绝旧 object 复用并要求 current-schema full recook。旧 schema
+不解析、不迁移，直接作为 cache miss 重新生成唯一现行 state。
 
 `planSourceImports()` 纯比较两个已验证 metadata view。UnitId 只在一侧出现分别为 `Added`/`Removed`；同一 unit 的
-target、importer、settings、source membership/path/hash/byte size、primary edge 或 output contract 任一变化为
+target、importer、settings、source membership/path/hash/byte size/read extent、primary edge 或 output contract 任一变化为
 `Reimport`。同一 source 可被多个 unit 引用，hash 变化会让全部消费者重新导入。输出按 UnitId 稳定排序，使用
 调用方 PMR 与 `maxChanges`；容量或分配失败不返回部分 plan，也不修改 baseline。
 
 `SourceImportCapture` 只对 importer 已经读取且实际消费的 bytes 计算 `ContentHash`，不为 provenance 二次打开
 源文件。provenance-aware recipe 入口在同一 parser 的 recipe、generic payload 与 PCM16 WAV 读取点收集 source；
-glTF 入口收集主 glTF/GLB、external buffer 的声明消费前缀与 external image 完整 encoded bytes，GLB BIN、base64
+glTF 入口收集主 glTF/GLB、external buffer 的声明消费前缀与 external image 完整 encoded bytes，并分别标记
+`WholeFile`/`Prefix` read extent；GLB BIN、base64
 buffer 与 bufferView image 不制造伪外部 source。每个 authoring document 当前形成一个 unit，显式 authoring root
 产生 canonical root-relative path；request-only 产品入口只是同一内部实现的薄投影，不保留第二套旧读取链。
 
-`tina_assetc --source-root <root> --import-state <state>` 在 recipe/glTF 模式启用该链路；工具先发布并完整打开/验证
-Catalog package，再捕获 manifest revision，最后用 sibling-temp + rename 原子替换 state。publish、validation、
-revision 或 state write 任一失败都不会提交候选 state。state 必须位于 tool cache，不能放进部署 Catalog root。
-当前仍没有 OS watcher、clean object 复用和 dirty-unit executor，因此不能描述为自动增量 Cooker 已完成。
+`tina_assetc --source-root <root> --import-state <state>` 在 recipe/glTF 模式启用该链路。执行 Cooker 前，工具先核对
+现有 manifest revision、单 import unit 的 current importer contract、primary locator 与所有已记录 source fingerprint：
+`WholeFile` 要求完整 size/hash 一致，`Prefix` 只重读先前实际消费的 byte 数。全部 clean 时整包复用，返回
+`cookMode=clean-reuse`，不解析 recipe/cgltf，不读取 cooked object，也不重写 manifest/object/state；旧 schema、
+revision/contract/source 变化则进入 `full-recook`。完整 recook 后仍先完整打开/验证 Catalog package，再捕获 revision，
+最后用 sibling-temp + rename 原子替换 state；任一步失败都不提交候选 state。state 必须位于 tool cache，不能放进
+部署 Catalog root。当前完成的是单 unit clean whole-package reuse；仍没有 OS watcher、dirty-unit executor 与多 unit
+clean/dirty object 拼装，因此不能描述为完整自动增量 Cooker 已完成。
 
 ## 身份、视图与所有权
 
@@ -321,8 +327,8 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - `ASSET-002` 已有 manifest revision polling、immutable Catalog change planner、fresh staging package 生成/验证与
   idle-safe root/Catalog commit，并已建立 current-only source import metadata wire、Catalog binding 与纯 import
-  planner；真实 importer provenance capture 与 validated state commit 已接入。OS watcher、clean object 复用 +
-  dirty-unit executor，以及 active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
+  planner；真实 importer provenance capture、validated state commit 与单 unit clean whole-package reuse 已接入。
+  OS watcher、多 unit clean/dirty object executor，以及 active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重

@@ -5,6 +5,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackagePublish.hpp>
+#include <tina/asset/SourceImportProbe.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
@@ -49,22 +50,6 @@ struct RecipeSourceCaptureContext final {
     const SourceImportCaptureConfig& config;
 };
 
-inline constexpr Core::u32 CatalogRecipeImporterVersion = 1U;
-
-[[nodiscard]] constexpr std::array<std::byte, 16>
-canonicalCatalogRecipeSettings(AssetFormat::TargetPlatform targetPlatform) noexcept
-{
-    // TINARSET + little-endian settings schema 1 + little-endian TargetPlatform + zero reserved.
-    return {
-        std::byte{'T'}, std::byte{'I'}, std::byte{'N'}, std::byte{'A'},
-        std::byte{'R'}, std::byte{'S'}, std::byte{'E'}, std::byte{'T'},
-        std::byte{1}, std::byte{0},
-        static_cast<std::byte>(static_cast<Core::u16>(targetPlatform) & 0xFFU),
-        static_cast<std::byte>((static_cast<Core::u16>(targetPlatform) >> 8U) & 0xFFU),
-        std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0},
-    };
-}
-
 [[nodiscard]] Core::Status captureRecipeDependencyBytes(const RecipeSourceCaptureContext* capture,
                                                         std::string_view sourceUtf8Path,
                                                         std::span<const std::byte> consumedBytes)
@@ -74,7 +59,9 @@ canonicalCatalogRecipeSettings(AssetFormat::TargetPlatform targetPlatform) noexc
         return Core::success();
     }
     auto sourceIndex = captureSourceImportBytes(capture->candidate, capture->config,
-                                                sourceUtf8Path, consumedBytes);
+                                                sourceUtf8Path,
+                                                AssetFormat::SourceImportReadExtent::WholeFile,
+                                                consumedBytes);
     if (!sourceIndex)
     {
         return Core::failure(std::move(sourceIndex.error()).withContext(
@@ -2129,28 +2116,21 @@ finalizeCatalogRecipeSourceImports(SourceImportCandidate candidate,
                              "catalog recipe source capture state is invalid");
     }
 
-    auto unitId = deriveSourceImportUnitId(SourceImporterKind::CatalogRecipe,
-                                           candidate.sources[primarySourceIndex].path);
-    if (!unitId)
+    auto contract = currentCatalogRecipeSourceImportContract(
+        candidate.sources[primarySourceIndex].path, request.targetPlatform);
+    if (!contract)
     {
-        return Core::failure(std::move(unitId.error()).withContext(
-            "finalizeCatalogRecipeSourceImports", "unitId"));
-    }
-    const auto canonicalSettings = canonicalCatalogRecipeSettings(request.targetPlatform);
-    auto settingsHash = digestSourceImportSettings(canonicalSettings);
-    if (!settingsHash)
-    {
-        return Core::failure(std::move(settingsHash.error()).withContext(
-            "finalizeCatalogRecipeSourceImports", "settings"));
+        return Core::failure(std::move(contract.error()).withContext(
+            "finalizeCatalogRecipeSourceImports", "currentContract"));
     }
 
     try
     {
         SourceImportCapturedUnit unit{
-            .unitId = *unitId,
-            .importerKind = SourceImporterKind::CatalogRecipe,
-            .importerVersion = CatalogRecipeImporterVersion,
-            .settingsHash = *settingsHash,
+            .unitId = contract->unitId,
+            .importerKind = contract->importerKind,
+            .importerVersion = contract->importerVersion,
+            .settingsHash = contract->settingsHash,
         };
         unit.inputs.reserve(candidate.sources.size());
         for (Core::u32 sourceIndex = 0; sourceIndex < candidate.sources.size(); ++sourceIndex)
@@ -2202,7 +2182,9 @@ loadCatalogCookRecipeFileInternal(std::string_view recipeUtf8Path,
     std::optional<RecipeSourceCaptureContext> sourceCapture;
     if (captureConfig != nullptr)
     {
-        auto captured = captureSourceImportBytes(sourceImports, *captureConfig, recipeUtf8Path, *bytes);
+        auto captured = captureSourceImportBytes(sourceImports, *captureConfig, recipeUtf8Path,
+                                                 AssetFormat::SourceImportReadExtent::WholeFile,
+                                                 *bytes);
         if (!captured)
         {
             return Core::failure(std::move(captured.error()).withContext(

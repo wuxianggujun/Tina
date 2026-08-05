@@ -35,6 +35,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogSnapshot.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportCapture.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportPlan.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportProbe.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CookedAssetBatch.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CookedAssetFile.hpp
 )
@@ -74,6 +75,7 @@ set(TINA_ASSET_SOURCES
     CatalogSnapshot.cpp
     SourceImportCapture.cpp
     SourceImportPlan.cpp
+    SourceImportProbe.cpp
     CookedAssetBatch.cpp
     CookedAssetFile.cpp
     Utf8Path.hpp

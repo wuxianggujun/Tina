@@ -998,10 +998,13 @@ TEST(CatalogCookSourceTests, CapturesRecipeSharedGenericPayloadAndWavWithoutDupl
     ASSERT_TRUE(expectedWavHash.has_value());
     EXPECT_EQ(recipeSource->contentHash, *expectedRecipeHash);
     EXPECT_EQ(recipeSource->fileBytes, recipeBytes.size());
+    EXPECT_EQ(recipeSource->readExtent, AssetFormat::SourceImportReadExtent::WholeFile);
     EXPECT_EQ(payloadSource->contentHash, *expectedPayloadHash);
     EXPECT_EQ(payloadSource->fileBytes, payloadBytes.size());
+    EXPECT_EQ(payloadSource->readExtent, AssetFormat::SourceImportReadExtent::WholeFile);
     EXPECT_EQ(wavSource->contentHash, *expectedWavHash);
     EXPECT_EQ(wavSource->fileBytes, wavBytes.size());
+    EXPECT_EQ(wavSource->readExtent, AssetFormat::SourceImportReadExtent::WholeFile);
 
     const auto& unit = result->sourceImports.units.front();
     EXPECT_EQ(unit.importerKind, SourceImporterKind::CatalogRecipe);

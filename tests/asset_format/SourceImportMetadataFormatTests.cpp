@@ -97,16 +97,19 @@ Bytes makeValidMetadata()
             .path = "characters/hero.glb",
             .contentHash = contentHash(0x10U),
             .fileBytes = 1024U,
+            .readExtent = SourceImportReadExtent::WholeFile,
         },
         SourceImportMetadataWriteSource{
             .path = "shared/palette.png",
             .contentHash = contentHash(0x11U),
             .fileBytes = 256U,
+            .readExtent = SourceImportReadExtent::Prefix,
         },
         SourceImportMetadataWriteSource{
             .path = "textures/hero.png",
             .contentHash = contentHash(0x12U),
             .fileBytes = 512U,
+            .readExtent = SourceImportReadExtent::WholeFile,
         },
     };
     const std::array unitOneInputs{
@@ -188,12 +191,14 @@ void expectFailure(Bytes bytes, const std::function<void(Bytes&)>& mutate, Core:
     EXPECT_EQ(result.error().code, expectedCode);
 }
 
-Core::Result<Bytes> writeSingleSource(std::string_view path)
+Core::Result<Bytes> writeSingleSource(std::string_view path,
+                                      SourceImportReadExtent readExtent = SourceImportReadExtent::WholeFile)
 {
     const std::array sources{SourceImportMetadataWriteSource{
         .path = path,
         .contentHash = contentHash(1U),
         .fileBytes = 1U,
+        .readExtent = readExtent,
     }};
     const std::array inputs{SourceImportMetadataWriteInput{
         .sourceIndex = 0U,
@@ -250,6 +255,7 @@ TEST(SourceImportMetadataFormatTests, WritesAndParsesCanonicalMetadataDeterminis
     const auto view = parseSourceImportMetadataView(first);
     ASSERT_TRUE(view.has_value()) << view.error().message;
     EXPECT_EQ(view->header().schemaMajor, 1U);
+    EXPECT_EQ(view->header().schemaMinor, 1U);
     EXPECT_EQ(view->header().sourceCount, 3U);
     EXPECT_EQ(view->header().unitCount, 2U);
     EXPECT_EQ(view->header().unitInputCount, 4U);
@@ -259,6 +265,8 @@ TEST(SourceImportMetadataFormatTests, WritesAndParsesCanonicalMetadataDeterminis
     EXPECT_EQ(view->sourcePath(0U), std::optional<std::string_view>{"characters/hero.glb"});
     EXPECT_EQ(view->sourcePath(2U), std::optional<std::string_view>{"textures/hero.png"});
     EXPECT_EQ(view->source(1U)->fileBytes, 256U);
+    EXPECT_EQ(view->source(0U)->readExtent, SourceImportReadExtent::WholeFile);
+    EXPECT_EQ(view->source(1U)->readExtent, SourceImportReadExtent::Prefix);
     EXPECT_EQ(view->unit(1U)->importerVersion, 5U);
     EXPECT_EQ(view->unitInputForUnit(1U, 0U)->sourceIndex, 0U);
     EXPECT_TRUE(hasSourceImportInputFlag(view->unitInputForUnit(1U, 1U)->flags,
@@ -288,7 +296,7 @@ TEST(SourceImportMetadataFormatTests, RejectsMagicOldSchemaFixedSizesAndReserved
 {
     const auto valid = makeValidMetadata();
     expectFailure(valid, [](Bytes& bytes) { putU8(bytes, 0U, 0U); }, AssetFormatErrorCode::InvalidMagic);
-    expectFailure(valid, [](Bytes& bytes) { putU16(bytes, 10U, 1U); },
+    expectFailure(valid, [](Bytes& bytes) { putU16(bytes, 10U, 0U); },
                   AssetFormatErrorCode::UnsupportedSchema);
     expectFailure(valid, [](Bytes& bytes) { putU32(bytes, 52U, 39U); }, AssetFormatErrorCode::InvalidHeader);
     expectFailure(valid, [](Bytes& bytes) { putU32(bytes, 20U, 1U); }, AssetFormatErrorCode::InvalidHeader);
@@ -348,7 +356,7 @@ TEST(SourceImportMetadataFormatTests, RejectsInvalidAndNonCanonicalPaths)
     expectPathWriteFailure(std::string_view(invalidUtf8.data(), invalidUtf8.size()));
 }
 
-TEST(SourceImportMetadataFormatTests, RejectsNonCanonicalRowsAndReservedBits)
+TEST(SourceImportMetadataFormatTests, RejectsInvalidRowsAndReservedBits)
 {
     const auto valid = makeValidMetadata();
     const auto view = parseSourceImportMetadataView(valid);
@@ -358,8 +366,10 @@ TEST(SourceImportMetadataFormatTests, RejectsNonCanonicalRowsAndReservedBits)
     const auto inputOffset = static_cast<Core::usize>(view->header().unitInputsOffset);
     const auto outputOffset = static_cast<Core::usize>(view->header().outputsOffset);
 
-    expectFailure(valid, [sourceOffset](Bytes& bytes) { putU32(bytes, sourceOffset + 36U, 1U); },
-                  AssetFormatErrorCode::InvalidLayout);
+    expectFailure(valid, [sourceOffset](Bytes& bytes) { putU32(bytes, sourceOffset + 36U, 0U); },
+                  AssetFormatErrorCode::UnsupportedValue);
+    expectFailure(valid, [sourceOffset](Bytes& bytes) { putU32(bytes, sourceOffset + 36U, 3U); },
+                  AssetFormatErrorCode::UnsupportedValue);
     expectFailure(valid, [unitOffset](Bytes& bytes) { putU32(bytes, unitOffset + 16U, 0U); },
                   AssetFormatErrorCode::UnsupportedValue);
     expectFailure(valid, [unitOffset](Bytes& bytes) { putU64(bytes, unitOffset + 56U, 1U); },
@@ -435,8 +445,14 @@ TEST(SourceImportMetadataFormatTests, WriterRejectsUnsortedAndDuplicateSourceRow
         .outputs = outputs,
     }};
     const std::array unsortedSources{
-        SourceImportMetadataWriteSource{.path = "z.png", .contentHash = contentHash(2U), .fileBytes = 1U},
-        SourceImportMetadataWriteSource{.path = "a.png", .contentHash = contentHash(3U), .fileBytes = 1U},
+        SourceImportMetadataWriteSource{.path = "z.png",
+                                        .contentHash = contentHash(2U),
+                                        .fileBytes = 1U,
+                                        .readExtent = SourceImportReadExtent::WholeFile},
+        SourceImportMetadataWriteSource{.path = "a.png",
+                                        .contentHash = contentHash(3U),
+                                        .fileBytes = 1U,
+                                        .readExtent = SourceImportReadExtent::WholeFile},
     };
     const auto result = writeSourceImportMetadataBytes(SourceImportMetadataWriteDesc{
         .manifestRevision = SourceImportManifestRevision{
@@ -450,8 +466,14 @@ TEST(SourceImportMetadataFormatTests, WriterRejectsUnsortedAndDuplicateSourceRow
     EXPECT_EQ(result.error().code, AssetFormatErrorCode::InvalidLayout);
 
     const std::array duplicateSources{
-        SourceImportMetadataWriteSource{.path = "a.png", .contentHash = contentHash(2U), .fileBytes = 1U},
-        SourceImportMetadataWriteSource{.path = "a.png", .contentHash = contentHash(3U), .fileBytes = 1U},
+        SourceImportMetadataWriteSource{.path = "a.png",
+                                        .contentHash = contentHash(2U),
+                                        .fileBytes = 1U,
+                                        .readExtent = SourceImportReadExtent::WholeFile},
+        SourceImportMetadataWriteSource{.path = "a.png",
+                                        .contentHash = contentHash(3U),
+                                        .fileBytes = 1U,
+                                        .readExtent = SourceImportReadExtent::WholeFile},
     };
     const auto duplicateResult = writeSourceImportMetadataBytes(SourceImportMetadataWriteDesc{
         .manifestRevision = SourceImportManifestRevision{
@@ -463,6 +485,17 @@ TEST(SourceImportMetadataFormatTests, WriterRejectsUnsortedAndDuplicateSourceRow
     });
     ASSERT_FALSE(duplicateResult.has_value());
     EXPECT_EQ(duplicateResult.error().code, AssetFormatErrorCode::InvalidLayout);
+}
+
+TEST(SourceImportMetadataFormatTests, WriterRejectsInvalidAndUnknownReadExtents)
+{
+    auto result = writeSingleSource("texture.png", SourceImportReadExtent::Invalid);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, AssetFormatErrorCode::UnsupportedValue);
+
+    result = writeSingleSource("texture.png", static_cast<SourceImportReadExtent>(3U));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, AssetFormatErrorCode::UnsupportedValue);
 }
 
 TEST(SourceImportMetadataFormatTests, EnforcesCallerLimitsWithoutExpandingHardLimits)

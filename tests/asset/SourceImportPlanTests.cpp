@@ -19,6 +19,7 @@ struct SourceSpec final {
     std::string path{};
     Core::u8 hashSeed = 0;
     Core::u64 fileBytes = 64;
+    AssetFormat::SourceImportReadExtent readExtent = AssetFormat::SourceImportReadExtent::WholeFile;
 };
 
 struct InputSpec final {
@@ -95,6 +96,7 @@ struct MetadataBytes final {
             .path = source.path,
             .contentHash = contentHash(source.hashSeed),
             .fileBytes = source.fileBytes,
+            .readExtent = source.readExtent,
         });
     }
 
@@ -282,11 +284,12 @@ TEST(SourceImportPlanTests, DetectsSettingsInputsOutputsAndTargetChanges)
         ImporterVersion,
         Settings,
         InputMembership,
+        ReadExtent,
         OutputKind,
         TargetPlatform,
     };
     constexpr std::array Mutations{Mutation::ImporterKind, Mutation::ImporterVersion,
-                                   Mutation::Settings, Mutation::InputMembership,
+                                   Mutation::Settings, Mutation::InputMembership, Mutation::ReadExtent,
                                    Mutation::OutputKind, Mutation::TargetPlatform};
 
     for (const auto mutation : Mutations)
@@ -308,6 +311,9 @@ TEST(SourceImportPlanTests, DetectsSettingsInputsOutputsAndTargetChanges)
             break;
         case Mutation::InputMembership:
             units[0].inputs.push_back(InputSpec{.sourceIndex = 1U});
+            break;
+        case Mutation::ReadExtent:
+            sources[0].readExtent = AssetFormat::SourceImportReadExtent::Prefix;
             break;
         case Mutation::OutputKind:
             units[0].outputs[0].kind = AssetFormat::AssetKind::Texture2D;

@@ -96,6 +96,11 @@ template <typename Bytes> [[nodiscard]] Bytes readFixed(std::span<const std::byt
     return (static_cast<u16>(flags) & ~Known) == 0U;
 }
 
+[[nodiscard]] constexpr bool isKnownReadExtent(SourceImportReadExtent extent) noexcept
+{
+    return extent >= SourceImportReadExtent::WholeFile && extent <= SourceImportReadExtent::Prefix;
+}
+
 [[nodiscard]] bool validLimits(const SourceImportMetadataLimits& limits) noexcept
 {
     return limits.maxFileBytes > 0U && limits.maxFileBytes <= SourceImportWire::MaxFileBytes &&
@@ -194,6 +199,7 @@ template <typename Bytes> [[nodiscard]] Bytes readFixed(std::span<const std::byt
         .fileBytes = readU64(bytes, offset + 16U),
         .pathOffset = readU64(bytes, offset + 24U),
         .pathBytes = readU32(bytes, offset + 32U),
+        .readExtent = static_cast<SourceImportReadExtent>(readU32(bytes, offset + 36U)),
     };
 }
 
@@ -479,7 +485,12 @@ Core::Result<SourceImportMetadataView> parseSourceImportMetadataView(std::span<c
         {
             return Core::failure(AssetFormatErrorCode::InvalidIdentity, "source content hash is zero");
         }
-        if (readU32(bytes, offset + 36U) != 0U || sourceEntry->pathBytes == 0U ||
+        if (!isKnownReadExtent(sourceEntry->readExtent))
+        {
+            return Core::failure(AssetFormatErrorCode::UnsupportedValue,
+                                 "source read extent is invalid or unsupported");
+        }
+        if (sourceEntry->pathBytes == 0U ||
             sourceEntry->pathBytes > limits.maxPathBytes || sourceEntry->pathOffset != expectedPathOffset)
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "source row is not canonical");
@@ -641,6 +652,11 @@ writeSourceImportMetadataBytes(const SourceImportMetadataWriteDesc& desc)
     u64 stringBytes = 0;
     for (const auto& source : desc.sources)
     {
+        if (!isKnownReadExtent(source.readExtent))
+        {
+            return Core::failure(AssetFormatErrorCode::UnsupportedValue,
+                                 "source import metadata write requires a valid read extent");
+        }
         if (source.path.size() > SourceImportWire::MaxPathBytes ||
             !checkedAdd(stringBytes, static_cast<u64>(source.path.size()), stringBytes))
         {
@@ -731,6 +747,7 @@ writeSourceImportMetadataBytes(const SourceImportMetadataWriteDesc& desc)
             writeU64(bytes, offset + 16U, source.fileBytes);
             writeU64(bytes, offset + 24U, pathOffset);
             writeU32(bytes, offset + 32U, static_cast<u32>(source.path.size()));
+            writeU32(bytes, offset + 36U, static_cast<u32>(source.readExtent));
             std::copy(source.path.begin(), source.path.end(),
                       reinterpret_cast<char*>(bytes.data() + static_cast<usize>(pathOffset)));
             pathOffset += source.path.size();

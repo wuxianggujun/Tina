@@ -40,8 +40,10 @@ TEST(SourceImportCaptureTests, CapturesCallerBytesAndWritesCanonicalMetadata)
     constexpr std::array PayloadBytes{std::byte{'p'}, std::byte{'a'}, std::byte{'y'}};
 
     SourceImportCandidate candidate{};
-    auto payloadIndex = captureSourceImportBytes(candidate, config, toUtf8(root / "payload.bin"), PayloadBytes);
-    auto recipeIndex = captureSourceImportBytes(candidate, config, toUtf8(root / "recipes/main.recipe"), RecipeBytes);
+    auto payloadIndex = captureSourceImportBytes(candidate, config, toUtf8(root / "payload.bin"),
+                                                 AssetFormat::SourceImportReadExtent::Prefix, PayloadBytes);
+    auto recipeIndex = captureSourceImportBytes(candidate, config, toUtf8(root / "recipes/main.recipe"),
+                                                AssetFormat::SourceImportReadExtent::WholeFile, RecipeBytes);
     ASSERT_TRUE(payloadIndex.has_value()) << payloadIndex.error().message;
     ASSERT_TRUE(recipeIndex.has_value()) << recipeIndex.error().message;
 
@@ -78,11 +80,45 @@ TEST(SourceImportCaptureTests, CapturesCallerBytesAndWritesCanonicalMetadata)
     ASSERT_EQ(view->header().sourceCount, 2U);
     EXPECT_EQ(view->sourcePath(0U), std::optional<std::string_view>{"payload.bin"});
     EXPECT_EQ(view->sourcePath(1U), std::optional<std::string_view>{"recipes/main.recipe"});
+    EXPECT_EQ(view->source(0U)->readExtent, AssetFormat::SourceImportReadExtent::Prefix);
+    EXPECT_EQ(view->source(1U)->readExtent, AssetFormat::SourceImportReadExtent::WholeFile);
     ASSERT_EQ(view->header().unitCount, 1U);
     const auto primary = view->unitInputForUnit(0U, 1U);
     ASSERT_TRUE(primary.has_value());
     EXPECT_TRUE(AssetFormat::hasSourceImportInputFlag(primary->flags,
                                                       AssetFormat::SourceImportInputFlags::Primary));
+}
+
+TEST(SourceImportCaptureTests, DeduplicatesOnlyIdenticalSourceObservations)
+{
+    const auto root = std::filesystem::temp_directory_path() / "tina_source_import_dedup";
+    const std::string rootUtf8 = toUtf8(root);
+    const SourceImportCaptureConfig config{.sourceRootUtf8 = rootUtf8};
+    constexpr std::array Bytes{std::byte{'a'}, std::byte{'b'}, std::byte{'c'}};
+    constexpr std::array DifferentBytes{std::byte{'a'}, std::byte{'b'}, std::byte{'d'}};
+    constexpr std::array ShortBytes{std::byte{'a'}, std::byte{'b'}};
+    const auto sourcePath = toUtf8(root / "source.bin");
+
+    SourceImportCandidate candidate{};
+    const auto first = captureSourceImportBytes(candidate, config, sourcePath,
+                                                AssetFormat::SourceImportReadExtent::WholeFile, Bytes);
+    ASSERT_TRUE(first.has_value()) << first.error().message;
+    const auto duplicate = captureSourceImportBytes(candidate, config, sourcePath,
+                                                    AssetFormat::SourceImportReadExtent::WholeFile, Bytes);
+    ASSERT_TRUE(duplicate.has_value()) << duplicate.error().message;
+    EXPECT_EQ(*duplicate, *first);
+    EXPECT_EQ(candidate.sources.size(), 1U);
+
+    const auto extentMismatch = captureSourceImportBytes(
+        candidate, config, sourcePath, AssetFormat::SourceImportReadExtent::Prefix, Bytes);
+    ASSERT_FALSE(extentMismatch.has_value());
+    const auto hashMismatch = captureSourceImportBytes(
+        candidate, config, sourcePath, AssetFormat::SourceImportReadExtent::WholeFile, DifferentBytes);
+    ASSERT_FALSE(hashMismatch.has_value());
+    const auto byteCountMismatch = captureSourceImportBytes(
+        candidate, config, sourcePath, AssetFormat::SourceImportReadExtent::WholeFile, ShortBytes);
+    ASSERT_FALSE(byteCountMismatch.has_value());
+    EXPECT_EQ(candidate.sources.size(), 1U);
 }
 
 TEST(SourceImportCaptureTests, InvalidCandidateDoesNotReplaceExistingState)

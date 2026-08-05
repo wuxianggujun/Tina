@@ -13,6 +13,7 @@
 #include <tina/asset/GltfCook.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/SourceImportProbe.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
@@ -608,6 +609,7 @@ struct GltfSourceCaptureContext final {
 [[nodiscard]] Core::Result<Core::u32> captureGltfSourceBytes(
     GltfSourceCaptureContext& capture,
     const std::filesystem::path& sourcePath,
+    AssetFormat::SourceImportReadExtent readExtent,
     std::span<const std::byte> consumedBytes)
 {
     if (capture.config == nullptr || capture.candidate == nullptr)
@@ -617,7 +619,7 @@ struct GltfSourceCaptureContext final {
     }
     const std::string sourceUtf8Path = pathToUtf8Bytes(sourcePath);
     return captureSourceImportBytes(*capture.candidate, *capture.config, sourceUtf8Path,
-                                    consumedBytes);
+                                    readExtent, consumedBytes);
 }
 
 [[nodiscard]] bool checkedAdd(std::uint64_t left, std::uint64_t right,
@@ -880,6 +882,7 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
 [[nodiscard]] Core::Result<Core::u32> captureGltfExternalSourceBytes(
     GltfSourceCaptureContext& capture,
     std::string_view uri,
+    AssetFormat::SourceImportReadExtent readExtent,
     std::span<const std::byte> consumedBytes)
 {
     auto sourcePath = resolveContainedGltfExternalPath(capture.documentSourcePath, uri);
@@ -887,7 +890,7 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
     {
         return Core::failure(std::move(sourcePath.error()));
     }
-    return captureGltfSourceBytes(capture, *sourcePath, consumedBytes);
+    return captureGltfSourceBytes(capture, *sourcePath, readExtent, consumedBytes);
 }
 
 [[nodiscard]] Core::Status loadGltfBuffersFromSnapshots(const cgltf_options& options,
@@ -958,7 +961,8 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
         }
         if (capture != nullptr)
         {
-            auto sourceIndex = captureGltfExternalSourceBytes(*capture, buffer.uri, snapshot->bytes);
+            auto sourceIndex = captureGltfExternalSourceBytes(
+                *capture, buffer.uri, AssetFormat::SourceImportReadExtent::Prefix, snapshot->bytes);
             if (!sourceIndex)
             {
                 return Core::failure(std::move(sourceIndex.error())
@@ -1042,7 +1046,9 @@ struct GltfImageDecodeBudget final {
         }
         if (capture != nullptr)
         {
-            auto sourceIndex = captureGltfExternalSourceBytes(*capture, image->uri, snapshot->bytes);
+            auto sourceIndex = captureGltfExternalSourceBytes(
+                *capture, image->uri, AssetFormat::SourceImportReadExtent::WholeFile,
+                snapshot->bytes);
             if (!sourceIndex)
             {
                 return Core::failure(std::move(sourceIndex.error())
@@ -1133,31 +1139,6 @@ struct GltfImageDecodeBudget final {
 
 namespace {
 
-[[nodiscard]] Core::Result<Core::ContentHash> digestGltfCookSettings(const GltfCookIds& ids)
-{
-    constexpr std::array Domain{
-        std::byte{'T'}, std::byte{'I'}, std::byte{'N'}, std::byte{'A'},
-        std::byte{'G'}, std::byte{'L'}, std::byte{'T'}, std::byte{'F'},
-        std::byte{'C'}, std::byte{'F'}, std::byte{'G'}, std::byte{0},
-    };
-    constexpr Core::u32 SettingsSchemaVersion = 1;
-    constexpr std::size_t AssetIdBytes = Core::AssetId::Bytes{}.size();
-    std::array<std::byte, Domain.size() + sizeof(Core::u32) + AssetIdBytes * 3U> canonical{};
-    auto cursor = std::copy(Domain.begin(), Domain.end(), canonical.begin());
-    for (Core::u32 shift = 0; shift < 32U; shift += 8U)
-    {
-        *cursor++ = static_cast<std::byte>((SettingsSchemaVersion >> shift) & 0xFFU);
-    }
-    const auto appendId = [&cursor](Core::AssetId id) {
-        const auto bytes = id.bytes();
-        cursor = std::copy(bytes.begin(), bytes.end(), cursor);
-    };
-    appendId(ids.meshId);
-    appendId(ids.materialId);
-    appendId(ids.prefabId);
-    return digestSourceImportSettings(canonical);
-}
-
 [[nodiscard]] Core::Status finalizeGltfSourceImports(CatalogCookSourceResult& result,
                                                      Core::u32 primarySourceIndex,
                                                      const GltfCookIds& requestedIds)
@@ -1170,24 +1151,18 @@ namespace {
     }
 
     const auto& primaryPath = result.sourceImports.sources[primarySourceIndex].path;
-    auto unitId = deriveSourceImportUnitId(SourceImporterKind::Gltf, primaryPath);
-    if (!unitId)
+    auto contract = currentGltfSourceImportContract(primaryPath, requestedIds);
+    if (!contract)
     {
-        return Core::failure(std::move(unitId.error())
-                                 .withContext("finalizeGltfSourceImports", "unit identity"));
-    }
-    auto settingsHash = digestGltfCookSettings(requestedIds);
-    if (!settingsHash)
-    {
-        return Core::failure(std::move(settingsHash.error())
-                                 .withContext("finalizeGltfSourceImports", "settings"));
+        return Core::failure(std::move(contract.error())
+                                 .withContext("finalizeGltfSourceImports", "currentContract"));
     }
 
     SourceImportCapturedUnit unit{
-        .unitId = *unitId,
-        .importerKind = SourceImporterKind::Gltf,
-        .importerVersion = 1,
-        .settingsHash = *settingsHash,
+        .unitId = contract->unitId,
+        .importerKind = contract->importerKind,
+        .importerVersion = contract->importerVersion,
+        .settingsHash = contract->settingsHash,
     };
     unit.inputs.reserve(result.sourceImports.sources.size());
     for (Core::u32 sourceIndex = 0; sourceIndex < result.sourceImports.sources.size(); ++sourceIndex)
@@ -1270,7 +1245,9 @@ namespace {
     if (activeCapture != nullptr)
     {
         auto sourceIndex = captureSourceImportBytes(result.sourceImports, *captureConfig,
-                                                    gltfUtf8Path, source->bytes);
+                                                    gltfUtf8Path,
+                                                    AssetFormat::SourceImportReadExtent::WholeFile,
+                                                    source->bytes);
         if (!sourceIndex)
         {
             return Core::failure(std::move(sourceIndex.error())

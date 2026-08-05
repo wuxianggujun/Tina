@@ -26,6 +26,7 @@ struct SourceImportCapturedSource final {
     std::string path{};
     Core::ContentHash contentHash{};
     Core::u64 fileBytes = 0;
+    AssetFormat::SourceImportReadExtent readExtent = AssetFormat::SourceImportReadExtent::Invalid;
 };
 
 struct SourceImportCapturedInput final {
@@ -58,12 +59,14 @@ struct SourceImportCandidate final {
 [[nodiscard]] Core::Result<std::string>
 normalizeSourceImportPath(const SourceImportCaptureConfig& config, std::string_view sourceUtf8Path);
 
-// Hashes the exact caller-provided bytes and appends/deduplicates one source. This function never
-// opens or rereads sourceUtf8Path. The returned index remains valid until candidate.sources changes.
+// Hashes the exact caller-provided bytes, records their explicit read extent, and
+// appends/deduplicates one source. This function never opens or rereads sourceUtf8Path. The returned
+// index remains valid until candidate.sources changes.
 [[nodiscard]] Core::Result<Core::u32>
 captureSourceImportBytes(SourceImportCandidate& candidate,
                          const SourceImportCaptureConfig& config,
                          std::string_view sourceUtf8Path,
+                         AssetFormat::SourceImportReadExtent readExtent,
                          std::span<const std::byte> consumedBytes);
 
 // Unit identity is derived only from the importer kind and canonical primary path. Importer

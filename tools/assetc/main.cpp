@@ -3,6 +3,7 @@
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageChangeDetector.hpp>
 #include <tina/asset/GltfCook.hpp>
+#include <tina/asset/SourceImportProbe.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -25,6 +26,14 @@ struct Options final {
     std::string gltfPath;
     std::string sourceRoot;
     std::string importStatePath;
+};
+
+struct PreCookProbe final {
+    bool enabled = false;
+    Tina::Asset::SourceImportProbeState state = Tina::Asset::SourceImportProbeState::NoBaseline;
+    std::string_view reason = "disabled";
+    Tina::Core::u32 cleanUnitCount = 0;
+    Tina::Core::u32 cleanObjectCount = 0;
 };
 
 void printUsage()
@@ -162,6 +171,107 @@ void printError(const Tina::Core::Error& error)
               << ",\"code\":" << error.code.value << ",\"message\":\"" << error.message << "\"}\n";
 }
 
+[[nodiscard]] constexpr std::string_view
+probeStateName(Tina::Asset::SourceImportProbeState state) noexcept
+{
+    switch (state)
+    {
+    case Tina::Asset::SourceImportProbeState::Clean:
+        return "clean";
+    case Tina::Asset::SourceImportProbeState::Dirty:
+        return "dirty";
+    case Tina::Asset::SourceImportProbeState::NoBaseline:
+        return "no-baseline";
+    }
+    return "unknown";
+}
+
+[[nodiscard]] Tina::Asset::CatalogPackageOpenConfig
+catalogOpenConfig(std::pmr::memory_resource& memory, bool validateOnOpen,
+                  bool verifyTypedPayload)
+{
+    return Tina::Asset::CatalogPackageOpenConfig{
+        .manifest =
+            Tina::Asset::CatalogFileLoadConfig{
+                .catalog =
+                    Tina::Asset::CatalogConfig{
+                        .maxEntries = 1024,
+                        .maxDependencies = 4096,
+                        .maxDependenciesPerAsset = 64,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = validateOnOpen,
+        .validation =
+            Tina::Asset::CatalogPackageValidationConfig{
+                .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = verifyTypedPayload,
+            },
+    };
+}
+
+[[nodiscard]] Tina::Core::Result<PreCookProbe>
+probeExistingImport(const Options& options, std::pmr::memory_resource& memory)
+{
+    if (options.importStatePath.empty())
+    {
+        return PreCookProbe{};
+    }
+
+    auto revision = Tina::Asset::captureCatalogPackageRevision(
+        options.outRoot,
+        Tina::Asset::CatalogPackageChangeDetectorConfig{.scratchMemoryResource = &memory});
+    if (!revision)
+    {
+        if (revision.error().code == Tina::Core::CoreErrorCode::NotFound)
+        {
+            return PreCookProbe{.enabled = true, .reason = "catalog-not-found"};
+        }
+        return Tina::Core::failure(std::move(revision.error()));
+    }
+
+    const Tina::AssetFormat::SourceImportManifestRevision importRevision{
+        .manifestDigest = revision->manifestDigest,
+        .manifestBytes = revision->manifestBytes,
+    };
+    Tina::Core::Result<Tina::Asset::SourceImportProbeResult> probe =
+        options.gltfPath.empty()
+            ? Tina::Asset::probeCatalogRecipeSourceImportState(
+                  options.importStatePath, importRevision, options.sourceRoot, options.recipePath)
+            : Tina::Asset::probeGltfSourceImportState(
+                  options.importStatePath, importRevision, options.sourceRoot, options.gltfPath);
+    if (!probe)
+    {
+        return Tina::Core::failure(std::move(probe.error()));
+    }
+    return PreCookProbe{
+        .enabled = true,
+        .state = probe->state,
+        .reason = Tina::Asset::sourceImportProbeReasonName(probe->reason),
+        .cleanUnitCount = probe->cleanUnitCount,
+        .cleanObjectCount = probe->cleanObjectCount,
+    };
+}
+
+void printSuccess(const Tina::Asset::CatalogSnapshot& catalog, std::string_view mode,
+                  std::string_view cookMode, const PreCookProbe& probe,
+                  Tina::Core::u32 unitsTotal, Tina::Core::u32 unitsRecooked,
+                  Tina::Core::u32 objectsReused, Tina::Core::u32 objectsCooked,
+                  bool importStateCommitted, std::string_view outRoot)
+{
+    std::cout << "{\"status\":\"ok\",\"tool\":\"tina_assetc\",\"entries\":"
+              << catalog.entryCount() << ",\"dependencies\":" << catalog.dependencyCount()
+              << ",\"mode\":\"" << mode << "\",\"cookMode\":\"" << cookMode
+              << "\",\"probe\":\"" << (probe.enabled ? probeStateName(probe.state) : "disabled")
+              << "\",\"probeReason\":\"" << probe.reason << "\",\"unitsTotal\":"
+              << unitsTotal << ",\"unitsRecooked\":" << unitsRecooked
+              << ",\"objectsReused\":" << objectsReused << ",\"objectsCooked\":"
+              << objectsCooked << ",\"importStateCommitted\":"
+              << (importStateCommitted ? "true" : "false") << ",\"out\":\"" << outRoot
+              << "\"}\n";
+}
+
 [[nodiscard]] Tina::Core::Result<Tina::Asset::CatalogCookRequest> buildTyped2dRequest()
 {
     const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
@@ -233,10 +343,40 @@ int main(int argc, char** argv)
         return parseResult == 2 ? 2 : 1;
     }
 
+    std::string mode = options.gltfPath.empty() ? (options.recipePath.empty() ? "typed2d" : "recipe")
+                                                : "gltf";
+    std::pmr::unsynchronized_pool_resource memory;
+    auto preCookProbe = probeExistingImport(options, memory);
+    if (!preCookProbe)
+    {
+        printError(preCookProbe.error());
+        return 1;
+    }
+    if (preCookProbe->state == Tina::Asset::SourceImportProbeState::Clean)
+    {
+        auto catalog = Tina::Asset::openCatalogPackage(
+            options.outRoot, catalogOpenConfig(memory, false, options.recipePath.empty()));
+        if (!catalog)
+        {
+            printError(catalog.error());
+            return 1;
+        }
+        if (catalog->entryCount() == preCookProbe->cleanObjectCount)
+        {
+            printSuccess(*catalog, mode, "clean-reuse", *preCookProbe,
+                         preCookProbe->cleanUnitCount, 0U, catalog->entryCount(), 0U, false,
+                         options.outRoot);
+            return 0;
+        }
+        preCookProbe->state = Tina::Asset::SourceImportProbeState::Dirty;
+        preCookProbe->reason = "catalog-output-count-changed";
+        preCookProbe->cleanUnitCount = 0U;
+        preCookProbe->cleanObjectCount = 0U;
+    }
+
     Tina::Core::Result<Tina::Asset::CatalogCookRequest> request =
         Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig, "no request");
     std::optional<Tina::Asset::SourceImportCandidate> sourceImports;
-    std::string mode = "typed2d";
     if (!options.gltfPath.empty())
     {
         if (options.importStatePath.empty())
@@ -256,7 +396,6 @@ int main(int argc, char** argv)
             request = std::move(sourceResult->request);
             sourceImports.emplace(std::move(sourceResult->sourceImports));
         }
-        mode = "gltf";
     } else if (!options.recipePath.empty())
     {
         if (options.importStatePath.empty())
@@ -276,7 +415,6 @@ int main(int argc, char** argv)
             request = std::move(sourceResult->request);
             sourceImports.emplace(std::move(sourceResult->sourceImports));
         }
-        mode = "recipe";
     } else
     {
         request = buildTyped2dRequest();
@@ -293,27 +431,8 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    std::pmr::unsynchronized_pool_resource memory;
-    Tina::Asset::CatalogPackageOpenConfig openConfig{
-        .manifest =
-            Tina::Asset::CatalogFileLoadConfig{
-                .catalog =
-                    Tina::Asset::CatalogConfig{
-                        .maxEntries = 1024,
-                        .maxDependencies = 4096,
-                        .maxDependenciesPerAsset = 64,
-                        .memoryResource = &memory,
-                    },
-            },
-        .validateOnOpen = true,
-        .validation =
-            Tina::Asset::CatalogPackageValidationConfig{
-                .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memory},
-                .verifyContent = true,
-                .verifyTypedPayload = options.recipePath.empty(),
-            },
-    };
-    auto catalog = Tina::Asset::openCatalogPackage(options.outRoot, openConfig);
+    auto catalog = Tina::Asset::openCatalogPackage(
+        options.outRoot, catalogOpenConfig(memory, true, options.recipePath.empty()));
     if (!catalog)
     {
         printError(catalog.error());
@@ -344,9 +463,8 @@ int main(int argc, char** argv)
         }
     }
 
-    std::cout << "{\"status\":\"ok\",\"tool\":\"tina_assetc\",\"entries\":" << catalog->entryCount()
-              << ",\"dependencies\":" << catalog->dependencyCount() << ",\"mode\":\"" << mode << "\""
-              << ",\"importStateCommitted\":" << (sourceImports ? "true" : "false")
-              << ",\"out\":\"" << options.outRoot << "\"}\n";
+    const auto unitsCooked = sourceImports ? static_cast<Tina::Core::u32>(sourceImports->units.size()) : 0U;
+    printSuccess(*catalog, mode, "full-recook", *preCookProbe, unitsCooked, unitsCooked, 0U,
+                 catalog->entryCount(), sourceImports.has_value(), options.outRoot);
     return 0;
 }

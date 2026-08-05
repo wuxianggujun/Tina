@@ -22,7 +22,7 @@ inline constexpr std::array<std::byte, 8> Magic{std::byte{'T'}, std::byte{'I'}, 
                                                 std::byte{'I'}, std::byte{'M'}, std::byte{'P'}, std::byte{'T'}};
 
 inline constexpr Core::u16 SchemaMajor = 1;
-inline constexpr Core::u16 SchemaMinor = 0;
+inline constexpr Core::u16 SchemaMinor = 1;
 inline constexpr Core::u32 HeaderBytes = 144;
 inline constexpr Core::u32 SourceEntryBytes = 40;
 inline constexpr Core::u32 UnitEntryBytes = 64;
@@ -143,6 +143,12 @@ enum class SourceImportInputFlags : Core::u16 {
     Primary = 1U << 0U,
 };
 
+enum class SourceImportReadExtent : Core::u32 {
+    Invalid = 0,
+    WholeFile = 1,
+    Prefix = 2,
+};
+
 [[nodiscard]] constexpr bool hasSourceImportInputFlag(SourceImportInputFlags value,
                                                        SourceImportInputFlags flag) noexcept
 {
@@ -190,6 +196,7 @@ struct SourceImportSource final {
     Core::u64 fileBytes = 0;
     Core::u64 pathOffset = 0;
     Core::u32 pathBytes = 0;
+    SourceImportReadExtent readExtent = SourceImportReadExtent::Invalid;
 };
 
 struct SourceImportUnit final {
@@ -256,6 +263,7 @@ struct SourceImportMetadataWriteSource final {
     std::string_view path;
     Core::ContentHash contentHash{};
     Core::u64 fileBytes = 0;
+    SourceImportReadExtent readExtent = SourceImportReadExtent::Invalid;
 };
 
 struct SourceImportMetadataWriteInput final {

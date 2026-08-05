@@ -886,6 +886,13 @@ out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalog
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
 ```
 
+ASSET-002 clean whole-package reuse 只需构建 `tina_asset_format_tests`、`tina_asset_tests`、`tina_assetc`，直接运行
+`SourceImportMetadataFormatTests.*:SourceImportCaptureTests.*:SourceImportPlanTests.*:SourceImportProbeTests.*` filter。
+CLI 对同一 recipe/glTF 连续执行两次：首跑必须为 `full-recook`，第二跑必须为 `clean-reuse`；第二跑前后比较
+manifest/object/state 的 bytes 与 mtime，均应不变。修改 WholeFile 任意 byte、Prefix 已消费范围内 byte、importer
+contract 或 manifest revision 后必须回到 full recook；只在 Prefix 已消费范围后追加 bytes 仍应 clean。该切片不要求
+运行完整 `tina_asset_tests`、Scene/sample 或 shader/bgfx target。
+
 multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct
 mesh/material AssetId、Prefab dependency、AssetId→Handle→registry-owned binding→packet-local ref 与双 mesh
 binding 可验证。Opaque3D 已做
