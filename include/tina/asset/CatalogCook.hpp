@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/CatalogPackage.hpp>
+#include <tina/asset/SourceImportCapture.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -25,6 +26,11 @@ struct CatalogCookRequest final {
     AssetFormat::TargetPlatform targetPlatform = AssetFormat::TargetPlatform::WindowsX64;
     // Unsorted inputs are sorted by AssetId before writing; duplicate ids fail.
     std::vector<CatalogCookAssetSpec> assets{};
+};
+
+struct CatalogCookSourceResult final {
+    CatalogCookRequest request{};
+    SourceImportCandidate sourceImports{};
 };
 
 struct CatalogCookResult final {
