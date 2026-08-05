@@ -31,6 +31,7 @@ inline constexpr InputActionId NavigationAction{42};
 struct FrameSpec final {
     Platform::PlatformFrameId frameId{1};
     std::vector<Platform::InputTransitionPayload> transitions{};
+    std::vector<Platform::PlatformEventPayload> platformEvents{};
     std::vector<Platform::Key> heldKeys{};
     std::vector<Platform::PointerButton> heldPointerButtons{};
     double pointerX = 10.0;

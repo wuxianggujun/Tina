@@ -556,7 +556,7 @@ Core::Status PrimaryWindowUICapabilityState::setFlowScreenAction(
     Core::Status status = updater.setFlowScreenAction(screen, action, std::move(callback));
     if (!status)
     {
-        return rememberFirstError(std::move(status.error()), Operation);
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
     }
     return Core::success();
 }
@@ -573,7 +573,7 @@ Core::Status PrimaryWindowUICapabilityState::clearFlowScreenAction(
     Core::Status status = updater.clearFlowScreenAction(screen, action);
     if (!status)
     {
-        return rememberFirstError(std::move(status.error()), Operation);
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
     }
     return Core::success();
 }

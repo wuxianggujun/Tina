@@ -744,8 +744,9 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 - `UI-FLOW-001` 已因 2D Pause 页面栈进入 InProgress：首切片复用 retained node，提供固定容量
   Layer/Screen 注册、push/pop/replace、栈顶 publication、失败原子性与生命周期回收；第二切片已增加
   topmost Screen 的 Back callback、Dropdown-first Escape/Gamepad East 路由与 Down/Up gameplay suppression；
-  第三切片增加单用户 `KeyboardMouse/Gamepad` revision、断连回落与 2D Pause 真实提示；多本地用户和
-  更宽 action 集继续后置；
+  第三切片增加单用户 `KeyboardMouse/Gamepad` revision、断连回落与 2D Pause 真实提示；第四切片增加
+  Confirm callback、focused-control-first Enter/Keypad Enter/Gamepad South 路由与 `ESC / ENTER`、`B / A`
+  产品提示；多本地用户和额外 action 继续后置；
 - `UI-BEHAVIOR-SPI-001` 只有标准 Behavior 无法满足有证据的插件场景时才冻结高级 SPI。
 
 详细状态和验收条件只在 [Backlog](backlog.md)维护。

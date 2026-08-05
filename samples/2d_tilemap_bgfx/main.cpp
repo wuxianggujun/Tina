@@ -134,9 +134,9 @@ inline constexpr u32 ProductCulledPointLight2DCount =
 inline constexpr u32 ProductShadowOccluder2DCount = 2;
 inline constexpr u32 ProductSoftShadowPointLight2DCount = 2;
 inline constexpr float ProductAmbientLight2DScale = 0.28F;
-inline constexpr u32 ProductEvidenceSchema = 21;
-inline constexpr std::string_view PauseKeyboardMouseHint = "ESC TO RESUME";
-inline constexpr std::string_view PauseGamepadHint = "B TO RESUME";
+inline constexpr u32 ProductEvidenceSchema = 22;
+inline constexpr std::string_view PauseKeyboardMouseHint = "ESC / ENTER TO RESUME";
+inline constexpr std::string_view PauseGamepadHint = "B / A TO RESUME";
 inline constexpr float ProductWarmLightSourceRadiusMeters = 0.45F;
 inline constexpr float ProductCoolLightSourceRadiusMeters = 0.6F;
 inline constexpr Tina::InputActionId MoveLeftAction{1};
@@ -309,6 +309,7 @@ struct LifecycleCounters final {
     u64 uiFlowActionsRegistered = 0;
     u64 uiFlowActionsCleared = 0;
     u64 uiFlowBackActionInvocations = 0;
+    u64 uiFlowConfirmActionInvocations = 0;
     u64 pauseInputDeviceHintUpdates = 0;
     u64 pauseInputDeviceRevision = 0;
     bool pauseInputHintKeyboardMouse = false;
@@ -1991,21 +1992,29 @@ class PauseOverlayState final : public Tina::IGameState {
         if (auto status = tree->setFlowScreenAction(
                 pauseScreen_, Tina::UI::UIFlowAction::Back,
                 Tina::UI::UIFlowActionCallback{
-                    [this](const Tina::UI::UIFlowActionEvent&) noexcept {
-                        if (!resumeRequested_)
-                        {
-                            resumeRequested_ = true;
-                            ++counters_->uiFlowBackActionInvocations;
-                            counters_->pauseResumeRequestedByAction = true;
-                        }
+                    [this](const Tina::UI::UIFlowActionEvent& event) noexcept {
+                        requestResumeFromAction(event);
                     }});
             !status)
         {
             static_cast<void>(tree->popFlowScreen(flowLayer_));
             return status;
         }
+        if (auto status = tree->setFlowScreenAction(
+                pauseScreen_, Tina::UI::UIFlowAction::Confirm,
+                Tina::UI::UIFlowActionCallback{
+                    [this](const Tina::UI::UIFlowActionEvent& event) noexcept {
+                        requestResumeFromAction(event);
+                    }});
+            !status)
+        {
+            static_cast<void>(tree->clearFlowScreenAction(
+                pauseScreen_, Tina::UI::UIFlowAction::Back));
+            static_cast<void>(tree->popFlowScreen(flowLayer_));
+            return status;
+        }
         ++counters_->uiFlowScreenPushes;
-        ++counters_->uiFlowActionsRegistered;
+        counters_->uiFlowActionsRegistered += 2U;
         recordInputDeviceHint(*inputDevice);
         counters_->pauseUIScreenActivated = true;
         ++counters_->pauseOverlayPushes;
@@ -2092,7 +2101,13 @@ class PauseOverlayState final : public Tina::IGameState {
         {
             return status;
         }
-        ++counters_->uiFlowActionsCleared;
+        if (auto status = tree->clearFlowScreenAction(
+                pauseScreen_, Tina::UI::UIFlowAction::Confirm);
+            !status)
+        {
+            return status;
+        }
+        counters_->uiFlowActionsCleared += 2U;
         auto active = tree->activeFlowScreen(flowLayer_);
         if (!active)
         {
@@ -2110,6 +2125,24 @@ class PauseOverlayState final : public Tina::IGameState {
     }
 
   private:
+    void requestResumeFromAction(const Tina::UI::UIFlowActionEvent& event) noexcept
+    {
+        if (resumeRequested_)
+        {
+            return;
+        }
+        resumeRequested_ = true;
+        counters_->pauseResumeRequestedByAction = true;
+        if (event.action == Tina::UI::UIFlowAction::Back)
+        {
+            ++counters_->uiFlowBackActionInvocations;
+        }
+        else if (event.action == Tina::UI::UIFlowAction::Confirm)
+        {
+            ++counters_->uiFlowConfirmActionInvocations;
+        }
+    }
+
     [[nodiscard]] static constexpr std::string_view
     inputDeviceHintText(Tina::UI::UIFlowInputDevice device) noexcept
     {
@@ -4943,12 +4976,16 @@ int main(int argc, char** argv)
         ok = ok && counters.pauseOverlayPushes == 1 && counters.pauseOverlayPops == 1
              && counters.pauseOverlayFrames >= 1 && counters.pauseOverlayFrames <= 3
              && counters.uiFlowScreenPushes == 2 && counters.uiFlowScreenPops == 1
-             && counters.uiFlowActionsRegistered == 1 && counters.uiFlowActionsCleared == 1
-             && counters.uiFlowBackActionInvocations + counters.pauseAutoResumeRequests == 1
+             && counters.uiFlowActionsRegistered == 2 && counters.uiFlowActionsCleared == 2
+             && counters.uiFlowBackActionInvocations +
+                    counters.uiFlowConfirmActionInvocations +
+                    counters.pauseAutoResumeRequests == 1
              && counters.pauseInputDeviceHintUpdates >= 1
              && counters.pauseInputHintKeyboardMouse != counters.pauseInputHintGamepad
              && counters.pauseResumeRequestedByAction ==
-                    (counters.uiFlowBackActionInvocations == 1)
+                    (counters.uiFlowBackActionInvocations +
+                         counters.uiFlowConfirmActionInvocations ==
+                     1)
              && counters.pauseUIScreenActivated && counters.baseUIScreenRestored;
     }
     else
@@ -4957,6 +4994,7 @@ int main(int argc, char** argv)
              && counters.uiFlowScreenPushes == 1 && counters.uiFlowScreenPops == 0
              && counters.uiFlowActionsRegistered == 0 && counters.uiFlowActionsCleared == 0
              && counters.uiFlowBackActionInvocations == 0
+             && counters.uiFlowConfirmActionInvocations == 0
              && counters.pauseInputDeviceHintUpdates == 0
              && !counters.pauseInputHintKeyboardMouse && !counters.pauseInputHintGamepad
              && counters.pauseAutoResumeRequests == 0
@@ -5050,6 +5088,7 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.uiFlowActionsRegistered);
     appendLeU64(evidenceBytes, counters.uiFlowActionsCleared);
     appendLeU64(evidenceBytes, counters.uiFlowBackActionInvocations);
+    appendLeU64(evidenceBytes, counters.uiFlowConfirmActionInvocations);
     appendLeU64(evidenceBytes, counters.pauseInputDeviceHintUpdates);
     appendLeU64(evidenceBytes, counters.pauseInputDeviceRevision);
     appendLeU32(evidenceBytes, counters.pauseInputHintKeyboardMouse ? 1U : 0U);
@@ -5218,6 +5257,8 @@ int main(int argc, char** argv)
                   << ",\"uiFlowActionsRegistered\":" << counters.uiFlowActionsRegistered
                   << ",\"uiFlowActionsCleared\":" << counters.uiFlowActionsCleared
                   << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
+                  << ",\"uiFlowConfirmActionInvocations\":"
+                  << counters.uiFlowConfirmActionInvocations
                   << ",\"pauseInputDeviceHintUpdates\":" << counters.pauseInputDeviceHintUpdates
                   << ",\"pauseInputDeviceRevision\":" << counters.pauseInputDeviceRevision
                   << ",\"pauseInputHintKeyboardMouse\":"
@@ -5433,6 +5474,8 @@ int main(int argc, char** argv)
               << ",\"uiFlowActionsRegistered\":" << counters.uiFlowActionsRegistered
               << ",\"uiFlowActionsCleared\":" << counters.uiFlowActionsCleared
               << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
+              << ",\"uiFlowConfirmActionInvocations\":"
+              << counters.uiFlowConfirmActionInvocations
               << ",\"pauseInputDeviceHintUpdates\":" << counters.pauseInputDeviceHintUpdates
               << ",\"pauseInputDeviceRevision\":" << counters.pauseInputDeviceRevision
               << ",\"pauseInputHintKeyboardMouse\":"

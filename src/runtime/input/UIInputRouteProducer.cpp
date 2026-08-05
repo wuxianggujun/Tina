@@ -1106,9 +1106,9 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
-        // Keyboard Accept (Enter/Space) and Gamepad South Accept activate on
-        // Down, remain visibly pressed while their exact control is held, and
-        // release only on the matching Up.
+        // Focused controls own Accept first. Otherwise Enter/Keypad Enter and
+        // Gamepad South route Confirm to the topmost active Flow Screen. A Flow
+        // release is checked first so a Screen pop cannot strand its press latch.
         if (const auto* key =
                 std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
             key != nullptr
@@ -1122,7 +1122,30 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     .window = key->window,
                     .key = key->key,
                 };
-            auto routed = key->state == Platform::DigitalTransition::Down
+            const bool pressed = key->state == Platform::DigitalTransition::Down;
+            const bool supportsFlowConfirm = key->key != Platform::Key::Space;
+            if (!pressed && supportsFlowConfirm)
+            {
+                auto flowRelease = context->routeFlowAction(
+                    platformFrame.id(), transitions[ordinal].sequence,
+                    UI::UIFlowAction::Confirm, UI::UIFlowActionSource::Keyboard,
+                    false, control);
+                if (!flowRelease)
+                {
+                    Core::Error error = std::move(flowRelease.error());
+                    error.addContext("UIInputRouteProducer::produce(keyboard-flow-confirm-release)");
+                    return Core::failure(std::move(error));
+                }
+                if (flowRelease->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+
+            auto routed = pressed
                 ? context->routeDefaultActionActivate(
                     platformFrame.id(),
                     transitions[ordinal].sequence,
@@ -1144,6 +1167,26 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 stagingWords_[ordinal / BitsPerConsumptionWord] |=
                     u64{1} << (ordinal % BitsPerConsumptionWord);
                 anyConsumed = true;
+                continue;
+            }
+            if (pressed && supportsFlowConfirm)
+            {
+                auto flow = context->routeFlowAction(
+                    platformFrame.id(), transitions[ordinal].sequence,
+                    UI::UIFlowAction::Confirm, UI::UIFlowActionSource::Keyboard,
+                    true, control);
+                if (!flow)
+                {
+                    Core::Error error = std::move(flow.error());
+                    error.addContext("UIInputRouteProducer::produce(keyboard-flow-confirm)");
+                    return Core::failure(std::move(error));
+                }
+                if (flow->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                }
             }
             continue;
         }
@@ -1159,7 +1202,29 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     .gamepad = gamepad->gamepad,
                     .button = gamepad->button,
                 };
-            auto routed = gamepad->state == Platform::DigitalTransition::Down
+            const bool pressed = gamepad->state == Platform::DigitalTransition::Down;
+            if (!pressed)
+            {
+                auto flowRelease = context->routeFlowAction(
+                    platformFrame.id(), transitions[ordinal].sequence,
+                    UI::UIFlowAction::Confirm, UI::UIFlowActionSource::Gamepad,
+                    false, control);
+                if (!flowRelease)
+                {
+                    Core::Error error = std::move(flowRelease.error());
+                    error.addContext("UIInputRouteProducer::produce(gamepad-flow-confirm-release)");
+                    return Core::failure(std::move(error));
+                }
+                if (flowRelease->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+
+            auto routed = pressed
                 ? context->routeDefaultActionActivate(
                     platformFrame.id(),
                     transitions[ordinal].sequence,
@@ -1181,6 +1246,26 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 stagingWords_[ordinal / BitsPerConsumptionWord] |=
                     u64{1} << (ordinal % BitsPerConsumptionWord);
                 anyConsumed = true;
+                continue;
+            }
+            if (pressed)
+            {
+                auto flow = context->routeFlowAction(
+                    platformFrame.id(), transitions[ordinal].sequence,
+                    UI::UIFlowAction::Confirm, UI::UIFlowActionSource::Gamepad,
+                    true, control);
+                if (!flow)
+                {
+                    Core::Error error = std::move(flow.error());
+                    error.addContext("UIInputRouteProducer::produce(gamepad-flow-confirm)");
+                    return Core::failure(std::move(error));
+                }
+                if (flow->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                }
             }
             continue;
         }

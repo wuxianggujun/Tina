@@ -496,6 +496,16 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
             return Core::failure(Core::CoreErrorCode::Internal, "test transition append failed");
         }
     }
+    for (const Platform::PlatformEventPayload& event : spec.platformEvents)
+    {
+        const Platform::FrameBatchAppendResult result = builder.appendPlatformEvent(event);
+        if (result != Platform::FrameBatchAppendResult::Appended &&
+            result != Platform::FrameBatchAppendResult::Coalesced &&
+            result != Platform::FrameBatchAppendResult::ResetInserted)
+        {
+            return Core::failure(Core::CoreErrorCode::Internal, "test platform event append failed");
+        }
+    }
     return builder.finishFrame();
 }
 

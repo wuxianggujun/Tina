@@ -349,6 +349,20 @@ enum class UIFlowNodeKind : u8 {
     Screen,
 };
 
+inline constexpr usize FlowActionSlotCount = 2;
+
+[[nodiscard]] constexpr usize flowActionSlotIndex(UIFlowAction action) noexcept
+{
+    switch (action)
+    {
+    case UIFlowAction::Back:
+        return 0;
+    case UIFlowAction::Confirm:
+        return 1;
+    }
+    return FlowActionSlotCount;
+}
+
 class UIFlowActionPressState final {
   public:
     explicit UIFlowActionPressState(Platform::WindowId ownerWindow) noexcept
@@ -359,7 +373,8 @@ class UIFlowActionPressState final {
     [[nodiscard]] Core::Status validate(UIFlowAction action, UIFlowActionSource source,
                                         const Platform::DigitalControlIdentity& control) const
     {
-        if (action != UIFlowAction::Back)
+        const usize actionIndex = flowActionSlotIndex(action);
+        if (actionIndex >= FlowActionSlotCount)
         {
             return Core::failure(UIErrorCode::InvalidFlowAction,
                                  "UI Flow action is not supported by this router");
@@ -368,7 +383,7 @@ class UIFlowActionPressState final {
         {
             const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
             if (key != nullptr && key->window == ownerWindow_ &&
-                key->key == Platform::Key::Escape)
+                keyboardControlIndex(action, key->key).has_value())
             {
                 return Core::success();
             }
@@ -379,8 +394,8 @@ class UIFlowActionPressState final {
                 std::get_if<Platform::GamepadButtonControlIdentity>(&control);
             if (button != nullptr && button->routedWindow == ownerWindow_ &&
                 button->gamepad.hasValue() &&
-                button->gamepad.index() < gamepadBackPresses_.size() &&
-                button->button == Platform::GamepadButton::East)
+                button->gamepad.index() < gamepadPresses_[actionIndex].size() &&
+                matchesGamepadControl(action, button->button))
             {
                 return Core::success();
             }
@@ -389,87 +404,139 @@ class UIFlowActionPressState final {
                              "UI Flow action control does not match its source");
     }
 
-    [[nodiscard]] bool isPressed(const Platform::DigitalControlIdentity& control) const noexcept
+    [[nodiscard]] bool isPressed(UIFlowAction action,
+                                 const Platform::DigitalControlIdentity& control) const noexcept
     {
         if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
             key != nullptr)
         {
-            return key->window == ownerWindow_ && key->key == Platform::Key::Escape &&
-                   keyboardBackPressed_;
+            const auto controlIndex = keyboardControlIndex(action, key->key);
+            return key->window == ownerWindow_ && controlIndex.has_value() &&
+                   keyboardPresses_[*controlIndex];
         }
         const auto* button =
             std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+        const usize actionIndex = flowActionSlotIndex(action);
         return button != nullptr && button->routedWindow == ownerWindow_ &&
-               button->button == Platform::GamepadButton::East &&
+               actionIndex < FlowActionSlotCount &&
+               matchesGamepadControl(action, button->button) &&
                button->gamepad.hasValue() &&
-               button->gamepad.index() < gamepadBackPresses_.size() &&
-               gamepadBackPresses_[button->gamepad.index()] == button->gamepad;
+               button->gamepad.index() < gamepadPresses_[actionIndex].size() &&
+               gamepadPresses_[actionIndex][button->gamepad.index()] == button->gamepad;
     }
 
-    void setPressed(const Platform::DigitalControlIdentity& control) noexcept
+    void setPressed(UIFlowAction action,
+                    const Platform::DigitalControlIdentity& control) noexcept
     {
         if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
             key != nullptr)
         {
-            if (key->window == ownerWindow_ && key->key == Platform::Key::Escape)
+            const auto controlIndex = keyboardControlIndex(action, key->key);
+            if (key->window == ownerWindow_ && controlIndex.has_value())
             {
-                keyboardBackPressed_ = true;
+                keyboardPresses_[*controlIndex] = true;
             }
             return;
         }
         const auto* button =
             std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+        const usize actionIndex = flowActionSlotIndex(action);
         if (button != nullptr && button->routedWindow == ownerWindow_ &&
-            button->button == Platform::GamepadButton::East &&
+            actionIndex < FlowActionSlotCount &&
+            matchesGamepadControl(action, button->button) &&
             button->gamepad.hasValue() &&
-            button->gamepad.index() < gamepadBackPresses_.size())
+            button->gamepad.index() < gamepadPresses_[actionIndex].size())
         {
-            gamepadBackPresses_[button->gamepad.index()] = button->gamepad;
+            gamepadPresses_[actionIndex][button->gamepad.index()] = button->gamepad;
         }
     }
 
-    void clearPressed(const Platform::DigitalControlIdentity& control) noexcept
+    void clearPressed(UIFlowAction action,
+                      const Platform::DigitalControlIdentity& control) noexcept
     {
         if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
             key != nullptr)
         {
-            if (key->window == ownerWindow_ && key->key == Platform::Key::Escape)
+            const auto controlIndex = keyboardControlIndex(action, key->key);
+            if (key->window == ownerWindow_ && controlIndex.has_value())
             {
-                keyboardBackPressed_ = false;
+                keyboardPresses_[*controlIndex] = false;
             }
             return;
         }
         const auto* button =
             std::get_if<Platform::GamepadButtonControlIdentity>(&control);
-        if (button != nullptr)
+        const usize actionIndex = flowActionSlotIndex(action);
+        if (button != nullptr && actionIndex < FlowActionSlotCount &&
+            button->gamepad.hasValue() &&
+            button->gamepad.index() < gamepadPresses_[actionIndex].size() &&
+            gamepadPresses_[actionIndex][button->gamepad.index()] == button->gamepad)
         {
-            clearGamepad(button->gamepad);
+            gamepadPresses_[actionIndex][button->gamepad.index()] = {};
         }
     }
 
     void clearAll() noexcept
     {
-        keyboardBackPressed_ = false;
-        gamepadBackPresses_.fill({});
+        keyboardPresses_.fill(false);
+        for (auto& actionPresses : gamepadPresses_)
+        {
+            actionPresses.fill({});
+        }
     }
 
     void clearGamepad(Platform::GamepadId gamepad) noexcept
     {
-        if (!gamepad.hasValue() || gamepad.index() >= gamepadBackPresses_.size())
+        if (!gamepad.hasValue() || gamepad.index() >= gamepadPresses_[0].size())
         {
             return;
         }
-        if (gamepadBackPresses_[gamepad.index()] == gamepad)
+        for (auto& actionPresses : gamepadPresses_)
         {
-            gamepadBackPresses_[gamepad.index()] = {};
+            if (actionPresses[gamepad.index()] == gamepad)
+            {
+                actionPresses[gamepad.index()] = {};
+            }
         }
     }
 
   private:
+    [[nodiscard]] static std::optional<usize>
+    keyboardControlIndex(UIFlowAction action, Platform::Key key) noexcept
+    {
+        if (action == UIFlowAction::Back && key == Platform::Key::Escape)
+        {
+            return 0;
+        }
+        if (action == UIFlowAction::Confirm && key == Platform::Key::Enter)
+        {
+            return 1;
+        }
+        if (action == UIFlowAction::Confirm && key == Platform::Key::KeypadEnter)
+        {
+            return 2;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] static bool matchesGamepadControl(
+        UIFlowAction action, Platform::GamepadButton button) noexcept
+    {
+        return (action == UIFlowAction::Back && button == Platform::GamepadButton::East) ||
+               (action == UIFlowAction::Confirm && button == Platform::GamepadButton::South);
+    }
+
     Platform::WindowId ownerWindow_{};
-    bool keyboardBackPressed_ = false;
-    std::array<Platform::GamepadId, Platform::PlatformFrameBuilder::MaximumGamepadSlots>
-        gamepadBackPresses_{};
+    std::array<bool, 3> keyboardPresses_{};
+    std::array<
+        std::array<Platform::GamepadId, Platform::PlatformFrameBuilder::MaximumGamepadSlots>,
+        FlowActionSlotCount>
+        gamepadPresses_{};
+};
+
+struct UIFlowActionSlot final {
+    UIFlowActionCallback callback{};
+    bool registered = false;
 };
 
 struct UIFlowNodeState final {
@@ -479,8 +546,7 @@ struct UIFlowNodeState final {
     UINodeId next{};
     UINodeId bottom{};
     UINodeId top{};
-    UIFlowActionCallback backAction{};
-    bool backActionRegistered = false;
+    std::array<UIFlowActionSlot, FlowActionSlotCount> actions{};
     bool stacked = false;
 };
 
@@ -4372,13 +4438,16 @@ struct UIContext::Impl final {
         const UINodeId node = idForIndex(index);
         if (state.kind == UIFlowNodeKind::Screen)
         {
-            if (state.backActionRegistered)
+            for (const UIFlowActionSlot& actionSlot : state.actions)
             {
-                if (registeredFlowActionCount == 0)
+                if (actionSlot.registered)
                 {
-                    std::terminate();
+                    if (registeredFlowActionCount == 0)
+                    {
+                        std::terminate();
+                    }
+                    --registeredFlowActionCount;
                 }
-                --registeredFlowActionCount;
             }
             if (state.stacked)
             {
@@ -7367,7 +7436,8 @@ struct UIContext::Impl final {
         {
             return root;
         }
-        if (action != UIFlowAction::Back || !callback.hasValue())
+        const usize actionIndex = flowActionSlotIndex(action);
+        if (actionIndex >= FlowActionSlotCount || !callback.hasValue())
         {
             return fail(UIErrorCode::InvalidFlowAction,
                         "UI Flow Screen action requires a supported action and non-empty callback");
@@ -7382,13 +7452,20 @@ struct UIContext::Impl final {
         }
 
         UIFlowNodeState& state = flowStatesByNodeIndex[screen.index()];
-        const bool replacing = state.backActionRegistered;
+        UIFlowActionSlot& actionSlot = state.actions[actionIndex];
+        const bool replacing = actionSlot.registered;
+        if (!replacing && registeredFlowActionCount >= capacityConfig.flowScreenCapacity)
+        {
+            ++flowCapacityFailureCount;
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI Flow Screen action capacity has been exhausted");
+        }
         ++flowActionCallbackOperationDepth;
         auto callbackOperation = Core::makeScopeExit([this]() noexcept {
             --flowActionCallbackOperationDepth;
         });
-        state.backAction = std::move(callback);
-        state.backActionRegistered = true;
+        actionSlot.callback = std::move(callback);
+        actionSlot.registered = true;
         if (!replacing)
         {
             ++registeredFlowActionCount;
@@ -7415,7 +7492,8 @@ struct UIContext::Impl final {
         {
             return root;
         }
-        if (action != UIFlowAction::Back)
+        const usize actionIndex = flowActionSlotIndex(action);
+        if (actionIndex >= FlowActionSlotCount)
         {
             return fail(UIErrorCode::InvalidFlowAction,
                         "UI Flow Screen action is not supported by this router");
@@ -7430,19 +7508,20 @@ struct UIContext::Impl final {
         }
 
         UIFlowNodeState& state = flowStatesByNodeIndex[screen.index()];
-        if (state.backActionRegistered)
+        UIFlowActionSlot& actionSlot = state.actions[actionIndex];
+        if (actionSlot.registered)
         {
             if (registeredFlowActionCount == 0)
             {
                 std::terminate();
             }
-            state.backActionRegistered = false;
+            actionSlot.registered = false;
             --registeredFlowActionCount;
             ++flowActionCallbackOperationDepth;
             auto callbackOperation = Core::makeScopeExit([this]() noexcept {
                 --flowActionCallbackOperationDepth;
             });
-            state.backAction.reset();
+            actionSlot.callback.reset();
         }
         return Core::success();
     }
@@ -14727,12 +14806,12 @@ struct UIContext::Impl final {
             return Core::failure(valid.error());
         }
 
-        const bool alreadyPressed = flowActionPressState.isPressed(control);
+        const bool alreadyPressed = flowActionPressState.isPressed(action, control);
         if (!pressed)
         {
             if (alreadyPressed)
             {
-                flowActionPressState.clearPressed(control);
+                flowActionPressState.clearPressed(action, control);
             }
             return UIFlowActionRouteResult{.consumed = alreadyPressed};
         }
@@ -14764,14 +14843,21 @@ struct UIContext::Impl final {
         }
 
         UIFlowNodeState& targetState = flowStatesByNodeIndex[targetScreen.index()];
-        if (!targetState.backActionRegistered || !targetState.backAction.hasValue())
+        const usize actionIndex = flowActionSlotIndex(action);
+        if (actionIndex >= FlowActionSlotCount)
+        {
+            return fail(UIErrorCode::InvalidFlowAction,
+                        "UI Flow action is not supported by this router");
+        }
+        UIFlowActionSlot& actionSlot = targetState.actions[actionIndex];
+        if (!actionSlot.registered || !actionSlot.callback.hasValue())
         {
             return UIFlowActionRouteResult{.screen = UIFlowScreenId{targetScreen}};
         }
 
-        flowActionPressState.setPressed(control);
+        flowActionPressState.setPressed(action, control);
         ++flowActionCallbackOperationDepth;
-        UIFlowActionCallback callback = std::move(targetState.backAction);
+        UIFlowActionCallback callback = std::move(actionSlot.callback);
         --flowActionCallbackOperationDepth;
         ++flowActionInvocationCount;
         ++routeDispatchDepth;
@@ -14788,11 +14874,12 @@ struct UIContext::Impl final {
         if (contains(targetScreen) && targetScreen.index() < flowStatesByNodeIndex.size())
         {
             UIFlowNodeState& liveState = flowStatesByNodeIndex[targetScreen.index()];
-            if (liveState.kind == UIFlowNodeKind::Screen && liveState.backActionRegistered &&
-                !liveState.backAction.hasValue())
+            UIFlowActionSlot& liveActionSlot = liveState.actions[actionIndex];
+            if (liveState.kind == UIFlowNodeKind::Screen && liveActionSlot.registered &&
+                !liveActionSlot.callback.hasValue())
             {
                 ++flowActionCallbackOperationDepth;
-                liveState.backAction = std::move(callback);
+                liveActionSlot.callback = std::move(callback);
                 --flowActionCallbackOperationDepth;
             }
         }

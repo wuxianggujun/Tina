@@ -600,9 +600,9 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIDefaultActionResult>
     routeDefaultActionRelease(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
                               UIButtonActivationSource source, const Platform::DigitalControlIdentity& control);
-    // Routes Back to the topmost committed active Flow Screen. A handled Down
-    // invokes its callback once and claims the exact physical control; the
-    // matching Up remains consumed even if the Screen has since been popped.
+    // Routes an action to the topmost committed active Flow Screen. A handled
+    // Down invokes its callback once and claims the exact physical control;
+    // the matching Up remains consumed even if the Screen has since been popped.
     [[nodiscard]] Core::Result<UIFlowActionRouteResult>
     routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
                     UIFlowAction action, UIFlowActionSource source, bool pressed,

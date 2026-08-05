@@ -340,6 +340,91 @@ TEST_F(UILayoutTest, FlowBackActionRoutesOnceAndClaimsItsReleaseAcrossScreenPop)
     EXPECT_EQ(statistics.actionInvocationCount, 1U);
 }
 
+TEST_F(UILayoutTest, FlowConfirmActionUsesIndependentSlotAndBoundedCapacity)
+{
+    auto context = makeContext({
+        .nodeCapacity = 6,
+        .rootCapacity = 1,
+        .flowLayerCapacity = 1,
+        .flowScreenCapacity = 2,
+    });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    auto updater = createUpdater(*context, root);
+    auto layerNode = updater.createElement(root.rootNodeId(), UI::makePanelElement());
+    ASSERT_TRUE(layerNode.has_value());
+    auto screenNode = updater.createElement(*layerNode, UI::makePanelElement());
+    auto secondScreenNode = updater.createElement(*layerNode, UI::makePanelElement());
+    ASSERT_TRUE(screenNode.has_value());
+    ASSERT_TRUE(secondScreenNode.has_value());
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 120.0F)));
+    assertOk(updater.setLayoutStyle(*layerNode, fixedSize(200.0F, 120.0F)));
+    assertOk(updater.setLayoutStyle(*screenNode, fixedSize(200.0F, 120.0F)));
+    assertOk(updater.setLayoutStyle(*secondScreenNode, fixedSize(200.0F, 120.0F)));
+
+    auto layer = updater.registerFlowLayer(*layerNode);
+    ASSERT_TRUE(layer.has_value());
+    auto screen = updater.registerFlowScreen(*layer, *screenNode);
+    auto secondScreen = updater.registerFlowScreen(*layer, *secondScreenNode);
+    ASSERT_TRUE(screen.has_value());
+    ASSERT_TRUE(secondScreen.has_value());
+    assertOk(updater.pushFlowScreen(*screen));
+
+    usize backInvocations = 0;
+    usize confirmInvocations = 0;
+    UI::UIFlowActionEvent confirmEvent{};
+    assertOk(updater.setFlowScreenAction(
+        *screen, UI::UIFlowAction::Back,
+        UI::UIFlowActionCallback{
+            [&backInvocations](const UI::UIFlowActionEvent&) noexcept {
+                ++backInvocations;
+            }}));
+    assertOk(updater.setFlowScreenAction(
+        *screen, UI::UIFlowAction::Confirm,
+        UI::UIFlowActionCallback{
+            [&confirmInvocations, &confirmEvent](const UI::UIFlowActionEvent& event) noexcept {
+                ++confirmInvocations;
+                confirmEvent = event;
+            }}));
+    const Core::Status exhausted = updater.setFlowScreenAction(
+        *secondScreen, UI::UIFlowAction::Back,
+        UI::UIFlowActionCallback{
+            [](const UI::UIFlowActionEvent&) noexcept {}});
+    ASSERT_FALSE(exhausted.has_value());
+    EXPECT_EQ(exhausted.error().code, UI::UIErrorCode::CapacityExceeded);
+    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+
+    const Platform::DigitalControlIdentity enter = Platform::KeyControlIdentity{
+        .window = context->ownerWindow(),
+        .key = Platform::Key::Enter,
+    };
+    auto confirmDown = context->routeFlowAction(
+        {1}, 1, UI::UIFlowAction::Confirm,
+        UI::UIFlowActionSource::Keyboard, true, enter);
+    ASSERT_TRUE(confirmDown.has_value());
+    EXPECT_TRUE(confirmDown->consumed);
+    EXPECT_TRUE(confirmDown->invoked);
+    EXPECT_EQ(confirmInvocations, 1U);
+    EXPECT_EQ(backInvocations, 0U);
+    EXPECT_EQ(confirmEvent.action, UI::UIFlowAction::Confirm);
+
+    auto confirmRelease = context->routeFlowAction(
+        {2}, 2, UI::UIFlowAction::Confirm,
+        UI::UIFlowActionSource::Keyboard, false, enter);
+    ASSERT_TRUE(confirmRelease.has_value());
+    EXPECT_TRUE(confirmRelease->consumed);
+    EXPECT_FALSE(confirmRelease->invoked);
+
+    assertOk(updater.clearFlowScreenAction(*screen, UI::UIFlowAction::Confirm));
+    assertOk(updater.clearFlowScreenAction(*screen, UI::UIFlowAction::Back));
+    const UI::UIFlowStatistics statistics = context->statistics().flow;
+    EXPECT_EQ(statistics.registeredActionCount, 0U);
+    EXPECT_EQ(statistics.actionHighWater, 2U);
+    EXPECT_EQ(statistics.actionInvocationCount, 1U);
+    EXPECT_EQ(statistics.capacityFailureCount, 1U);
+}
+
 TEST_F(UILayoutTest, FlowInputDeviceObservationIsOrderedAndRevisioned)
 {
     auto context = makeContext({

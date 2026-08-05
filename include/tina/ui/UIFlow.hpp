@@ -80,10 +80,11 @@ class UIFlowScreenId final {
     UINodeId m_node{};
 };
 
-// The action router intentionally freezes only the conventional Back action
-// used by Pause. Wider product actions remain a separate follow-up contract.
+// Small conventional action set routed to the topmost active Screen. Product
+// input mapping remains in Runtime so the retained UI contract stays backend-neutral.
 enum class UIFlowAction : u8 {
     Back,
+    Confirm,
 };
 
 enum class UIFlowActionSource : u8 {
