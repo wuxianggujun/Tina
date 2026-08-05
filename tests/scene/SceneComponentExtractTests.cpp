@@ -1812,8 +1812,14 @@ TEST(ScenePointLight3DTest, SetsClearsQueriesAndRejectsInvalidComponent)
         .color = {.red = 0.25F, .green = 0.5F, .blue = 0.75F},
         .intensity = 2.0F,
         .influenceRadiusMeters = 6.0F,
+        .shadow = PointLightShadow3D{
+            .nearPlaneMeters = 0.1F,
+            .depthBias = 0.002F,
+            .normalBiasMeters = 0.03F,
+        },
     };
     ASSERT_TRUE(world.setPointLight3D(entity, light));
+    const PointLight3D validLight = light;
     ASSERT_NE(world.pointLight3D(entity), nullptr);
     EXPECT_EQ(*world.pointLight3D(entity), light);
 
@@ -1829,6 +1835,21 @@ TEST(ScenePointLight3DTest, SetsClearsQueriesAndRejectsInvalidComponent)
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
     EXPECT_FLOAT_EQ(world.pointLight3D(entity)->intensity, 2.0F);
+
+    light = validLight;
+    light.shadow->nearPlaneMeters = light.influenceRadiusMeters;
+    invalid = world.setPointLight3D(entity, light);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_EQ(*world.pointLight3D(entity), validLight);
+
+    light = validLight;
+    light.shadow->normalBiasMeters =
+        Render::Mesh3DPointLightShadow::MaximumNormalBiasMeters + 0.001F;
+    invalid = world.setPointLight3D(entity, light);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_EQ(*world.pointLight3D(entity), validLight);
 
     ASSERT_TRUE(world.clearPointLight3D(entity));
     EXPECT_EQ(world.pointLight3D(entity), nullptr);
@@ -1864,6 +1885,11 @@ TEST(ScenePointLight3DTest, ExtractsStablePositionsColorsAndCoexistsWithDirectio
         .color = {.red = 0.1F, .green = 0.2F, .blue = 0.3F},
         .intensity = 3.0F,
         .influenceRadiusMeters = 2.0F,
+        .shadow = PointLightShadow3D{
+            .nearPlaneMeters = 0.1F,
+            .depthBias = 0.002F,
+            .normalBiasMeters = 0.04F,
+        },
     }));
     ASSERT_TRUE(world.setPointLight3D(inactive, PointLight3D{.active = false}));
     ASSERT_TRUE(world.setDirectionalLight3D(directional, DirectionalLight3D{}));
@@ -1897,9 +1923,62 @@ TEST(ScenePointLight3DTest, ExtractsStablePositionsColorsAndCoexistsWithDirectio
     EXPECT_FLOAT_EQ(lights[1].colorR, 0.3F);
     EXPECT_FLOAT_EQ(lights[1].colorG, 0.6F);
     EXPECT_FLOAT_EQ(lights[1].colorB, 0.9F);
+    ASSERT_TRUE(view->mesh3DLighting()->pointLightShadow().has_value());
+    const Render::Mesh3DPointLightShadow& shadow =
+        *view->mesh3DLighting()->pointLightShadow();
+    EXPECT_EQ(shadow.pointLightIndex, 1U);
+    EXPECT_FLOAT_EQ(shadow.nearPlaneMeters, 0.1F);
+    EXPECT_FLOAT_EQ(shadow.depthBias, 0.002F);
+    EXPECT_FLOAT_EQ(shadow.normalBiasMeters, 0.04F);
     EXPECT_FLOAT_EQ(view->mesh3DLighting()->ambientScale(), 0.3F);
     EXPECT_EQ(view->statistics().pointLight3DCount, 2U);
     EXPECT_EQ(view->statistics().directionalLightCount, 1U);
+}
+
+TEST(ScenePointLight3DTest, RejectsMoreThanOneCameraAffectingShadowAfterCulling)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+
+    const EntityId first = world.createEntity(translated(-0.5F, 0.0F, -5.0F)).value();
+    const EntityId second = world.createEntity(translated(0.5F, 0.0F, -5.0F)).value();
+    const EntityId offscreen = world.createEntity(translated(100.0F, 0.0F, -5.0F)).value();
+    ASSERT_TRUE(world.setPointLight3D(first, PointLight3D{.shadow = PointLightShadow3D{}}));
+    ASSERT_TRUE(world.setPointLight3D(second, PointLight3D{.shadow = PointLightShadow3D{}}));
+    ASSERT_TRUE(world.setPointLight3D(offscreen, PointLight3D{.shadow = PointLightShadow3D{}}));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 1.0F,
+    }));
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    Render::RenderSceneWriter writer = builder->writer();
+    auto status = extractRenderSceneFromWorld(
+        world, writer, packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActivePointLightShadows);
+    builder->rollback();
+
+    ASSERT_TRUE(world.setPointLight3D(second, PointLight3D{}));
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 1.0F,
+    }));
+    Render::RenderSceneWriter retryWriter = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world, retryWriter, packet.resourceSink(),
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
+        }));
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_TRUE(view->mesh3DLighting()->pointLightShadow().has_value());
+    EXPECT_EQ(view->mesh3DLighting()->pointLightShadow()->pointLightIndex, 0U);
 }
 
 TEST(ScenePointLight3DTest, CullsInfluenceSpheresAgainstPerspectiveFrustumBeforeCapacity)

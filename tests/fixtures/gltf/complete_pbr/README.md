@@ -4,7 +4,8 @@ Product/cook regression fixture for Tina 3D:
 
 - 2 meshes / 2 materials / 2 scene nodes (Right translated +X)
 - POSITION + NORMAL + TEXCOORD_0 per mesh; Cooker generates MikkTSpace tangents
-- Shared baseColor / metallicRoughness / normal PNG images (1×1 decode fixtures)
+- Shared 1x1 PNG decode fixtures: white base color, full G/B metallic-roughness,
+  and a flat `(128, 128, 255)` tangent-space normal
 - Distinct metallic/roughness factors (dielectric vs metal)
 
 Used by:

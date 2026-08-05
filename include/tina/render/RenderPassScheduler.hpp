@@ -13,6 +13,7 @@ enum class RenderPassKind : u8 {
     Clear,
     CascadedDirectionalShadowDepth,
     SpotLightShadowDepth,
+    PointLightShadowDepth,
     Opaque3D,
     Sprite2D,
     UI,
@@ -22,12 +23,14 @@ enum class RenderPassResource : u8 {
     PrimarySurface,
     DirectionalShadowAtlas,
     SpotLightShadowMap,
+    PointLightShadowMap,
 };
 
 struct RenderPassPlan final {
     RenderPassKind kind = RenderPassKind::Clear;
     RenderPassResource resource = RenderPassResource::PrimarySurface;
     u32 cascadeIndex = 0;
+    u32 faceIndex = 0;
     bool clearColor = false;
     bool clearDepth = false;
 };
@@ -35,8 +38,8 @@ struct RenderPassPlan final {
 class RenderPassSchedule final {
   public:
     // Optional full-surface clear plus four shadow cascades, one spot shadow,
-    // Opaque3D, Sprite2D and UI.
-    static constexpr u32 MaximumPassCount = 9;
+    // six point-light faces, Opaque3D, Sprite2D and UI.
+    static constexpr u32 MaximumPassCount = 15;
 
     [[nodiscard]] constexpr std::span<const RenderPassPlan> passes() const noexcept
     {
@@ -54,9 +57,10 @@ class RenderPassSchedule final {
 
 // Builds the deterministic pass order shared by all render backends. The first
 // enabled full-surface primary-surface content pass owns the color/depth clear.
-// Cascaded directional and spot shadows insert backend-owned depth passes;
+// Cascaded directional, spot and point shadows insert backend-owned depth passes;
 // their clears never consume primary-surface clear ownership. The spot pass is
-// ordered after all directional cascades and before Opaque3D.
+// ordered after all directional cascades, followed by point faces in
+// +X/-X/+Y/-Y/+Z/-Z order, then Opaque3D.
 // When the first primary-surface content pass uses a partial viewport, a
 // full-surface clear pass precedes it; an active surface with no content also
 // receives one clear-only pass.

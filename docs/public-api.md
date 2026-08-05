@@ -1,7 +1,7 @@
 # Public API
 
 本文描述当前 `include/tina` 公共面和 CMake target。它不是未来 SDK 愿望清单；尚未存在的能力（通用
-event queue、通用 GPU submission fence、point shadow 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
+event queue、通用 GPU submission fence、可配置 shadow atlas 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
 首切片**已经存在**。
 
 ## 分层
@@ -426,11 +426,15 @@ resolver，hidden mesh 不解析。`PrefabMeshBinding` 只完成 AssetId→Handl
 `ExtractRenderSceneParams::ambientLightScale` 写入当前帧 RenderScene lighting snapshot。超容量显式返回
 `TooManyActiveDirectionalLights`，不做静默裁剪；Scene 不持有 device lighting 状态。
 
-`PointLight3D` 保存 linear color、非负 intensity、正 world-space `influenceRadiusMeters` 与 active 标志；
+`PointLight3D` 保存 linear color、非负 intensity、正 world-space `influenceRadiusMeters`、optional
+`PointLightShadow3D` 与 active 标志；
 Entity world position 是光源中心，transform scale 不缩放半径。extraction 先校验全部 active component，
 在有效 PerspectiveCamera3D 与非0 surface 上做 influence sphere-vs-perspective-frustum culling，再按稳定 Entity
 identity 收集最多8个 camera-affecting light。第9个显式返回 `TooManyActivePointLights3D`；无相机或0x0
 surface 时保留未裁剪容量契约。position、radius 与 color×intensity 深拷贝进当前帧 Mesh3D lighting snapshot。
+shadow 的 `nearPlaneMeters` 必须正且小于 influence radius，depth/normal bias 必须 finite、非负且在公开
+上限内；culling 与稳定排序后以 `pointLightIndex` 关联灯槽。每帧最多一个 camera-affecting point shadow，
+第二个配置显式返回 `TooManyActivePointLightShadows`，不会发布部分 snapshot。
 
 `SpotLight3D` 保存 linear color、非负 intensity、正 world-space `influenceRadiusMeters`、满足
 `0 <= inner < outer < 90` 的 cone half-angle 与 active 标志；Entity world position 是光源中心，world local
@@ -681,8 +685,11 @@ destroy/retire 与 failure rollback 均为一个事务。`Mesh3DImageBasedLighti
 与 `normalBiasMeters` 随帧 snapshot 深拷贝，Render 侧以排序后的 `directionalLightIndex` 关联灯光。
 `SpotLight3D::shadow` 可携带 `SpotLightShadow3D`；`nearPlaneMeters` 必须正且小于该灯 influence radius，
 depth/normal bias 必须有限且有界。每帧最多一个 camera-affecting spot shadow，Scene 在 culling 与稳定排序后
-把它深拷贝为 `Mesh3DSpotLightShadow`，以 `spotLightIndex` 关联 Render 灯槽。point shadow 与可配置 atlas
-尚未完成。
+把它深拷贝为 `Mesh3DSpotLightShadow`，以 `spotLightIndex` 关联 Render 灯槽。`PointLight3D::shadow` 同样
+携带 near/depth/normal bias；每帧最多一个 camera-affecting point shadow，Scene 深拷贝为
+`Mesh3DPointLightShadow` 并以 `pointLightIndex` 关联灯槽。Render scheduler 固定按 CSM×4 → Spot×1 →
+Point×6 → Opaque3D 排序；bgfx 为 point shadow 私有持有按 `+X/-X/+Y/-Y/+Z/-Z` 排列的六张
+512×512 sampled D16 map，receiver 以 dominant axis 选面并执行3×3 PCF。可配置 atlas 尚未完成。
 
 ## Audio 与 Physics
 
@@ -752,7 +759,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
-- point shadow 与可配置 shadow atlas；
+- 可配置 shadow atlas；
 - TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；

@@ -7,8 +7,9 @@
   Asset, Render, and retained UI GoogleTest executables directly, then run the
   tina_sample_3d 300-frame product smoke with automated Dark -> Light -> Dark
   switching plus ListView/TreeView collection interaction. The final JSON is
-  validated as evidence schema 13. Short IBL on/on and off/off runs additionally
-  prove machine-local pixel stability within each mode and a visible A/B change.
+  validated as evidence schema 14. Short IBL on/on and off/off runs additionally
+  prove machine-local pixel stability within each mode and a visible A/B change;
+  one point-shadow-off run reuses the IBL-on baseline for a bounded shadow A/B.
 
   Does not use CTest. Does not clean-first wipe. Exits non-zero on first failure.
 
@@ -149,12 +150,19 @@ function Invoke-ProductSampleEvidence {
     param(
         [Parameter(Mandatory = $true)][string]$StepName,
         [Parameter(Mandatory = $true)][ValidateSet('on', 'off')][string]$IblMode,
+        [Parameter(Mandatory = $true)][ValidateSet('on', 'off')][string]$PointShadowMode,
         [Parameter(Mandatory = $true)][int]$Frames,
         [switch]$ThemeDemo,
         [switch]$CaptureSceneRgb
     )
 
-    $arguments = @("--frames=$Frames", '--frame-delay-ms=0', '--ui-theme=dark', "--ibl=$IblMode")
+    $arguments = @(
+        "--frames=$Frames",
+        '--frame-delay-ms=0',
+        '--ui-theme=dark',
+        "--ibl=$IblMode",
+        "--point-shadow=$PointShadowMode"
+    )
     if ($ThemeDemo) {
         $arguments += '--ui-theme-demo'
     }
@@ -201,7 +209,7 @@ function Invoke-ProductSampleEvidence {
 }
 
 $sampleRun = Invoke-ProductSampleEvidence -StepName 'tina_sample_3d' -IblMode 'on' `
-    -Frames $SampleFrames -ThemeDemo
+    -PointShadowMode 'on' -Frames $SampleFrames -ThemeDemo
 $evidence = $sampleRun.Evidence
 $sampleOut = $sampleRun.Stdout
 
@@ -209,7 +217,7 @@ $expectedResolverHits = [long]$SampleFrames * 2
 $expectedFields = [ordered]@{
     status                              = 'ok'
     sample                              = 'tina_sample_3d'
-    evidenceSchema                      = 13
+    evidenceSchema                      = 14
     frames                              = $SampleFrames
     gltfCooked                          = $true
     cookedStaticMesh                    = $true
@@ -225,6 +233,7 @@ $expectedFields = [ordered]@{
     cookedEnvironmentMap                = $true
     environmentMapsUploaded             = 1
     imageBasedLightingMode              = 'on'
+    pointLightShadowMode                = 'on'
     imageBasedLightingConfigured        = $true
     imageBasedLightingBindings          = 1
     imageBasedLightingClears            = 1
@@ -271,6 +280,8 @@ $expectedFields = [ordered]@{
     submittedCascadedDirectionalShadowCascadeCount = 4
     authoredSpotLightShadowCount        = 1
     submittedSpotLightShadowCount       = 1
+    authoredPointLightShadowCount       = 1
+    submittedPointLightShadowCount      = 1
     authoredPointLight3DCount           = 3
     pointLight3DCount                    = 2
     culledPointLight3DCount              = 1
@@ -375,7 +386,7 @@ if ($evidenceErrors.Count -ne 0) {
     Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$sampleOut")
 }
 
-Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=13 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=cooked-rgba16f-rg16f resize=surface-aspect-responsive-ui lights=directional-point-spot-culled csm=4-cascades spot-shadow=1 theme=dark-light-dark collections=list-tree"
+Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=14 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=cooked-rgba16f-rg16f resize=surface-aspect-responsive-ui lights=directional-point-spot-culled csm=4-cascades spot-shadow=1 point-shadow=1 theme=dark-light-dark collections=list-tree"
 Add-Step -Name 'tina_sample_3d' -ExitCode 0 -Detail "frames=$SampleFrames pixelFingerprint=$($evidence.pixelFingerprint)"
 
 $iblComparisonEvidence = [ordered]@{
@@ -390,7 +401,7 @@ foreach ($mode in @('on', 'off')) {
     for ($iteration = 1; $iteration -le 2; ++$iteration) {
         $stepName = "ibl-$mode-$iteration"
         $run = Invoke-ProductSampleEvidence -StepName $stepName -IblMode $mode `
-            -Frames $IblComparisonFrames -CaptureSceneRgb
+            -PointShadowMode 'on' -Frames $IblComparisonFrames -CaptureSceneRgb
         $modeEvidence = $run.Evidence
         $expectedConfigured = $mode -eq 'on'
         $expectedTransitions = if ($expectedConfigured) { 1 } else { 0 }
@@ -398,11 +409,12 @@ foreach ($mode in @('on', 'off')) {
         $modeExpectedFields = [ordered]@{
             status                            = 'ok'
             sample                            = 'tina_sample_3d'
-            evidenceSchema                    = 13
+            evidenceSchema                    = 14
             frames                            = $IblComparisonFrames
             cookedEnvironmentMap              = $true
             environmentMapsUploaded           = 1
             imageBasedLightingMode            = $mode
+            pointLightShadowMode              = 'on'
             imageBasedLightingConfigured      = $expectedConfigured
             imageBasedLightingBindings        = $expectedTransitions
             imageBasedLightingClears          = $expectedTransitions
@@ -413,6 +425,8 @@ foreach ($mode in @('on', 'off')) {
             submittedCascadedDirectionalShadowCascadeCount = 4
             authoredSpotLightShadowCount      = 1
             submittedSpotLightShadowCount     = 1
+            authoredPointLightShadowCount     = 1
+            submittedPointLightShadowCount    = 1
             pixelCaptureOk                    = $true
             sceneRgbPixelCount                = 191880
             sceneRgbOutputRequested           = $true
@@ -508,6 +522,70 @@ if ($iblPixelErrors.Count -ne 0) {
 Add-Step -Name 'iblPixelComparison' -ExitCode 0 `
     -Detail "frames=$IblComparisonFrames sceneOn=$($iblOnSceneFingerprints[0]) sceneOff=$($iblOffSceneFingerprints[0]) rgbL1Delta=$iblRgbL1Delta minimum=$minimumIblRgbL1Delta stable=true different=true"
 
+$pointShadowOffRun = Invoke-ProductSampleEvidence -StepName 'point-shadow-off' `
+    -IblMode 'on' -PointShadowMode 'off' -Frames $IblComparisonFrames -CaptureSceneRgb
+$pointShadowOffEvidence = $pointShadowOffRun.Evidence
+$pointShadowErrors = [System.Collections.Generic.List[string]]::new()
+$pointShadowOffExpectedFields = [ordered]@{
+    status                          = 'ok'
+    sample                          = 'tina_sample_3d'
+    evidenceSchema                  = 14
+    frames                          = $IblComparisonFrames
+    imageBasedLightingMode          = 'on'
+    imageBasedLightingConfigured    = $true
+    pointLightShadowMode            = 'off'
+    authoredPointLightShadowCount   = 0
+    submittedPointLightShadowCount  = 0
+    authoredPointLight3DCount       = 3
+    pointLight3DCount               = 2
+    pixelCaptureOk                  = $true
+    sceneRgbPixelCount              = 191880
+    sceneRgbOutputRequested         = $true
+    sceneRgbOutputWritten           = $true
+    renderResourceLedgerBalanced    = $true
+}
+foreach ($name in $pointShadowOffExpectedFields.Keys) {
+    $property = $pointShadowOffEvidence.PSObject.Properties[$name]
+    if ($null -eq $property) {
+        $pointShadowErrors.Add("point-shadow-off missing $name")
+        continue
+    }
+    $expected = $pointShadowOffExpectedFields[$name]
+    if ($property.Value -ne $expected) {
+        $pointShadowErrors.Add("point-shadow-off $name expected=$expected actual=$($property.Value)")
+    }
+}
+
+$pointShadowOnEvidence = $iblComparisonEvidence.on[0]
+$pointShadowOnRgb = [byte[]]$iblComparisonSceneRgb.on[0]
+$pointShadowOffRgb = [byte[]]$pointShadowOffRun.SceneRgbBytes
+$pointShadowOnFingerprint = [string]$pointShadowOnEvidence.sceneRgbFingerprint
+$pointShadowOffFingerprint = [string]$pointShadowOffEvidence.sceneRgbFingerprint
+if ($pointShadowOnFingerprint -eq $pointShadowOffFingerprint) {
+    $pointShadowErrors.Add("Point shadow on/off scene RGB fingerprints must differ: $pointShadowOnFingerprint")
+}
+$expectedPointShadowRgbBytes = [long]$pointShadowOnEvidence.sceneRgbPixelCount * 3
+if ($pointShadowOnRgb.LongLength -ne $expectedPointShadowRgbBytes -or
+    $pointShadowOffRgb.LongLength -ne $expectedPointShadowRgbBytes) {
+    $pointShadowErrors.Add("Point shadow scene RGB byte count mismatch: expected=$expectedPointShadowRgbBytes on=$($pointShadowOnRgb.LongLength) off=$($pointShadowOffRgb.LongLength)")
+}
+$pointShadowRgbL1Delta = [long]0
+if ($pointShadowErrors.Count -eq 0) {
+    for ($index = 0; $index -lt $pointShadowOnRgb.Length; ++$index) {
+        $pointShadowRgbL1Delta +=
+            [Math]::Abs([int]$pointShadowOnRgb[$index] - [int]$pointShadowOffRgb[$index])
+    }
+}
+if ($pointShadowRgbL1Delta -lt 1) {
+    $pointShadowErrors.Add("Point shadow scene RGB L1 delta must be positive: actual=$pointShadowRgbL1Delta")
+}
+if ($pointShadowErrors.Count -ne 0) {
+    Add-Step -Name 'pointShadowPixelComparison' -ExitCode 1 `
+        -Detail (($pointShadowErrors -join '; ') + "; output=$($pointShadowOffRun.Stdout)")
+}
+Add-Step -Name 'pointShadowPixelComparison' -ExitCode 0 `
+    -Detail "frames=$IblComparisonFrames sceneOn=$pointShadowOnFingerprint sceneOff=$pointShadowOffFingerprint rgbL1Delta=$pointShadowRgbL1Delta different=true"
+
 $report.finishedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 $report.sampleEvidence = $evidence
 $report.sampleStdout = $sampleOut
@@ -524,6 +602,15 @@ $report.iblPixelComparison = [ordered]@{
     onEvidence      = $iblComparisonEvidence.on
     offEvidence     = $iblComparisonEvidence.off
 }
+$report.pointShadowPixelComparison = [ordered]@{
+    frames              = $IblComparisonFrames
+    onSceneRgbFingerprint = $pointShadowOnFingerprint
+    offSceneRgbFingerprint = $pointShadowOffFingerprint
+    rgbL1Delta          = $pointShadowRgbL1Delta
+    different           = $true
+    onEvidence          = $pointShadowOnEvidence
+    offEvidence         = $pointShadowOffEvidence
+}
 $report.ok = $true
 
 if ($OutJson) {
@@ -535,5 +622,5 @@ if ($OutJson) {
     Write-Output "wrote $OutJson"
 }
 
-Write-Output "product-3d gate ok schema=13 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=on-off-pixel-differential csm=4-cascades spot-shadow=1 theme=dark-light-dark collections=list-tree"
+Write-Output "product-3d gate ok schema=14 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=on-off-pixel-differential csm=4-cascades spot-shadow=1 point-shadow=on-off-pixel-differential theme=dark-light-dark collections=list-tree"
 exit 0

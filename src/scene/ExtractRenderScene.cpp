@@ -70,6 +70,7 @@ struct DirectionalLightCandidate final {
 struct PointLight3DCandidate final {
     u64 stableKey = 0;
     Render::Mesh3DPointLight light{};
+    std::optional<PointLightShadow3D> shadow{};
 };
 
 struct SpotLight3DCandidate final {
@@ -477,6 +478,7 @@ struct ShadowOccluder2DCandidate final {
         pointCandidates[pointLightCount] = PointLight3DCandidate{
             .stableKey = stableEntityKey(entity),
             .light = light,
+            .shadow = component->shadow,
         };
         ++pointLightCount;
     }
@@ -577,8 +579,24 @@ struct ShadowOccluder2DCandidate final {
     }
     std::array<Render::Mesh3DPointLight, Render::Mesh3DLightingDesc::MaximumPointLightCount>
         pointLights{};
+    std::optional<Render::Mesh3DPointLightShadow> pointLightShadow;
     for (usize index = 0; index < pointLightCount; ++index) {
         pointLights[index] = pointCandidates[index].light;
+        if (!pointCandidates[index].shadow.has_value()) {
+            continue;
+        }
+        if (pointLightShadow.has_value()) {
+            return Core::failure(
+                SceneErrorCode::TooManyActivePointLightShadows,
+                "Scene extract supports at most one camera-affecting PointLightShadow3D");
+        }
+        const PointLightShadow3D& source = *pointCandidates[index].shadow;
+        pointLightShadow = Render::Mesh3DPointLightShadow{
+            .pointLightIndex = static_cast<u32>(index),
+            .nearPlaneMeters = source.nearPlaneMeters,
+            .depthBias = source.depthBias,
+            .normalBiasMeters = source.normalBiasMeters,
+        };
     }
     if (spotLightCount > 1) {
         std::sort(spotCandidates.data(), spotCandidates.data() + spotLightCount,
@@ -616,6 +634,7 @@ struct ShadowOccluder2DCandidate final {
         .spotLights =
             std::span<const Render::Mesh3DSpotLight>{spotLights.data(), spotLightCount},
         .cascadedDirectionalShadow = cascadedDirectionalShadow,
+        .pointLightShadow = pointLightShadow,
         .spotLightShadow = spotLightShadow,
         .ambientScale = ambientLightScale,
     });

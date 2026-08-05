@@ -651,10 +651,17 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
         .depthBias = 0.002F,
         .normalBiasMeters = 0.03F,
     };
+    Mesh3DPointLightShadow pointLightShadow{
+        .pointLightIndex = 1U,
+        .nearPlaneMeters = 0.1F,
+        .depthBias = 0.003F,
+        .normalBiasMeters = 0.04F,
+    };
     ASSERT_TRUE(builder.writer().setMesh3DLighting({
         .directionalLights = lights,
         .pointLights = pointLights,
         .spotLights = spotLights,
+        .pointLightShadow = pointLightShadow,
         .spotLightShadow = spotLightShadow,
         .ambientScale = 0.25F,
     }));
@@ -663,6 +670,7 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
     pointLights[1].colorB = 99.0F;
     spotLights[0].positionX = 99.0F;
     spotLights[1].outerConeCosine = 99.0F;
+    pointLightShadow.nearPlaneMeters = 99.0F;
     spotLightShadow.nearPlaneMeters = 99.0F;
 
     auto committed = builder.commit();
@@ -682,6 +690,12 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
     EXPECT_FLOAT_EQ(lighting.spotLights()[0].directionFromLightX, -1.0F);
     EXPECT_FLOAT_EQ(lighting.spotLights()[1].outerConeCosine, 0.7F);
     EXPECT_EQ(lighting.descriptor().spotLights.data(), lighting.spotLights().data());
+    ASSERT_TRUE(lighting.pointLightShadow().has_value());
+    EXPECT_EQ(lighting.pointLightShadow()->pointLightIndex, 1U);
+    EXPECT_FLOAT_EQ(lighting.pointLightShadow()->nearPlaneMeters, 0.1F);
+    EXPECT_FLOAT_EQ(lighting.pointLightShadow()->depthBias, 0.003F);
+    EXPECT_FLOAT_EQ(lighting.pointLightShadow()->normalBiasMeters, 0.04F);
+    EXPECT_EQ(lighting.descriptor().pointLightShadow, lighting.pointLightShadow());
     ASSERT_TRUE(lighting.spotLightShadow().has_value());
     EXPECT_EQ(lighting.spotLightShadow()->spotLightIndex, 1U);
     EXPECT_FLOAT_EQ(lighting.spotLightShadow()->nearPlaneMeters, 0.1F);
@@ -694,6 +708,42 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
     EXPECT_EQ(committed->statistics().pointLight3DCount, 2U);
     EXPECT_EQ(committed->statistics().spotLight3DCount, 2U);
     EXPECT_FALSE(committed->empty());
+}
+
+TEST(RenderSceneBuilderTest, PointLightShadowValidationRejectsInvalidCasterIndexNearPlaneAndBias)
+{
+    const std::array pointLights{Mesh3DPointLight{.influenceRadius = 5.0F}};
+    const auto expectInvalid = [&pointLights](Mesh3DPointLightShadow shadow) {
+        const Core::Status status = validateMesh3DLightingDesc(Mesh3DLightingDesc{
+            .pointLights = pointLights,
+            .pointLightShadow = shadow,
+        });
+        ASSERT_FALSE(status);
+        EXPECT_EQ(status.error().code, RenderErrorCode::InvalidMesh3DLighting);
+    };
+
+    EXPECT_TRUE(validateMesh3DLightingDesc(Mesh3DLightingDesc{
+        .pointLights = pointLights,
+        .pointLightShadow = Mesh3DPointLightShadow{
+            .nearPlaneMeters = 4.999F,
+            .depthBias = Mesh3DPointLightShadow::MaximumDepthBias,
+            .normalBiasMeters = Mesh3DPointLightShadow::MaximumNormalBiasMeters,
+        },
+    }));
+    expectInvalid(Mesh3DPointLightShadow{.pointLightIndex = 1U});
+    expectInvalid(Mesh3DPointLightShadow{.nearPlaneMeters = 0.0F});
+    expectInvalid(Mesh3DPointLightShadow{.nearPlaneMeters = 5.0F});
+    expectInvalid(Mesh3DPointLightShadow{
+        .nearPlaneMeters = std::numeric_limits<float>::quiet_NaN(),
+    });
+    expectInvalid(Mesh3DPointLightShadow{.depthBias = -0.001F});
+    expectInvalid(Mesh3DPointLightShadow{
+        .depthBias = Mesh3DPointLightShadow::MaximumDepthBias + 0.001F,
+    });
+    expectInvalid(Mesh3DPointLightShadow{.normalBiasMeters = -0.001F});
+    expectInvalid(Mesh3DPointLightShadow{
+        .normalBiasMeters = Mesh3DPointLightShadow::MaximumNormalBiasMeters + 0.001F,
+    });
 }
 
 TEST(RenderSceneBuilderTest, SpotLightShadowValidationRejectsInvalidCasterIndexNearPlaneAndBias)

@@ -65,6 +65,29 @@ set_target_properties(tina_render_bgfx_spot_contract_obj PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
+add_library(tina_render_bgfx_point_contract_obj OBJECT
+    ${PROJECT_SOURCE_DIR}/src/render/bgfx/BgfxPointLightShadowResources.cpp
+)
+target_compile_features(tina_render_bgfx_point_contract_obj PRIVATE cxx_std_23)
+target_compile_definitions(tina_render_bgfx_point_contract_obj PRIVATE
+    bgfx=tina_test_bgfx
+    BgfxPointLightShadowMapExtent=BgfxPointLightShadowMapExtentContractTest
+    BgfxPointLightShadowResources=BgfxPointLightShadowResourcesContractTest
+    createPointLightShadowResources=createPointLightShadowResourcesContractTest
+    destroyPointLightShadowResources=destroyPointLightShadowResourcesContractTest
+)
+target_include_directories(tina_render_bgfx_point_contract_obj BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes
+    ${PROJECT_SOURCE_DIR}/src/render/bgfx
+)
+target_link_libraries(tina_render_bgfx_point_contract_obj PRIVATE
+    Tina::ProjectOptions
+    Tina::Render
+)
+set_target_properties(tina_render_bgfx_point_contract_obj PROPERTIES
+    CXX_EXTENSIONS OFF
+)
+
 add_library(tina_render_bgfx_environment_map_contract_test_object OBJECT
     ${PROJECT_SOURCE_DIR}/src/render/bgfx/BgfxEnvironmentMapResources.cpp
 )
@@ -93,6 +116,8 @@ add_executable(tina_render_bgfx_tests
     BgfxCascadedDirectionalShadowResourcesContractTests.cpp
     BgfxSpotLightShadowMathTests.cpp
     BgfxSpotLightShadowResourcesContractTests.cpp
+    BgfxPointLightShadowMathTests.cpp
+    BgfxPointLightShadowResourcesContractTests.cpp
     BgfxEnvironmentMapResourcesContractTests.cpp
     BgfxResourceSlotGenerationTests.cpp
     BgfxRetirementTimelineTests.cpp
@@ -105,6 +130,7 @@ add_executable(tina_render_bgfx_tests
     $<TARGET_OBJECTS:tina_render_bgfx_ui_atlas_contract_test_object>
     $<TARGET_OBJECTS:tina_render_bgfx_csm_contract_test_object>
     $<TARGET_OBJECTS:tina_render_bgfx_spot_contract_obj>
+    $<TARGET_OBJECTS:tina_render_bgfx_point_contract_obj>
     $<TARGET_OBJECTS:tina_render_bgfx_environment_map_contract_test_object>
 )
 

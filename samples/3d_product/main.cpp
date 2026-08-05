@@ -121,6 +121,17 @@ enum class ImageBasedLightingMode {
     return mode == ImageBasedLightingMode::On ? "on" : "off";
 }
 
+enum class PointLightShadowMode {
+    On,
+    Off,
+};
+
+[[nodiscard]] constexpr std::string_view pointLightShadowModeName(
+    PointLightShadowMode mode) noexcept
+{
+    return mode == PointLightShadowMode::On ? "on" : "off";
+}
+
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
@@ -134,6 +145,7 @@ struct SampleOptions final {
     std::string sceneRgbOutputPath{};
     Tina::Sample3D::Product3DUITheme initialUiTheme = Tina::Sample3D::Product3DUITheme::Dark;
     ImageBasedLightingMode imageBasedLightingMode = ImageBasedLightingMode::On;
+    PointLightShadowMode pointLightShadowMode = PointLightShadowMode::On;
     bool uiThemeDemo = false;
     bool help = false;
 };
@@ -183,6 +195,7 @@ struct LifecycleCounters final {
     u32 authoredPointLight3DCount = 0;
     u32 pointLight3DCount = 0;
     u32 culledPointLight3DCount = 0;
+    u32 authoredPointLightShadowCount = 0;
     u32 authoredSpotLight3DCount = 0;
     u32 spotLight3DCount = 0;
     u32 culledSpotLight3DCount = 0;
@@ -479,6 +492,7 @@ void printUsage()
         << "  --ui-theme=dark|light   select the initial retained UI theme (default dark)\n"
         << "  --ui-theme-demo         exercise initial -> alternate -> initial theme in UI phase\n"
         << "  --ibl=on|off            bind or leave unbound the uploaded EnvironmentMap (default on)\n"
+        << "  --point-shadow=on|off   author the fixed PointLight shadow (default on)\n"
         << "  --expect-pixel-fingerprint=<32 lowercase hex chars>\n"
         << "                           require an exact machine-local RGBA8 frame match\n"
         << "  --scene-rgb-output=<path> write the captured central RGB ROI as raw bytes\n"
@@ -504,6 +518,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     constexpr std::string_view GltfPrefix = "--gltf=";
     constexpr std::string_view UiThemePrefix = "--ui-theme=";
     constexpr std::string_view ImageBasedLightingPrefix = "--ibl=";
+    constexpr std::string_view PointLightShadowPrefix = "--point-shadow=";
     constexpr std::string_view PixelFingerprintPrefix = "--expect-pixel-fingerprint=";
     constexpr std::string_view SceneRgbOutputPrefix = "--scene-rgb-output=";
     SampleOptions options;
@@ -514,6 +529,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     bool hasGltf = false;
     bool hasUiTheme = false;
     bool hasImageBasedLightingMode = false;
+    bool hasPointLightShadowMode = false;
     bool hasPixelFingerprint = false;
     bool hasSceneRgbOutput = false;
 
@@ -602,6 +618,19 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             options.imageBasedLightingMode =
                 mode == "on" ? ImageBasedLightingMode::On : ImageBasedLightingMode::Off;
             hasImageBasedLightingMode = true;
+        }
+        else if (argument.starts_with(PointLightShadowPrefix))
+        {
+            const std::string_view mode = argument.substr(PointLightShadowPrefix.size());
+            if (hasPointLightShadowMode || (mode != "on" && mode != "off"))
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "--point-shadow must appear once with on or off");
+            }
+            options.pointLightShadowMode =
+                mode == "on" ? PointLightShadowMode::On : PointLightShadowMode::Off;
+            hasPointLightShadowMode = true;
         }
         else if (argument.starts_with(PixelFingerprintPrefix))
         {
@@ -878,8 +907,55 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         return id;
     };
 
+    const auto rewritePrefabPayload = [&rewriteId](std::span<const std::byte> payload)
+        -> Tina::Core::Result<std::vector<std::byte>> {
+        std::vector<Tina::AssetFormat::PrefabNodeView> sourceNodes;
+        auto source = Tina::AssetFormat::parsePrefabPayload(payload, sourceNodes);
+        if (!source)
+        {
+            return Tina::Core::failure(std::move(source.error()));
+        }
+
+        std::vector<Tina::AssetFormat::PrefabNodeDesc> rewrittenNodes;
+        rewrittenNodes.reserve(source->nodes.size());
+        for (const Tina::AssetFormat::PrefabNodeView& node : source->nodes)
+        {
+            rewrittenNodes.push_back(Tina::AssetFormat::PrefabNodeDesc{
+                .stableNodeId = node.stableNodeId,
+                .parentIndex = node.parentIndex,
+                .positionX = node.positionX,
+                .positionY = node.positionY,
+                .positionZ = node.positionZ,
+                .rotationX = node.rotationX,
+                .rotationY = node.rotationY,
+                .rotationZ = node.rotationZ,
+                .rotationW = node.rotationW,
+                .scaleX = node.scaleX,
+                .scaleY = node.scaleY,
+                .scaleZ = node.scaleZ,
+                .meshId = node.hasMesh ? rewriteId(node.meshId) : Tina::Core::AssetId{},
+                .materialId =
+                    node.hasMaterial ? rewriteId(node.materialId) : Tina::Core::AssetId{},
+                .visible = node.visible,
+            });
+        }
+        return Tina::AssetFormat::writePrefabPayloadBytes(
+            Tina::AssetFormat::PrefabPayloadDesc{.nodes = rewrittenNodes});
+    };
+
     for (auto& asset : request->assets)
     {
+        if (asset.assetKind == Tina::AssetFormat::AssetKind::Prefab)
+        {
+            auto rewrittenPayload = rewritePrefabPayload(asset.payload);
+            if (!rewrittenPayload)
+            {
+                Tina::Core::Error error = std::move(rewrittenPayload.error());
+                error.addContext("prepareCookedProductAssets", "rewritePrefabPayload");
+                return Tina::Core::failure(std::move(error));
+            }
+            asset.payload = std::move(*rewrittenPayload);
+        }
         asset.assetId = rewriteId(asset.assetId);
         for (auto& dep : asset.dependencies)
         {
@@ -1548,6 +1624,45 @@ class Product3DState final : public Tina::IGameState {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "prefab instantiate produced fewer than two product instances");
         }
+
+        const bool hasBuiltInPointShadowWitness = !resources_->externalGltf;
+        if (hasBuiltInPointShadowWitness)
+        {
+            constexpr std::array<Tina::Scene::Vec3, 2> WitnessPositions{
+                Tina::Scene::Vec3{-1.0F, -1.0F, 0.0F},
+                Tina::Scene::Vec3{-0.35F, -0.35F, 0.85F},
+            };
+            constexpr std::array<float, 2> WitnessScales{2.4F, 0.85F};
+            for (std::size_t index = 0; index < WitnessPositions.size(); ++index)
+            {
+                const Tina::Scene::EntityId entity = prefabEntities_[index];
+                const Tina::Scene::LocalTransform* existing = world_->localTransform(entity);
+                const Tina::Scene::MeshRenderer3D* existingMesh =
+                    world_->meshRenderer3D(entity);
+                if (existing == nullptr || existingMesh == nullptr)
+                {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::Internal,
+                        "built-in point-shadow witness is missing a prefab transform or mesh");
+                }
+
+                Tina::Scene::LocalTransform local = *existing;
+                local.position = WitnessPositions[index];
+                local.scale = Tina::Scene::Vec3{
+                    WitnessScales[index], WitnessScales[index], WitnessScales[index]};
+                if (auto status = world_->setLocalTransform(entity, local); !status)
+                {
+                    return status;
+                }
+
+                Tina::Scene::MeshRenderer3D mesh = *existingMesh;
+                mesh.doubleSided = true;
+                if (auto status = world_->setMeshRenderer3D(entity, mesh); !status)
+                {
+                    return status;
+                }
+            }
+        }
         if (auto status = world_->updateWorldTransforms(); !status)
         {
             return status;
@@ -1634,11 +1749,18 @@ class Product3DState final : public Tina::IGameState {
             Tina::Render::RenderLinearColor color{};
             float intensity = 1.0F;
         };
-        const float pointInfluenceRadius = (std::max)(radius * 2.0F, 2.5F);
+        const float pointInfluenceRadius = hasBuiltInPointShadowWitness
+            ? (std::max)(radius * 3.0F, 4.0F)
+            : (std::max)(radius * 2.0F, 2.5F);
         const std::array ProductPointLights{
             ProductPointLight{
-                .position = {centerX - radius * 0.8F, centerY + radius * 0.9F,
-                             centerZ + radius * 0.75F},
+                .position = hasBuiltInPointShadowWitness
+                    ? Tina::Scene::Vec3{centerX + radius * 0.2F,
+                                        centerY + radius * 0.15F,
+                                        centerZ + radius * 1.8F}
+                    : Tina::Scene::Vec3{centerX - radius * 0.8F,
+                                        centerY + radius * 0.9F,
+                                        centerZ + radius * 0.75F},
                 .color = {.red = 1.0F, .green = 0.32F, .blue = 0.12F},
                 .intensity = 1.15F,
             },
@@ -1654,8 +1776,9 @@ class Product3DState final : public Tina::IGameState {
                 .color = {.red = 0.2F, .green = 1.0F, .blue = 0.35F},
             },
         };
-        for (const ProductPointLight& light : ProductPointLights)
+        for (std::size_t lightIndex = 0; lightIndex < ProductPointLights.size(); ++lightIndex)
         {
+            const ProductPointLight& light = ProductPointLights[lightIndex];
             auto lightEntity = world_->createEntity(Tina::Scene::LocalTransform{
                 .position = light.position,
             });
@@ -1663,13 +1786,18 @@ class Product3DState final : public Tina::IGameState {
             {
                 return Tina::Core::failure(std::move(lightEntity.error()));
             }
-            if (auto status = world_->setPointLight3D(
-                    *lightEntity,
-                    Tina::Scene::PointLight3D{
-                        .color = light.color,
-                        .intensity = light.intensity,
-                        .influenceRadiusMeters = pointInfluenceRadius,
-                    });
+            Tina::Scene::PointLight3D component{
+                .color = light.color,
+                .intensity = light.intensity,
+                .influenceRadiusMeters = pointInfluenceRadius,
+            };
+            if (lightIndex == 0U &&
+                options_.pointLightShadowMode == PointLightShadowMode::On)
+            {
+                component.shadow = Tina::Scene::PointLightShadow3D{};
+                ++counters_->authoredPointLightShadowCount;
+            }
+            if (auto status = world_->setPointLight3D(*lightEntity, component);
                 !status)
             {
                 return status;
@@ -2073,6 +2201,7 @@ class Product3DApplication final : public Tina::IGameApplication {
     const u32 submittedCascadedDirectionalShadowCascadeCount =
         capture.cascadedDirectionalShadowCascadeCount();
     const u32 submittedSpotLightShadowCount = capture.spotLightShadowCount();
+    const u32 submittedPointLightShadowCount = capture.pointLightShadowCount();
     counters.submittedCameraAspectRatio = capture.submittedCameraAspectRatio();
     counters.cameraAspectChanges = capture.cameraAspectChanges();
     counters.pointLight3DCount = capture.pointLight3DCount();
@@ -2170,6 +2299,9 @@ class Product3DApplication final : public Tina::IGameApplication {
     const bool sceneRgbOutputRequested = !options.sceneRgbOutputPath.empty();
     const bool imageBasedLightingEnabled =
         options.imageBasedLightingMode == ImageBasedLightingMode::On;
+    const bool pointLightShadowEnabled =
+        options.pointLightShadowMode == PointLightShadowMode::On;
+    const u32 expectedPointLightShadowCount = pointLightShadowEnabled ? 1U : 0U;
     const u64 expectedImageBasedLightingTransitions = imageBasedLightingEnabled ? 1U : 0U;
     const auto& ui = counters.ui;
     const bool expectedInitialThemeLight = options.initialUiTheme == Tina::Sample3D::Product3DUITheme::Light;
@@ -2243,6 +2375,8 @@ class Product3DApplication final : public Tina::IGameApplication {
         submittedCascadedDirectionalShadowCascadeCount !=
             Tina::Render::Mesh3DCascadedDirectionalShadow::CascadeCount ||
         counters.authoredSpotLightShadowCount != 1U || submittedSpotLightShadowCount != 1U ||
+        counters.authoredPointLightShadowCount != expectedPointLightShadowCount ||
+        submittedPointLightShadowCount != expectedPointLightShadowCount ||
         counters.authoredPointLight3DCount != 3U || counters.pointLight3DCount != 2U ||
         counters.culledPointLight3DCount != 1U ||
         counters.authoredSpotLight3DCount != 3U || counters.spotLight3DCount != 2U ||
@@ -2293,6 +2427,8 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"environmentMapsUploaded\":" << environmentMapsUploaded
                   << ",\"imageBasedLightingMode\":\""
                   << imageBasedLightingModeName(options.imageBasedLightingMode) << "\""
+                  << ",\"pointLightShadowMode\":\""
+                  << pointLightShadowModeName(options.pointLightShadowMode) << "\""
                   << ",\"imageBasedLightingConfigured\":"
                   << (counters.imageBasedLightingConfigured ? "true" : "false")
                   << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings
@@ -2321,6 +2457,9 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"authoredSpotLightShadowCount\":"
                   << counters.authoredSpotLightShadowCount
                   << ",\"submittedSpotLightShadowCount\":" << submittedSpotLightShadowCount
+                  << ",\"authoredPointLightShadowCount\":"
+                  << counters.authoredPointLightShadowCount
+                  << ",\"submittedPointLightShadowCount\":" << submittedPointLightShadowCount
                   << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
                   << ",\"pointLight3DCount\":" << counters.pointLight3DCount
                   << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount
@@ -2393,7 +2532,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":13,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":14,\"frames\":"
               << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"cookedEnvironmentMap\":true,"
@@ -2405,6 +2544,8 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"environmentMapsUploaded\":" << environmentMapsUploaded
               << ",\"imageBasedLightingMode\":\""
               << imageBasedLightingModeName(options.imageBasedLightingMode) << "\""
+              << ",\"pointLightShadowMode\":\""
+              << pointLightShadowModeName(options.pointLightShadowMode) << "\""
               << ",\"imageBasedLightingConfigured\":"
               << (counters.imageBasedLightingConfigured ? "true" : "false")
               << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings
@@ -2455,6 +2596,9 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"authoredSpotLightShadowCount\":"
               << counters.authoredSpotLightShadowCount
               << ",\"submittedSpotLightShadowCount\":" << submittedSpotLightShadowCount
+              << ",\"authoredPointLightShadowCount\":"
+              << counters.authoredPointLightShadowCount
+              << ",\"submittedPointLightShadowCount\":" << submittedPointLightShadowCount
               << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
               << ",\"pointLight3DCount\":" << counters.pointLight3DCount
               << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount

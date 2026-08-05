@@ -35,7 +35,8 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
     RenderPassSchedule schedule{};
     const auto append = [&schedule](RenderPassKind kind, RenderPassResource resource,
                                     bool clearColor, bool clearDepth,
-                                    u32 cascadeIndex = 0) noexcept {
+                                    u32 cascadeIndex = 0,
+                                    u32 faceIndex = 0) noexcept {
         if (schedule.m_passCount >= RenderPassSchedule::MaximumPassCount)
         {
             return false;
@@ -44,6 +45,7 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
             .kind = kind,
             .resource = resource,
             .cascadeIndex = cascadeIndex,
+            .faceIndex = faceIndex,
             .clearColor = clearColor,
             .clearDepth = clearDepth,
         };
@@ -60,6 +62,9 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
     const bool hasSpotLightShadow =
         hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
         frame.primaryWorldScene.mesh3DLighting()->spotLightShadow().has_value();
+    const bool hasPointLightShadow =
+        hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
+        frame.primaryWorldScene.mesh3DLighting()->pointLightShadow().has_value();
     const bool firstSurfaceContentNeedsFullSurfaceClear =
         (hasOpaqueContent &&
          !coversWholeSurface(frame.primaryWorldScene.perspectiveCamera()->normalizedViewport)) ||
@@ -101,6 +106,18 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
     {
         return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
                              "Render pass schedule exceeded its fixed pass capacity");
+    }
+    for (u32 faceIndex = 0;
+         hasPointLightShadow && faceIndex < Mesh3DPointLightShadow::FaceCount;
+         ++faceIndex)
+    {
+        if (!append(RenderPassKind::PointLightShadowDepth,
+                    RenderPassResource::PointLightShadowMap,
+                    false, true, 0, faceIndex))
+        {
+            return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
+                                 "Render pass schedule exceeded its fixed pass capacity");
+        }
     }
     if (hasOpaqueContent && !appendContent(RenderPassKind::Opaque3D))
     {

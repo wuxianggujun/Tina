@@ -63,7 +63,7 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
 | `MeshRenderer3D` | weak mesh/material `AssetHandle`、bounds、base color、可见性 | World 只校验结构；visible extract 通过两个 kind-specific resolver 解析非0 key |
 | `DirectionalLight3D` | linear RGB color、非负 intensity、active 标志 | Entity world local `+Z` 指向光源；每帧最多4个 active light，按稳定 Entity identity 发布 |
-| `PointLight3D` | linear RGB color、非负 intensity、正 influence radius、active 标志 | Entity world position 是灯光中心；每帧最多8个 camera-affecting active light，按稳定 Entity identity 发布；有有效 PerspectiveCamera3D 时 influence sphere 在容量检查前做 frustum culling |
+| `PointLight3D` | linear RGB color、非负 intensity、正 influence radius、optional `PointLightShadow3D`、active 标志 | Entity world position 是灯光中心；每帧最多8个 camera-affecting active light，按稳定 Entity identity 发布；有有效 PerspectiveCamera3D 时 influence sphere 在容量检查前做 frustum culling；最多一个 camera-affecting shadow config |
 | `SpotLight3D` | linear RGB color、非负 intensity、正 influence radius、合法 inner/outer cone half-angle、optional `SpotLightShadow3D`、active 标志 | Entity world position 是灯光中心，world local `-Z` 是出光方向；每帧最多8个 camera-affecting active light；与 point light 一样先做 influence sphere culling，再按稳定 Entity identity 发布；最多一个 camera-affecting shadow config |
 
 组件 storage 与 entity slot 共用固定容量。`set*` 替换当前值，`clear*` 移除组件；访问 stale 或 cross-world
@@ -131,11 +131,11 @@ handle/resolver/binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续�
 将 color×intensity 与 `ExtractRenderSceneParams::ambientLightScale` 写入固定4槽的 self-contained
 RenderScene snapshot。`PointLight3D` 使用已发布 world position、influence radius 与 color×intensity；
 `SpotLight3D` 额外把 world local `-Z` 转成出光方向，并把 inner/outer half-angle 转成 cosine。optional
-`SpotLightShadow3D` 要求 `0 < nearPlaneMeters < influenceRadiusMeters`、有限且有界的 depth/normal bias。
+`PointLightShadow3D`/`SpotLightShadow3D` 都要求 `0 < nearPlaneMeters < influenceRadiusMeters`、有限且有界的 depth/normal bias。
 二者在有效
 PerspectiveCamera3D 与非0 surface 时按 influence sphere-frustum culling 在各自固定8槽容量检查前裁剪，
-稳定 Entity identity 排序后深拷贝为同一 snapshot；shadow 在排序后映射 `spotLightIndex`，超过一个
-camera-affecting config 显式失败。没有灯组件时保留低层 device fallback；存在组件但全部 inactive 时发布 ambient-only
+稳定 Entity identity 排序后深拷贝为同一 snapshot；shadow 在排序后分别映射 `pointLightIndex`/
+`spotLightIndex`，任一类型超过一个 camera-affecting config 都显式失败。没有灯组件时保留低层 device fallback；存在组件但全部 inactive 时发布 ambient-only
 snapshot，避免重新启用 fallback 方向光。超过对应上限返回 `TooManyActiveDirectionalLights` 或
 `TooManyActivePointLights3D` 或 `TooManyActiveSpotLights3D`，不静默裁剪。
 `PointLight2D` 使用已发布 world position、显式 world-space influence/source radii 与 color×intensity。

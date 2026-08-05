@@ -54,6 +54,10 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxSpotLightShadowMath.hpp
         bgfx/BgfxSpotLightShadowResources.cpp
         bgfx/BgfxSpotLightShadowResources.hpp
+        bgfx/BgfxPointLightShadowMath.cpp
+        bgfx/BgfxPointLightShadowMath.hpp
+        bgfx/BgfxPointLightShadowResources.cpp
+        bgfx/BgfxPointLightShadowResources.hpp
         bgfx/BgfxOpaque3DShader.cpp
         bgfx/BgfxOpaque3DShader.hpp
         bgfx/BgfxResourceSlotGeneration.hpp

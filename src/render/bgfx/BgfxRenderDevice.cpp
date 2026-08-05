@@ -3,6 +3,8 @@
 #include "BgfxCascadedDirectionalShadowResources.hpp"
 #include "BgfxSpotLightShadowMath.hpp"
 #include "BgfxSpotLightShadowResources.hpp"
+#include "BgfxPointLightShadowMath.hpp"
+#include "BgfxPointLightShadowResources.hpp"
 #include "BgfxEnvironmentMapResources.hpp"
 #include "BgfxOpaque3DGeometry.hpp"
 #include "BgfxOpaque3DShader.hpp"
@@ -202,11 +204,28 @@ constexpr std::array<bgfx::ViewId, BgfxCascadedDirectionalShadowCascadeCount>
 static_assert(BgfxCascadedDirectionalShadowCascadeCount ==
               Mesh3DCascadedDirectionalShadow::CascadeCount);
 constexpr bgfx::ViewId kSpotLightShadowView = 5;
-constexpr bgfx::ViewId kOpaque3DView = 6;
-constexpr bgfx::ViewId kSprite2DView = 7;
-constexpr bgfx::ViewId kUIView = 8;
+constexpr std::array<bgfx::ViewId, BgfxPointLightShadowFaceCount>
+    kPointLightShadowViews{6, 7, 8, 9, 10, 11};
+constexpr std::array<const char*, BgfxPointLightShadowFaceCount>
+    kPointLightShadowSamplerNames{
+        "s_pointShadowPosX", "s_pointShadowNegX", "s_pointShadowPosY",
+        "s_pointShadowNegY", "s_pointShadowPosZ", "s_pointShadowNegZ"};
+
+template <typename Handle, usize Count>
+[[nodiscard]] constexpr std::array<Handle, Count> invalidBgfxHandleArray() noexcept
+{
+    std::array<Handle, Count> handles{};
+    for (Handle& handle : handles)
+    {
+        handle = BGFX_INVALID_HANDLE;
+    }
+    return handles;
+}
+constexpr bgfx::ViewId kOpaque3DView = 12;
+constexpr bgfx::ViewId kSprite2DView = 13;
+constexpr bgfx::ViewId kUIView = 14;
 // Must remain after every view that can reference a retireable resource.
-constexpr bgfx::ViewId kRetirementMarkerView = 9;
+constexpr bgfx::ViewId kRetirementMarkerView = 15;
 constexpr u32 kDefaultResetFlags = BGFX_RESET_VSYNC;
 constexpr u32 kClearRgba = 0x102a43ff;
 constexpr usize kIndicesPerSolidQuad = 6;
@@ -257,6 +276,13 @@ struct PreparedOpaque3D final {
         float normalBiasMeters = 0.0F;
     };
     std::optional<SpotLightShadow> spotLightShadow{};
+    struct PointLightShadow final {
+        BgfxPointLightShadowProjection projection{};
+        u16 pointLightIndex = 0;
+        float depthBias = 0.0F;
+        float normalBiasMeters = 0.0F;
+    };
+    std::optional<PointLightShadow> pointLightShadow{};
 };
 
 struct PreparedSprite2D final {
@@ -729,6 +755,33 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources)
             .normalBiasMeters = shadow.normalBiasMeters,
         };
     }
+    if (const auto& pointLightShadow = lighting.pointLightShadow();
+        pointLightShadow.has_value())
+    {
+        const Mesh3DPointLightShadow& shadow = *pointLightShadow;
+        const std::span<const Mesh3DPointLight> pointLights = lighting.pointLights();
+        if (shadow.pointLightIndex >= pointLights.size())
+        {
+            std::terminate();
+        }
+        auto projection = computePointLightShadowProjection(
+            BgfxPointLightShadowInput{
+                .light = pointLights[shadow.pointLightIndex],
+                .nearPlaneMeters = shadow.nearPlaneMeters,
+            },
+            caps->homogeneousDepth,
+            caps->originBottomLeft);
+        if (!projection)
+        {
+            return Core::failure(std::move(projection.error()));
+        }
+        prepared.pointLightShadow = PreparedOpaque3D::PointLightShadow{
+            .projection = *projection,
+            .pointLightIndex = static_cast<u16>(shadow.pointLightIndex),
+            .depthBias = shadow.depthBias,
+            .normalBiasMeters = shadow.normalBiasMeters,
+        };
+    }
     return prepared;
 }
 
@@ -1182,6 +1235,48 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         spotLightShadowResources_ = *spotLightShadowResources;
         statistics_.liveResources += 2U;
+
+        for (usize faceIndex = 0; faceIndex < opaque3DPointShadowMapSamplers_.size();
+             ++faceIndex)
+        {
+            opaque3DPointShadowMapSamplers_[faceIndex] = bgfx::createUniform(
+                kPointLightShadowSamplerNames[faceIndex], bgfx::UniformType::Sampler);
+            if (!bgfx::isValid(opaque3DPointShadowMapSamplers_[faceIndex]))
+            {
+                return Core::failure(
+                    RenderErrorCode::DeviceInitializationFailed,
+                    "bgfx rejected an Opaque3D point shadow-map sampler uniform");
+            }
+            ++statistics_.liveResources;
+        }
+
+        opaque3DPointShadowMatricesUniform_ = bgfx::createUniform(
+            "u_pointShadowMatrices", bgfx::UniformType::Mat4,
+            static_cast<u16>(BgfxPointLightShadowFaceCount));
+        if (!bgfx::isValid(opaque3DPointShadowMatricesUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D point shadow matrix array uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DPointShadowParamsUniform_ =
+            bgfx::createUniform("u_pointShadowParams", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DPointShadowParamsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D point shadow params uniform");
+        }
+        ++statistics_.liveResources;
+
+        auto pointLightShadowResources = createPointLightShadowResources();
+        if (!pointLightShadowResources)
+        {
+            return Core::failure(std::move(pointLightShadowResources.error()));
+        }
+        pointLightShadowResources_ = *pointLightShadowResources;
+        statistics_.liveResources +=
+            static_cast<u64>(BgfxPointLightShadowFaceCount * 2U);
 
         opaque3DSampler_ = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
         if (!bgfx::isValid(opaque3DSampler_))
@@ -1705,6 +1800,41 @@ class BgfxRenderDevice final : public IRenderDevice {
                 static_cast<u64>(bgfx::isValid(spotLightShadowResources_.depthMap));
             destroySpotLightShadowResources(spotLightShadowResources_);
             statistics_.liveResources -= spotLightShadowResourceCount;
+            u64 pointLightShadowResourceCount = 0;
+            for (const bgfx::FrameBufferHandle frameBuffer :
+                 pointLightShadowResources_.frameBuffers)
+            {
+                pointLightShadowResourceCount +=
+                    static_cast<u64>(bgfx::isValid(frameBuffer));
+            }
+            for (const bgfx::TextureHandle depthMap : pointLightShadowResources_.depthMaps)
+            {
+                pointLightShadowResourceCount +=
+                    static_cast<u64>(bgfx::isValid(depthMap));
+            }
+            destroyPointLightShadowResources(pointLightShadowResources_);
+            statistics_.liveResources -= pointLightShadowResourceCount;
+            for (bgfx::UniformHandle& sampler : opaque3DPointShadowMapSamplers_)
+            {
+                if (bgfx::isValid(sampler))
+                {
+                    bgfx::destroy(sampler);
+                    sampler = BGFX_INVALID_HANDLE;
+                    --statistics_.liveResources;
+                }
+            }
+            if (bgfx::isValid(opaque3DPointShadowMatricesUniform_))
+            {
+                bgfx::destroy(opaque3DPointShadowMatricesUniform_);
+                opaque3DPointShadowMatricesUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DPointShadowParamsUniform_))
+            {
+                bgfx::destroy(opaque3DPointShadowParamsUniform_);
+                opaque3DPointShadowParamsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(opaque3DSpotShadowMapSampler_))
             {
                 bgfx::destroy(opaque3DSpotShadowMapSampler_);
@@ -2324,6 +2454,27 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::touch(kSpotLightShadowView);
     }
 
+    void configurePointLightShadowView(
+        const PreparedOpaque3D::PointLightShadow& shadow,
+        usize faceIndex,
+        bool clearDepth) noexcept
+    {
+        if (faceIndex >= BgfxPointLightShadowFaceCount)
+        {
+            std::terminate();
+        }
+        const bgfx::ViewId view = kPointLightShadowViews[faceIndex];
+        const BgfxPointLightShadowFace& face = shadow.projection.faces[faceIndex];
+        bgfx::setViewRect(view, 0, 0, BgfxPointLightShadowMapExtent,
+                          BgfxPointLightShadowMapExtent);
+        bgfx::setViewFrameBuffer(view, pointLightShadowResources_.frameBuffers[faceIndex]);
+        bgfx::setViewClear(view, clearDepth ? BGFX_CLEAR_DEPTH : BGFX_CLEAR_NONE,
+                           0, 1.0F, 0);
+        bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
+        bgfx::setViewTransform(view, face.lightView.data(), face.lightProjection.data());
+        bgfx::touch(view);
+    }
+
     void configureOpaque3DView(const RenderSurfaceState& surface, const RenderPerspectiveCamera& camera,
                                bool clearColor, bool clearDepth) noexcept
     {
@@ -2546,6 +2697,22 @@ class BgfxRenderDevice final : public IRenderDevice {
                                   kSpotLightShadowView);
     }
 
+    void submitPointLightShadowDepth(
+        RenderSceneView scene,
+        FrameResourceTableView resources,
+        const PreparedOpaque3D& prepared,
+        bgfx::InstanceDataBuffer& instanceBuffer,
+        usize faceIndex) noexcept
+    {
+        if (!prepared.pointLightShadow.has_value() ||
+            faceIndex >= BgfxPointLightShadowFaceCount)
+        {
+            std::terminate();
+        }
+        submitOpaque3DShadowDepth(scene, resources, prepared, instanceBuffer,
+                                  kPointLightShadowViews[faceIndex]);
+    }
+
     void submitOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
                         const PreparedOpaque3D& prepared,
                         bgfx::InstanceDataBuffer& instanceBuffer) noexcept
@@ -2633,6 +2800,31 @@ class BgfxRenderDevice final : public IRenderDevice {
             spotShadowParams[0] = shadow.depthBias;
             spotShadowParams[1] = shadow.normalBiasMeters;
             spotShadowParams[3] = static_cast<float>(shadow.spotLightIndex) + 1.0F;
+        }
+
+        std::array<std::array<float, 16>, BgfxPointLightShadowFaceCount>
+            pointShadowMatrices{};
+        for (auto& matrix : pointShadowMatrices)
+        {
+            bx::mtxIdentity(matrix.data());
+        }
+        std::array<float, 4> pointShadowParams{
+            0.0F,
+            0.0F,
+            1.0F / static_cast<float>(BgfxPointLightShadowMapExtent),
+            0.0F,
+        };
+        if (prepared.pointLightShadow.has_value())
+        {
+            const auto& shadow = *prepared.pointLightShadow;
+            for (usize faceIndex = 0; faceIndex < pointShadowMatrices.size(); ++faceIndex)
+            {
+                pointShadowMatrices[faceIndex] =
+                    shadow.projection.faces[faceIndex].samplingTransform;
+            }
+            pointShadowParams[0] = shadow.depthBias;
+            pointShadowParams[1] = shadow.normalBiasMeters;
+            pointShadowParams[3] = static_cast<float>(shadow.pointLightIndex) + 1.0F;
         }
 
         bgfx::TextureHandle iblDiffuse = opaque3DDefaultIblCube_;
@@ -2751,6 +2943,13 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setTexture(6, opaque3DIblBrdfSampler_, iblBrdf);
             bgfx::setTexture(7, opaque3DSpotShadowMapSampler_,
                              spotLightShadowResources_.depthMap);
+            for (usize faceIndex = 0; faceIndex < opaque3DPointShadowMapSamplers_.size();
+                 ++faceIndex)
+            {
+                bgfx::setTexture(static_cast<u8>(8U + faceIndex),
+                                 opaque3DPointShadowMapSamplers_[faceIndex],
+                                 pointLightShadowResources_.depthMaps[faceIndex]);
+            }
             bgfx::setUniform(opaque3DLightDirectionsUniform_, lightDirections->data(),
                              static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
             bgfx::setUniform(opaque3DLightColorsUniform_, lightColors->data(),
@@ -2773,6 +2972,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setUniform(opaque3DCsmParamsUniform_, csmParams.data());
             bgfx::setUniform(opaque3DSpotShadowMatrixUniform_, spotShadowMatrix.data());
             bgfx::setUniform(opaque3DSpotShadowParamsUniform_, spotShadowParams.data());
+            bgfx::setUniform(opaque3DPointShadowMatricesUniform_,
+                             pointShadowMatrices.front().data(),
+                             static_cast<u16>(pointShadowMatrices.size()));
+            bgfx::setUniform(opaque3DPointShadowParamsUniform_, pointShadowParams.data());
             bgfx::setUniform(opaque3DIblParamsUniform_, iblParams.data());
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
         }
@@ -4029,6 +4232,22 @@ class BgfxRenderDevice final : public IRenderDevice {
                 submitSpotLightShadowDepth(
                     scene, resources, preparedOpaque3D, opaque3DInstanceBuffer);
                 break;
+            case RenderPassKind::PointLightShadowDepth:
+            {
+                requireResource(RenderPassResource::PointLightShadowMap);
+                if (pass.clearColor || !pass.clearDepth ||
+                    !preparedOpaque3D.pointLightShadow.has_value() ||
+                    pass.faceIndex >= BgfxPointLightShadowFaceCount)
+                {
+                    std::terminate();
+                }
+                const usize faceIndex = static_cast<usize>(pass.faceIndex);
+                configurePointLightShadowView(*preparedOpaque3D.pointLightShadow,
+                                              faceIndex, pass.clearDepth);
+                submitPointLightShadowDepth(scene, resources, preparedOpaque3D,
+                                            opaque3DInstanceBuffer, faceIndex);
+                break;
+            }
             case RenderPassKind::Opaque3D:
                 requireResource(RenderPassResource::PrimarySurface);
                 configureOpaque3DView(surface, *scene.perspectiveCamera(), pass.clearColor, pass.clearDepth);
@@ -4070,12 +4289,19 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle opaque3DSpotShadowMapSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DSpotShadowMatrixUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DSpotShadowParamsUniform_ = BGFX_INVALID_HANDLE;
+    std::array<bgfx::UniformHandle, BgfxPointLightShadowFaceCount>
+        opaque3DPointShadowMapSamplers_ =
+            invalidBgfxHandleArray<bgfx::UniformHandle,
+                                   BgfxPointLightShadowFaceCount>();
+    bgfx::UniformHandle opaque3DPointShadowMatricesUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DPointShadowParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DIblDiffuseSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DIblSpecularSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DIblBrdfSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DIblParamsUniform_ = BGFX_INVALID_HANDLE;
     BgfxCascadedDirectionalShadowResources cascadedDirectionalShadowResources_{};
     BgfxSpotLightShadowResources spotLightShadowResources_{};
+    BgfxPointLightShadowResources pointLightShadowResources_{};
     bgfx::UniformHandle opaque3DSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DNormalSampler_ = BGFX_INVALID_HANDLE;

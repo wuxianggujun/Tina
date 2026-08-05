@@ -4,8 +4,8 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent
 
 // Opaque3D metallic-roughness PBR (RENDER-001-IBL).
 // Up to four directional + eight point + eight spot lights, one four-cascade
-// directional shadow atlas, one spot-light shadow map, and one prefiltered
-// image-based lighting environment.
+// directional shadow atlas, one spot-light shadow map, six point-light shadow
+// maps, and one prefiltered image-based lighting environment.
 // Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
 // s_texNormal: tangent-space RGB normal using the required vertex tangent TBN.
@@ -18,6 +18,12 @@ SAMPLERCUBE(s_iblDiffuse, 4);
 SAMPLERCUBE(s_iblSpecular, 5);
 SAMPLER2D(s_iblBrdf, 6);
 SAMPLER2DSHADOW(s_spotShadowMap, 7);
+SAMPLER2DSHADOW(s_pointShadowPosX, 8);
+SAMPLER2DSHADOW(s_pointShadowNegX, 9);
+SAMPLER2DSHADOW(s_pointShadowPosY, 10);
+SAMPLER2DSHADOW(s_pointShadowNegY, 11);
+SAMPLER2DSHADOW(s_pointShadowPosZ, 12);
+SAMPLER2DSHADOW(s_pointShadowNegZ, 13);
 
 // xyz = world-space direction toward light; w = 1 when the slot is active.
 uniform vec4 u_lightDirs[4];
@@ -47,6 +53,10 @@ uniform mat4 u_spotShadowMatrix;
 // x = receiver depth bias, y = receiver normal bias, z = map texel size,
 // w = shadowed spot-light slot + 1 (zero disables sampling).
 uniform vec4 u_spotShadowParams;
+uniform mat4 u_pointShadowMatrices[6];
+// x = receiver depth bias, y = receiver normal bias, z = map texel size,
+// w = shadowed point-light slot + 1 (zero disables sampling).
+uniform vec4 u_pointShadowParams;
 // x = IBL intensity, y = maximum authored specular mip, z = 1 when enabled,
 // w = environment rotation around world +Y in radians.
 uniform vec4 u_iblParams;
@@ -266,6 +276,117 @@ float sampleSpotLightShadow(vec3 worldPosition, vec3 worldNormal)
 	return visibility / 9.0;
 }
 
+vec4 pointLightShadowVarying(int faceIndex, vec4 worldPosition)
+{
+	vec4 shadowPosition = mul(u_pointShadowMatrices[0], worldPosition);
+	if (faceIndex == 1)
+	{
+		shadowPosition = mul(u_pointShadowMatrices[1], worldPosition);
+	}
+	else if (faceIndex == 2)
+	{
+		shadowPosition = mul(u_pointShadowMatrices[2], worldPosition);
+	}
+	else if (faceIndex == 3)
+	{
+		shadowPosition = mul(u_pointShadowMatrices[3], worldPosition);
+	}
+	else if (faceIndex == 4)
+	{
+		shadowPosition = mul(u_pointShadowMatrices[4], worldPosition);
+	}
+	else if (faceIndex == 5)
+	{
+		shadowPosition = mul(u_pointShadowMatrices[5], worldPosition);
+	}
+	return shadowPosition;
+}
+
+float samplePointLightShadowFace(int faceIndex, vec3 shadowCoord)
+{
+	float visibility = shadow2D(s_pointShadowPosX, shadowCoord);
+	if (faceIndex == 1)
+	{
+		visibility = shadow2D(s_pointShadowNegX, shadowCoord);
+	}
+	else if (faceIndex == 2)
+	{
+		visibility = shadow2D(s_pointShadowPosY, shadowCoord);
+	}
+	else if (faceIndex == 3)
+	{
+		visibility = shadow2D(s_pointShadowNegY, shadowCoord);
+	}
+	else if (faceIndex == 4)
+	{
+		visibility = shadow2D(s_pointShadowPosZ, shadowCoord);
+	}
+	else if (faceIndex == 5)
+	{
+		visibility = shadow2D(s_pointShadowNegZ, shadowCoord);
+	}
+	return visibility;
+}
+
+float samplePointLightShadow(int pointLightIndex, vec3 worldPosition, vec3 worldNormal)
+{
+	if (u_pointShadowParams.w < 0.5)
+	{
+		return 1.0;
+	}
+
+	vec3 fragmentFromLight = worldPosition - u_pointLightPosRadius[pointLightIndex].xyz;
+	vec3 absoluteOffset = abs(fragmentFromLight);
+	int faceIndex = 0;
+	if (absoluteOffset.x >= absoluteOffset.y && absoluteOffset.x >= absoluteOffset.z)
+	{
+		faceIndex = fragmentFromLight.x >= 0.0 ? 0 : 1;
+	}
+	else if (absoluteOffset.y >= absoluteOffset.z)
+	{
+		faceIndex = fragmentFromLight.y >= 0.0 ? 2 : 3;
+	}
+	else
+	{
+		faceIndex = fragmentFromLight.z >= 0.0 ? 4 : 5;
+	}
+
+	vec3 biasedWorldPosition = worldPosition
+		+ worldNormal * max(u_pointShadowParams.y, 0.0);
+	vec4 shadowVarying = pointLightShadowVarying(
+		faceIndex, vec4(biasedWorldPosition, 1.0));
+	if (shadowVarying.w <= 0.0)
+	{
+		return 1.0;
+	}
+	vec3 shadowCoord = shadowVarying.xyz / shadowVarying.w;
+	bool outside = any(lessThan(shadowCoord.xy, vec2_splat(0.0)))
+		|| any(greaterThan(shadowCoord.xy, vec2_splat(1.0)))
+		|| shadowCoord.z < 0.0 || shadowCoord.z > 1.0;
+	if (outside)
+	{
+		return 1.0;
+	}
+
+	float compareDepth = shadowCoord.z - max(u_pointShadowParams.x, 0.0);
+	vec2 texel = vec2_splat(u_pointShadowParams.z);
+	vec2 sampleMinimum = texel * 0.5;
+	vec2 sampleMaximum = vec2_splat(1.0) - sampleMinimum;
+	float visibility = 0.0;
+	for (int sampleY = -1; sampleY <= 1; ++sampleY)
+	{
+		for (int sampleX = -1; sampleX <= 1; ++sampleX)
+		{
+			vec2 sampleUv = clamp(
+				shadowCoord.xy + texel * vec2(float(sampleX), float(sampleY)),
+				sampleMinimum, sampleMaximum);
+			visibility += samplePointLightShadowFace(
+				faceIndex, vec3(sampleUv, compareDepth));
+		}
+	}
+	return visibility / 9.0;
+}
+
 void main()
 {
 	vec4 texel = texture2D(s_texColor, v_texcoord0);
@@ -325,7 +446,13 @@ void main()
 			float attenuation = max(1.0 - lightDistance / influenceRadius, 0.0);
 			if (attenuation > 0.0)
 			{
-				lit += shadeLight(N, V, safeNormalize(lightOffset),
+				float visibility = 1.0;
+				if (abs(u_pointShadowParams.w - float(pointLightIndex + 1)) < 0.5)
+				{
+					visibility = samplePointLightShadow(
+						pointLightIndex, v_worldPos, geometricNormal);
+				}
+				lit += visibility * shadeLight(N, V, safeNormalize(lightOffset),
 					u_pointLightColors[pointLightIndex].rgb * attenuation,
 					albedo, F0, metallic, roughness);
 			}

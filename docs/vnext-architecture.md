@@ -119,7 +119,7 @@ publication 也已消除逐节点祖先回溯，当前步骤保持线性；完�
 - Asset：Catalog/Cooked、AssetId、Handle/Lease、IO Task/Main completion、typed payload、Texture/Mesh/EnvironmentMap
   upload、retirement ledger 与 AssetLease completion pin 已有；hot reload/增量 Cooker 后置。
 - Render：Null/bgfx、Sprite2D/Opaque3D Cook-Torrance GGX/IBL、UI Glyph、Texture2D/StaticMesh/EnvironmentMap
-  binding、owning packet、readback retirement marker、固定4级联 directional CSM 与固定单 SpotLight shadow 已有；point shadow 与可配置 atlas 后置。
+  binding、owning packet、readback retirement marker、固定4级联 directional CSM、固定单 SpotLight shadow 与固定单 PointLight 六面全向 shadow 已有；可配置 atlas 后置。
 - Physics：Box2D 2D 产品路径已有；Jolt 3D 未接入。
 
 multi-mesh glTF Cooker 已生成 distinct AssetId/Prefab dependency；`3D-001` 产品 sample 已关闭两个 mesh 的
@@ -157,7 +157,7 @@ TaskGroup barrier、Runtime-owned Asset/Audio lease drain 与通用 GPU completi
 | `TASK-001` | **Done**：Desktop 交互 CPU worker 默认 |
 | `RUNTIME-001` | **Done**：stack/commands/唯一提交点、四相位 policy、`blocksGameplayInputBelow` 空 snapshot 与产品暂停 overlay |
 | `RUNTIME-002` | FramePin + present-return CPU completion **Done**；RENDER-FENCE 的 Asset/Texture/Mesh/EnvironmentMap readback retirement 亦已完成，通用 submission fence 非当前契约 |
-| `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling + Cook-Torrance GGX/cooked EnvironmentMap IBL + 固定4级联 directional CSM + 固定单 SpotLight shadow/pass scheduler **Done**；point shadow 与可配置 atlas 后置 |
+| `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling + Cook-Torrance GGX/cooked EnvironmentMap IBL + 固定4级联 directional CSM + 固定单 SpotLight/PointLight shadow + pass scheduler **Done**；可配置 atlas 后置 |
 | `UI-002` / `UI-002-LINUX` / `UI-003` | action seam、Windows UIA patterns/HWND 产品接线与跨进程 gate 已有；Narrator/Inspect、AT-SPI 与 OS 级 DPI/跨 GPU 视觉矩阵仍开放 |
 | `UI-004` / `UI-005` | **Done**：Focus Scope/Modal/Pointer Capture，以及 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView |
 | `TEXT-001` | 多行编辑、grapheme/shaping 与完整 IME 候选窗仍开放 |

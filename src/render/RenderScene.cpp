@@ -777,6 +777,7 @@ Core::Status RenderSceneBuilder::setMesh3DLighting(const Mesh3DLightingDesc& lig
     snapshot.m_pointLightCount = static_cast<u32>(lighting.pointLights.size());
     snapshot.m_spotLightCount = static_cast<u32>(lighting.spotLights.size());
     snapshot.m_cascadedDirectionalShadow = lighting.cascadedDirectionalShadow;
+    snapshot.m_pointLightShadow = lighting.pointLightShadow;
     snapshot.m_spotLightShadow = lighting.spotLightShadow;
     snapshot.m_ambientScale = lighting.ambientScale;
     std::ranges::copy(lighting.directionalLights, snapshot.m_directionalLights.begin());

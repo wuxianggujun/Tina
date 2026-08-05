@@ -86,6 +86,27 @@ Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noex
         }
     }
 
+    if (lighting.pointLightShadow.has_value())
+    {
+        const Mesh3DPointLightShadow& shadow = *lighting.pointLightShadow;
+        if (shadow.pointLightIndex >= lighting.pointLights.size())
+        {
+            return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                                 "Mesh3D point shadow references a missing point light");
+        }
+        const Mesh3DPointLight& light = lighting.pointLights[shadow.pointLightIndex];
+        if (!std::isfinite(shadow.nearPlaneMeters) || shadow.nearPlaneMeters <= 0.0F ||
+            shadow.nearPlaneMeters >= light.influenceRadius || !std::isfinite(shadow.depthBias) ||
+            shadow.depthBias < 0.0F || shadow.depthBias > Mesh3DPointLightShadow::MaximumDepthBias ||
+            !std::isfinite(shadow.normalBiasMeters) || shadow.normalBiasMeters < 0.0F ||
+            shadow.normalBiasMeters > Mesh3DPointLightShadow::MaximumNormalBiasMeters)
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidMesh3DLighting,
+                "Mesh3D point shadow requires finite, bounded near plane and bias values inside the referenced light radius");
+        }
+    }
+
     for (const Mesh3DSpotLight& light : lighting.spotLights)
     {
         if (!std::isfinite(light.positionX) || !std::isfinite(light.positionY) ||

@@ -206,6 +206,26 @@ TEST(NullRenderDeviceLightingTest, AcceptsBoundedPointLightsAndRejectsInvalidVal
     };
     ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
         .pointLights = pointLights,
+        .pointLightShadow = Render::Mesh3DPointLightShadow{
+            .pointLightIndex = 1U,
+            .nearPlaneMeters = 0.1F,
+        },
+        .ambientScale = 0.2F,
+    }));
+
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .pointLights = pointLights,
+        .pointLightShadow = Render::Mesh3DPointLightShadow{
+            .pointLightIndex = 2U,
+        },
+        .ambientScale = 0.2F,
+    }));
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .pointLights = pointLights,
+        .pointLightShadow = Render::Mesh3DPointLightShadow{
+            .pointLightIndex = 0U,
+            .nearPlaneMeters = pointLights[0].influenceRadius,
+        },
         .ambientScale = 0.2F,
     }));
 

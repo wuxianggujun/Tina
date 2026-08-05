@@ -7,7 +7,7 @@ metallic-roughness Cook-Torrance GGX：Scene extraction 每帧提交0..4个 dire
 spot lights + ambient 的自包含 `RenderScene` snapshot；可选 `Mesh3DImageBasedLightingDesc` 再绑定一份 cooked
 diffuse irradiance cubemap、prefiltered specular cubemap 与 BRDF LUT。`setMesh3DLighting()` 仍是低层 device
 fallback/direct SPI。当前已有 PointLight3D 与 SpotLight3D、PerspectiveCamera3D influence-sphere culling，以及
-固定4级联 directional CSM、固定单 SpotLight shadow 和确定性 pass scheduler；仍无 point shadow、可配置 atlas 或通用 GPU submission fence；
+固定4级联 directional CSM、固定单 SpotLight shadow、固定单 PointLight 全向 shadow 和确定性 pass scheduler；仍无可配置 atlas 或通用 GPU submission fence；
 Texture2D/StaticMesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource retirement completion。
 
 ## Target 边界
@@ -86,8 +86,12 @@ radius，在有效 PerspectiveCamera3D 与非0 surface 时做 sphere-frustum cul
 primary-surface clear ownership。最多一个 camera-affecting spot light 可携带 optional `SpotLightShadow3D`；
 它以正且小于 influence radius 的 near plane、depth bias 与 normal bias 描述。Render snapshot 在 spot lights
 稳定排序后映射 `spotLightIndex`，bgfx 在四个 CSM pass 后执行一个固定 1024×1024 sampled D16 depth pass，
-receiver 仅对匹配的 spot slot 应用3×3 PCF。该 pass 不消费 primary-surface clear。point shadow 与可配置
-atlas 仍后置。
+receiver 仅对匹配的 spot slot 应用3×3 PCF。最多一个 camera-affecting point light 可携带 optional
+`PointLightShadow3D`；它使用同样有界的 near/depth/normal bias，并在 point lights culling 与稳定排序后映射
+`pointLightIndex`。bgfx 固定拥有六张 512×512 sampled D16 map，按 `+X/-X/+Y/-Y/+Z/-Z` 提交六个
+depth pass；receiver 以 dominant axis 选择面，只对匹配的 point slot 应用3×3 PCF。固定顺序为
+CSM×4 → Spot×1 → Point×6 → Opaque3D，所有 shadow pass 都不消费 primary-surface clear。第二个可见
+point shadow 或非法 near/depth/normal bias 在 Scene publish 前 fail closed；可配置 atlas 仍后置。
 
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、
@@ -275,6 +279,7 @@ MR/normal/factors、有界4 directional + 8 point + 8 spot-light 描述、Scene 
 以及 cooked diffuse/specular/BRDF split-sum IBL，
 以及 authored/MikkTSpace P3N3T4UV2 tangent 到 signed-scale-correct TBN 的完整路径；
 产品 sample 的3个 directional entity，以及 PointLight3D/SpotLight3D 各自
-authored/committed/culled=`3/2/1` 连续300帧稳定提交，并由首个可见 SpotLight 提交固定单灯 shadow。
-point shadow、可配置 shadow atlas、通用 GPU submission fence 与跨 DPI/GPU
+authored/committed/culled=`3/2/1` 连续300帧稳定提交，并由首个可见 SpotLight 与 PointLight 分别提交固定
+单灯 shadow。product-3d schema 14 固化两类 authored/submitted=`1/1`，PointLight shadow 另由 on/off
+中央 3D RGB ROI fingerprint 与正逐像素 L1 差分证明实际影响像素。可配置 shadow atlas、通用 GPU submission fence 与跨 DPI/GPU
 visual gate（`UI-003`）仍后置；Texture/Mesh/EnvironmentMap resource retirement 已不属于这些后置项。
