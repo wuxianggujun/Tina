@@ -505,6 +505,20 @@ manifest commit marker，不扫描 object/source，不启动线程，也不会�
 对应 package 通过完整 validation/reload 后才接受它；失败时继续使用旧 baseline，下一次 poll 会重复报告变化。
 manifest scratch bytes 使用显式 PMR 与 `maxManifestBytes`，输出不持有 manifest buffer。
 
+`SourceImportMetadataFormat` 是仅供 Cooker/tool cache 使用的独立 `TINAIMPT` schema `1.0`，不进入 Runtime
+`manifest.tmnft`，也不会随产品 Catalog 分发 source path。它保存 stable `SourceImportUnitId`、target/importer
+version/settings hash、root-relative strict UTF-8 source path + content fingerprint、unit input/primary edge、唯一
+owned output AssetId/kind，并以 Catalog manifest digest + byte size 绑定产生它的已验证 package。parser/writer 只
+接受当前 schema，旧 schema、非 canonical layout/path、reserved、overflow、重复 unit/source/output owner 或缺失
+primary 都直接失败；项目开发期不提供旧 import-state 兼容分支。
+
+`validateSourceImportCatalogBinding(metadata, revision)` 在复用任何旧 cooked object 前确认 import state 与当前
+Catalog manifest 一致；不一致要求 full recook。`planSourceImports(baseline, candidate, config)` 纯比较两个已验证
+metadata view，按 stable UnitId 输出 `Added`/`Removed`/`Reimport`。target、importer kind/version、settings、source
+membership/path/content/byte size、primary edge 或 output AssetId/kind 任一变化都会使匹配 unit 整体 `Reimport`；
+同一 source 可被多个 unit 引用，其 fingerprint 变化会标记所有消费者。结果使用调用方 PMR/`maxChanges`，失败
+不返回部分 plan，也不推进 baseline。当前 API 不启动 watcher、不读取源文件、不执行 recook。
+
 `planCatalogChanges(oldCatalog, newCatalog, config)` 比较两个已验证、immutable `CatalogSnapshot`，返回按
 `AssetId` 排序且每 ID 唯一的 `Added`/`Removed`/`Modified`/`Affected` 行。`Modified` 覆盖 entry metadata
 和完整 dependency contract；`Affected` 是新 Catalog 中对 Added/Modified 的 reverse-dependency 传递闭包，

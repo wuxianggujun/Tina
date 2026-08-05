@@ -17,13 +17,14 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
 | UI-002 | 收口 Windows UIA：tip 跨进程 gate 证据已固化；完成 Narrator/Inspect 人工金标后关闭 | 自动 HWND client gate + unit 已在 tip 复现；只剩操作员读屏/Inspect 清单 |
-| ASSET-002 | 分阶段建立热重载与增量 Cooker；已完成 manifest revision polling、immutable Catalog change planning、fresh stage validation 与 idle-safe root reload | caller-driven poll 保留 baseline/candidate 重试语义；Cooker 可生成并完整验证独立 staging root；root API 同步复验 package、调用 change planner，并仅在 owner-thread idle 时原子提交；后续再接 source import metadata/OS watcher、增量 recook 与 live Handle/Lease/GPU owner 迁移 |
+| ASSET-002 | 分阶段建立热重载与增量 Cooker；已完成 manifest revision polling、immutable Catalog change planning、fresh stage validation、idle-safe root reload，以及 current-only source import state + 纯 import planner | caller-driven poll 保留 baseline/candidate 重试语义；tool-side state 绑定 Catalog revision 并按 stable UnitId 检测 source/importer/output contract 变化；后续再接 importer provenance capture/state commit、OS watcher、增量 recook executor 与 live Handle/Lease/GPU owner 迁移 |
 
 Now 的退出条件：UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
 人工记录明确；没有未解释的 Accepted ADR/实现冲突。Linux AT-SPI 作为独立后置项，不阻塞 Windows
 UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；即时反馈与 Motion 的文档边界保持明确。
-ASSET-002 当前完成 package manifest polling、pure planner、fresh stage full validation 与保守的 idle-safe root reload；
-退出 Now 前还需要 source import metadata/依赖检测、OS watcher、增量 recook 与 live Handle/Lease/GPU owner 迁移事务，
+ASSET-002 当前完成 package manifest polling、Catalog/import pure planner、current-only import-state wire、fresh stage full
+validation 与保守的 idle-safe root reload；退出 Now 前还需要 importer provenance capture/state 原子提交、OS watcher、
+增量 recook executor 与 live Handle/Lease/GPU owner 迁移事务，
 不把“空闲时可切换 root”写成“完整增量热重载已完成”。
 
 ## Next：产品验收、性能基线与对外可用

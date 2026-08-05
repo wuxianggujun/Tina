@@ -82,19 +82,36 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 `AssetSystem::reloadCatalogWhenIdle()` 已在其上增加保守的 root 事务：强制完整打开/验证候选 package，生成
 change plan，并仅在 owner thread 且 queue、IO、Store、GPU upload 与 retirement 全部 idle 时原子替换
 root/Catalog。fresh staging package 的完整生成/验证与 manifest revision caller-driven polling 已具备；OS watcher、
-source import metadata、增量 recook，以及 live Handle/Lease/GPU owner
-迁移仍必须由后续事务切片完成。
+source provenance capture、增量 recook，以及 live Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
 
 `captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
 `pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
 因此后续 full validation/reload 失败不会吞掉重试。该检测只回答 package manifest 是否变化；object 完整性仍由
-full package validation 负责，source dependency detection 需要后续 import metadata。
+full package validation 负责；source dependency detection 必须基于独立 tool-side import state，当前已建立 wire/planner。
+
+## Source import state 与变更规划
+
+Cooker/tool 现在有独立的 `TINAIMPT` schema `1.0` import-state wire；它不扩展 Runtime Catalog manifest，避免
+把 source path 或 importer 状态带进发布包。metadata 以 stable `SourceImportUnitId` 表示一次 import owner，记录
+target/importer version/settings hash、按规范化 root-relative UTF-8 path 排序的 source fingerprint、恰好一个
+primary input、以及该 unit 唯一拥有且按 AssetId 排序的 outputs。header 保存完整 Catalog manifest digest 与 byte
+size；`validateSourceImportCatalogBinding()` 不匹配即拒绝旧 object 复用并要求 current-schema full recook。
+
+`planSourceImports()` 纯比较两个已验证 metadata view。UnitId 只在一侧出现分别为 `Added`/`Removed`；同一 unit 的
+target、importer、settings、source membership/path/hash/byte size、primary edge 或 output contract 任一变化为
+`Reimport`。同一 source 可被多个 unit 引用，hash 变化会让全部消费者重新导入。输出按 UnitId 稳定排序，使用
+调用方 PMR 与 `maxChanges`；容量或分配失败不返回部分 plan，也不修改 baseline。
+
+该 wire/planner 只建立 tool-side state 与纯决策边界。现有 recipe/glTF/WAV/generic payload 读取点尚未把本次实际
+消费的 bytes 汇集为 metadata，物理 state file 的原子提交、OS watcher、clean object 复用和 dirty unit executor
+仍是后续切片；因此不能把当前状态描述为已具备自动增量 Cooker。
 
 ## 身份、视图与所有权
 
 `AssetId` 是 Catalog 内的逻辑身份，不等于文件路径或 `ContentHash`。recipe 使用显式 canonical ID；
-glTF Cooker 接受显式首 mesh/material/prefab ID，未提供时按输入路径确定性派生。当前实现没有完整的
-import metadata 数据库，因此不能宣称源文件重命名后 ID 自动保持不变。
+glTF Cooker 接受显式首 mesh/material/prefab ID，未提供时按输入路径确定性派生。当前已有 stable
+ImportUnitId/output ownership wire，但 importer 路径尚未接入持久 state 提交，因此不能宣称源文件重命名后 ID
+已自动保持不变。
 
 `ContentHash` 用于确定性产物校验与非对抗性损坏检测。Hash 匹配后仍必须执行 wire bounds、schema、
 kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略。
@@ -294,8 +311,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - `ASSET-002` 已有 manifest revision polling、immutable Catalog change planner、fresh staging package 生成/验证与
-  idle-safe root/Catalog commit；OS watcher/source import metadata、增量 Cooker，以及 active Handle/Lease/GPU owner
-  的增量迁移事务仍未实现。通用
+  idle-safe root/Catalog commit，并已建立 current-only source import metadata wire、Catalog binding 与纯 import
+  planner；importer provenance capture、OS watcher、增量 Cooker executor，以及 active Handle/Lease/GPU owner 的
+  增量迁移事务仍未实现。通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重

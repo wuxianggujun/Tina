@@ -32,5 +32,7 @@ inline constexpr Core::ErrorCode Mesh3DBindingConflict{Core::ErrorDomain::Asset,
 inline constexpr Core::ErrorCode Mesh3DBindingNotFound{Core::ErrorDomain::Asset, 36};
 inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Asset, 37};
 inline constexpr Core::ErrorCode CatalogReloadBusy{Core::ErrorDomain::Asset, 38};
+inline constexpr Core::ErrorCode SourceImportPlanCapacityExceeded{Core::ErrorDomain::Asset, 39};
+inline constexpr Core::ErrorCode SourceImportCatalogMismatch{Core::ErrorDomain::Asset, 40};
 
 } // namespace Tina::Asset::AssetErrorCode
