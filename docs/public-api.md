@@ -491,7 +491,13 @@ without NUL。它从已打开主文件的有界快照解析 JSON/GLB；relative 
 拒绝 scheme、rooted path 与 `..`，再打开并以最终 handle/fd 路径验证 authoring-root containment。root 内
 symlink/junction 保持可用，逃逸、读取期间身份/size/time 变化或任一 file/count/range/parser/decode/output
 预算失败都返回 `Core::Error`，不返回部分 `CatalogCookRequest`。调用方随后仍须经 `cookCatalogPackage` 与
-原子 publish；该 API 不让 Runtime 直接消费 source URI，也不暴露 cgltf/stb/native handle。
+package publication；该 API 不让 Runtime 直接消费 source URI，也不暴露 cgltf/stb/native handle。
+
+`cookAndStageCatalogPackage(stagingRoot, request, config)` 先完成内存 cook，再原子取得一个调用方指定且此前
+不存在的 staging root，只在该私有目录写 object/manifest，并强制完整 on-disk/content validation。成功返回
+owning immutable `CatalogSnapshot`，此后 staging root 必须保持 immutable；cook 失败不创建目录，publish 或
+validation 失败可保留私有 partial stage 供诊断，但不会触碰 live root。已有目录返回 `AlreadyExists` 且不修改
+其中内容。`publishCatalogPackage()` 仍是 manifest-last 的 best-effort 原地写入，不是多文件替换事务。
 
 `planCatalogChanges(oldCatalog, newCatalog, config)` 比较两个已验证、immutable `CatalogSnapshot`，返回按
 `AssetId` 排序且每 ID 唯一的 `Added`/`Removed`/`Modified`/`Affected` 行。`Modified` 覆盖 entry metadata

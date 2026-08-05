@@ -24,8 +24,9 @@ struct CatalogPackageObjectBlob final {
 };
 
 // Writes manifest.tmnft (or relative path) and optional object blobs under catalogRoot.
-// Object relative paths use makeCookedArtifactPath. Manifest is written last (atomic by default)
-// so a crash mid-publish leaves the previous manifest if any.
+// Object relative paths use makeCookedArtifactPath and the manifest is written last. This is a
+// best-effort in-place publish, not a multi-file transaction; use cookAndStageCatalogPackage when
+// replacing content for an existing AssetId.
 [[nodiscard]] Core::Status publishCatalogPackage(std::string_view catalogRootUtf8,
                                                  std::string_view manifestRelativePath,
                                                  std::span<const std::byte> manifestBytes,

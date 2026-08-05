@@ -18,6 +18,7 @@
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/io/ReadFile.hpp>
+#include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <array>
@@ -28,7 +29,9 @@
 #include <cstring>
 #include <filesystem>
 #include <memory_resource>
+#include <new>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace Tina::Asset {
@@ -39,6 +42,74 @@ struct CookedPackage final {
     std::vector<CatalogPackageObjectBlob> objectViews{};
     std::vector<std::vector<std::byte>> objectStorage{};
 };
+
+[[nodiscard]] Core::Error makeStageFilesystemError(std::string_view message,
+                                                    const std::error_code& errorCode)
+{
+    Core::Error error{Core::CoreErrorCode::Io, message};
+    if (errorCode == std::errc::no_such_file_or_directory)
+    {
+        error.code = Core::CoreErrorCode::NotFound;
+    } else if (errorCode == std::errc::permission_denied)
+    {
+        error.code = Core::CoreErrorCode::PermissionDenied;
+    } else if (errorCode == std::errc::file_exists)
+    {
+        error.code = Core::CoreErrorCode::AlreadyExists;
+    }
+    if (errorCode)
+    {
+        error.setNativeCode(static_cast<Core::i64>(errorCode.value()));
+        error.addContext("native", errorCode.message());
+    }
+    return error;
+}
+
+[[nodiscard]] Core::Status createFreshStageRoot(std::string_view stagingRootUtf8)
+{
+    if (stagingRootUtf8.empty() || !Core::countStrictUtf8CodepointsWithoutNul(stagingRootUtf8))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "staging root path is invalid");
+    }
+
+    try
+    {
+        const auto stagingRoot = Detail::pathFromUtf8Bytes(stagingRootUtf8);
+        const auto parent = stagingRoot.parent_path();
+        std::error_code errorCode;
+        if (!std::filesystem::exists(parent.empty() ? std::filesystem::path{"."} : parent, errorCode))
+        {
+            if (errorCode)
+            {
+                return Core::failure(makeStageFilesystemError("failed to query staging parent", errorCode));
+            }
+            return Core::failure(Core::CoreErrorCode::NotFound, "staging parent directory does not exist");
+        }
+        if (!std::filesystem::is_directory(parent.empty() ? std::filesystem::path{"."} : parent, errorCode))
+        {
+            if (errorCode)
+            {
+                return Core::failure(makeStageFilesystemError("failed to query staging parent", errorCode));
+            }
+            return Core::failure(Core::CoreErrorCode::InvalidArgument, "staging parent is not a directory");
+        }
+        if (std::filesystem::create_directory(stagingRoot, errorCode))
+        {
+            return Core::success();
+        }
+        if (errorCode)
+        {
+            return Core::failure(makeStageFilesystemError("failed to create staging root", errorCode));
+        }
+        return Core::failure(Core::CoreErrorCode::AlreadyExists, "staging root already exists");
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "staging root path allocation failed");
+    } catch (const std::filesystem::filesystem_error& exception)
+    {
+        return Core::failure(makeStageFilesystemError("staging root filesystem operation failed", exception.code()));
+    }
+}
 
 [[nodiscard]] Core::Result<Core::AssetId> deriveTileMapChunkAssetId(Core::AssetId parentTileMapId,
                                                                    Core::u32 stableLayerId,
@@ -1029,6 +1100,45 @@ Core::Status cookAndPublishCatalogPackage(std::string_view catalogRootUtf8, cons
     }
     return publishCatalogPackage(catalogRootUtf8, DefaultCatalogManifestRelativePath, package->summary.manifestBytes,
                                  package->objectViews);
+}
+
+Core::Result<CatalogSnapshot>
+cookAndStageCatalogPackage(std::string_view stagingRootUtf8, const CatalogCookRequest& request,
+                           CatalogPackageStageConfig config)
+{
+    if (config.validation.manifest.catalog.memoryResource == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "catalog staging validation requires a memory resource");
+    }
+
+    auto package = cookPackageInternal(request);
+    if (!package)
+    {
+        return Core::failure(std::move(package.error()).withContext("cookAndStageCatalogPackage", "cook"));
+    }
+
+    if (Core::Status created = createFreshStageRoot(stagingRootUtf8); !created)
+    {
+        return Core::failure(std::move(created.error()).withContext("cookAndStageCatalogPackage", "createStage"));
+    }
+
+    auto published = publishCatalogPackage(stagingRootUtf8, DefaultCatalogManifestRelativePath,
+                                           package->summary.manifestBytes, package->objectViews);
+    if (!published)
+    {
+        return Core::failure(std::move(published.error()).withContext("cookAndStageCatalogPackage", "publish"));
+    }
+
+    config.validation.manifestRelativePath = DefaultCatalogManifestRelativePath;
+    config.validation.validateOnOpen = true;
+    config.validation.validation.verifyContent = true;
+    auto catalog = openCatalogPackage(stagingRootUtf8, config.validation);
+    if (!catalog)
+    {
+        return Core::failure(std::move(catalog.error()).withContext("cookAndStageCatalogPackage", "validate"));
+    }
+    return std::move(*catalog);
 }
 
 Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeText, std::string_view baseDirectoryUtf8)

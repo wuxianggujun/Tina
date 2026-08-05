@@ -1,4 +1,5 @@
 #include <tina/asset/AssetTypedViews.hpp>
+#include <tina/asset/CatalogChangePlan.hpp>
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageLoad.hpp>
@@ -33,6 +34,63 @@ namespace {
 {
     const auto u8 = path.u8string();
     return std::string(u8.begin(), u8.end());
+}
+
+[[nodiscard]] CatalogCookRequest makeTextureMaterialRequest(std::byte textureValue = std::byte{'t'})
+{
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+    CatalogCookRequest request{.targetPlatform = AssetFormat::TargetPlatform::WindowsX64};
+    request.assets.push_back(CatalogCookAssetSpec{
+        .assetKind = AssetFormat::AssetKind::Texture2D,
+        .assetId = textureId,
+        .payload = {textureValue, std::byte{'e'}, std::byte{'x'}},
+    });
+    request.assets.push_back(CatalogCookAssetSpec{
+        .assetKind = AssetFormat::AssetKind::Material,
+        .assetId = materialId,
+        .payload = {std::byte{'m'}, std::byte{'a'}, std::byte{'t'}},
+        .dependencies =
+            {
+                AssetFormat::CookedAssetWriteDependency{
+                    .assetId = textureId,
+                    .expectedKind = AssetFormat::AssetKind::Texture2D,
+                    .flags = AssetFormat::DependencyFlags::Required,
+                },
+            },
+    });
+    return request;
+}
+
+[[nodiscard]] CatalogPackageStageConfig makeStageConfig(std::pmr::memory_resource& memory,
+                                                        bool verifyTypedPayload = false)
+{
+    return CatalogPackageStageConfig{
+        .validation =
+            CatalogPackageOpenConfig{
+                .manifest =
+                    CatalogFileLoadConfig{
+                        .catalog =
+                            CatalogConfig{
+                                .maxEntries = 8U,
+                                .maxDependencies = 8U,
+                                .maxDependenciesPerAsset = 4U,
+                                .memoryResource = &memory,
+                            },
+                    },
+                .validation =
+                    CatalogPackageValidationConfig{
+                        .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                        .verifyTypedPayload = verifyTypedPayload,
+                    },
+            },
+    };
+}
+
+void removeDirectory(const std::filesystem::path& path)
+{
+    std::error_code errorCode;
+    std::filesystem::remove_all(path, errorCode);
 }
 
 TEST(CatalogCookTests, CookAndPublishFromRequest)
@@ -88,6 +146,86 @@ TEST(CatalogCookTests, CookAndPublishFromRequest)
     EXPECT_EQ(catalog->entryCount(), 2U);
     EXPECT_EQ(catalog->dependencyCount(), 1U);
     std::filesystem::remove_all(root, ec);
+}
+
+TEST(CatalogCookTests, StagesIntoFreshRootAndReturnsValidatedCatalog)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto stageRoot = std::filesystem::temp_directory_path() / "tina_catalog_stage_fresh";
+    removeDirectory(stageRoot);
+
+    auto staged = cookAndStageCatalogPackage(toUtf8(stageRoot), makeTextureMaterialRequest(),
+                                             makeStageConfig(memory));
+    ASSERT_TRUE(staged.has_value()) << staged.error().message;
+    EXPECT_EQ(staged->entryCount(), 2U);
+    EXPECT_EQ(staged->dependencyCount(), 1U);
+    EXPECT_TRUE(std::filesystem::is_regular_file(stageRoot / "manifest.tmnft"));
+
+    removeDirectory(stageRoot);
+}
+
+TEST(CatalogCookTests, StageRejectsExistingRootWithoutChangingItsContents)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto stageRoot = std::filesystem::temp_directory_path() / "tina_catalog_stage_existing";
+    removeDirectory(stageRoot);
+    ASSERT_TRUE(std::filesystem::create_directory(stageRoot));
+    const auto marker = stageRoot / "owner.marker";
+    const std::array markerBytes{std::byte{0x42}};
+    ASSERT_TRUE(Core::writeFile(toUtf8(marker), markerBytes).has_value());
+
+    auto staged = cookAndStageCatalogPackage(toUtf8(stageRoot), makeTextureMaterialRequest(),
+                                             makeStageConfig(memory));
+    ASSERT_FALSE(staged.has_value());
+    EXPECT_EQ(staged.error().code, Core::CoreErrorCode::AlreadyExists);
+    EXPECT_TRUE(std::filesystem::is_regular_file(marker));
+    EXPECT_FALSE(std::filesystem::exists(stageRoot / "manifest.tmnft"));
+
+    removeDirectory(stageRoot);
+}
+
+TEST(CatalogCookTests, StageValidationFailureLeavesOnlyPrivateStagingData)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto stageRoot = std::filesystem::temp_directory_path() / "tina_catalog_stage_invalid_typed";
+    removeDirectory(stageRoot);
+
+    auto staged = cookAndStageCatalogPackage(toUtf8(stageRoot), makeTextureMaterialRequest(),
+                                             makeStageConfig(memory, true));
+    ASSERT_FALSE(staged.has_value());
+    EXPECT_TRUE(std::filesystem::is_regular_file(stageRoot / "manifest.tmnft"));
+
+    removeDirectory(stageRoot);
+}
+
+TEST(CatalogCookTests, StagedCatalogsFeedDeterministicChangePlanning)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto baselineRoot = std::filesystem::temp_directory_path() / "tina_catalog_stage_plan_baseline";
+    const auto changedRoot = std::filesystem::temp_directory_path() / "tina_catalog_stage_plan_changed";
+    removeDirectory(baselineRoot);
+    removeDirectory(changedRoot);
+
+    auto baseline = cookAndStageCatalogPackage(toUtf8(baselineRoot), makeTextureMaterialRequest(),
+                                               makeStageConfig(memory));
+    auto changed = cookAndStageCatalogPackage(toUtf8(changedRoot), makeTextureMaterialRequest(std::byte{'u'}),
+                                              makeStageConfig(memory));
+    ASSERT_TRUE(baseline.has_value()) << baseline.error().message;
+    ASSERT_TRUE(changed.has_value()) << changed.error().message;
+
+    auto plan = planCatalogChanges(*baseline, *changed,
+                                   CatalogChangePlanConfig{.memoryResource = &memory, .maxChanges = 2U});
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    ASSERT_EQ(plan->changes.size(), 2U);
+    EXPECT_EQ(plan->modifiedCount, 1U);
+    EXPECT_EQ(plan->affectedCount, 1U);
+    EXPECT_EQ(plan->changes[0].assetId, *Core::AssetId::fromBytes(idBytes(1U)));
+    EXPECT_EQ(plan->changes[0].kind, CatalogChangeKind::Modified);
+    EXPECT_EQ(plan->changes[1].assetId, *Core::AssetId::fromBytes(idBytes(2U)));
+    EXPECT_EQ(plan->changes[1].kind, CatalogChangeKind::Affected);
+
+    removeDirectory(baselineRoot);
+    removeDirectory(changedRoot);
 }
 
 TEST(CatalogCookTests, InlineTexture2dAndSpriteRecipe)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -35,9 +36,20 @@ struct CatalogCookResult final {
 // Builds cooked object bytes + manifest in memory (no disk IO).
 [[nodiscard]] Core::Result<CatalogCookResult> cookCatalogPackage(const CatalogCookRequest& request);
 
-// cookCatalogPackage + publishCatalogPackage under catalogRoot (manifest.tmnft + objects/).
+// cookCatalogPackage + best-effort in-place publish under catalogRoot (manifest.tmnft + objects/).
 [[nodiscard]] Core::Status cookAndPublishCatalogPackage(std::string_view catalogRootUtf8,
                                                         const CatalogCookRequest& request);
+
+struct CatalogPackageStageConfig final {
+    CatalogPackageOpenConfig validation{};
+};
+
+// Cooks into a fresh staging root, publishes its objects there, and returns a fully validated
+// immutable CatalogSnapshot. The staging root must not exist; failures never modify a live package.
+// On success the caller owns the staging root and must treat it as immutable.
+[[nodiscard]] Core::Result<CatalogSnapshot>
+cookAndStageCatalogPackage(std::string_view stagingRootUtf8, const CatalogCookRequest& request,
+                           CatalogPackageStageConfig config);
 
 // Minimal line recipe format (UTF-8):
 //   # comment

@@ -42,7 +42,7 @@ Catalog package
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验；old/new snapshot 确定性 change plan |
 | Package | 确定性 object path、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
-| Cooker | recipe、writer、发布前 typed/package validation、staging 后原子发布；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
+| Cooker | recipe、writer、fresh staging root cook + 强制完整验证；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
@@ -81,7 +81,8 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 这一步只回答“两个已验证 Catalog 有什么变化、哪些新条目需要后续处理”，planner 本身不提交状态。
 `AssetSystem::reloadCatalogWhenIdle()` 已在其上增加保守的 root 事务：强制完整打开/验证候选 package，生成
 change plan，并仅在 owner thread 且 queue、IO、Store、GPU upload 与 retirement 全部 idle 时原子替换
-root/Catalog。文件监听、source import metadata、增量 recook/staging 生成，以及 live Handle/Lease/GPU owner
+root/Catalog。fresh staging package 的完整生成/验证已具备；文件监听、source import metadata、增量 recook，
+以及 live Handle/Lease/GPU owner
 迁移仍必须由后续事务切片完成。
 
 ## 身份、视图与所有权
@@ -269,7 +270,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 - 所有 size/count/offset multiplication 在分配和访问前检查 hard limit 与溢出；
 - Manifest entry 按 AssetId 严格升序，依赖范围必须完整、无 gap/overlap，依赖 kind 必须匹配；
 - full package validation 每次最多持有一个 Cooked file，并强制 parse、ContentHash 与 Catalog 对齐；
-- publish 先在 staging 写入并重新验证，最后原子替换 Manifest，失败不发布半个 Catalog；
+- `cookAndStageCatalogPackage()` 只在此前不存在的私有 root 写入，并在返回前强制完整验证；验证成功后通过
+  AssetSystem root 切换发布。`publishCatalogPackage()` 只是 manifest-last 的 best-effort 原地写入，不提供
+  多文件事务保证；
 - glTF/GLB 主路径与 percent-decoded 外部 URI 必须是 strict UTF-8 且不含 NUL；外部 URI 拒绝 scheme、
   绝对/rooted path 与 `..`；
 - 主文件、外部 buffer/image 均只从一次打开的 handle/fd 读取内存快照。外部文件以打开后的最终路径
@@ -285,8 +288,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
-- `ASSET-002` 已有 immutable Catalog change planner 与 idle-safe root/Catalog commit；文件监听、增量
-  Cooker、staging package 生成，以及 active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
+- `ASSET-002` 已有 immutable Catalog change planner、fresh staging package 生成/验证与 idle-safe root/Catalog
+  commit；文件监听/source import metadata、增量 Cooker，以及 active Handle/Lease/GPU owner 的增量迁移事务
+  仍未实现。通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重
