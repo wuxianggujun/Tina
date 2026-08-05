@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
@@ -497,6 +498,47 @@ TEST(GltfCookTests, CooksMinimalTriangleToMeshMaterialPrefab)
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
 }
 
+TEST(GltfCookTests, AcceptsFixedMeshIdAfterMaterialId)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_fixed_id_order";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "triangle.gltf";
+    {
+        std::ofstream out(gltfPath, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        out << minimalTriangleGltfJson();
+    }
+
+    Core::AssetId::Bytes meshBytes{};
+    meshBytes[0] = std::byte{0xF0};
+    Core::AssetId::Bytes materialBytes{};
+    materialBytes[0] = std::byte{0x10};
+    const auto meshId = *Core::AssetId::fromBytes(meshBytes);
+    const auto materialId = *Core::AssetId::fromBytes(materialBytes);
+    auto request = cookGltfFileToCatalogRequest(
+        gltfPath.string(), GltfCookIds{.meshId = meshId, .materialId = materialId});
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+
+    const auto prefab = std::find_if(request->assets.begin(), request->assets.end(),
+                                     [](const CatalogCookAssetSpec& asset) {
+                                         return asset.assetKind == AssetFormat::AssetKind::Prefab;
+                                     });
+    ASSERT_NE(prefab, request->assets.end());
+    ASSERT_EQ(prefab->dependencies.size(), 2U);
+    EXPECT_EQ(prefab->dependencies[0].assetId, materialId);
+    EXPECT_EQ(prefab->dependencies[1].assetId, meshId);
+    std::vector<AssetFormat::PrefabNodeView> nodes;
+    auto payload = AssetFormat::parsePrefabPayload(prefab->payload, nodes);
+    ASSERT_TRUE(payload.has_value()) << (payload ? "" : payload.error().message);
+    ASSERT_EQ(payload->nodes.size(), 1U);
+    EXPECT_EQ(payload->nodes[0].meshId, meshId);
+    EXPECT_EQ(payload->nodes[0].materialId, materialId);
+
+    std::filesystem::remove_all(dir, ec);
+}
+
 TEST(GltfCookTests, PreservesAuthoredTangents)
 {
     const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_authored_tangents";
@@ -766,6 +808,23 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
 
     const auto catalogRoot = dir / "catalog";
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+    std::pmr::monotonic_buffer_resource memory;
+    auto catalog = openCatalogPackage(
+        catalogRoot.string(),
+        CatalogPackageOpenConfig{
+            .manifest = CatalogFileLoadConfig{.catalog = CatalogConfig{.maxEntries = 16,
+                                                                        .maxDependencies = 32,
+                                                                        .maxDependenciesPerAsset = 16,
+                                                                        .memoryResource = &memory}},
+            .validateOnOpen = true,
+            .validation = CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+        });
+    ASSERT_TRUE(catalog.has_value()) << (catalog ? "" : catalog.error().message);
+    std::filesystem::remove_all(dir, ec);
 }
 
 // 1x1 red PNG (public domain fixture).
@@ -1618,7 +1677,7 @@ TEST(GltfCookTests, SplitsMultiPrimitiveMeshIntoDistinctAssetsAndPrefabChildren)
         }
         else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
         {
-            // Parent transform + 2 prim children → 4 deps (mesh+mat × 2)
+            // Parent transform + 2 primitive children, with identity carried by each payload node.
             EXPECT_EQ(asset.dependencies.size(), 4U);
             std::vector<AssetFormat::PrefabNodeView> nodes;
             auto prefab = AssetFormat::parsePrefabPayload(asset.payload, nodes);
@@ -1628,6 +1687,10 @@ TEST(GltfCookTests, SplitsMultiPrimitiveMeshIntoDistinctAssetsAndPrefabChildren)
             EXPECT_FLOAT_EQ(prefab->nodes[0].positionX, 1.0F);
             EXPECT_TRUE(prefab->nodes[1].hasMesh);
             EXPECT_TRUE(prefab->nodes[2].hasMesh);
+            EXPECT_TRUE(prefab->nodes[1].meshId);
+            EXPECT_TRUE(prefab->nodes[1].materialId);
+            EXPECT_TRUE(prefab->nodes[2].meshId);
+            EXPECT_TRUE(prefab->nodes[2].materialId);
             EXPECT_EQ(prefab->nodes[1].parentIndex, 0);
             EXPECT_EQ(prefab->nodes[2].parentIndex, 0);
         }

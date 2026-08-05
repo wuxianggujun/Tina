@@ -52,8 +52,8 @@ namespace {
     return *Core::AssetId::fromBytes(bytes);
 }
 
-// Sequential suffix keeps multi-mesh Prefab deps strictly AssetId-sorted while
-// remaining path-stable: bytes[12..15] = big-endian index after a seed hash prefix.
+// Sequential suffix keeps derived output identities path-stable:
+// bytes[12..15] = big-endian index after a seed hash prefix.
 [[nodiscard]] Core::AssetId deriveIndexedId(std::string_view seed, Core::u8 tag, Core::u32 index)
 {
     Core::AssetId id = deriveId(seed, tag == 0 ? 0x71 : tag);
@@ -1221,6 +1221,21 @@ namespace {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF path must be strict UTF-8 without NUL");
     }
+    if (static_cast<bool>(ids.meshId) != static_cast<bool>(ids.materialId))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "fixed glTF mesh and material AssetIds must be provided together");
+    }
+    if (ids.meshId && ids.meshId == ids.materialId)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "fixed glTF mesh and material AssetIds must be distinct");
+    }
+    if (ids.prefabId && (ids.prefabId == ids.meshId || ids.prefabId == ids.materialId))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "fixed glTF Prefab AssetId must be distinct from mesh and material IDs");
+    }
 
     const GltfCookIds requestedIds = ids;
     CatalogCookSourceResult result{};
@@ -1454,18 +1469,12 @@ namespace {
                 return Core::failure(std::move(pieces.error()));
             }
 
-            // Optional fixed ids.meshId/materialId only apply to mesh 0 / prim 0; when both are
-            // provided they must already satisfy meshId < materialId.
+            // Optional fixed ids.meshId/materialId only apply to mesh 0 / primitive 0.
             Core::AssetId meshId{};
             Core::AssetId materialId{};
             if (meshIndex == 0 && primIndex == 0 && static_cast<bool>(ids.meshId) &&
                 static_cast<bool>(ids.materialId))
             {
-                if (!(ids.meshId < ids.materialId))
-                {
-                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                         "fixed mesh AssetId must be strictly less than material AssetId");
-                }
                 meshId = ids.meshId;
                 materialId = ids.materialId;
             }
@@ -1747,12 +1756,21 @@ namespace {
             });
         }
     }
-    // Prefab node-order deps may not be AssetId-sorted when many meshes; CatalogCook requires
-    // strictly increasing dependency streams — sort + unique here (kinds stay mesh/material pairs
-    // only as ids; validation cares about id order, not pair adjacency).
+    // Payload nodes own reference identity; the Catalog dependency set is canonical and deduplicated.
     std::sort(prefabSpec.dependencies.begin(), prefabSpec.dependencies.end(),
               [](const AssetFormat::CookedAssetWriteDependency& a,
                  const AssetFormat::CookedAssetWriteDependency& b) { return a.assetId < b.assetId; });
+    const auto conflictingDependency = std::adjacent_find(
+        prefabSpec.dependencies.begin(), prefabSpec.dependencies.end(),
+        [](const AssetFormat::CookedAssetWriteDependency& left,
+           const AssetFormat::CookedAssetWriteDependency& right) {
+            return left.assetId == right.assetId && left.expectedKind != right.expectedKind;
+        });
+    if (conflictingDependency != prefabSpec.dependencies.end())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF output AssetId has conflicting dependency kinds");
+    }
     prefabSpec.dependencies.erase(std::unique(prefabSpec.dependencies.begin(), prefabSpec.dependencies.end(),
                                               [](const AssetFormat::CookedAssetWriteDependency& a,
                                                  const AssetFormat::CookedAssetWriteDependency& b) {

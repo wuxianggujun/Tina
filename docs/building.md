@@ -332,6 +332,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1
 ```powershell
 cmake --build --preset windows-vnext-debug --target tina_assetc tina_catalog_validate --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot>
+out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --recipe <recipe> `
+  --source-root <authoringRoot> --import-state <toolCache>\import-state.tmeta
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
 ```
@@ -340,7 +342,9 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 UTF-8，并拒绝绝对路径与 `..` 逃逸。glTF Cooker 把 authoring 输入视为不可信：主路径与 percent-decoded
 外部 URI 要求 strict UTF-8 without NUL；主文件及 relative buffer/image 均从一次打开的 handle/fd 快照
 读取，外部最终路径必须位于主文件最终 authoring root 下。root 内 symlink/junction 可用，逃逸链接、
-读取期间替换、超出 file/count/range/parser/decode/output 预算均结构化失败，不产生可发布的半包。
+读取期间替换、超出 file/count/range/parser/decode/output 预算均结构化失败，不产生可发布的半包。显式
+`--source-root` + `--import-state` 会记录实际消费 bytes 的 provenance，并只在 package 完整验证后原子提交
+tool-side state；state 路径不得位于部署 Catalog root。
 
 ## Linux Null 与 sanitizer
 

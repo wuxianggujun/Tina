@@ -9,6 +9,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetGpuRetirementTests.cpp
     AssetSystemGpuPipelineTests.cpp
     CatalogChangePlanTests.cpp
+    SourceImportCaptureTests.cpp
     SourceImportPlanTests.cpp
     CatalogSnapshotTests.cpp
     CatalogCookTests.cpp

@@ -21,7 +21,7 @@ namespace Tina::Asset {
 // - pbrMetallicRoughness: baseColorFactor, metallicFactor, roughnessFactor,
 //   baseColorTexture / metallicRoughnessTexture (PNG/JPEG → Texture2D deps)
 // - optional normalTexture → Texture2D dependency (cooked data; GPU PBR separate)
-// - scene nodes → Prefab deps bind each node's mesh/material AssetIds
+// - scene nodes store mesh/material AssetIds in Prefab payload nodes; Catalog deps are canonical refs
 // Output is a CatalogCookRequest ready for cookCatalogPackage / publish.
 //
 // Not supported (structured failure): Draco, morph, skin, multi-submesh merge,

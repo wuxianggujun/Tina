@@ -880,7 +880,8 @@ cmake --build --preset windows-vnext-debug `
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --recipe <recipe>
+out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --recipe <recipe> `
+  --source-root <authoringRoot> --import-state <toolCache>\import-state.tmeta
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
 ```

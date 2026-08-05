@@ -1,5 +1,6 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
+#include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
 
@@ -116,6 +117,51 @@ TEST(TypedPayloadValidationTests, RejectsRawTextureWhenTypedRequired)
     auto catalogRaw = openCatalogPackage(toUtf8(root), openConfig);
     ASSERT_TRUE(catalogRaw.has_value()) << catalogRaw.error().message;
 
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST(TypedPayloadValidationTests, RejectsPrefabDependencySetMissingPayloadReferences)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto prefabId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto meshId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(3U));
+    const std::array nodes{AssetFormat::PrefabNodeDesc{
+        .stableNodeId = 1,
+        .meshId = meshId,
+        .materialId = materialId,
+    }};
+    auto payload = AssetFormat::writePrefabPayloadBytes(AssetFormat::PrefabPayloadDesc{.nodes = nodes});
+    ASSERT_TRUE(payload.has_value()) << payload.error().message;
+
+    CatalogCookRequest request{.targetPlatform = AssetFormat::TargetPlatform::WindowsX64};
+    request.assets.push_back(CatalogCookAssetSpec{
+        .assetKind = AssetFormat::AssetKind::Prefab,
+        .assetId = prefabId,
+        .assetTypeVersion = AssetFormat::PrefabWire::SchemaVersion,
+        .payload = std::move(*payload),
+    });
+
+    const auto root = std::filesystem::temp_directory_path() / "tina_typed_validate_prefab_deps";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(root), request).has_value());
+
+    auto catalog = openCatalogPackage(
+        toUtf8(root),
+        CatalogPackageOpenConfig{
+            .manifest = CatalogFileLoadConfig{.catalog = CatalogConfig{.maxEntries = 8,
+                                                                        .maxDependencies = 8,
+                                                                        .maxDependenciesPerAsset = 4,
+                                                                        .memoryResource = &memory}},
+            .validateOnOpen = true,
+            .validation = CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+        });
+    ASSERT_FALSE(catalog.has_value());
     std::filesystem::remove_all(root, ec);
 }
 

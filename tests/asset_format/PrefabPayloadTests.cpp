@@ -20,8 +20,8 @@ namespace {
 
 TEST(PrefabPayloadTests, RoundTripsSingleRootMeshNode)
 {
-    const auto meshId = *Core::AssetId::fromBytes(idBytes(0x11));
-    const auto materialId = *Core::AssetId::fromBytes(idBytes(0x12));
+    const auto meshId = *Core::AssetId::fromBytes(idBytes(0x12));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(0x11));
     const std::array nodes{
         PrefabNodeDesc{
             .stableNodeId = 7,
@@ -39,12 +39,15 @@ TEST(PrefabPayloadTests, RoundTripsSingleRootMeshNode)
     std::vector<PrefabNodeView> storage;
     auto view = parsePrefabPayload(*payload, storage);
     ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    EXPECT_EQ(view->schemaVersion, PrefabWire::SchemaVersion);
     ASSERT_EQ(view->nodes.size(), 1U);
     EXPECT_EQ(view->nodes[0].stableNodeId, 7U);
     EXPECT_EQ(view->nodes[0].parentIndex, -1);
     EXPECT_FLOAT_EQ(view->nodes[0].positionY, 0.5F);
     EXPECT_TRUE(view->nodes[0].hasMesh);
     EXPECT_TRUE(view->nodes[0].hasMaterial);
+    EXPECT_EQ(view->nodes[0].meshId, meshId);
+    EXPECT_EQ(view->nodes[0].materialId, materialId);
     EXPECT_TRUE(view->nodes[0].visible);
 
     const auto prefabId = *Core::AssetId::fromBytes(idBytes(0x19));
@@ -58,8 +61,10 @@ TEST(PrefabPayloadTests, RoundTripsSingleRootMeshNode)
     const auto dep1 = cookedView->dependency(1);
     ASSERT_TRUE(dep0.has_value());
     ASSERT_TRUE(dep1.has_value());
-    EXPECT_EQ(dep0->expectedKind, AssetKind::StaticMesh);
-    EXPECT_EQ(dep1->expectedKind, AssetKind::Material);
+    EXPECT_EQ(dep0->assetId, materialId);
+    EXPECT_EQ(dep0->expectedKind, AssetKind::Material);
+    EXPECT_EQ(dep1->assetId, meshId);
+    EXPECT_EQ(dep1->expectedKind, AssetKind::StaticMesh);
     ASSERT_TRUE(verifyCookedAssetContentHash(*cookedView).has_value());
 }
 

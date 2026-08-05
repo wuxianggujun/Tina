@@ -10,7 +10,7 @@
 authoring source / recipe / glTF
   -> tina_assetc 或 Asset Cooker API
   -> CatalogCookRequest
-  -> atomic package publish
+  -> fresh-stage full validation or manifest-last package publish
        manifest.tmnft
        objects/<kind>/<prefix>/<asset-id>.tasset
 
@@ -81,8 +81,9 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 这一步只回答“两个已验证 Catalog 有什么变化、哪些新条目需要后续处理”，planner 本身不提交状态。
 `AssetSystem::reloadCatalogWhenIdle()` 已在其上增加保守的 root 事务：强制完整打开/验证候选 package，生成
 change plan，并仅在 owner thread 且 queue、IO、Store、GPU upload 与 retirement 全部 idle 时原子替换
-root/Catalog。fresh staging package 的完整生成/验证与 manifest revision caller-driven polling 已具备；OS watcher、
-source provenance capture、增量 recook，以及 live Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
+root/Catalog。fresh staging package 的完整生成/验证、manifest revision caller-driven polling、tool-side source
+provenance capture 与验证后 state commit 已具备；OS watcher、dirty-unit recook/clean object 复用，以及 live
+Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
 
 `captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
 `pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
@@ -102,16 +103,23 @@ target、importer、settings、source membership/path/hash/byte size、primary e
 `Reimport`。同一 source 可被多个 unit 引用，hash 变化会让全部消费者重新导入。输出按 UnitId 稳定排序，使用
 调用方 PMR 与 `maxChanges`；容量或分配失败不返回部分 plan，也不修改 baseline。
 
-该 wire/planner 只建立 tool-side state 与纯决策边界。现有 recipe/glTF/WAV/generic payload 读取点尚未把本次实际
-消费的 bytes 汇集为 metadata，物理 state file 的原子提交、OS watcher、clean object 复用和 dirty unit executor
-仍是后续切片；因此不能把当前状态描述为已具备自动增量 Cooker。
+`SourceImportCapture` 只对 importer 已经读取且实际消费的 bytes 计算 `ContentHash`，不为 provenance 二次打开
+源文件。provenance-aware recipe 入口在同一 parser 的 recipe、generic payload 与 PCM16 WAV 读取点收集 source；
+glTF 入口收集主 glTF/GLB、external buffer 的声明消费前缀与 external image 完整 encoded bytes，GLB BIN、base64
+buffer 与 bufferView image 不制造伪外部 source。每个 authoring document 当前形成一个 unit，显式 authoring root
+产生 canonical root-relative path；request-only 产品入口只是同一内部实现的薄投影，不保留第二套旧读取链。
+
+`tina_assetc --source-root <root> --import-state <state>` 在 recipe/glTF 模式启用该链路；工具先发布并完整打开/验证
+Catalog package，再捕获 manifest revision，最后用 sibling-temp + rename 原子替换 state。publish、validation、
+revision 或 state write 任一失败都不会提交候选 state。state 必须位于 tool cache，不能放进部署 Catalog root。
+当前仍没有 OS watcher、clean object 复用和 dirty-unit executor，因此不能描述为自动增量 Cooker 已完成。
 
 ## 身份、视图与所有权
 
 `AssetId` 是 Catalog 内的逻辑身份，不等于文件路径或 `ContentHash`。recipe 使用显式 canonical ID；
-glTF Cooker 接受显式首 mesh/material/prefab ID，未提供时按输入路径确定性派生。当前已有 stable
-ImportUnitId/output ownership wire，但 importer 路径尚未接入持久 state 提交，因此不能宣称源文件重命名后 ID
-已自动保持不变。
+glTF Cooker 接受显式首 mesh/material/prefab ID，未提供时按输入路径确定性派生。Importer provenance 与 state
+提交已经接入，但 stable `ImportUnitId` 和默认 glTF 派生 ID 仍基于 canonical source path；当前没有 rename map，
+因此重命名会表现为旧 unit Removed + 新 unit Added，并可能改变默认派生 AssetId。
 
 `ContentHash` 用于确定性产物校验与非对抗性损坏检测。Hash 匹配后仍必须执行 wire bounds、schema、
 kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略。
@@ -275,8 +283,9 @@ StaticMesh v1 固定为 P3N3T4UV2 + UInt16 index，不携带运行时 layout 分
 优先，具备 NORMAL+UV 但缺 tangent 时由 PRIVATE MikkTSpace 生成，缺 NORMAL/UV 的 primitive 显式失败。
 Material v2（40B）为 Opaque `UnlitBaseColor`，携带
 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`，以及可选 Texture2D dependency 标志
-（baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab 保存 node
-hierarchy 与 Mesh/Material AssetId。当前 Opaque3D 已采样 baseColor/MR/normal、
+（baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab v2 在每个 node
+payload 中直接保存 Mesh/Material `AssetId`，Cooked dependency 只保存按 `AssetId` 排序去重的完整引用集合，
+不再通过 dependency 位置推断 node identity。当前 Opaque3D 已采样 baseColor/MR/normal、
 应用 material factors，并从 World DirectionalLight3D/PointLight3D/SpotLight3D 发布逐帧有界
 4+8+8灯 snapshot；point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull；
 Opaque3D 只使用 vertex tangent TBN，并以 Cook-Torrance GGX 计算 direct light。EnvironmentMap v1 使用32B
@@ -312,8 +321,8 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - `ASSET-002` 已有 manifest revision polling、immutable Catalog change planner、fresh staging package 生成/验证与
   idle-safe root/Catalog commit，并已建立 current-only source import metadata wire、Catalog binding 与纯 import
-  planner；importer provenance capture、OS watcher、增量 Cooker executor，以及 active Handle/Lease/GPU owner 的
-  增量迁移事务仍未实现。通用
+  planner；真实 importer provenance capture 与 validated state commit 已接入。OS watcher、clean object 复用 +
+  dirty-unit executor，以及 active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重

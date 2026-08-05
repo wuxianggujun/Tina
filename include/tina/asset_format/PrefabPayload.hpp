@@ -10,32 +10,31 @@
 
 namespace Tina::AssetFormat {
 
-// Prefab cooked payload schema v1 (little-endian, after CookedAsset header/deps).
-// M11-E6 minimal hierarchy stub for product 3D toward M12 glTF gate.
+// Prefab cooked payload schema v2 (little-endian, after CookedAsset header/deps).
 // Layout:
 //   PrefabWire header 16B:
-//     u16 schemaVersion (=1)
+//     u16 schemaVersion (=2)
 //     u16 nodeCount
 //     u16 reserved0 (=0)
 //     u16 reserved1 (=0)
 //     u32 reserved2 (=0)
 //     u32 reserved3 (=0)
-//   PrefabNodeWire[nodeCount] 64B each:
+//   PrefabNodeWire[nodeCount] 84B each:
 //     u32 stableNodeId
 //     i32 parentIndex              // -1 = root
 //     f32 posX, posY, posZ
 //     f32 rotX, rotY, rotZ, rotW
 //     f32 scaleX, scaleY, scaleZ
-//     u16 flags                    // bit0 hasMesh, bit1 hasMaterial
+//     u16 flags                    // bit0 hidden
 //     u16 reserved
-//     // mesh/material AssetIds are CookedAsset dependencies (required when flags set),
-//     // ordered in the same sequence as nodes that declare them (stable node order).
+//     u8 meshAssetId[16]           // zero only when the node has no mesh
+//     u8 materialAssetId[16]       // zero only when the node has no mesh
+// CookedAsset dependencies are the unique mesh/material references sorted by AssetId.
 namespace PrefabWire {
-inline constexpr Core::u16 SchemaVersion = 1;
+inline constexpr Core::u16 SchemaVersion = 2;
 inline constexpr Core::u32 HeaderBytes = 16;
-inline constexpr Core::u32 NodeBytes = 64;
-inline constexpr Core::u16 FlagHasMesh = 1U << 0U;
-inline constexpr Core::u16 FlagHasMaterial = 1U << 1U;
+inline constexpr Core::u32 NodeBytes = 84;
+inline constexpr Core::u16 FlagHidden = 1U << 0U;
 inline constexpr Core::u16 MaxNodes = 4096;
 } // namespace PrefabWire
 
@@ -73,8 +72,6 @@ struct PrefabNodeView final {
     bool hasMesh = false;
     bool hasMaterial = false;
     bool visible = true;
-    // Filled by Asset::parsePrefabFromCooked from cooked dependency stream
-    // (mesh then material per hasMesh node). Empty when only payload-parsed.
     Core::AssetId meshId{};
     Core::AssetId materialId{};
 };
@@ -95,12 +92,11 @@ struct PrefabPayloadView final {
 
 [[nodiscard]] Core::Result<std::vector<std::byte>> writePrefabPayloadBytes(const PrefabPayloadDesc& desc);
 
-// submesh/node views alias into `payload` storage via out storage for nodes.
+// Node views are stored in caller-owned `nodeStorage`.
 [[nodiscard]] Core::Result<PrefabPayloadView> parsePrefabPayload(std::span<const std::byte> payload,
                                                                  std::vector<PrefabNodeView>& nodeStorage);
 
-// Full cooked Prefab: dependencies list StaticMesh/Material AssetIds in node order
-// for every node that declares mesh and/or material.
+// Full cooked Prefab: dependencies are the unique mesh/material AssetIds sorted by AssetId.
 [[nodiscard]] Core::Result<std::vector<std::byte>>
 writeCookedPrefabAsset(Core::AssetId assetId, const PrefabPayloadDesc& desc,
                        TargetPlatform platform = TargetPlatform::WindowsX64);

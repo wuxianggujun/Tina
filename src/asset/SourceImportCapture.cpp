@@ -148,7 +148,7 @@ Core::Result<Core::u32> captureSourceImportBytes(SourceImportCandidate& candidat
     }
     if (candidate.sources.size() >= config.maxSources)
     {
-        return Core::failure(AssetErrorCode::SourceImportPlanCapacityExceeded,
+        return Core::failure(AssetErrorCode::SourceImportCaptureCapacityExceeded,
                              "source import capture capacity exceeded");
     }
 
@@ -229,7 +229,7 @@ writeSourceImportCandidateBytes(const SourceImportCandidate& candidate,
     if (candidate.sources.size() > AssetFormat::SourceImportWire::MaxSources ||
         candidate.units.size() > AssetFormat::SourceImportWire::MaxUnits)
     {
-        return Core::failure(AssetErrorCode::SourceImportPlanCapacityExceeded,
+        return Core::failure(AssetErrorCode::SourceImportCaptureCapacityExceeded,
                              "source import candidate exceeds current metadata limits");
     }
 

@@ -486,6 +486,9 @@ Scene target 使用。
 TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源 glTF/WAV/image；cgltf/stb_image 与源文件解析只在
 Cooker/tool。
 
+Prefab 当前唯一 schema 为 v2：node payload 自带 Mesh/Material `AssetId`；Cooked dependency 是按 `AssetId`
+排序去重的 required 引用集合，typed parser 对两者完整对账，不按 dependency 位置恢复 node identity。
+
 `cookGltfFileToCatalogRequest(gltfUtf8Path, ids)` 是 `noexcept` Cooker 边界，输入路径必须是 strict UTF-8
 without NUL。它从已打开主文件的有界快照解析 JSON/GLB；relative external buffer/image 先 percent-decode，
 拒绝 scheme、rooted path 与 `..`，再打开并以最终 handle/fd 路径验证 authoring-root containment。root 内
@@ -517,7 +520,14 @@ Catalog manifest 一致；不一致要求 full recook。`planSourceImports(basel
 metadata view，按 stable UnitId 输出 `Added`/`Removed`/`Reimport`。target、importer kind/version、settings、source
 membership/path/content/byte size、primary edge 或 output AssetId/kind 任一变化都会使匹配 unit 整体 `Reimport`；
 同一 source 可被多个 unit 引用，其 fingerprint 变化会标记所有消费者。结果使用调用方 PMR/`maxChanges`，失败
-不返回部分 plan，也不推进 baseline。当前 API 不启动 watcher、不读取源文件、不执行 recook。
+不返回部分 plan，也不推进 baseline。
+
+`captureSourceImportBytes()` 对 caller 已读取并实际消费的 bytes 建立 root-relative source fingerprint，不自行
+读取文件；`loadCatalogCookRecipeSourceFile()` 与 `cookGltfFileToCatalogSourceResult()` 在唯一现行 importer 路径
+分别收集 recipe/WAV/generic payload 与 glTF/GLB/external buffer/image provenance。一个 authoring document 当前
+对应一个 stable unit，outputs 覆盖本次 request 的全部资产。`commitSourceImportCandidate()` 生成唯一当前 schema
+并 atomic replace；`tina_assetc` 只在对应 package 完整验证并取得 manifest revision 后调用它。当前 API 不启动
+watcher、不复用 clean object，也不执行 dirty-unit recook。
 
 `planCatalogChanges(oldCatalog, newCatalog, config)` 比较两个已验证、immutable `CatalogSnapshot`，返回按
 `AssetId` 排序且每 ID 唯一的 `Added`/`Removed`/`Modified`/`Affected` 行。`Modified` 覆盖 entry metadata

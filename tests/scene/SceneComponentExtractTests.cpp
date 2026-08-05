@@ -2796,7 +2796,7 @@ TEST_F(SceneMeshAssetTest, InstantiatesHierarchyAndMeshes)
             .visible = true,
         },
     };
-    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = AssetFormat::PrefabWire::SchemaVersion, .nodes = nodes};
     auto created = instantiatePrefab(
         world,
         prefab,
@@ -2851,7 +2851,7 @@ TEST(ScenePrefabInstantiateTest, RollsBackOnInvalidParentIndex)
             .hasMaterial = false,
         },
     };
-    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = AssetFormat::PrefabWire::SchemaVersion, .nodes = nodes};
     auto created = instantiatePrefab(world, prefab);
     ASSERT_FALSE(created.has_value());
     EXPECT_EQ(world.entityCount(), 0U);
@@ -2885,7 +2885,7 @@ TEST_F(SceneMeshAssetTest, ResolvesPerNodeMeshHandlesFromAssetIds)
             .materialId = matB,
         },
     };
-    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = AssetFormat::PrefabWire::SchemaVersion, .nodes = nodes};
     PrefabMeshBinding binding{
         .mesh = meshA_,
         .material = materialA_,
@@ -2941,7 +2941,7 @@ TEST_F(SceneMeshAssetTest, RollsBackWhenAssetIdResolverReturnsEmptyHandle)
             .materialId = fixtureAssetId(3),
         },
     };
-    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = AssetFormat::PrefabWire::SchemaVersion, .nodes = nodes};
     auto created = instantiatePrefab(
         world,
         prefab,
@@ -2977,7 +2977,7 @@ TEST_F(SceneMeshAssetTest, RollsBackEarlierNodesWhenLaterAssetResolverReturnsEmp
             .materialId = fixtureAssetId(3),
         },
     };
-    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = AssetFormat::PrefabWire::SchemaVersion, .nodes = nodes};
     auto created = instantiatePrefab(
         world,
         prefab,

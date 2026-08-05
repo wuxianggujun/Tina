@@ -1,6 +1,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
+#include <tina/asset/CatalogPackageChangeDetector.hpp>
 #include <tina/asset/GltfCook.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
@@ -10,6 +11,8 @@
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <memory_resource>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,6 +23,8 @@ struct Options final {
     std::string outRoot;
     std::string recipePath;
     std::string gltfPath;
+    std::string sourceRoot;
+    std::string importStatePath;
 };
 
 void printUsage()
@@ -29,6 +34,8 @@ void printUsage()
         << "  Fixture/recipe cooker for Catalog packages.\n"
         << "  --recipe <path>   cook from line recipe\n"
         << "  --gltf <path>     cook minimal glTF/GLB (cgltf) -> StaticMesh+Material+Prefab\n"
+        << "  --source-root <path>  authoring root for canonical source provenance\n"
+        << "  --import-state <path> atomically commit TINAIMPT state after package validation\n"
         << "  --help\n"
         << "\n"
         << "Default fixture (no --recipe): Texture2D 2x2 RGBA + Sprite full-UV.\n"
@@ -93,6 +100,26 @@ void printUsage()
             options.gltfPath.assign(value);
             continue;
         }
+        if (arg == "--source-root")
+        {
+            const auto value = requireValue(arg);
+            if (value.empty())
+            {
+                return 2;
+            }
+            options.sourceRoot.assign(value);
+            continue;
+        }
+        if (arg == "--import-state")
+        {
+            const auto value = requireValue(arg);
+            if (value.empty())
+            {
+                return 2;
+            }
+            options.importStatePath.assign(value);
+            continue;
+        }
         std::cerr << "unknown argument: " << arg << '\n';
         printUsage();
         return 2;
@@ -101,6 +128,21 @@ void printUsage()
     {
         std::cerr << "--out is required\n";
         printUsage();
+        return 2;
+    }
+    if (!options.recipePath.empty() && !options.gltfPath.empty())
+    {
+        std::cerr << "--recipe and --gltf are mutually exclusive\n";
+        return 2;
+    }
+    if (options.sourceRoot.empty() != options.importStatePath.empty())
+    {
+        std::cerr << "--source-root and --import-state must be provided together\n";
+        return 2;
+    }
+    if (!options.importStatePath.empty() && options.recipePath.empty() && options.gltfPath.empty())
+    {
+        std::cerr << "--import-state requires --recipe or --gltf\n";
         return 2;
     }
     return 0;
@@ -193,14 +235,47 @@ int main(int argc, char** argv)
 
     Tina::Core::Result<Tina::Asset::CatalogCookRequest> request =
         Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig, "no request");
+    std::optional<Tina::Asset::SourceImportCandidate> sourceImports;
     std::string mode = "typed2d";
     if (!options.gltfPath.empty())
     {
-        request = Tina::Asset::cookGltfFileToCatalogRequest(options.gltfPath);
+        if (options.importStatePath.empty())
+        {
+            request = Tina::Asset::cookGltfFileToCatalogRequest(options.gltfPath);
+        }
+        else
+        {
+            auto sourceResult = Tina::Asset::cookGltfFileToCatalogSourceResult(
+                options.gltfPath,
+                Tina::Asset::SourceImportCaptureConfig{.sourceRootUtf8 = options.sourceRoot});
+            if (!sourceResult)
+            {
+                printError(sourceResult.error());
+                return 1;
+            }
+            request = std::move(sourceResult->request);
+            sourceImports.emplace(std::move(sourceResult->sourceImports));
+        }
         mode = "gltf";
     } else if (!options.recipePath.empty())
     {
-        request = Tina::Asset::loadCatalogCookRecipeFile(options.recipePath);
+        if (options.importStatePath.empty())
+        {
+            request = Tina::Asset::loadCatalogCookRecipeFile(options.recipePath);
+        }
+        else
+        {
+            auto sourceResult = Tina::Asset::loadCatalogCookRecipeSourceFile(
+                options.recipePath,
+                Tina::Asset::SourceImportCaptureConfig{.sourceRootUtf8 = options.sourceRoot});
+            if (!sourceResult)
+            {
+                printError(sourceResult.error());
+                return 1;
+            }
+            request = std::move(sourceResult->request);
+            sourceImports.emplace(std::move(sourceResult->sourceImports));
+        }
         mode = "recipe";
     } else
     {
@@ -245,8 +320,33 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (sourceImports)
+    {
+        auto revision = Tina::Asset::captureCatalogPackageRevision(
+            options.outRoot,
+            Tina::Asset::CatalogPackageChangeDetectorConfig{.scratchMemoryResource = &memory});
+        if (!revision)
+        {
+            printError(revision.error());
+            return 1;
+        }
+        const auto stateStatus = Tina::Asset::commitSourceImportCandidate(
+            options.importStatePath,
+            *sourceImports,
+            Tina::AssetFormat::SourceImportManifestRevision{
+                .manifestDigest = revision->manifestDigest,
+                .manifestBytes = revision->manifestBytes,
+            });
+        if (!stateStatus)
+        {
+            printError(stateStatus.error());
+            return 1;
+        }
+    }
+
     std::cout << "{\"status\":\"ok\",\"tool\":\"tina_assetc\",\"entries\":" << catalog->entryCount()
               << ",\"dependencies\":" << catalog->dependencyCount() << ",\"mode\":\"" << mode << "\""
+              << ",\"importStateCommitted\":" << (sourceImports ? "true" : "false")
               << ",\"out\":\"" << options.outRoot << "\"}\n";
     return 0;
 }

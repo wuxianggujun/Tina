@@ -1057,8 +1057,6 @@ findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetI
         }
     }
     // Dependency streams must be strictly increasing AssetId (manifest + cooked validation).
-    // Prefab streams are still (StaticMesh, Material)×N in node order — callers must assign
-    // ids so that natural pair order also sorts by AssetId.
     for (const CatalogCookAssetSpec& asset : sorted)
     {
         for (std::size_t depIndex = 1; depIndex < asset.dependencies.size(); ++depIndex)
@@ -1970,6 +1968,11 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                     .expectedKind = AssetFormat::AssetKind::Material,
                     .flags = AssetFormat::DependencyFlags::Required,
                 });
+                std::sort(asset.dependencies.begin(), asset.dependencies.end(),
+                          [](const AssetFormat::CookedAssetWriteDependency& left,
+                             const AssetFormat::CookedAssetWriteDependency& right) {
+                              return left.assetId < right.assetId;
+                          });
             }
             request.assets.push_back(std::move(asset));
             continue;

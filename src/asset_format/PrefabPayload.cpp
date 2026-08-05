@@ -2,6 +2,7 @@
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -76,6 +77,19 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     std::memcpy(bytes.data() + offset, &value, sizeof(float));
 }
 
+void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId assetId)
+{
+    const auto& idBytes = assetId.bytes();
+    std::copy(idBytes.begin(), idBytes.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
+[[nodiscard]] Core::AssetId readAssetId(std::span<const std::byte> bytes, usize offset) noexcept
+{
+    Core::AssetId::Bytes idBytes{};
+    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset), idBytes.size(), idBytes.begin());
+    return Core::AssetId::fromBytes(idBytes).value_or(Core::AssetId{});
+}
+
 [[nodiscard]] bool isFiniteVec3(float x, float y, float z) noexcept
 {
     return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
@@ -118,11 +132,22 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
         }
         if (static_cast<bool>(node.meshId) != static_cast<bool>(node.materialId))
         {
-            // Allow mesh without material only if both absent or both present for v1 extract path.
-            if (static_cast<bool>(node.meshId) && !static_cast<bool>(node.materialId))
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "prefab mesh and material AssetIds must both be present or absent");
+        }
+        if (node.meshId && node.meshId == node.materialId)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "prefab mesh and material AssetIds must be distinct");
+        }
+        for (usize previousIndex = 0; previousIndex < index; ++previousIndex)
+        {
+            const PrefabNodeDesc& previous = desc.nodes[previousIndex];
+            if ((node.meshId && node.meshId == previous.materialId) ||
+                (node.materialId && node.materialId == previous.meshId))
             {
                 return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                                     "prefab mesh requires a material AssetId in v1");
+                                     "prefab AssetId cannot be used as both mesh and material");
             }
         }
     }
@@ -163,25 +188,11 @@ Core::Result<std::vector<std::byte>> writePrefabPayloadBytes(const PrefabPayload
         writeF32(payload, base + 36, node.scaleX);
         writeF32(payload, base + 40, node.scaleY);
         writeF32(payload, base + 44, node.scaleZ);
-        u16 flags = 0;
-        if (static_cast<bool>(node.meshId))
-        {
-            flags = static_cast<u16>(flags | PrefabWire::FlagHasMesh);
-        }
-        if (static_cast<bool>(node.materialId))
-        {
-            flags = static_cast<u16>(flags | PrefabWire::FlagHasMaterial);
-        }
-        if (!node.visible)
-        {
-            // reuse reserved high bit for hidden: bit15
-            flags = static_cast<u16>(flags | static_cast<u16>(1U << 15U));
-        }
+        const u16 flags = node.visible ? 0U : PrefabWire::FlagHidden;
         writeU16(payload, base + 48, flags);
         writeU16(payload, base + 50, 0);
-        writeU32(payload, base + 52, 0);
-        writeU32(payload, base + 56, 0);
-        writeU32(payload, base + 60, 0);
+        writeAssetId(payload, base + 52, node.meshId);
+        writeAssetId(payload, base + 68, node.materialId);
     }
     return payload;
 }
@@ -243,16 +254,35 @@ Core::Result<PrefabPayloadView> parsePrefabPayload(std::span<const std::byte> pa
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node transform must be finite");
         }
         const u16 flags = readU16(payload, base + 48);
-        node.hasMesh = (flags & PrefabWire::FlagHasMesh) != 0;
-        node.hasMaterial = (flags & PrefabWire::FlagHasMaterial) != 0;
-        node.visible = (flags & static_cast<u16>(1U << 15U)) == 0;
+        if ((flags & static_cast<u16>(~PrefabWire::FlagHidden)) != 0U)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node flags are invalid");
+        }
+        node.meshId = readAssetId(payload, base + 52);
+        node.materialId = readAssetId(payload, base + 68);
+        node.hasMesh = static_cast<bool>(node.meshId);
+        node.hasMaterial = static_cast<bool>(node.materialId);
+        node.visible = (flags & PrefabWire::FlagHidden) == 0U;
         if (node.hasMesh != node.hasMaterial)
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                                 "prefab mesh/material flags must match in v1");
+                                 "prefab mesh and material AssetIds must both be present or absent");
         }
-        if (readU16(payload, base + 50) != 0 || readU32(payload, base + 52) != 0 ||
-            readU32(payload, base + 56) != 0 || readU32(payload, base + 60) != 0)
+        if (node.hasMesh && node.meshId == node.materialId)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "prefab mesh and material AssetIds must be distinct");
+        }
+        for (const PrefabNodeView& previous : nodeStorage)
+        {
+            if ((node.meshId && node.meshId == previous.materialId) ||
+                (node.materialId && node.materialId == previous.meshId))
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "prefab AssetId cannot be used as both mesh and material");
+            }
+        }
+        if (readU16(payload, base + 50) != 0)
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node reserved fields must be zero");
         }
@@ -294,6 +324,25 @@ Core::Result<std::vector<std::byte>> writeCookedPrefabAsset(Core::AssetId assetI
             });
         }
     }
+    std::sort(deps.begin(), deps.end(), [](const CookedAssetWriteDependency& left,
+                                           const CookedAssetWriteDependency& right) {
+        return left.assetId < right.assetId;
+    });
+    const auto conflicting = std::adjacent_find(
+        deps.begin(), deps.end(), [](const CookedAssetWriteDependency& left,
+                                     const CookedAssetWriteDependency& right) {
+            return left.assetId == right.assetId && left.expectedKind != right.expectedKind;
+        });
+    if (conflicting != deps.end())
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "prefab AssetId cannot have conflicting dependency kinds");
+    }
+    deps.erase(std::unique(deps.begin(), deps.end(), [](const CookedAssetWriteDependency& left,
+                                                        const CookedAssetWriteDependency& right) {
+                   return left.assetId == right.assetId;
+               }),
+               deps.end());
     return writeCookedAssetBytes(CookedAssetWriteDesc{
         .assetKind = AssetKind::Prefab,
         .assetTypeVersion = PrefabWire::SchemaVersion,

@@ -2,6 +2,7 @@
 
 #include <tina/asset/AssetErrors.hpp>
 
+#include <algorithm>
 #include <new>
 #include <vector>
 
@@ -190,9 +191,10 @@ Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& fi
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
     }
-    if (file.header().assetKind != AssetFormat::AssetKind::Prefab)
+    if (file.header().assetKind != AssetFormat::AssetKind::Prefab ||
+        file.header().assetTypeVersion != AssetFormat::PrefabWire::SchemaVersion)
     {
-        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not Prefab");
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not a supported Prefab");
     }
     OwnedPrefabPayload owned{};
     auto view = AssetFormat::parsePrefabPayload(file.payload(), owned.nodes);
@@ -200,48 +202,67 @@ Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& fi
     {
         return Core::failure(std::move(view.error()));
     }
-    // Count mesh/material flags must match dependency count (2 per meshed node).
-    Core::u32 expectedDeps = 0;
-    for (const auto& node : owned.nodes)
+    try
     {
-        if (node.hasMesh)
+        struct ExpectedDependency final {
+            Core::AssetId assetId{};
+            AssetFormat::AssetKind kind = AssetFormat::AssetKind::Invalid;
+        };
+        std::vector<ExpectedDependency> expected;
+        expected.reserve(owned.nodes.size() * 2U);
+        for (const auto& node : owned.nodes)
         {
-            expectedDeps += 2;
+            if (!node.hasMesh)
+            {
+                continue;
+            }
+            expected.push_back(ExpectedDependency{.assetId = node.meshId,
+                                                  .kind = AssetFormat::AssetKind::StaticMesh});
+            expected.push_back(ExpectedDependency{.assetId = node.materialId,
+                                                  .kind = AssetFormat::AssetKind::Material});
         }
-    }
-    if (file.header().dependencyCount != expectedDeps)
-    {
-        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
-                             "prefab dependency count does not match mesh/material flags");
-    }
-    // Bind AssetIds from the dependency stream in node order (mesh, material) × N.
-    Core::u32 depIndex = 0;
-    for (auto& node : owned.nodes)
-    {
-        if (!node.hasMesh)
-        {
-            continue;
-        }
-        auto meshDep = file.dependency(depIndex++);
-        auto materialDep = file.dependency(depIndex++);
-        if (!meshDep || !materialDep)
+        std::sort(expected.begin(), expected.end(), [](const ExpectedDependency& left,
+                                                       const ExpectedDependency& right) {
+            return left.assetId < right.assetId;
+        });
+        const auto duplicate = std::adjacent_find(
+            expected.begin(), expected.end(), [](const ExpectedDependency& left, const ExpectedDependency& right) {
+                return left.assetId == right.assetId && left.kind != right.kind;
+            });
+        if (duplicate != expected.end())
         {
             return Core::failure(AssetErrorCode::CatalogEntryMismatch,
-                                 "prefab dependency stream shorter than meshed nodes");
+                                 "prefab uses one AssetId with conflicting dependency kinds");
         }
-        if (meshDep->expectedKind != AssetFormat::AssetKind::StaticMesh ||
-            materialDep->expectedKind != AssetFormat::AssetKind::Material)
+        expected.erase(std::unique(expected.begin(), expected.end(),
+                                   [](const ExpectedDependency& left, const ExpectedDependency& right) {
+                                       return left.assetId == right.assetId;
+                                   }),
+                       expected.end());
+        if (file.header().dependencyCount != expected.size())
         {
             return Core::failure(AssetErrorCode::CatalogEntryMismatch,
-                                 "prefab dependency kinds must be StaticMesh then Material");
+                                 "prefab dependency set does not match payload references");
         }
-        node.meshId = meshDep->assetId;
-        node.materialId = materialDep->assetId;
+        for (Core::u32 index = 0; index < file.header().dependencyCount; ++index)
+        {
+            const auto dependency = file.dependency(index);
+            const auto& required = expected[index];
+            if (!dependency || dependency->assetId != required.assetId ||
+                dependency->expectedKind != required.kind ||
+                dependency->flags != AssetFormat::DependencyFlags::Required)
+            {
+                return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                     "prefab dependency set does not match payload references");
+            }
+        }
+        owned.view = *view;
+        owned.view.nodes = owned.nodes;
+        return owned;
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed, "prefab validation allocation failed");
     }
-    owned.view = *view;
-    // view.nodes aliases owned.nodes — re-bind after mutation.
-    owned.view.nodes = owned.nodes;
-    return owned;
 }
 
 } // namespace Tina::Asset
