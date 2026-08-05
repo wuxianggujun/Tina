@@ -499,6 +499,12 @@ owning immutable `CatalogSnapshot`，此后 staging root 必须保持 immutable�
 validation 失败可保留私有 partial stage 供诊断，但不会触碰 live root。已有目录返回 `AlreadyExists` 且不修改
 其中内容。`publishCatalogPackage()` 仍是 manifest-last 的 best-effort 原地写入，不是多文件替换事务。
 
+`captureCatalogPackageRevision(root, config)` 对完整 manifest bytes 计算固定大小 `ContentHash` revision；
+`pollCatalogPackageChange(root, baseline, config)` 返回 `Unchanged|Changed` 与 candidate revision。检测器只观察
+manifest commit marker，不扫描 object/source，不启动线程，也不会自动推进 baseline。调用方只有在 candidate
+对应 package 通过完整 validation/reload 后才接受它；失败时继续使用旧 baseline，下一次 poll 会重复报告变化。
+manifest scratch bytes 使用显式 PMR 与 `maxManifestBytes`，输出不持有 manifest buffer。
+
 `planCatalogChanges(oldCatalog, newCatalog, config)` 比较两个已验证、immutable `CatalogSnapshot`，返回按
 `AssetId` 排序且每 ID 唯一的 `Added`/`Removed`/`Modified`/`Affected` 行。`Modified` 覆盖 entry metadata
 和完整 dependency contract；`Affected` 是新 Catalog 中对 Added/Modified 的 reverse-dependency 传递闭包，

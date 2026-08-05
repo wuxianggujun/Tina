@@ -41,7 +41,7 @@ Catalog package
 | Wire format | Cooked Asset/Manifest v1、little-endian、严格 magic/schema/enum/count/offset/alignment/padding 校验 |
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验；old/new snapshot 确定性 change plan |
-| Package | 确定性 object path、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
+| Package | 确定性 object path、manifest revision polling、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
 | Cooker | recipe、writer、fresh staging root cook + 强制完整验证；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
@@ -81,9 +81,14 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 这一步只回答“两个已验证 Catalog 有什么变化、哪些新条目需要后续处理”，planner 本身不提交状态。
 `AssetSystem::reloadCatalogWhenIdle()` 已在其上增加保守的 root 事务：强制完整打开/验证候选 package，生成
 change plan，并仅在 owner thread 且 queue、IO、Store、GPU upload 与 retirement 全部 idle 时原子替换
-root/Catalog。fresh staging package 的完整生成/验证已具备；文件监听、source import metadata、增量 recook，
-以及 live Handle/Lease/GPU owner
+root/Catalog。fresh staging package 的完整生成/验证与 manifest revision caller-driven polling 已具备；OS watcher、
+source import metadata、增量 recook，以及 live Handle/Lease/GPU owner
 迁移仍必须由后续事务切片完成。
+
+`captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
+`pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
+因此后续 full validation/reload 失败不会吞掉重试。该检测只回答 package manifest 是否变化；object 完整性仍由
+full package validation 负责，source dependency detection 需要后续 import metadata。
 
 ## 身份、视图与所有权
 
@@ -288,9 +293,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
-- `ASSET-002` 已有 immutable Catalog change planner、fresh staging package 生成/验证与 idle-safe root/Catalog
-  commit；文件监听/source import metadata、增量 Cooker，以及 active Handle/Lease/GPU owner 的增量迁移事务
-  仍未实现。通用
+- `ASSET-002` 已有 manifest revision polling、immutable Catalog change planner、fresh staging package 生成/验证与
+  idle-safe root/Catalog commit；OS watcher/source import metadata、增量 Cooker，以及 active Handle/Lease/GPU owner
+  的增量迁移事务仍未实现。通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重

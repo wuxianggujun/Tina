@@ -34,6 +34,7 @@ set(TINA_ASSET_TEST_SOURCES
     CatalogLoadOrderTests.cpp
     CatalogLoadPlanTests.cpp
     CatalogPackageTests.cpp
+    CatalogPackageChangeDetectorTests.cpp
     CatalogPackageLoadTests.cpp
     CatalogPackagePublishTests.cpp
     CatalogPackagePipelineTests.cpp
@@ -68,6 +69,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/CatalogLoadOrderHeader.cpp
     header_isolation/CatalogLoadPlanHeader.cpp
     header_isolation/CatalogPackageHeader.cpp
+    header_isolation/CatalogPackageChangeDetectorHeader.cpp
     header_isolation/CatalogPackageLoadHeader.cpp
     header_isolation/CatalogPackagePublishHeader.cpp
     header_isolation/CatalogPackageSummaryHeader.cpp

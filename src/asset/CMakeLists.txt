@@ -27,6 +27,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadOrder.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadPlan.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackage.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageChangeDetector.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageLoad.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackagePublish.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageSummary.hpp
@@ -63,6 +64,7 @@ set(TINA_ASSET_SOURCES
     CatalogLoadOrder.cpp
     CatalogLoadPlan.cpp
     CatalogPackage.cpp
+    CatalogPackageChangeDetector.cpp
     CatalogPackageLoad.cpp
     CatalogPackagePublish.cpp
     CatalogPackageSummary.cpp
