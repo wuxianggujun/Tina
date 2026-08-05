@@ -593,6 +593,33 @@ inline constexpr cgltf_size kMaxGltfImages = 4'096;
 inline constexpr cgltf_size kMaxGltfTextures = 4'096;
 inline constexpr cgltf_size kMaxGltfScenes = 256;
 
+struct GltfSourceCaptureContext final {
+    const SourceImportCaptureConfig* config = nullptr;
+    SourceImportCandidate* candidate = nullptr;
+    std::filesystem::path documentSourcePath{};
+};
+
+[[nodiscard]] std::string pathToUtf8Bytes(const std::filesystem::path& path)
+{
+    const auto utf8 = path.generic_u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+[[nodiscard]] Core::Result<Core::u32> captureGltfSourceBytes(
+    GltfSourceCaptureContext& capture,
+    const std::filesystem::path& sourcePath,
+    std::span<const std::byte> consumedBytes)
+{
+    if (capture.config == nullptr || capture.candidate == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF source capture context is incomplete");
+    }
+    const std::string sourceUtf8Path = pathToUtf8Bytes(sourcePath);
+    return captureSourceImportBytes(*capture.candidate, *capture.config, sourceUtf8Path,
+                                    consumedBytes);
+}
+
 [[nodiscard]] bool checkedAdd(std::uint64_t left, std::uint64_t right,
                               std::uint64_t& result) noexcept
 {
@@ -850,9 +877,23 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
     return (gltfFilePath.parent_path() / relative).lexically_normal();
 }
 
+[[nodiscard]] Core::Result<Core::u32> captureGltfExternalSourceBytes(
+    GltfSourceCaptureContext& capture,
+    std::string_view uri,
+    std::span<const std::byte> consumedBytes)
+{
+    auto sourcePath = resolveContainedGltfExternalPath(capture.documentSourcePath, uri);
+    if (!sourcePath)
+    {
+        return Core::failure(std::move(sourcePath.error()));
+    }
+    return captureGltfSourceBytes(capture, *sourcePath, consumedBytes);
+}
+
 [[nodiscard]] Core::Status loadGltfBuffersFromSnapshots(const cgltf_options& options,
                                                         cgltf_data* data,
-                                                        const std::filesystem::path& gltfFilePath)
+                                                        const std::filesystem::path& gltfFilePath,
+                                                        GltfSourceCaptureContext* capture)
 {
     if (data->buffers_count > 0 && data->buffers[0].data == nullptr &&
         data->buffers[0].uri == nullptr && data->bin != nullptr)
@@ -915,6 +956,15 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "glTF external buffer file budget exceeded");
         }
+        if (capture != nullptr)
+        {
+            auto sourceIndex = captureGltfExternalSourceBytes(*capture, buffer.uri, snapshot->bytes);
+            if (!sourceIndex)
+            {
+                return Core::failure(std::move(sourceIndex.error())
+                                         .withContext("loadGltfBuffersFromSnapshots", "source capture"));
+            }
+        }
         void* memory = options.memory.alloc_func(options.memory.user_data, buffer.size);
         if (memory == nullptr)
         {
@@ -939,7 +989,8 @@ struct GltfImageDecodeBudget final {
     const cgltf_image* image,
     const std::filesystem::path& gltfFilePath,
     std::vector<std::byte>& outRgba,
-    GltfImageDecodeBudget& budget)
+    GltfImageDecodeBudget& budget,
+    GltfSourceCaptureContext* capture)
 {
     if (image == nullptr)
     {
@@ -988,6 +1039,15 @@ struct GltfImageDecodeBudget final {
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "glTF external image file budget exceeded");
+        }
+        if (capture != nullptr)
+        {
+            auto sourceIndex = captureGltfExternalSourceBytes(*capture, image->uri, snapshot->bytes);
+            if (!sourceIndex)
+            {
+                return Core::failure(std::move(sourceIndex.error())
+                                         .withContext("decodeImageRgba8", "source capture"));
+            }
         }
         fileBytes = std::move(snapshot->bytes);
         encoded = reinterpret_cast<const stbi_uc*>(fileBytes.data());
@@ -1073,8 +1133,87 @@ struct GltfImageDecodeBudget final {
 
 namespace {
 
-[[nodiscard]] Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequestImpl(
+[[nodiscard]] Core::Result<Core::ContentHash> digestGltfCookSettings(const GltfCookIds& ids)
+{
+    constexpr std::array Domain{
+        std::byte{'T'}, std::byte{'I'}, std::byte{'N'}, std::byte{'A'},
+        std::byte{'G'}, std::byte{'L'}, std::byte{'T'}, std::byte{'F'},
+        std::byte{'C'}, std::byte{'F'}, std::byte{'G'}, std::byte{0},
+    };
+    constexpr Core::u32 SettingsSchemaVersion = 1;
+    constexpr std::size_t AssetIdBytes = Core::AssetId::Bytes{}.size();
+    std::array<std::byte, Domain.size() + sizeof(Core::u32) + AssetIdBytes * 3U> canonical{};
+    auto cursor = std::copy(Domain.begin(), Domain.end(), canonical.begin());
+    for (Core::u32 shift = 0; shift < 32U; shift += 8U)
+    {
+        *cursor++ = static_cast<std::byte>((SettingsSchemaVersion >> shift) & 0xFFU);
+    }
+    const auto appendId = [&cursor](Core::AssetId id) {
+        const auto bytes = id.bytes();
+        cursor = std::copy(bytes.begin(), bytes.end(), cursor);
+    };
+    appendId(ids.meshId);
+    appendId(ids.materialId);
+    appendId(ids.prefabId);
+    return digestSourceImportSettings(canonical);
+}
+
+[[nodiscard]] Core::Status finalizeGltfSourceImports(CatalogCookSourceResult& result,
+                                                     Core::u32 primarySourceIndex,
+                                                     const GltfCookIds& requestedIds)
+{
+    if (primarySourceIndex >= result.sourceImports.sources.size() ||
+        result.request.assets.size() > AssetFormat::SourceImportWire::MaxOutputs)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF source import contract exceeds current metadata limits");
+    }
+
+    const auto& primaryPath = result.sourceImports.sources[primarySourceIndex].path;
+    auto unitId = deriveSourceImportUnitId(SourceImporterKind::Gltf, primaryPath);
+    if (!unitId)
+    {
+        return Core::failure(std::move(unitId.error())
+                                 .withContext("finalizeGltfSourceImports", "unit identity"));
+    }
+    auto settingsHash = digestGltfCookSettings(requestedIds);
+    if (!settingsHash)
+    {
+        return Core::failure(std::move(settingsHash.error())
+                                 .withContext("finalizeGltfSourceImports", "settings"));
+    }
+
+    SourceImportCapturedUnit unit{
+        .unitId = *unitId,
+        .importerKind = SourceImporterKind::Gltf,
+        .importerVersion = 1,
+        .settingsHash = *settingsHash,
+    };
+    unit.inputs.reserve(result.sourceImports.sources.size());
+    for (Core::u32 sourceIndex = 0; sourceIndex < result.sourceImports.sources.size(); ++sourceIndex)
+    {
+        unit.inputs.push_back(SourceImportCapturedInput{
+            .sourceIndex = sourceIndex,
+            .flags = sourceIndex == primarySourceIndex
+                         ? AssetFormat::SourceImportInputFlags::Primary
+                         : AssetFormat::SourceImportInputFlags::None,
+        });
+    }
+    unit.outputs.reserve(result.request.assets.size());
+    for (const auto& asset : result.request.assets)
+    {
+        unit.outputs.push_back(SourceImportCapturedOutput{
+            .assetId = asset.assetId,
+            .assetKind = asset.assetKind,
+        });
+    }
+    result.sourceImports.units.push_back(std::move(unit));
+    return Core::success();
+}
+
+[[nodiscard]] Core::Result<CatalogCookSourceResult> cookGltfFileToCatalogSourceResultImpl(
     std::string_view gltfUtf8Path,
+    const SourceImportCaptureConfig* captureConfig,
     GltfCookIds ids)
 {
     if (gltfUtf8Path.empty() || !Core::isStrictUtf8WithoutNul(gltfUtf8Path))
@@ -1083,13 +1222,47 @@ namespace {
                              "glTF path must be strict UTF-8 without NUL");
     }
 
+    const GltfCookIds requestedIds = ids;
+    CatalogCookSourceResult result{};
+    result.sourceImports.targetPlatform = AssetFormat::TargetPlatform::WindowsX64;
+    GltfSourceCaptureContext capture{
+        .config = captureConfig,
+        .candidate = captureConfig != nullptr ? &result.sourceImports : nullptr,
+    };
+    GltfSourceCaptureContext* activeCapture = captureConfig != nullptr ? &capture : nullptr;
+    Core::u32 primarySourceIndex = 0;
+
+    if (captureConfig != nullptr)
+    {
+        auto primaryPath = normalizeSourceImportPath(*captureConfig, gltfUtf8Path);
+        if (!primaryPath)
+        {
+            return Core::failure(std::move(primaryPath.error())
+                                     .withContext("cookGltfFileToCatalogSourceResult", "root preflight"));
+        }
+    }
     const std::filesystem::path requestedPath = Detail::pathFromUtf8Bytes(gltfUtf8Path);
+    if (activeCapture != nullptr)
+    {
+        capture.documentSourcePath = requestedPath;
+    }
     auto source = GltfDetail::readFileSnapshot(requestedPath, nullptr, kMaxGltfSourceFileBytes);
     if (!source)
     {
         return Core::failure(std::move(source.error()));
     }
     const std::filesystem::path gltfFilePath = source->finalPath;
+    if (activeCapture != nullptr)
+    {
+        auto sourceIndex = captureSourceImportBytes(result.sourceImports, *captureConfig,
+                                                    gltfUtf8Path, source->bytes);
+        if (!sourceIndex)
+        {
+            return Core::failure(std::move(sourceIndex.error())
+                                     .withContext("cookGltfFileToCatalogSourceResult", "primary source"));
+        }
+        primarySourceIndex = *sourceIndex;
+    }
 
     CgltfMemoryBudget memoryBudget{};
     cgltf_options options{};
@@ -1120,7 +1293,7 @@ namespace {
     {
         return Core::failure(status.error());
     }
-    if (const auto status = loadGltfBuffersFromSnapshots(options, data, gltfFilePath); !status)
+    if (const auto status = loadGltfBuffersFromSnapshots(options, data, gltfFilePath, activeCapture); !status)
     {
         return Core::failure(status.error());
     }
@@ -1208,7 +1381,8 @@ namespace {
         if (decoded == decodedImages.end())
         {
             DecodedImage candidate{};
-            auto dims = decodeImageRgba8(image, gltfFilePath, candidate.rgba, imageBudget);
+            auto dims = decodeImageRgba8(image, gltfFilePath, candidate.rgba, imageBudget,
+                                         activeCapture);
             if (!dims)
             {
                 return Core::failure(std::move(dims.error()));
@@ -1508,7 +1682,7 @@ namespace {
         return Core::failure(std::move(prefabPayload.error()));
     }
 
-    CatalogCookRequest request{};
+    CatalogCookRequest& request = result.request;
     request.targetPlatform = AssetFormat::TargetPlatform::WindowsX64;
     // Dependencies-first: textures before materials that reference them.
     for (auto& tex : textures)
@@ -1586,17 +1760,24 @@ namespace {
                                               }),
                                   prefabSpec.dependencies.end());
     request.assets.push_back(std::move(prefabSpec));
-    return request;
+    if (activeCapture != nullptr)
+    {
+        if (auto status = finalizeGltfSourceImports(result, primarySourceIndex, requestedIds); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+    }
+    return result;
 }
 
-} // namespace
-
-Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view gltfUtf8Path,
-                                                              GltfCookIds ids) noexcept
+[[nodiscard]] Core::Result<CatalogCookSourceResult> cookGltfFileToCatalogSourceResultBoundary(
+    std::string_view gltfUtf8Path,
+    const SourceImportCaptureConfig* captureConfig,
+    GltfCookIds ids) noexcept
 {
     try
     {
-        return cookGltfFileToCatalogRequestImpl(gltfUtf8Path, ids);
+        return cookGltfFileToCatalogSourceResultImpl(gltfUtf8Path, captureConfig, ids);
     }
     catch (const std::bad_alloc&)
     {
@@ -1613,6 +1794,27 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "unexpected glTF cook failure");
     }
+}
+
+} // namespace
+
+Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view gltfUtf8Path,
+                                                              GltfCookIds ids) noexcept
+{
+    auto result = cookGltfFileToCatalogSourceResultBoundary(gltfUtf8Path, nullptr, ids);
+    if (!result)
+    {
+        return Core::failure(std::move(result.error()));
+    }
+    return std::move(result->request);
+}
+
+Core::Result<CatalogCookSourceResult> cookGltfFileToCatalogSourceResult(
+    std::string_view gltfUtf8Path,
+    SourceImportCaptureConfig captureConfig,
+    GltfCookIds ids) noexcept
+{
+    return cookGltfFileToCatalogSourceResultBoundary(gltfUtf8Path, &captureConfig, ids);
 }
 
 } // namespace Tina::Asset

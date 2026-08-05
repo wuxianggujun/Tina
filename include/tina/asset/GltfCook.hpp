@@ -40,4 +40,11 @@ struct GltfCookIds final {
     std::string_view gltfUtf8Path,
     GltfCookIds ids = {}) noexcept;
 
+// Captures the exact source bytes consumed by the cook under an explicit authoring root. One
+// document produces one glTF import unit; embedded buffers/images remain part of the primary source.
+[[nodiscard]] Core::Result<CatalogCookSourceResult> cookGltfFileToCatalogSourceResult(
+    std::string_view gltfUtf8Path,
+    SourceImportCaptureConfig captureConfig,
+    GltfCookIds ids = {}) noexcept;
+
 } // namespace Tina::Asset

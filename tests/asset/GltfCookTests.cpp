@@ -5,10 +5,12 @@
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -829,6 +832,201 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
     "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA="
   }]
 })json";
+}
+
+[[nodiscard]] std::string externalBufferTexturedTriangleGltfJson()
+{
+    std::string json = texturedTriangleGltfJson();
+    const std::size_t uriStart = json.find("data:application/octet-stream;base64,");
+    if (uriStart == std::string::npos)
+    {
+        return {};
+    }
+    const std::size_t uriEnd = json.find('"', uriStart);
+    if (uriEnd == std::string::npos)
+    {
+        return {};
+    }
+    json.replace(uriStart, uriEnd - uriStart, "geometry.bin");
+    return json;
+}
+
+void appendLittleEndianU32(std::vector<unsigned char>& bytes, std::uint32_t value)
+{
+    bytes.push_back(static_cast<unsigned char>(value & 0xFFU));
+    bytes.push_back(static_cast<unsigned char>((value >> 8U) & 0xFFU));
+    bytes.push_back(static_cast<unsigned char>((value >> 16U) & 0xFFU));
+    bytes.push_back(static_cast<unsigned char>((value >> 24U) & 0xFFU));
+}
+
+[[nodiscard]] std::vector<unsigned char> embeddedImageTriangleGlb()
+{
+    auto bin = externalTriangleBufferBytes();
+    const auto png = tinyRedPngBytes();
+    const std::size_t imageOffset = bin.size();
+    std::vector<unsigned char> binChunk(bin.begin(), bin.end());
+    binChunk.insert(binChunk.end(), png.begin(), png.end());
+
+    std::string json = std::string{R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{
+    "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+    "indices": 3, "mode": 4, "material": 0
+  }]}],
+  "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+  "textures": [{"source": 0}],
+  "images": [{"bufferView": 4, "mimeType": "image/png"}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6},
+    {"buffer": 0, "byteOffset": )json"} + std::to_string(imageOffset) +
+                       ", \"byteLength\": " + std::to_string(png.size()) + R"json(}
+  ],
+  "buffers": [{"byteLength": )json" + std::to_string(binChunk.size()) + R"json(}]
+})json";
+
+    while ((json.size() & 3U) != 0U)
+    {
+        json.push_back(' ');
+    }
+    while ((binChunk.size() & 3U) != 0U)
+    {
+        binChunk.push_back(0U);
+    }
+
+    std::vector<unsigned char> glb;
+    glb.reserve(12U + 8U + json.size() + 8U + binChunk.size());
+    appendLittleEndianU32(glb, 0x46546C67U);
+    appendLittleEndianU32(glb, 2U);
+    appendLittleEndianU32(glb, static_cast<std::uint32_t>(
+                                   12U + 8U + json.size() + 8U + binChunk.size()));
+    appendLittleEndianU32(glb, static_cast<std::uint32_t>(json.size()));
+    appendLittleEndianU32(glb, 0x4E4F534AU);
+    glb.insert(glb.end(), json.begin(), json.end());
+    appendLittleEndianU32(glb, static_cast<std::uint32_t>(binChunk.size()));
+    appendLittleEndianU32(glb, 0x004E4942U);
+    glb.insert(glb.end(), binChunk.begin(), binChunk.end());
+    return glb;
+}
+
+TEST(GltfCookTests, CapturesPrimaryExternalBufferPrefixAndExternalImage)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_source_capture_external";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    ASSERT_FALSE(ec) << ec.message();
+
+    const std::string json = externalBufferTexturedTriangleGltfJson();
+    ASSERT_FALSE(json.empty());
+    const auto declaredGeometry = externalTriangleBufferBytes();
+    std::vector<unsigned char> geometryFile(declaredGeometry.begin(), declaredGeometry.end());
+    geometryFile.insert(geometryFile.end(), {0xA1U, 0xB2U, 0xC3U, 0xD4U});
+    const auto png = tinyRedPngBytes();
+    const auto gltfPath = dir / "scene.gltf";
+    writeTextFile(gltfPath, json);
+    writeBinaryFile(dir / "geometry.bin", geometryFile);
+    writeBinaryFile(dir / "tex.png", png);
+
+    const std::string sourceRoot = dir.string();
+    auto cooked = cookGltfFileToCatalogSourceResult(
+        gltfPath.string(), SourceImportCaptureConfig{.sourceRootUtf8 = sourceRoot});
+    ASSERT_TRUE(cooked.has_value()) << (cooked ? "" : cooked.error().message);
+    ASSERT_EQ(cooked->sourceImports.sources.size(), 3U);
+    ASSERT_EQ(cooked->sourceImports.units.size(), 1U);
+
+    const auto findSource = [&](std::string_view path) -> const SourceImportCapturedSource* {
+        const auto found = std::find_if(
+            cooked->sourceImports.sources.begin(), cooked->sourceImports.sources.end(),
+            [path](const SourceImportCapturedSource& source) { return source.path == path; });
+        return found != cooked->sourceImports.sources.end() ? &*found : nullptr;
+    };
+    const auto digest = [](const auto& bytes) {
+        return Core::digestContentHashV1(
+            std::as_bytes(std::span(bytes.data(), bytes.size())));
+    };
+
+    const auto* primary = findSource("scene.gltf");
+    const auto* geometry = findSource("geometry.bin");
+    const auto* image = findSource("tex.png");
+    ASSERT_NE(primary, nullptr);
+    ASSERT_NE(geometry, nullptr);
+    ASSERT_NE(image, nullptr);
+    const auto primaryHash = digest(json);
+    const auto geometryHash = digest(declaredGeometry);
+    const auto imageHash = digest(png);
+    ASSERT_TRUE(primaryHash.has_value());
+    ASSERT_TRUE(geometryHash.has_value());
+    ASSERT_TRUE(imageHash.has_value());
+    EXPECT_EQ(primary->fileBytes, json.size());
+    EXPECT_EQ(primary->contentHash, *primaryHash);
+    EXPECT_EQ(geometry->fileBytes, declaredGeometry.size());
+    EXPECT_EQ(geometry->contentHash, *geometryHash);
+    EXPECT_EQ(image->fileBytes, png.size());
+    EXPECT_EQ(image->contentHash, *imageHash);
+
+    const auto& unit = cooked->sourceImports.units[0];
+    EXPECT_EQ(unit.importerKind, SourceImporterKind::Gltf);
+    EXPECT_EQ(unit.importerVersion, 1U);
+    ASSERT_EQ(unit.inputs.size(), 3U);
+    std::size_t primaryInputCount = 0;
+    for (const auto& input : unit.inputs)
+    {
+        ASSERT_LT(input.sourceIndex, cooked->sourceImports.sources.size());
+        if (AssetFormat::hasSourceImportInputFlag(
+                input.flags, AssetFormat::SourceImportInputFlags::Primary))
+        {
+            ++primaryInputCount;
+            EXPECT_EQ(cooked->sourceImports.sources[input.sourceIndex].path, "scene.gltf");
+        }
+    }
+    EXPECT_EQ(primaryInputCount, 1U);
+    ASSERT_EQ(unit.outputs.size(), cooked->request.assets.size());
+    for (const auto& asset : cooked->request.assets)
+    {
+        const auto output = std::find_if(
+            unit.outputs.begin(), unit.outputs.end(), [&](const SourceImportCapturedOutput& captured) {
+                return captured.assetId == asset.assetId && captured.assetKind == asset.assetKind;
+            });
+        EXPECT_NE(output, unit.outputs.end());
+    }
+}
+
+TEST(GltfCookTests, EmbeddedGlbBufferAndBufferViewImageRemainPrimarySource)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_source_capture_embedded";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    ASSERT_FALSE(ec) << ec.message();
+
+    const auto glb = embeddedImageTriangleGlb();
+    const auto gltfPath = dir / "scene.glb";
+    writeBinaryFile(gltfPath, glb);
+    const std::string sourceRoot = dir.string();
+    auto cooked = cookGltfFileToCatalogSourceResult(
+        gltfPath.string(), SourceImportCaptureConfig{.sourceRootUtf8 = sourceRoot});
+    ASSERT_TRUE(cooked.has_value()) << (cooked ? "" : cooked.error().message);
+    ASSERT_EQ(cooked->sourceImports.sources.size(), 1U);
+    EXPECT_EQ(cooked->sourceImports.sources[0].path, "scene.glb");
+    EXPECT_EQ(cooked->sourceImports.sources[0].fileBytes, glb.size());
+    ASSERT_EQ(cooked->sourceImports.units.size(), 1U);
+    ASSERT_EQ(cooked->sourceImports.units[0].inputs.size(), 1U);
+    EXPECT_TRUE(AssetFormat::hasSourceImportInputFlag(
+        cooked->sourceImports.units[0].inputs[0].flags,
+        AssetFormat::SourceImportInputFlags::Primary));
+    EXPECT_EQ(cooked->sourceImports.units[0].outputs.size(), cooked->request.assets.size());
+    EXPECT_EQ(cooked->request.assets.size(), 4U);
 }
 
 TEST(GltfCookTests, CooksBaseColorTextureToTexture2DDependency)
