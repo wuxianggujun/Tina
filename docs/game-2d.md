@@ -94,7 +94,7 @@ bgfx 对每个 fragment 计算线性径向衰减。`sourceRadiusMeters=0` 时 fr
 积分或重叠区间 union。
 ambient、上述透明排序、连续 texture batch 与 premultiplied alpha 不变。没有 PointLight2D 组件时维持
 原 unlit 输出，inactive-only 可显式发布 ambient-only。产品 sample 固定创建暖/冷两盏相机内灯、1盏
-永久离屏 active light 与两条遮挡线并逐帧发布；schema 19 断言 `authoredPointLight2DCount=3`、
+永久离屏 active light 与两条遮挡线并逐帧发布；当前 schema 20 继承 schema 19 并断言 `authoredPointLight2DCount=3`、
 `pointLight2DCount=2`、`culledPointLight2DCount=1` 与默认 `softShadowPointLight2DCount=2`，同时继承
 schema 16 的双灯双遮挡 evidence。`RunProduct2dShadowVisualGate.ps1` 对 soft/hard 各重复两次并证明两种
 RGBA8 fingerprint 稳定且不同。角色 Sprite 另带独立3×1 normal atlas；`RunProduct2dNormalMapVisualGate.ps1`
@@ -276,7 +276,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=15`（含2个 cooked chunk 与独立 normal atlas）、`texturesUploaded=3`；
-- `evidenceSchema=19`，`sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
+- `evidenceSchema=20`，继承 schema 19 的 normal-map 产品证据，并要求 `sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
   `pointLight2DCount=2`、`culledPointLight2DCount=1`，并继承 schema 16 的双灯双遮挡证据；
   `shadowOccluder2DCount=2`、`softShadowPointLight2DCount=2`、
   `normalMappedSpriteCount=1`、`sceneLightingFrames=renderExtractions`，并保留 `uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
@@ -284,6 +284,10 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - `uiTreeDemoRequested=true`、`uiTreeViewsCreated=1`、`uiTreeLogicalItems=13`、
   `uiTreeMaterializedCapacity=12`、`uiTreeSelectionChanges=2`、最终 stable key `402`/index `12`、
   `uiTreeScrolled=true`、Theme paint 与 Tree/TreeItem selected semantics 均已验证；
+- `uiFlowLayersRegistered=1`、`uiFlowScreensRegistered=2`；300 帧产品路径要求
+  `uiFlowScreenPushes=2`、`uiFlowScreenPops=1`、`pauseUIScreenActivated=true`、
+  `baseUIScreenRestored=true`、`uiFlowActionsRegistered=1`、`uiFlowActionsCleared=1`；无人输入 gate 还要求
+  `uiFlowBackActionInvocations=0`、`pauseAutoResumeRequests=1`、`pauseResumeRequestedByAction=false`；
 - `spriteBindingTextures=3`、`spriteTextureLeasesAcquired=3`、
   `spriteTextureRetirementsAccepted=3`、`spriteBindingRegistryReleased=true`、
   `spriteTextureHandlesInvalidated=3`、`spriteTextureRetirementRecords=3`、
@@ -317,9 +321,13 @@ exit 0。2026-07-29 动态 glyph atlas 修复后的 Dark/Light FreeType 截图�
 还会校验上述双纹理与动画字段。可复现脚本：
 `tools/windows/RunProduct2dGate.ps1`（TEST-002）。测试数量不是永久基线。
 
-`--frames>=60` 时产品 State 会在收尾前 `requestPush` 一层暂停 overlay（block fixed/frame/UI below，
-仍 extract 下层世界），约 3 帧后 `requestPop`，JSON 输出 `pauseOverlayPushes/Pops/Frames`
-（RUNTIME-001 产品证据）。短 smoke（如 30 帧）不推 overlay。
+`--frames>=60` 时产品 State 会在收尾前 `requestPush` 一层 Pause GameState（block fixed/frame/UI below，
+仍 extract 下层世界）。Pause `onEnter` 在既有 Layer 上 push `pause Screen`，该 Screen 的真实 Modal/标题替代
+`base Screen` 参与 publication，并注册 `Back` intent callback。Runtime 按 Dropdown-first 顺序将 Escape/Gamepad
+East 路由给该 active Screen；callback 只置 resume intent，`updateUI` pop Screen 并确认 base 恢复，下一帧再
+`requestPop` GameState。无人输入产品 gate 在第3个暂停帧生成同一 auto-resume intent，因此 smoke 不依赖人工输入；
+真实 Back 可在第1～3帧提前恢复。JSON 同时输出 `pauseOverlayPushes/Pops/Frames` 与上述 UI Flow/action 字段。短 smoke
+（如 30 帧）只保持初始 base Screen，不推 Pause State。
 
 `updateUI` 每帧从 `UIUpdateContext::committedSemantics()` 重建 `UIAccessibilityTree` 并经
 `UIAccessibilityProbeProvider` 发布；JSON 输出 `accessibilityPublished`、`accessibilityNodeCount`、

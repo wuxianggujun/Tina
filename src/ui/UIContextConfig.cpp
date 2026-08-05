@@ -91,6 +91,12 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     {
         return invalidContextConfig("UI motion track capacity exceeds the configured maximum");
     }
+    if (config.flowLayerCapacity > UIContextCapacityConfig::MaxFlowLayerCapacity ||
+        config.flowScreenCapacity > UIContextCapacityConfig::MaxFlowScreenCapacity ||
+        exceedsNodeCapacity(config.flowLayerCapacity) || exceedsNodeCapacity(config.flowScreenCapacity))
+    {
+        return invalidContextConfig("UI Flow capacities cannot exceed node capacity");
+    }
 
     return Core::success();
 }

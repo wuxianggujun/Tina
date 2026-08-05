@@ -23,12 +23,16 @@ struct UIContextCapacityConfig final {
     static constexpr usize DefaultStyleBucketCapacity = 256;
     static constexpr usize DefaultStyleRulesPerBucketCapacity = 256;
     static constexpr usize DefaultMotionTrackCapacity = 64;
+    static constexpr usize DefaultFlowLayerCapacity = 16;
+    static constexpr usize DefaultFlowScreenCapacity = 64;
     static constexpr usize MaxStyleClassCapacity = MaxNodeCapacity;
     static constexpr usize MaxStyleTokenCapacity = MaxNodeCapacity;
     static constexpr usize MaxStyleRuleCapacity = MaxNodeCapacity;
     static constexpr usize MaxStyleBucketCapacity = MaxNodeCapacity;
     static constexpr usize MaxNodeStyleClassLinkCapacity = MaxNodeCapacity * 4U;
     static constexpr usize MaxMotionTrackCapacity = MaxNodeCapacity;
+    static constexpr usize MaxFlowLayerCapacity = MaxNodeCapacity;
+    static constexpr usize MaxFlowScreenCapacity = MaxNodeCapacity;
 
     usize nodeCapacity = DefaultNodeCapacity;
     usize rootCapacity = DefaultRootCapacity;
@@ -71,6 +75,10 @@ struct UIContextCapacityConfig final {
     usize nodeStyleClassLinkCapacity = 0;
     // Fixed active transition tracks (UI-MOTION-001). Zero uses DefaultMotionTrackCapacity.
     usize motionTrackCapacity = 0;
+    // UI-FLOW-001 identities reuse retained nodes. Zero derives a fixed context
+    // capacity from min(DefaultFlow*, nodeCapacity); storage never grows later.
+    usize flowLayerCapacity = 0;
+    usize flowScreenCapacity = 0;
     // When true (product default), Element StyleRole recipes install productTheme
     // chrome. Local setBoxPaint / set*Paint / setTextStyle calls override only
     // their property; clearOverride restores the current role recipe. Unit tests

@@ -19,6 +19,7 @@
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIFocus.hpp>
+#include <tina/ui/UIFlow.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UIImage.hpp>
 #include <tina/ui/UIImageSource.hpp>

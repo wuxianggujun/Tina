@@ -2,6 +2,7 @@
 
 #include <tina/ui/UIErrors.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 namespace Tina::UI::Detail {
@@ -177,6 +178,14 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
         .motionTrackCapacity = config.motionTrackCapacity == 0
                                    ? UIContextCapacityConfig::DefaultMotionTrackCapacity
                                    : config.motionTrackCapacity,
+        .flowLayerCapacity = config.flowLayerCapacity == 0
+                                 ? (std::min)(UIContextCapacityConfig::DefaultFlowLayerCapacity,
+                                              config.nodeCapacity)
+                                 : config.flowLayerCapacity,
+        .flowScreenCapacity = config.flowScreenCapacity == 0
+                                  ? (std::min)(UIContextCapacityConfig::DefaultFlowScreenCapacity,
+                                               config.nodeCapacity)
+                                  : config.flowScreenCapacity,
         .applyDefaultProductChrome = config.applyDefaultProductChrome,
     };
 }

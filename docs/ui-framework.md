@@ -247,6 +247,9 @@ Tina::UI
 |  |- routed events / pointer capture
 |  |- focus / modal / navigation
 |  `- capability-based behavior side stores
+|- Flow
+|  |- strong Layer/Screen identities over retained nodes
+|  `- fixed-capacity per-Layer active Screen stack
 |- Presentation
 |  |- Theme tokens
 |  |- StyleRole + user StyleClass
@@ -738,7 +741,10 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 - `SDK-001` 的 GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装、
   Windows/Linux moved-prefix 与 Ubuntu producer → Debian consumer gate 已落地，待正式 ABI/兼容策略；此后每个新增公共 UI 切片同步增加
   consumer 覆盖；
-- `UI-FLOW-001` 只有真实页面栈需求后才增加 Activatable Screen/Layer Stack/Action Router；
+- `UI-FLOW-001` 已因 2D Pause 页面栈进入 InProgress：首切片复用 retained node，提供固定容量
+  Layer/Screen 注册、push/pop/replace、栈顶 publication、失败原子性与生命周期回收；第二切片已增加
+  topmost Screen 的 Back callback、Dropdown-first Escape/Gamepad East 路由与 Down/Up gameplay suppression；
+  多本地用户、输入设备提示和更宽 action 集继续后置；
 - `UI-BEHAVIOR-SPI-001` 只有标准 Behavior 无法满足有证据的插件场景时才冻结高级 SPI。
 
 详细状态和验收条件只在 [Backlog](backlog.md)维护。

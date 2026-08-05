@@ -298,6 +298,16 @@ mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree
 paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
 错误或 dirty queue 容量不足均零发布。
 
+`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供 `registerFlowLayer()`、`registerFlowScreen()`、
+`pushFlowScreen()`、`popFlowScreen()`、`replaceFlowScreen()`、`activeFlowScreen()` 和
+`isFlowScreenActive()`，并以 `setFlowScreenAction()` / `clearFlowScreenAction()` 为 Screen 注册唯一
+`UIFlowAction::Back` fixed-inline callback。Layer/Screen 复用现有 retained node 与 root ownership，不增加平行 UI ABI；非栈顶
+Screen 在 publication 中视为 `Collapsed`，作者样式保持不变。`UIContextCapacityConfig` 的
+`flowLayerCapacity/flowScreenCapacity` 固定注册上限，`UIContextStatistics::flow` 发布 capacity/count/high-water
+与失败/action 计数。`UIContext::routeFlowAction()` 供 Runtime 在 Action mapping 前把 Escape/Gamepad East 的
+Down/Up 路由到 topmost committed active Screen；处理过的 Down/Up 不再进入 gameplay。该切片不包含多本地用户、
+输入设备提示或 Back 之外的 action-id。
+
 `UIImageSource` 只保存 Texture2D `AssetId`、source pixel rect、texture pixel extent 与 intrinsic logical size；
 `UIImageContent` 增加 Fill/Contain/Cover/None、alignment、tint 和 Linear/Nearest sampling。
 `makeImageElement(image, accessibleName)` 发布 `UISemanticsRole::Image`，`makeIconElement(image)` 是 decorative
@@ -754,7 +764,7 @@ Jolt/Physics3D 尚未接入。
 **已存在（勿再文档成“没有”）：** `GameStateStack` 与 structural commands；相位 `blocks*Below` 与
 `blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / present-return CPU
 submission ledger；Focus Scope/Modal/持久 Pointer Capture；ScrollView/Dropdown/Popup/虚拟
-ListView/TreeView；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
+ListView/TreeView；`UIFlowLayerId`/`UIFlowScreenId` 与固定容量 Screen stack；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
 Invoke/Toggle/RangeValue/Value patterns。
 
 **仍不存在或未完成：**
@@ -767,7 +777,7 @@ Invoke/Toggle/RangeValue/Value patterns。
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
 - stylesheet 更广 opacity 等属性面、完整 keyframe timeline 与 layout animation；imageTint、paint-only Motion
   与 ColorToken reverse-dependency 更新已落地；
-- Activatable Screen/Layer Stack/Action Router 和输入设备提示；
+- Back 之外的产品 action、多本地用户路由和输入设备提示；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
 - 安装 SDK 的正式发布 ABI/兼容策略；Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer

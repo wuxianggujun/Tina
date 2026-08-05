@@ -211,6 +211,91 @@ PrimaryWindowUITreeUpdater::createElement(UI::UINodeId parent, const UI::UIEleme
     return m_state->createElement(m_epoch, m_phase, m_updater, parent, descriptor);
 }
 
+Core::Result<UI::UIFlowLayerId> PrimaryWindowUITreeUpdater::registerFlowLayer(UI::UINodeId layer)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIFlowLayerId>("PrimaryWindowUITreeUpdater::registerFlowLayer");
+    }
+    return m_state->registerFlowLayer(m_epoch, m_phase, m_updater, layer);
+}
+
+Core::Result<UI::UIFlowScreenId>
+PrimaryWindowUITreeUpdater::registerFlowScreen(UI::UIFlowLayerId layer, UI::UINodeId screen)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIFlowScreenId>("PrimaryWindowUITreeUpdater::registerFlowScreen");
+    }
+    return m_state->registerFlowScreen(m_epoch, m_phase, m_updater, layer, screen);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::pushFlowScreen(UI::UIFlowScreenId screen)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::pushFlowScreen");
+    }
+    return m_state->pushFlowScreen(m_epoch, m_phase, m_updater, screen);
+}
+
+Core::Result<UI::UIFlowScreenId> PrimaryWindowUITreeUpdater::popFlowScreen(UI::UIFlowLayerId layer)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIFlowScreenId>("PrimaryWindowUITreeUpdater::popFlowScreen");
+    }
+    return m_state->popFlowScreen(m_epoch, m_phase, m_updater, layer);
+}
+
+Core::Result<UI::UIFlowScreenId> PrimaryWindowUITreeUpdater::replaceFlowScreen(UI::UIFlowScreenId screen)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIFlowScreenId>("PrimaryWindowUITreeUpdater::replaceFlowScreen");
+    }
+    return m_state->replaceFlowScreen(m_epoch, m_phase, m_updater, screen);
+}
+
+Core::Result<UI::UIFlowScreenId> PrimaryWindowUITreeUpdater::activeFlowScreen(UI::UIFlowLayerId layer) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIFlowScreenId>("PrimaryWindowUITreeUpdater::activeFlowScreen");
+    }
+    return m_state->activeFlowScreen(m_epoch, m_phase, m_updater, layer);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isFlowScreenActive(UI::UIFlowScreenId screen) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isFlowScreenActive");
+    }
+    return m_state->isFlowScreenActive(m_epoch, m_phase, m_updater, screen);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setFlowScreenAction(
+    UI::UIFlowScreenId screen, UI::UIFlowAction action, UI::UIFlowActionCallback callback)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setFlowScreenAction");
+    }
+    return m_state->setFlowScreenAction(m_epoch, m_phase, m_updater, screen, action,
+                                        std::move(callback));
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearFlowScreenAction(UI::UIFlowScreenId screen,
+                                                               UI::UIFlowAction action)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearFlowScreenAction");
+    }
+    return m_state->clearFlowScreenAction(m_epoch, m_phase, m_updater, screen, action);
+}
+
 Core::Result<PrimaryWindowUIBuildTransaction>
 PrimaryWindowUITreeUpdater::beginBuildTransaction(
     UI::UINodeId parent, const UI::UIElementDescriptor& rootDescriptor,

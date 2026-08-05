@@ -53,6 +53,7 @@
 #include <tina/ui/UIAccessibility.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UIElement.hpp>
+#include <tina/ui/UIFlow.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIProgressBar.hpp>
@@ -133,7 +134,7 @@ inline constexpr u32 ProductCulledPointLight2DCount =
 inline constexpr u32 ProductShadowOccluder2DCount = 2;
 inline constexpr u32 ProductSoftShadowPointLight2DCount = 2;
 inline constexpr float ProductAmbientLight2DScale = 0.28F;
-inline constexpr u32 ProductEvidenceSchema = 19;
+inline constexpr u32 ProductEvidenceSchema = 20;
 inline constexpr float ProductWarmLightSourceRadiusMeters = 0.45F;
 inline constexpr float ProductCoolLightSourceRadiusMeters = 0.6F;
 inline constexpr Tina::InputActionId MoveLeftAction{1};
@@ -299,6 +300,17 @@ struct LifecycleCounters final {
     bool uiTreeFinalSelectionVerified = false;
     bool uiTreeScrolled = false;
     bool uiTreeThemeVerified = false;
+    u64 uiFlowLayersRegistered = 0;
+    u64 uiFlowScreensRegistered = 0;
+    u64 uiFlowScreenPushes = 0;
+    u64 uiFlowScreenPops = 0;
+    u64 uiFlowActionsRegistered = 0;
+    u64 uiFlowActionsCleared = 0;
+    u64 uiFlowBackActionInvocations = 0;
+    u64 pauseAutoResumeRequests = 0;
+    bool pauseResumeRequestedByAction = false;
+    bool pauseUIScreenActivated = false;
+    bool baseUIScreenRestored = false;
     // M11-C1/C2: Master/Music/SFX volume Sliders wired to AudioEngine buses.
     u64 uiSlidersCreated = 0;
     u64 uiSliderChanges = 0;
@@ -463,7 +475,7 @@ struct LifecycleCounters final {
 };
 
 inline constexpr u32 ExpectedUIPanelCount = 4;
-inline constexpr u32 ExpectedUITextLabelCount = 10;
+inline constexpr u32 ExpectedUITextLabelCount = 11;
 inline constexpr u32 ExpectedUITextEditCount = 1;
 inline constexpr u32 ExpectedUIButtonCount = 1;
 inline constexpr u32 ExpectedUIProgressBarCount = 1;
@@ -1922,14 +1934,62 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     return Tina::Core::success();
 }
 
-// Pause-style overlay: freezes base fixed/frame/render/UI while itself runs a few frames then pops.
-// Product evidence for RUNTIME-001 stack + policy blocksBelow (does not own the product UI root).
+// Pause-style overlay: freezes base simulation while activating the Pause UI Screen.
 class PauseOverlayState final : public Tina::IGameState {
   public:
-    explicit PauseOverlayState(LifecycleCounters& counters) noexcept : counters_(&counters) {}
-
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    PauseOverlayState(LifecycleCounters& counters, Tina::UI::UIRootOwner& uiRoot,
+                      Tina::UI::UIFlowLayerId flowLayer, Tina::UI::UIFlowScreenId baseScreen,
+                      Tina::UI::UIFlowScreenId pauseScreen) noexcept
+        : counters_(&counters), uiRoot_(&uiRoot), flowLayer_(flowLayer), baseScreen_(baseScreen),
+          pauseScreen_(pauseScreen)
     {
+    }
+
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
+    {
+        auto rootBuilder = context.primaryWindowUIRootBuilder();
+        if (!rootBuilder)
+        {
+            return Tina::Core::failure(std::move(rootBuilder.error()));
+        }
+        auto tree = rootBuilder->treeUpdater(*uiRoot_);
+        if (!tree)
+        {
+            return Tina::Core::failure(std::move(tree.error()));
+        }
+        if (auto status = tree->pushFlowScreen(pauseScreen_); !status)
+        {
+            return status;
+        }
+        auto active = tree->activeFlowScreen(flowLayer_);
+        if (!active)
+        {
+            return Tina::Core::failure(std::move(active.error()));
+        }
+        if (*active != pauseScreen_)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Pause UI Screen did not become active");
+        }
+        if (auto status = tree->setFlowScreenAction(
+                pauseScreen_, Tina::UI::UIFlowAction::Back,
+                Tina::UI::UIFlowActionCallback{
+                    [this](const Tina::UI::UIFlowActionEvent&) noexcept {
+                        if (!resumeRequested_)
+                        {
+                            resumeRequested_ = true;
+                            ++counters_->uiFlowBackActionInvocations;
+                            counters_->pauseResumeRequestedByAction = true;
+                        }
+                    }});
+            !status)
+        {
+            static_cast<void>(tree->popFlowScreen(flowLayer_));
+            return status;
+        }
+        ++counters_->uiFlowScreenPushes;
+        ++counters_->uiFlowActionsRegistered;
+        counters_->pauseUIScreenActivated = true;
         ++counters_->pauseOverlayPushes;
         return Tina::Core::success();
     }
@@ -1954,20 +2014,70 @@ class PauseOverlayState final : public Tina::IGameState {
 
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
-        ++counters_->pauseOverlayFrames;
-        // Keep overlay short so product smoke still finishes walk/physics evidence on base.
-        if (counters_->pauseOverlayFrames >= 3U)
+        if (pauseScreenPopped_)
         {
-            if (auto status = context.requestPop(); !status)
-            {
-                return status;
-            }
+            return context.requestPop();
         }
+        ++counters_->pauseOverlayFrames;
+        if (!resumeRequested_ && counters_->pauseOverlayFrames >= 3U)
+        {
+            resumeRequested_ = true;
+            ++counters_->pauseAutoResumeRequests;
+        }
+        return Tina::Core::success();
+    }
+
+    Tina::Core::Status updateUI(Tina::UIUpdateContext& context) override
+    {
+        if (pauseScreenPopped_ || !resumeRequested_)
+        {
+            return Tina::Core::success();
+        }
+        auto tree = context.primaryWindowUITreeUpdater(*uiRoot_);
+        if (!tree)
+        {
+            return Tina::Core::failure(std::move(tree.error()));
+        }
+        auto popped = tree->popFlowScreen(flowLayer_);
+        if (!popped)
+        {
+            return Tina::Core::failure(std::move(popped.error()));
+        }
+        if (*popped != pauseScreen_)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Pause UI Flow popped an unexpected Screen");
+        }
+        if (auto status = tree->clearFlowScreenAction(pauseScreen_, Tina::UI::UIFlowAction::Back);
+            !status)
+        {
+            return status;
+        }
+        ++counters_->uiFlowActionsCleared;
+        auto active = tree->activeFlowScreen(flowLayer_);
+        if (!active)
+        {
+            return Tina::Core::failure(std::move(active.error()));
+        }
+        if (*active != baseScreen_)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Base UI Screen was not restored after Pause");
+        }
+        ++counters_->uiFlowScreenPops;
+        counters_->baseUIScreenRestored = true;
+        pauseScreenPopped_ = true;
         return Tina::Core::success();
     }
 
   private:
     LifecycleCounters* counters_ = nullptr;
+    Tina::UI::UIRootOwner* uiRoot_ = nullptr;
+    Tina::UI::UIFlowLayerId flowLayer_{};
+    Tina::UI::UIFlowScreenId baseScreen_{};
+    Tina::UI::UIFlowScreenId pauseScreen_{};
+    bool resumeRequested_ = false;
+    bool pauseScreenPopped_ = false;
 };
 
 class TileMapBgfxState final : public Tina::IGameState {
@@ -2162,6 +2272,92 @@ class TileMapBgfxState final : public Tina::IGameState {
             return status;
         }
 
+        const Tina::UI::UILayoutStyle fullScreenFlowStyle =
+            absolutePanelStyle(Tina::UI::UILayoutLength::Px(0.0F), Tina::UI::UILayoutLength::Px(0.0F),
+                               Tina::UI::UILayoutLength::Percent(100.0F),
+                               Tina::UI::UILayoutLength::Percent(100.0F));
+        auto flowLayerNode = tree->createElement(root->rootNodeId(), UI::makePanelElement(fullScreenFlowStyle));
+        if (!flowLayerNode)
+        {
+            return Tina::Core::failure(std::move(flowLayerNode.error()));
+        }
+        auto baseScreenNode = tree->createElement(*flowLayerNode, UI::makePanelElement(fullScreenFlowStyle));
+        if (!baseScreenNode)
+        {
+            return Tina::Core::failure(std::move(baseScreenNode.error()));
+        }
+        auto pauseScreenNode = tree->createElement(*flowLayerNode, UI::makePanelElement(fullScreenFlowStyle));
+        if (!pauseScreenNode)
+        {
+            return Tina::Core::failure(std::move(pauseScreenNode.error()));
+        }
+        for (const Tina::UI::UINodeId structuralNode :
+             std::array{*flowLayerNode, *baseScreenNode, *pauseScreenNode})
+        {
+            if (auto status = tree->setBoxPaint(structuralNode, Tina::UI::UIBoxPaint{}); !status)
+            {
+                return status;
+            }
+        }
+
+        auto pauseModal = tree->createElement(
+            *pauseScreenNode,
+            UI::makeModalElement(absolutePanelStyle(
+                Tina::UI::UILayoutLength::Percent(32.0F), Tina::UI::UILayoutLength::Percent(34.0F),
+                Tina::UI::UILayoutLength::Percent(36.0F), Tina::UI::UILayoutLength::Percent(24.0F))));
+        if (!pauseModal)
+        {
+            return Tina::Core::failure(std::move(pauseModal.error()));
+        }
+        auto pauseTitle = tree->createElement(
+            *pauseModal,
+            UI::makeLabelElement(
+                "PAUSED", absolutePanelStyle(Tina::UI::UILayoutLength::Percent(10.0F),
+                                               Tina::UI::UILayoutLength::Percent(30.0F),
+                                               Tina::UI::UILayoutLength::Percent(80.0F),
+                                               Tina::UI::UILayoutLength::Percent(40.0F))));
+        if (!pauseTitle)
+        {
+            return Tina::Core::failure(std::move(pauseTitle.error()));
+        }
+
+        auto flowLayer = tree->registerFlowLayer(*flowLayerNode);
+        if (!flowLayer)
+        {
+            return Tina::Core::failure(std::move(flowLayer.error()));
+        }
+        auto baseScreen = tree->registerFlowScreen(*flowLayer, *baseScreenNode);
+        if (!baseScreen)
+        {
+            return Tina::Core::failure(std::move(baseScreen.error()));
+        }
+        auto pauseScreen = tree->registerFlowScreen(*flowLayer, *pauseScreenNode);
+        if (!pauseScreen)
+        {
+            return Tina::Core::failure(std::move(pauseScreen.error()));
+        }
+        if (auto status = tree->pushFlowScreen(*baseScreen); !status)
+        {
+            return status;
+        }
+        auto activeScreen = tree->activeFlowScreen(*flowLayer);
+        if (!activeScreen)
+        {
+            return Tina::Core::failure(std::move(activeScreen.error()));
+        }
+        if (*activeScreen != *baseScreen)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Base UI Screen did not become active during startup");
+        }
+        uiFlowLayer_ = *flowLayer;
+        uiBaseScreen_ = *baseScreen;
+        uiPauseScreen_ = *pauseScreen;
+        counters_->uiFlowLayersRegistered = 1;
+        counters_->uiFlowScreensRegistered = 2;
+        counters_->uiFlowScreenPushes = 1;
+        ++counters_->uiTextLabelsCreated;
+
         // Product controls inherit this Theme. Panels and title text keep a small
         // set of intentional hierarchy overrides which applyUITheme() refreshes.
         constexpr Tina::UI::UITheme initialTheme = Tina::UI::makeDefaultProductTheme();
@@ -2190,7 +2386,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         for (std::size_t index = 0; index < panels.size(); ++index)
         {
             const PanelSpec& panelSpec = panels[index];
-            auto panel = tree->createElement(root->rootNodeId(), UI::makePanelElement());
+            auto panel = tree->createElement(*baseScreenNode, UI::makePanelElement());
             if (!panel)
             {
                 return Tina::Core::failure(std::move(panel.error()));
@@ -2264,7 +2460,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         for (std::size_t index = 0; index < labels.size(); ++index)
         {
             const LabelSpec& labelSpec = labels[index];
-            auto label = tree->createElement(root->rootNodeId(), UI::makeLabelElement());
+            auto label = tree->createElement(*baseScreenNode, UI::makeLabelElement());
             if (!label)
             {
                 return Tina::Core::failure(std::move(label.error()));
@@ -2281,18 +2477,18 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 uiTitleNodes_[index] = *label;
             }
-            else if (index == ExpectedUITextLabelCount - 2U)
+            else if (index == labels.size() - 2U)
             {
                 uiSceneExplorerTitle_ = *label;
             }
-            else if (index == ExpectedUITextLabelCount - 1U)
+            else if (index == labels.size() - 1U)
             {
                 uiSceneSelectionLabel_ = *label;
             }
         }
 
         auto sceneTree = tree->createElement(
-            root->rootNodeId(),
+            *baseScreenNode,
             Tina::UI::makeTreeViewElement({.materializedItemCapacity = SceneTreeMaterializedItemCapacity}));
         if (!sceneTree)
         {
@@ -2351,7 +2547,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         // The real Theme command exercises pointer/default-action routing. Its callback
         // only records intent; updateUI() performs the owner-thread Theme transaction.
         {
-            auto button = tree->createElement(root->rootNodeId(), UI::makeButtonElement());
+            auto button = tree->createElement(*baseScreenNode, UI::makeButtonElement());
             if (!button)
             {
                 return Tina::Core::failure(std::move(button.error()));
@@ -2425,7 +2621,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             [&](float y, float initialValue,
                 float& pendingVolume, bool& hasPending, float& lastVolume, bool& fromSlider)
             -> Tina::Core::Status {
-                auto slider = tree->createElement(root->rootNodeId(), UI::makeSliderElement());
+                auto slider = tree->createElement(*baseScreenNode, UI::makeSliderElement());
                 if (!slider)
                 {
                     return Tina::Core::failure(std::move(slider.error()));
@@ -2494,7 +2690,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         enum class MuteBus : u8 { Master = 0, Music = 1, Sfx = 2 };
         const auto wireMuteCheckbox =
             [&](float y, MuteBus bus, bool initiallyChecked) -> Tina::Core::Status {
-                auto checkbox = tree->createElement(root->rootNodeId(), UI::makeCheckboxElement());
+                auto checkbox = tree->createElement(*baseScreenNode, UI::makeCheckboxElement());
                 if (!checkbox)
                 {
                     return Tina::Core::failure(std::move(checkbox.error()));
@@ -2571,7 +2767,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         // Single-line profile-name TextEdit. It is separated from the final mute
         // checkbox by 16 px so the settings column remains readable at 960x540.
         {
-            auto profileName = tree->createElement(root->rootNodeId(), UI::makeTextEditElement());
+            auto profileName = tree->createElement(*baseScreenNode, UI::makeTextEditElement());
             if (!profileName)
             {
                 return Tina::Core::failure(std::move(profileName.error()));
@@ -2614,7 +2810,7 @@ class TileMapBgfxState final : public Tina::IGameState {
 
         // Determinate loading/status indicator inherits its track and fill Theme chrome.
         {
-            auto progress = tree->createElement(root->rootNodeId(), UI::makeProgressBarElement());
+            auto progress = tree->createElement(*baseScreenNode, UI::makeProgressBarElement());
             if (!progress)
             {
                 return Tina::Core::failure(std::move(progress.error()));
@@ -2659,7 +2855,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             std::array<Tina::UI::UINodeId, radioSpecs.size()> radioButtons{};
             for (std::size_t index = 0; index < radioSpecs.size(); ++index)
             {
-                auto radioButton = tree->createElement(root->rootNodeId(), UI::makeRadioButtonElement());
+                auto radioButton = tree->createElement(*baseScreenNode, UI::makeRadioButtonElement());
                 if (!radioButton)
                 {
                     return Tina::Core::failure(std::move(radioButton.error()));
@@ -3360,7 +3556,9 @@ class TileMapBgfxState final : public Tina::IGameState {
             && counters_->pauseOverlayPushes == 0
             && counters_->frameUpdates + 12U == options_.targetFrameCount)
         {
-            if (auto status = context.requestPush(std::make_unique<PauseOverlayState>(*counters_)); !status)
+            if (auto status = context.requestPush(std::make_unique<PauseOverlayState>(
+                    *counters_, uiRoot_, uiFlowLayer_, uiBaseScreen_, uiPauseScreen_));
+                !status)
             {
                 return status;
             }
@@ -4155,6 +4353,9 @@ class TileMapBgfxState final : public Tina::IGameState {
     TileMapResources* resources_ = nullptr;
     Tina::Sample2D::DeviceCapture* capture_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
+    Tina::UI::UIFlowLayerId uiFlowLayer_{};
+    Tina::UI::UIFlowScreenId uiBaseScreen_{};
+    Tina::UI::UIFlowScreenId uiPauseScreen_{};
     std::array<Tina::UI::UINodeId, ExpectedUIPanelCount> uiPanelNodes_{};
     std::array<Tina::UI::UINodeId, 2> uiTitleNodes_{};
     Tina::UI::UINodeId uiThemeButton_{};
@@ -4622,6 +4823,8 @@ int main(int argc, char** argv)
               counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
               counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
+              counters.uiFlowLayersRegistered == 1 && counters.uiFlowScreensRegistered == 2 &&
+              counters.uiFlowScreenPushes >= 1 &&
               counters.uiTextEditsCreated == ExpectedUITextEditCount &&
               counters.uiTextEditInitialTextVerified &&
               counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
@@ -4654,12 +4857,26 @@ int main(int argc, char** argv)
     // M11-D1: require a successful primary-frame RGBA8 capture when the device supports it.
     ok = ok && counters.pixelCaptureAttempted && counters.pixelCaptureOk && !counters.pixelFingerprint.empty() &&
          counters.pixelCaptureWidth > 0 && counters.pixelCaptureHeight > 0 && counters.pixelCaptureBytes > 0;
-    // RUNTIME-001 pause overlay: long smokes (>=60 frames) must push/pop once; short smokes skip.
-    // stateExits counts only TileMapBgfxState exits (still 1); overlay uses pauseOverlayPops.
+    // RUNTIME-001 + UI-FLOW-001: long smokes activate and retire the Pause Screen.
     if (options->targetFrameCount >= 60)
     {
         ok = ok && counters.pauseOverlayPushes == 1 && counters.pauseOverlayPops == 1
-             && counters.pauseOverlayFrames == 3;
+             && counters.pauseOverlayFrames >= 1 && counters.pauseOverlayFrames <= 3
+             && counters.uiFlowScreenPushes == 2 && counters.uiFlowScreenPops == 1
+             && counters.uiFlowActionsRegistered == 1 && counters.uiFlowActionsCleared == 1
+             && counters.uiFlowBackActionInvocations + counters.pauseAutoResumeRequests == 1
+             && counters.pauseResumeRequestedByAction ==
+                    (counters.uiFlowBackActionInvocations == 1)
+             && counters.pauseUIScreenActivated && counters.baseUIScreenRestored;
+    }
+    else
+    {
+        ok = ok && counters.pauseOverlayPushes == 0 && counters.pauseOverlayPops == 0
+             && counters.uiFlowScreenPushes == 1 && counters.uiFlowScreenPops == 0
+             && counters.uiFlowActionsRegistered == 0 && counters.uiFlowActionsCleared == 0
+             && counters.uiFlowBackActionInvocations == 0 && counters.pauseAutoResumeRequests == 0
+             && !counters.pauseResumeRequestedByAction
+             && !counters.pauseUIScreenActivated && !counters.baseUIScreenRestored;
     }
     ok = ok && counters.stateExits == 1;
     // M11-D2: optional golden pixel fingerprint comparison (exact match, machine-local).
@@ -4741,6 +4958,17 @@ int main(int argc, char** argv)
     appendLeU32(evidenceBytes, counters.uiTreeFinalSelectionVerified ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.uiTreeScrolled ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.uiTreeThemeVerified ? 1U : 0U);
+    appendLeU64(evidenceBytes, counters.uiFlowLayersRegistered);
+    appendLeU64(evidenceBytes, counters.uiFlowScreensRegistered);
+    appendLeU64(evidenceBytes, counters.uiFlowScreenPushes);
+    appendLeU64(evidenceBytes, counters.uiFlowScreenPops);
+    appendLeU64(evidenceBytes, counters.uiFlowActionsRegistered);
+    appendLeU64(evidenceBytes, counters.uiFlowActionsCleared);
+    appendLeU64(evidenceBytes, counters.uiFlowBackActionInvocations);
+    appendLeU64(evidenceBytes, counters.pauseAutoResumeRequests);
+    appendLeU32(evidenceBytes, counters.pauseResumeRequestedByAction ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.pauseUIScreenActivated ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.baseUIScreenRestored ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.accessibilityHasTree ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.accessibilityHasTreeItem ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.accessibilityTreeSelectionVerified ? 1U : 0U);
@@ -4894,6 +5122,20 @@ int main(int argc, char** argv)
                   << (counters.uiTreeFinalSelectionVerified ? "true" : "false")
                   << ",\"uiTreeScrolled\":" << (counters.uiTreeScrolled ? "true" : "false")
                   << ",\"uiTreeThemeVerified\":" << (counters.uiTreeThemeVerified ? "true" : "false")
+                  << ",\"uiFlowLayersRegistered\":" << counters.uiFlowLayersRegistered
+                  << ",\"uiFlowScreensRegistered\":" << counters.uiFlowScreensRegistered
+                  << ",\"uiFlowScreenPushes\":" << counters.uiFlowScreenPushes
+                  << ",\"uiFlowScreenPops\":" << counters.uiFlowScreenPops
+                  << ",\"uiFlowActionsRegistered\":" << counters.uiFlowActionsRegistered
+                  << ",\"uiFlowActionsCleared\":" << counters.uiFlowActionsCleared
+                  << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
+                  << ",\"pauseAutoResumeRequests\":" << counters.pauseAutoResumeRequests
+                  << ",\"pauseResumeRequestedByAction\":"
+                  << (counters.pauseResumeRequestedByAction ? "true" : "false")
+                  << ",\"pauseUIScreenActivated\":"
+                  << (counters.pauseUIScreenActivated ? "true" : "false")
+                  << ",\"baseUIScreenRestored\":"
+                  << (counters.baseUIScreenRestored ? "true" : "false")
                   << ",\"uiSliders\":" << counters.uiSlidersCreated
                   << ",\"uiProgressBars\":" << counters.uiProgressBarsCreated
                   << ",\"uiRadioButtons\":" << counters.uiRadioButtonsCreated
@@ -5089,6 +5331,20 @@ int main(int argc, char** argv)
               << (counters.uiTreeFinalSelectionVerified ? "true" : "false")
               << ",\"uiTreeScrolled\":" << (counters.uiTreeScrolled ? "true" : "false")
               << ",\"uiTreeThemeVerified\":" << (counters.uiTreeThemeVerified ? "true" : "false")
+              << ",\"uiFlowLayersRegistered\":" << counters.uiFlowLayersRegistered
+              << ",\"uiFlowScreensRegistered\":" << counters.uiFlowScreensRegistered
+              << ",\"uiFlowScreenPushes\":" << counters.uiFlowScreenPushes
+              << ",\"uiFlowScreenPops\":" << counters.uiFlowScreenPops
+              << ",\"uiFlowActionsRegistered\":" << counters.uiFlowActionsRegistered
+              << ",\"uiFlowActionsCleared\":" << counters.uiFlowActionsCleared
+              << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
+              << ",\"pauseAutoResumeRequests\":" << counters.pauseAutoResumeRequests
+              << ",\"pauseResumeRequestedByAction\":"
+              << (counters.pauseResumeRequestedByAction ? "true" : "false")
+              << ",\"pauseUIScreenActivated\":"
+              << (counters.pauseUIScreenActivated ? "true" : "false")
+              << ",\"baseUIScreenRestored\":"
+              << (counters.baseUIScreenRestored ? "true" : "false")
               << ",\"uiSlidersCreated\":" << counters.uiSlidersCreated
               << ",\"uiSliderChanges\":" << counters.uiSliderChanges
               << ",\"uiCheckboxesCreated\":" << counters.uiCheckboxesCreated

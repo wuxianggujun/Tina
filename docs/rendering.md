@@ -118,7 +118,7 @@ premultiplied-alpha 合成保持不变。Scene extraction 在 descriptor 之前�
 texture，以 batch-local uniform 控制分支；fragment shader 用 world-position/UV derivatives 构造 TBN，因此
 rotation、signed scale、atlas UV 与 flip 无需额外矩阵。normal 只调制 point-light contribution，ambient、shadow
 visibility、attenuation 与 premultiplied alpha 保持原契约；无 normal 走原有分支，RGBA8 `(128,128,255)` 的
-flat normal 相对 Lambert factor 精确为1。当前仍无 HDR/tone mapping。product-2d schema 19 以
+flat normal 相对 Lambert factor 精确为1。当前仍无 HDR/tone mapping。product-2d schema 20 继承 schema 19，并以
 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1` 提供集成证据，继承双
 ShadowOccluder2D 与 soft/hard 差分，并以 `normalMappedSpriteCount=1/0` 的 normal on/off 可重复像素差分关闭 N5。
 

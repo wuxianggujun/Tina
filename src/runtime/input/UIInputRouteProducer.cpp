@@ -687,6 +687,65 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
         }
 
+        // An open Dropdown gets first refusal above. Otherwise Escape and
+        // Gamepad East route Back only to the topmost committed active Flow
+        // Screen. A handled Down claims its matching Up across Screen changes.
+        if (const auto* key = std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr && key->window == context->ownerWindow() &&
+            key->key == Platform::Key::Escape)
+        {
+            const Platform::DigitalControlIdentity control = Platform::KeyControlIdentity{
+                .window = key->window,
+                .key = key->key,
+            };
+            auto routed = context->routeFlowAction(
+                platformFrame.id(), transitions[ordinal].sequence, UI::UIFlowAction::Back,
+                UI::UIFlowActionSource::Keyboard,
+                key->state == Platform::DigitalTransition::Down, control);
+            if (!routed)
+            {
+                Core::Error error = std::move(routed.error());
+                error.addContext("UIInputRouteProducer::produce(keyboard-flow-back)");
+                return Core::failure(std::move(error));
+            }
+            if (routed->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+                continue;
+            }
+        }
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
+            gamepad != nullptr && gamepad->routedWindow == context->ownerWindow() &&
+            gamepad->button == Platform::GamepadButton::East)
+        {
+            const Platform::DigitalControlIdentity control =
+                Platform::GamepadButtonControlIdentity{
+                    .routedWindow = gamepad->routedWindow,
+                    .gamepad = gamepad->gamepad,
+                    .button = gamepad->button,
+                };
+            auto routed = context->routeFlowAction(
+                platformFrame.id(), transitions[ordinal].sequence, UI::UIFlowAction::Back,
+                UI::UIFlowActionSource::Gamepad,
+                gamepad->state == Platform::DigitalTransition::Down, control);
+            if (!routed)
+            {
+                Core::Error error = std::move(routed.error());
+                error.addContext("UIInputRouteProducer::produce(gamepad-flow-back)");
+                return Core::failure(std::move(error));
+            }
+            if (routed->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+                continue;
+            }
+        }
+
         // Focused collection controls own their navigation and activation keys
         // before TextEdit/focus traversal/default Accept. Route matching Up to
         // both command state machines so a focus change cannot strand a pressed

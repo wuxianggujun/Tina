@@ -403,6 +403,163 @@ PrimaryWindowUICapabilityState::createElement(u64 epoch, PrimaryWindowUIPhase ph
     return *child;
 }
 
+Core::Result<UI::UIFlowLayerId>
+PrimaryWindowUICapabilityState::registerFlowLayer(u64 epoch, PrimaryWindowUIPhase phase,
+                                                   UI::UITreeUpdater& updater, UI::UINodeId layer)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::registerFlowLayer";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.registerFlowLayer(layer);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Result<UI::UIFlowScreenId>
+PrimaryWindowUICapabilityState::registerFlowScreen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                    UI::UITreeUpdater& updater, UI::UIFlowLayerId layer,
+                                                    UI::UINodeId screen)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::registerFlowScreen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.registerFlowScreen(layer, screen);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Status PrimaryWindowUICapabilityState::pushFlowScreen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                            UI::UITreeUpdater& updater,
+                                                            UI::UIFlowScreenId screen)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::pushFlowScreen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.pushFlowScreen(screen);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIFlowScreenId>
+PrimaryWindowUICapabilityState::popFlowScreen(u64 epoch, PrimaryWindowUIPhase phase,
+                                              UI::UITreeUpdater& updater, UI::UIFlowLayerId layer)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::popFlowScreen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.popFlowScreen(layer);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Result<UI::UIFlowScreenId>
+PrimaryWindowUICapabilityState::replaceFlowScreen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                  UI::UITreeUpdater& updater,
+                                                  UI::UIFlowScreenId screen)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::replaceFlowScreen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.replaceFlowScreen(screen);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Result<UI::UIFlowScreenId>
+PrimaryWindowUICapabilityState::activeFlowScreen(u64 epoch, PrimaryWindowUIPhase phase,
+                                                 const UI::UITreeUpdater& updater,
+                                                 UI::UIFlowLayerId layer)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::activeFlowScreen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.activeFlowScreen(layer);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Result<bool>
+PrimaryWindowUICapabilityState::isFlowScreenActive(u64 epoch, PrimaryWindowUIPhase phase,
+                                                   const UI::UITreeUpdater& updater,
+                                                   UI::UIFlowScreenId screen)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isFlowScreenActive";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.isFlowScreenActive(screen);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setFlowScreenAction(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UIFlowScreenId screen, UI::UIFlowAction action, UI::UIFlowActionCallback callback)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setFlowScreenAction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setFlowScreenAction(screen, action, std::move(callback));
+    if (!status)
+    {
+        return rememberFirstError(std::move(status.error()), Operation);
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearFlowScreenAction(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UIFlowScreenId screen, UI::UIFlowAction action)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearFlowScreenAction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearFlowScreenAction(screen, action);
+    if (!status)
+    {
+        return rememberFirstError(std::move(status.error()), Operation);
+    }
+    return Core::success();
+}
+
 Core::Result<PrimaryWindowUIBuildTransaction>
 PrimaryWindowUICapabilityState::beginBuildTransaction(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,

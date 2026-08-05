@@ -343,6 +343,147 @@ struct UIComponentBuildReservation final {
     bool active = false;
 };
 
+enum class UIFlowNodeKind : u8 {
+    None = 0,
+    Layer,
+    Screen,
+};
+
+class UIFlowActionPressState final {
+  public:
+    explicit UIFlowActionPressState(Platform::WindowId ownerWindow) noexcept
+        : ownerWindow_(ownerWindow)
+    {
+    }
+
+    [[nodiscard]] Core::Status validate(UIFlowAction action, UIFlowActionSource source,
+                                        const Platform::DigitalControlIdentity& control) const
+    {
+        if (action != UIFlowAction::Back)
+        {
+            return Core::failure(UIErrorCode::InvalidFlowAction,
+                                 "UI Flow action is not supported by this router");
+        }
+        if (source == UIFlowActionSource::Keyboard)
+        {
+            const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
+            if (key != nullptr && key->window == ownerWindow_ &&
+                key->key == Platform::Key::Escape)
+            {
+                return Core::success();
+            }
+        }
+        else if (source == UIFlowActionSource::Gamepad)
+        {
+            const auto* button =
+                std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+            if (button != nullptr && button->routedWindow == ownerWindow_ &&
+                button->gamepad.hasValue() &&
+                button->gamepad.index() < gamepadBackPresses_.size() &&
+                button->button == Platform::GamepadButton::East)
+            {
+                return Core::success();
+            }
+        }
+        return Core::failure(UIErrorCode::InvalidFlowAction,
+                             "UI Flow action control does not match its source");
+    }
+
+    [[nodiscard]] bool isPressed(const Platform::DigitalControlIdentity& control) const noexcept
+    {
+        if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
+            key != nullptr)
+        {
+            return key->window == ownerWindow_ && key->key == Platform::Key::Escape &&
+                   keyboardBackPressed_;
+        }
+        const auto* button =
+            std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+        return button != nullptr && button->routedWindow == ownerWindow_ &&
+               button->button == Platform::GamepadButton::East &&
+               button->gamepad.hasValue() &&
+               button->gamepad.index() < gamepadBackPresses_.size() &&
+               gamepadBackPresses_[button->gamepad.index()] == button->gamepad;
+    }
+
+    void setPressed(const Platform::DigitalControlIdentity& control) noexcept
+    {
+        if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
+            key != nullptr)
+        {
+            if (key->window == ownerWindow_ && key->key == Platform::Key::Escape)
+            {
+                keyboardBackPressed_ = true;
+            }
+            return;
+        }
+        const auto* button =
+            std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+        if (button != nullptr && button->routedWindow == ownerWindow_ &&
+            button->button == Platform::GamepadButton::East &&
+            button->gamepad.hasValue() &&
+            button->gamepad.index() < gamepadBackPresses_.size())
+        {
+            gamepadBackPresses_[button->gamepad.index()] = button->gamepad;
+        }
+    }
+
+    void clearPressed(const Platform::DigitalControlIdentity& control) noexcept
+    {
+        if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
+            key != nullptr)
+        {
+            if (key->window == ownerWindow_ && key->key == Platform::Key::Escape)
+            {
+                keyboardBackPressed_ = false;
+            }
+            return;
+        }
+        const auto* button =
+            std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+        if (button != nullptr)
+        {
+            clearGamepad(button->gamepad);
+        }
+    }
+
+    void clearAll() noexcept
+    {
+        keyboardBackPressed_ = false;
+        gamepadBackPresses_.fill({});
+    }
+
+    void clearGamepad(Platform::GamepadId gamepad) noexcept
+    {
+        if (!gamepad.hasValue() || gamepad.index() >= gamepadBackPresses_.size())
+        {
+            return;
+        }
+        if (gamepadBackPresses_[gamepad.index()] == gamepad)
+        {
+            gamepadBackPresses_[gamepad.index()] = {};
+        }
+    }
+
+  private:
+    Platform::WindowId ownerWindow_{};
+    bool keyboardBackPressed_ = false;
+    std::array<Platform::GamepadId, Platform::PlatformFrameBuilder::MaximumGamepadSlots>
+        gamepadBackPresses_{};
+};
+
+struct UIFlowNodeState final {
+    UIFlowNodeKind kind = UIFlowNodeKind::None;
+    UINodeId layer{};
+    UINodeId previous{};
+    UINodeId next{};
+    UINodeId bottom{};
+    UINodeId top{};
+    UIFlowActionCallback backAction{};
+    bool backActionRegistered = false;
+    bool stacked = false;
+};
+
 struct UIContext::Impl final {
     static constexpr usize StyleInteractionNodeCapacity =
         2U * (7U + Detail::UIDefaultActionPressState::MaximumPressedTargetCount);
@@ -393,6 +534,18 @@ struct UIContext::Impl final {
     // A Modal stores the focus that should be restored when that committed
     // scope stops being topmost. Storage is fixed and index-aligned.
     std::pmr::vector<UINodeId> focusRestoreByNodeIndex;
+    std::pmr::vector<UIFlowNodeState> flowStatesByNodeIndex;
+    usize registeredFlowLayerCount = 0;
+    usize flowLayerHighWater = 0;
+    usize registeredFlowScreenCount = 0;
+    usize flowScreenHighWater = 0;
+    usize stackedFlowScreenCount = 0;
+    usize flowStackHighWater = 0;
+    usize registeredFlowActionCount = 0;
+    usize flowActionHighWater = 0;
+    usize flowActionInvocationCount = 0;
+    usize flowActionCallbackOperationDepth = 0;
+    usize flowCapacityFailureCount = 0;
     std::pmr::vector<UIStyleRoleId> styleRolesByNodeIndex;
     Detail::UIStyleSheetStorage styleSheetStorage;
     Detail::UIMotionTrackStorage motionTrackStorage;
@@ -489,6 +642,7 @@ struct UIContext::Impl final {
     Detail::UIButtonActionRegistry buttonActionRegistry;
     Detail::UIBehaviorStateStorage behaviorStateStorage;
     Detail::UIDefaultActionPressState defaultActionPressState;
+    UIFlowActionPressState flowActionPressState;
     StyleInteractionNodeSet committedStyleInteractionNodes{};
     Detail::UIRangeInputPressLatch rangeInputPressLatch;
     std::pmr::vector<UICheckboxPaint> checkboxPaintsByNodeIndex;
@@ -606,7 +760,7 @@ struct UIContext::Impl final {
         : ownerWindow(owner), capacityConfig(capacities), ownerThreadId(threadId), lifetime(std::move(lifetimeControl)),
           nodes(std::move(nodePool)), idsByIndex(&resource), layoutStylesByIndex(&resource),
           pointerHitPoliciesByIndex(&resource), enabledByNodeIndex(&resource), focusScopeModesByNodeIndex(&resource),
-          focusRestoreByNodeIndex(&resource), styleRolesByNodeIndex(&resource),
+          focusRestoreByNodeIndex(&resource), flowStatesByNodeIndex(&resource), styleRolesByNodeIndex(&resource),
           styleSheetStorage({
                                 .classCapacity = capacities.styleClassCapacity,
                                 .tokenCapacity = capacities.styleTokenCapacity,
@@ -661,7 +815,7 @@ struct UIContext::Impl final {
           behaviorStateStorage(capacities.nodeCapacity, capacities.nodeCapacity,
                                capacities.nodeCapacity, capacities.nodeCapacity, capacities.nodeCapacity,
                                capacities.nodeCapacity, capacities.nodeCapacity, resource),
-          defaultActionPressState(owner), rangeInputPressLatch(owner),
+          defaultActionPressState(owner), flowActionPressState(owner), rangeInputPressLatch(owner),
           checkboxPaintsByNodeIndex(&resource),
           sliderPaintsByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
           committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&resource),
@@ -714,6 +868,8 @@ struct UIContext::Impl final {
             .styleRulesPerBucketCapacity = normalized.styleRulesPerBucketCapacity,
             .nodeStyleClassLinkCapacity = normalized.nodeStyleClassLinkCapacity,
             .motionTrackCapacity = normalized.motionTrackCapacity,
+            .flowLayerCapacity = normalized.flowLayerCapacity,
+            .flowScreenCapacity = normalized.flowScreenCapacity,
             .applyDefaultProductChrome = normalized.applyDefaultProductChrome,
         };
 
@@ -731,6 +887,7 @@ struct UIContext::Impl final {
         impl->enabledByNodeIndex.resize(normalized.nodeCapacity, 1);
         impl->focusScopeModesByNodeIndex.resize(normalized.nodeCapacity, UIFocusScopeMode::None);
         impl->focusRestoreByNodeIndex.resize(normalized.nodeCapacity);
+        impl->flowStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->styleRolesByNodeIndex.resize(normalized.nodeCapacity, UIStyleRoleId::None);
         impl->styleClassesByNodeIndex.resize(normalized.nodeCapacity);
         impl->styleClassCountsByNodeIndex.resize(normalized.nodeCapacity, 0);
@@ -978,6 +1135,24 @@ struct UIContext::Impl final {
         }
     }
 
+    [[nodiscard]] bool isActiveFlowScreenIndex(u32 index) const noexcept
+    {
+        if (index >= flowStatesByNodeIndex.size())
+        {
+            return false;
+        }
+        const UIFlowNodeState& screenState = flowStatesByNodeIndex[index];
+        if (screenState.kind != UIFlowNodeKind::Screen || !screenState.stacked ||
+            !contains(screenState.layer))
+        {
+            return false;
+        }
+        const u32 layerIndex = screenState.layer.index();
+        return layerIndex < flowStatesByNodeIndex.size() &&
+               flowStatesByNodeIndex[layerIndex].kind == UIFlowNodeKind::Layer &&
+               flowStatesByNodeIndex[layerIndex].top == idForIndex(index);
+    }
+
     void prepareLayoutState(UILogicalSize viewportSize, const std::pmr::vector<u32>& order, bool allowReuse) noexcept
     {
         initializeLayoutWork(order, allowReuse);
@@ -992,6 +1167,12 @@ struct UIContext::Impl final {
             UIVisibility ownVisibility = style.visibility;
             if (record->kind == BuiltinElementKind::Popup && index < popupStatesByNodeIndex.size() &&
                 !popupStatesByNodeIndex[index].open)
+            {
+                ownVisibility = UIVisibility::Collapsed;
+            }
+            if (index < flowStatesByNodeIndex.size() &&
+                flowStatesByNodeIndex[index].kind == UIFlowNodeKind::Screen &&
+                !isActiveFlowScreenIndex(index))
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
@@ -4175,6 +4356,74 @@ struct UIContext::Impl final {
         return measurePlaceholderText(utf8, style);
     }
 
+    void releaseFlowNode(u32 index) noexcept
+    {
+        if (index >= flowStatesByNodeIndex.size())
+        {
+            return;
+        }
+        UIFlowNodeState& state = flowStatesByNodeIndex[index];
+        if (state.kind == UIFlowNodeKind::None)
+        {
+            return;
+        }
+
+        const UINodeId node = idForIndex(index);
+        if (state.kind == UIFlowNodeKind::Screen)
+        {
+            if (state.backActionRegistered)
+            {
+                if (registeredFlowActionCount == 0)
+                {
+                    std::terminate();
+                }
+                --registeredFlowActionCount;
+            }
+            if (state.stacked)
+            {
+                if (contains(state.previous))
+                {
+                    flowStatesByNodeIndex[state.previous.index()].next = state.next;
+                }
+                if (contains(state.next))
+                {
+                    flowStatesByNodeIndex[state.next.index()].previous = state.previous;
+                }
+                if (contains(state.layer))
+                {
+                    UIFlowNodeState& layerState = flowStatesByNodeIndex[state.layer.index()];
+                    if (layerState.bottom == node)
+                    {
+                        layerState.bottom = state.next;
+                    }
+                    if (layerState.top == node)
+                    {
+                        layerState.top = state.previous;
+                    }
+                }
+                if (stackedFlowScreenCount == 0)
+                {
+                    std::terminate();
+                }
+                --stackedFlowScreenCount;
+            }
+            if (registeredFlowScreenCount == 0)
+            {
+                std::terminate();
+            }
+            --registeredFlowScreenCount;
+        }
+        else
+        {
+            if (state.bottom.hasValue() || state.top.hasValue() || registeredFlowLayerCount == 0)
+            {
+                std::terminate();
+            }
+            --registeredFlowLayerCount;
+        }
+        state = {};
+    }
+
     void resetNodeSideData(u32 index) noexcept
     {
         if (index >= layoutStylesByIndex.size())
@@ -4194,6 +4443,10 @@ struct UIContext::Impl final {
         if (index < focusRestoreByNodeIndex.size())
         {
             focusRestoreByNodeIndex[index] = {};
+        }
+        if (index < flowStatesByNodeIndex.size())
+        {
+            flowStatesByNodeIndex[index] = {};
         }
         if (index < styleRolesByNodeIndex.size())
         {
@@ -6765,6 +7018,434 @@ struct UIContext::Impl final {
         return createElement(parent, descriptor);
     }
 
+    [[nodiscard]] Core::Status validateFlowUpdaterRoot(UINodeId updaterRoot) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI Flow requires a live updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status markFlowVisibilityDirty(std::initializer_list<UINodeId> screens)
+    {
+        // A pending structure publication already forces a complete layout
+        // rebuild, so startup registration/push needs no dirty-queue slots.
+        if (isPhaseDirty(PhaseStructure))
+        {
+            return Core::success();
+        }
+        Core::Status status = markLayoutDirtyBatch(screens);
+        if (!status && status.error().code == UIErrorCode::CapacityExceeded)
+        {
+            ++flowCapacityFailureCount;
+        }
+        return status;
+    }
+
+    [[nodiscard]] Core::Result<UIFlowLayerId> registerFlowLayerFromUpdater(UINodeId updaterRoot,
+                                                                           UINodeId layer)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status root = validateFlowUpdaterRoot(updaterRoot); !root)
+        {
+            return Core::failure(root.error());
+        }
+        if (!contains(layer) || !isNodeWithinRoot(updaterRoot, layer) || layer == updaterRoot ||
+            layer.index() >= flowStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidFlowLayer,
+                        "UI Flow Layer must be a live node owned by the updater root");
+        }
+        const NodeRecord* layerRecord = nodes.tryGet(layer.storageId());
+        if (layerRecord == nullptr || layerRecord->parentIndex != updaterRoot.index())
+        {
+            return fail(UIErrorCode::InvalidFlowLayer,
+                        "UI Flow Layer must be a direct child of the updater root");
+        }
+        UIFlowNodeState& state = flowStatesByNodeIndex[layer.index()];
+        if (state.kind != UIFlowNodeKind::None)
+        {
+            return fail(UIErrorCode::InvalidFlowLayer,
+                        "UI Flow Layer node is already registered as a Layer or Screen");
+        }
+        if (registeredFlowLayerCount >= capacityConfig.flowLayerCapacity)
+        {
+            ++flowCapacityFailureCount;
+            return fail(UIErrorCode::CapacityExceeded, "UI Flow Layer capacity has been exhausted");
+        }
+
+        state.kind = UIFlowNodeKind::Layer;
+        ++registeredFlowLayerCount;
+        flowLayerHighWater = (std::max)(flowLayerHighWater, registeredFlowLayerCount);
+        return UIFlowLayerId{layer};
+    }
+
+    [[nodiscard]] Core::Result<UIFlowScreenId>
+    registerFlowScreenFromUpdater(UINodeId updaterRoot, UIFlowLayerId layerId, UINodeId screen)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status root = validateFlowUpdaterRoot(updaterRoot); !root)
+        {
+            return Core::failure(root.error());
+        }
+        const UINodeId layer = layerId.nodeId();
+        if (!contains(layer) || !isNodeWithinRoot(updaterRoot, layer) ||
+            layer.index() >= flowStatesByNodeIndex.size() ||
+            flowStatesByNodeIndex[layer.index()].kind != UIFlowNodeKind::Layer)
+        {
+            return fail(UIErrorCode::InvalidFlowLayer, "UI Flow Layer identity is stale or unregistered");
+        }
+        if (!contains(screen) || !isNodeWithinRoot(updaterRoot, screen) || screen == updaterRoot ||
+            screen.index() >= flowStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidFlowScreen,
+                        "UI Flow Screen must be a live node owned by the updater root");
+        }
+        const NodeRecord* screenRecord = nodes.tryGet(screen.storageId());
+        if (screenRecord == nullptr || screenRecord->parentIndex != layer.index())
+        {
+            return fail(UIErrorCode::InvalidFlowScreen,
+                        "UI Flow Screen must be a direct child of its Layer");
+        }
+        UIFlowNodeState& state = flowStatesByNodeIndex[screen.index()];
+        if (state.kind != UIFlowNodeKind::None)
+        {
+            return fail(UIErrorCode::InvalidFlowScreen,
+                        "UI Flow Screen node is already registered as a Layer or Screen");
+        }
+        if (registeredFlowScreenCount >= capacityConfig.flowScreenCapacity)
+        {
+            ++flowCapacityFailureCount;
+            return fail(UIErrorCode::CapacityExceeded, "UI Flow Screen capacity has been exhausted");
+        }
+        if (Core::Status dirty = markFlowVisibilityDirty({screen}); !dirty)
+        {
+            return Core::failure(dirty.error());
+        }
+
+        state.kind = UIFlowNodeKind::Screen;
+        state.layer = layer;
+        ++registeredFlowScreenCount;
+        flowScreenHighWater = (std::max)(flowScreenHighWater, registeredFlowScreenCount);
+        return UIFlowScreenId{screen};
+    }
+
+    [[nodiscard]] Core::Status pushFlowScreenFromUpdater(UINodeId updaterRoot, UIFlowScreenId screenId)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status root = validateFlowUpdaterRoot(updaterRoot); !root)
+        {
+            return root;
+        }
+        const UINodeId screen = screenId.nodeId();
+        if (!contains(screen) || !isNodeWithinRoot(updaterRoot, screen) ||
+            screen.index() >= flowStatesByNodeIndex.size() ||
+            flowStatesByNodeIndex[screen.index()].kind != UIFlowNodeKind::Screen)
+        {
+            return fail(UIErrorCode::InvalidFlowScreen, "UI Flow Screen identity is stale or unregistered");
+        }
+        UIFlowNodeState& screenState = flowStatesByNodeIndex[screen.index()];
+        if (screenState.stacked)
+        {
+            return fail(UIErrorCode::InvalidFlowOperation,
+                        "UI Flow Screen cannot be pushed more than once in its Layer stack");
+        }
+        if (!contains(screenState.layer) ||
+            flowStatesByNodeIndex[screenState.layer.index()].kind != UIFlowNodeKind::Layer)
+        {
+            return fail(UIErrorCode::InvalidFlowLayer, "UI Flow Screen Layer identity is stale");
+        }
+        UIFlowNodeState& layerState = flowStatesByNodeIndex[screenState.layer.index()];
+        const UINodeId previousTop = layerState.top;
+        if (Core::Status dirty = markFlowVisibilityDirty({previousTop, screen}); !dirty)
+        {
+            return dirty;
+        }
+
+        screenState.previous = previousTop;
+        screenState.next = {};
+        screenState.stacked = true;
+        if (contains(previousTop))
+        {
+            flowStatesByNodeIndex[previousTop.index()].next = screen;
+        }
+        else
+        {
+            layerState.bottom = screen;
+        }
+        layerState.top = screen;
+        ++stackedFlowScreenCount;
+        flowStackHighWater = (std::max)(flowStackHighWater, stackedFlowScreenCount);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIFlowScreenId> popFlowScreenFromUpdater(UINodeId updaterRoot,
+                                                                        UIFlowLayerId layerId)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status root = validateFlowUpdaterRoot(updaterRoot); !root)
+        {
+            return Core::failure(root.error());
+        }
+        const UINodeId layer = layerId.nodeId();
+        if (!contains(layer) || !isNodeWithinRoot(updaterRoot, layer) ||
+            layer.index() >= flowStatesByNodeIndex.size() ||
+            flowStatesByNodeIndex[layer.index()].kind != UIFlowNodeKind::Layer)
+        {
+            return fail(UIErrorCode::InvalidFlowLayer, "UI Flow Layer identity is stale or unregistered");
+        }
+        UIFlowNodeState& layerState = flowStatesByNodeIndex[layer.index()];
+        const UINodeId popped = layerState.top;
+        if (!contains(popped))
+        {
+            return fail(UIErrorCode::InvalidFlowOperation, "UI Flow Layer stack is empty");
+        }
+        UIFlowNodeState& poppedState = flowStatesByNodeIndex[popped.index()];
+        const UINodeId nextTop = poppedState.previous;
+        if (Core::Status dirty = markFlowVisibilityDirty({popped, nextTop}); !dirty)
+        {
+            return Core::failure(dirty.error());
+        }
+
+        if (contains(nextTop))
+        {
+            flowStatesByNodeIndex[nextTop.index()].next = {};
+        }
+        else
+        {
+            layerState.bottom = {};
+        }
+        layerState.top = nextTop;
+        poppedState.previous = {};
+        poppedState.next = {};
+        poppedState.stacked = false;
+        if (stackedFlowScreenCount == 0)
+        {
+            std::terminate();
+        }
+        --stackedFlowScreenCount;
+        return UIFlowScreenId{popped};
+    }
+
+    [[nodiscard]] Core::Result<UIFlowScreenId> replaceFlowScreenFromUpdater(UINodeId updaterRoot,
+                                                                            UIFlowScreenId replacementId)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status root = validateFlowUpdaterRoot(updaterRoot); !root)
+        {
+            return Core::failure(root.error());
+        }
+        const UINodeId replacement = replacementId.nodeId();
+        if (!contains(replacement) || !isNodeWithinRoot(updaterRoot, replacement) ||
+            replacement.index() >= flowStatesByNodeIndex.size() ||
+            flowStatesByNodeIndex[replacement.index()].kind != UIFlowNodeKind::Screen)
+        {
+            return fail(UIErrorCode::InvalidFlowScreen, "UI Flow Screen identity is stale or unregistered");
+        }
+        UIFlowNodeState& replacementState = flowStatesByNodeIndex[replacement.index()];
+        if (replacementState.stacked)
+        {
+            return fail(UIErrorCode::InvalidFlowOperation,
+                        "UI Flow replacement Screen is already present in its Layer stack");
+        }
+        if (!contains(replacementState.layer) ||
+            flowStatesByNodeIndex[replacementState.layer.index()].kind != UIFlowNodeKind::Layer)
+        {
+            return fail(UIErrorCode::InvalidFlowLayer, "UI Flow replacement Layer identity is stale");
+        }
+        UIFlowNodeState& layerState = flowStatesByNodeIndex[replacementState.layer.index()];
+        const UINodeId replaced = layerState.top;
+        if (!contains(replaced))
+        {
+            return fail(UIErrorCode::InvalidFlowOperation,
+                        "UI Flow replace requires a non-empty Layer stack");
+        }
+        UIFlowNodeState& replacedState = flowStatesByNodeIndex[replaced.index()];
+        const UINodeId previous = replacedState.previous;
+        if (Core::Status dirty = markFlowVisibilityDirty({replaced, replacement}); !dirty)
+        {
+            return Core::failure(dirty.error());
+        }
+
+        replacementState.previous = previous;
+        replacementState.next = {};
+        replacementState.stacked = true;
+        if (contains(previous))
+        {
+            flowStatesByNodeIndex[previous.index()].next = replacement;
+        }
+        else
+        {
+            layerState.bottom = replacement;
+        }
+        layerState.top = replacement;
+        replacedState.previous = {};
+        replacedState.next = {};
+        replacedState.stacked = false;
+        return UIFlowScreenId{replaced};
+    }
+
+    [[nodiscard]] Core::Result<UIFlowScreenId> activeFlowScreenFromUpdater(UINodeId updaterRoot,
+                                                                           UIFlowLayerId layerId) const
+    {
+        if (!isOwnerThread())
+        {
+            return fail(UIErrorCode::WrongOwnerThread, "UI Flow queries require the UI owner thread");
+        }
+        if (Core::Status root = validateFlowUpdaterRoot(updaterRoot); !root)
+        {
+            return Core::failure(root.error());
+        }
+        const UINodeId layer = layerId.nodeId();
+        if (!contains(layer) || !isNodeWithinRoot(updaterRoot, layer) ||
+            layer.index() >= flowStatesByNodeIndex.size() ||
+            flowStatesByNodeIndex[layer.index()].kind != UIFlowNodeKind::Layer)
+        {
+            return fail(UIErrorCode::InvalidFlowLayer, "UI Flow Layer identity is stale or unregistered");
+        }
+        return UIFlowScreenId{flowStatesByNodeIndex[layer.index()].top};
+    }
+
+    [[nodiscard]] Core::Result<bool> isFlowScreenActiveFromUpdater(UINodeId updaterRoot,
+                                                                   UIFlowScreenId screenId) const
+    {
+        if (!isOwnerThread())
+        {
+            return fail(UIErrorCode::WrongOwnerThread, "UI Flow queries require the UI owner thread");
+        }
+        if (Core::Status root = validateFlowUpdaterRoot(updaterRoot); !root)
+        {
+            return Core::failure(root.error());
+        }
+        const UINodeId screen = screenId.nodeId();
+        if (!contains(screen) || !isNodeWithinRoot(updaterRoot, screen) ||
+            screen.index() >= flowStatesByNodeIndex.size() ||
+            flowStatesByNodeIndex[screen.index()].kind != UIFlowNodeKind::Screen)
+        {
+            return fail(UIErrorCode::InvalidFlowScreen, "UI Flow Screen identity is stale or unregistered");
+        }
+        return isActiveFlowScreenIndex(screen.index());
+    }
+
+    [[nodiscard]] Core::Status
+    setFlowScreenActionFromUpdater(UINodeId updaterRoot, UIFlowScreenId screenId,
+                                   UIFlowAction action, UIFlowActionCallback&& callback)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        if (routeDispatchDepth != 0 || flowActionCallbackOperationDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI Flow action registration cannot change during input routing");
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status root = validateFlowUpdaterRoot(updaterRoot); !root)
+        {
+            return root;
+        }
+        if (action != UIFlowAction::Back || !callback.hasValue())
+        {
+            return fail(UIErrorCode::InvalidFlowAction,
+                        "UI Flow Screen action requires a supported action and non-empty callback");
+        }
+        const UINodeId screen = screenId.nodeId();
+        if (!contains(screen) || !isNodeWithinRoot(updaterRoot, screen) ||
+            screen.index() >= flowStatesByNodeIndex.size() ||
+            flowStatesByNodeIndex[screen.index()].kind != UIFlowNodeKind::Screen)
+        {
+            return fail(UIErrorCode::InvalidFlowScreen,
+                        "UI Flow Screen identity is stale or unregistered");
+        }
+
+        UIFlowNodeState& state = flowStatesByNodeIndex[screen.index()];
+        const bool replacing = state.backActionRegistered;
+        ++flowActionCallbackOperationDepth;
+        auto callbackOperation = Core::makeScopeExit([this]() noexcept {
+            --flowActionCallbackOperationDepth;
+        });
+        state.backAction = std::move(callback);
+        state.backActionRegistered = true;
+        if (!replacing)
+        {
+            ++registeredFlowActionCount;
+            flowActionHighWater = (std::max)(flowActionHighWater, registeredFlowActionCount);
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status
+    clearFlowScreenActionFromUpdater(UINodeId updaterRoot, UIFlowScreenId screenId,
+                                     UIFlowAction action)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        if (routeDispatchDepth != 0 || flowActionCallbackOperationDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI Flow action registration cannot change during input routing");
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status root = validateFlowUpdaterRoot(updaterRoot); !root)
+        {
+            return root;
+        }
+        if (action != UIFlowAction::Back)
+        {
+            return fail(UIErrorCode::InvalidFlowAction,
+                        "UI Flow Screen action is not supported by this router");
+        }
+        const UINodeId screen = screenId.nodeId();
+        if (!contains(screen) || !isNodeWithinRoot(updaterRoot, screen) ||
+            screen.index() >= flowStatesByNodeIndex.size() ||
+            flowStatesByNodeIndex[screen.index()].kind != UIFlowNodeKind::Screen)
+        {
+            return fail(UIErrorCode::InvalidFlowScreen,
+                        "UI Flow Screen identity is stale or unregistered");
+        }
+
+        UIFlowNodeState& state = flowStatesByNodeIndex[screen.index()];
+        if (state.backActionRegistered)
+        {
+            if (registeredFlowActionCount == 0)
+            {
+                std::terminate();
+            }
+            state.backActionRegistered = false;
+            --registeredFlowActionCount;
+            ++flowActionCallbackOperationDepth;
+            auto callbackOperation = Core::makeScopeExit([this]() noexcept {
+                --flowActionCallbackOperationDepth;
+            });
+            state.backAction.reset();
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Result<UIComponentBuildBudget>
     requiredBuildBudgetForElement(const UIElementDescriptor& descriptor) const
     {
@@ -7155,6 +7836,7 @@ struct UIContext::Impl final {
             deactivateButtonActionForNode(currentIndex);
             sliderChangeCallbackRegistry.clearNode(currentIndex, true);
             motionTrackStorage.releaseNode(node);
+            releaseFlowNode(currentIndex);
             idsByIndex[currentIndex] = {};
             static_cast<void>(nodes.erase(node.storageId()));
             resetNodeSideData(currentIndex);
@@ -13955,6 +14637,7 @@ struct UIContext::Impl final {
         if (gamepad.has_value())
         {
             rangeInputPressLatch.clearGamepad(*gamepad);
+            flowActionPressState.clearGamepad(*gamepad);
             const UINodeId cancelledTarget = defaultActionPressState.pressedTarget(*gamepad);
             defaultActionPressState.clearGamepad(*gamepad);
             if (cancelledTarget.hasValue() && contains(cancelledTarget) && !isButtonPressed(cancelledTarget))
@@ -13966,12 +14649,115 @@ struct UIContext::Impl final {
 
         const UINodeId cancelledTarget = defaultActionFocusButton;
         rangeInputPressLatch.clear();
+        flowActionPressState.clearAll();
         defaultActionPressState.clearAll();
         if (cancelledTarget.hasValue() && contains(cancelledTarget))
         {
             static_cast<void>(markPaintDirty(cancelledTarget));
         }
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIFlowActionRouteResult>
+    routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                    UIFlowAction action, UIFlowActionSource source, bool pressed,
+                    const Platform::DigitalControlIdentity& control)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI Flow action cannot nest during input routing");
+        }
+        drainDeferredRootDestroys();
+        if (!platformFrame.hasValue() || sourceSequence == 0)
+        {
+            return fail(UIErrorCode::InvalidFlowAction,
+                        "UI Flow action requires a platform frame and source sequence");
+        }
+        if (Core::Status valid = flowActionPressState.validate(action, source, control);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+
+        const bool alreadyPressed = flowActionPressState.isPressed(control);
+        if (!pressed)
+        {
+            if (alreadyPressed)
+            {
+                flowActionPressState.clearPressed(control);
+            }
+            return UIFlowActionRouteResult{.consumed = alreadyPressed};
+        }
+        if (alreadyPressed)
+        {
+            return UIFlowActionRouteResult{.consumed = true};
+        }
+
+        UINodeId targetScreen{};
+        const auto& committedLayout = committedLayoutBuffers[publishedLayoutBufferIndex];
+        for (auto entry = committedLayout.rbegin(); entry != committedLayout.rend(); ++entry)
+        {
+            const UINodeId candidate = entry->node;
+            if (entry->effectiveVisibility != UIVisibility::Visible || !contains(candidate) ||
+                candidate.index() >= flowStatesByNodeIndex.size())
+            {
+                continue;
+            }
+            const UIFlowNodeState& state = flowStatesByNodeIndex[candidate.index()];
+            if (state.kind == UIFlowNodeKind::Screen && isActiveFlowScreenIndex(candidate.index()))
+            {
+                targetScreen = candidate;
+                break;
+            }
+        }
+        if (!targetScreen.hasValue())
+        {
+            return UIFlowActionRouteResult{};
+        }
+
+        UIFlowNodeState& targetState = flowStatesByNodeIndex[targetScreen.index()];
+        if (!targetState.backActionRegistered || !targetState.backAction.hasValue())
+        {
+            return UIFlowActionRouteResult{.screen = UIFlowScreenId{targetScreen}};
+        }
+
+        flowActionPressState.setPressed(control);
+        ++flowActionCallbackOperationDepth;
+        UIFlowActionCallback callback = std::move(targetState.backAction);
+        --flowActionCallbackOperationDepth;
+        ++flowActionInvocationCount;
+        ++routeDispatchDepth;
+        auto dispatchCleanup = Core::makeScopeExit([this]() noexcept {
+            finishRoutedPointerDispatch();
+        });
+        callback(UIFlowActionEvent{
+            .screen = UIFlowScreenId{targetScreen},
+            .action = action,
+            .source = source,
+            .platformFrame = platformFrame,
+            .sourceSequence = sourceSequence,
+        });
+        if (contains(targetScreen) && targetScreen.index() < flowStatesByNodeIndex.size())
+        {
+            UIFlowNodeState& liveState = flowStatesByNodeIndex[targetScreen.index()];
+            if (liveState.kind == UIFlowNodeKind::Screen && liveState.backActionRegistered &&
+                !liveState.backAction.hasValue())
+            {
+                ++flowActionCallbackOperationDepth;
+                liveState.backAction = std::move(callback);
+                --flowActionCallbackOperationDepth;
+            }
+        }
+        return UIFlowActionRouteResult{
+            .consumed = true,
+            .invoked = true,
+            .screen = UIFlowScreenId{targetScreen},
+        };
     }
 
     [[nodiscard]] Core::Result<UIDefaultActionResult>
@@ -16004,6 +16790,21 @@ struct UIContext::Impl final {
                     .lastSampledTrackCount = motionTrackStorage.lastSampledCount(),
                     .reducedMotion = reducedMotionEnabled,
                 },
+            .flow =
+                {
+                    .layerCapacity = capacityConfig.flowLayerCapacity,
+                    .registeredLayerCount = registeredFlowLayerCount,
+                    .layerHighWater = flowLayerHighWater,
+                    .screenCapacity = capacityConfig.flowScreenCapacity,
+                    .registeredScreenCount = registeredFlowScreenCount,
+                    .screenHighWater = flowScreenHighWater,
+                    .stackedScreenCount = stackedFlowScreenCount,
+                    .stackHighWater = flowStackHighWater,
+                    .registeredActionCount = registeredFlowActionCount,
+                    .actionHighWater = flowActionHighWater,
+                    .actionInvocationCount = flowActionInvocationCount,
+                    .capacityFailureCount = flowCapacityFailureCount,
+                },
         };
     }
 };
@@ -16368,6 +17169,89 @@ UITreeUpdater::beginBuildTransaction(UINodeId parent, const UIElementDescriptor&
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->beginBuildTransactionFromUpdater(m_root, parent, rootDescriptor, budget);
+}
+
+Core::Result<UIFlowLayerId> UITreeUpdater::registerFlowLayer(UINodeId layer)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->registerFlowLayerFromUpdater(m_root, layer);
+}
+
+Core::Result<UIFlowScreenId> UITreeUpdater::registerFlowScreen(UIFlowLayerId layer, UINodeId screen)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->registerFlowScreenFromUpdater(m_root, layer, screen);
+}
+
+Core::Status UITreeUpdater::pushFlowScreen(UIFlowScreenId screen)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->pushFlowScreenFromUpdater(m_root, screen);
+}
+
+Core::Result<UIFlowScreenId> UITreeUpdater::popFlowScreen(UIFlowLayerId layer)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->popFlowScreenFromUpdater(m_root, layer);
+}
+
+Core::Result<UIFlowScreenId> UITreeUpdater::replaceFlowScreen(UIFlowScreenId screen)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->replaceFlowScreenFromUpdater(m_root, screen);
+}
+
+Core::Result<UIFlowScreenId> UITreeUpdater::activeFlowScreen(UIFlowLayerId layer) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->activeFlowScreenFromUpdater(m_root, layer);
+}
+
+Core::Result<bool> UITreeUpdater::isFlowScreenActive(UIFlowScreenId screen) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isFlowScreenActiveFromUpdater(m_root, screen);
+}
+
+Core::Status UITreeUpdater::setFlowScreenAction(UIFlowScreenId screen, UIFlowAction action,
+                                                UIFlowActionCallback callback)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setFlowScreenActionFromUpdater(m_root, screen, action,
+                                                      std::move(callback));
+}
+
+Core::Status UITreeUpdater::clearFlowScreenAction(UIFlowScreenId screen, UIFlowAction action)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->clearFlowScreenActionFromUpdater(m_root, screen, action);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -17644,6 +18528,15 @@ UIContext::routeDefaultActionRelease(Platform::PlatformFrameId platformFrame, u6
     return m_impl->routeDefaultActionRelease(platformFrame, sourceSequence, source, control);
 }
 
+Core::Result<UIFlowActionRouteResult>
+UIContext::routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                           UIFlowAction action, UIFlowActionSource source, bool pressed,
+                           const Platform::DigitalControlIdentity& control)
+{
+    return m_impl->routeFlowAction(platformFrame, sourceSequence, action, source, pressed,
+                                   control);
+}
+
 Core::Result<UIContext::UIDefaultFocusStepResult> UIContext::routeDefaultActionFocusStep(bool reverse)
 {
     return m_impl->routeDefaultActionFocusStep(reverse);
@@ -17821,6 +18714,61 @@ Core::Result<UINodeId> UIContext::createElementFromUpdater(UINodeId updaterRoot,
                                                            const UIElementDescriptor& descriptor)
 {
     return m_impl->createElementFromUpdater(updaterRoot, parent, descriptor);
+}
+
+Core::Result<UIFlowLayerId> UIContext::registerFlowLayerFromUpdater(UINodeId updaterRoot, UINodeId layer)
+{
+    return m_impl->registerFlowLayerFromUpdater(updaterRoot, layer);
+}
+
+Core::Result<UIFlowScreenId> UIContext::registerFlowScreenFromUpdater(UINodeId updaterRoot,
+                                                                      UIFlowLayerId layer, UINodeId screen)
+{
+    return m_impl->registerFlowScreenFromUpdater(updaterRoot, layer, screen);
+}
+
+Core::Status UIContext::pushFlowScreenFromUpdater(UINodeId updaterRoot, UIFlowScreenId screen)
+{
+    return m_impl->pushFlowScreenFromUpdater(updaterRoot, screen);
+}
+
+Core::Result<UIFlowScreenId> UIContext::popFlowScreenFromUpdater(UINodeId updaterRoot, UIFlowLayerId layer)
+{
+    return m_impl->popFlowScreenFromUpdater(updaterRoot, layer);
+}
+
+Core::Result<UIFlowScreenId> UIContext::replaceFlowScreenFromUpdater(UINodeId updaterRoot,
+                                                                     UIFlowScreenId screen)
+{
+    return m_impl->replaceFlowScreenFromUpdater(updaterRoot, screen);
+}
+
+Core::Result<UIFlowScreenId> UIContext::activeFlowScreenFromUpdater(UINodeId updaterRoot,
+                                                                    UIFlowLayerId layer) const
+{
+    return m_impl->activeFlowScreenFromUpdater(updaterRoot, layer);
+}
+
+Core::Result<bool> UIContext::isFlowScreenActiveFromUpdater(UINodeId updaterRoot,
+                                                            UIFlowScreenId screen) const
+{
+    return m_impl->isFlowScreenActiveFromUpdater(updaterRoot, screen);
+}
+
+Core::Status UIContext::setFlowScreenActionFromUpdater(UINodeId updaterRoot,
+                                                       UIFlowScreenId screen,
+                                                       UIFlowAction action,
+                                                       UIFlowActionCallback&& callback)
+{
+    return m_impl->setFlowScreenActionFromUpdater(updaterRoot, screen, action,
+                                                  std::move(callback));
+}
+
+Core::Status UIContext::clearFlowScreenActionFromUpdater(UINodeId updaterRoot,
+                                                         UIFlowScreenId screen,
+                                                         UIFlowAction action)
+{
+    return m_impl->clearFlowScreenActionFromUpdater(updaterRoot, screen, action);
 }
 
 Core::Result<UIElementBuildTransaction>

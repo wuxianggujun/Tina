@@ -18,6 +18,7 @@
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIFocus.hpp>
+#include <tina/ui/UIFlow.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
@@ -161,6 +162,7 @@ struct UIContextStatistics final {
     UIStyleStatistics style{};
     UIComponentBuildStatistics componentBuild{};
     UIMotionStatistics motion{};
+    UIFlowStatistics flow{};
 };
 
 class UIContext;
@@ -298,6 +300,19 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UIElementBuildTransaction>
     beginBuildTransaction(UINodeId parent, const UIElementDescriptor& rootDescriptor,
                           UIComponentBuildBudget budget);
+    // A Layer is a direct child of this updater's root. A Screen is a direct
+    // child of its Layer and starts inactive. Only the stack top is published;
+    // inactive Screens behave as Collapsed without rewriting authored style.
+    [[nodiscard]] Core::Result<UIFlowLayerId> registerFlowLayer(UINodeId layer);
+    [[nodiscard]] Core::Result<UIFlowScreenId> registerFlowScreen(UIFlowLayerId layer, UINodeId screen);
+    [[nodiscard]] Core::Status pushFlowScreen(UIFlowScreenId screen);
+    [[nodiscard]] Core::Result<UIFlowScreenId> popFlowScreen(UIFlowLayerId layer);
+    [[nodiscard]] Core::Result<UIFlowScreenId> replaceFlowScreen(UIFlowScreenId screen);
+    [[nodiscard]] Core::Result<UIFlowScreenId> activeFlowScreen(UIFlowLayerId layer) const;
+    [[nodiscard]] Core::Result<bool> isFlowScreenActive(UIFlowScreenId screen) const;
+    [[nodiscard]] Core::Status setFlowScreenAction(UIFlowScreenId screen, UIFlowAction action,
+                                                   UIFlowActionCallback callback);
+    [[nodiscard]] Core::Status clearFlowScreenAction(UIFlowScreenId screen, UIFlowAction action);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UINodeId node, UIPointerHitPolicy policy);
@@ -561,9 +576,9 @@ class UIContext final {
     // Clears retained Primary Pointer interaction state for the matching
     // Window without synthesizing an Up event or invoking a Button action.
     [[nodiscard]] Core::Status cancelPointerInteraction(Platform::WindowId routedWindow);
-    // Clears a disconnected gamepad's default-action press without releasing
-    // another keyboard/gamepad control. A missing gamepad clears all default
-    // action controls for the window.
+    // Clears a disconnected gamepad's default-action and Flow-action presses
+    // without releasing another control. A missing gamepad clears every
+    // matching digital UI-action control for the window.
     [[nodiscard]] Core::Status
     cancelDefaultActionInteraction(Platform::WindowId routedWindow,
                                    std::optional<Platform::GamepadId> gamepad = std::nullopt);
@@ -584,6 +599,13 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIDefaultActionResult>
     routeDefaultActionRelease(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
                               UIButtonActivationSource source, const Platform::DigitalControlIdentity& control);
+    // Routes Back to the topmost committed active Flow Screen. A handled Down
+    // invokes its callback once and claims the exact physical control; the
+    // matching Up remains consumed even if the Screen has since been popped.
+    [[nodiscard]] Core::Result<UIFlowActionRouteResult>
+    routeFlowAction(Platform::PlatformFrameId platformFrame, u64 sourceSequence,
+                    UIFlowAction action, UIFlowActionSource source, bool pressed,
+                    const Platform::DigitalControlIdentity& control);
     // Cycles keyboard focus among visible Targetable Button/Checkbox/RadioButton/TextEdit nodes in paint
     // order. reverse=true moves backward (Shift+Tab). A committed Contain
     // Focus Scope, including Modal, keeps traversal inside its subtree.
@@ -666,6 +688,24 @@ class UIContext final {
     [[nodiscard]] Core::Result<UINodeId> createElement(UINodeId parent, const UIElementDescriptor& descriptor);
     [[nodiscard]] Core::Result<UINodeId> createElementFromUpdater(UINodeId updaterRoot, UINodeId parent,
                                                                   const UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<UIFlowLayerId> registerFlowLayerFromUpdater(UINodeId updaterRoot, UINodeId layer);
+    [[nodiscard]] Core::Result<UIFlowScreenId>
+    registerFlowScreenFromUpdater(UINodeId updaterRoot, UIFlowLayerId layer, UINodeId screen);
+    [[nodiscard]] Core::Status pushFlowScreenFromUpdater(UINodeId updaterRoot, UIFlowScreenId screen);
+    [[nodiscard]] Core::Result<UIFlowScreenId>
+    popFlowScreenFromUpdater(UINodeId updaterRoot, UIFlowLayerId layer);
+    [[nodiscard]] Core::Result<UIFlowScreenId>
+    replaceFlowScreenFromUpdater(UINodeId updaterRoot, UIFlowScreenId screen);
+    [[nodiscard]] Core::Result<UIFlowScreenId>
+    activeFlowScreenFromUpdater(UINodeId updaterRoot, UIFlowLayerId layer) const;
+    [[nodiscard]] Core::Result<bool>
+    isFlowScreenActiveFromUpdater(UINodeId updaterRoot, UIFlowScreenId screen) const;
+    [[nodiscard]] Core::Status
+    setFlowScreenActionFromUpdater(UINodeId updaterRoot, UIFlowScreenId screen,
+                                   UIFlowAction action, UIFlowActionCallback&& callback);
+    [[nodiscard]] Core::Status
+    clearFlowScreenActionFromUpdater(UINodeId updaterRoot, UIFlowScreenId screen,
+                                     UIFlowAction action);
     [[nodiscard]] Core::Result<UIElementBuildTransaction>
     beginBuildTransactionFromUpdater(UINodeId updaterRoot, UINodeId parent,
                                      const UIElementDescriptor& rootDescriptor,

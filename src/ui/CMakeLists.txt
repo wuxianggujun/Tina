@@ -25,6 +25,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIAccessibility.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContext.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContextConfig.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIFlow.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIElement.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIEventRouting.hpp

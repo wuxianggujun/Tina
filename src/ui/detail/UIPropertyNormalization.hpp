@@ -34,6 +34,8 @@ struct NormalizedUIContextCapacityConfig final {
     usize styleRulesPerBucketCapacity = 0;
     usize nodeStyleClassLinkCapacity = 0;
     usize motionTrackCapacity = 0;
+    usize flowLayerCapacity = 0;
+    usize flowScreenCapacity = 0;
     bool applyDefaultProductChrome = true;
 };
 

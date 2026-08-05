@@ -34,5 +34,9 @@ inline constexpr Core::ErrorCode InvalidAccessibilityAction{Core::ErrorDomain::U
 inline constexpr Core::ErrorCode InvalidElementDescriptor{Core::ErrorDomain::UI, 26};
 inline constexpr Core::ErrorCode BuildTransactionInProgress{Core::ErrorDomain::UI, 27};
 inline constexpr Core::ErrorCode InvalidStyle{Core::ErrorDomain::UI, 28};
+inline constexpr Core::ErrorCode InvalidFlowLayer{Core::ErrorDomain::UI, 29};
+inline constexpr Core::ErrorCode InvalidFlowScreen{Core::ErrorDomain::UI, 30};
+inline constexpr Core::ErrorCode InvalidFlowOperation{Core::ErrorDomain::UI, 31};
+inline constexpr Core::ErrorCode InvalidFlowAction{Core::ErrorDomain::UI, 32};
 
 } // namespace Tina::UI::UIErrorCode

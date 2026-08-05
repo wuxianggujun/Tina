@@ -54,6 +54,7 @@ add_executable(tina_ui_tests
     UIInputRouteTests.cpp
     UIFocusModalTests.cpp
     UIFocusNavigationTests.cpp
+    UIFlowTests.cpp
     UIPointerRouteInspectionTests.cpp
     UIPointerRoutePathTests.cpp
     UIPointerCaptureTests.cpp
@@ -109,6 +110,7 @@ add_executable(tina_ui_tests
     header_isolation/UIErrorsHeader.cpp
     header_isolation/UIEventRoutingHeader.cpp
     header_isolation/UIFocusHeader.cpp
+    header_isolation/UIFlowHeader.cpp
     header_isolation/UIHitTestHeader.cpp
     header_isolation/UIImageHeader.cpp
     header_isolation/UIImageSourceHeader.cpp

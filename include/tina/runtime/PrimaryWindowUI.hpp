@@ -115,6 +115,19 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<bool> isAlive(UI::UINodeId node) const;
     [[nodiscard]] Core::Result<UI::UINodeId> createElement(UI::UINodeId parent,
                                                           const UI::UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<UI::UIFlowLayerId> registerFlowLayer(UI::UINodeId layer);
+    [[nodiscard]] Core::Result<UI::UIFlowScreenId>
+    registerFlowScreen(UI::UIFlowLayerId layer, UI::UINodeId screen);
+    [[nodiscard]] Core::Status pushFlowScreen(UI::UIFlowScreenId screen);
+    [[nodiscard]] Core::Result<UI::UIFlowScreenId> popFlowScreen(UI::UIFlowLayerId layer);
+    [[nodiscard]] Core::Result<UI::UIFlowScreenId> replaceFlowScreen(UI::UIFlowScreenId screen);
+    [[nodiscard]] Core::Result<UI::UIFlowScreenId> activeFlowScreen(UI::UIFlowLayerId layer) const;
+    [[nodiscard]] Core::Result<bool> isFlowScreenActive(UI::UIFlowScreenId screen) const;
+    [[nodiscard]] Core::Status setFlowScreenAction(UI::UIFlowScreenId screen,
+                                                   UI::UIFlowAction action,
+                                                   UI::UIFlowActionCallback callback);
+    [[nodiscard]] Core::Status clearFlowScreenAction(UI::UIFlowScreenId screen,
+                                                     UI::UIFlowAction action);
     [[nodiscard]] Core::Result<PrimaryWindowUIBuildTransaction>
     beginBuildTransaction(UI::UINodeId parent,
                           const UI::UIElementDescriptor& rootDescriptor,

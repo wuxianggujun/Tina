@@ -57,6 +57,33 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<UI::UINodeId>
     createElement(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
                   const UI::UIElementDescriptor& descriptor);
+    [[nodiscard]] Core::Result<UI::UIFlowLayerId>
+    registerFlowLayer(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId layer);
+    [[nodiscard]] Core::Result<UI::UIFlowScreenId>
+    registerFlowScreen(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                       UI::UIFlowLayerId layer, UI::UINodeId screen);
+    [[nodiscard]] Core::Status
+    pushFlowScreen(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                   UI::UIFlowScreenId screen);
+    [[nodiscard]] Core::Result<UI::UIFlowScreenId>
+    popFlowScreen(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                  UI::UIFlowLayerId layer);
+    [[nodiscard]] Core::Result<UI::UIFlowScreenId>
+    replaceFlowScreen(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                      UI::UIFlowScreenId screen);
+    [[nodiscard]] Core::Result<UI::UIFlowScreenId>
+    activeFlowScreen(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                     UI::UIFlowLayerId layer);
+    [[nodiscard]] Core::Result<bool>
+    isFlowScreenActive(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                       UI::UIFlowScreenId screen);
+    [[nodiscard]] Core::Status
+    setFlowScreenAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                        UI::UIFlowScreenId screen, UI::UIFlowAction action,
+                        UI::UIFlowActionCallback callback);
+    [[nodiscard]] Core::Status
+    clearFlowScreenAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                          UI::UIFlowScreenId screen, UI::UIFlowAction action);
     [[nodiscard]] Core::Result<PrimaryWindowUIBuildTransaction>
     beginBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                           UI::UINodeId parent, const UI::UIElementDescriptor& rootDescriptor,
