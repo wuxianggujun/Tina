@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <exception>
 #include <filesystem>
-#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -251,9 +250,45 @@ Core::Status AssetSystem::bindCatalog(std::string_view catalogRootUtf8, CatalogS
 
 bool AssetSystem::isCatalogReloadIdle() const noexcept
 {
-    return m_queue.empty() && m_inFlight.load(std::memory_order_acquire) == 0U && m_store.activeCount() == 0U &&
-           m_index.empty() && (m_gpuUpload == nullptr || m_gpuUpload->trackedCount() == 0U) &&
-           m_retirement.liveCount() == 0U;
+    return m_queue.empty() && m_asyncRequests.empty() && m_inFlight.load(std::memory_order_acquire) == 0U &&
+           m_store.activeCount() == 0U && m_index.empty() &&
+           (m_gpuUpload == nullptr || m_gpuUpload->trackedCount() == 0U) && m_retirement.liveCount() == 0U;
+}
+
+void AssetSystem::prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
+                                           bool requireFullValidation) const noexcept
+{
+    if (config.manifest.catalog.memoryResource == nullptr)
+    {
+        config.manifest.catalog.memoryResource = m_memoryResource;
+    }
+    if (config.manifest.catalog.maxEntries == 0U)
+    {
+        config.manifest.catalog.maxEntries = 1024U;
+    }
+    if (config.manifest.catalog.maxDependencies == 0U)
+    {
+        config.manifest.catalog.maxDependencies = 4096U;
+    }
+    if (config.manifest.catalog.maxDependenciesPerAsset == 0U)
+    {
+        config.manifest.catalog.maxDependenciesPerAsset = 64U;
+    }
+    if (config.validation.file.memoryResource == nullptr)
+    {
+        config.validation.file.memoryResource = m_memoryResource;
+    }
+    if (requireFullValidation)
+    {
+        config.validateOnOpen = true;
+        config.validation.verifyContent = true;
+    }
+    if (m_requireTyped2dPayloads)
+    {
+        config.validateOnOpen = true;
+        config.validation.verifyContent = true;
+        config.validation.verifyTypedPayload = true;
+    }
 }
 
 Core::Status AssetSystem::commitCatalogWhenIdle(std::string_view catalogRootUtf8, CatalogSnapshot catalog)
@@ -312,31 +347,7 @@ Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8
                              "catalog reload requires an idle AssetSystem");
     }
 
-    if (config.package.manifest.catalog.memoryResource == nullptr)
-    {
-        config.package.manifest.catalog.memoryResource = m_memoryResource;
-    }
-    if (config.package.manifest.catalog.maxEntries == 0U)
-    {
-        config.package.manifest.catalog.maxEntries = 1024U;
-    }
-    if (config.package.manifest.catalog.maxDependencies == 0U)
-    {
-        config.package.manifest.catalog.maxDependencies = 4096U;
-    }
-    if (config.package.manifest.catalog.maxDependenciesPerAsset == 0U)
-    {
-        config.package.manifest.catalog.maxDependenciesPerAsset = 64U;
-    }
-    if (config.package.validation.file.memoryResource == nullptr)
-    {
-        config.package.validation.file.memoryResource = m_memoryResource;
-    }
-    if (m_requireTyped2dPayloads)
-    {
-        config.package.validation.verifyContent = true;
-        config.package.validation.verifyTypedPayload = true;
-    }
+    prepareCatalogOpenConfig(config.package, true);
 
     auto replacement = openCatalogPackage(catalogRootUtf8, config.package);
     if (!replacement)
@@ -348,16 +359,7 @@ Core::Status AssetSystem::reloadCatalogWhenIdle(std::string_view catalogRootUtf8
     {
         config.changePlan.memoryResource = m_memoryResource;
     }
-    if (config.changePlan.maxChanges == 0U)
-    {
-        if (m_catalog->entryCount() > (std::numeric_limits<Core::u32>::max)() - replacement->entryCount())
-        {
-            return Core::failure(AssetErrorCode::CatalogCapacityExceeded,
-                                 "catalog reload change count overflow");
-        }
-        config.changePlan.maxChanges = m_catalog->entryCount() + replacement->entryCount();
-    }
-    auto plan = planCatalogChanges(*m_catalog, *replacement, config.changePlan);
+    auto plan = planCatalogChanges(m_catalog, *replacement, config.changePlan);
     if (!plan)
     {
         return Core::failure(std::move(plan.error()).withContext("AssetSystem::reloadCatalogWhenIdle", "plan"));
@@ -372,32 +374,7 @@ Core::Status AssetSystem::openAndBindCatalog(std::string_view catalogRootUtf8, C
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset system has no memory resource");
     }
-    if (openConfig.manifest.catalog.memoryResource == nullptr)
-    {
-        openConfig.manifest.catalog.memoryResource = m_memoryResource;
-    }
-    // Provide sane defaults when caller left zeros (common for {} openConfig).
-    if (openConfig.manifest.catalog.maxEntries == 0)
-    {
-        openConfig.manifest.catalog.maxEntries = 1024;
-    }
-    if (openConfig.manifest.catalog.maxDependencies == 0)
-    {
-        openConfig.manifest.catalog.maxDependencies = 4096;
-    }
-    if (openConfig.manifest.catalog.maxDependenciesPerAsset == 0)
-    {
-        openConfig.manifest.catalog.maxDependenciesPerAsset = 64;
-    }
-    if (openConfig.validation.file.memoryResource == nullptr)
-    {
-        openConfig.validation.file.memoryResource = m_memoryResource;
-    }
-    if (m_requireTyped2dPayloads)
-    {
-        openConfig.validation.verifyContent = true;
-        openConfig.validation.verifyTypedPayload = true;
-    }
+    prepareCatalogOpenConfig(openConfig, false);
     auto catalog = openCatalogPackage(catalogRootUtf8, openConfig);
     if (!catalog)
     {

@@ -78,9 +78,11 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 结果和 scratch storage 都使用该 PMR；容量或分配失败只返回 `Core::Error`，不发布部分 plan。结果 PMR
 必须覆盖 `CatalogChangePlan` 生命周期。
 
-这一步只回答“两个已验证 Catalog 有什么变化、哪些新条目需要后续处理”。文件监听、source import
-metadata、增量 recook、staging package 验证、live Handle/Lease/GPU retirement 编排以及最终 Catalog
-commit 都不属于 planner，必须由后续事务切片完成。
+这一步只回答“两个已验证 Catalog 有什么变化、哪些新条目需要后续处理”，planner 本身不提交状态。
+`AssetSystem::reloadCatalogWhenIdle()` 已在其上增加保守的 root 事务：强制完整打开/验证候选 package，生成
+change plan，并仅在 owner thread 且 queue、IO、Store、GPU upload 与 retirement 全部 idle 时原子替换
+root/Catalog。文件监听、source import metadata、增量 recook/staging 生成，以及 live Handle/Lease/GPU owner
+迁移仍必须由后续事务切片完成。
 
 ## 身份、视图与所有权
 
@@ -283,9 +285,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
-- `ASSET-002` 已有 immutable Catalog change planner；文件监听、增量 Cooker、staging package 到 live
-  Catalog/Handle/Lease/GPU retirement 的事务提交仍未实现。通用 Asset cache/LRU、Bundle/Patch 与
-  network Asset 也尚未实现；
+- `ASSET-002` 已有 immutable Catalog change planner 与 idle-safe root/Catalog commit；文件监听、增量
+  Cooker、staging package 生成，以及 active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
+  Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重
   resolve/pin，并复用 Sprite/UI 共用 `Texture2D` kind/binding；Canvas NineSlice 展开后的1..9个 quad

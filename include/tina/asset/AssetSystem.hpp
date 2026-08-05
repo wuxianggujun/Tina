@@ -15,6 +15,7 @@
 #include <tina/task/TaskSystem.hpp>
 
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -64,7 +65,9 @@ struct AssetPumpStats final {
 
 struct CatalogReloadConfig final {
     CatalogPackageOpenConfig package{};
-    CatalogChangePlanConfig changePlan{};
+    CatalogChangePlanConfig changePlan{
+        .maxChanges = (std::numeric_limits<Core::u32>::max)(),
+    };
 };
 
 // Catalog-bound CPU/GPU-logical asset facade.
@@ -177,6 +180,8 @@ class AssetSystem final {
 
     void forgetHandle(AssetHandle handle) noexcept;
     [[nodiscard]] bool isCatalogReloadIdle() const noexcept;
+    void prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
+                                  bool requireFullValidation) const noexcept;
     [[nodiscard]] Core::Status commitCatalogWhenIdle(std::string_view catalogRootUtf8,
                                                       CatalogSnapshot catalog);
     [[nodiscard]] std::optional<Core::u32> findIndex(Core::AssetId assetId) const noexcept;

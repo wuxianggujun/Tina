@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory_resource>
+#include <new>
 #include <span>
 #include <utility>
 #include <vector>
@@ -34,6 +35,36 @@ struct EntrySpec final {
     Core::u16 typeVersion = 1;
     Core::u64 cookedFileBytes = 64;
     std::vector<DependencySpec> dependencies{};
+};
+
+class RejectingMemoryResource final : public std::pmr::memory_resource {
+  public:
+    explicit RejectingMemoryResource(std::size_t rejectedAllocationMinimumBytes) noexcept
+        : m_rejectedAllocationMinimumBytes(rejectedAllocationMinimumBytes)
+    {
+    }
+
+  private:
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    {
+        if (bytes >= m_rejectedAllocationMinimumBytes)
+        {
+            throw std::bad_alloc{};
+        }
+        return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void* allocation, std::size_t bytes, std::size_t alignment) override
+    {
+        std::pmr::new_delete_resource()->deallocate(allocation, bytes, alignment);
+    }
+
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override
+    {
+        return this == &other;
+    }
+
+    std::size_t m_rejectedAllocationMinimumBytes = 0;
 };
 
 [[nodiscard]] Core::ContentHash contentHash(Core::u8 seed)
@@ -299,9 +330,10 @@ TEST(CatalogChangePlanTests, RejectsInvalidInputsAndMapsAllocationFailure)
     ASSERT_FALSE(nullResource.has_value());
     EXPECT_EQ(nullResource.error().code, AssetErrorCode::InvalidCatalogConfig);
 
+    RejectingMemoryResource rejectingMemory{sizeof(CatalogChange) * 2U};
     auto allocationFailure = planCatalogChanges(
         oldCatalog, newCatalog,
-        CatalogChangePlanConfig{.memoryResource = std::pmr::null_memory_resource(), .maxChanges = 2U});
+        CatalogChangePlanConfig{.memoryResource = &rejectingMemory, .maxChanges = 2U});
     ASSERT_FALSE(allocationFailure.has_value());
     EXPECT_EQ(allocationFailure.error().code, AssetErrorCode::AllocationFailed);
 }

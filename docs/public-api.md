@@ -499,8 +499,9 @@ symlink/junction 保持可用，逃逸、读取期间身份/size/time 变化或�
 直接变化优先。调用方显式提供 PMR 与 `maxChanges`，该 PMR 必须覆盖结果生命周期；容量或分配失败不返回
 部分 plan。planner 不绑定 Catalog、不使 Handle 失效，也不取得 AssetSystem/Lease/GPU owner。
 
-`AssetSystem::reloadCatalogWhenIdle(root, config)` 是同步、owner-thread-only 的 root reload API。它打开并验证
-新的 Catalog package，使用 `config.changePlan` 调用上述 planner，并仅在 AssetSystem idle boundary 提交：pending
+`AssetSystem::reloadCatalogWhenIdle(root, config)` 是同步、owner-thread-only 的 root reload API。它强制完整打开并
+验证新的 Catalog package（reload 路径不会接受关闭 on-disk/content validation），使用 `config.changePlan` 调用
+上述 planner，并仅在 AssetSystem idle boundary 提交：pending
 queue、in-flight IO、active handles、tracked GPU uploads、以及 retirement records 都必须为空。成功后 root 与
 immutable Catalog 一起原子替换；open、validation、planning 或 commit 分配失败都保留旧 root/Catalog。已有 Catalog
 时，`bindCatalog()` 同样受 idle 门禁约束，不能绕过 reload API；非 owner thread 返回 `WrongOwnerThread`，非空工作

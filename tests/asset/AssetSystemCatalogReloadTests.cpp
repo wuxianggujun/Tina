@@ -1,11 +1,14 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/CatalogPackage.hpp>
+#include <tina/core/hash/ContentHashDigest.hpp>
 
 #include "support/CatalogPackageTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <memory_resource>
 #include <string>
 #include <thread>
@@ -17,6 +20,31 @@ using TestSupport::removePackage;
 using TestSupport::toUtf8;
 using TestSupport::TrackingMemoryResource;
 using TestSupport::writeTextureMaterialPackage;
+
+void rewriteTexturePayload(TestSupport::TextureMaterialPackage& package,
+                           const std::array<std::byte, 4>& payload)
+{
+    const auto digest = Core::digestContentHashV1(payload);
+    ASSERT_TRUE(digest.has_value());
+
+    constexpr Core::u32 PayloadAlignment = 16U;
+    const auto payloadOffset = TestSupport::alignUp(AssetFormat::Wire::CookedAssetHeaderBytes,
+                                                    PayloadAlignment);
+    TestSupport::putFixed(package.textureBytes, 48U, digest->bytes());
+    TestSupport::putFixed(package.textureBytes, static_cast<Core::usize>(payloadOffset), payload);
+
+    const auto artifact = AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D,
+                                                               package.textureId);
+    ASSERT_TRUE(artifact.has_value());
+    TestSupport::writeBytes(
+        package.root / Tina::TestSupport::pathFromUtf8Bytes(artifact->view()),
+        package.textureBytes);
+    TestSupport::writeBytes(
+        package.root / "manifest.tmnft",
+        TestSupport::makeTextureMaterialManifest(package.textureBytes.size(), *digest,
+                                                 package.materialBytes.size(),
+                                                 TestSupport::defaultPayloadHash()));
+}
 
 [[nodiscard]] Core::Result<CatalogSnapshot> openCatalog(TrackingMemoryResource& resource,
                                                         const TestSupport::TextureMaterialPackage& package)
@@ -118,7 +146,10 @@ TEST(AssetSystemCatalogReloadTests, ValidationFailureLeavesExistingBindingUntouc
     ASSERT_TRUE(system->bindCatalog(toUtf8(package.root), std::move(*initialCatalog)).has_value());
     const auto originalRoot = system->catalogRoot();
 
-    auto status = system->reloadCatalogWhenIdle(toUtf8(invalidPackage.root));
+    CatalogReloadConfig reloadConfig{};
+    reloadConfig.package.validateOnOpen = false;
+    reloadConfig.package.validation.verifyContent = false;
+    auto status = system->reloadCatalogWhenIdle(toUtf8(invalidPackage.root), reloadConfig);
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, Core::CoreErrorCode::NotFound);
     EXPECT_EQ(system->catalogRoot(), originalRoot);
@@ -127,6 +158,34 @@ TEST(AssetSystemCatalogReloadTests, ValidationFailureLeavesExistingBindingUntouc
 
     removePackage(package);
     removePackage(invalidPackage);
+}
+
+TEST(AssetSystemCatalogReloadTests, ChangePlanCapacityFailurePreservesExistingBinding)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTextureMaterialPackage("tina_asset_system_idle_reload_plan_capacity");
+    auto replacementPackage =
+        writeTextureMaterialPackage("tina_asset_system_idle_reload_plan_capacity_new");
+    rewriteTexturePayload(replacementPackage,
+                          {std::byte{0x51}, std::byte{0x62}, std::byte{0x73}, std::byte{0x84}});
+    auto system = makeSystem(resource);
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    auto initialCatalog = openCatalog(resource, package);
+    ASSERT_TRUE(initialCatalog.has_value()) << initialCatalog.error().message;
+    ASSERT_TRUE(system->bindCatalog(toUtf8(package.root), std::move(*initialCatalog)).has_value());
+
+    CatalogReloadConfig reloadConfig{};
+    reloadConfig.changePlan.maxChanges = 1U;
+    auto status = system->reloadCatalogWhenIdle(toUtf8(replacementPackage.root), reloadConfig);
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, AssetErrorCode::CatalogCapacityExceeded);
+    EXPECT_EQ(system->catalogRoot(), toUtf8(package.root));
+    ASSERT_NE(system->catalog(), nullptr);
+    EXPECT_EQ(system->catalog()->entryCount(), 2U);
+
+    removePackage(package);
+    removePackage(replacementPackage);
 }
 
 TEST(AssetSystemCatalogReloadTests, RejectsReloadFromNonOwnerThread)
