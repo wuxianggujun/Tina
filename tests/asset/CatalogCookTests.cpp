@@ -1,3 +1,4 @@
+#include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset/CatalogChangePlan.hpp>
 #include <tina/asset/CatalogCook.hpp>
@@ -5,6 +6,7 @@
 #include <tina/asset/CatalogPackageLoad.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
+#include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/io/WriteFile.hpp>
 
@@ -12,7 +14,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <filesystem>
 #include <memory_resource>
 #include <span>
@@ -91,6 +92,76 @@ void removeDirectory(const std::filesystem::path& path)
 {
     std::error_code errorCode;
     std::filesystem::remove_all(path, errorCode);
+}
+
+[[nodiscard]] std::vector<std::byte> makeMonoPcm16Wav()
+{
+    constexpr Core::u32 SampleRate = 8000U;
+    constexpr Core::u16 Channels = 1U;
+    constexpr Core::u16 BitsPerSample = 16U;
+    constexpr std::array<Core::i16, 8> Samples{0, 8000, 16000, 8000, 0, -8000, -16000, -8000};
+    constexpr Core::u32 DataBytes = static_cast<Core::u32>(Samples.size() * sizeof(Core::i16));
+    constexpr Core::u32 FormatChunkBytes = 16U;
+    constexpr Core::u32 RiffBytes = 4U + (8U + FormatChunkBytes) + (8U + DataBytes);
+
+    std::vector<std::byte> wav;
+    wav.reserve(44U + DataBytes);
+    const auto appendText = [&](std::string_view text) {
+        const auto bytes = std::as_bytes(std::span(text.data(), text.size()));
+        wav.insert(wav.end(), bytes.begin(), bytes.end());
+    };
+    const auto appendU16 = [&](Core::u16 value) {
+        wav.push_back(static_cast<std::byte>(value & 0xFFU));
+        wav.push_back(static_cast<std::byte>((value >> 8U) & 0xFFU));
+    };
+    const auto appendU32 = [&](Core::u32 value) {
+        for (Core::u32 shift = 0U; shift < 32U; shift += 8U)
+        {
+            wav.push_back(static_cast<std::byte>((value >> shift) & 0xFFU));
+        }
+    };
+
+    appendText("RIFF");
+    appendU32(RiffBytes);
+    appendText("WAVE");
+    appendText("fmt ");
+    appendU32(FormatChunkBytes);
+    appendU16(1U);
+    appendU16(Channels);
+    appendU32(SampleRate);
+    appendU32(SampleRate * Channels * (BitsPerSample / 8U));
+    appendU16(static_cast<Core::u16>(Channels * (BitsPerSample / 8U)));
+    appendU16(BitsPerSample);
+    appendText("data");
+    appendU32(DataBytes);
+    for (const auto sample : Samples)
+    {
+        appendU16(static_cast<Core::u16>(sample));
+    }
+    return wav;
+}
+
+[[nodiscard]] constexpr std::array<std::byte, 16>
+catalogRecipeSettingsBytes(AssetFormat::TargetPlatform targetPlatform) noexcept
+{
+    return {
+        std::byte{'T'}, std::byte{'I'}, std::byte{'N'}, std::byte{'A'},
+        std::byte{'R'}, std::byte{'S'}, std::byte{'E'}, std::byte{'T'},
+        std::byte{1}, std::byte{0},
+        static_cast<std::byte>(static_cast<Core::u16>(targetPlatform) & 0xFFU),
+        static_cast<std::byte>((static_cast<Core::u16>(targetPlatform) >> 8U) & 0xFFU),
+        std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0},
+    };
+}
+
+[[nodiscard]] const SourceImportCapturedSource*
+findCapturedSource(const SourceImportCandidate& candidate, std::string_view path) noexcept
+{
+    const auto found = std::find_if(candidate.sources.begin(), candidate.sources.end(),
+                                    [path](const SourceImportCapturedSource& source) {
+                                        return source.path == path;
+                                    });
+    return found == candidate.sources.end() ? nullptr : &*found;
 }
 
 TEST(CatalogCookTests, CookAndPublishFromRequest)
@@ -867,6 +938,144 @@ TEST(CatalogCookTests, RecipeFileRoundTrip)
     std::filesystem::remove_all(dir, ec);
 }
 
+TEST(CatalogCookSourceTests, CapturesRecipeSharedGenericPayloadAndWavWithoutDuplicateSources)
+{
+    const auto root = std::filesystem::temp_directory_path() / "tina_catalog_recipe_sources";
+    removeDirectory(root);
+    std::error_code errorCode;
+    std::filesystem::create_directories(root / "payloads", errorCode);
+    ASSERT_FALSE(errorCode);
+    std::filesystem::create_directories(root / "audio", errorCode);
+    ASSERT_FALSE(errorCode);
+
+    const std::array payloadBytes{std::byte{'S'}, std::byte{'H'}, std::byte{'A'}, std::byte{'R'}, std::byte{'E'}};
+    const auto wavBytes = makeMonoPcm16Wav();
+    const auto payloadPath = root / "payloads" / "shared.bin";
+    const auto wavPath = root / "audio" / "click.wav";
+    const auto recipePath = root / "pack.recipe";
+    ASSERT_TRUE(Core::writeFile(toUtf8(payloadPath), payloadBytes).has_value());
+    ASSERT_TRUE(Core::writeFile(toUtf8(wavPath), wavBytes).has_value());
+
+    const auto shaderId = *Core::AssetId::fromBytes(idBytes(20U));
+    const auto fontId = *Core::AssetId::fromBytes(idBytes(21U));
+    const auto audioId = *Core::AssetId::fromBytes(idBytes(22U));
+    const auto shaderText = shaderId.canonicalText();
+    const auto fontText = fontId.canonicalText();
+    const auto audioText = audioId.canonicalText();
+    std::string recipe = "platform WindowsX64\nasset Shader ";
+    recipe.append(shaderText.data(), shaderText.size());
+    recipe += " payloads/shared.bin\nasset Font ";
+    recipe.append(fontText.data(), fontText.size());
+    recipe += " payloads/shared.bin\naudioclip ";
+    recipe.append(audioText.data(), audioText.size());
+    recipe += " file audio/click.wav\n";
+    const auto recipeBytes = std::as_bytes(std::span(recipe.data(), recipe.size()));
+    ASSERT_TRUE(Core::writeFile(toUtf8(recipePath), recipeBytes).has_value());
+
+    auto result = loadCatalogCookRecipeSourceFile(
+        toUtf8(recipePath),
+        SourceImportCaptureConfig{
+            .sourceRootUtf8 = toUtf8(root),
+            .maxSources = 8U,
+        });
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->request.assets.size(), 3U);
+    EXPECT_EQ(result->sourceImports.targetPlatform, AssetFormat::TargetPlatform::WindowsX64);
+    ASSERT_EQ(result->sourceImports.sources.size(), 3U);
+    ASSERT_EQ(result->sourceImports.units.size(), 1U);
+
+    const auto* recipeSource = findCapturedSource(result->sourceImports, "pack.recipe");
+    const auto* payloadSource = findCapturedSource(result->sourceImports, "payloads/shared.bin");
+    const auto* wavSource = findCapturedSource(result->sourceImports, "audio/click.wav");
+    ASSERT_NE(recipeSource, nullptr);
+    ASSERT_NE(payloadSource, nullptr);
+    ASSERT_NE(wavSource, nullptr);
+    const auto expectedRecipeHash = Core::digestContentHashV1(recipeBytes);
+    const auto expectedPayloadHash = Core::digestContentHashV1(payloadBytes);
+    const auto expectedWavHash = Core::digestContentHashV1(wavBytes);
+    ASSERT_TRUE(expectedRecipeHash.has_value());
+    ASSERT_TRUE(expectedPayloadHash.has_value());
+    ASSERT_TRUE(expectedWavHash.has_value());
+    EXPECT_EQ(recipeSource->contentHash, *expectedRecipeHash);
+    EXPECT_EQ(recipeSource->fileBytes, recipeBytes.size());
+    EXPECT_EQ(payloadSource->contentHash, *expectedPayloadHash);
+    EXPECT_EQ(payloadSource->fileBytes, payloadBytes.size());
+    EXPECT_EQ(wavSource->contentHash, *expectedWavHash);
+    EXPECT_EQ(wavSource->fileBytes, wavBytes.size());
+
+    const auto& unit = result->sourceImports.units.front();
+    EXPECT_EQ(unit.importerKind, SourceImporterKind::CatalogRecipe);
+    EXPECT_EQ(unit.importerVersion, 1U);
+    const auto expectedUnitId = deriveSourceImportUnitId(SourceImporterKind::CatalogRecipe, "pack.recipe");
+    const auto expectedSettingsHash =
+        digestSourceImportSettings(catalogRecipeSettingsBytes(AssetFormat::TargetPlatform::WindowsX64));
+    ASSERT_TRUE(expectedUnitId.has_value());
+    ASSERT_TRUE(expectedSettingsHash.has_value());
+    EXPECT_EQ(unit.unitId, *expectedUnitId);
+    EXPECT_EQ(unit.settingsHash, *expectedSettingsHash);
+    ASSERT_EQ(unit.inputs.size(), 3U);
+
+    Core::u32 primaryCount = 0U;
+    for (const auto& input : unit.inputs)
+    {
+        ASSERT_LT(input.sourceIndex, result->sourceImports.sources.size());
+        if (AssetFormat::hasSourceImportInputFlag(input.flags,
+                                                  AssetFormat::SourceImportInputFlags::Primary))
+        {
+            ++primaryCount;
+            EXPECT_EQ(result->sourceImports.sources[input.sourceIndex].path, "pack.recipe");
+        }
+    }
+    EXPECT_EQ(primaryCount, 1U);
+
+    ASSERT_EQ(unit.outputs.size(), result->request.assets.size());
+    for (const auto& asset : result->request.assets)
+    {
+        const auto output = std::find_if(unit.outputs.begin(), unit.outputs.end(),
+                                         [&asset](const SourceImportCapturedOutput& candidate) {
+                                             return candidate.assetId == asset.assetId &&
+                                                    candidate.assetKind == asset.assetKind;
+                                         });
+        EXPECT_NE(output, unit.outputs.end());
+    }
+
+    removeDirectory(root);
+}
+
+TEST(CatalogCookSourceTests, RejectsRecipeDependenciesOutsideExplicitSourceRoot)
+{
+    const auto parent = std::filesystem::temp_directory_path() / "tina_catalog_recipe_source_root";
+    const auto root = parent / "root";
+    const auto outsidePath = parent / "outside.bin";
+    const auto recipePath = root / "pack.recipe";
+    removeDirectory(parent);
+    std::error_code errorCode;
+    std::filesystem::create_directories(root, errorCode);
+    ASSERT_FALSE(errorCode);
+    constexpr std::array OutsideBytes{std::byte{'O'}, std::byte{'U'}, std::byte{'T'}};
+    ASSERT_TRUE(Core::writeFile(toUtf8(outsidePath), OutsideBytes).has_value());
+
+    const auto assetId = *Core::AssetId::fromBytes(idBytes(23U));
+    const auto assetText = assetId.canonicalText();
+    std::string recipe = "asset Shader ";
+    recipe.append(assetText.data(), assetText.size());
+    recipe += " ../outside.bin\n";
+    ASSERT_TRUE(Core::writeFile(toUtf8(recipePath),
+                                std::as_bytes(std::span(recipe.data(), recipe.size())))
+                    .has_value());
+
+    const auto result = loadCatalogCookRecipeSourceFile(
+        toUtf8(recipePath),
+        SourceImportCaptureConfig{
+            .sourceRootUtf8 = toUtf8(root),
+            .maxSources = 4U,
+        });
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, AssetErrorCode::InvalidCatalogConfig);
+
+    removeDirectory(parent);
+}
+
 TEST(CatalogCookTests, GenericEnvironmentMapRecipeUsesCurrentPayloadVersion)
 {
     std::pmr::unsynchronized_pool_resource memory;
@@ -1011,49 +1220,7 @@ TEST(CatalogCookTests, AudioClipFileWavRecipe)
     std::filesystem::create_directories(dir, ec);
     const auto wavPath = dir / "click.wav";
 
-    // Minimal mono 16-bit PCM WAV: 8 samples @ 8000 Hz.
-    constexpr std::uint32_t sampleRate = 8000;
-    constexpr std::uint16_t channels = 1;
-    constexpr std::uint16_t bitsPerSample = 16;
-    constexpr std::uint32_t dataBytes = 16;
-    constexpr std::uint32_t fmtChunkSize = 16;
-    constexpr std::uint32_t riffSize = 4 + (8 + fmtChunkSize) + (8 + dataBytes);
-    std::vector<std::byte> wav;
-    wav.reserve(44 + dataBytes);
-    const auto append = [&](const void* data, std::size_t size) {
-        const auto* begin = static_cast<const std::byte*>(data);
-        wav.insert(wav.end(), begin, begin + size);
-    };
-    const auto appendU16 = [&](std::uint16_t value) {
-        const std::uint8_t le[2] = {static_cast<std::uint8_t>(value & 0xFF),
-                                    static_cast<std::uint8_t>((value >> 8) & 0xFF)};
-        append(le, 2);
-    };
-    const auto appendU32 = [&](std::uint32_t value) {
-        const std::uint8_t le[4] = {static_cast<std::uint8_t>(value & 0xFF),
-                                    static_cast<std::uint8_t>((value >> 8) & 0xFF),
-                                    static_cast<std::uint8_t>((value >> 16) & 0xFF),
-                                    static_cast<std::uint8_t>((value >> 24) & 0xFF)};
-        append(le, 4);
-    };
-    append("RIFF", 4);
-    appendU32(riffSize);
-    append("WAVE", 4);
-    append("fmt ", 4);
-    appendU32(fmtChunkSize);
-    appendU16(1);
-    appendU16(channels);
-    appendU32(sampleRate);
-    appendU32(sampleRate * channels * (bitsPerSample / 8));
-    appendU16(static_cast<std::uint16_t>(channels * (bitsPerSample / 8)));
-    appendU16(bitsPerSample);
-    append("data", 4);
-    appendU32(dataBytes);
-    const std::int16_t samples[8] = {0, 8000, 16000, 8000, 0, -8000, -16000, -8000};
-    for (const std::int16_t sample : samples)
-    {
-        appendU16(static_cast<std::uint16_t>(sample));
-    }
+    const auto wav = makeMonoPcm16Wav();
     ASSERT_TRUE(Core::writeFile(toUtf8(wavPath), wav).has_value());
 
     std::string recipe;

@@ -30,6 +30,7 @@
 #include <filesystem>
 #include <memory_resource>
 #include <new>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -42,6 +43,61 @@ struct CookedPackage final {
     std::vector<CatalogPackageObjectBlob> objectViews{};
     std::vector<std::vector<std::byte>> objectStorage{};
 };
+
+struct RecipeSourceCaptureContext final {
+    SourceImportCandidate& candidate;
+    const SourceImportCaptureConfig& config;
+};
+
+inline constexpr Core::u32 CatalogRecipeImporterVersion = 1U;
+
+[[nodiscard]] constexpr std::array<std::byte, 16>
+canonicalCatalogRecipeSettings(AssetFormat::TargetPlatform targetPlatform) noexcept
+{
+    // TINARSET + little-endian settings schema 1 + little-endian TargetPlatform + zero reserved.
+    return {
+        std::byte{'T'}, std::byte{'I'}, std::byte{'N'}, std::byte{'A'},
+        std::byte{'R'}, std::byte{'S'}, std::byte{'E'}, std::byte{'T'},
+        std::byte{1}, std::byte{0},
+        static_cast<std::byte>(static_cast<Core::u16>(targetPlatform) & 0xFFU),
+        static_cast<std::byte>((static_cast<Core::u16>(targetPlatform) >> 8U) & 0xFFU),
+        std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0},
+    };
+}
+
+[[nodiscard]] Core::Status captureRecipeDependencyBytes(const RecipeSourceCaptureContext* capture,
+                                                        std::string_view sourceUtf8Path,
+                                                        std::span<const std::byte> consumedBytes)
+{
+    if (capture == nullptr)
+    {
+        return Core::success();
+    }
+    auto sourceIndex = captureSourceImportBytes(capture->candidate, capture->config,
+                                                sourceUtf8Path, consumedBytes);
+    if (!sourceIndex)
+    {
+        return Core::failure(std::move(sourceIndex.error()).withContext(
+            "captureRecipeDependencyBytes", "capture"));
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status validateRecipeSourcePath(const SourceImportCaptureConfig* config,
+                                                    std::string_view sourceUtf8Path)
+{
+    if (config == nullptr)
+    {
+        return Core::success();
+    }
+    auto normalized = normalizeSourceImportPath(*config, sourceUtf8Path);
+    if (!normalized)
+    {
+        return Core::failure(std::move(normalized.error()).withContext(
+            "validateRecipeSourcePath", "normalize"));
+    }
+    return Core::success();
+}
 
 [[nodiscard]] Core::Error makeStageFilesystemError(std::string_view message,
                                                     const std::error_code& errorCode)
@@ -547,7 +603,9 @@ decodePcm16WavToClipDesc(std::span<const std::byte> bytes, std::vector<float>& p
 }
 
 [[nodiscard]] Core::Result<CatalogCookAssetSpec>
-parseAudioClipInline(const std::vector<std::string>& tokens, std::string_view baseDirectoryUtf8)
+parseAudioClipInline(const std::vector<std::string>& tokens,
+                     std::string_view baseDirectoryUtf8,
+                     const RecipeSourceCaptureContext* sourceCapture)
 {
     // audioclip <id> <sampleRate> <channels> <frameCount> <f0 f1 ...>
     // audioclip <id> <sampleRate> <channels> <frameCount> sine <freqHz>
@@ -577,12 +635,24 @@ parseAudioClipInline(const std::vector<std::string>& tokens, std::string_view ba
         {
             return Core::failure(std::move(path.error()));
         }
+        if (auto validated = validateRecipeSourcePath(
+                sourceCapture != nullptr ? &sourceCapture->config : nullptr, *path);
+            !validated)
+        {
+            return Core::failure(std::move(validated.error()).withContext(
+                "parseAudioClipInline", "validateWavPath"));
+        }
         std::pmr::unsynchronized_pool_resource wavMemory;
         auto bytes = Core::readFile(
             *path, Core::ReadFileConfig{.maxBytes = 32ULL * 1024ULL * 1024ULL, .memoryResource = &wavMemory});
         if (!bytes)
         {
             return Core::failure(std::move(bytes.error()).withContext("parseAudioClipInline", "readWav"));
+        }
+        if (auto captured = captureRecipeDependencyBytes(sourceCapture, *path, *bytes); !captured)
+        {
+            return Core::failure(std::move(captured.error()).withContext(
+                "parseAudioClipInline", "captureWav"));
         }
         auto decoded = decodePcm16WavToClipDesc(*bytes, pcm);
         if (!decoded)
@@ -1141,7 +1211,12 @@ cookAndStageCatalogPackage(std::string_view stagingRootUtf8, const CatalogCookRe
     return std::move(*catalog);
 }
 
-Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeText, std::string_view baseDirectoryUtf8)
+namespace {
+
+[[nodiscard]] Core::Result<CatalogCookRequest>
+parseCatalogCookRecipeInternal(std::string_view recipeText,
+                               std::string_view baseDirectoryUtf8,
+                               const RecipeSourceCaptureContext* sourceCapture)
 {
     CatalogCookRequest request{};
     std::pmr::unsynchronized_pool_resource memory;
@@ -1699,7 +1774,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         }
         if (tokens[0] == "audioclip")
         {
-            auto asset = parseAudioClipInline(tokens, baseDirectoryUtf8);
+            auto asset = parseAudioClipInline(tokens, baseDirectoryUtf8, sourceCapture);
             if (!asset)
             {
                 return Core::failure(std::move(asset.error()));
@@ -1983,10 +2058,22 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         {
             return Core::failure(std::move(payloadPath.error()));
         }
+        if (auto validated = validateRecipeSourcePath(
+                sourceCapture != nullptr ? &sourceCapture->config : nullptr, *payloadPath);
+            !validated)
+        {
+            return Core::failure(std::move(validated.error()).withContext(
+                "parseCatalogCookRecipe", "validatePayloadPath"));
+        }
         auto payload = Core::readFile(*payloadPath, Core::ReadFileConfig{.memoryResource = &memory});
         if (!payload)
         {
             return Core::failure(std::move(payload.error()).withContext("parseCatalogCookRecipe", "readPayload"));
+        }
+        if (auto captured = captureRecipeDependencyBytes(sourceCapture, *payloadPath, *payload); !captured)
+        {
+            return Core::failure(std::move(captured.error()).withContext(
+                "parseCatalogCookRecipe", "capturePayload"));
         }
 
         CatalogCookAssetSpec asset{
@@ -2028,30 +2115,169 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
     return request;
 }
 
-Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view recipeUtf8Path)
+[[nodiscard]] Core::Result<SourceImportCandidate>
+finalizeCatalogRecipeSourceImports(SourceImportCandidate candidate,
+                                   Core::u32 primarySourceIndex,
+                                   const CatalogCookRequest& request)
 {
+    if (primarySourceIndex >= candidate.sources.size() || !candidate.units.empty())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "catalog recipe source capture state is invalid");
+    }
+
+    auto unitId = deriveSourceImportUnitId(SourceImporterKind::CatalogRecipe,
+                                           candidate.sources[primarySourceIndex].path);
+    if (!unitId)
+    {
+        return Core::failure(std::move(unitId.error()).withContext(
+            "finalizeCatalogRecipeSourceImports", "unitId"));
+    }
+    const auto canonicalSettings = canonicalCatalogRecipeSettings(request.targetPlatform);
+    auto settingsHash = digestSourceImportSettings(canonicalSettings);
+    if (!settingsHash)
+    {
+        return Core::failure(std::move(settingsHash.error()).withContext(
+            "finalizeCatalogRecipeSourceImports", "settings"));
+    }
+
+    try
+    {
+        SourceImportCapturedUnit unit{
+            .unitId = *unitId,
+            .importerKind = SourceImporterKind::CatalogRecipe,
+            .importerVersion = CatalogRecipeImporterVersion,
+            .settingsHash = *settingsHash,
+        };
+        unit.inputs.reserve(candidate.sources.size());
+        for (Core::u32 sourceIndex = 0; sourceIndex < candidate.sources.size(); ++sourceIndex)
+        {
+            unit.inputs.push_back(SourceImportCapturedInput{
+                .sourceIndex = sourceIndex,
+                .flags = sourceIndex == primarySourceIndex ? AssetFormat::SourceImportInputFlags::Primary
+                                                           : AssetFormat::SourceImportInputFlags::None,
+            });
+        }
+        unit.outputs.reserve(request.assets.size());
+        for (const auto& asset : request.assets)
+        {
+            unit.outputs.push_back(SourceImportCapturedOutput{
+                .assetId = asset.assetId,
+                .assetKind = asset.assetKind,
+            });
+        }
+        candidate.targetPlatform = request.targetPlatform;
+        candidate.units.push_back(std::move(unit));
+        return candidate;
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "catalog recipe source result allocation failed");
+    }
+}
+
+[[nodiscard]] Core::Result<CatalogCookSourceResult>
+loadCatalogCookRecipeFileInternal(std::string_view recipeUtf8Path,
+                                  const SourceImportCaptureConfig* captureConfig)
+{
+    if (auto validated = validateRecipeSourcePath(captureConfig, recipeUtf8Path); !validated)
+    {
+        return Core::failure(std::move(validated.error()).withContext(
+            "loadCatalogCookRecipeFileInternal", "validateRecipePath"));
+    }
     std::pmr::unsynchronized_pool_resource memory;
     auto bytes = Core::readFile(recipeUtf8Path, Core::ReadFileConfig{.maxBytes = 16ULL * 1024ULL * 1024ULL,
                                                                      .memoryResource = &memory});
     if (!bytes)
     {
-        return Core::failure(std::move(bytes.error()).withContext("loadCatalogCookRecipeFile", "read"));
+        return Core::failure(std::move(bytes.error()).withContext(
+            "loadCatalogCookRecipeFileInternal", "readRecipe"));
     }
-    std::string text;
-    text.resize(bytes->size());
-    for (std::size_t index = 0; index < bytes->size(); ++index)
+
+    SourceImportCandidate sourceImports{};
+    std::optional<Core::u32> primarySourceIndex;
+    std::optional<RecipeSourceCaptureContext> sourceCapture;
+    if (captureConfig != nullptr)
     {
-        text[index] = static_cast<char>(std::to_integer<unsigned char>((*bytes)[index]));
+        auto captured = captureSourceImportBytes(sourceImports, *captureConfig, recipeUtf8Path, *bytes);
+        if (!captured)
+        {
+            return Core::failure(std::move(captured.error()).withContext(
+                "loadCatalogCookRecipeFileInternal", "captureRecipe"));
+        }
+        primarySourceIndex = *captured;
+        sourceCapture.emplace(RecipeSourceCaptureContext{sourceImports, *captureConfig});
     }
-    const auto path = Detail::pathFromUtf8Bytes(recipeUtf8Path);
-    const auto base = path.parent_path();
-    std::string baseUtf8 = ".";
-    if (!base.empty())
+
+    try
     {
-        const auto generic = base.generic_u8string();
-        baseUtf8.assign(generic.begin(), generic.end());
+        std::string text;
+        text.resize(bytes->size());
+        for (std::size_t index = 0; index < bytes->size(); ++index)
+        {
+            text[index] = static_cast<char>(std::to_integer<unsigned char>((*bytes)[index]));
+        }
+        const auto path = Detail::pathFromUtf8Bytes(recipeUtf8Path);
+        const auto base = path.parent_path();
+        std::string baseUtf8 = ".";
+        if (!base.empty())
+        {
+            const auto generic = base.generic_u8string();
+            baseUtf8.assign(generic.begin(), generic.end());
+        }
+        auto request = parseCatalogCookRecipeInternal(
+            text, baseUtf8, sourceCapture ? &*sourceCapture : nullptr);
+        if (!request)
+        {
+            return Core::failure(std::move(request.error()).withContext(
+                "loadCatalogCookRecipeFileInternal", "parseRecipe"));
+        }
+        if (captureConfig == nullptr)
+        {
+            return CatalogCookSourceResult{.request = std::move(*request)};
+        }
+
+        auto finalized = finalizeCatalogRecipeSourceImports(
+            std::move(sourceImports), *primarySourceIndex, *request);
+        if (!finalized)
+        {
+            return Core::failure(std::move(finalized.error()).withContext(
+                "loadCatalogCookRecipeFileInternal", "finalizeSources"));
+        }
+        return CatalogCookSourceResult{
+            .request = std::move(*request),
+            .sourceImports = std::move(*finalized),
+        };
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "catalog recipe file load allocation failed");
     }
-    return parseCatalogCookRecipe(text, baseUtf8);
+}
+
+} // namespace
+
+Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeText,
+                                                         std::string_view baseDirectoryUtf8)
+{
+    return parseCatalogCookRecipeInternal(recipeText, baseDirectoryUtf8, nullptr);
+}
+
+Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view recipeUtf8Path)
+{
+    auto result = loadCatalogCookRecipeFileInternal(recipeUtf8Path, nullptr);
+    if (!result)
+    {
+        return Core::failure(std::move(result.error()));
+    }
+    return std::move(result->request);
+}
+
+Core::Result<CatalogCookSourceResult>
+loadCatalogCookRecipeSourceFile(std::string_view recipeUtf8Path,
+                                SourceImportCaptureConfig captureConfig)
+{
+    return loadCatalogCookRecipeFileInternal(recipeUtf8Path, &captureConfig);
 }
 
 } // namespace Tina::Asset

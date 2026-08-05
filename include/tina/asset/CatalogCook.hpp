@@ -88,6 +88,11 @@ cookAndStageCatalogPackage(std::string_view stagingRootUtf8, const CatalogCookRe
 // Inline typed lines build the current versioned payload without pre-encoded files.
 [[nodiscard]] Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view recipeUtf8Path);
 
+// Loads the same recipe request while capturing the exact already-read recipe, generic payload,
+// and WAV bytes into one CatalogRecipe import unit. Every source must remain under sourceRootUtf8.
+[[nodiscard]] Core::Result<CatalogCookSourceResult>
+loadCatalogCookRecipeSourceFile(std::string_view recipeUtf8Path, SourceImportCaptureConfig captureConfig);
+
 // Parse recipe text with an explicit base directory for relative payload paths.
 [[nodiscard]] Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeText,
                                                                       std::string_view baseDirectoryUtf8);
