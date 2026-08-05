@@ -1,53 +1,25 @@
 #include <tina/asset/CatalogPackageChangeDetector.hpp>
 
-#include "Utf8Path.hpp"
+#include "CatalogPackagePath.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/io/ReadFile.hpp>
-#include <tina/core/text/Utf8.hpp>
-
-#include <filesystem>
 #include <string>
 #include <utility>
 
 namespace Tina::Asset {
 namespace {
 
-[[nodiscard]] bool hasPathEscapeComponent(const std::filesystem::path& relative) noexcept
-{
-    for (const auto& component : relative)
-    {
-        if (component == "..")
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 [[nodiscard]] Core::Result<std::string>
 catalogManifestPath(std::string_view catalogRootUtf8, std::string_view manifestRelativePath)
 {
-    if (catalogRootUtf8.empty() || !Core::countStrictUtf8CodepointsWithoutNul(catalogRootUtf8))
+    auto path = Detail::resolveCatalogManifestPath(catalogRootUtf8, manifestRelativePath);
+    if (!path)
     {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog root path is invalid");
+        return Core::failure(std::move(path.error()));
     }
-    if (manifestRelativePath.empty() ||
-        !Core::countStrictUtf8CodepointsWithoutNul(manifestRelativePath))
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "manifest relative path is invalid");
-    }
-
-    const auto relative = Detail::pathFromUtf8Bytes(manifestRelativePath);
-    if (relative.is_absolute() || hasPathEscapeComponent(relative))
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "manifest relative path is not safe");
-    }
-    const auto fullPath = Detail::pathFromUtf8Bytes(catalogRootUtf8) / relative;
-    const auto generic = fullPath.generic_u8string();
+    const auto generic = path->fullPath.generic_u8string();
     return std::string(generic.begin(), generic.end());
 }
 

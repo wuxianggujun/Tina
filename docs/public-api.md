@@ -514,6 +514,14 @@ manifest commit marker，不扫描 object/source，不启动线程，也不会�
 对应 package 通过完整 validation/reload 后才接受它；失败时继续使用旧 baseline，下一次 poll 会重复报告变化。
 manifest scratch bytes 使用显式 PMR 与 `maxManifestBytes`，输出不持有 manifest buffer。
 
+`CatalogPackageWatcher::Create(root, config)` 是 move-only opaque OS hint owner，公开头不暴露 native handle。
+Create 在返回前 arm Windows overlapped `ReadDirectoryChangesW` 或 Linux non-blocking inotify；调用方随后再捕获
+revision baseline，避免 watcher/baseline 之间留下事件缺口。`poll()` 只消费已就绪事件并返回
+`Quiet|Changed|RescanRequired` 与匹配事件数：只匹配 manifest 直接父目录中的目标文件名，write/rename/delete/replace
+产生 `Changed`，queue overflow、事件截断或目录失效产生 `RescanRequired`。hint 不读取 package、不启动线程、不推进
+baseline，也不替代上面的 revision poll/full validation/reload；目录失效后调用方重建 watcher。Windows/Linux 之外返回
+结构化 `Unsupported`，不保留 polling fallback。
+
 `SourceImportMetadataFormat` 是仅供 Cooker/tool cache 使用的独立 `TINAIMPT` schema `1.1`，不进入 Runtime
 `manifest.tmnft`，也不会随产品 Catalog 分发 source path。它保存 stable `SourceImportUnitId`、target/importer
 version/settings hash、root-relative strict UTF-8 source path + content fingerprint/read extent、unit input/primary edge、唯一
@@ -539,8 +547,8 @@ membership/path/content/byte size/read extent、primary edge 或 output AssetId/
 `probeCatalogRecipeSourceImportState()` / `probeGltfSourceImportState()` 是单描述 wrapper，走同一 batch 逻辑。
 `composeSourceImportCandidate()` 把 baseline clean unit 与本次 recooked candidate 合成唯一 current-schema graph，拒绝
 source fingerprint 冲突、重复 UnitId/output owner 与 target platform 不一致。`tina_assetc` 据此只运行 dirty/added
-importer，再通过 incremental stage API 复制 clean object、移除 removed output 并完整验证 fresh stage。当前 API 不启动 watcher，
-也不物理替换仍在使用的 live root。
+importer，再通过 incremental stage API 复制 clean object、移除 removed output 并完整验证 fresh stage。Cooker API 不启动 watcher，
+也不物理替换仍在使用的 live root；Runtime/tool host 可显式组合独立 `CatalogPackageWatcher`。
 
 `planCatalogChanges(oldCatalog, newCatalog, config)` 比较两个已验证、immutable `CatalogSnapshot`，返回按
 `AssetId` 排序且每 ID 唯一的 `Added`/`Removed`/`Modified`/`Affected` 行。`Modified` 覆盖 entry metadata

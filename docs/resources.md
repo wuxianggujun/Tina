@@ -83,12 +83,20 @@ planner 在新 Catalog 上建立反向依赖图，从 `Added`/`Modified` 做传�
 change plan，并仅在 owner thread 且 queue、IO、Store、GPU upload 与 retirement 全部 idle 时原子替换
 root/Catalog。fresh staging package 的完整生成/验证、manifest revision caller-driven polling、tool-side source
 provenance capture、验证后 state commit、多 unit clean/dirty fresh-stage executor 与 all-clean 零改写复用已具备；
-OS watcher 以及 live Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
+manifest OS watcher hint 也已具备；live Handle/Lease/GPU owner 迁移仍必须由后续事务切片完成。
 
 `captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
 `pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
 因此后续 full validation/reload 失败不会吞掉重试。该检测只回答 package manifest 是否变化；object 完整性仍由
 full package validation 负责；source dependency detection 必须基于独立 tool-side import state，当前已建立 wire/planner。
+
+`CatalogPackageWatcher::Create()` 在返回前使用 Windows `ReadDirectoryChangesW` overlapped I/O 或 Linux
+non-blocking inotify arm manifest 直接父目录，只匹配配置的 manifest 文件名。`poll()` 不阻塞、不启动线程；write、
+rename、delete、replace 返回 `Changed`，无关 sibling 事件保持 `Quiet`，native queue overflow、事件截断或目录失效返回
+`RescanRequired`。watcher 只是提示层：调用方必须先创建并 arm watcher，再捕获 accepted baseline；收到 hint 后仍调用
+`pollCatalogPackageChange()`，并且只有 candidate 对应 package 通过完整 validation/reload 后才推进 baseline。
+`RescanRequired` 要求重新读取 revision；目录已经失效时还必须重建 watcher。其他平台结构化返回 `Unsupported`，不静默
+退化为定时 polling。
 
 ## Source import state 与变更规划
 
@@ -122,7 +130,7 @@ revision/contract/source 变化，或 unit Added/Removed 时，只有 dirty/adde
 `--stage-import-state`；stage root 必须位于 live root 外部，candidate state 必须此前不存在且位于 live/stage root 外部。
 该过程不修改 `--out` live root 或旧 state，也不把 fresh stage 物理替换成固定 live 目录；Runtime
 通过 `reloadCatalogWhenIdle(stageRoot)` 接受 immutable stage。state 必须位于 tool cache，不能放进部署 Catalog root。
-当前仍没有 OS watcher 与 active Handle/Lease/GPU owner 增量迁移，因此不能描述为完整自动热重载已完成。
+当前仍没有 active Handle/Lease/GPU owner 增量迁移，因此不能描述为完整自动热重载已完成。
 
 ## 身份、视图与所有权
 
@@ -331,10 +339,10 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 
 - owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
-- `ASSET-002` 已有 manifest revision polling、immutable Catalog change planner、fresh staging package 生成/验证与
+- `ASSET-002` 已有 manifest OS watcher hint、revision polling、immutable Catalog change planner、fresh staging package 生成/验证与
   idle-safe root/Catalog commit，并已建立 current-only source import metadata wire、Catalog binding 与纯 import
   planner；真实 importer provenance capture、validated state commit、多 unit mixed fresh-stage executor 与 all-clean
-  零改写复用已接入。OS watcher 以及 active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
+  零改写复用已接入。active Handle/Lease/GPU owner 的增量迁移事务仍未实现。通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 也尚未实现；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重

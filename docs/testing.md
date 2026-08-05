@@ -901,6 +901,12 @@ contract 后，只允许对应 unit recook 并写入 fresh stage；未变 unit �
 失配必须 full recook；只在 Prefix 已消费范围后追加 bytes 仍应 clean。该切片不要求
 运行完整 `tina_asset_tests`、Scene/sample 或 shader/bgfx target。
 
+ASSET-002 Catalog watcher 只需增量构建 `tina_asset_tests`，直接运行
+`CatalogPackageWatcherTests.*:CatalogPackageChangeDetectorTests.*`。真实 Windows/Linux 测试覆盖 watcher 先 arm 后捕获
+baseline、目标 manifest write/rename/delete/replace、同目录 sibling 过滤、目录失效 `RescanRequired`、move ownership 与
+结构化配置/路径失败；该切片不构建 `tina_assetc`、sample、shader 或 bgfx target。overflow 由平台实现映射为
+`RescanRequired`，host 收到该状态后必须重新 capture revision，不能直接接受 candidate。
+
 multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct
 mesh/material AssetId、Prefab dependency、AssetId→Handle→registry-owned binding→packet-local ref 与双 mesh
 binding 可验证。Opaque3D 已做

@@ -28,6 +28,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadPlan.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackage.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageChangeDetector.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageWatcher.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageLoad.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackagePublish.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageSummary.hpp
@@ -69,6 +70,7 @@ set(TINA_ASSET_SOURCES
     CatalogLoadPlan.cpp
     CatalogPackage.cpp
     CatalogPackageChangeDetector.cpp
+    CatalogPackageWatcher.cpp
     CatalogPackageLoad.cpp
     CatalogPackagePublish.cpp
     CatalogPackageSummary.cpp
@@ -80,6 +82,7 @@ set(TINA_ASSET_SOURCES
     SourceImportProbe.cpp
     CookedAssetBatch.cpp
     CookedAssetFile.cpp
+    CatalogPackagePath.hpp
     Utf8Path.hpp
 )
 

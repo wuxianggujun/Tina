@@ -17,14 +17,14 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
 | UI-002 | 收口 Windows UIA：tip 跨进程 gate 证据已固化；完成 Narrator/Inspect 人工金标后关闭 | 自动 HWND client gate + unit 已在 tip 复现；只剩操作员读屏/Inspect 清单 |
-| ASSET-002 | 分阶段建立热重载与增量 Cooker；已完成 manifest revision polling、immutable Catalog change planning、fresh stage validation、idle-safe root reload、current-only source import state/planner、importer provenance capture + validated state commit，以及多 unit mixed clean/dirty fresh-stage executor | caller-driven poll 保留 baseline/candidate 重试语义；tool-side state 绑定 Catalog revision 并精确校验 output ownership；all-clean fast path 不解析 importer、不读 object、不改写 package/state；mixed 路径只 cook dirty/added unit，复制 clean object 并移除 removed output；后续再接 OS watcher 与 live Handle/Lease/GPU owner 迁移 |
+| ASSET-002 | 分阶段建立热重载与增量 Cooker；已完成 manifest OS watcher hint + revision polling、immutable Catalog change planning、fresh stage validation、idle-safe root reload、current-only source import state/planner、importer provenance capture + validated state commit，以及多 unit mixed clean/dirty fresh-stage executor | watcher 先 arm 再捕获 baseline，native hint 不替代 revision poll/full validation；caller-driven poll 保留 baseline/candidate 重试语义；tool-side state 绑定 Catalog revision 并精确校验 output ownership；all-clean fast path 不解析 importer、不读 object、不改写 package/state；mixed 路径只 cook dirty/added unit，复制 clean object 并移除 removed output；后续再接 live Handle/Lease/GPU owner 迁移 |
 
 Now 的退出条件：UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
 人工记录明确；没有未解释的 Accepted ADR/实现冲突。Linux AT-SPI 作为独立后置项，不阻塞 Windows
 UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；即时反馈与 Motion 的文档边界保持明确。
-ASSET-002 当前完成 package manifest polling、Catalog/import pure planner、current-only import-state wire、importer
+ASSET-002 当前完成 package manifest OS watcher hint + revision polling、Catalog/import pure planner、current-only import-state wire、importer
 provenance capture + validated state commit、多 unit mixed clean/dirty fresh-stage executor、all-clean 零改写复用、fresh stage
-full validation 与保守的 idle-safe root reload；退出 Now 前还需要 OS watcher 与 live Handle/Lease/GPU owner 迁移事务，
+full validation 与保守的 idle-safe root reload；退出 Now 前还需要 live Handle/Lease/GPU owner 迁移事务，
 不把“空闲时可切换 root”写成“完整增量热重载已完成”。
 
 ## Next：产品验收、性能基线与对外可用
