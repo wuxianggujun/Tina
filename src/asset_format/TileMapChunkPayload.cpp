@@ -1,10 +1,13 @@
 #include <tina/asset_format/TileMapChunkPayload.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
+#include <tina/core/hash/ContentHashDigest.hpp>
 
+#include <array>
 #include <cstring>
 #include <new>
 #include <stdexcept>
+#include <string_view>
 
 namespace Tina::AssetFormat {
 namespace {
@@ -107,6 +110,58 @@ void appendU32(std::vector<std::byte>& bytes, u32 value)
 }
 
 } // namespace
+
+Core::Result<Core::AssetId> deriveTileMapChunkAssetId(Core::AssetId parentTileMapId,
+                                                       Core::u32 stableLayerId,
+                                                       Core::u32 chunkX,
+                                                       Core::u32 chunkY)
+{
+    if (!parentTileMapId || stableLayerId == 0U ||
+        chunkX > TileMapChunkWire::MaxChunkCoordinate ||
+        chunkY > TileMapChunkWire::MaxChunkCoordinate)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                             "tilemap chunk identity inputs are invalid");
+    }
+
+    constexpr std::string_view Domain = "tina.asset.tilemap-chunk-id";
+    constexpr Core::u8 DerivationVersion = 1U;
+    constexpr usize ScalarBytes = sizeof(Core::u32);
+    std::array<std::byte, Domain.size() + 1U + Core::AssetId::Bytes{}.size() + ScalarBytes * 3U> input{};
+
+    usize offset = 0;
+    for (const char value : Domain)
+    {
+        input[offset++] = static_cast<std::byte>(static_cast<unsigned char>(value));
+    }
+    input[offset++] = static_cast<std::byte>(DerivationVersion);
+    for (const std::byte value : parentTileMapId.bytes())
+    {
+        input[offset++] = value;
+    }
+    const auto appendU32LittleEndian = [&input, &offset](Core::u32 value) {
+        for (usize byteIndex = 0; byteIndex < sizeof(value); ++byteIndex)
+        {
+            input[offset++] = static_cast<std::byte>((value >> (byteIndex * 8U)) & 0xFFU);
+        }
+    };
+    appendU32LittleEndian(stableLayerId);
+    appendU32LittleEndian(chunkX);
+    appendU32LittleEndian(chunkY);
+
+    auto digest = Core::digestContentHashV1(input);
+    if (!digest)
+    {
+        return Core::failure(std::move(digest.error()).withContext("deriveTileMapChunkAssetId", "digest"));
+    }
+    auto chunkId = Core::AssetId::fromBytes(digest->bytes());
+    if (!chunkId)
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "tilemap chunk AssetId derivation produced an invalid zero value");
+    }
+    return *chunkId;
+}
 
 std::optional<Core::u16> TileMapChunkPayloadView::cellAt(Core::u16 x, Core::u16 y) const noexcept
 {

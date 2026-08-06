@@ -174,52 +174,6 @@ struct RecipeSourceCaptureContext final {
     }
 }
 
-[[nodiscard]] Core::Result<Core::AssetId> deriveTileMapChunkAssetId(Core::AssetId parentTileMapId,
-                                                                   Core::u32 stableLayerId,
-                                                                   Core::u32 chunkX,
-                                                                   Core::u32 chunkY)
-{
-    // Chunk IDs are persistent recipe output. Hash a fixed, domain-separated little-endian preimage and
-    // key it by the stable layer ID so layer reordering or unrelated chunk occupancy does not churn IDs.
-    constexpr std::string_view Domain = "tina.asset.tilemap-chunk-id";
-    constexpr Core::u8 DerivationVersion = 1U;
-    constexpr std::size_t ScalarBytes = sizeof(Core::u32);
-    std::array<std::byte, Domain.size() + 1U + Core::AssetId::Bytes{}.size() + ScalarBytes * 3U> input{};
-
-    std::size_t offset = 0;
-    for (const char value : Domain)
-    {
-        input[offset++] = static_cast<std::byte>(static_cast<unsigned char>(value));
-    }
-    input[offset++] = static_cast<std::byte>(DerivationVersion);
-    for (const std::byte value : parentTileMapId.bytes())
-    {
-        input[offset++] = value;
-    }
-    const auto appendU32LittleEndian = [&input, &offset](Core::u32 value) {
-        for (std::size_t byteIndex = 0; byteIndex < sizeof(value); ++byteIndex)
-        {
-            input[offset++] = static_cast<std::byte>((value >> (byteIndex * 8U)) & 0xFFU);
-        }
-    };
-    appendU32LittleEndian(stableLayerId);
-    appendU32LittleEndian(chunkX);
-    appendU32LittleEndian(chunkY);
-
-    auto digest = Core::digestContentHashV1(input);
-    if (!digest)
-    {
-        return Core::failure(std::move(digest.error()).withContext("deriveTileMapChunkAssetId", "digest"));
-    }
-    auto chunkId = Core::AssetId::fromBytes(digest->bytes());
-    if (!chunkId)
-    {
-        return Core::failure(Core::CoreErrorCode::Internal,
-                             "tilemap chunk AssetId derivation produced an invalid zero value");
-    }
-    return *chunkId;
-}
-
 [[nodiscard]] bool isKnownKindName(std::string_view name, AssetFormat::AssetKind& out) noexcept
 {
     if (name == "Texture2D")
@@ -1782,7 +1736,8 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                         {
                             continue;
                         }
-                        auto chunkId = deriveTileMapChunkAssetId(pendingMapId, pendingLayer.stableLayerId, chunkX, chunkY);
+                        auto chunkId = AssetFormat::deriveTileMapChunkAssetId(
+                            pendingMapId, pendingLayer.stableLayerId, chunkX, chunkY);
                         if (!chunkId)
                         {
                             return Core::failure(std::move(chunkId.error()));

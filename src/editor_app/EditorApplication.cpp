@@ -7,15 +7,20 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
+#include <tina/asset/TileChunkRender.hpp>
+#include <tina/asset/TileMapInstance.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
+#include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/asset_format/World2DSnapshot.hpp>
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
+#include <tina/editor/EditorErrors.hpp>
 #include <tina/editor/World2DAuthoringDocument.hpp>
 #include <tina/editor/World2DAuthoringFile.hpp>
 #include <tina/editor/World3DAuthoringDocument.hpp>
 #include <tina/editor/World3DAuthoringFile.hpp>
+#include <tina/editor/TileMapAuthoringDocument.hpp>
 #include <tina/editor_app/EditorApplication.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -74,10 +79,19 @@ inline constexpr u32 WindowLogicalHeight = 800;
 inline constexpr u32 HierarchyMaterializedCapacity = 16;
 inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
-inline constexpr u32 EditorActionCount = 11;
+inline constexpr u32 EditorActionCount = 19;
 inline constexpr u32 EditorLayoutRegionCount = 6;
 inline constexpr u32 GpuViewportSpriteCount = 1;
 inline constexpr u32 GpuViewportMeshCount = 3;
+inline constexpr u32 InitialTileMapWidthCells = 8;
+inline constexpr u32 InitialTileMapHeightCells = 4;
+inline constexpr u32 TileMapAuthoringLayerCapacity = 16;
+inline constexpr u32 InitialTileMapCellCount = 12;
+inline constexpr u32 InitialTileMapChunkCount = 2;
+inline constexpr u32 EditorViewportSpriteCapacity =
+    GpuViewportSpriteCount + InitialTileMapWidthCells * InitialTileMapHeightCells *
+                                 TileMapAuthoringLayerCapacity;
+inline constexpr Tina::AssetFormat::TileMapLayerId InitialTileMapLayerId = 1;
 inline constexpr float PreviewWorldWidth = 16.0F;
 inline constexpr float PreviewWorldHeight = 9.0F;
 inline constexpr float DegreesToRadians = 0.01745329251994329577F;
@@ -98,6 +112,8 @@ enum class WorkspaceMode : u8 {
 enum class ViewportToolMode : u8 {
     Select,
     Move,
+    TilePaint,
+    TileErase,
 };
 
 struct ViewportGizmoTransaction final {
@@ -217,6 +233,15 @@ createBuiltInEditorCatalogRequest()
     recipe += " ";
     appendId(editorAssetId(0x21U));
     recipe += " 0 0 1 1 0.5 0.5 16\n";
+    recipe += "tileset ";
+    appendId(editorAssetId(0x41U));
+    recipe += " ";
+    appendId(editorAssetId(0x21U));
+    recipe += " 16 16\n";
+    recipe += "tile 1 0 0 0 0.5 0.5\n";
+    recipe += "tile 2 1 0.5 0 1 0.5\n";
+    recipe += "tile 3 0 0 0.5 0.5 1\n";
+    recipe += "tile 4 0 0.5 0.5 1 1\n";
     recipe += "staticmesh ";
     appendId(editorAssetId(0x31U));
     recipe += " cube\n";
@@ -318,6 +343,16 @@ struct LifecycleCounters final {
     u64 catalogUnresolvedReferences = 0;
     u64 catalogResolved2DSprites = 0;
     u64 catalogResolved3DMeshes = 0;
+    u64 tileMapDocumentRevision = 0;
+    u64 tileMapLayerCount = 0;
+    u64 tileMapChunkCount = 0;
+    u64 tileMapAuthoredCells = 0;
+    u64 tileMapCookArtifacts = 0;
+    u64 tileMapCookPreviewBytes = 0;
+    u64 tileMapEmittedSprites = 0;
+    u64 tileMapEdits = 0;
+    u64 tileMapUndos = 0;
+    u64 tileMapRedos = 0;
     u64 catalogEntryCount = 0;
     u64 workspaceSwitches = 0;
     u64 styleRegisteredClasses = 0;
@@ -399,6 +434,12 @@ enum class EditorCommand : u32 {
     Undo,
     Redo,
     Save,
+    PaintTile,
+    EraseTile,
+    ToggleTileLayer,
+    AddTileLayer,
+    AddObjectLayer,
+    CookTileMapPreview,
 };
 
 void writeJsonString(std::ostream& output, std::string_view value)
@@ -777,7 +818,7 @@ struct EulerDegrees final {
     case LightsKey:
         return "Runtime PointLight2D.";
     case TileMapKey:
-        return "TileMap authoring follows.";
+        return "Root and streamed chunks share one revision.";
     default:
         return "Validated World2D authoring item.";
     }
@@ -817,6 +858,7 @@ struct WorkspaceSessionState final {
 struct InitialAuthoringDocuments final {
     Tina::Editor::World2DAuthoringDocument world2D;
     Tina::Editor::World3DAuthoringDocument world3D;
+    Tina::Editor::TileMapAuthoringDocument tileMap;
     WorkspaceSessionState world2DSession;
     WorkspaceSessionState world3DSession;
 };
@@ -1003,9 +1045,76 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
             return Tina::Core::failure(std::move(status.error()));
         }
     }
+    std::vector<Tina::Core::u16> leftChunkCells(16, 0U);
+    leftChunkCells[0] = 1U;
+    leftChunkCells[1] = 2U;
+    leftChunkCells[2] = 1U;
+    leftChunkCells[3] = 2U;
+    leftChunkCells[4] = 3U;
+    leftChunkCells[7] = 3U;
+    std::vector<Tina::Core::u16> rightChunkCells(16, 0U);
+    rightChunkCells[0] = 2U;
+    rightChunkCells[1] = 1U;
+    rightChunkCells[2] = 2U;
+    rightChunkCells[3] = 1U;
+    rightChunkCells[4] = 4U;
+    rightChunkCells[7] = 4U;
+    auto tileMap = Tina::Editor::TileMapAuthoringDocument::Create(
+        Tina::Editor::TileMapAuthoringDesc{
+            .tileMapId = editorAssetId(0x42U),
+            .tilesetId = editorAssetId(0x41U),
+            .widthCells = InitialTileMapWidthCells,
+            .heightCells = InitialTileMapHeightCells,
+            .cellSizeMeters = 1.0F,
+            .chunkSizeCells = 4,
+            .layers = {
+                Tina::Editor::TileMapAuthoringLayer{
+                    .stableLayerId = InitialTileMapLayerId,
+                    .kind = Tina::AssetFormat::TileMapLayerKind::Tile,
+                    .name = "Ground",
+                    .chunks = {
+                        Tina::Editor::TileMapAuthoringChunk{
+                            .chunkX = 0,
+                            .chunkY = 0,
+                            .cells = std::move(leftChunkCells),
+                        },
+                        Tina::Editor::TileMapAuthoringChunk{
+                            .chunkX = 1,
+                            .chunkY = 0,
+                            .cells = std::move(rightChunkCells),
+                        },
+                    },
+                },
+                Tina::Editor::TileMapAuthoringLayer{
+                    .stableLayerId = 2,
+                    .kind = Tina::AssetFormat::TileMapLayerKind::Object,
+                    .name = "Gameplay",
+                    .objects = {
+                        Tina::Editor::TileMapAuthoringObject{
+                            .stableObjectId = 1,
+                            .kind = Tina::AssetFormat::TileMapObjectKind::Point,
+                            .name = "Spawn",
+                            .x = 1.5F,
+                            .y = 1.5F,
+                        },
+                    },
+                },
+            },
+        },
+        Tina::Editor::TileMapAuthoringDocumentConfig{
+            .layerCapacity = TileMapAuthoringLayerCapacity,
+            .objectCapacity = 128,
+            .chunkCapacity = 128,
+            .historyEntryCapacity = 16,
+            .historyByteCapacity = 4U * 1024U * 1024U,
+        });
+    if (!tileMap) {
+        return Tina::Core::failure(std::move(tileMap.error()));
+    }
     return InitialAuthoringDocuments{
         .world2D = std::move(*document),
         .world3D = std::move(*world3D),
+        .tileMap = std::move(*tileMap),
         .world2DSession = std::move(world2DSession),
         .world3DSession = std::move(world3DSession),
     };
@@ -1016,12 +1125,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
     EditorWorkspaceState(EditorLaunchOptions options, LifecycleCounters& counters,
                          Tina::Editor::World2DAuthoringDocument world2D,
                          Tina::Editor::World3DAuthoringDocument world3D,
+                         Tina::Editor::TileMapAuthoringDocument tileMap,
                          WorkspaceSessionState world2DSession,
                          WorkspaceSessionState world3DSession,
                          EditorAssetResources& assetResources,
                          EditorRenderDeviceAccess& renderDeviceAccess) noexcept
         : options_(std::move(options)), counters_(counters), document_(std::move(world2D)),
-          document3D_(std::move(world3D)), workspaceMode_(options_.initialWorkspace),
+          document3D_(std::move(world3D)), tileMapDocument_(std::move(tileMap)),
+          workspaceMode_(options_.initialWorkspace),
           world2DSession_(std::move(world2DSession)),
           world3DSession_(std::move(world3DSession)), assetResources_(assetResources),
           renderDeviceAccess_(renderDeviceAccess)
@@ -1363,10 +1474,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = tree->setTreeViewStyle(
                 hierarchyTree_,
                 UI::UITreeViewStyle{
-                    .rowHeight = 26.0F,
+                    .rowHeight = 32.0F,
                     .overscanRows = 1,
                     .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
-                    .wheelStep = 26.0F,
+                    .wheelStep = 32.0F,
                     .indentation = 16.0F,
                     .disclosureExtent = 10.0F,
                     .disclosureGap = 4.0F,
@@ -1474,6 +1585,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
+        if (auto status = storeNode(createButton(viewportTools, "Paint", fixedSize(60.0F, 28.0F), false),
+                                    tilePaintToolButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(viewportTools, "Erase", fixedSize(60.0F, 28.0F), false),
+                                    tileEraseToolButton_);
+            !status) {
+            return status;
+        }
         UI::UINodeId frameAllButton{};
         if (auto status = storeNode(createButton(viewportTools, "Frame All", fixedSize(64.0F, 28.0F), false),
                                     frameAllButton);
@@ -1525,7 +1646,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (auto status = storeNode(createLabel(viewportCanvasTop,
                                                 workspaceMode_ == WorkspaceMode::World2D
-                                                    ? "Grid 16 px"
+                                                    ? "Tile Grid 1 m"
                                                     : "Grid 1 m",
                                                 fixedSize(76.0F, 20.0F), secondaryText),
                                     gridStatus_);
@@ -1592,7 +1713,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (auto status = storeNode(createLabel(previewFrame,
                                                 workspaceMode_ == WorkspaceMode::World2D
-                                                    ? "Camera | Player | Light | TileMap"
+                                                    ? "Camera | Player | TileMap"
                                                     : "Camera | Hero | Left | Right",
                                                 fixedSize(240.0F, 22.0F), bodyText),
                                     previewEntities_);
@@ -1601,7 +1722,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (auto status = storeNode(createLabel(previewFrame,
                                                 workspaceMode_ == WorkspaceMode::World2D
-                                                    ? "World2D -> Catalog -> Scene"
+                                                    ? "World2D + TileMap -> Scene"
                                                     : "Prefab v2 -> Catalog -> Scene",
                                                 fixedSize(242.0F, 20.0F), secondaryText),
                                     previewCook_);
@@ -1716,7 +1837,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         counters_.inspectorScrollConfigured = true;
 
         UI::UINodeId inspectorContent{};
-        UI::UILayoutStyle inspectorContentStyle = fillWidth(650.0F);
+        UI::UILayoutStyle inspectorContentStyle = fillWidth(940.0F);
         inspectorContentStyle.padding = UI::UIEdgeSpacing::All(8.0F);
         inspectorContentStyle.flexContainer.gap.row = 7.0F;
         if (auto status = storeNode(createPanel(*inspectorScroll, inspectorContentStyle,
@@ -1869,6 +1990,67 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
 
+        UI::UINodeId tileMapTitle{};
+        if (auto status = storeNode(createLabel(inspectorContent, "TileMap", fillWidth(22.0F), sectionText),
+                                    tileMapTitle);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(inspectorContent, {}, fillWidth(42.0F), secondaryText),
+                                    tileMapStatus_);
+            !status) {
+            return status;
+        }
+        const auto createTileMapActionRow = [&](UI::UINodeId& row) -> Tina::Core::Status {
+            UI::UILayoutStyle rowStyle = fillWidth(34.0F);
+            rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+            rowStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+            rowStyle.flexContainer.gap.column = 6.0F;
+            return storeNode(createPanel(inspectorContent, rowStyle, UI::UIStyleRoleId::None), row);
+        };
+        UI::UINodeId tileMapBrushRow{};
+        if (auto status = createTileMapActionRow(tileMapBrushRow); !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(tileMapBrushRow, "Paint Cell", fixedSize(104.0F, 30.0F)),
+                                    paintTileButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(tileMapBrushRow, "Erase Cell", fixedSize(104.0F, 30.0F)),
+                                    eraseTileButton_);
+            !status) {
+            return status;
+        }
+        UI::UINodeId tileMapLayerRow{};
+        if (auto status = createTileMapActionRow(tileMapLayerRow); !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(tileMapLayerRow, "Toggle Layer", fixedSize(104.0F, 30.0F)),
+                                    toggleTileLayerButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(tileMapLayerRow, "Cook Preview", fixedSize(104.0F, 30.0F)),
+                                    cookTileMapButton_);
+            !status) {
+            return status;
+        }
+        UI::UINodeId tileMapAddRow{};
+        if (auto status = createTileMapActionRow(tileMapAddRow); !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(tileMapAddRow, "+ Tile Layer", fixedSize(104.0F, 30.0F)),
+                                    addTileLayerButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(tileMapAddRow, "+ Object Layer", fixedSize(104.0F, 30.0F)),
+                                    addObjectLayerButton_);
+            !status) {
+            return status;
+        }
+
         UI::UINodeId documentTitle{};
         if (auto status = storeNode(createLabel(inspectorContent, "Document", fillWidth(22.0F), sectionText),
                                     documentTitle);
@@ -1882,7 +2064,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (auto status = storeNode(createLabel(inspectorContent,
                                                 workspaceMode_ == WorkspaceMode::World2D
-                                                    ? "World2D schema v1 | canonical"
+                                                    ? "World2D v1 + TileMap v3/v1 | canonical"
                                                     : "Prefab schema v2 | canonical",
                                                 fillWidth(20.0F), secondaryText),
                                     documentFormat_);
@@ -1973,6 +2155,31 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
+        const auto bindEditorCommand = [&](UI::UINodeId button,
+                                           EditorCommand command) -> Tina::Core::Status {
+            return tree->setButtonAction(
+                button, UI::UIButtonActionCallback{[this, command](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(command);
+                }});
+        };
+        if (auto status = bindEditorCommand(paintTileButton_, EditorCommand::PaintTile); !status) {
+            return status;
+        }
+        if (auto status = bindEditorCommand(eraseTileButton_, EditorCommand::EraseTile); !status) {
+            return status;
+        }
+        if (auto status = bindEditorCommand(toggleTileLayerButton_, EditorCommand::ToggleTileLayer); !status) {
+            return status;
+        }
+        if (auto status = bindEditorCommand(addTileLayerButton_, EditorCommand::AddTileLayer); !status) {
+            return status;
+        }
+        if (auto status = bindEditorCommand(addObjectLayerButton_, EditorCommand::AddObjectLayer); !status) {
+            return status;
+        }
+        if (auto status = bindEditorCommand(cookTileMapButton_, EditorCommand::CookTileMapPreview); !status) {
+            return status;
+        }
         for (const UI::UINodeId button : selectToolButtons_) {
             if (auto status = tree->setButtonAction(
                     button, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
@@ -1990,6 +2197,22 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 !status) {
                 return status;
             }
+        }
+        if (auto status = tree->setButtonAction(
+                tilePaintToolButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueViewportToolMode(ViewportToolMode::TilePaint);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                tileEraseToolButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueViewportToolMode(ViewportToolMode::TileErase);
+                }});
+            !status) {
+            return status;
         }
         if (auto status = tree->setPointerHitPolicy(viewportPreviewLayer_,
                                                     UI::UIPointerHitPolicy::Targetable);
@@ -2027,6 +2250,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     void onExit(Tina::GameStateExitContext&) noexcept override
     {
         viewportGizmo_ = {};
+        pendingTileCellEdit_.reset();
+        pendingTileLayerId_ = 0;
         for (auto& listener : viewportPointerListeners_) {
             listener.reset();
         }
@@ -2208,7 +2433,59 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        counters_.gpuViewportSprites = previewResolvedSpriteCount_;
+        u64 emittedTileSprites = 0;
+        if (previewTileMap_.has_value() && !previewTileMapLayerIds_.empty() &&
+            previewTilesetAsset_) {
+            const Tina::Scene::WorldTransform* cameraTransform =
+                previewWorld_->worldTransform(cameraBinding->entity);
+            if (cameraTransform == nullptr) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "editor TileMap preview is missing the Camera2D world transform");
+            }
+            constexpr u64 TileEntityKeyBase = 100'000U;
+            constexpr u64 TileLayerEntityKeyStride =
+                static_cast<u64>(Tina::AssetFormat::TileMapWire::MaxDimension) *
+                    Tina::AssetFormat::TileMapWire::MaxDimension +
+                1U;
+            const Tina::Asset::TileChunkCameraQuery cameraQuery{
+                .centerX = cameraTransform->position.x,
+                .centerY = cameraTransform->position.y,
+                .halfWidth = PreviewWorldWidth * 0.5F,
+                .halfHeight = PreviewWorldHeight * 0.5F,
+            };
+            std::pmr::vector<Tina::Render::RenderSprite2DInput> tileSprites{
+                &assetResources_.memory};
+            for (Tina::Core::usize layerIndex = 0;
+                 layerIndex < previewTileMapLayerIds_.size(); ++layerIndex) {
+                auto emitted = Tina::Asset::emitVisibleTileMapSprites(
+                    *previewTileMap_, previewTileMapLayerIds_[layerIndex], cameraQuery,
+                    Tina::Asset::TileChunkSpriteEmitParams{
+                        .tileset = previewTilesetAsset_,
+                        .bindingResolver = {
+                            .userData = const_cast<EditorWorkspaceState*>(this),
+                            .resolve = &EditorWorkspaceState::resolvePreviewTileset,
+                        },
+                        .stableEntityKeyBase =
+                            TileEntityKeyBase + layerIndex * TileLayerEntityKeyStride,
+                        .sortingLayer = static_cast<Tina::Core::i16>(
+                            static_cast<Tina::Core::i32>(layerIndex) -
+                            static_cast<Tina::Core::i32>(previewTileMapLayerIds_.size())),
+                    },
+                    context.frameResourceSink(), tileSprites);
+                if (!emitted) {
+                    return Tina::Core::failure(std::move(emitted.error()));
+                }
+                for (const auto& sprite : tileSprites) {
+                    if (auto status = context.renderSceneWriter().addSprite2D(sprite); !status) {
+                        return status;
+                    }
+                }
+                emittedTileSprites += *emitted;
+            }
+        }
+        counters_.tileMapEmittedSprites = emittedTileSprites;
+        counters_.gpuViewportSprites = previewResolvedSpriteCount_ + emittedTileSprites;
         counters_.gpuViewportDocumentRevision = previewRevision_;
         return Tina::Core::success();
     }
@@ -2262,6 +2539,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
             }
         }
         if (auto status = processViewportGizmo(*tree); !status) {
+            return status;
+        }
+        if (auto status = processPendingTileBrush(*tree); !status) {
             return status;
         }
         if (pendingAutoTransformInput_ && pendingEditorCommand_ == EditorCommand::ApplyTransform) {
@@ -2330,6 +2610,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
         pendingViewportToolMode_ = mode;
     }
 
+    [[nodiscard]] bool tileMapEditingContext() const noexcept
+    {
+        return workspaceMode_ == WorkspaceMode::World2D && selectionKey_ == TileMapKey;
+    }
+
     [[nodiscard]] Tina::Core::Status
     registerViewportPointerListeners(Tina::PrimaryWindowUITreeUpdater& tree)
     {
@@ -2385,6 +2670,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     {
         if (pointer != Tina::Platform::PrimaryPointerId ||
             viewportToolMode_ != ViewportToolMode::Move || viewportGizmo_.captured ||
+            tileMapEditingContext() ||
             !std::isfinite(viewportLogicalRect_.width) ||
             !std::isfinite(viewportLogicalRect_.height) ||
             viewportLogicalRect_.width <= 0.0F || viewportLogicalRect_.height <= 0.0F) {
@@ -2430,10 +2716,68 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return true;
     }
 
+    [[nodiscard]] bool queueViewportTileBrush(UI::UILogicalPoint position) noexcept
+    {
+        if (!tileMapEditingContext() ||
+            (viewportToolMode_ != ViewportToolMode::TilePaint &&
+             viewportToolMode_ != ViewportToolMode::TileErase) ||
+            pendingTileCellEdit_.has_value() || !previewWorld_.has_value() ||
+            tileMapWidthCells_ == 0U || tileMapHeightCells_ == 0U ||
+            viewportLogicalRect_.width <= 0.0F || viewportLogicalRect_.height <= 0.0F) {
+            return false;
+        }
+        const Tina::Scene::World2DEntityBinding* cameraBinding = findPreviewBinding(CameraKey);
+        const Tina::Scene::WorldTransform* cameraTransform =
+            cameraBinding != nullptr ? previewWorld_->worldTransform(cameraBinding->entity) : nullptr;
+        if (cameraTransform == nullptr) {
+            return false;
+        }
+        const float normalizedX =
+            (position.x - viewportLogicalRect_.x) / viewportLogicalRect_.width;
+        const float normalizedY =
+            (position.y - viewportLogicalRect_.y) / viewportLogicalRect_.height;
+        if (!std::isfinite(normalizedX) || !std::isfinite(normalizedY) ||
+            normalizedX < 0.0F || normalizedX >= 1.0F ||
+            normalizedY < 0.0F || normalizedY >= 1.0F) {
+            return false;
+        }
+        const float worldHeight = PreviewWorldHeight;
+        const float worldWidth = worldHeight * viewportLogicalRect_.width /
+                                 viewportLogicalRect_.height;
+        const float worldX = cameraTransform->position.x +
+                             (normalizedX - 0.5F) * worldWidth;
+        const float worldY = cameraTransform->position.y +
+                             (0.5F - normalizedY) * worldHeight;
+        if (!std::isfinite(worldX) || !std::isfinite(worldY) ||
+            worldX < 0.0F || worldY < 0.0F) {
+            return false;
+        }
+        const u32 cellX = static_cast<u32>(std::floor(worldX));
+        const u32 cellY = static_cast<u32>(std::floor(worldY));
+        if (cellX >= tileMapWidthCells_ || cellY >= tileMapHeightCells_) {
+            return false;
+        }
+        pendingTileCellEdit_ = Tina::Editor::TileMapAuthoringCellEdit{
+            .x = cellX,
+            .y = cellY,
+            .localTileId = viewportToolMode_ == ViewportToolMode::TileErase
+                               ? Tina::Core::u16{0}
+                               : selectedTileId_,
+        };
+        pendingTileLayerId_ = activeTileMapLayerId_;
+        return true;
+    }
+
     void handleViewportPointerDown(UI::UIRoutedPointerEvent& event) noexcept
     {
         const UI::UIPointerInputEvent& input = event.input();
         if (input.button != Tina::Platform::PointerButton::Primary) {
+            return;
+        }
+        if (queueViewportTileBrush(input.position)) {
+            (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
+            event.consumeInputTransition();
+            event.preventDefaultAction();
             return;
         }
         const bool began = beginViewportGizmo(input.pointer, input.position);
@@ -2711,8 +3055,53 @@ class EditorWorkspaceState final : public Tina::IGameState {
     }
 
     [[nodiscard]] Tina::Core::Status
+    processPendingTileBrush(Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        if (!pendingTileCellEdit_.has_value()) {
+            return Tina::Core::success();
+        }
+        const Tina::Editor::TileMapAuthoringCellEdit edit = *pendingTileCellEdit_;
+        const auto layerId = pendingTileLayerId_;
+        pendingTileCellEdit_.reset();
+        pendingTileLayerId_ = 0;
+
+        const u64 revisionBefore = tileMapDocument_.revision();
+        if (auto status = tileMapDocument_.paintCell(
+                layerId, edit.x, edit.y, edit.localTileId); !status) {
+            return status;
+        }
+        if (tileMapDocument_.revision() == revisionBefore) {
+            authoringFeedback_ = edit.localTileId == 0U
+                                     ? "Tile erase left an already-empty cell unchanged"
+                                     : "Tile paint left the existing tile unchanged";
+            return refreshAuthoringUi(tree);
+        }
+        if (edit.localTileId != 0U) {
+            lastPaintedTile_ = edit;
+            selectedTileId_ = static_cast<Tina::Core::u16>(edit.localTileId % 4U + 1U);
+        } else {
+            lastPaintedTile_.reset();
+        }
+        ++counters_.authoringEdits;
+        ++counters_.tileMapEdits;
+        if (auto status = validateRuntimePreview(); !status) {
+            return status;
+        }
+        authoringFeedback_ = edit.localTileId == 0U
+                                 ? "Viewport tile erase committed"
+                                 : "Viewport tile paint committed";
+        return refreshAuthoringUi(tree);
+    }
+
+    [[nodiscard]] Tina::Core::Status
     refreshViewportToolUi(Tina::PrimaryWindowUITreeUpdater& tree)
     {
+        const bool tileToolsAvailable = tileMapEditingContext();
+        if (!tileToolsAvailable &&
+            (viewportToolMode_ == ViewportToolMode::TilePaint ||
+             viewportToolMode_ == ViewportToolMode::TileErase)) {
+            viewportToolMode_ = ViewportToolMode::Select;
+        }
         const bool selectActive = viewportToolMode_ == ViewportToolMode::Select;
         for (const UI::UINodeId button : selectToolButtons_) {
             if (auto status = tree.setEnabled(button, !selectActive); !status) {
@@ -2720,12 +3109,29 @@ class EditorWorkspaceState final : public Tina::IGameState {
             }
         }
         for (const UI::UINodeId button : moveToolButtons_) {
-            if (auto status = tree.setEnabled(button, selectActive); !status) {
+            if (auto status = tree.setEnabled(button, viewportToolMode_ != ViewportToolMode::Move); !status) {
                 return status;
             }
         }
-        return tree.setText(viewportToolStatus_, selectActive ? "Select | Local | Free"
-                                                              : "Move | Local | Free");
+        if (auto status = tree.setEnabled(
+                tilePaintToolButton_,
+                tileToolsAvailable && viewportToolMode_ != ViewportToolMode::TilePaint); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(
+                tileEraseToolButton_,
+                tileToolsAvailable && viewportToolMode_ != ViewportToolMode::TileErase); !status) {
+            return status;
+        }
+        std::string_view toolStatus = "Select | Local | Free";
+        if (viewportToolMode_ == ViewportToolMode::Move) {
+            toolStatus = "Move | Local | Free";
+        } else if (viewportToolMode_ == ViewportToolMode::TilePaint) {
+            toolStatus = "Tile Paint | Grid Snap";
+        } else if (viewportToolMode_ == ViewportToolMode::TileErase) {
+            toolStatus = "Tile Erase | Grid Snap";
+        }
+        return tree.setText(viewportToolStatus_, toolStatus);
     }
 
     [[nodiscard]] const Tina::Scene::World2DEntityBinding*
@@ -2811,6 +3217,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         return resolution->has_value() ? resolution->value().resource
                                        : Tina::Render::FrameResourceRef{};
+    }
+
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolvePreviewTileset(void* userData, Tina::Asset::AssetHandle asset,
+                          Tina::Render::FrameResourceSink& sink) noexcept
+    {
+        auto& self = *static_cast<EditorWorkspaceState*>(userData);
+        if (!self.spriteBindings_.has_value()) {
+            return Tina::Render::FrameResourceRef{};
+        }
+        return self.spriteBindings_->internTilesetFrameResource(asset, sink);
     }
 
     [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
@@ -2913,6 +3330,179 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return Tina::Core::success();
     }
 
+    [[nodiscard]] Tina::Core::Status editTileMapBrushCell(bool erase)
+    {
+        if (!tileMapEditingContext()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "TileMap brush requires the 2D TileMap selection");
+        }
+        auto authored = tileMapDocument_.snapshot();
+        if (!authored) {
+            return Tina::Core::failure(std::move(authored.error()));
+        }
+        auto layer = std::find_if(
+            authored->layers.begin(), authored->layers.end(), [this](const auto& candidate) {
+                return candidate.stableLayerId == activeTileMapLayerId_ &&
+                       candidate.kind == Tina::AssetFormat::TileMapLayerKind::Tile;
+            });
+        if (layer == authored->layers.end()) {
+            layer = std::find_if(authored->layers.begin(), authored->layers.end(),
+                                 [](const auto& candidate) {
+                                     return candidate.kind ==
+                                            Tina::AssetFormat::TileMapLayerKind::Tile;
+                                 });
+        }
+        if (layer == authored->layers.end()) {
+            return Tina::Core::failure(Tina::Editor::EditorErrorCode::LayerNotFound,
+                                       "TileMap document has no tile layer for the brush");
+        }
+        activeTileMapLayerId_ = layer->stableLayerId;
+
+        const auto authoredCellAt = [&](u32 x, u32 y) noexcept {
+            const u32 chunkX = x / authored->chunkSizeCells;
+            const u32 chunkY = y / authored->chunkSizeCells;
+            const auto chunk = std::find_if(
+                layer->chunks.begin(), layer->chunks.end(),
+                [chunkX, chunkY](const Tina::Editor::TileMapAuthoringChunk& candidate) {
+                    return candidate.chunkX == chunkX && candidate.chunkY == chunkY;
+                });
+            if (chunk == layer->chunks.end()) {
+                return Tina::Core::u16{0};
+            }
+            const u32 originX = chunkX * authored->chunkSizeCells;
+            const u32 originY = chunkY * authored->chunkSizeCells;
+            const u32 width = (std::min)(
+                static_cast<u32>(authored->chunkSizeCells), authored->widthCells - originX);
+            const auto index = static_cast<Tina::Core::usize>(y - originY) * width +
+                               (x - originX);
+            return index < chunk->cells.size() ? chunk->cells[index] : Tina::Core::u16{0};
+        };
+
+        u32 x = tileBrushX_ % authored->widthCells;
+        u32 y = tileBrushY_ % authored->heightCells;
+        if (erase && lastPaintedTile_.has_value()) {
+            x = lastPaintedTile_->x;
+            y = lastPaintedTile_->y;
+        } else if (erase && authoredCellAt(x, y) == 0U) {
+            bool found = false;
+            for (const auto& chunk : layer->chunks) {
+                const u32 originX = chunk.chunkX * authored->chunkSizeCells;
+                const u32 originY = chunk.chunkY * authored->chunkSizeCells;
+                const u32 width = (std::min)(
+                    static_cast<u32>(authored->chunkSizeCells), authored->widthCells - originX);
+                for (Tina::Core::usize index = 0; index < chunk.cells.size(); ++index) {
+                    if (chunk.cells[index] == 0U) {
+                        continue;
+                    }
+                    x = originX + static_cast<u32>(index % width);
+                    y = originY + static_cast<u32>(index / width);
+                    found = true;
+                    break;
+                }
+                if (found) {
+                    break;
+                }
+            }
+        }
+
+        Tina::Core::u16 tileId = erase ? 0U : selectedTileId_;
+        if (!erase && authoredCellAt(x, y) == tileId) {
+            tileId = static_cast<Tina::Core::u16>(tileId % 4U + 1U);
+        }
+        const auto revisionBefore = tileMapDocument_.revision();
+        if (auto status = tileMapDocument_.paintCell(layer->stableLayerId, x, y, tileId);
+            !status) {
+            return status;
+        }
+        if (tileMapDocument_.revision() == revisionBefore) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "TileMap brush operation did not change the selected cell");
+        }
+        if (erase) {
+            lastPaintedTile_.reset();
+        } else {
+            lastPaintedTile_ = Tina::Editor::TileMapAuthoringCellEdit{
+                .x = x,
+                .y = y,
+                .localTileId = tileId,
+            };
+            selectedTileId_ = static_cast<Tina::Core::u16>(tileId % 4U + 1U);
+            tileBrushX_ = (x + 1U) % authored->widthCells;
+            tileBrushY_ = y + (tileBrushX_ == 0U ? 1U : 0U);
+            tileBrushY_ %= authored->heightCells;
+        }
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status toggleActiveTileMapLayer()
+    {
+        if (!tileMapEditingContext()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "TileMap layer controls require the 2D TileMap selection");
+        }
+        auto authored = tileMapDocument_.snapshot();
+        if (!authored) {
+            return Tina::Core::failure(std::move(authored.error()));
+        }
+        auto layer = std::find_if(
+            authored->layers.begin(), authored->layers.end(), [this](const auto& candidate) {
+                return candidate.stableLayerId == activeTileMapLayerId_ &&
+                       candidate.kind == Tina::AssetFormat::TileMapLayerKind::Tile;
+            });
+        if (layer == authored->layers.end()) {
+            layer = std::find_if(authored->layers.begin(), authored->layers.end(),
+                                 [](const auto& candidate) {
+                                     return candidate.kind ==
+                                            Tina::AssetFormat::TileMapLayerKind::Tile;
+                                 });
+        }
+        if (layer == authored->layers.end()) {
+            return Tina::Core::failure(Tina::Editor::EditorErrorCode::LayerNotFound,
+                                       "TileMap document has no tile layer to toggle");
+        }
+        activeTileMapLayerId_ = layer->stableLayerId;
+        return tileMapDocument_.setLayerVisibility(layer->stableLayerId, !layer->visible);
+    }
+
+    [[nodiscard]] Tina::Core::Status
+    addTileMapLayer(Tina::AssetFormat::TileMapLayerKind kind)
+    {
+        if (!tileMapEditingContext()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "TileMap layer controls require the 2D TileMap selection");
+        }
+        auto authored = tileMapDocument_.snapshot();
+        if (!authored) {
+            return Tina::Core::failure(std::move(authored.error()));
+        }
+        u32 layerId = 1U;
+        while (std::any_of(authored->layers.begin(), authored->layers.end(),
+                           [layerId](const auto& candidate) {
+                               return candidate.stableLayerId == layerId;
+                           })) {
+            if (layerId == (std::numeric_limits<u32>::max)()) {
+                return Tina::Core::failure(
+                    Tina::Editor::EditorErrorCode::DocumentCapacityExceeded,
+                    "TileMap layer identity space is exhausted");
+            }
+            ++layerId;
+        }
+        if (kind == Tina::AssetFormat::TileMapLayerKind::Tile) {
+            if (auto status = tileMapDocument_.addTileLayer(
+                    layerId, "Tile Layer " + std::to_string(layerId)); !status) {
+                return status;
+            }
+            activeTileMapLayerId_ = layerId;
+            return Tina::Core::success();
+        }
+        return tileMapDocument_.addObjectLayer(
+            layerId, "Object Layer " + std::to_string(layerId));
+    }
+
     [[nodiscard]] Tina::Core::Status executeEditorCommand(Tina::PrimaryWindowUITreeUpdater& tree)
     {
         const EditorCommand command = *pendingEditorCommand_;
@@ -3002,19 +3592,29 @@ class EditorWorkspaceState final : public Tina::IGameState {
             break;
         }
         case EditorCommand::Undo:
-            status = workspaceMode_ == WorkspaceMode::World2D ? document_.undo()
-                                                               : document3D_.undo();
+            status = tileMapEditingContext()
+                         ? tileMapDocument_.undo()
+                         : (workspaceMode_ == WorkspaceMode::World2D ? document_.undo()
+                                                                      : document3D_.undo());
             if (status) {
                 ++counters_.authoringUndos;
+                if (tileMapEditingContext()) {
+                    ++counters_.tileMapUndos;
+                }
                 requiresPreviewValidation = true;
                 authoringFeedback_ = "Undo restored the previous canonical snapshot";
             }
             break;
         case EditorCommand::Redo:
-            status = workspaceMode_ == WorkspaceMode::World2D ? document_.redo()
-                                                               : document3D_.redo();
+            status = tileMapEditingContext()
+                         ? tileMapDocument_.redo()
+                         : (workspaceMode_ == WorkspaceMode::World2D ? document_.redo()
+                                                                      : document3D_.redo());
             if (status) {
                 ++counters_.authoringRedos;
+                if (tileMapEditingContext()) {
+                    ++counters_.tileMapRedos;
+                }
                 requiresPreviewValidation = true;
                 authoringFeedback_ = "Redo restored the next canonical snapshot";
             }
@@ -3027,6 +3627,71 @@ class EditorWorkspaceState final : public Tina::IGameState {
                                          : "Canonical Prefab v2 document saved atomically";
             }
             break;
+        case EditorCommand::PaintTile:
+            status = editTileMapBrushCell(false);
+            if (status) {
+                ++counters_.authoringEdits;
+                ++counters_.tileMapEdits;
+                requiresPreviewValidation = true;
+                authoringFeedback_ = "Tile painted as one root/chunk revision";
+            }
+            break;
+        case EditorCommand::EraseTile:
+            status = editTileMapBrushCell(true);
+            if (status) {
+                ++counters_.authoringEdits;
+                ++counters_.tileMapEdits;
+                requiresPreviewValidation = true;
+                authoringFeedback_ = "Tile erased as one root/chunk revision";
+            }
+            break;
+        case EditorCommand::ToggleTileLayer:
+            status = toggleActiveTileMapLayer();
+            if (status) {
+                ++counters_.authoringEdits;
+                ++counters_.tileMapEdits;
+                requiresPreviewValidation = true;
+                authoringFeedback_ = "Tile layer visibility committed";
+            }
+            break;
+        case EditorCommand::AddTileLayer:
+            status = addTileMapLayer(Tina::AssetFormat::TileMapLayerKind::Tile);
+            if (status) {
+                ++counters_.authoringEdits;
+                ++counters_.tileMapEdits;
+                requiresPreviewValidation = true;
+                authoringFeedback_ = "Tile layer added to the TileMap document";
+            }
+            break;
+        case EditorCommand::AddObjectLayer:
+            status = addTileMapLayer(Tina::AssetFormat::TileMapLayerKind::Object);
+            if (status) {
+                ++counters_.authoringEdits;
+                ++counters_.tileMapEdits;
+                requiresPreviewValidation = true;
+                authoringFeedback_ = "Object layer added to the TileMap document";
+            }
+            break;
+        case EditorCommand::CookTileMapPreview: {
+            if (!tileMapEditingContext()) {
+                status = Tina::Core::failure(
+                    Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                    "TileMap cook preview requires the 2D TileMap selection");
+                break;
+            }
+            auto preview = tileMapDocument_.cookPreview();
+            if (!preview) {
+                status = Tina::Core::failure(std::move(preview.error()));
+                break;
+            }
+            counters_.tileMapCookArtifacts = preview->artifacts.size();
+            counters_.tileMapCookPreviewBytes = 0;
+            for (const auto& artifact : preview->artifacts) {
+                counters_.tileMapCookPreviewBytes += artifact.cookedBytes.size();
+            }
+            authoringFeedback_ = "TileMap root and chunk cook preview rebuilt";
+            break;
+        }
         }
         if (!status) {
             return status;
@@ -3088,7 +3753,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        if (auto status = tree.setText(gridStatus_, world2D ? "Grid 16 px" : "Grid 1 m"); !status) {
+        if (auto status = tree.setText(gridStatus_, world2D ? "Tile Grid 1 m" : "Grid 1 m"); !status) {
             return status;
         }
         if (auto status = tree.setText(previewTitle_, world2D ? "World2D Scene" : "World3D Scene");
@@ -3096,13 +3761,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree.setText(previewEntities_,
-                                       world2D ? "Camera | Player | Light | TileMap"
+                                       world2D ? "Camera | Player | TileMap"
                                                : "Camera | Hero | Left | Right");
             !status) {
             return status;
         }
         if (auto status = tree.setText(previewCook_,
-                                       world2D ? "World2D -> Catalog -> Scene"
+                                       world2D ? "World2D + TileMap -> Scene"
                                                : "Prefab v2 -> Catalog -> Scene");
             !status) {
             return status;
@@ -3121,7 +3786,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree.setText(documentFormat_,
-                                       world2D ? "World2D schema v1 | canonical"
+                                       world2D ? "World2D v1 + TileMap v3/v1 | canonical"
                                                : "Prefab schema v2 | canonical");
             !status) {
             return status;
@@ -3236,26 +3901,34 @@ class EditorWorkspaceState final : public Tina::IGameState {
 
     [[nodiscard]] u64 activeUndoDepth() const noexcept
     {
-        return workspaceMode_ == WorkspaceMode::World2D ? document_.undoDepth()
-                                                        : document3D_.undoDepth();
+        return tileMapEditingContext()
+                   ? tileMapDocument_.undoDepth()
+                   : (workspaceMode_ == WorkspaceMode::World2D ? document_.undoDepth()
+                                                                : document3D_.undoDepth());
     }
 
     [[nodiscard]] u64 activeRedoDepth() const noexcept
     {
-        return workspaceMode_ == WorkspaceMode::World2D ? document_.redoDepth()
-                                                        : document3D_.redoDepth();
+        return tileMapEditingContext()
+                   ? tileMapDocument_.redoDepth()
+                   : (workspaceMode_ == WorkspaceMode::World2D ? document_.redoDepth()
+                                                                : document3D_.redoDepth());
     }
 
     [[nodiscard]] bool activeCanUndo() const noexcept
     {
-        return workspaceMode_ == WorkspaceMode::World2D ? document_.canUndo()
-                                                        : document3D_.canUndo();
+        return tileMapEditingContext()
+                   ? tileMapDocument_.canUndo()
+                   : (workspaceMode_ == WorkspaceMode::World2D ? document_.canUndo()
+                                                                : document3D_.canUndo());
     }
 
     [[nodiscard]] bool activeCanRedo() const noexcept
     {
-        return workspaceMode_ == WorkspaceMode::World2D ? document_.canRedo()
-                                                        : document3D_.canRedo();
+        return tileMapEditingContext()
+                   ? tileMapDocument_.canRedo()
+                   : (workspaceMode_ == WorkspaceMode::World2D ? document_.canRedo()
+                                                                : document3D_.canRedo());
     }
 
     [[nodiscard]] Tina::Core::Status moveSelectedPositiveX()
@@ -3453,6 +4126,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
             appendReference(node.meshId, Tina::AssetFormat::AssetKind::StaticMesh);
             appendReference(node.materialId, Tina::AssetFormat::AssetKind::Material);
         }
+        appendReference(tileMapDocument_.tilesetId(),
+                        Tina::AssetFormat::AssetKind::Tileset);
 
         std::vector<Tina::Core::AssetId> loadIds;
         const Tina::Asset::CatalogSnapshot& catalog = *assetResources_.system->catalog();
@@ -3477,6 +4152,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
 
         std::vector<Tina::Asset::AssetHandle> spriteAssets;
+        std::vector<Tina::Asset::AssetHandle> tilesetAssets;
         std::vector<Tina::Asset::AssetHandle> spriteTextureAssets;
         for (const PreviewAssetReference& reference : references) {
             if (reference.kind == Tina::AssetFormat::AssetKind::Texture2D) {
@@ -3486,28 +4162,33 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 }
                 continue;
             }
-            if (reference.kind != Tina::AssetFormat::AssetKind::Sprite) {
+            if (reference.kind != Tina::AssetFormat::AssetKind::Sprite &&
+                reference.kind != Tina::AssetFormat::AssetKind::Tileset) {
                 continue;
             }
-            const Tina::Asset::AssetHandle sprite = loadedAsset(reference.assetId, reference.kind);
-            if (!sprite) {
+            const Tina::Asset::AssetHandle asset = loadedAsset(reference.assetId, reference.kind);
+            if (!asset) {
                 continue;
             }
-            const Tina::Asset::CookedAssetFile* file = assetResources_.system->tryGet(sprite);
+            const Tina::Asset::CookedAssetFile* file = assetResources_.system->tryGet(asset);
             const auto textureDependency = file != nullptr ? file->dependency(0) : std::nullopt;
             if (!textureDependency.has_value() ||
                 textureDependency->expectedKind != Tina::AssetFormat::AssetKind::Texture2D) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "Catalog Sprite has no required Texture2D dependency");
+                                           "Catalog 2D asset has no required Texture2D dependency");
             }
             const Tina::Asset::AssetHandle texture = loadedAsset(
                 textureDependency->assetId, Tina::AssetFormat::AssetKind::Texture2D);
             if (!texture) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "Catalog Sprite Texture2D dependency was not loaded");
+                                           "Catalog 2D Texture2D dependency was not loaded");
             }
-            if (!containsHandle(spriteAssets, sprite)) {
-                spriteAssets.push_back(sprite);
+            if (reference.kind == Tina::AssetFormat::AssetKind::Sprite) {
+                if (!containsHandle(spriteAssets, asset)) {
+                    spriteAssets.push_back(asset);
+                }
+            } else if (!containsHandle(tilesetAssets, asset)) {
+                tilesetAssets.push_back(asset);
             }
             if (!containsHandle(spriteTextureAssets, texture)) {
                 spriteTextureAssets.push_back(texture);
@@ -3552,6 +4233,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
             for (const Tina::Asset::AssetHandle sprite : spriteAssets) {
                 if (spriteBindings_->resolveSprite(sprite) != 0) {
                     boundSpriteAssets_.push_back(sprite);
+                }
+            }
+            for (const Tina::Asset::AssetHandle tileset : tilesetAssets) {
+                if (spriteBindings_->resolveTileset(tileset) != 0) {
+                    boundTilesetAssets_.push_back(tileset);
                 }
             }
         }
@@ -3682,6 +4368,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     void releasePreviewAssetBindings() noexcept
     {
         previewWorld_.reset();
+        previewTileMap_.reset();
+        previewTileMapLayerIds_.clear();
+        previewTilesetAsset_ = {};
         if (mesh3DBindings_.has_value()) {
             if (auto status = mesh3DBindings_->retireAllBindings(); !status) {
                 std::terminate();
@@ -3696,6 +4385,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         loadedPreviewHandles_.clear();
         boundSpriteAssets_.clear();
+        boundTilesetAssets_.clear();
         boundMeshAssets_.clear();
         boundMaterialAssets_.clear();
     }
@@ -3785,6 +4475,87 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (playerTransform == nullptr) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "editor runtime preview is missing the Player transform");
+        }
+
+        counters_.tileMapDocumentRevision = tileMapDocument_.revision();
+        counters_.tileMapLayerCount = tileMapDocument_.layerCount();
+        counters_.tileMapChunkCount = tileMapDocument_.chunkCount();
+        counters_.tileMapAuthoredCells = tileMapDocument_.nonEmptyCellCount();
+        auto tileMapRoot = Tina::AssetFormat::parseTileMapPayload(
+            tileMapDocument_.rootPayloadBytes());
+        if (!tileMapRoot) {
+            return Tina::Core::failure(std::move(tileMapRoot.error()));
+        }
+        tileMapWidthCells_ = tileMapRoot->widthCells;
+        tileMapHeightCells_ = tileMapRoot->heightCells;
+        counters_.tileMapCookArtifacts = 0;
+        counters_.tileMapCookPreviewBytes = 0;
+        auto cookPreview = tileMapDocument_.cookPreview();
+        if (!cookPreview) {
+            return Tina::Core::failure(std::move(cookPreview.error()));
+        }
+        counters_.tileMapCookArtifacts = cookPreview->artifacts.size();
+        for (const auto& artifact : cookPreview->artifacts) {
+            counters_.tileMapCookPreviewBytes += artifact.cookedBytes.size();
+        }
+
+        previewTileMap_.reset();
+        previewTileMapLayerIds_.clear();
+        previewTilesetAsset_ = {};
+        const Tina::Asset::AssetHandle tilesetAsset = loadedAsset(
+            tileMapDocument_.tilesetId(), Tina::AssetFormat::AssetKind::Tileset);
+        if (tilesetAsset && containsHandle(boundTilesetAssets_, tilesetAsset) &&
+            assetResources_.system.has_value()) {
+            const Tina::Asset::CookedAssetFile* tilesetFile =
+                assetResources_.system->tryGet(tilesetAsset);
+            if (tilesetFile == nullptr) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "Catalog Tileset payload is unavailable");
+            }
+            auto tileSet = Tina::AssetFormat::parseTilesetPayload(tilesetFile->payload());
+            if (!tileSet) {
+                return Tina::Core::failure(std::move(tileSet.error()));
+            }
+            auto map = Tina::Asset::TileMapInstance::Create(
+                *tileMapRoot, *tileSet, tileMapDocument_.tileMapId(),
+                tileMapDocument_.tilesetId(),
+                Tina::Asset::TileMapInstanceConfig{
+                    .residentChunkCapacity =
+                        (std::max)(Tina::Core::usize{1}, tileMapDocument_.chunkCount()),
+                    .memoryResource = &assetResources_.memory,
+                });
+            if (!map) {
+                return Tina::Core::failure(std::move(map.error()));
+            }
+            for (Tina::Core::usize chunkIndex = 0;
+                 chunkIndex < tileMapDocument_.chunkCount(); ++chunkIndex) {
+                const auto chunkPayload = tileMapDocument_.chunkPayloadAt(chunkIndex);
+                if (!chunkPayload) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::Internal,
+                        "TileMap authoring chunk view disappeared during preview build");
+                }
+                auto chunk = Tina::AssetFormat::parseTileMapChunkPayload(
+                    chunkPayload->payloadBytes);
+                if (!chunk) {
+                    return Tina::Core::failure(std::move(chunk.error()));
+                }
+                if (auto status = map->attachChunk(
+                        chunkPayload->assetId, *chunk,
+                        static_cast<u64>(chunkIndex + 1U)); !status) {
+                    return status;
+                }
+            }
+            previewTileMapLayerIds_.reserve(tileMapRoot->layerCount);
+            for (Tina::Core::u16 layerIndex = 0; layerIndex < tileMapRoot->layerCount;
+                 ++layerIndex) {
+                const auto layer = tileMapRoot->layerAt(layerIndex);
+                if (layer && layer->kind == Tina::AssetFormat::TileMapLayerKind::Tile) {
+                    previewTileMapLayerIds_.push_back(layer->stableLayerId);
+                }
+            }
+            previewTileMap_.emplace(std::move(*map));
+            previewTilesetAsset_ = tilesetAsset;
         }
 
         ++counters_.runtimePreviewInstantiations;
@@ -3978,7 +4749,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         publishWorkspaceSessionCounters();
         const bool dirty = counters_.documentDirty;
         const bool pathConfigured = counters_.documentPathConfigured;
-        const bool selectionEditable = stableEntityIdForHierarchyItem(selectionKey_) != 0U;
+        const bool selectionEditable = stableEntityIdForHierarchyItem(selectionKey_) != 0U &&
+                                       !tileMapEditingContext();
         const bool selectionEditable3D = selectionEditable && workspaceMode_ == WorkspaceMode::World3D;
 
         if (auto status = refreshWorkspaceChrome(tree); !status) {
@@ -4029,6 +4801,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
         statusPreview += std::to_string(workspaceMode_ == WorkspaceMode::World2D
                                             ? previewResolvedSpriteCount_
                                             : previewResolvedMeshCount_);
+        if (workspaceMode_ == WorkspaceMode::World2D) {
+            statusPreview += " + ";
+            statusPreview += std::to_string(counters_.tileMapEmittedSprites);
+            statusPreview += " tiles";
+        }
         if (auto status = tree.setText(statusPreview_, statusPreview); !status) {
             return status;
         }
@@ -4048,6 +4825,25 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree.setText(authoringHint_, authoringFeedback_); !status) {
+            return status;
+        }
+        auto tileMapRoot = Tina::AssetFormat::parseTileMapPayload(
+            tileMapDocument_.rootPayloadBytes());
+        if (!tileMapRoot) {
+            return Tina::Core::failure(std::move(tileMapRoot.error()));
+        }
+        std::string tileMapStatus = std::to_string(tileMapRoot->widthCells);
+        tileMapStatus += " x ";
+        tileMapStatus += std::to_string(tileMapRoot->heightCells);
+        tileMapStatus += " | Layers ";
+        tileMapStatus += std::to_string(tileMapDocument_.layerCount());
+        tileMapStatus += " | Chunks ";
+        tileMapStatus += std::to_string(tileMapDocument_.chunkCount());
+        tileMapStatus += " | Cells ";
+        tileMapStatus += std::to_string(tileMapDocument_.nonEmptyCellCount());
+        tileMapStatus += " | Rev ";
+        tileMapStatus += std::to_string(tileMapDocument_.revision());
+        if (auto status = tree.setText(tileMapStatus_, tileMapStatus); !status) {
             return status;
         }
         if (auto status = tree.setEnabled(inspectorPositionX_, selectionEditable); !status) {
@@ -4083,6 +4879,25 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = tree.setEnabled(moveButton_, selectionEditable); !status) {
             return status;
         }
+        const bool tileMapControlsEnabled = tileMapEditingContext();
+        if (auto status = tree.setEnabled(paintTileButton_, tileMapControlsEnabled); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(eraseTileButton_, tileMapControlsEnabled); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(toggleTileLayerButton_, tileMapControlsEnabled); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(addTileLayerButton_, tileMapControlsEnabled); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(addObjectLayerButton_, tileMapControlsEnabled); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(cookTileMapButton_, tileMapControlsEnabled); !status) {
+            return status;
+        }
         if (auto status = tree.setEnabled(undoButton_, activeCanUndo()); !status) {
             return status;
         }
@@ -4107,6 +4922,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         std::string note = "Note: ";
         note += hierarchyAuthoringNote(workspaceMode_, key);
+        if (workspaceMode_ == WorkspaceMode::World2D && key == TileMapKey) {
+            note += " Layers=";
+            note += std::to_string(tileMapDocument_.layerCount());
+            note += ", chunks=";
+            note += std::to_string(tileMapDocument_.chunkCount());
+            note += ", cells=";
+            note += std::to_string(tileMapDocument_.nonEmptyCellCount());
+        }
         float positionX = 0.0F;
         float positionY = 0.0F;
         float positionZ = 0.0F;
@@ -4115,7 +4938,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
         float scaleY = 1.0F;
         float scaleZ = 1.0F;
         bool hasEntity = false;
-        const u32 stableEntityId = stableEntityIdForHierarchyItem(key);
+        const u32 stableEntityId = workspaceMode_ == WorkspaceMode::World2D && key == TileMapKey
+                                       ? 0U
+                                       : stableEntityIdForHierarchyItem(key);
         if (stableEntityId != 0U) {
             if (workspaceMode_ == WorkspaceMode::World2D) {
                 std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
@@ -4309,6 +5134,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     LifecycleCounters& counters_;
     Tina::Editor::World2DAuthoringDocument document_;
     Tina::Editor::World3DAuthoringDocument document3D_;
+    Tina::Editor::TileMapAuthoringDocument tileMapDocument_;
     WorkspaceMode workspaceMode_ = WorkspaceMode::World2D;
     WorkspaceSessionState world2DSession_{};
     WorkspaceSessionState world3DSession_{};
@@ -4332,6 +5158,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId inspectorScaleY_{};
     UI::UINodeId inspectorScaleZ_{};
     UI::UINodeId authoringHint_{};
+    UI::UINodeId tileMapStatus_{};
     UI::UINodeId statusDocument_{};
     UI::UINodeId statusPreview_{};
     UI::UINodeId statusSelection_{};
@@ -4354,10 +5181,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::array<UI::UINodeId, 2> selectToolButtons_{};
     std::array<UI::UINodeId, 2> moveToolButtons_{};
     UI::UINodeId moveButton_{};
+    UI::UINodeId tilePaintToolButton_{};
+    UI::UINodeId tileEraseToolButton_{};
     UI::UINodeId applyTransformButton_{};
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
     UI::UINodeId saveButton_{};
+    UI::UINodeId paintTileButton_{};
+    UI::UINodeId eraseTileButton_{};
+    UI::UINodeId toggleTileLayerButton_{};
+    UI::UINodeId addTileLayerButton_{};
+    UI::UINodeId addObjectLayerButton_{};
+    UI::UINodeId cookTileMapButton_{};
     UI::UIStyleClassId dockClass_{};
     UI::UIStyleClassId viewportClass_{};
     UI::UIStyleTokenId viewportToken_{};
@@ -4373,6 +5208,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 autoAuthoringStage_ = 0;
     UI::UILogicalPoint autoGizmoStart_{};
     mutable std::optional<Tina::Scene::World> previewWorld_{};
+    mutable std::optional<Tina::Asset::TileMapInstance> previewTileMap_{};
+    Tina::Asset::AssetHandle previewTilesetAsset_{};
+    std::vector<Tina::AssetFormat::TileMapLayerId> previewTileMapLayerIds_{};
+    u32 tileMapWidthCells_ = 0;
+    u32 tileMapHeightCells_ = 0;
+    Tina::AssetFormat::TileMapLayerId activeTileMapLayerId_ = InitialTileMapLayerId;
+    u32 tileBrushX_ = 2;
+    u32 tileBrushY_ = 2;
+    Tina::Core::u16 selectedTileId_ = 1;
+    std::optional<Tina::Editor::TileMapAuthoringCellEdit> lastPaintedTile_{};
+    std::optional<Tina::Editor::TileMapAuthoringCellEdit> pendingTileCellEdit_{};
+    Tina::AssetFormat::TileMapLayerId pendingTileLayerId_ = 0;
     std::vector<Tina::Scene::World2DEntityBinding> previewBindings_{};
     std::vector<World3DPreviewBinding> preview3DBindings_{};
     Tina::Scene::EntityId previewCamera3D_{};
@@ -4380,6 +5227,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};
     std::vector<Tina::Asset::AssetHandle> loadedPreviewHandles_{};
     std::vector<Tina::Asset::AssetHandle> boundSpriteAssets_{};
+    std::vector<Tina::Asset::AssetHandle> boundTilesetAssets_{};
     std::vector<Tina::Asset::AssetHandle> boundMeshAssets_{};
     std::vector<Tina::Asset::AssetHandle> boundMaterialAssets_{};
     u64 previewResolvedSpriteCount_ = 0;
@@ -4417,6 +5265,7 @@ class EditorApplication final : public Tina::IGameApplication {
                 std::make_unique<EditorWorkspaceState>(
                     options_, counters_, std::move(initialDocuments->world2D),
                     std::move(initialDocuments->world3D),
+                    std::move(initialDocuments->tileMap),
                     std::move(initialDocuments->world2DSession),
                     std::move(initialDocuments->world3DSession), assetResources_,
                     renderDeviceAccess_);
@@ -4446,7 +5295,7 @@ class EditorApplication final : public Tina::IGameApplication {
     config.primaryWindow.title = "Tina Editor - 2D / 3D";
     config.primaryWindow.initialLogicalExtent = {WindowLogicalWidth, WindowLogicalHeight};
     config.primaryWindow.initiallyVisible = true;
-    config.renderSceneCapacities.spriteCapacity = 8;
+    config.renderSceneCapacities.spriteCapacity = EditorViewportSpriteCapacity;
     config.renderSceneCapacities.mesh3DItemCapacity = 8;
     config.renderSceneCapacities.mesh3DBatchCapacity = 4;
     return config;
@@ -4519,7 +5368,8 @@ class EditorApplication final : public Tina::IGameApplication {
         counters.builtInPreviewCatalog == projectCatalogConfigured ||
         counters.runtimePreviewInstantiations < 1 || counters.renderExtractions != options.targetFrameCount ||
         (options.targetFrameCount > 1 &&
-         (world2D ? counters.gpuViewportSprites != counters.catalogResolved2DSprites
+         (world2D ? counters.gpuViewportSprites !=
+                        counters.catalogResolved2DSprites + counters.tileMapEmittedSprites
                   : counters.gpuViewportMeshes != counters.catalogResolved3DMeshes)) ||
         (world2D ? !counters.world2DWorkspaceReady : !counters.world3DWorkspaceReady) ||
         counters.viewportLogicalWidth <= 0.0F || counters.viewportLogicalHeight <= 0.0F ||
@@ -4533,12 +5383,19 @@ class EditorApplication final : public Tina::IGameApplication {
                                    "Tina Editor lifecycle counters did not match contract");
     }
     if (!projectCatalogConfigured &&
-        (counters.catalogEntryCount != 4 || counters.catalogAssetsLoaded != 3 ||
+        (counters.catalogEntryCount != 5 || counters.catalogAssetsLoaded != 4 ||
          counters.catalogGpuTextures != 1 || counters.catalogGpuMeshes != 1 ||
          counters.catalogSpriteBindings != 1 || counters.catalogMeshBindings != 1 ||
          counters.catalogMaterialBindings != 1 || counters.catalogUnresolvedReferences != 0 ||
          ((world2D || options.autoDemo) &&
           counters.catalogResolved2DSprites != GpuViewportSpriteCount) ||
+         ((world2D || options.autoDemo) &&
+          (counters.tileMapLayerCount != 2 ||
+           counters.tileMapChunkCount != InitialTileMapChunkCount ||
+           counters.tileMapAuthoredCells != InitialTileMapCellCount ||
+           counters.tileMapCookArtifacts != InitialTileMapChunkCount + 1U ||
+           counters.tileMapCookPreviewBytes == 0 ||
+           counters.tileMapEmittedSprites != InitialTileMapCellCount)) ||
          ((!world2D || options.autoDemo) &&
           counters.catalogResolved3DMeshes != GpuViewportMeshCount))) {
         std::string message = "Tina Editor built-in Catalog counters mismatch: entries=";
@@ -4561,6 +5418,14 @@ class EditorApplication final : public Tina::IGameApplication {
         message += std::to_string(counters.catalogResolved2DSprites);
         message += ", resolved3D=";
         message += std::to_string(counters.catalogResolved3DMeshes);
+        message += ", tileLayers=";
+        message += std::to_string(counters.tileMapLayerCount);
+        message += ", tileChunks=";
+        message += std::to_string(counters.tileMapChunkCount);
+        message += ", tileCells=";
+        message += std::to_string(counters.tileMapAuthoredCells);
+        message += ", tileSprites=";
+        message += std::to_string(counters.tileMapEmittedSprites);
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    std::move(message));
     }
@@ -4777,6 +5642,16 @@ class EditorApplication final : public Tina::IGameApplication {
               << counters.catalogUnresolvedReferences
               << ",\"catalogResolved2DSprites\":" << counters.catalogResolved2DSprites
               << ",\"catalogResolved3DMeshes\":" << counters.catalogResolved3DMeshes
+              << ",\"tileMapDocumentRevision\":" << counters.tileMapDocumentRevision
+              << ",\"tileMapLayerCount\":" << counters.tileMapLayerCount
+              << ",\"tileMapChunkCount\":" << counters.tileMapChunkCount
+              << ",\"tileMapAuthoredCells\":" << counters.tileMapAuthoredCells
+              << ",\"tileMapCookArtifacts\":" << counters.tileMapCookArtifacts
+              << ",\"tileMapCookPreviewBytes\":" << counters.tileMapCookPreviewBytes
+              << ",\"tileMapEmittedSprites\":" << counters.tileMapEmittedSprites
+              << ",\"tileMapEdits\":" << counters.tileMapEdits
+              << ",\"tileMapUndos\":" << counters.tileMapUndos
+              << ",\"tileMapRedos\":" << counters.tileMapRedos
               << ",\"workspaceSwitches\":" << counters.workspaceSwitches
               << ",\"world2DWorkspaceReady\":"
               << (counters.world2DWorkspaceReady ? "true" : "false")

@@ -54,7 +54,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 改 2D/3D 抽取或 World | [Scene](scene-ecs.md) · [2D](game-2d.md) · [3D](game-3d.md) |
 | 改 2D 栅格导航 / TileMap 导航转换 | [2D 导航](navigation2d.md) · [2D](game-2d.md) · [资源](resources.md) |
 | 改 2D World/gameplay 存档 | [World2D 序列化](world2d-serialization.md) · [Scene](scene-ecs.md) |
-| 改 2D/3D Editor、authoring document、undo、原子保存或 viewport | [Editor 2D / 3D](editor-2d.md) · [World2D 序列化](world2d-serialization.md) · [3D](game-3d.md) |
+| 改 2D/3D Editor、World/TileMap authoring document、undo、原子保存或 viewport | [Editor 2D / 3D](editor-2d.md) · [World2D 序列化](world2d-serialization.md) · [资源](resources.md) · [3D](game-3d.md) |
 | 改 Catalog / Cook / Handle | [资源](resources.md) |
 | 改 submit / bgfx 边界 | [Render](rendering.md) |
 | 选 preset / 跑门禁 | [构建](building.md) · [测试](testing.md) |

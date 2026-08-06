@@ -69,7 +69,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail |
 | `Tina::Navigation2D` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
-| `Tina::Editor` | 工具侧 validated World2D authoring document、bounded revision history、文件加载/原子保存与 runtime snapshot preview；不由 `Tina::GameSDK` 聚合链接 |
+| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap authoring document、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
@@ -571,6 +571,14 @@ edit/undo/redo 后失效。完整场景、容量和失败契约见 [Editor 2D / 
 `AssetId` 与 visibility 都由当前 Prefab writer/parser 验证。EditorApp 的 3D Inspector 编辑完整 TRS XYZ，提交时一次
 从 Euler XYZ 生成 normalized quaternion，不清零未编辑的 hierarchy/asset/visibility 字段。
 
+`TileMapAuthoringDocument::Create(desc, config)` 创建一个 move-only current-schema payload-family owner。一个 revision
+原子拥有 TileMap/依赖 Tileset identity、canonical root bytes 与所有 canonical non-empty chunk bytes；root/chunk borrowed
+view 在下一次成功 edit/load/undo/redo 后失效。`setCells()` / `paintCell()`、layer 增删/重命名/显隐、object upsert/erase
+均复用同一 bounded history，空 chunk 自动删除；批量 brush 重复坐标、错误 layer kind、全图 stable ID、schema 或容量失败
+不发布半份 root/chunk family。`loadPayloadFamily()` 只打开 root v3 + chunk v1，并强制每个 chunk 使用
+`deriveTileMapChunkAssetId(map, layer, x, y)` 的现行稳定 identity；不双读旧 schema。`cookPreview()` 为当前 revision 输出
+一个 TileMap artifact 和每个非空 chunk 的 TileMapChunk artifact，dependency contract 与正式 Cooked writer 相同。
+
 `loadWorld2DAuthoringDocument(utf8Path, document)` 以 document 配置在当前 World2D schema 内可容纳的最大 wire size 为读取上限，读取成功后
 复用 `loadSnapshot()` 原子建立 baseline；read/schema/document/history 容量失败不改变 current 或 undo/redo。
 `saveWorld2DAuthoringDocument(utf8Path, document)` 把当前 `snapshotBytes()` 写入同目录临时文件并原子替换目标，
@@ -682,6 +690,8 @@ TileMap 的唯一当前 root wire contract 是 schema v3。`TileMapPayloadView` 
 `u32`。layer 与 object 都有独立 visibility；name/properties 是 strict UTF-8 borrowed views；object kind
 当前只有 Point 和 axis-aligned Rectangle。tile layer 保存按坐标排序的非空 chunk ref，缺失坐标是已知
 空块；cell 位于独立 `TileMapChunk` v1 payload。旧 schema v1/v2 均不兼容，也没有默认单层 API。
+`deriveTileMapChunkAssetId()` 是 AssetFormat 的公开 current-schema identity helper；Cooker 与 Editor 共用它，输入 map/layer/
+coordinate 非法时返回结构化错误，不维护第二份 editor-only 派生算法。
 
 `TileMapInstance` 拷贝验证后的 root metadata/tileset 定义，只为当前 resident chunk 持有可变 cells、
 content revision 与 residency generation。`layer(id)` 返回借用到 instance-owned payload 的 metadata/object

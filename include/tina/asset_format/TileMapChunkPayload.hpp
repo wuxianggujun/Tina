@@ -63,6 +63,12 @@ struct TileMapChunkPayloadView final {
     [[nodiscard]] std::optional<Core::u16> cellAt(Core::u16 x, Core::u16 y) const noexcept;
 };
 
+// Stable current-schema identity for a chunk owned by one map/layer/coordinate.
+// Layer reordering and unrelated chunk occupancy do not change the result.
+[[nodiscard]] Core::Result<Core::AssetId>
+deriveTileMapChunkAssetId(Core::AssetId parentTileMapId, Core::u32 stableLayerId,
+                          Core::u32 chunkX, Core::u32 chunkY);
+
 [[nodiscard]] Core::Result<std::vector<std::byte>>
 writeTileMapChunkPayloadBytes(const TileMapChunkPayloadDesc& desc);
 

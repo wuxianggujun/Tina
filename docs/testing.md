@@ -835,13 +835,15 @@ smoke。
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_editor_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
-  --gtest_filter=World2DAuthoringDocumentTests.*
+  --gtest_filter=World2DAuthoringDocumentTests.*:TileMapAuthoringDocumentTests.*
 ```
 
 用例覆盖 canonical runtime preview、replace/load/upsert/erase-subtree/gameplay revision、undo/redo 与分支替换、
 entry/byte budget 淘汰、非法 schema/parent/容量失败的 current + history 原子性以及公开头隔离。只有 Editor application
 接线或文件/cook 集成完成时才扩大到 `TinaEditor.exe` 产品 smoke；Runtime samples 不是 Editor gate，纯 document 小切片
 不跑无关产品门禁。
+TileMap suite 另覆盖 root v3 + chunk v1 canonical family、稳定 chunk AssetId、Paint/Erase、空 chunk 删除、layer/object
+事务、payload-family load、root+chunk Cooked preview、bounded Undo/Redo 与失败不发布。
 
 TinaEditor GPU viewport 切片在代码完成后只做一次受影响正式 target 的增量验证，不重跑全量 UI/产品矩阵：
 
@@ -856,10 +858,11 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
 
 布局/Catalog/GPU smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、
 `viewportLayoutReady=true`、`inspectorScrollConfigured=true`、`renderExtractions=frames`、
-2D `gpuViewportSprites=1`、3D `gpuViewportMeshes=3`、`gpuViewportReady=true`、
+2D `gpuViewportSprites=13`（1 World Sprite + 12 Tile sprites）、3D `gpuViewportMeshes=3`、`gpuViewportReady=true`、
 `gpuViewportDocumentRevision=documentRevision`，以及非空 logical rect、位于 `[0,1]` 内的 normalized viewport 和
-`uiRootsCreated=1` / `uiRootsReleased=1`。built-in Catalog 还固定检查 entry/load=`4/3`、Texture/Mesh upload=`1/1`、
-Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`1/3`。viewport 使用上一轮 committed
+`uiRootsCreated=1` / `uiRootsReleased=1`。built-in Catalog 还固定检查 entry/load=`5/4`、Texture/Mesh upload=`1/1`、
+Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0`、resolved 2D/3D=`1/3`，以及 TileMap
+layer/chunk/cell/artifact/emitted=`2/2/12/3/12` 和 cook bytes 非零。viewport 使用上一轮 committed
 layout，所以首帧不提交 world，窗口尺寸改变后下一帧跟随新 rect。
 `--no-auto-demo` 仍用于人工操作模式；本切片不扩大到完整 product-2d gate。
 Transform/gizmo smoke 还要检查 Inspector transaction=`1`，gizmo begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，
@@ -972,7 +975,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D 完整产品；Inspector 完整 TRS transaction、routed-pointer viewport Move capture、双 workspace 独立 session、Undo/Redo 与原子 Save；`--catalog-root` + AssetSystem + Sprite/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、gizmo、session、Catalog/GPU resolve、document revision 与 preview 状态 | TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
+| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D/TileMap v3+v1 完整产品；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile Paint/Erase、layer/object authoring、root+chunk cook preview、双 workspace 独立 session、Undo/Redo 与原子 Save；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、gizmo、TileMap、session、Catalog/GPU resolve、document revision 与 preview 状态 | SpriteAnimationClip timeline 与完整 `2D-EDITOR` 产品工作流 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |

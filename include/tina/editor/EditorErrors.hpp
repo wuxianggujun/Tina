@@ -10,5 +10,8 @@ inline constexpr Core::ErrorCode HistoryCapacityExceeded{Core::ErrorDomain::Edit
 inline constexpr Core::ErrorCode UndoUnavailable{Core::ErrorDomain::Editor, 4};
 inline constexpr Core::ErrorCode RedoUnavailable{Core::ErrorDomain::Editor, 5};
 inline constexpr Core::ErrorCode EntityNotFound{Core::ErrorDomain::Editor, 6};
+inline constexpr Core::ErrorCode LayerNotFound{Core::ErrorDomain::Editor, 7};
+inline constexpr Core::ErrorCode ObjectNotFound{Core::ErrorDomain::Editor, 8};
+inline constexpr Core::ErrorCode InvalidAuthoringOperation{Core::ErrorDomain::Editor, 9};
 
 } // namespace Tina::Editor::EditorErrorCode

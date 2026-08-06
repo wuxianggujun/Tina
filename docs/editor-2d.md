@@ -2,12 +2,14 @@
 
 ## 产品场景
 
-Editor 的首个闭环同时覆盖当前 schema-v1 World2D snapshot 与 schema-v2 Prefab。Hierarchy/Inspector 把一次
+Editor 的当前闭环同时覆盖 schema-v1 World2D snapshot、schema-v2 Prefab，以及 TileMap schema-v3 root +
+TileMapChunk schema-v1 payload family。Hierarchy/Inspector 把一次
 用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Preview 直接把当前 canonical bytes
 交给对应 Runtime parser 与 Scene instantiate。工具不能绕过 `AssetFormat` 写半合法数据，也不维护 editor-only 或旧
 schema 兼容格式。
 
-独立 `Tina::Editor` target 提供 `World2DAuthoringDocument/File` 与 `World3DAuthoringDocument/File`；独立
+独立 `Tina::Editor` target 提供 `World2DAuthoringDocument/File`、`World3DAuthoringDocument/File` 与
+`TileMapAuthoringDocument`；独立
 `Tina::EditorApp` 负责桌面组合，正式产品 target `tina_editor_desktop` 输出 `TinaEditor.exe`，其 `main()` 只负责
 调用应用模块。2D Inspector 编辑 Position X/Y、
 Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整 Position/Rotation/Scale XYZ，并把 Euler XYZ 一次规范化为 quaternion。
@@ -31,9 +33,16 @@ Move tool 在 preview layer 使用 routed pointer capture：Move 事件只更新
 向 active document 提交一次 revision。2D 将 logical delta 映射到 XY 并翻转 Y，3D 首切片映射到 XZ ground plane 并保留 Y；
 PointerCancel、selection/workspace/revision 冲突均丢弃临时状态并恢复 canonical preview，document/history 不变。
 
+2D Hierarchy 选中 TileMap 后开放 viewport `Tile Paint` / `Tile Erase` 和 Inspector 的 Paint、Erase、Toggle Layer、
+Add Tile Layer、Add Object Layer、Cook Preview。Pointer 坐标通过 committed viewport rect 和 Camera2D 投影换算到
+真实 cell；每次点击只发布一个完整 root/chunk revision，空 chunk 自动删除。TileMap Undo/Redo 与 World2D document
+history 相互独立；切到 3D 或离开 TileMap selection 会关闭 tile tools。新增 Tile layer 会立即成为 active brush layer，
+preview 按 root authoring order 提取全部可见 Tile layer，而不是只渲染第一层。
+
 `--catalog-root=<UTF-8 path>` 配置项目 Cooked Catalog；Editor 启动时通过真实 `AssetSystem` 完整打开并校验 package。
 未配置时只为新建文档创建并明确标记临时 built-in preview Catalog，不把它伪装为项目内容。Editor 从 canonical
-World2D/Prefab 的 `AssetId` 收集并去重 preview 根资源：2D 由 `Sprite2DBindingRegistry` 持有 Sprite 的 Texture2D
+World2D/Prefab/TileMap 的 `AssetId` 收集并去重 preview 根资源：2D 由 `Sprite2DBindingRegistry` 持有 Sprite 或
+Tileset 的 Texture2D
 Lease/GPU/binding，3D 由 `Mesh3DBindingRegistry` 持有 StaticMesh、Material 与共享 Texture2D 的
 Lease/GPU/binding；Scene extraction 只取得 packet-local `FrameResourceRef`。项目 Catalog 中缺失或 kind 不匹配的引用
 只从本次 preview 过滤，authoring document 与 history 保持不变，不回退到固定 binding key 或彩色 proxy。
@@ -42,23 +51,25 @@ Lease/GPU/binding；Scene extraction 只取得 packet-local `FrameResourceRef`�
 
 ```text
 Toolbar (document/path/mode/undo/redo/save)
-Context bar (breadcrumb/select/move/frame/free-move status)
+Context bar (breadcrumb/select/move/tile-paint/tile-erase/frame/status)
 Workspace
   Hierarchy dock (filter/actions/virtual TreeView/selection summary)
   Active 2D/3D viewport (mode/tools/zoom/preview canvas/footer)
-  Inspector dock (scrollable identity/transform transaction/components/authoring/document)
+  Inspector dock (scrollable identity/transform/components/TileMap authoring/document)
 Status bar (schema/entities/revision/preview/selection)
 ```
 
 这层属于 `Tina::EditorApp` 组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局与 GPU smoke 的
 结构化输出报告 `editorLayoutRegions=6`、`viewportLayoutReady=true`、`inspectorScrollConfigured=true`、
-`renderExtractions`、2D `gpuViewportSprites=1` 或 3D `gpuViewportMeshes=3`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。
+`renderExtractions`、2D `gpuViewportSprites=13`（1 World Sprite + 12 Tile sprites）或 3D
+`gpuViewportMeshes=3`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。
 `gpuViewportDocumentRevision` 还必须与最终 canonical document revision 一致。字段事务由 `inspectorTransactions`、
 `inspectorRejectedTransactions` 和最终 Player/Hero 完整 TRS 取证；gizmo 由 begin/preview/commit/cancel/reject counter 与最终
 world delta 取证；文件保存另由 active document 字段与 `world2D/3DDocumentPathConfigured`、`world2D/3DDocumentLoaded`、
 `world2D/3DDocumentDirty`、`world2D/3DSavedSnapshotBytes` 和落盘 bytes 取证。
 Catalog 接线由 `catalogReady`、`projectCatalogConfigured` / `builtInPreviewCatalog`、entry/load/GPU/binding/unresolved
-计数以及 `catalogResolved2DSprites` / `catalogResolved3DMeshes` 取证。
+计数以及 `catalogResolved2DSprites` / `catalogResolved3DMeshes` 取证。TileMap 另报告 document revision、layer/chunk/
+non-empty cell、root+chunk cook artifact/bytes、emitted sprite 与 edit/undo/redo 计数。
 
 ## 文件加载与原子保存
 
@@ -88,14 +99,14 @@ smoke 在编辑和可选 Save 后执行一次 2D↔3D round-trip，并回到初�
 ## 模块边界与数据流
 
 ```text
-Inspector / gizmo / importer intent
-  -> World2DAuthoringDocument / World3DAuthoringDocument candidate
+Inspector / gizmo / tile brush / importer intent
+  -> World2DAuthoringDocument / World3DAuthoringDocument / TileMapAuthoringDocument candidate
   -> AssetFormat current-schema validate + canonical write
   -> bounded revision publication
-  -> snapshotBytes() / payloadBytes()
+  -> World2D/Prefab bytes or TileMap root + non-empty chunk bytes
   -> AssetId + validated Catalog / AssetSystem
-  -> Sprite2D / Mesh3D binding registry
-  -> World2D instantiate / Prefab-to-World3D preview
+  -> Sprite2D/Tileset / Mesh3D binding registry
+  -> World2D instantiate / TileMapInstance / Prefab-to-World3D preview
   -> packet-local FrameResourceRef extraction
   -> active document save -> Core atomic sibling replace
 ```
@@ -113,6 +124,7 @@ Inspector / gizmo / importer intent
 | entity | 4096 | `World2DSnapshotWire::MaximumEntities` |
 | prefab node | 4096 | `PrefabWire::MaxNodes` |
 | gameplay bytes | 4 MiB | `World2DSnapshotWire::MaximumGameplayBytes` |
+| TileMap layer / object / chunk | 16 / 128 / 128 | 当前 Editor document 显式配置；schema hard limit 更高 |
 | history entries（含 current） | 32 | 2..256 |
 | history canonical bytes（含 current） | 16 MiB | 64 bytes..1 GiB |
 
@@ -130,6 +142,12 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 - `setGameplay(schema, version, bytes)`：游戏自有 blob 仍要求“空 blob ↔ 零 schema/version、非空 blob ↔ 非零”；
 - `World3DAuthoringDocument::replace/loadPayload/upsertNode/eraseNodeSubtree`：在 Prefab v2 上提供相同的
   canonical publication、subtree 删除、容量与失败原子性；
+- `TileMapAuthoringDocument::setCells/paintCell`：批量 cell 作为一个 root/chunk revision；重复坐标、越界、错误
+  layer kind 或容量失败都不发布；
+- `addTileLayer/addObjectLayer/eraseLayer/renameLayer/setLayerVisibility` 与 `upsertObject/eraseObject`：只写当前
+  TileMap schema，稳定 layer/object ID 由 writer 全图校验；
+- `loadPayloadFamily()`：只接受完整 current-schema root + stable-ID chunk family，并建立 clean baseline；
+- `cookPreview()`：输出一个 TileMap cooked artifact 和每个非空 chunk 的 TileMapChunk artifact；
 - viewport gizmo：Down 固定 workspace/stable ID/revision/start point/committed viewport extent，Move 发布
   absolute-delta Scene preview，Up 锁定终态且只调用一次 `upsertEntity()` / `upsertNode()`；Cancel、no-op 或 baseline
   冲突恢复 canonical preview，不生成 history entry；
@@ -145,7 +163,7 @@ history 可撤销性检查。以下失败均保留 current bytes、revision、un
 
 - stable ID 为零/重复、parent 自引用/前向引用/缺失；
 - transform/component 非有限、枚举/flag/AssetId/Gameplay identity 非法；
-- 输入为旧 schema、非 canonical wire bytes 或截断 payload；
+- 输入为旧 schema、非 canonical wire bytes、截断 payload，或 chunk 不属于 root/稳定派生 ID 不匹配；
 - entity/gameplay 超出 document config；
 - current + candidate 超出 history byte budget；
 - 分配失败。
@@ -159,6 +177,10 @@ smoke；`tina_sample_2d` / `tina_sample_3d` 不是 Editor 验收入口。纯 `Ti
 `tina_editor_tests` 的精确 filter，修改 Runtime UI committed-layout 契约时才补对应 `tina_runtime_ui_tests` filter。
 
 ```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_editor_tests --parallel 1 -- /nr:false
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
+  --gtest_filter=TileMapAuthoringDocumentTests.*
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
@@ -183,8 +205,9 @@ Move → Apply Transform → viewport drag → Undo → Redo → Save → other 
 begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，只增加一个 document revision；round-trip 固定
 `workspaceSwitches=2`、runtime preview instantiations=`8`、document/GPU revision=`7/7`、undo depth=`3`，并证明
 inactive session 的 path/loaded/baseline/dirty 未变化。2D delta 固定为 `(2,-1,0)`；3D XZ delta 固定为 `(2,0,1)`，
-完整 TRS 在 canonical Prefab、Scene preview 与结构化结果中一致。built-in Catalog smoke 还必须固定报告 entry/load=`4/3`、
+完整 TRS 在 canonical Prefab、Scene preview 与结构化结果中一致。built-in Catalog smoke 还必须固定报告 entry/load=`5/4`、
 Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`1/3`。
 
-Catalog asset-resolved viewport 已完成。后续产品切片依次为：TileMap root+chunk authoring/cook；SpriteAnimationClip
-timeline authoring/cook。每个切片继续只保留现行 schema，不增加旧资产兼容分支。
+TileMap root+chunk authoring/cook preview 与 Catalog-resolved viewport 已完成。2D smoke 还固定验证 TileMap
+layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、cook bytes 非零，GPU sprites=`13`。下一产品切片为
+SpriteAnimationClip timeline authoring/cook；继续只保留现行 schema，不增加旧资产兼容分支。

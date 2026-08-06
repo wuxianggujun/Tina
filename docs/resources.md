@@ -48,7 +48,7 @@ Catalog package
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked 产品 consumer |
-| Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Mesh registry 解析同一 World2D/Prefab 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
+| Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
 | TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer + property-tagged visible Rectangle 原子生成 NavigationGrid2DData v1；当前不是新 AssetKind |
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
@@ -66,7 +66,7 @@ N16.3 统一 Sprite owner，N16.4 已让 Mesh/Material item 同样只携带 fram
 Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 Texture Lease/GPU owner。
 
 `Tina::EditorApp` 复用上述正式资源路径，不维护 editor-only `AssetStore` 或固定 device binding key。它从当前
-canonical World2D/Prefab 收集并去重 Sprite、StaticMesh 与 Material 根引用，`AssetSystem::load()` 后由 registry
+canonical World2D/TileMap/Prefab 收集并去重 Sprite、Tileset、StaticMesh 与 Material 根引用，`AssetSystem::load()` 后由 registry
 取得依赖 Lease、上传 Texture2D/StaticMesh 并注册 binding。Scene 仅保存 weak Handle，Render item 仅保存当前 packet
 的 `FrameResourceRef`。项目 Catalog 中 unresolved/wrong-kind 引用 fail closed：只过滤对应 preview component，document、
 history 与持久化 AssetId 不变。内建 Catalog 是未指定项目路径时的临时预览 fixture，退出时连同临时 package 一并释放。
@@ -292,6 +292,10 @@ TileMap 当前唯一 root typed payload 为 schema v3：按 authoring 顺序保�
 point/rectangle。`layerAt()/findLayer()`、`chunkRefAt()/findChunkRef()`、`objectAt()/findObject()` 和 property
 lookup 返回 borrowed view。旧 schema v1/v2 均不兼容。
 
+工具侧 `TileMapAuthoringDocument` 让 root v3 与全部非空 chunk v1 作为一个 bounded、可撤销 revision 发布；
+`deriveTileMapChunkAssetId()` 由 AssetFormat 提供唯一稳定派生实现并同时被 Cooker/Editor 使用。Cook preview 直接包装
+canonical root/chunk payload 为正式 Cooked artifacts，不生成 editor-only wire format，也不增加旧 schema 兼容路径。
+
 每个非空块是独立 `AssetKind::TileMapChunk` schema v1，保存 parent TileMap `AssetId`、layer ID、chunk
 坐标、边缘实际尺寸、非空计数和 row-major cells。parent ID 内嵌在 payload，而不建立 chunk→parent
 dependency，避免 parent→deferred chunk 图形成环。TileMap root 对每个 chunk 使用
@@ -378,8 +382,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
   继续命中同一 resolve/pin cache，不新增 `UITexture`、IconAsset 或第二套 atlas owner。产品资源失效、
   视觉/尺寸矩阵与 `ui_image_nineslice_v1` benchmark 证据均已关闭，见 [UI 框架设计](ui-framework.md)与
   Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)；
-- TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；
-  优先级 IO 调度、editor authoring/undo/redo、自动 gameplay 生成与旧 TileMap schema migration 仍须独立验收；
+- TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；Editor root/chunk
+  authoring、bounded undo/redo、viewport brush 与 cook preview 已完成。优先级 IO 调度和自动 gameplay 生成仍须独立验收；
+  开发期不规划旧 TileMap schema migration；
 - Navigation2D 的 runtime-derived schema-v1 grid、动态 blocker 和确定性 A* 已闭环；独立 Cooked
   Navigation AssetKind、旧导航 schema migration、editor bake 与自动 Physics 同步仍未提供；
 - shader/font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收；
