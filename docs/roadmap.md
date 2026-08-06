@@ -28,6 +28,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | --- | --- |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
+| 2D-EDITOR | 先落地受验证 World2D authoring document、固定预算 revision history 与唯一 runtime snapshot preview，再接 editor shell、TileMap 和动画工具 |
 | UI-PERF-001 | Done；含 `ui_motion_v1` 在内的 UI workload 集已齐 |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-FLOW-001 | Done；固定容量 Layer/Screen 栈、Back/Confirm/Menu Action Router、16 槽本地用户、Gamepad assignment、per-user 设备 revision 与 2D 产品已闭环 |
@@ -83,7 +84,7 @@ Layer/Screen、Action Router、多本地用户与设备提示都复用窗口级�
 - 仅在标准 Behavior 不足时评估 startup-only 自定义 Behavior SPI；
 - 多行 TextEdit、grapheme/shaping 与完整 IME 候选窗；
 - Linux AT-SPI adapter 与真实辅助技术验收；
-- TileMap/Scene/动画 editor tooling、undo/redo 与 cook preview；
+- TileMap/动画专用 authoring document、editor shell 可交互 Inspector/Hierarchy、文件原子保存与产品 cook preview；World2D document/undo 基础已进入 Next；
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 

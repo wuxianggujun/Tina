@@ -69,6 +69,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail |
 | `Tina::Navigation2D` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
+| `Tina::Editor` | 工具侧 validated World2D authoring document、bounded revision history 与 runtime snapshot preview；不由 `Tina::GameSDK` 聚合链接 |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
@@ -538,6 +539,22 @@ blocked flags；可选 object layer 只栅格化 property 精确匹配的 visibl
 已驻留，任何 layer/chunk/object/schema 错误都不返回半份数据。结果当前不是 Catalog `AssetKind`；产品 State
 持有 Grid/Pathfinder，Scene、Runtime、Render 和 Physics2D 不隐式取得所有权。详见
 [2D 导航](navigation2d.md)。
+
+## Editor
+
+`Tina::Editor` 是独立工具侧 target，不进入 Runtime `EngineHost`，也不由 `Tina::GameSDK` 聚合链接。
+`World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
+entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
+
+`replace(desc)` 是 Inspector/gizmo/importer 的批量事务边界；`loadSnapshot()`、`upsertEntity()`、
+`eraseEntitySubtree()` 与 `setGameplay()` 是同一 revision 机制上的窄操作。候选先经唯一现行
+`AssetFormat::writeWorld2DSnapshotBytes()` 或 parser 完整校验，成功后才替换 current 并裁剪 redo；非法 stable ID/
+parent、非有限 component、旧 schema、document 容量或 history byte 容量失败都保持 current、undo、redo 和 revision
+不变。history 到达预算时淘汰最老 revision，不扩展声明容量；若 current + candidate 无法同时容纳则编辑失败。
+
+`snapshotBytes()` 就是 cook/runtime preview，不存在 editor-only wire format；可直接交给
+`AssetFormat::parseWorld2DSnapshot()`，随后由 `Scene::instantiateWorld2DSnapshot()` 消费。借用 bytes 在下一次成功
+edit/undo/redo 后失效。完整场景、容量和失败契约见 [2D Editor](editor-2d.md)。
 
 ## Asset 与 Cooked
 

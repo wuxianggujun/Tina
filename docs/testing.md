@@ -828,6 +828,20 @@ Handle↔AssetId、capture→parse→instantiate→capture byte equality，以�
 sample 或产品接线，因此开发闭环不运行完整 product gate；只有后续把存档接入产品 State 时才增加对应 sample
 smoke。
 
+## 2D Editor authoring document
+
+日常只构建独立工具模块并运行对应 suite；不需要重跑产品、bgfx 或完整 Asset/Scene executable：
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_editor_tests --parallel 1 -- /nr:false
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
+  --gtest_filter=World2DAuthoringDocumentTests.*
+```
+
+用例覆盖 canonical runtime preview、replace/load/upsert/erase-subtree/gameplay revision、undo/redo 与分支替换、
+entry/byte budget 淘汰、非法 schema/parent/容量失败的 current + history 原子性以及公开头隔离。只有 editor shell
+接线或文件/cook 集成完成时才扩大到对应 sample/CLI；纯 document 小切片不跑无关产品 gate。
+
 ## Scene ShadowOccluder2D
 
 `2D-LIGHT-N2` 的最小门禁覆盖：
@@ -914,7 +928,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `tina_sample_editor_shell` | 只读工具壳：Hierarchy TreeView + Inspector + Viewport 占位；startup StyleClass/ColorToken/sheet；运行期 token 更新；JSON `readOnly=true`/`editorModule=false`/`stylesheetInstalled` | 正式 `Tina::Editor` 模块、authoring 写入、undo/cook、`2D-EDITOR` 产品工具 |
+| `tina_sample_editor_shell` | 只读工具壳：Hierarchy TreeView + Inspector + Viewport 占位；startup StyleClass/ColorToken/sheet；运行期 token 更新；JSON `readOnly=true`/`editorModule=false` 表示尚未接入已存在的 `Tina::Editor` document | authoring 写入、undo/cook 与 `2D-EDITOR` 产品交互接线 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |

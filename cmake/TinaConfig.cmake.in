@@ -42,6 +42,7 @@ endif()
 set(Tina_PACKAGE_TARGETS
     ${Tina_GAME_SDK_TARGETS}
     Tina::AssetTypes
+    Tina::Editor
     Tina::WindowSurfaceIntegration
     Tina::UIRenderIntegration
 )

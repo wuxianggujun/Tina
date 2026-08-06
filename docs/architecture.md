@@ -25,6 +25,8 @@ flowchart TD
     Render["Tina::Render"] --> Core
     Audio["Tina::Audio"] --> Core
     AssetFormat["Tina::AssetFormat"] --> Core
+    Editor["Tina::Editor"] --> Core
+    Editor --> AssetFormat
     Navigation2D["Tina::Navigation2D"] --> Core
     UI["Tina::UI"] --> Core
     UI --> Platform
