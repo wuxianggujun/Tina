@@ -54,6 +54,8 @@ inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 EditorActionCount = 5;
 inline constexpr u32 EditorLayoutRegionCount = 6;
+inline constexpr float DegreesToRadians = 0.01745329251994329577F;
+inline constexpr float RadiansToDegrees = 57.295779513082320876F;
 
 inline constexpr UI::UITreeViewItemKey SceneRootKey = 1;
 inline constexpr UI::UITreeViewItemKey CameraKey = 2;
@@ -102,6 +104,9 @@ struct LifecycleCounters final {
     u64 cookPreviewBytes = 0;
     float finalPlayerPositionX = 0.0F;
     float finalPlayerPositionY = 0.0F;
+    float finalPlayerRotationDegrees = 0.0F;
+    float finalPlayerScaleX = 1.0F;
+    float finalPlayerScaleY = 1.0F;
     u64 editorLayoutRegions = 0;
     u64 viewportPreviewMarkers = 0;
     bool selectionVerified = false;
@@ -117,7 +122,7 @@ struct LifecycleCounters final {
 
 enum class EditorCommand : u32 {
     MoveSelectedPositiveX,
-    ApplyPosition,
+    ApplyTransform,
     Undo,
     Redo,
     Save,
@@ -182,6 +187,26 @@ template <typename Value>
 {
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
     return error == std::errc{} && end == text.data() + text.size() && std::isfinite(value);
+}
+
+[[nodiscard]] float planarRotationDegrees(float rotationX, float rotationY, float rotationZ,
+                                          float rotationW) noexcept
+{
+    const double lengthSquared = static_cast<double>(rotationX) * rotationX +
+                                 static_cast<double>(rotationY) * rotationY +
+                                 static_cast<double>(rotationZ) * rotationZ +
+                                 static_cast<double>(rotationW) * rotationW;
+    if (!std::isfinite(lengthSquared) || lengthSquared <= 1.0e-12) {
+        return 0.0F;
+    }
+    const float inverseLength = static_cast<float>(1.0 / std::sqrt(lengthSquared));
+    rotationX *= inverseLength;
+    rotationY *= inverseLength;
+    rotationZ *= inverseLength;
+    rotationW *= inverseLength;
+    const float sinAngle = 2.0F * (rotationW * rotationZ + rotationX * rotationY);
+    const float cosAngle = 1.0F - 2.0F * (rotationY * rotationY + rotationZ * rotationZ);
+    return std::atan2(sinAngle, cosAngle) * RadiansToDegrees;
 }
 
 [[nodiscard]] Tina::Core::Result<SampleOptions> parseOptions(int argumentCount, char** arguments)
@@ -1188,16 +1213,17 @@ class EditorShellState final : public Tina::IGameState {
         if (auto status = createTransformRow("Position Y", "0.000", true, inspectorPositionY_); !status) {
             return status;
         }
-        UI::UINodeId rotationField{};
-        if (auto status = createTransformRow("Rotation", "0.000", false, rotationField); !status) {
+        if (auto status = createTransformRow("Rotation Z", "0.000", true, inspectorRotationDegrees_); !status) {
             return status;
         }
-        UI::UINodeId scaleField{};
-        if (auto status = createTransformRow("Scale", "1.000", false, scaleField); !status) {
+        if (auto status = createTransformRow("Scale X", "1.000", true, inspectorScaleX_); !status) {
             return status;
         }
-        if (auto status = storeNode(createButton(inspectorContent, "Apply Position", fillWidth(34.0F)),
-                                    applyPositionButton_);
+        if (auto status = createTransformRow("Scale Y", "1.000", true, inspectorScaleY_); !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(inspectorContent, "Apply Transform", fillWidth(34.0F)),
+                                    applyTransformButton_);
             !status) {
             return status;
         }
@@ -1318,8 +1344,8 @@ class EditorShellState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree->setButtonAction(
-                applyPositionButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                    queueEditorCommand(EditorCommand::ApplyPosition);
+                applyTransformButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::ApplyTransform);
                 }});
             !status) {
             return status;
@@ -1407,7 +1433,7 @@ class EditorShellState final : public Tina::IGameState {
             if (queuedFirstSelection_) {
                 constexpr std::array commands{
                     EditorCommand::MoveSelectedPositiveX,
-                    EditorCommand::ApplyPosition,
+                    EditorCommand::ApplyTransform,
                     EditorCommand::Undo,
                     EditorCommand::Redo,
                     EditorCommand::Save,
@@ -1417,7 +1443,7 @@ class EditorShellState final : public Tina::IGameState {
                 if (autoAuthoringStage_ < commandCount) {
                     const EditorCommand command = commands[autoAuthoringStage_];
                     if (queueEditorCommand(command)) {
-                        pendingAutoPositionInput_ = command == EditorCommand::ApplyPosition;
+                        pendingAutoTransformInput_ = command == EditorCommand::ApplyTransform;
                         ++autoAuthoringStage_;
                     }
                 }
@@ -1467,12 +1493,21 @@ class EditorShellState final : public Tina::IGameState {
                 return status;
             }
         }
-        if (pendingAutoPositionInput_ && pendingEditorCommand_ == EditorCommand::ApplyPosition) {
-            pendingAutoPositionInput_ = false;
+        if (pendingAutoTransformInput_ && pendingEditorCommand_ == EditorCommand::ApplyTransform) {
+            pendingAutoTransformInput_ = false;
             if (auto status = tree->setText(inspectorPositionX_, "2.5"); !status) {
                 return status;
             }
             if (auto status = tree->setText(inspectorPositionY_, "-1.25"); !status) {
+                return status;
+            }
+            if (auto status = tree->setText(inspectorRotationDegrees_, "30.0"); !status) {
+                return status;
+            }
+            if (auto status = tree->setText(inspectorScaleX_, "1.25"); !status) {
+                return status;
+            }
+            if (auto status = tree->setText(inspectorScaleY_, "0.75"); !status) {
                 return status;
             }
         }
@@ -1521,7 +1556,7 @@ class EditorShellState final : public Tina::IGameState {
                 authoringFeedback_ = "Move X +1 applied as one document revision";
             }
             break;
-        case EditorCommand::ApplyPosition: {
+        case EditorCommand::ApplyTransform: {
             auto positionXText = tree.text(inspectorPositionX_);
             if (!positionXText) {
                 return Tina::Core::failure(std::move(positionXText.error()));
@@ -1530,19 +1565,36 @@ class EditorShellState final : public Tina::IGameState {
             if (!positionYText) {
                 return Tina::Core::failure(std::move(positionYText.error()));
             }
+            auto rotationDegreesText = tree.text(inspectorRotationDegrees_);
+            if (!rotationDegreesText) {
+                return Tina::Core::failure(std::move(rotationDegreesText.error()));
+            }
+            auto scaleXText = tree.text(inspectorScaleX_);
+            if (!scaleXText) {
+                return Tina::Core::failure(std::move(scaleXText.error()));
+            }
+            auto scaleYText = tree.text(inspectorScaleY_);
+            if (!scaleYText) {
+                return Tina::Core::failure(std::move(scaleYText.error()));
+            }
             float positionX = 0.0F;
             float positionY = 0.0F;
-            if (!parseFiniteFloat(*positionXText, positionX) || !parseFiniteFloat(*positionYText, positionY)) {
+            float rotationDegrees = 0.0F;
+            float scaleX = 1.0F;
+            float scaleY = 1.0F;
+            if (!parseFiniteFloat(*positionXText, positionX) || !parseFiniteFloat(*positionYText, positionY) ||
+                !parseFiniteFloat(*rotationDegreesText, rotationDegrees) ||
+                !parseFiniteFloat(*scaleXText, scaleX) || !parseFiniteFloat(*scaleYText, scaleY)) {
                 ++counters_.inspectorRejectedTransactions;
-                authoringFeedback_ = "Position rejected: enter finite decimal values";
+                authoringFeedback_ = "Transform rejected: enter finite decimal values";
                 return refreshAuthoringUi(tree);
             }
-            status = applySelectedPosition(positionX, positionY);
+            status = applySelectedTransform(positionX, positionY, rotationDegrees, scaleX, scaleY);
             if (status) {
                 ++counters_.authoringEdits;
                 ++counters_.inspectorTransactions;
                 requiresPreviewValidation = true;
-                authoringFeedback_ = "Position applied as one document revision";
+                authoringFeedback_ = "Transform applied as one document revision";
             }
             break;
         }
@@ -1636,7 +1688,9 @@ class EditorShellState final : public Tina::IGameState {
         return document_.upsertEntity(edited);
     }
 
-    [[nodiscard]] Tina::Core::Status applySelectedPosition(float positionX, float positionY)
+    [[nodiscard]] Tina::Core::Status applySelectedTransform(float positionX, float positionY,
+                                                            float rotationDegrees, float scaleX,
+                                                            float scaleY)
     {
         const u32 stableEntityId = stableEntityIdForHierarchyItem(selectionKey_);
         if (stableEntityId == 0U) {
@@ -1659,6 +1713,14 @@ class EditorShellState final : public Tina::IGameState {
         auto edited = *entity;
         edited.positionX = positionX;
         edited.positionY = positionY;
+        const float normalizedDegrees = std::remainder(rotationDegrees, 360.0F);
+        const float halfRadians = normalizedDegrees * DegreesToRadians * 0.5F;
+        edited.rotationX = 0.0F;
+        edited.rotationY = 0.0F;
+        edited.rotationZ = std::sin(halfRadians);
+        edited.rotationW = std::cos(halfRadians);
+        edited.scaleX = scaleX;
+        edited.scaleY = scaleY;
         return document_.upsertEntity(edited);
     }
 
@@ -1703,6 +1765,11 @@ class EditorShellState final : public Tina::IGameState {
         counters_.cookPreviewBytes = document_.snapshotBytes().size();
         counters_.finalPlayerPositionX = playerTransform->position.x;
         counters_.finalPlayerPositionY = playerTransform->position.y;
+        counters_.finalPlayerRotationDegrees = planarRotationDegrees(
+            playerTransform->rotation.x, playerTransform->rotation.y, playerTransform->rotation.z,
+            playerTransform->rotation.w);
+        counters_.finalPlayerScaleX = playerTransform->scale.x;
+        counters_.finalPlayerScaleY = playerTransform->scale.y;
         counters_.runtimePreviewValid = true;
         return Tina::Core::success();
     }
@@ -1778,7 +1845,16 @@ class EditorShellState final : public Tina::IGameState {
         if (auto status = tree.setEnabled(inspectorPositionY_, selectionEditable); !status) {
             return status;
         }
-        if (auto status = tree.setEnabled(applyPositionButton_, selectionEditable); !status) {
+        if (auto status = tree.setEnabled(inspectorRotationDegrees_, selectionEditable); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(inspectorScaleX_, selectionEditable); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(inspectorScaleY_, selectionEditable); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(applyTransformButton_, selectionEditable); !status) {
             return status;
         }
         if (auto status = tree.setEnabled(moveButton_, selectionEditable); !status) {
@@ -1810,6 +1886,9 @@ class EditorShellState final : public Tina::IGameState {
         note += hierarchyAuthoringNote(key);
         float positionX = 0.0F;
         float positionY = 0.0F;
+        float rotationDegrees = 0.0F;
+        float scaleX = 1.0F;
+        float scaleY = 1.0F;
         bool hasEntity = false;
         const u32 stableEntityId = stableEntityIdForHierarchyItem(key);
         if (stableEntityId != 0U) {
@@ -1825,6 +1904,10 @@ class EditorShellState final : public Tina::IGameState {
                 hasEntity = true;
                 positionX = entity->positionX;
                 positionY = entity->positionY;
+                rotationDegrees = planarRotationDegrees(entity->rotationX, entity->rotationY,
+                                                        entity->rotationZ, entity->rotationW);
+                scaleX = entity->scaleX;
+                scaleY = entity->scaleY;
                 note += " X=";
                 note += std::to_string(entity->positionX);
             }
@@ -1836,7 +1919,20 @@ class EditorShellState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        return tree.setText(inspectorPositionY_, hasEntity ? std::to_string(positionY) : "n/a");
+        if (auto status = tree.setText(inspectorPositionY_, hasEntity ? std::to_string(positionY) : "n/a");
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setText(inspectorRotationDegrees_,
+                                       hasEntity ? std::to_string(rotationDegrees) : "n/a");
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setText(inspectorScaleX_, hasEntity ? std::to_string(scaleX) : "n/a");
+            !status) {
+            return status;
+        }
+        return tree.setText(inspectorScaleY_, hasEntity ? std::to_string(scaleY) : "n/a");
     }
 
     [[nodiscard]] Tina::Core::Status publishViewportPreview(Tina::PrimaryWindowUITreeUpdater& tree)
@@ -1875,7 +1971,13 @@ class EditorShellState final : public Tina::IGameState {
             const auto entity = std::find_if(storage.begin(), storage.end(), [stableEntityId](const auto& candidate) {
                 return candidate.stableEntityId == stableEntityId;
             });
-            UI::UILayoutStyle markerStyle = fixedSize(12.0F, 12.0F);
+            const float markerWidth = entity == storage.end()
+                                          ? 12.0F
+                                          : std::clamp(12.0F * std::abs(entity->scaleX), 4.0F, 48.0F);
+            const float markerHeight = entity == storage.end()
+                                           ? 12.0F
+                                           : std::clamp(12.0F * std::abs(entity->scaleY), 4.0F, 48.0F);
+            UI::UILayoutStyle markerStyle = fixedSize(markerWidth, markerHeight);
             markerStyle.placement = UI::UILayoutPlacement::Overlay;
             markerStyle.overlay.horizontal = UI::UIAxisAlignment::Start;
             markerStyle.overlay.vertical = UI::UIAxisAlignment::Start;
@@ -2009,13 +2111,16 @@ class EditorShellState final : public Tina::IGameState {
     std::array<UI::UINodeId, 4> viewportPreviewMarkers_{};
     UI::UINodeId inspectorPositionX_{};
     UI::UINodeId inspectorPositionY_{};
+    UI::UINodeId inspectorRotationDegrees_{};
+    UI::UINodeId inspectorScaleX_{};
+    UI::UINodeId inspectorScaleY_{};
     UI::UINodeId authoringHint_{};
     UI::UINodeId statusDocument_{};
     UI::UINodeId statusPreview_{};
     UI::UINodeId statusSelection_{};
     UI::UINodeId toolbarPath_{};
     UI::UINodeId moveButton_{};
-    UI::UINodeId applyPositionButton_{};
+    UI::UINodeId applyTransformButton_{};
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
     UI::UINodeId saveButton_{};
@@ -2027,7 +2132,7 @@ class EditorShellState final : public Tina::IGameState {
     bool playerExpanded_ = true;
     bool queuedFirstSelection_ = false;
     bool queuedSecondSelection_ = false;
-    bool pendingAutoPositionInput_ = false;
+    bool pendingAutoTransformInput_ = false;
     u32 autoAuthoringStage_ = 0;
     std::vector<std::byte> savedBaselineBytes_{};
     std::string authoringFeedback_ = "One validated revision per command";
@@ -2130,7 +2235,9 @@ class EditorShellApplication final : public Tina::IGameApplication {
             counters.authoringUndos != 1 || counters.authoringRedos != 1 ||
             counters.runtimePreviewInstantiations != 5 || counters.documentRevision != 6 ||
             counters.documentUndoDepth != 2 || counters.documentRedoDepth != 0 ||
-            counters.finalPlayerPositionX != 2.5F || counters.finalPlayerPositionY != -1.25F) {
+            counters.finalPlayerPositionX != 2.5F || counters.finalPlayerPositionY != -1.25F ||
+            std::abs(counters.finalPlayerRotationDegrees - 30.0F) > 0.001F ||
+            counters.finalPlayerScaleX != 1.25F || counters.finalPlayerScaleY != 0.75F) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "editor shell automatic authoring demo did not finish");
         }
@@ -2224,6 +2331,9 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"cookPreviewBytes\":" << counters.cookPreviewBytes
               << ",\"finalPlayerPositionX\":" << counters.finalPlayerPositionX
               << ",\"finalPlayerPositionY\":" << counters.finalPlayerPositionY
+              << ",\"finalPlayerRotationDegrees\":" << counters.finalPlayerRotationDegrees
+              << ",\"finalPlayerScaleX\":" << counters.finalPlayerScaleX
+              << ",\"finalPlayerScaleY\":" << counters.finalPlayerScaleY
               << ",\"finalSelectionKey\":" << counters.finalSelectionKey
               << ",\"finalSelectionIndex\":" << counters.finalSelectionIndex
               << ",\"selectionVerified\":" << (counters.selectionVerified ? "true" : "false") << "}\n";

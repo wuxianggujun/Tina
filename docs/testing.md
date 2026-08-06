@@ -856,7 +856,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.
 布局 smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、`viewportPreviewMarkers=4`、
 `viewportLayoutReady=true`、`inspectorScrollConfigured=true`，以及 `uiRootsCreated=1` / `uiRootsReleased=1`。
 `--no-auto-demo` 仍用于人工操作模式；在真实 viewport 接入前，不扩大到完整 product-2d gate。
-Rotation/Scale 仍是只读字段，不把它们当作已验证的 authoring mutation。
+Transform smoke 还要检查最终 Player `rotation=30 degrees`、`scale=(1.25,0.75)`；五个 Inspector 字段通过一次
+`Apply Transform` 发布，真实 GPU viewport 与 viewport gizmo 仍不在本切片验收范围。
 
 Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的 shell smoke：
 
