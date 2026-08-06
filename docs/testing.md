@@ -853,7 +853,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.
   --frames=60 --frame-delay-ms=0
 ```
 
-布局 smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、
+布局 smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、`viewportPreviewMarkers=4`、
 `viewportLayoutReady=true`、`inspectorScrollConfigured=true`，以及 `uiRootsCreated=1` / `uiRootsReleased=1`。
 `--no-auto-demo` 仍用于人工操作模式；在真实 viewport 接入前，不扩大到完整 product-2d gate。
 Rotation/Scale 仍是只读字段，不把它们当作已验证的 authoring mutation。

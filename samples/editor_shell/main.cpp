@@ -103,6 +103,7 @@ struct LifecycleCounters final {
     float finalPlayerPositionX = 0.0F;
     float finalPlayerPositionY = 0.0F;
     u64 editorLayoutRegions = 0;
+    u64 viewportPreviewMarkers = 0;
     bool selectionVerified = false;
     bool stylesheetInstalled = false;
     bool runtimePreviewValid = false;
@@ -950,7 +951,13 @@ class EditorShellState final : public Tina::IGameState {
         }
         UI::UINodeId previewFrame{};
         UI::UILayoutStyle previewFrameStyle = fixedSize(300.0F, 146.0F);
+        previewFrameStyle = percentSize(86.0F, 82.0F);
+        previewFrameStyle.minMax.minWidth = UI::UILayoutLength::Px(300.0F);
+        previewFrameStyle.minMax.minHeight = UI::UILayoutLength::Px(146.0F);
+        previewFrameStyle.minMax.maxWidth = UI::UILayoutLength::Px(600.0F);
+        previewFrameStyle.minMax.maxHeight = UI::UILayoutLength::Px(360.0F);
         previewFrameStyle.padding = UI::UIEdgeSpacing::All(14.0F);
+        previewFrameStyle.flexContainer.direction = UI::UIFlexDirection::Column;
         previewFrameStyle.flexContainer.justifyContent = UI::UIJustifyContent::Center;
         previewFrameStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
         previewFrameStyle.flexContainer.gap.row = 8.0F;
@@ -967,6 +974,33 @@ class EditorShellState final : public Tina::IGameState {
             !status) {
             return status;
         }
+        UI::UILayoutStyle previewWorldLayerStyle = growingRegion();
+        previewWorldLayerStyle.minMax.minHeight = UI::UILayoutLength::Px(72.0F);
+        previewWorldLayerStyle.placement = UI::UILayoutPlacement::Flow;
+        if (auto status = storeNode(createPanel(previewFrame, previewWorldLayerStyle,
+                                                UI::UIStyleRoleId::PanelSurface),
+                                    viewportPreviewLayer_);
+            !status) {
+            return status;
+        }
+        constexpr std::array previewMarkerKeys{
+            CameraKey,
+            PlayerKey,
+            LightsKey,
+            TileMapKey,
+        };
+        for (std::size_t index = 0; index < previewMarkerKeys.size(); ++index) {
+            UI::UILayoutStyle markerStyle = fixedSize(12.0F, 12.0F);
+            markerStyle.placement = UI::UILayoutPlacement::Overlay;
+            markerStyle.overlay.horizontal = UI::UIAxisAlignment::Start;
+            markerStyle.overlay.vertical = UI::UIAxisAlignment::Start;
+            if (auto status = storeNode(createPanel(viewportPreviewLayer_, markerStyle, UI::UIStyleRoleId::None),
+                                        viewportPreviewMarkers_[index]);
+                !status) {
+                return status;
+            }
+        }
+        counters_.viewportPreviewMarkers = previewMarkerKeys.size();
         UI::UINodeId previewEntities{};
         if (auto status = storeNode(createLabel(previewFrame, "Camera | Player | Light | TileMap",
                                                 fixedSize(240.0F, 22.0F), bodyText),
@@ -1684,6 +1718,9 @@ class EditorShellState final : public Tina::IGameState {
         if (auto status = publishInspector(tree, selectionKey_); !status) {
             return status;
         }
+        if (auto status = publishViewportPreview(tree); !status) {
+            return status;
+        }
         std::string documentStatus = "Revision ";
         documentStatus += std::to_string(document_.revision());
         documentStatus += " | Undo ";
@@ -1802,6 +1839,68 @@ class EditorShellState final : public Tina::IGameState {
         return tree.setText(inspectorPositionY_, hasEntity ? std::to_string(positionY) : "n/a");
     }
 
+    [[nodiscard]] Tina::Core::Status publishViewportPreview(Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
+        auto snapshot = document_.parseCurrentSnapshot(storage);
+        if (!snapshot) {
+            return Tina::Core::failure(std::move(snapshot.error()));
+        }
+        float cameraX = 0.0F;
+        float cameraY = 0.0F;
+        if (const auto camera = std::find_if(storage.begin(), storage.end(), [](const auto& entity) {
+                return entity.stableEntityId == 2U;
+            });
+            camera != storage.end()) {
+            cameraX = camera->positionX;
+            cameraY = camera->positionY;
+        }
+
+        constexpr float WorldWidth = 16.0F;
+        constexpr float WorldHeight = 9.0F;
+        constexpr std::array markerKeys{
+            CameraKey,
+            PlayerKey,
+            LightsKey,
+            TileMapKey,
+        };
+        constexpr std::array markerColors{
+            UI::rgb(0x72A7D8),
+            UI::rgb(0xE7B65A),
+            UI::rgb(0x7DD3A7),
+            UI::rgb(0xB29CEB),
+        };
+        for (std::size_t index = 0; index < markerKeys.size(); ++index) {
+            const u32 stableEntityId = stableEntityIdForHierarchyItem(markerKeys[index]);
+            const auto entity = std::find_if(storage.begin(), storage.end(), [stableEntityId](const auto& candidate) {
+                return candidate.stableEntityId == stableEntityId;
+            });
+            UI::UILayoutStyle markerStyle = fixedSize(12.0F, 12.0F);
+            markerStyle.placement = UI::UILayoutPlacement::Overlay;
+            markerStyle.overlay.horizontal = UI::UIAxisAlignment::Start;
+            markerStyle.overlay.vertical = UI::UIAxisAlignment::Start;
+            if (entity == storage.end()) {
+                markerStyle.visibility = UI::UIVisibility::Collapsed;
+            } else {
+                const float normalizedX = std::clamp((entity->positionX - cameraX) / WorldWidth + 0.5F, 0.0F, 1.0F);
+                const float normalizedY = std::clamp(0.5F - (entity->positionY - cameraY) / WorldHeight, 0.0F, 1.0F);
+                markerStyle.overlay.offset.x = UI::UILayoutLength::Percent(normalizedX * 100.0F);
+                markerStyle.overlay.offset.y = UI::UILayoutLength::Percent(normalizedY * 100.0F);
+            }
+            if (auto status = tree.setLayoutStyle(viewportPreviewMarkers_[index], markerStyle); !status) {
+                return status;
+            }
+            if (entity != storage.end()) {
+                const bool selected = stableEntityIdForHierarchyItem(selectionKey_) == stableEntityId;
+                const UI::UIStraightSrgba8Color color = selected ? UI::rgb(0xF2F5F7) : markerColors[index];
+                if (auto status = tree.setBoxPaint(viewportPreviewMarkers_[index], UI::makeSolidBox(color)); !status) {
+                    return status;
+                }
+            }
+        }
+        return Tina::Core::success();
+    }
+
     [[nodiscard]] UI::UITreeViewDataSource hierarchyDataSource() noexcept
     {
         return UI::UITreeViewDataSource{
@@ -1906,6 +2005,8 @@ class EditorShellState final : public Tina::IGameState {
     UI::UINodeId inspectorNote_{};
     UI::UINodeId inspectorDocument_{};
     UI::UINodeId hierarchySelectionSummary_{};
+    UI::UINodeId viewportPreviewLayer_{};
+    std::array<UI::UINodeId, 4> viewportPreviewMarkers_{};
     UI::UINodeId inspectorPositionX_{};
     UI::UINodeId inspectorPositionY_{};
     UI::UINodeId authoringHint_{};
@@ -2012,7 +2113,7 @@ class EditorShellApplication final : public Tina::IGameApplication {
         counters.styleRegisteredTokens != 2 || counters.styleActiveRules != 2 ||
         counters.authoringActionsWired != EditorActionCount || !counters.runtimePreviewValid ||
         counters.editorLayoutRegions != EditorLayoutRegionCount || !counters.viewportLayoutReady ||
-        !counters.inspectorScrollConfigured ||
+        counters.viewportPreviewMarkers != 4 || !counters.inspectorScrollConfigured ||
         counters.documentPathConfigured != documentPathConfigured ||
         counters.runtimePreviewInstantiations < 1 ||
         counters.documentEntityCount != InitialAuthoringEntityCount ||
@@ -2108,6 +2209,7 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"inspectorRejectedTransactions\":" << counters.inspectorRejectedTransactions
               << ",\"savedSnapshotBytes\":" << counters.savedSnapshotBytes
               << ",\"editorLayoutRegions\":" << counters.editorLayoutRegions
+              << ",\"viewportPreviewMarkers\":" << counters.viewportPreviewMarkers
               << ",\"viewportLayoutReady\":" << (counters.viewportLayoutReady ? "true" : "false")
               << ",\"inspectorScrollConfigured\":"
               << (counters.inspectorScrollConfigured ? "true" : "false")

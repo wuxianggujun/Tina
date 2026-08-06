@@ -11,7 +11,8 @@ schema 兼容格式。
 Inspector 的 Position X/Y、`Apply Position`、`Move X +1`、Undo、Redo 接到真实 document，并在每次成功命令后把同一份 canonical snapshot 解析、
 实例化到新的 `Scene::World` 做 runtime preview 验证。当前 shell 的 retained UI 布局也已完整铺开：Toolbar、上下文
 工具条、Hierarchy dock、World2D viewport 工作区、可滚动 Inspector（Identity/Transform/Components/Authoring/
-Document）和底部 status bar 均由 `Flex`、`minMax`、固定控件高度与滚动容器组合；窗口变大时 viewport 与中间工作区增长，
+Document）和底部 status bar 均由 `Flex`、`minMax`、固定控件高度与滚动容器组合；中心 preview 已绑定 canonical
+Camera/Player/Light/TileMap 位置，用 Overlay 百分比 marker 随工作区增长；窗口变大时 viewport 与中间工作区增长，
 两侧 dock 保持 bounded width。传入 `--document-path=<UTF-8 path>` 后，已有文件会先按当前 schema 原子加载为 clean
 baseline，不存在的路径则作为新文档 Save target；Toolbar Save 原子保存当前 canonical snapshot，并让 Toolbar/
 Inspector/status bar 依据 saved baseline 显示 `Modified/Saved`；未配置路径时 Save 保持 disabled。
@@ -32,7 +33,8 @@ Status bar (schema/entities/revision/preview/selection)
 ```
 
 这层只属于 `samples/editor_shell` 的组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局 smoke 的
-结构化输出额外报告 `editorLayoutRegions=6`、`viewportLayoutReady=true` 和 `inspectorScrollConfigured=true`；这些字段
+结构化输出额外报告 `editorLayoutRegions=6`、`viewportPreviewMarkers=4`、`viewportLayoutReady=true` 和
+`inspectorScrollConfigured=true`；这些字段
 只证明 retained tree 已建立，不证明真实 GPU viewport。字段事务由 `inspectorTransactions`、
 `inspectorRejectedTransactions` 和最终 Player XY 取证；文件保存另由 `authoringSaves`、`savedSnapshotBytes`、
 `documentSaved`、`documentDirty` 和落盘 bytes 取证。
