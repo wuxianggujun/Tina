@@ -48,7 +48,7 @@ Catalog package
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked 产品 consumer |
-| Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
+| Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
 | TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer + property-tagged visible Rectangle 原子生成 NavigationGrid2DData v1；当前不是新 AssetKind |
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
@@ -66,7 +66,7 @@ N16.3 统一 Sprite owner，N16.4 已让 Mesh/Material item 同样只携带 fram
 Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 Texture Lease/GPU owner。
 
 `Tina::EditorApp` 复用上述正式资源路径，不维护 editor-only `AssetStore` 或固定 device binding key。它从当前
-canonical World2D/TileMap/Prefab 收集并去重 Sprite、Tileset、StaticMesh 与 Material 根引用，`AssetSystem::load()` 后由 registry
+canonical World2D/TileMap/Prefab/SpriteAnimationClip 收集并去重 Sprite、Tileset、StaticMesh 与 Material 根引用，`AssetSystem::load()` 后由 registry
 取得依赖 Lease、上传 Texture2D/StaticMesh 并注册 binding。Scene 仅保存 weak Handle，Render item 仅保存当前 packet
 的 `FrameResourceRef`。项目 Catalog 中 unresolved/wrong-kind 引用 fail closed：只过滤对应 preview component，document、
 history 与持久化 AssetId 不变。内建 Catalog 是未指定项目路径时的临时预览 fixture，退出时连同临时 package 一并释放。
@@ -295,6 +295,11 @@ lookup 返回 borrowed view。旧 schema v1/v2 均不兼容。
 工具侧 `TileMapAuthoringDocument` 让 root v3 与全部非空 chunk v1 作为一个 bounded、可撤销 revision 发布；
 `deriveTileMapChunkAssetId()` 由 AssetFormat 提供唯一稳定派生实现并同时被 Cooker/Editor 使用。Cook preview 直接包装
 canonical root/chunk payload 为正式 Cooked artifacts，不生成 editor-only wire format，也不增加旧 schema 兼容路径。
+
+工具侧 `SpriteAnimationAuthoringDocument` 同样只持有当前 SpriteAnimationClip v1 canonical payload 和 required Sprite
+dependency stream。Timeline 的帧 CRUD/重排/时长/模式各发布一个 bounded revision；Cook Preview 直接包装为正式
+SpriteAnimationClip Cooked artifact。EditorApp 只在 Asset/Scene integration 边界把 Sprite `AssetId` 解析为 weak handle
+并交给 `SpriteAnimator2D`，3D workspace 不创建第二套动画资源 owner。
 
 每个非空块是独立 `AssetKind::TileMapChunk` schema v1，保存 parent TileMap `AssetId`、layer ID、chunk
 坐标、边缘实际尺寸、非空计数和 row-major cells。parent ID 内嵌在 payload，而不建立 chunk→parent

@@ -69,7 +69,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail |
 | `Tina::Navigation2D` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
-| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap authoring document、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
+| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip authoring document、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
@@ -578,6 +578,13 @@ view 在下一次成功 edit/load/undo/redo 后失效。`setCells()` / `paintCel
 不发布半份 root/chunk family。`loadPayloadFamily()` 只打开 root v3 + chunk v1，并强制每个 chunk 使用
 `deriveTileMapChunkAssetId(map, layer, x, y)` 的现行稳定 identity；不双读旧 schema。`cookPreview()` 为当前 revision 输出
 一个 TileMap artifact 和每个非空 chunk 的 TileMapChunk artifact，dependency contract 与正式 Cooked writer 相同。
+
+`SpriteAnimationAuthoringDocument::Create(desc, config)` 创建一个 move-only SpriteAnimationClip v1 owner。revision
+原子拥有 clip `AssetId`、播放模式、帧顺序、逐帧 Sprite `AssetId`/正有限时长、canonical payload 与排序去重的 required
+Sprite dependency stream。API 提供 replace、frame insert/append/set/duplicate/erase/move、duration、Once/Loop/PingPong、
+bounded Undo/Redo、current-schema `loadCookedAsset()` 与 `cookPreview()`；非法帧、self dependency、容量、history 或非 v1
+Cooked asset 失败均不发布。EditorApp 把该 document 接入独立 Timeline，并在 Asset/Scene 边界解析为
+`SpriteAnimator2D`，document target 本身仍不依赖 Scene 或 Runtime。
 
 `loadWorld2DAuthoringDocument(utf8Path, document)` 以 document 配置在当前 World2D schema 内可容纳的最大 wire size 为读取上限，读取成功后
 复用 `loadSnapshot()` 原子建立 baseline；read/schema/document/history 容量失败不改变 current 或 undo/redo。
