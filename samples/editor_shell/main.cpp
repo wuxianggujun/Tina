@@ -23,6 +23,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -51,7 +52,7 @@ inline constexpr u32 WindowLogicalHeight = 800;
 inline constexpr u32 HierarchyMaterializedCapacity = 16;
 inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
-inline constexpr u32 EditorActionCount = 4;
+inline constexpr u32 EditorActionCount = 5;
 inline constexpr u32 EditorLayoutRegionCount = 6;
 
 inline constexpr UI::UITreeViewItemKey SceneRootKey = 1;
@@ -90,6 +91,8 @@ struct LifecycleCounters final {
     u64 authoringUndos = 0;
     u64 authoringRedos = 0;
     u64 authoringSaves = 0;
+    u64 inspectorTransactions = 0;
+    u64 inspectorRejectedTransactions = 0;
     u64 savedSnapshotBytes = 0;
     u64 runtimePreviewInstantiations = 0;
     u64 documentRevision = 0;
@@ -98,6 +101,7 @@ struct LifecycleCounters final {
     u64 documentRedoDepth = 0;
     u64 cookPreviewBytes = 0;
     float finalPlayerPositionX = 0.0F;
+    float finalPlayerPositionY = 0.0F;
     u64 editorLayoutRegions = 0;
     bool selectionVerified = false;
     bool stylesheetInstalled = false;
@@ -111,6 +115,7 @@ struct LifecycleCounters final {
 
 enum class EditorCommand : u32 {
     MoveSelectedPositiveX,
+    ApplyPosition,
     Undo,
     Redo,
     Save,
@@ -169,6 +174,12 @@ template <typename Value>
 {
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
     return error == std::errc{} && end == text.data() + text.size();
+}
+
+[[nodiscard]] bool parseFiniteFloat(std::string_view text, float& value) noexcept
+{
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    return error == std::errc{} && end == text.data() + text.size() && std::isfinite(value);
 }
 
 [[nodiscard]] Tina::Core::Result<SampleOptions> parseOptions(int argumentCount, char** arguments)
@@ -1091,7 +1102,7 @@ class EditorShellState final : public Tina::IGameState {
             return status;
         }
         const auto createTransformRow = [&](std::string_view caption, std::string_view value,
-                                            UI::UINodeId& valueNode) -> Tina::Core::Status {
+                                            bool enabled, UI::UINodeId& valueNode) -> Tina::Core::Status {
             UI::UINodeId row{};
             UI::UILayoutStyle rowStyle = fillWidth(30.0F);
             rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
@@ -1111,20 +1122,25 @@ class EditorShellState final : public Tina::IGameState {
             valueStyle.size.width = UI::UILayoutLength::Auto();
             valueStyle.flexItem.grow = 1.0F;
             valueStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-            return storeNode(createTextEdit(row, value, valueStyle, false), valueNode);
+            return storeNode(createTextEdit(row, value, valueStyle, enabled), valueNode);
         };
-        if (auto status = createTransformRow("Position X", "0.000", inspectorPositionX_); !status) {
+        if (auto status = createTransformRow("Position X", "0.000", true, inspectorPositionX_); !status) {
             return status;
         }
-        if (auto status = createTransformRow("Position Y", "0.000", inspectorPositionY_); !status) {
+        if (auto status = createTransformRow("Position Y", "0.000", true, inspectorPositionY_); !status) {
             return status;
         }
         UI::UINodeId rotationField{};
-        if (auto status = createTransformRow("Rotation", "0.000", rotationField); !status) {
+        if (auto status = createTransformRow("Rotation", "0.000", false, rotationField); !status) {
             return status;
         }
         UI::UINodeId scaleField{};
-        if (auto status = createTransformRow("Scale", "1.000", scaleField); !status) {
+        if (auto status = createTransformRow("Scale", "1.000", false, scaleField); !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(inspectorContent, "Apply Position", fillWidth(34.0F)),
+                                    applyPositionButton_);
+            !status) {
             return status;
         }
 
@@ -1176,10 +1192,9 @@ class EditorShellState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        UI::UINodeId authoringHint{};
         if (auto status = storeNode(createLabel(inspectorContent, "One validated revision per command",
                                                 fillWidth(20.0F), secondaryText),
-                                    authoringHint);
+                                    authoringHint_);
             !status) {
             return status;
         }
@@ -1240,6 +1255,13 @@ class EditorShellState final : public Tina::IGameState {
         if (auto status = tree->setButtonAction(
                 moveButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
                     queueEditorCommand(EditorCommand::MoveSelectedPositiveX);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                applyPositionButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::ApplyPosition);
                 }});
             !status) {
             return status;
@@ -1325,15 +1347,19 @@ class EditorShellState final : public Tina::IGameState {
             if (queuedFirstSelection_) {
                 constexpr std::array commands{
                     EditorCommand::MoveSelectedPositiveX,
+                    EditorCommand::ApplyPosition,
                     EditorCommand::Undo,
                     EditorCommand::Redo,
                     EditorCommand::Save,
                 };
                 const std::size_t commandCount =
                     options_.documentPathUtf8.empty() ? commands.size() - 1U : commands.size();
-                if (autoAuthoringStage_ < commandCount &&
-                    queueEditorCommand(commands[autoAuthoringStage_])) {
-                    ++autoAuthoringStage_;
+                if (autoAuthoringStage_ < commandCount) {
+                    const EditorCommand command = commands[autoAuthoringStage_];
+                    if (queueEditorCommand(command)) {
+                        pendingAutoPositionInput_ = command == EditorCommand::ApplyPosition;
+                        ++autoAuthoringStage_;
+                    }
                 }
             }
         }
@@ -1381,6 +1407,15 @@ class EditorShellState final : public Tina::IGameState {
                 return status;
             }
         }
+        if (pendingAutoPositionInput_ && pendingEditorCommand_ == EditorCommand::ApplyPosition) {
+            pendingAutoPositionInput_ = false;
+            if (auto status = tree->setText(inspectorPositionX_, "2.5"); !status) {
+                return status;
+            }
+            if (auto status = tree->setText(inspectorPositionY_, "-1.25"); !status) {
+                return status;
+            }
+        }
         if (pendingEditorCommand_.has_value()) {
             if (auto status = executeEditorCommand(*tree); !status) {
                 return status;
@@ -1423,13 +1458,40 @@ class EditorShellState final : public Tina::IGameState {
             if (status) {
                 ++counters_.authoringEdits;
                 requiresPreviewValidation = true;
+                authoringFeedback_ = "Move X +1 applied as one document revision";
             }
             break;
+        case EditorCommand::ApplyPosition: {
+            auto positionXText = tree.text(inspectorPositionX_);
+            if (!positionXText) {
+                return Tina::Core::failure(std::move(positionXText.error()));
+            }
+            auto positionYText = tree.text(inspectorPositionY_);
+            if (!positionYText) {
+                return Tina::Core::failure(std::move(positionYText.error()));
+            }
+            float positionX = 0.0F;
+            float positionY = 0.0F;
+            if (!parseFiniteFloat(*positionXText, positionX) || !parseFiniteFloat(*positionYText, positionY)) {
+                ++counters_.inspectorRejectedTransactions;
+                authoringFeedback_ = "Position rejected: enter finite decimal values";
+                return refreshAuthoringUi(tree);
+            }
+            status = applySelectedPosition(positionX, positionY);
+            if (status) {
+                ++counters_.authoringEdits;
+                ++counters_.inspectorTransactions;
+                requiresPreviewValidation = true;
+                authoringFeedback_ = "Position applied as one document revision";
+            }
+            break;
+        }
         case EditorCommand::Undo:
             status = document_.undo();
             if (status) {
                 ++counters_.authoringUndos;
                 requiresPreviewValidation = true;
+                authoringFeedback_ = "Undo restored the previous canonical snapshot";
             }
             break;
         case EditorCommand::Redo:
@@ -1437,10 +1499,14 @@ class EditorShellState final : public Tina::IGameState {
             if (status) {
                 ++counters_.authoringRedos;
                 requiresPreviewValidation = true;
+                authoringFeedback_ = "Redo restored the next canonical snapshot";
             }
             break;
         case EditorCommand::Save:
             status = saveCurrentDocument();
+            if (status) {
+                authoringFeedback_ = "Canonical World2D document saved atomically";
+            }
             break;
         }
         if (!status) {
@@ -1510,6 +1576,32 @@ class EditorShellState final : public Tina::IGameState {
         return document_.upsertEntity(edited);
     }
 
+    [[nodiscard]] Tina::Core::Status applySelectedPosition(float positionX, float positionY)
+    {
+        const u32 stableEntityId = stableEntityIdForHierarchyItem(selectionKey_);
+        if (stableEntityId == 0U) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::NotFound,
+                                       "editor selection has no authoring entity");
+        }
+
+        std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
+        auto snapshot = document_.parseCurrentSnapshot(storage);
+        if (!snapshot) {
+            return Tina::Core::failure(std::move(snapshot.error()));
+        }
+        const auto entity = std::find_if(storage.begin(), storage.end(), [stableEntityId](const auto& candidate) {
+            return candidate.stableEntityId == stableEntityId;
+        });
+        if (entity == storage.end()) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::NotFound,
+                                       "editor selection is absent from the authoring document");
+        }
+        auto edited = *entity;
+        edited.positionX = positionX;
+        edited.positionY = positionY;
+        return document_.upsertEntity(edited);
+    }
+
     [[nodiscard]] Tina::Core::Status validateRuntimePreview()
     {
         counters_.runtimePreviewValid = false;
@@ -1550,6 +1642,7 @@ class EditorShellState final : public Tina::IGameState {
         counters_.documentRedoDepth = document_.redoDepth();
         counters_.cookPreviewBytes = document_.snapshotBytes().size();
         counters_.finalPlayerPositionX = playerTransform->position.x;
+        counters_.finalPlayerPositionY = playerTransform->position.y;
         counters_.runtimePreviewValid = true;
         return Tina::Core::success();
     }
@@ -1558,6 +1651,7 @@ class EditorShellState final : public Tina::IGameState {
     {
         const bool dirty = isDocumentDirty();
         const bool pathConfigured = !options_.documentPathUtf8.empty();
+        const bool selectionEditable = stableEntityIdForHierarchyItem(selectionKey_) != 0U;
         counters_.documentDirty = dirty;
         counters_.documentSaved = pathConfigured && !dirty;
 
@@ -1612,7 +1706,19 @@ class EditorShellState final : public Tina::IGameState {
         if (auto status = tree.setText(statusSelection_, statusSelection); !status) {
             return status;
         }
-        if (auto status = tree.setEnabled(moveButton_, stableEntityIdForHierarchyItem(selectionKey_) != 0U); !status) {
+        if (auto status = tree.setText(authoringHint_, authoringFeedback_); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(inspectorPositionX_, selectionEditable); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(inspectorPositionY_, selectionEditable); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(applyPositionButton_, selectionEditable); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(moveButton_, selectionEditable); !status) {
             return status;
         }
         if (auto status = tree.setEnabled(undoButton_, document_.canUndo()); !status) {
@@ -1775,11 +1881,13 @@ class EditorShellState final : public Tina::IGameState {
     UI::UINodeId hierarchySelectionSummary_{};
     UI::UINodeId inspectorPositionX_{};
     UI::UINodeId inspectorPositionY_{};
+    UI::UINodeId authoringHint_{};
     UI::UINodeId statusDocument_{};
     UI::UINodeId statusPreview_{};
     UI::UINodeId statusSelection_{};
     UI::UINodeId toolbarPath_{};
     UI::UINodeId moveButton_{};
+    UI::UINodeId applyPositionButton_{};
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
     UI::UINodeId saveButton_{};
@@ -1791,8 +1899,10 @@ class EditorShellState final : public Tina::IGameState {
     bool playerExpanded_ = true;
     bool queuedFirstSelection_ = false;
     bool queuedSecondSelection_ = false;
+    bool pendingAutoPositionInput_ = false;
     u32 autoAuthoringStage_ = 0;
     std::vector<std::byte> savedBaselineBytes_{};
+    std::string authoringFeedback_ = "One validated revision per command";
     std::optional<u64> pendingSelectionIndex_{};
     std::optional<EditorCommand> pendingEditorCommand_{};
     std::optional<UI::UIStraightSrgba8Color> pendingViewportTokenColor_{};
@@ -1876,10 +1986,12 @@ class EditorShellApplication final : public Tina::IGameApplication {
     }
     if (options.autoDemo) {
         if (counters.hierarchySelectionChanges < 1 || counters.finalSelectionKey != TileMapKey ||
-            counters.styleTokenUpdates < 2 || counters.authoringEdits != 1 || counters.authoringUndos != 1 ||
-            counters.authoringRedos != 1 || counters.runtimePreviewInstantiations != 4 ||
-            counters.documentRevision != 5 || counters.documentUndoDepth != 1 || counters.documentRedoDepth != 0 ||
-            counters.finalPlayerPositionX != 1.0F) {
+            counters.styleTokenUpdates < 2 || counters.authoringEdits != 2 ||
+            counters.inspectorTransactions != 1 || counters.inspectorRejectedTransactions != 0 ||
+            counters.authoringUndos != 1 || counters.authoringRedos != 1 ||
+            counters.runtimePreviewInstantiations != 5 || counters.documentRevision != 6 ||
+            counters.documentUndoDepth != 2 || counters.documentRedoDepth != 0 ||
+            counters.finalPlayerPositionX != 2.5F || counters.finalPlayerPositionY != -1.25F) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "editor shell automatic authoring demo did not finish");
         }
@@ -1953,6 +2065,8 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"authoringUndos\":" << counters.authoringUndos
               << ",\"authoringRedos\":" << counters.authoringRedos
               << ",\"authoringSaves\":" << counters.authoringSaves
+              << ",\"inspectorTransactions\":" << counters.inspectorTransactions
+              << ",\"inspectorRejectedTransactions\":" << counters.inspectorRejectedTransactions
               << ",\"savedSnapshotBytes\":" << counters.savedSnapshotBytes
               << ",\"editorLayoutRegions\":" << counters.editorLayoutRegions
               << ",\"viewportLayoutReady\":" << (counters.viewportLayoutReady ? "true" : "false")
@@ -1968,6 +2082,7 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"documentDirty\":" << (counters.documentDirty ? "true" : "false")
               << ",\"cookPreviewBytes\":" << counters.cookPreviewBytes
               << ",\"finalPlayerPositionX\":" << counters.finalPlayerPositionX
+              << ",\"finalPlayerPositionY\":" << counters.finalPlayerPositionY
               << ",\"finalSelectionKey\":" << counters.finalSelectionKey
               << ",\"finalSelectionIndex\":" << counters.finalSelectionIndex
               << ",\"selectionVerified\":" << (counters.selectionVerified ? "true" : "false") << "}\n";

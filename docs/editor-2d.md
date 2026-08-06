@@ -8,14 +8,14 @@
 schema 兼容格式。
 
 独立 `Tina::Editor` target、`World2DAuthoringDocument` 与 `World2DAuthoringFile` 已提供。`tina_sample_editor_shell` 现已把 Hierarchy/
-Inspector 的 `Move X +1`、Undo、Redo 接到真实 document，并在每次成功命令后把同一份 canonical snapshot 解析、
+Inspector 的 Position X/Y、`Apply Position`、`Move X +1`、Undo、Redo 接到真实 document，并在每次成功命令后把同一份 canonical snapshot 解析、
 实例化到新的 `Scene::World` 做 runtime preview 验证。当前 shell 的 retained UI 布局也已完整铺开：Toolbar、上下文
 工具条、Hierarchy dock、World2D viewport 工作区、可滚动 Inspector（Identity/Transform/Components/Authoring/
 Document）和底部 status bar 均由 `Flex`、`minMax`、固定控件高度与滚动容器组合；窗口变大时 viewport 与中间工作区增长，
 两侧 dock 保持 bounded width。传入 `--document-path=<UTF-8 path>` 后 Toolbar Save 会原子保存当前 canonical snapshot，
 并让 Toolbar/Inspector/status bar 依据 saved baseline 显示 `Modified/Saved`；未配置路径时 Save 保持 disabled。
-Transform 输入、真实 viewport 绘制和非 Move 的 Inspector commit 目前明确为只读/占位状态，不伪装成已完成的
-document transaction。真实渲染 viewport、TileMap/动画专用 document
+Position X/Y 通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，拒绝时恢复
+canonical 字段并保持 document/history/preview 不变。Rotation/Scale 继续只读，避免提前冻结未完成的变换语义。真实渲染 viewport、TileMap/动画专用 document
 仍是后续切片；它们必须复用这里的 revision/failure 语义，不各自实现一套 undo stack 或 cooked preview。
 
 ## Editor shell layout
@@ -26,13 +26,14 @@ Context bar (breadcrumb/select/move/frame/snap)
 Workspace
   Hierarchy dock (filter/actions/virtual TreeView/selection summary)
   World2D viewport (mode/tools/zoom/preview canvas/footer)
-  Inspector dock (scrollable identity/transform/components/authoring/document)
+  Inspector dock (scrollable identity/position transaction/components/authoring/document)
 Status bar (schema/entities/revision/preview/selection)
 ```
 
 这层只属于 `samples/editor_shell` 的组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局 smoke 的
 结构化输出额外报告 `editorLayoutRegions=6`、`viewportLayoutReady=true` 和 `inspectorScrollConfigured=true`；这些字段
-只证明 retained tree 已建立，不证明真实 GPU viewport。文件保存另由 `authoringSaves`、`savedSnapshotBytes`、
+只证明 retained tree 已建立，不证明真实 GPU viewport。字段事务由 `inspectorTransactions`、
+`inspectorRejectedTransactions` 和最终 Player XY 取证；文件保存另由 `authoringSaves`、`savedSnapshotBytes`、
 `documentSaved`、`documentDirty` 和落盘 bytes 取证。
 
 ## 原子文件保存
@@ -129,7 +130,7 @@ Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirecto
 document 与 shell 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；非法 edit 原子失败；
 subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 三个公共头
 isolation 编译通过；文件保存 exact canonical bytes、覆盖失败不删除旧目标；shell 自动完成
-edit → undo → redo → save，在四个 revision 状态均成功实例化 runtime preview，Save 不增加第五次 instantiate。
+Move → Apply Position → Undo → Redo → Save，在五个 revision 状态均成功实例化 runtime preview，Save 不增加第六次 instantiate。
 
-后续产品切片依次为：真实渲染 viewport 与 Inspector 字段 transaction；TileMap root+chunk authoring/cook；
+后续产品切片依次为：真实渲染 viewport 与 Rotation/Scale/gizmo transaction；TileMap root+chunk authoring/cook；
 SpriteAnimationClip timeline authoring/cook。每个切片继续只保留现行 schema，不增加旧资产兼容分支。

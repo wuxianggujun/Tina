@@ -855,8 +855,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.
 
 布局 smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、
 `viewportLayoutReady=true`、`inspectorScrollConfigured=true`，以及 `uiRootsCreated=1` / `uiRootsReleased=1`。
-`--no-auto-demo` 仍用于人工操作模式；在真实 viewport 或字段 transaction 接入前，不扩大到完整
-product-2d gate，也不把只读 Transform 控件当作已验证的 authoring mutation。
+`--no-auto-demo` 仍用于人工操作模式；在真实 viewport 接入前，不扩大到完整 product-2d gate。
+Rotation/Scale 仍是只读字段，不把它们当作已验证的 authoring mutation。
 
 Editor 原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的 shell smoke：
 
@@ -870,7 +870,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.
   --document-path=artifacts/editor_shell/smoke/world2d.tworld
 ```
 
-保存 smoke 要保持 `runtimePreviewInstantiations=4`，并检查 `authoringSaves=1`、`documentSaved=true`、
+Position transaction 接入后，同一 60-frame smoke 要检查 `authoringActionsWired=5`、`authoringEdits=2`、
+`inspectorTransactions=1`、`inspectorRejectedTransactions=0`、`runtimePreviewInstantiations=5`、
+`documentRevision=6`、`documentUndoDepth=2` 与最终 Player XY=`(2.5,-1.25)`。保存还要检查 `authoringSaves=1`、`documentSaved=true`、
 `documentDirty=false`、`savedSnapshotBytes=cookPreviewBytes`；落盘文件必须与当前 canonical snapshot exact match。
 未提供 `--document-path` 时 Save disabled，既有 smoke 仍报告 `authoringSaves=0` 与 `documentDirty=true`。
 Core 的目录替换失败回归保留在 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory`；当前
