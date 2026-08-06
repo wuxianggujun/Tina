@@ -50,6 +50,7 @@ inline constexpr u32 HierarchyMaterializedCapacity = 16;
 inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AuthoringActionCount = 3;
+inline constexpr u32 EditorLayoutRegionCount = 6;
 
 inline constexpr UI::UITreeViewItemKey SceneRootKey = 1;
 inline constexpr UI::UITreeViewItemKey CameraKey = 2;
@@ -92,9 +93,12 @@ struct LifecycleCounters final {
     u64 documentRedoDepth = 0;
     u64 cookPreviewBytes = 0;
     float finalPlayerPositionX = 0.0F;
+    u64 editorLayoutRegions = 0;
     bool selectionVerified = false;
     bool stylesheetInstalled = false;
     bool runtimePreviewValid = false;
+    bool viewportLayoutReady = false;
+    bool inspectorScrollConfigured = false;
 };
 
 enum class AuthoringCommand : u32 {
@@ -221,6 +225,40 @@ template <typename Value>
     return style;
 }
 
+[[nodiscard]] UI::UILayoutStyle fixedSize(float width, float height) noexcept
+{
+    UI::UILayoutStyle style{};
+    style.size.width = UI::UILayoutLength::Px(width);
+    style.size.height = UI::UILayoutLength::Px(height);
+    return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle fillWidth(float height) noexcept
+{
+    UI::UILayoutStyle style{};
+    style.size.width = UI::UILayoutLength::Percent(100.0F);
+    style.size.height = UI::UILayoutLength::Px(height);
+    return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle growingRegion() noexcept
+{
+    UI::UILayoutStyle style = percentSize(100.0F, 100.0F);
+    style.flexItem.grow = 1.0F;
+    style.flexItem.shrink = 1.0F;
+    style.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle boundedDock(float basisPercent, float minimumWidth,
+                                            float maximumWidth) noexcept
+{
+    UI::UILayoutStyle style = flexChild(0.0F, basisPercent, 100.0F);
+    style.minMax.minWidth = UI::UILayoutLength::Px(minimumWidth);
+    style.minMax.maxWidth = UI::UILayoutLength::Px(maximumWidth);
+    return style;
+}
+
 [[nodiscard]] std::string_view hierarchyLabel(UI::UITreeViewItemKey key) noexcept
 {
     switch (key) {
@@ -269,19 +307,19 @@ template <typename Value>
 {
     switch (key) {
     case SceneRootKey:
-        return "Canonical World2D scene root.";
+        return "Canonical World2D root.";
     case CameraKey:
-        return "Camera2D is persisted in the current document.";
+        return "Persisted Camera2D entity.";
     case PlayerKey:
-        return "Inspector edits use stable entity identity.";
+        return "Stable entity identity.";
     case PlayerSpriteKey:
-        return "Component row edits its owning Player entity.";
+        return "Player sprite component.";
     case PlayerTransformKey:
-        return "Move X publishes one undoable revision.";
+        return "Move X is undoable.";
     case LightsKey:
-        return "PointLight2D is instantiated by the runtime preview.";
+        return "Runtime PointLight2D.";
     case TileMapKey:
-        return "TileMap authoring is the next editor document slice.";
+        return "TileMap authoring follows.";
     default:
         return "Validated World2D authoring item.";
     }
@@ -422,104 +460,256 @@ class EditorShellState final : public Tina::IGameState {
             return Tina::Core::failure(std::move(tree.error()));
         }
 
-        if (auto status = tree->setProductTheme(UI::makeDefaultProductTheme()); !status) {
+        const UI::UITheme productTheme = UI::makeDefaultProductTheme();
+        if (auto status = tree->setProductTheme(productTheme); !status) {
             return status;
         }
 
+        const UI::UITextStyle titleText = UI::makeTitleTextStyle(productTheme, 18.0F);
+        const UI::UITextStyle sectionText = UI::makeTitleTextStyle(productTheme, 15.0F);
+        const UI::UITextStyle bodyText = UI::makeBodyTextStyle(productTheme, 14.0F);
+        const UI::UITextStyle compactText = UI::makeBodyTextStyle(productTheme, 12.0F);
+        const UI::UITextStyle secondaryText = UI::makeSecondaryTextStyle(productTheme, 12.0F);
+        const UI::UITextStyle accentText = UI::makeAccentTextStyle(productTheme, 13.0F);
+
+        const auto storeNode = [](auto&& result, UI::UINodeId& output) -> Tina::Core::Status {
+            if (!result) {
+                return Tina::Core::failure(std::move(result.error()));
+            }
+            output = *result;
+            return Tina::Core::success();
+        };
+        const auto createPanel = [&](UI::UINodeId parent, UI::UILayoutStyle layout,
+                                     UI::UIStyleRoleId role,
+                                     UI::UIStyleClassId styleClass = {}) {
+            UI::UIElementDescriptor descriptor = UI::makePanelElement(layout);
+            descriptor.visual.styleRole = role;
+            if (styleClass.hasValue()) {
+                descriptor.visual.styleClasses = std::span(&styleClass, 1);
+            }
+            return tree->createElement(parent, descriptor);
+        };
+        const auto createLabel = [&](UI::UINodeId parent, std::string_view text,
+                                     UI::UILayoutStyle layout, const UI::UITextStyle& style) {
+            UI::UIElementDescriptor descriptor = UI::makeLabelElement(text, layout);
+            descriptor.textStyle = style;
+            return tree->createElement(parent, descriptor);
+        };
+        const auto createButton = [&](UI::UINodeId parent, std::string_view text,
+                                      UI::UILayoutStyle layout, bool enabled = true) {
+            UI::UIElementDescriptor descriptor = UI::makeButtonElement(text, layout);
+            descriptor.textStyle = compactText;
+            descriptor.enabled = enabled;
+            return tree->createElement(parent, descriptor);
+        };
+        const auto createTextEdit = [&](UI::UINodeId parent, std::string_view text,
+                                        UI::UILayoutStyle layout, bool enabled) {
+            UI::UIElementDescriptor descriptor = UI::makeTextEditElement(text, layout);
+            descriptor.textStyle = compactText;
+            descriptor.enabled = enabled;
+            return tree->createElement(parent, descriptor);
+        };
+
         UI::UILayoutStyle rootStyle = percentSize(100.0F, 100.0F);
         rootStyle.flexContainer.direction = UI::UIFlexDirection::Column;
-        rootStyle.flexContainer.gap = UI::UILayoutGap::All(8.0F);
-        rootStyle.padding = {
-            .left = 12.0F,
-            .top = 12.0F,
-            .right = 12.0F,
-            .bottom = 12.0F,
-        };
+        rootStyle.flexContainer.gap.row = 6.0F;
+        rootStyle.padding = UI::UIEdgeSpacing::All(10.0F);
         if (auto status = tree->setLayoutStyle(root->rootNodeId(), rootStyle); !status) {
             return status;
         }
 
-        auto title = tree->createElement(root->rootNodeId(),
-                                         UI::makeLabelElement("Tina 2D Editor"));
-        if (!title) {
-            return Tina::Core::failure(std::move(title.error()));
-        }
-        UI::UILayoutStyle titleStyle{};
-        titleStyle.size.width = UI::UILayoutLength::Percent(100.0F);
-        titleStyle.size.height = UI::UILayoutLength::Px(28.0F);
-        if (auto status = tree->setLayoutStyle(*title, titleStyle); !status) {
+        const UI::UINodeId rootNode = root->rootNodeId();
+        UI::UINodeId toolbar{};
+        UI::UILayoutStyle toolbarStyle = fillWidth(48.0F);
+        toolbarStyle.flexItem.shrink = 0.0F;
+        toolbarStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        toolbarStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        toolbarStyle.flexContainer.gap.column = 8.0F;
+        toolbarStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(10.0F, 7.0F);
+        if (auto status = storeNode(createPanel(rootNode, toolbarStyle, UI::UIStyleRoleId::PanelSurface,
+                                                dockClass_),
+                                    toolbar);
+            !status) {
             return status;
         }
 
-        auto subtitle = tree->createElement(
-            root->rootNodeId(),
-            UI::makeLabelElement(
-                "Scene Document"));
-        if (!subtitle) {
-            return Tina::Core::failure(std::move(subtitle.error()));
+        UI::UINodeId toolbarBrand{};
+        if (auto status = storeNode(createLabel(toolbar, "TINA EDITOR", fixedSize(132.0F, 26.0F), titleText),
+                                    toolbarBrand);
+            !status) {
+            return status;
         }
-        UI::UILayoutStyle subtitleStyle{};
-        subtitleStyle.size.width = UI::UILayoutLength::Percent(100.0F);
-        subtitleStyle.size.height = UI::UILayoutLength::Px(22.0F);
-        if (auto status = tree->setLayoutStyle(*subtitle, subtitleStyle); !status) {
+        UI::UINodeId toolbarDocument{};
+        if (auto status = storeNode(createLabel(toolbar, "World2D Scene", fixedSize(138.0F, 24.0F), bodyText),
+                                    toolbarDocument);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle pathStyle = fixedSize(0.0F, 22.0F);
+        pathStyle.size.width = UI::UILayoutLength::Auto();
+        pathStyle.flexItem.grow = 1.0F;
+        pathStyle.flexItem.shrink = 1.0F;
+        pathStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        UI::UINodeId toolbarPath{};
+        if (auto status = storeNode(createLabel(toolbar, "scenes/world2d.tworld  |  Saved", pathStyle,
+                                                secondaryText),
+                                    toolbarPath);
+            !status) {
             return status;
         }
 
-        UI::UIElementDescriptor bodyDesc = UI::makePanelElement();
-        bodyDesc.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
-        bodyDesc.visual.styleClasses = std::span(&dockClass_, 1);
-        auto body = tree->createElement(root->rootNodeId(), bodyDesc);
-        if (!body) {
-            return Tina::Core::failure(std::move(body.error()));
+        UI::UINodeId mode2DButton{};
+        if (auto status = storeNode(createButton(toolbar, "2D", fixedSize(46.0F, 30.0F), false), mode2DButton);
+            !status) {
+            return status;
         }
-        UI::UILayoutStyle bodyStyle = percentSize(100.0F, 100.0F);
-        bodyStyle.flexItem.grow = 1.0F;
-        bodyStyle.flexItem.shrink = 1.0F;
+        UI::UINodeId previewModeButton{};
+        if (auto status = storeNode(createButton(toolbar, "Preview", fixedSize(68.0F, 30.0F), false),
+                                    previewModeButton);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(toolbar, "Undo", fixedSize(60.0F, 30.0F)), undoButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(toolbar, "Redo", fixedSize(60.0F, 30.0F)), redoButton_);
+            !status) {
+            return status;
+        }
+        UI::UINodeId saveButton{};
+        if (auto status = storeNode(createButton(toolbar, "Save", fixedSize(58.0F, 30.0F), false), saveButton);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId contextBar{};
+        UI::UILayoutStyle contextBarStyle = fillWidth(34.0F);
+        contextBarStyle.flexItem.shrink = 0.0F;
+        contextBarStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        contextBarStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        contextBarStyle.flexContainer.gap.column = 6.0F;
+        contextBarStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(10.0F, 3.0F);
+        if (auto status = storeNode(createPanel(rootNode, contextBarStyle, UI::UIStyleRoleId::PanelElevated,
+                                                viewportClass_),
+                                    contextBar);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle breadcrumbStyle = fixedSize(0.0F, 22.0F);
+        breadcrumbStyle.size.width = UI::UILayoutLength::Auto();
+        breadcrumbStyle.flexItem.grow = 1.0F;
+        breadcrumbStyle.flexItem.shrink = 1.0F;
+        breadcrumbStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        UI::UINodeId breadcrumb{};
+        if (auto status = storeNode(createLabel(contextBar, "Scene / World2D / Player", breadcrumbStyle,
+                                                secondaryText),
+                                    breadcrumb);
+            !status) {
+            return status;
+        }
+        for (const std::string_view tool : {std::string_view{"Select"}, std::string_view{"Move"},
+                                            std::string_view{"Frame"}}) {
+            UI::UINodeId toolButton{};
+            if (auto status = storeNode(createButton(contextBar, tool, fixedSize(58.0F, 26.0F), false),
+                                        toolButton);
+                !status) {
+                return status;
+            }
+        }
+        UI::UINodeId snapStatus{};
+        if (auto status = storeNode(createLabel(contextBar, "Snap 16 px", fixedSize(72.0F, 20.0F), accentText),
+                                    snapStatus);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId body{};
+        UI::UILayoutStyle bodyStyle = growingRegion();
+        bodyStyle.minMax.minHeight = UI::UILayoutLength::Px(320.0F);
         bodyStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-        bodyStyle.flexContainer.gap.column = 10.0F;
-        if (auto status = tree->setLayoutStyle(*body, bodyStyle); !status) {
+        bodyStyle.flexContainer.gap.column = 8.0F;
+        if (auto status = storeNode(createPanel(rootNode, bodyStyle, UI::UIStyleRoleId::None), body); !status) {
             return status;
         }
 
-        UI::UIElementDescriptor dockDesc = UI::makePanelElement();
-        dockDesc.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
-        dockDesc.visual.styleClasses = std::span(&dockClass_, 1);
-        auto left = tree->createElement(*body, dockDesc);
-        if (!left) {
-            return Tina::Core::failure(std::move(left.error()));
-        }
-        UI::UILayoutStyle leftStyle = flexChild(0.0F, 28.0F, 100.0F);
+        UI::UINodeId left{};
+        UI::UILayoutStyle leftStyle = boundedDock(22.0F, 220.0F, 300.0F);
         leftStyle.flexContainer.direction = UI::UIFlexDirection::Column;
-        leftStyle.flexContainer.gap.row = 6.0F;
-        if (auto status = tree->setLayoutStyle(*left, leftStyle); !status) {
-            return status;
-        }
-        auto hierarchyTitle =
-            tree->createElement(*left, UI::makeLabelElement("Hierarchy"));
-        if (!hierarchyTitle) {
-            return Tina::Core::failure(std::move(hierarchyTitle.error()));
-        }
-        UI::UILayoutStyle hierarchyTitleStyle{};
-        hierarchyTitleStyle.size.width = UI::UILayoutLength::Percent(100.0F);
-        hierarchyTitleStyle.size.height = UI::UILayoutLength::Px(22.0F);
-        if (auto status = tree->setLayoutStyle(*hierarchyTitle, hierarchyTitleStyle); !status) {
+        leftStyle.flexContainer.gap.row = 7.0F;
+        leftStyle.padding = UI::UIEdgeSpacing::All(8.0F);
+        if (auto status = storeNode(createPanel(body, leftStyle, UI::UIStyleRoleId::PanelSurface, dockClass_), left);
+            !status) {
             return status;
         }
 
+        UI::UINodeId hierarchyHeader{};
+        UI::UILayoutStyle hierarchyHeaderStyle = fillWidth(28.0F);
+        hierarchyHeaderStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        hierarchyHeaderStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        if (auto status = storeNode(createPanel(left, hierarchyHeaderStyle, UI::UIStyleRoleId::None),
+                                    hierarchyHeader);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle hierarchyTitleStyle = fixedSize(0.0F, 24.0F);
+        hierarchyTitleStyle.size.width = UI::UILayoutLength::Auto();
+        hierarchyTitleStyle.flexItem.grow = 1.0F;
+        hierarchyTitleStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        UI::UINodeId hierarchyTitle{};
+        if (auto status = storeNode(createLabel(hierarchyHeader, "Hierarchy", hierarchyTitleStyle, sectionText),
+                                    hierarchyTitle);
+            !status) {
+            return status;
+        }
+        UI::UINodeId hierarchyCount{};
+        if (auto status = storeNode(createLabel(hierarchyHeader, "5 entities", fixedSize(66.0F, 20.0F),
+                                                secondaryText),
+                                    hierarchyCount);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId hierarchyFilter{};
+        if (auto status = storeNode(createTextEdit(left, "Filter hierarchy", fillWidth(32.0F), false),
+                                    hierarchyFilter);
+            !status) {
+            return status;
+        }
+        UI::UINodeId hierarchyActions{};
+        UI::UILayoutStyle hierarchyActionsStyle = fillWidth(30.0F);
+        hierarchyActionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        hierarchyActionsStyle.flexContainer.gap.column = 6.0F;
+        if (auto status = storeNode(createPanel(left, hierarchyActionsStyle, UI::UIStyleRoleId::None),
+                                    hierarchyActions);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle hierarchyActionStyle = fixedSize(0.0F, 30.0F);
+        hierarchyActionStyle.size.width = UI::UILayoutLength::Auto();
+        hierarchyActionStyle.flexItem.grow = 1.0F;
+        hierarchyActionStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        for (const std::string_view action : {std::string_view{"Add Entity"},
+                                              std::string_view{"Focus"}}) {
+            UI::UINodeId actionButton{};
+            if (auto status = storeNode(createButton(hierarchyActions, action, hierarchyActionStyle, false),
+                                        actionButton);
+                !status) {
+                return status;
+            }
+        }
+
+        UI::UILayoutStyle hierarchyStyle = growingRegion();
+        hierarchyStyle.minMax.minHeight = UI::UILayoutLength::Px(160.0F);
         auto hierarchy = tree->createElement(
-            *left, UI::makeTreeViewElement({.materializedItemCapacity = HierarchyMaterializedCapacity}));
+            left, UI::makeTreeViewElement({.materializedItemCapacity = HierarchyMaterializedCapacity},
+                                          hierarchyStyle));
         if (!hierarchy) {
             return Tina::Core::failure(std::move(hierarchy.error()));
         }
         hierarchyTree_ = *hierarchy;
-        UI::UILayoutStyle hierarchyStyle = percentSize(100.0F, 100.0F);
-        hierarchyStyle.flexItem.grow = 1.0F;
-        hierarchyStyle.flexItem.shrink = 1.0F;
-        if (auto status = tree->setLayoutStyle(*hierarchy, hierarchyStyle); !status) {
-            return status;
-        }
         if (auto status = tree->setTreeViewStyle(
-                *hierarchy,
+                hierarchyTree_,
                 UI::UITreeViewStyle{
                     .rowHeight = 26.0F,
                     .overscanRows = 1,
@@ -532,157 +722,494 @@ class EditorShellState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        if (auto status = tree->setTreeViewPaint(*hierarchy, UI::makeTreeViewPaint(UI::makeDefaultProductTheme()));
+        if (auto status = tree->setTreeViewPaint(hierarchyTree_, UI::makeTreeViewPaint(productTheme)); !status) {
+            return status;
+        }
+        if (auto status = tree->setTreeViewDataSource(hierarchyTree_, hierarchyDataSource()); !status) {
+            return status;
+        }
+        if (auto status = tree->setTreeViewSelectedIndex(hierarchyTree_, 0); !status) {
+            return status;
+        }
+
+        UI::UINodeId hierarchyFooter{};
+        UI::UILayoutStyle hierarchyFooterStyle = fillWidth(48.0F);
+        hierarchyFooterStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(8.0F, 5.0F);
+        hierarchyFooterStyle.flexContainer.gap.row = 2.0F;
+        if (auto status = storeNode(createPanel(left, hierarchyFooterStyle, UI::UIStyleRoleId::PanelElevated),
+                                    hierarchyFooter);
             !status) {
             return status;
         }
-        if (auto status = tree->setTreeViewDataSource(*hierarchy, hierarchyDataSource()); !status) {
+        if (auto status = storeNode(createLabel(hierarchyFooter, {}, fillWidth(20.0F), bodyText),
+                                    hierarchySelectionSummary_);
+            !status) {
             return status;
         }
-        if (auto status = tree->setTreeViewSelectedIndex(*hierarchy, 0); !status) {
+        UI::UINodeId hierarchyFooterHint{};
+        if (auto status = storeNode(createLabel(hierarchyFooter, "Stable authoring identity", fillWidth(18.0F),
+                                                secondaryText),
+                                    hierarchyFooterHint);
+            !status) {
             return status;
         }
 
-        UI::UIElementDescriptor centerDesc = UI::makePanelElement();
-        centerDesc.visual.styleRole = UI::UIStyleRoleId::PanelElevated;
-        centerDesc.visual.styleClasses = std::span(&viewportClass_, 1);
-        auto center = tree->createElement(*body, centerDesc);
-        if (!center) {
-            return Tina::Core::failure(std::move(center.error()));
-        }
-        UI::UILayoutStyle centerStyle = flexChild(1.0F, 44.0F, 100.0F);
+        UI::UINodeId center{};
+        UI::UILayoutStyle centerStyle = growingRegion();
+        centerStyle.size.width = UI::UILayoutLength::Percent(52.0F);
+        centerStyle.minMax.minWidth = UI::UILayoutLength::Px(360.0F);
         centerStyle.flexContainer.direction = UI::UIFlexDirection::Column;
-        centerStyle.flexContainer.gap.row = 6.0F;
-        if (auto status = tree->setLayoutStyle(*center, centerStyle); !status) {
+        centerStyle.flexContainer.gap.row = 7.0F;
+        centerStyle.padding = UI::UIEdgeSpacing::All(8.0F);
+        if (auto status = storeNode(createPanel(body, centerStyle, UI::UIStyleRoleId::PanelElevated,
+                                                viewportClass_),
+                                    center);
+            !status) {
             return status;
         }
-        auto viewportTitle =
-            tree->createElement(*center, UI::makeLabelElement("World2D Preview"));
-        if (!viewportTitle) {
-            return Tina::Core::failure(std::move(viewportTitle.error()));
-        }
-        UI::UILayoutStyle viewportTitleStyle{};
-        viewportTitleStyle.size.width = UI::UILayoutLength::Percent(100.0F);
-        viewportTitleStyle.size.height = UI::UILayoutLength::Px(22.0F);
-        if (auto status = tree->setLayoutStyle(*viewportTitle, viewportTitleStyle); !status) {
+
+        UI::UINodeId viewportHeader{};
+        UI::UILayoutStyle viewportHeaderStyle = fillWidth(30.0F);
+        viewportHeaderStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        viewportHeaderStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        viewportHeaderStyle.flexContainer.gap.column = 8.0F;
+        if (auto status = storeNode(createPanel(center, viewportHeaderStyle, UI::UIStyleRoleId::None),
+                                    viewportHeader);
+            !status) {
             return status;
         }
-        UI::UIElementDescriptor viewportDesc = UI::makePanelElement();
-        viewportDesc.visual.styleRole = UI::UIStyleRoleId::PanelElevated;
-        viewportDesc.visual.styleClasses = std::span(&viewportClass_, 1);
-        auto viewport = tree->createElement(*center, viewportDesc);
-        if (!viewport) {
-            return Tina::Core::failure(std::move(viewport.error()));
-        }
-        UI::UILayoutStyle viewportStyle = percentSize(100.0F, 100.0F);
-        viewportStyle.flexItem.grow = 1.0F;
-        viewportStyle.flexContainer.direction = UI::UIFlexDirection::Column;
-        viewportStyle.flexContainer.gap.row = 8.0F;
-        viewportStyle.padding = {
-            .left = 16.0F,
-            .top = 16.0F,
-            .right = 16.0F,
-            .bottom = 16.0F,
-        };
-        if (auto status = tree->setLayoutStyle(*viewport, viewportStyle); !status) {
+        UI::UILayoutStyle viewportTitleStyle = fixedSize(0.0F, 24.0F);
+        viewportTitleStyle.size.width = UI::UILayoutLength::Auto();
+        viewportTitleStyle.flexItem.grow = 1.0F;
+        viewportTitleStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        UI::UINodeId viewportTitle{};
+        if (auto status = storeNode(createLabel(viewportHeader, "World2D Viewport", viewportTitleStyle,
+                                                sectionText),
+                                    viewportTitle);
+            !status) {
             return status;
         }
-        const std::array viewportHintTexts{
-            std::string_view{"Runtime Scene preview: ready"},
-            std::string_view{"Document schema: World2D v1"},
-            std::string_view{"Cook preview: canonical snapshot"},
-            std::string_view{"Renderer viewport: pending"},
-        };
-        for (const std::string_view hintText : viewportHintTexts) {
-            auto viewportHint = tree->createElement(*viewport, UI::makeLabelElement(hintText));
-            if (!viewportHint) {
-                return Tina::Core::failure(std::move(viewportHint.error()));
-            }
-            UI::UILayoutStyle viewportHintStyle{};
-            viewportHintStyle.size.width = UI::UILayoutLength::Percent(100.0F);
-            viewportHintStyle.size.height = UI::UILayoutLength::Px(22.0F);
-            if (auto status = tree->setLayoutStyle(*viewportHint, viewportHintStyle); !status) {
+        UI::UINodeId viewportMode{};
+        UI::UIElementDescriptor viewportModeDesc =
+            UI::makeDropdownElement("Orthographic", fixedSize(108.0F, 28.0F));
+        viewportModeDesc.textStyle = compactText;
+        viewportModeDesc.enabled = false;
+        if (auto status = storeNode(tree->createElement(viewportHeader, viewportModeDesc), viewportMode); !status) {
+            return status;
+        }
+
+        UI::UINodeId viewportTools{};
+        UI::UILayoutStyle viewportToolsStyle = fillWidth(32.0F);
+        viewportToolsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        viewportToolsStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        viewportToolsStyle.flexContainer.gap.column = 6.0F;
+        if (auto status = storeNode(createPanel(center, viewportToolsStyle, UI::UIStyleRoleId::PanelSurface),
+                                    viewportTools);
+            !status) {
+            return status;
+        }
+        for (const std::string_view tool : {std::string_view{"Select"}, std::string_view{"Move"},
+                                            std::string_view{"Frame All"}}) {
+            UI::UINodeId toolButton{};
+            if (auto status = storeNode(createButton(viewportTools, tool, fixedSize(64.0F, 28.0F), false),
+                                        toolButton);
+                !status) {
                 return status;
             }
         }
-
-        UI::UIElementDescriptor rightDesc = UI::makePanelElement();
-        rightDesc.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
-        rightDesc.visual.styleClasses = std::span(&dockClass_, 1);
-        auto right = tree->createElement(*body, rightDesc);
-        if (!right) {
-            return Tina::Core::failure(std::move(right.error()));
+        UI::UILayoutStyle zoomSliderStyle = fixedSize(0.0F, 24.0F);
+        zoomSliderStyle.size.width = UI::UILayoutLength::Auto();
+        zoomSliderStyle.flexItem.grow = 1.0F;
+        zoomSliderStyle.flexItem.shrink = 1.0F;
+        zoomSliderStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        UI::UIElementDescriptor zoomSliderDesc = UI::makeSliderElement(zoomSliderStyle);
+        zoomSliderDesc.enabled = false;
+        UI::UINodeId zoomSlider{};
+        if (auto status = storeNode(tree->createElement(viewportTools, zoomSliderDesc), zoomSlider); !status) {
+            return status;
         }
-        UI::UILayoutStyle rightStyle = flexChild(0.0F, 28.0F, 100.0F);
+        if (auto status = tree->setSliderRange(zoomSlider, 25.0F, 400.0F, 25.0F); !status) {
+            return status;
+        }
+        if (auto status = tree->setSliderValue(zoomSlider, 100.0F); !status) {
+            return status;
+        }
+        UI::UINodeId zoomValue{};
+        if (auto status = storeNode(createLabel(viewportTools, "100%", fixedSize(42.0F, 20.0F), accentText),
+                                    zoomValue);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId viewportCanvas{};
+        UI::UILayoutStyle viewportCanvasStyle = growingRegion();
+        viewportCanvasStyle.minMax.minHeight = UI::UILayoutLength::Px(220.0F);
+        viewportCanvasStyle.padding = UI::UIEdgeSpacing::All(12.0F);
+        viewportCanvasStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
+        if (auto status = storeNode(createPanel(center, viewportCanvasStyle, UI::UIStyleRoleId::PanelSurface,
+                                                viewportClass_),
+                                    viewportCanvas);
+            !status) {
+            return status;
+        }
+        UI::UINodeId viewportCanvasTop{};
+        UI::UILayoutStyle viewportCanvasTopStyle = fillWidth(22.0F);
+        viewportCanvasTopStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        viewportCanvasTopStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
+        if (auto status = storeNode(createPanel(viewportCanvas, viewportCanvasTopStyle, UI::UIStyleRoleId::None),
+                                    viewportCanvasTop);
+            !status) {
+            return status;
+        }
+        UI::UINodeId gridStatus{};
+        if (auto status = storeNode(createLabel(viewportCanvasTop, "Grid 16 px", fixedSize(76.0F, 20.0F),
+                                                secondaryText),
+                                    gridStatus);
+            !status) {
+            return status;
+        }
+        UI::UINodeId previewStatus{};
+        if (auto status = storeNode(createLabel(viewportCanvasTop, "Runtime preview ready",
+                                                fixedSize(132.0F, 20.0F), accentText),
+                                    previewStatus);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId viewportSceneArea{};
+        UI::UILayoutStyle viewportSceneAreaStyle = growingRegion();
+        viewportSceneAreaStyle.flexContainer.justifyContent = UI::UIJustifyContent::Center;
+        viewportSceneAreaStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        if (auto status = storeNode(createPanel(viewportCanvas, viewportSceneAreaStyle,
+                                                UI::UIStyleRoleId::None),
+                                    viewportSceneArea);
+            !status) {
+            return status;
+        }
+        UI::UINodeId previewFrame{};
+        UI::UILayoutStyle previewFrameStyle = fixedSize(300.0F, 146.0F);
+        previewFrameStyle.padding = UI::UIEdgeSpacing::All(14.0F);
+        previewFrameStyle.flexContainer.justifyContent = UI::UIJustifyContent::Center;
+        previewFrameStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        previewFrameStyle.flexContainer.gap.row = 8.0F;
+        if (auto status = storeNode(createPanel(viewportSceneArea, previewFrameStyle,
+                                                UI::UIStyleRoleId::PanelElevated, dockClass_),
+                                    previewFrame);
+            !status) {
+            return status;
+        }
+        UI::UINodeId previewTitle{};
+        if (auto status = storeNode(createLabel(previewFrame, "World2D Scene", fixedSize(170.0F, 24.0F),
+                                                titleText),
+                                    previewTitle);
+            !status) {
+            return status;
+        }
+        UI::UINodeId previewEntities{};
+        if (auto status = storeNode(createLabel(previewFrame, "Camera | Player | Light | TileMap",
+                                                fixedSize(240.0F, 22.0F), bodyText),
+                                    previewEntities);
+            !status) {
+            return status;
+        }
+        UI::UINodeId previewCook{};
+        if (auto status = storeNode(createLabel(previewFrame, "Canonical snapshot -> Scene::World",
+                                                fixedSize(242.0F, 20.0F), secondaryText),
+                                    previewCook);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId viewportCanvasBottom{};
+        UI::UILayoutStyle viewportCanvasBottomStyle = fillWidth(22.0F);
+        viewportCanvasBottomStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        viewportCanvasBottomStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
+        if (auto status = storeNode(createPanel(viewportCanvas, viewportCanvasBottomStyle,
+                                                UI::UIStyleRoleId::None),
+                                    viewportCanvasBottom);
+            !status) {
+            return status;
+        }
+        UI::UINodeId viewportOrigin{};
+        if (auto status = storeNode(createLabel(viewportCanvasBottom, "Origin 0, 0", fixedSize(76.0F, 20.0F),
+                                                secondaryText),
+                                    viewportOrigin);
+            !status) {
+            return status;
+        }
+        UI::UINodeId viewportExtent{};
+        if (auto status = storeNode(createLabel(viewportCanvasBottom, "1280 x 800 logical",
+                                                fixedSize(120.0F, 20.0F), secondaryText),
+                                    viewportExtent);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId viewportFooter{};
+        UI::UILayoutStyle viewportFooterStyle = fillWidth(28.0F);
+        viewportFooterStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        viewportFooterStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
+        viewportFooterStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        viewportFooterStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(8.0F, 3.0F);
+        if (auto status = storeNode(createPanel(center, viewportFooterStyle, UI::UIStyleRoleId::PanelSurface),
+                                    viewportFooter);
+            !status) {
+            return status;
+        }
+        UI::UINodeId cameraStatus{};
+        if (auto status = storeNode(createLabel(viewportFooter, "Camera2D", fixedSize(70.0F, 20.0F), bodyText),
+                                    cameraStatus);
+            !status) {
+            return status;
+        }
+        UI::UINodeId viewportModeStatus{};
+        if (auto status = storeNode(createLabel(viewportFooter, "Select | Local | Snap",
+                                                fixedSize(128.0F, 20.0F), secondaryText),
+                                    viewportModeStatus);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId right{};
+        UI::UILayoutStyle rightStyle = boundedDock(26.0F, 280.0F, 360.0F);
         rightStyle.flexContainer.direction = UI::UIFlexDirection::Column;
-        rightStyle.flexContainer.gap.row = 8.0F;
-        if (auto status = tree->setLayoutStyle(*right, rightStyle); !status) {
-            return status;
-        }
-        auto inspectorTitle =
-            tree->createElement(*right, UI::makeLabelElement("Inspector"));
-        if (!inspectorTitle) {
-            return Tina::Core::failure(std::move(inspectorTitle.error()));
-        }
-        UI::UILayoutStyle inspectorTitleStyle{};
-        inspectorTitleStyle.size.width = UI::UILayoutLength::Percent(100.0F);
-        inspectorTitleStyle.size.height = UI::UILayoutLength::Px(22.0F);
-        if (auto status = tree->setLayoutStyle(*inspectorTitle, inspectorTitleStyle); !status) {
+        rightStyle.flexContainer.gap.row = 7.0F;
+        rightStyle.padding = UI::UIEdgeSpacing::All(8.0F);
+        if (auto status = storeNode(createPanel(body, rightStyle, UI::UIStyleRoleId::PanelSurface, dockClass_),
+                                    right);
+            !status) {
             return status;
         }
 
-        auto nameLabel = tree->createElement(*right, UI::makeLabelElement());
-        if (!nameLabel) {
-            return Tina::Core::failure(std::move(nameLabel.error()));
+        UI::UINodeId inspectorHeader{};
+        UI::UILayoutStyle inspectorHeaderStyle = fillWidth(30.0F);
+        inspectorHeaderStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        inspectorHeaderStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        inspectorHeaderStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
+        if (auto status = storeNode(createPanel(right, inspectorHeaderStyle, UI::UIStyleRoleId::None),
+                                    inspectorHeader);
+            !status) {
+            return status;
         }
-        inspectorName_ = *nameLabel;
-        auto kindLabel = tree->createElement(*right, UI::makeLabelElement());
-        if (!kindLabel) {
-            return Tina::Core::failure(std::move(kindLabel.error()));
+        UI::UINodeId inspectorTitle{};
+        if (auto status = storeNode(createLabel(inspectorHeader, "Inspector", fixedSize(110.0F, 24.0F),
+                                                sectionText),
+                                    inspectorTitle);
+            !status) {
+            return status;
         }
-        inspectorKind_ = *kindLabel;
-        auto noteLabel = tree->createElement(*right, UI::makeLabelElement());
-        if (!noteLabel) {
-            return Tina::Core::failure(std::move(noteLabel.error()));
+        UI::UINodeId inspectorMode{};
+        if (auto status = storeNode(createLabel(inspectorHeader, "Selection", fixedSize(58.0F, 20.0F),
+                                                accentText),
+                                    inspectorMode);
+            !status) {
+            return status;
         }
-        inspectorNote_ = *noteLabel;
-        auto documentLabel = tree->createElement(*right, UI::makeLabelElement());
-        if (!documentLabel) {
-            return Tina::Core::failure(std::move(documentLabel.error()));
+
+        UI::UILayoutStyle inspectorScrollStyle = growingRegion();
+        inspectorScrollStyle.minMax.minHeight = UI::UILayoutLength::Px(180.0F);
+        auto inspectorScroll = tree->createElement(right, UI::makeScrollViewElement(inspectorScrollStyle));
+        if (!inspectorScroll) {
+            return Tina::Core::failure(std::move(inspectorScroll.error()));
         }
-        inspectorDocument_ = *documentLabel;
-        for (const UI::UINodeId node : {inspectorName_, inspectorKind_, inspectorNote_, inspectorDocument_}) {
-            UI::UILayoutStyle labelStyle{};
-            labelStyle.size.width = UI::UILayoutLength::Percent(100.0F);
-            labelStyle.size.height = UI::UILayoutLength::Px(22.0F);
-            if (auto status = tree->setLayoutStyle(node, labelStyle); !status) {
+        if (auto status = tree->setScrollViewStyle(
+                *inspectorScroll,
+                UI::UIScrollViewStyle{
+                    .axes = UI::UIScrollAxes::Vertical,
+                    .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                    .wheelStep = 36.0F,
+                });
+            !status) {
+            return status;
+        }
+        counters_.inspectorScrollConfigured = true;
+
+        UI::UINodeId inspectorContent{};
+        UI::UILayoutStyle inspectorContentStyle = fillWidth(650.0F);
+        inspectorContentStyle.padding = UI::UIEdgeSpacing::All(8.0F);
+        inspectorContentStyle.flexContainer.gap.row = 7.0F;
+        if (auto status = storeNode(createPanel(*inspectorScroll, inspectorContentStyle,
+                                                UI::UIStyleRoleId::PanelSurface),
+                                    inspectorContent);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId identityTitle{};
+        if (auto status = storeNode(createLabel(inspectorContent, "Identity", fillWidth(22.0F), sectionText),
+                                    identityTitle);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(inspectorContent, {}, fillWidth(22.0F), bodyText),
+                                    inspectorName_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(inspectorContent, {}, fillWidth(22.0F), secondaryText),
+                                    inspectorKind_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(inspectorContent, {}, fillWidth(42.0F), secondaryText),
+                                    inspectorNote_);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId transformTitle{};
+        if (auto status = storeNode(createLabel(inspectorContent, "Transform", fillWidth(22.0F), sectionText),
+                                    transformTitle);
+            !status) {
+            return status;
+        }
+        const auto createTransformRow = [&](std::string_view caption, std::string_view value,
+                                            UI::UINodeId& valueNode) -> Tina::Core::Status {
+            UI::UINodeId row{};
+            UI::UILayoutStyle rowStyle = fillWidth(30.0F);
+            rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+            rowStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+            rowStyle.flexContainer.gap.column = 8.0F;
+            if (auto status = storeNode(createPanel(inspectorContent, rowStyle, UI::UIStyleRoleId::None), row);
+                !status) {
+                return status;
+            }
+            UI::UINodeId captionNode{};
+            if (auto status = storeNode(createLabel(row, caption, fixedSize(74.0F, 20.0F), secondaryText),
+                                        captionNode);
+                !status) {
+                return status;
+            }
+            UI::UILayoutStyle valueStyle = fixedSize(0.0F, 30.0F);
+            valueStyle.size.width = UI::UILayoutLength::Auto();
+            valueStyle.flexItem.grow = 1.0F;
+            valueStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+            return storeNode(createTextEdit(row, value, valueStyle, false), valueNode);
+        };
+        if (auto status = createTransformRow("Position X", "0.000", inspectorPositionX_); !status) {
+            return status;
+        }
+        if (auto status = createTransformRow("Position Y", "0.000", inspectorPositionY_); !status) {
+            return status;
+        }
+        UI::UINodeId rotationField{};
+        if (auto status = createTransformRow("Rotation", "0.000", rotationField); !status) {
+            return status;
+        }
+        UI::UINodeId scaleField{};
+        if (auto status = createTransformRow("Scale", "1.000", scaleField); !status) {
+            return status;
+        }
+
+        UI::UINodeId componentsTitle{};
+        if (auto status = storeNode(createLabel(inspectorContent, "Components", fillWidth(22.0F), sectionText),
+                                    componentsTitle);
+            !status) {
+            return status;
+        }
+        for (const std::string_view component : {std::string_view{"Transform"},
+                                                 std::string_view{"SpriteRenderer2D"},
+                                                 std::string_view{"Runtime preview"}}) {
+            UI::UINodeId componentRow{};
+            UI::UILayoutStyle componentRowStyle = fillWidth(24.0F);
+            componentRowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+            componentRowStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+            componentRowStyle.flexContainer.gap.column = 8.0F;
+            if (auto status = storeNode(createPanel(inspectorContent, componentRowStyle,
+                                                    UI::UIStyleRoleId::None),
+                                        componentRow);
+                !status) {
+                return status;
+            }
+            UI::UINodeId componentCheckbox{};
+            UI::UIElementDescriptor checkboxDesc = UI::makeCheckboxElement(fixedSize(20.0F, 20.0F));
+            checkboxDesc.enabled = false;
+            if (auto status = storeNode(tree->createElement(componentRow, checkboxDesc), componentCheckbox);
+                !status) {
+                return status;
+            }
+            if (auto status = tree->setChecked(componentCheckbox, true); !status) {
+                return status;
+            }
+            UI::UINodeId componentLabel{};
+            if (auto status = storeNode(createLabel(componentRow, component, fixedSize(170.0F, 20.0F), bodyText),
+                                        componentLabel);
+                !status) {
                 return status;
             }
         }
 
-        auto moveButton = tree->createElement(*right, UI::makeButtonElement("Move X +1"));
-        if (!moveButton) {
-            return Tina::Core::failure(std::move(moveButton.error()));
+        UI::UINodeId authoringTitle{};
+        if (auto status = storeNode(createLabel(inspectorContent, "Authoring", fillWidth(22.0F), sectionText),
+                                    authoringTitle);
+            !status) {
+            return status;
         }
-        moveButton_ = *moveButton;
-        auto undoButton = tree->createElement(*right, UI::makeButtonElement("Undo"));
-        if (!undoButton) {
-            return Tina::Core::failure(std::move(undoButton.error()));
+        if (auto status = storeNode(createButton(inspectorContent, "Move X +1", fillWidth(34.0F)), moveButton_);
+            !status) {
+            return status;
         }
-        undoButton_ = *undoButton;
-        auto redoButton = tree->createElement(*right, UI::makeButtonElement("Redo"));
-        if (!redoButton) {
-            return Tina::Core::failure(std::move(redoButton.error()));
+        UI::UINodeId authoringHint{};
+        if (auto status = storeNode(createLabel(inspectorContent, "One validated revision per command",
+                                                fillWidth(20.0F), secondaryText),
+                                    authoringHint);
+            !status) {
+            return status;
         }
-        redoButton_ = *redoButton;
-        for (const UI::UINodeId node : {moveButton_, undoButton_, redoButton_}) {
-            UI::UILayoutStyle buttonStyle{};
-            buttonStyle.size.width = UI::UILayoutLength::Percent(100.0F);
-            buttonStyle.size.height = UI::UILayoutLength::Px(34.0F);
-            if (auto status = tree->setLayoutStyle(node, buttonStyle); !status) {
-                return status;
-            }
+
+        UI::UINodeId documentTitle{};
+        if (auto status = storeNode(createLabel(inspectorContent, "Document", fillWidth(22.0F), sectionText),
+                                    documentTitle);
+            !status) {
+            return status;
         }
+        if (auto status = storeNode(createLabel(inspectorContent, {}, fillWidth(22.0F), bodyText),
+                                    inspectorDocument_);
+            !status) {
+            return status;
+        }
+        UI::UINodeId documentFormat{};
+        if (auto status = storeNode(createLabel(inspectorContent, "World2D schema v1 | canonical",
+                                                fillWidth(20.0F), secondaryText),
+                                    documentFormat);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId statusBar{};
+        UI::UILayoutStyle statusBarStyle = fillWidth(30.0F);
+        statusBarStyle.flexItem.shrink = 0.0F;
+        statusBarStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        statusBarStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        statusBarStyle.flexContainer.gap.column = 12.0F;
+        statusBarStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(10.0F, 4.0F);
+        if (auto status = storeNode(createPanel(rootNode, statusBarStyle, UI::UIStyleRoleId::PanelSurface,
+                                                dockClass_),
+                                    statusBar);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle statusSegmentStyle = fixedSize(0.0F, 20.0F);
+        statusSegmentStyle.size.width = UI::UILayoutLength::Auto();
+        statusSegmentStyle.flexItem.grow = 1.0F;
+        statusSegmentStyle.flexItem.shrink = 1.0F;
+        statusSegmentStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        if (auto status = storeNode(createLabel(statusBar, {}, statusSegmentStyle, compactText),
+                                    statusDocument_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(statusBar, {}, statusSegmentStyle, secondaryText),
+                                    statusPreview_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(statusBar, {}, fixedSize(190.0F, 20.0F), accentText),
+                                    statusSelection_);
+            !status) {
+            return status;
+        }
+
         if (auto status = tree->setButtonAction(
                 moveButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
                     queueAuthoringCommand(AuthoringCommand::MoveSelectedPositiveX);
@@ -705,6 +1232,8 @@ class EditorShellState final : public Tina::IGameState {
             return status;
         }
         counters_.authoringActionsWired = AuthoringActionCount;
+        counters_.editorLayoutRegions = EditorLayoutRegionCount;
+        counters_.viewportLayoutReady = true;
 
         auto initialSelection = tree->treeViewSelection(hierarchyTree_);
         if (!initialSelection) {
@@ -961,6 +1490,36 @@ class EditorShellState final : public Tina::IGameState {
         if (auto status = tree.setText(inspectorDocument_, documentStatus); !status) {
             return status;
         }
+        std::string statusDocument = "World2D v1  |  ";
+        statusDocument += std::to_string(document_.entityCount());
+        statusDocument += " entities  |  Revision ";
+        statusDocument += std::to_string(document_.revision());
+        if (auto status = tree.setText(statusDocument_, statusDocument); !status) {
+            return status;
+        }
+        std::string statusPreview = "Runtime preview: ";
+        statusPreview += counters_.runtimePreviewValid ? "valid" : "invalid";
+        statusPreview += "  |  Cook ";
+        statusPreview += std::to_string(document_.snapshotBytes().size());
+        statusPreview += " B";
+        if (auto status = tree.setText(statusPreview_, statusPreview); !status) {
+            return status;
+        }
+        std::string selectionSummary = "Selected: ";
+        selectionSummary += hierarchyLabel(selectionKey_);
+        const u32 selectedEntityId = stableEntityIdForHierarchyItem(selectionKey_);
+        if (selectedEntityId != 0U) {
+            selectionSummary += "  |  ID ";
+            selectionSummary += std::to_string(selectedEntityId);
+        }
+        if (auto status = tree.setText(hierarchySelectionSummary_, selectionSummary); !status) {
+            return status;
+        }
+        std::string statusSelection = "Selected: ";
+        statusSelection += hierarchyLabel(selectionKey_);
+        if (auto status = tree.setText(statusSelection_, statusSelection); !status) {
+            return status;
+        }
         if (auto status = tree.setEnabled(moveButton_, stableEntityIdForHierarchyItem(selectionKey_) != 0U); !status) {
             return status;
         }
@@ -985,6 +1544,9 @@ class EditorShellState final : public Tina::IGameState {
         }
         std::string note = "Note: ";
         note += hierarchyAuthoringNote(key);
+        float positionX = 0.0F;
+        float positionY = 0.0F;
+        bool hasEntity = false;
         const u32 stableEntityId = stableEntityIdForHierarchyItem(key);
         if (stableEntityId != 0U) {
             std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
@@ -996,11 +1558,21 @@ class EditorShellState final : public Tina::IGameState {
                 return candidate.stableEntityId == stableEntityId;
             });
             if (entity != storage.end()) {
+                hasEntity = true;
+                positionX = entity->positionX;
+                positionY = entity->positionY;
                 note += " X=";
                 note += std::to_string(entity->positionX);
             }
         }
-        return tree.setText(inspectorNote_, note);
+        if (auto status = tree.setText(inspectorNote_, note); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(inspectorPositionX_, hasEntity ? std::to_string(positionX) : "n/a");
+            !status) {
+            return status;
+        }
+        return tree.setText(inspectorPositionY_, hasEntity ? std::to_string(positionY) : "n/a");
     }
 
     [[nodiscard]] UI::UITreeViewDataSource hierarchyDataSource() noexcept
@@ -1105,6 +1677,12 @@ class EditorShellState final : public Tina::IGameState {
     UI::UINodeId inspectorKind_{};
     UI::UINodeId inspectorNote_{};
     UI::UINodeId inspectorDocument_{};
+    UI::UINodeId hierarchySelectionSummary_{};
+    UI::UINodeId inspectorPositionX_{};
+    UI::UINodeId inspectorPositionY_{};
+    UI::UINodeId statusDocument_{};
+    UI::UINodeId statusPreview_{};
+    UI::UINodeId statusSelection_{};
     UI::UINodeId moveButton_{};
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
@@ -1186,6 +1764,8 @@ class EditorShellApplication final : public Tina::IGameApplication {
         !counters.stylesheetInstalled || counters.styleRegisteredClasses != 2 ||
         counters.styleRegisteredTokens != 2 || counters.styleActiveRules != 2 ||
         counters.authoringActionsWired != AuthoringActionCount || !counters.runtimePreviewValid ||
+        counters.editorLayoutRegions != EditorLayoutRegionCount || !counters.viewportLayoutReady ||
+        !counters.inspectorScrollConfigured ||
         counters.runtimePreviewInstantiations < 1 ||
         counters.documentEntityCount != InitialAuthoringEntityCount ||
         counters.cookPreviewBytes != Tina::AssetFormat::World2DSnapshotWire::HeaderBytes +
@@ -1258,6 +1838,10 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"authoringEdits\":" << counters.authoringEdits
               << ",\"authoringUndos\":" << counters.authoringUndos
               << ",\"authoringRedos\":" << counters.authoringRedos
+              << ",\"editorLayoutRegions\":" << counters.editorLayoutRegions
+              << ",\"viewportLayoutReady\":" << (counters.viewportLayoutReady ? "true" : "false")
+              << ",\"inspectorScrollConfigured\":"
+              << (counters.inspectorScrollConfigured ? "true" : "false")
               << ",\"runtimePreviewInstantiations\":" << counters.runtimePreviewInstantiations
               << ",\"runtimePreviewValid\":" << (counters.runtimePreviewValid ? "true" : "false")
               << ",\"documentRevision\":" << counters.documentRevision

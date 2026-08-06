@@ -9,8 +9,28 @@ schema 兼容格式。
 
 独立 `Tina::Editor` target 与 `World2DAuthoringDocument` 已提供。`tina_sample_editor_shell` 现已把 Hierarchy/
 Inspector 的 `Move X +1`、Undo、Redo 接到真实 document，并在每次成功命令后把同一份 canonical snapshot 解析、
-实例化到新的 `Scene::World` 做 runtime preview 验证。文件原子保存、真实渲染 viewport、TileMap/动画专用 document
+实例化到新的 `Scene::World` 做 runtime preview 验证。当前 shell 的 retained UI 布局也已完整铺开：Toolbar、上下文
+工具条、Hierarchy dock、World2D viewport 工作区、可滚动 Inspector（Identity/Transform/Components/Authoring/
+Document）和底部 status bar 均由 `Flex`、`minMax`、固定控件高度与滚动容器组合；窗口变大时 viewport 与中间工作区增长，
+两侧 dock 保持 bounded width。Transform 输入、文件 Save、真实 viewport 绘制和非 Move 的 Inspector commit 目前明确为
+只读/占位状态，不伪装成已完成的 document transaction。文件原子保存、真实渲染 viewport、TileMap/动画专用 document
 仍是后续切片；它们必须复用这里的 revision/failure 语义，不各自实现一套 undo stack 或 cooked preview。
+
+## Editor shell layout
+
+```text
+Toolbar (document/path/mode/undo/redo)
+Context bar (breadcrumb/select/move/frame/snap)
+Workspace
+  Hierarchy dock (filter/actions/virtual TreeView/selection summary)
+  World2D viewport (mode/tools/zoom/preview canvas/footer)
+  Inspector dock (scrollable identity/transform/components/authoring/document)
+Status bar (schema/entities/revision/preview/selection)
+```
+
+这层只属于 `samples/editor_shell` 的组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局 smoke 的
+结构化输出额外报告 `editorLayoutRegions=6`、`viewportLayoutReady=true` 和 `inspectorScrollConfigured=true`；这些字段
+只证明 retained tree 已建立，不证明真实 GPU viewport 或文件写入。
 
 ## 模块边界与数据流
 

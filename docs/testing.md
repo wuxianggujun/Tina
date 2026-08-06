@@ -842,6 +842,22 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
 entry/byte budget 淘汰、非法 schema/parent/容量失败的 current + history 原子性以及公开头隔离。只有 editor shell
 接线或文件/cook 集成完成时才扩大到对应 sample/CLI；纯 document 小切片不跑无关产品 gate。
 
+Editor shell 布局切片在代码完成后只做一次受影响 target 的增量验证，不重跑全量 UI/产品矩阵：
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_editor_tests tina_sample_editor_shell --parallel 1 -- /nr:false
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
+  --gtest_filter=World2DAuthoringDocumentTests.*
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
+  --frames=60 --frame-delay-ms=0
+```
+
+布局 smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、
+`viewportLayoutReady=true`、`inspectorScrollConfigured=true`，以及 `uiRootsCreated=1` / `uiRootsReleased=1`。
+`--no-auto-demo` 仍用于人工操作模式；在真实 viewport、文件保存或字段 transaction 接入前，不扩大到完整
+product-2d gate，也不把只读 Transform 控件当作已验证的 authoring mutation。
+
 ## Scene ShadowOccluder2D
 
 `2D-LIGHT-N2` 的最小门禁覆盖：
@@ -928,7 +944,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `tina_sample_editor_shell` | `Tina::Editor` World2D document 驱动的 Hierarchy/Inspector；`Move X +1`、Undo、Redo 各发布一个受验证 revision；每次状态切换从 canonical bytes 解析并实例化新的 `Scene::World`；JSON 报告 action/revision/history/entity/byte/runtime-preview 证据 | 原子文件保存、真实渲染 viewport、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
+| `tina_sample_editor_shell` | `Tina::Editor` World2D document 驱动的完整 shell 布局（Toolbar/Context/Hierarchy/World2D viewport/滚动 Inspector/status bar）；`Move X +1`、Undo、Redo 各发布一个受验证 revision；每次状态切换从 canonical bytes 解析并实例化新的 `Scene::World`；JSON 还报告 `editorLayoutRegions`、viewport/Inspector 布局状态 | 原子文件保存、真实 GPU viewport、Transform/Inspector 字段 transaction、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
