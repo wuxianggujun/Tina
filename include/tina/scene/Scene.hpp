@@ -15,3 +15,4 @@
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
 #include <tina/scene/World.hpp>
+#include <tina/scene/World2DSnapshot.hpp>

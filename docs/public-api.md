@@ -66,7 +66,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::RenderBgfx` | optional installed bgfx Render adapter；需 `COMPONENTS RenderBgfx` |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
 | `Tina::DesktopBootstrap` | optional installed Windows/Linux Desktop 组合入口；需 `COMPONENTS DesktopBootstrap` |
-| `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、standalone Particle/Trail |
+| `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail |
 | `Tina::Navigation2D` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
@@ -447,6 +447,14 @@ sprite 不解析任一 handle。Scene 不保存 resolver、sink、ref 或任何 
 packet-local ref。任一 resolver/handle/binding 无效返回 `UnresolvedMesh`；mesh 解析失败时不调用 material
 resolver，hidden mesh 不解析。`PrefabMeshBinding` 只完成 AssetId→Handle，不保存或分配 Render key。
 
+`captureWorld2DSnapshotBytes()` 将 owner-thread World 的 LocalTransform 与四类2D组件写入唯一现行
+schema-v1 snapshot；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture weak handle 映射为
+稳定 `AssetId`。capture 按 hierarchy depth、stable ID 确定性排序，拒绝重复/零 ID、损坏层级和任何3D组件，
+不会静默丢字段。`instantiateWorld2DSnapshot()` 在修改目标 World 前预检容量、全部组件与 AssetId→weak handle
+解析；失败销毁本次创建的完整集合并保留既有实体。Runtime `EntityId`/generation、AssetHandle、Lease、Render
+ref/key 都不持久化。gameplay blob 由 game-owned schema/version/bytes 携带，Runtime 不解释。旧 snapshot
+schema 直接拒绝，不保留运行时兼容分支。详见 [World2D 序列化](world2d-serialization.md)。
+
 `DirectionalLight3D` 保存 linear color、非负 intensity 与 active 标志；Entity 的 world local `+Z` 指向
 光源。extraction 按稳定 Entity identity 收集最多4个 active light，把 world direction、color×intensity 与
 `ExtractRenderSceneParams::ambientLightScale` 写入当前帧 RenderScene lighting snapshot。超容量显式返回
@@ -533,7 +541,7 @@ blocked flags；可选 object layer 只栅格化 property 精确匹配的 visibl
 
 ## Asset 与 Cooked
 
-`AssetFormat` 定义 versioned manifest/cooked wire format 和 Texture2D/StaticMesh/Material/Prefab/EnvironmentMap/TileMap/
+`AssetFormat` 定义 versioned manifest/cooked wire format、World2D snapshot 和 Texture2D/StaticMesh/Material/Prefab/EnvironmentMap/TileMap/
 TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源 glTF/WAV/image；cgltf/stb_image 与源文件解析只在
 Cooker/tool。
 

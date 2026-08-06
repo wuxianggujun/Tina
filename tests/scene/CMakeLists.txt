@@ -4,6 +4,7 @@ set(TINA_SCENE_TEST_SOURCES
     ParticleSystem2DTests.cpp
     SpriteAnimator2DTests.cpp
     Trail2DTests.cpp
+    World2DSnapshotTests.cpp
     header_isolation/Camera2DHeader.cpp
     header_isolation/DirectionalLight3DHeader.cpp
     header_isolation/EntityHeader.cpp
@@ -23,6 +24,7 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/Trail2DHeader.cpp
     header_isolation/TransformHeader.cpp
     header_isolation/WorldHeader.cpp
+    header_isolation/World2DSnapshotHeader.cpp
 )
 
 add_executable(tina_scene_tests ${TINA_SCENE_TEST_SOURCES})

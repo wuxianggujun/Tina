@@ -13,6 +13,7 @@
 - Camera2D、SpriteRenderer2D、PointLight2D、ShadowOccluder2D、PerspectiveCamera3D、MeshRenderer3D、DirectionalLight3D 组件；
 - standalone fixed-capacity `ParticleSystem2D` 与 `Trail2D`；
 - World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；
+- 2D World 组件与 game-owned gameplay blob 的 current-only schema-v1 快照；
 - Cooked Prefab node 到 World entity hierarchy 的事务式实例化。
 
 它不负责：
@@ -177,6 +178,28 @@ Lease/GPU。extraction 只获得 packet-local ref，active frame pin 阻止 reti
 
 writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用内有效，不能保存到下一帧。
 
+## World2D 快照
+
+`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v1；
+`captureWorld2DSnapshotBytes()` / `instantiateWorld2DSnapshot()` 在该 wire 与 `World` 间转换。持久化边界只包含：
+
+- 调用方提供的非零稳定 entity ID 与 parent stable ID；
+- LocalTransform；
+- SpriteRenderer2D、Camera2D、PointLight2D、ShadowOccluder2D；
+- Sprite/normal Texture 的稳定 `AssetId`；
+- Runtime 不解释的 gameplay schema/version/bytes。
+
+Runtime `EntityId` 的 owner/index/generation、weak `AssetHandle`、AssetLease、Render key 和 GPU handle 均不进入
+字节流。capture 先按 hierarchy depth、再按 stable ID 排序，保证 parent 先于 child 且字节不受 World slot/
+generation 影响；发现3D组件时直接失败，避免生成丢字段的“成功”存档。Sprite handle 必须由借用 callback
+解析为 `AssetId`；restore 则在修改 World 前把全部 AssetId 解析回 weak handle。
+
+parser 使用临时 entity storage，完整 header、保留位、component canonical bytes、层级、值域和 gameplay
+身份通过后才替换调用方 storage。restore 在 mutation 前完成 schema、容量、资源与组件预检；后续
+create/reparent/component/publication 任一步失败都会逆序销毁本次 entity，不影响原有 World。旧 schema 不走
+兼容或 migration 分支，统一 `UnsupportedSchema`；需要格式演进时定义新的明确 schema 与离线迁移工具，不在
+运行时堆叠开发期兼容代码。完整 wire、容量与借用期见 [World2D 序列化](world2d-serialization.md)。
+
 ## Prefab 实例化
 
 `instantiatePrefab()` 读取 `AssetFormat::PrefabPayloadView`，按稳定 node 顺序执行：
@@ -216,7 +239,8 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
 - `tina_scene_tests`：entity generation、owner、destroy/reparent、Transform propagation、2D/3D component、
   extraction、PointLight2D/ShadowOccluder2D/DirectionalLight3D set/query/clear、world
   position/direction/segment/color/intensity/ambient、stable identity 排序、inactive/超容量、
-  Prefab rollback/AssetId→Handle resolver、3D kind-specific resolver fail-closed，以及
+  World2D capture/restore 确定性 round-trip、AssetId resolver 与失败 rollback，Prefab rollback/
+  AssetId→Handle resolver、3D kind-specific resolver fail-closed，以及
   Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle 保留、resolver fail-closed/解析次数与
   writer capacity；
 - `tina_asset_tests`：Sprite/Mesh3D binding registry 的容量/owner thread、Sprite register/retirement 与 Mesh

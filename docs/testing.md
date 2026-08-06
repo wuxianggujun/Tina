@@ -810,6 +810,24 @@ resource contract 使用非默认尺寸证明 D16 resource 接线，view rect �
 功能切片收口时先运行 EnvironmentMap AssetFormat/Asset/Null/bgfx/shader filters，再跑30帧 product smoke；
 最后才执行完整 TEST-003，不在每个实现步骤重复全量测试。
 
+## World2D serialization
+
+`2D-SERIALIZATION` 的最小门禁只构建 `tina_asset_format_tests` 与 `tina_scene_tests`，然后定向运行：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_format_tests.exe `
+  --gtest_filter=World2DSnapshotTests.*
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe `
+  --gtest_filter=World2DSnapshotSceneTests.*
+```
+
+AssetFormat 用例覆盖全组件/gameplay round-trip、确定性 bytes、旧 schema 拒绝、stable ID/parent 约束、
+non-canonical absent component 与 parse failure 保留旧 storage。Scene 用例覆盖 hierarchy+stable-ID 排序、
+Handle↔AssetId、capture→parse→instantiate→capture byte equality，以及容量、资源解析和 transform publication
+失败时保留既有 World。两个 target 同时编译新公开头的 header-isolation TU。该切片不修改 backend、shader、
+sample 或产品接线，因此开发闭环不运行完整 product gate；只有后续把存档接入产品 State 时才增加对应 sample
+smoke。
+
 ## Scene ShadowOccluder2D
 
 `2D-LIGHT-N2` 的最小门禁覆盖：

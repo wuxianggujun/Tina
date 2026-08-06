@@ -13,6 +13,7 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TilesetPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TileMapPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TileMapChunkPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/World2DSnapshot.hpp
 )
 
 add_library(tina_asset_format STATIC
@@ -30,6 +31,7 @@ add_library(tina_asset_format STATIC
     TilesetPayload.cpp
     TileMapPayload.cpp
     TileMapChunkPayload.cpp
+    World2DSnapshot.cpp
 )
 add_library(Tina::AssetFormat ALIAS tina_asset_format)
 
