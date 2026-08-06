@@ -167,7 +167,8 @@ inline constexpr UI::UITreeViewItemKey TileMapKey = 7;
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
-    std::string documentPathUtf8{};
+    std::string world2DDocumentPathUtf8{};
+    std::string world3DDocumentPathUtf8{};
     WorkspaceMode initialWorkspace = WorkspaceMode::World2D;
     bool autoDemo = true;
 };
@@ -206,6 +207,8 @@ struct LifecycleCounters final {
     u64 viewportGizmoCancels = 0;
     u64 viewportGizmoRejects = 0;
     u64 savedSnapshotBytes = 0;
+    u64 world2DSavedSnapshotBytes = 0;
+    u64 world3DSavedSnapshotBytes = 0;
     u64 runtimePreviewInstantiations = 0;
     u64 documentRevision = 0;
     u64 documentEntityCount = 0;
@@ -243,6 +246,13 @@ struct LifecycleCounters final {
     bool documentLoaded = false;
     bool documentSaved = false;
     bool documentDirty = true;
+    bool finalWorkspaceWorld2D = true;
+    bool world2DDocumentPathConfigured = false;
+    bool world3DDocumentPathConfigured = false;
+    bool world2DDocumentLoaded = false;
+    bool world3DDocumentLoaded = false;
+    bool world2DDocumentDirty = true;
+    bool world3DDocumentDirty = true;
     bool world2DWorkspaceReady = false;
     bool world3DWorkspaceReady = false;
 };
@@ -396,13 +406,15 @@ struct EulerDegrees final {
 {
     constexpr std::string_view FramesPrefix = "--frames=";
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
-    constexpr std::string_view DocumentPathPrefix = "--document-path=";
+    constexpr std::string_view World2DPathPrefix = "--world2d-path=";
+    constexpr std::string_view World3DPathPrefix = "--world3d-path=";
     constexpr std::string_view WorkspacePrefix = "--workspace=";
 
     SampleOptions options{};
     bool hasFrames = false;
     bool hasDelay = false;
-    bool hasDocumentPath = false;
+    bool hasWorld2DPath = false;
+    bool hasWorld3DPath = false;
     bool hasWorkspace = false;
     for (int index = 1; index < argumentCount; ++index) {
         const std::string_view argument{arguments[index]};
@@ -432,18 +444,42 @@ struct EulerDegrees final {
             hasDelay = true;
             continue;
         }
-        if (argument.starts_with(DocumentPathPrefix)) {
-            if (hasDocumentPath) {
+        if (argument.starts_with(World2DPathPrefix)) {
+            if (hasWorld2DPath) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                           "Duplicate --document-path argument");
+                                           "Duplicate --world2d-path argument");
             }
-            const std::string_view value = argument.substr(DocumentPathPrefix.size());
+            const std::string_view value = argument.substr(World2DPathPrefix.size());
             if (value.empty()) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                           "--document-path must not be empty");
+                                           "--world2d-path must not be empty");
             }
-            options.documentPathUtf8.assign(value);
-            hasDocumentPath = true;
+            try {
+                options.world2DDocumentPathUtf8.assign(value);
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                           "Could not retain --world2d-path");
+            }
+            hasWorld2DPath = true;
+            continue;
+        }
+        if (argument.starts_with(World3DPathPrefix)) {
+            if (hasWorld3DPath) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "Duplicate --world3d-path argument");
+            }
+            const std::string_view value = argument.substr(World3DPathPrefix.size());
+            if (value.empty()) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--world3d-path must not be empty");
+            }
+            try {
+                options.world3DDocumentPathUtf8.assign(value);
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                           "Could not retain --world3d-path");
+            }
+            hasWorld3DPath = true;
             continue;
         }
         if (argument.starts_with(WorkspacePrefix)) {
@@ -639,10 +675,22 @@ struct EulerDegrees final {
     return *Tina::Core::AssetId::fromBytes(bytes);
 }
 
+struct WorkspaceSessionState final {
+    std::string documentPathUtf8{};
+    std::vector<std::byte> savedBaselineBytes{};
+    bool loadedFromPath = false;
+
+    [[nodiscard]] bool hasDocumentPath() const noexcept
+    {
+        return !documentPathUtf8.empty();
+    }
+};
+
 struct InitialAuthoringDocuments final {
     Tina::Editor::World2DAuthoringDocument world2D;
     Tina::Editor::World3DAuthoringDocument world3D;
-    bool loadedFromPath = false;
+    WorkspaceSessionState world2DSession;
+    WorkspaceSessionState world3DSession;
 };
 
 struct World3DPreviewBinding final {
@@ -651,7 +699,7 @@ struct World3DPreviewBinding final {
 };
 
 [[nodiscard]] Tina::Core::Result<InitialAuthoringDocuments>
-createAuthoringDocuments(std::string_view documentPathUtf8, WorkspaceMode initialWorkspace)
+createAuthoringDocuments(const SampleOptions& options)
 {
     auto document = Tina::Editor::World2DAuthoringDocument::Create({
         .entityCapacity = AuthoringEntityCapacity,
@@ -663,11 +711,35 @@ createAuthoringDocuments(std::string_view documentPathUtf8, WorkspaceMode initia
         return Tina::Core::failure(std::move(document.error()));
     }
 
-    bool loadedFromPath = false;
-    if (!documentPathUtf8.empty() && initialWorkspace == WorkspaceMode::World2D) {
-        auto status = Tina::Editor::loadWorld2DAuthoringDocument(documentPathUtf8, *document);
+    WorkspaceSessionState world2DSession{};
+    WorkspaceSessionState world3DSession{};
+    try {
+        world2DSession.documentPathUtf8 = options.world2DDocumentPathUtf8;
+        world3DSession.documentPathUtf8 = options.world3DDocumentPathUtf8;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "editor shell could not retain workspace document paths");
+    }
+    if (world2DSession.hasDocumentPath() && world3DSession.hasDocumentPath() &&
+        world2DSession.documentPathUtf8 == world3DSession.documentPathUtf8) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::InvalidArgument,
+            "World2D and World3D workspace paths must reference different files");
+    }
+
+    if (world2DSession.hasDocumentPath()) {
+        auto status = Tina::Editor::loadWorld2DAuthoringDocument(
+            world2DSession.documentPathUtf8, *document);
         if (status) {
-            loadedFromPath = true;
+            world2DSession.loadedFromPath = true;
+            try {
+                const std::span<const std::byte> openedBytes = document->snapshotBytes();
+                world2DSession.savedBaselineBytes.assign(openedBytes.begin(), openedBytes.end());
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "editor shell could not retain the opened World2D baseline");
+            }
         } else if (status.error().code != Tina::Core::CoreErrorCode::NotFound) {
             return Tina::Core::failure(std::move(status.error()));
         }
@@ -697,7 +769,7 @@ createAuthoringDocuments(std::string_view documentPathUtf8, WorkspaceMode initia
             .parentStableEntityId = 1,
         },
     };
-    if (!loadedFromPath) {
+    if (!world2DSession.loadedFromPath) {
         auto bytes = Tina::AssetFormat::writeWorld2DSnapshotBytes(
             Tina::AssetFormat::World2DSnapshotDesc{.entities = entities});
         if (!bytes) {
@@ -716,10 +788,19 @@ createAuthoringDocuments(std::string_view documentPathUtf8, WorkspaceMode initia
     if (!world3D) {
         return Tina::Core::failure(std::move(world3D.error()));
     }
-    if (!documentPathUtf8.empty() && initialWorkspace == WorkspaceMode::World3D) {
-        auto status = Tina::Editor::loadWorld3DAuthoringDocument(documentPathUtf8, *world3D);
+    if (world3DSession.hasDocumentPath()) {
+        auto status = Tina::Editor::loadWorld3DAuthoringDocument(
+            world3DSession.documentPathUtf8, *world3D);
         if (status) {
-            loadedFromPath = true;
+            world3DSession.loadedFromPath = true;
+            try {
+                const std::span<const std::byte> openedBytes = world3D->payloadBytes();
+                world3DSession.savedBaselineBytes.assign(openedBytes.begin(), openedBytes.end());
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "editor shell could not retain the opened World3D baseline");
+            }
         } else if (status.error().code != Tina::Core::CoreErrorCode::NotFound) {
             return Tina::Core::failure(std::move(status.error()));
         }
@@ -767,7 +848,7 @@ createAuthoringDocuments(std::string_view documentPathUtf8, WorkspaceMode initia
             .materialId = materialId,
         },
     };
-    if (!(loadedFromPath && initialWorkspace == WorkspaceMode::World3D)) {
+    if (!world3DSession.loadedFromPath) {
         auto prefabBytes = Tina::AssetFormat::writePrefabPayloadBytes({.nodes = nodes});
         if (!prefabBytes) {
             return Tina::Core::failure(std::move(prefabBytes.error()));
@@ -779,7 +860,8 @@ createAuthoringDocuments(std::string_view documentPathUtf8, WorkspaceMode initia
     return InitialAuthoringDocuments{
         .world2D = std::move(*document),
         .world3D = std::move(*world3D),
-        .loadedFromPath = loadedFromPath,
+        .world2DSession = std::move(world2DSession),
+        .world3DSession = std::move(world3DSession),
     };
 }
 
@@ -788,10 +870,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
     EditorWorkspaceState(SampleOptions options, LifecycleCounters& counters,
                          Tina::Editor::World2DAuthoringDocument world2D,
                          Tina::Editor::World3DAuthoringDocument world3D,
-                         std::vector<std::byte> savedBaselineBytes, bool documentLoaded) noexcept
-        : options_(options), counters_(counters), document_(std::move(world2D)),
-          document3D_(std::move(world3D)), workspaceMode_(options.initialWorkspace),
-          documentLoaded_(documentLoaded), savedBaselineBytes_(std::move(savedBaselineBytes))
+                         WorkspaceSessionState world2DSession,
+                         WorkspaceSessionState world3DSession) noexcept
+        : options_(std::move(options)), counters_(counters), document_(std::move(world2D)),
+          document3D_(std::move(world3D)), workspaceMode_(options_.initialWorkspace),
+          world2DSession_(std::move(world2DSession)),
+          world3DSession_(std::move(world3DSession))
     {
     }
 
@@ -948,11 +1032,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
         pathStyle.flexItem.grow = 1.0F;
         pathStyle.flexItem.shrink = 1.0F;
         pathStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        const WorkspaceSessionState& initialSession = activeWorkspaceSession();
         const std::string_view initialPathStatus =
-            options_.documentPathUtf8.empty()
+            !initialSession.hasDocumentPath()
                 ? "No save path | Unsaved"
-                : (documentLoaded_ ? "Existing document opened | Saved"
-                                   : "Save target configured | Modified");
+                : (initialSession.loadedFromPath ? "Existing document opened | Saved"
+                                                 : "Save target configured | Modified");
         if (auto status = storeNode(createLabel(toolbar, initialPathStatus, pathStyle, secondaryText),
                                     toolbarPath_);
             !status) {
@@ -980,7 +1065,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = storeNode(createButton(toolbar, "Save", fixedSize(58.0F, 30.0F),
-                                                 !options_.documentPathUtf8.empty()),
+                                                 initialSession.hasDocumentPath()),
                                     saveButton_);
             !status) {
             return status;
@@ -1758,10 +1843,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
         counters_.authoringActionsWired = EditorActionCount;
         counters_.editorLayoutRegions = EditorLayoutRegionCount;
         counters_.viewportLayoutReady = true;
-        counters_.documentPathConfigured = !options_.documentPathUtf8.empty();
-        counters_.documentLoaded = documentLoaded_;
-        counters_.savedSnapshotBytes = savedBaselineBytes_.size();
-
         auto initialSelection = tree->treeViewSelection(hierarchyTree_);
         if (!initialSelection) {
             return Tina::Core::failure(std::move(initialSelection.error()));
@@ -1888,11 +1969,21 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     (void)queueAutoCommand(EditorCommand::Redo);
                     break;
                 case 7:
-                    if (options_.documentPathUtf8.empty()) {
+                    if (!activeWorkspaceSession().hasDocumentPath()) {
                         ++autoAuthoringStage_;
                     } else {
                         (void)queueAutoCommand(EditorCommand::Save);
                     }
+                    break;
+                case 8:
+                    (void)queueAutoCommand(options_.initialWorkspace == WorkspaceMode::World2D
+                                               ? EditorCommand::SwitchToWorld3D
+                                               : EditorCommand::SwitchToWorld2D);
+                    break;
+                case 9:
+                    (void)queueAutoCommand(options_.initialWorkspace == WorkspaceMode::World2D
+                                               ? EditorCommand::SwitchToWorld2D
+                                               : EditorCommand::SwitchToWorld3D);
                     break;
                 default:
                     break;
@@ -2800,7 +2891,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             }
             break;
         case EditorCommand::Save:
-            status = saveCurrentDocument();
+            status = saveActiveDocument();
             if (status) {
                 authoringFeedback_ = workspaceMode_ == WorkspaceMode::World2D
                                          ? "Canonical World2D document saved atomically"
@@ -2907,9 +2998,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return tree.setEnabled(mode3DButton_, world2D);
     }
 
-    [[nodiscard]] Tina::Core::Status saveCurrentDocument()
+    [[nodiscard]] Tina::Core::Status saveActiveDocument()
     {
-        if (!workspacePathConfigured()) {
+        WorkspaceSessionState& session = activeWorkspaceSession();
+        if (!session.hasDocumentPath()) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                        "active editor workspace has no configured document path");
         }
@@ -2918,39 +3010,77 @@ class EditorWorkspaceState final : public Tina::IGameState {
             std::vector<std::byte> savedCandidate(current.begin(), current.end());
             Tina::Core::Status status = workspaceMode_ == WorkspaceMode::World2D
                                             ? Tina::Editor::saveWorld2DAuthoringDocument(
-                                                  options_.documentPathUtf8, document_)
+                                                  session.documentPathUtf8, document_)
                                             : Tina::Editor::saveWorld3DAuthoringDocument(
-                                                  options_.documentPathUtf8, document3D_);
+                                                  session.documentPathUtf8, document3D_);
             if (!status) {
                 return status;
             }
-            savedBaselineBytes_ = std::move(savedCandidate);
+            session.savedBaselineBytes = std::move(savedCandidate);
         } catch (const std::bad_alloc&) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
                                        "editor shell could not retain the saved document baseline");
         }
         ++counters_.authoringSaves;
-        counters_.savedSnapshotBytes = savedBaselineBytes_.size();
         return Tina::Core::success();
     }
 
-    [[nodiscard]] bool isDocumentDirty() const noexcept
+    [[nodiscard]] WorkspaceSessionState& activeWorkspaceSession() noexcept
     {
-        const std::span<const std::byte> current = activeDocumentBytes();
-        return savedBaselineBytes_.size() != current.size() ||
-               !std::equal(savedBaselineBytes_.begin(), savedBaselineBytes_.end(), current.begin());
+        return workspaceMode_ == WorkspaceMode::World2D ? world2DSession_ : world3DSession_;
     }
 
-    [[nodiscard]] bool workspacePathConfigured() const noexcept
+    [[nodiscard]] const WorkspaceSessionState& activeWorkspaceSession() const noexcept
     {
-        return !options_.documentPathUtf8.empty() &&
-               workspaceMode_ == options_.initialWorkspace;
+        return workspaceMode_ == WorkspaceMode::World2D ? world2DSession_ : world3DSession_;
+    }
+
+    [[nodiscard]] const WorkspaceSessionState& workspaceSession(WorkspaceMode mode) const noexcept
+    {
+        return mode == WorkspaceMode::World2D ? world2DSession_ : world3DSession_;
+    }
+
+    [[nodiscard]] std::span<const std::byte> documentBytes(WorkspaceMode mode) const noexcept
+    {
+        return mode == WorkspaceMode::World2D ? document_.snapshotBytes()
+                                               : document3D_.payloadBytes();
+    }
+
+    [[nodiscard]] bool isDocumentDirty(WorkspaceMode mode) const noexcept
+    {
+        const WorkspaceSessionState& session = workspaceSession(mode);
+        const std::span<const std::byte> current = documentBytes(mode);
+        return session.savedBaselineBytes.size() != current.size() ||
+               !std::equal(session.savedBaselineBytes.begin(), session.savedBaselineBytes.end(),
+                           current.begin());
+    }
+
+    void publishWorkspaceSessionCounters() noexcept
+    {
+        const bool world2DDirty = isDocumentDirty(WorkspaceMode::World2D);
+        const bool world3DDirty = isDocumentDirty(WorkspaceMode::World3D);
+        const WorkspaceSessionState& active = activeWorkspaceSession();
+
+        counters_.finalWorkspaceWorld2D = workspaceMode_ == WorkspaceMode::World2D;
+        counters_.world2DDocumentPathConfigured = world2DSession_.hasDocumentPath();
+        counters_.world3DDocumentPathConfigured = world3DSession_.hasDocumentPath();
+        counters_.world2DDocumentLoaded = world2DSession_.loadedFromPath;
+        counters_.world3DDocumentLoaded = world3DSession_.loadedFromPath;
+        counters_.world2DDocumentDirty = world2DDirty;
+        counters_.world3DDocumentDirty = world3DDirty;
+        counters_.world2DSavedSnapshotBytes = world2DSession_.savedBaselineBytes.size();
+        counters_.world3DSavedSnapshotBytes = world3DSession_.savedBaselineBytes.size();
+        counters_.documentPathConfigured = active.hasDocumentPath();
+        counters_.documentLoaded = active.loadedFromPath;
+        counters_.documentDirty = workspaceMode_ == WorkspaceMode::World2D ? world2DDirty
+                                                                           : world3DDirty;
+        counters_.documentSaved = active.hasDocumentPath() && !counters_.documentDirty;
+        counters_.savedSnapshotBytes = active.savedBaselineBytes.size();
     }
 
     [[nodiscard]] std::span<const std::byte> activeDocumentBytes() const noexcept
     {
-        return workspaceMode_ == WorkspaceMode::World2D ? document_.snapshotBytes()
-                                                        : document3D_.payloadBytes();
+        return documentBytes(workspaceMode_);
     }
 
     [[nodiscard]] u64 activeDocumentRevision() const noexcept
@@ -3362,12 +3492,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
 
     [[nodiscard]] Tina::Core::Status refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& tree)
     {
-        const bool dirty = isDocumentDirty();
-        const bool pathConfigured = workspacePathConfigured();
+        publishWorkspaceSessionCounters();
+        const bool dirty = counters_.documentDirty;
+        const bool pathConfigured = counters_.documentPathConfigured;
         const bool selectionEditable = stableEntityIdForHierarchyItem(selectionKey_) != 0U;
         const bool selectionEditable3D = selectionEditable && workspaceMode_ == WorkspaceMode::World3D;
-        counters_.documentDirty = dirty;
-        counters_.documentSaved = pathConfigured && !dirty;
 
         if (auto status = refreshWorkspaceChrome(tree); !status) {
             return status;
@@ -3693,7 +3822,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Editor::World2DAuthoringDocument document_;
     Tina::Editor::World3DAuthoringDocument document3D_;
     WorkspaceMode workspaceMode_ = WorkspaceMode::World2D;
-    bool documentLoaded_ = false;
+    WorkspaceSessionState world2DSession_{};
+    WorkspaceSessionState world3DSession_{};
     Tina::UI::UIRootOwner uiRoot_{};
     UI::UINodeId hierarchyTree_{};
     UI::UINodeId inspectorName_{};
@@ -3763,7 +3893,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UILogicalRect viewportLogicalRect_{};
     std::optional<Tina::Render::RenderNormalizedViewport> viewportNormalized_{};
     EditorFrameResources frameResources_{};
-    std::vector<std::byte> savedBaselineBytes_{};
     std::string authoringFeedback_ = "One validated revision per command";
     std::optional<u64> pendingSelectionIndex_{};
     std::optional<EditorCommand> pendingEditorCommand_{};
@@ -3780,29 +3909,21 @@ class EditorApplication final : public Tina::IGameApplication {
 
     Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext&) override
     {
-        auto initialDocuments = createAuthoringDocuments(options_.documentPathUtf8,
-                                                          options_.initialWorkspace);
+        auto initialDocuments = createAuthoringDocuments(options_);
         if (!initialDocuments) {
             return Tina::Core::failure(std::move(initialDocuments.error()));
         }
         try {
-            std::vector<std::byte> savedBaselineBytes;
-            if (initialDocuments->loadedFromPath) {
-                const std::span<const std::byte> openedBytes =
-                    options_.initialWorkspace == WorkspaceMode::World2D
-                        ? initialDocuments->world2D.snapshotBytes()
-                        : initialDocuments->world3D.payloadBytes();
-                savedBaselineBytes.assign(openedBytes.begin(), openedBytes.end());
-            }
             std::unique_ptr<Tina::IGameState> state =
                 std::make_unique<EditorWorkspaceState>(
                     options_, counters_, std::move(initialDocuments->world2D),
-                    std::move(initialDocuments->world3D), std::move(savedBaselineBytes),
-                    initialDocuments->loadedFromPath);
+                    std::move(initialDocuments->world3D),
+                    std::move(initialDocuments->world2DSession),
+                    std::move(initialDocuments->world3DSession));
             return state;
         } catch (const std::bad_alloc&) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
-                                       "editor shell could not retain the opened document baseline");
+                                       "editor shell could not create workspace sessions");
         }
     }
 
@@ -3845,8 +3966,24 @@ class EditorApplication final : public Tina::IGameApplication {
 [[nodiscard]] Tina::Core::Status verifyLifecycle(Tina::RunExitReason exitReason, const SampleOptions& options,
                                                  const LifecycleCounters& counters)
 {
-    const bool documentPathConfigured = !options.documentPathUtf8.empty();
     const bool world2D = options.initialWorkspace == WorkspaceMode::World2D;
+    const bool world2DPathConfigured = !options.world2DDocumentPathUtf8.empty();
+    const bool world3DPathConfigured = !options.world3DDocumentPathUtf8.empty();
+    const bool documentPathConfigured = world2D ? world2DPathConfigured
+                                                : world3DPathConfigured;
+    const bool activeDocumentLoaded = world2D ? counters.world2DDocumentLoaded
+                                              : counters.world3DDocumentLoaded;
+    const bool activeDocumentDirty = world2D ? counters.world2DDocumentDirty
+                                             : counters.world3DDocumentDirty;
+    const u64 activeSavedSnapshotBytes = world2D ? counters.world2DSavedSnapshotBytes
+                                                 : counters.world3DSavedSnapshotBytes;
+    const auto uneditedSessionMatches = [](bool pathConfigured, bool loaded, bool dirty,
+                                           u64 savedBytes) noexcept {
+        if (!pathConfigured) {
+            return !loaded && dirty && savedBytes == 0;
+        }
+        return loaded ? !dirty && savedBytes > 0 : dirty && savedBytes == 0;
+    };
     const u64 expectedCookBytes =
         world2D
             ? Tina::AssetFormat::World2DSnapshotWire::HeaderBytes +
@@ -3867,6 +4004,13 @@ class EditorApplication final : public Tina::IGameApplication {
         counters.editorLayoutRegions != EditorLayoutRegionCount || !counters.viewportLayoutReady ||
         !counters.gpuViewportReady || !counters.inspectorScrollConfigured ||
         counters.documentPathConfigured != documentPathConfigured ||
+        counters.documentLoaded != activeDocumentLoaded ||
+        counters.documentDirty != activeDocumentDirty ||
+        counters.documentSaved != (documentPathConfigured && !activeDocumentDirty) ||
+        counters.savedSnapshotBytes != activeSavedSnapshotBytes ||
+        counters.finalWorkspaceWorld2D != world2D ||
+        counters.world2DDocumentPathConfigured != world2DPathConfigured ||
+        counters.world3DDocumentPathConfigured != world3DPathConfigured ||
         counters.runtimePreviewInstantiations < 1 || counters.renderExtractions != options.targetFrameCount ||
         (options.targetFrameCount > 1 &&
          (world2D ? counters.gpuViewportSprites != GpuViewportSpriteCount
@@ -3903,14 +4047,14 @@ class EditorApplication final : public Tina::IGameApplication {
                       std::abs(counters.viewportGizmoWorldDeltaX - 2.0F) <= 0.001F &&
                       std::abs(counters.viewportGizmoWorldDeltaY) <= 0.001F &&
                       std::abs(counters.viewportGizmoWorldDeltaZ - 1.0F) <= 0.001F;
-        if (counters.hierarchySelectionChanges < 1 || counters.finalSelectionKey != TileMapKey ||
-            counters.styleTokenUpdates < 2 || counters.authoringEdits != 3 ||
+        if (counters.hierarchySelectionChanges < 1 || counters.styleTokenUpdates < 2 ||
+            counters.authoringEdits != 3 ||
             counters.inspectorTransactions != 1 || counters.inspectorRejectedTransactions != 0 ||
             counters.viewportGizmoBegins != 1 || counters.viewportGizmoPreviews != 2 ||
             counters.viewportGizmoCommits != 1 || counters.viewportGizmoCancels != 0 ||
             counters.viewportGizmoRejects != 0 ||
             counters.authoringUndos != 1 || counters.authoringRedos != 1 ||
-            counters.runtimePreviewInstantiations != 6 || counters.documentRevision != 7 ||
+            counters.documentRevision != 7 ||
             counters.gpuViewportDocumentRevision != counters.documentRevision ||
             counters.documentUndoDepth != 3 || counters.documentRedoDepth != 0 ||
             std::abs(counters.finalPlayerRotationDegrees - 30.0F) > 0.001F ||
@@ -3919,9 +4063,26 @@ class EditorApplication final : public Tina::IGameApplication {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "editor shell automatic authoring demo did not finish");
         }
+        if (counters.finalSelectionKey != TileMapKey || counters.finalSelectionIndex != 6) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "editor shell automatic hierarchy selection did not finish");
+        }
+        if (counters.workspaceSwitches != 2) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "editor shell workspace round-trip did not execute two mode switches");
+        }
+        if (counters.runtimePreviewInstantiations != 8 ||
+            !counters.world2DWorkspaceReady || !counters.world3DWorkspaceReady) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "editor shell workspace round-trip did not validate both runtime previews");
+        }
         if (documentPathConfigured) {
             if (counters.authoringSaves != 1 || !counters.documentSaved || counters.documentDirty ||
-                counters.savedSnapshotBytes != counters.cookPreviewBytes) {
+                counters.savedSnapshotBytes != counters.cookPreviewBytes ||
+                activeSavedSnapshotBytes != counters.cookPreviewBytes) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                            "editor shell automatic save did not finish");
             }
@@ -3930,6 +4091,27 @@ class EditorApplication final : public Tina::IGameApplication {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "editor shell reported an unexpected saved document");
         }
+        const bool inactiveSessionMatches =
+            world2D ? uneditedSessionMatches(
+                          world3DPathConfigured, counters.world3DDocumentLoaded,
+                          counters.world3DDocumentDirty, counters.world3DSavedSnapshotBytes)
+                    : uneditedSessionMatches(
+                          world2DPathConfigured, counters.world2DDocumentLoaded,
+                          counters.world2DDocumentDirty, counters.world2DSavedSnapshotBytes);
+        if (!inactiveSessionMatches) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "editor shell changed the inactive workspace session during mode round-trip");
+        }
+    } else if (!uneditedSessionMatches(
+                   world2DPathConfigured, counters.world2DDocumentLoaded,
+                   counters.world2DDocumentDirty, counters.world2DSavedSnapshotBytes) ||
+               !uneditedSessionMatches(
+                   world3DPathConfigured, counters.world3DDocumentLoaded,
+                   counters.world3DDocumentDirty, counters.world3DSavedSnapshotBytes)) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "editor shell initial workspace sessions did not preserve their open baselines");
     }
     return Tina::Core::success();
 }
@@ -3964,8 +4146,10 @@ class EditorApplication final : public Tina::IGameApplication {
     }
 
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_editor_shell\",\"readOnly\":false"
-              << ",\"editorModule\":true,\"supports2D\":true,\"supports3D\":true,\"workspace\":";
+              << ",\"editorModule\":true,\"supports2D\":true,\"supports3D\":true,\"initialWorkspace\":";
     writeJsonString(std::cout, options.initialWorkspace == WorkspaceMode::World2D ? "2d" : "3d");
+    std::cout << ",\"finalWorkspace\":";
+    writeJsonString(std::cout, counters.finalWorkspaceWorld2D ? "2d" : "3d");
     std::cout << ",\"stylesheetInstalled\":"
               << (counters.stylesheetInstalled ? "true" : "false") << ",\"frames\":" << counters.frameUpdates
               << ",\"targetFrames\":" << options.targetFrameCount
@@ -3973,9 +4157,24 @@ class EditorApplication final : public Tina::IGameApplication {
               << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false") << ",\"exit\":";
     writeJsonString(std::cout, runExitReasonName(*runResult));
     std::cout << ",\"documentPathConfigured\":"
-              << (counters.documentPathConfigured ? "true" : "false") << ",\"documentPath\":";
-    writeJsonString(std::cout, options.documentPathUtf8);
+              << (counters.documentPathConfigured ? "true" : "false")
+              << ",\"world2DDocumentPath\":";
+    writeJsonString(std::cout, options.world2DDocumentPathUtf8);
+    std::cout << ",\"world3DDocumentPath\":";
+    writeJsonString(std::cout, options.world3DDocumentPathUtf8);
     std::cout << ",\"documentLoaded\":" << (counters.documentLoaded ? "true" : "false")
+              << ",\"world2DDocumentPathConfigured\":"
+              << (counters.world2DDocumentPathConfigured ? "true" : "false")
+              << ",\"world3DDocumentPathConfigured\":"
+              << (counters.world3DDocumentPathConfigured ? "true" : "false")
+              << ",\"world2DDocumentLoaded\":"
+              << (counters.world2DDocumentLoaded ? "true" : "false")
+              << ",\"world3DDocumentLoaded\":"
+              << (counters.world3DDocumentLoaded ? "true" : "false")
+              << ",\"world2DDocumentDirty\":"
+              << (counters.world2DDocumentDirty ? "true" : "false")
+              << ",\"world3DDocumentDirty\":"
+              << (counters.world3DDocumentDirty ? "true" : "false")
               << ",\"stateEnters\":" << counters.stateEnters << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
@@ -4000,6 +4199,8 @@ class EditorApplication final : public Tina::IGameApplication {
               << ",\"viewportGizmoCancels\":" << counters.viewportGizmoCancels
               << ",\"viewportGizmoRejects\":" << counters.viewportGizmoRejects
               << ",\"savedSnapshotBytes\":" << counters.savedSnapshotBytes
+              << ",\"world2DSavedSnapshotBytes\":" << counters.world2DSavedSnapshotBytes
+              << ",\"world3DSavedSnapshotBytes\":" << counters.world3DSavedSnapshotBytes
               << ",\"editorLayoutRegions\":" << counters.editorLayoutRegions
               << ",\"viewportLayoutReady\":" << (counters.viewportLayoutReady ? "true" : "false")
               << ",\"inspectorScrollConfigured\":"

@@ -549,7 +549,8 @@ blocked flags；可选 object layer 只栅格化 property 精确匹配的 visibl
 ## Editor
 
 `Tina::Editor` 是不依赖 UI/Runtime/Scene/backend 的工具侧 document target；`Tina::EditorApp` 是独立桌面组合 target，
-负责 2D/3D workspace、retained UI、Runtime preview 与 GPU viewport，不把这些依赖反向带入 document 层。
+负责 2D/3D 独立 workspace session、retained UI、Runtime preview 与 GPU viewport，不把这些依赖反向带入 document 层。
+每个 session 的 path、loaded flag、saved baseline 与 dirty 状态由 EditorApp 私有持有，不扩展 document 公共 ABI。
 `World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
 entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
 

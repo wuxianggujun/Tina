@@ -9,8 +9,8 @@ Tina 当前是 C++23 2D/3D 游戏 Runtime，产品入口为：
 
 - `tina_sample_2d`：Catalog/TileMap/Navigation2D/Scene/UI/Audio，可选 Physics2D、FreeType 和 miniaudio；
 - `tina_sample_3d`：glTF cook、Catalog/Prefab、Scene extraction 与 bgfx 绘制；
-- `tina_sample_editor_shell`：独立 `Tina::EditorApp` 的 2D/3D workspace、canonical document、Inspector、
-  Runtime preview 与 GPU viewport；
+- `tina_sample_editor_shell`：独立 `Tina::EditorApp` 的 2D/3D canonical document、独立 path/baseline/dirty
+  workspace session、Inspector、Runtime preview 与 GPU viewport；
 - `tina_sample_null`：无窗口、无 GPU 的 Runtime 生命周期门禁；
 - 其余 `tina_sample_*_infrastructure`：模块或 adapter 夹具，不等同于产品门禁。
 

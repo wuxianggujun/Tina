@@ -19,9 +19,10 @@ World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 prox
 固定控件高度与滚动容器组合。`updateUI()` 从上一轮成功提交的 viewport/root `worldRect` 计算
 `RenderNormalizedViewport`，因此窗口变大时 viewport 与中间工作区共同增长，两侧 dock 保持 bounded width，
 world pass 下一帧跟随新的布局；首帧在 committed rect 可用前不提交 world，避免用 `1280×800` 写死区域或全屏闪烁。
-传入 `--document-path=<UTF-8 path>` 后，已有文件会先按当前 schema 原子加载为 clean
-baseline，不存在的路径则作为新文档 Save target；Toolbar Save 原子保存当前 canonical snapshot，并让 Toolbar/
-Inspector/status bar 依据 saved baseline 显示 `Modified/Saved`；未配置路径时 Save 保持 disabled。
+`--world2d-path=<UTF-8 path>` 与 `--world3d-path=<UTF-8 path>` 分别配置两个 workspace session；已有文件按各自
+schema 原子加载为 clean baseline，不存在的路径保留为该 workspace 的新文档 Save target。每个 session 独立持有
+path、loaded flag 与 saved baseline，切换模式不移动或复用这些状态；Toolbar Save 只原子保存 active canonical
+document，未给当前 workspace 配置路径时保持 disabled。两种路径不得指向同一文件。
 2D 的五个字段和 3D 的九个字段都通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
 拒绝时恢复 canonical 字段并保持 document/history/preview 不变。2D Rotation Z 发布平面 Z quaternion；3D Euler XYZ
 发布完整规范化 quaternion，并保留 hierarchy、Mesh/Material 与 visibility。GPU proxy 同步读取完整 canonical TRS。
@@ -46,7 +47,8 @@ Status bar (schema/entities/revision/preview/selection)
 `renderExtractions`、2D `gpuViewportSprites=4` 或 3D `gpuViewportMeshes=3`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。
 `gpuViewportDocumentRevision` 还必须与最终 canonical document revision 一致。字段事务由 `inspectorTransactions`、
 `inspectorRejectedTransactions` 和最终 Player/Hero 完整 TRS 取证；gizmo 由 begin/preview/commit/cancel/reject counter 与最终
-world delta 取证；文件保存另由 `authoringSaves`、`savedSnapshotBytes`、`documentSaved`、`documentDirty` 和落盘 bytes 取证。
+world delta 取证；文件保存另由 active document 字段与 `world2D/3DDocumentPathConfigured`、`world2D/3DDocumentLoaded`、
+`world2D/3DDocumentDirty`、`world2D/3DSavedSnapshotBytes` 和落盘 bytes 取证。
 
 ## 文件加载与原子保存
 
@@ -68,6 +70,10 @@ Shell 在真正写入前先准备 saved baseline，避免“文件已保存但 U
 canonical bytes 与 saved baseline 的完整相等比较判断 dirty；因此保存后编辑再 Undo 回 saved bytes 会恢复 `Saved`，
 而不是仅按单调 revision 误报 `Modified`。Save 是 Editor command，不是 authoring revision，也不触发多余的
 `Scene::World` preview instantiate。
+
+2D/3D session 在启动时独立 open；任一路径 NotFound 只让对应 document 保持默认内容和空 baseline，另一 session
+不受影响。模式切换只改变 active view，目标 session 的 path、loaded、baseline、dirty 与 history 均保持原值；自动
+smoke 在编辑和可选 Save 后执行一次 2D↔3D round-trip，并回到初始 workspace。
 
 ## 模块边界与数据流
 
@@ -144,13 +150,16 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe
   --gtest_filter=PrimaryWindowUICapabilityTest.CommittedLayoutRectCopiesPreviousPublishedWorldRectAndExpires
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
   --frames=60 --frame-delay-ms=0 --workspace=2d `
-  --document-path=artifacts/editor_shell/smoke/world2d.tworld
+  --world2d-path=artifacts/editor_shell/smoke/world2d.tworld `
+  --world3d-path=artifacts/editor_shell/smoke/world3d.tprefab
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
   --frames=60 --frame-delay-ms=0 --workspace=3d `
-  --document-path=artifacts/editor_shell/smoke/world3d.tprefab
+  --world2d-path=artifacts/editor_shell/smoke/world2d.tworld `
+  --world3d-path=artifacts/editor_shell/smoke/world3d.tprefab
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
   --frames=10 --frame-delay-ms=0 --no-auto-demo --workspace=2d `
-  --document-path=artifacts/editor_shell/smoke/world2d.tworld
+  --world2d-path=artifacts/editor_shell/smoke/world2d.tworld `
+  --world3d-path=artifacts/editor_shell/smoke/world3d.tprefab
 ```
 
 Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory` 回归。由于它目前位于 monolithic
@@ -165,10 +174,11 @@ proxy transforms 与 revision 来自同一 preview World/binding，committed UI 
 subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 2D/3D 公共头
 isolation 编译通过；已有文件加载为 clean baseline、加载失败不改变 current/history；文件保存 exact canonical bytes、
 覆盖失败不删除旧目标；shell 自动完成
-Move → Apply Transform → viewport drag → Undo → Redo → Save。一次 drag 固定报告 begin/preview/commit=`1/2/1`、
-cancel/reject=`0/0`，只增加一个 document revision；最终 runtime preview instantiations=`6`、document/GPU revision=`7/7`、
-undo depth=`3`，Save 不增加第七次 instantiate。2D delta 固定为 `(2,-1,0)`；3D XZ delta 固定为 `(2,0,1)`，并证明
-Position Z、Rotation X/Y/Z 与 Scale Z 在 canonical Prefab、Scene preview 与结构化结果中一致。
+Move → Apply Transform → viewport drag → Undo → Redo → Save → other workspace → initial workspace。一次 drag 固定报告
+begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，只增加一个 document revision；round-trip 固定
+`workspaceSwitches=2`、runtime preview instantiations=`8`、document/GPU revision=`7/7`、undo depth=`3`，并证明
+inactive session 的 path/loaded/baseline/dirty 未变化。2D delta 固定为 `(2,-1,0)`；3D XZ delta 固定为 `(2,0,1)`，
+完整 TRS 在 canonical Prefab、Scene preview 与结构化结果中一致。
 
-后续产品切片依次为：独立 workspace session；Catalog asset-resolved viewport；TileMap root+chunk authoring/cook；
+后续产品切片依次为：Catalog asset-resolved viewport；TileMap root+chunk authoring/cook；
 SpriteAnimationClip timeline authoring/cook。每个切片继续只保留现行 schema，不增加旧资产兼容分支。
