@@ -546,8 +546,9 @@ blocked flags；可选 object layer 只栅格化 property 精确匹配的 visibl
 `World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
 entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
 
-`replace(desc)` 是 Inspector/gizmo/importer 的批量事务边界；`loadSnapshot()`、`upsertEntity()`、
-`eraseEntitySubtree()` 与 `setGameplay()` 是同一 revision 机制上的窄操作。候选先经唯一现行
+`replace(desc)` 是 Inspector/gizmo/importer 的可撤销批量事务边界；`loadSnapshot()` 校验并原子建立新的 saved
+baseline，成功后清空 undo/redo；`upsertEntity()`、`eraseEntitySubtree()` 与 `setGameplay()` 是同一 revision
+机制上的窄操作。候选先经唯一现行
 `AssetFormat::writeWorld2DSnapshotBytes()` 或 parser 完整校验，成功后才替换 current 并裁剪 redo；非法 stable ID/
 parent、非有限 component、旧 schema、document 容量或 history byte 容量失败都保持 current、undo、redo 和 revision
 不变。history 到达预算时淘汰最老 revision，不扩展声明容量；若 current + candidate 无法同时容纳则编辑失败。

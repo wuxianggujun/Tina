@@ -145,11 +145,28 @@ Core::Status World2DAuthoringDocument::loadSnapshot(std::span<const std::byte> s
     {
         return Core::failure(std::move(parsed.error()));
     }
-    return replace(World2DSnapshotDesc{
+    if (parsed->entities.size() > m_config.entityCapacity ||
+        parsed->gameplayBytes.size() > m_config.gameplayByteCapacity)
+    {
+        return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
+                             "World2D authoring snapshot exceeds the configured document capacity");
+    }
+    auto canonicalBytes = AssetFormat::writeWorld2DSnapshotBytes(World2DSnapshotDesc{
         .entities = parsed->entities,
         .gameplaySchema = parsed->gameplaySchema,
         .gameplayVersion = parsed->gameplayVersion,
         .gameplayBytes = parsed->gameplayBytes,
+    });
+    if (!canonicalBytes)
+    {
+        return Core::failure(std::move(canonicalBytes.error()));
+    }
+    return resetBaseline(Revision{
+        .bytes = std::move(*canonicalBytes),
+        .entityCount = static_cast<Core::u32>(parsed->entities.size()),
+        .gameplaySchema = parsed->gameplaySchema,
+        .gameplayVersion = parsed->gameplayVersion,
+        .gameplayByteCount = static_cast<Core::u32>(parsed->gameplayBytes.size()),
     });
 }
 
@@ -325,6 +342,26 @@ Core::Status World2DAuthoringDocument::commit(Revision candidate)
     m_history.push_back(std::move(candidate));
     m_historyCursor = m_history.size() - 1U;
 
+    advanceRevision();
+    return Core::success();
+}
+
+Core::Status World2DAuthoringDocument::resetBaseline(Revision candidate)
+{
+    if (candidate.bytes.size() > m_config.historyByteCapacity)
+    {
+        return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
+                             "World2D authoring baseline exceeds the configured history byte capacity");
+    }
+    if (m_history.size() == 1U && candidate.bytes == current().bytes)
+    {
+        return Core::success();
+    }
+
+    m_history.clear();
+    m_history.push_back(std::move(candidate));
+    m_historyCursor = 0;
+    m_historyBytes = m_history.front().bytes.size();
     advanceRevision();
     return Core::success();
 }

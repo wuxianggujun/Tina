@@ -7,9 +7,10 @@
 交给 Runtime parser 与 Scene instantiate。工具不能绕过 `AssetFormat` 写半合法数据，也不维护 editor-only 或旧
 schema 兼容格式。
 
-首切片提供独立 `Tina::Editor` target 与 `World2DAuthoringDocument`。现有 `tina_sample_editor_shell` 的交互接线、
-文件原子保存、TileMap/动画专用 document 是后续切片；它们必须复用这里的 revision/failure 语义，不各自实现一套
-undo stack 或 cooked preview。
+独立 `Tina::Editor` target 与 `World2DAuthoringDocument` 已提供。`tina_sample_editor_shell` 现已把 Hierarchy/
+Inspector 的 `Move X +1`、Undo、Redo 接到真实 document，并在每次成功命令后把同一份 canonical snapshot 解析、
+实例化到新的 `Scene::World` 做 runtime preview 验证。文件原子保存、真实渲染 viewport、TileMap/动画专用 document
+仍是后续切片；它们必须复用这里的 revision/failure 语义，不各自实现一套 undo stack 或 cooked preview。
 
 ## 模块边界与数据流
 
@@ -45,7 +46,8 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 ## 编辑与状态流
 
 - `replace(desc)`：完整 batch transaction，适合多字段 Inspector commit、gizmo drag end 或 importer；
-- `loadSnapshot(bytes)`：只接受完整通过当前 parser 的 snapshot，再按当前 writer 规范化；旧 schema 直接失败；
+- `loadSnapshot(bytes)`：只接受完整通过当前 parser 的 snapshot，再按当前 writer 规范化并原子建立新 baseline；
+  成功清空 undo/redo，旧 schema 或容量失败保留原 document/history；
 - `upsertEntity(entity)`：按 stable ID 替换或追加一个 entity，parent 仍必须指向此前 entity；
 - `eraseEntitySubtree(id)`：按 topological authoring order 删除目标及全部后代，避免悬空 parent；
 - `setGameplay(schema, version, bytes)`：游戏自有 blob 仍要求“空 blob ↔ 零 schema/version、非空 blob ↔ 非零”；
@@ -70,17 +72,23 @@ Undo/Redo 无对应 revision 时分别返回 `UndoUnavailable` / `RedoUnavailabl
 
 ## 验收
 
-小切片只运行独立 target 与精确 filter：
+小切片只运行独立 target、精确 filter 与对应 sample 短 smoke：
 
 ```powershell
-cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_editor_tests --parallel 1 -- /nr:false
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_editor_tests tina_sample_editor_shell --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
   --gtest_filter=World2DAuthoringDocumentTests.*
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
+  --frames=60 --frame-delay-ms=0
 ```
 
-首切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；非法 edit 原子失败；subtree 删除；bounded
-undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 两个公共头 isolation 编译通过。
+人工操作按钮时使用较长帧数并传 `--no-auto-demo`；该模式仍验证 document 与 runtime preview 一般不变量，
+但不把用户产生的 revision 数量误判为自动 smoke 失败。
 
-后续产品切片依次为：editor shell 可交互 Scene Inspector/Undo/Redo、原子文件保存与 runtime preview；TileMap root+
-chunk authoring/cook；SpriteAnimationClip timeline authoring/cook。每个切片继续只保留现行 schema，不增加旧资产兼容
-分支。
+document 与 shell 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；非法 edit 原子失败；
+subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 两个公共头
+isolation 编译通过；shell 自动完成 edit → undo → redo，并在四个 revision 状态均成功实例化 runtime preview。
+
+后续产品切片依次为：原子文件保存与真实渲染 viewport；TileMap root+chunk authoring/cook；
+SpriteAnimationClip timeline authoring/cook。每个切片继续只保留现行 schema，不增加旧资产兼容分支。

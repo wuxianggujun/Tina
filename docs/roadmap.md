@@ -28,7 +28,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | --- | --- |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
-| 2D-EDITOR | 先落地受验证 World2D authoring document、固定预算 revision history 与唯一 runtime snapshot preview，再接 editor shell、TileMap 和动画工具 |
+| 2D-EDITOR | World2D authoring document、固定预算 revision history、editor shell edit/undo/redo 与 Scene runtime snapshot preview 已落地；下一步是原子文件保存、真实 viewport、TileMap 和动画工具 |
 | UI-PERF-001 | Done；含 `ui_motion_v1` 在内的 UI workload 集已齐 |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-FLOW-001 | Done；固定容量 Layer/Screen 栈、Back/Confirm/Menu Action Router、16 槽本地用户、Gamepad assignment、per-user 设备 revision 与 2D 产品已闭环 |

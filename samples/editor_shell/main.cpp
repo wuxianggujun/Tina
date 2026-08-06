@@ -1,13 +1,16 @@
-// Read-only editor shell sample: proves Tina::UI can host tool chrome
-// (Hierarchy TreeView + Inspector + Viewport placeholder). No authoring
-// writes, no Tina::Editor module, not 2D-EDITOR product tooling.
+// 2D editor shell: retained tool chrome backed by a validated World2D
+// authoring document, bounded undo/redo, and Scene runtime preview.
 
+#include <tina/asset_format/World2DSnapshot.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
+#include <tina/editor/World2DAuthoringDocument.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
+#include <tina/scene/World.hpp>
+#include <tina/scene/World2DSnapshot.hpp>
 #include <tina/ui/UIElement.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
@@ -30,6 +33,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -43,6 +47,9 @@ inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
 inline constexpr u32 WindowLogicalWidth = 1280;
 inline constexpr u32 WindowLogicalHeight = 800;
 inline constexpr u32 HierarchyMaterializedCapacity = 16;
+inline constexpr u32 AuthoringEntityCapacity = 16;
+inline constexpr u32 InitialAuthoringEntityCount = 5;
+inline constexpr u32 AuthoringActionCount = 3;
 
 inline constexpr UI::UITreeViewItemKey SceneRootKey = 1;
 inline constexpr UI::UITreeViewItemKey CameraKey = 2;
@@ -55,7 +62,7 @@ inline constexpr UI::UITreeViewItemKey TileMapKey = 7;
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
-    bool autoSelectDemo = true;
+    bool autoDemo = true;
 };
 
 struct LifecycleCounters final {
@@ -74,9 +81,26 @@ struct LifecycleCounters final {
     u64 styleActiveRules = 0;
     u64 styleRevision = 0;
     u64 styleTokenUpdates = 0;
+    u64 authoringActionsWired = 0;
+    u64 authoringEdits = 0;
+    u64 authoringUndos = 0;
+    u64 authoringRedos = 0;
+    u64 runtimePreviewInstantiations = 0;
+    u64 documentRevision = 0;
+    u64 documentEntityCount = 0;
+    u64 documentUndoDepth = 0;
+    u64 documentRedoDepth = 0;
+    u64 cookPreviewBytes = 0;
+    float finalPlayerPositionX = 0.0F;
     bool selectionVerified = false;
     bool stylesheetInstalled = false;
-    bool readOnlyShell = true;
+    bool runtimePreviewValid = false;
+};
+
+enum class AuthoringCommand : u32 {
+    MoveSelectedPositiveX,
+    Undo,
+    Redo,
 };
 
 void writeJsonString(std::ostream& output, std::string_view value)
@@ -170,8 +194,8 @@ template <typename Value>
             hasDelay = true;
             continue;
         }
-        if (argument == "--no-auto-select") {
-            options.autoSelectDemo = false;
+        if (argument == "--no-auto-demo") {
+            options.autoDemo = false;
             continue;
         }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -241,32 +265,100 @@ template <typename Value>
     }
 }
 
-[[nodiscard]] std::string_view hierarchyReadOnlyNote(UI::UITreeViewItemKey key) noexcept
+[[nodiscard]] std::string_view hierarchyAuthoringNote(UI::UITreeViewItemKey key) noexcept
 {
     switch (key) {
     case SceneRootKey:
-        return "Mock hierarchy only; no authoring write path.";
+        return "Canonical World2D scene root.";
     case CameraKey:
-        return "Viewport is a placeholder panel, not a live world view.";
+        return "Camera2D is persisted in the current document.";
     case PlayerKey:
-        return "Selection drives Inspector labels only.";
+        return "Inspector edits use stable entity identity.";
     case PlayerSpriteKey:
-        return "Weak AssetHandle display is not wired in this shell.";
+        return "Component row edits its owning Player entity.";
     case PlayerTransformKey:
-        return "No gizmo or property mutation.";
+        return "Move X publishes one undoable revision.";
     case LightsKey:
-        return "Lighting preview stays in product-2d, not this shell.";
+        return "PointLight2D is instantiated by the runtime preview.";
     case TileMapKey:
-        return "TileMap cook/edit is Deferred 2D-EDITOR work.";
+        return "TileMap authoring is the next editor document slice.";
     default:
-        return "Read-only shell.";
+        return "Validated World2D authoring item.";
     }
+}
+
+[[nodiscard]] u32 stableEntityIdForHierarchyItem(UI::UITreeViewItemKey key) noexcept
+{
+    switch (key) {
+    case SceneRootKey:
+        return 1;
+    case CameraKey:
+        return 2;
+    case PlayerKey:
+    case PlayerSpriteKey:
+    case PlayerTransformKey:
+        return 3;
+    case LightsKey:
+        return 6;
+    case TileMapKey:
+        return 7;
+    default:
+        return 0;
+    }
+}
+
+[[nodiscard]] Tina::Core::Result<Tina::Editor::World2DAuthoringDocument> createAuthoringDocument()
+{
+    auto document = Tina::Editor::World2DAuthoringDocument::Create({
+        .entityCapacity = AuthoringEntityCapacity,
+        .gameplayByteCapacity = 1024,
+        .historyEntryCapacity = 8,
+        .historyByteCapacity = 64U * 1024U,
+    });
+    if (!document) {
+        return Tina::Core::failure(std::move(document.error()));
+    }
+
+    const std::array entities{
+        Tina::AssetFormat::World2DEntityDesc{.stableEntityId = 1},
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 2,
+            .parentStableEntityId = 1,
+            .positionY = 4.0F,
+            .camera = Tina::AssetFormat::World2DCameraDesc{},
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 3,
+            .parentStableEntityId = 1,
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 6,
+            .parentStableEntityId = 1,
+            .positionX = 2.0F,
+            .positionY = 2.0F,
+            .pointLight = Tina::AssetFormat::World2DPointLightDesc{},
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 7,
+            .parentStableEntityId = 1,
+        },
+    };
+    auto bytes = Tina::AssetFormat::writeWorld2DSnapshotBytes(
+        Tina::AssetFormat::World2DSnapshotDesc{.entities = entities});
+    if (!bytes) {
+        return Tina::Core::failure(std::move(bytes.error()));
+    }
+    if (auto status = document->loadSnapshot(*bytes); !status) {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    return std::move(*document);
 }
 
 class EditorShellState final : public Tina::IGameState {
   public:
-    EditorShellState(SampleOptions options, LifecycleCounters& counters) noexcept
-        : options_(options), counters_(counters)
+    EditorShellState(SampleOptions options, LifecycleCounters& counters,
+                     Tina::Editor::World2DAuthoringDocument document) noexcept
+        : options_(options), counters_(counters), document_(std::move(document))
     {
     }
 
@@ -348,7 +440,7 @@ class EditorShellState final : public Tina::IGameState {
         }
 
         auto title = tree->createElement(root->rootNodeId(),
-                                         UI::makeLabelElement("Tina Editor Shell (read-only)"));
+                                         UI::makeLabelElement("Tina 2D Editor"));
         if (!title) {
             return Tina::Core::failure(std::move(title.error()));
         }
@@ -362,7 +454,7 @@ class EditorShellState final : public Tina::IGameState {
         auto subtitle = tree->createElement(
             root->rootNodeId(),
             UI::makeLabelElement(
-                "Not 2D-EDITOR. Mock hierarchy + startup StyleClass/token sheet + runtime token demo."));
+                "Scene Document"));
         if (!subtitle) {
             return Tina::Core::failure(std::move(subtitle.error()));
         }
@@ -465,7 +557,7 @@ class EditorShellState final : public Tina::IGameState {
             return status;
         }
         auto viewportTitle =
-            tree->createElement(*center, UI::makeLabelElement("Viewport (placeholder)"));
+            tree->createElement(*center, UI::makeLabelElement("World2D Preview"));
         if (!viewportTitle) {
             return Tina::Core::failure(std::move(viewportTitle.error()));
         }
@@ -495,12 +587,11 @@ class EditorShellState final : public Tina::IGameState {
         if (auto status = tree->setLayoutStyle(*viewport, viewportStyle); !status) {
             return status;
         }
-        // Multiple labels so the empty center is not a silent black void in screenshots.
         const std::array viewportHintTexts{
-            std::string_view{"Viewport placeholder (read-only shell)"},
-            std::string_view{"No live Scene / TileMap / Camera bind"},
-            std::string_view{"Panel fill from stylesheet ColorToken"},
-            std::string_view{"Not 2D-EDITOR product tooling"},
+            std::string_view{"Runtime Scene preview: ready"},
+            std::string_view{"Document schema: World2D v1"},
+            std::string_view{"Cook preview: canonical snapshot"},
+            std::string_view{"Renderer viewport: pending"},
         };
         for (const std::string_view hintText : viewportHintTexts) {
             auto viewportHint = tree->createElement(*viewport, UI::makeLabelElement(hintText));
@@ -555,7 +646,12 @@ class EditorShellState final : public Tina::IGameState {
             return Tina::Core::failure(std::move(noteLabel.error()));
         }
         inspectorNote_ = *noteLabel;
-        for (const UI::UINodeId node : {inspectorName_, inspectorKind_, inspectorNote_}) {
+        auto documentLabel = tree->createElement(*right, UI::makeLabelElement());
+        if (!documentLabel) {
+            return Tina::Core::failure(std::move(documentLabel.error()));
+        }
+        inspectorDocument_ = *documentLabel;
+        for (const UI::UINodeId node : {inspectorName_, inspectorKind_, inspectorNote_, inspectorDocument_}) {
             UI::UILayoutStyle labelStyle{};
             labelStyle.size.width = UI::UILayoutLength::Percent(100.0F);
             labelStyle.size.height = UI::UILayoutLength::Px(22.0F);
@@ -564,12 +660,61 @@ class EditorShellState final : public Tina::IGameState {
             }
         }
 
+        auto moveButton = tree->createElement(*right, UI::makeButtonElement("Move X +1"));
+        if (!moveButton) {
+            return Tina::Core::failure(std::move(moveButton.error()));
+        }
+        moveButton_ = *moveButton;
+        auto undoButton = tree->createElement(*right, UI::makeButtonElement("Undo"));
+        if (!undoButton) {
+            return Tina::Core::failure(std::move(undoButton.error()));
+        }
+        undoButton_ = *undoButton;
+        auto redoButton = tree->createElement(*right, UI::makeButtonElement("Redo"));
+        if (!redoButton) {
+            return Tina::Core::failure(std::move(redoButton.error()));
+        }
+        redoButton_ = *redoButton;
+        for (const UI::UINodeId node : {moveButton_, undoButton_, redoButton_}) {
+            UI::UILayoutStyle buttonStyle{};
+            buttonStyle.size.width = UI::UILayoutLength::Percent(100.0F);
+            buttonStyle.size.height = UI::UILayoutLength::Px(34.0F);
+            if (auto status = tree->setLayoutStyle(node, buttonStyle); !status) {
+                return status;
+            }
+        }
+        if (auto status = tree->setButtonAction(
+                moveButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueAuthoringCommand(AuthoringCommand::MoveSelectedPositiveX);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                undoButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueAuthoringCommand(AuthoringCommand::Undo);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                redoButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueAuthoringCommand(AuthoringCommand::Redo);
+                }});
+            !status) {
+            return status;
+        }
+        counters_.authoringActionsWired = AuthoringActionCount;
+
         auto initialSelection = tree->treeViewSelection(hierarchyTree_);
         if (!initialSelection) {
             return Tina::Core::failure(std::move(initialSelection.error()));
         }
         selectionKey_ = initialSelection->key;
-        if (auto status = publishInspector(*tree, selectionKey_); !status) {
+        if (auto status = validateRuntimePreview(); !status) {
+            return status;
+        }
+        if (auto status = refreshAuthoringUi(*tree); !status) {
             return status;
         }
         counters_.finalSelectionKey = selectionKey_;
@@ -599,7 +744,7 @@ class EditorShellState final : public Tina::IGameState {
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_.frameUpdates;
-        if (options_.autoSelectDemo) {
+        if (options_.autoDemo) {
             const u64 first = (std::max)(u64{1}, options_.targetFrameCount / u64{3});
             const u64 second =
                 (std::max)(first + u64{1}, options_.targetFrameCount - options_.targetFrameCount / u64{3});
@@ -612,6 +757,17 @@ class EditorShellState final : public Tina::IGameState {
                 pendingSelectionIndex_ = 6;
                 pendingViewportTokenColor_ = UI::rgb(0x0C141E);
                 queuedSecondSelection_ = true;
+            }
+            if (queuedFirstSelection_) {
+                constexpr std::array commands{
+                    AuthoringCommand::MoveSelectedPositiveX,
+                    AuthoringCommand::Undo,
+                    AuthoringCommand::Redo,
+                };
+                if (autoAuthoringStage_ < commands.size() &&
+                    queueAuthoringCommand(commands[autoAuthoringStage_])) {
+                    ++autoAuthoringStage_;
+                }
             }
         }
         if (counters_.frameUpdates >= options_.targetFrameCount) {
@@ -654,7 +810,12 @@ class EditorShellState final : public Tina::IGameState {
         if (selection->key != selectionKey_) {
             selectionKey_ = selection->key;
             ++counters_.hierarchySelectionChanges;
-            if (auto status = publishInspector(*tree, selectionKey_); !status) {
+            if (auto status = refreshAuthoringUi(*tree); !status) {
+                return status;
+            }
+        }
+        if (pendingAuthoringCommand_.has_value()) {
+            if (auto status = executeAuthoringCommand(*tree); !status) {
                 return status;
             }
         }
@@ -673,6 +834,142 @@ class EditorShellState final : public Tina::IGameState {
     }
 
   private:
+    bool queueAuthoringCommand(AuthoringCommand command) noexcept
+    {
+        if (pendingAuthoringCommand_.has_value()) {
+            return false;
+        }
+        pendingAuthoringCommand_ = command;
+        return true;
+    }
+
+    [[nodiscard]] Tina::Core::Status executeAuthoringCommand(Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        const AuthoringCommand command = *pendingAuthoringCommand_;
+        pendingAuthoringCommand_.reset();
+
+        Tina::Core::Status status = Tina::Core::success();
+        switch (command) {
+        case AuthoringCommand::MoveSelectedPositiveX:
+            status = moveSelectedPositiveX();
+            if (status) {
+                ++counters_.authoringEdits;
+            }
+            break;
+        case AuthoringCommand::Undo:
+            status = document_.undo();
+            if (status) {
+                ++counters_.authoringUndos;
+            }
+            break;
+        case AuthoringCommand::Redo:
+            status = document_.redo();
+            if (status) {
+                ++counters_.authoringRedos;
+            }
+            break;
+        }
+        if (!status) {
+            return status;
+        }
+        if (auto previewStatus = validateRuntimePreview(); !previewStatus) {
+            return previewStatus;
+        }
+        return refreshAuthoringUi(tree);
+    }
+
+    [[nodiscard]] Tina::Core::Status moveSelectedPositiveX()
+    {
+        const u32 stableEntityId = stableEntityIdForHierarchyItem(selectionKey_);
+        if (stableEntityId == 0U) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::NotFound,
+                                       "editor selection has no authoring entity");
+        }
+
+        std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
+        auto snapshot = document_.parseCurrentSnapshot(storage);
+        if (!snapshot) {
+            return Tina::Core::failure(std::move(snapshot.error()));
+        }
+        const auto entity = std::find_if(storage.begin(), storage.end(), [stableEntityId](const auto& candidate) {
+            return candidate.stableEntityId == stableEntityId;
+        });
+        if (entity == storage.end()) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::NotFound,
+                                       "editor selection is absent from the authoring document");
+        }
+        auto edited = *entity;
+        edited.positionX += 1.0F;
+        return document_.upsertEntity(edited);
+    }
+
+    [[nodiscard]] Tina::Core::Status validateRuntimePreview()
+    {
+        counters_.runtimePreviewValid = false;
+        std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
+        auto snapshot = document_.parseCurrentSnapshot(storage);
+        if (!snapshot) {
+            return Tina::Core::failure(std::move(snapshot.error()));
+        }
+        auto world = Tina::Scene::World::Create({.entityCapacity = AuthoringEntityCapacity});
+        if (!world) {
+            return Tina::Core::failure(std::move(world.error()));
+        }
+        auto bindings = Tina::Scene::instantiateWorld2DSnapshot(*world, *snapshot);
+        if (!bindings) {
+            return Tina::Core::failure(std::move(bindings.error()));
+        }
+        if (bindings->size() != document_.entityCount() || world->entityCount() != document_.entityCount()) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor runtime preview entity count mismatch");
+        }
+        const auto player = std::find_if(bindings->begin(), bindings->end(), [](const auto& binding) {
+            return binding.stableEntityId == 3U;
+        });
+        if (player == bindings->end()) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor runtime preview is missing the Player entity");
+        }
+        const Tina::Scene::LocalTransform* playerTransform = world->localTransform(player->entity);
+        if (playerTransform == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor runtime preview is missing the Player transform");
+        }
+
+        ++counters_.runtimePreviewInstantiations;
+        counters_.documentRevision = document_.revision();
+        counters_.documentEntityCount = document_.entityCount();
+        counters_.documentUndoDepth = document_.undoDepth();
+        counters_.documentRedoDepth = document_.redoDepth();
+        counters_.cookPreviewBytes = document_.snapshotBytes().size();
+        counters_.finalPlayerPositionX = playerTransform->position.x;
+        counters_.runtimePreviewValid = true;
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        if (auto status = publishInspector(tree, selectionKey_); !status) {
+            return status;
+        }
+        std::string documentStatus = "Revision ";
+        documentStatus += std::to_string(document_.revision());
+        documentStatus += " | Undo ";
+        documentStatus += std::to_string(document_.undoDepth());
+        documentStatus += " | Redo ";
+        documentStatus += std::to_string(document_.redoDepth());
+        if (auto status = tree.setText(inspectorDocument_, documentStatus); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(moveButton_, stableEntityIdForHierarchyItem(selectionKey_) != 0U); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(undoButton_, document_.canUndo()); !status) {
+            return status;
+        }
+        return tree.setEnabled(redoButton_, document_.canRedo());
+    }
+
     [[nodiscard]] Tina::Core::Status publishInspector(Tina::PrimaryWindowUITreeUpdater& tree,
                                                       UI::UITreeViewItemKey key)
     {
@@ -687,7 +984,22 @@ class EditorShellState final : public Tina::IGameState {
             return status;
         }
         std::string note = "Note: ";
-        note += hierarchyReadOnlyNote(key);
+        note += hierarchyAuthoringNote(key);
+        const u32 stableEntityId = stableEntityIdForHierarchyItem(key);
+        if (stableEntityId != 0U) {
+            std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
+            auto snapshot = document_.parseCurrentSnapshot(storage);
+            if (!snapshot) {
+                return Tina::Core::failure(std::move(snapshot.error()));
+            }
+            const auto entity = std::find_if(storage.begin(), storage.end(), [stableEntityId](const auto& candidate) {
+                return candidate.stableEntityId == stableEntityId;
+            });
+            if (entity != storage.end()) {
+                note += " X=";
+                note += std::to_string(entity->positionX);
+            }
+        }
         return tree.setText(inspectorNote_, note);
     }
 
@@ -786,11 +1098,16 @@ class EditorShellState final : public Tina::IGameState {
 
     SampleOptions options_;
     LifecycleCounters& counters_;
+    Tina::Editor::World2DAuthoringDocument document_;
     Tina::UI::UIRootOwner uiRoot_{};
     UI::UINodeId hierarchyTree_{};
     UI::UINodeId inspectorName_{};
     UI::UINodeId inspectorKind_{};
     UI::UINodeId inspectorNote_{};
+    UI::UINodeId inspectorDocument_{};
+    UI::UINodeId moveButton_{};
+    UI::UINodeId undoButton_{};
+    UI::UINodeId redoButton_{};
     UI::UIStyleClassId dockClass_{};
     UI::UIStyleClassId viewportClass_{};
     UI::UIStyleTokenId viewportToken_{};
@@ -799,7 +1116,9 @@ class EditorShellState final : public Tina::IGameState {
     bool playerExpanded_ = true;
     bool queuedFirstSelection_ = false;
     bool queuedSecondSelection_ = false;
+    u32 autoAuthoringStage_ = 0;
     std::optional<u64> pendingSelectionIndex_{};
+    std::optional<AuthoringCommand> pendingAuthoringCommand_{};
     std::optional<UI::UIStraightSrgba8Color> pendingViewportTokenColor_{};
 };
 
@@ -812,7 +1131,12 @@ class EditorShellApplication final : public Tina::IGameApplication {
 
     Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext&) override
     {
-        std::unique_ptr<Tina::IGameState> state = std::make_unique<EditorShellState>(options_, counters_);
+        auto document = createAuthoringDocument();
+        if (!document) {
+            return Tina::Core::failure(std::move(document.error()));
+        }
+        std::unique_ptr<Tina::IGameState> state =
+            std::make_unique<EditorShellState>(options_, counters_, std::move(*document));
         return state;
     }
 
@@ -830,7 +1154,7 @@ class EditorShellApplication final : public Tina::IGameApplication {
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
     config.applicationName = "Tina Editor Shell";
-    config.primaryWindow.title = "Tina Editor Shell (read-only)";
+    config.primaryWindow.title = "Tina 2D Editor";
     config.primaryWindow.initialLogicalExtent = {WindowLogicalWidth, WindowLogicalHeight};
     config.primaryWindow.initiallyVisible = true;
     return config;
@@ -860,15 +1184,24 @@ class EditorShellApplication final : public Tina::IGameApplication {
         counters.stateExits != 1 || counters.applicationShutdowns != 1 || counters.uiRootsCreated != 1 ||
         counters.uiRootsReleased != 1 || !counters.selectionVerified || counters.hierarchyLogicalItems == 0 ||
         !counters.stylesheetInstalled || counters.styleRegisteredClasses != 2 ||
-        counters.styleRegisteredTokens != 2 || counters.styleActiveRules != 2) {
+        counters.styleRegisteredTokens != 2 || counters.styleActiveRules != 2 ||
+        counters.authoringActionsWired != AuthoringActionCount || !counters.runtimePreviewValid ||
+        counters.runtimePreviewInstantiations < 1 ||
+        counters.documentEntityCount != InitialAuthoringEntityCount ||
+        counters.cookPreviewBytes != Tina::AssetFormat::World2DSnapshotWire::HeaderBytes +
+                                         InitialAuthoringEntityCount *
+                                             Tina::AssetFormat::World2DSnapshotWire::EntityBytes) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "editor shell lifecycle counters did not match contract");
     }
-    if (options.autoSelectDemo) {
+    if (options.autoDemo) {
         if (counters.hierarchySelectionChanges < 1 || counters.finalSelectionKey != TileMapKey ||
-            counters.styleTokenUpdates < 2) {
+            counters.styleTokenUpdates < 2 || counters.authoringEdits != 1 || counters.authoringUndos != 1 ||
+            counters.authoringRedos != 1 || counters.runtimePreviewInstantiations != 4 ||
+            counters.documentRevision != 5 || counters.documentUndoDepth != 1 || counters.documentRedoDepth != 0 ||
+            counters.finalPlayerPositionX != 1.0F) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "editor shell auto-select/token demo did not finish");
+                                       "editor shell automatic authoring demo did not finish");
         }
     }
     return Tina::Core::success();
@@ -903,11 +1236,12 @@ class EditorShellApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_editor_shell\",\"readOnly\":true"
-              << ",\"editorModule\":false,\"stylesheetInstalled\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_editor_shell\",\"readOnly\":false"
+              << ",\"editorModule\":true,\"stylesheetInstalled\":"
               << (counters.stylesheetInstalled ? "true" : "false") << ",\"frames\":" << counters.frameUpdates
               << ",\"targetFrames\":" << options.targetFrameCount
-              << ",\"frameDelayMs\":" << options.frameDelayMilliseconds << ",\"exit\":";
+              << ",\"frameDelayMs\":" << options.frameDelayMilliseconds
+              << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false") << ",\"exit\":";
     writeJsonString(std::cout, runExitReasonName(*runResult));
     std::cout << ",\"stateEnters\":" << counters.stateEnters << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
@@ -920,6 +1254,18 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"styleActiveRules\":" << counters.styleActiveRules
               << ",\"styleRevision\":" << counters.styleRevision
               << ",\"styleTokenUpdates\":" << counters.styleTokenUpdates
+              << ",\"authoringActionsWired\":" << counters.authoringActionsWired
+              << ",\"authoringEdits\":" << counters.authoringEdits
+              << ",\"authoringUndos\":" << counters.authoringUndos
+              << ",\"authoringRedos\":" << counters.authoringRedos
+              << ",\"runtimePreviewInstantiations\":" << counters.runtimePreviewInstantiations
+              << ",\"runtimePreviewValid\":" << (counters.runtimePreviewValid ? "true" : "false")
+              << ",\"documentRevision\":" << counters.documentRevision
+              << ",\"documentEntityCount\":" << counters.documentEntityCount
+              << ",\"documentUndoDepth\":" << counters.documentUndoDepth
+              << ",\"documentRedoDepth\":" << counters.documentRedoDepth
+              << ",\"cookPreviewBytes\":" << counters.cookPreviewBytes
+              << ",\"finalPlayerPositionX\":" << counters.finalPlayerPositionX
               << ",\"finalSelectionKey\":" << counters.finalSelectionKey
               << ",\"finalSelectionIndex\":" << counters.finalSelectionIndex
               << ",\"selectionVerified\":" << (counters.selectionVerified ? "true" : "false") << "}\n";

@@ -80,9 +80,17 @@ TEST(World2DAuthoringDocumentTests, LoadsCanonicalSnapshotAndEditsGameplayAsRevi
     ASSERT_TRUE(source);
 
     auto document = createDocument();
+    ASSERT_TRUE(document.upsertEntity(World2DEntityDesc{.stableEntityId = 1}));
+    ASSERT_TRUE(document.upsertEntity(World2DEntityDesc{.stableEntityId = 2}));
+    ASSERT_TRUE(document.undo());
+    ASSERT_TRUE(document.canUndo());
+    ASSERT_TRUE(document.canRedo());
     ASSERT_TRUE(document.loadSnapshot(*source));
     EXPECT_EQ(document.entityCount(), 1U);
     EXPECT_EQ(std::vector(document.snapshotBytes().begin(), document.snapshotBytes().end()), *source);
+    EXPECT_EQ(document.historyEntryCount(), 1U);
+    EXPECT_FALSE(document.canUndo());
+    EXPECT_FALSE(document.canRedo());
 
     const std::array gameplay{std::byte{0x31}, std::byte{0x32}, std::byte{0x33}};
     ASSERT_TRUE(document.setGameplay(9, 4, gameplay));
@@ -93,6 +101,38 @@ TEST(World2DAuthoringDocumentTests, LoadsCanonicalSnapshotAndEditsGameplayAsRevi
     EXPECT_EQ(document.gameplayByteCount(), 0U);
     ASSERT_TRUE(document.redo());
     EXPECT_EQ(document.gameplayByteCount(), gameplay.size());
+}
+
+TEST(World2DAuthoringDocumentTests, LoadBaselineBudgetFailurePreservesDocumentAndHistoryBranches)
+{
+    constexpr Core::usize EmptyBytes = AssetFormat::World2DSnapshotWire::HeaderBytes;
+    constexpr Core::usize OneEntityBytes = EmptyBytes + AssetFormat::World2DSnapshotWire::EntityBytes;
+    auto document = createDocument({
+        .historyEntryCapacity = 4,
+        .historyByteCapacity = EmptyBytes + OneEntityBytes,
+    });
+    ASSERT_TRUE(document.upsertEntity(World2DEntityDesc{.stableEntityId = 1}));
+    ASSERT_TRUE(document.undo());
+
+    const std::array replacement{
+        World2DEntityDesc{.stableEntityId = 7},
+        World2DEntityDesc{.stableEntityId = 8},
+    };
+    auto source = AssetFormat::writeWorld2DSnapshotBytes(World2DSnapshotDesc{.entities = replacement});
+    ASSERT_TRUE(source);
+    ASSERT_GT(source->size(), document.config().historyByteCapacity);
+
+    const auto beforeBytes = std::vector(document.snapshotBytes().begin(), document.snapshotBytes().end());
+    const auto beforeRevision = document.revision();
+    const auto beforeHistoryEntries = document.historyEntryCount();
+    const auto status = document.loadSnapshot(*source);
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, EditorErrorCode::HistoryCapacityExceeded);
+    EXPECT_EQ(std::vector(document.snapshotBytes().begin(), document.snapshotBytes().end()), beforeBytes);
+    EXPECT_EQ(document.revision(), beforeRevision);
+    EXPECT_EQ(document.historyEntryCount(), beforeHistoryEntries);
+    EXPECT_FALSE(document.canUndo());
+    EXPECT_TRUE(document.canRedo());
 }
 
 TEST(World2DAuthoringDocumentTests, InvalidEditPreservesDocumentAndHistoryBranches)

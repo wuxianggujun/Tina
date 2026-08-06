@@ -6,7 +6,9 @@ target_compile_features(tina_sample_editor_shell PRIVATE cxx_std_23)
 target_link_libraries(tina_sample_editor_shell PRIVATE
     Tina::ProjectOptions
     Tina::DesktopBootstrap
+    Tina::Editor
     Tina::Runtime
+    Tina::Scene
 )
 set_target_properties(tina_sample_editor_shell PROPERTIES CXX_EXTENSIONS OFF)
 

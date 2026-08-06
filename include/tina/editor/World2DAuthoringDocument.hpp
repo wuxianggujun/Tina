@@ -67,6 +67,8 @@ public:
     // Replaces the whole document as one undoable revision. This is the batch
     // transaction boundary used by inspectors, gizmos, importers, and tools.
     [[nodiscard]] Core::Status replace(const AssetFormat::World2DSnapshotDesc& desc);
+    // Opens canonical bytes as a new saved baseline. Success clears undo/redo;
+    // failure preserves the existing document and history.
     [[nodiscard]] Core::Status loadSnapshot(std::span<const std::byte> snapshotBytes);
 
     // Focused authoring operations are also complete revisions. A failed
@@ -93,6 +95,7 @@ private:
 
     [[nodiscard]] const Revision& current() const noexcept { return m_history[m_historyCursor]; }
     [[nodiscard]] Core::Status commit(Revision candidate);
+    [[nodiscard]] Core::Status resetBaseline(Revision candidate);
     void advanceRevision() noexcept;
 
     World2DAuthoringDocumentConfig m_config{};

@@ -928,7 +928,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `tina_sample_editor_shell` | 只读工具壳：Hierarchy TreeView + Inspector + Viewport 占位；startup StyleClass/ColorToken/sheet；运行期 token 更新；JSON `readOnly=true`/`editorModule=false` 表示尚未接入已存在的 `Tina::Editor` document | authoring 写入、undo/cook 与 `2D-EDITOR` 产品交互接线 |
+| `tina_sample_editor_shell` | `Tina::Editor` World2D document 驱动的 Hierarchy/Inspector；`Move X +1`、Undo、Redo 各发布一个受验证 revision；每次状态切换从 canonical bytes 解析并实例化新的 `Scene::World`；JSON 报告 action/revision/history/entity/byte/runtime-preview 证据 | 原子文件保存、真实渲染 viewport、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
