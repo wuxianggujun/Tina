@@ -839,17 +839,17 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
 ```
 
 用例覆盖 canonical runtime preview、replace/load/upsert/erase-subtree/gameplay revision、undo/redo 与分支替换、
-entry/byte budget 淘汰、非法 schema/parent/容量失败的 current + history 原子性以及公开头隔离。只有 editor shell
+entry/byte budget 淘汰、非法 schema/parent/容量失败的 current + history 原子性以及公开头隔离。只有 Editor application
 接线或文件/cook 集成完成时才扩大到对应 sample/CLI；纯 document 小切片不跑无关产品 gate。
 
-Editor shell GPU viewport 切片在代码完成后只做一次受影响 target 的增量验证，不重跑全量 UI/产品矩阵：
+TinaEditor GPU viewport 切片在代码完成后只做一次受影响 target 的增量验证，不重跑全量 UI/产品矩阵：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_runtime_ui_tests tina_sample_editor_shell --parallel 1 -- /nr:false
+  --target tina_runtime_ui_tests tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe `
   --gtest_filter=PrimaryWindowUICapabilityTest.CommittedLayoutRectCopiesPreviousPublishedWorldRectAndExpires
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
   --frames=60 --frame-delay-ms=0
 ```
 
@@ -863,17 +863,17 @@ Transform/gizmo smoke 还要检查 Inspector transaction=`1`，gizmo begin/previ
 workspace round-trip=`2`、runtime preview instantiations=`8`、最终 revision/undo depth=`7/3` 且 GPU revision 对齐。
 2D delta=`(2,-1,0)`；3D XZ delta=`(2,0,1)`，完整 TRS 在 canonical document、Scene preview 与结构化结果中一致。
 
-Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的 shell smoke：
+Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的产品 smoke：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_editor_tests tina_sample_editor_shell --parallel 1 -- /nr:false
+  --target tina_editor_tests tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
   --gtest_filter=World2DAuthoringFileTests.*:World3DAuthoringFileTests.*
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
   --frames=60 --frame-delay-ms=0 --workspace=2d `
-  --world2d-path=artifacts/editor_shell/smoke/world2d.tworld `
-  --world3d-path=artifacts/editor_shell/smoke/world3d.tprefab
+  --world2d-path=artifacts/editor/smoke/world2d.tworld `
+  --world3d-path=artifacts/editor/smoke/world3d.tprefab
 ```
 
 两个 workspace 分别使用 `--world2d-path` / `--world3d-path`，不保留共享 path 参数。smoke 要检查每个 session 的
@@ -961,15 +961,15 @@ area-light interval union 或跨 GPU exact golden 证据。
 开发阶段直接运行 Scene normal resolver、RenderScene normal propagation、Null/bgfx normal resource/batch 的
 定向 filter；闭环后再跑产品四次视觉差分与完整 product gate。该证据不声明跨 GPU exact golden。
 
-## 产品样例的证据边界
+## 产品与样例的证据边界
 
-| Sample | 证明 | 不证明 |
+| Executable | 证明 | 不证明 |
 | --- | --- | --- |
 | `tina_sample_null` | EngineHost、固定帧、Headless/Null lifecycle | GLFW、GPU、可见 UI |
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `tina_sample_editor_shell` | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D 完整 shell；Inspector 完整 TRS transaction、routed-pointer viewport Move capture、双 workspace 独立 path/loaded/baseline/dirty session、Undo/Redo 与原子 Save；committed UI rect 驱动 Camera2D/Sprite 或 PerspectiveCamera/Mesh partial GPU viewport；JSON 报告 layout、gizmo、session、GPU/document revision 与 preview 状态 | Catalog asset-resolved viewport、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
+| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D 完整产品；Inspector 完整 TRS transaction、routed-pointer viewport Move capture、双 workspace 独立 path/loaded/baseline/dirty session、Undo/Redo 与原子 Save；committed UI rect 驱动 Camera2D/Sprite 或 PerspectiveCamera/Mesh partial GPU viewport；JSON 报告 layout、gizmo、session、GPU/document revision 与 preview 状态 | Catalog asset-resolved viewport、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |

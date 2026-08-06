@@ -8,13 +8,14 @@ Editor 的首个闭环同时覆盖当前 schema-v1 World2D snapshot 与 schema-v
 schema 兼容格式。
 
 独立 `Tina::Editor` target 提供 `World2DAuthoringDocument/File` 与 `World3DAuthoringDocument/File`；独立
-`Tina::EditorApp` 负责桌面组合，`tina_sample_editor_shell` 只保留薄 `main()`。2D Inspector 编辑 Position X/Y、
+`Tina::EditorApp` 负责桌面组合，正式产品 target `tina_editor_desktop` 输出 `TinaEditor.exe`，其 `main()` 只负责
+调用应用模块。2D Inspector 编辑 Position X/Y、
 Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整 Position/Rotation/Scale XYZ，并把 Euler XYZ 一次规范化为 quaternion。
 `Apply Transform`、`Move X +1`、viewport Move、Undo、Redo 都接到 active document，每次成功 canonical command 后
 从同一份 bytes 实例化新的 `Scene::World`。2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
-当前 shell 的 retained UI 布局已完整铺开：Toolbar、2D/3D 模式切换、上下文工具条、Hierarchy dock、active viewport 工作区、
+当前 Editor application 的 retained UI 布局已完整铺开：Toolbar、2D/3D 模式切换、上下文工具条、Hierarchy dock、active viewport 工作区、
 可滚动 Inspector（Identity/Transform/Components/Authoring/Document）和底部 status bar 均由 `Flex`、`minMax`、
 固定控件高度与滚动容器组合。`updateUI()` 从上一轮成功提交的 viewport/root `worldRect` 计算
 `RenderNormalizedViewport`，因此窗口变大时 viewport 与中间工作区共同增长，两侧 dock 保持 bounded width，
@@ -30,7 +31,7 @@ Move tool 在 preview layer 使用 routed pointer capture：Move 事件只更新
 向 active document 提交一次 revision。2D 将 logical delta 映射到 XY 并翻转 Y，3D 首切片映射到 XZ ground plane 并保留 Y；
 PointerCancel、selection/workspace/revision 冲突均丢弃临时状态并恢复 canonical preview，document/history 不变。
 
-## Editor shell layout
+## Editor application layout
 
 ```text
 Toolbar (document/path/mode/undo/redo/save)
@@ -141,25 +142,25 @@ Undo/Redo 无对应 revision 时分别返回 `UndoUnavailable` / `RedoUnavailabl
 
 ## 验收
 
-小切片只运行独立 target、精确 filter 与对应 sample 短 smoke：
+小切片只运行独立 target、精确 filter 与 TinaEditor 产品短 smoke：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_runtime_ui_tests tina_sample_editor_shell --parallel 1 -- /nr:false
+  --target tina_runtime_ui_tests tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe `
   --gtest_filter=PrimaryWindowUICapabilityTest.CommittedLayoutRectCopiesPreviousPublishedWorldRectAndExpires
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
   --frames=60 --frame-delay-ms=0 --workspace=2d `
-  --world2d-path=artifacts/editor_shell/smoke/world2d.tworld `
-  --world3d-path=artifacts/editor_shell/smoke/world3d.tprefab
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
+  --world2d-path=artifacts/editor/smoke/world2d.tworld `
+  --world3d-path=artifacts/editor/smoke/world3d.tprefab
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
   --frames=60 --frame-delay-ms=0 --workspace=3d `
-  --world2d-path=artifacts/editor_shell/smoke/world2d.tworld `
-  --world3d-path=artifacts/editor_shell/smoke/world3d.tprefab
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
+  --world2d-path=artifacts/editor/smoke/world2d.tworld `
+  --world3d-path=artifacts/editor/smoke/world3d.tprefab
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
   --frames=10 --frame-delay-ms=0 --no-auto-demo --workspace=2d `
-  --world2d-path=artifacts/editor_shell/smoke/world2d.tworld `
-  --world3d-path=artifacts/editor_shell/smoke/world3d.tprefab
+  --world2d-path=artifacts/editor/smoke/world2d.tworld `
+  --world3d-path=artifacts/editor/smoke/world3d.tprefab
 ```
 
 Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory` 回归。由于它目前位于 monolithic
@@ -169,11 +170,11 @@ Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirecto
 人工操作按钮时使用较长帧数并传 `--no-auto-demo`；该模式仍验证 document 与 runtime preview 一般不变量，
 但不把用户产生的 revision 数量误判为自动 smoke 失败。
 
-document 与 shell 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；GPU viewport 的 Camera、
+document 与 EditorApp 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；GPU viewport 的 Camera、
 proxy transforms 与 revision 来自同一 preview World/binding，committed UI rect 正确归一化且不保存 snapshot borrow；非法 edit 原子失败；
 subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 2D/3D 公共头
 isolation 编译通过；已有文件加载为 clean baseline、加载失败不改变 current/history；文件保存 exact canonical bytes、
-覆盖失败不删除旧目标；shell 自动完成
+覆盖失败不删除旧目标；TinaEditor 自动完成
 Move → Apply Transform → viewport drag → Undo → Redo → Save → other workspace → initial workspace。一次 drag 固定报告
 begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，只增加一个 document revision；round-trip 固定
 `workspaceSwitches=2`、runtime preview instantiations=`8`、document/GPU revision=`7/7`、undo depth=`3`，并证明

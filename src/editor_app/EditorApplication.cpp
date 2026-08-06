@@ -164,7 +164,7 @@ inline constexpr UI::UITreeViewItemKey PlayerTransformKey = 5;
 inline constexpr UI::UITreeViewItemKey LightsKey = 6;
 inline constexpr UI::UITreeViewItemKey TileMapKey = 7;
 
-struct SampleOptions final {
+struct EditorLaunchOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
     std::string world2DDocumentPathUtf8{};
@@ -308,7 +308,7 @@ void writeJsonString(std::ostream& output, std::string_view value)
 
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_editor_shell\",\"domain\":"
+    std::cerr << "{\"status\":\"error\",\"application\":\"TinaEditor\",\"domain\":"
               << static_cast<std::uint16_t>(error.code.domain) << ",\"code\":" << error.code.value
               << ",\"message\":";
     writeJsonString(std::cerr, error.message);
@@ -402,7 +402,7 @@ struct EulerDegrees final {
     };
 }
 
-[[nodiscard]] Tina::Core::Result<SampleOptions> parseOptions(int argumentCount, char** arguments)
+[[nodiscard]] Tina::Core::Result<EditorLaunchOptions> parseOptions(int argumentCount, char** arguments)
 {
     constexpr std::string_view FramesPrefix = "--frames=";
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
@@ -410,7 +410,7 @@ struct EulerDegrees final {
     constexpr std::string_view World3DPathPrefix = "--world3d-path=";
     constexpr std::string_view WorkspacePrefix = "--workspace=";
 
-    SampleOptions options{};
+    EditorLaunchOptions options{};
     bool hasFrames = false;
     bool hasDelay = false;
     bool hasWorld2DPath = false;
@@ -699,7 +699,7 @@ struct World3DPreviewBinding final {
 };
 
 [[nodiscard]] Tina::Core::Result<InitialAuthoringDocuments>
-createAuthoringDocuments(const SampleOptions& options)
+createAuthoringDocuments(const EditorLaunchOptions& options)
 {
     auto document = Tina::Editor::World2DAuthoringDocument::Create({
         .entityCapacity = AuthoringEntityCapacity,
@@ -718,7 +718,7 @@ createAuthoringDocuments(const SampleOptions& options)
         world3DSession.documentPathUtf8 = options.world3DDocumentPathUtf8;
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
-                                   "editor shell could not retain workspace document paths");
+                                   "Tina Editor could not retain workspace document paths");
     }
     if (world2DSession.hasDocumentPath() && world3DSession.hasDocumentPath() &&
         world2DSession.documentPathUtf8 == world3DSession.documentPathUtf8) {
@@ -738,7 +738,7 @@ createAuthoringDocuments(const SampleOptions& options)
             } catch (const std::bad_alloc&) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::OutOfMemory,
-                    "editor shell could not retain the opened World2D baseline");
+                    "Tina Editor could not retain the opened World2D baseline");
             }
         } else if (status.error().code != Tina::Core::CoreErrorCode::NotFound) {
             return Tina::Core::failure(std::move(status.error()));
@@ -799,7 +799,7 @@ createAuthoringDocuments(const SampleOptions& options)
             } catch (const std::bad_alloc&) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::OutOfMemory,
-                    "editor shell could not retain the opened World3D baseline");
+                    "Tina Editor could not retain the opened World3D baseline");
             }
         } else if (status.error().code != Tina::Core::CoreErrorCode::NotFound) {
             return Tina::Core::failure(std::move(status.error()));
@@ -867,7 +867,7 @@ createAuthoringDocuments(const SampleOptions& options)
 
 class EditorWorkspaceState final : public Tina::IGameState {
   public:
-    EditorWorkspaceState(SampleOptions options, LifecycleCounters& counters,
+    EditorWorkspaceState(EditorLaunchOptions options, LifecycleCounters& counters,
                          Tina::Editor::World2DAuthoringDocument world2D,
                          Tina::Editor::World3DAuthoringDocument world3D,
                          WorkspaceSessionState world2DSession,
@@ -3019,7 +3019,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             session.savedBaselineBytes = std::move(savedCandidate);
         } catch (const std::bad_alloc&) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
-                                       "editor shell could not retain the saved document baseline");
+                                       "Tina Editor could not retain the saved document baseline");
         }
         ++counters_.authoringSaves;
         return Tina::Core::success();
@@ -3817,7 +3817,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return false;
     }
 
-    SampleOptions options_;
+    EditorLaunchOptions options_;
     LifecycleCounters& counters_;
     Tina::Editor::World2DAuthoringDocument document_;
     Tina::Editor::World3DAuthoringDocument document3D_;
@@ -3902,7 +3902,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
 
 class EditorApplication final : public Tina::IGameApplication {
   public:
-    EditorApplication(SampleOptions options, LifecycleCounters& counters) noexcept
+    EditorApplication(EditorLaunchOptions options, LifecycleCounters& counters) noexcept
         : options_(options), counters_(counters)
     {
     }
@@ -3923,7 +3923,7 @@ class EditorApplication final : public Tina::IGameApplication {
             return state;
         } catch (const std::bad_alloc&) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
-                                       "editor shell could not create workspace sessions");
+                                       "Tina Editor could not create workspace sessions");
         }
     }
 
@@ -3933,7 +3933,7 @@ class EditorApplication final : public Tina::IGameApplication {
     }
 
   private:
-    SampleOptions options_;
+    EditorLaunchOptions options_;
     LifecycleCounters& counters_;
 };
 
@@ -3963,7 +3963,7 @@ class EditorApplication final : public Tina::IGameApplication {
     return "Unknown";
 }
 
-[[nodiscard]] Tina::Core::Status verifyLifecycle(Tina::RunExitReason exitReason, const SampleOptions& options,
+[[nodiscard]] Tina::Core::Status verifyLifecycle(Tina::RunExitReason exitReason, const EditorLaunchOptions& options,
                                                  const LifecycleCounters& counters)
 {
     const bool world2D = options.initialWorkspace == WorkspaceMode::World2D;
@@ -3993,7 +3993,7 @@ class EditorApplication final : public Tina::IGameApplication {
                   InitialAuthoringEntityCount * Tina::AssetFormat::PrefabWire::NodeBytes;
     if (exitReason != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "editor shell stopped for an unexpected reason");
+                                   "Tina Editor stopped for an unexpected reason");
     }
     if (counters.frameUpdates != options.targetFrameCount || counters.stateEnters != 1 ||
         counters.stateExits != 1 || counters.applicationShutdowns != 1 || counters.uiRootsCreated != 1 ||
@@ -4024,7 +4024,7 @@ class EditorApplication final : public Tina::IGameApplication {
         counters.documentEntityCount != InitialAuthoringEntityCount ||
         counters.cookPreviewBytes != expectedCookBytes) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "editor shell lifecycle counters did not match contract");
+                                   "Tina Editor lifecycle counters did not match contract");
     }
     if (options.autoDemo) {
         const bool dimensionSpecificTransformMatches =
@@ -4061,35 +4061,35 @@ class EditorApplication final : public Tina::IGameApplication {
             counters.finalPlayerScaleX != 1.25F || counters.finalPlayerScaleY != 0.75F ||
             !dimensionSpecificTransformMatches) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "editor shell automatic authoring demo did not finish");
+                                       "Tina Editor automatic authoring demo did not finish");
         }
         if (counters.finalSelectionKey != TileMapKey || counters.finalSelectionIndex != 6) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
-                "editor shell automatic hierarchy selection did not finish");
+                "Tina Editor automatic hierarchy selection did not finish");
         }
         if (counters.workspaceSwitches != 2) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
-                "editor shell workspace round-trip did not execute two mode switches");
+                "Tina Editor workspace round-trip did not execute two mode switches");
         }
         if (counters.runtimePreviewInstantiations != 8 ||
             !counters.world2DWorkspaceReady || !counters.world3DWorkspaceReady) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
-                "editor shell workspace round-trip did not validate both runtime previews");
+                "Tina Editor workspace round-trip did not validate both runtime previews");
         }
         if (documentPathConfigured) {
             if (counters.authoringSaves != 1 || !counters.documentSaved || counters.documentDirty ||
                 counters.savedSnapshotBytes != counters.cookPreviewBytes ||
                 activeSavedSnapshotBytes != counters.cookPreviewBytes) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "editor shell automatic save did not finish");
+                                           "Tina Editor automatic save did not finish");
             }
         } else if (counters.authoringSaves != 0 || counters.documentSaved || !counters.documentDirty ||
                    counters.savedSnapshotBytes != 0) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "editor shell reported an unexpected saved document");
+                                       "Tina Editor reported an unexpected saved document");
         }
         const bool inactiveSessionMatches =
             world2D ? uneditedSessionMatches(
@@ -4101,7 +4101,7 @@ class EditorApplication final : public Tina::IGameApplication {
         if (!inactiveSessionMatches) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
-                "editor shell changed the inactive workspace session during mode round-trip");
+                "Tina Editor changed the inactive workspace session during mode round-trip");
         }
     } else if (!uneditedSessionMatches(
                    world2DPathConfigured, counters.world2DDocumentLoaded,
@@ -4111,19 +4111,19 @@ class EditorApplication final : public Tina::IGameApplication {
                    counters.world3DDocumentDirty, counters.world3DSavedSnapshotBytes)) {
         return Tina::Core::failure(
             Tina::Core::CoreErrorCode::Internal,
-            "editor shell initial workspace sessions did not preserve their open baselines");
+            "Tina Editor initial workspace sessions did not preserve their open baselines");
     }
     return Tina::Core::success();
 }
 
-[[nodiscard]] int runSample(int argumentCount, char** arguments)
+[[nodiscard]] int runEditor(int argumentCount, char** arguments)
 {
     auto optionsResult = parseOptions(argumentCount, arguments);
     if (!optionsResult) {
         writeError(optionsResult.error());
         return 2;
     }
-    const SampleOptions options = *optionsResult;
+    const EditorLaunchOptions options = *optionsResult;
 
     auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig());
     if (!hostResult) {
@@ -4145,7 +4145,7 @@ class EditorApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_editor_shell\",\"readOnly\":false"
+    std::cout << "{\"status\":\"ok\",\"application\":\"TinaEditor\",\"readOnly\":false"
               << ",\"editorModule\":true,\"supports2D\":true,\"supports3D\":true,\"initialWorkspace\":";
     writeJsonString(std::cout, options.initialWorkspace == WorkspaceMode::World2D ? "2d" : "3d");
     std::cout << ",\"finalWorkspace\":";
@@ -4257,7 +4257,7 @@ namespace Tina::EditorApp {
 int runEditorApplication(int argumentCount, char** arguments)
 {
     try {
-        return runSample(argumentCount, arguments);
+        return runEditor(argumentCount, arguments);
     } catch (const std::bad_alloc&) {
         Tina::Core::Error error{Tina::Core::CoreErrorCode::OutOfMemory,
                                 "Tina Editor ran out of memory"};

@@ -39,7 +39,10 @@ Path: `sample2d-freetype/.../frame-02.png`
 
 **Issues:** none blocking. Particle/trail motion is intentional product demo (UI-003 playfield ROI jitter source).
 
-### 3. `tina_sample_editor_shell` (bgfx Debug)
+> 2026-08-07：本节保留当时的 target/path 作为历史证据；当前产品入口已迁移为
+> `src/editor_app/main.cpp` + `tina_editor_desktop` / `TinaEditor.exe`。
+
+### 3. `tina_sample_editor_shell` (bgfx Debug, historical name)
 
 | Check | Before | After |
 | --- | --- | --- |
