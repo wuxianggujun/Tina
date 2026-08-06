@@ -308,8 +308,26 @@ class FreeTypeTextRasterizer final : public IUITextRasterizer {
             index += unitLength;
         }
 
+        const float lineHeight = style.logicalSize * style.lineHeightScale;
+        float baselineFromLineTop = lineHeight;
+        if (slot->face->size != nullptr) {
+            const float ascender =
+                static_cast<float>(slot->face->size->metrics.ascender) / 64.0F;
+            const float descender =
+                -static_cast<float>(slot->face->size->metrics.descender) / 64.0F;
+            const float fontExtent = ascender + descender;
+            if (std::isfinite(ascender) && ascender >= 0.0F
+                && std::isfinite(descender) && descender >= 0.0F
+                && std::isfinite(fontExtent) && fontExtent > 0.0F) {
+                const float leading = lineHeight - fontExtent;
+                baselineFromLineTop =
+                    std::clamp(ascender + leading * 0.5F, 0.0F, lineHeight);
+            }
+        }
+
         return UITextRasterBatch{
             .metrics = *metrics,
+            .baselineFromLineTop = baselineFromLineTop,
             .glyphs = std::span<const UITextGlyphRaster>{m_glyphs.data(), glyphCount},
             .coverage = std::span<const u8>{m_coverage.data(), coverageUsed},
         };

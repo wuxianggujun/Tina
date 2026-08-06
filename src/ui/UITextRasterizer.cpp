@@ -191,6 +191,7 @@ class PlaceholderTextRasterizer final : public IUITextRasterizer {
 
         return UITextRasterBatch{
             .metrics = *metrics,
+            .baselineFromLineTop = lineHeight,
             .glyphs = std::span<const UITextGlyphRaster>{m_glyphs.data(), glyphCount},
             .coverage = std::span<const u8>{m_coverage.data(), coverageUsed},
         };

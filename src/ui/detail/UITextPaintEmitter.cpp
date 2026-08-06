@@ -63,6 +63,12 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
         auto batch = rasterSource.rasterizer->raster(rasterSource.face, utf8, style);
         if (batch)
         {
+            float baselineFromLineTop = batch->baselineFromLineTop;
+            if (!(std::isfinite(baselineFromLineTop) && baselineFromLineTop >= 0.0F &&
+                  baselineFromLineTop <= lineHeight))
+            {
+                baselineFromLineTop = lineHeight;
+            }
             const usize outputBase = output.size();
             const u32 ordinalBase = nextPaintOrdinal;
             float cursorX = startX;
@@ -128,7 +134,7 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
                 }
 
                 const float drawX = normalizeFloat(cursorX + glyph.bearingX);
-                const float drawY = normalizeFloat(cursorY + (lineHeight - glyph.bearingY));
+                const float drawY = normalizeFloat(cursorY + baselineFromLineTop - glyph.bearingY);
                 const float drawW = static_cast<float>(placed->width);
                 const float drawH = static_cast<float>(placed->height);
                 output.push_back(UICommittedPaintEntry{

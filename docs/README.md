@@ -54,7 +54,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 改 2D/3D 抽取或 World | [Scene](scene-ecs.md) · [2D](game-2d.md) · [3D](game-3d.md) |
 | 改 2D 栅格导航 / TileMap 导航转换 | [2D 导航](navigation2d.md) · [2D](game-2d.md) · [资源](resources.md) |
 | 改 2D World/gameplay 存档 | [World2D 序列化](world2d-serialization.md) · [Scene](scene-ecs.md) |
-| 改 2D authoring document / undo / 原子保存 / cook preview | [2D Editor](editor-2d.md) · [World2D 序列化](world2d-serialization.md) |
+| 改 2D/3D Editor、authoring document、undo、原子保存或 viewport | [Editor 2D / 3D](editor-2d.md) · [World2D 序列化](world2d-serialization.md) · [3D](game-3d.md) |
 | 改 Catalog / Cook / Handle | [资源](resources.md) |
 | 改 submit / bgfx 边界 | [Render](rendering.md) |
 | 选 preset / 跑门禁 | [构建](building.md) · [测试](testing.md) |
@@ -76,7 +76,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | --- | --- |
 | Runtime / 公共 API | [Runtime](runtime.md) · [公共 API](public-api.md) · [Gameplay](gameplay.md) |
 | Platform / Input / Task | [Platform 与 Input](platform-input.md) · [Task System](task-system.md) |
-| Scene / 2D / 3D / Navigation / Editor | [Scene](scene-ecs.md) · [2D](game-2d.md) · [2D 导航](navigation2d.md) · [World2D 序列化](world2d-serialization.md) · [2D Editor](editor-2d.md) · [3D](game-3d.md) |
+| Scene / 2D / 3D / Navigation / Editor | [Scene](scene-ecs.md) · [2D](game-2d.md) · [2D 导航](navigation2d.md) · [World2D 序列化](world2d-serialization.md) · [Editor 2D / 3D](editor-2d.md) · [3D](game-3d.md) |
 | Render / Asset | [Render](rendering.md) · [资源](resources.md) |
 | UI / Audio / Physics | [Retained UI](ui.md) · [UI 框架设计](ui-framework.md) · [Audio](audio.md) · [Physics](physics.md) |
 | Core / 性能 / 依赖 | [Core](core.md) · [性能与内存](performance-memory.md) · [依赖治理](dependencies.md) |

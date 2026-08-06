@@ -440,8 +440,8 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     expectOk(tree.updater.setLayoutStyle(tree.listView, fixedSize(100.0F, 40.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.treeView, fixedSize(100.0F, 40.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.other, fixedSize(100.0F, 20.0F)));
-    expectOk(tree.updater.setListViewStyle(tree.listView, {.rowHeight = 18.0F, .overscanRows = 1}));
-    expectOk(tree.updater.setTreeViewStyle(tree.treeView, {.rowHeight = 18.0F, .overscanRows = 1}));
+    expectOk(tree.updater.setListViewStyle(tree.listView, {.rowHeight = 24.0F, .overscanRows = 1}));
+    expectOk(tree.updater.setTreeViewStyle(tree.treeView, {.rowHeight = 24.0F, .overscanRows = 1}));
     expectOk(tree.updater.setListViewDataSource(tree.listView, tree.listSource->view()));
     expectOk(tree.updater.setTreeViewDataSource(tree.treeView, tree.treeSource->view()));
     expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));

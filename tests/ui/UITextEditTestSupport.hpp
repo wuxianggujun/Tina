@@ -99,6 +99,7 @@ public:
         }
         return UI::UITextRasterBatch{
             .metrics = *metrics,
+            .baselineFromLineTop = style.logicalSize * style.lineHeightScale,
             .glyphs = std::span<const UI::UITextGlyphRaster>(
                 m_glyphs.data(),
                 utf8.size()),

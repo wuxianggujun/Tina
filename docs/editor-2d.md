@@ -1,19 +1,20 @@
-# 2D Editor
+# Editor 2D / 3D
 
 ## 产品场景
 
-`2D-EDITOR` 的首个可闭环场景是：工具打开当前 schema-v1 World2D snapshot，Hierarchy/Inspector/gizmo 把一次
-用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Cook Preview 直接把当前 snapshot
-交给 Runtime parser 与 Scene instantiate。工具不能绕过 `AssetFormat` 写半合法数据，也不维护 editor-only 或旧
+Editor 的首个闭环同时覆盖当前 schema-v1 World2D snapshot 与 schema-v2 Prefab。Hierarchy/Inspector 把一次
+用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Preview 直接把当前 canonical bytes
+交给对应 Runtime parser 与 Scene instantiate。工具不能绕过 `AssetFormat` 写半合法数据，也不维护 editor-only 或旧
 schema 兼容格式。
 
-独立 `Tina::Editor` target、`World2DAuthoringDocument` 与 `World2DAuthoringFile` 已提供。`tina_sample_editor_shell` 现已把 Hierarchy/
-Inspector 的 Position X/Y、Rotation Z（度）、Scale X/Y、`Apply Transform`、`Move X +1`、Undo、Redo 接到真实 document，并在每次成功命令后把同一份 canonical snapshot 解析、
-实例化到新的 `Scene::World`。同一个 World/binding snapshot 现在同时驱动 runtime preview 验证与真实 GPU viewport：
-Camera entity 提供 Camera2D transform，Camera/Player/Light/TileMap 以 bgfx 默认纹理的着色 authoring proxy 提交，
-不再维护一套 UI marker 模拟状态，也不把 proxy 冒充已解析的 Catalog 产品资源。
+独立 `Tina::Editor` target 提供 `World2DAuthoringDocument/File` 与 `World3DAuthoringDocument/File`；独立
+`Tina::EditorApp` 负责桌面组合，`tina_sample_editor_shell` 只保留薄 `main()`。2D Inspector 编辑 Position X/Y、
+Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整 Position/Rotation/Scale XYZ，并把 Euler XYZ 一次规范化为 quaternion。
+`Apply Transform`、`Move X +1`、Undo、Redo 都接到 active document，每次成功命令后从同一份 canonical bytes
+实例化新的 `Scene::World`。2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个 World/binding 驱动，
+不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
-当前 shell 的 retained UI 布局已完整铺开：Toolbar、上下文工具条、Hierarchy dock、World2D viewport 工作区、
+当前 shell 的 retained UI 布局已完整铺开：Toolbar、2D/3D 模式切换、上下文工具条、Hierarchy dock、active viewport 工作区、
 可滚动 Inspector（Identity/Transform/Components/Authoring/Document）和底部 status bar 均由 `Flex`、`minMax`、
 固定控件高度与滚动容器组合。`updateUI()` 从上一轮成功提交的 viewport/root `worldRect` 计算
 `RenderNormalizedViewport`，因此窗口变大时 viewport 与中间工作区共同增长，两侧 dock 保持 bounded width，
@@ -21,9 +22,9 @@ world pass 下一帧跟随新的布局；首帧在 committed rect 可用前不�
 传入 `--document-path=<UTF-8 path>` 后，已有文件会先按当前 schema 原子加载为 clean
 baseline，不存在的路径则作为新文档 Save target；Toolbar Save 原子保存当前 canonical snapshot，并让 Toolbar/
 Inspector/status bar 依据 saved baseline 显示 `Modified/Saved`；未配置路径时 Save 保持 disabled。
-五个 Transform 字段通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，拒绝时恢复
-canonical 字段并保持 document/history/preview 不变。Rotation Z 输入会规范化到 `[-180, 180]` 等价角并发布平面 Z 四元数，
-Scale X/Y 保留有符号有限值且不改写 Scale Z；GPU proxy 尺寸同步反映 X/Y scale。viewport gizmo、TileMap/动画专用 document
+2D 的五个字段和 3D 的九个字段都通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
+拒绝时恢复 canonical 字段并保持 document/history/preview 不变。2D Rotation Z 发布平面 Z quaternion；3D Euler XYZ
+发布完整规范化 quaternion，并保留 hierarchy、Mesh/Material 与 visibility。GPU proxy 同步读取完整 canonical TRS。viewport gizmo、TileMap/动画专用 document
 仍是后续切片；它们必须复用这里的 revision/failure 语义，不各自实现一套 undo stack 或 cooked preview。
 
 ## Editor shell layout
@@ -33,16 +34,16 @@ Toolbar (document/path/mode/undo/redo/save)
 Context bar (breadcrumb/select/move/frame/snap)
 Workspace
   Hierarchy dock (filter/actions/virtual TreeView/selection summary)
-  World2D viewport (mode/tools/zoom/preview canvas/footer)
+  Active 2D/3D viewport (mode/tools/zoom/preview canvas/footer)
   Inspector dock (scrollable identity/transform transaction/components/authoring/document)
 Status bar (schema/entities/revision/preview/selection)
 ```
 
-这层只属于 `samples/editor_shell` 的组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局与 GPU smoke 的
+这层属于 `Tina::EditorApp` 组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局与 GPU smoke 的
 结构化输出报告 `editorLayoutRegions=6`、`viewportLayoutReady=true`、`inspectorScrollConfigured=true`、
-`renderExtractions`、`gpuViewportSprites=4`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。
+`renderExtractions`、2D `gpuViewportSprites=4` 或 3D `gpuViewportMeshes=3`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。
 `gpuViewportDocumentRevision` 还必须与最终 canonical document revision 一致。字段事务由 `inspectorTransactions`、
-`inspectorRejectedTransactions` 和最终 Player XY/Rotation Z/Scale XY 取证；文件保存另由 `authoringSaves`、`savedSnapshotBytes`、
+`inspectorRejectedTransactions` 和最终 Player/Hero 完整 TRS 取证；文件保存另由 `authoringSaves`、`savedSnapshotBytes`、
 `documentSaved`、`documentDirty` 和落盘 bytes 取证。
 
 ## 文件加载与原子保存
@@ -57,6 +58,10 @@ Status bar (schema/entities/revision/preview/selection)
 `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`，其他平台使用同目录 rename。replace 失败时删除临时
 文件但不先删除旧目标，document、revision 与 undo/redo 也完全不变。
 
+`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v2 提供相同契约：读取上限由
+document node capacity 和当前 wire size 计算，成功加载建立 clean baseline，保存只发布 `payloadBytes()`，不生成
+Editor 私有格式。2D 与 3D 文件失败都不会改写 active document 或既有目标。
+
 Shell 在真正写入前先准备 saved baseline，避免“文件已保存但 UI 因随后分配失败仍报成功”的半状态。保存成功后以
 canonical bytes 与 saved baseline 的完整相等比较判断 dirty；因此保存后编辑再 Undo 回 saved bytes 会恢复 `Saved`，
 而不是仅按单调 revision 误报 `Modified`。Save 是 Editor command，不是 authoring revision，也不触发多余的
@@ -66,25 +71,26 @@ canonical bytes 与 saved baseline 的完整相等比较判断 dirty；因此保
 
 ```text
 Inspector / gizmo / importer intent
-  -> World2DAuthoringDocument candidate
+  -> World2DAuthoringDocument / World3DAuthoringDocument candidate
   -> AssetFormat current-schema validate + canonical write
   -> bounded revision publication
-  -> snapshotBytes()
-  -> AssetFormat::parseWorld2DSnapshot() -> Scene::instantiateWorld2DSnapshot() / product preview
-  -> saveWorld2DAuthoringDocument() -> Core atomic sibling replace
+  -> snapshotBytes() / payloadBytes()
+  -> World2D instantiate / Prefab-to-World3D preview
+  -> active document save -> Core atomic sibling replace
 ```
 
 - `Editor` 依赖 `Core` 与 `AssetFormat`，不依赖 UI、Runtime、Scene 或 backend；
 - `Editor` 是工具侧已安装 target，但不由 `Tina::GameSDK` 聚合链接；
 - 持久化身份仍只有 stable entity/parent ID 与 `AssetId`，没有 Runtime `EntityId`、generation、Handle、Lease 或 GPU
   identity；
-- `snapshotBytes()` 是唯一 preview/cook 输入，不生成第二份语义相近的 editor wire payload。
+- `snapshotBytes()` / `payloadBytes()` 是唯一 preview/cook 输入，不生成第二份语义相近的 editor wire payload。
 
 ## 容量边界
 
 | 预算 | 默认 | hard limit / 规则 |
 | --- | ---: | --- |
 | entity | 4096 | `World2DSnapshotWire::MaximumEntities` |
+| prefab node | 4096 | `PrefabWire::MaxNodes` |
 | gameplay bytes | 4 MiB | `World2DSnapshotWire::MaximumGameplayBytes` |
 | history entries（含 current） | 32 | 2..256 |
 | history canonical bytes（含 current） | 16 MiB | 64 bytes..1 GiB |
@@ -101,6 +107,8 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 - `upsertEntity(entity)`：按 stable ID 替换或追加一个 entity，parent 仍必须指向此前 entity；
 - `eraseEntitySubtree(id)`：按 topological authoring order 删除目标及全部后代，避免悬空 parent；
 - `setGameplay(schema, version, bytes)`：游戏自有 blob 仍要求“空 blob ↔ 零 schema/version、非空 blob ↔ 非零”；
+- `World3DAuthoringDocument::replace/loadPayload/upsertNode/eraseNodeSubtree`：在 Prefab v2 上提供相同的
+  canonical publication、subtree 删除、容量与失败原子性；
 - `undo()` / `redo()`：只移动已发布 revision cursor，不重新解析、不分配。
 
 相同 canonical bytes 是 no-op，不增加 revision 或裁剪 redo。成功 edit/undo/redo 单调推进 document revision；达到
@@ -130,10 +138,13 @@ cmake --build --preset windows-vnext-bgfx-product-2d-debug `
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe `
   --gtest_filter=PrimaryWindowUICapabilityTest.CommittedLayoutRectCopiesPreviousPublishedWorldRectAndExpires
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
-  --frames=60 --frame-delay-ms=0 `
+  --frames=60 --frame-delay-ms=0 --workspace=2d `
   --document-path=artifacts/editor_shell/smoke/world2d.tworld
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
-  --frames=10 --frame-delay-ms=0 --no-auto-demo `
+  --frames=60 --frame-delay-ms=0 --workspace=3d `
+  --document-path=artifacts/editor_shell/smoke/world3d.tprefab
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
+  --frames=10 --frame-delay-ms=0 --no-auto-demo --workspace=2d `
   --document-path=artifacts/editor_shell/smoke/world2d.tworld
 ```
 
@@ -146,10 +157,11 @@ Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirecto
 
 document 与 shell 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；GPU viewport 的 Camera、
 proxy transforms 与 revision 来自同一 preview World/binding，committed UI rect 正确归一化且不保存 snapshot borrow；非法 edit 原子失败；
-subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 三个公共头
+subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 2D/3D 公共头
 isolation 编译通过；已有文件加载为 clean baseline、加载失败不改变 current/history；文件保存 exact canonical bytes、
 覆盖失败不删除旧目标；shell 自动完成
-Move → Apply Transform → Undo → Redo → Save，在五个 revision 状态均成功实例化 runtime preview，Save 不增加第六次 instantiate。
+Move → Apply Transform → Undo → Redo → Save，在五个 revision 状态均成功实例化 runtime preview，Save 不增加第六次 instantiate；
+3D smoke 还必须证明 Position Z、Rotation X/Y/Z 与 Scale Z 在 canonical Prefab、Scene preview 与结构化结果中一致。
 
 后续产品切片依次为：viewport gizmo transaction；TileMap root+chunk authoring/cook；
 SpriteAnimationClip timeline authoring/cook。每个切片继续只保留现行 schema，不增加旧资产兼容分支。

@@ -2,6 +2,9 @@
 
 #include "detail/UITextPaintEmitter.hpp"
 
+#include <tina/ui/UIErrors.hpp>
+
+#include <array>
 #include <memory>
 #include <memory_resource>
 #include <utility>
@@ -23,6 +26,78 @@ namespace {
 {
     return UI::premultiply(UI::rgb(0xE6EDF3));
 }
+
+class BaselineRasterizer final : public UI::IUITextRasterizer {
+  public:
+    [[nodiscard]] Core::Result<UI::UIFontFaceId> openFace(
+        std::span<const std::byte> fontBytes, i32 faceIndex) override
+    {
+        if (!fontBytes.empty() || faceIndex != 0)
+        {
+            return Core::failure(UI::UIErrorCode::InvalidFont,
+                                 "Baseline test rasterizer only exposes its built-in face");
+        }
+        return UI::UIFontFaceId{.index = 0, .generation = 1};
+    }
+
+    [[nodiscard]] Core::Status closeFace(UI::UIFontFaceId) noexcept override
+    {
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UI::UITextMetrics> measure(
+        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style) override
+    {
+        return UI::UITextMetrics{
+            .measuredSize = {
+                .width = utf8.empty() ? 0.0F : 5.0F,
+                .height = utf8.empty() ? 0.0F : style.logicalSize * style.lineHeightScale,
+            },
+            .codepointCount = utf8.empty() ? 0U : 1U,
+            .lineCount = utf8.empty() ? 0U : 1U,
+        };
+    }
+
+    [[nodiscard]] Core::Result<UI::UITextRasterBatch> raster(
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style) override
+    {
+        auto metrics = measure(face, utf8, style);
+        if (!metrics)
+        {
+            return Core::failure(metrics.error());
+        }
+        if (utf8 != "g")
+        {
+            return Core::failure(UI::UIErrorCode::InvalidText,
+                                 "Baseline test rasterizer accepts only g");
+        }
+        return UI::UITextRasterBatch{
+            .metrics = *metrics,
+            .baselineFromLineTop = 8.0F,
+            .glyphs = m_glyphs,
+            .coverage = m_coverage,
+        };
+    }
+
+    [[nodiscard]] UI::UITextRasterizerCapacity capacity() const noexcept override
+    {
+        return {.faceCapacity = 1, .maxGlyphsPerRaster = 1, .coverageByteCapacity = 40};
+    }
+
+  private:
+    std::array<UI::UITextGlyphRaster, 1> m_glyphs{
+        UI::UITextGlyphRaster{
+            .codepoint = static_cast<u32>('g'),
+            .advance = 5.0F,
+            .bearingY = 7.0F,
+            .width = 4,
+            .height = 10,
+            .coverageOffset = 0,
+            .coveragePitch = 4,
+        },
+    };
+    std::array<u8, 40> m_coverage{};
+};
 
 TEST(UITextPaintEmitterTests, EmitsDeterministicFallbackAndRestoresBaseXAcrossChainedLines)
 {
@@ -99,6 +174,40 @@ TEST(UITextPaintEmitterTests, EmitsAtlasGlyphsWhenRasterSourceIsAvailable)
     EXPECT_EQ(output[1].paintOrdinal, 8U);
     EXPECT_EQ(nextPaintOrdinal, 9U);
     EXPECT_GT(cursor.x, 4.0F);
+}
+
+TEST(UITextPaintEmitterTests, UsesRasterBaselineToKeepDescenderInsideLineBox)
+{
+    BaselineRasterizer rasterizer;
+    auto face = rasterizer.openFace({}, 0);
+    ASSERT_TRUE(face.has_value());
+    auto atlasResult = UI::UIGlyphAtlas::Create(UI::UIGlyphAtlasCapacity{
+        .width = 32,
+        .height = 32,
+        .maxGlyphs = 1,
+    });
+    ASSERT_TRUE(atlasResult.has_value());
+    std::unique_ptr<UI::UIGlyphAtlas> atlas = std::move(*atlasResult);
+
+    std::pmr::vector<UI::UICommittedPaintEntry> output;
+    output.reserve(1);
+    u32 nextPaintOrdinal = 0;
+    const UI::UICommittedLayoutEntry layoutEntry{
+        .effectiveClip = {.x = 0.0F, .y = 20.0F, .width = 100.0F, .height = 15.0F},
+    };
+    UI::Detail::UITextPaintEmitter::append(
+        output, layoutEntry, nextPaintOrdinal, "g", testStyle(), testColor(), 10.0F, 20.0F,
+        UI::Detail::UITextPaintRasterSource{
+            .rasterizer = &rasterizer,
+            .face = *face,
+            .atlas = atlas.get(),
+        },
+        nullptr);
+
+    ASSERT_EQ(output.size(), 1U);
+    EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::Glyph);
+    EXPECT_FLOAT_EQ(output[0].worldRect.y, 21.0F);
+    EXPECT_LE(output[0].worldRect.bottom(), layoutEntry.effectiveClip.bottom());
 }
 
 TEST(UITextPaintEmitterTests, RollsBackPartialAtlasOutputAndOrdinalsBeforeFallback)

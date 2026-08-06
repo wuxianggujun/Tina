@@ -548,7 +548,8 @@ blocked flags；可选 object layer 只栅格化 property 精确匹配的 visibl
 
 ## Editor
 
-`Tina::Editor` 是独立工具侧 target，不进入 Runtime `EngineHost`，也不由 `Tina::GameSDK` 聚合链接。
+`Tina::Editor` 是不依赖 UI/Runtime/Scene/backend 的工具侧 document target；`Tina::EditorApp` 是独立桌面组合 target，
+负责 2D/3D workspace、retained UI、Runtime preview 与 GPU viewport，不把这些依赖反向带入 document 层。
 `World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
 entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
 
@@ -561,13 +562,22 @@ parent、非有限 component、旧 schema、document 容量或 history byte 容�
 
 `snapshotBytes()` 就是 cook/runtime preview，不存在 editor-only wire format；可直接交给
 `AssetFormat::parseWorld2DSnapshot()`，随后由 `Scene::instantiateWorld2DSnapshot()` 消费。借用 bytes 在下一次成功
-edit/undo/redo 后失效。完整场景、容量和失败契约见 [2D Editor](editor-2d.md)。
+edit/undo/redo 后失效。完整场景、容量和失败契约见 [Editor 2D / 3D](editor-2d.md)。
+
+`World3DAuthoringDocument::Create(config)` 以当前 Prefab v2 创建 move-only canonical owner，提供
+`replace()`、`loadPayload()`、`upsertNode()`、`eraseNodeSubtree()` 与相同的 bounded undo/redo 原子性。
+`payloadBytes()` 是唯一 3D preview/cook 输入；stable node ID、topological parent index、完整 TRS、Mesh/Material
+`AssetId` 与 visibility 都由当前 Prefab writer/parser 验证。EditorApp 的 3D Inspector 编辑完整 TRS XYZ，提交时一次
+从 Euler XYZ 生成 normalized quaternion，不清零未编辑的 hierarchy/asset/visibility 字段。
 
 `loadWorld2DAuthoringDocument(utf8Path, document)` 以 document 配置在当前 World2D schema 内可容纳的最大 wire size 为读取上限，读取成功后
 复用 `loadSnapshot()` 原子建立 baseline；read/schema/document/history 容量失败不改变 current 或 undo/redo。
 `saveWorld2DAuthoringDocument(utf8Path, document)` 把当前 `snapshotBytes()` 写入同目录临时文件并原子替换目标，
 自动创建父目录。失败返回底层 Core IO error + `saveWorld2DAuthoringDocument=replace` context，不改变 document、
 revision/history 或已存在的目标文件；该 API 不引入 editor-only wire format。
+
+`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v2 提供同一读取上限、clean baseline、
+atomic sibling replace 与失败不变契约。
 
 ## Asset 与 Cooked
 

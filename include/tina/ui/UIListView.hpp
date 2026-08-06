@@ -48,6 +48,8 @@ struct UIListViewCreateConfig final {
 };
 
 struct UIListViewStyle final {
+    // Exact logical row extent. It must be large enough for the active
+    // CollectionItem text line; layout rejects a row that would clip text.
     float rowHeight = 28.0F;
     u32 overscanRows = 2;
     UIScrollBarVisibility scrollBarVisibility = UIScrollBarVisibility::Auto;

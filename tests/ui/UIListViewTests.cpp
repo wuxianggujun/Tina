@@ -78,7 +78,8 @@ struct ListDataSource final {
 };
 
 [[nodiscard]] std::unique_ptr<UI::UIContext>
-createContext(Platform::WindowId window, usize nodeCapacity, std::pmr::memory_resource& resource)
+createContext(Platform::WindowId window, usize nodeCapacity, std::pmr::memory_resource& resource,
+              bool applyDefaultProductChrome = false)
 {
     auto result = UI::UIContext::Create(window,
                                         {
@@ -86,7 +87,7 @@ createContext(Platform::WindowId window, usize nodeCapacity, std::pmr::memory_re
                                             .rootCapacity = 1,
                                             .routePathCapacity = nodeCapacity,
                                             .textByteCapacity = 4096,
-                                            .applyDefaultProductChrome = false,
+                                            .applyDefaultProductChrome = applyDefaultProductChrome,
                                         },
                                         resource);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
@@ -96,6 +97,12 @@ createContext(Platform::WindowId window, usize nodeCapacity, std::pmr::memory_re
 [[nodiscard]] std::unique_ptr<UI::UIContext> createContext(Platform::WindowId window, usize nodeCapacity)
 {
     return createContext(window, nodeCapacity, *std::pmr::get_default_resource());
+}
+
+[[nodiscard]] std::unique_ptr<UI::UIContext> createProductContext(Platform::WindowId window,
+                                                                  usize nodeCapacity)
+{
+    return createContext(window, nodeCapacity, *std::pmr::get_default_resource(), true);
 }
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
@@ -153,6 +160,27 @@ void assertOk(Core::Status status)
         }
     }
     return nullptr;
+}
+
+[[nodiscard]] const UI::UICommittedLayoutEntry* findLayoutEntry(UI::UICommittedLayoutView view,
+                                                                 UI::UINodeId node) noexcept
+{
+    for (const UI::UICommittedLayoutEntry& entry : view.entries())
+    {
+        if (entry.node == node)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+void expectContains(UI::UILogicalRect outer, UI::UILogicalRect inner)
+{
+    EXPECT_LE(outer.x, inner.x);
+    EXPECT_LE(outer.y, inner.y);
+    EXPECT_GE(outer.right(), inner.right());
+    EXPECT_GE(outer.bottom(), inner.bottom());
 }
 
 class UIListViewTest : public testing::Test {
@@ -593,6 +621,81 @@ TEST_F(UIListViewTest, StylesheetSelectionCacheClearsWhenMaterializedRowIsReboun
                       return entry.solidFill == selectedColor;
                   }),
               0U);
+}
+
+TEST_F(UIListViewTest, ProductChromeKeepsConsecutiveRowTextInsideRequestedBounds)
+{
+    constexpr u32 RowCapacity = 4;
+    auto context = createProductContext(window, ContextNodeCapacity);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    ListDataSource source{.count = 2, .label = "Row"};
+
+    const UI::UINodeId listView = *updater.createElement(
+        root.rootNodeId(),
+        UI::makeListViewElement({.materializedItemCapacity = RowCapacity}));
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(180.0F, 80.0F)));
+    assertOk(updater.setLayoutStyle(listView, fixedSize(180.0F, 80.0F)));
+    assertOk(updater.setListViewStyle(
+        listView,
+        {
+            .rowHeight = 27.0F,
+            .overscanRows = 0,
+            .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+            .wheelStep = 27.0F,
+        }));
+    assertOk(updater.setListViewDataSource(listView, source.view()));
+    assertOk(context->commitLayout({.width = 180.0F, .height = 80.0F}));
+
+    const UI::UISemanticsEntry* firstRow = findVirtualItem(context->committedSemantics(), 0);
+    const UI::UISemanticsEntry* secondRow = findVirtualItem(context->committedSemantics(), 1);
+    ASSERT_NE(firstRow, nullptr);
+    ASSERT_NE(secondRow, nullptr);
+    EXPECT_LE(firstRow->worldRect.bottom(), secondRow->worldRect.y);
+
+    const UI::UICommittedLayoutEntry* firstLayout = findLayoutEntry(context->committedLayout(), firstRow->node);
+    const UI::UICommittedLayoutEntry* secondLayout = findLayoutEntry(context->committedLayout(), secondRow->node);
+    ASSERT_NE(firstLayout, nullptr);
+    ASSERT_NE(secondLayout, nullptr);
+    for (const UI::UICommittedLayoutEntry* rowLayout : {firstLayout, secondLayout})
+    {
+        const UI::UICommittedContentPlacement& placement = rowLayout->contentPlacement;
+        ASSERT_TRUE(placement.hasIntrinsicContent);
+        expectContains(
+            placement.contentBox,
+            {
+                .x = placement.origin.x,
+                .y = placement.origin.y,
+                .width = placement.intrinsicSize.width,
+                .height = placement.intrinsicSize.height,
+            });
+    }
+
+    const UI::UIPremultipliedRgba8Color textColor =
+        UI::premultiply(UI::makeDefaultProductTheme().textPrimary);
+    usize firstRowTextPaintCount = 0;
+    usize secondRowTextPaintCount = 0;
+    for (const UI::UICommittedPaintEntry& paint : context->committedPaint().entries())
+    {
+        if (paint.solidFill != textColor || (paint.node != firstRow->node && paint.node != secondRow->node))
+        {
+            continue;
+        }
+        const UI::UICommittedLayoutEntry& rowLayout = paint.node == firstRow->node ? *firstLayout : *secondLayout;
+        expectContains(rowLayout.worldRect, paint.worldRect);
+        expectContains(paint.effectiveClip, paint.worldRect);
+        if (paint.node == firstRow->node)
+        {
+            ++firstRowTextPaintCount;
+            EXPECT_LE(paint.worldRect.bottom(), secondLayout->worldRect.y);
+        } else
+        {
+            ++secondRowTextPaintCount;
+        }
+    }
+    EXPECT_GT(firstRowTextPaintCount, 0U);
+    EXPECT_GT(secondRowTextPaintCount, 0U);
 }
 
 } // namespace

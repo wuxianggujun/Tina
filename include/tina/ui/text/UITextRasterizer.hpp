@@ -64,6 +64,10 @@ struct UITextGlyphRaster final {
 // raster() on the same rasterizer instance, or by destroying the rasterizer.
 struct UITextRasterBatch final {
     UITextMetrics metrics{};
+    // Distance from the logical line top to the font baseline. This is
+    // backend-neutral so paint does not have to guess a baseline from the
+    // requested line height.
+    float baselineFromLineTop = 0.0F;
     std::span<const UITextGlyphRaster> glyphs{};
     std::span<const u8> coverage{};
 };

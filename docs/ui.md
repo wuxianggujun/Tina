@@ -205,6 +205,9 @@ callback 副作用。
   Tab/Shift+Tab 关闭并退出 Popup scope，外部点击关闭且阻止 click-through；
 - ListView：Up/Down、PageUp/PageDown、Home/End、Keyboard/Gamepad activate 与 stable-key selection；
 - TreeView：沿用集合导航，并以 Left/Right 折叠、展开或移动到父/子项；
+- ListView/TreeView 的 `rowHeight` 是精确行高，必须容纳当前 `CollectionItem` 单行文本；内部 row 仅保留
+  横向 padding，纵向内容盒使用完整行高并居中放置文本。字体 raster batch 显式发布 line-top baseline，
+  glyph paint 与 clip 必须完整落在所属 row 内，不能依赖下一行覆盖或静默裁掉 descender；
 - TextEdit：Pointer focus/selection，Tab traversal，Left/Right/Home/End、Backspace/Delete、Shift selection、
   Ctrl+A、committed text 与 IME；
 - ProgressBar：非交互 determinate range/value，hit policy 为 Ignore。

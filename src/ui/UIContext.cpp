@@ -218,6 +218,20 @@ using Detail::UINineSlicePatchBatch;
 inline constexpr u8 ThemeDirtyPaint = 1U << 0U;
 inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
 inline constexpr u8 ThemeDirtyLayoutAncestor = 1U << 2U;
+inline constexpr float CollectionRowHorizontalPadding = 8.0F;
+inline constexpr float CollectionRowTextFitTolerance = 0.001F;
+
+void configureCollectionRowLayout(UILayoutStyle& layout, float rowHeight,
+                                  float leftPadding = CollectionRowHorizontalPadding) noexcept
+{
+    layout.size.height = UILayoutLength::Px(rowHeight);
+    layout.padding = UIEdgeSpacing{
+        .left = leftPadding,
+        .top = 0.0F,
+        .right = CollectionRowHorizontalPadding,
+        .bottom = 0.0F,
+    };
+}
 
 [[nodiscard]] constexpr bool ownsDirectionalNavigation(BuiltinElementKind kind) noexcept
 {
@@ -1708,6 +1722,13 @@ struct UIContext::Impl final {
             {
                 return bound;
             }
+            if (textStatesByIndex[currentChild].metrics.measuredSize.height >
+                state.style.rowHeight + CollectionRowTextFitTolerance)
+            {
+                return fail(UIErrorCode::InvalidControlValue,
+                            "UI ListView row height is smaller than its text line box");
+            }
+            configureCollectionRowLayout(layoutStylesByIndex[currentChild], state.style.rowHeight);
             layoutScratchByIndex[currentChild].effectiveVisibility = rowVisibility;
             const double logicalY = static_cast<double>(logicalIndex) * state.style.rowHeight;
             const float rowY = normalizeFloat(
@@ -1898,11 +1919,14 @@ struct UIContext::Impl final {
                 return bound;
             }
             UILayoutStyle& rowStyle = layoutStylesByIndex[currentChild];
-            rowStyle.size.height = UILayoutLength::Px(state.style.rowHeight);
-            rowStyle.padding.left = normalizeFloat(static_cast<float>(leftPadding));
-            rowStyle.padding.right = 8.0F;
-            rowStyle.padding.top = 4.0F;
-            rowStyle.padding.bottom = 4.0F;
+            if (textStatesByIndex[currentChild].metrics.measuredSize.height >
+                state.style.rowHeight + CollectionRowTextFitTolerance)
+            {
+                return fail(UIErrorCode::InvalidControlValue,
+                            "UI TreeView row height is smaller than its text line box");
+            }
+            configureCollectionRowLayout(rowStyle, state.style.rowHeight,
+                                         normalizeFloat(static_cast<float>(leftPadding)));
             layoutScratchByIndex[currentChild].effectiveVisibility = rowVisibility;
             const double logicalY = static_cast<double>(logicalIndex) * state.style.rowHeight;
             const float rowY = normalizeFloat(
@@ -7025,8 +7049,7 @@ struct UIContext::Impl final {
             }
             const UINodeId item = *itemResult;
             UILayoutStyle& itemLayout = layoutStylesByIndex[item.index()];
-            itemLayout.size.height = UILayoutLength::Px(state.style.rowHeight);
-            itemLayout.padding = UIEdgeSpacing::HorizontalVertical(8.0F, 4.0F);
+            configureCollectionRowLayout(itemLayout, state.style.rowHeight);
         }
         rollback.release();
         return listView;
@@ -7073,8 +7096,7 @@ struct UIContext::Impl final {
             }
             const UINodeId item = *itemResult;
             UILayoutStyle& itemLayout = layoutStylesByIndex[item.index()];
-            itemLayout.size.height = UILayoutLength::Px(state.style.rowHeight);
-            itemLayout.padding = UIEdgeSpacing::HorizontalVertical(8.0F, 4.0F);
+            configureCollectionRowLayout(itemLayout, state.style.rowHeight);
         }
         rollback.release();
         return treeView;
@@ -11529,7 +11551,7 @@ struct UIContext::Impl final {
             {
                 break;
             }
-            layoutStylesByIndex[child].size.height = UILayoutLength::Px(state.style.rowHeight);
+            configureCollectionRowLayout(layoutStylesByIndex[child], state.style.rowHeight);
             child = childRecord->nextSiblingIndex;
         }
         return Core::success();
@@ -11875,7 +11897,8 @@ struct UIContext::Impl final {
             {
                 break;
             }
-            layoutStylesByIndex[child].size.height = UILayoutLength::Px(state.style.rowHeight);
+            configureCollectionRowLayout(layoutStylesByIndex[child], state.style.rowHeight,
+                                         layoutStylesByIndex[child].padding.left);
             child = childRecord->nextSiblingIndex;
         }
         return Core::success();

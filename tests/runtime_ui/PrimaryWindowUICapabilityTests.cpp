@@ -1100,7 +1100,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ListViewFacadeRoundTripsAndExpiresWithPhas
 {
     constexpr u32 MaterializedItemCapacity = 12;
     constexpr UI::UIListViewStyle ListStyle{
-        .rowHeight = 20.0F,
+        .rowHeight = 24.0F,
         .overscanRows = 1,
         .scrollBarVisibility = UI::UIScrollBarVisibility::Always,
         .wheelStep = 20.0F,
@@ -1187,7 +1187,7 @@ TEST_F(PrimaryWindowUICapabilityTest, TreeViewFacadeRoundTripsExpansionAndExpire
 {
     constexpr u32 MaterializedItemCapacity = 12;
     constexpr UI::UITreeViewStyle TreeStyle{
-        .rowHeight = 20.0F,
+        .rowHeight = 24.0F,
         .overscanRows = 1,
         .scrollBarVisibility = UI::UIScrollBarVisibility::Always,
         .wheelStep = 20.0F,

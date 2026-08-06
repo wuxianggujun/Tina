@@ -283,6 +283,7 @@ endif ()
 add_subdirectory(src/runtime)
 if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(src/desktop)
+    add_subdirectory(src/editor_app)
 endif()
 
 include(TinaGameSdkPackage)
