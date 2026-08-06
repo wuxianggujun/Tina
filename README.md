@@ -12,6 +12,7 @@ The current retained UI still lives in `include/tina/ui` and `src/ui`. Reference
 - `IGameApplication` owns program startup/shutdown; `IGameState` owns frame behavior.
 - Platform/Input uses Tina contracts with a private GLFW adapter.
 - Render uses backend-neutral frame/scene data with a private bgfx backend.
+- Navigation2D provides schema-v1 grids, generation-safe dynamic blockers, deterministic synchronous/incremental A*, and resident TileMap conversion.
 - Catalog/Cooked assets, AssetId, Handle/Lease, task-backed loading, GPU upload, and retirement exist.
 - The retained UI includes layout, routing, text/glyph rendering, Button, Checkbox, Slider,
   ProgressBar, RadioButton, single-line TextEdit, ScrollView, Dropdown/Popup, and virtualized
@@ -19,7 +20,7 @@ The current retained UI still lives in `include/tina/ui` and `src/ui`. Reference
 - `tina_sample_ui_showcase` presents 20 controls, layered interaction feedback, collection/scroll
   workflows, and live Dark/Light themes.
 - Audio and Physics2D have optional miniaudio and Box2D adapters.
-- `tina_sample_2d` and `tina_sample_3d` are the product smoke entry points.
+- `tina_sample_2d` covers Catalog/TileMap/Navigation2D/UI/Audio/Physics2D; `tina_sample_3d` covers the 3D product path.
 
 Public headers and the Game SDK do not expose bgfx, GLFW, Box2D, miniaudio, FreeType, cgltf,
 stb_image, MikkTSpace, or xxHash types.

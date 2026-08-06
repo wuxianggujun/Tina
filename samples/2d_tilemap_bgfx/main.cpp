@@ -9,6 +9,7 @@
 #include <tina/asset/TileChunkDirtyCache.hpp>
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapInstance.hpp>
+#include <tina/asset/TileMapNavigation2D.hpp>
 #include <tina/asset/TileMapStream.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
 #include <tina/asset/TileMapPhysicsSync.hpp>
@@ -23,6 +24,7 @@
 #include <tina/core/hash/ContentHash.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/navigation2d/NavigationPathfinder2D.hpp>
 #include <tina/render/Camera2DProjection.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -118,6 +120,14 @@ inline constexpr u32 ExpectedCatalogRecipeAssets =
     ExpectedTileMapStreamChunks + 1; // independent character normal atlas
 inline constexpr u32 ExpectedUploadedTextures = 3;
 inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
+inline constexpr u32 ExpectedNavigationSolidTileCells = 11;
+inline constexpr u32 ExpectedNavigationBlockerRectangles = 1;
+inline constexpr u32 ExpectedNavigationBlockedCells = 13;
+inline constexpr u32 ExpectedNavigationBasePathCells = 7;
+inline constexpr u32 ExpectedNavigationDynamicPathCells = 9;
+inline constexpr Tina::Navigation2D::NavigationCell2D ProductNavigationStart{1, 3};
+inline constexpr Tina::Navigation2D::NavigationCell2D ProductNavigationGoal{5, 3};
+inline constexpr Tina::Navigation2D::NavigationCellRect2D ProductNavigationDynamicBlocker{4, 2, 1, 1};
 inline constexpr u32 ProductParticleCapacity = 12;
 inline constexpr u32 ProductParticleEmitted = 10;
 inline constexpr u32 ProductParticleExpiredAt300Frames = 4;
@@ -134,7 +144,7 @@ inline constexpr u32 ProductCulledPointLight2DCount =
 inline constexpr u32 ProductShadowOccluder2DCount = 2;
 inline constexpr u32 ProductSoftShadowPointLight2DCount = 2;
 inline constexpr float ProductAmbientLight2DScale = 0.28F;
-inline constexpr u32 ProductEvidenceSchema = 23;
+inline constexpr u32 ProductEvidenceSchema = 24;
 inline constexpr std::string_view PauseKeyboardMouseHint = "ESC / ENTER / P TO RESUME";
 inline constexpr std::string_view PauseGamepadHint = "B / A / START TO RESUME";
 inline constexpr float ProductWarmLightSourceRadiusMeters = 0.45F;
@@ -365,6 +375,18 @@ struct LifecycleCounters final {
     u64 tileMapStreamCommitted = 0;
     u64 tileMapStreamResident = 0;
     u64 tileMapStreamPeakResident = 0;
+    // 2D-NAV: schema-v1 TileMap conversion, deterministic A*, blocker, and cancellation evidence.
+    u16 navigationSchemaVersion = 0;
+    u64 navigationSolidTileCells = 0;
+    u64 navigationBlockerRectangles = 0;
+    u64 navigationBlockedCells = 0;
+    u64 navigationBasePathCells = 0;
+    u64 navigationDynamicPathCells = 0;
+    u64 navigationIncrementalExpandedNodes = 0;
+    u64 navigationGridRevision = 0;
+    u64 navigationDynamicBlockerMutations = 0;
+    bool navigationCancelled = false;
+    bool navigationReady = false;
     // 2D-FX: deterministic fixed-capacity particle/trail product evidence.
     u64 particleEmitted = 0;
     u64 particleExpired = 0;
@@ -784,6 +806,8 @@ struct TileMapResources final {
     Tina::Asset::AssetLease audioClipLease{};
     // Must remain at its final address: TileMapGridCollision borrows stream.map().
     std::optional<Tina::Asset::TileMapStream> tileMapStream{};
+    std::optional<Tina::Navigation2D::NavigationGrid2D> navigationGrid{};
+    std::optional<Tina::Navigation2D::NavigationPathfinder2D> navigationPathfinder{};
     std::optional<Tina::Asset::TileMapGridCollision> grid{};
     std::optional<Tina::Asset::CharacterController2D> controller{};
     std::optional<Tina::Asset::TileChunkDirtyCache> chunkDirtyCache{};
@@ -1105,6 +1129,135 @@ struct TileMapResources final {
 #endif
     counters.objectLayerObjectCount = layer->objectCount;
     counters.objectLayerConsumed = true;
+    return Tina::Core::success();
+}
+
+[[nodiscard]] Tina::Core::Status prepareNavigation2D(TileMapResources& resources, LifecycleCounters& counters)
+{
+    if (!resources.tileMapStream)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "resident tilemap is required for navigation setup");
+    }
+
+    auto built = Tina::Asset::buildTileMapNavigation2DData(
+        resources.tileMapStream->map(),
+        Tina::Asset::TileMapNavigation2DDataBuildConfig{
+            .solidTileLayerId = CollisionTileLayerId,
+            .blockerObjectLayerId = GameplayObjectLayerId,
+            .blockerPropertyKey = "role",
+            .blockerPropertyValue = "crate",
+        },
+        resources.memory);
+    if (!built)
+    {
+        return Tina::Core::failure(std::move(built.error()).withContext(
+            "prepareNavigation2D", "TileMap schema-v1 conversion"));
+    }
+
+    const Tina::Asset::TileMapNavigation2DDataBuildStats buildStats = built->stats;
+    auto grid = Tina::Navigation2D::NavigationGrid2D::Create(
+        std::move(built->data),
+        Tina::Navigation2D::NavigationGrid2DConfig{.dynamicBlockerCapacity = 4},
+        resources.memory);
+    if (!grid)
+    {
+        return Tina::Core::failure(std::move(grid.error()).withContext(
+            "prepareNavigation2D", "navigation grid creation"));
+    }
+
+    auto pathfinder = Tina::Navigation2D::NavigationPathfinder2D::Create(
+        Tina::Navigation2D::NavigationPathfinder2DConfig{.cellCapacity = grid->cellCount()},
+        resources.memory);
+    if (!pathfinder)
+    {
+        return Tina::Core::failure(std::move(pathfinder.error()).withContext(
+            "prepareNavigation2D", "pathfinder creation"));
+    }
+
+    auto basePath = pathfinder->findPath(*grid, ProductNavigationStart, ProductNavigationGoal);
+    if (!basePath)
+    {
+        return Tina::Core::failure(std::move(basePath.error()).withContext(
+            "prepareNavigation2D", "base path query"));
+    }
+    if (basePath->state != Tina::Navigation2D::NavigationPathQueryState::Reached)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product navigation base path was not reachable");
+    }
+    const Tina::Core::usize basePathCellCount = pathfinder->path().size();
+
+    auto blocker = grid->addBlocker(ProductNavigationDynamicBlocker);
+    if (!blocker)
+    {
+        return Tina::Core::failure(std::move(blocker.error()).withContext(
+            "prepareNavigation2D", "dynamic blocker insertion"));
+    }
+    auto dynamicPath = pathfinder->findPath(*grid, ProductNavigationStart, ProductNavigationGoal);
+    if (!dynamicPath)
+    {
+        return Tina::Core::failure(std::move(dynamicPath.error()).withContext(
+            "prepareNavigation2D", "dynamic blocker path query"));
+    }
+    if (dynamicPath->state != Tina::Navigation2D::NavigationPathQueryState::Reached)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product navigation dynamic path was not reachable");
+    }
+    const Tina::Core::usize dynamicPathCellCount = pathfinder->path().size();
+    if (auto status = grid->removeBlocker(*blocker); !status)
+    {
+        return Tina::Core::failure(std::move(status.error()).withContext(
+            "prepareNavigation2D", "dynamic blocker removal"));
+    }
+
+    auto incremental = pathfinder->begin(*grid, ProductNavigationStart, ProductNavigationGoal);
+    if (!incremental)
+    {
+        return Tina::Core::failure(std::move(incremental.error()).withContext(
+            "prepareNavigation2D", "incremental query begin"));
+    }
+    if (incremental->state != Tina::Navigation2D::NavigationPathQueryState::Pending)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product navigation incremental query did not enter Pending");
+    }
+    auto advanced = pathfinder->advance(*grid, 1);
+    if (!advanced)
+    {
+        return Tina::Core::failure(std::move(advanced.error()).withContext(
+            "prepareNavigation2D", "incremental query advance"));
+    }
+    if (advanced->state != Tina::Navigation2D::NavigationPathQueryState::Pending)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product navigation incremental query completed before cancellation evidence");
+    }
+    const Tina::Navigation2D::NavigationPathQueryResult cancelled = pathfinder->cancel();
+    if (cancelled.state != Tina::Navigation2D::NavigationPathQueryState::Cancelled)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product navigation incremental query did not cancel deterministically");
+    }
+
+    counters.navigationSchemaVersion = grid->data().schemaVersion();
+    counters.navigationSolidTileCells = buildStats.solidTileCells;
+    counters.navigationBlockerRectangles = buildStats.blockerRectangles;
+    counters.navigationBlockedCells = buildStats.blockedCells;
+    counters.navigationBasePathCells = basePathCellCount;
+    counters.navigationDynamicPathCells = dynamicPathCellCount;
+    counters.navigationIncrementalExpandedNodes = cancelled.expandedNodes;
+    counters.navigationGridRevision = grid->revision();
+    counters.navigationDynamicBlockerMutations = 2;
+    counters.navigationCancelled = true;
+    counters.navigationReady = true;
+
+    // The stored pathfinder starts idle and therefore does not retain a borrowed pointer
+    // to the local grid object that is about to move into its final owner.
+    pathfinder->reset();
+    resources.navigationGrid.emplace(std::move(*grid));
+    resources.navigationPathfinder.emplace(std::move(*pathfinder));
     return Tina::Core::success();
 }
 
@@ -1755,6 +1908,10 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                                    "initial visual/collision tilemap chunks are not resident");
     }
     if (const auto status = consumeGameplayObjectLayer(resources, counters); !status)
+    {
+        return status;
+    }
+    if (const auto status = prepareNavigation2D(resources, counters); !status)
     {
         return status;
     }
@@ -4914,6 +5071,20 @@ int main(int argc, char** argv)
         counters.tileMapStreamCommitted == ExpectedTileMapStreamChunks &&
         counters.tileMapStreamResident == ExpectedTileMapStreamChunks &&
         counters.tileMapStreamPeakResident >= ExpectedTileMapStreamChunks;
+    const bool navigationValid =
+        resources.navigationGrid.has_value() && resources.navigationPathfinder.has_value() &&
+        counters.navigationReady &&
+        counters.navigationSchemaVersion == Tina::Navigation2D::NavigationGrid2DSchema::Version &&
+        counters.navigationSolidTileCells == ExpectedNavigationSolidTileCells &&
+        counters.navigationBlockerRectangles == ExpectedNavigationBlockerRectangles &&
+        counters.navigationBlockedCells == ExpectedNavigationBlockedCells &&
+        counters.navigationBasePathCells == ExpectedNavigationBasePathCells &&
+        counters.navigationDynamicPathCells == ExpectedNavigationDynamicPathCells &&
+        counters.navigationIncrementalExpandedNodes == 1U &&
+        counters.navigationGridRevision == 3U && counters.navigationDynamicBlockerMutations == 2U &&
+        counters.navigationCancelled && resources.navigationGrid->dynamicBlockerCount() == 0U &&
+        resources.navigationGrid->revision() == counters.navigationGridRevision &&
+        resources.navigationPathfinder->cellCapacity() == resources.navigationGrid->cellCount();
     const bool product300EffectsValid =
         options->targetFrameCount != 300U ||
         (counters.particleExpired == ProductParticleExpiredAt300Frames &&
@@ -5010,7 +5181,7 @@ int main(int argc, char** argv)
                                                            counters.pauseOpenActionInvocations
                                                      : 0;
     bool ok = flowMenuCountersValid && selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
-              cameraFollowValid && chunkDirtyValid && tileMapStreamValid && effectsValid && lighting2DValid &&
+              cameraFollowValid && chunkDirtyValid && tileMapStreamValid && navigationValid && effectsValid && lighting2DValid &&
               normalMappingValid &&
               audioValid && audioDeviceValid &&
               characterAnimationValid && spriteBindingsValid && treeViewValid &&
@@ -5103,7 +5274,7 @@ int main(int argc, char** argv)
 
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
-    evidenceBytes.reserve(512);
+    evidenceBytes.reserve(640);
     appendLeU32(evidenceBytes, ProductEvidenceSchema);
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
@@ -5125,6 +5296,17 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.tileMapStreamCommitted);
     appendLeU64(evidenceBytes, counters.tileMapStreamResident);
     appendLeU64(evidenceBytes, counters.tileMapStreamPeakResident);
+    appendLeU32(evidenceBytes, counters.navigationSchemaVersion);
+    appendLeU64(evidenceBytes, counters.navigationSolidTileCells);
+    appendLeU64(evidenceBytes, counters.navigationBlockerRectangles);
+    appendLeU64(evidenceBytes, counters.navigationBlockedCells);
+    appendLeU64(evidenceBytes, counters.navigationBasePathCells);
+    appendLeU64(evidenceBytes, counters.navigationDynamicPathCells);
+    appendLeU64(evidenceBytes, counters.navigationIncrementalExpandedNodes);
+    appendLeU64(evidenceBytes, counters.navigationGridRevision);
+    appendLeU64(evidenceBytes, counters.navigationDynamicBlockerMutations);
+    appendLeU32(evidenceBytes, counters.navigationCancelled ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.navigationReady ? 1U : 0U);
     appendLeU32(evidenceBytes, ExpectedCharacterAnimationClips);
     appendLeU32(evidenceBytes, ExpectedCharacterAnimationSprites);
     appendLeU64(evidenceBytes, counters.characterAnimationResolvedFrames);
@@ -5400,6 +5582,19 @@ int main(int argc, char** argv)
                   << ",\"tileMapStreamCommitted\":" << counters.tileMapStreamCommitted
                   << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
                   << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
+                  << ",\"navigationReady\":" << (counters.navigationReady ? "true" : "false")
+                  << ",\"navigationSchemaVersion\":" << counters.navigationSchemaVersion
+                  << ",\"navigationSolidTileCells\":" << counters.navigationSolidTileCells
+                  << ",\"navigationBlockerRectangles\":" << counters.navigationBlockerRectangles
+                  << ",\"navigationBlockedCells\":" << counters.navigationBlockedCells
+                  << ",\"navigationBasePathCells\":" << counters.navigationBasePathCells
+                  << ",\"navigationDynamicPathCells\":" << counters.navigationDynamicPathCells
+                  << ",\"navigationIncrementalExpandedNodes\":"
+                  << counters.navigationIncrementalExpandedNodes
+                  << ",\"navigationGridRevision\":" << counters.navigationGridRevision
+                  << ",\"navigationDynamicBlockerMutations\":"
+                  << counters.navigationDynamicBlockerMutations
+                  << ",\"navigationCancelled\":" << (counters.navigationCancelled ? "true" : "false")
                   << ",\"cameraProjectionResolves\":" << counters.cameraProjectionResolves
                    << ",\"renderExtractions\":" << counters.renderExtractions
                    << ",\"pauseOverlayPushes\":" << counters.pauseOverlayPushes
@@ -5482,6 +5677,18 @@ int main(int argc, char** argv)
               << ",\"tileMapStreamCommitted\":" << counters.tileMapStreamCommitted
               << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
               << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
+              << ",\"navigationReady\":" << (counters.navigationReady ? "true" : "false")
+              << ",\"navigationSchemaVersion\":" << counters.navigationSchemaVersion
+              << ",\"navigationSolidTileCells\":" << counters.navigationSolidTileCells
+              << ",\"navigationBlockerRectangles\":" << counters.navigationBlockerRectangles
+              << ",\"navigationBlockedCells\":" << counters.navigationBlockedCells
+              << ",\"navigationBasePathCells\":" << counters.navigationBasePathCells
+              << ",\"navigationDynamicPathCells\":" << counters.navigationDynamicPathCells
+              << ",\"navigationIncrementalExpandedNodes\":"
+              << counters.navigationIncrementalExpandedNodes
+              << ",\"navigationGridRevision\":" << counters.navigationGridRevision
+              << ",\"navigationDynamicBlockerMutations\":" << counters.navigationDynamicBlockerMutations
+              << ",\"navigationCancelled\":" << (counters.navigationCancelled ? "true" : "false")
               << ",\"texturesUploaded\":" << counters.texturesUploaded
               << ",\"spriteBindingTextures\":" << counters.spriteBindingTextures
               << ",\"spriteTextureLeasesAcquired\":" << counters.spriteTextureLeasesAcquired

@@ -14,6 +14,7 @@ target_link_libraries(tina_sample_2d PRIVATE
     Tina::DesktopBootstrap
     Tina::Runtime
     Tina::Asset
+    Tina::Navigation2D
     Tina::Scene
     Tina::RenderBgfx
 )

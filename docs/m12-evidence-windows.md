@@ -98,7 +98,7 @@ FreeType/Physics2D/Audio/miniaudio/Asset 直接测试与300帧 sample 均 exit 0
 
 该归档 sample 的 `evidenceSchema=14` 验证 Dark→Light→Dark 与 Scene Explorer TreeView：13个 logical
 item、12个 materialized slot、两次 stable-key selection、最终 key `402`/index `12`、滚动、Theme paint
-和 Tree/TreeItem selected semantics。当前 sample/gate 已升级到 schema 23：继承 schema 19 的 normal-map
+和 Tree/TreeItem selected semantics。当前 sample/gate 已升级到 schema 24：继承 schema 19 的 normal-map
 证据与 schema 16 的两盏 committed
 `PointLight2D`、两条 `ShadowOccluder2D` 与 `sceneLightingFrames=renderExtractions`，并增加
 schema 17 的 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1` 以及 N4
@@ -107,7 +107,8 @@ character normal atlas、`normalMappedSpriteCount=1/0`、15个 recipe assets、`
 Texture2D 的 owner/retirement，并以 normal on/off 各两次同机差分关闭。schema 21 增加 Layer/Screen
 注册、2D Pause Screen push/pop、Back action、单用户输入设备 revision 与 Pause 提示；schema 22 增加
 Confirm action、focused-control precedence 与 action/auto-resume intent 字段；schema 23 再增加 Menu action、
-P/Start 路由、Base Menu 打开 Pause 与 Pause Menu 恢复字段。旧报告不反向改写；本节不把尚未
+P/Start 路由、Base Menu 打开 Pause 与 Pause Menu 恢复字段；schema 24 增加 Navigation2D 的
+solid/rectangle/blocked=`11/1/13`、基础/动态路径=`7/9`、单步推进、取消与 revision/mutation 字段。旧报告不反向改写；本节不把尚未
 归档的新 gate 运行结果写成既有 Windows 归档证据。
 动态 glyph atlas 修复后的 Dark/Light
 FreeType client capture 位于

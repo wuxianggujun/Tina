@@ -14,6 +14,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/Mesh3DBindingRegistry.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/Sprite2DBindingRegistry.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapInstance.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapNavigation2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapStream.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/GridCollision.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkView.hpp
@@ -55,6 +56,7 @@ set(TINA_ASSET_SOURCES
     Mesh3DBindingRegistry.cpp
     Sprite2DBindingRegistry.cpp
     TileMapInstance.cpp
+    TileMapNavigation2D.cpp
     TileMapStream.cpp
     GridCollision.cpp
     TileChunkView.cpp
@@ -115,7 +117,7 @@ target_include_directories(tina_asset PRIVATE
     ${PROJECT_SOURCE_DIR}/thirdparty/stb
 )
 target_link_libraries(tina_asset
-    PUBLIC Tina::Core Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render
+    PUBLIC Tina::Core Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render Tina::Navigation2D
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>" mikktspace::mikktspace
 )
 if (TINA_BUILD_PHYSICS2D)

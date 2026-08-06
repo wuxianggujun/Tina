@@ -22,6 +22,7 @@ function(tina_configure_game_sdk_package)
         Tina::Render
         Tina::Runtime
         Tina::Scene
+        Tina::Navigation2D
         Tina::AssetFormat
         Tina::Asset
         Tina::UI
@@ -37,6 +38,7 @@ function(tina_configure_game_sdk_package)
         tina_render
         tina_runtime
         tina_scene
+        tina_navigation2d
         tina_asset_format
         tina_asset_types
         tina_asset
@@ -52,6 +54,7 @@ function(tina_configure_game_sdk_package)
     tina_configure_game_sdk_target(tina_render Render)
     tina_configure_game_sdk_target(tina_runtime Runtime)
     tina_configure_game_sdk_target(tina_scene Scene)
+    tina_configure_game_sdk_target(tina_navigation2d Navigation2D)
     tina_configure_game_sdk_target(tina_asset_format AssetFormat)
     tina_configure_game_sdk_target(tina_asset_types AssetTypes)
     tina_configure_game_sdk_target(tina_asset Asset)
@@ -239,6 +242,7 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_SOURCE_DIR}/include/tina/render"
         "${PROJECT_SOURCE_DIR}/include/tina/runtime"
         "${PROJECT_SOURCE_DIR}/include/tina/scene"
+        "${PROJECT_SOURCE_DIR}/include/tina/navigation2d"
         "${PROJECT_SOURCE_DIR}/include/tina/asset_format"
         "${PROJECT_SOURCE_DIR}/include/tina/asset"
         "${PROJECT_SOURCE_DIR}/include/tina/ui"

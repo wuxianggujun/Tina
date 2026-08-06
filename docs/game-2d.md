@@ -1,7 +1,7 @@
 # 2D 产品架构
 
 `tina_sample_2d` 是当前正式 2D 产品门禁，不再只是 fixture Sprite 样例。完整 feature 图通过
-Catalog/TileMap/Scene/Particle/Trail/UI/Audio/Physics2D/FreeType/miniaudio 的300帧结构化与 Windows 视觉证据。
+Catalog/TileMap/Navigation2D/Scene/Particle/Trail/UI/Audio/Physics2D/FreeType/miniaudio 的300帧结构化与 Windows 视觉证据。
 
 ## 模块边界
 
@@ -9,6 +9,7 @@ Catalog/TileMap/Scene/Particle/Trail/UI/Audio/Physics2D/FreeType/miniaudio 的30
 Game2DState
   -> Catalog / AssetSystem / typed Cooked payload
   -> TileMapStream -> resident TileMapInstance + CharacterController2D
+  -> NavigationGrid2D + NavigationPathfinder2D
   -> optional PhysicsWorld2D
   -> Scene::World (Camera2D + SpriteRenderer2D + PointLight2D + ShadowOccluder2D)
   -> Scene::ParticleSystem2D + Trail2D
@@ -22,6 +23,7 @@ Game2DState
 - TileMap emit 保存 weak Tileset `AssetHandle`，每次非空可见 emit 借用 resolver，通过
   `Sprite2DBindingRegistry` intern packet-local texture ref，不保存产品 key/ref；
 - TileMap、角色控制、选择高亮、Physics sync 和产品规则留在 Asset/产品 State；
+- Navigation2D 由产品 State/Resources owner 持有，不进入 Scene World；TileMap 转换桥留在 Asset；
 - Render backend 不理解 tile/cell/gameplay，也不接收 AssetHandle；
 - Box2D、bgfx、FreeType、miniaudio 均位于可选私有 adapter。
 
@@ -94,7 +96,7 @@ bgfx 对每个 fragment 计算线性径向衰减。`sourceRadiusMeters=0` 时 fr
 积分或重叠区间 union。
 ambient、上述透明排序、连续 texture batch 与 premultiplied alpha 不变。没有 PointLight2D 组件时维持
 原 unlit 输出，inactive-only 可显式发布 ambient-only。产品 sample 固定创建暖/冷两盏相机内灯、1盏
-永久离屏 active light 与两条遮挡线并逐帧发布；当前 schema 23 继承 schema 19 并断言 `authoredPointLight2DCount=3`、
+永久离屏 active light 与两条遮挡线并逐帧发布；当前 schema 24 继承 schema 19 并断言 `authoredPointLight2DCount=3`、
 `pointLight2DCount=2`、`culledPointLight2DCount=1` 与默认 `softShadowPointLight2DCount=2`，同时继承
 schema 16 的双灯双遮挡 evidence。`RunProduct2dShadowVisualGate.ps1` 对 soft/hard 各重复两次并证明两种
 RGBA8 fingerprint 稳定且不同。角色 Sprite 另带独立3×1 normal atlas；`RunProduct2dNormalMapVisualGate.ps1`
@@ -226,6 +228,26 @@ ground 后向右行走并撞墙；它与 Box2D dynamic body 共用同一 Tile so
 受控 `--seed-tile-selection=x,y` 可以验证 logical→world→cell 命中和 selection highlight。默认 smoke
 不注入点击，`tileSelectionHits=0` 合法；UI 点击不得穿透成世界选择。
 
+## Navigation2D 产品接入
+
+`Tina::Navigation2D` 是独立于 `Scene::World` 的 backend-neutral 固定容量模块。产品在 visual/collision
+chunk 已驻留、gameplay object layer 已验证后调用 `Asset::buildTileMapNavigation2DData()`：
+
+1. hidden collision tile layer `20` 中带 Tileset `MaterialSolid` 的11个 cell 成为 base blocker；
+2. gameplay object layer `30` 中 visible Rectangle 且 `role=crate` 的 object `102` 栅格化为2个 cell；
+3. 去重后 schema-v1 数据含13个 blocked cell；引用 chunk 未驻留或 layer/object 非法时原子失败；
+4. State-owned `NavigationGrid2D` 预留4个 generation dynamic blocker；
+5. `NavigationPathfinder2D` 按完整32-cell map 容量一次性预分配 records/open-set/path storage。
+
+四方向单位代价 A* 使用 `f -> Manhattan heuristic -> row-major index` 决胜。产品从 `(1,3)` 到 `(5,3)`
+得到7-cell基础路径；添加 `{4,2,1,1}` dynamic blocker 后得到9-cell改道路径，随后移除 blocker。另一个
+`begin()` query 只 `advance(1)` 后调用 `cancel()`，终态必须为 `Cancelled`；add/remove 使 Grid revision 从1
+推进到3，最终 live dynamic blocker 为0。以上字段进入 schema 24 evidence。
+
+`begin()/advance()` 是 cooperative query，不创建 worker/thread；Pending 期间必须继续传入同一 Grid 地址与
+revision，否则终态为 `Invalidated`。blocked endpoint/open-set 耗尽是 `Unreachable`，不是 API error。
+完整 schema、借用和容量契约见 [2D 导航](navigation2d.md)。
+
 ## Physics2D 产品接入
 
 在 `TINA_BUILD_PHYSICS2D=ON` 图中：
@@ -264,7 +286,7 @@ retire 与零 underrun；miniaudio callback 调用 mixer 和 device lifecycle �
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx-product-2d
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_sample_2d tina_scene_tests tina_physics2d_tests tina_ui_tests tina_runtime_ui_tests `
+  --target tina_sample_2d tina_navigation2d_tests tina_scene_tests tina_physics2d_tests tina_ui_tests tina_runtime_ui_tests `
            tina_ui_render_integration_tests tina_ui_freetype_tests tina_audio_tests `
            tina_audio_miniaudio_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
@@ -276,7 +298,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=15`（含2个 cooked chunk 与独立 normal atlas）、`texturesUploaded=3`；
-- `evidenceSchema=23`，继承 schema 22 的 Confirm、schema 21 的输入设备提示、schema 20 的 UI Flow 与 schema 19 的 normal-map 产品证据，并要求 `sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
+- `evidenceSchema=24`，新增 Navigation2D 产品证据，并继承 schema 23 的 Menu、schema 22 的 Confirm、schema 21 的输入设备提示、schema 20 的 UI Flow 与 schema 19 的 normal-map 证据；仍要求 `sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
   `pointLight2DCount=2`、`culledPointLight2DCount=1`，并继承 schema 16 的双灯双遮挡证据；
   `shadowOccluder2DCount=2`、`softShadowPointLight2DCount=2`、
   `normalMappedSpriteCount=1`、`sceneLightingFrames=renderExtractions`，并保留 `uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
@@ -301,6 +323,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - `tileMapStreamRequests=2`、`tileMapStreamCommitted=2`、`tileMapStreamResident=2`，且每个 frame 都推进
   demand/pump/commit；
 - `objectLayerConsumed=true`、`objectLayerObjects=2`，稳定 object `101/102` 已被产品逻辑消费；
+- `navigationReady=true`、`navigationSchemaVersion=1`、solid/rectangle/blocked=`11/1/13`、基础/动态路径
+  cell=`7/9`、`navigationIncrementalExpandedNodes=1`、revision/mutation=`3/2` 且
+  `navigationCancelled=true`；
 - 300次 extraction/physics step，角色 grounded/walk/hit-right；
 - Tile/角色 base/角色 normal 三纹理 upload/binding、连续 sprite batch、Camera follow/interpolation、chunk cache；
 - 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；
@@ -351,7 +376,10 @@ Escape/Gamepad East 的 Back 路由给该 active Screen；Enter/Keypad Enter/Gam
 
 - 当前 streaming 是固定容量 Camera/layer demand owner，已有 retain-window demand-recency LRU，但不包含
   优先级 IO 调度、通用 Tile/Scene 编辑器、自动把任意 object layer 转成完整 gameplay、旧 schema
-  migration、navigation 或网络 rollback；
+  migration 或网络 rollback；
+- Navigation2D 当前只有 schema-v1矩形 grid、四方向单位代价 A*、property-tagged Rectangle blocker 与
+  cooperative query；没有 diagonal/weight/navmesh、内部 worker、crowd avoidance、独立 Cooked Navigation
+  AssetKind、Physics 自动同步或 editor bake；
 - Cooked SpriteAsset 的完整 atlas/PPU metadata resolve 仍可扩展，当前产品使用 Texture2D + 显式 UV/key；
 - GPU chunk mesh cache、复杂透明材质与多 camera/letterbox policy 尚未产品化；
 - 当前 2D-FX 是 CPU fixed-capacity Sprite2D extraction，不包含 Cooked FX asset schema、effect graph/editor、

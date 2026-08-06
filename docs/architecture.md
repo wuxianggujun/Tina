@@ -7,7 +7,7 @@
 
 Tina 当前是 C++23 2D/3D 游戏 Runtime，产品入口为：
 
-- `tina_sample_2d`：Catalog/TileMap/Scene/UI/Audio，可选 Physics2D、FreeType 和 miniaudio；
+- `tina_sample_2d`：Catalog/TileMap/Navigation2D/Scene/UI/Audio，可选 Physics2D、FreeType 和 miniaudio；
 - `tina_sample_3d`：glTF cook、Catalog/Prefab、Scene extraction 与 bgfx 绘制；
 - `tina_sample_null`：无窗口、无 GPU 的 Runtime 生命周期门禁；
 - 其余 `tina_sample_*_infrastructure`：模块或 adapter 夹具，不等同于产品门禁。
@@ -25,6 +25,7 @@ flowchart TD
     Render["Tina::Render"] --> Core
     Audio["Tina::Audio"] --> Core
     AssetFormat["Tina::AssetFormat"] --> Core
+    Navigation2D["Tina::Navigation2D"] --> Core
     UI["Tina::UI"] --> Core
     UI --> Platform
     Scene["Tina::Scene"] --> Core
@@ -38,6 +39,7 @@ flowchart TD
     Asset --> AssetFormat
     Asset --> Task
     Asset --> Render
+    Asset --> Navigation2D
     Runtime["Tina::Runtime"] --> Core
     Runtime --> Platform
     Runtime --> Task
@@ -73,6 +75,7 @@ flowchart TD
 | `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄 | 不含 bgfx 类型 |
 | `tina_audio` | AudioEngine、voice/bus/command/completion | 不含 miniaudio 类型 |
 | `tina_asset_format` | Cooked wire format 与 typed payload | Runtime 不读取源资产 |
+| `tina_navigation2d` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* | 只依赖 Core；不创建线程，不进入 Scene World |
 
 ### 产品模块
 
@@ -106,6 +109,8 @@ flowchart TD
 - Platform、Task、Render、Audio backend 由 bootstrap factory 创建，初始化失败必须逆序回滚。
 - 主窗口 `UIContext` 由 Runtime 私有持有；游戏只拿 root/phase-scoped facade，不拿裸指针。
 - `AssetHandle` 是弱 generation lookup，`AssetLease` 跨异步/帧边界强保活。
+- `NavigationGrid2D`/`NavigationPathfinder2D` 由产品 State/Resources owner 持有；Pending query 只借用开始时
+  同一 Grid 地址与 revision，Grid move/mutation 会使后续 `advance()` 确定性 `Invalidated`。
 - `Sprite2DBindingRegistry` 是固定容量 owner-thread owner，借用 `AssetSystem`/`IRenderDevice`；每个 Entry
   唯一拥有 resident `AssetLease`、`GpuTextureId` 与 binding，并直接 handoff 到 AssetSystem retirement。
 - `Mesh3DBindingRegistry` 是固定容量 owner-thread owner，借用 `AssetSystem`/`IRenderDevice`；Mesh entry
@@ -229,6 +234,15 @@ N16.3 后 Sprite registry Entry 是 2D resident Lease/GPU/binding 的唯一 owne
 registry retirement；backend 接受 Mesh/Texture 后原子失效 generation 与引用 binding，AssetSystem completion
 pin 再释放 Lease。2D 与 3D Scene/Render item 的持久 binding key、产品手写 key table 和调用方 registered/GPU
 cleanup 账簿都已删除。`ASSET-HANDLE-SCENE` 的 A1-A6 与 N16.1-N16.4 已完成。
+
+产品 2D 导航不进入 `Scene::World`。`Asset::buildTileMapNavigation2DData()` 从当前 resident
+`TileMapInstance` 的显式 solid tile layer 与 property-tagged visible Rectangle object 生成唯一现行 schema-v1
+数据；引用 chunk 未驻留、layer kind 或 object geometry 非法时原子失败。State 再创建固定容量
+`NavigationGrid2D` 与 `NavigationPathfinder2D`，动态 blocker 以 owner-aware generation ID 和 per-cell 引用计数
+叠加；四方向单位代价 A* 以 `f -> Manhattan heuristic -> row-major index` 稳定决胜。同步 `findPath()` 与
+分步 `begin()/advance()/cancel()` 共用同一 storage，`Reached/Unreachable/Cancelled/Invalidated` 均为明确结果。
+当前没有独立 Cooked Navigation `AssetKind`、自动 Physics 同步或内部 worker。完整契约见
+[2D 导航](navigation2d.md)。
 
 ## 当前 UI 边界
 

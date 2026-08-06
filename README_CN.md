@@ -12,13 +12,14 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 - Platform/Input 使用 Tina 公共契约与私有 GLFW adapter；
 - Render 使用后端无关 `RenderFrame`/`RenderScene`，bgfx 只存在于私有 backend；
 - Scene 支持 generation `EntityId`、Transform 层级及 2D/3D extraction；
+- Navigation2D 支持 schema-v1 栅格、generation 动态阻挡、确定性同步/分步 A* 与 TileMap 导航派生；
 - Asset 支持 Catalog/Cooked、AssetId、Handle/Lease、Task-backed IO/Main completion、GPU
   upload/retirement；
 - UI 支持 retained tree、布局、路由、文本/Glyph、Button、Checkbox、Slider、ProgressBar、RadioButton、
   单行 TextEdit、ScrollView、Dropdown/Popup 及虚拟化 ListView/TreeView；
 - `tina_sample_ui_showcase` 提供 20 控件工作台、完整交互层次、集合/滚动流程与 Dark/Light 实时换肤；
 - Audio 提供 backend-neutral engine 与可选 miniaudio；Physics2D 提供可选 Box2D 3.x adapter；
-- `tina_sample_2d` 是 Catalog/TileMap/UI/Audio/Physics2D 产品门禁，`tina_sample_3d` 是
+- `tina_sample_2d` 是 Catalog/TileMap/Navigation2D/UI/Audio/Physics2D 产品门禁，`tina_sample_3d` 是
   glTF/Prefab/Scene/Render 产品门禁。
 
 Game SDK 与公开头不暴露 bgfx、GLFW、Box2D、miniaudio、FreeType、cgltf、stb_image、MikkTSpace
@@ -61,7 +62,7 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx-product-2d
-cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d tina_physics2d_tests tina_ui_freetype_tests tina_audio_tests tina_audio_miniaudio_tests --parallel 2 -- /nr:false
+cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d tina_navigation2d_tests tina_physics2d_tests tina_ui_freetype_tests tina_audio_tests tina_audio_miniaudio_tests --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
 ```
 

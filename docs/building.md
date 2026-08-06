@@ -294,7 +294,7 @@ Dropdown/List/Tree selection、Tree expansion、ScrollView offset 和 UI root �
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx-product-2d
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_sample_2d tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
+  --target tina_sample_2d tina_navigation2d_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
            tina_ui_freetype_tests tina_physics2d_tests tina_audio_tests tina_audio_miniaudio_tests `
            tina_asset_tests --parallel 2 -- /nr:false
 ```
@@ -310,6 +310,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_ui_freetype_tests.ex
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_physics2d_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_navigation2d_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo
 ```
 
@@ -321,7 +322,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1
 ```
 
-主 gate 在模块测试与 schema 23、`texturesUploaded=3` 产品 sample 后，依次运行 soft/hard shadow
+主 gate 在模块测试与 schema 24、`texturesUploaded=3` 产品 sample 后，依次运行 soft/hard shadow
 差分与 normal-map on/off 四跑（on×2 + off×2）差分。只复验可见差分时可直接运行；两者都是同
 host/backend 证据，不是跨 GPU exact golden：
 

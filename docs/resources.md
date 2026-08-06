@@ -23,6 +23,7 @@ Catalog package
   -> optional Sprite2DBindingRegistry (borrow AssetSystem + RenderDevice)
      / Mesh3DBindingRegistry (borrow AssetSystem + RenderDevice)
   -> optional TileMapStream chunk residency owner
+  -> optional TileMapInstance -> NavigationGrid2DData schema-v1 conversion
   -> optional Null UploadTicket coordinator
 ```
 
@@ -47,6 +48,7 @@ Catalog package
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked 产品 consumer |
+| TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer + property-tagged visible Rectangle 原子生成 NavigationGrid2DData v1；当前不是新 AssetKind |
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
 `ParticleSystem2D`/`Trail2D` 与 3D `MeshRenderer3D` 复制 weak handle，并在 extraction 时显式借用产品 resolver；A2
@@ -305,6 +307,13 @@ optional cache，overflow 时按最近一次成功 demand update 的 recency 自
 `TileMapChunkNotResident`，重新 attach 会分配新的 residency generation，dirty cache 因而不会把旧
 resident 数据误当成 cache hit。
 
+`buildTileMapNavigation2DData(map, config, resource)` 位于 Asset 模块，但返回 Tina::Navigation2D-owned
+schema-v1 数据。solid tile layer 只把 Tileset `MaterialSolid` cell 设为 blocked；可选 object layer 只匹配
+visible Rectangle 的精确 property key/value，并按实际相交 cell 栅格化。引用 chunk 未驻留、layer kind
+错误、标记对象不是合法 Rectangle 或分配失败时不返回半份结果。该转换不修改 TileMapInstance，也不把
+Navigation 数据写回 Catalog；产品 State 决定 Grid/Pathfinder 容量与重建时机。详见
+[2D 导航](navigation2d.md)。
+
 `AssetKind` 还包含 Shader 与 Font 枚举值，但当前没有对应的公开 typed payload header、完整 Cooker 与
 产品消费闭环，不能把它们列为已完成资源类型。FreeType 字体仍通过显式 `TINA_UI_FONT_PATH`/fixture
 接入，详见 [UI](ui.md)。
@@ -363,8 +372,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
   视觉/尺寸矩阵与 `ui_image_nineslice_v1` benchmark 证据均已关闭，见 [UI 框架设计](ui-framework.md)与
   Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)；
 - TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；
-  优先级 IO 调度、editor authoring/undo/redo、自动 gameplay 生成、navigation 与旧 schema migration
-  仍须独立验收；
+  优先级 IO 调度、editor authoring/undo/redo、自动 gameplay 生成与旧 TileMap schema migration 仍须独立验收；
+- Navigation2D 的 runtime-derived schema-v1 grid、动态 blocker 和确定性 A* 已闭环；独立 Cooked
+  Navigation AssetKind、旧导航 schema migration、editor bake 与自动 Physics 同步仍未提供；
 - shader/font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收；
 - Linux 当前 tip GCC13/Clang22（含 sanitizer）复验已由 `TEST-001` 关闭；可选 Wayland/真显示器是独立扩展。
 

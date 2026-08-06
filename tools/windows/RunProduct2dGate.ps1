@@ -49,6 +49,7 @@ $BinDir = [System.IO.Path]::GetFullPath($BinDir)
 $expectedGate = 'bgfx-physics-freetype-audio'
 $targets = @(
     'tina_sample_2d',
+    'tina_navigation2d_tests',
     'tina_scene_tests',
     'tina_render_scene_tests',
     'tina_render_bgfx_tests',
@@ -63,6 +64,7 @@ $targets = @(
     'tina_asset_tests'
 )
 $testExes = @(
+    'tina_navigation2d_tests.exe',
     'tina_scene_tests.exe',
     'tina_render_scene_tests.exe',
     'tina_render_bgfx_tests.exe',
@@ -141,7 +143,18 @@ if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
 $requiredProductEvidence = @(
-    'evidenceSchema\":23',
+    'evidenceSchema\":24',
+    'navigationReady\":true',
+    'navigationSchemaVersion\":1',
+    'navigationSolidTileCells\":11',
+    'navigationBlockerRectangles\":1',
+    'navigationBlockedCells\":13',
+    'navigationBasePathCells\":7',
+    'navigationDynamicPathCells\":9',
+    'navigationIncrementalExpandedNodes\":1',
+    'navigationGridRevision\":3',
+    'navigationDynamicBlockerMutations\":2',
+    'navigationCancelled\":true',
     'sprite2DLightingConfigured\":true',
     'authoredPointLight2DCount\":3',
     'pointLight2DCount\":2',

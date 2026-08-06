@@ -25,6 +25,7 @@ enum class ErrorDomain : u16 {
     Audio = 10,
     Physics2D = 11,
     Cooker = 12,
+    Navigation2D = 13,
 };
 
 struct ErrorCode final {

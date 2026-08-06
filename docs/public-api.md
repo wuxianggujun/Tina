@@ -67,6 +67,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
 | `Tina::DesktopBootstrap` | optional installed Windows/Linux Desktop 组合入口；需 `COMPONENTS DesktopBootstrap` |
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、standalone Particle/Trail |
+| `Tina::Navigation2D` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
@@ -509,6 +510,27 @@ segment 各自从创建时计算 lifetime/age，width 按 normalized age 在 sta
 当前没有公开 SceneManager、ECS registry 或 Runtime-owned World capability。EnTT 不在公开面，也未被当前
 Scene target 使用。
 
+## Navigation2D
+
+`NavigationGrid2DData::Create()` 只接受 schema v1、精确 row-major cell flags 与正 finite cell size；旧
+schema 和保留 flag 直接失败。`NavigationGrid2D::Create()` 在调用方 PMR 上一次性建立固定容量
+`NavigationBlockerId` generation pool 与 per-cell 引用计数。`addBlocker()`、`updateBlocker()`、
+`removeBlocker()` 对容量、越界、stale 和 wrong-owner 失败保持旧状态；重叠 blocker 不会互相误清除，真实
+mutation 推进 `revision()`。
+
+`NavigationPathfinder2D::Create(cellCapacity)` 一次性分配 records/open-set/path storage。四方向单位代价 A*
+按 `f`、Manhattan heuristic、row-major index 确定性决胜。`findPath()` 同步完成查询；
+`begin()/advance(expansionBudget)` 提供调用方编排的分步查询，`cancel()` 产生吸收态 `Cancelled`。blocked
+endpoint 或 open set 耗尽返回 `Unreachable`；Pending 期间 Grid 地址或 revision 变化返回 `Invalidated`。
+越界 cell、零 budget 和未开始 query 是 `Core::Result` error。`path()` 只借用到下一次
+`begin()/reset()` 或 Pathfinder 析构。
+
+`Asset::buildTileMapNavigation2DData()` 是 TileMap 转换桥：solid tile layer 中 `MaterialSolid` cell 进入 base
+blocked flags；可选 object layer 只栅格化 property 精确匹配的 visible Rectangle。引用的 TileMapChunk 必须
+已驻留，任何 layer/chunk/object/schema 错误都不返回半份数据。结果当前不是 Catalog `AssetKind`；产品 State
+持有 Grid/Pathfinder，Scene、Runtime、Render 和 Physics2D 不隐式取得所有权。详见
+[2D 导航](navigation2d.md)。
+
 ## Asset 与 Cooked
 
 `AssetFormat` 定义 versioned manifest/cooked wire format 和 Texture2D/StaticMesh/Material/Prefab/EnvironmentMap/TileMap/
@@ -762,6 +784,8 @@ Jolt/Physics3D 尚未接入。
 | `AssetLease` | 强 CPU payload owner | lease reset/destroy |
 | `AudioVoiceId` | `AudioEngine` generation owner | 显式 destroy、engine shutdown/generation reuse；one-shot/stream terminal completion pump 后自动 retire |
 | `TileMapStream::map()` | `TileMapStream` 借用 | stream move/shutdown/destroy；borrower 必须先销毁 |
+| `NavigationBlockerId` | `NavigationGrid2D` generation owner | remove/grid destroy/generation reuse；跨 Grid 无效 |
+| `NavigationPathfinder2D::path()` | Pathfinder 借用 | 下一次 begin/reset 或 Pathfinder 析构 |
 | `GpuTextureId/GpuMeshId/GpuEnvironmentMapId` | RenderDevice | retire/destroy 时逻辑失效；有外部 pin 时由 completion marker（或 shutdown hard drain）证明完成，无 pin fallback 交给 backend deferred destroy |
 | PlatformFrame view | Platform | 下一次 poll/build |
 | Phase context/writer | Runtime callback | callback 返回 |
@@ -780,7 +804,7 @@ Jolt/Physics3D 尚未接入。
 `blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / present-return CPU
 submission ledger；Focus Scope/Modal/持久 Pointer Capture；ScrollView/Dropdown/Popup/虚拟
 ListView/TreeView；`UIFlowLayerId`/`UIFlowScreenId`、固定容量 Screen stack、16 槽 `UIFlowLocalUserId` 与 Gamepad assignment；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
-Invoke/Toggle/RangeValue/Value patterns。
+Invoke/Toggle/RangeValue/Value patterns；schema-v1 Navigation2D grid、动态 blocker 与确定性同步/分步 A*。
 
 **仍不存在或未完成：**
 

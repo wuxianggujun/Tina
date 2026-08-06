@@ -294,8 +294,9 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=y
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 ```
 
-N6 不包含优先级 IO 调度、GPU chunk mesh cache、editor、旧 schema migration、navigation 或自动
-gameplay 生成；当前 LRU 只管理 `TileMapStream` optional retained slot，不是通用 Asset cache。
+N6 当时不包含优先级 IO 调度、GPU chunk mesh cache、editor、旧 schema migration、navigation 或自动
+gameplay 生成；当前 LRU 只管理 `TileMapStream` optional retained slot，不是通用 Asset cache。后续
+Navigation2D 垂直切片见 [2D 导航](navigation2d.md)，不反向改写 N6 的历史范围。
 
 ## N7 - 2D-AUDIO-ADV
 
