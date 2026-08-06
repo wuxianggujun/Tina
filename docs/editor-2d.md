@@ -10,9 +10,9 @@ schema 兼容格式。
 独立 `Tina::Editor` target 提供 `World2DAuthoringDocument/File` 与 `World3DAuthoringDocument/File`；独立
 `Tina::EditorApp` 负责桌面组合，`tina_sample_editor_shell` 只保留薄 `main()`。2D Inspector 编辑 Position X/Y、
 Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整 Position/Rotation/Scale XYZ，并把 Euler XYZ 一次规范化为 quaternion。
-`Apply Transform`、`Move X +1`、Undo、Redo 都接到 active document，每次成功命令后从同一份 canonical bytes
-实例化新的 `Scene::World`。2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个 World/binding 驱动，
-不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
+`Apply Transform`、`Move X +1`、viewport Move、Undo、Redo 都接到 active document，每次成功 canonical command 后
+从同一份 bytes 实例化新的 `Scene::World`。2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
+World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
 当前 shell 的 retained UI 布局已完整铺开：Toolbar、2D/3D 模式切换、上下文工具条、Hierarchy dock、active viewport 工作区、
 可滚动 Inspector（Identity/Transform/Components/Authoring/Document）和底部 status bar 均由 `Flex`、`minMax`、
@@ -24,14 +24,16 @@ baseline，不存在的路径则作为新文档 Save target；Toolbar Save 原�
 Inspector/status bar 依据 saved baseline 显示 `Modified/Saved`；未配置路径时 Save 保持 disabled。
 2D 的五个字段和 3D 的九个字段都通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
 拒绝时恢复 canonical 字段并保持 document/history/preview 不变。2D Rotation Z 发布平面 Z quaternion；3D Euler XYZ
-发布完整规范化 quaternion，并保留 hierarchy、Mesh/Material 与 visibility。GPU proxy 同步读取完整 canonical TRS。viewport gizmo、TileMap/动画专用 document
-仍是后续切片；它们必须复用这里的 revision/failure 语义，不各自实现一套 undo stack 或 cooked preview。
+发布完整规范化 quaternion，并保留 hierarchy、Mesh/Material 与 visibility。GPU proxy 同步读取完整 canonical TRS。
+Move tool 在 preview layer 使用 routed pointer capture：Move 事件只更新临时 `Scene::World`，ButtonUp 才按 stable ID
+向 active document 提交一次 revision。2D 将 logical delta 映射到 XY 并翻转 Y，3D 首切片映射到 XZ ground plane 并保留 Y；
+PointerCancel、selection/workspace/revision 冲突均丢弃临时状态并恢复 canonical preview，document/history 不变。
 
 ## Editor shell layout
 
 ```text
 Toolbar (document/path/mode/undo/redo/save)
-Context bar (breadcrumb/select/move/frame/snap)
+Context bar (breadcrumb/select/move/frame/free-move status)
 Workspace
   Hierarchy dock (filter/actions/virtual TreeView/selection summary)
   Active 2D/3D viewport (mode/tools/zoom/preview canvas/footer)
@@ -43,8 +45,8 @@ Status bar (schema/entities/revision/preview/selection)
 结构化输出报告 `editorLayoutRegions=6`、`viewportLayoutReady=true`、`inspectorScrollConfigured=true`、
 `renderExtractions`、2D `gpuViewportSprites=4` 或 3D `gpuViewportMeshes=3`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。
 `gpuViewportDocumentRevision` 还必须与最终 canonical document revision 一致。字段事务由 `inspectorTransactions`、
-`inspectorRejectedTransactions` 和最终 Player/Hero 完整 TRS 取证；文件保存另由 `authoringSaves`、`savedSnapshotBytes`、
-`documentSaved`、`documentDirty` 和落盘 bytes 取证。
+`inspectorRejectedTransactions` 和最终 Player/Hero 完整 TRS 取证；gizmo 由 begin/preview/commit/cancel/reject counter 与最终
+world delta 取证；文件保存另由 `authoringSaves`、`savedSnapshotBytes`、`documentSaved`、`documentDirty` 和落盘 bytes 取证。
 
 ## 文件加载与原子保存
 
@@ -109,6 +111,9 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 - `setGameplay(schema, version, bytes)`：游戏自有 blob 仍要求“空 blob ↔ 零 schema/version、非空 blob ↔ 非零”；
 - `World3DAuthoringDocument::replace/loadPayload/upsertNode/eraseNodeSubtree`：在 Prefab v2 上提供相同的
   canonical publication、subtree 删除、容量与失败原子性；
+- viewport gizmo：Down 固定 workspace/stable ID/revision/start point/committed viewport extent，Move 发布
+  absolute-delta Scene preview，Up 锁定终态且只调用一次 `upsertEntity()` / `upsertNode()`；Cancel、no-op 或 baseline
+  冲突恢复 canonical preview，不生成 history entry；
 - `undo()` / `redo()`：只移动已发布 revision cursor，不重新解析、不分配。
 
 相同 canonical bytes 是 no-op，不增加 revision 或裁剪 redo。成功 edit/undo/redo 单调推进 document revision；达到
@@ -160,8 +165,10 @@ proxy transforms 与 revision 来自同一 preview World/binding，committed UI 
 subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 2D/3D 公共头
 isolation 编译通过；已有文件加载为 clean baseline、加载失败不改变 current/history；文件保存 exact canonical bytes、
 覆盖失败不删除旧目标；shell 自动完成
-Move → Apply Transform → Undo → Redo → Save，在五个 revision 状态均成功实例化 runtime preview，Save 不增加第六次 instantiate；
-3D smoke 还必须证明 Position Z、Rotation X/Y/Z 与 Scale Z 在 canonical Prefab、Scene preview 与结构化结果中一致。
+Move → Apply Transform → viewport drag → Undo → Redo → Save。一次 drag 固定报告 begin/preview/commit=`1/2/1`、
+cancel/reject=`0/0`，只增加一个 document revision；最终 runtime preview instantiations=`6`、document/GPU revision=`7/7`、
+undo depth=`3`，Save 不增加第七次 instantiate。2D delta 固定为 `(2,-1,0)`；3D XZ delta 固定为 `(2,0,1)`，并证明
+Position Z、Rotation X/Y/Z 与 Scale Z 在 canonical Prefab、Scene preview 与结构化结果中一致。
 
-后续产品切片依次为：viewport gizmo transaction；TileMap root+chunk authoring/cook；
+后续产品切片依次为：独立 workspace session；Catalog asset-resolved viewport；TileMap root+chunk authoring/cook；
 SpriteAnimationClip timeline authoring/cook。每个切片继续只保留现行 schema，不增加旧资产兼容分支。
