@@ -48,6 +48,7 @@ Catalog package
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked 产品 consumer |
+| Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Mesh registry 解析同一 World2D/Prefab 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
 | TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer + property-tagged visible Rectangle 原子生成 NavigationGrid2DData v1；当前不是新 AssetKind |
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
@@ -63,6 +64,12 @@ handle；Scene extraction 再通过两个 kind-specific `AssetFrameResourceResol
 并 fail closed 地 intern 当前 binding。N16.1 建立 `FrameResourceRef`/资源表，N16.2 迁移全部 Sprite item，
 N16.3 统一 Sprite owner，N16.4 已让 Mesh/Material item 同样只携带 frame ref，并让 3D registry 唯一拥有
 Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 Texture Lease/GPU owner。
+
+`Tina::EditorApp` 复用上述正式资源路径，不维护 editor-only `AssetStore` 或固定 device binding key。它从当前
+canonical World2D/Prefab 收集并去重 Sprite、StaticMesh 与 Material 根引用，`AssetSystem::load()` 后由 registry
+取得依赖 Lease、上传 Texture2D/StaticMesh 并注册 binding。Scene 仅保存 weak Handle，Render item 仅保存当前 packet
+的 `FrameResourceRef`。项目 Catalog 中 unresolved/wrong-kind 引用 fail closed：只过滤对应 preview component，document、
+history 与持久化 AssetId 不变。内建 Catalog 是未指定项目路径时的临时预览 fixture，退出时连同临时 package 一并释放。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。

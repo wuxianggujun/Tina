@@ -1,9 +1,15 @@
 ﻿// Tina Editor desktop composition: shared retained tool chrome backed by
 // validated World2D and World3D authoring documents and Scene GPU previews.
 
-#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/AssetGpuMesh.hpp>
+#include <tina/asset/AssetGpuTexture.hpp>
+#include <tina/asset/AssetSystem.hpp>
+#include <tina/asset/CatalogCook.hpp>
+#include <tina/asset/Mesh3DBindingRegistry.hpp>
+#include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/World2DSnapshot.hpp>
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/editor/World2DAuthoringDocument.hpp>
@@ -17,6 +23,7 @@
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
+#include <tina/scene/Camera2D.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
@@ -38,7 +45,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -67,12 +76,19 @@ inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 EditorActionCount = 11;
 inline constexpr u32 EditorLayoutRegionCount = 6;
-inline constexpr u32 GpuViewportSpriteCount = 4;
+inline constexpr u32 GpuViewportSpriteCount = 1;
 inline constexpr u32 GpuViewportMeshCount = 3;
 inline constexpr float PreviewWorldWidth = 16.0F;
 inline constexpr float PreviewWorldHeight = 9.0F;
 inline constexpr float DegreesToRadians = 0.01745329251994329577F;
 inline constexpr float RadiansToDegrees = 57.295779513082320876F;
+
+[[nodiscard]] Tina::Core::AssetId editorAssetId(u8 marker)
+{
+    Tina::Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(marker);
+    return *Tina::Core::AssetId::fromBytes(bytes);
+}
 
 enum class WorkspaceMode : u8 {
     World2D,
@@ -107,55 +123,6 @@ struct ViewportGizmoTransaction final {
     bool cancelRequested = false;
 };
 
-class EditorFrameResources final {
-  public:
-    EditorFrameResources() noexcept = default;
-    EditorFrameResources(const EditorFrameResources&) = delete;
-    EditorFrameResources& operator=(const EditorFrameResources&) = delete;
-
-    ~EditorFrameResources() noexcept
-    {
-        if (frameBorrowCount_ != 0) {
-            std::terminate();
-        }
-    }
-
-    [[nodiscard]] Tina::Core::Result<Tina::Render::FrameResourceRef>
-    intern(Tina::Render::FrameResourceSink& sink, Tina::Render::FrameResourceKind kind,
-           u64 deviceBindingKey) const noexcept
-    {
-        if (deviceBindingKey == 0) {
-            return Tina::Core::failure(Tina::Render::RenderErrorCode::InvalidFrameResource,
-                                       "editor frame resource binding key must be non-zero");
-        }
-        ++frameBorrowCount_;
-        Tina::Render::FramePin pin{
-            Tina::Render::FramePinKind::Custom,
-            deviceBindingKey,
-            const_cast<EditorFrameResources*>(this),
-            &EditorFrameResources::releaseFrameBorrow,
-        };
-        return sink.intern(
-            Tina::Render::FrameResourceDescriptor{
-                .kind = kind,
-                .deviceBindingKey = deviceBindingKey,
-            },
-            std::move(pin));
-    }
-
-  private:
-    static void releaseFrameBorrow(void* userData) noexcept
-    {
-        auto* owner = static_cast<EditorFrameResources*>(userData);
-        if (owner == nullptr || owner->frameBorrowCount_ == 0) {
-            std::terminate();
-        }
-        --owner->frameBorrowCount_;
-    }
-
-    mutable u32 frameBorrowCount_ = 0;
-};
-
 inline constexpr UI::UITreeViewItemKey SceneRootKey = 1;
 inline constexpr UI::UITreeViewItemKey CameraKey = 2;
 inline constexpr UI::UITreeViewItemKey PlayerKey = 3;
@@ -169,9 +136,163 @@ struct EditorLaunchOptions final {
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
     std::string world2DDocumentPathUtf8{};
     std::string world3DDocumentPathUtf8{};
+    std::string catalogRootUtf8{};
     WorkspaceMode initialWorkspace = WorkspaceMode::World2D;
     bool autoDemo = true;
 };
+
+class EditorRenderDeviceAccess final {
+  public:
+    void set(Tina::Render::IRenderDevice* device) noexcept { device_ = device; }
+    [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept { return device_; }
+
+  private:
+    Tina::Render::IRenderDevice* device_ = nullptr;
+};
+
+[[nodiscard]] std::string pathToUtf8(const std::filesystem::path& path)
+{
+    const std::u8string encoded = path.u8string();
+    return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
+}
+
+[[nodiscard]] Tina::Core::Result<std::filesystem::path> createUniqueEditorTempDirectory()
+{
+    std::error_code tempError;
+    const std::filesystem::path tempRoot = std::filesystem::temp_directory_path(tempError);
+    if (tempError) {
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                "Tina Editor could not query the temporary directory"};
+        error.setNativeCode(tempError.value());
+        error.addContext("temporary_directory_path", tempError.message());
+        return Tina::Core::failure(std::move(error));
+    }
+
+    const auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
+    constexpr u32 MaximumAttempts = 256;
+    for (u32 attempt = 0; attempt < MaximumAttempts; ++attempt) {
+        const std::filesystem::path candidate =
+            tempRoot / ("tina_editor_catalog_" + std::to_string(seed) + "_" +
+                        std::to_string(attempt));
+        std::error_code createError;
+        if (std::filesystem::create_directory(candidate, createError)) {
+            return candidate;
+        }
+        if (!createError) {
+            continue;
+        }
+        std::error_code existsError;
+        const bool exists = std::filesystem::exists(candidate, existsError);
+        if (existsError || !exists) {
+            Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                    "Tina Editor could not create a temporary Catalog root"};
+            error.setNativeCode(createError.value());
+            error.addContext("candidate", pathToUtf8(candidate));
+            return Tina::Core::failure(std::move(error));
+        }
+    }
+    return Tina::Core::failure(Tina::Core::CoreErrorCode::AlreadyExists,
+                               "Tina Editor exhausted temporary Catalog directory attempts");
+}
+
+[[nodiscard]] Tina::Core::Result<Tina::Asset::CatalogCookRequest>
+createBuiltInEditorCatalogRequest()
+{
+    std::string recipe;
+#if defined(_WIN32)
+    recipe = "platform WindowsX64\n";
+#else
+    recipe = "platform LinuxX64\n";
+#endif
+    const auto appendId = [&recipe](Tina::Core::AssetId id) {
+        const auto text = id.canonicalText();
+        recipe.append(text.data(), text.size());
+    };
+
+    recipe += "texture2d ";
+    appendId(editorAssetId(0x21U));
+    recipe += " 2 2 3478CFFF 4CB5AEFF F2C14EFF E05D5DFF\n";
+    recipe += "sprite ";
+    appendId(editorAssetId(0x22U));
+    recipe += " ";
+    appendId(editorAssetId(0x21U));
+    recipe += " 0 0 1 1 0.5 0.5 16\n";
+    recipe += "staticmesh ";
+    appendId(editorAssetId(0x31U));
+    recipe += " cube\n";
+    recipe += "material ";
+    appendId(editorAssetId(0x32U));
+    recipe += " unlit 0.26 0.68 0.92 1.0\n";
+    return Tina::Asset::parseCatalogCookRecipe(recipe, ".");
+}
+
+struct EditorAssetResources final {
+    std::pmr::unsynchronized_pool_resource memory{};
+    std::optional<Tina::Asset::AssetSystem> system{};
+    std::filesystem::path ownedWorkRoot{};
+    std::string catalogRootUtf8{};
+    u32 catalogEntryCount = 0;
+    bool projectCatalogConfigured = false;
+    bool builtInPreviewCatalog = false;
+
+    EditorAssetResources() = default;
+    EditorAssetResources(const EditorAssetResources&) = delete;
+    EditorAssetResources& operator=(const EditorAssetResources&) = delete;
+
+    ~EditorAssetResources() noexcept
+    {
+        system.reset();
+        if (!ownedWorkRoot.empty()) {
+            std::error_code cleanupError;
+            std::filesystem::remove_all(ownedWorkRoot, cleanupError);
+        }
+    }
+};
+
+[[nodiscard]] Tina::Core::Status prepareEditorCatalog(const EditorLaunchOptions& options,
+                                                      EditorAssetResources& resources)
+{
+    resources.projectCatalogConfigured = !options.catalogRootUtf8.empty();
+    resources.builtInPreviewCatalog = !resources.projectCatalogConfigured;
+    if (resources.projectCatalogConfigured) {
+        resources.catalogRootUtf8 = options.catalogRootUtf8;
+    } else {
+        auto workRoot = createUniqueEditorTempDirectory();
+        if (!workRoot) {
+            return Tina::Core::failure(std::move(workRoot.error()));
+        }
+        resources.ownedWorkRoot = std::move(*workRoot);
+        resources.catalogRootUtf8 = pathToUtf8(resources.ownedWorkRoot / "catalog");
+        auto request = createBuiltInEditorCatalogRequest();
+        if (!request) {
+            return Tina::Core::failure(std::move(request.error()));
+        }
+        if (auto status = Tina::Asset::cookAndPublishCatalogPackage(resources.catalogRootUtf8,
+                                                                    *request);
+            !status) {
+            return status;
+        }
+    }
+
+    auto system = Tina::Asset::AssetSystem::Create({
+        .storeCapacity = 128,
+        .memoryResource = &resources.memory,
+        .requireTyped2dPayloads = true,
+    });
+    if (!system) {
+        return Tina::Core::failure(std::move(system.error()));
+    }
+    Tina::Asset::CatalogPackageOpenConfig openConfig{};
+    openConfig.validation.verifyTypedPayload = true;
+    if (auto status = system->openAndBindCatalog(resources.catalogRootUtf8, openConfig); !status) {
+        return status;
+    }
+    resources.catalogEntryCount = system->catalog() != nullptr
+                                      ? system->catalog()->entryCount()
+                                      : 0U;
+    resources.system.emplace(std::move(*system));
+    return Tina::Core::success();
+}
 
 struct LifecycleCounters final {
     u64 frameUpdates = 0;
@@ -188,6 +309,16 @@ struct LifecycleCounters final {
     u64 gpuViewportSprites = 0;
     u64 gpuViewportMeshes = 0;
     u64 gpuViewportDocumentRevision = 0;
+    u64 catalogAssetsLoaded = 0;
+    u64 catalogGpuTextures = 0;
+    u64 catalogGpuMeshes = 0;
+    u64 catalogSpriteBindings = 0;
+    u64 catalogMeshBindings = 0;
+    u64 catalogMaterialBindings = 0;
+    u64 catalogUnresolvedReferences = 0;
+    u64 catalogResolved2DSprites = 0;
+    u64 catalogResolved3DMeshes = 0;
+    u64 catalogEntryCount = 0;
     u64 workspaceSwitches = 0;
     u64 styleRegisteredClasses = 0;
     u64 styleRegisteredTokens = 0;
@@ -255,6 +386,9 @@ struct LifecycleCounters final {
     bool world3DDocumentDirty = true;
     bool world2DWorkspaceReady = false;
     bool world3DWorkspaceReady = false;
+    bool catalogReady = false;
+    bool projectCatalogConfigured = false;
+    bool builtInPreviewCatalog = false;
 };
 
 enum class EditorCommand : u32 {
@@ -328,26 +462,6 @@ template <typename Value>
     return error == std::errc{} && end == text.data() + text.size() && std::isfinite(value);
 }
 
-[[nodiscard]] float planarRotationDegrees(float rotationX, float rotationY, float rotationZ,
-                                          float rotationW) noexcept
-{
-    const double lengthSquared = static_cast<double>(rotationX) * rotationX +
-                                 static_cast<double>(rotationY) * rotationY +
-                                 static_cast<double>(rotationZ) * rotationZ +
-                                 static_cast<double>(rotationW) * rotationW;
-    if (!std::isfinite(lengthSquared) || lengthSquared <= 1.0e-12) {
-        return 0.0F;
-    }
-    const float inverseLength = static_cast<float>(1.0 / std::sqrt(lengthSquared));
-    rotationX *= inverseLength;
-    rotationY *= inverseLength;
-    rotationZ *= inverseLength;
-    rotationW *= inverseLength;
-    const float sinAngle = 2.0F * (rotationW * rotationZ + rotationX * rotationY);
-    const float cosAngle = 1.0F - 2.0F * (rotationY * rotationY + rotationZ * rotationZ);
-    return std::atan2(sinAngle, cosAngle) * RadiansToDegrees;
-}
-
 struct EulerDegrees final {
     float x = 0.0F;
     float y = 0.0F;
@@ -408,6 +522,7 @@ struct EulerDegrees final {
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
     constexpr std::string_view World2DPathPrefix = "--world2d-path=";
     constexpr std::string_view World3DPathPrefix = "--world3d-path=";
+    constexpr std::string_view CatalogRootPrefix = "--catalog-root=";
     constexpr std::string_view WorkspacePrefix = "--workspace=";
 
     EditorLaunchOptions options{};
@@ -415,6 +530,7 @@ struct EulerDegrees final {
     bool hasDelay = false;
     bool hasWorld2DPath = false;
     bool hasWorld3DPath = false;
+    bool hasCatalogRoot = false;
     bool hasWorkspace = false;
     for (int index = 1; index < argumentCount; ++index) {
         const std::string_view argument{arguments[index]};
@@ -480,6 +596,25 @@ struct EulerDegrees final {
                                            "Could not retain --world3d-path");
             }
             hasWorld3DPath = true;
+            continue;
+        }
+        if (argument.starts_with(CatalogRootPrefix)) {
+            if (hasCatalogRoot) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "Duplicate --catalog-root argument");
+            }
+            const std::string_view value = argument.substr(CatalogRootPrefix.size());
+            if (value.empty()) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--catalog-root must not be empty");
+            }
+            try {
+                options.catalogRootUtf8.assign(value);
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                           "Could not retain --catalog-root");
+            }
+            hasCatalogRoot = true;
             continue;
         }
         if (argument.starts_with(WorkspacePrefix)) {
@@ -668,13 +803,6 @@ struct EulerDegrees final {
     }
 }
 
-[[nodiscard]] Tina::Core::AssetId editorAssetId(u8 marker)
-{
-    Tina::Core::AssetId::Bytes bytes{};
-    bytes[0] = static_cast<std::byte>(marker);
-    return *Tina::Core::AssetId::fromBytes(bytes);
-}
-
 struct WorkspaceSessionState final {
     std::string documentPathUtf8{};
     std::vector<std::byte> savedBaselineBytes{};
@@ -696,6 +824,13 @@ struct InitialAuthoringDocuments final {
 struct World3DPreviewBinding final {
     u32 stableNodeId = 0;
     Tina::Scene::EntityId entity{};
+};
+
+struct PreviewAssetReference final {
+    Tina::Core::AssetId assetId{};
+    Tina::AssetFormat::AssetKind kind = Tina::AssetFormat::AssetKind::Invalid;
+
+    friend bool operator==(const PreviewAssetReference&, const PreviewAssetReference&) = default;
 };
 
 [[nodiscard]] Tina::Core::Result<InitialAuthoringDocuments>
@@ -751,11 +886,22 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
             .stableEntityId = 2,
             .parentStableEntityId = 1,
             .positionY = 4.0F,
-            .camera = Tina::AssetFormat::World2DCameraDesc{},
+            .camera = Tina::AssetFormat::World2DCameraDesc{
+                .fixedWorldHeightMeters = PreviewWorldHeight,
+            },
         },
         Tina::AssetFormat::World2DEntityDesc{
             .stableEntityId = 3,
             .parentStableEntityId = 1,
+            .sprite = Tina::AssetFormat::World2DSpriteDesc{
+                .spriteId = editorAssetId(0x22U),
+                .overrides = Tina::AssetFormat::World2DSpriteOverrideFlags::Size,
+                .sizeX = 1.0F,
+                .sizeY = 1.4F,
+                .colorRed = 231,
+                .colorGreen = 182,
+                .colorBlue = 90,
+            },
         },
         Tina::AssetFormat::World2DEntityDesc{
             .stableEntityId = 6,
@@ -871,17 +1017,26 @@ class EditorWorkspaceState final : public Tina::IGameState {
                          Tina::Editor::World2DAuthoringDocument world2D,
                          Tina::Editor::World3DAuthoringDocument world3D,
                          WorkspaceSessionState world2DSession,
-                         WorkspaceSessionState world3DSession) noexcept
+                         WorkspaceSessionState world3DSession,
+                         EditorAssetResources& assetResources,
+                         EditorRenderDeviceAccess& renderDeviceAccess) noexcept
         : options_(std::move(options)), counters_(counters), document_(std::move(world2D)),
           document3D_(std::move(world3D)), workspaceMode_(options_.initialWorkspace),
           world2DSession_(std::move(world2DSession)),
-          world3DSession_(std::move(world3DSession))
+          world3DSession_(std::move(world3DSession)), assetResources_(assetResources),
+          renderDeviceAccess_(renderDeviceAccess)
     {
     }
 
     Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_.stateEnters;
+        auto assetRollback = Tina::Core::makeScopeExit([this]() noexcept {
+            releasePreviewAssetBindings();
+        });
+        if (auto status = preparePreviewAssetBindings(); !status) {
+            return status;
+        }
 
         auto rootBuilder = context.primaryWindowUIRootBuilder();
         if (!rootBuilder) {
@@ -1377,10 +1532,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        UI::UINodeId previewStatus{};
-        if (auto status = storeNode(createLabel(viewportCanvasTop, "Runtime preview ready",
-                                                fixedSize(132.0F, 20.0F), accentText),
-                                    previewStatus);
+        const std::string_view initialAssetStatus =
+            counters_.catalogUnresolvedReferences != 0
+                ? "Catalog refs unresolved"
+                : (assetResources_.projectCatalogConfigured ? "Project Catalog ready"
+                                                            : "Built-in Catalog ready");
+        if (auto status = storeNode(createLabel(viewportCanvasTop, initialAssetStatus,
+                                                fixedSize(154.0F, 20.0F), accentText),
+                                    previewAssetStatus_);
             !status) {
             return status;
         }
@@ -1442,8 +1601,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (auto status = storeNode(createLabel(previewFrame,
                                                 workspaceMode_ == WorkspaceMode::World2D
-                                                    ? "Canonical snapshot -> Scene::World"
-                                                    : "Canonical Prefab v2 -> Scene::World",
+                                                    ? "World2D -> Catalog -> Scene"
+                                                    : "Prefab v2 -> Catalog -> Scene",
                                                 fixedSize(242.0F, 20.0F), secondaryText),
                                     previewCook_);
             !status) {
@@ -1861,6 +2020,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
 
         uiRoot_ = std::move(*root);
         ++counters_.uiRootsCreated;
+        assetRollback.release();
         return Tina::Core::success();
     }
 
@@ -1874,10 +2034,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         previewBindings_.clear();
         preview3DBindings_.clear();
         previewCamera3D_ = {};
-        previewWorld_.reset();
-        previewMeshAsset_ = {};
-        previewMaterialAsset_ = {};
-        previewAssetStore_.reset();
+        releasePreviewAssetBindings();
         if (uiRoot_) {
             uiRoot_.reset();
             ++counters_.uiRootsReleased;
@@ -2020,93 +2177,38 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "editor GPU viewport is missing the Camera binding");
         }
-        const Tina::Scene::WorldTransform* cameraTransform = previewWorld_->worldTransform(cameraBinding->entity);
-        if (cameraTransform == nullptr) {
+        const Tina::Scene::Camera2D* authoredCamera = previewWorld_->camera2D(cameraBinding->entity);
+        if (authoredCamera == nullptr) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "editor GPU viewport is missing the Camera world transform");
+                                       "editor GPU viewport is missing the Camera2D component");
         }
-
-        auto& writer = context.renderSceneWriter();
-        const Tina::Render::RenderCamera2DInput camera{
-            .stableCameraKey = cameraBinding->stableEntityId,
-            .centerX = cameraTransform->position.x,
-            .centerY = cameraTransform->position.y,
-            .rotationRadians = planarRotationDegrees(
-                                   cameraTransform->rotation.x, cameraTransform->rotation.y,
-                                   cameraTransform->rotation.z, cameraTransform->rotation.w) *
-                               DegreesToRadians,
-            .worldWidth = PreviewWorldWidth,
-            .worldHeight = PreviewWorldHeight,
-            .actualPixelsPerMeter = (std::max)(1.0F, viewportLogicalRect_.height / PreviewWorldHeight),
-            .normalizedViewport = *viewportNormalized_,
-            .pixelSnap = Tina::Render::RenderPixelSnapPolicy::Disabled,
-        };
-        if (auto status = writer.setCamera2D(camera); !status) {
+        Tina::Scene::Camera2D camera = *authoredCamera;
+        camera.projection = Tina::Render::FixedWorldHeight2D{.heightMeters = PreviewWorldHeight};
+        camera.normalizedViewport = *viewportNormalized_;
+        camera.pixelSnap = Tina::Render::RenderPixelSnapPolicy::Disabled;
+        if (auto status = previewWorld_->setCamera2D(cameraBinding->entity, camera); !status) {
             return status;
         }
-
-        auto texture = frameResources_.intern(context.frameResourceSink(),
-                                              Tina::Render::FrameResourceKind::Texture2D, 1);
-        if (!texture) {
-            return Tina::Core::failure(std::move(texture.error()));
+        if (auto status = Tina::Scene::extractRenderSceneFromWorld(
+                *previewWorld_, context.renderSceneWriter(), context.frameResourceSink(),
+                Tina::Scene::ExtractRenderSceneParams{
+                    .surfaceViewport = {
+                        .pixelWidth = surfacePixelWidth_,
+                        .pixelHeight = surfacePixelHeight_,
+                    },
+                    .spriteBindingResolver = {
+                        .userData = const_cast<EditorWorkspaceState*>(this),
+                        .resolve = &EditorWorkspaceState::resolvePreviewSprite,
+                    },
+                    .normalTextureBindingResolver = {
+                        .userData = const_cast<EditorWorkspaceState*>(this),
+                        .resolve = &EditorWorkspaceState::resolvePreviewTexture,
+                    },
+                });
+            !status) {
+            return status;
         }
-        struct ProxySpec final {
-            UI::UITreeViewItemKey hierarchyKey = UI::InvalidUITreeViewItemKey;
-            float widthMeters = 1.0F;
-            float heightMeters = 1.0F;
-            Tina::Core::i32 orderInLayer = 0;
-            u8 red = 255;
-            u8 green = 255;
-            u8 blue = 255;
-        };
-        constexpr std::array<ProxySpec, GpuViewportSpriteCount> ProxySpecs{{
-            {.hierarchyKey = TileMapKey, .widthMeters = 5.0F, .heightMeters = 3.0F,
-             .orderInLayer = -20, .red = 178, .green = 156, .blue = 235},
-            {.hierarchyKey = CameraKey, .widthMeters = 0.6F, .heightMeters = 0.6F,
-             .orderInLayer = 10, .red = 114, .green = 167, .blue = 216},
-            {.hierarchyKey = PlayerKey, .widthMeters = 1.0F, .heightMeters = 1.4F,
-             .orderInLayer = 20, .red = 231, .green = 182, .blue = 90},
-            {.hierarchyKey = LightsKey, .widthMeters = 0.8F, .heightMeters = 0.8F,
-             .orderInLayer = 30, .red = 125, .green = 211, .blue = 167},
-        }};
-
-        for (const ProxySpec& spec : ProxySpecs) {
-            const Tina::Scene::World2DEntityBinding* binding = findPreviewBinding(spec.hierarchyKey);
-            if (binding == nullptr) {
-                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "editor GPU viewport is missing a canonical proxy binding");
-            }
-            const Tina::Scene::WorldTransform* transform = previewWorld_->worldTransform(binding->entity);
-            if (transform == nullptr) {
-                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "editor GPU viewport is missing a canonical proxy transform");
-            }
-            const bool selected = stableEntityIdForHierarchyItem(selectionKey_) == binding->stableEntityId;
-            const Tina::Render::RenderSprite2DInput sprite{
-                .texture = *texture,
-                .stableEntityKey = binding->stableEntityId,
-                .centerX = transform->position.x,
-                .centerY = transform->position.y,
-                .rotationRadians = planarRotationDegrees(
-                                       transform->rotation.x, transform->rotation.y,
-                                       transform->rotation.z, transform->rotation.w) *
-                                   DegreesToRadians,
-                .widthMeters = spec.widthMeters,
-                .heightMeters = spec.heightMeters,
-                .scaleX = visibleProxyScale(transform->scale.x),
-                .scaleY = visibleProxyScale(transform->scale.y),
-                .sortingLayer = 0,
-                .orderInLayer = spec.orderInLayer,
-                .red = selected ? u8{242} : spec.red,
-                .green = selected ? u8{245} : spec.green,
-                .blue = selected ? u8{247} : spec.blue,
-                .alpha = 220,
-            };
-            if (auto status = writer.addSprite2D(sprite); !status) {
-                return status;
-            }
-            ++counters_.gpuViewportSprites;
-        }
+        counters_.gpuViewportSprites = previewResolvedSpriteCount_;
         counters_.gpuViewportDocumentRevision = previewRevision_;
         return Tina::Core::success();
     }
@@ -2659,8 +2761,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 *previewWorld_, context.renderSceneWriter(), context.frameResourceSink(),
                 Tina::Scene::ExtractRenderSceneParams{
                     .surfaceViewport = {
-                        .pixelWidth = WindowLogicalWidth,
-                        .pixelHeight = WindowLogicalHeight,
+                        .pixelWidth = surfacePixelWidth_,
+                        .pixelHeight = surfacePixelHeight_,
                     },
                     .mesh3DBindingResolver = {
                         .userData = const_cast<EditorWorkspaceState*>(this),
@@ -2674,9 +2776,41 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        counters_.gpuViewportMeshes = GpuViewportMeshCount;
+        counters_.gpuViewportMeshes = previewResolvedMeshCount_;
         counters_.gpuViewportDocumentRevision = previewRevision_;
         return Tina::Core::success();
+    }
+
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolvePreviewSprite(void* userData, Tina::Asset::AssetHandle asset,
+                         Tina::Render::FrameResourceSink& sink) noexcept
+    {
+        auto& self = *static_cast<EditorWorkspaceState*>(userData);
+        if (!self.spriteBindings_.has_value()) {
+            return Tina::Render::FrameResourceRef{};
+        }
+        return self.spriteBindings_->internSpriteFrameResource(asset, sink);
+    }
+
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolvePreviewTexture(void* userData, Tina::Asset::AssetHandle asset,
+                          Tina::Render::FrameResourceSink& sink) noexcept
+    {
+        auto& self = *static_cast<EditorWorkspaceState*>(userData);
+        if (!self.spriteBindings_.has_value() || !self.assetResources_.system.has_value()) {
+            return Tina::Render::FrameResourceRef{};
+        }
+        const Tina::Core::AssetId assetId = self.assetResources_.system->store().assetId(asset);
+        if (!assetId.hasValue()) {
+            return Tina::Render::FrameResourceRef{};
+        }
+        const auto resolver = self.spriteBindings_->texture2DFrameResourceResolver();
+        auto resolution = resolver.resolve(resolver.userData, assetId, sink);
+        if (!resolution) {
+            return Tina::Core::failure(std::move(resolution.error()));
+        }
+        return resolution->has_value() ? resolution->value().resource
+                                       : Tina::Render::FrameResourceRef{};
     }
 
     [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
@@ -2684,13 +2818,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
                        Tina::Render::FrameResourceSink& sink) noexcept
     {
         auto& self = *static_cast<EditorWorkspaceState*>(userData);
-        if (!self.previewAssetStore_.has_value() || asset != self.previewMeshAsset_ ||
-            self.previewAssetStore_->assetKind(asset) !=
-                Tina::AssetFormat::AssetKind::StaticMesh) {
+        if (!self.mesh3DBindings_.has_value()) {
             return Tina::Render::FrameResourceRef{};
         }
-        return self.frameResources_.intern(sink,
-                                           Tina::Render::FrameResourceKind::Mesh3DGeometry, 1);
+        return self.mesh3DBindings_->internMeshFrameResource(asset, sink);
     }
 
     [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
@@ -2698,20 +2829,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
                            Tina::Render::FrameResourceSink& sink) noexcept
     {
         auto& self = *static_cast<EditorWorkspaceState*>(userData);
-        if (!self.previewAssetStore_.has_value() || asset != self.previewMaterialAsset_ ||
-            self.previewAssetStore_->assetKind(asset) !=
-                Tina::AssetFormat::AssetKind::Material) {
+        if (!self.mesh3DBindings_.has_value()) {
             return Tina::Render::FrameResourceRef{};
         }
-        return self.frameResources_.intern(sink,
-                                           Tina::Render::FrameResourceKind::Mesh3DMaterial, 1);
-    }
-
-    [[nodiscard]] static float visibleProxyScale(float scale) noexcept
-    {
-        constexpr float MinimumVisibleScale = 0.05F;
-        const float magnitude = (std::max)(std::abs(scale), MinimumVisibleScale);
-        return std::signbit(scale) ? -magnitude : magnitude;
+        return self.mesh3DBindings_->internMaterialFrameResource(asset, sink);
     }
 
     [[nodiscard]] Tina::Core::Status updateGpuViewport(Tina::PrimaryWindowUITreeUpdater& tree)
@@ -2772,6 +2893,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
 
         viewportLogicalRect_ = *viewportRect;
         viewportNormalized_ = normalized;
+        const double maximumSurfaceExtent =
+            static_cast<double>((std::numeric_limits<u32>::max)());
+        surfacePixelWidth_ = static_cast<u32>(
+            std::clamp(std::round(static_cast<double>(rootRect->width)), 1.0,
+                       maximumSurfaceExtent));
+        surfacePixelHeight_ = static_cast<u32>(
+            std::clamp(std::round(static_cast<double>(rootRect->height)), 1.0,
+                       maximumSurfaceExtent));
         counters_.viewportLogicalX = viewportRect->x;
         counters_.viewportLogicalY = viewportRect->y;
         counters_.viewportLogicalWidth = viewportRect->width;
@@ -2973,9 +3102,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree.setText(previewCook_,
-                                       world2D ? "Canonical snapshot -> Scene::World"
-                                               : "Canonical Prefab v2 -> Scene::World");
+                                       world2D ? "World2D -> Catalog -> Scene"
+                                               : "Prefab v2 -> Catalog -> Scene");
             !status) {
+            return status;
+        }
+        std::string assetStatus = assetResources_.projectCatalogConfigured
+                                      ? "Project Catalog | "
+                                      : "Built-in Catalog | ";
+        assetStatus += world2D ? "2D " : "3D ";
+        assetStatus += std::to_string(world2D ? previewResolvedSpriteCount_
+                                              : previewResolvedMeshCount_);
+        assetStatus += " resolved";
+        if (auto status = tree.setText(previewAssetStatus_, assetStatus); !status) {
             return status;
         }
         if (auto status = tree.setText(cameraStatus_, world2D ? "Camera2D" : "Camera3D"); !status) {
@@ -3247,6 +3386,320 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return document_.upsertEntity(edited);
     }
 
+    [[nodiscard]] Tina::Asset::AssetHandle
+    loadedAsset(Tina::Core::AssetId assetId, Tina::AssetFormat::AssetKind expectedKind) const noexcept
+    {
+        if (!assetResources_.system.has_value()) {
+            return {};
+        }
+        const auto handle = assetResources_.system->find(assetId);
+        if (!handle.has_value() ||
+            assetResources_.system->store().assetKind(*handle) != expectedKind ||
+            assetResources_.system->tryGet(*handle) == nullptr) {
+            return {};
+        }
+        return *handle;
+    }
+
+    [[nodiscard]] static bool containsHandle(std::span<const Tina::Asset::AssetHandle> handles,
+                                             Tina::Asset::AssetHandle handle) noexcept
+    {
+        return std::find(handles.begin(), handles.end(), handle) != handles.end();
+    }
+
+    [[nodiscard]] Tina::Core::Status preparePreviewAssetBindings()
+    {
+        auto* device = renderDeviceAccess_.get();
+        if (device == nullptr || !assetResources_.system.has_value() ||
+            assetResources_.system->catalog() == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Tina Editor Catalog or RenderDevice is unavailable");
+        }
+
+        std::vector<Tina::AssetFormat::World2DEntityDesc> world2DStorage;
+        auto world2D = document_.parseCurrentSnapshot(world2DStorage);
+        if (!world2D) {
+            return Tina::Core::failure(std::move(world2D.error()));
+        }
+        std::vector<Tina::AssetFormat::PrefabNodeView> world3DStorage;
+        auto world3D = document3D_.parseCurrentPrefab(world3DStorage);
+        if (!world3D) {
+            return Tina::Core::failure(std::move(world3D.error()));
+        }
+
+        std::vector<PreviewAssetReference> references;
+        const auto appendReference = [&references](Tina::Core::AssetId assetId,
+                                                   Tina::AssetFormat::AssetKind kind) {
+            if (!assetId.hasValue()) {
+                return;
+            }
+            const PreviewAssetReference reference{.assetId = assetId, .kind = kind};
+            if (std::find(references.begin(), references.end(), reference) == references.end()) {
+                references.push_back(reference);
+            }
+        };
+        for (const auto& entity : world2DStorage) {
+            if (!entity.sprite.has_value()) {
+                continue;
+            }
+            appendReference(entity.sprite->spriteId, Tina::AssetFormat::AssetKind::Sprite);
+            appendReference(entity.sprite->normalTextureId,
+                            Tina::AssetFormat::AssetKind::Texture2D);
+        }
+        for (const auto& node : world3DStorage) {
+            if (!node.hasMesh) {
+                continue;
+            }
+            appendReference(node.meshId, Tina::AssetFormat::AssetKind::StaticMesh);
+            appendReference(node.materialId, Tina::AssetFormat::AssetKind::Material);
+        }
+
+        std::vector<Tina::Core::AssetId> loadIds;
+        const Tina::Asset::CatalogSnapshot& catalog = *assetResources_.system->catalog();
+        for (const PreviewAssetReference& reference : references) {
+            const auto entryIndex = catalog.find(reference.assetId);
+            const auto entry = entryIndex.has_value() ? catalog.entry(*entryIndex) : std::nullopt;
+            if (!entry.has_value() || entry->assetKind != reference.kind) {
+                ++counters_.catalogUnresolvedReferences;
+                continue;
+            }
+            if (std::find(loadIds.begin(), loadIds.end(), reference.assetId) == loadIds.end()) {
+                loadIds.push_back(reference.assetId);
+            }
+        }
+        if (!loadIds.empty()) {
+            auto loaded = assetResources_.system->load(loadIds);
+            if (!loaded) {
+                return Tina::Core::failure(std::move(loaded.error()));
+            }
+            loadedPreviewHandles_.assign(loaded->begin(), loaded->end());
+            counters_.catalogAssetsLoaded = loaded->size();
+        }
+
+        std::vector<Tina::Asset::AssetHandle> spriteAssets;
+        std::vector<Tina::Asset::AssetHandle> spriteTextureAssets;
+        for (const PreviewAssetReference& reference : references) {
+            if (reference.kind == Tina::AssetFormat::AssetKind::Texture2D) {
+                const Tina::Asset::AssetHandle texture = loadedAsset(reference.assetId, reference.kind);
+                if (texture && !containsHandle(spriteTextureAssets, texture)) {
+                    spriteTextureAssets.push_back(texture);
+                }
+                continue;
+            }
+            if (reference.kind != Tina::AssetFormat::AssetKind::Sprite) {
+                continue;
+            }
+            const Tina::Asset::AssetHandle sprite = loadedAsset(reference.assetId, reference.kind);
+            if (!sprite) {
+                continue;
+            }
+            const Tina::Asset::CookedAssetFile* file = assetResources_.system->tryGet(sprite);
+            const auto textureDependency = file != nullptr ? file->dependency(0) : std::nullopt;
+            if (!textureDependency.has_value() ||
+                textureDependency->expectedKind != Tina::AssetFormat::AssetKind::Texture2D) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "Catalog Sprite has no required Texture2D dependency");
+            }
+            const Tina::Asset::AssetHandle texture = loadedAsset(
+                textureDependency->assetId, Tina::AssetFormat::AssetKind::Texture2D);
+            if (!texture) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "Catalog Sprite Texture2D dependency was not loaded");
+            }
+            if (!containsHandle(spriteAssets, sprite)) {
+                spriteAssets.push_back(sprite);
+            }
+            if (!containsHandle(spriteTextureAssets, texture)) {
+                spriteTextureAssets.push_back(texture);
+            }
+        }
+        if (!spriteTextureAssets.empty()) {
+            auto registry = Tina::Asset::Sprite2DBindingRegistry::Create(
+                *assetResources_.system, *device,
+                Tina::Asset::Sprite2DBindingRegistryConfig{
+                    .textureCapacity = spriteTextureAssets.size(),
+                    .memoryResource = &assetResources_.memory,
+                });
+            if (!registry) {
+                return Tina::Core::failure(std::move(registry.error()));
+            }
+            spriteBindings_.emplace(std::move(*registry));
+            for (const Tina::Asset::AssetHandle textureAsset : spriteTextureAssets) {
+                const Tina::Asset::CookedAssetFile* textureFile =
+                    assetResources_.system->tryGet(textureAsset);
+                if (textureFile == nullptr) {
+                    return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                               "Catalog Texture2D payload is unavailable");
+                }
+                auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, *textureFile);
+                if (!texture) {
+                    return Tina::Core::failure(std::move(texture.error()));
+                }
+                Tina::Render::GpuTextureId gpuTexture = *texture;
+                auto textureCleanup = Tina::Core::makeScopeExit([device, &gpuTexture]() noexcept {
+                    if (gpuTexture) {
+                        (void)device->destroyTexture2D(gpuTexture);
+                    }
+                });
+                auto binding = spriteBindings_->registerTextureBinding(textureAsset, gpuTexture);
+                if (!binding) {
+                    return Tina::Core::failure(std::move(binding.error()));
+                }
+                textureCleanup.release();
+                ++counters_.catalogGpuTextures;
+                ++counters_.catalogSpriteBindings;
+            }
+            for (const Tina::Asset::AssetHandle sprite : spriteAssets) {
+                if (spriteBindings_->resolveSprite(sprite) != 0) {
+                    boundSpriteAssets_.push_back(sprite);
+                }
+            }
+        }
+
+        std::vector<Tina::Asset::AssetHandle> meshAssets;
+        std::vector<Tina::Asset::AssetHandle> materialAssets;
+        std::vector<Tina::Asset::AssetHandle> materialTextureAssets;
+        for (const PreviewAssetReference& reference : references) {
+            if (reference.kind == Tina::AssetFormat::AssetKind::StaticMesh) {
+                const Tina::Asset::AssetHandle mesh = loadedAsset(reference.assetId, reference.kind);
+                if (mesh && !containsHandle(meshAssets, mesh)) {
+                    meshAssets.push_back(mesh);
+                }
+            } else if (reference.kind == Tina::AssetFormat::AssetKind::Material) {
+                const Tina::Asset::AssetHandle material = loadedAsset(reference.assetId, reference.kind);
+                if (!material || containsHandle(materialAssets, material)) {
+                    continue;
+                }
+                materialAssets.push_back(material);
+                const Tina::Asset::CookedAssetFile* file = assetResources_.system->tryGet(material);
+                if (file == nullptr) {
+                    return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                               "Catalog Material payload is unavailable");
+                }
+                for (u32 dependencyIndex = 0;
+                     dependencyIndex < file->header().dependencyCount;
+                     ++dependencyIndex) {
+                    const auto dependency = file->dependency(dependencyIndex);
+                    if (!dependency.has_value() ||
+                        dependency->expectedKind != Tina::AssetFormat::AssetKind::Texture2D) {
+                        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                                   "Catalog Material has an invalid dependency");
+                    }
+                    const Tina::Asset::AssetHandle texture = loadedAsset(
+                        dependency->assetId, Tina::AssetFormat::AssetKind::Texture2D);
+                    if (!texture) {
+                        return Tina::Core::failure(
+                            Tina::Core::CoreErrorCode::Internal,
+                            "Catalog Material Texture2D dependency was not loaded");
+                    }
+                    if (!containsHandle(materialTextureAssets, texture)) {
+                        materialTextureAssets.push_back(texture);
+                    }
+                }
+            }
+        }
+        if (!meshAssets.empty() || !materialAssets.empty()) {
+            auto registry = Tina::Asset::Mesh3DBindingRegistry::Create(
+                *assetResources_.system, *device,
+                Tina::Asset::Mesh3DBindingRegistryConfig{
+                    .meshCapacity = (std::max)(std::size_t{1}, meshAssets.size()),
+                    .materialCapacity = (std::max)(std::size_t{1}, materialAssets.size()),
+                    .textureCapacity = (std::max)(std::size_t{1}, materialTextureAssets.size()),
+                    .memoryResource = &assetResources_.memory,
+                });
+            if (!registry) {
+                return Tina::Core::failure(std::move(registry.error()));
+            }
+            mesh3DBindings_.emplace(std::move(*registry));
+            for (const Tina::Asset::AssetHandle textureAsset : materialTextureAssets) {
+                const Tina::Asset::CookedAssetFile* textureFile =
+                    assetResources_.system->tryGet(textureAsset);
+                if (textureFile == nullptr) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::Internal,
+                        "Catalog material Texture2D is unavailable");
+                }
+                auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, *textureFile);
+                if (!texture) {
+                    return Tina::Core::failure(std::move(texture.error()));
+                }
+                Tina::Render::GpuTextureId gpuTexture = *texture;
+                auto textureCleanup = Tina::Core::makeScopeExit([device, &gpuTexture]() noexcept {
+                    if (gpuTexture) {
+                        (void)device->destroyTexture2D(gpuTexture);
+                    }
+                });
+                if (auto status = mesh3DBindings_->registerMaterialTexture(textureAsset, gpuTexture);
+                    !status) {
+                    return status;
+                }
+                textureCleanup.release();
+                ++counters_.catalogGpuTextures;
+            }
+            for (const Tina::Asset::AssetHandle meshAsset : meshAssets) {
+                const Tina::Asset::CookedAssetFile* meshFile =
+                    assetResources_.system->tryGet(meshAsset);
+                if (meshFile == nullptr) {
+                    return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                               "Catalog StaticMesh payload is unavailable");
+                }
+                auto mesh = Tina::Asset::uploadStaticMeshFromCooked(*device, *meshFile);
+                if (!mesh) {
+                    return Tina::Core::failure(std::move(mesh.error()));
+                }
+                Tina::Render::GpuMeshId gpuMesh = *mesh;
+                auto meshCleanup = Tina::Core::makeScopeExit([device, &gpuMesh]() noexcept {
+                    if (gpuMesh) {
+                        (void)device->destroyStaticMesh(gpuMesh);
+                    }
+                });
+                auto binding = mesh3DBindings_->registerMeshBinding(meshAsset, gpuMesh);
+                if (!binding) {
+                    return Tina::Core::failure(std::move(binding.error()));
+                }
+                meshCleanup.release();
+                boundMeshAssets_.push_back(meshAsset);
+                ++counters_.catalogGpuMeshes;
+                ++counters_.catalogMeshBindings;
+            }
+            for (const Tina::Asset::AssetHandle materialAsset : materialAssets) {
+                auto binding = mesh3DBindings_->registerMaterialBinding(materialAsset);
+                if (!binding) {
+                    return Tina::Core::failure(std::move(binding.error()));
+                }
+                boundMaterialAssets_.push_back(materialAsset);
+                ++counters_.catalogMaterialBindings;
+            }
+        }
+
+        counters_.catalogReady = true;
+        counters_.projectCatalogConfigured = assetResources_.projectCatalogConfigured;
+        counters_.builtInPreviewCatalog = assetResources_.builtInPreviewCatalog;
+        counters_.catalogEntryCount = assetResources_.catalogEntryCount;
+        return Tina::Core::success();
+    }
+
+    void releasePreviewAssetBindings() noexcept
+    {
+        previewWorld_.reset();
+        if (mesh3DBindings_.has_value()) {
+            if (auto status = mesh3DBindings_->retireAllBindings(); !status) {
+                std::terminate();
+            }
+            mesh3DBindings_.reset();
+        }
+        if (spriteBindings_.has_value()) {
+            if (auto status = spriteBindings_->retireAllTextureBindings(); !status) {
+                std::terminate();
+            }
+            spriteBindings_.reset();
+        }
+        loadedPreviewHandles_.clear();
+        boundSpriteAssets_.clear();
+        boundMeshAssets_.clear();
+        boundMaterialAssets_.clear();
+    }
+
     [[nodiscard]] Tina::Core::Status validateRuntimePreview()
     {
         if (workspaceMode_ == WorkspaceMode::World3D) {
@@ -3258,11 +3711,46 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (!snapshot) {
             return Tina::Core::failure(std::move(snapshot.error()));
         }
+        u64 resolvedSpriteCount = 0;
+        for (auto& entity : storage) {
+            if (!entity.sprite.has_value()) {
+                continue;
+            }
+            const Tina::Asset::AssetHandle sprite = loadedAsset(
+                entity.sprite->spriteId, Tina::AssetFormat::AssetKind::Sprite);
+            const Tina::Asset::AssetHandle normalTexture = loadedAsset(
+                entity.sprite->normalTextureId, Tina::AssetFormat::AssetKind::Texture2D);
+            const bool spriteResolved = sprite && containsHandle(boundSpriteAssets_, sprite);
+            const bool normalResolved = !entity.sprite->normalTextureId.hasValue() ||
+                                        (normalTexture && spriteBindings_.has_value() &&
+                                         spriteBindings_->bindingKey(normalTexture) != 0);
+            if (!spriteResolved || !normalResolved) {
+                entity.sprite.reset();
+                continue;
+            }
+            ++resolvedSpriteCount;
+        }
+        const Tina::AssetFormat::World2DSnapshotView previewSnapshot{
+            .schemaVersion = snapshot->schemaVersion,
+            .entities = storage,
+            .gameplaySchema = snapshot->gameplaySchema,
+            .gameplayVersion = snapshot->gameplayVersion,
+            .gameplayBytes = snapshot->gameplayBytes,
+        };
         auto world = Tina::Scene::World::Create({.entityCapacity = AuthoringEntityCapacity});
         if (!world) {
             return Tina::Core::failure(std::move(world.error()));
         }
-        auto bindings = Tina::Scene::instantiateWorld2DSnapshot(*world, *snapshot);
+        auto bindings = Tina::Scene::instantiateWorld2DSnapshot(
+            *world, previewSnapshot,
+            Tina::Scene::World2DSnapshotAssetResolver{
+                .resolveSprite = [this](Tina::Core::AssetId assetId) {
+                    return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Sprite);
+                },
+                .resolveTexture = [this](Tina::Core::AssetId assetId) {
+                    return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Texture2D);
+                },
+            });
         if (!bindings) {
             return Tina::Core::failure(std::move(bindings.error()));
         }
@@ -3270,13 +3758,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "editor runtime preview entity count mismatch");
         }
-        constexpr std::array proxyHierarchyKeys{
+        constexpr std::array requiredHierarchyKeys{
             CameraKey,
             PlayerKey,
-            LightsKey,
-            TileMapKey,
         };
-        for (const UI::UITreeViewItemKey hierarchyKey : proxyHierarchyKeys) {
+        for (const UI::UITreeViewItemKey hierarchyKey : requiredHierarchyKeys) {
             const u32 stableEntityId = stableEntityIdForHierarchyItem(hierarchyKey);
             const auto binding = std::find_if(
                 bindings->begin(), bindings->end(),
@@ -3285,7 +3771,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 });
             if (binding == bindings->end() || world->worldTransform(binding->entity) == nullptr) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "editor runtime preview is missing a GPU proxy transform");
+                                           "editor runtime preview is missing a required transform");
             }
         }
         const auto player = std::find_if(bindings->begin(), bindings->end(), [](const auto& binding) {
@@ -3324,50 +3810,39 @@ class EditorWorkspaceState final : public Tina::IGameState {
         preview3DBindings_.clear();
         previewCamera3D_ = {};
         previewRevision_ = document_.revision();
+        previewResolvedSpriteCount_ = resolvedSpriteCount;
+        counters_.catalogResolved2DSprites = resolvedSpriteCount;
         counters_.world2DWorkspaceReady = true;
         counters_.runtimePreviewValid = true;
-        return Tina::Core::success();
-    }
-
-    [[nodiscard]] Tina::Core::Status ensureWorld3DPreviewAssets()
-    {
-        if (previewAssetStore_.has_value()) {
-            return Tina::Core::success();
-        }
-        auto store = Tina::Asset::AssetStore::Create({
-            .capacity = 2,
-            .memoryResource = &previewAssetMemory_,
-        });
-        if (!store) {
-            return Tina::Core::failure(std::move(store.error()));
-        }
-        auto mesh = store->beginQueued(editorAssetId(0x31U),
-                                       Tina::AssetFormat::AssetKind::StaticMesh);
-        if (!mesh) {
-            return Tina::Core::failure(std::move(mesh.error()));
-        }
-        auto material = store->beginQueued(editorAssetId(0x32U),
-                                           Tina::AssetFormat::AssetKind::Material);
-        if (!material) {
-            return Tina::Core::failure(std::move(material.error()));
-        }
-        previewMeshAsset_ = *mesh;
-        previewMaterialAsset_ = *material;
-        previewAssetStore_.emplace(std::move(*store));
         return Tina::Core::success();
     }
 
     [[nodiscard]] Tina::Core::Status validateWorld3DRuntimePreview()
     {
         counters_.runtimePreviewValid = false;
-        if (auto status = ensureWorld3DPreviewAssets(); !status) {
-            return status;
-        }
-
         std::vector<Tina::AssetFormat::PrefabNodeView> nodeStorage;
         auto prefab = document3D_.parseCurrentPrefab(nodeStorage);
         if (!prefab) {
             return Tina::Core::failure(std::move(prefab.error()));
+        }
+        u64 resolvedMeshCount = 0;
+        for (auto& node : nodeStorage) {
+            if (!node.hasMesh) {
+                continue;
+            }
+            const Tina::Asset::AssetHandle mesh = loadedAsset(
+                node.meshId, Tina::AssetFormat::AssetKind::StaticMesh);
+            const Tina::Asset::AssetHandle material = loadedAsset(
+                node.materialId, Tina::AssetFormat::AssetKind::Material);
+            if (!mesh || !material || !containsHandle(boundMeshAssets_, mesh) ||
+                !containsHandle(boundMaterialAssets_, material)) {
+                node.hasMesh = false;
+                node.hasMaterial = false;
+                node.meshId = {};
+                node.materialId = {};
+                continue;
+            }
+            ++resolvedMeshCount;
         }
         auto world = Tina::Scene::World::Create({.entityCapacity = AuthoringEntityCapacity});
         if (!world) {
@@ -3376,11 +3851,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
         auto entities = Tina::Scene::instantiatePrefab(
             *world, *prefab,
             Tina::Scene::PrefabMeshBinding{
-                .mesh = previewMeshAsset_,
-                .material = previewMaterialAsset_,
                 .localBounds = {.radius = 1.75F},
                 .baseColorFactor = {.red = 0.26F, .green = 0.68F, .blue = 0.92F,
                                     .alpha = 1.0F},
+                .resolveMesh = [this](Tina::Core::AssetId assetId) {
+                    return loadedAsset(assetId, Tina::AssetFormat::AssetKind::StaticMesh);
+                },
+                .resolveMaterial = [this](Tina::Core::AssetId assetId) {
+                    return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Material);
+                },
             });
         if (!entities) {
             return Tina::Core::failure(std::move(entities.error()));
@@ -3425,8 +3904,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 if (auto status = world->setMeshRenderer3D(
                         entity,
                         Tina::Scene::MeshRenderer3D{
-                            .mesh = previewMeshAsset_,
-                            .material = previewMaterialAsset_,
+                            .mesh = loadedAsset(node.meshId,
+                                                Tina::AssetFormat::AssetKind::StaticMesh),
+                            .material = loadedAsset(node.materialId,
+                                                    Tina::AssetFormat::AssetKind::Material),
                             .localBounds = {.radius = 1.75F},
                             .baseColorFactor = color,
                             .visible = node.visible,
@@ -3485,6 +3966,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         preview3DBindings_ = std::move(bindings);
         previewCamera3D_ = cameraEntity;
         previewRevision_ = document3D_.revision();
+        previewResolvedMeshCount_ = resolvedMeshCount;
+        counters_.catalogResolved3DMeshes = resolvedMeshCount;
         counters_.world3DWorkspaceReady = true;
         counters_.runtimePreviewValid = true;
         return Tina::Core::success();
@@ -3540,7 +4023,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
         statusPreview += counters_.runtimePreviewValid ? "valid" : "invalid";
         statusPreview += "  |  Cook ";
         statusPreview += std::to_string(activeDocumentBytes().size());
-        statusPreview += " B";
+        statusPreview += " B  |  Catalog ";
+        statusPreview += assetResources_.projectCatalogConfigured ? "project" : "built-in";
+        statusPreview += "  |  Resolved ";
+        statusPreview += std::to_string(workspaceMode_ == WorkspaceMode::World2D
+                                            ? previewResolvedSpriteCount_
+                                            : previewResolvedMeshCount_);
         if (auto status = tree.setText(statusPreview_, statusPreview); !status) {
             return status;
         }
@@ -3824,6 +4312,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     WorkspaceMode workspaceMode_ = WorkspaceMode::World2D;
     WorkspaceSessionState world2DSession_{};
     WorkspaceSessionState world3DSession_{};
+    EditorAssetResources& assetResources_;
+    EditorRenderDeviceAccess& renderDeviceAccess_;
     Tina::UI::UIRootOwner uiRoot_{};
     UI::UINodeId hierarchyTree_{};
     UI::UINodeId inspectorName_{};
@@ -3854,6 +4344,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId previewTitle_{};
     UI::UINodeId previewEntities_{};
     UI::UINodeId previewCook_{};
+    UI::UINodeId previewAssetStatus_{};
     UI::UINodeId cameraStatus_{};
     UI::UINodeId viewportToolStatus_{};
     UI::UINodeId documentFormat_{};
@@ -3885,14 +4376,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::vector<Tina::Scene::World2DEntityBinding> previewBindings_{};
     std::vector<World3DPreviewBinding> preview3DBindings_{};
     Tina::Scene::EntityId previewCamera3D_{};
-    std::pmr::unsynchronized_pool_resource previewAssetMemory_{};
-    std::optional<Tina::Asset::AssetStore> previewAssetStore_{};
-    Tina::Asset::AssetHandle previewMeshAsset_{};
-    Tina::Asset::AssetHandle previewMaterialAsset_{};
+    std::optional<Tina::Asset::Sprite2DBindingRegistry> spriteBindings_{};
+    std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};
+    std::vector<Tina::Asset::AssetHandle> loadedPreviewHandles_{};
+    std::vector<Tina::Asset::AssetHandle> boundSpriteAssets_{};
+    std::vector<Tina::Asset::AssetHandle> boundMeshAssets_{};
+    std::vector<Tina::Asset::AssetHandle> boundMaterialAssets_{};
+    u64 previewResolvedSpriteCount_ = 0;
+    u64 previewResolvedMeshCount_ = 0;
     u64 previewRevision_ = 0;
     UI::UILogicalRect viewportLogicalRect_{};
     std::optional<Tina::Render::RenderNormalizedViewport> viewportNormalized_{};
-    EditorFrameResources frameResources_{};
+    u32 surfacePixelWidth_ = WindowLogicalWidth;
+    u32 surfacePixelHeight_ = WindowLogicalHeight;
     std::string authoringFeedback_ = "One validated revision per command";
     std::optional<u64> pendingSelectionIndex_{};
     std::optional<EditorCommand> pendingEditorCommand_{};
@@ -3902,8 +4398,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
 
 class EditorApplication final : public Tina::IGameApplication {
   public:
-    EditorApplication(EditorLaunchOptions options, LifecycleCounters& counters) noexcept
-        : options_(options), counters_(counters)
+    EditorApplication(EditorLaunchOptions options, LifecycleCounters& counters,
+                      EditorAssetResources& assetResources,
+                      EditorRenderDeviceAccess& renderDeviceAccess) noexcept
+        : options_(options), counters_(counters), assetResources_(assetResources),
+          renderDeviceAccess_(renderDeviceAccess)
     {
     }
 
@@ -3919,7 +4418,8 @@ class EditorApplication final : public Tina::IGameApplication {
                     options_, counters_, std::move(initialDocuments->world2D),
                     std::move(initialDocuments->world3D),
                     std::move(initialDocuments->world2DSession),
-                    std::move(initialDocuments->world3DSession));
+                    std::move(initialDocuments->world3DSession), assetResources_,
+                    renderDeviceAccess_);
             return state;
         } catch (const std::bad_alloc&) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
@@ -3935,6 +4435,8 @@ class EditorApplication final : public Tina::IGameApplication {
   private:
     EditorLaunchOptions options_;
     LifecycleCounters& counters_;
+    EditorAssetResources& assetResources_;
+    EditorRenderDeviceAccess& renderDeviceAccess_;
 };
 
 [[nodiscard]] Tina::EngineConfig createEngineConfig()
@@ -3969,6 +4471,7 @@ class EditorApplication final : public Tina::IGameApplication {
     const bool world2D = options.initialWorkspace == WorkspaceMode::World2D;
     const bool world2DPathConfigured = !options.world2DDocumentPathUtf8.empty();
     const bool world3DPathConfigured = !options.world3DDocumentPathUtf8.empty();
+    const bool projectCatalogConfigured = !options.catalogRootUtf8.empty();
     const bool documentPathConfigured = world2D ? world2DPathConfigured
                                                 : world3DPathConfigured;
     const bool activeDocumentLoaded = world2D ? counters.world2DDocumentLoaded
@@ -4011,10 +4514,13 @@ class EditorApplication final : public Tina::IGameApplication {
         counters.finalWorkspaceWorld2D != world2D ||
         counters.world2DDocumentPathConfigured != world2DPathConfigured ||
         counters.world3DDocumentPathConfigured != world3DPathConfigured ||
+        !counters.catalogReady ||
+        counters.projectCatalogConfigured != projectCatalogConfigured ||
+        counters.builtInPreviewCatalog == projectCatalogConfigured ||
         counters.runtimePreviewInstantiations < 1 || counters.renderExtractions != options.targetFrameCount ||
         (options.targetFrameCount > 1 &&
-         (world2D ? counters.gpuViewportSprites != GpuViewportSpriteCount
-                  : counters.gpuViewportMeshes != GpuViewportMeshCount)) ||
+         (world2D ? counters.gpuViewportSprites != counters.catalogResolved2DSprites
+                  : counters.gpuViewportMeshes != counters.catalogResolved3DMeshes)) ||
         (world2D ? !counters.world2DWorkspaceReady : !counters.world3DWorkspaceReady) ||
         counters.viewportLogicalWidth <= 0.0F || counters.viewportLogicalHeight <= 0.0F ||
         counters.viewportNormalizedX < 0.0F || counters.viewportNormalizedY < 0.0F ||
@@ -4025,6 +4531,38 @@ class EditorApplication final : public Tina::IGameApplication {
         counters.cookPreviewBytes != expectedCookBytes) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Tina Editor lifecycle counters did not match contract");
+    }
+    if (!projectCatalogConfigured &&
+        (counters.catalogEntryCount != 4 || counters.catalogAssetsLoaded != 3 ||
+         counters.catalogGpuTextures != 1 || counters.catalogGpuMeshes != 1 ||
+         counters.catalogSpriteBindings != 1 || counters.catalogMeshBindings != 1 ||
+         counters.catalogMaterialBindings != 1 || counters.catalogUnresolvedReferences != 0 ||
+         ((world2D || options.autoDemo) &&
+          counters.catalogResolved2DSprites != GpuViewportSpriteCount) ||
+         ((!world2D || options.autoDemo) &&
+          counters.catalogResolved3DMeshes != GpuViewportMeshCount))) {
+        std::string message = "Tina Editor built-in Catalog counters mismatch: entries=";
+        message += std::to_string(counters.catalogEntryCount);
+        message += ", loaded=";
+        message += std::to_string(counters.catalogAssetsLoaded);
+        message += ", gpuTextures=";
+        message += std::to_string(counters.catalogGpuTextures);
+        message += ", gpuMeshes=";
+        message += std::to_string(counters.catalogGpuMeshes);
+        message += ", spriteBindings=";
+        message += std::to_string(counters.catalogSpriteBindings);
+        message += ", meshBindings=";
+        message += std::to_string(counters.catalogMeshBindings);
+        message += ", materialBindings=";
+        message += std::to_string(counters.catalogMaterialBindings);
+        message += ", unresolved=";
+        message += std::to_string(counters.catalogUnresolvedReferences);
+        message += ", resolved2D=";
+        message += std::to_string(counters.catalogResolved2DSprites);
+        message += ", resolved3D=";
+        message += std::to_string(counters.catalogResolved3DMeshes);
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   std::move(message));
     }
     if (options.autoDemo) {
         const bool dimensionSpecificTransformMatches =
@@ -4125,14 +4663,27 @@ class EditorApplication final : public Tina::IGameApplication {
     }
     const EditorLaunchOptions options = *optionsResult;
 
-    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig());
+    LifecycleCounters counters{};
+    EditorAssetResources assetResources{};
+    if (auto status = prepareEditorCatalog(options, assetResources); !status) {
+        writeError(status.error());
+        return 1;
+    }
+    EditorRenderDeviceAccess renderDeviceAccess{};
+    Tina::Desktop::CreateEngineOptions desktopOptions{};
+    desktopOptions.wrapWindowSurfaceRenderDevice =
+        [&renderDeviceAccess](std::unique_ptr<Tina::Render::IRenderDevice> device)
+            -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
+            renderDeviceAccess.set(device.get());
+            return device;
+        };
+    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig(), std::move(desktopOptions));
     if (!hostResult) {
         writeError(hostResult.error());
         return 1;
     }
 
-    LifecycleCounters counters{};
-    EditorApplication application{options, counters};
+    EditorApplication application{options, counters, assetResources, renderDeviceAccess};
     auto runResult = (*hostResult)->run(application);
     if (!runResult) {
         writeError(runResult.error());
@@ -4162,6 +4713,8 @@ class EditorApplication final : public Tina::IGameApplication {
     writeJsonString(std::cout, options.world2DDocumentPathUtf8);
     std::cout << ",\"world3DDocumentPath\":";
     writeJsonString(std::cout, options.world3DDocumentPathUtf8);
+    std::cout << ",\"catalogRoot\":";
+    writeJsonString(std::cout, options.catalogRootUtf8);
     std::cout << ",\"documentLoaded\":" << (counters.documentLoaded ? "true" : "false")
               << ",\"world2DDocumentPathConfigured\":"
               << (counters.world2DDocumentPathConfigured ? "true" : "false")
@@ -4208,6 +4761,22 @@ class EditorApplication final : public Tina::IGameApplication {
               << ",\"renderExtractions\":" << counters.renderExtractions
               << ",\"gpuViewportSprites\":" << counters.gpuViewportSprites
               << ",\"gpuViewportMeshes\":" << counters.gpuViewportMeshes
+              << ",\"catalogReady\":" << (counters.catalogReady ? "true" : "false")
+              << ",\"projectCatalogConfigured\":"
+              << (counters.projectCatalogConfigured ? "true" : "false")
+              << ",\"builtInPreviewCatalog\":"
+              << (counters.builtInPreviewCatalog ? "true" : "false")
+              << ",\"catalogEntryCount\":" << counters.catalogEntryCount
+              << ",\"catalogAssetsLoaded\":" << counters.catalogAssetsLoaded
+              << ",\"catalogGpuTextures\":" << counters.catalogGpuTextures
+              << ",\"catalogGpuMeshes\":" << counters.catalogGpuMeshes
+              << ",\"catalogSpriteBindings\":" << counters.catalogSpriteBindings
+              << ",\"catalogMeshBindings\":" << counters.catalogMeshBindings
+              << ",\"catalogMaterialBindings\":" << counters.catalogMaterialBindings
+              << ",\"catalogUnresolvedReferences\":"
+              << counters.catalogUnresolvedReferences
+              << ",\"catalogResolved2DSprites\":" << counters.catalogResolved2DSprites
+              << ",\"catalogResolved3DMeshes\":" << counters.catalogResolved3DMeshes
               << ",\"workspaceSwitches\":" << counters.workspaceSwitches
               << ",\"world2DWorkspaceReady\":"
               << (counters.world2DWorkspaceReady ? "true" : "false")

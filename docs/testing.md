@@ -840,24 +840,27 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
 
 用例覆盖 canonical runtime preview、replace/load/upsert/erase-subtree/gameplay revision、undo/redo 与分支替换、
 entry/byte budget 淘汰、非法 schema/parent/容量失败的 current + history 原子性以及公开头隔离。只有 Editor application
-接线或文件/cook 集成完成时才扩大到对应 sample/CLI；纯 document 小切片不跑无关产品 gate。
+接线或文件/cook 集成完成时才扩大到 `TinaEditor.exe` 产品 smoke；Runtime samples 不是 Editor gate，纯 document 小切片
+不跑无关产品门禁。
 
-TinaEditor GPU viewport 切片在代码完成后只做一次受影响 target 的增量验证，不重跑全量 UI/产品矩阵：
+TinaEditor GPU viewport 切片在代码完成后只做一次受影响正式 target 的增量验证，不重跑全量 UI/产品矩阵：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_runtime_ui_tests tina_editor_desktop --parallel 1 -- /nr:false
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe `
-  --gtest_filter=PrimaryWindowUICapabilityTest.CommittedLayoutRectCopiesPreviousPublishedWorldRectAndExpires
+  --target tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=60 --frame-delay-ms=0
+  --frames=60 --frame-delay-ms=0 --workspace=2d
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
+  --frames=60 --frame-delay-ms=0 --workspace=3d
 ```
 
-布局/GPU smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、
+布局/Catalog/GPU smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、
 `viewportLayoutReady=true`、`inspectorScrollConfigured=true`、`renderExtractions=frames`、
-`gpuViewportSprites=4`、`gpuViewportReady=true`、`gpuViewportDocumentRevision=documentRevision`，以及非空 logical rect、
-位于 `[0,1]` 内的 normalized viewport 和 `uiRootsCreated=1` / `uiRootsReleased=1`。viewport 使用上一轮 committed layout，
-所以首帧不提交 world，随后帧才提交 4 个 proxy；窗口尺寸改变后下一帧跟随新 rect。
+2D `gpuViewportSprites=1`、3D `gpuViewportMeshes=3`、`gpuViewportReady=true`、
+`gpuViewportDocumentRevision=documentRevision`，以及非空 logical rect、位于 `[0,1]` 内的 normalized viewport 和
+`uiRootsCreated=1` / `uiRootsReleased=1`。built-in Catalog 还固定检查 entry/load=`4/3`、Texture/Mesh upload=`1/1`、
+Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`1/3`。viewport 使用上一轮 committed
+layout，所以首帧不提交 world，窗口尺寸改变后下一帧跟随新 rect。
 `--no-auto-demo` 仍用于人工操作模式；本切片不扩大到完整 product-2d gate。
 Transform/gizmo smoke 还要检查 Inspector transaction=`1`，gizmo begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，
 workspace round-trip=`2`、runtime preview instantiations=`8`、最终 revision/undo depth=`7/3` 且 GPU revision 对齐。
@@ -969,7 +972,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D 完整产品；Inspector 完整 TRS transaction、routed-pointer viewport Move capture、双 workspace 独立 path/loaded/baseline/dirty session、Undo/Redo 与原子 Save；committed UI rect 驱动 Camera2D/Sprite 或 PerspectiveCamera/Mesh partial GPU viewport；JSON 报告 layout、gizmo、session、GPU/document revision 与 preview 状态 | Catalog asset-resolved viewport、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
+| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D 完整产品；Inspector 完整 TRS transaction、routed-pointer viewport Move capture、双 workspace 独立 session、Undo/Redo 与原子 Save；`--catalog-root` + AssetSystem + Sprite/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、gizmo、session、Catalog/GPU resolve、document revision 与 preview 状态 | TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
