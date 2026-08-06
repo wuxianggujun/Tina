@@ -1903,6 +1903,42 @@ TEST_F(PrimaryWindowUICapabilityTest, UpdateCapabilityMutatesOwnedTreeThenExpire
     EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, CommittedLayoutRectCopiesPreviousPublishedWorldRectAndExpires)
+{
+    CapabilityState state;
+    auto enterEpoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(enterEpoch.has_value()) << enterEpoch.error().message;
+    auto builder = state.rootBuilder(*enterEpoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto enterTree = builder->treeUpdater(*root);
+    ASSERT_TRUE(enterTree.has_value()) << enterTree.error().message;
+
+    ASSERT_TRUE(enterTree->setLayoutStyle(root->rootNodeId(), fixedSize(160.0F, 90.0F)).has_value());
+    auto panel = enterTree->createElement(root->rootNodeId(), UI::makePanelElement(fixedSize(80.0F, 40.0F)));
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+    ASSERT_TRUE(state.finishPhase(*enterEpoch, CapabilityPhase::GameStateEnter).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 90.0F}).has_value());
+
+    auto updateEpoch = state.beginUIUpdatePhase(context.get());
+    ASSERT_TRUE(updateEpoch.has_value()) << updateEpoch.error().message;
+    auto updateTree = state.treeUpdater(*updateEpoch, CapabilityPhase::UIUpdate, *root);
+    ASSERT_TRUE(updateTree.has_value()) << updateTree.error().message;
+
+    auto rect = updateTree->committedLayoutRect(*panel);
+    ASSERT_TRUE(rect.has_value()) << rect.error().message;
+    EXPECT_FLOAT_EQ(rect->x, 0.0F);
+    EXPECT_FLOAT_EQ(rect->y, 0.0F);
+    EXPECT_FLOAT_EQ(rect->width, 80.0F);
+    EXPECT_FLOAT_EQ(rect->height, 40.0F);
+
+    ASSERT_TRUE(state.finishPhase(*updateEpoch, CapabilityPhase::UIUpdate).has_value());
+    auto expired = updateTree->committedLayoutRect(*panel);
+    ASSERT_FALSE(expired.has_value());
+    EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, SetBoxPaintFailureIsStickyAcrossContextAndPreventsLaterMutation)
 {
     auto foreignContextResult = UI::UIContext::Create(window, {.nodeCapacity = 4, .rootCapacity = 1});

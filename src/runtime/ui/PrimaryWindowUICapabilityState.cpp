@@ -385,6 +385,23 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isAlive(u64 epoch, PrimaryWin
     return updater.isAlive(node);
 }
 
+Core::Result<UI::UILogicalRect>
+PrimaryWindowUICapabilityState::committedLayoutRect(u64 epoch, PrimaryWindowUIPhase phase,
+                                                    const UI::UITreeUpdater& updater, UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::committedLayoutRect";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto rect = updater.committedLayoutRect(node);
+    if (!rect)
+    {
+        return Core::failure(rememberFirstError(std::move(rect.error()), Operation));
+    }
+    return *rect;
+}
+
 Core::Result<UI::UINodeId>
 PrimaryWindowUICapabilityState::createElement(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId parent,

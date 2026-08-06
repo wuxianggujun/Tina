@@ -321,6 +321,10 @@ class UITreeUpdater final {
                                                    UIFlowActionCallback callback);
     [[nodiscard]] Core::Status clearFlowScreenAction(UIFlowScreenId screen, UIFlowAction action);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
+    // Copies the node's world rect from the last successful layout commit.
+    // Returns InvalidNode when the node is outside this updater root or absent
+    // from the committed snapshot. The returned value owns no snapshot borrow.
+    [[nodiscard]] Core::Result<UILogicalRect> committedLayoutRect(UINodeId node) const;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UINodeId node, UIPointerHitPolicy policy);
     // Enables or disables a published widget. Disabled widgets remain in the

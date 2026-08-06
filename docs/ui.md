@@ -52,6 +52,8 @@ Runtime 私有持有主窗口 UIContext；普通游戏不取得裸 `UIContext*`�
 
 - `GameStateEnterContext::primaryWindowUIRootBuilder()` 只在 `onEnter()` 当前 epoch 有效；
 - `UIUpdateContext::primaryWindowUITreeUpdater(root)` 只在 `updateUI()` 当前 epoch 对该 root 有效；
+- `PrimaryWindowUITreeUpdater::committedLayoutRect(node)` 复制上一轮成功 layout commit 的 root-scoped
+  `worldRect`；返回值不借用 snapshot，未提交/跨 root/失效节点返回 `InvalidNode`；
 - `PrimaryWindowUITreeUpdater::beginBuildTransaction()` 返回的 move-only transaction 只在当前 epoch 有效；
 - facade 的第一次失败成为 phase sticky error，回调结束后统一返回；
 - builder/updater/transaction、span 和 committed view 不得跨 phase 保存；活动 transaction 若逃逸 callback，
@@ -60,6 +62,8 @@ Runtime 私有持有主窗口 UIContext；普通游戏不取得裸 `UIContext*`�
 `PrimaryWindowUITreeUpdater` 通过统一 `createElement()` 创建 ListView/TreeView，并暴露其 DataSource、
 style/paint、metrics、selection、scroll，以及 Tree expansion 操作；这些 facade 与其他 mutation 一样受 phase epoch 和
 owner-thread 约束，不把 `UIContext` 或第三方类型暴露给游戏。
+直接 `UITreeUpdater` 提供相同的 `committedLayoutRect()` 数值复制契约。由于 Runtime 的 RenderScene extraction 位于
+本帧 UI update/commit 之前，组合层在 `updateUI()` 读取 rect 后应从下一帧开始使用，不能假定正在修改的布局已发布。
 
 ## Element authoring 与布局契约
 

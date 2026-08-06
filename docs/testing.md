@@ -842,22 +842,25 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
 entry/byte budget 淘汰、非法 schema/parent/容量失败的 current + history 原子性以及公开头隔离。只有 editor shell
 接线或文件/cook 集成完成时才扩大到对应 sample/CLI；纯 document 小切片不跑无关产品 gate。
 
-Editor shell 布局切片在代码完成后只做一次受影响 target 的增量验证，不重跑全量 UI/产品矩阵：
+Editor shell GPU viewport 切片在代码完成后只做一次受影响 target 的增量验证，不重跑全量 UI/产品矩阵：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_editor_tests tina_sample_editor_shell --parallel 1 -- /nr:false
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
-  --gtest_filter=World2DAuthoringDocumentTests.*
+  --target tina_runtime_ui_tests tina_sample_editor_shell --parallel 1 -- /nr:false
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe `
+  --gtest_filter=PrimaryWindowUICapabilityTest.CommittedLayoutRectCopiesPreviousPublishedWorldRectAndExpires
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
   --frames=60 --frame-delay-ms=0
 ```
 
-布局 smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、`viewportPreviewMarkers=4`、
-`viewportLayoutReady=true`、`inspectorScrollConfigured=true`，以及 `uiRootsCreated=1` / `uiRootsReleased=1`。
-`--no-auto-demo` 仍用于人工操作模式；在真实 viewport 接入前，不扩大到完整 product-2d gate。
+布局/GPU smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=6`、
+`viewportLayoutReady=true`、`inspectorScrollConfigured=true`、`renderExtractions=frames`、
+`gpuViewportSprites=4`、`gpuViewportReady=true`、`gpuViewportDocumentRevision=documentRevision`，以及非空 logical rect、
+位于 `[0,1]` 内的 normalized viewport 和 `uiRootsCreated=1` / `uiRootsReleased=1`。viewport 使用上一轮 committed layout，
+所以首帧不提交 world，随后帧才提交 4 个 proxy；窗口尺寸改变后下一帧跟随新 rect。
+`--no-auto-demo` 仍用于人工操作模式；本切片不扩大到完整 product-2d gate。
 Transform smoke 还要检查最终 Player `rotation=30 degrees`、`scale=(1.25,0.75)`；五个 Inspector 字段通过一次
-`Apply Transform` 发布，真实 GPU viewport 与 viewport gizmo 仍不在本切片验收范围。
+`Apply Transform` 发布；viewport gizmo 仍不在本切片验收范围。
 
 Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的 shell smoke：
 
@@ -967,7 +970,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `tina_sample_editor_shell` | `Tina::Editor` World2D document 驱动的完整 shell 布局（Toolbar/Context/Hierarchy/World2D viewport/滚动 Inspector/status bar）；Position Apply、`Move X +1`、Undo、Redo 各发布一个受验证 revision；每次状态切换从 canonical bytes 解析并实例化新的 `Scene::World`；显式 `--document-path` 接通 existing-file reopen、原子 Save 和 canonical dirty baseline；JSON 报告 layout、preview、load/save/dirty 状态 | 真实 GPU viewport、Rotation/Scale/gizmo transaction、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
+| `tina_sample_editor_shell` | `Tina::Editor` World2D document 驱动的完整 shell 布局（Toolbar/Context/Hierarchy/World2D viewport/滚动 Inspector/status bar）；Position/Rotation/Scale Apply、`Move X +1`、Undo、Redo 各发布一个受验证 revision；每次状态切换从 canonical bytes 解析并实例化新的 `Scene::World`；上一轮 committed UI rect 驱动 partial Camera2D viewport，4 个 GPU authoring proxy 与验证读取同一 World/binding/revision；显式 `--document-path` 接通 existing-file reopen、原子 Save 和 canonical dirty baseline；JSON 报告 layout、GPU viewport、preview、load/save/dirty 状态 | Catalog asset-resolved viewport、viewport gizmo transaction、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |

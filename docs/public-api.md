@@ -300,6 +300,12 @@ mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree
 paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
 错误或 dirty queue 容量不足均零发布。
 
+`UITreeUpdater::committedLayoutRect(node)` 与 phase-scoped
+`PrimaryWindowUITreeUpdater::committedLayoutRect(node)` 复制上一轮成功 layout publication 的 `worldRect`。
+查询只接受当前 updater root 内仍存活且存在于 committed snapshot 的节点；返回值不借用 snapshot，节点未提交、
+跨 root、失效或 facade 过期均返回结构化错误。该窄查询用于 Render/Editor 等需要把 retained layout 数值转换为
+下一帧 viewport 的组合层，不暴露裸 `UIContext` 或完整 committed view。
+
 `UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供 `registerFlowLayer()`、`registerFlowScreen()`、
 `pushFlowScreen()`、`popFlowScreen()`、`replaceFlowScreen()`、`activeFlowScreen()` 和
 `isFlowScreenActive()`，并以 `setFlowScreenAction()` / `clearFlowScreenAction()` 为 Screen 注册

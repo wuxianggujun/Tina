@@ -201,6 +201,15 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isAlive(UI::UINodeId node) const
     return m_state->isAlive(m_epoch, m_phase, m_updater, node);
 }
 
+Core::Result<UI::UILogicalRect> PrimaryWindowUITreeUpdater::committedLayoutRect(UI::UINodeId node) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UILogicalRect>("PrimaryWindowUITreeUpdater::committedLayoutRect");
+    }
+    return m_state->committedLayoutRect(m_epoch, m_phase, m_updater, node);
+}
+
 Core::Result<UI::UINodeId>
 PrimaryWindowUITreeUpdater::createElement(UI::UINodeId parent, const UI::UIElementDescriptor& descriptor)
 {

@@ -9,16 +9,21 @@ schema 兼容格式。
 
 独立 `Tina::Editor` target、`World2DAuthoringDocument` 与 `World2DAuthoringFile` 已提供。`tina_sample_editor_shell` 现已把 Hierarchy/
 Inspector 的 Position X/Y、Rotation Z（度）、Scale X/Y、`Apply Transform`、`Move X +1`、Undo、Redo 接到真实 document，并在每次成功命令后把同一份 canonical snapshot 解析、
-实例化到新的 `Scene::World` 做 runtime preview 验证。当前 shell 的 retained UI 布局也已完整铺开：Toolbar、上下文
-工具条、Hierarchy dock、World2D viewport 工作区、可滚动 Inspector（Identity/Transform/Components/Authoring/
-Document）和底部 status bar 均由 `Flex`、`minMax`、固定控件高度与滚动容器组合；中心 preview 已绑定 canonical
-Camera/Player/Light/TileMap 位置，用 Overlay 百分比 marker 随工作区增长；窗口变大时 viewport 与中间工作区增长，
-两侧 dock 保持 bounded width。传入 `--document-path=<UTF-8 path>` 后，已有文件会先按当前 schema 原子加载为 clean
+实例化到新的 `Scene::World`。同一个 World/binding snapshot 现在同时驱动 runtime preview 验证与真实 GPU viewport：
+Camera entity 提供 Camera2D transform，Camera/Player/Light/TileMap 以 bgfx 默认纹理的着色 authoring proxy 提交，
+不再维护一套 UI marker 模拟状态，也不把 proxy 冒充已解析的 Catalog 产品资源。
+
+当前 shell 的 retained UI 布局已完整铺开：Toolbar、上下文工具条、Hierarchy dock、World2D viewport 工作区、
+可滚动 Inspector（Identity/Transform/Components/Authoring/Document）和底部 status bar 均由 `Flex`、`minMax`、
+固定控件高度与滚动容器组合。`updateUI()` 从上一轮成功提交的 viewport/root `worldRect` 计算
+`RenderNormalizedViewport`，因此窗口变大时 viewport 与中间工作区共同增长，两侧 dock 保持 bounded width，
+world pass 下一帧跟随新的布局；首帧在 committed rect 可用前不提交 world，避免用 `1280×800` 写死区域或全屏闪烁。
+传入 `--document-path=<UTF-8 path>` 后，已有文件会先按当前 schema 原子加载为 clean
 baseline，不存在的路径则作为新文档 Save target；Toolbar Save 原子保存当前 canonical snapshot，并让 Toolbar/
 Inspector/status bar 依据 saved baseline 显示 `Modified/Saved`；未配置路径时 Save 保持 disabled。
 五个 Transform 字段通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，拒绝时恢复
 canonical 字段并保持 document/history/preview 不变。Rotation Z 输入会规范化到 `[-180, 180]` 等价角并发布平面 Z 四元数，
-Scale X/Y 保留有符号有限值且不改写 Scale Z；marker 尺寸同步反映 X/Y scale。真实渲染 viewport 与 viewport gizmo、TileMap/动画专用 document
+Scale X/Y 保留有符号有限值且不改写 Scale Z；GPU proxy 尺寸同步反映 X/Y scale。viewport gizmo、TileMap/动画专用 document
 仍是后续切片；它们必须复用这里的 revision/failure 语义，不各自实现一套 undo stack 或 cooked preview。
 
 ## Editor shell layout
@@ -33,10 +38,10 @@ Workspace
 Status bar (schema/entities/revision/preview/selection)
 ```
 
-这层只属于 `samples/editor_shell` 的组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局 smoke 的
-结构化输出额外报告 `editorLayoutRegions=6`、`viewportPreviewMarkers=4`、`viewportLayoutReady=true` 和
-`inspectorScrollConfigured=true`；这些字段
-只证明 retained tree 已建立，不证明真实 GPU viewport。字段事务由 `inspectorTransactions`、
+这层只属于 `samples/editor_shell` 的组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局与 GPU smoke 的
+结构化输出报告 `editorLayoutRegions=6`、`viewportLayoutReady=true`、`inspectorScrollConfigured=true`、
+`renderExtractions`、`gpuViewportSprites=4`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。
+`gpuViewportDocumentRevision` 还必须与最终 canonical document revision 一致。字段事务由 `inspectorTransactions`、
 `inspectorRejectedTransactions` 和最终 Player XY/Rotation Z/Scale XY 取证；文件保存另由 `authoringSaves`、`savedSnapshotBytes`、
 `documentSaved`、`documentDirty` 和落盘 bytes 取证。
 
@@ -121,11 +126,14 @@ Undo/Redo 无对应 revision 时分别返回 `UndoUnavailable` / `RedoUnavailabl
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_editor_tests tina_sample_editor_shell --parallel 1 -- /nr:false
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
-  --gtest_filter=World2DAuthoringFileTests.*
+  --target tina_runtime_ui_tests tina_sample_editor_shell --parallel 1 -- /nr:false
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe `
+  --gtest_filter=PrimaryWindowUICapabilityTest.CommittedLayoutRectCopiesPreviousPublishedWorldRectAndExpires
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
   --frames=60 --frame-delay-ms=0 `
+  --document-path=artifacts/editor_shell/smoke/world2d.tworld
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.exe `
+  --frames=10 --frame-delay-ms=0 --no-auto-demo `
   --document-path=artifacts/editor_shell/smoke/world2d.tworld
 ```
 
@@ -136,11 +144,12 @@ Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirecto
 人工操作按钮时使用较长帧数并传 `--no-auto-demo`；该模式仍验证 document 与 runtime preview 一般不变量，
 但不把用户产生的 revision 数量误判为自动 smoke 失败。
 
-document 与 shell 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；非法 edit 原子失败；
+document 与 shell 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；GPU viewport 的 Camera、
+proxy transforms 与 revision 来自同一 preview World/binding，committed UI rect 正确归一化且不保存 snapshot borrow；非法 edit 原子失败；
 subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 三个公共头
 isolation 编译通过；已有文件加载为 clean baseline、加载失败不改变 current/history；文件保存 exact canonical bytes、
 覆盖失败不删除旧目标；shell 自动完成
 Move → Apply Transform → Undo → Redo → Save，在五个 revision 状态均成功实例化 runtime preview，Save 不增加第六次 instantiate。
 
-后续产品切片依次为：真实渲染 viewport 与 viewport gizmo transaction；TileMap root+chunk authoring/cook；
+后续产品切片依次为：viewport gizmo transaction；TileMap root+chunk authoring/cook；
 SpriteAnimationClip timeline authoring/cook。每个切片继续只保留现行 schema，不增加旧资产兼容分支。

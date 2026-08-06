@@ -17729,6 +17729,28 @@ bool UITreeUpdater::isAlive(UINodeId node) const noexcept
     return m_context != nullptr && m_context->isAliveInRoot(m_root, node);
 }
 
+Core::Result<UILogicalRect> UITreeUpdater::committedLayoutRect(UINodeId node) const
+{
+    if (m_context == nullptr)
+    {
+        return Core::failure(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    if (!m_context->isAliveInRoot(m_root, node))
+    {
+        return Core::failure(UIErrorCode::InvalidNode,
+                             "UI committed layout query requires a live node in the updater root");
+    }
+    for (const UICommittedLayoutEntry& entry : m_context->committedLayout().entries())
+    {
+        if (entry.node == node)
+        {
+            return entry.worldRect;
+        }
+    }
+    return Core::failure(UIErrorCode::InvalidNode,
+                         "UI node is absent from the committed layout snapshot");
+}
+
 Core::Status UITreeUpdater::setLayoutStyle(UINodeId node, const UILayoutStyle& style)
 {
     if (m_context == nullptr)

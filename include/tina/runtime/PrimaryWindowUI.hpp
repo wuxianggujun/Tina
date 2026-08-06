@@ -113,6 +113,9 @@ class PrimaryWindowUITreeUpdater final {
     PrimaryWindowUITreeUpdater& operator=(PrimaryWindowUITreeUpdater&& other) noexcept;
 
     [[nodiscard]] Core::Result<bool> isAlive(UI::UINodeId node) const;
+    // Copies the node's world rect from the previous successful UI layout
+    // publication. The query is root-scoped and expires with this phase facade.
+    [[nodiscard]] Core::Result<UI::UILogicalRect> committedLayoutRect(UI::UINodeId node) const;
     [[nodiscard]] Core::Result<UI::UINodeId> createElement(UI::UINodeId parent,
                                                           const UI::UIElementDescriptor& descriptor);
     [[nodiscard]] Core::Result<UI::UIFlowLayerId> registerFlowLayer(UI::UINodeId layer);

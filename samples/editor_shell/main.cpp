@@ -6,6 +6,7 @@
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/editor/World2DAuthoringDocument.hpp>
 #include <tina/editor/World2DAuthoringFile.hpp>
+#include <tina/render/RenderScene.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
@@ -38,10 +39,13 @@
 #include <utility>
 #include <vector>
 
+#include "../common/SampleSpriteFrameResource.hpp"
+
 namespace {
 
 namespace UI = Tina::UI;
 
+using Tina::Core::u8;
 using Tina::Core::u32;
 using Tina::Core::u64;
 
@@ -54,6 +58,9 @@ inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 EditorActionCount = 5;
 inline constexpr u32 EditorLayoutRegionCount = 6;
+inline constexpr u32 GpuViewportSpriteCount = 4;
+inline constexpr float PreviewWorldWidth = 16.0F;
+inline constexpr float PreviewWorldHeight = 9.0F;
 inline constexpr float DegreesToRadians = 0.01745329251994329577F;
 inline constexpr float RadiansToDegrees = 57.295779513082320876F;
 
@@ -83,6 +90,9 @@ struct LifecycleCounters final {
     UI::UITreeViewItemKey finalSelectionKey = UI::InvalidUITreeViewItemKey;
     u64 finalSelectionIndex = 0;
     u64 hierarchyLogicalItems = 0;
+    u64 renderExtractions = 0;
+    u64 gpuViewportSprites = 0;
+    u64 gpuViewportDocumentRevision = 0;
     u64 styleRegisteredClasses = 0;
     u64 styleRegisteredTokens = 0;
     u64 styleActiveRules = 0;
@@ -107,11 +117,19 @@ struct LifecycleCounters final {
     float finalPlayerRotationDegrees = 0.0F;
     float finalPlayerScaleX = 1.0F;
     float finalPlayerScaleY = 1.0F;
+    float viewportLogicalX = 0.0F;
+    float viewportLogicalY = 0.0F;
+    float viewportLogicalWidth = 0.0F;
+    float viewportLogicalHeight = 0.0F;
+    float viewportNormalizedX = 0.0F;
+    float viewportNormalizedY = 0.0F;
+    float viewportNormalizedWidth = 0.0F;
+    float viewportNormalizedHeight = 0.0F;
     u64 editorLayoutRegions = 0;
-    u64 viewportPreviewMarkers = 0;
     bool selectionVerified = false;
     bool stylesheetInstalled = false;
     bool runtimePreviewValid = false;
+    bool gpuViewportReady = false;
     bool viewportLayoutReady = false;
     bool inspectorScrollConfigured = false;
     bool documentPathConfigured = false;
@@ -849,9 +867,7 @@ class EditorShellState final : public Tina::IGameState {
         centerStyle.flexContainer.direction = UI::UIFlexDirection::Column;
         centerStyle.flexContainer.gap.row = 7.0F;
         centerStyle.padding = UI::UIEdgeSpacing::All(8.0F);
-        if (auto status = storeNode(createPanel(body, centerStyle, UI::UIStyleRoleId::PanelElevated,
-                                                viewportClass_),
-                                    center);
+        if (auto status = storeNode(createPanel(body, centerStyle, UI::UIStyleRoleId::None), center);
             !status) {
             return status;
         }
@@ -934,8 +950,7 @@ class EditorShellState final : public Tina::IGameState {
         viewportCanvasStyle.minMax.minHeight = UI::UILayoutLength::Px(220.0F);
         viewportCanvasStyle.padding = UI::UIEdgeSpacing::All(12.0F);
         viewportCanvasStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
-        if (auto status = storeNode(createPanel(center, viewportCanvasStyle, UI::UIStyleRoleId::PanelSurface,
-                                                viewportClass_),
+        if (auto status = storeNode(createPanel(center, viewportCanvasStyle, UI::UIStyleRoleId::None),
                                     viewportCanvas);
             !status) {
             return status;
@@ -987,7 +1002,7 @@ class EditorShellState final : public Tina::IGameState {
         previewFrameStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
         previewFrameStyle.flexContainer.gap.row = 8.0F;
         if (auto status = storeNode(createPanel(viewportSceneArea, previewFrameStyle,
-                                                UI::UIStyleRoleId::PanelElevated, dockClass_),
+                                                UI::UIStyleRoleId::None),
                                     previewFrame);
             !status) {
             return status;
@@ -1003,29 +1018,11 @@ class EditorShellState final : public Tina::IGameState {
         previewWorldLayerStyle.minMax.minHeight = UI::UILayoutLength::Px(72.0F);
         previewWorldLayerStyle.placement = UI::UILayoutPlacement::Flow;
         if (auto status = storeNode(createPanel(previewFrame, previewWorldLayerStyle,
-                                                UI::UIStyleRoleId::PanelSurface),
+                                                UI::UIStyleRoleId::None),
                                     viewportPreviewLayer_);
             !status) {
             return status;
         }
-        constexpr std::array previewMarkerKeys{
-            CameraKey,
-            PlayerKey,
-            LightsKey,
-            TileMapKey,
-        };
-        for (std::size_t index = 0; index < previewMarkerKeys.size(); ++index) {
-            UI::UILayoutStyle markerStyle = fixedSize(12.0F, 12.0F);
-            markerStyle.placement = UI::UILayoutPlacement::Overlay;
-            markerStyle.overlay.horizontal = UI::UIAxisAlignment::Start;
-            markerStyle.overlay.vertical = UI::UIAxisAlignment::Start;
-            if (auto status = storeNode(createPanel(viewportPreviewLayer_, markerStyle, UI::UIStyleRoleId::None),
-                                        viewportPreviewMarkers_[index]);
-                !status) {
-                return status;
-            }
-        }
-        counters_.viewportPreviewMarkers = previewMarkerKeys.size();
         UI::UINodeId previewEntities{};
         if (auto status = storeNode(createLabel(previewFrame, "Camera | Player | Light | TileMap",
                                                 fixedSize(240.0F, 22.0F), bodyText),
@@ -1401,6 +1398,9 @@ class EditorShellState final : public Tina::IGameState {
 
     void onExit(Tina::GameStateExitContext&) noexcept override
     {
+        viewportNormalized_.reset();
+        previewBindings_.clear();
+        previewWorld_.reset();
         if (uiRoot_) {
             uiRoot_.reset();
             ++counters_.uiRootsReleased;
@@ -1458,6 +1458,113 @@ class EditorShellState final : public Tina::IGameState {
         return Tina::Core::success();
     }
 
+    Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
+    {
+        ++counters_.renderExtractions;
+        counters_.gpuViewportSprites = 0;
+        if (!viewportNormalized_.has_value()) {
+            return Tina::Core::success();
+        }
+        if (!previewWorld_.has_value()) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor GPU viewport has no canonical preview World");
+        }
+
+        const Tina::Scene::World2DEntityBinding* cameraBinding = findPreviewBinding(CameraKey);
+        if (cameraBinding == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor GPU viewport is missing the Camera binding");
+        }
+        const Tina::Scene::WorldTransform* cameraTransform = previewWorld_->worldTransform(cameraBinding->entity);
+        if (cameraTransform == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor GPU viewport is missing the Camera world transform");
+        }
+
+        auto& writer = context.renderSceneWriter();
+        const Tina::Render::RenderCamera2DInput camera{
+            .stableCameraKey = cameraBinding->stableEntityId,
+            .centerX = cameraTransform->position.x,
+            .centerY = cameraTransform->position.y,
+            .rotationRadians = planarRotationDegrees(
+                                   cameraTransform->rotation.x, cameraTransform->rotation.y,
+                                   cameraTransform->rotation.z, cameraTransform->rotation.w) *
+                               DegreesToRadians,
+            .worldWidth = PreviewWorldWidth,
+            .worldHeight = PreviewWorldHeight,
+            .actualPixelsPerMeter = (std::max)(1.0F, viewportLogicalRect_.height / PreviewWorldHeight),
+            .normalizedViewport = *viewportNormalized_,
+            .pixelSnap = Tina::Render::RenderPixelSnapPolicy::Disabled,
+        };
+        if (auto status = writer.setCamera2D(camera); !status) {
+            return status;
+        }
+
+        auto texture = spriteFrameResource_.intern(context.frameResourceSink(), 1);
+        if (!texture) {
+            return Tina::Core::failure(std::move(texture.error()));
+        }
+        struct ProxySpec final {
+            UI::UITreeViewItemKey hierarchyKey = UI::InvalidUITreeViewItemKey;
+            float widthMeters = 1.0F;
+            float heightMeters = 1.0F;
+            Tina::Core::i32 orderInLayer = 0;
+            u8 red = 255;
+            u8 green = 255;
+            u8 blue = 255;
+        };
+        constexpr std::array<ProxySpec, GpuViewportSpriteCount> ProxySpecs{{
+            {.hierarchyKey = TileMapKey, .widthMeters = 5.0F, .heightMeters = 3.0F,
+             .orderInLayer = -20, .red = 178, .green = 156, .blue = 235},
+            {.hierarchyKey = CameraKey, .widthMeters = 0.6F, .heightMeters = 0.6F,
+             .orderInLayer = 10, .red = 114, .green = 167, .blue = 216},
+            {.hierarchyKey = PlayerKey, .widthMeters = 1.0F, .heightMeters = 1.4F,
+             .orderInLayer = 20, .red = 231, .green = 182, .blue = 90},
+            {.hierarchyKey = LightsKey, .widthMeters = 0.8F, .heightMeters = 0.8F,
+             .orderInLayer = 30, .red = 125, .green = 211, .blue = 167},
+        }};
+
+        for (const ProxySpec& spec : ProxySpecs) {
+            const Tina::Scene::World2DEntityBinding* binding = findPreviewBinding(spec.hierarchyKey);
+            if (binding == nullptr) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "editor GPU viewport is missing a canonical proxy binding");
+            }
+            const Tina::Scene::WorldTransform* transform = previewWorld_->worldTransform(binding->entity);
+            if (transform == nullptr) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "editor GPU viewport is missing a canonical proxy transform");
+            }
+            const bool selected = stableEntityIdForHierarchyItem(selectionKey_) == binding->stableEntityId;
+            const Tina::Render::RenderSprite2DInput sprite{
+                .texture = *texture,
+                .stableEntityKey = binding->stableEntityId,
+                .centerX = transform->position.x,
+                .centerY = transform->position.y,
+                .rotationRadians = planarRotationDegrees(
+                                       transform->rotation.x, transform->rotation.y,
+                                       transform->rotation.z, transform->rotation.w) *
+                                   DegreesToRadians,
+                .widthMeters = spec.widthMeters,
+                .heightMeters = spec.heightMeters,
+                .scaleX = visibleProxyScale(transform->scale.x),
+                .scaleY = visibleProxyScale(transform->scale.y),
+                .sortingLayer = 0,
+                .orderInLayer = spec.orderInLayer,
+                .red = selected ? u8{242} : spec.red,
+                .green = selected ? u8{245} : spec.green,
+                .blue = selected ? u8{247} : spec.blue,
+                .alpha = 220,
+            };
+            if (auto status = writer.addSprite2D(sprite); !status) {
+                return status;
+            }
+            ++counters_.gpuViewportSprites;
+        }
+        counters_.gpuViewportDocumentRevision = previewRevision_;
+        return Tina::Core::success();
+    }
+
     Tina::Core::Status updateUI(Tina::UIUpdateContext& context) override
     {
         if (!context.hasPrimaryWindowUI() || !uiRoot_) {
@@ -1466,6 +1573,9 @@ class EditorShellState final : public Tina::IGameState {
         auto tree = context.primaryWindowUITreeUpdater(uiRoot_);
         if (!tree) {
             return Tina::Core::failure(std::move(tree.error()));
+        }
+        if (auto status = updateGpuViewport(*tree); !status) {
+            return status;
         }
         if (pendingViewportTokenColor_.has_value()) {
             const UI::UIStraightSrgba8Color color = *pendingViewportTokenColor_;
@@ -1538,6 +1648,95 @@ class EditorShellState final : public Tina::IGameState {
         }
         pendingEditorCommand_ = command;
         return true;
+    }
+
+    [[nodiscard]] const Tina::Scene::World2DEntityBinding*
+    findPreviewBinding(UI::UITreeViewItemKey hierarchyKey) const noexcept
+    {
+        const u32 stableEntityId = stableEntityIdForHierarchyItem(hierarchyKey);
+        const auto binding = std::find_if(
+            previewBindings_.begin(), previewBindings_.end(),
+            [stableEntityId](const Tina::Scene::World2DEntityBinding& candidate) {
+                return candidate.stableEntityId == stableEntityId;
+            });
+        return binding == previewBindings_.end() ? nullptr : &*binding;
+    }
+
+    [[nodiscard]] static float visibleProxyScale(float scale) noexcept
+    {
+        constexpr float MinimumVisibleScale = 0.05F;
+        const float magnitude = (std::max)(std::abs(scale), MinimumVisibleScale);
+        return std::signbit(scale) ? -magnitude : magnitude;
+    }
+
+    [[nodiscard]] Tina::Core::Status updateGpuViewport(Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        auto viewportRect = tree.committedLayoutRect(viewportPreviewLayer_);
+        if (!viewportRect) {
+            return Tina::Core::failure(std::move(viewportRect.error()));
+        }
+        auto rootRect = tree.committedLayoutRect(uiRoot_.rootNodeId());
+        if (!rootRect) {
+            return Tina::Core::failure(std::move(rootRect.error()));
+        }
+        if (!std::isfinite(rootRect->x) || !std::isfinite(rootRect->y) ||
+            !std::isfinite(rootRect->width) || !std::isfinite(rootRect->height) ||
+            !std::isfinite(viewportRect->x) || !std::isfinite(viewportRect->y) ||
+            !std::isfinite(viewportRect->width) || !std::isfinite(viewportRect->height) ||
+            rootRect->width <= 0.0F || rootRect->height <= 0.0F ||
+            viewportRect->width <= 0.0F || viewportRect->height <= 0.0F) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor GPU viewport committed layout is not usable");
+        }
+
+        const double rootWidth = rootRect->width;
+        const double rootHeight = rootRect->height;
+        const double left = std::clamp(
+            (static_cast<double>(viewportRect->x) - rootRect->x) / rootWidth, 0.0, 1.0);
+        const double top = std::clamp(
+            (static_cast<double>(viewportRect->y) - rootRect->y) / rootHeight, 0.0, 1.0);
+        const double right = std::clamp(
+            (static_cast<double>(viewportRect->x) + viewportRect->width - rootRect->x) /
+                rootWidth,
+            0.0, 1.0);
+        const double bottom = std::clamp(
+            (static_cast<double>(viewportRect->y) + viewportRect->height - rootRect->y) /
+                rootHeight,
+            0.0, 1.0);
+        if (!(right > left) || !(bottom > top)) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor GPU viewport lies outside the committed UI root");
+        }
+
+        Tina::Render::RenderNormalizedViewport normalized{
+            .x = static_cast<float>(left),
+            .y = static_cast<float>(top),
+            .width = static_cast<float>(right - left),
+            .height = static_cast<float>(bottom - top),
+        };
+        if (static_cast<double>(normalized.x) + normalized.width > 1.0) {
+            normalized.width = std::nextafter(normalized.width, 0.0F);
+        }
+        if (static_cast<double>(normalized.y) + normalized.height > 1.0) {
+            normalized.height = std::nextafter(normalized.height, 0.0F);
+        }
+        if (normalized.width <= 0.0F || normalized.height <= 0.0F) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor GPU viewport normalized extent is empty");
+        }
+
+        viewportLogicalRect_ = *viewportRect;
+        viewportNormalized_ = normalized;
+        counters_.viewportLogicalX = viewportRect->x;
+        counters_.viewportLogicalY = viewportRect->y;
+        counters_.viewportLogicalWidth = viewportRect->width;
+        counters_.viewportLogicalHeight = viewportRect->height;
+        counters_.viewportNormalizedX = normalized.x;
+        counters_.viewportNormalizedY = normalized.y;
+        counters_.viewportNormalizedWidth = normalized.width;
+        counters_.viewportNormalizedHeight = normalized.height;
+        counters_.gpuViewportReady = true;
+        return Tina::Core::success();
     }
 
     [[nodiscard]] Tina::Core::Status executeEditorCommand(Tina::PrimaryWindowUITreeUpdater& tree)
@@ -1744,6 +1943,24 @@ class EditorShellState final : public Tina::IGameState {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "editor runtime preview entity count mismatch");
         }
+        constexpr std::array proxyHierarchyKeys{
+            CameraKey,
+            PlayerKey,
+            LightsKey,
+            TileMapKey,
+        };
+        for (const UI::UITreeViewItemKey hierarchyKey : proxyHierarchyKeys) {
+            const u32 stableEntityId = stableEntityIdForHierarchyItem(hierarchyKey);
+            const auto binding = std::find_if(
+                bindings->begin(), bindings->end(),
+                [stableEntityId](const Tina::Scene::World2DEntityBinding& candidate) {
+                    return candidate.stableEntityId == stableEntityId;
+                });
+            if (binding == bindings->end() || world->worldTransform(binding->entity) == nullptr) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "editor runtime preview is missing a GPU proxy transform");
+            }
+        }
         const auto player = std::find_if(bindings->begin(), bindings->end(), [](const auto& binding) {
             return binding.stableEntityId == 3U;
         });
@@ -1770,6 +1987,9 @@ class EditorShellState final : public Tina::IGameState {
             playerTransform->rotation.w);
         counters_.finalPlayerScaleX = playerTransform->scale.x;
         counters_.finalPlayerScaleY = playerTransform->scale.y;
+        previewWorld_.emplace(std::move(*world));
+        previewBindings_ = std::move(*bindings);
+        previewRevision_ = document_.revision();
         counters_.runtimePreviewValid = true;
         return Tina::Core::success();
     }
@@ -1783,9 +2003,6 @@ class EditorShellState final : public Tina::IGameState {
         counters_.documentSaved = pathConfigured && !dirty;
 
         if (auto status = publishInspector(tree, selectionKey_); !status) {
-            return status;
-        }
-        if (auto status = publishViewportPreview(tree); !status) {
             return status;
         }
         std::string documentStatus = "Revision ";
@@ -1935,74 +2152,6 @@ class EditorShellState final : public Tina::IGameState {
         return tree.setText(inspectorScaleY_, hasEntity ? std::to_string(scaleY) : "n/a");
     }
 
-    [[nodiscard]] Tina::Core::Status publishViewportPreview(Tina::PrimaryWindowUITreeUpdater& tree)
-    {
-        std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
-        auto snapshot = document_.parseCurrentSnapshot(storage);
-        if (!snapshot) {
-            return Tina::Core::failure(std::move(snapshot.error()));
-        }
-        float cameraX = 0.0F;
-        float cameraY = 0.0F;
-        if (const auto camera = std::find_if(storage.begin(), storage.end(), [](const auto& entity) {
-                return entity.stableEntityId == 2U;
-            });
-            camera != storage.end()) {
-            cameraX = camera->positionX;
-            cameraY = camera->positionY;
-        }
-
-        constexpr float WorldWidth = 16.0F;
-        constexpr float WorldHeight = 9.0F;
-        constexpr std::array markerKeys{
-            CameraKey,
-            PlayerKey,
-            LightsKey,
-            TileMapKey,
-        };
-        constexpr std::array markerColors{
-            UI::rgb(0x72A7D8),
-            UI::rgb(0xE7B65A),
-            UI::rgb(0x7DD3A7),
-            UI::rgb(0xB29CEB),
-        };
-        for (std::size_t index = 0; index < markerKeys.size(); ++index) {
-            const u32 stableEntityId = stableEntityIdForHierarchyItem(markerKeys[index]);
-            const auto entity = std::find_if(storage.begin(), storage.end(), [stableEntityId](const auto& candidate) {
-                return candidate.stableEntityId == stableEntityId;
-            });
-            const float markerWidth = entity == storage.end()
-                                          ? 12.0F
-                                          : std::clamp(12.0F * std::abs(entity->scaleX), 4.0F, 48.0F);
-            const float markerHeight = entity == storage.end()
-                                           ? 12.0F
-                                           : std::clamp(12.0F * std::abs(entity->scaleY), 4.0F, 48.0F);
-            UI::UILayoutStyle markerStyle = fixedSize(markerWidth, markerHeight);
-            markerStyle.placement = UI::UILayoutPlacement::Overlay;
-            markerStyle.overlay.horizontal = UI::UIAxisAlignment::Start;
-            markerStyle.overlay.vertical = UI::UIAxisAlignment::Start;
-            if (entity == storage.end()) {
-                markerStyle.visibility = UI::UIVisibility::Collapsed;
-            } else {
-                const float normalizedX = std::clamp((entity->positionX - cameraX) / WorldWidth + 0.5F, 0.0F, 1.0F);
-                const float normalizedY = std::clamp(0.5F - (entity->positionY - cameraY) / WorldHeight, 0.0F, 1.0F);
-                markerStyle.overlay.offset.x = UI::UILayoutLength::Percent(normalizedX * 100.0F);
-                markerStyle.overlay.offset.y = UI::UILayoutLength::Percent(normalizedY * 100.0F);
-            }
-            if (auto status = tree.setLayoutStyle(viewportPreviewMarkers_[index], markerStyle); !status) {
-                return status;
-            }
-            if (entity != storage.end()) {
-                const bool selected = stableEntityIdForHierarchyItem(selectionKey_) == stableEntityId;
-                const UI::UIStraightSrgba8Color color = selected ? UI::rgb(0xF2F5F7) : markerColors[index];
-                if (auto status = tree.setBoxPaint(viewportPreviewMarkers_[index], UI::makeSolidBox(color)); !status) {
-                    return status;
-                }
-            }
-        }
-        return Tina::Core::success();
-    }
-
     [[nodiscard]] UI::UITreeViewDataSource hierarchyDataSource() noexcept
     {
         return UI::UITreeViewDataSource{
@@ -2108,7 +2257,6 @@ class EditorShellState final : public Tina::IGameState {
     UI::UINodeId inspectorDocument_{};
     UI::UINodeId hierarchySelectionSummary_{};
     UI::UINodeId viewportPreviewLayer_{};
-    std::array<UI::UINodeId, 4> viewportPreviewMarkers_{};
     UI::UINodeId inspectorPositionX_{};
     UI::UINodeId inspectorPositionY_{};
     UI::UINodeId inspectorRotationDegrees_{};
@@ -2134,6 +2282,12 @@ class EditorShellState final : public Tina::IGameState {
     bool queuedSecondSelection_ = false;
     bool pendingAutoTransformInput_ = false;
     u32 autoAuthoringStage_ = 0;
+    std::optional<Tina::Scene::World> previewWorld_{};
+    std::vector<Tina::Scene::World2DEntityBinding> previewBindings_{};
+    u64 previewRevision_ = 0;
+    UI::UILogicalRect viewportLogicalRect_{};
+    std::optional<Tina::Render::RenderNormalizedViewport> viewportNormalized_{};
+    mutable Tina::Samples::SampleSpriteFrameResource spriteFrameResource_{};
     std::vector<std::byte> savedBaselineBytes_{};
     std::string authoringFeedback_ = "One validated revision per command";
     std::optional<u64> pendingSelectionIndex_{};
@@ -2187,6 +2341,7 @@ class EditorShellApplication final : public Tina::IGameApplication {
     config.primaryWindow.title = "Tina 2D Editor";
     config.primaryWindow.initialLogicalExtent = {WindowLogicalWidth, WindowLogicalHeight};
     config.primaryWindow.initiallyVisible = true;
+    config.renderSceneCapacities.spriteCapacity = 8;
     return config;
 }
 
@@ -2218,9 +2373,15 @@ class EditorShellApplication final : public Tina::IGameApplication {
         counters.styleRegisteredTokens != 2 || counters.styleActiveRules != 2 ||
         counters.authoringActionsWired != EditorActionCount || !counters.runtimePreviewValid ||
         counters.editorLayoutRegions != EditorLayoutRegionCount || !counters.viewportLayoutReady ||
-        counters.viewportPreviewMarkers != 4 || !counters.inspectorScrollConfigured ||
+        !counters.gpuViewportReady || !counters.inspectorScrollConfigured ||
         counters.documentPathConfigured != documentPathConfigured ||
-        counters.runtimePreviewInstantiations < 1 ||
+        counters.runtimePreviewInstantiations < 1 || counters.renderExtractions != options.targetFrameCount ||
+        (options.targetFrameCount > 1 && counters.gpuViewportSprites != GpuViewportSpriteCount) ||
+        counters.viewportLogicalWidth <= 0.0F || counters.viewportLogicalHeight <= 0.0F ||
+        counters.viewportNormalizedX < 0.0F || counters.viewportNormalizedY < 0.0F ||
+        counters.viewportNormalizedWidth <= 0.0F || counters.viewportNormalizedHeight <= 0.0F ||
+        static_cast<double>(counters.viewportNormalizedX) + counters.viewportNormalizedWidth > 1.0 ||
+        static_cast<double>(counters.viewportNormalizedY) + counters.viewportNormalizedHeight > 1.0 ||
         counters.documentEntityCount != InitialAuthoringEntityCount ||
         counters.cookPreviewBytes != Tina::AssetFormat::World2DSnapshotWire::HeaderBytes +
                                          InitialAuthoringEntityCount *
@@ -2234,6 +2395,7 @@ class EditorShellApplication final : public Tina::IGameApplication {
             counters.inspectorTransactions != 1 || counters.inspectorRejectedTransactions != 0 ||
             counters.authoringUndos != 1 || counters.authoringRedos != 1 ||
             counters.runtimePreviewInstantiations != 5 || counters.documentRevision != 6 ||
+            counters.gpuViewportDocumentRevision != counters.documentRevision ||
             counters.documentUndoDepth != 2 || counters.documentRedoDepth != 0 ||
             counters.finalPlayerPositionX != 2.5F || counters.finalPlayerPositionY != -1.25F ||
             std::abs(counters.finalPlayerRotationDegrees - 30.0F) > 0.001F ||
@@ -2316,10 +2478,21 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"inspectorRejectedTransactions\":" << counters.inspectorRejectedTransactions
               << ",\"savedSnapshotBytes\":" << counters.savedSnapshotBytes
               << ",\"editorLayoutRegions\":" << counters.editorLayoutRegions
-              << ",\"viewportPreviewMarkers\":" << counters.viewportPreviewMarkers
               << ",\"viewportLayoutReady\":" << (counters.viewportLayoutReady ? "true" : "false")
               << ",\"inspectorScrollConfigured\":"
               << (counters.inspectorScrollConfigured ? "true" : "false")
+              << ",\"renderExtractions\":" << counters.renderExtractions
+              << ",\"gpuViewportSprites\":" << counters.gpuViewportSprites
+              << ",\"gpuViewportDocumentRevision\":" << counters.gpuViewportDocumentRevision
+              << ",\"gpuViewportReady\":" << (counters.gpuViewportReady ? "true" : "false")
+              << ",\"viewportLogicalX\":" << counters.viewportLogicalX
+              << ",\"viewportLogicalY\":" << counters.viewportLogicalY
+              << ",\"viewportLogicalWidth\":" << counters.viewportLogicalWidth
+              << ",\"viewportLogicalHeight\":" << counters.viewportLogicalHeight
+              << ",\"viewportNormalizedX\":" << counters.viewportNormalizedX
+              << ",\"viewportNormalizedY\":" << counters.viewportNormalizedY
+              << ",\"viewportNormalizedWidth\":" << counters.viewportNormalizedWidth
+              << ",\"viewportNormalizedHeight\":" << counters.viewportNormalizedHeight
               << ",\"runtimePreviewInstantiations\":" << counters.runtimePreviewInstantiations
               << ",\"runtimePreviewValid\":" << (counters.runtimePreviewValid ? "true" : "false")
               << ",\"documentRevision\":" << counters.documentRevision

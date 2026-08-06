@@ -54,6 +54,9 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot(u64 epoch);
     [[nodiscard]] Core::Result<bool> isAlive(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
                                              UI::UINodeId node);
+    [[nodiscard]] Core::Result<UI::UILogicalRect>
+    committedLayoutRect(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+                        UI::UINodeId node);
     [[nodiscard]] Core::Result<UI::UINodeId>
     createElement(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent,
                   const UI::UIElementDescriptor& descriptor);
