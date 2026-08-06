@@ -109,6 +109,7 @@ struct LifecycleCounters final {
     bool viewportLayoutReady = false;
     bool inspectorScrollConfigured = false;
     bool documentPathConfigured = false;
+    bool documentLoaded = false;
     bool documentSaved = false;
     bool documentDirty = true;
 };
@@ -381,7 +382,13 @@ template <typename Value>
     }
 }
 
-[[nodiscard]] Tina::Core::Result<Tina::Editor::World2DAuthoringDocument> createAuthoringDocument()
+struct InitialAuthoringDocument final {
+    Tina::Editor::World2DAuthoringDocument document;
+    bool loadedFromPath = false;
+};
+
+[[nodiscard]] Tina::Core::Result<InitialAuthoringDocument>
+createAuthoringDocument(std::string_view documentPathUtf8)
 {
     auto document = Tina::Editor::World2DAuthoringDocument::Create({
         .entityCapacity = AuthoringEntityCapacity,
@@ -391,6 +398,19 @@ template <typename Value>
     });
     if (!document) {
         return Tina::Core::failure(std::move(document.error()));
+    }
+
+    if (!documentPathUtf8.empty()) {
+        auto status = Tina::Editor::loadWorld2DAuthoringDocument(documentPathUtf8, *document);
+        if (status) {
+            return InitialAuthoringDocument{
+                .document = std::move(*document),
+                .loadedFromPath = true,
+            };
+        }
+        if (status.error().code != Tina::Core::CoreErrorCode::NotFound) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
     }
 
     const std::array entities{
@@ -425,14 +445,16 @@ template <typename Value>
     if (auto status = document->loadSnapshot(*bytes); !status) {
         return Tina::Core::failure(std::move(status.error()));
     }
-    return std::move(*document);
+    return InitialAuthoringDocument{.document = std::move(*document)};
 }
 
 class EditorShellState final : public Tina::IGameState {
   public:
     EditorShellState(SampleOptions options, LifecycleCounters& counters,
-                     Tina::Editor::World2DAuthoringDocument document) noexcept
-        : options_(options), counters_(counters), document_(std::move(document))
+                     Tina::Editor::World2DAuthoringDocument document,
+                     std::vector<std::byte> savedBaselineBytes, bool documentLoaded) noexcept
+        : options_(options), counters_(counters), document_(std::move(document)),
+          documentLoaded_(documentLoaded), savedBaselineBytes_(std::move(savedBaselineBytes))
     {
     }
 
@@ -586,9 +608,11 @@ class EditorShellState final : public Tina::IGameState {
         pathStyle.flexItem.grow = 1.0F;
         pathStyle.flexItem.shrink = 1.0F;
         pathStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-        const std::string_view initialPathStatus = options_.documentPathUtf8.empty()
-                                                       ? "No save path | Unsaved"
-                                                       : "Save target configured | Modified";
+        const std::string_view initialPathStatus =
+            options_.documentPathUtf8.empty()
+                ? "No save path | Unsaved"
+                : (documentLoaded_ ? "Existing document opened | Saved"
+                                   : "Save target configured | Modified");
         if (auto status = storeNode(createLabel(toolbar, initialPathStatus, pathStyle, secondaryText),
                                     toolbarPath_);
             !status) {
@@ -1291,6 +1315,8 @@ class EditorShellState final : public Tina::IGameState {
         counters_.editorLayoutRegions = EditorLayoutRegionCount;
         counters_.viewportLayoutReady = true;
         counters_.documentPathConfigured = !options_.documentPathUtf8.empty();
+        counters_.documentLoaded = documentLoaded_;
+        counters_.savedSnapshotBytes = savedBaselineBytes_.size();
 
         auto initialSelection = tree->treeViewSelection(hierarchyTree_);
         if (!initialSelection) {
@@ -1872,6 +1898,7 @@ class EditorShellState final : public Tina::IGameState {
     SampleOptions options_;
     LifecycleCounters& counters_;
     Tina::Editor::World2DAuthoringDocument document_;
+    bool documentLoaded_ = false;
     Tina::UI::UIRootOwner uiRoot_{};
     UI::UINodeId hierarchyTree_{};
     UI::UINodeId inspectorName_{};
@@ -1917,13 +1944,24 @@ class EditorShellApplication final : public Tina::IGameApplication {
 
     Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext&) override
     {
-        auto document = createAuthoringDocument();
-        if (!document) {
-            return Tina::Core::failure(std::move(document.error()));
+        auto initialDocument = createAuthoringDocument(options_.documentPathUtf8);
+        if (!initialDocument) {
+            return Tina::Core::failure(std::move(initialDocument.error()));
         }
-        std::unique_ptr<Tina::IGameState> state =
-            std::make_unique<EditorShellState>(options_, counters_, std::move(*document));
-        return state;
+        try {
+            std::vector<std::byte> savedBaselineBytes;
+            if (initialDocument->loadedFromPath) {
+                savedBaselineBytes.assign(initialDocument->document.snapshotBytes().begin(),
+                                          initialDocument->document.snapshotBytes().end());
+            }
+            std::unique_ptr<Tina::IGameState> state = std::make_unique<EditorShellState>(
+                options_, counters_, std::move(initialDocument->document), std::move(savedBaselineBytes),
+                initialDocument->loadedFromPath);
+            return state;
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                       "editor shell could not retain the opened document baseline");
+        }
     }
 
     void onShutdown(Tina::GameShutdownContext&) noexcept override
@@ -2049,7 +2087,8 @@ class EditorShellApplication final : public Tina::IGameApplication {
     std::cout << ",\"documentPathConfigured\":"
               << (counters.documentPathConfigured ? "true" : "false") << ",\"documentPath\":";
     writeJsonString(std::cout, options.documentPathUtf8);
-    std::cout << ",\"stateEnters\":" << counters.stateEnters << ",\"stateExits\":" << counters.stateExits
+    std::cout << ",\"documentLoaded\":" << (counters.documentLoaded ? "true" : "false")
+              << ",\"stateEnters\":" << counters.stateEnters << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased

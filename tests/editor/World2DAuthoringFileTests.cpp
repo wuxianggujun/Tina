@@ -1,9 +1,11 @@
 #include <tina/core/io/ReadFile.hpp>
+#include <tina/core/io/WriteFile.hpp>
 #include <tina/editor/World2DAuthoringDocument.hpp>
 #include <tina/editor/World2DAuthoringFile.hpp>
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <filesystem>
 #include <memory_resource>
 #include <string>
@@ -96,6 +98,75 @@ TEST_F(World2DAuthoringFileTests, RejectsInvalidPathWithoutMutatingDocument)
     EXPECT_EQ(status.error().code, Core::CoreErrorCode::InvalidArgument);
     EXPECT_EQ(document->revision(), revision);
     EXPECT_EQ(std::vector(document->snapshotBytes().begin(), document->snapshotBytes().end()), before);
+}
+
+TEST_F(World2DAuthoringFileTests, LoadsCanonicalSnapshotAsNewBaseline)
+{
+    auto source = World2DAuthoringDocument::Create();
+    ASSERT_TRUE(source);
+    ASSERT_TRUE(source->upsertEntity(AssetFormat::World2DEntityDesc{
+        .stableEntityId = 9,
+        .positionX = 2.5F,
+        .positionY = -1.25F,
+    }));
+    const auto path = m_root / "load" / "world.tworld";
+    ASSERT_TRUE(saveWorld2DAuthoringDocument(toUtf8(path), *source));
+
+    auto target = World2DAuthoringDocument::Create();
+    ASSERT_TRUE(target);
+    ASSERT_TRUE(target->upsertEntity(AssetFormat::World2DEntityDesc{.stableEntityId = 1}));
+    ASSERT_TRUE(target->upsertEntity(AssetFormat::World2DEntityDesc{.stableEntityId = 2}));
+    ASSERT_TRUE(target->undo());
+    ASSERT_TRUE(target->canUndo());
+    ASSERT_TRUE(target->canRedo());
+
+    ASSERT_TRUE(loadWorld2DAuthoringDocument(toUtf8(path), *target));
+    EXPECT_EQ(std::vector(target->snapshotBytes().begin(), target->snapshotBytes().end()),
+              std::vector(source->snapshotBytes().begin(), source->snapshotBytes().end()));
+    EXPECT_EQ(target->entityCount(), 1U);
+    EXPECT_EQ(target->historyEntryCount(), 1U);
+    EXPECT_FALSE(target->canUndo());
+    EXPECT_FALSE(target->canRedo());
+}
+
+TEST_F(World2DAuthoringFileTests, LoadFailurePreservesDocumentAndHistory)
+{
+    const auto path = m_root / "invalid" / "world.tworld";
+    const std::array invalidBytes{std::byte{0x54}, std::byte{0x49}, std::byte{0x4E}};
+    ASSERT_TRUE(Core::writeFile(toUtf8(path), invalidBytes,
+                                Core::WriteFileConfig{.createParents = true}));
+
+    auto document = World2DAuthoringDocument::Create();
+    ASSERT_TRUE(document);
+    ASSERT_TRUE(document->upsertEntity(AssetFormat::World2DEntityDesc{.stableEntityId = 1}));
+    ASSERT_TRUE(document->upsertEntity(AssetFormat::World2DEntityDesc{.stableEntityId = 2}));
+    ASSERT_TRUE(document->undo());
+    const auto before = std::vector(document->snapshotBytes().begin(), document->snapshotBytes().end());
+    const Core::u64 revision = document->revision();
+    const Core::usize undoDepth = document->undoDepth();
+    const Core::usize redoDepth = document->redoDepth();
+
+    const auto status = loadWorld2DAuthoringDocument(toUtf8(path), *document);
+    ASSERT_FALSE(status);
+    EXPECT_EQ(std::vector(document->snapshotBytes().begin(), document->snapshotBytes().end()), before);
+    EXPECT_EQ(document->revision(), revision);
+    EXPECT_EQ(document->undoDepth(), undoDepth);
+    EXPECT_EQ(document->redoDepth(), redoDepth);
+}
+
+TEST_F(World2DAuthoringFileTests, MissingLoadPathPreservesDocument)
+{
+    auto document = World2DAuthoringDocument::Create();
+    ASSERT_TRUE(document);
+    ASSERT_TRUE(document->upsertEntity(AssetFormat::World2DEntityDesc{.stableEntityId = 1}));
+    const auto before = std::vector(document->snapshotBytes().begin(), document->snapshotBytes().end());
+    const Core::u64 revision = document->revision();
+
+    const auto status = loadWorld2DAuthoringDocument(toUtf8(m_root / "missing.tworld"), *document);
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, Core::CoreErrorCode::NotFound);
+    EXPECT_EQ(std::vector(document->snapshotBytes().begin(), document->snapshotBytes().end()), before);
+    EXPECT_EQ(document->revision(), revision);
 }
 
 } // namespace

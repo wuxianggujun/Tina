@@ -858,7 +858,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_editor_shell.
 `--no-auto-demo` 仍用于人工操作模式；在真实 viewport 接入前，不扩大到完整 product-2d gate。
 Rotation/Scale 仍是只读字段，不把它们当作已验证的 authoring mutation。
 
-Editor 原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的 shell smoke：
+Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的 shell smoke：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -874,6 +874,8 @@ Position transaction 接入后，同一 60-frame smoke 要检查 `authoringActio
 `inspectorTransactions=1`、`inspectorRejectedTransactions=0`、`runtimePreviewInstantiations=5`、
 `documentRevision=6`、`documentUndoDepth=2` 与最终 Player XY=`(2.5,-1.25)`。保存还要检查 `authoringSaves=1`、`documentSaved=true`、
 `documentDirty=false`、`savedSnapshotBytes=cookPreviewBytes`；落盘文件必须与当前 canonical snapshot exact match。
+随后对同一路径再运行一次 `--no-auto-demo` 短 smoke，要求 `documentLoaded=true`、`documentSaved=true`、
+`documentDirty=false`、Undo/Redo depth 均为0，证明 reopen 建立 clean baseline 而不是产生一次普通 edit。
 未提供 `--document-path` 时 Save disabled，既有 smoke 仍报告 `authoringSaves=0` 与 `documentDirty=true`。
 Core 的目录替换失败回归保留在 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory`；当前
 `tina_tests` 是 Core + Runtime monolithic target，小型 Editor 切片不为单个 filter 重编全部对象，留到大功能统一 gate。
@@ -964,7 +966,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `tina_sample_editor_shell` | `Tina::Editor` World2D document 驱动的完整 shell 布局（Toolbar/Context/Hierarchy/World2D viewport/滚动 Inspector/status bar）；`Move X +1`、Undo、Redo 各发布一个受验证 revision；每次状态切换从 canonical bytes 解析并实例化新的 `Scene::World`；显式 `--document-path` 接通原子 Save 和 canonical dirty baseline；JSON 报告 layout、preview、save/dirty 状态 | 真实 GPU viewport、Transform/Inspector 字段 transaction、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
+| `tina_sample_editor_shell` | `Tina::Editor` World2D document 驱动的完整 shell 布局（Toolbar/Context/Hierarchy/World2D viewport/滚动 Inspector/status bar）；Position Apply、`Move X +1`、Undo、Redo 各发布一个受验证 revision；每次状态切换从 canonical bytes 解析并实例化新的 `Scene::World`；显式 `--document-path` 接通 existing-file reopen、原子 Save 和 canonical dirty baseline；JSON 报告 layout、preview、load/save/dirty 状态 | 真实 GPU viewport、Rotation/Scale/gizmo transaction、TileMap/动画 authoring 与完整 `2D-EDITOR` 产品工作流 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |

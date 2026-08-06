@@ -12,8 +12,9 @@ Inspector 的 Position X/Y、`Apply Position`、`Move X +1`、Undo、Redo 接到
 实例化到新的 `Scene::World` 做 runtime preview 验证。当前 shell 的 retained UI 布局也已完整铺开：Toolbar、上下文
 工具条、Hierarchy dock、World2D viewport 工作区、可滚动 Inspector（Identity/Transform/Components/Authoring/
 Document）和底部 status bar 均由 `Flex`、`minMax`、固定控件高度与滚动容器组合；窗口变大时 viewport 与中间工作区增长，
-两侧 dock 保持 bounded width。传入 `--document-path=<UTF-8 path>` 后 Toolbar Save 会原子保存当前 canonical snapshot，
-并让 Toolbar/Inspector/status bar 依据 saved baseline 显示 `Modified/Saved`；未配置路径时 Save 保持 disabled。
+两侧 dock 保持 bounded width。传入 `--document-path=<UTF-8 path>` 后，已有文件会先按当前 schema 原子加载为 clean
+baseline，不存在的路径则作为新文档 Save target；Toolbar Save 原子保存当前 canonical snapshot，并让 Toolbar/
+Inspector/status bar 依据 saved baseline 显示 `Modified/Saved`；未配置路径时 Save 保持 disabled。
 Position X/Y 通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，拒绝时恢复
 canonical 字段并保持 document/history/preview 不变。Rotation/Scale 继续只读，避免提前冻结未完成的变换语义。真实渲染 viewport、TileMap/动画专用 document
 仍是后续切片；它们必须复用这里的 revision/failure 语义，不各自实现一套 undo stack 或 cooked preview。
@@ -36,7 +37,12 @@ Status bar (schema/entities/revision/preview/selection)
 `inspectorRejectedTransactions` 和最终 Player XY 取证；文件保存另由 `authoringSaves`、`savedSnapshotBytes`、
 `documentSaved`、`documentDirty` 和落盘 bytes 取证。
 
-## 原子文件保存
+## 文件加载与原子保存
+
+`loadWorld2DAuthoringDocument(utf8Path, document)` 先以 document 配置可容纳的当前 schema 最大 wire size 为上限完整读取文件，再调用
+`loadSnapshot()`；成功 canonicalize 并清空旧 history，read/旧 schema/截断/document capacity/history capacity
+失败均保留原 document 与 history。Shell 不把“文件存在但加载失败”当作新文件继续运行，避免退出时覆盖坏文件或
+更高版本资产。
 
 `saveWorld2DAuthoringDocument(utf8Path, document)` 只读取 document 已发布的 `snapshotBytes()`，通过 Core
 `writeFile()` 在目标同目录写完整临时文件，再用 OS 原子 replace 发布；缺失父目录会创建。Windows 使用
@@ -129,7 +135,8 @@ Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirecto
 
 document 与 shell 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；非法 edit 原子失败；
 subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 三个公共头
-isolation 编译通过；文件保存 exact canonical bytes、覆盖失败不删除旧目标；shell 自动完成
+isolation 编译通过；已有文件加载为 clean baseline、加载失败不改变 current/history；文件保存 exact canonical bytes、
+覆盖失败不删除旧目标；shell 自动完成
 Move → Apply Position → Undo → Redo → Save，在五个 revision 状态均成功实例化 runtime preview，Save 不增加第六次 instantiate。
 
 后续产品切片依次为：真实渲染 viewport 与 Rotation/Scale/gizmo transaction；TileMap root+chunk authoring/cook；
