@@ -1,7 +1,9 @@
 add_library(tina_editor STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World2DAuthoringDocument.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/World2DAuthoringFile.hpp
     World2DAuthoringDocument.cpp
+    World2DAuthoringFile.cpp
 )
 add_library(Tina::Editor ALIAS tina_editor)
 

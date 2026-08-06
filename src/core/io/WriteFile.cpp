@@ -12,6 +12,16 @@
 #include <system_error>
 #include <utility>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#endif
+
 namespace Tina::Core {
 namespace {
 
@@ -50,6 +60,27 @@ namespace {
     std::mt19937_64 rng{static_cast<std::uint64_t>(now) ^ 0x9E3779B97F4A7C15ULL};
     const auto token = rng();
     return ".tina_write_" + std::to_string(token) + ".tmp";
+}
+
+[[nodiscard]] Status replaceFileAtomically(const std::filesystem::path& tempPath,
+                                           const std::filesystem::path& finalPath)
+{
+#if defined(_WIN32)
+    if (::MoveFileExW(tempPath.c_str(), finalPath.c_str(),
+                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE)
+    {
+        const std::error_code errorCode{static_cast<int>(::GetLastError()), std::system_category()};
+        return failure(makeIoError("failed to atomically replace target file", errorCode));
+    }
+#else
+    std::error_code errorCode;
+    std::filesystem::rename(tempPath, finalPath, errorCode);
+    if (errorCode)
+    {
+        return failure(makeIoError("failed to atomically replace target file", errorCode));
+    }
+#endif
+    return success();
 }
 
 } // namespace
@@ -128,19 +159,10 @@ Status writeFile(std::string_view utf8Path, std::span<const std::byte> bytes, Wr
         return status;
     }
 
-    std::filesystem::rename(tempPath, finalPath, errorCode);
-    if (errorCode)
+    if (auto status = replaceFileAtomically(tempPath, finalPath); !status)
     {
-        // Fallback: remove destination then rename (Windows replace semantics).
-        std::error_code removeError;
-        std::filesystem::remove(finalPath, removeError);
-        errorCode.clear();
-        std::filesystem::rename(tempPath, finalPath, errorCode);
-        if (errorCode)
-        {
-            std::filesystem::remove(tempPath, removeError);
-            return failure(makeIoError("failed to atomically replace target file", errorCode));
-        }
+        std::filesystem::remove(tempPath, errorCode);
+        return status;
     }
     return success();
 }

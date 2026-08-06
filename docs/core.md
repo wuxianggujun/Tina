@@ -71,7 +71,8 @@ ContentHash。
 
 - `readFile(path, {maxBytes, memoryResource})`：只读 regular file，分配前检查大小，返回 owning PMR bytes；
 - `createParentDirectories(path)`；
-- `writeFile(path, bytes, config)`：默认创建父目录，并使用同目录唯一临时文件 + rename/replace；
+- `writeFile(path, bytes, config)`：默认创建父目录，并使用同目录唯一临时文件 + OS 原子 replace；Windows
+  `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)` 与其他平台 rename 均不通过“先删除目标”降级；
 - 空路径、目录、非法 UTF-8、容量、permission 与 OS error 返回结构化 Error。
 
 路径 canonicalization、sandbox/root containment 属于具体 Cooker/Asset 输入策略，不由 Core

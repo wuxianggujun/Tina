@@ -5,6 +5,7 @@
 #include <tina/core/error/Error.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/editor/World2DAuthoringDocument.hpp>
+#include <tina/editor/World2DAuthoringFile.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
@@ -22,6 +23,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -49,7 +51,7 @@ inline constexpr u32 WindowLogicalHeight = 800;
 inline constexpr u32 HierarchyMaterializedCapacity = 16;
 inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
-inline constexpr u32 AuthoringActionCount = 3;
+inline constexpr u32 EditorActionCount = 4;
 inline constexpr u32 EditorLayoutRegionCount = 6;
 
 inline constexpr UI::UITreeViewItemKey SceneRootKey = 1;
@@ -63,6 +65,7 @@ inline constexpr UI::UITreeViewItemKey TileMapKey = 7;
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
+    std::string documentPathUtf8{};
     bool autoDemo = true;
 };
 
@@ -86,6 +89,8 @@ struct LifecycleCounters final {
     u64 authoringEdits = 0;
     u64 authoringUndos = 0;
     u64 authoringRedos = 0;
+    u64 authoringSaves = 0;
+    u64 savedSnapshotBytes = 0;
     u64 runtimePreviewInstantiations = 0;
     u64 documentRevision = 0;
     u64 documentEntityCount = 0;
@@ -99,12 +104,16 @@ struct LifecycleCounters final {
     bool runtimePreviewValid = false;
     bool viewportLayoutReady = false;
     bool inspectorScrollConfigured = false;
+    bool documentPathConfigured = false;
+    bool documentSaved = false;
+    bool documentDirty = true;
 };
 
-enum class AuthoringCommand : u32 {
+enum class EditorCommand : u32 {
     MoveSelectedPositiveX,
     Undo,
     Redo,
+    Save,
 };
 
 void writeJsonString(std::ostream& output, std::string_view value)
@@ -166,10 +175,12 @@ template <typename Value>
 {
     constexpr std::string_view FramesPrefix = "--frames=";
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
+    constexpr std::string_view DocumentPathPrefix = "--document-path=";
 
     SampleOptions options{};
     bool hasFrames = false;
     bool hasDelay = false;
+    bool hasDocumentPath = false;
     for (int index = 1; index < argumentCount; ++index) {
         const std::string_view argument{arguments[index]};
         if (argument.starts_with(FramesPrefix)) {
@@ -196,6 +207,20 @@ template <typename Value>
                                            "--frame-delay-ms must be an unsigned integer");
             }
             hasDelay = true;
+            continue;
+        }
+        if (argument.starts_with(DocumentPathPrefix)) {
+            if (hasDocumentPath) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "Duplicate --document-path argument");
+            }
+            const std::string_view value = argument.substr(DocumentPathPrefix.size());
+            if (value.empty()) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--document-path must not be empty");
+            }
+            options.documentPathUtf8.assign(value);
+            hasDocumentPath = true;
             continue;
         }
         if (argument == "--no-auto-demo") {
@@ -550,10 +575,11 @@ class EditorShellState final : public Tina::IGameState {
         pathStyle.flexItem.grow = 1.0F;
         pathStyle.flexItem.shrink = 1.0F;
         pathStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-        UI::UINodeId toolbarPath{};
-        if (auto status = storeNode(createLabel(toolbar, "scenes/world2d.tworld  |  Saved", pathStyle,
-                                                secondaryText),
-                                    toolbarPath);
+        const std::string_view initialPathStatus = options_.documentPathUtf8.empty()
+                                                       ? "No save path | Unsaved"
+                                                       : "Save target configured | Modified";
+        if (auto status = storeNode(createLabel(toolbar, initialPathStatus, pathStyle, secondaryText),
+                                    toolbarPath_);
             !status) {
             return status;
         }
@@ -577,8 +603,9 @@ class EditorShellState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        UI::UINodeId saveButton{};
-        if (auto status = storeNode(createButton(toolbar, "Save", fixedSize(58.0F, 30.0F), false), saveButton);
+        if (auto status = storeNode(createButton(toolbar, "Save", fixedSize(58.0F, 30.0F),
+                                                 !options_.documentPathUtf8.empty()),
+                                    saveButton_);
             !status) {
             return status;
         }
@@ -1212,28 +1239,36 @@ class EditorShellState final : public Tina::IGameState {
 
         if (auto status = tree->setButtonAction(
                 moveButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                    queueAuthoringCommand(AuthoringCommand::MoveSelectedPositiveX);
+                    queueEditorCommand(EditorCommand::MoveSelectedPositiveX);
                 }});
             !status) {
             return status;
         }
         if (auto status = tree->setButtonAction(
                 undoButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                    queueAuthoringCommand(AuthoringCommand::Undo);
+                    queueEditorCommand(EditorCommand::Undo);
                 }});
             !status) {
             return status;
         }
         if (auto status = tree->setButtonAction(
                 redoButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                    queueAuthoringCommand(AuthoringCommand::Redo);
+                    queueEditorCommand(EditorCommand::Redo);
                 }});
             !status) {
             return status;
         }
-        counters_.authoringActionsWired = AuthoringActionCount;
+        if (auto status = tree->setButtonAction(
+                saveButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::Save);
+                }});
+            !status) {
+            return status;
+        }
+        counters_.authoringActionsWired = EditorActionCount;
         counters_.editorLayoutRegions = EditorLayoutRegionCount;
         counters_.viewportLayoutReady = true;
+        counters_.documentPathConfigured = !options_.documentPathUtf8.empty();
 
         auto initialSelection = tree->treeViewSelection(hierarchyTree_);
         if (!initialSelection) {
@@ -1289,12 +1324,15 @@ class EditorShellState final : public Tina::IGameState {
             }
             if (queuedFirstSelection_) {
                 constexpr std::array commands{
-                    AuthoringCommand::MoveSelectedPositiveX,
-                    AuthoringCommand::Undo,
-                    AuthoringCommand::Redo,
+                    EditorCommand::MoveSelectedPositiveX,
+                    EditorCommand::Undo,
+                    EditorCommand::Redo,
+                    EditorCommand::Save,
                 };
-                if (autoAuthoringStage_ < commands.size() &&
-                    queueAuthoringCommand(commands[autoAuthoringStage_])) {
+                const std::size_t commandCount =
+                    options_.documentPathUtf8.empty() ? commands.size() - 1U : commands.size();
+                if (autoAuthoringStage_ < commandCount &&
+                    queueEditorCommand(commands[autoAuthoringStage_])) {
                     ++autoAuthoringStage_;
                 }
             }
@@ -1343,8 +1381,8 @@ class EditorShellState final : public Tina::IGameState {
                 return status;
             }
         }
-        if (pendingAuthoringCommand_.has_value()) {
-            if (auto status = executeAuthoringCommand(*tree); !status) {
+        if (pendingEditorCommand_.has_value()) {
+            if (auto status = executeEditorCommand(*tree); !status) {
                 return status;
             }
         }
@@ -1363,48 +1401,88 @@ class EditorShellState final : public Tina::IGameState {
     }
 
   private:
-    bool queueAuthoringCommand(AuthoringCommand command) noexcept
+    bool queueEditorCommand(EditorCommand command) noexcept
     {
-        if (pendingAuthoringCommand_.has_value()) {
+        if (pendingEditorCommand_.has_value()) {
             return false;
         }
-        pendingAuthoringCommand_ = command;
+        pendingEditorCommand_ = command;
         return true;
     }
 
-    [[nodiscard]] Tina::Core::Status executeAuthoringCommand(Tina::PrimaryWindowUITreeUpdater& tree)
+    [[nodiscard]] Tina::Core::Status executeEditorCommand(Tina::PrimaryWindowUITreeUpdater& tree)
     {
-        const AuthoringCommand command = *pendingAuthoringCommand_;
-        pendingAuthoringCommand_.reset();
+        const EditorCommand command = *pendingEditorCommand_;
+        pendingEditorCommand_.reset();
 
         Tina::Core::Status status = Tina::Core::success();
+        bool requiresPreviewValidation = false;
         switch (command) {
-        case AuthoringCommand::MoveSelectedPositiveX:
+        case EditorCommand::MoveSelectedPositiveX:
             status = moveSelectedPositiveX();
             if (status) {
                 ++counters_.authoringEdits;
+                requiresPreviewValidation = true;
             }
             break;
-        case AuthoringCommand::Undo:
+        case EditorCommand::Undo:
             status = document_.undo();
             if (status) {
                 ++counters_.authoringUndos;
+                requiresPreviewValidation = true;
             }
             break;
-        case AuthoringCommand::Redo:
+        case EditorCommand::Redo:
             status = document_.redo();
             if (status) {
                 ++counters_.authoringRedos;
+                requiresPreviewValidation = true;
             }
+            break;
+        case EditorCommand::Save:
+            status = saveCurrentDocument();
             break;
         }
         if (!status) {
             return status;
         }
-        if (auto previewStatus = validateRuntimePreview(); !previewStatus) {
-            return previewStatus;
+        if (requiresPreviewValidation) {
+            if (auto previewStatus = validateRuntimePreview(); !previewStatus) {
+                return previewStatus;
+            }
         }
         return refreshAuthoringUi(tree);
+    }
+
+    [[nodiscard]] Tina::Core::Status saveCurrentDocument()
+    {
+        if (options_.documentPathUtf8.empty()) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "editor shell has no configured document path");
+        }
+        try {
+            std::vector<std::byte> savedCandidate(document_.snapshotBytes().begin(),
+                                                  document_.snapshotBytes().end());
+            if (auto status = Tina::Editor::saveWorld2DAuthoringDocument(
+                    options_.documentPathUtf8, document_);
+                !status) {
+                return status;
+            }
+            savedBaselineBytes_ = std::move(savedCandidate);
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                       "editor shell could not retain the saved document baseline");
+        }
+        ++counters_.authoringSaves;
+        counters_.savedSnapshotBytes = savedBaselineBytes_.size();
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] bool isDocumentDirty() const noexcept
+    {
+        const std::span<const std::byte> current = document_.snapshotBytes();
+        return savedBaselineBytes_.size() != current.size() ||
+               !std::equal(savedBaselineBytes_.begin(), savedBaselineBytes_.end(), current.begin());
     }
 
     [[nodiscard]] Tina::Core::Status moveSelectedPositiveX()
@@ -1478,6 +1556,11 @@ class EditorShellState final : public Tina::IGameState {
 
     [[nodiscard]] Tina::Core::Status refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& tree)
     {
+        const bool dirty = isDocumentDirty();
+        const bool pathConfigured = !options_.documentPathUtf8.empty();
+        counters_.documentDirty = dirty;
+        counters_.documentSaved = pathConfigured && !dirty;
+
         if (auto status = publishInspector(tree, selectionKey_); !status) {
             return status;
         }
@@ -1487,6 +1570,7 @@ class EditorShellState final : public Tina::IGameState {
         documentStatus += std::to_string(document_.undoDepth());
         documentStatus += " | Redo ";
         documentStatus += std::to_string(document_.redoDepth());
+        documentStatus += pathConfigured ? (dirty ? " | Modified" : " | Saved") : " | Unsaved";
         if (auto status = tree.setText(inspectorDocument_, documentStatus); !status) {
             return status;
         }
@@ -1494,7 +1578,15 @@ class EditorShellState final : public Tina::IGameState {
         statusDocument += std::to_string(document_.entityCount());
         statusDocument += " entities  |  Revision ";
         statusDocument += std::to_string(document_.revision());
+        statusDocument += pathConfigured ? (dirty ? "  |  Modified" : "  |  Saved") : "  |  Unsaved";
         if (auto status = tree.setText(statusDocument_, statusDocument); !status) {
+            return status;
+        }
+        const std::string_view pathStatus = pathConfigured
+                                                ? (dirty ? "Save target configured | Modified"
+                                                         : "Save target configured | Saved")
+                                                : "No save path | Unsaved";
+        if (auto status = tree.setText(toolbarPath_, pathStatus); !status) {
             return status;
         }
         std::string statusPreview = "Runtime preview: ";
@@ -1526,7 +1618,10 @@ class EditorShellState final : public Tina::IGameState {
         if (auto status = tree.setEnabled(undoButton_, document_.canUndo()); !status) {
             return status;
         }
-        return tree.setEnabled(redoButton_, document_.canRedo());
+        if (auto status = tree.setEnabled(redoButton_, document_.canRedo()); !status) {
+            return status;
+        }
+        return tree.setEnabled(saveButton_, pathConfigured && dirty);
     }
 
     [[nodiscard]] Tina::Core::Status publishInspector(Tina::PrimaryWindowUITreeUpdater& tree,
@@ -1683,9 +1778,11 @@ class EditorShellState final : public Tina::IGameState {
     UI::UINodeId statusDocument_{};
     UI::UINodeId statusPreview_{};
     UI::UINodeId statusSelection_{};
+    UI::UINodeId toolbarPath_{};
     UI::UINodeId moveButton_{};
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
+    UI::UINodeId saveButton_{};
     UI::UIStyleClassId dockClass_{};
     UI::UIStyleClassId viewportClass_{};
     UI::UIStyleTokenId viewportToken_{};
@@ -1695,8 +1792,9 @@ class EditorShellState final : public Tina::IGameState {
     bool queuedFirstSelection_ = false;
     bool queuedSecondSelection_ = false;
     u32 autoAuthoringStage_ = 0;
+    std::vector<std::byte> savedBaselineBytes_{};
     std::optional<u64> pendingSelectionIndex_{};
-    std::optional<AuthoringCommand> pendingAuthoringCommand_{};
+    std::optional<EditorCommand> pendingEditorCommand_{};
     std::optional<UI::UIStraightSrgba8Color> pendingViewportTokenColor_{};
 };
 
@@ -1754,6 +1852,7 @@ class EditorShellApplication final : public Tina::IGameApplication {
 [[nodiscard]] Tina::Core::Status verifyLifecycle(Tina::RunExitReason exitReason, const SampleOptions& options,
                                                  const LifecycleCounters& counters)
 {
+    const bool documentPathConfigured = !options.documentPathUtf8.empty();
     if (exitReason != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "editor shell stopped for an unexpected reason");
@@ -1763,9 +1862,10 @@ class EditorShellApplication final : public Tina::IGameApplication {
         counters.uiRootsReleased != 1 || !counters.selectionVerified || counters.hierarchyLogicalItems == 0 ||
         !counters.stylesheetInstalled || counters.styleRegisteredClasses != 2 ||
         counters.styleRegisteredTokens != 2 || counters.styleActiveRules != 2 ||
-        counters.authoringActionsWired != AuthoringActionCount || !counters.runtimePreviewValid ||
+        counters.authoringActionsWired != EditorActionCount || !counters.runtimePreviewValid ||
         counters.editorLayoutRegions != EditorLayoutRegionCount || !counters.viewportLayoutReady ||
         !counters.inspectorScrollConfigured ||
+        counters.documentPathConfigured != documentPathConfigured ||
         counters.runtimePreviewInstantiations < 1 ||
         counters.documentEntityCount != InitialAuthoringEntityCount ||
         counters.cookPreviewBytes != Tina::AssetFormat::World2DSnapshotWire::HeaderBytes +
@@ -1782,6 +1882,17 @@ class EditorShellApplication final : public Tina::IGameApplication {
             counters.finalPlayerPositionX != 1.0F) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "editor shell automatic authoring demo did not finish");
+        }
+        if (documentPathConfigured) {
+            if (counters.authoringSaves != 1 || !counters.documentSaved || counters.documentDirty ||
+                counters.savedSnapshotBytes != counters.cookPreviewBytes) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "editor shell automatic save did not finish");
+            }
+        } else if (counters.authoringSaves != 0 || counters.documentSaved || !counters.documentDirty ||
+                   counters.savedSnapshotBytes != 0) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor shell reported an unexpected saved document");
         }
     }
     return Tina::Core::success();
@@ -1823,6 +1934,9 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"frameDelayMs\":" << options.frameDelayMilliseconds
               << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false") << ",\"exit\":";
     writeJsonString(std::cout, runExitReasonName(*runResult));
+    std::cout << ",\"documentPathConfigured\":"
+              << (counters.documentPathConfigured ? "true" : "false") << ",\"documentPath\":";
+    writeJsonString(std::cout, options.documentPathUtf8);
     std::cout << ",\"stateEnters\":" << counters.stateEnters << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
@@ -1838,6 +1952,8 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"authoringEdits\":" << counters.authoringEdits
               << ",\"authoringUndos\":" << counters.authoringUndos
               << ",\"authoringRedos\":" << counters.authoringRedos
+              << ",\"authoringSaves\":" << counters.authoringSaves
+              << ",\"savedSnapshotBytes\":" << counters.savedSnapshotBytes
               << ",\"editorLayoutRegions\":" << counters.editorLayoutRegions
               << ",\"viewportLayoutReady\":" << (counters.viewportLayoutReady ? "true" : "false")
               << ",\"inspectorScrollConfigured\":"
@@ -1848,6 +1964,8 @@ class EditorShellApplication final : public Tina::IGameApplication {
               << ",\"documentEntityCount\":" << counters.documentEntityCount
               << ",\"documentUndoDepth\":" << counters.documentUndoDepth
               << ",\"documentRedoDepth\":" << counters.documentRedoDepth
+              << ",\"documentSaved\":" << (counters.documentSaved ? "true" : "false")
+              << ",\"documentDirty\":" << (counters.documentDirty ? "true" : "false")
               << ",\"cookPreviewBytes\":" << counters.cookPreviewBytes
               << ",\"finalPlayerPositionX\":" << counters.finalPlayerPositionX
               << ",\"finalSelectionKey\":" << counters.finalSelectionKey

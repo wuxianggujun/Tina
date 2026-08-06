@@ -69,7 +69,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail |
 | `Tina::Navigation2D` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
-| `Tina::Editor` | 工具侧 validated World2D authoring document、bounded revision history 与 runtime snapshot preview；不由 `Tina::GameSDK` 聚合链接 |
+| `Tina::Editor` | 工具侧 validated World2D authoring document、bounded revision history、原子文件保存与 runtime snapshot preview；不由 `Tina::GameSDK` 聚合链接 |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
@@ -556,6 +556,10 @@ parent、非有限 component、旧 schema、document 容量或 history byte 容�
 `snapshotBytes()` 就是 cook/runtime preview，不存在 editor-only wire format；可直接交给
 `AssetFormat::parseWorld2DSnapshot()`，随后由 `Scene::instantiateWorld2DSnapshot()` 消费。借用 bytes 在下一次成功
 edit/undo/redo 后失效。完整场景、容量和失败契约见 [2D Editor](editor-2d.md)。
+
+`saveWorld2DAuthoringDocument(utf8Path, document)` 把当前 `snapshotBytes()` 写入同目录临时文件并原子替换目标，
+自动创建父目录。失败返回底层 Core IO error + `saveWorld2DAuthoringDocument=replace` context，不改变 document、
+revision/history 或已存在的目标文件；该 API 不引入 editor-only wire format。
 
 ## Asset 与 Cooked
 

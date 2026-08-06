@@ -18,7 +18,8 @@ struct WriteFileConfig final {
 
 // Synchronously writes the entire buffer to utf8Path.
 // Path is UTF-8 without embedded NUL. Does not canonicalize paths or follow async IO.
-// atomicReplace uses a unique temp sibling under the same parent directory.
+// atomicReplace uses a unique temp sibling and an OS-level same-directory
+// replace; a failed replace does not remove the previous target.
 [[nodiscard]] Status writeFile(std::string_view utf8Path, std::span<const std::byte> bytes,
                                WriteFileConfig config = {});
 

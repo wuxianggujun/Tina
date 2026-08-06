@@ -93,5 +93,22 @@ TEST(WriteFileTests, OverwriteExistingAtomically)
     std::filesystem::remove_all(path.parent_path(), ec);
 }
 
+TEST(WriteFileTests, FailedAtomicReplacePreservesExistingTargetDirectory)
+{
+    const auto path = std::filesystem::temp_directory_path() / "tina_writefile_tests" / "target-directory";
+    std::error_code ec;
+    std::filesystem::remove_all(path.parent_path(), ec);
+    ASSERT_TRUE(std::filesystem::create_directories(path, ec));
+    ASSERT_FALSE(ec);
+
+    constexpr char Content[] = "must-not-replace-a-directory";
+    const auto bytes = std::as_bytes(std::span<const char>(Content, sizeof(Content) - 1U));
+    const auto status = writeFile(toUtf8(path), bytes);
+    EXPECT_FALSE(status.has_value());
+    EXPECT_TRUE(std::filesystem::is_directory(path));
+
+    std::filesystem::remove_all(path.parent_path(), ec);
+}
+
 } // namespace
 } // namespace Tina::Core
