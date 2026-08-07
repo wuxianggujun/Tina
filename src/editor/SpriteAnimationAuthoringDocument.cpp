@@ -52,7 +52,8 @@ Core::Status validateSpriteAnimationAuthoringDocumentConfig(
     constexpr Core::usize MinimumRevisionBytes =
         AssetFormat::SpriteAnimationClipWire::HeaderBytes +
         AssetFormat::SpriteAnimationClipWire::FrameBytes +
-        AssetFormat::Wire::DependencyEntryBytes;
+        sizeof(AssetFormat::SpriteAnimationFrameDesc) +
+        sizeof(AssetFormat::CookedAssetWriteDependency);
     if (config.historyByteCapacity < MinimumRevisionBytes * 2U ||
         config.historyByteCapacity > SpriteAnimationAuthoringLimits::MaximumHistoryBytes)
     {
@@ -200,24 +201,38 @@ SpriteAnimationAuthoringDocument::buildRevision(
             return Core::failure(std::move(payload.error()));
         }
 
-        const Core::usize dependencyBytes =
-            dependencies->size() * AssetFormat::Wire::DependencyEntryBytes;
-        if (payload->size() > (std::numeric_limits<Core::usize>::max)() - dependencyBytes)
-        {
-            return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                                 "Sprite animation revision byte count overflowed");
-        }
+        std::vector<AssetFormat::SpriteAnimationFrameDesc> ownedFrames = desc.frames;
+        std::vector<AssetFormat::CookedAssetWriteDependency> ownedDependencies =
+            std::move(*dependencies);
         double totalDurationSeconds = 0.0;
         for (const auto& frame : desc.frames)
         {
             totalDurationSeconds += static_cast<double>(frame.durationSeconds);
         }
-        const Core::usize revisionByteCount = dependencyBytes + payload->size();
+        Core::usize revisionByteCount = payload->capacity();
+        const auto addOwnedCapacity = [&revisionByteCount](Core::usize count,
+                                                           Core::usize elementBytes) {
+            const Core::usize maximum = (std::numeric_limits<Core::usize>::max)();
+            if (count > maximum / elementBytes ||
+                revisionByteCount > maximum - count * elementBytes)
+            {
+                return false;
+            }
+            revisionByteCount += count * elementBytes;
+            return true;
+        };
+        if (!addOwnedCapacity(ownedFrames.capacity(), sizeof(ownedFrames.front())) ||
+            !addOwnedCapacity(ownedDependencies.capacity(),
+                              sizeof(ownedDependencies.front())))
+        {
+            return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
+                                 "Sprite animation revision byte count overflowed");
+        }
         return Revision{
             .clipId = desc.clipId,
             .playbackMode = desc.playbackMode,
-            .frames = desc.frames,
-            .dependencies = std::move(*dependencies),
+            .frames = std::move(ownedFrames),
+            .dependencies = std::move(ownedDependencies),
             .payloadBytes = std::move(*payload),
             .totalDurationSeconds = totalDurationSeconds,
             .byteCount = revisionByteCount,

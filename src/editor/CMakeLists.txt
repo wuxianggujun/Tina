@@ -1,5 +1,7 @@
 add_library(tina_editor STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorErrors.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorDocumentTabs.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/ProjectAssetBrowser.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/SpriteAnimationAuthoringDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/TileMapAuthoringDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World2DAuthoringDocument.hpp
@@ -7,6 +9,8 @@ add_library(tina_editor STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World3DAuthoringDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World3DAuthoringFile.hpp
     World2DAuthoringDocument.cpp
+    EditorDocumentTabs.cpp
+    ProjectAssetBrowser.cpp
     SpriteAnimationAuthoringDocument.cpp
     World2DAuthoringFile.cpp
     World3DAuthoringDocument.cpp

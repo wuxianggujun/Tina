@@ -1,4 +1,6 @@
 add_executable(tina_editor_tests
+    EditorDocumentTabsTests.cpp
+    ProjectAssetBrowserTests.cpp
     SpriteAnimationAuthoringDocumentTests.cpp
     TileMapAuthoringDocumentTests.cpp
     World2DAuthoringDocumentTests.cpp
@@ -6,6 +8,8 @@ add_executable(tina_editor_tests
     World3DAuthoringDocumentTests.cpp
     World3DAuthoringFileTests.cpp
     header_isolation/EditorErrorsHeader.cpp
+    header_isolation/EditorDocumentTabsHeader.cpp
+    header_isolation/ProjectAssetBrowserHeader.cpp
     header_isolation/SpriteAnimationAuthoringDocumentHeader.cpp
     header_isolation/TileMapAuthoringDocumentHeader.cpp
     header_isolation/World2DAuthoringDocumentHeader.cpp

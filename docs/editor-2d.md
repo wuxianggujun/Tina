@@ -49,13 +49,23 @@ Lease/GPU/binding，3D 由 `Mesh3DBindingRegistry` 持有 StaticMesh、Material 
 Lease/GPU/binding；Scene extraction 只取得 packet-local `FrameResourceRef`。项目 Catalog 中缺失或 kind 不匹配的引用
 只从本次 preview 过滤，authoring document 与 history 保持不变，不回退到固定 binding key 或彩色 proxy。
 
+Project Browser 直接拥有 Catalog descriptor 的确定性 AssetId 排序索引，并提供 All/2D/3D/Media 过滤、稳定选择和
+固定 32 px 虚拟列表行。Prefab、TileMap 与 SpriteAnimationClip 只按当前 schema 打开到对应 authoring surface；其他
+kind 打开只读 Asset Inspector。固定容量 document tab model 以 `(document kind, AssetId)` 去重，支持 pinned/dirty close
+保护和 2D/3D workspace 路由。当前应用接线仍是每种 authoring kind 共用一份 working document；多个同 kind Catalog tab
+尚未各自拥有独立 document/history，Save As、dirty-close 确认对话框与 Catalog refresh 也尚未接入，不能把本阶段描述成
+完整多文档持久化。
+
 ## Editor application layout
 
 ```text
 Toolbar (document/path/mode/undo/redo/save)
+Document tabs (World2D/World3D/TileMap/Animation/Catalog assets/close)
 Context bar (breadcrumb/select/move/tile-paint/tile-erase/frame/status)
 Workspace
-  Hierarchy dock (filter/actions/virtual TreeView/selection summary)
+  Left dock
+    Hierarchy (filter/actions/virtual TreeView/selection summary)
+    Project Assets (All/2D/3D/Media/virtual ListView/open)
   Active 2D/3D viewport (mode/tools/zoom/preview canvas/footer)
   Inspector dock (scrollable identity/transform/components/TileMap authoring/document)
 SpriteAnimationClip Timeline (frames/playback/mode/duration/reorder/undo/redo/cook)
@@ -63,7 +73,7 @@ Status bar (schema/entities/revision/preview/selection)
 ```
 
 这层属于 `Tina::EditorApp` 组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局与 GPU smoke 的
-结构化输出报告 `editorLayoutRegions=7`、`viewportLayoutReady=true`、`inspectorScrollConfigured=true`、
+结构化输出报告 `editorLayoutRegions=9`、`viewportLayoutReady=true`、`inspectorScrollConfigured=true`、
 `renderExtractions`、2D `gpuViewportSprites=13`（1 World Sprite + 12 Tile sprites）或 3D
 `gpuViewportMeshes=3`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。
 `gpuViewportDocumentRevision` 还必须与最终 canonical document revision 一致。字段事务由 `inspectorTransactions`、
@@ -73,7 +83,9 @@ world delta 取证；文件保存另由 active document 字段与 `world2D/3DDoc
 Catalog 接线由 `catalogReady`、`projectCatalogConfigured` / `builtInPreviewCatalog`、entry/load/GPU/binding/unresolved
 计数以及 `catalogResolved2DSprites` / `catalogResolved3DMeshes` 取证。TileMap 另报告 document revision、layer/chunk/
 non-empty cell、root+chunk cook artifact/bytes、emitted sprite 与 edit/undo/redo 计数；Animation 另报告
-document revision、frame/cook bytes、preview frame、edit/undo/redo 与 playback transition。
+document revision、frame/cook bytes、preview frame、edit/undo/redo 与 playback transition。Project Browser/tabs 另报告
+`projectAssetBrowserReady`、`projectAssetVisibleItems`、`projectAssetOpenCount`、`documentTabsReady`、`documentTabCount` 与
+`documentTabSwitches`；自动 smoke 从 4 个 pinned tab 打开一个 Catalog asset，最终 tab/open count 固定为 `5/1`。
 
 ## 文件加载与原子保存
 
@@ -131,6 +143,8 @@ Inspector / gizmo / tile brush / animation timeline / importer intent
 | gameplay bytes | 4 MiB | `World2DSnapshotWire::MaximumGameplayBytes` |
 | TileMap layer / object / chunk | 16 / 128 / 128 | 当前 Editor document 显式配置；schema hard limit 更高 |
 | SpriteAnimationClip frame | 256 | 当前 Editor document 显式配置；schema hard limit 为 4096 |
+| Project Asset descriptor | 4096 | 创建时复制并按 AssetId 排序；超限或重复 ID 原子失败 |
+| EditorApp document tab | 6 | 固定 UI 槽；公共 model 默认 16、hard limit 64 |
 | history entries（含 current） | 32 | 2..256 |
 | history canonical bytes（含 current） | 16 MiB | 64 bytes..1 GiB |
 
@@ -208,16 +222,18 @@ subtree 删除；bounded undo/redo、branch replacement 与 history byte failure
 isolation 编译通过；已有文件加载为 clean baseline、加载失败不改变 current/history；文件保存 exact canonical bytes、
 覆盖失败不删除旧目标；TinaEditor 自动完成
 Move → Apply Transform → viewport drag → Undo → Redo → Save → other workspace → Animation Next/Mode/Undo/Redo/Cook
-→ initial workspace。一次 drag 固定报告
+→ initial workspace → Open Selected Asset。一次 drag 固定报告
 begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，只增加一个 document revision；round-trip 固定
 `workspaceSwitches=2`、runtime preview instantiations=`8`、document/GPU revision=`7/7`、undo depth=`3`，并证明
 inactive session 的 path/loaded/baseline/dirty 未变化。2D delta 固定为 `(2,-1,0)`；3D XZ delta 固定为 `(2,0,1)`，
 完整 TRS 在 canonical Prefab、Scene preview 与结构化结果中一致。built-in Catalog smoke 还必须固定报告 entry/load=`8/7`、
 Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`1/3`。
 
-TileMap root+chunk authoring/cook preview、SpriteAnimationClip timeline authoring/cook 与 Catalog-resolved viewport 已完成。
+TileMap root+chunk authoring/cook preview、SpriteAnimationClip timeline authoring/cook、Catalog-resolved viewport、
+Project Browser、分类过滤、资源 Inspector、Catalog current-schema open 与固定容量 document tabs 已完成。
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、
 Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D Player 直接预览已解析 Sprite frame，3D workspace
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、
 动画 revision/frame/cook=`4/4/256 B`、Catalog entry/load=`8/7` 和 GPU sprites=`13`。下一产品切片为
-Project/Asset Browser、从 Catalog 打开资源及多文档切换；继续只保留现行 schema，不增加旧资产兼容分支。
+tab-owned 独立 document/history、Save/Save As、dirty-close 确认对话框与 Catalog refresh；继续只保留现行 schema，
+不增加旧资产兼容分支。

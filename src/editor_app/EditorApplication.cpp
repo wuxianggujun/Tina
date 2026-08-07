@@ -15,7 +15,9 @@
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
+#include <tina/editor/EditorDocumentTabs.hpp>
 #include <tina/editor/EditorErrors.hpp>
+#include <tina/editor/ProjectAssetBrowser.hpp>
 #include <tina/editor/SpriteAnimationAuthoringDocument.hpp>
 #include <tina/editor/World2DAuthoringDocument.hpp>
 #include <tina/editor/World2DAuthoringFile.hpp>
@@ -38,6 +40,7 @@
 #include <tina/scene/World.hpp>
 #include <tina/scene/World2DSnapshot.hpp>
 #include <tina/ui/UIElement.hpp>
+#include <tina/ui/UIListView.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIStyle.hpp>
@@ -79,11 +82,13 @@ inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
 inline constexpr u32 WindowLogicalWidth = 1280;
 inline constexpr u32 WindowLogicalHeight = 800;
 inline constexpr u32 HierarchyMaterializedCapacity = 16;
+inline constexpr u32 AssetBrowserMaterializedCapacity = 12;
 inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
-inline constexpr u32 EditorActionCount = 40;
-inline constexpr u32 EditorLayoutRegionCount = 7;
+inline constexpr u32 DocumentTabSlots = 6;
+inline constexpr u32 EditorActionCount = 52;
+inline constexpr u32 EditorLayoutRegionCount = 9;
 inline constexpr u32 GpuViewportSpriteCount = 1;
 inline constexpr u32 GpuViewportMeshCount = 3;
 inline constexpr u32 InitialTileMapWidthCells = 8;
@@ -348,6 +353,11 @@ struct LifecycleCounters final {
     UI::UITreeViewItemKey finalSelectionKey = UI::InvalidUITreeViewItemKey;
     u64 finalSelectionIndex = 0;
     u64 hierarchyLogicalItems = 0;
+    u64 projectAssetSelectionChanges = 0;
+    u64 projectAssetOpenCount = 0;
+    u64 projectAssetVisibleItems = 0;
+    u64 documentTabCount = 0;
+    u64 documentTabSwitches = 0;
     u64 renderExtractions = 0;
     u64 gpuViewportSprites = 0;
     u64 gpuViewportMeshes = 0;
@@ -450,6 +460,8 @@ struct LifecycleCounters final {
     bool catalogReady = false;
     bool projectCatalogConfigured = false;
     bool builtInPreviewCatalog = false;
+    bool projectAssetBrowserReady = false;
+    bool documentTabsReady = false;
 };
 
 enum class EditorCommand : u32 {
@@ -481,6 +493,12 @@ enum class EditorCommand : u32 {
     AnimationCookPreview,
     AnimationUndo,
     AnimationRedo,
+    ProjectFilterAll,
+    ProjectFilter2D,
+    ProjectFilter3D,
+    ProjectFilterMedia,
+    OpenSelectedProjectAsset,
+    CloseActiveDocument,
 };
 
 void writeJsonString(std::ostream& output, std::string_view value)
@@ -1182,6 +1200,89 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
     };
 }
 
+[[nodiscard]] Tina::Core::Result<Tina::Editor::ProjectAssetBrowserModel>
+createProjectAssetBrowser(const EditorAssetResources& resources)
+{
+    if (!resources.system.has_value() || resources.system->catalog() == nullptr) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "Tina Editor Project browser requires an open Catalog");
+    }
+    const Tina::Asset::CatalogSnapshot& catalog = *resources.system->catalog();
+    try {
+        std::vector<Tina::Editor::ProjectAssetDescriptor> assets;
+        assets.reserve(catalog.entryCount());
+        for (u32 index = 0; index < catalog.entryCount(); ++index) {
+            const auto entry = catalog.entry(index);
+            if (!entry) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "Tina Editor Catalog entry disappeared");
+            }
+            const auto idText = entry->assetId.canonicalText();
+            std::string displayName{Tina::Editor::projectAssetKindLabel(entry->assetKind)};
+            displayName += "  ";
+            displayName.append(idText.data(), 8U);
+            assets.push_back(Tina::Editor::ProjectAssetDescriptor{
+                .assetId = entry->assetId,
+                .assetKind = entry->assetKind,
+                .assetTypeVersion = entry->assetTypeVersion,
+                .dependencyCount = entry->dependencyCount,
+                .cookedFileBytes = entry->cookedFileBytes,
+                .displayName = std::move(displayName),
+            });
+        }
+        return Tina::Editor::ProjectAssetBrowserModel::Create(
+            assets, Tina::Editor::ProjectAssetBrowserConfig{
+                        .itemCapacity = (std::max)(Tina::Core::usize{4096},
+                                                  assets.size()),
+                    });
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Tina Editor Project browser allocation failed");
+    }
+}
+
+[[nodiscard]] Tina::Core::Result<Tina::Editor::EditorDocumentTabs>
+createEditorDocumentTabs(WorkspaceMode initialWorkspace)
+{
+    const std::array initialTabs{
+        Tina::Editor::EditorDocumentTabDesc{
+            .key = {.kind = Tina::Editor::EditorDocumentKind::World2D},
+            .title = "World2D",
+            .pinned = true,
+        },
+        Tina::Editor::EditorDocumentTabDesc{
+            .key = {.kind = Tina::Editor::EditorDocumentKind::World3D},
+            .title = "World3D",
+            .pinned = true,
+        },
+        Tina::Editor::EditorDocumentTabDesc{
+            .key = {.kind = Tina::Editor::EditorDocumentKind::TileMap2D,
+                    .assetId = editorAssetId(0x42U)},
+            .title = "TileMap",
+            .pinned = true,
+        },
+        Tina::Editor::EditorDocumentTabDesc{
+            .key = {.kind = Tina::Editor::EditorDocumentKind::SpriteAnimation2D,
+                    .assetId = editorAssetId(0x50U)},
+            .title = "Animation",
+            .pinned = true,
+        },
+    };
+    auto tabs = Tina::Editor::EditorDocumentTabs::Create(
+        initialTabs, Tina::Editor::EditorDocumentTabsConfig{
+                         .tabCapacity = DocumentTabSlots,
+                         .titleByteCapacity = 96,
+                     });
+    if (!tabs) {
+        return Tina::Core::failure(std::move(tabs.error()));
+    }
+    if (auto status = tabs->activate(initialWorkspace == WorkspaceMode::World2D ? 0U : 1U);
+        !status) {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    return tabs;
+}
+
 class EditorWorkspaceState final : public Tina::IGameState {
   public:
     EditorWorkspaceState(EditorLaunchOptions options, LifecycleCounters& counters,
@@ -1191,6 +1292,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
                          Tina::Editor::SpriteAnimationAuthoringDocument spriteAnimation,
                          WorkspaceSessionState world2DSession,
                          WorkspaceSessionState world3DSession,
+                         Tina::Editor::ProjectAssetBrowserModel projectAssets,
+                         Tina::Editor::EditorDocumentTabs documentTabs,
                          EditorAssetResources& assetResources,
                          EditorRenderDeviceAccess& renderDeviceAccess) noexcept
         : options_(std::move(options)), counters_(counters), document_(std::move(world2D)),
@@ -1198,7 +1301,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
           spriteAnimationDocument_(std::move(spriteAnimation)),
           workspaceMode_(options_.initialWorkspace),
           world2DSession_(std::move(world2DSession)),
-          world3DSession_(std::move(world3DSession)), assetResources_(assetResources),
+          world3DSession_(std::move(world3DSession)),
+          projectAssets_(std::move(projectAssets)),
+          documentTabs_(std::move(documentTabs)), assetResources_(assetResources),
           renderDeviceAccess_(renderDeviceAccess)
     {
     }
@@ -1451,6 +1556,50 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
 
+        UI::UINodeId documentTabsBar{};
+        UI::UILayoutStyle documentTabsBarStyle = fillWidth(34.0F);
+        documentTabsBarStyle.flexItem.shrink = 0.0F;
+        documentTabsBarStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        documentTabsBarStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        documentTabsBarStyle.flexContainer.gap.column = 6.0F;
+        documentTabsBarStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(8.0F, 3.0F);
+        if (auto status = storeNode(createPanel(rootNode, documentTabsBarStyle,
+                                                UI::UIStyleRoleId::PanelSurface, dockClass_),
+                                    documentTabsBar);
+            !status) {
+            return status;
+        }
+        UI::UINodeId documentTabsTitle{};
+        if (auto status = storeNode(createLabel(documentTabsBar, "Documents",
+                                                fixedSize(78.0F, 22.0F), secondaryText),
+                                    documentTabsTitle);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle documentTabStyle = fixedSize(0.0F, 28.0F);
+        documentTabStyle.size.width = UI::UILayoutLength::Auto();
+        documentTabStyle.flexItem.grow = 1.0F;
+        documentTabStyle.flexItem.shrink = 1.0F;
+        documentTabStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        for (u32 index = 0; index < DocumentTabSlots; ++index) {
+            const auto* tab = documentTabs_.tab(index);
+            if (auto status = storeNode(createButton(documentTabsBar,
+                                                     tab != nullptr ? tab->title : "Empty",
+                                                     documentTabStyle,
+                                                     tab != nullptr &&
+                                                         index != documentTabs_.activeIndex()),
+                                        documentTabButtons_[index]);
+                !status) {
+                return status;
+            }
+        }
+        if (auto status = storeNode(createButton(documentTabsBar, "Close",
+                                                 fixedSize(58.0F, 28.0F), false),
+                                    closeDocumentButton_);
+            !status) {
+            return status;
+        }
+
         UI::UINodeId body{};
         UI::UILayoutStyle bodyStyle = growingRegion();
         bodyStyle.minMax.minHeight = UI::UILayoutLength::Px(320.0F);
@@ -1577,6 +1726,123 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = storeNode(createLabel(hierarchyFooter, "Stable authoring identity", fillWidth(18.0F),
                                                 secondaryText),
                                     hierarchyFooterHint);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId projectHeader{};
+        UI::UILayoutStyle projectHeaderStyle = fillWidth(28.0F);
+        projectHeaderStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        projectHeaderStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        projectHeaderStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
+        if (auto status = storeNode(createPanel(left, projectHeaderStyle, UI::UIStyleRoleId::None),
+                                    projectHeader);
+            !status) {
+            return status;
+        }
+        UI::UINodeId projectTitle{};
+        if (auto status = storeNode(createLabel(projectHeader, "Project Assets",
+                                                fixedSize(118.0F, 24.0F), sectionText),
+                                    projectTitle);
+            !status) {
+            return status;
+        }
+        std::string initialProjectCount = std::to_string(projectAssets_.visibleItemCount());
+        initialProjectCount += " / ";
+        initialProjectCount += std::to_string(projectAssets_.itemCount());
+        if (auto status = storeNode(createLabel(projectHeader, initialProjectCount,
+                                                fixedSize(58.0F, 20.0F), secondaryText),
+                                    projectAssetCount_);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId projectFilters{};
+        UI::UILayoutStyle projectFiltersStyle = fillWidth(28.0F);
+        projectFiltersStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        projectFiltersStyle.flexContainer.gap.column = 4.0F;
+        if (auto status = storeNode(createPanel(left, projectFiltersStyle,
+                                                UI::UIStyleRoleId::None),
+                                    projectFilters);
+            !status) {
+            return status;
+        }
+        const std::array<std::string_view, 4> projectFilterLabels{"All", "2D", "3D", "Media"};
+        for (u32 index = 0; index < projectFilterLabels.size(); ++index) {
+            UI::UILayoutStyle filterStyle = fixedSize(0.0F, 28.0F);
+            filterStyle.size.width = UI::UILayoutLength::Auto();
+            filterStyle.flexItem.grow = 1.0F;
+            filterStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+            if (auto status = storeNode(createButton(projectFilters, projectFilterLabels[index],
+                                                     filterStyle, index != 0U),
+                                        projectFilterButtons_[index]);
+                !status) {
+                return status;
+            }
+        }
+
+        UI::UILayoutStyle projectListStyle = growingRegion();
+        projectListStyle.minMax.minHeight = UI::UILayoutLength::Px(128.0F);
+        auto projectList = tree->createElement(
+            left, UI::makeListViewElement(
+                      {.materializedItemCapacity = AssetBrowserMaterializedCapacity},
+                      projectListStyle));
+        if (!projectList) {
+            return Tina::Core::failure(std::move(projectList.error()));
+        }
+        projectAssetList_ = *projectList;
+        if (auto status = tree->setListViewStyle(
+                projectAssetList_,
+                UI::UIListViewStyle{
+                    .rowHeight = 32.0F,
+                    .overscanRows = 1,
+                    .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                    .wheelStep = 32.0F,
+                });
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setListViewPaint(projectAssetList_,
+                                                 UI::makeListViewPaint(productTheme));
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setListViewDataSource(projectAssetList_,
+                                                      projectAssetDataSource());
+            !status) {
+            return status;
+        }
+        if (projectAssets_.visibleItemCount() != 0U) {
+            if (auto status = tree->setListViewSelectedIndex(projectAssetList_, 0U); !status) {
+                return status;
+            }
+            observedProjectAssetSelectionIndex_ = 0U;
+        }
+
+        UI::UINodeId projectActions{};
+        UI::UILayoutStyle projectActionsStyle = fillWidth(30.0F);
+        projectActionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        projectActionsStyle.flexContainer.gap.column = 6.0F;
+        if (auto status = storeNode(createPanel(left, projectActionsStyle,
+                                                UI::UIStyleRoleId::None),
+                                    projectActions);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle projectActionStyle = fixedSize(0.0F, 30.0F);
+        projectActionStyle.size.width = UI::UILayoutLength::Auto();
+        projectActionStyle.flexItem.grow = 1.0F;
+        projectActionStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        if (auto status = storeNode(createButton(projectActions, "Open",
+                                                 projectActionStyle,
+                                                 projectAssets_.visibleItemCount() != 0U),
+                                    openProjectAssetButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(projectActions, "Catalog",
+                                                fixedSize(66.0F, 20.0F), accentText),
+                                    projectAssetSource_);
             !status) {
             return status;
         }
@@ -2487,6 +2753,51 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
+        const std::array projectFilterCommands{
+            EditorCommand::ProjectFilterAll,
+            EditorCommand::ProjectFilter2D,
+            EditorCommand::ProjectFilter3D,
+            EditorCommand::ProjectFilterMedia,
+        };
+        for (u32 index = 0; index < projectFilterButtons_.size(); ++index) {
+            if (auto status = tree->setButtonAction(
+                    projectFilterButtons_[index],
+                    UI::UIButtonActionCallback{
+                        [this, command = projectFilterCommands[index]](
+                            const UI::UIButtonActionEvent&) noexcept {
+                            queueEditorCommand(command);
+                        }});
+                !status) {
+                return status;
+            }
+        }
+        if (auto status = tree->setButtonAction(
+                openProjectAssetButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::OpenSelectedProjectAsset);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                closeDocumentButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::CloseActiveDocument);
+                }});
+            !status) {
+            return status;
+        }
+        for (u32 index = 0; index < documentTabButtons_.size(); ++index) {
+            if (auto status = tree->setButtonAction(
+                    documentTabButtons_[index],
+                    UI::UIButtonActionCallback{
+                        [this, index](const UI::UIButtonActionEvent&) noexcept {
+                            pendingDocumentTabActivation_ = index;
+                        }});
+                !status) {
+                return status;
+            }
+        }
         if (auto status = tree->setPointerHitPolicy(viewportPreviewLayer_,
                                                     UI::UIPointerHitPolicy::Targetable);
             !status) {
@@ -2498,6 +2809,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         counters_.authoringActionsWired = EditorActionCount;
         counters_.editorLayoutRegions = EditorLayoutRegionCount;
         counters_.viewportLayoutReady = true;
+        counters_.projectAssetBrowserReady = true;
+        counters_.documentTabsReady = true;
+        counters_.projectAssetVisibleItems = projectAssets_.visibleItemCount();
+        counters_.documentTabCount = documentTabs_.tabCount();
         auto initialSelection = tree->treeViewSelection(hierarchyTree_);
         if (!initialSelection) {
             return Tina::Core::failure(std::move(initialSelection.error()));
@@ -2674,6 +2989,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     } else {
                         (void)queueAutoCommand(EditorCommand::SwitchToWorld3D);
                     }
+                    break;
+                case 17:
+                    (void)queueAutoCommand(EditorCommand::OpenSelectedProjectAsset);
                     break;
                 default:
                     break;
@@ -2858,8 +3176,34 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (selection->key != selectionKey_) {
             selectionKey_ = selection->key;
+            assetInspectorActive_ = false;
             ++counters_.hierarchySelectionChanges;
             if (auto status = refreshAuthoringUi(*tree); !status) {
+                return status;
+            }
+        }
+        auto projectSelection = tree->listViewSelection(projectAssetList_);
+        if (!projectSelection) {
+            return Tina::Core::failure(std::move(projectSelection.error()));
+        }
+        if (projectSelection->hasValue() &&
+            observedProjectAssetSelectionIndex_ != projectSelection->logicalIndex) {
+            if (auto status = projectAssets_.selectVisibleIndex(
+                    static_cast<Tina::Core::usize>(projectSelection->logicalIndex));
+                !status) {
+                return status;
+            }
+            observedProjectAssetSelectionIndex_ = projectSelection->logicalIndex;
+            assetInspectorActive_ = true;
+            ++counters_.projectAssetSelectionChanges;
+            if (auto status = refreshAuthoringUi(*tree); !status) {
+                return status;
+            }
+        }
+        if (pendingDocumentTabActivation_.has_value()) {
+            const u32 index = *pendingDocumentTabActivation_;
+            pendingDocumentTabActivation_.reset();
+            if (auto status = activateDocumentTab(*tree, index); !status) {
                 return status;
             }
         }
@@ -2985,6 +3329,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return Tina::Core::failure(Tina::Editor::EditorErrorCode::FrameNotFound,
                                        "Animation timeline frame does not exist");
         }
+        animationSelectedFrameIndex_ = frameIndex;
+        counters_.animationPreviewFrameIndex = frameIndex;
         const Tina::Asset::AssetHandle sprite = loadedAsset(
             frame->spriteId, Tina::AssetFormat::AssetKind::Sprite);
         if (!sprite || !containsHandle(boundSpriteAssets_, sprite)) {
@@ -2992,8 +3338,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return Tina::Core::success();
         }
         animationPreviewAvailable_ = true;
-        animationSelectedFrameIndex_ = frameIndex;
-        counters_.animationPreviewFrameIndex = frameIndex;
         if (workspaceMode_ != WorkspaceMode::World2D || !previewWorld_.has_value()) {
             return Tina::Core::success();
         }
@@ -4118,6 +4462,274 @@ class EditorWorkspaceState final : public Tina::IGameState {
             layerId, "Object Layer " + std::to_string(layerId));
     }
 
+    [[nodiscard]] Tina::Core::Status refreshProjectAssetUi(
+        Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        std::string count = std::to_string(projectAssets_.visibleItemCount());
+        count += " / ";
+        count += std::to_string(projectAssets_.itemCount());
+        if (auto status = tree.setText(projectAssetCount_, count); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(
+                projectAssetSource_,
+                assetResources_.projectCatalogConfigured ? "Project" : "Preview");
+            !status) {
+            return status;
+        }
+        const u32 activeFilter = static_cast<u32>(projectAssets_.filter());
+        for (u32 index = 0; index < projectFilterButtons_.size(); ++index) {
+            if (auto status = tree.setEnabled(projectFilterButtons_[index],
+                                              index != activeFilter);
+                !status) {
+                return status;
+            }
+        }
+        if (auto status = tree.setEnabled(openProjectAssetButton_,
+                                          projectAssets_.selectedItem() != nullptr);
+            !status) {
+            return status;
+        }
+        counters_.projectAssetVisibleItems = projectAssets_.visibleItemCount();
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status refreshDocumentTabsUi(
+        Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        for (u32 index = 0; index < documentTabButtons_.size(); ++index) {
+            const auto* tab = documentTabs_.tab(index);
+            std::string title = tab != nullptr ? tab->title : "Empty";
+            if (tab != nullptr && tab->dirty) {
+                title += " *";
+            }
+            if (auto status = tree.setText(documentTabButtons_[index], title); !status) {
+                return status;
+            }
+            if (auto status = tree.setEnabled(
+                    documentTabButtons_[index],
+                    tab != nullptr && index != documentTabs_.activeIndex());
+                !status) {
+                return status;
+            }
+        }
+        const auto* active = documentTabs_.activeTab();
+        if (auto status = tree.setEnabled(closeDocumentButton_,
+                                          active != nullptr && !active->pinned &&
+                                              !active->dirty);
+            !status) {
+            return status;
+        }
+        if (active != nullptr) {
+            if (auto status = tree.setText(toolbarDocument_, active->title); !status) {
+                return status;
+            }
+        }
+        counters_.documentTabCount = documentTabs_.tabCount();
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status applyProjectAssetFilter(
+        Tina::PrimaryWindowUITreeUpdater& tree,
+        Tina::Editor::ProjectAssetFilter filter)
+    {
+        if (auto status = projectAssets_.setFilter(filter); !status) {
+            return status;
+        }
+        observedProjectAssetSelectionIndex_.reset();
+        if (auto status = tree.setListViewDataSource(projectAssetList_,
+                                                     projectAssetDataSource());
+            !status) {
+            return status;
+        }
+        if (projectAssets_.visibleItemCount() != 0U) {
+            if (auto status = tree.setListViewSelectedIndex(projectAssetList_, 0U); !status) {
+                return status;
+            }
+            assetInspectorActive_ = true;
+        } else {
+            assetInspectorActive_ = false;
+        }
+        authoringFeedback_ = "Project Asset Browser filter changed";
+        if (auto status = refreshProjectAssetUi(tree); !status) {
+            return status;
+        }
+        return refreshAuthoringUi(tree);
+    }
+
+    [[nodiscard]] Tina::Core::Status loadProjectAssetDocument(
+        const Tina::Editor::ProjectAssetDescriptor& asset)
+    {
+        if (!assetResources_.system.has_value()) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Tina Editor AssetSystem is unavailable");
+        }
+        auto loaded = assetResources_.system->loadOne(asset.assetId);
+        if (!loaded) {
+            return Tina::Core::failure(std::move(loaded.error()));
+        }
+        const Tina::Asset::CookedAssetFile* file =
+            assetResources_.system->tryGet(*loaded);
+        if (file == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Opened Catalog asset has no CPU payload");
+        }
+        switch (Tina::Editor::projectAssetOpenKind(asset.assetKind)) {
+        case Tina::Editor::ProjectAssetOpenKind::World3D:
+            return document3D_.loadPayload(file->payload());
+        case Tina::Editor::ProjectAssetOpenKind::SpriteAnimation2D:
+            return spriteAnimationDocument_.loadCookedAsset(file->bytes());
+        case Tina::Editor::ProjectAssetOpenKind::TileMap2D: {
+            Tina::Core::AssetId tilesetId{};
+            std::vector<Tina::Core::AssetId> chunkIds;
+            std::vector<Tina::Core::AssetId> dependencies;
+            try {
+                chunkIds.reserve(file->header().dependencyCount);
+                dependencies.reserve(file->header().dependencyCount);
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                           "TileMap document dependency allocation failed");
+            }
+            for (u32 index = 0; index < file->header().dependencyCount; ++index) {
+                const auto dependency = file->dependency(index);
+                if (!dependency) {
+                    return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                               "TileMap document dependency disappeared");
+                }
+                if (dependency->expectedKind == Tina::AssetFormat::AssetKind::Tileset) {
+                    tilesetId = dependency->assetId;
+                    dependencies.push_back(dependency->assetId);
+                } else if (dependency->expectedKind ==
+                           Tina::AssetFormat::AssetKind::TileMapChunk) {
+                    chunkIds.push_back(dependency->assetId);
+                    dependencies.push_back(dependency->assetId);
+                }
+            }
+            if (!dependencies.empty()) {
+                auto dependencyHandles = assetResources_.system->load(dependencies);
+                if (!dependencyHandles) {
+                    return Tina::Core::failure(std::move(dependencyHandles.error()));
+                }
+            }
+            std::vector<Tina::Editor::TileMapAuthoringChunkSource> chunks;
+            try {
+                chunks.reserve(chunkIds.size());
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                           "TileMap document chunk allocation failed");
+            }
+            for (const Tina::Core::AssetId chunkId : chunkIds) {
+                const auto handle = assetResources_.system->find(chunkId);
+                const auto* chunkFile = handle ? assetResources_.system->tryGet(*handle)
+                                               : nullptr;
+                if (chunkFile == nullptr) {
+                    return Tina::Core::failure(
+                        Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                        "TileMap Catalog chunk is not resident");
+                }
+                chunks.push_back({.assetId = chunkId,
+                                  .payloadBytes = chunkFile->payload()});
+            }
+            return tileMapDocument_.loadPayloadFamily(
+                asset.assetId, tilesetId, file->payload(), chunks);
+        }
+        case Tina::Editor::ProjectAssetOpenKind::AssetInspector:
+        default:
+            return Tina::Core::success();
+        }
+    }
+
+    [[nodiscard]] Tina::Core::Status openSelectedProjectAsset(
+        Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        const auto* asset = projectAssets_.selectedItem();
+        if (asset == nullptr) {
+            return Tina::Core::failure(Tina::Editor::EditorErrorCode::ProjectAssetNotFound,
+                                       "Project Asset Browser has no selected asset");
+        }
+        const Tina::Editor::EditorDocumentKind documentKind =
+            Tina::Editor::editorDocumentKindForAsset(asset->assetKind);
+        const Tina::Editor::EditorDocumentKey documentKey{
+            .kind = documentKind,
+            .assetId = asset->assetId,
+        };
+        if (!documentTabs_.find(documentKey) &&
+            documentTabs_.tabCount() >= documentTabs_.config().tabCapacity) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabCapacityExceeded,
+                "Close a document before opening another Catalog asset");
+        }
+        if (auto status = loadProjectAssetDocument(*asset); !status) {
+            return status;
+        }
+        auto opened = documentTabs_.open(Tina::Editor::EditorDocumentTabDesc{
+            .key = documentKey,
+            .title = asset->displayName,
+        });
+        if (!opened) {
+            return Tina::Core::failure(std::move(opened.error()));
+        }
+        ++counters_.projectAssetOpenCount;
+        authoringFeedback_ = "Catalog asset opened in a document tab";
+        return activateDocumentTab(tree, static_cast<u32>(*opened));
+    }
+
+    [[nodiscard]] Tina::Core::Status closeActiveDocument(
+        Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        const Tina::Core::usize closingIndex = documentTabs_.activeIndex();
+        if (auto status = documentTabs_.close(closingIndex); !status) {
+            return status;
+        }
+        assetInspectorActive_ = false;
+        authoringFeedback_ = "Document tab closed";
+        if (documentTabs_.activeTab() == nullptr) {
+            return refreshDocumentTabsUi(tree);
+        }
+        return activateDocumentTab(tree,
+                                   static_cast<u32>(documentTabs_.activeIndex()));
+    }
+
+    [[nodiscard]] Tina::Core::Status activateDocumentTab(
+        Tina::PrimaryWindowUITreeUpdater& tree, u32 index)
+    {
+        if (auto status = documentTabs_.activate(index); !status) {
+            return status;
+        }
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Active Editor document tab disappeared");
+        }
+        assetInspectorActive_ = tab->key.kind ==
+                                Tina::Editor::EditorDocumentKind::AssetInspector;
+        switch (Tina::Editor::editorDocumentWorkspace(tab->key.kind)) {
+        case Tina::Editor::EditorDocumentWorkspace::TwoD:
+            if (auto status = activateWorkspace(tree, WorkspaceMode::World2D); !status) {
+                return status;
+            }
+            if (tab->key.kind == Tina::Editor::EditorDocumentKind::TileMap2D) {
+                pendingSelectionIndex_ = 6U;
+            } else if (tab->key.kind ==
+                       Tina::Editor::EditorDocumentKind::SpriteAnimation2D) {
+                pendingSelectionIndex_ = 2U;
+            }
+            break;
+        case Tina::Editor::EditorDocumentWorkspace::ThreeD:
+            if (auto status = activateWorkspace(tree, WorkspaceMode::World3D); !status) {
+                return status;
+            }
+            break;
+        case Tina::Editor::EditorDocumentWorkspace::None:
+            break;
+        }
+        ++counters_.documentTabSwitches;
+        if (auto status = refreshAuthoringUi(tree); !status) {
+            return status;
+        }
+        return refreshDocumentTabsUi(tree);
+    }
+
     [[nodiscard]] Tina::Core::Status executeEditorCommand(Tina::PrimaryWindowUITreeUpdater& tree)
     {
         const EditorCommand command = *pendingEditorCommand_;
@@ -4127,6 +4739,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         bool requiresPreviewValidation = false;
         bool animationDocumentChanged = false;
         if (command >= EditorCommand::AnimationTogglePlayback &&
+            command <= EditorCommand::AnimationRedo &&
             workspaceMode_ != WorkspaceMode::World2D) {
             return Tina::Core::failure(
                 Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
@@ -4134,10 +4747,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         switch (command) {
         case EditorCommand::SwitchToWorld2D:
-            status = activateWorkspace(tree, WorkspaceMode::World2D);
+            status = activateDocumentTab(tree, 0U);
             break;
         case EditorCommand::SwitchToWorld3D:
-            status = activateWorkspace(tree, WorkspaceMode::World3D);
+            status = activateDocumentTab(tree, 1U);
             break;
         case EditorCommand::MoveSelectedPositiveX:
             status = moveSelectedPositiveX();
@@ -4326,9 +4939,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 animationPlaying_ = false;
                 authoringFeedback_ = "Animation preview paused";
             } else {
-                animationAnimator_->restart();
+                animationAnimator_->play();
                 animationPlaying_ = true;
-                status = applyAnimationPreviewFrame(0);
+                status = applyAnimationPreviewFrame(
+                    static_cast<u32>(animationAnimator_->frameIndex()));
                 authoringFeedback_ = "Animation preview playing";
             }
             ++counters_.animationPlaybackTransitions;
@@ -4529,21 +5143,46 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 authoringFeedback_ = "Animation Redo restored the next clip revision";
             }
             break;
+        case EditorCommand::ProjectFilterAll:
+            status = applyProjectAssetFilter(tree, Tina::Editor::ProjectAssetFilter::All);
+            break;
+        case EditorCommand::ProjectFilter2D:
+            status = applyProjectAssetFilter(tree, Tina::Editor::ProjectAssetFilter::TwoD);
+            break;
+        case EditorCommand::ProjectFilter3D:
+            status = applyProjectAssetFilter(tree, Tina::Editor::ProjectAssetFilter::ThreeD);
+            break;
+        case EditorCommand::ProjectFilterMedia:
+            status = applyProjectAssetFilter(tree, Tina::Editor::ProjectAssetFilter::Media);
+            break;
+        case EditorCommand::OpenSelectedProjectAsset:
+            status = openSelectedProjectAsset(tree);
+            break;
+        case EditorCommand::CloseActiveDocument:
+            status = closeActiveDocument(tree);
+            break;
         }
         if (!status) {
             return status;
         }
         if (animationDocumentChanged) {
             if (auto animationStatus = rebuildAnimationAnimator(); !animationStatus) {
-                return animationStatus;
+                animationAnimator_.reset();
+                animationPlaying_ = false;
+                animationPreviewAvailable_ = false;
+                authoringFeedback_ += " | Runtime preview unavailable: ";
+                authoringFeedback_ += animationStatus.error().message;
             }
             auto preview = spriteAnimationDocument_.cookPreview();
-            if (!preview) {
-                return Tina::Core::failure(std::move(preview.error()));
-            }
             counters_.animationDocumentRevision = spriteAnimationDocument_.revision();
             counters_.animationFrameCount = spriteAnimationDocument_.frameCount();
-            counters_.animationCookPreviewBytes = preview->cookedBytes.size();
+            if (preview) {
+                counters_.animationCookPreviewBytes = preview->cookedBytes.size();
+            } else {
+                counters_.animationCookPreviewBytes = 0;
+                authoringFeedback_ += " | Cook preview unavailable: ";
+                authoringFeedback_ += preview.error().message;
+            }
         }
         if (requiresPreviewValidation) {
             if (auto previewStatus = validateRuntimePreview(); !previewStatus) {
@@ -5638,11 +6277,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
         publishWorkspaceSessionCounters();
         const bool dirty = counters_.documentDirty;
         const bool pathConfigured = counters_.documentPathConfigured;
-        const bool selectionEditable = stableEntityIdForHierarchyItem(selectionKey_) != 0U &&
+        const bool selectionEditable = !assetInspectorActive_ &&
+                                       stableEntityIdForHierarchyItem(selectionKey_) != 0U &&
                                        !tileMapEditingContext();
         const bool selectionEditable3D = selectionEditable && workspaceMode_ == WorkspaceMode::World3D;
 
         if (auto status = refreshWorkspaceChrome(tree); !status) {
+            return status;
+        }
+        if (auto status = refreshProjectAssetUi(tree); !status) {
+            return status;
+        }
+        if (auto status = refreshDocumentTabsUi(tree); !status) {
             return status;
         }
         if (auto status = refreshViewportToolUi(tree); !status) {
@@ -5654,13 +6300,23 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = publishInspector(tree, selectionKey_); !status) {
             return status;
         }
-        std::string documentStatus = "Revision ";
-        documentStatus += std::to_string(activeDocumentRevision());
-        documentStatus += " | Undo ";
-        documentStatus += std::to_string(activeUndoDepth());
-        documentStatus += " | Redo ";
-        documentStatus += std::to_string(activeRedoDepth());
-        documentStatus += pathConfigured ? (dirty ? " | Modified" : " | Saved") : " | Unsaved";
+        std::string documentStatus;
+        if (assetInspectorActive_ && projectAssets_.selectedItem() != nullptr) {
+            const auto* asset = projectAssets_.selectedItem();
+            documentStatus = "Catalog asset | Type v";
+            documentStatus += std::to_string(asset->assetTypeVersion);
+            documentStatus += " | Dependencies ";
+            documentStatus += std::to_string(asset->dependencyCount);
+        } else {
+            documentStatus = "Revision ";
+            documentStatus += std::to_string(activeDocumentRevision());
+            documentStatus += " | Undo ";
+            documentStatus += std::to_string(activeUndoDepth());
+            documentStatus += " | Redo ";
+            documentStatus += std::to_string(activeRedoDepth());
+            documentStatus += pathConfigured ? (dirty ? " | Modified" : " | Saved")
+                                             : " | Unsaved";
+        }
         if (auto status = tree.setText(inspectorDocument_, documentStatus); !status) {
             return status;
         }
@@ -5712,7 +6368,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         std::string statusSelection = "Selected: ";
-        statusSelection += hierarchyLabel(workspaceMode_, selectionKey_);
+        if (assetInspectorActive_ && projectAssets_.selectedItem() != nullptr) {
+            statusSelection += projectAssets_.selectedItem()->displayName;
+        } else {
+            statusSelection += hierarchyLabel(workspaceMode_, selectionKey_);
+        }
         if (auto status = tree.setText(statusSelection_, statusSelection); !status) {
             return status;
         }
@@ -5802,6 +6462,46 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status publishInspector(Tina::PrimaryWindowUITreeUpdater& tree,
                                                       UI::UITreeViewItemKey key)
     {
+        if (assetInspectorActive_) {
+            const auto* asset = projectAssets_.selectedItem();
+            if (asset == nullptr) {
+                return Tina::Core::failure(
+                    Tina::Editor::EditorErrorCode::ProjectAssetNotFound,
+                    "Project Asset Inspector has no selected asset");
+            }
+            std::string name = "Asset: ";
+            name += asset->displayName;
+            if (auto status = tree.setText(inspectorName_, name); !status) {
+                return status;
+            }
+            std::string kind = "Kind: ";
+            kind += Tina::Editor::projectAssetKindLabel(asset->assetKind);
+            if (auto status = tree.setText(inspectorKind_, kind); !status) {
+                return status;
+            }
+            const auto idText = asset->assetId.canonicalText();
+            std::string note = "AssetId: ";
+            note.append(idText.data(), idText.size());
+            note += " | v";
+            note += std::to_string(asset->assetTypeVersion);
+            note += " | deps ";
+            note += std::to_string(asset->dependencyCount);
+            note += " | ";
+            note += std::to_string(asset->cookedFileBytes);
+            note += " B";
+            if (auto status = tree.setText(inspectorNote_, note); !status) {
+                return status;
+            }
+            for (const UI::UINodeId field : {
+                     inspectorPositionX_, inspectorPositionY_, inspectorPositionZ_,
+                     inspectorRotationX_, inspectorRotationY_, inspectorRotationZ_,
+                     inspectorScaleX_, inspectorScaleY_, inspectorScaleZ_}) {
+                if (auto status = tree.setText(field, "n/a"); !status) {
+                    return status;
+                }
+            }
+            return Tina::Core::success();
+        }
         std::string name = "Name: ";
         name += hierarchyLabel(workspaceMode_, key);
         if (auto status = tree.setText(inspectorName_, name); !status) {
@@ -5929,6 +6629,41 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return tree.setText(inspectorScaleZ_, hasEntity ? std::to_string(scaleZ) : "n/a");
     }
 
+    [[nodiscard]] UI::UIListViewDataSource projectAssetDataSource() const noexcept
+    {
+        return UI::UIListViewDataSource{
+            .state = this,
+            .itemCount = &EditorWorkspaceState::projectAssetItemCount,
+            .resolveItem = &EditorWorkspaceState::resolveProjectAssetItem,
+        };
+    }
+
+    [[nodiscard]] static u64 projectAssetItemCount(const void* state) noexcept
+    {
+        const auto* self = static_cast<const EditorWorkspaceState*>(state);
+        return self != nullptr ? self->projectAssets_.visibleItemCount() : 0U;
+    }
+
+    static bool resolveProjectAssetItem(const void* state, u64 logicalIndex,
+                                        UI::UIListViewItemDescriptor& output) noexcept
+    {
+        const auto* self = static_cast<const EditorWorkspaceState*>(state);
+        if (self == nullptr) {
+            return false;
+        }
+        const auto* asset = self->projectAssets_.visibleItem(
+            static_cast<Tina::Core::usize>(logicalIndex));
+        if (asset == nullptr) {
+            return false;
+        }
+        output = UI::UIListViewItemDescriptor{
+            .key = 10'000U + logicalIndex,
+            .label = asset->displayName,
+            .enabled = true,
+        };
+        return true;
+    }
+
     [[nodiscard]] UI::UITreeViewDataSource hierarchyDataSource() noexcept
     {
         return UI::UITreeViewDataSource{
@@ -6031,10 +6766,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
     WorkspaceMode workspaceMode_ = WorkspaceMode::World2D;
     WorkspaceSessionState world2DSession_{};
     WorkspaceSessionState world3DSession_{};
+    Tina::Editor::ProjectAssetBrowserModel projectAssets_;
+    Tina::Editor::EditorDocumentTabs documentTabs_;
     EditorAssetResources& assetResources_;
     EditorRenderDeviceAccess& renderDeviceAccess_;
     Tina::UI::UIRootOwner uiRoot_{};
     UI::UINodeId hierarchyTree_{};
+    UI::UINodeId projectAssetList_{};
+    UI::UINodeId projectAssetCount_{};
+    UI::UINodeId projectAssetSource_{};
     UI::UINodeId inspectorName_{};
     UI::UINodeId inspectorKind_{};
     UI::UINodeId inspectorNote_{};
@@ -6082,6 +6822,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
     UI::UINodeId saveButton_{};
+    UI::UINodeId openProjectAssetButton_{};
+    UI::UINodeId closeDocumentButton_{};
+    std::array<UI::UINodeId, 4> projectFilterButtons_{};
+    std::array<UI::UINodeId, DocumentTabSlots> documentTabButtons_{};
     UI::UINodeId paintTileButton_{};
     UI::UINodeId eraseTileButton_{};
     UI::UINodeId toggleTileLayerButton_{};
@@ -6149,6 +6893,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 animationVisibleFrameStart_ = 0;
     bool animationPlaying_ = false;
     bool animationPreviewAvailable_ = false;
+    bool assetInspectorActive_ = false;
     bool pendingAnimationTimelineRefresh_ = false;
     UI::UILogicalRect viewportLogicalRect_{};
     std::optional<Tina::Render::RenderNormalizedViewport> viewportNormalized_{};
@@ -6156,6 +6901,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 surfacePixelHeight_ = WindowLogicalHeight;
     std::string authoringFeedback_ = "One validated revision per command";
     std::optional<u64> pendingSelectionIndex_{};
+    std::optional<u64> observedProjectAssetSelectionIndex_{};
+    std::optional<u32> pendingDocumentTabActivation_{};
     std::optional<EditorCommand> pendingEditorCommand_{};
     std::optional<u32> pendingAnimationFrameSelection_{};
     std::optional<ViewportToolMode> pendingViewportToolMode_{};
@@ -6178,6 +6925,14 @@ class EditorApplication final : public Tina::IGameApplication {
         if (!initialDocuments) {
             return Tina::Core::failure(std::move(initialDocuments.error()));
         }
+        auto projectAssets = createProjectAssetBrowser(assetResources_);
+        if (!projectAssets) {
+            return Tina::Core::failure(std::move(projectAssets.error()));
+        }
+        auto documentTabs = createEditorDocumentTabs(options_.initialWorkspace);
+        if (!documentTabs) {
+            return Tina::Core::failure(std::move(documentTabs.error()));
+        }
         try {
             std::unique_ptr<Tina::IGameState> state =
                 std::make_unique<EditorWorkspaceState>(
@@ -6186,7 +6941,8 @@ class EditorApplication final : public Tina::IGameApplication {
                     std::move(initialDocuments->tileMap),
                     std::move(initialDocuments->spriteAnimation),
                     std::move(initialDocuments->world2DSession),
-                    std::move(initialDocuments->world3DSession), assetResources_,
+                    std::move(initialDocuments->world3DSession),
+                    std::move(*projectAssets), std::move(*documentTabs), assetResources_,
                     renderDeviceAccess_);
             return state;
         } catch (const std::bad_alloc&) {
@@ -6274,6 +7030,10 @@ class EditorApplication final : public Tina::IGameApplication {
         counters.authoringActionsWired != EditorActionCount || !counters.runtimePreviewValid ||
         counters.editorLayoutRegions != EditorLayoutRegionCount || !counters.viewportLayoutReady ||
         !counters.gpuViewportReady || !counters.inspectorScrollConfigured ||
+        !counters.projectAssetBrowserReady || !counters.documentTabsReady ||
+        counters.projectAssetVisibleItems == 0 ||
+        counters.documentTabCount != (options.autoDemo ? 5U : 4U) ||
+        (options.autoDemo && counters.projectAssetOpenCount != 1U) ||
         counters.documentPathConfigured != documentPathConfigured ||
         counters.documentLoaded != activeDocumentLoaded ||
         counters.documentDirty != activeDocumentDirty ||
@@ -6524,6 +7284,16 @@ class EditorApplication final : public Tina::IGameApplication {
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased
               << ",\"hierarchySelectionChanges\":" << counters.hierarchySelectionChanges
               << ",\"hierarchyLogicalItems\":" << counters.hierarchyLogicalItems
+              << ",\"projectAssetSelectionChanges\":"
+              << counters.projectAssetSelectionChanges
+              << ",\"projectAssetOpenCount\":" << counters.projectAssetOpenCount
+              << ",\"projectAssetVisibleItems\":" << counters.projectAssetVisibleItems
+              << ",\"projectAssetBrowserReady\":"
+              << (counters.projectAssetBrowserReady ? "true" : "false")
+              << ",\"documentTabCount\":" << counters.documentTabCount
+              << ",\"documentTabSwitches\":" << counters.documentTabSwitches
+              << ",\"documentTabsReady\":"
+              << (counters.documentTabsReady ? "true" : "false")
               << ",\"styleRegisteredClasses\":" << counters.styleRegisteredClasses
               << ",\"styleRegisteredTokens\":" << counters.styleRegisteredTokens
               << ",\"styleActiveRules\":" << counters.styleActiveRules

@@ -188,15 +188,23 @@ TEST(SpriteAnimationAuthoringDocumentTests, EnforcesFrameAndHistoryBudgetsWithou
     ASSERT_FALSE(capacityStatus);
     EXPECT_EQ(capacityStatus.error().code, EditorErrorCode::DocumentCapacityExceeded);
 
+    const SpriteAnimationAuthoringDesc oneFrameClip{
+        .clipId = assetId(0x70U),
+        .frames = {frame(0x71U)},
+    };
+    auto budgetProbe = SpriteAnimationAuthoringDocument::Create(oneFrameClip);
+    ASSERT_TRUE(budgetProbe);
+    EXPECT_GE(budgetProbe->historyByteCount(),
+              budgetProbe->payloadBytes().size() +
+                  sizeof(AssetFormat::SpriteAnimationFrameDesc) +
+                  sizeof(AssetFormat::CookedAssetWriteDependency));
+
     auto historyBounded = SpriteAnimationAuthoringDocument::Create(
-        SpriteAnimationAuthoringDesc{
-            .clipId = assetId(0x70U),
-            .frames = {frame(0x71U)},
-        },
+        oneFrameClip,
         SpriteAnimationAuthoringDocumentConfig{
             .frameCapacity = 2,
             .historyEntryCapacity = 4,
-            .historyByteCapacity = 96,
+            .historyByteCapacity = budgetProbe->historyByteCount() * 2U,
         });
     ASSERT_TRUE(historyBounded);
     const auto beforeRevision = historyBounded->revision();

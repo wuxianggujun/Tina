@@ -11,8 +11,8 @@ Tina 当前是 C++23 2D/3D 游戏 Runtime，产品入口为：
 - `tina_sample_3d`：glTF cook、Catalog/Prefab、Scene extraction 与 bgfx 绘制；
 - `TinaEditor.exe`（target `tina_editor_desktop`）：独立 `Tina::EditorApp` 的 World2D/World3D/TileMap/
   SpriteAnimationClip canonical document、独立 path/baseline/dirty workspace session、TRS Inspector、viewport gizmo、
-  Tile brush/layer/cook preview、SpriteAnimation timeline、
-  Runtime preview 与 Catalog-resolved 2D/3D GPU viewport；
+  Tile brush/layer/cook preview、SpriteAnimation timeline、Catalog Project Browser、固定容量 document tabs、
+  资源 Inspector、Runtime preview 与 Catalog-resolved 2D/3D GPU viewport；
 - `tina_sample_null`：无窗口、无 GPU 的 Runtime 生命周期门禁；
 - 其余 `tina_sample_*_infrastructure`：模块或 adapter 夹具，不等同于产品门禁。
 
@@ -86,6 +86,7 @@ flowchart TD
 | `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄 | 不含 bgfx 类型 |
 | `tina_audio` | AudioEngine、voice/bus/command/completion | 不含 miniaudio 类型 |
 | `tina_asset_format` | Cooked wire format 与 typed payload | Runtime 不读取源资产 |
+| `tina_editor` | current-schema authoring documents、Project Asset index 与 document-tab navigation state | 只依赖 Core/AssetFormat；owner move-only，不反向依赖 UI/Runtime/Scene |
 | `tina_navigation2d` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* | 只依赖 Core；不创建线程，不进入 Scene World |
 
 ### 产品模块

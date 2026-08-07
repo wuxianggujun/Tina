@@ -28,7 +28,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | --- | --- |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
-| 2D-EDITOR | EditorApp 独立模块、World2D + Prefab v2 World3D + TileMap v3/v1 + SpriteAnimationClip v1 canonical document、固定预算 revision history、独立 workspace session、完整 TRS Inspector transaction、viewport gizmo、Tile/Timeline authoring、Cook Preview、原子 Save，以及 `AssetSystem` + Sprite/Tileset/Mesh registry 驱动的 Catalog-resolved 2D/3D GPU viewport 已落地；下一步是 Project/Asset Browser、Catalog 资源打开与多文档切换 |
+| 2D-EDITOR | EditorApp 独立模块、World2D + Prefab v2 World3D + TileMap v3/v1 + SpriteAnimationClip v1 canonical document、固定预算 revision history、独立 workspace session、完整 TRS Inspector transaction、viewport gizmo、Tile/Timeline authoring、Cook Preview、原子 Save、Catalog-resolved 2D/3D GPU viewport，以及 Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/固定容量 tabs 已落地；下一步是每 tab 独立 document/history、Save/Save As、dirty-close modal 与 Catalog refresh |
 | UI-PERF-001 | Done；含 `ui_motion_v1` 在内的 UI workload 集已齐 |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-FLOW-001 | Done；固定容量 Layer/Screen 栈、Back/Confirm/Menu Action Router、16 槽本地用户、Gamepad assignment、per-user 设备 revision 与 2D 产品已闭环 |
@@ -84,7 +84,7 @@ Layer/Screen、Action Router、多本地用户与设备提示都复用窗口级�
 - 仅在标准 Behavior 不足时评估 startup-only 自定义 Behavior SPI；
 - 多行 TextEdit、grapheme/shaping 与完整 IME 候选窗；
 - Linux AT-SPI adapter 与真实辅助技术验收；
-- Project/Asset Browser、从 Catalog 打开资源、多文档 tab 与选中资源驱动 Inspector；World2D/World3D/TileMap/SpriteAnimationClip document、独立 workspace session、完整 TRS、viewport gizmo、Tile/Timeline tools、原子 Save、Catalog-resolved viewport 和 EditorApp 布局已进入 Next；
+- 每 tab 独立 World2D/World3D/TileMap/SpriteAnimationClip document/history、Save/Save As、dirty-close modal 与 Catalog refresh；Project Browser、Catalog current-schema open、资源 Inspector、固定容量 tab navigation、独立 workspace session、完整 TRS、viewport gizmo、Tile/Timeline tools、原子 Save、Catalog-resolved viewport 和 EditorApp 布局已进入 Next；
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 

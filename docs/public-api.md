@@ -69,7 +69,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail |
 | `Tina::Navigation2D` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
-| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip authoring document、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
+| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip authoring document、Project Asset index、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
@@ -551,6 +551,13 @@ blocked flags；可选 object layer 只栅格化 property 精确匹配的 visibl
 `Tina::Editor` 是不依赖 UI/Runtime/Scene/backend 的工具侧 document target；`Tina::EditorApp` 是独立桌面组合 target，
 负责 2D/3D 独立 workspace session、retained UI、Runtime preview 与 GPU viewport，不把这些依赖反向带入 document 层。
 每个 session 的 path、loaded flag、saved baseline 与 dirty 状态由 EditorApp 私有持有，不扩展 document 公共 ABI。
+
+`ProjectAssetBrowserModel::Create()` 复制 Catalog-derived descriptor、按 `AssetId` 确定性排序并拒绝重复/超容量输入；
+All/2D/3D/Media filter 重建稳定索引，owned descriptor view 只在 model 析构时失效。`EditorDocumentTabs::Create()`
+创建固定容量 move-only tab owner，以 `(EditorDocumentKind, AssetId)` 去重 open，失败保持 tab 列表和 active selection；
+pinned tab 不可关闭，dirty tab 必须显式 `discardDirty=true`。这两个公共模型只表达工具状态，不拥有 Runtime/Scene/UI。
+EditorApp 已接入 Catalog browser、资源 Inspector 和 workspace tab 路由；每个 tab 独立拥有 authoring document/history、
+Save As 与 dirty-close modal 仍是下一阶段，不在当前公共契约中伪装完成。
 `World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
 entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
 

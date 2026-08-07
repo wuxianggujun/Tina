@@ -858,14 +858,16 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
   --frames=60 --frame-delay-ms=0 --workspace=3d
 ```
 
-布局/Catalog/GPU smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=7`、
+布局/Catalog/GPU smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=9`、
 `viewportLayoutReady=true`、`inspectorScrollConfigured=true`、`renderExtractions=frames`、
 2D `gpuViewportSprites=13`（1 World Sprite + 12 Tile sprites）、3D `gpuViewportMeshes=3`、`gpuViewportReady=true`、
 `gpuViewportDocumentRevision=documentRevision`，以及非空 logical rect、位于 `[0,1]` 内的 normalized viewport 和
 `uiRootsCreated=1` / `uiRootsReleased=1`。built-in Catalog 还固定检查 entry/load=`8/7`、Texture/Mesh upload=`1/1`、
 Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0`、resolved 2D/3D=`1/3`，以及 TileMap
 layer/chunk/cell/artifact/emitted=`2/2/12/3/12`、Animation revision/frame/cook=`4/4/256 B` 和 cook bytes 非零。
-自动演示实际执行 Animation Next/Mode/Undo/Redo/Cook，Timeline action 总数为 40；viewport 使用上一轮 committed
+Project Browser/tabs 还要求 ready=`true/true`、visible assets 非零；自动演示从 4 个 pinned tab 打开一个资源，
+`documentTabCount=5`、`projectAssetOpenCount=1`。自动演示实际执行 Animation Next/Mode/Undo/Redo/Cook，
+Editor action 总数为 52；viewport 使用上一轮 committed
 layout，所以首帧不提交 world，窗口尺寸改变后下一帧跟随新 rect。
 `--no-auto-demo` 仍用于人工操作模式；本切片不扩大到完整 product-2d gate。
 Transform/gizmo smoke 还要检查 Inspector transaction=`1`，gizmo begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，
@@ -978,7 +980,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D/TileMap v3+v1/SpriteAnimationClip v1 完整产品；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/Undo/Redo/Cook、双 workspace 独立 session、Undo/Redo 与原子 Save；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、gizmo、TileMap、Animation、session、Catalog/GPU resolve、document revision 与 preview 状态 | Project/Asset Browser、多文档资源打开与完整 `2D-EDITOR` 产品工作流 |
+| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D/TileMap v3+v1/SpriteAnimationClip v1 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/固定容量 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/Undo/Redo/Cook、双 workspace 独立 session、Undo/Redo 与原子 Save；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Animation、session、Catalog/GPU resolve、document revision 与 preview 状态 | 每 tab 独立 document/history、Save As、dirty-close modal、Catalog refresh 与完整 `2D-EDITOR` 产品工作流 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
