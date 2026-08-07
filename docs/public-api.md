@@ -623,6 +623,13 @@ view 在下一次成功 edit/load/undo/redo 后失效。`setCells()` / `paintCel
 `deriveTileMapChunkAssetId(map, layer, x, y)` 的现行稳定 identity；不双读旧 schema。`cookPreview()` 为当前 revision 输出
 一个 TileMap artifact 和每个非空 chunk 的 TileMapChunk artifact，dependency contract 与正式 Cooked writer 相同。
 
+`TileMapGameplaySpawnPlan::Build(tileMap, archetypes, config)` 从指定 visible object layer 生成 owning 记录，并暴露
+`records()`、`sourceDocumentRevision()` 与 `objectLayerId()`。archetype name 和 game-owned non-zero `u32` ID 必须分别
+唯一；hidden object 被忽略，visible object 的 archetype 缺失或未知、重复 binding、记录容量或分配失败都不返回半份
+plan。`generateTileMapGameplay()` 在调用 game-owned encoder 完成全部 bytes 后，只用一次
+`World2DAuthoringDocument::replace()` 发布 schema/version/blob；encoder、World2D 容量、parse 或 replace 失败保留
+document revision 与 undo/redo。Editor 定义生成和事务边界，不定义游戏 ECS component 或运行时 archetype 行为。
+
 `SpriteAnimationAuthoringDocument::Create(desc, config)` 创建一个 move-only SpriteAnimationClip v1 owner。revision
 原子拥有 clip `AssetId`、播放模式、帧顺序、逐帧 Sprite `AssetId`/正有限时长、canonical payload 与排序去重的 required
 Sprite dependency stream。API 提供 replace、frame insert/append/set/duplicate/erase/move、duration、Once/Loop/PingPong、
@@ -775,7 +782,9 @@ empty 不调用 resolver；空 handle 返回 `InvalidHandle`，missing/zero bind
 `TileMapStream::Create()` 消费 root/tileset `AssetLease` 并拥有 resident `TileMapInstance`。调用顺序必须是
 `updateDemand() -> AssetSystem::pump() -> commitReady()`。load window 中的 desired chunk 单独超过
 resident capacity 时 failure 是 transactional，旧 active set 保持不变；retain window 只是 optional
-cache，overflow 时按最近一次成功 demand update 的 recency 自动淘汰，读取 API 不 touch recency。
+cache，overflow 时按最近一次成功 demand update 的 recency 自动淘汰，读取 API 不 touch recency。同一 chunk 的 demand
+取最高 `TileMapChunkDemand::priority`；新请求按 `priority desc -> layerId -> chunkY -> chunkX` 稳定 dispatch，只消费本轮
+request budget，不重排或抢占已经 Requested/Resident 的 slot。
 `map()` 是借用视图：先把 stream 放到最终地址再创建 `TileMapGridCollision`，stream 不得在
 borrower 存活时移动，并必须早于它所引用的 `AssetSystem` 析构。
 
@@ -934,7 +943,7 @@ Invoke/Toggle/RangeValue/Value patterns；schema-v1 Navigation2D grid、动态 b
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
-- TileMap 优先级 IO 调度、editor orchestration、旧 schema migration 与自动 gameplay 生成；
+- TileMap 更高层 editor orchestration 与旧 schema migration；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
 - stylesheet 更广 opacity 等属性面、完整 keyframe timeline 与 layout animation；imageTint、paint-only Motion

@@ -20,5 +20,7 @@ inline constexpr Core::ErrorCode DocumentTabNotFound{Core::ErrorDomain::Editor, 
 inline constexpr Core::ErrorCode DirtyDocumentRequiresConfirmation{Core::ErrorDomain::Editor, 14};
 inline constexpr Core::ErrorCode PinnedDocumentCannotClose{Core::ErrorDomain::Editor, 15};
 inline constexpr Core::ErrorCode ProjectAssetNotFound{Core::ErrorDomain::Editor, 16};
+inline constexpr Core::ErrorCode UnknownGameplayArchetype{Core::ErrorDomain::Editor, 17};
+inline constexpr Core::ErrorCode DuplicateGameplayArchetype{Core::ErrorDomain::Editor, 18};
 
 } // namespace Tina::Editor::EditorErrorCode

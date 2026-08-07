@@ -333,6 +333,12 @@ lookup 返回 borrowed view。旧 schema v1/v2 均不兼容。
 `deriveTileMapChunkAssetId()` 由 AssetFormat 提供唯一稳定派生实现并同时被 Cooker/Editor 使用。Cook preview 直接包装
 canonical root/chunk payload 为正式 Cooked artifacts，不生成 editor-only wire format，也不增加旧 schema 兼容路径。
 
+`TileMapGameplaySpawnPlan::Build()` 从指定的 visible object layer 生成 owning、bounded 的游戏出生记录。调用方提供
+archetype name 到 game-owned `u32` ID 的唯一映射；hidden object 被跳过，visible object 必须具有可解析的 archetype
+property，结果按 stable object ID 排序并记录 source document revision/layer ID。未知 archetype、重复 name/ID、记录容量
+或分配失败都不返回半份 plan。`generateTileMapGameplay()` 先完成 plan 与 game-owned encoder，再以一次
+`World2DAuthoringDocument::replace()` 发布 gameplay schema/version/bytes；任何前置失败保留 current revision 和 undo/redo。
+
 工具侧 `SpriteAnimationAuthoringDocument` 同样只持有当前 SpriteAnimationClip v1 canonical payload 和 required Sprite
 dependency stream。Timeline 的帧 CRUD/重排/时长/模式各发布一个 bounded revision；Cook Preview 直接包装为正式
 SpriteAnimationClip Cooked artifact。EditorApp 只在 Asset/Scene integration 边界把 Sprite `AssetId` 解析为 weak handle
@@ -355,7 +361,9 @@ validation 要求恰好一个 eager `Required` Tileset dependency，所有 root 
 `updateDemand -> AssetSystem::pump -> commitReady` 推进；load/retain margin、request budget 和 resident
 capacity 都在 config 中有界。需求移出 retain window 时可取消 Queued/Loading 请求或 detach/unload
 Resident chunk。desired load window 单独超过 capacity 时 failure 不改变旧 active set；retain window 只是
-optional cache，overflow 时按最近一次成功 demand update 的 recency 自动淘汰，读取 API 不 touch。
+optional cache，overflow 时按最近一次成功 demand update 的 recency 自动淘汰，读取 API 不 touch。同一 chunk 的多份
+demand 聚合最高 priority；本轮尚未 dispatch 的新请求按 `priority desc -> layerId -> chunkY -> chunkX` 消费 request
+budget。priority 不重排、取消或抢占已有 Requested/Resident slot，因此不会伪造底层 IO preemption。
 `TileMapInstance` 对引用但未驻留的访问返回
 `TileMapChunkNotResident`，重新 attach 会分配新的 residency generation，dirty cache 因而不会把旧
 resident 数据误当成 cache hit。
@@ -424,9 +432,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
   继续命中同一 resolve/pin cache，不新增 `UITexture`、IconAsset 或第二套 atlas owner。产品资源失效、
   视觉/尺寸矩阵与 `ui_image_nineslice_v1` benchmark 证据均已关闭，见 [UI 框架设计](ui-framework.md)与
   Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)；
-- TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；Editor root/chunk
-  authoring、bounded undo/redo、viewport brush 与 cook preview 已完成。优先级 IO 调度和自动 gameplay 生成仍须独立验收；
-  开发期不规划旧 TileMap schema migration；
+- TileMap streaming 已提供固定容量 Camera/layer priority demand、稳定的新请求排序、取消/卸载与 retain-window
+  demand-recency LRU；Editor root/chunk authoring、bounded undo/redo、viewport brush、cook preview 与 game-owned
+  gameplay spawn generation 已完成。开发期不规划旧 TileMap schema migration；
 - Editor project workspace/空目录创建基础 API 已完成 strict UTF-8 root 隔离、物理/reparse 校验与 identity-safe rollback；
   Project `New` 已完成空 current-schema Catalog manifest-last publish + reopen/typed validation；Project `Open`、下一安全帧
   live Catalog/project switch，以及 Editor source-import fresh-stage/reload/单一 pointer commit/reopen 产品流程均已完成；

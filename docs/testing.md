@@ -862,7 +862,7 @@ smoke。
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_editor_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
-  --gtest_filter=SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
+  --gtest_filter=TileMapGameplaySpawnPlanTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 ```
 
 用例覆盖 canonical runtime preview、replace/load/upsert/erase-subtree/gameplay revision、undo/redo 与分支替换、
@@ -870,7 +870,9 @@ entry/byte budget 淘汰、非法 schema/parent/容量失败的 current + histor
 接线或文件/cook 集成完成时才扩大到 `TinaEditor.exe` 产品 smoke；Runtime samples 不是 Editor gate，纯 document 小切片
 不跑无关产品门禁。
 TileMap suite 另覆盖 root v3 + chunk v1 canonical family、稳定 chunk AssetId、Paint/Erase、空 chunk 删除、layer/object
-事务、payload-family load、root+chunk Cooked preview、bounded Undo/Redo 与失败不发布。
+事务、payload-family load、root+chunk Cooked preview、bounded Undo/Redo 与失败不发布。Gameplay plan suite 覆盖 owning
+stable-ID records、hidden object、unknown/duplicate/capacity failure，以及 encoder 完成后单次 World2D publication 和失败时
+redo branch 保留。
 SpriteAnimation suite 覆盖 clip identity、canonical v1 payload/dependency mapping、frame CRUD/duplicate/reorder/duration、
 Once/Loop/PingPong、current-schema Cooked load、正式 Cook Preview、bounded Undo/Redo、容量失败与失败不发布。
 File suite 直接比较 SpriteAnimation Cooked artifact 和 TileMap root/chunk artifact family 的 exact bytes、target platform、
@@ -903,11 +905,12 @@ layer/chunk/cell/artifact/emitted=`2/2/12/3/12`、Animation revision/frame/cook=
 Project Browser/tabs 还要求 ready=`true/true`、visible assets 非零；自动演示从 4 个 pinned tab 打开一个额外 Animation，
 再恢复 pinned Animation 与初始 workspace，固定 `documentTabCount/projectAssetOpenCount/tabOwnedDocumentLoads/`
 `tabOwnedDocumentSwaps/previewAssetBindingRefreshes=5/1/1/2/2`。自动演示实际执行 Animation Next/Mode/Undo/Redo/Cook，
-Editor action 总数为 60；viewport 使用上一轮 committed
+Editor action 总数为 61；2D 自动路径还要求 gameplay generation/records/bytes=`1/2/64`、source revision 非零，3D
+对应四字段全为零；viewport 使用上一轮 committed
 layout，所以首帧不提交 world，窗口尺寸改变后下一帧跟随新 rect。
 `--no-auto-demo` 仍用于人工操作模式；本切片不扩大到完整 product-2d gate。
 Transform/gizmo smoke 还要检查 Inspector transaction=`1`，gizmo begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，
-2D/3D workspace switches=`2/4`、runtime preview instantiations=`10/12`、最终 revision/undo depth=`7/3` 且 GPU revision 对齐。
+2D/3D workspace switches=`2/4`、runtime preview instantiations=`11/12`、最终 revision/undo depth 分别为 `8/4` 与 `7/3` 且 GPU revision 对齐。
 2D delta=`(2,-1,0)`；3D XZ delta=`(2,0,1)`，完整 TRS 在 canonical document、Scene preview 与结构化结果中一致。
 
 Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的产品 smoke：
@@ -1078,7 +1081,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，消费 point 101/rectangle 102；Navigation2D 从 solid tile/property Rectangle 派生 schema-v1 grid，并验证 dynamic blocker、确定性基础/改道路径、分步取消与 revision；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；Sprite2D base/optional-normal extraction 使用 packet-local `FrameResourceRef`；schema 24 继承双灯双遮挡、逐帧 lighting、authored/committed/culled=`3/2/1`、soft/hard 与 normal-map 四跑差分，并保留 UI Flow base/pause Screen push/pop、Back/Confirm/Menu、Dark→Light→Dark、Tree stable-key selection/scroll/semantics、三份 Registry Lease/GPU/binding owner handoff/retirement、weak texture handle 失效、ledger Released、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、跨 GPU lighting golden、priority IO/editor/自动 gameplay 生成、独立 Cooked Navigation/editor bake/Physics 自动同步、更多 shape/joint、Linux |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，按唯一 role=player/crate 与 Point/Rectangle kind 消费，不依赖固定 object ID；Navigation2D 从 solid tile/property Rectangle 派生 schema-v1 grid，并验证 dynamic blocker、确定性基础/改道路径、分步取消与 revision；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；Sprite2D base/optional-normal extraction 使用 packet-local `FrameResourceRef`；schema 24 继承双灯双遮挡、逐帧 lighting、authored/committed/culled=`3/2/1`、soft/hard 与 normal-map 四跑差分，并保留 UI Flow base/pause Screen push/pop、Back/Confirm/Menu、Dark→Light→Dark、Tree stable-key selection/scroll/semantics、三份 Registry Lease/GPU/binding owner handoff/retirement、weak texture handle 失效、ledger Released、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性与 PMR 压力（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、跨 GPU lighting golden、通用 Scene 编辑器、独立 Cooked Navigation/editor bake/Physics 自动同步、更多 shape/joint、Linux |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；evidence schema 14、`tangentMeshesUploaded=2`、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、固定4级联 CSM config authored/submitted=`1`、固定 SpotLight/PointLight shadow authored/submitted=`1/1`、startup-only shadow extent、point-shadow on/off ROI 像素差分、实时 framebuffer aspect、响应式 right rail/footer、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、跨 GPU golden |
@@ -1155,9 +1158,15 @@ chunk ref、parent/layer/coord/extent/non-empty）；旧 schema、重复/零稳�
 显式 layer block与旧裸 `row` 拒绝；Cooker 在 Manifest 发布前验证 eager Tileset、deferred chunk dependency
 和所有非零 tile localId。Runtime 还覆盖仅加载 visible chunk、demand shift 的 cancel/unload、capacity
 transaction、retain overflow 自动淘汰与 demand-recency LRU、Asset async active-read move/destroy 生命周期，
+同一 chunk 最高 priority 聚合、`priority desc -> layerId -> chunkY -> chunkX` 新请求顺序与已 dispatch IO 不抢占，
 以及 residency generation 驱动 dirty cache 重建；render/collision 全部显式传 layer ID。desired load window
 单独超 capacity 仍必须验证旧 active set 不变。产品 smoke 必须看到 `objectLayerConsumed=true`、
-`objectLayerObjects=2`、`tileMapStreamRequests/Committed/Resident=2`。
+`objectLayerObjects=2`、唯一 role/kind 消费和 `tileMapStreamRequests/Committed/Resident=2`。priority 小切片只需运行：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe `
+  --gtest_filter=TileMapStreamTests.AggregatesHighestPriorityAndOrdersOnlyNewRequests
+```
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-debug `

@@ -7,6 +7,7 @@ add_executable(tina_editor_tests
     SpriteAnimationAuthoringFileTests.cpp
     TileMapAuthoringDocumentTests.cpp
     TileMapAuthoringFileTests.cpp
+    TileMapGameplaySpawnPlanTests.cpp
     World2DAuthoringDocumentTests.cpp
     World2DAuthoringFileTests.cpp
     World3DAuthoringDocumentTests.cpp
@@ -20,6 +21,7 @@ add_executable(tina_editor_tests
     header_isolation/SpriteAnimationAuthoringFileHeader.cpp
     header_isolation/TileMapAuthoringDocumentHeader.cpp
     header_isolation/TileMapAuthoringFileHeader.cpp
+    header_isolation/TileMapGameplaySpawnPlanHeader.cpp
     header_isolation/World2DAuthoringDocumentHeader.cpp
     header_isolation/World2DAuthoringFileHeader.cpp
     header_isolation/World3DAuthoringDocumentHeader.cpp

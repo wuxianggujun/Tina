@@ -107,8 +107,8 @@ inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
 inline constexpr Tina::AssetFormat::TileMapLayerId VisualTileLayerId = 10;
 inline constexpr Tina::AssetFormat::TileMapLayerId CollisionTileLayerId = 20;
 inline constexpr Tina::AssetFormat::TileMapLayerId GameplayObjectLayerId = 30;
-inline constexpr Tina::AssetFormat::TileMapObjectId PlayerSpawnObjectId = 101;
-inline constexpr Tina::AssetFormat::TileMapObjectId CrateSpawnObjectId = 102;
+inline constexpr u32 VisualTileLayerDemandPriority = 100;
+inline constexpr u32 CollisionTileLayerDemandPriority = 50;
 inline constexpr u32 ExpectedCharacterAnimationClips = 3;
 inline constexpr u32 ExpectedCharacterAnimationSprites = 3;
 inline constexpr u32 ExpectedSceneCrateSprites = 1;
@@ -1098,28 +1098,50 @@ struct TileMapResources final {
         return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
                                    "gameplay object layer must contain exactly two objects");
     }
-    const auto playerSpawn = layer->findObject(PlayerSpawnObjectId);
-    const auto crateSpawn = layer->findObject(CrateSpawnObjectId);
+    std::optional<Tina::AssetFormat::TileMapObjectPayloadView> playerSpawn;
+    std::optional<Tina::AssetFormat::TileMapObjectPayloadView> crateSpawn;
+    for (u32 objectIndex = 0; objectIndex < layer->objectCount; ++objectIndex)
+    {
+        const auto object = layer->objectAt(objectIndex);
+        if (!object || !object->visible || object->propertyCount != 1U)
+        {
+            return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                       "gameplay spawn object metadata is invalid");
+        }
+        const auto role = object->findProperty("role");
+        if (!role)
+        {
+            return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                       "gameplay spawn object has no role archetype");
+        }
+        if (role->value == "player")
+        {
+            if (playerSpawn || object->kind != Tina::AssetFormat::TileMapObjectKind::Point)
+            {
+                return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                           "player gameplay archetype must have one Point record");
+            }
+            playerSpawn = object;
+        }
+        else if (role->value == "crate")
+        {
+            if (crateSpawn || object->kind != Tina::AssetFormat::TileMapObjectKind::Rectangle)
+            {
+                return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                           "crate gameplay archetype must have one Rectangle record");
+            }
+            crateSpawn = object;
+        }
+        else
+        {
+            return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                       "gameplay spawn object references an unknown sample archetype");
+        }
+    }
     if (!playerSpawn || !crateSpawn)
     {
         return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
-                                   "gameplay object layer is missing required stable object ids");
-    }
-    const auto playerRole = playerSpawn->findProperty("role");
-    if (playerSpawn->kind != Tina::AssetFormat::TileMapObjectKind::Point || !playerSpawn->visible ||
-        playerSpawn->name != "player_spawn" || playerSpawn->propertyCount != 1U || !playerRole ||
-        playerRole->value != "player")
-    {
-        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
-                                   "player spawn object is invalid");
-    }
-    const auto crateRole = crateSpawn->findProperty("role");
-    if (crateSpawn->kind != Tina::AssetFormat::TileMapObjectKind::Rectangle || !crateSpawn->visible ||
-        crateSpawn->name != "crate_spawn" || crateSpawn->propertyCount != 1U || !crateRole ||
-        crateRole->value != "crate")
-    {
-        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
-                                   "crate spawn object is invalid");
+                                   "gameplay object layer is missing a required sample archetype");
     }
     resources.characterSpawnX = playerSpawn->x;
     resources.characterSpawnY = playerSpawn->y;
@@ -1270,8 +1292,16 @@ struct TileMapResources final {
     }
 
     const std::array demands{
-        Tina::Asset::TileMapChunkDemand{.layerId = VisualTileLayerId, .camera = camera},
-        Tina::Asset::TileMapChunkDemand{.layerId = CollisionTileLayerId, .camera = camera},
+        Tina::Asset::TileMapChunkDemand{
+            .layerId = VisualTileLayerId,
+            .priority = VisualTileLayerDemandPriority,
+            .camera = camera,
+        },
+        Tina::Asset::TileMapChunkDemand{
+            .layerId = CollisionTileLayerId,
+            .priority = CollisionTileLayerDemandPriority,
+            .camera = camera,
+        },
     };
     if (auto status = resources.tileMapStream->updateDemand(demands); !status)
     {
@@ -4424,8 +4454,8 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
         if (sample.uiEntitiesExpanded_)
         {
-            if (emit(PlayerSpawnTreeItemKey, "player_spawn #101", 1) ||
-                emit(CrateSpawnTreeItemKey, "crate_spawn #102", 1))
+            if (emit(PlayerSpawnTreeItemKey, "player_spawn", 1) ||
+                emit(CrateSpawnTreeItemKey, "crate_spawn", 1))
             {
                 return true;
             }
@@ -4487,9 +4517,9 @@ class TileMapBgfxState final : public Tina::IGameState {
         case EntitiesTreeItemKey:
             return "Entities";
         case PlayerSpawnTreeItemKey:
-            return "player_spawn #101";
+            return "player_spawn";
         case CrateSpawnTreeItemKey:
-            return "crate_spawn #102";
+            return "crate_spawn";
         default:
             return "none";
         }

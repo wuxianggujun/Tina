@@ -37,6 +37,7 @@
 #include <tina/editor/SpriteAnimationAuthoringFile.hpp>
 #include <tina/editor/TileMapAuthoringDocument.hpp>
 #include <tina/editor/TileMapAuthoringFile.hpp>
+#include <tina/editor/TileMapGameplaySpawnPlan.hpp>
 #include <tina/editor/World2DAuthoringDocument.hpp>
 #include <tina/editor/World2DAuthoringFile.hpp>
 #include <tina/editor/World3DAuthoringDocument.hpp>
@@ -66,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cctype>
 #include <charconv>
 #include <chrono>
@@ -117,7 +119,8 @@ inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
 inline constexpr u32 DocumentTabSlots = 6;
-inline constexpr u32 EditorActionCount = 60;
+inline constexpr u32 EditorActionCount = 61;
+inline constexpr u32 AutomaticAuthoringStageCount = 21;
 inline constexpr u32 EditorLayoutRegionCount = 9;
 inline constexpr u32 GpuViewportSpriteCount = 1;
 inline constexpr u32 GpuViewportMeshCount = 3;
@@ -130,6 +133,11 @@ inline constexpr u32 EditorViewportSpriteCapacity =
     GpuViewportSpriteCount + InitialTileMapWidthCells * InitialTileMapHeightCells *
                                  TileMapAuthoringLayerCapacity;
 inline constexpr Tina::AssetFormat::TileMapLayerId InitialTileMapLayerId = 1;
+inline constexpr Tina::AssetFormat::TileMapLayerId InitialGameplayObjectLayerId = 2;
+inline constexpr u32 EditorGameplaySpawnSchema = 0x5453504EU;
+inline constexpr u32 EditorGameplaySpawnVersion = 1;
+inline constexpr u32 EditorPlayerArchetypeId = 1;
+inline constexpr u32 EditorCrateArchetypeId = 2;
 inline constexpr float PreviewWorldWidth = 16.0F;
 inline constexpr float PreviewWorldHeight = 9.0F;
 inline constexpr float DegreesToRadians = 0.01745329251994329577F;
@@ -140,6 +148,35 @@ inline constexpr float RadiansToDegrees = 57.295779513082320876F;
     Tina::Core::AssetId::Bytes bytes{};
     bytes[0] = static_cast<std::byte>(marker);
     return *Tina::Core::AssetId::fromBytes(bytes);
+}
+
+void appendGameplayU32(std::vector<std::byte>& bytes, u32 value)
+{
+    for (u32 shift = 0; shift < 32U; shift += 8U) {
+        bytes.push_back(static_cast<std::byte>((value >> shift) & 0xFFU));
+    }
+}
+
+[[nodiscard]] Tina::Core::Result<std::vector<std::byte>>
+encodeEditorGameplaySpawns(
+    std::span<const Tina::Editor::TileMapGameplaySpawnRecord> records)
+{
+    constexpr u32 HeaderBytes = 8;
+    constexpr u32 RecordBytes = 28;
+    std::vector<std::byte> bytes;
+    bytes.reserve(HeaderBytes + records.size() * RecordBytes);
+    appendGameplayU32(bytes, static_cast<u32>(records.size()));
+    appendGameplayU32(bytes, RecordBytes);
+    for (const Tina::Editor::TileMapGameplaySpawnRecord& record : records) {
+        appendGameplayU32(bytes, record.stableObjectId);
+        appendGameplayU32(bytes, record.gameArchetypeId);
+        appendGameplayU32(bytes, static_cast<u32>(record.kind));
+        appendGameplayU32(bytes, std::bit_cast<u32>(record.x));
+        appendGameplayU32(bytes, std::bit_cast<u32>(record.y));
+        appendGameplayU32(bytes, std::bit_cast<u32>(record.width));
+        appendGameplayU32(bytes, std::bit_cast<u32>(record.height));
+    }
+    return bytes;
 }
 
 enum class WorkspaceMode : u8 {
@@ -1039,6 +1076,10 @@ struct LifecycleCounters final {
     u64 tileMapEdits = 0;
     u64 tileMapUndos = 0;
     u64 tileMapRedos = 0;
+    u64 tileMapGameplayGenerations = 0;
+    u64 tileMapGameplaySpawnRecords = 0;
+    u64 tileMapGameplayBytes = 0;
+    u64 tileMapGameplaySourceRevision = 0;
     u64 animationDocumentRevision = 0;
     u64 animationFrameCount = 0;
     u64 animationCookPreviewBytes = 0;
@@ -1152,6 +1193,7 @@ enum class EditorCommand : u32 {
     AddTileLayer,
     AddObjectLayer,
     CookTileMapPreview,
+    GenerateTileMapGameplay,
     AnimationTogglePlayback,
     AnimationPreviousFrame,
     AnimationNextFrame,
@@ -2036,9 +2078,20 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
                         Tina::Editor::TileMapAuthoringObject{
                             .stableObjectId = 1,
                             .kind = Tina::AssetFormat::TileMapObjectKind::Point,
-                            .name = "Spawn",
+                            .name = "Player Spawn",
                             .x = 1.5F,
                             .y = 1.5F,
+                            .properties = {{.key = "archetype", .value = "player"}},
+                        },
+                        Tina::Editor::TileMapAuthoringObject{
+                            .stableObjectId = 2,
+                            .kind = Tina::AssetFormat::TileMapObjectKind::Rectangle,
+                            .name = "Crate Spawn",
+                            .x = 4.0F,
+                            .y = 1.0F,
+                            .width = 1.0F,
+                            .height = 1.0F,
+                            .properties = {{.key = "archetype", .value = "crate"}},
                         },
                     },
                 },
@@ -3419,6 +3472,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
+        UI::UINodeId tileMapGameplayRow{};
+        if (auto status = createTileMapActionRow(tileMapGameplayRow); !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(tileMapGameplayRow, "Generate Gameplay",
+                                                 fixedSize(214.0F, 30.0F)),
+                                    generateTileMapGameplayButton_);
+            !status) {
+            return status;
+        }
 
         UI::UINodeId documentTitle{};
         if (auto status = storeNode(createLabel(inspectorContent, "Document", fillWidth(22.0F), sectionText),
@@ -3794,6 +3857,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = bindEditorCommand(cookTileMapButton_, EditorCommand::CookTileMapPreview); !status) {
             return status;
         }
+        if (auto status = bindEditorCommand(generateTileMapGameplayButton_,
+                                            EditorCommand::GenerateTileMapGameplay);
+            !status) {
+            return status;
+        }
         const std::array animationCommandBindings{
             std::pair{animationPlayButton_, EditorCommand::AnimationTogglePlayback},
             std::pair{animationPreviousButton_, EditorCommand::AnimationPreviousFrame},
@@ -4140,57 +4208,64 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     (void)queueAutoCommand(EditorCommand::Redo);
                     break;
                 case 7:
+                    if (options_.initialWorkspace != WorkspaceMode::World2D) {
+                        ++autoAuthoringStage_;
+                    } else if (tileMapEditingContext()) {
+                        (void)queueAutoCommand(EditorCommand::GenerateTileMapGameplay);
+                    }
+                    break;
+                case 8:
                     if (!activeWorkspaceSession().hasDocumentPath()) {
                         ++autoAuthoringStage_;
                     } else {
                         (void)queueAutoCommand(EditorCommand::Save);
                     }
                     break;
-                case 8:
+                case 9:
                     (void)queueAutoCommand(options_.initialWorkspace == WorkspaceMode::World2D
                                                ? EditorCommand::SwitchToWorld3D
                                                : EditorCommand::SwitchToWorld2D);
                     break;
-                case 9:
+                case 10:
                     if (options_.initialWorkspace == WorkspaceMode::World3D) {
                         ++autoAuthoringStage_;
                     } else {
                         (void)queueAutoCommand(EditorCommand::SwitchToWorld2D);
                     }
                     break;
-                case 10:
+                case 11:
                     if (workspaceMode_ == WorkspaceMode::World2D) {
                         ++autoAuthoringStage_;
                     } else {
                         (void)queueAutoCommand(EditorCommand::SwitchToWorld2D);
                     }
                     break;
-                case 11:
+                case 12:
                     (void)queueAutoCommand(EditorCommand::AnimationNextFrame);
                     break;
-                case 12:
+                case 13:
                     (void)queueAutoCommand(EditorCommand::AnimationCycleMode);
                     break;
-                case 13:
+                case 14:
                     (void)queueAutoCommand(EditorCommand::AnimationUndo);
                     break;
-                case 14:
+                case 15:
                     (void)queueAutoCommand(EditorCommand::AnimationRedo);
                     break;
-                case 15:
+                case 16:
                     (void)queueAutoCommand(EditorCommand::AnimationCookPreview);
                     break;
-                case 16:
+                case 17:
                     if (options_.initialWorkspace == WorkspaceMode::World2D) {
                         ++autoAuthoringStage_;
                     } else {
                         (void)queueAutoCommand(EditorCommand::SwitchToWorld3D);
                     }
                     break;
-                case 17:
+                case 18:
                     (void)queueAutoCommand(EditorCommand::OpenSelectedProjectAsset);
                     break;
-                case 18:
+                case 19:
                     if (counters_.tabOwnedDocumentLoads != 0U) {
                         const auto* activeTab = documentTabs_.activeTab();
                         if (activeTab == nullptr) {
@@ -4214,7 +4289,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     }
                     ++autoAuthoringStage_;
                     break;
-                case 19:
+                case 20:
+                    pendingSelectionIndex_ = 6U;
                     (void)queueAutoCommand(options_.initialWorkspace == WorkspaceMode::World2D
                                                ? EditorCommand::SwitchToWorld2D
                                                : EditorCommand::SwitchToWorld3D);
@@ -4248,7 +4324,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle;
         const bool automaticDemoSettled =
             !options_.sourceImport.importOnStart || !options_.autoDemo ||
-            autoAuthoringStage_ >= 20U;
+            autoAuthoringStage_ >= AutomaticAuthoringStageCount;
         if (counters_.frameUpdates >= options_.targetFrameCount &&
             sourceImportSettled && automaticDemoSettled) {
             context.requestExitAfterFrame();
@@ -7994,6 +8070,44 @@ class EditorWorkspaceState final : public Tina::IGameState {
             authoringFeedback_ = "TileMap root and chunk cook preview rebuilt";
             break;
         }
+        case EditorCommand::GenerateTileMapGameplay: {
+            if (!tileMapEditingContext()) {
+                status = Tina::Core::failure(
+                    Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                    "Gameplay generation requires the 2D TileMap selection");
+                break;
+            }
+            constexpr std::array Archetypes{
+                Tina::Editor::TileMapGameplayArchetypeBinding{
+                    .archetype = "player", .gameArchetypeId = EditorPlayerArchetypeId},
+                Tina::Editor::TileMapGameplayArchetypeBinding{
+                    .archetype = "crate", .gameArchetypeId = EditorCrateArchetypeId},
+            };
+            auto generated = Tina::Editor::generateTileMapGameplay(
+                tileMapDocument_, document_, Archetypes,
+                {
+                    .objectLayerId = InitialGameplayObjectLayerId,
+                    .archetypePropertyKey = "archetype",
+                    .recordCapacity = tileMapDocument_.config().objectCapacity,
+                },
+                {
+                    .gameplaySchema = EditorGameplaySpawnSchema,
+                    .gameplayVersion = EditorGameplaySpawnVersion,
+                },
+                encodeEditorGameplaySpawns);
+            if (!generated) {
+                status = Tina::Core::failure(std::move(generated.error()));
+                break;
+            }
+            ++counters_.tileMapGameplayGenerations;
+            counters_.tileMapGameplaySpawnRecords = generated->records().size();
+            counters_.tileMapGameplayBytes = document_.gameplayByteCount();
+            counters_.tileMapGameplaySourceRevision = generated->sourceDocumentRevision();
+            ++counters_.authoringEdits;
+            requiresPreviewValidation = true;
+            authoringFeedback_ = "Gameplay spawn plan generated as one World2D revision";
+            break;
+        }
         case EditorCommand::AnimationTogglePlayback:
             if (!animationAnimator_.has_value() || !animationPreviewAvailable_) {
                 status = Tina::Core::failure(
@@ -9923,6 +10037,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = tree.setEnabled(cookTileMapButton_, tileMapControlsEnabled); !status) {
             return status;
         }
+        if (auto status = tree.setEnabled(generateTileMapGameplayButton_, tileMapControlsEnabled);
+            !status) {
+            return status;
+        }
         if (auto status = tree.setEnabled(undoButton_, activeCanUndo()); !status) {
             return status;
         }
@@ -10482,6 +10600,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId addTileLayerButton_{};
     UI::UINodeId addObjectLayerButton_{};
     UI::UINodeId cookTileMapButton_{};
+    UI::UINodeId generateTileMapGameplayButton_{};
     UI::UINodeId animationModeButton_{};
     UI::UINodeId animationPlayButton_{};
     UI::UINodeId animationCookButton_{};
@@ -10673,7 +10792,8 @@ class EditorApplication final : public Tina::IGameApplication {
         world2D
             ? Tina::AssetFormat::World2DSnapshotWire::HeaderBytes +
                   InitialAuthoringEntityCount *
-                      Tina::AssetFormat::World2DSnapshotWire::EntityBytes
+                      Tina::AssetFormat::World2DSnapshotWire::EntityBytes +
+                  counters.tileMapGameplayBytes
             : Tina::AssetFormat::PrefabWire::HeaderBytes +
                   InitialAuthoringEntityCount * Tina::AssetFormat::PrefabWire::NodeBytes;
     if (exitReason != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame) {
@@ -10807,8 +10927,18 @@ class EditorApplication final : public Tina::IGameApplication {
                       std::abs(counters.viewportGizmoWorldDeltaX - 2.0F) <= 0.001F &&
                       std::abs(counters.viewportGizmoWorldDeltaY) <= 0.001F &&
                       std::abs(counters.viewportGizmoWorldDeltaZ - 1.0F) <= 0.001F;
+        const bool gameplayGenerationMatches =
+            world2D
+                ? counters.tileMapGameplayGenerations == 1U &&
+                      counters.tileMapGameplaySpawnRecords == 2U &&
+                      counters.tileMapGameplayBytes == 64U &&
+                      counters.tileMapGameplaySourceRevision != 0U
+                : counters.tileMapGameplayGenerations == 0U &&
+                      counters.tileMapGameplaySpawnRecords == 0U &&
+                      counters.tileMapGameplayBytes == 0U &&
+                      counters.tileMapGameplaySourceRevision == 0U;
         if (counters.hierarchySelectionChanges < 1 || counters.styleTokenUpdates < 2 ||
-            counters.authoringEdits != 4 ||
+            counters.authoringEdits != (world2D ? 5U : 4U) ||
             counters.inspectorTransactions != 1 || counters.inspectorRejectedTransactions != 0 ||
             counters.viewportGizmoBegins != 1 || counters.viewportGizmoPreviews != 2 ||
             counters.viewportGizmoCommits != 1 || counters.viewportGizmoCancels != 0 ||
@@ -10817,12 +10947,13 @@ class EditorApplication final : public Tina::IGameApplication {
             counters.animationEdits != 1 || counters.animationUndos != 1 ||
             counters.animationRedos != 1 || counters.animationDocumentRevision != 4 ||
             counters.animationPreviewFrameIndex != 1 ||
-            counters.documentRevision != 7 ||
+            counters.documentRevision != (world2D ? 8U : 7U) ||
             counters.gpuViewportDocumentRevision != counters.documentRevision ||
-            counters.documentUndoDepth != 3 || counters.documentRedoDepth != 0 ||
+            counters.documentUndoDepth != (world2D ? 4U : 3U) ||
+            counters.documentRedoDepth != 0 ||
             std::abs(counters.finalPlayerRotationDegrees - 30.0F) > 0.001F ||
             counters.finalPlayerScaleX != 1.25F || counters.finalPlayerScaleY != 0.75F ||
-            !dimensionSpecificTransformMatches) {
+            !dimensionSpecificTransformMatches || !gameplayGenerationMatches) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "Tina Editor automatic authoring demo did not finish");
         }
@@ -11051,6 +11182,11 @@ class EditorApplication final : public Tina::IGameApplication {
               << ",\"tileMapEdits\":" << counters.tileMapEdits
               << ",\"tileMapUndos\":" << counters.tileMapUndos
               << ",\"tileMapRedos\":" << counters.tileMapRedos
+              << ",\"tileMapGameplayGenerations\":" << counters.tileMapGameplayGenerations
+              << ",\"tileMapGameplaySpawnRecords\":" << counters.tileMapGameplaySpawnRecords
+              << ",\"tileMapGameplayBytes\":" << counters.tileMapGameplayBytes
+              << ",\"tileMapGameplaySourceRevision\":"
+              << counters.tileMapGameplaySourceRevision
               << ",\"animationDocumentRevision\":" << counters.animationDocumentRevision
               << ",\"animationFrameCount\":" << counters.animationFrameCount
               << ",\"animationCookPreviewBytes\":" << counters.animationCookPreviewBytes

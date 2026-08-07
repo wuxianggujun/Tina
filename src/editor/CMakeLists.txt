@@ -8,6 +8,7 @@ add_library(tina_editor STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor/SpriteAnimationAuthoringFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/TileMapAuthoringDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/TileMapAuthoringFile.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/TileMapGameplaySpawnPlan.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World2DAuthoringDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World2DAuthoringFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World3DAuthoringDocument.hpp
@@ -24,6 +25,7 @@ add_library(tina_editor STATIC
     World3DAuthoringFile.cpp
     TileMapAuthoringDocument.cpp
     TileMapAuthoringFile.cpp
+    TileMapGameplaySpawnPlan.cpp
 )
 add_library(Tina::Editor ALIAS tina_editor)
 

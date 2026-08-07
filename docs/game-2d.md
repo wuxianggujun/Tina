@@ -206,7 +206,8 @@ endtilemap
 request budget 与 resident capacity 都显式有界。需求移出 retain window 时，Queued/Loading 请求会取消，
 Resident chunk 会从 instance detach、释放 lease 并 logical unload。load window 中的 desired chunk 是强需求，
 单独超过 capacity 时旧 active set 原样保留；retain window 只作 optional cache，空间不足时按最近一次成功
-`updateDemand` 时位于 load window 的 recency 自动淘汰，Tile/collision 读取不会 touch recency。
+`updateDemand` 时位于 load window 的 recency 自动淘汰，Tile/collision 读取不会 touch recency。同一 chunk 的 demand
+取最高 priority；新请求按 `priority desc -> layerId -> chunkY -> chunkX` 消费本轮 budget，不抢占已 dispatch 的 IO。
 
 `TileMapInstance` 只复制 root metadata/tileset 定义并保存当前 resident chunk cell；`layer(id)` 继续暴露
 metadata/object borrowed view。`tileIdAt()`、`setTile()`、`chunkRevision()`、chunk extraction、dirty cache、
@@ -217,10 +218,9 @@ generation 与 content revision，避免 unload/reload 后误命中旧缓存。
 产品 recipe 使用三个稳定 layer：visible visual tile layer `10`、hidden collision tile layer `20`、visible
 gameplay object layer `30`。渲染只显式提交 layer `10`；visibility=false 使 layer `20` 不进入 sprite emit，
 但 `TileMapGridCollision(stream.map(), 20)` 仍可把 resident cells 作为碰撞数据。该 grid 借用 instance，
-因此产品先把 stream 放到最终地址再构造 grid，并在 controller 查询前推进 streaming。object `101` 是
-`player_spawn` point，object
-`102` 是 `crate_spawn` rectangle；sample 按稳定 ID 和 properties 校验并消费它们，分别初始化角色位置和
-dynamic crate 位置。
+因此产品先把 stream 放到最终地址再构造 grid，并在 controller 查询前推进 streaming。sample 遍历 object layer，
+按唯一 `role=player` Point 与 `role=crate` Rectangle 消费记录，未知、重复或缺失 archetype 都 fail closed；产品逻辑
+不依赖固定 object ID 或 display name。
 
 `CharacterController2D` 使用 `IGridCollisionProvider` 进行确定性的 Tile AABB 运动。默认产品 demo 在
 ground 后向右行走并撞墙；它与 Box2D dynamic body 共用同一 Tile solid 数据，但角色本身不是刚体。
@@ -234,7 +234,7 @@ ground 后向右行走并撞墙；它与 Box2D dynamic body 共用同一 Tile so
 chunk 已驻留、gameplay object layer 已验证后调用 `Asset::buildTileMapNavigation2DData()`：
 
 1. hidden collision tile layer `20` 中带 Tileset `MaterialSolid` 的11个 cell 成为 base blocker；
-2. gameplay object layer `30` 中 visible Rectangle 且 `role=crate` 的 object `102` 栅格化为2个 cell；
+2. gameplay object layer `30` 中唯一 visible Rectangle 且 `role=crate` 的 object 栅格化为2个 cell；
 3. 去重后 schema-v1 数据含13个 blocked cell；引用 chunk 未驻留或 layer/object 非法时原子失败；
 4. State-owned `NavigationGrid2D` 预留4个 generation dynamic blocker；
 5. `NavigationPathfinder2D` 按完整32-cell map 容量一次性预分配 records/open-set/path storage。
@@ -256,7 +256,7 @@ revision，否则终态为 `Invalidated`。blocked endpoint/open-set 耗尽是 `
 2. `TileMapGridCollision(stream.map(), 20)` 显式选择 hidden collision tile layer；
 3. `collectAllSolidCellsForPhysics()` 从该 layer 收集 solid cell；
 4. `syncTileMapSolidsToStaticBodies()` 通过公开 `createBody()` + `createShape(Box)` 原子创建 static terrain；
-5. 产品 State 从 object `102` 创建一个 dynamic crate，并显式挂接 Box shape；
+5. 产品 State 从 `role=crate` 的 Rectangle record 创建一个 dynamic crate，并显式挂接 Box shape；
 6. 同一 World 创建 circle sensor 和一个远离主场景的 spring Distance joint；
 7. 每个 fixed tick 调用 `PhysicsWorld2D::step()`，读取 contact/sensor event、body state 与 joint state；
 8. Scene sprite 使用 crate state 输出可见结果。
@@ -322,7 +322,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   `trailSpriteBindingResolverHits>0`；这些字段都进入 evidence hash；
 - `tileMapStreamRequests=2`、`tileMapStreamCommitted=2`、`tileMapStreamResident=2`，且每个 frame 都推进
   demand/pump/commit；
-- `objectLayerConsumed=true`、`objectLayerObjects=2`，稳定 object `101/102` 已被产品逻辑消费；
+- `objectLayerConsumed=true`、`objectLayerObjects=2`，唯一 player/crate role 与 Point/Rectangle kind 已被产品逻辑消费；
 - `navigationReady=true`、`navigationSchemaVersion=1`、solid/rectangle/blocked=`11/1/13`、基础/动态路径
   cell=`7/9`、`navigationIncrementalExpandedNodes=1`、revision/mutation=`3/2` 且
   `navigationCancelled=true`；
@@ -374,9 +374,8 @@ Escape/Gamepad East 的 Back 路由给该 active Screen；Enter/Keypad Enter/Gam
 
 ## 当前限制
 
-- 当前 streaming 是固定容量 Camera/layer demand owner，已有 retain-window demand-recency LRU，但不包含
-  优先级 IO 调度、通用 Tile/Scene 编辑器、自动把任意 object layer 转成完整 gameplay、旧 schema
-  migration 或网络 rollback；
+- 当前 streaming 是固定容量 Camera/layer priority demand owner，已有稳定的新请求排序与 retain-window
+  demand-recency LRU；通用 Scene 编辑器、旧 schema migration 与网络 rollback 仍未提供；
 - Navigation2D 当前只有 schema-v1矩形 grid、四方向单位代价 A*、property-tagged Rectangle blocker 与
   cooperative query；没有 diagonal/weight/navmesh、内部 worker、crowd avoidance、独立 Cooked Navigation
   AssetKind、Physics 自动同步或 editor bake；
