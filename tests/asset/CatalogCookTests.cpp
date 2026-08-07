@@ -1087,6 +1087,29 @@ TEST(CatalogCookTests, RecipeFileRoundTrip)
     std::filesystem::remove_all(dir, ec);
 }
 
+TEST(CatalogCookTests, ReadsRecipeTargetWithoutOpeningReferencedPayloads)
+{
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "tina_catalog_recipe_target_only";
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+    ASSERT_TRUE(std::filesystem::create_directories(dir, error));
+    const auto recipePath = dir / "pack.recipe";
+    const auto textureId = Core::AssetId::fromBytes(idBytes(0xA7U))->canonicalText();
+    std::string recipe = "platform LinuxX64\nasset Texture2D ";
+    recipe.append(textureId.data(), textureId.size());
+    recipe += " missing-payload.bin\n";
+    ASSERT_TRUE(Core::writeFile(
+        toUtf8(recipePath), std::as_bytes(std::span(recipe.data(), recipe.size()))));
+
+    auto target = loadCatalogCookRecipeTargetPlatform(toUtf8(recipePath));
+    ASSERT_TRUE(target) << (target ? "" : target.error().message);
+    EXPECT_EQ(*target, AssetFormat::TargetPlatform::LinuxX64);
+    EXPECT_FALSE(loadCatalogCookRecipeFile(toUtf8(recipePath)));
+
+    std::filesystem::remove_all(dir, error);
+}
+
 TEST(CatalogCookSourceTests, CapturesRecipeSharedGenericPayloadAndWavWithoutDuplicateSources)
 {
     const auto root = std::filesystem::temp_directory_path() / "tina_catalog_recipe_sources";

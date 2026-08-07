@@ -27,9 +27,10 @@ world pass 下一帧跟随新的布局；首帧在 committed rect 可用前不�
 schema 原子加载为 clean baseline，不存在的路径保留为该 workspace 的新文档 Save target。每个 pinned/Catalog tab
 都有固定容量 session，独立持有 document key、strict UTF-8 path、target platform、loaded flag 与完整 canonical
 baseline。Toolbar 的 path 是单行 TextEdit：Save 只在 active document 已有路径且 dirty 时启用；Save As 对四类可写
-document 启用，Asset Inspector 保持只读。Windows Save As 使用 native dialog：World2D 选择 `.tworld`、World3D 选择
-`.tprefab`、SpriteAnimation 选择 `.tasset` 文件，TileMap 选择 package 输出目录。取消 dialog 不修改 path、baseline、dirty、
-tab 或 selection；非 Windows adapter 返回 `Unsupported`，EditorApp 明确回退到 TextEdit 中的 strict UTF-8 路径。
+document 启用，Asset Inspector 保持只读。Windows 使用系统 native dialog；Linux 私有 adapter 使用 `zenity` 并在缺失时
+回退 `kdialog`。World2D 选择 `.tworld`、World3D 选择 `.tprefab`、SpriteAnimation 选择 `.tasset` 文件，TileMap 选择 package
+输出目录。取消 dialog 不修改 path、baseline、dirty、tab 或 selection；其他未支持平台返回 `Unsupported`，EditorApp
+明确回退到 TextEdit 中的 strict UTF-8 路径。
 两个打开的 document 不得拥有相同文本路径。
 2D 的五个字段和 3D 的九个字段都通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
 拒绝时恢复 canonical 字段并保持 document/history/preview 不变。2D Rotation Z 发布平面 Z quaternion；3D Euler XYZ
@@ -77,9 +78,19 @@ workspace，下一安全帧在 Render packet 建立前通过 `AssetSystem::reloa
 验证并切换 live Catalog。commit 前脏 Catalog document 会阻止切换，其他动态 Catalog tab 在成功切换后失效；Browser
 只从 AssetSystem 已提交 snapshot 重建，固定 TileMap/Animation document 也从新 Catalog 重新打开。owning workspace、
 Browser/selection、2D/3D binding 与 animation preview 全部验证成功后才增加 project-switch 计数；commit 前失败保留旧
-Catalog，commit 后 preview 重建失败则作为结构化致命错误返回，不能伪装为成功。Editor source import 尚未接线；非 Windows
-尚无 project-folder adapter，因此
-`2D-EDITOR` 继续保持 InProgress。
+Catalog，commit 后 preview 重建失败则作为结构化致命错误返回，不能伪装为成功。
+
+Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 absolute `--project-root=<path>`，以可重复且可混合的
+`--import-recipe=<path>` / `--import-gltf=<path>` 表达完整 intended unit 集；`--import-on-start` 在安全帧启动导入，
+`--project-root` 与 `--catalog-root` 互斥。Project Assets 的 Import Source 也把 `.recipe` / `.gltf` / `.glb` 加入同一
+intended set。后台 `EditorSourceImportService` 只调用共享 Asset pipeline，probe 完整 unit 集并生成 fully validated fresh
+stage，不接触 UI、Render 或 `AssetSystem`；owner thread 在下一安全帧携带当前 Sprite/Mesh participant 调用
+`reloadCatalog()`。dirty Catalog document 会在 commit 前保留 Ready stage；`CatalogReloadBusy` 同样保留 stage 并逐安全帧
+重试。fresh stage 在 Ready 前已包含 sibling current import state；Catalog、Browser、documents 与 2D/3D/Animation preview
+全部提交后，Editor 只原子发布项目 `.tina/cache/source-import/active-catalog.path`。再次以 `--project-root` 启动或 Project Open
+时验证 pointer、stage state、Catalog revision/output binding 与 physical containment，并恢复 Catalog 和完整 intended unit 集。
+Windows 使用系统原生 dialog；Linux 私有 adapter 以 `zenity` 为首选、`kdialog` 为缺失回退，覆盖 open/save/folder 且不经过
+shell。Linux 定向编译和真实 helper 产品门禁完成前，`2D-EDITOR` 继续保持 InProgress。
 
 ## Editor application layout
 
@@ -90,7 +101,7 @@ Context bar (breadcrumb/select/move/tile-paint/tile-erase/frame/status)
 Workspace
   Left dock
     Hierarchy (filter/actions/virtual TreeView/selection summary)
-    Project Assets (All/2D/3D/Media/virtual ListView/new/open/refresh)
+    Project Assets (All/2D/3D/Media/virtual ListView/new/open/import/refresh)
   Active 2D/3D viewport (mode/tools/zoom/preview canvas/footer)
   Inspector dock (scrollable identity/transform/components/TileMap authoring/document/36px dependency list)
 SpriteAnimationClip Timeline (frames/playback/mode/duration/reorder/undo/redo/cook)
@@ -112,7 +123,9 @@ non-empty cell、root+chunk cook artifact/bytes、emitted sprite 与 edit/undo/r
 document revision、frame/cook bytes、preview frame、edit/undo/redo 与 playback transition。Project Browser/tabs 另报告
 `projectAssetBrowserReady`、`projectAssetVisibleItems`、`projectAssetOpenCount`、`documentTabsReady`、`documentTabCount` 与
 `documentTabSwitches`；自动 smoke 从 4 个 pinned tab 打开一个额外 current-schema Animation asset，再恢复 pinned
-Animation 与初始 workspace，最终 tab/open/load/swap/binding-refresh 固定为 `5/1/1/2/2`。
+Animation 与初始 workspace，最终 tab/open/load/swap/binding-refresh 固定为 `5/1/1/2/2`。Editor action count 为 `60`；
+source-import 自动化另报告 project root、intended unit count、start/complete/failure/busy-retry、unit/object 统计、Running/Ready
+与 state-committed 状态。
 
 ## 文件加载与原子保存
 
@@ -265,13 +278,14 @@ Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0
 
 TileMap root+chunk authoring/cook/save、SpriteAnimationClip timeline authoring/cook/save、Catalog-resolved viewport、
 Project Browser、分类过滤、资源 Inspector、Catalog current-schema open/refresh、固定容量 document tabs/session、
-Save/Save As、Windows native Save As picker 与 dirty-close Modal 已完成。项目 workspace 与空目录创建的基础 API 已完成，
+Save/Save As、Windows native dialog、Linux `zenity`/`kdialog` dialog 与 dirty-close Modal 已完成。项目 workspace 与空目录创建的基础 API 已完成，
 Windows Project `New` 也能创建 Source/Catalog、manifest-last 发布空 current-schema package 并 reopen/typed-validate；
-Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source-import 产品接线仍未完成，
-因此不能把完整项目工作流标为 Done。
+Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source import 的完整 intended unit
+probe、后台 fresh-stage cook、主线程 Catalog reload/busy retry、dirty-document commit gate、stage sibling state + 单一 active pointer
+commit 与 reopen 恢复也已完成；当前只因 Linux 定向编译和真实 helper 产品门禁尚未完成而保持 InProgress。
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、
 Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D Player 直接预览已解析 Sprite frame，3D workspace
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、
 动画 revision/frame/cook=`4/4/256 B`、Catalog entry/load=`9/7` 和 GPU sprites=`13`。继续只保留现行 schema，
-不增加旧资产兼容分支；下一产品切片是 Editor source import 与非 Windows native dialog adapter（当前仍使用结构化
-`Unsupported` + TextEdit 回退）。
+不增加旧资产兼容分支；下一产品切片是 Linux Editor target 定向编译及 `zenity`/`kdialog` open/save/folder/cancel
+产品门禁；其他未支持平台继续结构化返回 `Unsupported`，document Save 路径保留 TextEdit 回退。

@@ -1188,6 +1188,7 @@ namespace {
 
 [[nodiscard]] Core::Result<CatalogCookSourceResult> cookGltfFileToCatalogSourceResultImpl(
     std::string_view gltfUtf8Path,
+    AssetFormat::TargetPlatform targetPlatform,
     const SourceImportCaptureConfig* captureConfig,
     GltfCookIds ids)
 {
@@ -1195,6 +1196,11 @@ namespace {
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF path must be strict UTF-8 without NUL");
+    }
+    if (targetPlatform == AssetFormat::TargetPlatform::Invalid)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF cook target platform must be valid");
     }
     if (static_cast<bool>(ids.meshId) != static_cast<bool>(ids.materialId))
     {
@@ -1214,7 +1220,7 @@ namespace {
 
     const GltfCookIds requestedIds = ids;
     CatalogCookSourceResult result{};
-    result.sourceImports.targetPlatform = AssetFormat::TargetPlatform::WindowsX64;
+    result.sourceImports.targetPlatform = targetPlatform;
     GltfSourceCaptureContext capture{
         .config = captureConfig,
         .candidate = captureConfig != nullptr ? &result.sourceImports : nullptr,
@@ -1669,7 +1675,7 @@ namespace {
     }
 
     CatalogCookRequest& request = result.request;
-    request.targetPlatform = AssetFormat::TargetPlatform::WindowsX64;
+    request.targetPlatform = targetPlatform;
     // Dependencies-first: textures before materials that reference them.
     for (auto& tex : textures)
     {
@@ -1767,12 +1773,14 @@ namespace {
 
 [[nodiscard]] Core::Result<CatalogCookSourceResult> cookGltfFileToCatalogSourceResultBoundary(
     std::string_view gltfUtf8Path,
+    AssetFormat::TargetPlatform targetPlatform,
     const SourceImportCaptureConfig* captureConfig,
     GltfCookIds ids) noexcept
 {
     try
     {
-        return cookGltfFileToCatalogSourceResultImpl(gltfUtf8Path, captureConfig, ids);
+        return cookGltfFileToCatalogSourceResultImpl(gltfUtf8Path, targetPlatform,
+                                                     captureConfig, ids);
     }
     catch (const std::bad_alloc&)
     {
@@ -1793,10 +1801,13 @@ namespace {
 
 } // namespace
 
-Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view gltfUtf8Path,
-                                                              GltfCookIds ids) noexcept
+Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(
+    std::string_view gltfUtf8Path,
+    AssetFormat::TargetPlatform targetPlatform,
+    GltfCookIds ids) noexcept
 {
-    auto result = cookGltfFileToCatalogSourceResultBoundary(gltfUtf8Path, nullptr, ids);
+    auto result = cookGltfFileToCatalogSourceResultBoundary(gltfUtf8Path, targetPlatform,
+                                                            nullptr, ids);
     if (!result)
     {
         return Core::failure(std::move(result.error()));
@@ -1806,10 +1817,12 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
 
 Core::Result<CatalogCookSourceResult> cookGltfFileToCatalogSourceResult(
     std::string_view gltfUtf8Path,
+    AssetFormat::TargetPlatform targetPlatform,
     SourceImportCaptureConfig captureConfig,
     GltfCookIds ids) noexcept
 {
-    return cookGltfFileToCatalogSourceResultBoundary(gltfUtf8Path, &captureConfig, ids);
+    return cookGltfFileToCatalogSourceResultBoundary(gltfUtf8Path, targetPlatform,
+                                                     &captureConfig, ids);
 }
 
 } // namespace Tina::Asset

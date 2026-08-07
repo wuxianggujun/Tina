@@ -802,7 +802,9 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     counters.completePbrFixture = resources.completePbrFixture;
 
     // Cook via GltfCook (cgltf PRIVATE). Unsupported features fail with structured Asset errors.
-    auto request = Tina::Asset::cookGltfFileToCatalogRequest(toUtf8(gltfPath), Tina::Asset::GltfCookIds{});
+    auto request = Tina::Asset::cookGltfFileToCatalogRequest(
+        toUtf8(gltfPath), Tina::AssetFormat::TargetPlatform::WindowsX64,
+        Tina::Asset::GltfCookIds{});
     if (!request)
     {
         Tina::Core::Error error = std::move(request.error());

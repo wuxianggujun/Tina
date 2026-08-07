@@ -35,15 +35,18 @@ struct GltfCookIds final {
     Core::AssetId prefabId{};
 };
 
+// targetPlatform is explicit because the same source may be cooked for Windows or Linux.
 // When ids are default/empty, deterministic ids are derived from the glTF path string.
 [[nodiscard]] Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(
     std::string_view gltfUtf8Path,
+    AssetFormat::TargetPlatform targetPlatform,
     GltfCookIds ids = {}) noexcept;
 
 // Captures the exact source bytes consumed by the cook under an explicit authoring root. One
 // document produces one glTF import unit; embedded buffers/images remain part of the primary source.
 [[nodiscard]] Core::Result<CatalogCookSourceResult> cookGltfFileToCatalogSourceResult(
     std::string_view gltfUtf8Path,
+    AssetFormat::TargetPlatform targetPlatform,
     SourceImportCaptureConfig captureConfig,
     GltfCookIds ids = {}) noexcept;
 

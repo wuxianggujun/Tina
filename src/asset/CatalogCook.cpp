@@ -1572,6 +1572,43 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 
 namespace {
 
+[[nodiscard]] Core::Result<AssetFormat::TargetPlatform>
+parseCatalogCookRecipeTargetPlatformInternal(std::string_view recipeText)
+{
+    AssetFormat::TargetPlatform targetPlatform = AssetFormat::TargetPlatform::Invalid;
+    std::size_t cursor = 0;
+    while (cursor <= recipeText.size())
+    {
+        const auto end = recipeText.find('\n', cursor);
+        auto lineView = recipeText.substr(
+            cursor, end == std::string_view::npos ? std::string_view::npos : end - cursor);
+        if (!lineView.empty() && lineView.back() == '\r')
+        {
+            lineView.remove_suffix(1);
+        }
+        cursor = end == std::string_view::npos ? recipeText.size() + 1 : end + 1;
+
+        const auto line = trim(lineView);
+        if (line.empty() || line[0] == '#')
+        {
+            continue;
+        }
+        const auto tokens = splitWs(line);
+        if (!tokens.empty() && tokens[0] == "platform" &&
+            (tokens.size() != 2 || !isKnownPlatformName(tokens[1], targetPlatform)))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "invalid platform line in recipe");
+        }
+    }
+    if (targetPlatform == AssetFormat::TargetPlatform::Invalid)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "catalog recipe requires a platform line");
+    }
+    return targetPlatform;
+}
+
 [[nodiscard]] Core::Result<CatalogCookRequest>
 parseCatalogCookRecipeInternal(std::string_view recipeText,
                                std::string_view baseDirectoryUtf8,
@@ -2631,6 +2668,39 @@ Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view reci
         return Core::failure(std::move(result.error()));
     }
     return std::move(result->request);
+}
+
+Core::Result<AssetFormat::TargetPlatform>
+loadCatalogCookRecipeTargetPlatform(std::string_view recipeUtf8Path)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    auto bytes = Core::readFile(
+        recipeUtf8Path,
+        Core::ReadFileConfig{.maxBytes = 16ULL * 1024ULL * 1024ULL,
+                             .memoryResource = &memory});
+    if (!bytes)
+    {
+        return Core::failure(std::move(bytes.error()).withContext(
+            "loadCatalogCookRecipeTargetPlatform", "readRecipe"));
+    }
+    try
+    {
+        std::string text(bytes->size(), '\0');
+        std::transform(bytes->begin(), bytes->end(), text.begin(), [](const std::byte value) {
+            return static_cast<char>(std::to_integer<unsigned char>(value));
+        });
+        auto platform = parseCatalogCookRecipeTargetPlatformInternal(text);
+        if (!platform)
+        {
+            return Core::failure(std::move(platform.error()).withContext(
+                "loadCatalogCookRecipeTargetPlatform", "parsePlatform"));
+        }
+        return *platform;
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "catalog recipe target platform allocation failed");
+    }
 }
 
 Core::Result<CatalogCookSourceResult>

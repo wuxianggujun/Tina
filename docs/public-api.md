@@ -565,10 +565,11 @@ dirty-close modal 提供 Save/Save As、Discard、Cancel；Catalog Refresh 在�
 `AssetSystem::reloadCatalog()` 的 Sprite/Mesh participant transaction。以上编排留在 `Tina::EditorApp` 私有层，
 不扩大 document 公共 ABI。
 
-Windows EditorApp 的私有 `EditorFileDialog` 用 `IFileSaveDialog` 为 World2D `.tworld`、World3D `.tprefab` 与
-SpriteAnimation `.tasset` 选择文件，用 folder-pick dialog 为 TileMap 选择输出根；Windows/COM 类型不进入公共头。
-Cancel 是成功的 no-op，保留 session path、baseline、dirty、tab 与 selection。非 Windows 私有 adapter 返回结构化
-`CoreErrorCode::Unsupported`，EditorApp 回退到 Toolbar/dirty-close TextEdit 中的 strict UTF-8 路径。
+EditorApp 私有 `EditorFileDialog` 在 Windows 用 `IFileSaveDialog`，在 Linux 用 `zenity` 并在 helper 缺失时回退
+`kdialog`；两者都为 World2D `.tworld`、World3D `.tprefab` 与 SpriteAnimation `.tasset` 选择文件，并为 TileMap/Project
+选择目录。native/COM/POSIX 类型不进入公共头，Linux argv 不经过 shell 且 child 始终有界回收。Cancel 是成功的 no-op，
+保留 session path、baseline、dirty、tab 与 selection。其他未支持平台返回结构化 `CoreErrorCode::Unsupported`，
+EditorApp 回退到 Toolbar/dirty-close TextEdit 中的 strict UTF-8 路径。
 
 `EditorProjectWorkspace::Create(desc, config)` 建立 owning、move-only 的 canonical project/source/Cooked Catalog root
 模型。三个 root 必须是有界 strict UTF-8 absolute path；Source 与 Catalog 必须严格位于 project root 内且互不相同、
@@ -576,16 +577,24 @@ Cancel 是成功的 no-op，保留 session path、baseline、dirty、tab 与 sel
 `CreateNewEditorProject(request)` 创建或采用既有空 project root，并创建默认 `Source`/`Catalog`（或调用方给定的两个
 single-component 目录）；它拒绝非物理目录和 symlink/junction/reparse point，重新验证 root identity/final containment，
 失败只删除 identity 仍匹配且确由本次事务创建的目录。成功结果不暴露 `std::filesystem` 或 native 类型。
-该公共 API 本身不发布 Catalog。Windows EditorApp 的 Project `New` command 在 folder picker 成功后组合该 API、
+该公共 API 本身不发布 Catalog。EditorApp 的 Project `New` command 在受支持的 desktop folder picker 成功后组合该 API、
 `AssetFormat::writeCookedManifestBytes()` 与 `Asset::publishCatalogPackage()`：发布零 entry current-schema manifest 后再用
 `openCatalogPackage()` typed-validate。Project `Open` 私有组合验证选中 root 的物理 `Source/`/`Catalog/` 目录、reparse
 边界与 final containment。New/Open 都只在命令阶段排队 workspace；下一安全帧先拒绝仍有 dirty 的 Catalog document，
 再调用 `AssetSystem::reloadCatalog()` 的 Sprite/Mesh participant transaction。Browser 必须从成功 reload 后的
 `AssetSystem::catalog()` snapshot 构建，不能独立重开磁盘路径形成第二份事实；成功切换还会失效干净的动态 Catalog tab、
 重新打开固定 TileMap/Animation document 并重建 2D/3D/Animation preview。active root/workspace 与 project-switch 计数只在
-完整 preview 成功后发布；任何 commit 前失败继续使用旧 Catalog，commit 后失败作为结构化致命错误返回。该编排留在
-`Tina::EditorApp` 私有层；Editor source
-import 和非 Windows project-folder adapter 尚未完成，因此仍不能视为完整项目工作流已经完成。
+完整 preview 成功后发布；任何 commit 前失败继续使用旧 Catalog，commit 后失败作为结构化致命错误返回。
+
+Editor source import 同样留在 `Tina::EditorApp` 私有组合层，不扩大 document ABI。launch option parser 消费 absolute
+strict UTF-8 `--project-root`、可重复混合 `--import-recipe` / `--import-gltf` 和 `--import-on-start`，以一个有序 owning
+集合表达完整 intended units。`EditorSourceImportService` 在后台只调用 Asset pipeline；Ready stage 由 owner thread 在安全帧
+携带 Sprite/Mesh participants reload。dirty Catalog document 阻止 commit 但不丢弃 stage；`CatalogReloadBusy` 也保留 stage
+重试。fresh stage 在 Ready 前已拥有 sibling state；Catalog/Browser/documents/preview 成功后只把
+`active-catalog.path` 作为项目 tool cache 的唯一原子 commit marker。Project reopen 验证 pointer、stage state、Catalog
+revision/output binding 与 physical containment 后恢复 Catalog 和完整 intended units。Editor file dialog 仍是 EditorApp 私有
+adapter：Windows 调用系统 dialog，Linux 使用 `zenity` 并在缺失时回退 `kdialog`，通过 argv 直传且回收 helper 子进程。
+Linux 定向编译和真实 helper 产品门禁完成前，`2D-EDITOR` 仍保持 InProgress。
 `World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
 entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
 
@@ -644,8 +653,8 @@ Cooker/tool。
 Prefab 当前唯一 schema 为 v2：node payload 自带 Mesh/Material `AssetId`；Cooked dependency 是按 `AssetId`
 排序去重的 required 引用集合，typed parser 对两者完整对账，不按 dependency 位置恢复 node identity。
 
-`cookGltfFileToCatalogRequest(gltfUtf8Path, ids)` 是 `noexcept` Cooker 边界，输入路径必须是 strict UTF-8
-without NUL。它从已打开主文件的有界快照解析 JSON/GLB；relative external buffer/image 先 percent-decode，
+`cookGltfFileToCatalogRequest(gltfUtf8Path, targetPlatform, ids)` 是 `noexcept` Cooker 边界，输入路径必须是 strict UTF-8
+without NUL，目标平台必须显式给出且不能为 `Invalid`。它从已打开主文件的有界快照解析 JSON/GLB；relative external buffer/image 先 percent-decode，
 拒绝 scheme、rooted path 与 `..`，再打开并以最终 handle/fd 路径验证 authoring-root containment。root 内
 symlink/junction 保持可用，逃逸、读取期间身份/size/time 变化或任一 file/count/range/parser/decode/output
 预算失败都返回 `Core::Error`，不返回部分 `CatalogCookRequest`。调用方随后仍须经 `cookCatalogPackage` 与
@@ -694,16 +703,24 @@ membership/path/content/byte size/read extent、primary edge 或 output AssetId/
 
 `captureSourceImportBytes()` 对 caller 已读取并实际消费的 bytes 建立 root-relative source fingerprint，并强制 caller
 声明唯一现行 `WholeFile`/`Prefix` read extent，不自行
-读取文件；`loadCatalogCookRecipeSourceFile()` 与 `cookGltfFileToCatalogSourceResult()` 在唯一现行 importer 路径
+读取文件；`loadCatalogCookRecipeSourceFile()` 与显式接收 target platform 的 `cookGltfFileToCatalogSourceResult()` 在唯一现行 importer 路径
 分别收集 recipe/WAV/generic payload 与 glTF/GLB/external buffer/image provenance。一个 authoring document 当前
 对应一个 stable unit，outputs 覆盖本次 request 的全部资产。`commitSourceImportCandidate()` 生成唯一当前 schema
 并 atomic replace；`tina_assetc` 只在对应 package 完整验证并取得 manifest revision 后调用它。
 `probeSourceImportUnits()` 对完整预期 UnitId 集合协调 per-unit probe，分别保留 clean unit 并统计 removed unit；
 `probeCatalogRecipeSourceImportState()` / `probeGltfSourceImportState()` 是单描述 wrapper，走同一 batch 逻辑。
 `composeSourceImportCandidate()` 把 baseline clean unit 与本次 recooked candidate 合成唯一 current-schema graph，拒绝
-source fingerprint 冲突、重复 UnitId/output owner 与 target platform 不一致。`tina_assetc` 据此只运行 dirty/added
+source fingerprint 冲突、重复 UnitId/output owner 与 target platform 不一致。`tina_assetc` 从 recipe 推导批次 target，
+纯 glTF 批次使用 host target，再据此只运行 dirty/added
 importer，再通过 incremental stage API 复制 clean object、移除 removed output 并完整验证 fresh stage。Cooker API 不启动 watcher，
 也不物理替换仍在使用的 live root；Runtime/tool host 可显式组合独立 `CatalogPackageWatcher`。
+
+`executeSourceImportPipeline(request, stopToken)` 是 recipe/glTF host 共用的同步高层工具 API。request 必须给出完整 intended
+unit span、显式且非 `Invalid` 的 target platform、source/baseline/state 与 fresh-stage 路径；实现统一执行 baseline current-schema validation、batch probe、all-clean
+零改写复用、dirty/added recook、removed output 剔除、candidate compose、fresh package 完整验证和 stage-bound state commit。
+结果明确报告 `CleanReuse|FullRecook|IncrementalRecook`、unit/object 统计及 stage/state ownership。该 API 不调用
+`AssetSystem::reloadCatalog()`、不替换 live root，也不取得 UI/Render owner；host 可在后台调用，随后在 owner thread 安全点
+决定是否接受 stage。stop、IO、容量、validation 或 allocation 失败不返回部分 candidate。
 
 `planCatalogChanges(oldCatalog, newCatalog, config)` 比较两个已验证、immutable `CatalogSnapshot`，返回按
 `AssetId` 排序且每 ID 唯一的 `Added`/`Removed`/`Modified`/`Affected` 行。`Modified` 覆盖 entry metadata

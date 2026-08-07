@@ -35,5 +35,7 @@ inline constexpr Core::ErrorCode CatalogReloadBusy{Core::ErrorDomain::Asset, 38}
 inline constexpr Core::ErrorCode SourceImportPlanCapacityExceeded{Core::ErrorDomain::Asset, 39};
 inline constexpr Core::ErrorCode SourceImportCatalogMismatch{Core::ErrorDomain::Asset, 40};
 inline constexpr Core::ErrorCode SourceImportCaptureCapacityExceeded{Core::ErrorDomain::Asset, 41};
+inline constexpr Core::ErrorCode SourceImportCancelled{Core::ErrorDomain::Asset, 42};
+inline constexpr Core::ErrorCode SourceImportTargetPlatformMismatch{Core::ErrorDomain::Asset, 43};
 
 } // namespace Tina::Asset::AssetErrorCode

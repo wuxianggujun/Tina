@@ -3,8 +3,19 @@ add_library(tina_editor_app STATIC
     EditorApplication.cpp
     EditorFileDialog.cpp
     EditorFileDialog.hpp
+    EditorSourceImportLaunchOptions.cpp
+    EditorSourceImportLaunchOptions.hpp
+    EditorSourceImportService.cpp
+    EditorSourceImportService.hpp
 )
 add_library(Tina::EditorApp ALIAS tina_editor_app)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(tina_editor_app PRIVATE
+        EditorFileDialogLinux.cpp
+        EditorFileDialogLinux.hpp
+    )
+endif()
 
 target_compile_features(tina_editor_app PUBLIC cxx_std_23)
 target_include_directories(tina_editor_app

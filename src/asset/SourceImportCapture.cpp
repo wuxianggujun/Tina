@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cwctype>
 #include <filesystem>
 #include <limits>
 #include <new>
@@ -53,6 +54,55 @@ namespace {
     return false;
 }
 
+[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
+                                       const std::filesystem::path& right) noexcept
+{
+#if defined(_WIN32)
+    const auto& leftText = left.native();
+    const auto& rightText = right.native();
+    return leftText.size() == rightText.size() &&
+           std::equal(leftText.begin(), leftText.end(), rightText.begin(),
+                      [](const wchar_t leftCharacter, const wchar_t rightCharacter) {
+                          return std::towlower(leftCharacter) == std::towlower(rightCharacter);
+                      });
+#else
+    return left == right;
+#endif
+}
+
+[[nodiscard]] Core::Result<std::filesystem::path>
+rootRelativeSourcePath(const std::filesystem::path& root,
+                       const std::filesystem::path& source)
+{
+    auto sourcePart = source.begin();
+    for (auto rootPart = root.begin(); rootPart != root.end(); ++rootPart, ++sourcePart)
+    {
+        if (sourcePart == source.end() || !pathComponentEquals(*rootPart, *sourcePart))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "source import path is outside the configured authoring root");
+        }
+    }
+
+    std::filesystem::path relative;
+    for (; sourcePart != source.end(); ++sourcePart)
+    {
+        relative /= *sourcePart;
+    }
+    if (escapesRoot(relative))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "source import path is outside the configured authoring root");
+    }
+#if defined(_WIN32)
+    auto stableText = relative.native();
+    std::transform(stableText.begin(), stableText.end(), stableText.begin(),
+                   [](const wchar_t character) { return std::towlower(character); });
+    relative = std::filesystem::path(std::move(stableText));
+#endif
+    return relative;
+}
+
 struct CanonicalUnit final {
     AssetFormat::SourceImportUnitId unitId{};
     Core::u32 importerKind = 0;
@@ -81,13 +131,12 @@ Core::Result<std::string> normalizeSourceImportPath(const SourceImportCaptureCon
                               .lexically_normal();
         const auto source = std::filesystem::absolute(Detail::pathFromUtf8Bytes(sourceUtf8Path))
                                 .lexically_normal();
-        const auto relative = source.lexically_relative(root);
-        if (escapesRoot(relative))
+        auto relative = rootRelativeSourcePath(root, source);
+        if (!relative)
         {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "source import path is outside the configured authoring root");
+            return Core::failure(std::move(relative.error()));
         }
-        const auto generic = relative.generic_u8string();
+        const auto generic = relative->generic_u8string();
         std::string normalized(generic.begin(), generic.end());
         if (normalized.empty() || normalized.size() > AssetFormat::SourceImportWire::MaxPathBytes)
         {

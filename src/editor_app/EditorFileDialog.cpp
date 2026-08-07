@@ -5,6 +5,10 @@
 #include <new>
 #include <utility>
 
+#if defined(__linux__)
+#include "EditorFileDialogLinux.hpp"
+#endif
+
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -401,6 +405,11 @@ EditorFileDialog::openExistingFile(const OpenExistingFileDialogRequest& request)
         }
     }
     return showDialog(*dialog.get(), nativeOwnerWindow_);
+#elif defined(__linux__)
+    if (auto status = ensureOwnerThread(); !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    return openExistingFileLinux(request);
 #else
     static_cast<void>(request);
     return Core::failure(Core::CoreErrorCode::Unsupported,
@@ -477,6 +486,11 @@ EditorFileDialog::saveFile(const SaveFileDialogRequest& request) const
         }
     }
     return showDialog(*dialog.get(), nativeOwnerWindow_);
+#elif defined(__linux__)
+    if (auto status = ensureOwnerThread(); !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    return saveFileLinux(request);
 #else
     static_cast<void>(request);
     return Core::failure(Core::CoreErrorCode::Unsupported,
@@ -518,6 +532,11 @@ EditorFileDialog::pickFolder(const PickFolderDialogRequest& request) const
         return Core::failure(std::move(status.error()));
     }
     return showDialog(*dialog.get(), nativeOwnerWindow_);
+#elif defined(__linux__)
+    if (auto status = ensureOwnerThread(); !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    return pickFolderLinux(request);
 #else
     static_cast<void>(request);
     return Core::failure(Core::CoreErrorCode::Unsupported,

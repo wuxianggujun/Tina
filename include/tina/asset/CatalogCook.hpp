@@ -102,6 +102,11 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 // Inline typed lines build the current versioned payload without pre-encoded files.
 [[nodiscard]] Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view recipeUtf8Path);
 
+// Reads only the recipe document and resolves its declared target platform. Referenced payload,
+// image, and audio sources are not opened, so hosts can select a cook target before import.
+[[nodiscard]] Core::Result<AssetFormat::TargetPlatform>
+loadCatalogCookRecipeTargetPlatform(std::string_view recipeUtf8Path);
+
 // Loads the same recipe request while capturing the exact already-read recipe, generic payload,
 // and WAV bytes into one CatalogRecipe import unit. Every source must remain under sourceRootUtf8.
 [[nodiscard]] Core::Result<CatalogCookSourceResult>

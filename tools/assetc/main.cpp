@@ -1,13 +1,11 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
-#include <tina/asset/CatalogPackageChangeDetector.hpp>
 #include <tina/asset/GltfCook.hpp>
-#include <tina/asset/SourceImportExecutor.hpp>
-#include <tina/asset/SourceImportPlan.hpp>
-#include <tina/asset/SourceImportProbe.hpp>
+#include <tina/asset/SourceImportPipeline.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
+#include <tina/asset_format/SourceImportMetadataFormat.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -412,19 +410,6 @@ catalogOpenConfig(std::pmr::memory_resource& memory, bool validateOnOpen,
     };
 }
 
-struct LoadedBaseline final {
-    std::pmr::vector<std::byte> stateBytes{};
-    Tina::AssetFormat::SourceImportMetadataView metadata{};
-    Tina::Asset::CatalogSnapshot catalog{};
-    Tina::AssetFormat::SourceImportManifestRevision revision{};
-};
-
-struct BaselineLoadResult final {
-    std::optional<LoadedBaseline> baseline{};
-    PreCookProbe probe{};
-    bool catalogPresent = false;
-};
-
 [[nodiscard]] bool verifyTypedPayloads(const Options& options) noexcept
 {
     return std::none_of(options.imports.begin(), options.imports.end(), [](const ImportOption& input) {
@@ -445,106 +430,6 @@ struct BaselineLoadResult final {
     return options.imports.front().kind == ImportKind::Recipe ? "recipe" : "gltf";
 }
 
-[[nodiscard]] Tina::Core::Result<BaselineLoadResult>
-loadBaseline(const Options& options, std::pmr::memory_resource& memory)
-{
-    if (options.importStatePath.empty())
-    {
-        return BaselineLoadResult{};
-    }
-    auto revision = Tina::Asset::captureCatalogPackageRevision(
-        options.outRoot,
-        Tina::Asset::CatalogPackageChangeDetectorConfig{.scratchMemoryResource = &memory});
-    if (!revision)
-    {
-        if (revision.error().code == Tina::Core::CoreErrorCode::NotFound)
-        {
-            return BaselineLoadResult{
-                .probe = PreCookProbe{.enabled = true,
-                                      .state = Tina::Asset::SourceImportProbeState::NoBaseline,
-                                      .reason = "catalog-not-found"},
-            };
-        }
-        return Tina::Core::failure(std::move(revision.error()));
-    }
-
-    const Tina::AssetFormat::SourceImportManifestRevision importRevision{
-        .manifestDigest = revision->manifestDigest,
-        .manifestBytes = revision->manifestBytes,
-    };
-    auto catalog = Tina::Asset::openCatalogPackage(
-        options.outRoot, catalogOpenConfig(memory, false, verifyTypedPayloads(options)));
-    if (!catalog)
-    {
-        return Tina::Core::failure(std::move(catalog.error()));
-    }
-
-    auto stateBytes = Tina::Core::readFile(
-        options.importStatePath,
-        Tina::Core::ReadFileConfig{.maxBytes = Tina::Core::MaxReadFileBytes,
-                                   .memoryResource = &memory});
-    if (!stateBytes)
-    {
-        if (stateBytes.error().code == Tina::Core::CoreErrorCode::NotFound)
-        {
-            return BaselineLoadResult{
-                .probe = PreCookProbe{.enabled = true,
-                                      .state = Tina::Asset::SourceImportProbeState::NoBaseline,
-                                      .reason = "state-not-found"},
-                .catalogPresent = true,
-            };
-        }
-        return Tina::Core::failure(std::move(stateBytes.error()));
-    }
-    auto metadata = Tina::AssetFormat::parseSourceImportMetadataView(*stateBytes);
-    if (!metadata)
-    {
-        if (metadata.error().code == Tina::AssetFormat::AssetFormatErrorCode::UnsupportedSchema)
-        {
-            return BaselineLoadResult{
-                .probe = PreCookProbe{.enabled = true,
-                                      .state = Tina::Asset::SourceImportProbeState::Dirty,
-                                      .reason = "state-schema-changed"},
-                .catalogPresent = true,
-            };
-        }
-        return Tina::Core::failure(std::move(metadata.error()));
-    }
-    if (const auto status = Tina::Asset::validateSourceImportCatalogBinding(*metadata, importRevision);
-        !status)
-    {
-        return BaselineLoadResult{
-            .probe = PreCookProbe{.enabled = true,
-                                  .state = Tina::Asset::SourceImportProbeState::Dirty,
-                                  .reason = "catalog-revision-changed"},
-            .catalogPresent = true,
-        };
-    }
-    if (const auto status = Tina::Asset::validateSourceImportCatalogOutputs(*metadata, *catalog);
-        !status)
-    {
-        return BaselineLoadResult{
-            .probe = PreCookProbe{.enabled = true,
-                                  .state = Tina::Asset::SourceImportProbeState::Dirty,
-                                  .reason = "catalog-output-changed"},
-            .catalogPresent = true,
-        };
-    }
-
-    return BaselineLoadResult{
-        .baseline = LoadedBaseline{
-            .stateBytes = std::move(*stateBytes),
-            .metadata = *metadata,
-            .catalog = std::move(*catalog),
-            .revision = importRevision,
-        },
-        .probe = PreCookProbe{.enabled = true,
-                              .state = Tina::Asset::SourceImportProbeState::Dirty,
-                              .reason = "not-probed"},
-        .catalogPresent = true,
-    };
-}
-
 void printSuccess(const Tina::Asset::CatalogSnapshot& catalog, std::string_view mode,
                   std::string_view cookMode, const PreCookProbe& probe,
                   Tina::Core::u32 unitsTotal, Tina::Core::u32 unitsRecooked,
@@ -563,6 +448,30 @@ void printSuccess(const Tina::Asset::CatalogSnapshot& catalog, std::string_view 
               << objectsCooked << ",\"importStateCommitted\":"
               << (importStateCommitted ? "true" : "false") << ",\"out\":\"" << outRoot
               << "\"}\n";
+}
+
+void printPipelineSuccess(const Tina::Asset::SourceImportPipelineResult& result,
+                          std::string_view mode)
+{
+    const auto cookMode = result.mode == Tina::Asset::SourceImportPipelineMode::CleanReuse
+                              ? "clean-reuse"
+                          : result.mode == Tina::Asset::SourceImportPipelineMode::IncrementalRecook
+                              ? "incremental-recook"
+                              : "full-recook";
+    std::cout << "{\"status\":\"ok\",\"tool\":\"tina_assetc\",\"entries\":"
+              << result.catalogEntries << ",\"dependencies\":" << result.catalogDependencies
+              << ",\"mode\":\"" << mode << "\",\"cookMode\":\"" << cookMode
+              << "\",\"probe\":\"" << probeStateName(result.probeState)
+              << "\",\"probeReason\":\""
+              << Tina::Asset::sourceImportProbeReasonName(result.probeReason)
+              << "\",\"unitsTotal\":" << result.unitsTotal
+              << ",\"unitsRecooked\":" << result.unitsRecooked
+              << ",\"unitsRemoved\":" << result.unitsRemoved
+              << ",\"objectsReused\":" << result.objectsReused
+              << ",\"objectsCooked\":" << result.objectsCooked
+              << ",\"importStateCommitted\":"
+              << (result.importStateCommitted ? "true" : "false") << ",\"out\":\""
+              << result.catalogRootUtf8 << "\"}\n";
 }
 
 [[nodiscard]] Tina::Core::Result<Tina::Asset::CatalogCookRequest> buildTyped2dRequest()
@@ -650,31 +559,109 @@ appendCookRequest(Tina::Asset::CatalogCookRequest& combined,
 }
 
 [[nodiscard]] Tina::Core::Result<Tina::Asset::CatalogCookRequest>
-cookImportRequest(const ImportOption& input)
+cookImportRequest(const ImportOption& input,
+                  Tina::AssetFormat::TargetPlatform targetPlatform)
 {
     return input.kind == ImportKind::Recipe
                ? Tina::Asset::loadCatalogCookRecipeFile(input.path)
-               : Tina::Asset::cookGltfFileToCatalogRequest(input.path);
+               : Tina::Asset::cookGltfFileToCatalogRequest(input.path, targetPlatform);
 }
 
-[[nodiscard]] Tina::Core::Result<Tina::Asset::CatalogCookSourceResult>
-cookSourceImport(const ImportOption& input, std::string_view sourceRoot)
+[[nodiscard]] constexpr Tina::AssetFormat::TargetPlatform hostTargetPlatform() noexcept
 {
-    const Tina::Asset::SourceImportCaptureConfig capture{.sourceRootUtf8 = sourceRoot};
-    return input.kind == ImportKind::Recipe
-               ? Tina::Asset::loadCatalogCookRecipeSourceFile(input.path, capture)
-               : Tina::Asset::cookGltfFileToCatalogSourceResult(input.path, capture);
+#if defined(_WIN32)
+    return Tina::AssetFormat::TargetPlatform::WindowsX64;
+#else
+    return Tina::AssetFormat::TargetPlatform::LinuxX64;
+#endif
 }
 
-[[nodiscard]] Tina::Core::Result<Tina::Asset::SourceImportUnitProbeDesc>
-makeProbeDesc(const ImportOption& input, std::string_view sourceRoot,
-              Tina::AssetFormat::TargetPlatform targetPlatform)
+[[nodiscard]] Tina::Core::Result<Tina::AssetFormat::TargetPlatform>
+resolveRecipeTargetPlatform(const Options& options)
 {
-    return input.kind == ImportKind::Recipe
-               ? Tina::Asset::makeCatalogRecipeSourceImportProbeDesc(
-                     sourceRoot, input.path, targetPlatform)
-               : Tina::Asset::makeGltfSourceImportProbeDesc(
-                     sourceRoot, input.path, Tina::Asset::GltfCookIds{});
+    Tina::AssetFormat::TargetPlatform targetPlatform =
+        Tina::AssetFormat::TargetPlatform::Invalid;
+    for (const auto& input : options.imports)
+    {
+        if (input.kind != ImportKind::Recipe)
+        {
+            continue;
+        }
+        auto recipeTarget = Tina::Asset::loadCatalogCookRecipeTargetPlatform(input.path);
+        if (!recipeTarget)
+        {
+            return Tina::Core::failure(std::move(recipeTarget.error()));
+        }
+        if (targetPlatform == Tina::AssetFormat::TargetPlatform::Invalid)
+        {
+            targetPlatform = *recipeTarget;
+        }
+        else if (targetPlatform != *recipeTarget)
+        {
+            return Tina::Core::failure(
+                Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                "source import recipes target different platforms");
+        }
+    }
+    return targetPlatform == Tina::AssetFormat::TargetPlatform::Invalid
+               ? hostTargetPlatform()
+               : targetPlatform;
+}
+
+[[nodiscard]] Tina::Core::Result<std::optional<Tina::AssetFormat::TargetPlatform>>
+committedImportTargetPlatform(const Options& options,
+                              std::pmr::memory_resource& memory)
+{
+    if (options.importStatePath.empty())
+    {
+        return std::optional<Tina::AssetFormat::TargetPlatform>{};
+    }
+    auto bytes = Tina::Core::readFile(
+        options.importStatePath,
+        Tina::Core::ReadFileConfig{.maxBytes = Tina::Core::MaxReadFileBytes,
+                                   .memoryResource = &memory});
+    if (!bytes)
+    {
+        if (bytes.error().code == Tina::Core::CoreErrorCode::NotFound)
+        {
+            return std::optional<Tina::AssetFormat::TargetPlatform>{};
+        }
+        return Tina::Core::failure(std::move(bytes.error()));
+    }
+    auto metadata = Tina::AssetFormat::parseSourceImportMetadataView(*bytes);
+    if (!metadata)
+    {
+        if (metadata.error().code == Tina::AssetFormat::AssetFormatErrorCode::UnsupportedSchema)
+        {
+            return std::optional<Tina::AssetFormat::TargetPlatform>{};
+        }
+        return Tina::Core::failure(std::move(metadata.error()));
+    }
+    return std::optional<Tina::AssetFormat::TargetPlatform>{
+        metadata->header().targetPlatform};
+}
+
+[[nodiscard]] Tina::Core::Result<Tina::AssetFormat::TargetPlatform>
+resolveImportTargetPlatform(const Options& options,
+                            std::pmr::memory_resource& memory)
+{
+    const bool hasRecipe = std::any_of(
+        options.imports.begin(), options.imports.end(),
+        [](const ImportOption& input) { return input.kind == ImportKind::Recipe; });
+    if (!hasRecipe)
+    {
+        return hostTargetPlatform();
+    }
+    auto committed = committedImportTargetPlatform(options, memory);
+    if (!committed)
+    {
+        return Tina::Core::failure(std::move(committed.error()));
+    }
+    if (committed->has_value())
+    {
+        return **committed;
+    }
+    return resolveRecipeTargetPlatform(options);
 }
 
 [[nodiscard]] Tina::Asset::CatalogPackageStageConfig
@@ -683,25 +670,6 @@ stageConfig(std::pmr::memory_resource& memory, bool verifyTypedPayload)
     return Tina::Asset::CatalogPackageStageConfig{
         .validation = catalogOpenConfig(memory, false, verifyTypedPayload),
     };
-}
-
-[[nodiscard]] Tina::Core::Status
-commitImportState(std::string_view root, std::string_view statePath,
-                  const Tina::Asset::SourceImportCandidate& candidate,
-                  std::pmr::memory_resource& memory)
-{
-    auto revision = Tina::Asset::captureCatalogPackageRevision(
-        root, Tina::Asset::CatalogPackageChangeDetectorConfig{.scratchMemoryResource = &memory});
-    if (!revision)
-    {
-        return Tina::Core::failure(std::move(revision.error()));
-    }
-    return Tina::Asset::commitSourceImportCandidate(
-        statePath, candidate,
-        Tina::AssetFormat::SourceImportManifestRevision{
-            .manifestDigest = revision->manifestDigest,
-            .manifestBytes = revision->manifestBytes,
-        });
 }
 
 } // namespace
@@ -716,6 +684,12 @@ int main(int argc, char** argv)
 
     const std::string_view mode = modeName(options);
     std::pmr::unsynchronized_pool_resource memory;
+    auto importTargetPlatform = resolveImportTargetPlatform(options, memory);
+    if (!importTargetPlatform)
+    {
+        printError(importTargetPlatform.error());
+        return 1;
+    }
 
     if (options.importStatePath.empty())
     {
@@ -731,7 +705,7 @@ int main(int argc, char** argv)
             bool hasTargetPlatform = false;
             for (const auto& input : options.imports)
             {
-                auto unit = cookImportRequest(input);
+                auto unit = cookImportRequest(input, *importTargetPlatform);
                 if (!unit)
                 {
                     printError(unit.error());
@@ -768,205 +742,50 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    auto loaded = loadBaseline(options, memory);
-    if (!loaded)
-    {
-        printError(loaded.error());
-        return 1;
-    }
-
-    if (loaded->baseline)
-    {
-        auto& baseline = *loaded->baseline;
-        std::vector<Tina::Asset::SourceImportUnitProbeDesc> descriptions;
-        descriptions.reserve(options.imports.size());
-        for (const auto& input : options.imports)
-        {
-            auto desc = makeProbeDesc(input, options.sourceRoot,
-                                      baseline.metadata.header().targetPlatform);
-            if (!desc)
-            {
-                printError(desc.error());
-                return 1;
-            }
-            descriptions.push_back(std::move(*desc));
-        }
-        auto batch = Tina::Asset::probeSourceImportUnits(
-            baseline.metadata, baseline.revision, descriptions);
-        if (!batch)
-        {
-            printError(batch.error());
-            return 1;
-        }
-
-        loaded->probe.cleanUnitCount = batch->cleanUnitCount;
-        loaded->probe.cleanObjectCount = batch->cleanObjectCount;
-        if (batch->removedUnitCount != 0U)
-        {
-            loaded->probe.state = Tina::Asset::SourceImportProbeState::Dirty;
-            loaded->probe.reason = "unit-set-changed";
-        }
-        else if (batch->dirtyUnitCount == 0U)
-        {
-            loaded->probe.state = Tina::Asset::SourceImportProbeState::Clean;
-            loaded->probe.reason = "none";
-            printSuccess(baseline.catalog, mode, "clean-reuse", loaded->probe,
-                         static_cast<Tina::Core::u32>(options.imports.size()), 0U, 0U,
-                         baseline.catalog.entryCount(), 0U, false, options.outRoot);
-            return 0;
-        }
-        else
-        {
-            loaded->probe.state = Tina::Asset::SourceImportProbeState::Dirty;
-            const auto dirty = std::find_if(batch->units.begin(), batch->units.end(), [](const auto& unit) {
-                return unit.state != Tina::Asset::SourceImportProbeState::Clean;
-            });
-            loaded->probe.reason = dirty != batch->units.end()
-                                       ? Tina::Asset::sourceImportProbeReasonName(dirty->reason)
-                                       : "unit-set-changed";
-        }
-
-        if (options.stageOutRoot.empty())
-        {
-            printError(Tina::Core::Error{
-                Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
-                "dirty source import requires fresh --stage-out and --stage-import-state"});
-            return 1;
-        }
-
-        Tina::Asset::CatalogCookRequest dirtyRequest{};
-        bool hasTargetPlatform = false;
-        if (batch->cleanUnitCount != 0U)
-        {
-            dirtyRequest.targetPlatform = baseline.metadata.header().targetPlatform;
-            hasTargetPlatform = true;
-        }
-        std::vector<Tina::Asset::SourceImportCandidate> recookedCandidates;
-        std::vector<Tina::AssetFormat::SourceImportUnitId> retainedUnitIds;
-        recookedCandidates.reserve(batch->dirtyUnitCount);
-        retainedUnitIds.reserve(batch->cleanUnitCount);
-        for (Tina::Core::usize index = 0; index < options.imports.size(); ++index)
-        {
-            if (batch->units[index].state == Tina::Asset::SourceImportProbeState::Clean)
-            {
-                retainedUnitIds.push_back(descriptions[index].expected.unitId);
-                continue;
-            }
-
-            auto unit = cookSourceImport(options.imports[index], options.sourceRoot);
-            if (!unit)
-            {
-                printError(unit.error());
-                return 1;
-            }
-            if (const auto status = appendCookRequest(dirtyRequest, hasTargetPlatform,
-                                                      std::move(unit->request));
-                !status)
-            {
-                printError(status.error());
-                return 1;
-            }
-            recookedCandidates.push_back(std::move(unit->sourceImports));
-        }
-        auto composed = Tina::Asset::composeSourceImportCandidate(
-            Tina::Asset::SourceImportCandidateComposeDesc{
-                .baseline = &baseline.metadata,
-                .retainedUnitIds = retainedUnitIds,
-                .recookedCandidates = recookedCandidates,
-            });
-        if (!composed)
-        {
-            printError(composed.error());
-            return 1;
-        }
-        auto staged = Tina::Asset::cookAndStageIncrementalCatalogPackage(
-            options.stageOutRoot, options.outRoot, baseline.catalog,
-            composed->retainedAssetIds, dirtyRequest,
-            stageConfig(memory, verifyTypedPayloads(options)));
-        if (!staged)
-        {
-            printError(staged.error());
-            return 1;
-        }
-        if (const auto status = commitImportState(options.stageOutRoot,
-                                                  options.stageImportStatePath,
-                                                  composed->candidate, memory);
-            !status)
-        {
-            printError(status.error());
-            return 1;
-        }
-
-        const auto cookMode = batch->cleanUnitCount != 0U ? "incremental-recook" : "full-recook";
-        printSuccess(*staged, mode, cookMode, loaded->probe,
-                     static_cast<Tina::Core::u32>(options.imports.size()),
-                     batch->dirtyUnitCount, batch->removedUnitCount,
-                     static_cast<Tina::Core::u32>(composed->retainedAssetIds.size()),
-                     static_cast<Tina::Core::u32>(dirtyRequest.assets.size()), true,
-                     options.stageOutRoot);
-        return 0;
-    }
-
-    if (loaded->catalogPresent && options.stageOutRoot.empty())
-    {
-        printError(Tina::Core::Error{
-            Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
-            "full recook of an existing baseline requires fresh --stage-out and --stage-import-state"});
-        return 1;
-    }
-
-    Tina::Asset::CatalogCookRequest request{};
-    bool hasTargetPlatform = false;
-    std::vector<Tina::Asset::SourceImportCandidate> candidates;
-    candidates.reserve(options.imports.size());
+    std::vector<Tina::Asset::SourceImportPipelineUnit> units;
+    units.reserve(options.imports.size());
     for (const auto& input : options.imports)
     {
-        auto unit = cookSourceImport(input, options.sourceRoot);
-        if (!unit)
+        units.push_back(Tina::Asset::SourceImportPipelineUnit{
+            .kind = input.kind == ImportKind::Recipe
+                        ? Tina::Asset::SourceImportPipelineUnitKind::CatalogRecipe
+                        : Tina::Asset::SourceImportPipelineUnitKind::Gltf,
+            .sourceUtf8Path = input.path,
+        });
+    }
+    const auto executePipeline = [&](Tina::AssetFormat::TargetPlatform targetPlatform) {
+        return Tina::Asset::executeSourceImportPipeline(Tina::Asset::SourceImportPipelineRequest{
+            .sourceRootUtf8 = options.sourceRoot,
+            .targetPlatform = targetPlatform,
+            .units = units,
+            .baselineCatalogRootUtf8 = options.outRoot,
+            .baselineStateUtf8Path = options.importStatePath,
+            .stageCatalogRootUtf8 = options.stageOutRoot,
+            .stageStateUtf8Path = options.stageImportStatePath,
+            .stageConfig = stageConfig(memory, verifyTypedPayloads(options)),
+        });
+    };
+    auto imported = executePipeline(*importTargetPlatform);
+    if (!imported &&
+        imported.error().code == Tina::Asset::AssetErrorCode::SourceImportTargetPlatformMismatch)
+    {
+        auto currentRecipeTarget = resolveRecipeTargetPlatform(options);
+        if (!currentRecipeTarget)
         {
-            printError(unit.error());
+            printError(currentRecipeTarget.error());
             return 1;
         }
-        if (const auto status = appendCookRequest(request, hasTargetPlatform,
-                                                  std::move(unit->request));
-            !status)
+        if (*currentRecipeTarget != *importTargetPlatform)
         {
-            printError(status.error());
-            return 1;
+            importTargetPlatform = *currentRecipeTarget;
+            imported = executePipeline(*importTargetPlatform);
         }
-        candidates.push_back(std::move(unit->sourceImports));
     }
-    auto composed = Tina::Asset::composeSourceImportCandidate(
-        Tina::Asset::SourceImportCandidateComposeDesc{.recookedCandidates = candidates});
-    if (!composed)
+    if (!imported)
     {
-        printError(composed.error());
+        printError(imported.error());
         return 1;
     }
-
-    const std::string_view targetRoot = options.stageOutRoot.empty()
-                                            ? std::string_view(options.outRoot)
-                                            : std::string_view(options.stageOutRoot);
-    const std::string_view targetState = options.stageImportStatePath.empty()
-                                             ? std::string_view(options.importStatePath)
-                                             : std::string_view(options.stageImportStatePath);
-    auto staged = Tina::Asset::cookAndStageCatalogPackage(
-        targetRoot, request, stageConfig(memory, verifyTypedPayloads(options)));
-    if (!staged)
-    {
-        printError(staged.error());
-        return 1;
-    }
-    if (const auto status = commitImportState(targetRoot, targetState,
-                                              composed->candidate, memory);
-        !status)
-    {
-        printError(status.error());
-        return 1;
-    }
-
-    const auto unitCount = static_cast<Tina::Core::u32>(options.imports.size());
-    printSuccess(*staged, mode, "full-recook", loaded->probe, unitCount, unitCount, 0U,
-                 0U, staged->entryCount(), true, targetRoot);
+    printPipelineSuccess(*imported, mode);
     return 0;
 }

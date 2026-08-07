@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cwctype>
 #include <filesystem>
 #include <memory_resource>
 #include <optional>
@@ -120,6 +121,31 @@ TEST(SourceImportCaptureTests, DeduplicatesOnlyIdenticalSourceObservations)
     ASSERT_FALSE(byteCountMismatch.has_value());
     EXPECT_EQ(candidate.sources.size(), 1U);
 }
+
+#if defined(_WIN32)
+TEST(SourceImportCaptureTests, WindowsEquivalentPathCaseUsesOneStableIdentity)
+{
+    const auto root = std::filesystem::temp_directory_path() /
+                      "Tina_Source_Import_Path_Case";
+    auto lowerRootText = root.native();
+    std::transform(lowerRootText.begin(), lowerRootText.end(), lowerRootText.begin(),
+                   [](const wchar_t character) { return std::towlower(character); });
+    const auto source = root / "Mixed" / "Asset.GLTF";
+
+    auto canonical = normalizeSourceImportPath(
+        SourceImportCaptureConfig{.sourceRootUtf8 = toUtf8(root)}, toUtf8(source));
+    auto equivalent = normalizeSourceImportPath(
+        SourceImportCaptureConfig{
+            .sourceRootUtf8 = toUtf8(std::filesystem::path(std::move(lowerRootText))),
+        },
+        toUtf8(source));
+
+    ASSERT_TRUE(canonical) << (canonical ? "" : canonical.error().message);
+    ASSERT_TRUE(equivalent) << (equivalent ? "" : equivalent.error().message);
+    EXPECT_EQ(*canonical, "mixed/asset.gltf");
+    EXPECT_EQ(*equivalent, *canonical);
+}
+#endif
 
 TEST(SourceImportCaptureTests, InvalidCandidateDoesNotReplaceExistingState)
 {

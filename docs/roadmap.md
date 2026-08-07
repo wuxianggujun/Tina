@@ -28,7 +28,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | --- | --- |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
-| 2D-EDITOR | EditorApp 独立模块、四类 current-schema canonical document/file、固定预算 revision history、per-tab session/baseline、完整 TRS Inspector transaction、viewport gizmo、Tile/Timeline authoring、Cook Preview、Save/Save As、dirty-close modal、Catalog Refresh、Catalog-resolved 2D/3D GPU viewport 已落地；Windows 四类 native Save As、owning canonical path/dependency Inspector、`EditorProjectWorkspace`/空项目目录创建 API、Project `New` 空 current-schema Catalog publish/reopen，以及 Project `Open` + 下一安全帧 live Catalog switch 也已落地。下一步完成 Editor source import 与非 Windows project-folder adapter；这些产品接线完成前不把完整项目工作流标 Done |
+| 2D-EDITOR | EditorApp 独立模块、四类 current-schema canonical document/file、固定预算 revision history、per-tab session/baseline、完整 TRS Inspector transaction、viewport gizmo、Tile/Timeline authoring、Cook Preview、Save/Save As、dirty-close modal、Catalog Refresh、Catalog-resolved 2D/3D GPU viewport 已落地；Windows 原生 dialog 与 Linux `zenity`/`kdialog` open/save/folder 私有 adapter、owning canonical path/dependency Inspector、`EditorProjectWorkspace`/空项目目录创建 API、Project `New` 空 current-schema Catalog publish/reopen、Project `Open` + 下一安全帧 live Catalog switch，以及完整 intended unit source import、后台 validated fresh stage、主线程 reload/busy retry、dirty commit gate、单一 active pointer commit 与 reopen 恢复均已落地。下一步是 Linux 定向编译和真实 helper 产品门禁；完成前 `2D-EDITOR` 保持 InProgress |
 | UI-PERF-001 | Done；含 `ui_motion_v1` 在内的 UI workload 集已齐 |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-FLOW-001 | Done；固定容量 Layer/Screen 栈、Back/Confirm/Menu Action Router、16 槽本地用户、Gamepad assignment、per-user 设备 revision 与 2D 产品已闭环 |
@@ -84,7 +84,7 @@ Layer/Screen、Action Router、多本地用户与设备提示都复用窗口级�
 - 仅在标准 Behavior 不足时评估 startup-only 自定义 Behavior SPI；
 - 多行 TextEdit、grapheme/shaping 与完整 IME 候选窗；
 - Linux AT-SPI adapter 与真实辅助技术验收；
-- Editor source import 产品接线与非 Windows project-folder adapter；workspace/空目录创建 API、Windows Project `New` 空 Catalog publish/reopen、Project `Open` + 下一安全帧 live Catalog switch、native Save As、owning canonical path/dependency Inspector、Save/dirty-close/Catalog Refresh/current-schema open/per-tab session/完整 TRS/gizmo/Tile/Timeline/Catalog-resolved viewport 已落地；
+- Linux Editor native dialog 定向编译与 `zenity`/`kdialog` 真实产品门禁；adapter、Editor source import、workspace/空目录创建 API、Windows/Linux Project New/Open dialog、Windows Project `New` 空 Catalog publish/reopen、Project `Open` + 下一安全帧 live Catalog switch、native Save As、owning canonical path/dependency Inspector、Save/dirty-close/Catalog Refresh/current-schema open/per-tab session/完整 TRS/gizmo/Tile/Timeline/Catalog-resolved viewport 已落地；
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 

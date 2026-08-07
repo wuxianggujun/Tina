@@ -34,6 +34,8 @@ enum class SourceImportProbeReason : Core::u8 {
     SourceContentChanged = 9,
     UnitSetChanged = 10,
     StateSchemaChanged = 11,
+    CatalogNotFound = 12,
+    CatalogOutputChanged = 13,
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -65,6 +67,10 @@ sourceImportProbeReasonName(SourceImportProbeReason reason) noexcept
         return "unit-set-changed";
     case SourceImportProbeReason::StateSchemaChanged:
         return "state-schema-changed";
+    case SourceImportProbeReason::CatalogNotFound:
+        return "catalog-not-found";
+    case SourceImportProbeReason::CatalogOutputChanged:
+        return "catalog-output-changed";
     }
     return "unknown";
 }
