@@ -15,6 +15,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         EditorFileDialogLinux.cpp
         EditorFileDialogLinux.hpp
     )
+
+    if(TINA_BUILD_TESTING)
+        add_executable(tina_editor_file_dialog_gate
+            EditorFileDialogGateMain.cpp
+        )
+        target_compile_features(tina_editor_file_dialog_gate PRIVATE cxx_std_23)
+        target_link_libraries(tina_editor_file_dialog_gate PRIVATE Tina::EditorApp)
+        set_target_properties(tina_editor_file_dialog_gate PROPERTIES
+            CXX_EXTENSIONS OFF
+        )
+    endif()
 endif()
 
 target_compile_features(tina_editor_app PUBLIC cxx_std_23)

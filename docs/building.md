@@ -92,6 +92,23 @@ Preset 的 `binaryDir` 使用 `${sourceDir}/out/build/...`。每个 Git worktree
 先构建最小受影响 target，并观察依赖图；若已有 `shaderc`/第三方库却开始大范围重编，先停止并检查
 regenerate、编译命令或依赖追踪变化，不把重型工具链重编当作默认步骤。
 
+### Linux Editor 两阶段复用与资源回收
+
+Linux Editor 的 `zenity` / `kdialog` 产品门禁使用唯一专用 build tree：
+`out/build/docker-linux-gcc13-vnext-bgfx-editor`。两种 helper 环境不得各自重建 bgfx、shaderc 或 Editor：
+
+1. `gcc13-editor-zenity` 是 primary：唯一一次 configure/build，随后运行 `tina_editor_app_tests` 与 2D/3D
+   短 smoke；全部成功后写入当前 source fingerprint 和三份 executable SHA-256。
+2. `gcc13-editor-kdialog` 是 secondary：要求 primary stamp 存在并逐项校验 source/binary hash，只运行真实
+   `kdialog` open/save/folder/cancel；**不调用 CMake，不重复运行测试或 workspace smoke**。
+3. secondary 成功后自动删除该专用 build tree。失败时保留 tree 只用于读取首个错误和定向重试；记录后
+   必须删除，不能让临时 Linux/vcpkg/bgfx/shaderc 产物长期累积在项目中。
+4. 每个容器都使用 `--rm`；gate 对 probe/helper 使用独立进程组和硬超时，并回收 clipboard、watchdog、
+   Openbox 与临时 UTF-8 fixture。收尾输出必须包含 build tree、进程和临时目录的资源状态。
+
+这项删除规则只针对门禁专用临时 tree；Windows 核心集成 worktree 的常驻增量 build tree 继续保留复用，
+不得用全量 wipe 代替定向资源管理。
+
 ## Windows 日常 UI 增量构建
 
 日常 UI 开发优先使用固定脚本，不手写 MSBuild native 参数：

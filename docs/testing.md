@@ -21,6 +21,9 @@ CTest 测试。测试进程任一返回非0即失败。
    每个功能 worktree 重复构建 bgfx、shaderc 或完整产品图。
 11. 不得跨 worktree 共用 `binaryDir`。Preset 路径基于 `${sourceDir}`，CMake cache 和生成项目绑定源码
    绝对路径；需要隔离验证时使用该 worktree 自己的临时 build tree。
+12. 同一提交/工作树的跨环境验证先构建一次，再用 source fingerprint + binary hash 复用产物；secondary
+   环境不得为了“确认编译”重复 configure/build/test。最后一个环境完成后回收专用 build tree、容器、
+   helper/watchdog/窗口管理器和 agent，并在结果中记录资源状态。
 
 ## Windows UI 快速门禁
 
@@ -903,6 +906,25 @@ Undo/Redo depth 均为0。未给 active workspace 配置路径时 Save disabled�
 Windows 人工 Save As 还应分别确认 `.tworld`、`.tprefab`、`.tasset` save-file dialog 与 TileMap folder picker；Cancel 后
 path/baseline/dirty/tab/selection 不变。Linux 使用安装了 `zenity` 或仅安装 `kdialog` 的两种环境分别验证 open/save/folder、
 Cancel、UTF-8 absolute path 与 helper 回收；其他未支持平台返回 `Unsupported` 后仍可从 TextEdit 路径完成保存。
+
+Linux Editor 自动门禁必须按顺序执行：
+
+```powershell
+# Primary：唯一一次 Linux configure/build/test + 2D/3D smoke，再验证 zenity。
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 `
+  -Gate gcc13-editor-zenity -OutJson artifacts\gates\2d-editor-linux-zenity.json
+
+# Secondary：只校验 primary 的 source fingerprint / executable SHA-256 并验证 kdialog；
+# 不调用 CMake、不重复测试/smoke，成功后自动删除专用 Linux Editor build tree。
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 `
+  -Gate gcc13-editor-kdialog -OutJson artifacts\gates\2d-editor-linux-kdialog.json
+```
+
+两个 helper 镜像互斥安装，`kdialog` 环境中 `zenity` 必须确实不存在，不能靠修改 `PATH` 模拟 fallback。
+每个 open/save/folder/cancel case 都检查 probe 的直接子进程 executable/cmdline、UTF-8 absolute result 和
+child 已 reaped。primary 成功暂时报告 `resource_build_tree=retained-for-kdialog-reuse`；secondary 成功必须报告
+`resource_build_tree=removed`、`resource_processes=stopped` 和 `resource_temporary_directory=removed`。任何失败
+不得启动第二套编译；保留的专用 tree 只用于首错诊断，完成重试或记录后定向删除。
 Windows Project `New` 人工门禁选择一个空目录，要求生成 `Source/`、`Catalog/` 和零 entry current-schema manifest；随后
 用 `openCatalogPackage()` 的 typed validation 重新打开成功，并在下一安全帧报告 `projectSwitches=1`、
 `projectCatalogConfigured=true`、`builtInPreviewCatalog=false`，active Catalog root 指向新项目，空 Browser 与无资源 preview

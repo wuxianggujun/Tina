@@ -51,6 +51,11 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
   常驻 `out/build/<preset>` 做集中增量验证；不要在每个功能 worktree 重复构建 bgfx/shaderc/产品图。
 - 禁止不同 worktree 共用同一个 CMake `binaryDir`；preset 基于 `${sourceDir}`，cache 与生成项目绑定
   源码绝对路径。只有确需合并前验证的高风险切片才创建该 worktree 自己的临时 build tree。
+- Linux Editor `zenity`/`kdialog` 门禁只允许 primary 环境执行一次 configure/build/test/smoke；secondary
+  环境必须校验源码指纹与二进制 hash 后直接复用，不得再次调用 CMake 或重复测试。最后一个环境成功后删除
+  专用 `out/build/docker-linux-gcc13-vnext-bgfx-editor`，失败时只为诊断保留并在重试/记录后回收。
+- 构建/gate 收尾必须报告并回收本轮启动的编译进程、helper、watchdog、窗口管理器、容器和 agent；不得把
+  临时跨平台 build tree 长期留在项目内。常驻核心 build tree 不因提速或日常收尾而全量删除。
 
 ## 核心约定
 

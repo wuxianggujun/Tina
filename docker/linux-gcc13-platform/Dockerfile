@@ -67,5 +67,18 @@ RUN set -eux; \
     "${VCPKG_ROOT}/bootstrap-vcpkg.sh" -disableMetrics; \
     test -f "${VCPKG_ROOT}/versions/baseline.json"
 
+# Keep the compiler/vcpkg layers identical for the zenity and kdialog images.
+ARG TINA_EDITOR_DIALOG_HELPER=none
+RUN set -eux; \
+    case "${TINA_EDITOR_DIALOG_HELPER}" in \
+      none) exit 0 ;; \
+      zenity) editor_dialog_packages="dbus-x11 openbox xclip xdotool zenity" ;; \
+      kdialog) editor_dialog_packages="dbus-x11 openbox xclip xdotool kdialog" ;; \
+      *) echo "invalid TINA_EDITOR_DIALOG_HELPER=${TINA_EDITOR_DIALOG_HELPER}" >&2; exit 2 ;; \
+    esac; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ${editor_dialog_packages}; \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /work/tina
 CMD ["/bin/bash"]
