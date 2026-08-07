@@ -1,17 +1,25 @@
 add_executable(tina_editor_tests
     EditorDocumentTabsTests.cpp
+    EditorProjectCreationTests.cpp
+    EditorProjectWorkspaceTests.cpp
     ProjectAssetBrowserTests.cpp
     SpriteAnimationAuthoringDocumentTests.cpp
+    SpriteAnimationAuthoringFileTests.cpp
     TileMapAuthoringDocumentTests.cpp
+    TileMapAuthoringFileTests.cpp
     World2DAuthoringDocumentTests.cpp
     World2DAuthoringFileTests.cpp
     World3DAuthoringDocumentTests.cpp
     World3DAuthoringFileTests.cpp
     header_isolation/EditorErrorsHeader.cpp
     header_isolation/EditorDocumentTabsHeader.cpp
+    header_isolation/EditorProjectCreationHeader.cpp
+    header_isolation/EditorProjectWorkspaceHeader.cpp
     header_isolation/ProjectAssetBrowserHeader.cpp
     header_isolation/SpriteAnimationAuthoringDocumentHeader.cpp
+    header_isolation/SpriteAnimationAuthoringFileHeader.cpp
     header_isolation/TileMapAuthoringDocumentHeader.cpp
+    header_isolation/TileMapAuthoringFileHeader.cpp
     header_isolation/World2DAuthoringDocumentHeader.cpp
     header_isolation/World2DAuthoringFileHeader.cpp
     header_isolation/World3DAuthoringDocumentHeader.cpp

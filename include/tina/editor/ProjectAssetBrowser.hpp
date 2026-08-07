@@ -34,6 +34,8 @@ struct ProjectAssetDescriptor final {
     Core::u32 dependencyCount = 0;
     Core::u64 cookedFileBytes = 0;
     std::string displayName{};
+    std::string canonicalRelativeCookedPath{};
+    std::vector<AssetFormat::AssetDependency> dependencies{};
 
     friend bool operator==(const ProjectAssetDescriptor&,
                            const ProjectAssetDescriptor&) = default;
@@ -41,6 +43,8 @@ struct ProjectAssetDescriptor final {
 
 struct ProjectAssetBrowserConfig final {
     Core::usize itemCapacity = 4096;
+    Core::usize dependencyCapacity = AssetFormat::Wire::MaxManifestDependencies;
+    Core::usize dependencyCapacityPerAsset = AssetFormat::Wire::MaxDependenciesPerAsset;
 };
 
 [[nodiscard]] std::string_view projectAssetKindLabel(
@@ -51,8 +55,8 @@ struct ProjectAssetBrowserConfig final {
     AssetFormat::AssetKind kind, ProjectAssetFilter filter) noexcept;
 
 // Owning, deterministic project asset index for Editor UI. Input entries are
-// copied and sorted by AssetId. visibleItem() views expire on destruction only;
-// filter and selection changes do not move owned descriptors.
+// copied and sorted by AssetId. visibleItem() and Inspector snapshot views expire
+// on destruction only; filter and selection changes do not move owned descriptors.
 class ProjectAssetBrowserModel final {
 public:
     ProjectAssetBrowserModel(const ProjectAssetBrowserModel&) = delete;
@@ -81,6 +85,9 @@ public:
     [[nodiscard]] const ProjectAssetDescriptor*
     visibleItem(Core::usize visibleIndex) const noexcept;
     [[nodiscard]] const ProjectAssetDescriptor* selectedItem() const noexcept;
+    [[nodiscard]] const ProjectAssetDescriptor*
+    inspectorSnapshot(Core::AssetId assetId) const noexcept;
+    [[nodiscard]] const ProjectAssetDescriptor* selectedInspectorSnapshot() const noexcept;
 
     [[nodiscard]] Core::Status setFilter(ProjectAssetFilter filter) noexcept;
     [[nodiscard]] Core::Status selectVisibleIndex(Core::usize visibleIndex) noexcept;

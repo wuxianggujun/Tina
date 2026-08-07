@@ -9,7 +9,7 @@ TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v1。H
 schema 兼容格式。
 
 独立 `Tina::Editor` target 提供 `World2DAuthoringDocument/File`、`World3DAuthoringDocument/File`、
-`TileMapAuthoringDocument` 与 `SpriteAnimationAuthoringDocument`；独立
+`TileMapAuthoringDocument/File`、`SpriteAnimationAuthoringDocument/File`，以及项目根模型与空项目目录创建 API；独立
 `Tina::EditorApp` 负责桌面组合，正式产品 target `tina_editor_desktop` 输出 `TinaEditor.exe`，其 `main()` 只负责
 调用应用模块。2D Inspector 编辑 Position X/Y、
 Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整 Position/Rotation/Scale XYZ，并把 Euler XYZ 一次规范化为 quaternion。
@@ -23,10 +23,14 @@ World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 prox
 固定控件高度与滚动容器组合。`updateUI()` 从上一轮成功提交的 viewport/root `worldRect` 计算
 `RenderNormalizedViewport`，因此窗口变大时 viewport 与中间工作区共同增长，两侧 dock 保持 bounded width，
 world pass 下一帧跟随新的布局；首帧在 committed rect 可用前不提交 world，避免用 `1280×800` 写死区域或全屏闪烁。
-`--world2d-path=<UTF-8 path>` 与 `--world3d-path=<UTF-8 path>` 分别配置两个 workspace session；已有文件按各自
-schema 原子加载为 clean baseline，不存在的路径保留为该 workspace 的新文档 Save target。每个 session 独立持有
-path、loaded flag 与 saved baseline，切换模式不移动或复用这些状态；Toolbar Save 只原子保存 active canonical
-document，未给当前 workspace 配置路径时保持 disabled。两种路径不得指向同一文件。
+`--world2d-path=<UTF-8 path>` 与 `--world3d-path=<UTF-8 path>` 分别配置两个 pinned workspace session；已有文件按各自
+schema 原子加载为 clean baseline，不存在的路径保留为该 workspace 的新文档 Save target。每个 pinned/Catalog tab
+都有固定容量 session，独立持有 document key、strict UTF-8 path、target platform、loaded flag 与完整 canonical
+baseline。Toolbar 的 path 是单行 TextEdit：Save 只在 active document 已有路径且 dirty 时启用；Save As 对四类可写
+document 启用，Asset Inspector 保持只读。Windows Save As 使用 native dialog：World2D 选择 `.tworld`、World3D 选择
+`.tprefab`、SpriteAnimation 选择 `.tasset` 文件，TileMap 选择 package 输出目录。取消 dialog 不修改 path、baseline、dirty、
+tab 或 selection；非 Windows adapter 返回 `Unsupported`，EditorApp 明确回退到 TextEdit 中的 strict UTF-8 路径。
+两个打开的 document 不得拥有相同文本路径。
 2D 的五个字段和 3D 的九个字段都通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
 拒绝时恢复 canonical 字段并保持 document/history/preview 不变。2D Rotation Z 发布平面 Z quaternion；3D Euler XYZ
 发布完整规范化 quaternion，并保留 hierarchy、Mesh/Material 与 visibility。GPU preview 同步读取完整 canonical TRS。
@@ -50,27 +54,48 @@ Lease/GPU/binding；Scene extraction 只取得 packet-local `FrameResourceRef`�
 只从本次 preview 过滤，authoring document 与 history 保持不变，不回退到固定 binding key 或彩色 proxy。
 
 Project Browser 直接拥有 Catalog descriptor 的确定性 AssetId 排序索引，并提供 All/2D/3D/Media 过滤、稳定选择和
-固定 32 px 虚拟列表行。Prefab、TileMap 与 SpriteAnimationClip 只按当前 schema 打开到对应 authoring surface；其他
+固定 32 px 虚拟列表行。每个 owned descriptor 还保存由 `AssetKind + AssetId` 重新派生的 canonical cooked 相对路径与
+完整、按 AssetId 排序的 dependency records，不借用 Catalog snapshot。只读 Asset Inspector 按 active Inspector tab 的
+`AssetId` 取得对应 snapshot，以固定 36 px 行高虚拟化显示 dependency kind、AssetId 与 flags，而不是继续跟随 Project
+Browser 的临时 selection。Prefab、TileMap 与 SpriteAnimationClip 只按当前 schema 打开到对应 authoring surface；其他
 kind 打开只读 Asset Inspector。固定容量 document tab model 以 `(document kind, AssetId)` 去重，支持 pinned/dirty close
-保护和 2D/3D workspace 路由。EditorApp 的固定 slot 对每个 Catalog authoring tab 独立拥有 document/history；切换时
-只 swap 同 kind active owner，重复打开既有 key 只激活而不 reload。新资源引用的 registry rebuild 延迟到下一帧
-`updateFrame()`，避开当前 Render packet 借用期。Save/Save As、dirty-close 确认对话框与 Catalog refresh 尚未接入，
-因此当前仍不是完整多文档持久化。
+保护和 2D/3D workspace 路由。EditorApp 的固定 slot 对每个 Catalog authoring tab 独立拥有 document/history/session；
+切换时只 swap 同 kind active owner，重复打开既有 key 只激活而不 reload。dirty 的非 pinned tab 仍可点击 Close，随后
+Modal 提供 Save/Save As、Discard、Cancel；Cancel 不改变 tab、document 或 selection，保存失败保留 Modal 与 dirty 状态。
+Project Browser 的 Refresh 在下一帧 Render packet 建立前调用 `AssetSystem::reloadCatalog()`，显式携带当前 Sprite/Mesh
+registry participant；成功后重建 browser selection 与 preview binding，失败继续使用旧 Catalog。所有路径只写当前
+schema，不增加 editor-only wire 或旧资产兼容分支。
+
+`EditorProjectWorkspace::Create()` 已提供 owning、move-only 的 project/source/Cooked Catalog root 模型：三个 root 必须是
+bounded strict UTF-8 absolute path，Source 与 Catalog 都严格位于 project root 下且彼此不重叠；这里只做 lexical
+normalization。`CreateNewEditorProject()` 进一步创建或采用一个既有空 project root，建立默认 `Source/` 与 `Catalog/`
+目录，拒绝 symlink/junction/reparse root，核验最终物理 containment，并只按捕获的目录 identity 回滚本次事务创建的目录。
+EditorApp 的 Project `New` action 在 Windows 先选择空目录，再调用该 API，写零 entry 的 current-schema manifest，通过
+`publishCatalogPackage()` manifest-last 发布，并以 typed validation 重新打开磁盘 package。Project `Open` 要求所选 root
+包含物理 `Source/` 与 `Catalog/` 目录，拒绝 symlink/junction/reparse 布局并核验 final containment。New/Open 成功后只排队
+workspace，下一安全帧在 Render packet 建立前通过 `AssetSystem::reloadCatalog()` 的 Sprite/Mesh participant transaction
+验证并切换 live Catalog。commit 前脏 Catalog document 会阻止切换，其他动态 Catalog tab 在成功切换后失效；Browser
+只从 AssetSystem 已提交 snapshot 重建，固定 TileMap/Animation document 也从新 Catalog 重新打开。owning workspace、
+Browser/selection、2D/3D binding 与 animation preview 全部验证成功后才增加 project-switch 计数；commit 前失败保留旧
+Catalog，commit 后 preview 重建失败则作为结构化致命错误返回，不能伪装为成功。Editor source import 尚未接线；非 Windows
+尚无 project-folder adapter，因此
+`2D-EDITOR` 继续保持 InProgress。
 
 ## Editor application layout
 
 ```text
-Toolbar (document/path/mode/undo/redo/save)
+Toolbar (document/editable path/mode/undo/redo/save/save-as)
 Document tabs (World2D/World3D/TileMap/Animation/Catalog assets/close)
 Context bar (breadcrumb/select/move/tile-paint/tile-erase/frame/status)
 Workspace
   Left dock
     Hierarchy (filter/actions/virtual TreeView/selection summary)
-    Project Assets (All/2D/3D/Media/virtual ListView/open)
+    Project Assets (All/2D/3D/Media/virtual ListView/new/open/refresh)
   Active 2D/3D viewport (mode/tools/zoom/preview canvas/footer)
-  Inspector dock (scrollable identity/transform/components/TileMap authoring/document)
+  Inspector dock (scrollable identity/transform/components/TileMap authoring/document/36px dependency list)
 SpriteAnimationClip Timeline (frames/playback/mode/duration/reorder/undo/redo/cook)
 Status bar (schema/entities/revision/preview/selection)
+Dirty-close modal (save/save-as/discard/cancel)
 ```
 
 这层属于 `Tina::EditorApp` 组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局与 GPU smoke 的
@@ -105,8 +130,14 @@ Animation 与初始 workspace，最终 tab/open/load/swap/binding-refresh 固定
 document node capacity 和当前 wire size 计算，成功加载建立 clean baseline，保存只发布 `payloadBytes()`，不生成
 Editor 私有格式。2D 与 3D 文件失败都不会改写 active document 或既有目标。
 
-Shell 在真正写入前先准备 saved baseline，避免“文件已保存但 UI 因随后分配失败仍报成功”的半状态。保存成功后以
-canonical bytes 与 saved baseline 的完整相等比较判断 dirty；因此保存后编辑再 Undo 回 saved bytes 会恢复 `Saved`，
+`saveSpriteAnimationAuthoringDocument(path, document, platform)` 直接写 `cookPreview(platform)` 的唯一 current-schema
+Cooked artifact，并以 sibling atomic replace 发布。`saveTileMapAuthoringDocument(root, document, platform)` 使用每个
+artifact 的 canonical relative path，先逐个原子发布全部 TileMapChunk，再最后发布 TileMap root 作为 commit marker；
+返回 artifact/byte count。二者都自动创建父目录，不生成 manifest、source metadata 或 Editor 私有格式。
+
+Shell 在真正写入前先准备 saved baseline 与目标 path，避免“文件已保存但 UI 因随后分配失败仍报成功”的半状态。
+World/Animation baseline 比较 identity + primary payload；TileMap baseline 还比较 root identity、全部 chunk identity 与
+payload。保存成功后以 canonical bytes 与 saved baseline 的完整相等比较判断 dirty；因此保存后编辑再 Undo 回 saved bytes 会恢复 `Saved`，
 而不是仅按单调 revision 误报 `Modified`。Save 是 Editor command，不是 authoring revision，也不触发多余的
 `Scene::World` preview instantiate。
 
@@ -145,7 +176,8 @@ Inspector / gizmo / tile brush / animation timeline / importer intent
 | gameplay bytes | 4 MiB | `World2DSnapshotWire::MaximumGameplayBytes` |
 | TileMap layer / object / chunk | 16 / 128 / 128 | 当前 Editor document 显式配置；schema hard limit 更高 |
 | SpriteAnimationClip frame | 256 | 当前 Editor document 显式配置；schema hard limit 为 4096 |
-| Project Asset descriptor | 4096 | 创建时复制并按 AssetId 排序；超限或重复 ID 原子失败 |
+| Project Asset descriptor / dependencies total / per asset | 4096 / 4,000,000 / 4096 | 创建时复制 canonical path 与完整 dependency records 并按 AssetId 排序；超限、重复或图不一致原子失败 |
+| Project root UTF-8 path | 4096 bytes | project/source/Catalog 各自上限；Source 与 Catalog 必须是 project 的隔离子目录 |
 | EditorApp document tab | 6 | 固定 UI 槽；公共 model 默认 16、hard limit 64 |
 | history entries（含 current） | 32 | 2..256 |
 | history canonical bytes（含 current） | 16 MiB | 64 bytes..1 GiB |
@@ -202,7 +234,7 @@ smoke；`tina_sample_2d` / `tina_sample_3d` 不是 Editor 验收入口。纯 `Ti
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
-  --gtest_filter=SpriteAnimationAuthoringDocumentTests.*
+  --gtest_filter=SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
@@ -231,11 +263,15 @@ inactive session 的 path/loaded/baseline/dirty 未变化。2D delta 固定为 `
 完整 TRS 在 canonical Prefab、Scene preview 与结构化结果中一致。built-in Catalog smoke 还必须固定报告 entry/load=`9/7`、
 Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`1/3`。
 
-TileMap root+chunk authoring/cook preview、SpriteAnimationClip timeline authoring/cook、Catalog-resolved viewport、
-Project Browser、分类过滤、资源 Inspector、Catalog current-schema open 与固定容量 document tabs 已完成。
+TileMap root+chunk authoring/cook/save、SpriteAnimationClip timeline authoring/cook/save、Catalog-resolved viewport、
+Project Browser、分类过滤、资源 Inspector、Catalog current-schema open/refresh、固定容量 document tabs/session、
+Save/Save As、Windows native Save As picker 与 dirty-close Modal 已完成。项目 workspace 与空目录创建的基础 API 已完成，
+Windows Project `New` 也能创建 Source/Catalog、manifest-last 发布空 current-schema package 并 reopen/typed-validate；
+Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source-import 产品接线仍未完成，
+因此不能把完整项目工作流标为 Done。
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、
 Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D Player 直接预览已解析 Sprite frame，3D workspace
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、
-动画 revision/frame/cook=`4/4/256 B`、Catalog entry/load=`9/7` 和 GPU sprites=`13`。下一产品切片为
-Save/Save As、dirty-close 确认对话框与 Catalog refresh；继续只保留现行 schema，
-不增加旧资产兼容分支。
+动画 revision/frame/cook=`4/4/256 B`、Catalog entry/load=`9/7` 和 GPU sprites=`13`。继续只保留现行 schema，
+不增加旧资产兼容分支；下一产品切片是 Editor source import 与非 Windows native dialog adapter（当前仍使用结构化
+`Unsupported` + TextEdit 回退）。

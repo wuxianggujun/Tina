@@ -28,7 +28,7 @@ UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；�
 | --- | --- |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
-| 2D-EDITOR | EditorApp 独立模块、World2D + Prefab v2 World3D + TileMap v3/v1 + SpriteAnimationClip v1 canonical document、固定预算 revision history、独立 workspace session、完整 TRS Inspector transaction、viewport gizmo、Tile/Timeline authoring、Cook Preview、原子 Save、Catalog-resolved 2D/3D GPU viewport，以及 Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/固定容量 tab-owned document/history 已落地；下一步是 Save/Save As、dirty-close modal 与 Catalog refresh |
+| 2D-EDITOR | EditorApp 独立模块、四类 current-schema canonical document/file、固定预算 revision history、per-tab session/baseline、完整 TRS Inspector transaction、viewport gizmo、Tile/Timeline authoring、Cook Preview、Save/Save As、dirty-close modal、Catalog Refresh、Catalog-resolved 2D/3D GPU viewport 已落地；Windows 四类 native Save As、owning canonical path/dependency Inspector、`EditorProjectWorkspace`/空项目目录创建 API、Project `New` 空 current-schema Catalog publish/reopen，以及 Project `Open` + 下一安全帧 live Catalog switch 也已落地。下一步完成 Editor source import 与非 Windows project-folder adapter；这些产品接线完成前不把完整项目工作流标 Done |
 | UI-PERF-001 | Done；含 `ui_motion_v1` 在内的 UI workload 集已齐 |
 | SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
 | UI-FLOW-001 | Done；固定容量 Layer/Screen 栈、Back/Confirm/Menu Action Router、16 槽本地用户、Gamepad assignment、per-user 设备 revision 与 2D 产品已闭环 |
@@ -84,7 +84,7 @@ Layer/Screen、Action Router、多本地用户与设备提示都复用窗口级�
 - 仅在标准 Behavior 不足时评估 startup-only 自定义 Behavior SPI；
 - 多行 TextEdit、grapheme/shaping 与完整 IME 候选窗；
 - Linux AT-SPI adapter 与真实辅助技术验收；
-- Save/Save As、dirty-close modal 与 Catalog refresh；Project Browser、Catalog current-schema open、资源 Inspector、固定容量 tab-owned document/history、独立 workspace session、完整 TRS、viewport gizmo、Tile/Timeline tools、原子 Save、Catalog-resolved viewport 和 EditorApp 布局已进入 Next；
+- Editor source import 产品接线与非 Windows project-folder adapter；workspace/空目录创建 API、Windows Project `New` 空 Catalog publish/reopen、Project `Open` + 下一安全帧 live Catalog switch、native Save As、owning canonical path/dependency Inspector、Save/dirty-close/Catalog Refresh/current-schema open/per-tab session/完整 TRS/gizmo/Tile/Timeline/Catalog-resolved viewport 已落地；
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 

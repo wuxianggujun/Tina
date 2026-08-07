@@ -1,10 +1,13 @@
 ﻿// Tina Editor desktop composition: shared retained tool chrome backed by
 // validated World2D and World3D authoring documents and Scene GPU previews.
 
+#include "EditorFileDialog.hpp"
+
 #include <tina/asset/AssetGpuMesh.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/CatalogCook.hpp>
+#include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset/TileChunkRender.hpp>
@@ -14,16 +17,20 @@
 #include <tina/asset_format/World2DSnapshot.hpp>
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/Utf8.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/editor/EditorDocumentTabs.hpp>
 #include <tina/editor/EditorErrors.hpp>
+#include <tina/editor/EditorProjectCreation.hpp>
 #include <tina/editor/ProjectAssetBrowser.hpp>
 #include <tina/editor/SpriteAnimationAuthoringDocument.hpp>
+#include <tina/editor/SpriteAnimationAuthoringFile.hpp>
+#include <tina/editor/TileMapAuthoringDocument.hpp>
+#include <tina/editor/TileMapAuthoringFile.hpp>
 #include <tina/editor/World2DAuthoringDocument.hpp>
 #include <tina/editor/World2DAuthoringFile.hpp>
 #include <tina/editor/World3DAuthoringDocument.hpp>
 #include <tina/editor/World3DAuthoringFile.hpp>
-#include <tina/editor/TileMapAuthoringDocument.hpp>
 #include <tina/editor_app/EditorApplication.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -56,6 +63,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -69,6 +77,16 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#endif
 
 namespace {
 
@@ -88,7 +106,7 @@ inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
 inline constexpr u32 DocumentTabSlots = 6;
-inline constexpr u32 EditorActionCount = 52;
+inline constexpr u32 EditorActionCount = 59;
 inline constexpr u32 EditorLayoutRegionCount = 9;
 inline constexpr u32 GpuViewportSpriteCount = 1;
 inline constexpr u32 GpuViewportMeshCount = 3;
@@ -179,6 +197,162 @@ class EditorRenderDeviceAccess final {
 {
     const std::u8string encoded = path.u8string();
     return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
+}
+
+[[nodiscard]] constexpr Tina::AssetFormat::TargetPlatform editorTargetPlatform() noexcept;
+
+[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
+                                       const std::filesystem::path& right) noexcept
+{
+#if defined(_WIN32)
+    const auto& leftText = left.native();
+    const auto& rightText = right.native();
+    if (leftText.size() != rightText.size() ||
+        leftText.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+        return false;
+    }
+    return ::CompareStringOrdinal(leftText.data(), static_cast<int>(leftText.size()),
+                                  rightText.data(), static_cast<int>(rightText.size()),
+                                  TRUE) == CSTR_EQUAL;
+#else
+    return left == right;
+#endif
+}
+
+[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
+                                          const std::filesystem::path& ancestor) noexcept
+{
+    auto candidatePart = candidate.begin();
+    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
+         ++ancestorPart, ++candidatePart) {
+        if (candidatePart == candidate.end() ||
+            !pathComponentEquals(*candidatePart, *ancestorPart)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] Tina::Core::Status validatePhysicalProjectDirectory(
+    const std::filesystem::path& path, std::string_view label)
+{
+    std::error_code statusError;
+    const auto status = std::filesystem::symlink_status(path, statusError);
+    if (statusError) {
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                "Editor could not inspect a project directory"};
+        error.setNativeCode(statusError.value());
+        error.addContext(label, pathToUtf8(path));
+        return Tina::Core::failure(std::move(error));
+    }
+    if (std::filesystem::is_symlink(status) || !std::filesystem::is_directory(status)) {
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
+                                "Editor project layout requires physical directories"};
+        error.addContext(label, pathToUtf8(path));
+        return Tina::Core::failure(std::move(error));
+    }
+#if defined(_WIN32)
+    const DWORD attributes = ::GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD nativeCode = ::GetLastError();
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                "Editor could not inspect Win32 project directory attributes"};
+        error.setNativeCode(static_cast<Tina::Core::i64>(nativeCode));
+        error.addContext(label, pathToUtf8(path));
+        return Tina::Core::failure(std::move(error));
+    }
+    if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0U ||
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U) {
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
+                                "Editor project directories must not be junctions or reparse points"};
+        error.addContext(label, pathToUtf8(path));
+        return Tina::Core::failure(std::move(error));
+    }
+#endif
+    return Tina::Core::success();
+}
+
+[[nodiscard]] Tina::Core::Result<Tina::Editor::EditorProjectWorkspace>
+openExistingEditorProjectWorkspace(std::string_view projectRootUtf8)
+{
+    if (projectRootUtf8.empty() || !Tina::Core::isStrictUtf8WithoutNul(projectRootUtf8)) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "Editor project root must be strict UTF-8 without NUL");
+    }
+
+    try {
+        const std::filesystem::path projectRoot =
+            std::filesystem::u8path(projectRootUtf8.begin(), projectRootUtf8.end());
+        const std::filesystem::path sourceRoot = projectRoot / "Source";
+        const std::filesystem::path catalogRoot = projectRoot / "Catalog";
+        for (const auto& directory : std::array{
+                 std::pair{std::cref(projectRoot), std::string_view{"projectRoot"}},
+                 std::pair{std::cref(sourceRoot), std::string_view{"sourceRoot"}},
+                 std::pair{std::cref(catalogRoot), std::string_view{"cookedCatalogRoot"}},
+             }) {
+            if (auto status = validatePhysicalProjectDirectory(directory.first.get(),
+                                                               directory.second);
+                !status) {
+                return Tina::Core::failure(std::move(status.error()));
+            }
+        }
+
+        std::error_code canonicalError;
+        const auto physicalProject = std::filesystem::weakly_canonical(projectRoot,
+                                                                        canonicalError);
+        if (canonicalError) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                       "Editor could not resolve the physical project root");
+        }
+        const auto physicalSource = std::filesystem::weakly_canonical(sourceRoot,
+                                                                       canonicalError);
+        if (canonicalError) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                       "Editor could not resolve the physical Source root");
+        }
+        const auto physicalCatalog = std::filesystem::weakly_canonical(catalogRoot,
+                                                                        canonicalError);
+        if (canonicalError) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                       "Editor could not resolve the physical Catalog root");
+        }
+        if (physicalSource == physicalProject || physicalCatalog == physicalProject ||
+            !pathIsSameOrDescendant(physicalSource, physicalProject) ||
+            !pathIsSameOrDescendant(physicalCatalog, physicalProject) ||
+            pathIsSameOrDescendant(physicalSource, physicalCatalog) ||
+            pathIsSameOrDescendant(physicalCatalog, physicalSource)) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::PermissionDenied,
+                "Editor Source and Catalog directories escaped their project root");
+        }
+
+        const std::string canonicalProject = pathToUtf8(projectRoot.lexically_normal());
+        const std::string canonicalSource = pathToUtf8(sourceRoot.lexically_normal());
+        const std::string canonicalCatalog = pathToUtf8(catalogRoot.lexically_normal());
+        return Tina::Editor::EditorProjectWorkspace::Create({
+            .projectRootUtf8 = canonicalProject,
+            .sourceRootUtf8 = canonicalSource,
+            .cookedCatalogRootUtf8 = canonicalCatalog,
+            .targetPlatform = editorTargetPlatform(),
+        });
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Editor project open allocation failed");
+    } catch (const std::filesystem::filesystem_error& exception) {
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                "Editor project open filesystem validation failed"};
+        error.setNativeCode(exception.code().value());
+        return Tina::Core::failure(std::move(error));
+    }
+}
+
+[[nodiscard]] constexpr Tina::AssetFormat::TargetPlatform editorTargetPlatform() noexcept
+{
+#if defined(_WIN32)
+    return Tina::AssetFormat::TargetPlatform::WindowsX64;
+#else
+    return Tina::AssetFormat::TargetPlatform::LinuxX64;
+#endif
 }
 
 [[nodiscard]] Tina::Core::Result<std::filesystem::path> createUniqueEditorTempDirectory()
@@ -473,6 +647,7 @@ struct LifecycleCounters final {
     bool builtInPreviewCatalog = false;
     bool projectAssetBrowserReady = false;
     bool documentTabsReady = false;
+    u32 projectSwitches = 0;
 };
 
 enum class EditorCommand : u32 {
@@ -483,6 +658,7 @@ enum class EditorCommand : u32 {
     Undo,
     Redo,
     Save,
+    SaveAs,
     PaintTile,
     EraseTile,
     ToggleTileLayer,
@@ -508,8 +684,14 @@ enum class EditorCommand : u32 {
     ProjectFilter2D,
     ProjectFilter3D,
     ProjectFilterMedia,
+    RefreshProjectCatalog,
+    CreateProject,
+    OpenProject,
     OpenSelectedProjectAsset,
     CloseActiveDocument,
+    DirtyCloseSave,
+    DirtyCloseDiscard,
+    DirtyCloseCancel,
 };
 
 void writeJsonString(std::ostream& output, std::string_view value)
@@ -797,6 +979,20 @@ struct EulerDegrees final {
     return style;
 }
 
+[[nodiscard]] UI::UILayoutStyle dirtyCloseModalLayout(
+    UI::UIVisibility visibility) noexcept
+{
+    UI::UILayoutStyle style = fixedSize(520.0F, 214.0F);
+    style.placement = UI::UILayoutPlacement::Overlay;
+    style.overlay.horizontal = UI::UIAxisAlignment::Center;
+    style.overlay.vertical = UI::UIAxisAlignment::Center;
+    style.visibility = visibility;
+    style.padding = UI::UIEdgeSpacing::All(18.0F);
+    style.flexContainer.direction = UI::UIFlexDirection::Column;
+    style.flexContainer.gap.row = 10.0F;
+    return style;
+}
+
 [[nodiscard]] UI::UILayoutStyle boundedDock(float basisPercent, float minimumWidth,
                                             float maximumWidth) noexcept
 {
@@ -914,9 +1110,159 @@ struct EulerDegrees final {
     }
 }
 
+struct SavedTileMapChunkBaseline final {
+    Tina::Core::AssetId assetId{};
+    std::vector<std::byte> payloadBytes{};
+};
+
+struct SavedDocumentBaseline final {
+    Tina::Core::AssetId assetId{};
+    std::vector<std::byte> primaryBytes{};
+    std::vector<SavedTileMapChunkBaseline> tileMapChunks{};
+    bool captured = false;
+
+    [[nodiscard]] Tina::Core::usize byteCount() const noexcept
+    {
+        Tina::Core::usize total = primaryBytes.size();
+        for (const SavedTileMapChunkBaseline& chunk : tileMapChunks) {
+            total += chunk.payloadBytes.size();
+        }
+        return total;
+    }
+};
+
+[[nodiscard]] Tina::Core::Result<SavedDocumentBaseline>
+captureSavedBaseline(const Tina::Editor::World2DAuthoringDocument& document)
+{
+    try {
+        SavedDocumentBaseline baseline{};
+        const std::span<const std::byte> bytes = document.snapshotBytes();
+        baseline.primaryBytes.assign(bytes.begin(), bytes.end());
+        baseline.captured = true;
+        return baseline;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "World2D saved baseline allocation failed");
+    }
+}
+
+[[nodiscard]] Tina::Core::Result<SavedDocumentBaseline>
+captureSavedBaseline(const Tina::Editor::World3DAuthoringDocument& document)
+{
+    try {
+        SavedDocumentBaseline baseline{};
+        const std::span<const std::byte> bytes = document.payloadBytes();
+        baseline.primaryBytes.assign(bytes.begin(), bytes.end());
+        baseline.captured = true;
+        return baseline;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "World3D saved baseline allocation failed");
+    }
+}
+
+[[nodiscard]] Tina::Core::Result<SavedDocumentBaseline>
+captureSavedBaseline(const Tina::Editor::TileMapAuthoringDocument& document)
+{
+    try {
+        SavedDocumentBaseline baseline{};
+        baseline.assetId = document.tileMapId();
+        const std::span<const std::byte> rootBytes = document.rootPayloadBytes();
+        baseline.primaryBytes.assign(rootBytes.begin(), rootBytes.end());
+        baseline.tileMapChunks.reserve(document.chunkCount());
+        for (Tina::Core::usize index = 0; index < document.chunkCount(); ++index) {
+            const auto chunk = document.chunkPayloadAt(index);
+            if (!chunk) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "TileMap chunk disappeared while capturing the saved baseline");
+            }
+            SavedTileMapChunkBaseline savedChunk{.assetId = chunk->assetId};
+            savedChunk.payloadBytes.assign(chunk->payloadBytes.begin(),
+                                           chunk->payloadBytes.end());
+            baseline.tileMapChunks.push_back(std::move(savedChunk));
+        }
+        baseline.captured = true;
+        return baseline;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "TileMap saved baseline allocation failed");
+    }
+}
+
+[[nodiscard]] Tina::Core::Result<SavedDocumentBaseline>
+captureSavedBaseline(const Tina::Editor::SpriteAnimationAuthoringDocument& document)
+{
+    try {
+        SavedDocumentBaseline baseline{};
+        baseline.assetId = document.clipId();
+        const std::span<const std::byte> bytes = document.payloadBytes();
+        baseline.primaryBytes.assign(bytes.begin(), bytes.end());
+        baseline.captured = true;
+        return baseline;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "SpriteAnimation saved baseline allocation failed");
+    }
+}
+
+[[nodiscard]] bool baselineBytesMatch(const std::vector<std::byte>& baseline,
+                                      std::span<const std::byte> current) noexcept
+{
+    return baseline.size() == current.size() &&
+           std::equal(baseline.begin(), baseline.end(), current.begin());
+}
+
+[[nodiscard]] bool savedBaselineMatches(
+    const SavedDocumentBaseline& baseline,
+    const Tina::Editor::World2DAuthoringDocument& document) noexcept
+{
+    return baseline.captured &&
+           baselineBytesMatch(baseline.primaryBytes, document.snapshotBytes());
+}
+
+[[nodiscard]] bool savedBaselineMatches(
+    const SavedDocumentBaseline& baseline,
+    const Tina::Editor::World3DAuthoringDocument& document) noexcept
+{
+    return baseline.captured &&
+           baselineBytesMatch(baseline.primaryBytes, document.payloadBytes());
+}
+
+[[nodiscard]] bool savedBaselineMatches(
+    const SavedDocumentBaseline& baseline,
+    const Tina::Editor::TileMapAuthoringDocument& document) noexcept
+{
+    if (!baseline.captured || baseline.assetId != document.tileMapId() ||
+        !baselineBytesMatch(baseline.primaryBytes, document.rootPayloadBytes()) ||
+        baseline.tileMapChunks.size() != document.chunkCount()) {
+        return false;
+    }
+    for (Tina::Core::usize index = 0; index < baseline.tileMapChunks.size(); ++index) {
+        const auto current = document.chunkPayloadAt(index);
+        if (!current || current->assetId != baseline.tileMapChunks[index].assetId ||
+            !baselineBytesMatch(baseline.tileMapChunks[index].payloadBytes,
+                                current->payloadBytes)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool savedBaselineMatches(
+    const SavedDocumentBaseline& baseline,
+    const Tina::Editor::SpriteAnimationAuthoringDocument& document) noexcept
+{
+    return baseline.captured && baseline.assetId == document.clipId() &&
+           baselineBytesMatch(baseline.primaryBytes, document.payloadBytes());
+}
+
 struct WorkspaceSessionState final {
+    Tina::Editor::EditorDocumentKey key{};
     std::string documentPathUtf8{};
-    std::vector<std::byte> savedBaselineBytes{};
+    SavedDocumentBaseline savedBaseline{};
+    Tina::AssetFormat::TargetPlatform targetPlatform =
+        Tina::AssetFormat::TargetPlatform::WindowsX64;
     bool loadedFromPath = false;
 
     [[nodiscard]] bool hasDocumentPath() const noexcept
@@ -941,6 +1287,12 @@ using TabAuthoringDocument =
     std::variant<Tina::Editor::World3DAuthoringDocument,
                  Tina::Editor::TileMapAuthoringDocument,
                  Tina::Editor::SpriteAnimationAuthoringDocument>;
+
+struct LoadedProjectAssetDocument final {
+    std::optional<TabAuthoringDocument> document{};
+    Tina::AssetFormat::TargetPlatform targetPlatform =
+        Tina::AssetFormat::TargetPlatform::WindowsX64;
+};
 
 struct SuspendedTabAuthoringDocument final {
     Tina::Editor::EditorDocumentKey key{};
@@ -974,6 +1326,12 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
 
     WorkspaceSessionState world2DSession{};
     WorkspaceSessionState world3DSession{};
+    world2DSession.key = {
+        .kind = Tina::Editor::EditorDocumentKind::World2D,
+    };
+    world3DSession.key = {
+        .kind = Tina::Editor::EditorDocumentKind::World3D,
+    };
     try {
         world2DSession.documentPathUtf8 = options.world2DDocumentPathUtf8;
         world3DSession.documentPathUtf8 = options.world3DDocumentPathUtf8;
@@ -993,14 +1351,11 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
             world2DSession.documentPathUtf8, *document);
         if (status) {
             world2DSession.loadedFromPath = true;
-            try {
-                const std::span<const std::byte> openedBytes = document->snapshotBytes();
-                world2DSession.savedBaselineBytes.assign(openedBytes.begin(), openedBytes.end());
-            } catch (const std::bad_alloc&) {
-                return Tina::Core::failure(
-                    Tina::Core::CoreErrorCode::OutOfMemory,
-                    "Tina Editor could not retain the opened World2D baseline");
+            auto baseline = captureSavedBaseline(*document);
+            if (!baseline) {
+                return Tina::Core::failure(std::move(baseline.error()));
             }
+            world2DSession.savedBaseline = std::move(*baseline);
         } else if (status.error().code != Tina::Core::CoreErrorCode::NotFound) {
             return Tina::Core::failure(std::move(status.error()));
         }
@@ -1065,14 +1420,11 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
             world3DSession.documentPathUtf8, *world3D);
         if (status) {
             world3DSession.loadedFromPath = true;
-            try {
-                const std::span<const std::byte> openedBytes = world3D->payloadBytes();
-                world3DSession.savedBaselineBytes.assign(openedBytes.begin(), openedBytes.end());
-            } catch (const std::bad_alloc&) {
-                return Tina::Core::failure(
-                    Tina::Core::CoreErrorCode::OutOfMemory,
-                    "Tina Editor could not retain the opened World3D baseline");
+            auto baseline = captureSavedBaseline(*world3D);
+            if (!baseline) {
+                return Tina::Core::failure(std::move(baseline.error()));
             }
+            world3DSession.savedBaseline = std::move(*baseline);
         } else if (status.error().code != Tina::Core::CoreErrorCode::NotFound) {
             return Tina::Core::failure(std::move(status.error()));
         }
@@ -1225,13 +1577,8 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
 }
 
 [[nodiscard]] Tina::Core::Result<Tina::Editor::ProjectAssetBrowserModel>
-createProjectAssetBrowser(const EditorAssetResources& resources)
+createProjectAssetBrowser(const Tina::Asset::CatalogSnapshot& catalog)
 {
-    if (!resources.system.has_value() || resources.system->catalog() == nullptr) {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "Tina Editor Project browser requires an open Catalog");
-    }
-    const Tina::Asset::CatalogSnapshot& catalog = *resources.system->catalog();
     try {
         std::vector<Tina::Editor::ProjectAssetDescriptor> assets;
         assets.reserve(catalog.entryCount());
@@ -1245,6 +1592,23 @@ createProjectAssetBrowser(const EditorAssetResources& resources)
             std::string displayName{Tina::Editor::projectAssetKindLabel(entry->assetKind)};
             displayName += "  ";
             displayName.append(idText.data(), 8U);
+            std::vector<Tina::AssetFormat::AssetDependency> dependencies;
+            dependencies.reserve(entry->dependencyCount);
+            for (u32 dependencyIndex = 0;
+                 dependencyIndex < entry->dependencyCount;
+                 ++dependencyIndex) {
+                const auto dependency = catalog.dependency(index, dependencyIndex);
+                if (!dependency) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::Internal,
+                        "Tina Editor Catalog dependency disappeared");
+                }
+                dependencies.push_back(Tina::AssetFormat::AssetDependency{
+                    .assetId = dependency->assetId,
+                    .expectedKind = dependency->expectedKind,
+                    .flags = dependency->flags,
+                });
+            }
             assets.push_back(Tina::Editor::ProjectAssetDescriptor{
                 .assetId = entry->assetId,
                 .assetKind = entry->assetKind,
@@ -1252,17 +1616,31 @@ createProjectAssetBrowser(const EditorAssetResources& resources)
                 .dependencyCount = entry->dependencyCount,
                 .cookedFileBytes = entry->cookedFileBytes,
                 .displayName = std::move(displayName),
+                .dependencies = std::move(dependencies),
             });
         }
         return Tina::Editor::ProjectAssetBrowserModel::Create(
             assets, Tina::Editor::ProjectAssetBrowserConfig{
                         .itemCapacity = (std::max)(Tina::Core::usize{4096},
                                                   assets.size()),
+                        .dependencyCapacity = (std::max)(
+                            Tina::Core::usize{16384},
+                            static_cast<Tina::Core::usize>(catalog.dependencyCount())),
                     });
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
                                    "Tina Editor Project browser allocation failed");
     }
+}
+
+[[nodiscard]] Tina::Core::Result<Tina::Editor::ProjectAssetBrowserModel>
+createProjectAssetBrowser(const EditorAssetResources& resources)
+{
+    if (!resources.system.has_value() || resources.system->catalog() == nullptr) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "Tina Editor Project browser requires an open Catalog");
+    }
+    return createProjectAssetBrowser(*resources.system->catalog());
 }
 
 [[nodiscard]] Tina::Core::Result<Tina::Editor::EditorDocumentTabs>
@@ -1344,6 +1722,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_.stateEnters;
+        if (auto status = initializePinnedDocumentSessions(); !status) {
+            return status;
+        }
         auto assetRollback = Tina::Core::makeScopeExit([this]() noexcept {
             releasePreviewAssetBindings();
         });
@@ -1495,18 +1876,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        UI::UILayoutStyle pathStyle = fixedSize(0.0F, 22.0F);
+        UI::UILayoutStyle pathStyle = fixedSize(0.0F, 30.0F);
         pathStyle.size.width = UI::UILayoutLength::Auto();
         pathStyle.flexItem.grow = 1.0F;
         pathStyle.flexItem.shrink = 1.0F;
         pathStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
         const WorkspaceSessionState& initialSession = activeWorkspaceSession();
-        const std::string_view initialPathStatus =
-            !initialSession.hasDocumentPath()
-                ? "No save path | Unsaved"
-                : (initialSession.loadedFromPath ? "Existing document opened | Saved"
-                                                 : "Save target configured | Modified");
-        if (auto status = storeNode(createLabel(toolbar, initialPathStatus, pathStyle, secondaryText),
+        if (auto status = storeNode(createTextEdit(toolbar,
+                                                   initialSession.documentPathUtf8,
+                                                   pathStyle, true),
                                     toolbarPath_);
             !status) {
             return status;
@@ -1535,6 +1913,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = storeNode(createButton(toolbar, "Save", fixedSize(58.0F, 30.0F),
                                                  initialSession.hasDocumentPath()),
                                     saveButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(toolbar, "Save As", fixedSize(72.0F, 30.0F)),
+                                    saveAsButton_);
             !status) {
             return status;
         }
@@ -1852,6 +2235,33 @@ class EditorWorkspaceState final : public Tina::IGameState {
             observedProjectAssetSelectionIndex_ = 0U;
         }
 
+        UI::UINodeId projectLifecycleActions{};
+        UI::UILayoutStyle projectLifecycleActionsStyle = fillWidth(30.0F);
+        projectLifecycleActionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        projectLifecycleActionsStyle.flexContainer.gap.column = 6.0F;
+        if (auto status = storeNode(createPanel(left, projectLifecycleActionsStyle,
+                                                UI::UIStyleRoleId::None),
+                                    projectLifecycleActions);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle projectLifecycleActionStyle = fixedSize(0.0F, 30.0F);
+        projectLifecycleActionStyle.size.width = UI::UILayoutLength::Auto();
+        projectLifecycleActionStyle.flexItem.grow = 1.0F;
+        projectLifecycleActionStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        if (auto status = storeNode(createButton(projectLifecycleActions, "New Project",
+                                                 projectLifecycleActionStyle),
+                                    createProjectButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(projectLifecycleActions, "Open Project",
+                                                 projectLifecycleActionStyle),
+                                    openProjectButton_);
+            !status) {
+            return status;
+        }
+
         UI::UINodeId projectActions{};
         UI::UILayoutStyle projectActionsStyle = fillWidth(30.0F);
         projectActionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
@@ -1866,15 +2276,22 @@ class EditorWorkspaceState final : public Tina::IGameState {
         projectActionStyle.size.width = UI::UILayoutLength::Auto();
         projectActionStyle.flexItem.grow = 1.0F;
         projectActionStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-        if (auto status = storeNode(createButton(projectActions, "Open",
+        if (auto status = storeNode(createButton(projectActions, "Open Asset",
                                                  projectActionStyle,
                                                  projectAssets_.visibleItemCount() != 0U),
                                     openProjectAssetButton_);
             !status) {
             return status;
         }
+        if (auto status = storeNode(createButton(
+                                        projectActions, "Refresh", projectActionStyle,
+                                        assetResources_.projectCatalogConfigured),
+                                    refreshProjectCatalogButton_);
+            !status) {
+            return status;
+        }
         if (auto status = storeNode(createLabel(projectActions, "Catalog",
-                                                fixedSize(66.0F, 20.0F), accentText),
+                                                fixedSize(52.0F, 20.0F), accentText),
                                     projectAssetSource_);
             !status) {
             return status;
@@ -2228,6 +2645,45 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (auto status = storeNode(createLabel(inspectorContent, {}, fillWidth(42.0F), secondaryText),
                                     inspectorNote_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(inspectorContent, {}, fillWidth(42.0F), secondaryText),
+                                    inspectorAssetPath_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(inspectorContent, {}, fillWidth(22.0F), sectionText),
+                                    inspectorDependencySummary_);
+            !status) {
+            return status;
+        }
+        auto inspectorDependencies = tree->createElement(
+            inspectorContent,
+            UI::makeListViewElement(
+                {.materializedItemCapacity = 6}, fillWidth(156.0F)));
+        if (!inspectorDependencies) {
+            return Tina::Core::failure(std::move(inspectorDependencies.error()));
+        }
+        inspectorDependencyList_ = *inspectorDependencies;
+        if (auto status = tree->setListViewStyle(
+                inspectorDependencyList_,
+                UI::UIListViewStyle{
+                    .rowHeight = 36.0F,
+                    .overscanRows = 1,
+                    .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                    .wheelStep = 36.0F,
+                });
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setListViewPaint(
+                inspectorDependencyList_, UI::makeListViewPaint(productTheme));
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setListViewDataSource(
+                inspectorDependencyList_, inspectorDependencyDataSource());
             !status) {
             return status;
         }
@@ -2645,6 +3101,68 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
 
+        if (auto status = storeNode(
+                tree->createElement(
+                    rootNode,
+                    UI::makeModalElement(
+                        dirtyCloseModalLayout(UI::UIVisibility::Collapsed))),
+                dirtyCloseModal_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(
+                createLabel(dirtyCloseModal_, "Save changes before closing?",
+                            fillWidth(28.0F), sectionText),
+                dirtyCloseTitle_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(
+                createLabel(dirtyCloseModal_,
+                            "The current canonical document has unsaved changes.",
+                            fillWidth(24.0F), bodyText),
+                dirtyCloseMessage_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(
+                createTextEdit(dirtyCloseModal_, {}, fillWidth(32.0F), true),
+                dirtyClosePath_);
+            !status) {
+            return status;
+        }
+        UI::UINodeId dirtyCloseActions{};
+        UI::UILayoutStyle dirtyCloseActionsStyle = fillWidth(34.0F);
+        dirtyCloseActionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        dirtyCloseActionsStyle.flexContainer.justifyContent =
+            UI::UIJustifyContent::End;
+        dirtyCloseActionsStyle.flexContainer.gap.column = 8.0F;
+        if (auto status = storeNode(
+                createPanel(dirtyCloseModal_, dirtyCloseActionsStyle,
+                            UI::UIStyleRoleId::None),
+                dirtyCloseActions);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(
+                createButton(dirtyCloseActions, "Save", fixedSize(86.0F, 32.0F)),
+                dirtyCloseSaveButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(
+                createButton(dirtyCloseActions, "Discard", fixedSize(86.0F, 32.0F)),
+                dirtyCloseDiscardButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(
+                createButton(dirtyCloseActions, "Cancel", fixedSize(86.0F, 32.0F)),
+                dirtyCloseCancelButton_);
+            !status) {
+            return status;
+        }
+
         if (auto status = tree->setButtonAction(
                 mode2DButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
                     queueEditorCommand(EditorCommand::SwitchToWorld2D);
@@ -2690,6 +3208,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = tree->setButtonAction(
                 saveButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
                     queueEditorCommand(EditorCommand::Save);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                saveAsButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::SaveAs);
                 }});
             !status) {
             return status;
@@ -2813,12 +3338,52 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree->setButtonAction(
+                refreshProjectCatalogButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::RefreshProjectCatalog);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                createProjectButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::CreateProject);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                openProjectButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::OpenProject);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
                 closeDocumentButton_,
                 UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
                     queueEditorCommand(EditorCommand::CloseActiveDocument);
                 }});
             !status) {
             return status;
+        }
+        const std::array dirtyCloseBindings{
+            std::pair{dirtyCloseSaveButton_, EditorCommand::DirtyCloseSave},
+            std::pair{dirtyCloseDiscardButton_, EditorCommand::DirtyCloseDiscard},
+            std::pair{dirtyCloseCancelButton_, EditorCommand::DirtyCloseCancel},
+        };
+        for (const auto& [button, command] : dirtyCloseBindings) {
+            if (auto status = tree->setButtonAction(
+                    button,
+                    UI::UIButtonActionCallback{
+                        [this, command](const UI::UIButtonActionEvent&) noexcept {
+                            queueEditorCommand(command);
+                        }});
+                !status) {
+                return status;
+            }
         }
         for (u32 index = 0; index < documentTabButtons_.size(); ++index) {
             if (auto status = tree->setButtonAction(
@@ -2900,6 +3465,21 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_.frameUpdates;
+        if (pendingProjectSwitch_.has_value()) {
+            auto workspace = std::move(*pendingProjectSwitch_);
+            pendingProjectSwitch_.reset();
+            if (auto status = switchLiveProjectCatalog(std::move(workspace)); !status) {
+                return status;
+            }
+        }
+        if (catalogRefreshPending_) {
+            catalogRefreshPending_ = false;
+            if (auto status = refreshProjectCatalog(); !status) {
+                return status;
+            }
+            previewAssetBindingsRefreshPending_ = false;
+            projectBrowserUiRefreshPending_ = true;
+        }
         if (previewAssetBindingsRefreshPending_) {
             releasePreviewAssetBindings();
             if (auto status = preparePreviewAssetBindings(); !status) {
@@ -3222,6 +3802,35 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (pendingAnimationTimelineRefresh_) {
             pendingAnimationTimelineRefresh_ = false;
             if (auto status = refreshAnimationTimelineUi(*tree); !status) {
+                return status;
+            }
+        }
+        if (projectBrowserUiRefreshPending_) {
+            projectBrowserUiRefreshPending_ = false;
+            if (auto status = tree->setListViewDataSource(
+                    projectAssetList_, projectAssetDataSource());
+                !status) {
+                return status;
+            }
+            if (auto status = tree->invalidateListViewItems(projectAssetList_); !status) {
+                return status;
+            }
+            const auto selectedIndex = projectAssets_.selectedVisibleIndex();
+            if (selectedIndex.has_value()) {
+                if (auto status = tree->setListViewSelectedIndex(
+                        projectAssetList_, *selectedIndex);
+                    !status) {
+                    return status;
+                }
+                observedProjectAssetSelectionIndex_ = *selectedIndex;
+            } else {
+                if (auto status = tree->clearListViewSelection(projectAssetList_); !status) {
+                    return status;
+                }
+                observedProjectAssetSelectionIndex_.reset();
+                assetInspectorActive_ = false;
+            }
+            if (auto status = refreshAuthoringUi(*tree); !status) {
                 return status;
             }
         }
@@ -4563,7 +5172,610 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
+        if (auto status = tree.setEnabled(refreshProjectCatalogButton_,
+                                          assetResources_.projectCatalogConfigured &&
+                                              !catalogRefreshPending_ &&
+                                              !pendingProjectSwitch_.has_value());
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(createProjectButton_,
+                                          !pendingProjectSwitch_.has_value());
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(openProjectButton_,
+                                          !pendingProjectSwitch_.has_value());
+            !status) {
+            return status;
+        }
         counters_.projectAssetVisibleItems = projectAssets_.visibleItemCount();
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status reportAuthoringFailure(
+        std::string_view prefix, const Tina::Core::Error& error)
+    {
+        try {
+            authoringFeedback_.assign(prefix);
+            authoringFeedback_ += error.message;
+            return Tina::Core::success();
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Editor authoring failure feedback allocation failed");
+        }
+    }
+
+    [[nodiscard]] Tina::Core::Result<Tina::Editor::ProjectAssetBrowserModel>
+    prepareProjectBrowserForSnapshot(
+        const Tina::Asset::CatalogSnapshot& catalog,
+        Tina::Editor::ProjectAssetFilter filter,
+        std::optional<Tina::Core::AssetId> selectedAsset)
+    {
+        auto browser = createProjectAssetBrowser(catalog);
+        if (!browser) {
+            return Tina::Core::failure(std::move(browser.error()));
+        }
+        if (auto status = browser->setFilter(filter); !status) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
+        bool restoredSelection = false;
+        if (selectedAsset.has_value()) {
+            restoredSelection = static_cast<bool>(browser->selectAsset(*selectedAsset));
+        }
+        if (!restoredSelection && browser->visibleItemCount() != 0U) {
+            if (auto status = browser->selectVisibleIndex(0U); !status) {
+                return Tina::Core::failure(std::move(status.error()));
+            }
+        }
+        return std::move(*browser);
+    }
+
+    [[nodiscard]] Tina::Core::Result<Tina::Editor::EditorDocumentTabs>
+    prepareProjectSwitchDocumentTabs()
+    {
+        if (auto status = synchronizeActiveTabDirty(); !status) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
+
+        std::vector<Tina::Editor::EditorDocumentTabDesc> retainedTabs;
+        try {
+            retainedTabs.reserve(documentTabs_.tabCount());
+            for (Tina::Core::usize index = 0; index < documentTabs_.tabCount(); ++index) {
+                const auto* tab = documentTabs_.tab(index);
+                if (tab == nullptr) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::Internal,
+                        "Editor document tab disappeared during project switch staging");
+                }
+                if (tab->key.assetId && tab->dirty) {
+                    return Tina::Core::failure(
+                        Tina::Editor::EditorErrorCode::DirtyDocumentRequiresConfirmation,
+                        "Save or discard modified Catalog documents before switching projects");
+                }
+                if (tab->pinned || !tab->key.assetId) {
+                    retainedTabs.push_back(*tab);
+                }
+            }
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Editor project switch tab staging allocation failed");
+        }
+
+        auto candidate = Tina::Editor::EditorDocumentTabs::Create(
+            retainedTabs, documentTabs_.config());
+        if (!candidate) {
+            return Tina::Core::failure(std::move(candidate.error()));
+        }
+        const Tina::Editor::EditorDocumentKey fallbackKey{
+            .kind = workspaceMode_ == WorkspaceMode::World2D
+                        ? Tina::Editor::EditorDocumentKind::World2D
+                        : Tina::Editor::EditorDocumentKind::World3D,
+        };
+        const auto fallback = candidate->find(fallbackKey);
+        if (!fallback.has_value()) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Editor project switch has no workspace document fallback");
+        }
+        if (auto status = candidate->activate(*fallback); !status) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
+        return std::move(*candidate);
+    }
+
+    [[nodiscard]] Tina::Core::Status switchCatalogAuthoringOwnersToPinnedTabs()
+    {
+        constexpr std::array catalogDocumentKinds{
+            Tina::Editor::EditorDocumentKind::World3D,
+            Tina::Editor::EditorDocumentKind::TileMap2D,
+            Tina::Editor::EditorDocumentKind::SpriteAnimation2D,
+        };
+        for (const auto kind : catalogDocumentKinds) {
+            auto* owner = activeAuthoringDocumentOwner(kind);
+            if (owner == nullptr) {
+                continue;
+            }
+            const Tina::Editor::EditorDocumentTabDesc* pinned = nullptr;
+            for (Tina::Core::usize index = 0; index < documentTabs_.tabCount(); ++index) {
+                const auto* candidate = documentTabs_.tab(index);
+                if (candidate != nullptr && candidate->pinned &&
+                    candidate->key.kind == kind) {
+                    pinned = candidate;
+                    break;
+                }
+            }
+            if (pinned == nullptr) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "Editor project switch has no pinned authoring document owner");
+            }
+            if (*owner != pinned->key) {
+                if (auto status = switchActiveAuthoringDocument(pinned->key); !status) {
+                    return status;
+                }
+            }
+        }
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status refreshPinnedCatalogAuthoringDocuments(
+        const Tina::Editor::ProjectAssetBrowserModel& browser)
+    {
+        constexpr std::array reloadableKinds{
+            Tina::Editor::EditorDocumentKind::TileMap2D,
+            Tina::Editor::EditorDocumentKind::SpriteAnimation2D,
+        };
+        for (const auto kind : reloadableKinds) {
+            const Tina::Editor::EditorDocumentTabDesc* pinned = nullptr;
+            for (Tina::Core::usize index = 0; index < documentTabs_.tabCount(); ++index) {
+                const auto* candidate = documentTabs_.tab(index);
+                if (candidate != nullptr && candidate->pinned &&
+                    candidate->key.kind == kind) {
+                    pinned = candidate;
+                    break;
+                }
+            }
+            if (pinned == nullptr || !pinned->key.assetId) {
+                continue;
+            }
+            const auto* asset = browser.inspectorSnapshot(pinned->key.assetId);
+            if (asset == nullptr ||
+                Tina::Editor::editorDocumentKindForAsset(asset->assetKind) != kind) {
+                continue;
+            }
+            auto loaded = loadProjectAssetDocument(*asset);
+            if (!loaded) {
+                return Tina::Core::failure(std::move(loaded.error()));
+            }
+            if (!loaded->document.has_value()) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "Pinned Catalog authoring asset did not produce a document");
+            }
+            if (kind == Tina::Editor::EditorDocumentKind::TileMap2D) {
+                auto* document = std::get_if<Tina::Editor::TileMapAuthoringDocument>(
+                    &*loaded->document);
+                if (document == nullptr) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::Internal,
+                        "Pinned TileMap Catalog asset produced the wrong document kind");
+                }
+                tileMapDocument_ = std::move(*document);
+            } else {
+                auto* document =
+                    std::get_if<Tina::Editor::SpriteAnimationAuthoringDocument>(
+                        &*loaded->document);
+                if (document == nullptr) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::Internal,
+                        "Pinned animation Catalog asset produced the wrong document kind");
+                }
+                spriteAnimationDocument_ = std::move(*document);
+            }
+        }
+        return Tina::Core::success();
+    }
+
+    void commitProjectSwitchDocumentTabs(
+        Tina::Editor::EditorDocumentTabs candidateTabs) noexcept
+    {
+        documentTabs_ = std::move(candidateTabs);
+        for (auto& slot : suspendedAuthoringDocuments_) {
+            slot.reset();
+        }
+        for (auto& slot : tabDocumentSessions_) {
+            slot.reset();
+        }
+        pendingDirtyCloseKey_.reset();
+        assetInspectorActive_ = false;
+        counters_.documentTabCount = documentTabs_.tabCount();
+    }
+
+    [[nodiscard]] Tina::Core::Status rebuildLiveCatalogPreview(
+        std::string successFeedback)
+    {
+        counters_.runtimePreviewValid = false;
+        counters_.catalogReady = false;
+        animationAnimator_.reset();
+        releasePreviewAssetBindings();
+        if (auto status = preparePreviewAssetBindings(); !status) {
+            auto error = std::move(status.error());
+            releasePreviewAssetBindings();
+            if (auto feedback = reportAuthoringFailure(
+                    "Catalog committed, but runtime preview binding rebuild failed: ",
+                    error);
+                !feedback) {
+                return feedback;
+            }
+            return Tina::Core::failure(std::move(error));
+        }
+        if (auto status = rebuildAnimationAnimator(); !status) {
+            auto error = std::move(status.error());
+            releasePreviewAssetBindings();
+            counters_.runtimePreviewValid = false;
+            if (auto feedback = reportAuthoringFailure(
+                    "Catalog committed, but animation preview rebuild failed: ",
+                    error);
+                !feedback) {
+                return feedback;
+            }
+            return Tina::Core::failure(std::move(error));
+        }
+        if (auto status = validateRuntimePreview(); !status) {
+            auto error = std::move(status.error());
+            releasePreviewAssetBindings();
+            counters_.runtimePreviewValid = false;
+            if (auto feedback = reportAuthoringFailure(
+                    "Catalog committed, but runtime preview validation failed: ",
+                    error);
+                !feedback) {
+                return feedback;
+            }
+            return Tina::Core::failure(std::move(error));
+        }
+        ++counters_.previewAssetBindingRefreshes;
+        authoringFeedback_.swap(successFeedback);
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status switchLiveProjectCatalog(
+        Tina::Editor::EditorProjectWorkspace workspace)
+    {
+        if (!assetResources_.system.has_value()) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Project switch requires the Editor AssetSystem");
+        }
+
+        auto candidateTabs = prepareProjectSwitchDocumentTabs();
+        if (!candidateTabs) {
+            return reportAuthoringFailure(
+                "Project switch blocked; previous Catalog preserved: ",
+                candidateTabs.error());
+        }
+
+        std::optional<Tina::Core::AssetId> previousSelection{};
+        if (const auto* selected = projectAssets_.selectedItem(); selected != nullptr) {
+            previousSelection = selected->assetId;
+        }
+        const Tina::Editor::ProjectAssetFilter previousFilter = projectAssets_.filter();
+
+        std::string nextCatalogRoot;
+        std::string successFeedback;
+        try {
+            nextCatalogRoot.assign(workspace.cookedCatalogRootUtf8());
+            successFeedback = "Project switched: ";
+            successFeedback += workspace.projectRootUtf8();
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Project switch path staging allocation failed");
+        }
+
+        Tina::Asset::Sprite2DBindingRegistry* spriteParticipant =
+            spriteBindings_.has_value() ? &*spriteBindings_ : nullptr;
+        Tina::Asset::Mesh3DBindingRegistry* meshParticipant =
+            mesh3DBindings_.has_value() ? &*mesh3DBindings_ : nullptr;
+        Tina::Asset::CatalogReloadConfig reloadConfig{};
+        reloadConfig.package.manifest.catalog.maxEntries = 1024;
+        reloadConfig.package.manifest.catalog.maxDependencies = 4096;
+        reloadConfig.package.manifest.catalog.maxDependenciesPerAsset = 64;
+        reloadConfig.package.validation.verifyTypedPayload = true;
+        if (spriteParticipant != nullptr) {
+            reloadConfig.bindings.sprite2D =
+                std::span<Tina::Asset::Sprite2DBindingRegistry*>{&spriteParticipant, 1U};
+        }
+        if (meshParticipant != nullptr) {
+            reloadConfig.bindings.mesh3D =
+                std::span<Tina::Asset::Mesh3DBindingRegistry*>{&meshParticipant, 1U};
+        }
+        auto reload = assetResources_.system->reloadCatalog(
+            workspace.cookedCatalogRootUtf8(), reloadConfig);
+        if (!reload) {
+            return reportAuthoringFailure(
+                "Project switch failed; previous Catalog preserved: ", reload.error());
+        }
+
+        const Tina::Asset::CatalogSnapshot* committedCatalog =
+            assetResources_.system->catalog();
+        if (committedCatalog == nullptr) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Project switch committed without an AssetSystem Catalog snapshot");
+        }
+        auto candidateBrowser = prepareProjectBrowserForSnapshot(
+            *committedCatalog, previousFilter, previousSelection);
+        if (!candidateBrowser) {
+            auto error = std::move(candidateBrowser.error());
+            if (auto feedback = reportAuthoringFailure(
+                    "Project Catalog committed, but Browser rebuild failed: ", error);
+                !feedback) {
+                return feedback;
+            }
+            return Tina::Core::failure(std::move(error));
+        }
+        if (auto status = switchCatalogAuthoringOwnersToPinnedTabs(); !status) {
+            return status;
+        }
+        if (auto status = refreshPinnedCatalogAuthoringDocuments(*candidateBrowser);
+            !status) {
+            return status;
+        }
+
+        assetResources_.catalogRootUtf8.swap(nextCatalogRoot);
+        assetResources_.catalogEntryCount =
+            static_cast<u32>(candidateBrowser->itemCount());
+        assetResources_.projectCatalogConfigured = true;
+        assetResources_.builtInPreviewCatalog = false;
+        counters_.catalogEntryCount = assetResources_.catalogEntryCount;
+        counters_.projectCatalogConfigured = true;
+        counters_.builtInPreviewCatalog = false;
+        if (auto status = rebuildLiveCatalogPreview(std::move(successFeedback)); !status) {
+            return status;
+        }
+
+        projectAssets_ = std::move(*candidateBrowser);
+        commitProjectSwitchDocumentTabs(std::move(*candidateTabs));
+        activeProjectWorkspace_ = std::move(workspace);
+        ++counters_.projectSwitches;
+        observedProjectAssetSelectionIndex_.reset();
+        previewAssetBindingsRefreshPending_ = false;
+        projectBrowserUiRefreshPending_ = true;
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status createNewProjectFromDialog()
+    {
+        auto location = makeSaveDialogLocation(
+            assetResources_.catalogRootUtf8, {}, true);
+        if (!location) {
+            return Tina::Core::failure(std::move(location.error()));
+        }
+        auto selected = fileDialog_.pickFolder({
+            .titleUtf8 = "Create Tina Project in Empty Folder",
+            .initialDirectoryUtf8 = location->initialDirectoryUtf8,
+        });
+        if (!selected) {
+            if (selected.error().code == Tina::Core::CoreErrorCode::Unsupported) {
+                authoringFeedback_ =
+                    "Native project folder selection is unavailable on this platform";
+                return Tina::Core::success();
+            }
+            return Tina::Core::failure(std::move(selected.error()));
+        }
+        if (!selected->selected()) {
+            authoringFeedback_ = "New project creation cancelled";
+            return Tina::Core::success();
+        }
+
+        auto workspace = Tina::Editor::CreateNewEditorProject({
+            .projectRootUtf8 = selected->selectedPathUtf8,
+            .targetPlatform = editorTargetPlatform(),
+        });
+        if (!workspace) {
+            try {
+                authoringFeedback_ = "Project creation failed: ";
+                authoringFeedback_ += workspace.error().message;
+                return Tina::Core::success();
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Project creation failure message allocation failed");
+            }
+        }
+
+        auto emptyManifest = Tina::AssetFormat::writeCookedManifestBytes({
+            .targetPlatform = workspace->targetPlatform(),
+        });
+        if (!emptyManifest) {
+            return Tina::Core::failure(std::move(emptyManifest.error()));
+        }
+        if (auto status = Tina::Asset::publishCatalogPackage(
+                workspace->cookedCatalogRootUtf8(),
+                Tina::Asset::DefaultCatalogManifestRelativePath,
+                *emptyManifest, {}, {.writeObjects = false});
+            !status) {
+            try {
+                authoringFeedback_ =
+                    "Project directories created, but empty Catalog initialization failed: ";
+                authoringFeedback_ += status.error().message;
+                return Tina::Core::success();
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Project Catalog initialization failure message allocation failed");
+            }
+        }
+        std::pmr::unsynchronized_pool_resource validationMemory;
+        Tina::Asset::CatalogPackageOpenConfig openConfig{};
+        openConfig.manifest.catalog = {
+            .maxEntries = 1,
+            .maxDependencies = 0,
+            .maxDependenciesPerAsset = 0,
+            .memoryResource = &validationMemory,
+        };
+        openConfig.validation.verifyTypedPayload = true;
+        auto validatedCatalog = Tina::Asset::openCatalogPackage(
+            workspace->cookedCatalogRootUtf8(), openConfig);
+        if (!validatedCatalog) {
+            try {
+                authoringFeedback_ =
+                    "Project directories created, but empty Catalog validation failed: ";
+                authoringFeedback_ += validatedCatalog.error().message;
+                return Tina::Core::success();
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Project Catalog validation failure message allocation failed");
+            }
+        }
+
+        try {
+            std::string feedback =
+                "Project created; live Catalog switch scheduled: ";
+            feedback += workspace->projectRootUtf8();
+            pendingProjectSwitch_ = std::move(*workspace);
+            authoringFeedback_.swap(feedback);
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Project creation success message allocation failed");
+        }
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status openProjectFromDialog()
+    {
+        const std::string_view currentRoot = activeProjectWorkspace_.has_value()
+                                                 ? activeProjectWorkspace_->projectRootUtf8()
+                                                 : std::string_view{assetResources_.catalogRootUtf8};
+        auto location = makeSaveDialogLocation(currentRoot, {}, true);
+        if (!location) {
+            return Tina::Core::failure(std::move(location.error()));
+        }
+        auto selected = fileDialog_.pickFolder({
+            .titleUtf8 = "Open Tina Project",
+            .initialDirectoryUtf8 = location->initialDirectoryUtf8,
+        });
+        if (!selected) {
+            if (selected.error().code == Tina::Core::CoreErrorCode::Unsupported) {
+                authoringFeedback_ =
+                    "Native project folder selection is unavailable on this platform";
+                return Tina::Core::success();
+            }
+            return Tina::Core::failure(std::move(selected.error()));
+        }
+        if (!selected->selected()) {
+            authoringFeedback_ = "Open project cancelled";
+            return Tina::Core::success();
+        }
+
+        auto workspace = openExistingEditorProjectWorkspace(selected->selectedPathUtf8);
+        if (!workspace) {
+            return reportAuthoringFailure("Project open failed: ", workspace.error());
+        }
+        try {
+            std::string feedback = "Project open scheduled: ";
+            feedback += workspace->projectRootUtf8();
+            pendingProjectSwitch_ = std::move(*workspace);
+            authoringFeedback_.swap(feedback);
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Project open success feedback allocation failed");
+        }
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status refreshProjectCatalog()
+    {
+        if (!assetResources_.projectCatalogConfigured ||
+            !assetResources_.system.has_value()) {
+            authoringFeedback_ = "Catalog refresh requires a configured project Catalog";
+            return Tina::Core::success();
+        }
+
+        auto candidateTabs = prepareProjectSwitchDocumentTabs();
+        if (!candidateTabs) {
+            return reportAuthoringFailure(
+                "Catalog refresh blocked; previous Catalog preserved: ",
+                candidateTabs.error());
+        }
+
+        const Tina::Editor::ProjectAssetFilter previousFilter =
+            projectAssets_.filter();
+        std::optional<Tina::Core::AssetId> previousSelection{};
+        if (const auto* selected = projectAssets_.selectedItem(); selected != nullptr) {
+            previousSelection = selected->assetId;
+        }
+
+        Tina::Asset::Sprite2DBindingRegistry* spriteParticipant =
+            spriteBindings_.has_value() ? &*spriteBindings_ : nullptr;
+        Tina::Asset::Mesh3DBindingRegistry* meshParticipant =
+            mesh3DBindings_.has_value() ? &*mesh3DBindings_ : nullptr;
+        Tina::Asset::CatalogReloadConfig reloadConfig{};
+        reloadConfig.package.manifest.catalog.maxEntries = 1024;
+        reloadConfig.package.manifest.catalog.maxDependencies = 4096;
+        reloadConfig.package.manifest.catalog.maxDependenciesPerAsset = 64;
+        reloadConfig.package.validation.verifyTypedPayload = true;
+        if (spriteParticipant != nullptr) {
+            reloadConfig.bindings.sprite2D =
+                std::span<Tina::Asset::Sprite2DBindingRegistry*>{&spriteParticipant, 1U};
+        }
+        if (meshParticipant != nullptr) {
+            reloadConfig.bindings.mesh3D =
+                std::span<Tina::Asset::Mesh3DBindingRegistry*>{&meshParticipant, 1U};
+        }
+        auto reload = assetResources_.system->reloadCatalog(
+            assetResources_.catalogRootUtf8, reloadConfig);
+        if (!reload) {
+            return reportAuthoringFailure(
+                "Catalog refresh failed; previous Catalog preserved: ", reload.error());
+        }
+
+        const Tina::Asset::CatalogSnapshot* committedCatalog =
+            assetResources_.system->catalog();
+        if (committedCatalog == nullptr) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Catalog refresh committed without an AssetSystem Catalog snapshot");
+        }
+        auto refreshedBrowser = prepareProjectBrowserForSnapshot(
+            *committedCatalog, previousFilter, previousSelection);
+        if (!refreshedBrowser) {
+            auto error = std::move(refreshedBrowser.error());
+            if (auto feedback = reportAuthoringFailure(
+                    "Catalog refresh committed, but Browser rebuild failed: ", error);
+                !feedback) {
+                return feedback;
+            }
+            return Tina::Core::failure(std::move(error));
+        }
+        if (auto status = switchCatalogAuthoringOwnersToPinnedTabs(); !status) {
+            return status;
+        }
+        if (auto status = refreshPinnedCatalogAuthoringDocuments(*refreshedBrowser);
+            !status) {
+            return status;
+        }
+
+        assetResources_.catalogEntryCount =
+            static_cast<u32>(refreshedBrowser->itemCount());
+        counters_.catalogEntryCount = assetResources_.catalogEntryCount;
+        if (auto status = rebuildLiveCatalogPreview(
+                "Catalog, Project Browser, documents, and preview bindings refreshed");
+            !status) {
+            return status;
+        }
+
+        projectAssets_ = std::move(*refreshedBrowser);
+        commitProjectSwitchDocumentTabs(std::move(*candidateTabs));
+        observedProjectAssetSelectionIndex_.reset();
+        projectBrowserUiRefreshPending_ = true;
+        previewAssetBindingsRefreshPending_ = false;
         return Tina::Core::success();
     }
 
@@ -4591,8 +5803,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         const auto* active = documentTabs_.activeTab();
         if (auto status = tree.setEnabled(closeDocumentButton_,
-                                          active != nullptr && !active->pinned &&
-                                              !active->dirty);
+                                          active != nullptr && !active->pinned);
             !status) {
             return status;
         }
@@ -4631,6 +5842,171 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         return refreshAuthoringUi(tree);
+    }
+
+    [[nodiscard]] WorkspaceSessionState*
+    findDocumentSession(Tina::Editor::EditorDocumentKey key) noexcept
+    {
+        if (key == world2DSession_.key) {
+            return &world2DSession_;
+        }
+        if (key == world3DSession_.key) {
+            return &world3DSession_;
+        }
+        for (auto& slot : tabDocumentSessions_) {
+            if (slot.has_value() && slot->key == key) {
+                return &*slot;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] const WorkspaceSessionState*
+    findDocumentSession(Tina::Editor::EditorDocumentKey key) const noexcept
+    {
+        if (key == world2DSession_.key) {
+            return &world2DSession_;
+        }
+        if (key == world3DSession_.key) {
+            return &world3DSession_;
+        }
+        for (const auto& slot : tabDocumentSessions_) {
+            if (slot.has_value() && slot->key == key) {
+                return &*slot;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] Tina::Core::Status
+    installDocumentSession(WorkspaceSessionState session)
+    {
+        if (findDocumentSession(session.key) != nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Editor document already owns a save session");
+        }
+        for (auto& slot : tabDocumentSessions_) {
+            if (!slot.has_value()) {
+                slot.emplace(std::move(session));
+                return Tina::Core::success();
+            }
+        }
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::DocumentTabCapacityExceeded,
+            "Editor document save session capacity is exhausted");
+    }
+
+    void discardDocumentSession(Tina::Editor::EditorDocumentKey key) noexcept
+    {
+        for (auto& slot : tabDocumentSessions_) {
+            if (slot.has_value() && slot->key == key) {
+                slot.reset();
+                return;
+            }
+        }
+    }
+
+    [[nodiscard]] Tina::Core::Status initializePinnedDocumentSessions()
+    {
+        if (findDocumentSession(tileMapDocumentOwnerKey_) != nullptr &&
+            findDocumentSession(spriteAnimationDocumentOwnerKey_) != nullptr) {
+            return Tina::Core::success();
+        }
+        auto tileMapBaseline = captureSavedBaseline(tileMapDocument_);
+        if (!tileMapBaseline) {
+            return Tina::Core::failure(std::move(tileMapBaseline.error()));
+        }
+        auto animationBaseline = captureSavedBaseline(spriteAnimationDocument_);
+        if (!animationBaseline) {
+            return Tina::Core::failure(std::move(animationBaseline.error()));
+        }
+        WorkspaceSessionState tileMapSession{
+            .key = tileMapDocumentOwnerKey_,
+            .savedBaseline = std::move(*tileMapBaseline),
+        };
+        WorkspaceSessionState animationSession{
+            .key = spriteAnimationDocumentOwnerKey_,
+            .savedBaseline = std::move(*animationBaseline),
+        };
+        bool installedTileMapSession = false;
+        if (findDocumentSession(tileMapDocumentOwnerKey_) == nullptr) {
+            if (auto status = installDocumentSession(std::move(tileMapSession)); !status) {
+                return status;
+            }
+            installedTileMapSession = true;
+        }
+        if (findDocumentSession(spriteAnimationDocumentOwnerKey_) == nullptr) {
+            if (auto status = installDocumentSession(std::move(animationSession)); !status) {
+                if (installedTileMapSession) {
+                    discardDocumentSession(tileMapDocumentOwnerKey_);
+                }
+                return status;
+            }
+        }
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Result<WorkspaceSessionState>
+    makeProjectAssetSession(Tina::Editor::EditorDocumentKey key,
+                            const TabAuthoringDocument& document,
+                            Tina::AssetFormat::TargetPlatform targetPlatform) const
+    {
+        auto baseline = std::visit(
+            [](const auto& activeDocument) {
+                return captureSavedBaseline(activeDocument);
+            },
+            document);
+        if (!baseline) {
+            return Tina::Core::failure(std::move(baseline.error()));
+        }
+        return WorkspaceSessionState{
+            .key = key,
+            .savedBaseline = std::move(*baseline),
+            .targetPlatform = targetPlatform,
+            .loadedFromPath = true,
+        };
+    }
+
+    [[nodiscard]] WorkspaceSessionState* activeDocumentSession() noexcept
+    {
+        const auto* tab = documentTabs_.activeTab();
+        return tab != nullptr ? findDocumentSession(tab->key) : nullptr;
+    }
+
+    [[nodiscard]] const WorkspaceSessionState* activeDocumentSession() const noexcept
+    {
+        const auto* tab = documentTabs_.activeTab();
+        return tab != nullptr ? findDocumentSession(tab->key) : nullptr;
+    }
+
+    [[nodiscard]] bool documentPathOwnedByOtherSession(
+        std::string_view path,
+        Tina::Editor::EditorDocumentKey activeKey) const noexcept
+    {
+        const auto ownsPath = [path, activeKey](const WorkspaceSessionState& session) {
+            return session.key != activeKey && session.documentPathUtf8 == path;
+        };
+        if (ownsPath(world2DSession_) || ownsPath(world3DSession_)) {
+            return true;
+        }
+        return std::any_of(tabDocumentSessions_.begin(), tabDocumentSessions_.end(),
+                           [&](const auto& slot) {
+                               return slot.has_value() && ownsPath(*slot);
+                           });
+    }
+
+    [[nodiscard]] Tina::Core::Status refreshToolbarPathForActiveTab(
+        Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        const WorkspaceSessionState* session = activeDocumentSession();
+        if (auto status = tree.setText(
+                toolbarPath_, session != nullptr ? session->documentPathUtf8
+                                                 : std::string_view{});
+            !status) {
+            return status;
+        }
+        return tree.setEnabled(toolbarPath_, session != nullptr);
     }
 
     [[nodiscard]] Tina::Editor::EditorDocumentKey*
@@ -4777,7 +6153,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
     }
 
-    [[nodiscard]] Tina::Core::Result<std::optional<TabAuthoringDocument>>
+    [[nodiscard]] Tina::Core::Result<LoadedProjectAssetDocument>
     loadProjectAssetDocument(
         const Tina::Editor::ProjectAssetDescriptor& asset)
     {
@@ -4809,7 +6185,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
             TabAuthoringDocument state{
                 std::in_place_type<Tina::Editor::World3DAuthoringDocument>,
                 std::move(*candidate)};
-            return std::optional<TabAuthoringDocument>{std::move(state)};
+            return LoadedProjectAssetDocument{
+                .document = std::optional<TabAuthoringDocument>{std::move(state)},
+                .targetPlatform = file->header().targetPlatform,
+            };
         }
         case Tina::Editor::ProjectAssetOpenKind::SpriteAnimation2D:
         {
@@ -4829,7 +6208,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
             TabAuthoringDocument state{
                 std::in_place_type<Tina::Editor::SpriteAnimationAuthoringDocument>,
                 std::move(*candidate)};
-            return std::optional<TabAuthoringDocument>{std::move(state)};
+            return LoadedProjectAssetDocument{
+                .document = std::optional<TabAuthoringDocument>{std::move(state)},
+                .targetPlatform = file->header().targetPlatform,
+            };
         }
         case Tina::Editor::ProjectAssetOpenKind::TileMap2D: {
             Tina::Core::AssetId tilesetId{};
@@ -4906,11 +6288,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
             TabAuthoringDocument state{
                 std::in_place_type<Tina::Editor::TileMapAuthoringDocument>,
                 std::move(*candidate)};
-            return std::optional<TabAuthoringDocument>{std::move(state)};
+            return LoadedProjectAssetDocument{
+                .document = std::optional<TabAuthoringDocument>{std::move(state)},
+                .targetPlatform = file->header().targetPlatform,
+            };
         }
         case Tina::Editor::ProjectAssetOpenKind::AssetInspector:
         default:
-            return std::optional<TabAuthoringDocument>{std::nullopt};
+            return LoadedProjectAssetDocument{
+                .targetPlatform = file->header().targetPlatform,
+            };
         }
     }
 
@@ -4946,6 +6333,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (!loadedDocument) {
             return Tina::Core::failure(std::move(loadedDocument.error()));
         }
+        std::optional<WorkspaceSessionState> preparedSession{};
+        if (loadedDocument->document.has_value()) {
+            auto session = makeProjectAssetSession(
+                documentKey, *loadedDocument->document,
+                loadedDocument->targetPlatform);
+            if (!session) {
+                return Tina::Core::failure(std::move(session.error()));
+            }
+            preparedSession.emplace(std::move(*session));
+        }
+        const Tina::Core::usize previousActiveIndex = documentTabs_.activeIndex();
         auto opened = documentTabs_.open(Tina::Editor::EditorDocumentTabDesc{
             .key = documentKey,
             .title = asset->displayName,
@@ -4953,11 +6351,20 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (!opened) {
             return Tina::Core::failure(std::move(opened.error()));
         }
-        if (loadedDocument->has_value()) {
-            if (auto status = installNewAuthoringDocument(
-                    documentKey, std::move(**loadedDocument));
-                !status) {
+        if (preparedSession.has_value()) {
+            if (auto status = installDocumentSession(std::move(*preparedSession)); !status) {
                 (void)documentTabs_.close(*opened, true);
+                (void)documentTabs_.activate(previousActiveIndex);
+                return status;
+            }
+        }
+        if (loadedDocument->document.has_value()) {
+            if (auto status = installNewAuthoringDocument(
+                    documentKey, std::move(*loadedDocument->document));
+                !status) {
+                discardDocumentSession(documentKey);
+                (void)documentTabs_.close(*opened, true);
+                (void)documentTabs_.activate(previousActiveIndex);
                 return status;
             }
             ++counters_.tabOwnedDocumentLoads;
@@ -4967,8 +6374,78 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return activateDocumentTab(tree, static_cast<u32>(*opened));
     }
 
-    [[nodiscard]] Tina::Core::Status closeActiveDocument(
+    [[nodiscard]] Tina::Core::Status showDirtyCloseModal(
         Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr || tab->pinned || !tab->dirty) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Dirty-close confirmation requires a modified unpinned document");
+        }
+        const WorkspaceSessionState* session = findDocumentSession(tab->key);
+        try {
+            std::string title = "Save changes to ";
+            title += tab->title;
+            title += '?';
+            if (auto status = tree.setText(dirtyCloseTitle_, title); !status) {
+                return status;
+            }
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                       "Dirty-close title allocation failed");
+        }
+        if (auto status = tree.setText(
+                dirtyCloseMessage_,
+                session != nullptr && session->hasDocumentPath()
+                    ? "Save the canonical document, discard the edits, or cancel closing."
+                    : "Choose a Save As destination, discard the edits, or cancel closing.");
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setText(
+                dirtyClosePath_,
+                session != nullptr ? session->documentPathUtf8 : std::string_view{});
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(dirtyClosePath_, session != nullptr); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(
+                dirtyCloseSaveButton_,
+                session != nullptr && session->hasDocumentPath() ? "Save" : "Save As");
+            !status) {
+            return status;
+        }
+        pendingDirtyCloseKey_ = tab->key;
+        if (auto status = tree.setLayoutStyle(
+                dirtyCloseModal_, dirtyCloseModalLayout(UI::UIVisibility::Visible));
+            !status) {
+            pendingDirtyCloseKey_.reset();
+            return status;
+        }
+        return tree.requestFocus(
+            session != nullptr && session->hasDocumentPath()
+                ? dirtyCloseSaveButton_
+                : dirtyClosePath_);
+    }
+
+    [[nodiscard]] Tina::Core::Status hideDirtyCloseModal(
+        Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        if (auto status = tree.setLayoutStyle(
+                dirtyCloseModal_, dirtyCloseModalLayout(UI::UIVisibility::Collapsed));
+            !status) {
+            return status;
+        }
+        pendingDirtyCloseKey_.reset();
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status closeActiveDocument(
+        Tina::PrimaryWindowUITreeUpdater& tree,
+        bool discardDirty = false)
     {
         if (auto status = synchronizeActiveTabDirty(); !status) {
             return status;
@@ -4985,10 +6462,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 Tina::Editor::EditorErrorCode::PinnedDocumentCannotClose,
                 "Pinned Editor document cannot be closed");
         }
-        if (closingTab->dirty) {
-            return Tina::Core::failure(
-                Tina::Editor::EditorErrorCode::DirtyDocumentRequiresConfirmation,
-                "Modified Editor document requires explicit discard confirmation");
+        if (closingTab->dirty && !discardDirty) {
+            return showDirtyCloseModal(tree);
         }
         const Tina::Editor::EditorDocumentKey closingKey = closingTab->key;
         if (auto* owner = activeAuthoringDocumentOwner(closingKey.kind);
@@ -5012,9 +6487,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
             }
             discardSuspendedAuthoringDocument(closingKey);
         }
-        if (auto status = documentTabs_.close(closingIndex); !status) {
+        if (auto status = documentTabs_.close(closingIndex, discardDirty); !status) {
             return status;
         }
+        discardDocumentSession(closingKey);
         assetInspectorActive_ = false;
         authoringFeedback_ = "Document tab closed";
         if (documentTabs_.activeTab() == nullptr) {
@@ -5022,6 +6498,93 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         return activateDocumentTab(tree,
                                    static_cast<u32>(documentTabs_.activeIndex()));
+    }
+
+    [[nodiscard]] bool dirtyCloseTargetsActiveDocument() const noexcept
+    {
+        const auto* tab = documentTabs_.activeTab();
+        return tab != nullptr && pendingDirtyCloseKey_.has_value() &&
+               tab->key == *pendingDirtyCloseKey_;
+    }
+
+    [[nodiscard]] Tina::Core::Status confirmDirtyCloseSave(
+        Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        if (!dirtyCloseTargetsActiveDocument()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                "Dirty-close target is no longer the active document");
+        }
+        const WorkspaceSessionState* session = activeDocumentSession();
+        if (session == nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Active dirty document does not support persistence");
+        }
+
+        Tina::Core::Status saveStatus = Tina::Core::success();
+        if (session->hasDocumentPath()) {
+            saveStatus = saveActiveDocument();
+        } else {
+            auto path = tree.text(dirtyClosePath_);
+            if (!path) {
+                return Tina::Core::failure(std::move(path.error()));
+            }
+            auto selectedPath = requestNativeSaveAsPath(*path);
+            if (!selectedPath) {
+                if (selectedPath.error().code == Tina::Core::CoreErrorCode::Unsupported) {
+                    saveStatus = saveActiveDocument(*path);
+                } else {
+                    saveStatus = Tina::Core::failure(std::move(selectedPath.error()));
+                }
+            } else if (!selectedPath->has_value()) {
+                authoringFeedback_ = "Save As cancelled; dirty document remains open";
+                return tree.setText(dirtyCloseMessage_, authoringFeedback_);
+            } else {
+                saveStatus = saveActiveDocument(**selectedPath);
+            }
+        }
+        if (!saveStatus) {
+            try {
+                std::string message = "Save failed: ";
+                message += saveStatus.error().message;
+                authoringFeedback_ = message;
+                return tree.setText(dirtyCloseMessage_, message);
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                           "Save failure message allocation failed");
+            }
+        }
+        if (auto status = closeActiveDocument(tree); !status) {
+            return status;
+        }
+        return hideDirtyCloseModal(tree);
+    }
+
+    [[nodiscard]] Tina::Core::Status confirmDirtyCloseDiscard(
+        Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        if (!dirtyCloseTargetsActiveDocument()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                "Dirty-close target is no longer the active document");
+        }
+        if (auto status = closeActiveDocument(tree, true); !status) {
+            return status;
+        }
+        return hideDirtyCloseModal(tree);
+    }
+
+    [[nodiscard]] Tina::Core::Status cancelDirtyClose(
+        Tina::PrimaryWindowUITreeUpdater& tree)
+    {
+        if (!dirtyCloseTargetsActiveDocument()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                "Dirty-close target is no longer the active document");
+        }
+        authoringFeedback_ = "Close cancelled; document and selection preserved";
+        return hideDirtyCloseModal(tree);
     }
 
     [[nodiscard]] Tina::Core::Status activateDocumentTab(
@@ -5042,6 +6605,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = documentTabs_.activate(index); !status) {
+            return status;
+        }
+        if (auto status = refreshToolbarPathForActiveTab(tree); !status) {
             return status;
         }
         assetInspectorActive_ = tab->key.kind ==
@@ -5169,42 +6735,144 @@ class EditorWorkspaceState final : public Tina::IGameState {
             }
             break;
         }
-        case EditorCommand::Undo:
-            status = tileMapEditingContext()
-                         ? tileMapDocument_.undo()
-                         : (workspaceMode_ == WorkspaceMode::World2D ? document_.undo()
-                                                                      : document3D_.undo());
+        case EditorCommand::Undo: {
+            const auto* activeTab = documentTabs_.activeTab();
+            if (activeTab == nullptr) {
+                return Tina::Core::failure(
+                    Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                    "Editor has no active document to undo");
+            }
+            const Tina::Editor::EditorDocumentKind activeKind = activeTab->key.kind;
+            switch (activeKind) {
+            case Tina::Editor::EditorDocumentKind::TileMap2D:
+                status = tileMapDocument_.undo();
+                break;
+            case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+                status = spriteAnimationDocument_.undo();
+                break;
+            case Tina::Editor::EditorDocumentKind::World3D:
+                status = document3D_.undo();
+                break;
+            case Tina::Editor::EditorDocumentKind::World2D:
+            default:
+                status = document_.undo();
+                break;
+            }
             if (status) {
                 ++counters_.authoringUndos;
-                if (tileMapEditingContext()) {
+                if (activeKind == Tina::Editor::EditorDocumentKind::TileMap2D) {
                     ++counters_.tileMapUndos;
+                } else if (activeKind ==
+                           Tina::Editor::EditorDocumentKind::SpriteAnimation2D) {
+                    animationSelectedFrameIndex_ = (std::min)(
+                        animationSelectedFrameIndex_,
+                        static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U));
+                    ++counters_.animationUndos;
+                    animationDocumentChanged = true;
                 }
                 requiresPreviewValidation = true;
                 authoringFeedback_ = "Undo restored the previous canonical snapshot";
             }
             break;
-        case EditorCommand::Redo:
-            status = tileMapEditingContext()
-                         ? tileMapDocument_.redo()
-                         : (workspaceMode_ == WorkspaceMode::World2D ? document_.redo()
-                                                                      : document3D_.redo());
+        }
+        case EditorCommand::Redo: {
+            const auto* activeTab = documentTabs_.activeTab();
+            if (activeTab == nullptr) {
+                return Tina::Core::failure(
+                    Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                    "Editor has no active document to redo");
+            }
+            const Tina::Editor::EditorDocumentKind activeKind = activeTab->key.kind;
+            switch (activeKind) {
+            case Tina::Editor::EditorDocumentKind::TileMap2D:
+                status = tileMapDocument_.redo();
+                break;
+            case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+                status = spriteAnimationDocument_.redo();
+                break;
+            case Tina::Editor::EditorDocumentKind::World3D:
+                status = document3D_.redo();
+                break;
+            case Tina::Editor::EditorDocumentKind::World2D:
+            default:
+                status = document_.redo();
+                break;
+            }
             if (status) {
                 ++counters_.authoringRedos;
-                if (tileMapEditingContext()) {
+                if (activeKind == Tina::Editor::EditorDocumentKind::TileMap2D) {
                     ++counters_.tileMapRedos;
+                } else if (activeKind ==
+                           Tina::Editor::EditorDocumentKind::SpriteAnimation2D) {
+                    animationSelectedFrameIndex_ = (std::min)(
+                        animationSelectedFrameIndex_,
+                        static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U));
+                    ++counters_.animationRedos;
+                    animationDocumentChanged = true;
                 }
                 requiresPreviewValidation = true;
                 authoringFeedback_ = "Redo restored the next canonical snapshot";
             }
             break;
+        }
         case EditorCommand::Save:
-            status = saveActiveDocument();
-            if (status) {
-                authoringFeedback_ = workspaceMode_ == WorkspaceMode::World2D
-                                         ? "Canonical World2D document saved atomically"
-                                         : "Canonical Prefab v2 document saved atomically";
+        case EditorCommand::SaveAs: {
+            if (command == EditorCommand::SaveAs) {
+                auto path = tree.text(toolbarPath_);
+                if (!path) {
+                    return Tina::Core::failure(std::move(path.error()));
+                }
+                auto selectedPath = requestNativeSaveAsPath(*path);
+                if (!selectedPath) {
+                    if (selectedPath.error().code == Tina::Core::CoreErrorCode::Unsupported) {
+                        status = saveActiveDocument(*path);
+                    } else {
+                        status = Tina::Core::failure(std::move(selectedPath.error()));
+                    }
+                } else if (!selectedPath->has_value()) {
+                    authoringFeedback_ = "Save As cancelled; document preserved";
+                    status = Tina::Core::success();
+                    break;
+                } else {
+                    status = saveActiveDocument(**selectedPath);
+                }
+            } else {
+                status = saveActiveDocument();
+            }
+            if (!status) {
+                try {
+                    authoringFeedback_ = "Save failed: ";
+                    authoringFeedback_ += status.error().message;
+                } catch (const std::bad_alloc&) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::OutOfMemory,
+                        "Save failure message allocation failed");
+                }
+                status = Tina::Core::success();
+                break;
+            }
+            if (auto pathStatus = refreshToolbarPathForActiveTab(tree); !pathStatus) {
+                return pathStatus;
+            }
+            switch (documentTabs_.activeTab()->key.kind) {
+            case Tina::Editor::EditorDocumentKind::World2D:
+                authoringFeedback_ = "Canonical World2D document saved atomically";
+                break;
+            case Tina::Editor::EditorDocumentKind::World3D:
+                authoringFeedback_ = "Canonical Prefab v2 document saved atomically";
+                break;
+            case Tina::Editor::EditorDocumentKind::TileMap2D:
+                authoringFeedback_ = "Canonical TileMap root and chunks saved root-last";
+                break;
+            case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+                authoringFeedback_ = "Canonical SpriteAnimationClip saved atomically";
+                break;
+            case Tina::Editor::EditorDocumentKind::AssetInspector:
+            default:
+                break;
             }
             break;
+        }
         case EditorCommand::PaintTile:
             status = editTileMapBrushCell(false);
             if (status) {
@@ -5498,11 +7166,30 @@ class EditorWorkspaceState final : public Tina::IGameState {
         case EditorCommand::ProjectFilterMedia:
             status = applyProjectAssetFilter(tree, Tina::Editor::ProjectAssetFilter::Media);
             break;
+        case EditorCommand::RefreshProjectCatalog:
+            catalogRefreshPending_ = true;
+            authoringFeedback_ = "Catalog refresh scheduled before the next render packet";
+            break;
+        case EditorCommand::CreateProject:
+            status = createNewProjectFromDialog();
+            break;
+        case EditorCommand::OpenProject:
+            status = openProjectFromDialog();
+            break;
         case EditorCommand::OpenSelectedProjectAsset:
             status = openSelectedProjectAsset(tree);
             break;
         case EditorCommand::CloseActiveDocument:
             status = closeActiveDocument(tree);
+            break;
+        case EditorCommand::DirtyCloseSave:
+            status = confirmDirtyCloseSave(tree);
+            break;
+        case EditorCommand::DirtyCloseDiscard:
+            status = confirmDirtyCloseDiscard(tree);
+            break;
+        case EditorCommand::DirtyCloseCancel:
+            status = cancelDirtyClose(tree);
             break;
         }
         if (!status) {
@@ -5639,36 +7326,239 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return tree.setEnabled(mode3DButton_, world2D);
     }
 
-    [[nodiscard]] Tina::Core::Status saveActiveDocument()
+    [[nodiscard]] Tina::Core::Result<SavedDocumentBaseline>
+    captureActiveDocumentSavedBaseline() const
     {
-        if (!activeTabUsesWorkspaceSession()) {
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                "Editor has no active document to save");
+        }
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            return captureSavedBaseline(document_);
+        case Tina::Editor::EditorDocumentKind::World3D:
+            return captureSavedBaseline(document3D_);
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            return captureSavedBaseline(tileMapDocument_);
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            return captureSavedBaseline(spriteAnimationDocument_);
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
             return Tina::Core::failure(
                 Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
-                "Catalog-backed document requires Save As before overwrite");
+                "Read-only Asset Inspector documents cannot be saved");
         }
-        WorkspaceSessionState& session = activeWorkspaceSession();
-        if (!session.hasDocumentPath()) {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                       "active editor workspace has no configured document path");
-        }
+    }
+
+    struct SaveDialogLocation final {
+        std::string initialDirectoryUtf8{};
+        std::string suggestedFileNameUtf8{};
+    };
+
+    [[nodiscard]] Tina::Core::Result<SaveDialogLocation>
+    makeSaveDialogLocation(std::string_view currentPathUtf8,
+                           std::string_view fallbackFileNameUtf8,
+                           bool directoryTarget) const
+    {
+        SaveDialogLocation location{};
         try {
-            const std::span<const std::byte> current = activeDocumentBytes();
-            std::vector<std::byte> savedCandidate(current.begin(), current.end());
-            Tina::Core::Status status = workspaceMode_ == WorkspaceMode::World2D
-                                            ? Tina::Editor::saveWorld2DAuthoringDocument(
-                                                  session.documentPathUtf8, document_)
-                                            : Tina::Editor::saveWorld3DAuthoringDocument(
-                                                  session.documentPathUtf8, document3D_);
-            if (!status) {
-                return status;
+            location.suggestedFileNameUtf8.assign(fallbackFileNameUtf8);
+            if (currentPathUtf8.empty() ||
+                !Tina::Core::isStrictUtf8WithoutNul(currentPathUtf8)) {
+                return location;
             }
-            session.savedBaselineBytes = std::move(savedCandidate);
+
+            const std::filesystem::path currentPath =
+                std::filesystem::u8path(currentPathUtf8.begin(), currentPathUtf8.end());
+            std::filesystem::path directory = directoryTarget
+                                                  ? currentPath
+                                                  : currentPath.parent_path();
+            std::error_code directoryError;
+            if (!directory.empty() &&
+                std::filesystem::is_directory(directory, directoryError) &&
+                !directoryError) {
+                location.initialDirectoryUtf8 = pathToUtf8(directory);
+            } else if (directoryTarget) {
+                directoryError.clear();
+                directory = currentPath.parent_path();
+                if (!directory.empty() &&
+                    std::filesystem::is_directory(directory, directoryError) &&
+                    !directoryError) {
+                    location.initialDirectoryUtf8 = pathToUtf8(directory);
+                }
+            }
+
+            if (!directoryTarget && currentPath.has_filename()) {
+                const std::string candidate = pathToUtf8(currentPath.filename());
+                if (!candidate.empty()) {
+                    location.suggestedFileNameUtf8 = candidate;
+                }
+            }
+            return location;
         } catch (const std::bad_alloc&) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
-                                       "Tina Editor could not retain the saved document baseline");
+                                       "Editor Save As dialog path allocation failed");
+        } catch (const std::filesystem::filesystem_error&) {
+            return location;
         }
+    }
+
+    [[nodiscard]] Tina::Core::Result<std::optional<std::string>>
+    requestNativeSaveAsPath(std::string_view currentPathUtf8)
+    {
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr || activeDocumentSession() == nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Active Editor document does not support Save As");
+        }
+
+        if (tab->key.kind == Tina::Editor::EditorDocumentKind::TileMap2D) {
+            auto location = makeSaveDialogLocation(currentPathUtf8, {}, true);
+            if (!location) {
+                return Tina::Core::failure(std::move(location.error()));
+            }
+            auto selected = fileDialog_.pickFolder({
+                .titleUtf8 = "Save Tina TileMap",
+                .initialDirectoryUtf8 = location->initialDirectoryUtf8,
+            });
+            if (!selected) {
+                return Tina::Core::failure(std::move(selected.error()));
+            }
+            if (!selected->selected()) {
+                return std::optional<std::string>{};
+            }
+            return std::optional<std::string>{std::move(selected->selectedPathUtf8)};
+        }
+
+        std::string_view title = "Save Tina document";
+        std::string_view fallbackFileName = "document.tasset";
+        std::string_view extension = "tasset";
+        Tina::EditorApp::Detail::EditorFileDialogFilter filter{
+            .labelUtf8 = "Tina Asset",
+            .patternUtf8 = "*.tasset",
+        };
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            title = "Save Tina World2D";
+            fallbackFileName = "world.tworld";
+            extension = "tworld";
+            filter = {.labelUtf8 = "Tina World2D", .patternUtf8 = "*.tworld"};
+            break;
+        case Tina::Editor::EditorDocumentKind::World3D:
+            title = "Save Tina World3D Prefab";
+            fallbackFileName = "world.tprefab";
+            extension = "tprefab";
+            filter = {.labelUtf8 = "Tina Prefab", .patternUtf8 = "*.tprefab"};
+            break;
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            title = "Save Tina Sprite Animation";
+            fallbackFileName = "animation.tasset";
+            break;
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Active Editor document does not support file Save As");
+        }
+
+        auto location = makeSaveDialogLocation(currentPathUtf8, fallbackFileName, false);
+        if (!location) {
+            return Tina::Core::failure(std::move(location.error()));
+        }
+        const std::array filters{filter};
+        auto selected = fileDialog_.saveFile({
+            .titleUtf8 = title,
+            .initialDirectoryUtf8 = location->initialDirectoryUtf8,
+            .suggestedFileNameUtf8 = location->suggestedFileNameUtf8,
+            .defaultExtensionUtf8 = extension,
+            .filters = filters,
+        });
+        if (!selected) {
+            return Tina::Core::failure(std::move(selected.error()));
+        }
+        if (!selected->selected()) {
+            return std::optional<std::string>{};
+        }
+        return std::optional<std::string>{std::move(selected->selectedPathUtf8)};
+    }
+
+    [[nodiscard]] Tina::Core::Status saveActiveDocument(
+        std::optional<std::string_view> saveAsPath = std::nullopt)
+    {
+        const auto* tab = documentTabs_.activeTab();
+        WorkspaceSessionState* session = activeDocumentSession();
+        if (tab == nullptr || session == nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Active Editor document does not support persistence");
+        }
+
+        std::string preparedPath{};
+        try {
+            const std::string_view target = saveAsPath.has_value()
+                                                ? *saveAsPath
+                                                : std::string_view{session->documentPathUtf8};
+            if (target.empty() || !Tina::Core::isStrictUtf8WithoutNul(target)) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "Editor save path must be non-empty strict UTF-8 without NUL");
+            }
+            if (documentPathOwnedByOtherSession(target, tab->key)) {
+                return Tina::Core::failure(
+                    Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                    "Another open Editor document already owns this save path");
+            }
+            preparedPath.assign(target);
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                       "Editor save path allocation failed");
+        }
+
+        auto preparedBaseline = captureActiveDocumentSavedBaseline();
+        if (!preparedBaseline) {
+            return Tina::Core::failure(std::move(preparedBaseline.error()));
+        }
+
+        Tina::Core::Status status = Tina::Core::success();
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            status = Tina::Editor::saveWorld2DAuthoringDocument(preparedPath,
+                                                                document_);
+            break;
+        case Tina::Editor::EditorDocumentKind::World3D:
+            status = Tina::Editor::saveWorld3DAuthoringDocument(preparedPath,
+                                                                document3D_);
+            break;
+        case Tina::Editor::EditorDocumentKind::TileMap2D: {
+            auto saved = Tina::Editor::saveTileMapAuthoringDocument(
+                preparedPath, tileMapDocument_, session->targetPlatform);
+            if (!saved) {
+                status = Tina::Core::failure(std::move(saved.error()));
+            }
+            break;
+        }
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            status = Tina::Editor::saveSpriteAnimationAuthoringDocument(
+                preparedPath, spriteAnimationDocument_, session->targetPlatform);
+            break;
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Read-only Asset Inspector documents cannot be saved");
+        }
+        if (!status) {
+            return status;
+        }
+
+        session->documentPathUtf8 = std::move(preparedPath);
+        session->savedBaseline = std::move(*preparedBaseline);
         ++counters_.authoringSaves;
-        return Tina::Core::success();
+        return synchronizeActiveTabDirty();
     }
 
     [[nodiscard]] WorkspaceSessionState& activeWorkspaceSession() noexcept
@@ -5715,17 +7605,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     {
         const WorkspaceSessionState& session = workspaceSession(mode);
         const std::span<const std::byte> current = workspaceSessionDocumentBytes(mode);
-        return session.savedBaselineBytes.size() != current.size() ||
-               !std::equal(session.savedBaselineBytes.begin(), session.savedBaselineBytes.end(),
-                           current.begin());
-    }
-
-    [[nodiscard]] bool activeTabUsesWorkspaceSession() const noexcept
-    {
-        const auto* tab = documentTabs_.activeTab();
-        return tab != nullptr && !tab->key.assetId &&
-               (tab->key.kind == Tina::Editor::EditorDocumentKind::World2D ||
-                tab->key.kind == Tina::Editor::EditorDocumentKind::World3D);
+        return !session.savedBaseline.captured ||
+               !baselineBytesMatch(session.savedBaseline.primaryBytes, current);
     }
 
     [[nodiscard]] bool activeTabDocumentDirty() const noexcept
@@ -5734,16 +7615,20 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (tab == nullptr) {
             return false;
         }
+        const WorkspaceSessionState* session = findDocumentSession(tab->key);
+        if (session == nullptr) {
+            return false;
+        }
         switch (tab->key.kind) {
         case Tina::Editor::EditorDocumentKind::World2D:
-            return isDocumentDirty(WorkspaceMode::World2D);
+            return !savedBaselineMatches(session->savedBaseline, document_);
         case Tina::Editor::EditorDocumentKind::World3D:
-            return tab->key.assetId ? document3D_.undoDepth() != 0U
-                                    : isDocumentDirty(WorkspaceMode::World3D);
+            return !savedBaselineMatches(session->savedBaseline, document3D_);
         case Tina::Editor::EditorDocumentKind::TileMap2D:
-            return tileMapDocument_.undoDepth() != 0U;
+            return !savedBaselineMatches(session->savedBaseline, tileMapDocument_);
         case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
-            return spriteAnimationDocument_.undoDepth() != 0U;
+            return !savedBaselineMatches(session->savedBaseline,
+                                         spriteAnimationDocument_);
         case Tina::Editor::EditorDocumentKind::AssetInspector:
         default:
             return false;
@@ -5763,8 +7648,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     {
         const bool world2DDirty = isDocumentDirty(WorkspaceMode::World2D);
         const bool world3DDirty = isDocumentDirty(WorkspaceMode::World3D);
-        const bool usesWorkspaceSession = activeTabUsesWorkspaceSession();
-        const WorkspaceSessionState& active = activeWorkspaceSession();
+        const WorkspaceSessionState* active = activeDocumentSession();
 
         counters_.finalWorkspaceWorld2D = workspaceMode_ == WorkspaceMode::World2D;
         counters_.world2DDocumentPathConfigured = world2DSession_.hasDocumentPath();
@@ -5773,69 +7657,151 @@ class EditorWorkspaceState final : public Tina::IGameState {
         counters_.world3DDocumentLoaded = world3DSession_.loadedFromPath;
         counters_.world2DDocumentDirty = world2DDirty;
         counters_.world3DDocumentDirty = world3DDirty;
-        counters_.world2DSavedSnapshotBytes = world2DSession_.savedBaselineBytes.size();
-        counters_.world3DSavedSnapshotBytes = world3DSession_.savedBaselineBytes.size();
-        counters_.documentPathConfigured = usesWorkspaceSession && active.hasDocumentPath();
-        counters_.documentLoaded = usesWorkspaceSession && active.loadedFromPath;
-        counters_.documentDirty = usesWorkspaceSession
-                                      ? (workspaceMode_ == WorkspaceMode::World2D
-                                             ? world2DDirty
-                                             : world3DDirty)
-                                      : activeTabDocumentDirty();
+        counters_.world2DSavedSnapshotBytes =
+            world2DSession_.savedBaseline.primaryBytes.size();
+        counters_.world3DSavedSnapshotBytes =
+            world3DSession_.savedBaseline.primaryBytes.size();
+        counters_.documentPathConfigured =
+            active != nullptr && active->hasDocumentPath();
+        counters_.documentLoaded = active != nullptr && active->loadedFromPath;
+        counters_.documentDirty = activeTabDocumentDirty();
         counters_.documentSaved = counters_.documentPathConfigured &&
                                   !counters_.documentDirty;
-        counters_.savedSnapshotBytes = usesWorkspaceSession
-                                           ? active.savedBaselineBytes.size()
-                                           : 0U;
+        counters_.savedSnapshotBytes =
+            active != nullptr ? active->savedBaseline.byteCount() : 0U;
     }
 
     [[nodiscard]] std::span<const std::byte> activeDocumentBytes() const noexcept
     {
-        return documentBytes(workspaceMode_);
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr) {
+            return {};
+        }
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            return document_.snapshotBytes();
+        case Tina::Editor::EditorDocumentKind::World3D:
+            return document3D_.payloadBytes();
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            return tileMapDocument_.rootPayloadBytes();
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            return spriteAnimationDocument_.payloadBytes();
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return {};
+        }
+    }
+
+    [[nodiscard]] u64 activeDocumentCanonicalByteCount() const noexcept
+    {
+        u64 total = activeDocumentBytes().size();
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr ||
+            tab->key.kind != Tina::Editor::EditorDocumentKind::TileMap2D) {
+            return total;
+        }
+        for (Tina::Core::usize index = 0; index < tileMapDocument_.chunkCount();
+             ++index) {
+            const auto chunk = tileMapDocument_.chunkPayloadAt(index);
+            if (chunk) {
+                total += chunk->payloadBytes.size();
+            }
+        }
+        return total;
     }
 
     [[nodiscard]] u64 activeDocumentRevision() const noexcept
     {
-        return workspaceMode_ == WorkspaceMode::World2D ? document_.revision()
-                                                        : document3D_.revision();
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr) {
+            return 0U;
+        }
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            return document_.revision();
+        case Tina::Editor::EditorDocumentKind::World3D:
+            return document3D_.revision();
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            return tileMapDocument_.revision();
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            return spriteAnimationDocument_.revision();
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return 0U;
+        }
     }
 
     [[nodiscard]] u64 activeDocumentItemCount() const noexcept
     {
-        return workspaceMode_ == WorkspaceMode::World2D ? document_.entityCount()
-                                                        : document3D_.nodeCount();
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr) {
+            return 0U;
+        }
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            return document_.entityCount();
+        case Tina::Editor::EditorDocumentKind::World3D:
+            return document3D_.nodeCount();
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            return tileMapDocument_.layerCount();
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            return spriteAnimationDocument_.frameCount();
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return 0U;
+        }
     }
 
     [[nodiscard]] u64 activeUndoDepth() const noexcept
     {
-        return tileMapEditingContext()
-                   ? tileMapDocument_.undoDepth()
-                   : (workspaceMode_ == WorkspaceMode::World2D ? document_.undoDepth()
-                                                                : document3D_.undoDepth());
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr) {
+            return 0U;
+        }
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            return document_.undoDepth();
+        case Tina::Editor::EditorDocumentKind::World3D:
+            return document3D_.undoDepth();
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            return tileMapDocument_.undoDepth();
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            return spriteAnimationDocument_.undoDepth();
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return 0U;
+        }
     }
 
     [[nodiscard]] u64 activeRedoDepth() const noexcept
     {
-        return tileMapEditingContext()
-                   ? tileMapDocument_.redoDepth()
-                   : (workspaceMode_ == WorkspaceMode::World2D ? document_.redoDepth()
-                                                                : document3D_.redoDepth());
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr) {
+            return 0U;
+        }
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            return document_.redoDepth();
+        case Tina::Editor::EditorDocumentKind::World3D:
+            return document3D_.redoDepth();
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            return tileMapDocument_.redoDepth();
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            return spriteAnimationDocument_.redoDepth();
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return 0U;
+        }
     }
 
     [[nodiscard]] bool activeCanUndo() const noexcept
     {
-        return tileMapEditingContext()
-                   ? tileMapDocument_.canUndo()
-                   : (workspaceMode_ == WorkspaceMode::World2D ? document_.canUndo()
-                                                                : document3D_.canUndo());
+        return activeUndoDepth() != 0U;
     }
 
     [[nodiscard]] bool activeCanRedo() const noexcept
     {
-        return tileMapEditingContext()
-                   ? tileMapDocument_.canRedo()
-                   : (workspaceMode_ == WorkspaceMode::World2D ? document_.canRedo()
-                                                                : document3D_.canRedo());
+        return activeRedoDepth() != 0U;
     }
 
     [[nodiscard]] Tina::Core::Status moveSelectedPositiveX()
@@ -6726,12 +8692,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         std::string documentStatus;
-        if (assetInspectorActive_ && projectAssets_.selectedItem() != nullptr) {
-            const auto* asset = projectAssets_.selectedItem();
-            documentStatus = "Catalog asset | Type v";
-            documentStatus += std::to_string(asset->assetTypeVersion);
-            documentStatus += " | Dependencies ";
-            documentStatus += std::to_string(asset->dependencyCount);
+        if (assetInspectorActive_) {
+            const auto* asset = inspectedProjectAsset();
+            if (asset != nullptr) {
+                documentStatus = "Catalog asset | Type v";
+                documentStatus += std::to_string(asset->assetTypeVersion);
+                documentStatus += " | Dependencies ";
+                documentStatus += std::to_string(asset->dependencyCount);
+            } else {
+                documentStatus = "Catalog asset unavailable in active project";
+            }
         } else {
             documentStatus = "Revision ";
             documentStatus += std::to_string(activeDocumentRevision());
@@ -6745,29 +8715,47 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = tree.setText(inspectorDocument_, documentStatus); !status) {
             return status;
         }
-        std::string statusDocument = workspaceMode_ == WorkspaceMode::World2D
-                                         ? "World2D v1  |  "
-                                         : "Prefab v2  |  ";
+        std::string_view documentKindLabel = "No document";
+        std::string_view documentItemLabel = "items";
+        if (const auto* activeTab = documentTabs_.activeTab(); activeTab != nullptr) {
+            switch (activeTab->key.kind) {
+            case Tina::Editor::EditorDocumentKind::World2D:
+                documentKindLabel = "World2D v1";
+                documentItemLabel = "entities";
+                break;
+            case Tina::Editor::EditorDocumentKind::World3D:
+                documentKindLabel = "Prefab v2";
+                documentItemLabel = "nodes";
+                break;
+            case Tina::Editor::EditorDocumentKind::TileMap2D:
+                documentKindLabel = "TileMap v3/v1";
+                documentItemLabel = "layers";
+                break;
+            case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+                documentKindLabel = "SpriteAnimationClip v1";
+                documentItemLabel = "frames";
+                break;
+            case Tina::Editor::EditorDocumentKind::AssetInspector:
+                documentKindLabel = "Asset Inspector";
+                documentItemLabel = "items";
+                break;
+            }
+        }
+        std::string statusDocument{documentKindLabel};
+        statusDocument += "  |  ";
         statusDocument += std::to_string(activeDocumentItemCount());
-        statusDocument += workspaceMode_ == WorkspaceMode::World2D
-                              ? " entities  |  Revision "
-                              : " nodes  |  Revision ";
+        statusDocument += ' ';
+        statusDocument += documentItemLabel;
+        statusDocument += "  |  Revision ";
         statusDocument += std::to_string(activeDocumentRevision());
         statusDocument += pathConfigured ? (dirty ? "  |  Modified" : "  |  Saved") : "  |  Unsaved";
         if (auto status = tree.setText(statusDocument_, statusDocument); !status) {
             return status;
         }
-        const std::string_view pathStatus = pathConfigured
-                                                ? (dirty ? "Save target configured | Modified"
-                                                         : "Save target configured | Saved")
-                                                : "No save path | Unsaved";
-        if (auto status = tree.setText(toolbarPath_, pathStatus); !status) {
-            return status;
-        }
         std::string statusPreview = "Runtime preview: ";
         statusPreview += counters_.runtimePreviewValid ? "valid" : "invalid";
         statusPreview += "  |  Cook ";
-        statusPreview += std::to_string(activeDocumentBytes().size());
+        statusPreview += std::to_string(activeDocumentCanonicalByteCount());
         statusPreview += " B  |  Catalog ";
         statusPreview += assetResources_.projectCatalogConfigured ? "project" : "built-in";
         statusPreview += "  |  Resolved ";
@@ -6793,8 +8781,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         std::string statusSelection = "Selected: ";
-        if (assetInspectorActive_ && projectAssets_.selectedItem() != nullptr) {
-            statusSelection += projectAssets_.selectedItem()->displayName;
+        if (assetInspectorActive_) {
+            const auto* asset = inspectedProjectAsset();
+            statusSelection += asset != nullptr ? asset->displayName : "Unavailable Catalog asset";
         } else {
             statusSelection += hierarchyLabel(workspaceMode_, selectionKey_);
         }
@@ -6881,18 +8870,74 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = tree.setEnabled(redoButton_, activeCanRedo()); !status) {
             return status;
         }
-        return tree.setEnabled(saveButton_, pathConfigured && dirty);
+        const bool documentCanSave = activeDocumentSession() != nullptr;
+        if (auto status = tree.setEnabled(toolbarPath_, documentCanSave); !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(saveAsButton_, documentCanSave); !status) {
+            return status;
+        }
+        return tree.setEnabled(saveButton_, documentCanSave && pathConfigured && dirty);
+    }
+
+    [[nodiscard]] const Tina::Editor::ProjectAssetDescriptor*
+    inspectedProjectAsset() const noexcept
+    {
+        const auto* activeTab = documentTabs_.activeTab();
+        if (activeTab != nullptr &&
+            activeTab->key.kind == Tina::Editor::EditorDocumentKind::AssetInspector &&
+            activeTab->key.assetId) {
+            return projectAssets_.inspectorSnapshot(activeTab->key.assetId);
+        }
+        return projectAssets_.selectedInspectorSnapshot();
     }
 
     [[nodiscard]] Tina::Core::Status publishInspector(Tina::PrimaryWindowUITreeUpdater& tree,
                                                       UI::UITreeViewItemKey key)
     {
         if (assetInspectorActive_) {
-            const auto* asset = projectAssets_.selectedItem();
+            const auto* asset = inspectedProjectAsset();
             if (asset == nullptr) {
-                return Tina::Core::failure(
-                    Tina::Editor::EditorErrorCode::ProjectAssetNotFound,
-                    "Project Asset Inspector has no selected asset");
+                if (auto status = tree.setText(inspectorName_, "Asset unavailable"); !status) {
+                    return status;
+                }
+                if (auto status = tree.setText(inspectorKind_, "Kind: Missing from active Catalog");
+                    !status) {
+                    return status;
+                }
+                std::string note = "AssetId: ";
+                const auto* activeTab = documentTabs_.activeTab();
+                if (activeTab != nullptr && activeTab->key.assetId) {
+                    const auto idText = activeTab->key.assetId.canonicalText();
+                    note.append(idText.data(), idText.size());
+                } else {
+                    note += "none";
+                }
+                note += " | The active project no longer contains this asset";
+                if (auto status = tree.setText(inspectorNote_, note); !status) {
+                    return status;
+                }
+                if (auto status = tree.setText(inspectorAssetPath_, "Cooked: unavailable");
+                    !status) {
+                    return status;
+                }
+                if (auto status = tree.setText(inspectorDependencySummary_, "Dependencies 0");
+                    !status) {
+                    return status;
+                }
+                inspectorDependencyLabels_.clear();
+                if (auto status = tree.invalidateListViewItems(inspectorDependencyList_); !status) {
+                    return status;
+                }
+                for (const UI::UINodeId field : {
+                         inspectorPositionX_, inspectorPositionY_, inspectorPositionZ_,
+                         inspectorRotationX_, inspectorRotationY_, inspectorRotationZ_,
+                         inspectorScaleX_, inspectorScaleY_, inspectorScaleZ_}) {
+                    if (auto status = tree.setText(field, "n/a"); !status) {
+                        return status;
+                    }
+                }
+                return Tina::Core::success();
             }
             std::string name = "Asset: ";
             name += asset->displayName;
@@ -6917,6 +8962,44 @@ class EditorWorkspaceState final : public Tina::IGameState {
             if (auto status = tree.setText(inspectorNote_, note); !status) {
                 return status;
             }
+            std::string path = "Cooked: ";
+            path += asset->canonicalRelativeCookedPath;
+            if (auto status = tree.setText(inspectorAssetPath_, path); !status) {
+                return status;
+            }
+            std::string dependencySummary = "Dependencies ";
+            dependencySummary += std::to_string(asset->dependencies.size());
+            if (auto status = tree.setText(inspectorDependencySummary_, dependencySummary);
+                !status) {
+                return status;
+            }
+            try {
+                std::vector<std::string> dependencyLabels;
+                dependencyLabels.reserve(asset->dependencies.size());
+                for (const Tina::AssetFormat::AssetDependency& dependency :
+                     asset->dependencies) {
+                    const auto dependencyId = dependency.assetId.canonicalText();
+                    std::string label{
+                        Tina::Editor::projectAssetKindLabel(dependency.expectedKind)};
+                    label += "  ";
+                    label.append(dependencyId.data(), 8U);
+                    label += "  | Required";
+                    if (Tina::AssetFormat::hasDependencyFlag(
+                            dependency.flags,
+                            Tina::AssetFormat::DependencyFlags::Deferred)) {
+                        label += ", deferred load";
+                    }
+                    dependencyLabels.push_back(std::move(label));
+                }
+                inspectorDependencyLabels_ = std::move(dependencyLabels);
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Project Asset Inspector dependency label allocation failed");
+            }
+            if (auto status = tree.invalidateListViewItems(inspectorDependencyList_); !status) {
+                return status;
+            }
             for (const UI::UINodeId field : {
                      inspectorPositionX_, inspectorPositionY_, inspectorPositionZ_,
                      inspectorRotationX_, inspectorRotationY_, inspectorRotationZ_,
@@ -6926,6 +9009,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 }
             }
             return Tina::Core::success();
+        }
+        inspectorDependencyLabels_.clear();
+        if (auto status = tree.setText(inspectorAssetPath_, {}); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(inspectorDependencySummary_, {}); !status) {
+            return status;
+        }
+        if (auto status = tree.invalidateListViewItems(inspectorDependencyList_); !status) {
+            return status;
         }
         std::string name = "Name: ";
         name += hierarchyLabel(workspaceMode_, key);
@@ -7052,6 +9145,38 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         return tree.setText(inspectorScaleZ_, hasEntity ? std::to_string(scaleZ) : "n/a");
+    }
+
+    [[nodiscard]] UI::UIListViewDataSource inspectorDependencyDataSource() const noexcept
+    {
+        return UI::UIListViewDataSource{
+            .state = this,
+            .itemCount = &EditorWorkspaceState::inspectorDependencyItemCount,
+            .resolveItem = &EditorWorkspaceState::resolveInspectorDependencyItem,
+        };
+    }
+
+    [[nodiscard]] static u64 inspectorDependencyItemCount(const void* state) noexcept
+    {
+        const auto* self = static_cast<const EditorWorkspaceState*>(state);
+        return self != nullptr ? self->inspectorDependencyLabels_.size() : 0U;
+    }
+
+    static bool resolveInspectorDependencyItem(
+        const void* state, u64 logicalIndex,
+        UI::UIListViewItemDescriptor& output) noexcept
+    {
+        const auto* self = static_cast<const EditorWorkspaceState*>(state);
+        if (self == nullptr || logicalIndex >= self->inspectorDependencyLabels_.size()) {
+            return false;
+        }
+        output = UI::UIListViewItemDescriptor{
+            .key = 20'000U + logicalIndex,
+            .label = self->inspectorDependencyLabels_[
+                static_cast<Tina::Core::usize>(logicalIndex)],
+            .enabled = false,
+        };
+        return true;
     }
 
     [[nodiscard]] UI::UIListViewDataSource projectAssetDataSource() const noexcept
@@ -7201,13 +9326,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
     };
     std::array<std::optional<SuspendedTabAuthoringDocument>, DocumentTabSlots>
         suspendedAuthoringDocuments_{};
+    std::array<std::optional<WorkspaceSessionState>, DocumentTabSlots>
+        tabDocumentSessions_{};
     WorkspaceMode workspaceMode_ = WorkspaceMode::World2D;
     WorkspaceSessionState world2DSession_{};
     WorkspaceSessionState world3DSession_{};
     Tina::Editor::ProjectAssetBrowserModel projectAssets_;
     Tina::Editor::EditorDocumentTabs documentTabs_;
+    std::optional<Tina::Editor::EditorProjectWorkspace> pendingProjectSwitch_{};
+    std::optional<Tina::Editor::EditorProjectWorkspace> activeProjectWorkspace_{};
     EditorAssetResources& assetResources_;
     EditorRenderDeviceAccess& renderDeviceAccess_;
+    Tina::EditorApp::Detail::EditorFileDialog fileDialog_{};
     Tina::UI::UIRootOwner uiRoot_{};
     UI::UINodeId hierarchyTree_{};
     UI::UINodeId projectAssetList_{};
@@ -7216,6 +9346,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId inspectorName_{};
     UI::UINodeId inspectorKind_{};
     UI::UINodeId inspectorNote_{};
+    UI::UINodeId inspectorAssetPath_{};
+    UI::UINodeId inspectorDependencySummary_{};
+    UI::UINodeId inspectorDependencyList_{};
     UI::UINodeId inspectorDocument_{};
     UI::UINodeId hierarchySelectionSummary_{};
     UI::UINodeId viewportPreviewLayer_{};
@@ -7237,6 +9370,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId statusSelection_{};
     UI::UINodeId toolbarPath_{};
     UI::UINodeId toolbarDocument_{};
+    UI::UINodeId dirtyCloseModal_{};
+    UI::UINodeId dirtyCloseTitle_{};
+    UI::UINodeId dirtyCloseMessage_{};
+    UI::UINodeId dirtyClosePath_{};
     UI::UINodeId breadcrumb_{};
     UI::UINodeId viewportTitle_{};
     UI::UINodeId viewportMode_{};
@@ -7260,8 +9397,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
     UI::UINodeId saveButton_{};
+    UI::UINodeId saveAsButton_{};
     UI::UINodeId openProjectAssetButton_{};
+    UI::UINodeId refreshProjectCatalogButton_{};
+    UI::UINodeId createProjectButton_{};
+    UI::UINodeId openProjectButton_{};
     UI::UINodeId closeDocumentButton_{};
+    UI::UINodeId dirtyCloseSaveButton_{};
+    UI::UINodeId dirtyCloseDiscardButton_{};
+    UI::UINodeId dirtyCloseCancelButton_{};
     std::array<UI::UINodeId, 4> projectFilterButtons_{};
     std::array<UI::UINodeId, DocumentTabSlots> documentTabButtons_{};
     UI::UINodeId paintTileButton_{};
@@ -7332,6 +9476,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool animationPlaying_ = false;
     bool animationPreviewAvailable_ = false;
     bool previewAssetBindingsRefreshPending_ = false;
+    bool catalogRefreshPending_ = false;
+    bool projectBrowserUiRefreshPending_ = false;
     bool assetInspectorActive_ = false;
     bool pendingAnimationTimelineRefresh_ = false;
     UI::UILogicalRect viewportLogicalRect_{};
@@ -7341,8 +9487,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::string authoringFeedback_ = "One validated revision per command";
     std::optional<u64> pendingSelectionIndex_{};
     std::optional<u64> observedProjectAssetSelectionIndex_{};
+    std::vector<std::string> inspectorDependencyLabels_{};
     std::optional<u32> pendingDocumentTabActivation_{};
     std::optional<EditorCommand> pendingEditorCommand_{};
+    std::optional<Tina::Editor::EditorDocumentKey> pendingDirtyCloseKey_{};
     std::optional<u32> pendingAnimationFrameSelection_{};
     std::optional<ViewportToolMode> pendingViewportToolMode_{};
     std::optional<UI::UIStraightSrgba8Color> pendingViewportTokenColor_{};
@@ -7434,7 +9582,8 @@ class EditorApplication final : public Tina::IGameApplication {
     const bool world2D = options.initialWorkspace == WorkspaceMode::World2D;
     const bool world2DPathConfigured = !options.world2DDocumentPathUtf8.empty();
     const bool world3DPathConfigured = !options.world3DDocumentPathUtf8.empty();
-    const bool projectCatalogConfigured = !options.catalogRootUtf8.empty();
+    const bool projectCatalogConfigured =
+        !options.catalogRootUtf8.empty() || counters.projectSwitches != 0U;
     const bool documentPathConfigured = world2D ? world2DPathConfigured
                                                 : world3DPathConfigured;
     const bool activeDocumentLoaded = world2D ? counters.world2DDocumentLoaded
@@ -7470,7 +9619,7 @@ class EditorApplication final : public Tina::IGameApplication {
         counters.editorLayoutRegions != EditorLayoutRegionCount || !counters.viewportLayoutReady ||
         !counters.gpuViewportReady || !counters.inspectorScrollConfigured ||
         !counters.projectAssetBrowserReady || !counters.documentTabsReady ||
-        counters.projectAssetVisibleItems == 0 ||
+        (!projectCatalogConfigured && counters.projectAssetVisibleItems == 0) ||
         counters.documentTabCount != (options.autoDemo ? 5U : 4U) ||
         (options.autoDemo && counters.projectAssetOpenCount != 1U) ||
         (options.autoDemo &&
@@ -7504,7 +9653,7 @@ class EditorApplication final : public Tina::IGameApplication {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Tina Editor lifecycle counters did not match contract");
     }
-    if (!projectCatalogConfigured &&
+    if (!projectCatalogConfigured && counters.projectSwitches == 0U &&
         (counters.catalogEntryCount != 9 || counters.catalogAssetsLoaded != 7 ||
          counters.catalogGpuTextures != 1 || counters.catalogGpuMeshes != 1 ||
          counters.catalogSpriteBindings != 1 || counters.catalogMeshBindings != 1 ||
@@ -7706,6 +9855,8 @@ class EditorApplication final : public Tina::IGameApplication {
     writeJsonString(std::cout, options.world3DDocumentPathUtf8);
     std::cout << ",\"catalogRoot\":";
     writeJsonString(std::cout, options.catalogRootUtf8);
+    std::cout << ",\"activeCatalogRoot\":";
+    writeJsonString(std::cout, assetResources.catalogRootUtf8);
     std::cout << ",\"documentLoaded\":" << (counters.documentLoaded ? "true" : "false")
               << ",\"world2DDocumentPathConfigured\":"
               << (counters.world2DDocumentPathConfigured ? "true" : "false")
@@ -7771,6 +9922,7 @@ class EditorApplication final : public Tina::IGameApplication {
               << (counters.projectCatalogConfigured ? "true" : "false")
               << ",\"builtInPreviewCatalog\":"
               << (counters.builtInPreviewCatalog ? "true" : "false")
+              << ",\"projectSwitches\":" << counters.projectSwitches
               << ",\"catalogEntryCount\":" << counters.catalogEntryCount
               << ",\"catalogAssetsLoaded\":" << counters.catalogAssetsLoaded
               << ",\"catalogGpuTextures\":" << counters.catalogGpuTextures

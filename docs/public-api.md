@@ -69,7 +69,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail |
 | `Tina::Navigation2D` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
-| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip authoring document、Project Asset index、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
+| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
@@ -553,12 +553,39 @@ blocked flags；可选 object layer 只栅格化 property 精确匹配的 visibl
 每个 session 的 path、loaded flag、saved baseline 与 dirty 状态由 EditorApp 私有持有，不扩展 document 公共 ABI。
 
 `ProjectAssetBrowserModel::Create()` 复制 Catalog-derived descriptor、按 `AssetId` 确定性排序并拒绝重复/超容量输入；
-All/2D/3D/Media filter 重建稳定索引，owned descriptor view 只在 model 析构时失效。`EditorDocumentTabs::Create()`
+每个 owned descriptor 保存由 `AssetKind + AssetId` 派生的 canonical relative cooked path，以及完整、按 AssetId 排序的
+dependency records，并校验 count、目标、kind、flags 与重复边。`inspectorSnapshot(assetId)` 因而可按 active Inspector
+tab 的稳定 `AssetId` 取得 owning metadata，不依赖浏览器当前 filter/selection。All/2D/3D/Media filter 重建稳定索引，
+owned descriptor view 只在 model 析构时失效。`EditorDocumentTabs::Create()`
 创建固定容量 move-only tab owner，以 `(EditorDocumentKind, AssetId)` 去重 open，失败保持 tab 列表和 active selection；
 pinned tab 不可关闭，dirty tab 必须显式 `discardDirty=true`。这两个公共模型只表达工具状态，不拥有 Runtime/Scene/UI。
 EditorApp 已接入 Catalog browser、资源 Inspector 和 workspace tab 路由；每个 tab 独立拥有 authoring document/history、
-同 key 重新打开只激活既有状态。Save/Save As、dirty-close modal 与 Catalog refresh 仍是下一阶段，不在当前公共契约中
-伪装完成。
+session 与 canonical saved baseline，同 key 重新打开只激活既有状态。Save/Save As 按 active document kind 分派；
+dirty-close modal 提供 Save/Save As、Discard、Cancel；Catalog Refresh 在下一帧 packet 前复用
+`AssetSystem::reloadCatalog()` 的 Sprite/Mesh participant transaction。以上编排留在 `Tina::EditorApp` 私有层，
+不扩大 document 公共 ABI。
+
+Windows EditorApp 的私有 `EditorFileDialog` 用 `IFileSaveDialog` 为 World2D `.tworld`、World3D `.tprefab` 与
+SpriteAnimation `.tasset` 选择文件，用 folder-pick dialog 为 TileMap 选择输出根；Windows/COM 类型不进入公共头。
+Cancel 是成功的 no-op，保留 session path、baseline、dirty、tab 与 selection。非 Windows 私有 adapter 返回结构化
+`CoreErrorCode::Unsupported`，EditorApp 回退到 Toolbar/dirty-close TextEdit 中的 strict UTF-8 路径。
+
+`EditorProjectWorkspace::Create(desc, config)` 建立 owning、move-only 的 canonical project/source/Cooked Catalog root
+模型。三个 root 必须是有界 strict UTF-8 absolute path；Source 与 Catalog 必须严格位于 project root 内且互不相同、
+互不嵌套。该 API 只做 lexical validation，因此后续文件操作仍须验证 final physical containment。
+`CreateNewEditorProject(request)` 创建或采用既有空 project root，并创建默认 `Source`/`Catalog`（或调用方给定的两个
+single-component 目录）；它拒绝非物理目录和 symlink/junction/reparse point，重新验证 root identity/final containment，
+失败只删除 identity 仍匹配且确由本次事务创建的目录。成功结果不暴露 `std::filesystem` 或 native 类型。
+该公共 API 本身不发布 Catalog。Windows EditorApp 的 Project `New` command 在 folder picker 成功后组合该 API、
+`AssetFormat::writeCookedManifestBytes()` 与 `Asset::publishCatalogPackage()`：发布零 entry current-schema manifest 后再用
+`openCatalogPackage()` typed-validate。Project `Open` 私有组合验证选中 root 的物理 `Source/`/`Catalog/` 目录、reparse
+边界与 final containment。New/Open 都只在命令阶段排队 workspace；下一安全帧先拒绝仍有 dirty 的 Catalog document，
+再调用 `AssetSystem::reloadCatalog()` 的 Sprite/Mesh participant transaction。Browser 必须从成功 reload 后的
+`AssetSystem::catalog()` snapshot 构建，不能独立重开磁盘路径形成第二份事实；成功切换还会失效干净的动态 Catalog tab、
+重新打开固定 TileMap/Animation document 并重建 2D/3D/Animation preview。active root/workspace 与 project-switch 计数只在
+完整 preview 成功后发布；任何 commit 前失败继续使用旧 Catalog，commit 后失败作为结构化致命错误返回。该编排留在
+`Tina::EditorApp` 私有层；Editor source
+import 和非 Windows project-folder adapter 尚未完成，因此仍不能视为完整项目工作流已经完成。
 `World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
 entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
 
@@ -602,6 +629,11 @@ revision/history 或已存在的目标文件；该 API 不引入 editor-only wir
 
 `loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v2 提供同一读取上限、clean baseline、
 atomic sibling replace 与失败不变契约。
+
+`saveSpriteAnimationAuthoringDocument(utf8Path, document, platform)` 把当前 `cookPreview(platform)` 的唯一 canonical
+Cooked artifact 原子替换到目标文件。`saveTileMapAuthoringDocument(utf8Root, document, platform)` 按每个
+`CookedArtifactPath` 写 current-schema artifact，先发布全部 TileMapChunk、最后发布 TileMap root，并返回 artifact/byte
+count。两者都创建父目录，不写 manifest，不维护 editor-only 或旧 schema 格式。
 
 ## Asset 与 Cooked
 

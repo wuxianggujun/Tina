@@ -1,6 +1,8 @@
 add_library(tina_editor_app STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor_app/EditorApplication.hpp
     EditorApplication.cpp
+    EditorFileDialog.cpp
+    EditorFileDialog.hpp
 )
 add_library(Tina::EditorApp ALIAS tina_editor_app)
 
@@ -18,6 +20,9 @@ target_link_libraries(tina_editor_app
         Tina::Scene
         "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
+if(WIN32)
+    target_link_libraries(tina_editor_app PRIVATE ole32 shell32 uuid)
+endif()
 set_target_properties(tina_editor_app PROPERTIES
     CXX_EXTENSIONS OFF
     EXPORT_NAME EditorApp

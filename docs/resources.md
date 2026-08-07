@@ -49,7 +49,7 @@ Catalog package
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked 产品 consumer |
 | Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
-| Editor Project Browser | 拥有 Catalog metadata 的 AssetId 排序索引，All/2D/3D/Media 过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
+| Editor Project Browser | 拥有 Catalog metadata、canonical cooked 相对路径与完整 dependency records 的 AssetId 排序索引，All/2D/3D/Media 过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
 | TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer + property-tagged visible Rectangle 原子生成 NavigationGrid2DData v1；当前不是新 AssetKind |
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
@@ -71,10 +71,24 @@ canonical World2D/TileMap/Prefab/SpriteAnimationClip 收集并去重 Sprite、Ti
 取得依赖 Lease、上传 Texture2D/StaticMesh 并注册 binding。Scene 仅保存 weak Handle，Render item 仅保存当前 packet
 的 `FrameResourceRef`。项目 Catalog 中 unresolved/wrong-kind 引用 fail closed：只过滤对应 preview component，document、
 history 与持久化 AssetId 不变。内建 Catalog 是未指定项目路径时的临时预览 fixture，退出时连同临时 package 一并释放。
-Project Browser 只复制 Catalog identity/kind/version/dependency count/file size/display label，不借用 CatalogSnapshot entry；
-打开 authorable asset 后仍由 AssetSystem 取得并验证 Cooked bytes，每个 tab 独立保留 canonical document/history；切换
-active owner 后在下一帧重建当前文档集合所需的 resident bindings。Catalog live refresh 尚未接入，当前不会在后台把
-变化中的 package 半发布到 Editor UI。
+Project Browser 复制 Catalog identity/kind/version/dependency count/file size/display label、由 kind+AssetId 派生的 canonical
+cooked 相对路径和全部 dependency records，不借用 CatalogSnapshot entry。Project Asset 虚拟列表使用固定 32 px 行高；
+Asset Inspector 按 active Inspector tab 的 AssetId 取得 owning snapshot，并用固定 36 px 行高虚拟 dependency list 显示 kind、
+AssetId 与 flags，不因 browser 的临时 selection 改变已打开 Inspector 内容；
+打开 authorable asset 后仍由 AssetSystem 取得并验证 Cooked bytes，每个 tab 独立保留 canonical document/history/session；
+切换 active owner 后在下一帧重建当前文档集合所需的 resident bindings。Project Browser 的显式 Refresh 在下一帧
+Render packet 建立前调用 `AssetSystem::reloadCatalog()`，把当前 Sprite/Mesh registry 作为 participant；只有完整 package
+与全部 participant transaction 成功才重建 browser/selection/preview binding，失败继续显示并使用旧 Catalog。
+
+`EditorProjectWorkspace` 已把 project、editable Source 与 immutable Cooked Catalog 表达为三个 owning canonical strict UTF-8
+root，Source/Catalog 必须是 project 下互不重叠的隔离子目录。`CreateNewEditorProject()` 可事务式建立或采用空 project
+root，并在物理/reparse containment 与目录 identity 校验后创建两个子目录；失败只回滚本事务仍保持原 identity 的目录。
+Windows EditorApp Project `New` 随后写零 entry current-schema manifest，以 `publishCatalogPackage()` manifest-last 发布，
+再通过 `openCatalogPackage()` typed-validate；Project `Open` 验证物理 Source/Catalog 布局。New/Open 将 workspace 排队到
+下一安全帧；脏 Catalog document 会在 commit 前阻止切换。带 Sprite/Mesh participant 的 `AssetSystem::reloadCatalog()`
+成功后，Browser 只从已提交 snapshot 重建，干净的动态 Catalog tab 被失效，固定 TileMap/Animation document 从新 Catalog
+重新打开，再验证 2D/3D/Animation preview。commit 前失败保留旧 Catalog；commit 后 preview 重建失败返回结构化致命错误，
+不会留下伪成功状态。Editor source-import 产品流程与非 Windows project-folder adapter 仍待接线。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。
@@ -395,6 +409,10 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
 - TileMap streaming 已提供固定容量 Camera/layer demand、取消/卸载与 retain-window demand-recency LRU；Editor root/chunk
   authoring、bounded undo/redo、viewport brush 与 cook preview 已完成。优先级 IO 调度和自动 gameplay 生成仍须独立验收；
   开发期不规划旧 TileMap schema migration；
+- Editor project workspace/空目录创建基础 API 已完成 strict UTF-8 root 隔离、物理/reparse 校验与 identity-safe rollback；
+  Windows Project `New` 已完成空 current-schema Catalog manifest-last publish + reopen/typed validation；Project `Open` 与
+  下一安全帧 live Catalog/project switch 已完成，Editor source-import 产品流程与非 Windows folder adapter 尚未完成，
+  项目产品流程仍为 InProgress；
 - Navigation2D 的 runtime-derived schema-v1 grid、动态 blocker 和确定性 A* 已闭环；独立 Cooked
   Navigation AssetKind、旧导航 schema migration、editor bake 与自动 Physics 同步仍未提供；
 - shader/font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收；

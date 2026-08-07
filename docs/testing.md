@@ -835,7 +835,7 @@ smoke。
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_editor_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
-  --gtest_filter=SpriteAnimationAuthoringDocumentTests.*
+  --gtest_filter=SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 ```
 
 用例覆盖 canonical runtime preview、replace/load/upsert/erase-subtree/gameplay revision、undo/redo 与分支替换、
@@ -846,6 +846,14 @@ TileMap suite 另覆盖 root v3 + chunk v1 canonical family、稳定 chunk Asset
 事务、payload-family load、root+chunk Cooked preview、bounded Undo/Redo 与失败不发布。
 SpriteAnimation suite 覆盖 clip identity、canonical v1 payload/dependency mapping、frame CRUD/duplicate/reorder/duration、
 Once/Loop/PingPong、current-schema Cooked load、正式 Cook Preview、bounded Undo/Redo、容量失败与失败不发布。
+File suite 直接比较 SpriteAnimation Cooked artifact 和 TileMap root/chunk artifact family 的 exact bytes、target platform、
+artifact/byte count；TileMap 保存必须使用 canonical relative path 并 root-last 发布。
+`ProjectAssetBrowserTests` 覆盖 canonical cooked path、完整排序 dependency ownership、Inspector snapshot 稳定性和非法依赖图；
+`EditorProjectWorkspaceTests` 覆盖 strict UTF-8 canonical roots、Source/Catalog 隔离、容量和 Windows 大小写关系；
+`EditorProjectCreationTests` 覆盖空目录创建/采用、非法 root/name/platform、non-empty root 保持不变，以及失败只回滚
+本事务创建目录的行为；实现本身还在删除前核对 physical directory identity，并拒绝 symlink/junction/reparse root。
+它们只证明基础 API；EditorApp `New` 的空 Catalog publish/reopen、Project `Open` + live switch 与 source-import 产品流程
+仍需要各自产品门禁。
 
 TinaEditor GPU viewport 切片在代码完成后只做一次受影响正式 target 的增量验证，不重跑全量 UI/产品矩阵：
 
@@ -868,7 +876,7 @@ layer/chunk/cell/artifact/emitted=`2/2/12/3/12`、Animation revision/frame/cook=
 Project Browser/tabs 还要求 ready=`true/true`、visible assets 非零；自动演示从 4 个 pinned tab 打开一个额外 Animation，
 再恢复 pinned Animation 与初始 workspace，固定 `documentTabCount/projectAssetOpenCount/tabOwnedDocumentLoads/`
 `tabOwnedDocumentSwaps/previewAssetBindingRefreshes=5/1/1/2/2`。自动演示实际执行 Animation Next/Mode/Undo/Redo/Cook，
-Editor action 总数为 52；viewport 使用上一轮 committed
+Editor action 总数为 59；viewport 使用上一轮 committed
 layout，所以首帧不提交 world，窗口尺寸改变后下一帧跟随新 rect。
 `--no-auto-demo` 仍用于人工操作模式；本切片不扩大到完整 product-2d gate。
 Transform/gizmo smoke 还要检查 Inspector transaction=`1`，gizmo begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，
@@ -881,7 +889,7 @@ Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_tests tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
-  --gtest_filter=World2DAuthoringFileTests.*:World3DAuthoringFileTests.*
+  --gtest_filter=World2DAuthoringFileTests.*:World3DAuthoringFileTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
   --frames=60 --frame-delay-ms=0 --workspace=2d `
   --world2d-path=artifacts/editor/smoke/world2d.tworld `
@@ -892,6 +900,15 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
 path-configured/loaded/dirty/saved-bytes 字段；编辑和 Save active document 后切到另一 workspace 再切回，inactive session
 状态必须完全不变。随后对同一双路径运行一次 `--no-auto-demo` 短 smoke，要求两个已存在文件各自 loaded/clean、
 Undo/Redo depth 均为0。未给 active workspace 配置路径时 Save disabled，`authoringSaves=0` 且 active dirty=true。
+Windows 人工 Save As 还应分别确认 `.tworld`、`.tprefab`、`.tasset` save-file dialog 与 TileMap folder picker；Cancel 后
+path/baseline/dirty/tab/selection 不变。非 Windows 应确认 adapter 返回 `Unsupported` 后仍可从 TextEdit 路径完成保存。
+Windows Project `New` 人工门禁选择一个空目录，要求生成 `Source/`、`Catalog/` 和零 entry current-schema manifest；随后
+用 `openCatalogPackage()` 的 typed validation 重新打开成功，并在下一安全帧报告 `projectSwitches=1`、
+`projectCatalogConfigured=true`、`builtInPreviewCatalog=false`，active Catalog root 指向新项目，空 Browser 与无资源 preview
+仍保持有效。随后 Project `Open` 选择同一 root，应再次安全切换；选择缺少 Source/Catalog、含 reparse/junction 或无效
+current-schema manifest 的 root 必须保留旧 Catalog、Browser 与 preview。另需先打开并修改一个 Catalog document，确认
+New/Open 被阻止且旧状态不变；保存或丢弃后重试，确认动态 Catalog tab 被关闭、固定 TileMap/Animation tab 从已提交
+Catalog snapshot 重新加载，Browser 不会复用 reload 前的磁盘快照。非 Windows 当前只报告 folder selection unavailable。
 Core 的目录替换失败回归保留在 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory`；当前
 `tina_tests` 是 Core + Runtime monolithic target，小型 Editor 切片不为单个 filter 重编全部对象，留到大功能统一 gate。
 
@@ -981,7 +998,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D/TileMap v3+v1/SpriteAnimationClip v1 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open、固定容量且独立拥有 document/history 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/Undo/Redo/Cook、双 workspace 独立 session、Undo/Redo 与原子 Save；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Animation、session、Catalog/GPU resolve、document revision 与 preview 状态 | Save/Save As、dirty-close modal、Catalog refresh 与完整 `2D-EDITOR` 产品工作流 |
+| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D/TileMap v3+v1/SpriteAnimationClip v1 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/refresh、fixed 32 px asset list、active-tab AssetId Inspector 与 fixed 36 px dependency list、固定容量且独立拥有 document/history/session 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/Undo/Redo/Cook、Windows `.tworld`/`.tprefab`/`.tasset` Save As + TileMap folder picker、Project `New` 创建 Source/Catalog 并 manifest-last 发布/reopen 空 current-schema package、Project `Open` 与下一安全帧 live Catalog switch、canonical dirty baseline 与 dirty-close Modal；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Animation、session、Catalog/GPU resolve、document revision 与 preview 状态 | Editor source import 与非 Windows native dialog adapter |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |

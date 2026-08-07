@@ -16,6 +16,14 @@ namespace {
            filter == ProjectAssetFilter::ThreeD || filter == ProjectAssetFilter::Media;
 }
 
+[[nodiscard]] bool validDependencyFlags(AssetFormat::DependencyFlags flags) noexcept
+{
+    constexpr auto Required = static_cast<Core::u16>(AssetFormat::DependencyFlags::Required);
+    constexpr auto Deferred = static_cast<Core::u16>(AssetFormat::DependencyFlags::Deferred);
+    const auto value = static_cast<Core::u16>(flags);
+    return (value & Required) != 0U && (value & ~(Required | Deferred)) == 0U;
+}
+
 } // namespace
 
 std::string_view projectAssetKindLabel(AssetFormat::AssetKind kind) noexcept
@@ -105,26 +113,20 @@ Core::Result<ProjectAssetBrowserModel> ProjectAssetBrowserModel::Create(
     std::span<const ProjectAssetDescriptor> assets,
     ProjectAssetBrowserConfig config)
 {
-    if (config.itemCapacity == 0U)
+    if (config.itemCapacity == 0U ||
+        config.itemCapacity > AssetFormat::Wire::MaxManifestEntries ||
+        config.dependencyCapacity > AssetFormat::Wire::MaxManifestDependencies ||
+        config.dependencyCapacityPerAsset > AssetFormat::Wire::MaxDependenciesPerAsset ||
+        config.dependencyCapacityPerAsset > config.dependencyCapacity)
     {
         return Core::failure(EditorErrorCode::InvalidConfiguration,
-                             "Project asset browser capacity must be non-zero");
+                             "Project asset browser capacities are invalid");
     }
     if (assets.size() > config.itemCapacity)
     {
         return Core::failure(EditorErrorCode::ProjectAssetCapacityExceeded,
                              "Project Catalog exceeds the asset browser capacity");
     }
-    for (const auto& asset : assets)
-    {
-        if (!asset.assetId || asset.assetKind == AssetFormat::AssetKind::Invalid ||
-            asset.displayName.empty() || !Core::isStrictUtf8WithoutNul(asset.displayName))
-        {
-            return Core::failure(EditorErrorCode::InvalidConfiguration,
-                                 "Project asset descriptor has invalid identity, kind, or display name");
-        }
-    }
-
     try
     {
         std::vector<ProjectAssetDescriptor> ownedAssets(assets.begin(), assets.end());
@@ -140,6 +142,79 @@ Core::Result<ProjectAssetBrowserModel> ProjectAssetBrowserModel::Create(
             return Core::failure(EditorErrorCode::InvalidConfiguration,
                                  "Project asset browser received duplicate AssetIds");
         }
+
+        Core::usize dependencyCount = 0U;
+        for (auto& asset : ownedAssets)
+        {
+            if (!asset.assetId || asset.assetKind == AssetFormat::AssetKind::Invalid ||
+                asset.assetTypeVersion == 0U || asset.cookedFileBytes == 0U ||
+                asset.cookedFileBytes > AssetFormat::Wire::MaxCookedFileBytes ||
+                asset.displayName.empty() || !Core::isStrictUtf8WithoutNul(asset.displayName) ||
+                asset.dependencyCount != asset.dependencies.size())
+            {
+                return Core::failure(
+                    EditorErrorCode::InvalidConfiguration,
+                    "Project asset descriptor has invalid identity, metadata, or display name");
+            }
+            if (asset.dependencies.size() > config.dependencyCapacityPerAsset ||
+                asset.dependencies.size() > config.dependencyCapacity - dependencyCount)
+            {
+                return Core::failure(EditorErrorCode::ProjectAssetCapacityExceeded,
+                                     "Project Catalog exceeds the asset dependency capacity");
+            }
+            dependencyCount += asset.dependencies.size();
+
+            auto canonicalPath =
+                AssetFormat::makeCookedArtifactPath(asset.assetKind, asset.assetId);
+            if (!canonicalPath)
+            {
+                return Core::failure(EditorErrorCode::InvalidConfiguration,
+                                     "Project asset descriptor has an unsupported asset kind");
+            }
+            asset.canonicalRelativeCookedPath.assign(canonicalPath->view());
+
+            std::stable_sort(asset.dependencies.begin(), asset.dependencies.end(),
+                             [](const auto& left, const auto& right) {
+                                 return left.assetId < right.assetId;
+                             });
+            std::optional<Core::AssetId> previousDependency;
+            for (const auto& dependency : asset.dependencies)
+            {
+                if (!dependency.assetId ||
+                    dependency.expectedKind == AssetFormat::AssetKind::Invalid ||
+                    !validDependencyFlags(dependency.flags) ||
+                    dependency.assetId == asset.assetId ||
+                    (previousDependency && dependency.assetId == *previousDependency))
+                {
+                    return Core::failure(EditorErrorCode::InvalidConfiguration,
+                                         "Project asset descriptor has an invalid dependency");
+                }
+                previousDependency = dependency.assetId;
+            }
+        }
+
+        for (const auto& asset : ownedAssets)
+        {
+            for (const auto& dependency : asset.dependencies)
+            {
+                const auto target = std::lower_bound(
+                    ownedAssets.begin(), ownedAssets.end(), dependency.assetId,
+                    [](const auto& candidate, Core::AssetId assetId) {
+                        return candidate.assetId < assetId;
+                    });
+                if (target == ownedAssets.end() || target->assetId != dependency.assetId)
+                {
+                    return Core::failure(EditorErrorCode::InvalidConfiguration,
+                                         "Project asset dependency target is missing");
+                }
+                if (target->assetKind != dependency.expectedKind)
+                {
+                    return Core::failure(EditorErrorCode::InvalidConfiguration,
+                                         "Project asset dependency kind does not match its target");
+                }
+            }
+        }
+
         std::vector<Core::usize> visibleIndices;
         visibleIndices.reserve(ownedAssets.size());
         for (Core::usize index = 0; index < ownedAssets.size(); ++index)
@@ -183,6 +258,23 @@ const ProjectAssetDescriptor* ProjectAssetBrowserModel::visibleItem(
 const ProjectAssetDescriptor* ProjectAssetBrowserModel::selectedItem() const noexcept
 {
     return m_selectedVisibleIndex ? visibleItem(*m_selectedVisibleIndex) : nullptr;
+}
+
+const ProjectAssetDescriptor* ProjectAssetBrowserModel::inspectorSnapshot(
+    Core::AssetId assetId) const noexcept
+{
+    const auto asset = std::lower_bound(
+        m_assets.begin(), m_assets.end(), assetId,
+        [](const auto& candidate, Core::AssetId requestedAssetId) {
+            return candidate.assetId < requestedAssetId;
+        });
+    return asset != m_assets.end() && asset->assetId == assetId ? &*asset : nullptr;
+}
+
+const ProjectAssetDescriptor*
+ProjectAssetBrowserModel::selectedInspectorSnapshot() const noexcept
+{
+    return selectedItem();
 }
 
 Core::Status ProjectAssetBrowserModel::setFilter(ProjectAssetFilter filter) noexcept

@@ -22,9 +22,20 @@ namespace {
         .assetId = assetId(marker),
         .assetKind = kind,
         .assetTypeVersion = 1,
-        .dependencyCount = marker,
+        .dependencyCount = 0,
         .cookedFileBytes = static_cast<Core::u64>(marker) * 100U,
         .displayName = std::string(projectAssetKindLabel(kind)),
+    };
+}
+
+[[nodiscard]] AssetFormat::AssetDependency dependency(
+    Core::u8 marker, AssetFormat::AssetKind expectedKind,
+    AssetFormat::DependencyFlags flags = AssetFormat::DependencyFlags::Required)
+{
+    return {
+        .assetId = assetId(marker),
+        .expectedKind = expectedKind,
+        .flags = flags,
     };
 }
 
@@ -84,6 +95,129 @@ TEST(ProjectAssetBrowserTests, RejectsCapacityDuplicatesAndInvisibleSelectionAto
     ASSERT_FALSE(missing);
     EXPECT_EQ(missing.error().code, EditorErrorCode::ProjectAssetNotFound);
     EXPECT_EQ(browser->selectedItem()->assetId, before);
+
+    const auto invalidVisible = browser->selectVisibleIndex(4U);
+    ASSERT_FALSE(invalidVisible);
+    EXPECT_EQ(browser->selectedItem()->assetId, before);
+
+    const auto invalidFilter =
+        browser->setFilter(static_cast<ProjectAssetFilter>(0xffU));
+    ASSERT_FALSE(invalidFilter);
+    EXPECT_EQ(browser->filter(), ProjectAssetFilter::TwoD);
+    EXPECT_EQ(browser->selectedItem()->assetId, before);
+}
+
+TEST(ProjectAssetBrowserTests, OwnsCanonicalInspectorMetadataAndSortedDependencies)
+{
+    auto sprite = asset(0x30U, AssetFormat::AssetKind::Sprite);
+    sprite.dependencyCount = 2U;
+    sprite.canonicalRelativeCookedPath = "caller/value/is/not/trusted";
+    sprite.dependencies = {
+        dependency(0x20U, AssetFormat::AssetKind::Material,
+                   AssetFormat::DependencyFlags::Required |
+                       AssetFormat::DependencyFlags::Deferred),
+        dependency(0x10U, AssetFormat::AssetKind::Texture2D),
+    };
+    std::array assets{
+        sprite,
+        asset(0x10U, AssetFormat::AssetKind::Texture2D),
+        asset(0x20U, AssetFormat::AssetKind::Material),
+    };
+
+    auto browser = ProjectAssetBrowserModel::Create(assets);
+    ASSERT_TRUE(browser);
+    const auto* snapshot = browser->inspectorSnapshot(assetId(0x30U));
+    ASSERT_NE(snapshot, nullptr);
+    const auto expectedPath = AssetFormat::makeCookedArtifactPath(
+        AssetFormat::AssetKind::Sprite, assetId(0x30U));
+    ASSERT_TRUE(expectedPath);
+    EXPECT_EQ(snapshot->canonicalRelativeCookedPath, expectedPath->view());
+    ASSERT_EQ(snapshot->dependencies.size(), 2U);
+    EXPECT_EQ(snapshot->dependencies[0].assetId, assetId(0x10U));
+    EXPECT_EQ(snapshot->dependencies[1].assetId, assetId(0x20U));
+
+    assets[0].displayName = "mutated";
+    assets[0].dependencies.clear();
+    EXPECT_EQ(snapshot->displayName, "Sprite");
+    EXPECT_EQ(snapshot->dependencies.size(), 2U);
+
+    ASSERT_TRUE(browser->selectAsset(assetId(0x30U)));
+    EXPECT_EQ(browser->selectedInspectorSnapshot(), snapshot);
+    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::ThreeD));
+    EXPECT_EQ(browser->inspectorSnapshot(assetId(0x30U)), snapshot);
+    EXPECT_EQ(browser->selectedInspectorSnapshot()->assetKind,
+              AssetFormat::AssetKind::Material);
+}
+
+TEST(ProjectAssetBrowserTests, RejectsInvalidInspectorMetadataAndDependencyGraph)
+{
+    const auto texture = asset(0x10U, AssetFormat::AssetKind::Texture2D);
+    auto sprite = asset(0x20U, AssetFormat::AssetKind::Sprite);
+    sprite.dependencyCount = 1U;
+    sprite.dependencies = {dependency(0x10U, AssetFormat::AssetKind::Texture2D)};
+
+    const std::array validAssets{texture, sprite};
+    auto exhausted = ProjectAssetBrowserModel::Create(
+        validAssets, ProjectAssetBrowserConfig{
+                         .itemCapacity = 2U,
+                         .dependencyCapacity = 0U,
+                         .dependencyCapacityPerAsset = 0U,
+                     });
+    ASSERT_FALSE(exhausted);
+    EXPECT_EQ(exhausted.error().code, EditorErrorCode::ProjectAssetCapacityExceeded);
+
+    auto mismatchedCount = sprite;
+    mismatchedCount.dependencyCount = 0U;
+    const std::array countAssets{texture, mismatchedCount};
+    EXPECT_FALSE(ProjectAssetBrowserModel::Create(countAssets));
+
+    auto invalidVersion = texture;
+    invalidVersion.assetTypeVersion = 0U;
+    const std::array versionAssets{invalidVersion, sprite};
+    EXPECT_FALSE(ProjectAssetBrowserModel::Create(versionAssets));
+
+    auto invalidBytes = texture;
+    invalidBytes.cookedFileBytes = 0U;
+    const std::array byteAssets{invalidBytes, sprite};
+    EXPECT_FALSE(ProjectAssetBrowserModel::Create(byteAssets));
+
+    auto selfReferencing = sprite;
+    selfReferencing.dependencies = {
+        dependency(0x20U, AssetFormat::AssetKind::Sprite),
+    };
+    const std::array selfAssets{texture, selfReferencing};
+    EXPECT_FALSE(ProjectAssetBrowserModel::Create(selfAssets));
+
+    auto duplicateDependency = sprite;
+    duplicateDependency.dependencyCount = 2U;
+    duplicateDependency.dependencies = {
+        dependency(0x10U, AssetFormat::AssetKind::Texture2D),
+        dependency(0x10U, AssetFormat::AssetKind::Texture2D),
+    };
+    const std::array duplicateDependencyAssets{texture, duplicateDependency};
+    EXPECT_FALSE(ProjectAssetBrowserModel::Create(duplicateDependencyAssets));
+
+    auto missingTarget = sprite;
+    missingTarget.dependencies = {
+        dependency(0x30U, AssetFormat::AssetKind::Texture2D),
+    };
+    const std::array missingAssets{texture, missingTarget};
+    EXPECT_FALSE(ProjectAssetBrowserModel::Create(missingAssets));
+
+    auto wrongKind = sprite;
+    wrongKind.dependencies = {
+        dependency(0x10U, AssetFormat::AssetKind::Material),
+    };
+    const std::array wrongKindAssets{texture, wrongKind};
+    EXPECT_FALSE(ProjectAssetBrowserModel::Create(wrongKindAssets));
+
+    auto invalidFlags = sprite;
+    invalidFlags.dependencies = {
+        dependency(0x10U, AssetFormat::AssetKind::Texture2D,
+                   AssetFormat::DependencyFlags::None),
+    };
+    const std::array invalidFlagAssets{texture, invalidFlags};
+    EXPECT_FALSE(ProjectAssetBrowserModel::Create(invalidFlagAssets));
 }
 
 } // namespace
