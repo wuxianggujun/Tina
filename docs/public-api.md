@@ -557,7 +557,8 @@ All/2D/3D/Media filter 重建稳定索引，owned descriptor view 只在 model �
 创建固定容量 move-only tab owner，以 `(EditorDocumentKind, AssetId)` 去重 open，失败保持 tab 列表和 active selection；
 pinned tab 不可关闭，dirty tab 必须显式 `discardDirty=true`。这两个公共模型只表达工具状态，不拥有 Runtime/Scene/UI。
 EditorApp 已接入 Catalog browser、资源 Inspector 和 workspace tab 路由；每个 tab 独立拥有 authoring document/history、
-Save As 与 dirty-close modal 仍是下一阶段，不在当前公共契约中伪装完成。
+同 key 重新打开只激活既有状态。Save/Save As、dirty-close modal 与 Catalog refresh 仍是下一阶段，不在当前公共契约中
+伪装完成。
 `World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
 entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
 

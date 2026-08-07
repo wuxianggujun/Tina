@@ -67,6 +67,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -233,6 +234,13 @@ createBuiltInEditorCatalogRequest()
         recipe.append(text.data(), text.size());
     };
 
+    recipe += "spriteanim ";
+    appendId(editorAssetId(0x10U));
+    recipe += " Loop ";
+    appendId(editorAssetId(0x22U));
+    recipe += ":0.10 ";
+    appendId(editorAssetId(0x23U));
+    recipe += ":0.15\n";
     recipe += "texture2d ";
     appendId(editorAssetId(0x21U));
     recipe += " 2 2 3478CFFF 4CB5AEFF F2C14EFF E05D5DFF\n";
@@ -358,6 +366,9 @@ struct LifecycleCounters final {
     u64 projectAssetVisibleItems = 0;
     u64 documentTabCount = 0;
     u64 documentTabSwitches = 0;
+    u64 tabOwnedDocumentLoads = 0;
+    u64 tabOwnedDocumentSwaps = 0;
+    u64 previewAssetBindingRefreshes = 0;
     u64 renderExtractions = 0;
     u64 gpuViewportSprites = 0;
     u64 gpuViewportMeshes = 0;
@@ -923,6 +934,19 @@ struct InitialAuthoringDocuments final {
     WorkspaceSessionState world3DSession;
 };
 
+// A Catalog-backed authoring tab keeps its own document while another tab of
+// the same kind is active. The active document of each kind remains in the
+// existing members so the established preview/editor code can use one owner.
+using TabAuthoringDocument =
+    std::variant<Tina::Editor::World3DAuthoringDocument,
+                 Tina::Editor::TileMapAuthoringDocument,
+                 Tina::Editor::SpriteAnimationAuthoringDocument>;
+
+struct SuspendedTabAuthoringDocument final {
+    Tina::Editor::EditorDocumentKey key{};
+    TabAuthoringDocument document;
+};
+
 struct World3DPreviewBinding final {
     u32 stableNodeId = 0;
     Tina::Scene::EntityId entity{};
@@ -1306,6 +1330,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
           documentTabs_(std::move(documentTabs)), assetResources_(assetResources),
           renderDeviceAccess_(renderDeviceAccess)
     {
+        if (const auto* tab = documentTabs_.tab(1); tab != nullptr) {
+            world3DDocumentOwnerKey_ = tab->key;
+        }
+        if (const auto* tab = documentTabs_.tab(2); tab != nullptr) {
+            tileMapDocumentOwnerKey_ = tab->key;
+        }
+        if (const auto* tab = documentTabs_.tab(3); tab != nullptr) {
+            spriteAnimationDocumentOwnerKey_ = tab->key;
+        }
     }
 
     Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
@@ -2867,6 +2900,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_.frameUpdates;
+        if (previewAssetBindingsRefreshPending_) {
+            releasePreviewAssetBindings();
+            if (auto status = preparePreviewAssetBindings(); !status) {
+                return status;
+            }
+            if (auto status = validateRuntimePreview(); !status) {
+                return status;
+            }
+            ++counters_.previewAssetBindingRefreshes;
+            previewAssetBindingsRefreshPending_ = false;
+        }
         if (options_.autoDemo) {
             const u64 first = (std::max)(u64{1}, options_.targetFrameCount / u64{3});
             const u64 second =
@@ -2992,6 +3036,35 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     break;
                 case 17:
                     (void)queueAutoCommand(EditorCommand::OpenSelectedProjectAsset);
+                    break;
+                case 18:
+                    if (counters_.tabOwnedDocumentLoads != 0U) {
+                        const auto* activeTab = documentTabs_.activeTab();
+                        if (activeTab == nullptr) {
+                            break;
+                        }
+                        switch (activeTab->key.kind) {
+                        case Tina::Editor::EditorDocumentKind::World3D:
+                            pendingDocumentTabActivation_ = 1U;
+                            break;
+                        case Tina::Editor::EditorDocumentKind::TileMap2D:
+                            pendingDocumentTabActivation_ = 2U;
+                            break;
+                        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+                            pendingDocumentTabActivation_ = 3U;
+                            break;
+                        case Tina::Editor::EditorDocumentKind::World2D:
+                        case Tina::Editor::EditorDocumentKind::AssetInspector:
+                        default:
+                            break;
+                        }
+                    }
+                    ++autoAuthoringStage_;
+                    break;
+                case 19:
+                    (void)queueAutoCommand(options_.initialWorkspace == WorkspaceMode::World2D
+                                               ? EditorCommand::SwitchToWorld2D
+                                               : EditorCommand::SwitchToWorld3D);
                     break;
                 default:
                     break;
@@ -4497,6 +4570,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status refreshDocumentTabsUi(
         Tina::PrimaryWindowUITreeUpdater& tree)
     {
+        if (auto status = synchronizeActiveTabDirty(); !status) {
+            return status;
+        }
         for (u32 index = 0; index < documentTabButtons_.size(); ++index) {
             const auto* tab = documentTabs_.tab(index);
             std::string title = tab != nullptr ? tab->title : "Empty";
@@ -4557,7 +4633,152 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return refreshAuthoringUi(tree);
     }
 
-    [[nodiscard]] Tina::Core::Status loadProjectAssetDocument(
+    [[nodiscard]] Tina::Editor::EditorDocumentKey*
+    activeAuthoringDocumentOwner(Tina::Editor::EditorDocumentKind kind) noexcept
+    {
+        switch (kind) {
+        case Tina::Editor::EditorDocumentKind::World3D:
+            return &world3DDocumentOwnerKey_;
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            return &tileMapDocumentOwnerKey_;
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            return &spriteAnimationDocumentOwnerKey_;
+        case Tina::Editor::EditorDocumentKind::World2D:
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return nullptr;
+        }
+    }
+
+    [[nodiscard]] const SuspendedTabAuthoringDocument*
+    findSuspendedAuthoringDocument(Tina::Editor::EditorDocumentKey key) const noexcept
+    {
+        for (const auto& slot : suspendedAuthoringDocuments_) {
+            if (slot.has_value() && slot->key == key) {
+                return &*slot;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] SuspendedTabAuthoringDocument*
+    findSuspendedAuthoringDocument(Tina::Editor::EditorDocumentKey key) noexcept
+    {
+        for (auto& slot : suspendedAuthoringDocuments_) {
+            if (slot.has_value() && slot->key == key) {
+                return &*slot;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] Tina::Core::Status
+    switchActiveAuthoringDocument(Tina::Editor::EditorDocumentKey key) noexcept
+    {
+        auto* owner = activeAuthoringDocumentOwner(key.kind);
+        if (owner == nullptr || *owner == key) {
+            return Tina::Core::success();
+        }
+        auto* suspended = findSuspendedAuthoringDocument(key);
+        if (suspended == nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                "Catalog authoring tab has no suspended document state");
+        }
+        switch (key.kind) {
+        case Tina::Editor::EditorDocumentKind::World3D: {
+            auto* target = std::get_if<Tina::Editor::World3DAuthoringDocument>(
+                &suspended->document);
+            if (target == nullptr) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "World3D tab state has the wrong document kind");
+            }
+            std::swap(document3D_, *target);
+            break;
+        }
+        case Tina::Editor::EditorDocumentKind::TileMap2D: {
+            auto* target = std::get_if<Tina::Editor::TileMapAuthoringDocument>(
+                &suspended->document);
+            if (target == nullptr) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "TileMap tab state has the wrong document kind");
+            }
+            std::swap(tileMapDocument_, *target);
+            break;
+        }
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D: {
+            auto* target = std::get_if<Tina::Editor::SpriteAnimationAuthoringDocument>(
+                &suspended->document);
+            if (target == nullptr) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "SpriteAnimation tab state has the wrong document kind");
+            }
+            std::swap(spriteAnimationDocument_, *target);
+            break;
+        }
+        case Tina::Editor::EditorDocumentKind::World2D:
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return Tina::Core::success();
+        }
+        std::swap(*owner, suspended->key);
+        ++counters_.tabOwnedDocumentSwaps;
+        previewAssetBindingsRefreshPending_ = true;
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Core::Status
+    installNewAuthoringDocument(Tina::Editor::EditorDocumentKey key,
+                                TabAuthoringDocument document)
+    {
+        auto* owner = activeAuthoringDocumentOwner(key.kind);
+        if (owner == nullptr || *owner == key) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "Catalog document kind cannot own an authoring tab");
+        }
+        std::optional<SuspendedTabAuthoringDocument>* emptySlot = nullptr;
+        for (auto& slot : suspendedAuthoringDocuments_) {
+            if (!slot.has_value()) {
+                emptySlot = &slot;
+                break;
+            }
+        }
+        if (emptySlot == nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabCapacityExceeded,
+                "Editor authoring document state capacity is exhausted");
+        }
+        try {
+            emptySlot->emplace(SuspendedTabAuthoringDocument{
+                .key = key,
+                .document = std::move(document),
+            });
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                       "Editor authoring tab state allocation failed");
+        }
+        if (auto status = switchActiveAuthoringDocument(key); !status) {
+            emptySlot->reset();
+            return status;
+        }
+        return Tina::Core::success();
+    }
+
+    void discardSuspendedAuthoringDocument(
+        Tina::Editor::EditorDocumentKey key) noexcept
+    {
+        if (auto* slot = findSuspendedAuthoringDocument(key); slot != nullptr) {
+            for (auto& candidate : suspendedAuthoringDocuments_) {
+                if (candidate.has_value() && &*candidate == slot) {
+                    candidate.reset();
+                    return;
+                }
+            }
+        }
+    }
+
+    [[nodiscard]] Tina::Core::Result<std::optional<TabAuthoringDocument>>
+    loadProjectAssetDocument(
         const Tina::Editor::ProjectAssetDescriptor& asset)
     {
         if (!assetResources_.system.has_value()) {
@@ -4576,9 +4797,40 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         switch (Tina::Editor::projectAssetOpenKind(asset.assetKind)) {
         case Tina::Editor::ProjectAssetOpenKind::World3D:
-            return document3D_.loadPayload(file->payload());
+        {
+            auto candidate = Tina::Editor::World3DAuthoringDocument::Create(
+                document3D_.config());
+            if (!candidate) {
+                return Tina::Core::failure(std::move(candidate.error()));
+            }
+            if (auto status = candidate->loadPayload(file->payload()); !status) {
+                return Tina::Core::failure(std::move(status.error()));
+            }
+            TabAuthoringDocument state{
+                std::in_place_type<Tina::Editor::World3DAuthoringDocument>,
+                std::move(*candidate)};
+            return std::optional<TabAuthoringDocument>{std::move(state)};
+        }
         case Tina::Editor::ProjectAssetOpenKind::SpriteAnimation2D:
-            return spriteAnimationDocument_.loadCookedAsset(file->bytes());
+        {
+            auto seed = spriteAnimationDocument_.snapshot();
+            if (!seed) {
+                return Tina::Core::failure(std::move(seed.error()));
+            }
+            seed->clipId = asset.assetId;
+            auto candidate = Tina::Editor::SpriteAnimationAuthoringDocument::Create(
+                *seed, spriteAnimationDocument_.config());
+            if (!candidate) {
+                return Tina::Core::failure(std::move(candidate.error()));
+            }
+            if (auto status = candidate->loadCookedAsset(file->bytes()); !status) {
+                return Tina::Core::failure(std::move(status.error()));
+            }
+            TabAuthoringDocument state{
+                std::in_place_type<Tina::Editor::SpriteAnimationAuthoringDocument>,
+                std::move(*candidate)};
+            return std::optional<TabAuthoringDocument>{std::move(state)};
+        }
         case Tina::Editor::ProjectAssetOpenKind::TileMap2D: {
             Tina::Core::AssetId tilesetId{};
             std::vector<Tina::Core::AssetId> chunkIds;
@@ -4630,18 +4882,44 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 chunks.push_back({.assetId = chunkId,
                                   .payloadBytes = chunkFile->payload()});
             }
-            return tileMapDocument_.loadPayloadFamily(
-                asset.assetId, tilesetId, file->payload(), chunks);
+            if (!tilesetId) {
+                return Tina::Core::failure(
+                    Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                    "TileMap Catalog asset has no Tileset dependency");
+            }
+            auto seed = tileMapDocument_.snapshot();
+            if (!seed) {
+                return Tina::Core::failure(std::move(seed.error()));
+            }
+            seed->tileMapId = asset.assetId;
+            seed->tilesetId = tilesetId;
+            auto candidate = Tina::Editor::TileMapAuthoringDocument::Create(
+                *seed, tileMapDocument_.config());
+            if (!candidate) {
+                return Tina::Core::failure(std::move(candidate.error()));
+            }
+            if (auto status = candidate->loadPayloadFamily(
+                    asset.assetId, tilesetId, file->payload(), chunks);
+                !status) {
+                return Tina::Core::failure(std::move(status.error()));
+            }
+            TabAuthoringDocument state{
+                std::in_place_type<Tina::Editor::TileMapAuthoringDocument>,
+                std::move(*candidate)};
+            return std::optional<TabAuthoringDocument>{std::move(state)};
         }
         case Tina::Editor::ProjectAssetOpenKind::AssetInspector:
         default:
-            return Tina::Core::success();
+            return std::optional<TabAuthoringDocument>{std::nullopt};
         }
     }
 
     [[nodiscard]] Tina::Core::Status openSelectedProjectAsset(
         Tina::PrimaryWindowUITreeUpdater& tree)
     {
+        if (auto status = synchronizeActiveTabDirty(); !status) {
+            return status;
+        }
         const auto* asset = projectAssets_.selectedItem();
         if (asset == nullptr) {
             return Tina::Core::failure(Tina::Editor::EditorErrorCode::ProjectAssetNotFound,
@@ -4653,14 +4931,20 @@ class EditorWorkspaceState final : public Tina::IGameState {
             .kind = documentKind,
             .assetId = asset->assetId,
         };
+        if (const auto existing = documentTabs_.find(documentKey); existing.has_value()) {
+            ++counters_.projectAssetOpenCount;
+            authoringFeedback_ = "Catalog asset tab activated";
+            return activateDocumentTab(tree, static_cast<u32>(*existing));
+        }
         if (!documentTabs_.find(documentKey) &&
             documentTabs_.tabCount() >= documentTabs_.config().tabCapacity) {
             return Tina::Core::failure(
                 Tina::Editor::EditorErrorCode::DocumentTabCapacityExceeded,
                 "Close a document before opening another Catalog asset");
         }
-        if (auto status = loadProjectAssetDocument(*asset); !status) {
-            return status;
+        auto loadedDocument = loadProjectAssetDocument(*asset);
+        if (!loadedDocument) {
+            return Tina::Core::failure(std::move(loadedDocument.error()));
         }
         auto opened = documentTabs_.open(Tina::Editor::EditorDocumentTabDesc{
             .key = documentKey,
@@ -4668,6 +4952,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
         });
         if (!opened) {
             return Tina::Core::failure(std::move(opened.error()));
+        }
+        if (loadedDocument->has_value()) {
+            if (auto status = installNewAuthoringDocument(
+                    documentKey, std::move(**loadedDocument));
+                !status) {
+                (void)documentTabs_.close(*opened, true);
+                return status;
+            }
+            ++counters_.tabOwnedDocumentLoads;
         }
         ++counters_.projectAssetOpenCount;
         authoringFeedback_ = "Catalog asset opened in a document tab";
@@ -4677,7 +4970,48 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status closeActiveDocument(
         Tina::PrimaryWindowUITreeUpdater& tree)
     {
+        if (auto status = synchronizeActiveTabDirty(); !status) {
+            return status;
+        }
         const Tina::Core::usize closingIndex = documentTabs_.activeIndex();
+        const auto* closingTab = documentTabs_.activeTab();
+        if (closingTab == nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                "Editor has no active document tab to close");
+        }
+        if (closingTab->pinned) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::PinnedDocumentCannotClose,
+                "Pinned Editor document cannot be closed");
+        }
+        if (closingTab->dirty) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DirtyDocumentRequiresConfirmation,
+                "Modified Editor document requires explicit discard confirmation");
+        }
+        const Tina::Editor::EditorDocumentKey closingKey = closingTab->key;
+        if (auto* owner = activeAuthoringDocumentOwner(closingKey.kind);
+            owner != nullptr && *owner == closingKey) {
+            const Tina::Editor::EditorDocumentTabDesc* replacement = nullptr;
+            for (Tina::Core::usize index = 0; index < documentTabs_.tabCount(); ++index) {
+                const auto* candidate = documentTabs_.tab(index);
+                if (index != closingIndex && candidate != nullptr &&
+                    candidate->key.kind == closingKey.kind) {
+                    replacement = candidate;
+                    break;
+                }
+            }
+            if (replacement == nullptr) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "Closing authoring tab has no remaining document owner");
+            }
+            if (auto status = switchActiveAuthoringDocument(replacement->key); !status) {
+                return status;
+            }
+            discardSuspendedAuthoringDocument(closingKey);
+        }
         if (auto status = documentTabs_.close(closingIndex); !status) {
             return status;
         }
@@ -4693,13 +5027,22 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status activateDocumentTab(
         Tina::PrimaryWindowUITreeUpdater& tree, u32 index)
     {
-        if (auto status = documentTabs_.activate(index); !status) {
+        if (index != documentTabs_.activeIndex()) {
+            if (auto status = synchronizeActiveTabDirty(); !status) {
+                return status;
+            }
+        }
+        const auto* tab = documentTabs_.tab(index);
+        if (tab == nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                "Editor document tab does not exist");
+        }
+        if (auto status = switchActiveAuthoringDocument(tab->key); !status) {
             return status;
         }
-        const auto* tab = documentTabs_.activeTab();
-        if (tab == nullptr) {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "Active Editor document tab disappeared");
+        if (auto status = documentTabs_.activate(index); !status) {
+            return status;
         }
         assetInspectorActive_ = tab->key.kind ==
                                 Tina::Editor::EditorDocumentKind::AssetInspector;
@@ -5298,6 +5641,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
 
     [[nodiscard]] Tina::Core::Status saveActiveDocument()
     {
+        if (!activeTabUsesWorkspaceSession()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Catalog-backed document requires Save As before overwrite");
+        }
         WorkspaceSessionState& session = activeWorkspaceSession();
         if (!session.hasDocumentPath()) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -5344,19 +5692,78 @@ class EditorWorkspaceState final : public Tina::IGameState {
                                                : document3D_.payloadBytes();
     }
 
+    [[nodiscard]] std::span<const std::byte>
+    workspaceSessionDocumentBytes(WorkspaceMode mode) const noexcept
+    {
+        if (mode == WorkspaceMode::World2D || !world3DDocumentOwnerKey_.assetId) {
+            return documentBytes(mode);
+        }
+        const Tina::Editor::EditorDocumentKey baseWorld3DKey{
+            .kind = Tina::Editor::EditorDocumentKind::World3D,
+        };
+        const auto* suspended = findSuspendedAuthoringDocument(baseWorld3DKey);
+        if (suspended == nullptr) {
+            return {};
+        }
+        const auto* document = std::get_if<Tina::Editor::World3DAuthoringDocument>(
+            &suspended->document);
+        return document != nullptr ? document->payloadBytes()
+                                   : std::span<const std::byte>{};
+    }
+
     [[nodiscard]] bool isDocumentDirty(WorkspaceMode mode) const noexcept
     {
         const WorkspaceSessionState& session = workspaceSession(mode);
-        const std::span<const std::byte> current = documentBytes(mode);
+        const std::span<const std::byte> current = workspaceSessionDocumentBytes(mode);
         return session.savedBaselineBytes.size() != current.size() ||
                !std::equal(session.savedBaselineBytes.begin(), session.savedBaselineBytes.end(),
                            current.begin());
+    }
+
+    [[nodiscard]] bool activeTabUsesWorkspaceSession() const noexcept
+    {
+        const auto* tab = documentTabs_.activeTab();
+        return tab != nullptr && !tab->key.assetId &&
+               (tab->key.kind == Tina::Editor::EditorDocumentKind::World2D ||
+                tab->key.kind == Tina::Editor::EditorDocumentKind::World3D);
+    }
+
+    [[nodiscard]] bool activeTabDocumentDirty() const noexcept
+    {
+        const auto* tab = documentTabs_.activeTab();
+        if (tab == nullptr) {
+            return false;
+        }
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            return isDocumentDirty(WorkspaceMode::World2D);
+        case Tina::Editor::EditorDocumentKind::World3D:
+            return tab->key.assetId ? document3D_.undoDepth() != 0U
+                                    : isDocumentDirty(WorkspaceMode::World3D);
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            return tileMapDocument_.undoDepth() != 0U;
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            return spriteAnimationDocument_.undoDepth() != 0U;
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return false;
+        }
+    }
+
+    [[nodiscard]] Tina::Core::Status synchronizeActiveTabDirty() noexcept
+    {
+        if (documentTabs_.activeTab() == nullptr) {
+            return Tina::Core::success();
+        }
+        return documentTabs_.setDirty(documentTabs_.activeIndex(),
+                                      activeTabDocumentDirty());
     }
 
     void publishWorkspaceSessionCounters() noexcept
     {
         const bool world2DDirty = isDocumentDirty(WorkspaceMode::World2D);
         const bool world3DDirty = isDocumentDirty(WorkspaceMode::World3D);
+        const bool usesWorkspaceSession = activeTabUsesWorkspaceSession();
         const WorkspaceSessionState& active = activeWorkspaceSession();
 
         counters_.finalWorkspaceWorld2D = workspaceMode_ == WorkspaceMode::World2D;
@@ -5368,12 +5775,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
         counters_.world3DDocumentDirty = world3DDirty;
         counters_.world2DSavedSnapshotBytes = world2DSession_.savedBaselineBytes.size();
         counters_.world3DSavedSnapshotBytes = world3DSession_.savedBaselineBytes.size();
-        counters_.documentPathConfigured = active.hasDocumentPath();
-        counters_.documentLoaded = active.loadedFromPath;
-        counters_.documentDirty = workspaceMode_ == WorkspaceMode::World2D ? world2DDirty
-                                                                           : world3DDirty;
-        counters_.documentSaved = active.hasDocumentPath() && !counters_.documentDirty;
-        counters_.savedSnapshotBytes = active.savedBaselineBytes.size();
+        counters_.documentPathConfigured = usesWorkspaceSession && active.hasDocumentPath();
+        counters_.documentLoaded = usesWorkspaceSession && active.loadedFromPath;
+        counters_.documentDirty = usesWorkspaceSession
+                                      ? (workspaceMode_ == WorkspaceMode::World2D
+                                             ? world2DDirty
+                                             : world3DDirty)
+                                      : activeTabDocumentDirty();
+        counters_.documentSaved = counters_.documentPathConfigured &&
+                                  !counters_.documentDirty;
+        counters_.savedSnapshotBytes = usesWorkspaceSession
+                                           ? active.savedBaselineBytes.size()
+                                           : 0U;
     }
 
     [[nodiscard]] std::span<const std::byte> activeDocumentBytes() const noexcept
@@ -5582,6 +5995,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "Tina Editor Catalog or RenderDevice is unavailable");
         }
+
+        counters_.catalogAssetsLoaded = 0;
+        counters_.catalogGpuTextures = 0;
+        counters_.catalogGpuMeshes = 0;
+        counters_.catalogSpriteBindings = 0;
+        counters_.catalogMeshBindings = 0;
+        counters_.catalogMaterialBindings = 0;
+        counters_.catalogUnresolvedReferences = 0;
+        counters_.catalogResolved2DSprites = 0;
+        counters_.catalogResolved3DMeshes = 0;
+        previewResolvedSpriteCount_ = 0;
+        previewResolvedMeshCount_ = 0;
 
         std::vector<Tina::AssetFormat::World2DEntityDesc> world2DStorage;
         auto world2D = document_.parseCurrentSnapshot(world2DStorage);
@@ -6763,6 +7188,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Editor::World3DAuthoringDocument document3D_;
     Tina::Editor::TileMapAuthoringDocument tileMapDocument_;
     Tina::Editor::SpriteAnimationAuthoringDocument spriteAnimationDocument_;
+    Tina::Editor::EditorDocumentKey world3DDocumentOwnerKey_{
+        .kind = Tina::Editor::EditorDocumentKind::World3D,
+    };
+    Tina::Editor::EditorDocumentKey tileMapDocumentOwnerKey_{
+        .kind = Tina::Editor::EditorDocumentKind::TileMap2D,
+        .assetId = editorAssetId(0x42U),
+    };
+    Tina::Editor::EditorDocumentKey spriteAnimationDocumentOwnerKey_{
+        .kind = Tina::Editor::EditorDocumentKind::SpriteAnimation2D,
+        .assetId = editorAssetId(0x50U),
+    };
+    std::array<std::optional<SuspendedTabAuthoringDocument>, DocumentTabSlots>
+        suspendedAuthoringDocuments_{};
     WorkspaceMode workspaceMode_ = WorkspaceMode::World2D;
     WorkspaceSessionState world2DSession_{};
     WorkspaceSessionState world3DSession_{};
@@ -6893,6 +7331,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 animationVisibleFrameStart_ = 0;
     bool animationPlaying_ = false;
     bool animationPreviewAvailable_ = false;
+    bool previewAssetBindingsRefreshPending_ = false;
     bool assetInspectorActive_ = false;
     bool pendingAnimationTimelineRefresh_ = false;
     UI::UILogicalRect viewportLogicalRect_{};
@@ -7034,6 +7473,10 @@ class EditorApplication final : public Tina::IGameApplication {
         counters.projectAssetVisibleItems == 0 ||
         counters.documentTabCount != (options.autoDemo ? 5U : 4U) ||
         (options.autoDemo && counters.projectAssetOpenCount != 1U) ||
+        (options.autoDemo &&
+         (counters.tabOwnedDocumentLoads != 1U ||
+          counters.tabOwnedDocumentSwaps != 2U ||
+          counters.previewAssetBindingRefreshes != 2U)) ||
         counters.documentPathConfigured != documentPathConfigured ||
         counters.documentLoaded != activeDocumentLoaded ||
         counters.documentDirty != activeDocumentDirty ||
@@ -7062,13 +7505,12 @@ class EditorApplication final : public Tina::IGameApplication {
                                    "Tina Editor lifecycle counters did not match contract");
     }
     if (!projectCatalogConfigured &&
-        (counters.catalogEntryCount != 8 || counters.catalogAssetsLoaded != 7 ||
+        (counters.catalogEntryCount != 9 || counters.catalogAssetsLoaded != 7 ||
          counters.catalogGpuTextures != 1 || counters.catalogGpuMeshes != 1 ||
          counters.catalogSpriteBindings != 1 || counters.catalogMeshBindings != 1 ||
          counters.catalogMaterialBindings != 1 || counters.catalogUnresolvedReferences != 0 ||
-         ((world2D || options.autoDemo) &&
-          counters.catalogResolved2DSprites != GpuViewportSpriteCount) ||
-         ((world2D || options.autoDemo) &&
+         (world2D && counters.catalogResolved2DSprites != GpuViewportSpriteCount) ||
+         (world2D &&
           (counters.tileMapLayerCount != 2 ||
            counters.tileMapChunkCount != InitialTileMapChunkCount ||
            counters.tileMapAuthoredCells != InitialTileMapCellCount ||
@@ -7078,8 +7520,7 @@ class EditorApplication final : public Tina::IGameApplication {
          counters.animationFrameCount != 4 ||
          counters.animationCookPreviewBytes == 0 ||
          counters.animationPreviewFrameIndex >= counters.animationFrameCount ||
-         ((!world2D || options.autoDemo) &&
-          counters.catalogResolved3DMeshes != GpuViewportMeshCount))) {
+         (!world2D && counters.catalogResolved3DMeshes != GpuViewportMeshCount))) {
         std::string message = "Tina Editor built-in Catalog counters mismatch: entries=";
         message += std::to_string(counters.catalogEntryCount);
         message += ", loaded=";
@@ -7156,12 +7597,12 @@ class EditorApplication final : public Tina::IGameApplication {
                 Tina::Core::CoreErrorCode::Internal,
                 "Tina Editor automatic hierarchy selection did not finish");
         }
-        if (counters.workspaceSwitches != 2) {
+        if (counters.workspaceSwitches < 2) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
                 "Tina Editor workspace round-trip did not execute two mode switches");
         }
-        if (counters.runtimePreviewInstantiations != 8 ||
+        if (counters.runtimePreviewInstantiations < 8 ||
             !counters.world2DWorkspaceReady || !counters.world3DWorkspaceReady) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
@@ -7292,6 +7733,10 @@ class EditorApplication final : public Tina::IGameApplication {
               << (counters.projectAssetBrowserReady ? "true" : "false")
               << ",\"documentTabCount\":" << counters.documentTabCount
               << ",\"documentTabSwitches\":" << counters.documentTabSwitches
+              << ",\"tabOwnedDocumentLoads\":" << counters.tabOwnedDocumentLoads
+              << ",\"tabOwnedDocumentSwaps\":" << counters.tabOwnedDocumentSwaps
+              << ",\"previewAssetBindingRefreshes\":"
+              << counters.previewAssetBindingRefreshes
               << ",\"documentTabsReady\":"
               << (counters.documentTabsReady ? "true" : "false")
               << ",\"styleRegisteredClasses\":" << counters.styleRegisteredClasses

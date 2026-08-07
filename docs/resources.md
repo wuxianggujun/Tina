@@ -72,8 +72,9 @@ canonical World2D/TileMap/Prefab/SpriteAnimationClip 收集并去重 Sprite、Ti
 的 `FrameResourceRef`。项目 Catalog 中 unresolved/wrong-kind 引用 fail closed：只过滤对应 preview component，document、
 history 与持久化 AssetId 不变。内建 Catalog 是未指定项目路径时的临时预览 fixture，退出时连同临时 package 一并释放。
 Project Browser 只复制 Catalog identity/kind/version/dependency count/file size/display label，不借用 CatalogSnapshot entry；
-打开 authorable asset 后仍由 AssetSystem 取得并验证 Cooked bytes。Catalog live refresh 与每 tab 独立 resident document
-尚未接入，当前不会在后台把变化中的 package 半发布到 Editor UI。
+打开 authorable asset 后仍由 AssetSystem 取得并验证 Cooked bytes，每个 tab 独立保留 canonical document/history；切换
+active owner 后在下一帧重建当前文档集合所需的 resident bindings。Catalog live refresh 尚未接入，当前不会在后台把
+变化中的 package 半发布到 Editor UI。
 
 历史 M10/M11 子编号不再在这里维护。完成能力以源码、target、测试和本表为准；未完成工作统一进入
 [Backlog](backlog.md)。

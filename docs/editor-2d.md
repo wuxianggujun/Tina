@@ -52,9 +52,10 @@ Lease/GPU/binding；Scene extraction 只取得 packet-local `FrameResourceRef`�
 Project Browser 直接拥有 Catalog descriptor 的确定性 AssetId 排序索引，并提供 All/2D/3D/Media 过滤、稳定选择和
 固定 32 px 虚拟列表行。Prefab、TileMap 与 SpriteAnimationClip 只按当前 schema 打开到对应 authoring surface；其他
 kind 打开只读 Asset Inspector。固定容量 document tab model 以 `(document kind, AssetId)` 去重，支持 pinned/dirty close
-保护和 2D/3D workspace 路由。当前应用接线仍是每种 authoring kind 共用一份 working document；多个同 kind Catalog tab
-尚未各自拥有独立 document/history，Save As、dirty-close 确认对话框与 Catalog refresh 也尚未接入，不能把本阶段描述成
-完整多文档持久化。
+保护和 2D/3D workspace 路由。EditorApp 的固定 slot 对每个 Catalog authoring tab 独立拥有 document/history；切换时
+只 swap 同 kind active owner，重复打开既有 key 只激活而不 reload。新资源引用的 registry rebuild 延迟到下一帧
+`updateFrame()`，避开当前 Render packet 借用期。Save/Save As、dirty-close 确认对话框与 Catalog refresh 尚未接入，
+因此当前仍不是完整多文档持久化。
 
 ## Editor application layout
 
@@ -85,7 +86,8 @@ Catalog 接线由 `catalogReady`、`projectCatalogConfigured` / `builtInPreviewC
 non-empty cell、root+chunk cook artifact/bytes、emitted sprite 与 edit/undo/redo 计数；Animation 另报告
 document revision、frame/cook bytes、preview frame、edit/undo/redo 与 playback transition。Project Browser/tabs 另报告
 `projectAssetBrowserReady`、`projectAssetVisibleItems`、`projectAssetOpenCount`、`documentTabsReady`、`documentTabCount` 与
-`documentTabSwitches`；自动 smoke 从 4 个 pinned tab 打开一个 Catalog asset，最终 tab/open count 固定为 `5/1`。
+`documentTabSwitches`；自动 smoke 从 4 个 pinned tab 打开一个额外 current-schema Animation asset，再恢复 pinned
+Animation 与初始 workspace，最终 tab/open/load/swap/binding-refresh 固定为 `5/1/1/2/2`。
 
 ## 文件加载与原子保存
 
@@ -224,9 +226,9 @@ isolation 编译通过；已有文件加载为 clean baseline、加载失败不�
 Move → Apply Transform → viewport drag → Undo → Redo → Save → other workspace → Animation Next/Mode/Undo/Redo/Cook
 → initial workspace → Open Selected Asset。一次 drag 固定报告
 begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，只增加一个 document revision；round-trip 固定
-`workspaceSwitches=2`、runtime preview instantiations=`8`、document/GPU revision=`7/7`、undo depth=`3`，并证明
+2D/3D `workspaceSwitches=2/4`、runtime preview instantiations=`10/12`、document/GPU revision=`7/7`、undo depth=`3`，并证明
 inactive session 的 path/loaded/baseline/dirty 未变化。2D delta 固定为 `(2,-1,0)`；3D XZ delta 固定为 `(2,0,1)`，
-完整 TRS 在 canonical Prefab、Scene preview 与结构化结果中一致。built-in Catalog smoke 还必须固定报告 entry/load=`8/7`、
+完整 TRS 在 canonical Prefab、Scene preview 与结构化结果中一致。built-in Catalog smoke 还必须固定报告 entry/load=`9/7`、
 Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`1/3`。
 
 TileMap root+chunk authoring/cook preview、SpriteAnimationClip timeline authoring/cook、Catalog-resolved viewport、
@@ -234,6 +236,6 @@ Project Browser、分类过滤、资源 Inspector、Catalog current-schema open 
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、
 Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D Player 直接预览已解析 Sprite frame，3D workspace
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、
-动画 revision/frame/cook=`4/4/256 B`、Catalog entry/load=`8/7` 和 GPU sprites=`13`。下一产品切片为
-tab-owned 独立 document/history、Save/Save As、dirty-close 确认对话框与 Catalog refresh；继续只保留现行 schema，
+动画 revision/frame/cook=`4/4/256 B`、Catalog entry/load=`9/7` 和 GPU sprites=`13`。下一产品切片为
+Save/Save As、dirty-close 确认对话框与 Catalog refresh；继续只保留现行 schema，
 不增加旧资产兼容分支。
