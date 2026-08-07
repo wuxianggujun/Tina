@@ -20,6 +20,7 @@ enum class TileMapChunkResidencyState : Core::u8 {
 
 struct TileMapChunkDemand final {
     AssetFormat::TileMapLayerId layerId = 0;
+    Core::u32 priority = 0;
     TileChunkCameraQuery camera{};
 };
 
@@ -89,6 +90,11 @@ class TileMapStream final {
         [[nodiscard]] friend constexpr bool operator==(const ChunkKey&, const ChunkKey&) = default;
     };
 
+    struct DesiredChunk final {
+        ChunkKey key{};
+        Core::u32 priority = 0;
+    };
+
     struct Slot final {
         ChunkKey key{};
         AssetHandle handle{};
@@ -104,19 +110,22 @@ class TileMapStream final {
 
     TileMapStream(AssetSystem& assets, AssetLease rootLease, AssetLease tilesetLease,
                   TileMapInstance map, TileMapStreamConfig config,
-                  std::pmr::vector<Slot> slots, std::pmr::vector<ChunkKey> desired,
+                  std::pmr::vector<Slot> slots, std::pmr::vector<DesiredChunk> desired,
                   std::pmr::vector<RetainCandidate> retain) noexcept;
 
     [[nodiscard]] Core::Status buildDemandSet(std::span<const TileMapChunkDemand> demands,
-                                              Core::u16 margin, std::pmr::vector<ChunkKey>& out) const;
+                                              Core::u16 margin, std::pmr::vector<DesiredChunk>& out) const;
     [[nodiscard]] bool retainedByDemand(std::span<const TileMapChunkDemand> demands,
                                         const ChunkKey& key, Core::u16 margin) const noexcept;
     [[nodiscard]] Slot* findSlot(const ChunkKey& key) noexcept;
     [[nodiscard]] const Slot* findSlot(const ChunkKey& key) const noexcept;
     [[nodiscard]] static bool contains(std::span<const ChunkKey> keys, const ChunkKey& key) noexcept;
+    [[nodiscard]] static bool contains(std::span<const DesiredChunk> chunks,
+                                       const ChunkKey& key) noexcept;
     [[nodiscard]] static bool contains(std::span<const RetainCandidate> candidates,
                                        const ChunkKey& key) noexcept;
     [[nodiscard]] static bool keyLess(const ChunkKey& left, const ChunkKey& right) noexcept;
+    [[nodiscard]] static bool desiredLess(const DesiredChunk& left, const DesiredChunk& right) noexcept;
     [[nodiscard]] Core::u64 nextResidencyGeneration() noexcept;
     [[nodiscard]] Core::u64 nextDemandGeneration() noexcept;
     void removeSlot(Core::usize index) noexcept;
@@ -127,7 +136,7 @@ class TileMapStream final {
     TileMapInstance m_map{};
     TileMapStreamConfig m_config{};
     std::pmr::vector<Slot> m_slots{};
-    std::pmr::vector<ChunkKey> m_desired{};
+    std::pmr::vector<DesiredChunk> m_desired{};
     std::pmr::vector<RetainCandidate> m_retain{};
     Core::u64 m_nextResidencyGeneration = 1;
     Core::u64 m_nextDemandGeneration = 1;

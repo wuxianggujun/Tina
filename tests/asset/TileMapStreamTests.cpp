@@ -302,6 +302,70 @@ TEST(TileMapStreamTests, DemandLoadsOnlyVisibleChunksAndCommitsResidentCells)
     std::filesystem::remove_all(package.root, ec);
 }
 
+TEST(TileMapStreamTests, AggregatesHighestPriorityAndOrdersOnlyNewRequests)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTileMapStreamPackage("tina_tilemap_stream_priority_dispatch");
+
+    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+                                                        .memoryResource = &resource,
+                                                        .batch = CookedAssetBatchLoadConfig{
+                                                            .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+                                                            .memoryResource = &resource},
+                                                        .queueCapacity = 16});
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+    auto bound = bindPackage(*system, package, resource);
+    ASSERT_TRUE(bound.has_value()) << bound.error().message;
+
+    auto rootHandle = system->loadOne(package.tileMapId);
+    ASSERT_TRUE(rootHandle.has_value()) << rootHandle.error().message;
+    auto tilesetHandle = system->findFirstLoadedOfKind(AssetFormat::AssetKind::Tileset);
+    ASSERT_TRUE(tilesetHandle.has_value());
+    auto rootLease = system->acquire(*rootHandle);
+    auto tilesetLease = system->acquire(*tilesetHandle);
+    ASSERT_TRUE(rootLease.has_value()) << rootLease.error().message;
+    ASSERT_TRUE(tilesetLease.has_value()) << tilesetLease.error().message;
+
+    auto stream = TileMapStream::Create(*system, std::move(*rootLease), std::move(*tilesetLease),
+                                        TileMapStreamConfig{.residentCapacity = 3,
+                                                            .requestBudgetPerUpdate = 1,
+                                                            .memoryResource = &resource});
+    ASSERT_TRUE(stream.has_value()) << stream.error().message;
+
+    const auto demandChunk = [](float centerX, Core::u32 priority) {
+        return TileMapChunkDemand{.layerId = VisualLayerId,
+                                  .priority = priority,
+                                  .camera = TileChunkCameraQuery{.centerX = centerX,
+                                                                 .centerY = 1.0f,
+                                                                 .halfWidth = 1.0f,
+                                                                 .halfHeight = 1.0f}};
+    };
+    const std::array initial{
+        demandChunk(1.0f, 1U),
+        demandChunk(10.0f, 5U),
+        demandChunk(1.0f, 10U),
+    };
+    ASSERT_TRUE(stream->updateDemand(initial).has_value());
+    EXPECT_TRUE(system->find(package.chunkAId).has_value());
+    EXPECT_FALSE(system->find(package.chunkBId).has_value());
+    EXPECT_FALSE(system->find(package.chunkCId).has_value());
+
+    const std::array reordered{
+        demandChunk(10.0f, 7U),
+        demandChunk(6.0f, 7U),
+        demandChunk(1.0f, 0U),
+    };
+    ASSERT_TRUE(stream->updateDemand(reordered).has_value());
+    EXPECT_TRUE(system->find(package.chunkAId).has_value());
+    EXPECT_TRUE(system->find(package.chunkBId).has_value());
+    EXPECT_FALSE(system->find(package.chunkCId).has_value());
+    EXPECT_EQ(stream->stats().totalCancelled, 0U);
+
+    EXPECT_TRUE(stream->shutdown().has_value());
+    std::error_code ec;
+    std::filesystem::remove_all(package.root, ec);
+}
+
 TEST(TileMapStreamTests, DemandShiftCancelsAndUnloadsOutsideRetainWindow)
 {
     TrackingMemoryResource resource;

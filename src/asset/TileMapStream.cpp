@@ -78,9 +78,18 @@ bool TileMapStream::keyLess(const ChunkKey& left, const ChunkKey& right) noexcep
     return left.coord.chunkX < right.coord.chunkX;
 }
 
+bool TileMapStream::desiredLess(const DesiredChunk& left, const DesiredChunk& right) noexcept
+{
+    if (left.priority != right.priority)
+    {
+        return left.priority > right.priority;
+    }
+    return keyLess(left.key, right.key);
+}
+
 TileMapStream::TileMapStream(AssetSystem& assets, AssetLease rootLease, AssetLease tilesetLease,
                              TileMapInstance map, TileMapStreamConfig config,
-                             std::pmr::vector<Slot> slots, std::pmr::vector<ChunkKey> desired,
+                             std::pmr::vector<Slot> slots, std::pmr::vector<DesiredChunk> desired,
                              std::pmr::vector<RetainCandidate> retain) noexcept
     : m_assets(&assets), m_rootLease(std::move(rootLease)), m_tilesetLease(std::move(tilesetLease)),
       m_map(std::move(map)), m_config(config), m_slots(std::move(slots)),
@@ -219,7 +228,7 @@ Core::Result<TileMapStream> TileMapStream::Create(AssetSystem& assets, AssetLeas
     try
     {
         std::pmr::vector<Slot> slots{config.memoryResource};
-        std::pmr::vector<ChunkKey> desired{config.memoryResource};
+        std::pmr::vector<DesiredChunk> desired{config.memoryResource};
         std::pmr::vector<RetainCandidate> retain{config.memoryResource};
         slots.reserve(config.residentCapacity);
         desired.reserve(config.residentCapacity);
@@ -236,6 +245,12 @@ Core::Result<TileMapStream> TileMapStream::Create(AssetSystem& assets, AssetLeas
 bool TileMapStream::contains(std::span<const ChunkKey> keys, const ChunkKey& key) noexcept
 {
     return std::find(keys.begin(), keys.end(), key) != keys.end();
+}
+
+bool TileMapStream::contains(std::span<const DesiredChunk> chunks, const ChunkKey& key) noexcept
+{
+    return std::find_if(chunks.begin(), chunks.end(),
+                        [&key](const DesiredChunk& chunk) { return chunk.key == key; }) != chunks.end();
 }
 
 bool TileMapStream::contains(std::span<const RetainCandidate> candidates, const ChunkKey& key) noexcept
@@ -260,7 +275,7 @@ const TileMapStream::Slot* TileMapStream::findSlot(const ChunkKey& key) const no
 }
 
 Core::Status TileMapStream::buildDemandSet(std::span<const TileMapChunkDemand> demands, Core::u16 margin,
-                                           std::pmr::vector<ChunkKey>& out) const
+                                           std::pmr::vector<DesiredChunk>& out) const
 {
     out.clear();
     for (const TileMapChunkDemand& demand : demands)
@@ -301,8 +316,11 @@ Core::Status TileMapStream::buildDemandSet(std::span<const TileMapChunkDemand> d
                     .coord = TileMapChunkCoord{.chunkX = chunkX, .chunkY = chunkY},
                     .assetId = rootRef->chunkAssetId,
                 };
-                if (contains(out, key))
+                const auto existing = std::find_if(
+                    out.begin(), out.end(), [&key](const DesiredChunk& chunk) { return chunk.key == key; });
+                if (existing != out.end())
                 {
+                    existing->priority = (std::max)(existing->priority, demand.priority);
                     continue;
                 }
                 if (out.size() == m_config.residentCapacity)
@@ -311,11 +329,11 @@ Core::Status TileMapStream::buildDemandSet(std::span<const TileMapChunkDemand> d
                     return Core::failure(Core::CoreErrorCode::CapacityExceeded,
                                          "TileMapStream demand exceeds resident capacity");
                 }
-                out.push_back(key);
+                out.push_back(DesiredChunk{.key = key, .priority = demand.priority});
             }
         }
     }
-    std::sort(out.begin(), out.end(), keyLess);
+    std::sort(out.begin(), out.end(), desiredLess);
     return Core::success();
 }
 
@@ -437,8 +455,9 @@ Core::Status TileMapStream::updateDemand(std::span<const TileMapChunkDemand> dem
     }
 
     Core::u32 issued = 0;
-    for (const ChunkKey& key : m_desired)
+    for (const DesiredChunk& desired : m_desired)
     {
+        const ChunkKey& key = desired.key;
         if (findSlot(key) != nullptr || issued >= m_config.requestBudgetPerUpdate)
         {
             continue;
