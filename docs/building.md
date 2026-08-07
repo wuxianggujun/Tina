@@ -92,6 +92,37 @@ Preset 的 `binaryDir` 使用 `${sourceDir}/out/build/...`。每个 Git worktree
 先构建最小受影响 target，并观察依赖图；若已有 `shaderc`/第三方库却开始大范围重编，先停止并检查
 regenerate、编译命令或依赖追踪变化，不把重型工具链重编当作默认步骤。
 
+### Linux compile-only 与临时资源生命周期
+
+`compile-only` 是独立验证模式，不是缩短版测试门禁。它只证明指定 Linux compiler 能配置并编译当前
+source/toolchain/target tuple，执行规则如下：
+
+1. 每个 tuple 最多执行一次 configure 和一次最小 target build。若已有匹配的 source fingerprint、toolchain
+   identity、target 与成功结果，直接复用该结论，不为“再次确认”重建。
+2. compile-only 不启动任何 GoogleTest executable、sample、workspace smoke、visual/platform gate。若任务还要求
+   运行测试，应把它记录为单独的 test gate，并显式复用已有 binary；不得把测试偷偷附加到 compile-only 后面。
+3. Docker、WSL、临时 worktree 或一次性 Linux preset 产生的 build tree 默认都是 **ephemeral**。取得 compiler
+   exit code 和首个错误记录后，无论成功失败都立即删除；失败产物只允许保留到错误已记录，不跨任务保留。
+4. 同一轮不同 helper/container 只复用已构建 binary 和 hash，不再调用 CMake。需要不同 compiler/toolchain 的
+   独立结论时才建立新的 tuple，且每个 tuple 完成后分别回收。
+
+临时资源收尾必须覆盖：本轮 build tree、staging/install/consumer tree、临时目录、容器、named volume、一次性
+镜像/构建缓存、compiler/linker/helper/watchdog/窗口管理器进程和 agent。不得删除外部共享 `VCPKG_ROOT`，也不得
+用全局 `docker system prune` 或全量删除 Windows 核心 build tree 代替定向清理。只有明确登记为核心集成增量缓存
+的 tree 可以保留；`docker-*`、`wsl-*`、`tmp-*` 和 gate 专用 tree 默认不在保留名单。
+
+收尾报告至少写明以下事实，不能只写“已清理”：
+
+```text
+mode=compile-only configureRuns=0|1 buildRuns=0|1 testRuns=0 sampleRuns=0
+buildTree=<path> buildTreeState=absent
+compilerProcesses=0 helperProcesses=0 containers=0 volumes=0 agents=0
+retainedCaches=<明确列出的核心常驻 tree；没有则为 none>
+```
+
+开始前和结束后只统计 `out/build` 的直接子目录，定位异常增长；不要递归扫描整个仓库。临时 tree 完成后必须
+不存在，不能因为后续“也许会再测”把数十 GiB 的 vcpkg/bgfx/shaderc/object 产物留在项目中。
+
 ### Linux Editor 两阶段复用与资源回收
 
 Linux Editor 的 `zenity` / `kdialog` 产品门禁使用唯一专用 build tree：
@@ -101,8 +132,8 @@ Linux Editor 的 `zenity` / `kdialog` 产品门禁使用唯一专用 build tree�
    短 smoke；全部成功后写入当前 source fingerprint 和三份 executable SHA-256。
 2. `gcc13-editor-kdialog` 是 secondary：要求 primary stamp 存在并逐项校验 source/binary hash，只运行真实
    `kdialog` open/save/folder/cancel；**不调用 CMake，不重复运行测试或 workspace smoke**。
-3. secondary 成功后自动删除该专用 build tree。失败时保留 tree 只用于读取首个错误和定向重试；记录后
-   必须删除，不能让临时 Linux/vcpkg/bgfx/shaderc 产物长期累积在项目中。
+3. secondary 成功后自动删除该专用 build tree。失败时只允许短暂保留 tree 以读取首个错误；错误记录完成后
+   同一轮定向重试可以复用，重试结束或任务收尾时必须删除，不能跨任务累积 Linux/vcpkg/bgfx/shaderc 产物。
 4. 每个容器都使用 `--rm`；gate 对 probe/helper 使用独立进程组和硬超时，并回收 clipboard、watchdog、
    Openbox 与临时 UTF-8 fixture。收尾输出必须包含 build tree、进程和临时目录的资源状态。
 

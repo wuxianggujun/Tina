@@ -24,6 +24,30 @@ CTest 测试。测试进程任一返回非0即失败。
 12. 同一提交/工作树的跨环境验证先构建一次，再用 source fingerprint + binary hash 复用产物；secondary
    环境不得为了“确认编译”重复 configure/build/test。最后一个环境完成后回收专用 build tree、容器、
    helper/watchdog/窗口管理器和 agent，并在结果中记录资源状态。
+13. `compile-only` 与 test gate 严格分离：前者最多 configure/build 一次最小 target，且
+    `testRuns=0`、`sampleRuns=0`；不得运行 GoogleTest、sample、smoke 或 visual/platform gate。相同
+    source/toolchain/target 指纹已有成功结果时不重复编译。
+14. Linux compile-only、Docker/WSL、临时 worktree 和 gate 专用 build tree 默认是 ephemeral。取得退出码与首错
+    记录后，无论成功失败都回收，不能为了未来可能运行的测试保留数十 GiB 产物。收尾必须报告 tree 已不存在，
+    且 compiler/helper/container/volume/agent 均归零；核心集成常驻 tree 和外部共享 `VCPKG_ROOT` 不在清理范围。
+
+## Compile-only 结果口径
+
+Linux compile-only 的通过条件只有“指定最小 target 编译 exit 0”。它不产生测试通过、sample 生命周期、真实
+backend、sanitizer 或视觉结论；报告中不得出现相应的 passed 表述。需要这些结论时另开 test gate，优先复用
+同一 source fingerprint 与 binary hash，直接运行对应 executable，不再次 configure/build。
+
+推荐的结果与资源记录：
+
+```text
+mode=compile-only tuple=<source/toolchain/target fingerprint>
+configureRuns=0|1 buildRuns=0|1 testRuns=0 sampleRuns=0
+buildTreeState=absent compilerProcesses=0 helperProcesses=0
+containers=0 volumes=0 agents=0
+```
+
+若清理前发现 build tree 异常增长，先按 `out/build` 直接子目录记录占用和 owner，再只删除本轮 ephemeral tree；
+不递归扫描整个仓库，不删除核心 Windows 增量 tree，不清空共享 vcpkg cache，不执行全局 Docker prune。
 
 ## Windows UI 快速门禁
 
