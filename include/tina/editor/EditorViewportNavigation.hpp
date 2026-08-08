@@ -48,6 +48,19 @@ struct EditorViewport3DNavigationState final {
                            const EditorViewport3DNavigationState&) = default;
 };
 
+// Stable camera orientations used by the Editor viewport view selector. Axis
+// presets preserve the current target and distance; Perspective restores the
+// canonical three-quarter authoring angle without changing the framed content.
+enum class EditorViewport3DViewPreset : Core::u8 {
+    Perspective = 0,
+    Top = 1,
+    Bottom = 2,
+    Front = 3,
+    Back = 4,
+    Left = 5,
+    Right = 6,
+};
+
 struct EditorViewportNavigationConfig final {
     float twoDWorldUnitsPerPixelAtZoomOne = 0.01F;
     float minimumTwoDZoom = 0.05F;
@@ -130,6 +143,13 @@ public:
     [[nodiscard]] Core::Status orbit3D(EditorViewportVector2 pixelDelta);
     [[nodiscard]] Core::Status pan3D(EditorViewportVector2 pixelDelta);
     [[nodiscard]] Core::Status dolly3D(float wheelSteps);
+
+    // Direct view publications are atomic and share the same monotonic
+    // revision as pointer/wheel navigation. Invalid state preserves the
+    // previous camera and revision.
+    [[nodiscard]] Core::Status set2DView(EditorViewport2DNavigationState state);
+    [[nodiscard]] Core::Status set3DView(EditorViewport3DNavigationState state);
+    [[nodiscard]] Core::Status set3DViewPreset(EditorViewport3DViewPreset preset);
 
 private:
     EditorViewportNavigation(EditorViewportNavigationConfig config,

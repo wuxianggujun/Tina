@@ -406,4 +406,80 @@ Core::Status EditorViewportNavigation::dolly3D(float wheelSteps)
     return apply(std::span{&input, 1U});
 }
 
+Core::Status EditorViewportNavigation::set2DView(
+    EditorViewport2DNavigationState state)
+{
+    if (auto status = validateState(m_config, state, m_snapshot.threeD); !status)
+    {
+        return status;
+    }
+    if (state == m_snapshot.twoD)
+    {
+        return Core::success();
+    }
+    m_snapshot.twoD = state;
+    m_snapshot.revision = nextRevision(m_snapshot.revision);
+    return Core::success();
+}
+
+Core::Status EditorViewportNavigation::set3DView(
+    EditorViewport3DNavigationState state)
+{
+    if (auto status = validateState(m_config, m_snapshot.twoD, state); !status)
+    {
+        return status;
+    }
+    state.yawRadians = normalizedYaw(state.yawRadians);
+    if (state == m_snapshot.threeD)
+    {
+        return Core::success();
+    }
+    m_snapshot.threeD = state;
+    m_snapshot.revision = nextRevision(m_snapshot.revision);
+    return Core::success();
+}
+
+Core::Status EditorViewportNavigation::set3DViewPreset(
+    EditorViewport3DViewPreset preset)
+{
+    EditorViewport3DNavigationState state = m_snapshot.threeD;
+    const float halfPi = std::numbers::pi_v<float> * 0.5F;
+    const float quarterPi = std::numbers::pi_v<float> * 0.25F;
+    switch (preset)
+    {
+    case EditorViewport3DViewPreset::Perspective:
+        state.yawRadians = quarterPi;
+        state.pitchRadians = std::numbers::pi_v<float> / 6.0F;
+        break;
+    case EditorViewport3DViewPreset::Top:
+        state.yawRadians = 0.0F;
+        state.pitchRadians = m_config.maximumThreeDPitchRadians;
+        break;
+    case EditorViewport3DViewPreset::Bottom:
+        state.yawRadians = 0.0F;
+        state.pitchRadians = m_config.minimumThreeDPitchRadians;
+        break;
+    case EditorViewport3DViewPreset::Front:
+        state.yawRadians = 0.0F;
+        state.pitchRadians = 0.0F;
+        break;
+    case EditorViewport3DViewPreset::Back:
+        state.yawRadians = std::numbers::pi_v<float>;
+        state.pitchRadians = 0.0F;
+        break;
+    case EditorViewport3DViewPreset::Left:
+        state.yawRadians = -halfPi;
+        state.pitchRadians = 0.0F;
+        break;
+    case EditorViewport3DViewPreset::Right:
+        state.yawRadians = halfPi;
+        state.pitchRadians = 0.0F;
+        break;
+    default:
+        return Core::failure(EditorErrorCode::InvalidConfiguration,
+                             "Editor 3D viewport view preset is invalid");
+    }
+    return set3DView(state);
+}
+
 } // namespace Tina::Editor

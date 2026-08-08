@@ -11,10 +11,12 @@ schema 兼容格式。
 独立 `Tina::Editor` target 提供 `World2DAuthoringDocument/File`、`World3DAuthoringDocument/File`、
 `TileMapAuthoringDocument/File`、`SpriteAnimationAuthoringDocument/File`，以及项目根模型与空项目目录创建 API；独立
 `Tina::EditorApp` 负责桌面组合，正式产品 target `tina_editor_desktop` 输出 `TinaEditor.exe`，其 `main()` 只负责
-调用应用模块。2D Inspector 编辑 Position X/Y、
-Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整 Position/Rotation/Scale XYZ，并把 Euler XYZ 一次规范化为 quaternion。
-`Apply Transform`、`Move X +1`、viewport transform gizmo、Undo、Redo 都接到 active document，每次成功 canonical command 后
-从同一份 bytes 实例化新的 `Scene::World`。2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
+调用应用模块。2D Inspector 编辑 Position X/Y、Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整
+Position/Rotation/Scale XYZ。viewport 多选时各字段独立显示 `Mixed`，显式 Apply 只解析用户给出具体数值的字段，
+`Mixed` 字段按 `std::nullopt` 保留每个对象自己的 canonical 值。一次多对象 Apply 只调用一次 active document
+`replace()`，no-op 不发布 revision、command counter 或 dirty 状态。`Apply Transform`、`Move X +1`、viewport transform
+gizmo、Undo、Redo 都接到 active document，每次成功 canonical command 后从同一份 bytes 实例化新的 `Scene::World`。
+2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
 Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生命周期；自动演示不再默认执行。只有同时显式传入
@@ -38,23 +40,34 @@ document 启用，Asset Inspector 保持只读。Windows 使用系统 native dia
 明确回退到 TextEdit 中的 strict UTF-8 路径。
 两个打开的 document 不得拥有相同文本路径。
 2D 的五个字段和 3D 的九个字段都通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
-拒绝时恢复 canonical 字段并保持 document/history/preview 不变。2D Rotation Z 发布平面 Z quaternion；3D Euler XYZ
-发布完整规范化 quaternion，并保留 hierarchy、Mesh/Material 与 visibility。GPU preview 同步读取完整 canonical TRS。
+拒绝时恢复 canonical 字段并保持 document/history/preview 不变。多选 batch 对每个 optional 缺失字段保留原值，并要求
+全部 selected stable ID 都存在后才原子发布。2D Rotation Z 总是发布 X/Y 为零的平面 Z quaternion；3D Euler XYZ
+合并当前未编辑分量后发布完整规范化 quaternion，并保留 hierarchy、Mesh/Material 与 visibility。GPU preview 同步读取完整 canonical TRS。
 `EditorTransformGizmo` 在 preview layer 使用 routed pointer capture，并以固定容量 snapshot 提供 Translate、Rotate、Scale，
 支持 World/Local orientation、translation/rotation/scale snapping，以及 2D/3D axis、plane、rotation ring 与 uniform scale
-handle。Move 事件只把绝对 delta 应用到临时 `Scene::World`，ButtonUp 才按动态 stable ID 向 active document 提交一次
-revision。PointerCancel、pointer/selection/workspace/revision 冲突、no-op 或非法 scale 均丢弃临时状态并恢复 canonical
-preview，document/history 不变。
+handle。EditorApp 的 group transaction 只捕获 selected transformable roots；同时选中 parent/child 时过滤 child，group pivot
+取这些 root 的平均 world position。Move 事件把绝对 delta 应用到临时 `Scene::World` 的 world transform，再按当前 parent
+反算 local transform；零 scale、非法 TRS 或会产生 shear 的组合 fail closed。ButtonUp 才以一次 `replace()` 提交全部目标。
+PointerCancel、pointer/selection/workspace/document revision 冲突、no-op 或非法 scale 均丢弃临时状态并恢复 canonical
+preview，document/history 不变。Hierarchy 与 status bar 在多选时显示 `N selected | Group pivot`，Inspector 标题显示
+`Mixed values`，gizmo 开始、预览、提交与取消都有明确状态反馈。
 
 Hierarchy 每次在 World2D/World3D document 变化后都从 canonical entity/node
 及其 parent stable ID 重建动态树；document root 使用非持久化的 UI key，实际场景项直接以 stable ID 作为 key。`Add`、
 `Duplicate`、`Delete`、任意 `Reparent`、`To Root` 与 `Focus` 已同时接入 2D/3D：状态操作只发布一个 canonical revision，刷新后按
 stable ID 恢复选择；Prefab v2 删除最后一个完整 subtree 会原子拒绝。Select tool 的 marquee 从当前 preview 投影收集候选，
-以固定 512 项容量发布按 stable ID 排序的 Replace/Add/Toggle 多选及 added/removed diff，primary stable ID 同步回 Hierarchy。
+以固定 512 项容量发布按 stable ID 排序的 Replace/Add/Toggle 多选及 added/removed diff，primary stable ID 同步回 Hierarchy；
+空结果把 Hierarchy 明确切回 document root，不会用伪造 stable ID 恢复旧 viewport selection。只有 selection 实际变化才推进
+selection revision，活动 gizmo 通过该 revision 检测并安全取消。
 
 `EditorPlaySession` 已接入 Toolbar 的 Play/Pause/Step/Stop。启动时复制当前 2D snapshot 或 3D Prefab canonical bytes，
 以有界 fixed-step clock 驱动隔离 preview；authoring document 不被 simulation 修改。play session 活跃期间锁定 authoring command
 与 document tab 切换，仍允许 viewport Focus；Stop 后丢弃隔离 snapshot 并从 canonical authoring document 重建 preview。
+
+Editor 快捷键使用 frame action mapping：`Ctrl+S` Save、`Ctrl+Shift+S` Save As、`Ctrl+Z` Undo、`Ctrl+Y` Redo、
+`Ctrl+D` Duplicate、`Delete` Delete、`Ctrl+1` / `Ctrl+2` 切换 2D/3D、`Ctrl+0` Frame All、`Ctrl+F` Focus Selection、
+`F6` Play/Resume、`F7` Step、`F8` Stop。`Escape` 按优先级取消 gizmo、marquee、navigation，关闭 dirty modal 或停止 Play。
+不绑定裸 `Q/W/E/R`，避免 Inspector TextEdit 输入期间误触 viewport tool。
 
 2D workspace 激活 TileMap document tab 后开放 viewport `Tile Paint` / `Tile Erase` 和 Inspector 的 Paint、Erase、Toggle Layer、
 Add Tile Layer、Add Object Layer、Cook Preview、Generate Gameplay。Pointer 坐标通过 committed viewport rect 和 Camera2D 投影换算到
@@ -152,11 +165,15 @@ source-import 自动化另报告 project root、intended unit count、start/comp
 
 ## 2D/3D viewport navigation, grid and zoom
 
-`Tina::Editor::EditorViewportNavigation` 同时拥有独立的 2D center/zoom 与 3D target/yaw/pitch/distance 状态。
+`Tina::Editor::EditorViewportNavigation` 同时拥有独立的 2D center/zoom 与 3D target/yaw/pitch/distance 状态，并提供
+`set2DView()`、`set3DView()` 与 3D Perspective/Top/Bottom/Front/Back/Left/Right preset 的原子直接发布。
 最多 64 条输入组成一次原子 batch：任一输入非法时两套 camera state 与 revision 都不变，有实际变化的 batch 只推进一次
 revision。EditorApp 已把中键拖动接到 2D/3D pan、3D 右键拖动接到 orbit、滚轮接到 2D pointer-anchored zoom 或 3D
-dolly；Focus 与 Frame All 根据当前动态选择或全部 preview 内容重建 navigation state。状态再统一驱动 Camera、projection、grid、
-TileMap picking/culling、marquee candidate projection 与 transform gizmo，不存在只移动装饰网格的旁路。
+dolly；Focus 与 Frame All 根据当前动态选择或全部 preview 内容重建 navigation state。2D 与 3D workspace 分别持有 camera
+session，切换 workspace 或重建 preview 后恢复各自最近视角；Frame All reference 与用户 session 分离，不会在 preview rebuild
+时覆盖已初始化 session。3D view selector 按 Perspective → Top → Front → Right → Back → Left → Bottom 循环，orbit 后清除
+preset 并显示 `View: Custom`。状态再统一驱动 Camera、projection、grid、TileMap picking/culling、marquee candidate projection
+与 transform gizmo，不存在只移动装饰网格的旁路。
 
 `Tina::Editor::EditorViewportGrid` 是 backend-neutral、固定 `160` segment 容量的正式 Editor 模块。输入只包含 projection、
 committed logical extent、25%-400% zoom、相机中心和 world spacing；成功 publication 输出归一化且限制在 `[0,1]` 的
@@ -280,13 +297,16 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 - `TileMapGameplaySpawnPlan::Build()`：从指定 visible object layer 生成按 stable object ID 排序的 owning records；hidden
   object 跳过，unknown/duplicate/capacity failure 不发布；
 - `generateTileMapGameplay()`：game-owned encoder 成功后只发布一个 World2D revision，因此整次生成只增加一个 undo entry；
-- `EditorViewportNavigation`：2D pan/anchored zoom 与 3D orbit/pan/dolly 共用有界原子输入 batch，失败保留两套 camera
-  state 与 revision；
-- `EditorTransformGizmo`：Down 固定 workspace/stable ID/revision、handle、orientation 与 projected axes，Move 发布
-  Translate/Rotate/Scale absolute-delta Scene preview，Up 锁定终态且只调用一次 `upsertEntity()` / `upsertNode()`；Cancel、
-  no-op 或 baseline 冲突恢复 canonical preview，不生成 history entry；
+- `EditorViewportNavigation`：2D pan/anchored zoom 与 3D orbit/pan/dolly 共用有界原子输入 batch，direct view/preset 走同一
+  revision；EditorApp 为 2D/3D 分别保存 session，并把 Frame All reference 与 session 分账；
+- Inspector batch apply：`Mixed` 解析为缺失 optional，遍历完整多选 stable ID 后只调用一次 `replace()`；2D 只写
+  Position XY/Rotation Z/Scale XY 且 Rotation Z 强制平面 quaternion，3D 合并未编辑 Euler 分量；no-op 不生成 history entry；
+- `EditorTransformGizmo`：Down 固定 workspace/document/selection revision、handle、orientation、selected transformable roots
+  与 projected axes，过滤 selected parent 的 child 并建立平均 world pivot；Move 发布 Translate/Rotate/Scale absolute-delta
+  Scene preview，并把 world 结果安全反算为 local transform；Up 锁定终态且只调用一次 document `replace()`；Cancel、no-op、
+  shear/零 scale 或 baseline 冲突恢复 canonical preview，不生成 history entry；
 - `EditorMarqueeSelection::Evaluate()`：以固定容量 stable-ID candidate/current selection 计算 Replace/Add/Toggle 结果与
-  added/removed diff；非法 rect、重复/零 stable ID 或 union 超限时原子失败；
+  added/removed diff；非法 rect、重复/零 stable ID 或 union 超限时原子失败；空结果同步 Hierarchy document root；
 - `EditorPlaySession`：复制 current-schema canonical bytes，提供 Playing/Paused、bounded fixed-step advance、single-step 与
   Stop；session 不持有或修改 authoring document；
 - `undo()` / `redo()`：只移动已发布 revision cursor，不重新解析、不分配。

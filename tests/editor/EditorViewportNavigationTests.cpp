@@ -155,5 +155,94 @@ TEST(EditorViewportNavigationTests, CanonicalizesInitialYawForGridConsumption)
     EXPECT_LE(navigation->threeD().yawRadians, std::numbers::pi_v<float>);
 }
 
+TEST(EditorViewportNavigationTests, DirectViewsPublishOnceAndIgnoreNoOp)
+{
+    auto navigation = EditorViewportNavigation::Create();
+    ASSERT_TRUE(navigation);
+
+    ASSERT_TRUE(navigation->set2DView({.center = {3.0F, 4.0F}, .zoom = 2.0F}));
+    EXPECT_EQ(navigation->revision(), 2U);
+    const auto afterTwoD = navigation->snapshot();
+    ASSERT_TRUE(navigation->set2DView(afterTwoD.twoD));
+    EXPECT_EQ(navigation->revision(), 2U);
+
+    auto threeD = afterTwoD.threeD;
+    threeD.target = {1.0F, 2.0F, 3.0F};
+    threeD.yawRadians = std::numbers::pi_v<float> * 2.0F + 0.25F;
+    ASSERT_TRUE(navigation->set3DView(threeD));
+    EXPECT_EQ(navigation->revision(), 3U);
+    EXPECT_NEAR(navigation->threeD().yawRadians, 0.25F, 0.00001F);
+
+    threeD.yawRadians = 0.25F;
+    ASSERT_TRUE(navigation->set3DView(threeD));
+    EXPECT_EQ(navigation->revision(), 3U);
+}
+
+TEST(EditorViewportNavigationTests, InvalidDirectViewPreservesStateAndRevision)
+{
+    auto navigation = EditorViewportNavigation::Create();
+    ASSERT_TRUE(navigation);
+    const auto before = navigation->snapshot();
+
+    auto invalidTwoD = before.twoD;
+    invalidTwoD.zoom = (std::numeric_limits<float>::infinity)();
+    const auto twoDStatus = navigation->set2DView(invalidTwoD);
+    ASSERT_FALSE(twoDStatus);
+    EXPECT_EQ(twoDStatus.error().code, EditorErrorCode::InvalidConfiguration);
+    EXPECT_EQ(navigation->snapshot(), before);
+
+    auto invalidThreeD = before.threeD;
+    invalidThreeD.distance = 0.0F;
+    const auto threeDStatus = navigation->set3DView(invalidThreeD);
+    ASSERT_FALSE(threeDStatus);
+    EXPECT_EQ(threeDStatus.error().code, EditorErrorCode::InvalidConfiguration);
+    EXPECT_EQ(navigation->snapshot(), before);
+}
+
+TEST(EditorViewportNavigationTests, ViewPresetsKeepTargetAndDistance)
+{
+    auto navigation = EditorViewportNavigation::Create(
+        {}, {}, EditorViewport3DNavigationState{
+                  .target = {4.0F, -2.0F, 7.0F},
+                  .yawRadians = 0.3F,
+                  .pitchRadians = -0.2F,
+                  .distance = 6.0F,
+              });
+    ASSERT_TRUE(navigation);
+
+    ASSERT_TRUE(navigation->set3DViewPreset(
+        EditorViewport3DViewPreset::Top));
+    EXPECT_EQ(navigation->threeD().target,
+              (EditorViewportVector3{4.0F, -2.0F, 7.0F}));
+    EXPECT_FLOAT_EQ(navigation->threeD().distance, 6.0F);
+    EXPECT_FLOAT_EQ(navigation->threeD().yawRadians, 0.0F);
+    EXPECT_FLOAT_EQ(navigation->threeD().pitchRadians,
+                    navigation->config().maximumThreeDPitchRadians);
+    const auto revisionAfterTop = navigation->revision();
+
+    ASSERT_TRUE(navigation->set3DViewPreset(
+        EditorViewport3DViewPreset::Top));
+    EXPECT_EQ(navigation->revision(), revisionAfterTop);
+
+    ASSERT_TRUE(navigation->set3DViewPreset(
+        EditorViewport3DViewPreset::Perspective));
+    EXPECT_NEAR(navigation->threeD().yawRadians,
+                std::numbers::pi_v<float> * 0.25F, 0.00001F);
+    EXPECT_NEAR(navigation->threeD().pitchRadians,
+                std::numbers::pi_v<float> / 6.0F, 0.00001F);
+}
+
+TEST(EditorViewportNavigationTests, InvalidViewPresetPreservesState)
+{
+    auto navigation = EditorViewportNavigation::Create();
+    ASSERT_TRUE(navigation);
+    const auto before = navigation->snapshot();
+    const auto status = navigation->set3DViewPreset(
+        static_cast<EditorViewport3DViewPreset>(255U));
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, EditorErrorCode::InvalidConfiguration);
+    EXPECT_EQ(navigation->snapshot(), before);
+}
+
 } // namespace
 } // namespace Tina::Editor
