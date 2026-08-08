@@ -3,6 +3,12 @@ add_library(tina_editor STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorDocumentTabs.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorProjectCreation.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorProjectWorkspace.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorMarqueeSelection.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorPlaySession.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorSceneOperations.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorTransformGizmo.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorViewportGrid.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorViewportNavigation.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/ProjectAssetBrowser.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/SpriteAnimationAuthoringDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/SpriteAnimationAuthoringFile.hpp
@@ -15,8 +21,14 @@ add_library(tina_editor STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World3DAuthoringFile.hpp
     World2DAuthoringDocument.cpp
     EditorDocumentTabs.cpp
+    EditorMarqueeSelection.cpp
+    EditorPlaySession.cpp
     EditorProjectCreation.cpp
     EditorProjectWorkspace.cpp
+    EditorSceneOperations.cpp
+    EditorTransformGizmo.cpp
+    EditorViewportGrid.cpp
+    EditorViewportNavigation.cpp
     ProjectAssetBrowser.cpp
     SpriteAnimationAuthoringDocument.cpp
     SpriteAnimationAuthoringFile.cpp

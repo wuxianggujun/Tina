@@ -37,17 +37,34 @@ Linux compile-only 的通过条件只有“指定最小 target 编译 exit 0”�
 backend、sanitizer 或视觉结论；报告中不得出现相应的 passed 表述。需要这些结论时另开 test gate，优先复用
 同一 source fingerprint 与 binary hash，直接运行对应 executable，不再次 configure/build。
 
+| 请求类型 | configure/build | GoogleTest / sample | 临时资源生命周期 |
+| --- | --- | --- | --- |
+| 仅验证 Linux 编译 | 每个 source/toolchain/target tuple 最多各一次 | 一律不运行，`testRuns=0 sampleRuns=0` | 记录编译结果或首错后立即回收 |
+| 同一轮 Linux 编译 + test gate | 只在 primary 构建一次 | 直接复用刚生成且 hash 匹配的 binary，各运行一次 | 最后一个 gate 结束后立即回收 |
+| secondary helper/container 验证 | 不 configure、不 build | 不重复 GoogleTest/workspace smoke，只运行该环境独有的 helper probe | probe 结束后回收该环境及共享临时 tree |
+
+后续只要求确认同一 tuple 是否编译通过时，复用已经记录的成功结论，不重新创建 build tree。后续确实需要运行
+此前未要求的测试、但临时 binary 已按规则回收时，应把它作为新的 test gate 排期；不能以此为理由让
+compile-only tree 跨任务常驻，也不能把重建成本隐藏成 compile-only 的“再次验证”。
+
 推荐的结果与资源记录：
 
 ```text
 mode=compile-only tuple=<source/toolchain/target fingerprint>
 configureRuns=0|1 buildRuns=0|1 testRuns=0 sampleRuns=0
-buildTreeState=absent compilerProcesses=0 helperProcesses=0
-containers=0 volumes=0 agents=0
+buildTree=<path> buildTreeState=absent
+stagingTreeState=absent installTreeState=absent consumerTreeState=absent temporaryDirectoriesState=absent
+ownedTemporaryBytesBefore=<bytes> ownedTemporaryBytesAfter=0
+compilerProcesses=0 linkerProcesses=0 helperProcesses=0 watchdogProcesses=0 windowManagerProcesses=0
+containers=0 namedVolumes=0 oneShotImages=0 ownedBuildCacheBytesAfter=0 agents=0
+retainedCaches=<owner + path-or-id + bytes + 保留原因；没有则为 none>
+cleanupStatus=complete
 ```
 
 若清理前发现 build tree 异常增长，先按 `out/build` 直接子目录记录占用和 owner，再只删除本轮 ephemeral tree；
-不递归扫描整个仓库，不删除核心 Windows 增量 tree，不清空共享 vcpkg cache，不执行全局 Docker prune。
+不递归扫描整个仓库，不删除核心 Windows 增量 tree，不清空共享 vcpkg cache，不执行全局 Docker prune。上面任一
+临时资源状态非零、`buildTreeState` 不是 `absent`，或存在未登记的保留目录，都必须将 gate 标记为收尾未完成，
+不能报告“资源已释放”。无法查询的字段必须写 `unknown` 和原因，不能用 `0` 代替未知状态。
 
 ## Windows UI 快速门禁
 
@@ -862,7 +879,7 @@ smoke。
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_editor_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
-  --gtest_filter=TileMapGameplaySpawnPlanTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
+  --gtest_filter=EditorPlaySessionTests.*:EditorSceneOperationsTests.*:EditorViewportNavigationTests.*:EditorViewportGridTests.*:EditorTransformGizmoTests.*:EditorMarqueeSelectionTests.*:TileMapGameplaySpawnPlanTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 ```
 
 用例覆盖 canonical runtime preview、replace/load/upsert/erase-subtree/gameplay revision、undo/redo 与分支替换、
@@ -890,9 +907,9 @@ TinaEditor GPU viewport 切片在代码完成后只做一次受影响正式 targ
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=60 --frame-delay-ms=0 --workspace=2d
+  --frames=60 --frame-delay-ms=0 --workspace=2d --auto-demo
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=60 --frame-delay-ms=0 --workspace=3d
+  --frames=60 --frame-delay-ms=0 --workspace=3d --auto-demo
 ```
 
 布局/Catalog/GPU smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=9`、
@@ -905,13 +922,13 @@ layer/chunk/cell/artifact/emitted=`2/2/12/3/12`、Animation revision/frame/cook=
 Project Browser/tabs 还要求 ready=`true/true`、visible assets 非零；自动演示从 4 个 pinned tab 打开一个额外 Animation，
 再恢复 pinned Animation 与初始 workspace，固定 `documentTabCount/projectAssetOpenCount/tabOwnedDocumentLoads/`
 `tabOwnedDocumentSwaps/previewAssetBindingRefreshes=5/1/1/2/2`。自动演示实际执行 Animation Next/Mode/Undo/Redo/Cook，
-Editor action 总数为 61；2D 自动路径还要求 gameplay generation/records/bytes=`1/2/64`、source revision 非零，3D
+`editorActionsReady=true`；2D 自动路径还要求 gameplay generation/records/bytes 非零、source revision 非零，3D
 对应四字段全为零；viewport 使用上一轮 committed
 layout，所以首帧不提交 world，窗口尺寸改变后下一帧跟随新 rect。
-`--no-auto-demo` 仍用于人工操作模式；本切片不扩大到完整 product-2d gate。
-Transform/gizmo smoke 还要检查 Inspector transaction=`1`，gizmo begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，
-2D/3D workspace switches=`2/4`、runtime preview instantiations=`11/12`、最终 revision/undo depth 分别为 `8/4` 与 `7/3` 且 GPU revision 对齐。
-2D delta=`(2,-1,0)`；3D XZ delta=`(2,0,1)`，完整 TRS 在 canonical document、Scene preview 与结构化结果中一致。
+不带 `--auto-demo` 就是默认人工操作模式；本切片不扩大到完整 product-2d gate。
+Transform/gizmo smoke 还要检查 Inspector transaction、gizmo begin/preview/commit 均非零，cancel/reject 为零，
+2D/3D workspace round-trip、runtime preview 多次重建、最终 document revision/undo depth 非零且 GPU revision 对齐。
+Gizmo delta 必须有限且非 identity，完整 TRS 在 canonical document、Scene preview 与结构化结果中一致。
 
 Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的产品 smoke：
 
@@ -921,14 +938,14 @@ cmake --build --preset windows-vnext-bgfx-product-2d-debug `
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
   --gtest_filter=World2DAuthoringFileTests.*:World3DAuthoringFileTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=60 --frame-delay-ms=0 --workspace=2d `
+  --frames=60 --frame-delay-ms=0 --workspace=2d --auto-demo `
   --world2d-path=artifacts/editor/smoke/world2d.tworld `
   --world3d-path=artifacts/editor/smoke/world3d.tprefab
 ```
 
 两个 workspace 分别使用 `--world2d-path` / `--world3d-path`，不保留共享 path 参数。smoke 要检查每个 session 的
 path-configured/loaded/dirty/saved-bytes 字段；编辑和 Save active document 后切到另一 workspace 再切回，inactive session
-状态必须完全不变。随后对同一双路径运行一次 `--no-auto-demo` 短 smoke，要求两个已存在文件各自 loaded/clean、
+状态必须完全不变。随后对同一双路径运行一次不带 `--auto-demo` 的短 smoke，要求两个已存在文件各自 loaded/clean、
 Undo/Redo depth 均为0。未给 active workspace 配置路径时 Save disabled，`authoringSaves=0` 且 active dirty=true。
 Windows 人工 Save As 还应分别确认 `.tworld`、`.tprefab`、`.tasset` save-file dialog 与 TileMap folder picker；Cancel 后
 path/baseline/dirty/tab/selection 不变。Linux 使用安装了 `zenity` 或仅安装 `kdialog` 的两种环境分别验证 open/save/folder、
@@ -1421,6 +1438,18 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003SizeMatrix.ps1 
 Linux 门禁必须记录 compiler、stdlib、CMake、vcpkg baseline、display backend 和 sanitizer 环境。
 Clang preset 通过 chainload 固定 libstdc++15；Ubuntu 默认旧工具链不能冒充正式结果。
 
+### Compile-only 不是测试门禁
+
+任务只要求验证 Linux 编译兼容性时，必须显式记录 `mode=compile-only`。该模式最多对当前
+source/toolchain/target tuple 执行一次 configure 和一次最小 target build，不运行 GoogleTest、sample、
+workspace smoke、visual/platform gate；即使构建生成了测试 executable，`testRuns` 和 `sampleRuns` 也必须为0。
+已有匹配指纹的成功编译结论时直接复用，不重复编译，更不能为了“确认”而重跑测试。
+
+compile-only 取得退出码和首个错误后立即进入资源收尾，成功与失败执行同一规则。Docker/WSL/临时 worktree
+产生的 build、staging、install、consumer tree，以及本轮容器、volume、一次性镜像/缓存、编译/helper/watchdog
+进程和 agent 都必须定向回收。失败产物只允许保留到错误完成记录，不得跨任务保留。完整生命周期与保留例外
+见 [building.md](building.md#linux-compile-only-与临时资源生命周期)。
+
 ### Docker Desktop（Windows 宿主）— GCC13 Null 子图
 
 见 [m12-evidence-linux.md](m12-evidence-linux.md)。快捷：
@@ -1459,10 +1488,14 @@ Asset、UI、RenderScene 测试不得继承宽泛 suppression。
 commit/worktree: <sha + dirty files if any>
 date/platform/toolchain: <...>
 preset/configuration: <...>
+mode/runs: <gate | compile-only; configure/build/test/sample 次数>
 build command + exit code: <...>
 test/sample command + exit code: <...>
 test summary / structured JSON: <...>
 visual/sanitizer evidence: <not run | path/result>
+resource cleanup: <all temporary trees=absent; ownedTemporaryBytesAfter=0; processes/containers/volumes/images/owned cache/agents=0>
+retained caches: <owner + path-or-id + bytes + 保留原因；没有则为 none>
+cleanup status: <complete | incomplete + 未回收或 unknown 项>
 known limitations: <...>
 ```
 

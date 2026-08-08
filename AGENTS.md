@@ -59,7 +59,8 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
   复用该结论，不重复构建。其 build tree 一律视为临时资源，取得编译结果和首错记录后立即删除。
 - 构建/gate 收尾必须报告并回收本轮启动的编译进程、helper、watchdog、窗口管理器、容器和 agent；不得把
   临时跨平台 build tree、container volume 和一次性镜像/缓存长期留在项目内。收尾还要核验临时目录不存在，
-  并报告 `buildTree/process/container/volume/agent` 的资源状态。常驻核心 build tree 不因提速或日常收尾而全量删除。
+  并报告回收前后字节数及 `buildTree/process/container/volume/image/cache/agent` 的资源状态；任何字段未核验时
+  不得声称“资源已释放”。常驻核心 build tree 不因提速或日常收尾而全量删除，但必须登记路径、占用和保留原因。
 
 ## 核心约定
 
@@ -79,6 +80,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 ## 完成验证
 
 1. `git status` / `git diff --check`
-2. 最小受影响 target 构建 + 直接 GoogleTest
+2. 最小受影响 target 构建；只有 test gate 才直接运行 GoogleTest，Linux `compile-only` 必须保持
+   `testRuns=0 sampleRuns=0`
 3. 相关 sample 短 smoke
 4. 公开头无第三方泄漏

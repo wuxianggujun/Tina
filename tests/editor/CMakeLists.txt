@@ -1,7 +1,13 @@
 add_executable(tina_editor_tests
     EditorDocumentTabsTests.cpp
+    EditorMarqueeSelectionTests.cpp
+    EditorPlaySessionTests.cpp
     EditorProjectCreationTests.cpp
     EditorProjectWorkspaceTests.cpp
+    EditorSceneOperationsTests.cpp
+    EditorTransformGizmoTests.cpp
+    EditorViewportGridTests.cpp
+    EditorViewportNavigationTests.cpp
     ProjectAssetBrowserTests.cpp
     SpriteAnimationAuthoringDocumentTests.cpp
     SpriteAnimationAuthoringFileTests.cpp
@@ -14,8 +20,14 @@ add_executable(tina_editor_tests
     World3DAuthoringFileTests.cpp
     header_isolation/EditorErrorsHeader.cpp
     header_isolation/EditorDocumentTabsHeader.cpp
+    header_isolation/EditorMarqueeSelectionHeader.cpp
+    header_isolation/EditorPlaySessionHeader.cpp
     header_isolation/EditorProjectCreationHeader.cpp
     header_isolation/EditorProjectWorkspaceHeader.cpp
+    header_isolation/EditorSceneOperationsHeader.cpp
+    header_isolation/EditorTransformGizmoHeader.cpp
+    header_isolation/EditorViewportGridHeader.cpp
+    header_isolation/EditorViewportNavigationHeader.cpp
     header_isolation/ProjectAssetBrowserHeader.cpp
     header_isolation/SpriteAnimationAuthoringDocumentHeader.cpp
     header_isolation/SpriteAnimationAuthoringFileHeader.cpp

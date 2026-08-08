@@ -101,6 +101,8 @@ source/toolchain/target tuple，执行规则如下：
    identity、target 与成功结果，直接复用该结论，不为“再次确认”重建。
 2. compile-only 不启动任何 GoogleTest executable、sample、workspace smoke、visual/platform gate。若任务还要求
    运行测试，应把它记录为单独的 test gate，并显式复用已有 binary；不得把测试偷偷附加到 compile-only 后面。
+   仅要求 Linux 编译兼容性时，即使刚生成了测试 executable，也必须保持 `testRuns=0`，不能以“顺便验证”为由
+   运行新 binary 或重跑历史测试结果。
 3. Docker、WSL、临时 worktree 或一次性 Linux preset 产生的 build tree 默认都是 **ephemeral**。取得 compiler
    exit code 和首个错误记录后，无论成功失败都立即删除；失败产物只允许保留到错误已记录，不跨任务保留。
 4. 同一轮不同 helper/container 只复用已构建 binary 和 hash，不再调用 CMake。需要不同 compiler/toolchain 的
@@ -111,17 +113,31 @@ source/toolchain/target tuple，执行规则如下：
 用全局 `docker system prune` 或全量删除 Windows 核心 build tree 代替定向清理。只有明确登记为核心集成增量缓存
 的 tree 可以保留；`docker-*`、`wsl-*`、`tmp-*` 和 gate 专用 tree 默认不在保留名单。
 
+启动 gate 前必须建立本轮资源账簿：为每个临时 path/container/volume/image/cache 记录 owner、用途和回收方式，
+并记录本轮临时文件的合计占用。只清理账簿中由本轮创建或明确独占的资源，不猜测、不全局 prune；共享资源若需
+保留，转入 `retainedCaches` 并写明 owner、路径或 ID、占用和保留原因。这样既避免误删共享缓存，也避免无人认领
+的 Linux 构建产物继续把项目目录膨胀到数十 GiB。
+
 收尾报告至少写明以下事实，不能只写“已清理”：
 
 ```text
 mode=compile-only configureRuns=0|1 buildRuns=0|1 testRuns=0 sampleRuns=0
 buildTree=<path> buildTreeState=absent
-compilerProcesses=0 helperProcesses=0 containers=0 volumes=0 agents=0
-retainedCaches=<明确列出的核心常驻 tree；没有则为 none>
+stagingTreeState=absent installTreeState=absent consumerTreeState=absent temporaryDirectoriesState=absent
+ownedTemporaryBytesBefore=<bytes> ownedTemporaryBytesAfter=0
+compilerProcesses=0 linkerProcesses=0 helperProcesses=0 watchdogProcesses=0 windowManagerProcesses=0
+containers=0 namedVolumes=0 oneShotImages=0 ownedBuildCacheBytesAfter=0 agents=0
+retainedCaches=<owner + path-or-id + bytes + 保留原因；没有则为 none>
 ```
 
-开始前和结束后只统计 `out/build` 的直接子目录，定位异常增长；不要递归扫描整个仓库。临时 tree 完成后必须
-不存在，不能因为后续“也许会再测”把数十 GiB 的 vcpkg/bgfx/shaderc/object 产物留在项目中。
+开始前只对本轮明确使用的临时 tree 记录占用字节，结束后验证路径不存在并记为0；可列出 `out/build` 的直接
+子目录定位异常增长，但不要递归扫描整个仓库。任何保留项都必须逐项记录路径、占用和保留原因，未登记的
+Linux/Docker/WSL 临时 tree 仍存在即视为收尾失败。不能因为后续“也许会再测”把数十 GiB 的
+vcpkg/bgfx/shaderc/object 产物留在项目中。
+
+上述资源块必须进入 gate 日志和任务最终报告。某项无法查询时必须写 `unknown` 和原因，并将
+`cleanupStatus=incomplete`；只有所有本轮独占临时资源均为 `absent/0`，且保留项全部登记后，才可写
+`cleanupStatus=complete` 或“资源已释放”。
 
 ### Linux Editor 两阶段复用与资源回收
 

@@ -13,9 +13,14 @@ schema 兼容格式。
 `Tina::EditorApp` 负责桌面组合，正式产品 target `tina_editor_desktop` 输出 `TinaEditor.exe`，其 `main()` 只负责
 调用应用模块。2D Inspector 编辑 Position X/Y、
 Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整 Position/Rotation/Scale XYZ，并把 Euler XYZ 一次规范化为 quaternion。
-`Apply Transform`、`Move X +1`、viewport Move、Undo、Redo 都接到 active document，每次成功 canonical command 后
+`Apply Transform`、`Move X +1`、viewport transform gizmo、Undo、Redo 都接到 active document，每次成功 canonical command 后
 从同一份 bytes 实例化新的 `Scene::World`。2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
+
+Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生命周期；自动演示不再默认执行。只有同时显式传入
+`--auto-demo` 与非零 `--frames=<N>` 才运行自动 authoring 流程，重复 `--auto-demo` 或缺少 `--frames` 都拒绝启动。
+单独传 `--frames=<N>` 只运行有限帧普通模式，其退出门禁只检查生命周期、UI、viewport、preview、document 与有限值等
+通用不变量；自动编辑目标与选择都从当前 hierarchy 的 stable ID 动态解析。
 
 当前 Editor application 的 retained UI 布局已完整铺开：Toolbar、2D/3D 模式切换、上下文工具条、Hierarchy dock、active viewport 工作区、
 可滚动 Inspector（Identity/Transform/Components/Authoring/Document）、SpriteAnimationClip Timeline 和底部 status bar
@@ -35,14 +40,26 @@ document 启用，Asset Inspector 保持只读。Windows 使用系统 native dia
 2D 的五个字段和 3D 的九个字段都通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
 拒绝时恢复 canonical 字段并保持 document/history/preview 不变。2D Rotation Z 发布平面 Z quaternion；3D Euler XYZ
 发布完整规范化 quaternion，并保留 hierarchy、Mesh/Material 与 visibility。GPU preview 同步读取完整 canonical TRS。
-Move tool 在 preview layer 使用 routed pointer capture：Move 事件只更新临时 `Scene::World`，ButtonUp 才按 stable ID
-向 active document 提交一次 revision。2D 将 logical delta 映射到 XY 并翻转 Y，3D 首切片映射到 XZ ground plane 并保留 Y；
-PointerCancel、selection/workspace/revision 冲突均丢弃临时状态并恢复 canonical preview，document/history 不变。
+`EditorTransformGizmo` 在 preview layer 使用 routed pointer capture，并以固定容量 snapshot 提供 Translate、Rotate、Scale，
+支持 World/Local orientation、translation/rotation/scale snapping，以及 2D/3D axis、plane、rotation ring 与 uniform scale
+handle。Move 事件只把绝对 delta 应用到临时 `Scene::World`，ButtonUp 才按动态 stable ID 向 active document 提交一次
+revision。PointerCancel、pointer/selection/workspace/revision 冲突、no-op 或非法 scale 均丢弃临时状态并恢复 canonical
+preview，document/history 不变。
 
-2D Hierarchy 选中 TileMap 后开放 viewport `Tile Paint` / `Tile Erase` 和 Inspector 的 Paint、Erase、Toggle Layer、
+Hierarchy 每次在 World2D/World3D document 变化后都从 canonical entity/node
+及其 parent stable ID 重建动态树；document root 使用非持久化的 UI key，实际场景项直接以 stable ID 作为 key。`Add`、
+`Duplicate`、`Delete`、任意 `Reparent`、`To Root` 与 `Focus` 已同时接入 2D/3D：状态操作只发布一个 canonical revision，刷新后按
+stable ID 恢复选择；Prefab v2 删除最后一个完整 subtree 会原子拒绝。Select tool 的 marquee 从当前 preview 投影收集候选，
+以固定 512 项容量发布按 stable ID 排序的 Replace/Add/Toggle 多选及 added/removed diff，primary stable ID 同步回 Hierarchy。
+
+`EditorPlaySession` 已接入 Toolbar 的 Play/Pause/Step/Stop。启动时复制当前 2D snapshot 或 3D Prefab canonical bytes，
+以有界 fixed-step clock 驱动隔离 preview；authoring document 不被 simulation 修改。play session 活跃期间锁定 authoring command
+与 document tab 切换，仍允许 viewport Focus；Stop 后丢弃隔离 snapshot 并从 canonical authoring document 重建 preview。
+
+2D workspace 激活 TileMap document tab 后开放 viewport `Tile Paint` / `Tile Erase` 和 Inspector 的 Paint、Erase、Toggle Layer、
 Add Tile Layer、Add Object Layer、Cook Preview、Generate Gameplay。Pointer 坐标通过 committed viewport rect 和 Camera2D 投影换算到
 真实 cell；每次点击只发布一个完整 root/chunk revision，空 chunk 自动删除。TileMap Undo/Redo 与 World2D document
-history 相互独立；切到 3D 或离开 TileMap selection 会关闭 tile tools。新增 Tile layer 会立即成为 active brush layer，
+history 相互独立；切到 3D 或离开 TileMap document 会关闭 tile tools。新增 Tile layer 会立即成为 active brush layer，
 preview 按 root authoring order 提取全部可见 Tile layer，而不是只渲染第一层。
 
 `--catalog-root=<UTF-8 path>` 配置项目 Cooked Catalog；Editor 启动时通过真实 `AssetSystem` 完整打开并校验 package。
@@ -90,17 +107,18 @@ stage，不接触 UI、Render 或 `AssetSystem`；owner thread 在下一安全�
 全部提交后，Editor 只原子发布项目 `.tina/cache/source-import/active-catalog.path`。再次以 `--project-root` 启动或 Project Open
 时验证 pointer、stage state、Catalog revision/output binding 与 physical containment，并恢复 Catalog 和完整 intended unit 集。
 Windows 使用系统原生 dialog；Linux 私有 adapter 以 `zenity` 为首选、`kdialog` 为缺失回退，覆盖 open/save/folder 且不经过
-shell。Linux 定向编译和真实 helper 产品门禁完成前，`2D-EDITOR` 继续保持 InProgress。
+shell。Linux 定向编译和真实 helper 产品门禁仍是平台证据，但不是 Editor 完成度的唯一剩余项；视口导航、gizmo、
+场景操作与可视化门禁必须分别按当前源码状态记录。
 
 ## Editor application layout
 
 ```text
-Toolbar (document/editable path/mode/undo/redo/save/save-as)
+Toolbar (document/editable path/mode/play/pause/step/stop/undo/redo/save/save-as)
 Document tabs (World2D/World3D/TileMap/Animation/Catalog assets/close)
-Context bar (breadcrumb/select/move/tile-paint/tile-erase/frame/status)
+Context bar (breadcrumb/select/translate/rotate/scale/world-local/snap/marquee/tile tools/frame/status)
 Workspace
   Left dock
-    Hierarchy (filter/actions/virtual TreeView/selection summary)
+    Hierarchy (filter/add/duplicate/delete/reparent/focus/virtual dynamic TreeView/selection summary)
     Project Assets (All/2D/3D/Media/virtual ListView/new/open/import/refresh)
   Active 2D/3D viewport (mode/tools/zoom/preview canvas/footer)
   Inspector dock (scrollable identity/transform/components/TileMap authoring/document/36px dependency list)
@@ -112,10 +130,13 @@ Dirty-close modal (save/save-as/discard/cancel)
 这层属于 `Tina::EditorApp` 组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局与 GPU smoke 的
 结构化输出报告 `editorLayoutRegions=9`、`viewportLayoutReady=true`、`inspectorScrollConfigured=true`、
 `renderExtractions`、2D `gpuViewportSprites=13`（1 World Sprite + 12 Tile sprites）或 3D
-`gpuViewportMeshes=3`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。
+`gpuViewportMeshes=3`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。正式视口不再使用
+`600x360` preview 上限或在画布中放置 Scene/Entity/Cook 测试说明；中央 GPU 区域随 workspace 剩余空间伸展。
 `gpuViewportDocumentRevision` 还必须与最终 canonical document revision 一致。字段事务由 `inspectorTransactions`、
-`inspectorRejectedTransactions` 和最终 Player/Hero 完整 TRS 取证；gizmo 由 begin/preview/commit/cancel/reject counter 与最终
-world delta 取证；文件保存另由 active document 字段与 `world2D/3DDocumentPathConfigured`、`world2D/3DDocumentLoaded`、
+`inspectorRejectedTransactions` 和当前动态 stable ID 对应的有限、正 scale 完整 TRS 取证；gizmo 由
+begin/preview/commit/cancel/reject counter 与有限且非 identity 的最终 delta 取证。Hierarchy 自动目标只记录运行时解析出的
+stable ID，并要求最终 key 与该 stable ID 一致、logical index 位于动态 item count 内。
+文件保存另由 active document 字段与 `world2D/3DDocumentPathConfigured`、`world2D/3DDocumentLoaded`、
 `world2D/3DDocumentDirty`、`world2D/3DSavedSnapshotBytes` 和落盘 bytes 取证。
 Catalog 接线由 `catalogReady`、`projectCatalogConfigured` / `builtInPreviewCatalog`、entry/load/GPU/binding/unresolved
 计数以及 `catalogResolved2DSprites` / `catalogResolved3DMeshes` 取证。TileMap 另报告 document revision、layer/chunk/
@@ -124,9 +145,37 @@ non-empty cell、root+chunk cook artifact/bytes、emitted sprite、edit/undo/red
 document revision、frame/cook bytes、preview frame、edit/undo/redo 与 playback transition。Project Browser/tabs 另报告
 `projectAssetBrowserReady`、`projectAssetVisibleItems`、`projectAssetOpenCount`、`documentTabsReady`、`documentTabCount` 与
 `documentTabSwitches`；自动 smoke 从 4 个 pinned tab 打开一个额外 current-schema Animation asset，再恢复 pinned
-Animation 与初始 workspace，最终 tab/open/load/swap/binding-refresh 固定为 `5/1/1/2/2`。Editor action count 为 `61`；
+Animation 与初始 workspace，最终 tab/open/load/swap/binding-refresh 固定为 `5/1/1/2/2`。门禁不绑定内部 command/action
+枚举的固定数量；
 source-import 自动化另报告 project root、intended unit count、start/complete/failure/busy-retry、unit/object 统计、Running/Ready
 与 state-committed 状态。
+
+## 2D/3D viewport navigation, grid and zoom
+
+`Tina::Editor::EditorViewportNavigation` 同时拥有独立的 2D center/zoom 与 3D target/yaw/pitch/distance 状态。
+最多 64 条输入组成一次原子 batch：任一输入非法时两套 camera state 与 revision 都不变，有实际变化的 batch 只推进一次
+revision。EditorApp 已把中键拖动接到 2D/3D pan、3D 右键拖动接到 orbit、滚轮接到 2D pointer-anchored zoom 或 3D
+dolly；Focus 与 Frame All 根据当前动态选择或全部 preview 内容重建 navigation state。状态再统一驱动 Camera、projection、grid、
+TileMap picking/culling、marquee candidate projection 与 transform gizmo，不存在只移动装饰网格的旁路。
+
+`Tina::Editor::EditorViewportGrid` 是 backend-neutral、固定 `160` segment 容量的正式 Editor 模块。输入只包含 projection、
+committed logical extent、25%-400% zoom、相机中心和 world spacing；成功 publication 输出归一化且限制在 `[0,1]` 的
+projected segment、revision 与 minor/major/axis 计数。配置未变化时不发布新 revision，也不产生 retained layout
+mutation；非法配置或容量失败保留上一份 publication。公共头不依赖 UI、Scene、Render 或 backend。
+
+- 2D 使用 Camera2D 中心、视口 aspect 与 `FixedWorldHeight2D` 生成 1 m orthographic grid；低像素密度时按
+  `1/2/5 x 10^n` 自适应隐藏过密 minor line，X/Y axis 独立着色。
+- 3D 使用真实 camera yaw/pitch/distance/FOV 投影并裁剪 XZ perspective ground grid；当前 retained UI 只提供
+  axis-aligned quad，因此每条斜向 ray 以固定容量、首尾相接的水平/垂直短线构成连续阶梯 polyline，不再显示为一串离散小方块，
+  也不能退化成普通屏幕方格。X/Z axis 独立着色。
+- overlay node 在 root 创建期一次性预分配，未使用槽为 `Collapsed`，全部 `UIPointerHitPolicy::Ignore`；命中仍由
+  `viewportPreviewLayer_` 统一路由给 navigation、transform gizmo、marquee 与 TileMap brush。
+- Zoom Slider 与 Frame All 共用 `viewportZoomPercent`。2D projection、TileMap visibility query、pointer-to-cell、gizmo delta
+  和 grid 使用同一 world extent；3D 同步调整 perspective FOV，避免只缩放网格而场景内容不变。
+
+产品结果必须报告 `viewportGridRevision/Segments/MinorLines/MajorLines/AxisLines`、`viewportZoomPercent`、
+`viewportGridReady` 与 `viewportGrid2DObserved/viewportGrid3DObserved`。自动 smoke 必须实际发布过两种 projection；
+默认交互模式或未带 `--auto-demo` 的有限帧运行只要求当前 workspace 对应的 projection。
 
 ## 文件加载与原子保存
 
@@ -220,6 +269,8 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 - `setGameplay(schema, version, bytes)`：游戏自有 blob 仍要求“空 blob ↔ 零 schema/version、非空 blob ↔ 非零”；
 - `World3DAuthoringDocument::replace/loadPayload/upsertNode/eraseNodeSubtree`：在 Prefab v2 上提供相同的
   canonical publication、subtree 删除、容量与失败原子性；
+- `EditorSceneOperations`：在两种 scene document 上提供 add、duplicate subtree、delete subtree 与 reparent；新 stable ID
+  从当前 document 动态派生，成功状态变更只发布一个 canonical revision，no-op reparent 不发布；
 - `TileMapAuthoringDocument::setCells/paintCell`：批量 cell 作为一个 root/chunk revision；重复坐标、越界、错误
   layer kind 或容量失败都不发布；
 - `addTileLayer/addObjectLayer/eraseLayer/renameLayer/setLayerVisibility` 与 `upsertObject/eraseObject`：只写当前
@@ -229,9 +280,15 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 - `TileMapGameplaySpawnPlan::Build()`：从指定 visible object layer 生成按 stable object ID 排序的 owning records；hidden
   object 跳过，unknown/duplicate/capacity failure 不发布；
 - `generateTileMapGameplay()`：game-owned encoder 成功后只发布一个 World2D revision，因此整次生成只增加一个 undo entry；
-- viewport gizmo：Down 固定 workspace/stable ID/revision/start point/committed viewport extent，Move 发布
-  absolute-delta Scene preview，Up 锁定终态且只调用一次 `upsertEntity()` / `upsertNode()`；Cancel、no-op 或 baseline
-  冲突恢复 canonical preview，不生成 history entry；
+- `EditorViewportNavigation`：2D pan/anchored zoom 与 3D orbit/pan/dolly 共用有界原子输入 batch，失败保留两套 camera
+  state 与 revision；
+- `EditorTransformGizmo`：Down 固定 workspace/stable ID/revision、handle、orientation 与 projected axes，Move 发布
+  Translate/Rotate/Scale absolute-delta Scene preview，Up 锁定终态且只调用一次 `upsertEntity()` / `upsertNode()`；Cancel、
+  no-op 或 baseline 冲突恢复 canonical preview，不生成 history entry；
+- `EditorMarqueeSelection::Evaluate()`：以固定容量 stable-ID candidate/current selection 计算 Replace/Add/Toggle 结果与
+  added/removed diff；非法 rect、重复/零 stable ID 或 union 超限时原子失败；
+- `EditorPlaySession`：复制 current-schema canonical bytes，提供 Playing/Paused、bounded fixed-step advance、single-step 与
+  Stop；session 不持有或修改 authoring document；
 - `undo()` / `redo()`：只移动已发布 revision cursor，不重新解析、不分配。
 
 相同 canonical bytes 是 no-op，不增加 revision 或裁剪 redo。成功 edit/undo/redo 单调推进 document revision；达到
@@ -261,33 +318,34 @@ smoke；`tina_sample_2d` / `tina_sample_3d` 不是 Editor 验收入口。纯 `Ti
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_tests --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
-  --gtest_filter=TileMapGameplaySpawnPlanTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
+  --gtest_filter=EditorPlaySessionTests.*:EditorSceneOperationsTests.*:EditorViewportNavigationTests.*:EditorViewportGridTests.*:EditorTransformGizmoTests.*:EditorMarqueeSelectionTests.*:TileMapGameplaySpawnPlanTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=60 --frame-delay-ms=0 --workspace=2d
+  --frames=60 --frame-delay-ms=0 --workspace=2d --auto-demo
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=60 --frame-delay-ms=0 --workspace=3d
+  --frames=60 --frame-delay-ms=0 --workspace=3d --auto-demo
 ```
 
 Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory` 回归。由于它目前位于 monolithic
 `tina_tests`，小型 Editor 保存切片不为单个 filter 重编整个 Runtime 测试 executable；下一次大功能统一 Core gate
 再执行。当前 Editor file overwrite 用例会真实经过 Windows `MoveFileExW` 覆盖路径。
 
-人工操作按钮时使用较长帧数并传 `--no-auto-demo`；该模式仍验证 document 与 runtime preview 一般不变量，
-但不把用户产生的 revision 数量误判为自动 smoke 失败。
+人工操作直接启动 `TinaEditor.exe`，不传 `--frames` 与 `--auto-demo`，由窗口关闭结束；需要有限帧观察时只传较长的
+`--frames=<N>`。两种方式都不会运行自动 authoring 流程，也不会把用户产生的 revision 数量误判为自动 smoke 失败。
 
 document 与 EditorApp 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；GPU viewport 的 Camera、
 resolved transforms 与 revision 来自同一 preview World/binding，committed UI rect 正确归一化且不保存 snapshot borrow；非法 edit 原子失败；
 subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 2D/3D 公共头
 isolation 编译通过；已有文件加载为 clean baseline、加载失败不改变 current/history；文件保存 exact canonical bytes、
-覆盖失败不删除旧目标；TinaEditor 自动完成
+覆盖失败不删除旧目标；TinaEditor 在显式 `--auto-demo` 下自动完成
 Move → Apply Transform → viewport drag → Undo → Redo → Generate Gameplay（2D）→ Save → other workspace → Animation Next/Mode/Undo/Redo/Cook
-→ initial workspace → Open Selected Asset。一次 drag 固定报告
-begin/preview/commit=`1/2/1`、cancel/reject=`0/0`，只增加一个 document revision；round-trip 固定
-2D/3D `workspaceSwitches=2/4`、runtime preview instantiations=`11/12`、document/GPU revision=`8/7`、undo depth=`4/3`，并证明
-inactive session 的 path/loaded/baseline/dirty 未变化。2D delta 固定为 `(2,-1,0)`；3D XZ delta 固定为 `(2,0,1)`，
-完整 TRS 在 canonical Prefab、Scene preview 与结构化结果中一致。2D gameplay generation/records/bytes=`1/2/64`
+→ initial workspace → Open Selected Asset。自动目标从当前 hierarchy 动态选择可变换 stable ID，最终选择同样按 stable ID
+重新解析并验证 logical index 位于当前动态 item count 内。一次 drag 必须 begin/preview/commit 成功且 cancel/reject 为零，
+delta 各分量有限并至少一项非零；最终 TRS 各分量有限且 scale 为正，document/GPU revision 相等，Undo/Redo 都实际完成且
+redo depth 为零。round-trip 至少执行两次 workspace switch、验证两种 workspace preview ready，并证明 inactive session 的
+path/loaded/baseline/dirty 未变化；不再固化最终坐标、scene revision、undo depth 或 preview instantiate 次数。
+2D gameplay generation/records/bytes=`1/2/64`
 且 source revision 非零；3D 的四项 gameplay generation 字段保持零。built-in Catalog smoke 还必须固定报告 entry/load=`9/7`、
 Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`1/3`。
 
@@ -297,10 +355,13 @@ Save/Save As、Windows native dialog、Linux `zenity`/`kdialog` dialog 与 dirty
 Windows Project `New` 也能创建 Source/Catalog、manifest-last 发布空 current-schema package 并 reopen/typed-validate；
 Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source import 的完整 intended unit
 probe、后台 fresh-stage cook、主线程 Catalog reload/busy retry、dirty-document commit gate、stage sibling state + 单一 active pointer
-commit 与 reopen 恢复也已完成；当前只因 Linux 定向编译和真实 helper 产品门禁尚未完成而保持 InProgress。
+commit 与 reopen 恢复也已完成；新增 viewport/hierarchy/play 功能的专项测试、产品交互和视觉证据，以及 Linux helper 门禁仍待收口。
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、
-Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D Player 直接预览已解析 Sprite frame，3D workspace
+Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D 中当前可渲染实体直接预览已解析 Sprite frame，3D workspace
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、
-动画 revision/frame/cook=`4/4/256 B`、Catalog entry/load=`9/7` 和 GPU sprites=`13`。继续只保留现行 schema，
-不增加旧资产兼容分支；下一产品切片是 Linux Editor target 定向编译及 `zenity`/`kdialog` open/save/folder/cancel
-产品门禁；其他未支持平台继续结构化返回 `Unsupported`，document Save 路径保留 TextEdit 回退。
+动画 frame/cook=`4/256 B`、Catalog entry/load=`9/7` 和 GPU sprites=`13`。继续只保留现行 schema，
+不增加旧资产兼容分支。`EditorSceneOperations` / `EditorPlaySession` 的专门 unit 与 header-isolation 已接线。
+`2D-EDITOR` 仍保持 InProgress 的真实剩余项是：增加 EditorApp 产品输入/smoke/视觉门禁，覆盖 navigation、Translate/Rotate/Scale gizmo、
+marquee、多步 scene operations 与 Play/Pause/Step/Stop 状态流；完成跨 DPI/GPU 视觉金标；完成 Linux Editor target 定向编译及
+`zenity`/`kdialog` open/save/folder/cancel 产品门禁。其他未支持平台继续结构化返回 `Unsupported`，document Save 路径保留
+TextEdit 回退。
