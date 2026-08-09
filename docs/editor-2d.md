@@ -114,12 +114,15 @@ Catalog，commit 后 preview 重建失败则作为结构化致命错误返回，
 Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 absolute `--project-root=<path>`，以可重复且可混合的
 `--import-recipe=<path>` / `--import-gltf=<path>` 表达完整 intended unit 集；`--import-on-start` 在安全帧启动导入，
 `--project-root` 与 `--catalog-root` 互斥。Project Assets 的 Import Source 也把 `.recipe` / `.gltf` / `.glb` 加入同一
-intended set。后台 `EditorSourceImportService` 只调用共享 Asset pipeline，probe 完整 unit 集并生成 fully validated fresh
+intended set。unit 必须是项目 `Source/` 下既有的物理文件；Editor 在启动 worker 前按物理路径规范化并校验 containment、
+扩展名/importer kind，Windows 大小写、分隔符或 `..` 形成的同文件别名会作为重复 unit 拒绝且不改变既有集合。对话框选择
+`Source/` 外文件会保留当前 Catalog 并给出明确反馈。后台 `EditorSourceImportService` 只调用共享 Asset pipeline，probe 完整 unit 集并生成 fully validated fresh
 stage，不接触 UI、Render 或 `AssetSystem`；owner thread 在下一安全帧携带当前 Sprite/Mesh participant 调用
 `reloadCatalog()`。dirty Catalog document 会在 commit 前保留 Ready stage；`CatalogReloadBusy` 同样保留 stage 并逐安全帧
 重试。fresh stage 在 Ready 前已包含 sibling current import state；Catalog、Browser、documents 与 2D/3D/Animation preview
 全部提交后，Editor 只原子发布项目 `.tina/cache/source-import/active-catalog.path`。再次以 `--project-root` 启动或 Project Open
-时验证 pointer、stage state、Catalog revision/output binding 与 physical containment，并恢复 Catalog 和完整 intended unit 集。
+时验证 pointer、stage state、Catalog revision/output binding 与 physical containment，并恢复 Catalog 和完整 intended unit 集；
+有限帧自动导入会直接返回 parser/path/cooker 的真实错误，而不是用 lifecycle 通用错误覆盖首错。
 Windows 使用系统原生 dialog；Linux 私有 adapter 以 `zenity` 为首选、`kdialog` 为缺失回退，覆盖 open/save/folder 且不经过
 shell。Linux 定向编译和真实 helper 产品门禁仍是平台证据，但不是 Editor 完成度的唯一剩余项；视口导航、gizmo、
 场景操作与可视化门禁必须分别按当前源码状态记录。

@@ -1002,8 +1002,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
   --import-on-start
 ```
 
-parser unit 必须证明 mixed recipe/glTF 按 caller order 保留完整 intended unit 集、同 kind 重复零突变、absolute strict UTF-8/
-容量门禁，以及 `--import-on-start` 对 project+unit 的组合要求；service unit 必须证明 worker 不触碰 owner-thread 状态、Ready
+parser unit 必须证明 mixed recipe/glTF 按 caller order 保留完整 intended unit 集、同 kind 的等价物理路径别名重复零突变、
+absolute strict UTF-8、扩展名/importer kind、project `Source/` containment/容量门禁，以及 `--import-on-start` 对 project+unit
+的组合要求；service unit 必须证明 worker 不触碰 owner-thread 状态、Ready
 stage 在 acknowledge 前稳定、failure 在 dismiss 前稳定。Asset 定向 filter 证明 Linux target recipe 的首次 full recook/第二次
 clean reuse，以及 glTF cooker 把显式 Linux target 写入 request/package。产品 smoke 要求 `sourceImportStarts/Completions/Failures=1/1/0`、
 intended/total unit=`2/2`、`sourceImportStateCommitted=true`、Running/Ready=false，并检查 fresh stage 成为
@@ -1012,7 +1013,8 @@ intended/total unit=`2/2`、`sourceImportStateCommitted=true`、Running/Ready=fa
 直到后续安全帧成功。state 必须是 immutable stage 的 sibling 文件，项目 tool cache 只以
 `.tina/cache/source-import/active-catalog.path` 作为唯一原子 commit marker；结束后以同一 `--project-root` 无
 `--import-on-start` reopen，要求恢复该 stage 及完整 intended unit 集，而不是退回固定 `Catalog/`。这是一轮大功能定向验收，
-不要求同时运行全量 UI、Runtime 或 product-2d gate。
+不要求同时运行全量 UI、Runtime 或 product-2d gate。另需覆盖 Source 外选择、缺失物理文件和 cooker 首错，确认均保留旧
+Catalog，且有限帧 JSON 返回真实错误而不是 lifecycle 通用失败。
 Core 的目录替换失败回归保留在 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory`；当前
 `tina_tests` 是 Core + Runtime monolithic target，小型 Editor 切片不为单个 filter 重编全部对象，留到大功能统一 gate。
 

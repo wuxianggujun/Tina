@@ -3,9 +3,21 @@
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <limits>
 #include <new>
 #include <utility>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#endif
 
 namespace Tina::EditorApp::Detail {
 namespace {
@@ -50,6 +62,99 @@ inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
     }
 }
 
+[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
+                                       const std::filesystem::path& right) noexcept
+{
+#if defined(_WIN32)
+    const auto& leftText = left.native();
+    const auto& rightText = right.native();
+    if (leftText.size() != rightText.size() ||
+        leftText.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+        return false;
+    }
+    return ::CompareStringOrdinal(leftText.data(), static_cast<int>(leftText.size()),
+                                  rightText.data(), static_cast<int>(rightText.size()),
+                                  TRUE) == CSTR_EQUAL;
+#else
+    return left == right;
+#endif
+}
+
+[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
+                                          const std::filesystem::path& ancestor) noexcept
+{
+    auto candidatePart = candidate.begin();
+    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
+         ++ancestorPart, ++candidatePart) {
+        if (candidatePart == candidate.end() ||
+            !pathComponentEquals(*candidatePart, *ancestorPart)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool pathsReferToSameLocation(std::string_view left,
+                                            std::string_view right) noexcept
+{
+    try {
+        auto leftPath = utf8Path(left);
+        auto rightPath = utf8Path(right);
+        if (!leftPath || !rightPath) {
+            return false;
+        }
+        const auto normalizedLeft = leftPath->lexically_normal();
+        const auto normalizedRight = rightPath->lexically_normal();
+        return pathIsSameOrDescendant(normalizedLeft, normalizedRight) &&
+               pathIsSameOrDescendant(normalizedRight, normalizedLeft);
+    } catch (...) {
+        return false;
+    }
+}
+
+[[nodiscard]] Core::Status validateImportUnitPath(
+    std::string_view path, std::string_view optionName,
+    EditorSourceImportLaunchUnitKind kind)
+{
+    if (auto status = validatePathText(path, optionName); !status) {
+        return status;
+    }
+    auto nativePath = utf8Path(path);
+    if (!nativePath) {
+        return Core::failure(std::move(nativePath.error()));
+    }
+    if (!nativePath->is_absolute()) {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             std::string{optionName} + " must be an absolute path");
+    }
+
+    std::string extension;
+    try {
+        const auto encoded = nativePath->extension().u8string();
+        extension.assign(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+                       [](unsigned char value) {
+                           return static_cast<char>(std::tolower(value));
+                       });
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Could not validate source-import extension");
+    } catch (const std::filesystem::filesystem_error&) {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Source-import extension is invalid on this platform");
+    }
+
+    const bool extensionMatches =
+        kind == EditorSourceImportLaunchUnitKind::CatalogRecipe
+            ? extension == ".recipe"
+            : extension == ".gltf" || extension == ".glb";
+    if (!extensionMatches) {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             std::string{optionName} + " has an incompatible file extension");
+    }
+    return Core::success();
+}
+
 [[nodiscard]] Core::Status validateProjectRoot(std::string_view path)
 {
     if (auto status = validatePathText(path, "--project-root"); !status) {
@@ -72,7 +177,8 @@ inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
 {
     return std::any_of(options.intendedUnits.begin(), options.intendedUnits.end(),
                        [kind, path](const EditorSourceImportLaunchUnit& unit) {
-                           return unit.kind == kind && unit.pathUtf8 == path;
+                           return unit.kind == kind &&
+                                  pathsReferToSameLocation(unit.pathUtf8, path);
                        });
 }
 
@@ -81,7 +187,7 @@ appendImportUnit(std::string_view path, std::string_view optionName,
                  EditorSourceImportLaunchUnitKind kind,
                  EditorSourceImportLaunchOptions& options)
 {
-    if (auto status = validatePathText(path, optionName); !status) {
+    if (auto status = validateImportUnitPath(path, optionName, kind); !status) {
         return Core::failure(std::move(status.error()));
     }
     if (containsUnit(options, kind, path)) {
@@ -171,13 +277,14 @@ validateEditorSourceImportLaunchOptions(const EditorSourceImportLaunchOptions& o
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "Source-import launch unit kind is invalid");
         }
-        if (auto status = validatePathText(unit.pathUtf8, optionName); !status) {
+        if (auto status = validateImportUnitPath(unit.pathUtf8, optionName, unit.kind); !status) {
             return status;
         }
         const auto duplicate = std::find_if(
             options.intendedUnits.begin(), options.intendedUnits.begin() + index,
             [&unit](const EditorSourceImportLaunchUnit& candidate) {
-                return candidate.kind == unit.kind && candidate.pathUtf8 == unit.pathUtf8;
+                return candidate.kind == unit.kind &&
+                       pathsReferToSameLocation(candidate.pathUtf8, unit.pathUtf8);
             });
         if (duplicate != options.intendedUnits.begin() + index) {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
@@ -187,6 +294,26 @@ validateEditorSourceImportLaunchOptions(const EditorSourceImportLaunchOptions& o
     if (!options.intendedUnits.empty() && options.projectRootUtf8.empty()) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "Source-import units require --project-root");
+    }
+    if (!options.intendedUnits.empty()) {
+        auto projectRoot = utf8Path(options.projectRootUtf8);
+        if (!projectRoot) {
+            return Core::failure(std::move(projectRoot.error()));
+        }
+        const auto sourceRoot = (*projectRoot / "Source").lexically_normal();
+        for (const auto& unit : options.intendedUnits) {
+            auto unitPath = utf8Path(unit.pathUtf8);
+            if (!unitPath) {
+                return Core::failure(std::move(unitPath.error()));
+            }
+            const auto normalizedUnit = unitPath->lexically_normal();
+            if (pathIsSameOrDescendant(sourceRoot, normalizedUnit) ||
+                !pathIsSameOrDescendant(normalizedUnit, sourceRoot)) {
+                return Core::failure(
+                    Core::CoreErrorCode::PermissionDenied,
+                    "Source-import unit must be a file below the project Source directory");
+            }
+        }
     }
     if (options.importOnStart && options.intendedUnits.empty()) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,

@@ -406,6 +406,129 @@ class EditorRenderDeviceAccess final {
            pathIsSameOrDescendant(right, left);
 }
 
+[[nodiscard]] bool sourceImportPathsReferToSameLocation(
+    std::string_view left, std::string_view right) noexcept
+{
+    try {
+        const auto leftPath = std::filesystem::u8path(left.begin(), left.end()).lexically_normal();
+        const auto rightPath = std::filesystem::u8path(right.begin(), right.end()).lexically_normal();
+        return pathsReferToSameLocation(leftPath, rightPath);
+    } catch (...) {
+        return false;
+    }
+}
+
+[[nodiscard]] Tina::Core::Result<Tina::EditorApp::Detail::EditorSourceImportUnit>
+validateSourceImportUnit(
+    const Tina::Editor::EditorProjectWorkspace& workspace,
+    const Tina::EditorApp::Detail::EditorSourceImportUnit& unit)
+{
+    if (unit.sourcePathUtf8.empty() ||
+        unit.sourcePathUtf8.size() > Tina::AssetFormat::SourceImportWire::MaxPathBytes ||
+        !Tina::Core::isStrictUtf8WithoutNul(unit.sourcePathUtf8)) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::InvalidArgument,
+            "Editor source import path must be bounded strict UTF-8 without NUL");
+    }
+    if (unit.kind != Tina::EditorApp::Detail::EditorSourceImportUnitKind::CatalogRecipe &&
+        unit.kind != Tina::EditorApp::Detail::EditorSourceImportUnitKind::Gltf) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "Editor source import unit kind is invalid");
+    }
+
+    try {
+        const auto sourceRoot = std::filesystem::u8path(
+            workspace.sourceRootUtf8().begin(), workspace.sourceRootUtf8().end());
+        const auto candidate = std::filesystem::u8path(
+            unit.sourcePathUtf8.begin(), unit.sourcePathUtf8.end());
+        if (!candidate.is_absolute()) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::InvalidArgument,
+                "Editor source import path must be absolute");
+        }
+
+        std::error_code statusError;
+        const auto candidateStatus = std::filesystem::symlink_status(candidate, statusError);
+        if (statusError || !std::filesystem::is_regular_file(candidateStatus)) {
+            Tina::Core::Error error{
+                statusError ? Tina::Core::CoreErrorCode::Io
+                            : Tina::Core::CoreErrorCode::InvalidArgument,
+                "Editor source import path must name an existing physical file"};
+            if (statusError) {
+                error.setNativeCode(statusError.value());
+            }
+            error.addContext("sourcePath", unit.sourcePathUtf8);
+            return Tina::Core::failure(std::move(error));
+        }
+#if defined(_WIN32)
+        const DWORD attributes = ::GetFileAttributesW(candidate.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                    "Editor could not inspect source import file attributes"};
+            error.setNativeCode(static_cast<Tina::Core::i64>(::GetLastError()));
+            error.addContext("sourcePath", unit.sourcePathUtf8);
+            return Tina::Core::failure(std::move(error));
+        }
+        if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::PermissionDenied,
+                "Editor source import files must not be reparse points");
+        }
+#endif
+
+        std::error_code canonicalError;
+        const auto physicalSourceRoot =
+            std::filesystem::weakly_canonical(sourceRoot, canonicalError);
+        if (canonicalError) {
+            Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                    "Editor could not resolve the project Source directory"};
+            error.setNativeCode(canonicalError.value());
+            return Tina::Core::failure(std::move(error));
+        }
+        const auto physicalCandidate =
+            std::filesystem::weakly_canonical(candidate, canonicalError);
+        if (canonicalError) {
+            Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                    "Editor could not resolve the source import file"};
+            error.setNativeCode(canonicalError.value());
+            return Tina::Core::failure(std::move(error));
+        }
+        if (pathsReferToSameLocation(physicalCandidate, physicalSourceRoot) ||
+            !pathIsSameOrDescendant(physicalCandidate, physicalSourceRoot)) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::PermissionDenied,
+                "Editor source import file must be below the project's Source directory");
+        }
+
+        std::string extension = pathToUtf8(physicalCandidate.extension());
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+                       [](unsigned char value) {
+                           return static_cast<char>(std::tolower(value));
+                       });
+        const bool extensionMatches =
+            unit.kind == Tina::EditorApp::Detail::EditorSourceImportUnitKind::CatalogRecipe
+                ? extension == ".recipe"
+                : extension == ".gltf" || extension == ".glb";
+        if (!extensionMatches) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::InvalidArgument,
+                "Editor source import kind does not match the selected file extension");
+        }
+
+        auto validated = unit;
+        validated.sourcePathUtf8 = pathToUtf8(physicalCandidate.lexically_normal());
+        return validated;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Editor source import path validation allocation failed");
+    } catch (const std::filesystem::filesystem_error& exception) {
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                "Editor source import path validation failed"};
+        error.setNativeCode(exception.code().value());
+        return Tina::Core::failure(std::move(error));
+    }
+}
+
 [[nodiscard]] Tina::Core::Status validatePhysicalProjectDirectory(
     const std::filesystem::path& path, std::string_view label)
 {
@@ -9827,6 +9950,35 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return Tina::Core::success();
         }
 
+        std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> validatedUnits;
+        try {
+            validatedUnits.reserve(sourceImportUnits_.size());
+            for (const auto& unit : sourceImportUnits_) {
+                auto validated = validateSourceImportUnit(*activeProjectWorkspace_, unit);
+                if (!validated) {
+                    return Tina::Core::failure(std::move(validated.error()));
+                }
+                const bool duplicate = std::any_of(
+                    validatedUnits.begin(), validatedUnits.end(),
+                    [&](const auto& existing) {
+                        return existing.kind == validated->kind &&
+                               sourceImportPathsReferToSameLocation(
+                                   existing.sourcePathUtf8,
+                                   validated->sourcePathUtf8);
+                    });
+                if (duplicate) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::InvalidArgument,
+                        "Editor source import intended set contains the same physical file twice");
+                }
+                validatedUnits.push_back(std::move(*validated));
+            }
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Editor could not validate the source import intended set");
+        }
+
         auto stagePaths = createSourceImportStagePaths(*activeProjectWorkspace_);
         if (!stagePaths) {
             return Tina::Core::failure(std::move(stagePaths.error()));
@@ -9849,7 +10001,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             request.freshStageRootUtf8 = stagePaths->catalogRootUtf8;
             request.freshStageStatePathUtf8 = stagePaths->statePathUtf8;
             request.targetPlatform = activeProjectWorkspace_->targetPlatform();
-            request.units = sourceImportUnits_;
+            request.units = validatedUnits;
             sourceImportPointerPathUtf8_ = pathToUtf8(cache->activeCatalogPointer);
             sourceImportPendingStageRootUtf8_ = request.freshStageRootUtf8;
         } catch (const std::bad_alloc&) {
@@ -9861,6 +10013,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = sourceImportService_.start(std::move(request)); !status) {
             return status;
         }
+        sourceImportUnits_.swap(validatedUnits);
+        counters_.sourceImportIntendedUnits = sourceImportUnits_.size();
         stageReservation.release();
         sourceImportCatalogCommitted_ = false;
         counters_.sourceImportRunning = true;
@@ -9928,11 +10082,24 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return Tina::Core::success();
         }
 
+        auto validated = validateSourceImportUnit(
+            *activeProjectWorkspace_,
+            Tina::EditorApp::Detail::EditorSourceImportUnit{
+                .kind = kind,
+                .sourcePathUtf8 = selected->selectedPathUtf8,
+            });
+        if (!validated) {
+            return reportAuthoringFailure("Source import selection rejected: ",
+                                          validated.error());
+        }
+
         const bool alreadyIntended = std::any_of(
             sourceImportUnits_.begin(), sourceImportUnits_.end(),
             [&](const auto& unit) {
                 return unit.kind == kind &&
-                       unit.sourcePathUtf8 == selected->selectedPathUtf8;
+                       sourceImportPathsReferToSameLocation(
+                           unit.sourcePathUtf8,
+                           validated->sourcePathUtf8);
             });
         if (!alreadyIntended) {
             if (sourceImportUnits_.size() >=
@@ -9942,10 +10109,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     "Editor source import intended unit capacity exceeded");
             }
             try {
-                sourceImportUnits_.push_back({
-                    .kind = kind,
-                    .sourcePathUtf8 = std::move(selected->selectedPathUtf8),
-                });
+                sourceImportUnits_.push_back(std::move(*validated));
                 counters_.sourceImportIntendedUnits = sourceImportUnits_.size();
             } catch (const std::bad_alloc&) {
                 return Tina::Core::failure(
@@ -10195,6 +10359,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
             counters_.sourceImportRunning = false;
             counters_.sourceImportReady = false;
             cleanupFailedSourceImportStage();
+            if (options_.sourceImport.importOnStart &&
+                options_.targetFrameCount != 0U) {
+                return Tina::Core::failure(*failure);
+            }
             return sourceImportService_.dismissFailure();
         }
         if (sourceImportService_.state() != State::Ready) {
