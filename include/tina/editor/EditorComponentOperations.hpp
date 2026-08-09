@@ -19,9 +19,10 @@ enum class World2DComponentKind : Core::u8 {
     Camera = 1,
     PointLight = 2,
     ShadowOccluder = 3,
+    SpriteAnimation = 4,
 };
 
-inline constexpr Core::usize World2DComponentKindCount = 4;
+inline constexpr Core::usize World2DComponentKindCount = 5;
 
 struct EditorComponentInfo final {
     World2DComponentKind kind = World2DComponentKind::Sprite;
@@ -44,13 +45,16 @@ struct EditorComponentInfo final {
 // lacks it. Remove detaches it from every listed entity that has it. Unknown
 // stable IDs fail closed; a request that would change no entity fails closed
 // (ComponentAlreadyPresent / ComponentNotFound) instead of publishing a no-op.
-// The Sprite wire schema requires a non-zero sprite AssetId, so adding a
-// Sprite component fails closed unless spriteAssetId resolves an asset.
+// Sprite and SpriteAnimation wire schemas require a non-zero AssetId, so those
+// kinds fail closed unless componentAssetId resolves an asset (the sprite or
+// the animation clip respectively). SpriteAnimation additionally requires a
+// Sprite on the same entity; removing a Sprite cascades and also removes the
+// entity's SpriteAnimation binding.
 [[nodiscard]] Core::Result<EditorSceneOperationResult>
 addWorld2DComponent(World2DAuthoringDocument& document,
                     std::span<const Core::u32> stableEntityIds,
                     World2DComponentKind kind,
-                    Core::AssetId spriteAssetId = {});
+                    Core::AssetId componentAssetId = {});
 
 [[nodiscard]] Core::Result<EditorSceneOperationResult>
 removeWorld2DComponent(World2DAuthoringDocument& document,
@@ -107,6 +111,12 @@ struct World2DShadowOccluderEditInput final {
     std::optional<bool> active{};
 };
 
+struct World2DSpriteAnimationEditInput final {
+    std::optional<Core::AssetId> clipId{};
+    std::optional<float> playbackSpeed{};
+    std::optional<bool> autoPlay{};
+};
+
 [[nodiscard]] Core::Result<EditorSceneOperationResult>
 applyWorld2DSpriteEdit(World2DAuthoringDocument& document,
                        std::span<const Core::u32> stableEntityIds,
@@ -126,6 +136,11 @@ applyWorld2DPointLightEdit(World2DAuthoringDocument& document,
 applyWorld2DShadowOccluderEdit(World2DAuthoringDocument& document,
                                std::span<const Core::u32> stableEntityIds,
                                const World2DShadowOccluderEditInput& input);
+
+[[nodiscard]] Core::Result<EditorSceneOperationResult>
+applyWorld2DSpriteAnimationEdit(World2DAuthoringDocument& document,
+                                std::span<const Core::u32> stableEntityIds,
+                                const World2DSpriteAnimationEditInput& input);
 
 // World3D MeshRenderer is represented by paired non-zero mesh/material asset
 // IDs on a prefab node. Add therefore requires both IDs; remove clears both.

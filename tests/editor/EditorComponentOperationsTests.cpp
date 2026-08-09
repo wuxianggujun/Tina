@@ -434,5 +434,67 @@ TEST(EditorComponentOperationsTests, World3DMeshRendererAddEditRemove)
     EXPECT_TRUE(hasWorld3DMeshRenderer(world3DNodes(document).front()));
 }
 
+TEST(EditorComponentOperationsTests, SpriteAnimationRequiresSpriteAndCascadesOnSpriteRemove)
+{
+    auto document = createWorld2D();
+    auto entity = addWorld2DEntity(document);
+    ASSERT_TRUE(entity);
+    const std::array ids{entity->primaryStableId};
+    const auto before = fingerprint(document);
+
+    // Requires a clip AssetId and a sprite on the entity.
+    auto missingClip = addWorld2DComponent(document, ids,
+                                           World2DComponentKind::SpriteAnimation);
+    ASSERT_FALSE(missingClip);
+    EXPECT_EQ(missingClip.error().code, EditorErrorCode::InvalidAuthoringOperation);
+    expectUnchanged(document, before);
+
+    auto missingSprite = addWorld2DComponent(document, ids,
+                                             World2DComponentKind::SpriteAnimation,
+                                             testAssetId('1'));
+    ASSERT_FALSE(missingSprite);
+    EXPECT_EQ(missingSprite.error().code,
+              EditorErrorCode::InvalidAuthoringOperation);
+    expectUnchanged(document, before);
+
+    ASSERT_TRUE(addWorld2DComponent(document, ids, World2DComponentKind::Sprite,
+                                    testAssetId('a')));
+    auto added = addWorld2DComponent(document, ids,
+                                     World2DComponentKind::SpriteAnimation,
+                                     testAssetId('1'));
+    ASSERT_TRUE(added) << added.error().message;
+    auto entities = world2DEntities(document);
+    ASSERT_TRUE(findEntity(entities, ids[0])->spriteAnimation.has_value());
+    EXPECT_EQ(findEntity(entities, ids[0])->spriteAnimation->clipId,
+              testAssetId('1'));
+    EXPECT_TRUE(findEntity(entities, ids[0])->spriteAnimation->autoPlay);
+
+    auto edited = applyWorld2DSpriteAnimationEdit(
+        document, ids, {.playbackSpeed = 2.0F, .autoPlay = false});
+    ASSERT_TRUE(edited) << edited.error().message;
+    entities = world2DEntities(document);
+    EXPECT_FLOAT_EQ(findEntity(entities, ids[0])->spriteAnimation->playbackSpeed,
+                    2.0F);
+    EXPECT_FALSE(findEntity(entities, ids[0])->spriteAnimation->autoPlay);
+
+    auto invalidSpeed = applyWorld2DSpriteAnimationEdit(document, ids,
+                                                        {.playbackSpeed = 0.0F});
+    ASSERT_FALSE(invalidSpeed);
+    EXPECT_EQ(invalidSpeed.error().code,
+              EditorErrorCode::InvalidAuthoringOperation);
+
+    // Removing the sprite cascades and drops the animation binding too.
+    auto removedSprite = removeWorld2DComponent(document, ids,
+                                                World2DComponentKind::Sprite);
+    ASSERT_TRUE(removedSprite) << removedSprite.error().message;
+    entities = world2DEntities(document);
+    EXPECT_FALSE(findEntity(entities, ids[0])->sprite.has_value());
+    EXPECT_FALSE(findEntity(entities, ids[0])->spriteAnimation.has_value());
+
+    ASSERT_TRUE(document.undo());
+    entities = world2DEntities(document);
+    EXPECT_TRUE(findEntity(entities, ids[0])->spriteAnimation.has_value());
+}
+
 } // namespace
 } // namespace Tina::Editor

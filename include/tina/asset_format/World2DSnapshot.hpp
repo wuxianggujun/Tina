@@ -15,9 +15,9 @@ namespace Tina::AssetFormat {
 // never serialized; stableEntityId and AssetId are the persistence boundary.
 namespace World2DSnapshotWire {
 
-inline constexpr Core::u16 SchemaVersion = 1;
+inline constexpr Core::u16 SchemaVersion = 2;
 inline constexpr Core::u16 HeaderBytes = 32;
-inline constexpr Core::u32 EntityBytes = 224;
+inline constexpr Core::u32 EntityBytes = 256;
 inline constexpr Core::u32 MaximumEntities = 4096;
 inline constexpr Core::u32 MaximumGameplayBytes = 4U * 1024U * 1024U;
 
@@ -25,8 +25,10 @@ inline constexpr Core::u32 ComponentSprite = 1U << 0U;
 inline constexpr Core::u32 ComponentCamera = 1U << 1U;
 inline constexpr Core::u32 ComponentPointLight = 1U << 2U;
 inline constexpr Core::u32 ComponentShadowOccluder = 1U << 3U;
+inline constexpr Core::u32 ComponentSpriteAnimation = 1U << 4U;
 inline constexpr Core::u32 ValidComponentFlags =
-    ComponentSprite | ComponentCamera | ComponentPointLight | ComponentShadowOccluder;
+    ComponentSprite | ComponentCamera | ComponentPointLight | ComponentShadowOccluder |
+    ComponentSpriteAnimation;
 
 } // namespace World2DSnapshotWire
 
@@ -122,6 +124,15 @@ struct World2DShadowOccluderDesc final {
     friend bool operator==(const World2DShadowOccluderDesc&, const World2DShadowOccluderDesc&) = default;
 };
 
+// Binds a cooked SpriteAnimationClip asset to the entity's SpriteRenderer2D.
+struct World2DSpriteAnimationDesc final {
+    Core::AssetId clipId{};
+    float playbackSpeed = 1.0F;
+    bool autoPlay = true;
+
+    friend bool operator==(const World2DSpriteAnimationDesc&, const World2DSpriteAnimationDesc&) = default;
+};
+
 struct World2DEntityDesc final {
     Core::u32 stableEntityId = 0;
     Core::u32 parentStableEntityId = 0;
@@ -139,6 +150,7 @@ struct World2DEntityDesc final {
     std::optional<World2DCameraDesc> camera{};
     std::optional<World2DPointLightDesc> pointLight{};
     std::optional<World2DShadowOccluderDesc> shadowOccluder{};
+    std::optional<World2DSpriteAnimationDesc> spriteAnimation{};
 
     friend bool operator==(const World2DEntityDesc&, const World2DEntityDesc&) = default;
 };

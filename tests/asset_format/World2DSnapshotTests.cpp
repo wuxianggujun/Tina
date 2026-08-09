@@ -83,7 +83,36 @@ namespace {
                 .localEndY = 4.0F,
                 .active = false,
             },
+        .spriteAnimation =
+            World2DSpriteAnimationDesc{
+                .clipId = assetId(9),
+                .playbackSpeed = 1.5F,
+                .autoPlay = false,
+            },
     };
+}
+
+TEST(World2DSnapshotTests, SpriteAnimationRequiresClipSpriteAndPositiveSpeed)
+{
+    World2DEntityDesc entity{.stableEntityId = 1};
+    entity.spriteAnimation = World2DSpriteAnimationDesc{.clipId = assetId(9)};
+
+    // Animation without a sprite on the same entity is rejected.
+    const std::array withoutSprite{entity};
+    EXPECT_FALSE(validateWorld2DSnapshotDesc({.entities = withoutSprite}));
+
+    entity.sprite = World2DSpriteDesc{.spriteId = assetId(1)};
+    const std::array valid{entity};
+    EXPECT_TRUE(validateWorld2DSnapshotDesc({.entities = valid}));
+
+    entity.spriteAnimation->clipId = Core::AssetId{};
+    const std::array zeroClip{entity};
+    EXPECT_FALSE(validateWorld2DSnapshotDesc({.entities = zeroClip}));
+
+    entity.spriteAnimation->clipId = assetId(9);
+    entity.spriteAnimation->playbackSpeed = 0.0F;
+    const std::array zeroSpeed{entity};
+    EXPECT_FALSE(validateWorld2DSnapshotDesc({.entities = zeroSpeed}));
 }
 
 TEST(World2DSnapshotTests, RoundTripsAllComponentsAndGameplayDeterministically)

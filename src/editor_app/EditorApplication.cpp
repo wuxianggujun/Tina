@@ -1371,20 +1371,24 @@ enum class EditorCommand : u32 {
     ComponentAddCamera,
     ComponentAddPointLight,
     ComponentAddShadowOccluder,
+    ComponentAddSpriteAnimation,
     ComponentAddMeshRenderer,
     ComponentRemoveSprite,
     ComponentRemoveCamera,
     ComponentRemovePointLight,
     ComponentRemoveShadowOccluder,
+    ComponentRemoveSpriteAnimation,
     ComponentRemoveMeshRenderer,
     ComponentApplySprite,
     ComponentApplyCamera,
     ComponentApplyPointLight,
     ComponentApplyShadowOccluder,
+    ComponentApplySpriteAnimation,
     ComponentToggleSpriteVisible,
     ComponentToggleCameraActive,
     ComponentTogglePointLightActive,
     ComponentToggleShadowOccluderActive,
+    ComponentToggleSpriteAnimationAutoPlay,
     ComponentToggleMeshVisible,
     ComponentAssignSprite,
     Undo,
@@ -3930,6 +3934,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 !status) {
                 return status;
             }
+            const std::array<std::string_view, 2> animationCaptions{"Clip", "Speed"};
+            if (auto status = createComponentSection(
+                    componentSections_[4], "SpriteAnimation2D", animationCaptions, false,
+                    "Apply SpriteAnimation2D");
+                !status) {
+                return status;
+            }
             const std::array<std::string_view, 2> meshCaptions{"Mesh", "Material"};
             if (auto status = createComponentSection(
                     componentSections_[MeshRendererSectionIndex], "MeshRenderer3D",
@@ -4400,7 +4411,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         {
-            const std::array<std::array<EditorCommand, 3>, 5> sectionCommands{{
+            const std::array<std::array<EditorCommand, 3>, 6> sectionCommands{{
                 {EditorCommand::ComponentAddSprite, EditorCommand::ComponentRemoveSprite,
                  EditorCommand::ComponentToggleSpriteVisible},
                 {EditorCommand::ComponentAddCamera, EditorCommand::ComponentRemoveCamera,
@@ -4409,13 +4420,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
                  EditorCommand::ComponentTogglePointLightActive},
                 {EditorCommand::ComponentAddShadowOccluder, EditorCommand::ComponentRemoveShadowOccluder,
                  EditorCommand::ComponentToggleShadowOccluderActive},
+                {EditorCommand::ComponentAddSpriteAnimation, EditorCommand::ComponentRemoveSpriteAnimation,
+                 EditorCommand::ComponentToggleSpriteAnimationAutoPlay},
                 {EditorCommand::ComponentAddMeshRenderer, EditorCommand::ComponentRemoveMeshRenderer,
                  EditorCommand::ComponentToggleMeshVisible},
             }};
-            const std::array<EditorCommand, 4> sectionApplyCommands{
+            const std::array<EditorCommand, 5> sectionApplyCommands{
                 EditorCommand::ComponentApplySprite, EditorCommand::ComponentApplyCamera,
                 EditorCommand::ComponentApplyPointLight,
-                EditorCommand::ComponentApplyShadowOccluder};
+                EditorCommand::ComponentApplyShadowOccluder,
+                EditorCommand::ComponentApplySpriteAnimation};
             for (Tina::Core::usize sectionIndex = 0;
                  sectionIndex < componentSections_.size(); ++sectionIndex) {
                 const auto& section = componentSections_[sectionIndex];
@@ -11802,20 +11816,24 @@ class EditorWorkspaceState final : public Tina::IGameState {
         case EditorCommand::ComponentAddCamera:
         case EditorCommand::ComponentAddPointLight:
         case EditorCommand::ComponentAddShadowOccluder:
+        case EditorCommand::ComponentAddSpriteAnimation:
         case EditorCommand::ComponentAddMeshRenderer:
         case EditorCommand::ComponentRemoveSprite:
         case EditorCommand::ComponentRemoveCamera:
         case EditorCommand::ComponentRemovePointLight:
         case EditorCommand::ComponentRemoveShadowOccluder:
+        case EditorCommand::ComponentRemoveSpriteAnimation:
         case EditorCommand::ComponentRemoveMeshRenderer:
         case EditorCommand::ComponentApplySprite:
         case EditorCommand::ComponentApplyCamera:
         case EditorCommand::ComponentApplyPointLight:
         case EditorCommand::ComponentApplyShadowOccluder:
+        case EditorCommand::ComponentApplySpriteAnimation:
         case EditorCommand::ComponentToggleSpriteVisible:
         case EditorCommand::ComponentToggleCameraActive:
         case EditorCommand::ComponentTogglePointLightActive:
         case EditorCommand::ComponentToggleShadowOccluderActive:
+        case EditorCommand::ComponentToggleSpriteAnimationAutoPlay:
         case EditorCommand::ComponentToggleMeshVisible:
         case EditorCommand::ComponentAssignSprite: {
             bool published = false;
@@ -12772,7 +12790,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree.setText(documentFormat_,
-                                       world2D ? "World2D v1 + TileMap v3/v1 | canonical"
+                                       world2D ? "World2D v2 + TileMap v3/v1 | canonical"
                                                : "Prefab schema v2 | canonical");
             !status) {
             return status;
@@ -13749,6 +13767,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
             successVerb = "added";
             componentName = "ShadowOccluder2D";
             break;
+        case EditorCommand::ComponentAddSpriteAnimation: {
+            Tina::Core::AssetId clipId = selectedProjectAssetIdOfKind(
+                Tina::AssetFormat::AssetKind::SpriteAnimationClip);
+            if (!clipId) {
+                clipId = editorAssetId(0x10U);
+            }
+            result = Tina::Editor::addWorld2DComponent(
+                document_, ids, World2DComponentKind::SpriteAnimation, clipId);
+            successVerb = "added";
+            componentName = "SpriteAnimation2D";
+            break;
+        }
         case EditorCommand::ComponentAddMeshRenderer: {
             Tina::Core::AssetId meshId = selectedProjectAssetIdOfKind(
                 Tina::AssetFormat::AssetKind::StaticMesh);
@@ -13789,6 +13819,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 document_, ids, World2DComponentKind::ShadowOccluder);
             successVerb = "removed";
             componentName = "ShadowOccluder2D";
+            break;
+        case EditorCommand::ComponentRemoveSpriteAnimation:
+            result = Tina::Editor::removeWorld2DComponent(
+                document_, ids, World2DComponentKind::SpriteAnimation);
+            successVerb = "removed";
+            componentName = "SpriteAnimation2D";
             break;
         case EditorCommand::ComponentRemoveMeshRenderer:
             result = Tina::Editor::removeWorld3DMeshRenderer(document3D_, ids);
@@ -13865,6 +13901,55 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 document_, ids, {.active = !primary->shadowOccluder->active});
             successVerb = "toggled";
             componentName = "ShadowOccluder2D active";
+            break;
+        }
+        case EditorCommand::ComponentToggleSpriteAnimationAutoPlay: {
+            auto primary = primaryWorld2DEntity();
+            if (!primary) {
+                result = Tina::Core::failure(std::move(primary.error()));
+                break;
+            }
+            if (!primary->spriteAnimation) {
+                result = Tina::Core::failure(
+                    Tina::Editor::EditorErrorCode::ComponentNotFound,
+                    "Toggle requires a SpriteAnimation2D on the primary selection");
+                break;
+            }
+            result = Tina::Editor::applyWorld2DSpriteAnimationEdit(
+                document_, ids, {.autoPlay = !primary->spriteAnimation->autoPlay});
+            successVerb = "toggled";
+            componentName = "SpriteAnimation2D autoPlay";
+            break;
+        }
+        case EditorCommand::ComponentApplySpriteAnimation: {
+            const auto& section = componentSections_[4];
+            auto clipText = tree.text(section.fields[0]);
+            if (!clipText) {
+                return Tina::Core::failure(std::move(clipText.error()));
+            }
+            Tina::Editor::World2DSpriteAnimationEditInput input{};
+            if (*clipText != "Mixed" && *clipText != "n/a") {
+                const auto parsedClip =
+                    Tina::Core::AssetId::parseCanonical(*clipText);
+                if (!parsedClip.has_value()) {
+                    return reject(Tina::Core::Error{
+                        Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                        "Clip must be a 32-hex canonical AssetId or Mixed"});
+                }
+                input.clipId = *parsedClip;
+            }
+            auto speed = parseFloatField(section.fields[1], "Speed");
+            if (!speed) {
+                if (isRejectable(speed.error())) {
+                    return reject(speed.error());
+                }
+                return Tina::Core::failure(std::move(speed.error()));
+            }
+            input.playbackSpeed = *speed;
+            result = Tina::Editor::applyWorld2DSpriteAnimationEdit(document_, ids,
+                                                                   input);
+            successVerb = "applied";
+            componentName = "SpriteAnimation2D";
             break;
         }
         case EditorCommand::ComponentToggleMeshVisible: {
@@ -14170,7 +14255,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 primary = selected.front();
             }
 
-            for (Tina::Core::usize sectionIndex = 0; sectionIndex < 4U;
+            for (Tina::Core::usize sectionIndex = 0; sectionIndex < 5U;
                  ++sectionIndex) {
                 const auto& section = componentSections_[sectionIndex];
                 const auto kind = static_cast<Tina::Editor::World2DComponentKind>(
@@ -14422,6 +14507,38 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     }
                     break;
                 }
+                case Tina::Editor::World2DComponentKind::SpriteAnimation: {
+                    const auto& animation = *primary->spriteAnimation;
+                    status = tree.setChecked(
+                        section.activeCheckbox,
+                        animation.autoPlay &&
+                            !mixedBool([](const auto& e) {
+                                return e.spriteAnimation->autoPlay;
+                            }));
+                    if (status) {
+                        bool clipMixed = false;
+                        for (const auto* entity : selected) {
+                            if (Tina::Editor::hasWorld2DComponent(*entity, kind) &&
+                                entity->spriteAnimation->clipId != animation.clipId) {
+                                clipMixed = true;
+                                break;
+                            }
+                        }
+                        const auto clipText = animation.clipId.canonicalText();
+                        status = setField(
+                            0, clipMixed,
+                            std::string{clipText.data(), clipText.size()});
+                    }
+                    if (status) {
+                        status = setField(
+                            1,
+                            mixedFloat([](const auto& e) {
+                                return e.spriteAnimation->playbackSpeed;
+                            }),
+                            std::to_string(animation.playbackSpeed));
+                    }
+                    break;
+                }
                 }
                 if (!status) {
                     return status;
@@ -14430,7 +14547,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return Tina::Core::success();
         }
 
-        for (Tina::Core::usize sectionIndex = 0; sectionIndex < 4U; ++sectionIndex) {
+        for (Tina::Core::usize sectionIndex = 0; sectionIndex < 5U; ++sectionIndex) {
             if (auto status = resetSection(componentSections_[sectionIndex]);
                 !status) {
                 return status;
@@ -14869,11 +14986,21 @@ class EditorWorkspaceState final : public Tina::IGameState {
                                      containsHandle(boundSpriteAssets_, animationSprite);
         if (animationPreviewAvailable_) {
             const u32 selectedStableId = stableEntityIdForHierarchyItem(selectionKey_);
+            // Explicitly authored SpriteAnimation2D bindings win over the
+            // selection/first-sprite preview heuristics.
             auto animationTarget = std::find_if(
-                storage.begin(), storage.end(), [selectedStableId](const auto& entity) {
-                    return entity.stableEntityId == selectedStableId &&
+                storage.begin(), storage.end(), [](const auto& entity) {
+                    return entity.spriteAnimation.has_value() &&
+                           entity.spriteAnimation->autoPlay &&
                            entity.sprite.has_value();
                 });
+            if (animationTarget == storage.end()) {
+                animationTarget = std::find_if(
+                    storage.begin(), storage.end(), [selectedStableId](const auto& entity) {
+                        return entity.stableEntityId == selectedStableId &&
+                               entity.sprite.has_value();
+                    });
+            }
             if (animationTarget == storage.end()) {
                 animationTarget = std::find_if(
                     storage.begin(), storage.end(), [](const auto& entity) {
@@ -16882,9 +17009,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UI::UINodeId assignButton{};
         UI::UINodeId applyButton{};
     };
-    // 0..3 mirror Tina::Editor::World2DComponentKind; 4 is the 3D MeshRenderer.
-    static constexpr Tina::Core::usize MeshRendererSectionIndex = 4;
-    std::array<ComponentSectionUi, 5> componentSections_{};
+    // 0..4 mirror Tina::Editor::World2DComponentKind; 5 is the 3D MeshRenderer.
+    static constexpr Tina::Core::usize MeshRendererSectionIndex = 5;
+    std::array<ComponentSectionUi, 6> componentSections_{};
     UI::UINodeId mode2DButton_{};
     UI::UINodeId mode3DButton_{};
     UI::UINodeId playButton_{};

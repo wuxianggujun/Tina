@@ -26,6 +26,9 @@ inline constexpr std::array<EditorComponentInfo, World2DComponentKindCount>
         {.kind = World2DComponentKind::ShadowOccluder,
          .displayName = "ShadowOccluder2D",
          .removable = true},
+        {.kind = World2DComponentKind::SpriteAnimation,
+         .displayName = "SpriteAnimation2D",
+         .removable = true},
     }};
 
 [[nodiscard]] std::unexpected<Core::Error> componentOperationAllocationFailure()
@@ -88,12 +91,12 @@ resolveSelection(std::span<const Item> items, std::span<const Core::u32> stableI
 
 void attachDefaultWorld2DComponent(AssetFormat::World2DEntityDesc& entity,
                                    World2DComponentKind kind,
-                                   Core::AssetId spriteAssetId)
+                                   Core::AssetId componentAssetId)
 {
     switch (kind) {
     case World2DComponentKind::Sprite: {
         auto& sprite = entity.sprite.emplace();
-        sprite.spriteId = spriteAssetId;
+        sprite.spriteId = componentAssetId;
         break;
     }
     case World2DComponentKind::Camera:
@@ -105,6 +108,11 @@ void attachDefaultWorld2DComponent(AssetFormat::World2DEntityDesc& entity,
     case World2DComponentKind::ShadowOccluder:
         entity.shadowOccluder.emplace();
         break;
+    case World2DComponentKind::SpriteAnimation: {
+        auto& animation = entity.spriteAnimation.emplace();
+        animation.clipId = componentAssetId;
+        break;
+    }
     }
 }
 
@@ -114,6 +122,8 @@ void detachWorld2DComponent(AssetFormat::World2DEntityDesc& entity,
     switch (kind) {
     case World2DComponentKind::Sprite:
         entity.sprite.reset();
+        // The animation binding targets the sprite, so it cannot outlive it.
+        entity.spriteAnimation.reset();
         break;
     case World2DComponentKind::Camera:
         entity.camera.reset();
@@ -123,6 +133,9 @@ void detachWorld2DComponent(AssetFormat::World2DEntityDesc& entity,
         break;
     case World2DComponentKind::ShadowOccluder:
         entity.shadowOccluder.reset();
+        break;
+    case World2DComponentKind::SpriteAnimation:
+        entity.spriteAnimation.reset();
         break;
     }
 }
@@ -308,6 +321,8 @@ bool hasWorld2DComponent(const AssetFormat::World2DEntityDesc& entity,
         return entity.pointLight.has_value();
     case World2DComponentKind::ShadowOccluder:
         return entity.shadowOccluder.has_value();
+    case World2DComponentKind::SpriteAnimation:
+        return entity.spriteAnimation.has_value();
     }
     return false;
 }
@@ -315,24 +330,32 @@ bool hasWorld2DComponent(const AssetFormat::World2DEntityDesc& entity,
 Core::Result<EditorSceneOperationResult>
 addWorld2DComponent(World2DAuthoringDocument& document,
                     std::span<const Core::u32> stableEntityIds,
-                    World2DComponentKind kind, Core::AssetId spriteAssetId)
+                    World2DComponentKind kind, Core::AssetId componentAssetId)
 {
     if (auto status = validateWorld2DComponentSelection(stableEntityIds, kind);
         !status) {
         return Core::failure(std::move(status.error()));
     }
-    if (kind == World2DComponentKind::Sprite && !spriteAssetId) {
+    if ((kind == World2DComponentKind::Sprite ||
+         kind == World2DComponentKind::SpriteAnimation) &&
+        !componentAssetId) {
         return Core::failure(
             EditorErrorCode::InvalidAuthoringOperation,
-            "Editor sprite component requires a non-zero sprite AssetId");
+            "Editor component requires a non-zero AssetId for this kind");
     }
     bool anyMissing = false;
     auto result = editWorld2DEntities(
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
             if (!hasWorld2DComponent(entity, kind)) {
+                if (kind == World2DComponentKind::SpriteAnimation &&
+                    !entity.sprite) {
+                    return Core::failure(
+                        EditorErrorCode::InvalidAuthoringOperation,
+                        "Editor sprite animation requires a SpriteRenderer2D on the entity");
+                }
                 anyMissing = true;
-                attachDefaultWorld2DComponent(entity, kind, spriteAssetId);
+                attachDefaultWorld2DComponent(entity, kind, componentAssetId);
             }
             return Core::success();
         });
@@ -528,6 +551,38 @@ applyWorld2DShadowOccluderEdit(World2DAuthoringDocument& document,
             applyOptional(input.localEndX, occluder.localEndX);
             applyOptional(input.localEndY, occluder.localEndY);
             applyOptional(input.active, occluder.active);
+            return Core::success();
+        });
+}
+
+Core::Result<EditorSceneOperationResult>
+applyWorld2DSpriteAnimationEdit(World2DAuthoringDocument& document,
+                                std::span<const Core::u32> stableEntityIds,
+                                const World2DSpriteAnimationEditInput& input)
+{
+    if (auto status = finiteEditStatus(
+            allFinite({input.playbackSpeed.value_or(1.0F)}) &&
+            (!input.playbackSpeed.has_value() || *input.playbackSpeed > 0.0F));
+        !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    if (input.clipId.has_value() && !*input.clipId) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "Editor sprite animation requires a non-zero clip AssetId");
+    }
+    return editWorld2DEntities(
+        document, stableEntityIds,
+        [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
+            if (!entity.spriteAnimation) {
+                return Core::failure(
+                    EditorErrorCode::ComponentNotFound,
+                    "Editor animation edit targets an entity without a binding");
+            }
+            auto& animation = *entity.spriteAnimation;
+            applyOptional(input.clipId, animation.clipId);
+            applyOptional(input.playbackSpeed, animation.playbackSpeed);
+            applyOptional(input.autoPlay, animation.autoPlay);
             return Core::success();
         });
 }

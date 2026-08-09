@@ -23,6 +23,7 @@ constexpr usize SpriteOffset = 56;
 constexpr usize CameraOffset = 136;
 constexpr usize PointLightOffset = 168;
 constexpr usize OccluderOffset = 200;
+constexpr usize SpriteAnimationOffset = 224;
 
 [[nodiscard]] u8 readU8(std::span<const std::byte> bytes, usize offset) noexcept
 {
@@ -229,6 +230,21 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     return Core::success();
 }
 
+[[nodiscard]] Core::Status validateSpriteAnimation(const World2DSpriteAnimationDesc& animation) noexcept
+{
+    if (!animation.clipId)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                             "World2D sprite animation requires a non-zero clip AssetId");
+    }
+    if (!isFinite(animation.playbackSpeed) || !(animation.playbackSpeed > 0.0F))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D sprite animation playback speed must be positive and finite");
+    }
+    return Core::success();
+}
+
 [[nodiscard]] Core::Status validateEntity(const World2DEntityDesc& entity) noexcept
 {
     if (entity.stableEntityId == 0U || entity.stableEntityId == entity.parentStableEntityId)
@@ -267,6 +283,18 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
             return status;
         }
     }
+    if (entity.spriteAnimation)
+    {
+        if (!entity.sprite)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "World2D sprite animation requires a sprite component on the same entity");
+        }
+        if (const Core::Status status = validateSpriteAnimation(*entity.spriteAnimation); !status)
+        {
+            return status;
+        }
+    }
     return Core::success();
 }
 
@@ -276,12 +304,12 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     if (entities.size() > World2DSnapshotWire::MaximumEntities)
     {
         return Core::failure(AssetFormatErrorCode::SizeLimitExceeded,
-                             "World2D entity count exceeds the schema-v1 limit");
+                             "World2D entity count exceeds the current-schema limit");
     }
     if (gameplayBytes.size() > World2DSnapshotWire::MaximumGameplayBytes)
     {
         return Core::failure(AssetFormatErrorCode::SizeLimitExceeded,
-                             "World2D gameplay blob exceeds the schema-v1 limit");
+                             "World2D gameplay blob exceeds the current-schema limit");
     }
     if (gameplayBytes.empty() ? (gameplaySchema != 0U || gameplayVersion != 0U)
                               : (gameplaySchema == 0U || gameplayVersion == 0U))
@@ -403,6 +431,13 @@ void writeOccluder(std::vector<std::byte>& bytes, usize base, const World2DShado
     writeU8(bytes, base + OccluderOffset + 16U, occluder.active ? 1U : 0U);
 }
 
+void writeSpriteAnimation(std::vector<std::byte>& bytes, usize base, const World2DSpriteAnimationDesc& animation)
+{
+    writeAssetId(bytes, base + SpriteAnimationOffset, animation.clipId);
+    writeF32(bytes, base + SpriteAnimationOffset + 16U, animation.playbackSpeed);
+    writeU8(bytes, base + SpriteAnimationOffset + 20U, animation.autoPlay ? 1U : 0U);
+}
+
 } // namespace
 
 Core::Status validateWorld2DSnapshotDesc(const World2DSnapshotDesc& desc) noexcept
@@ -451,6 +486,8 @@ Core::Result<std::vector<std::byte>> writeWorld2DSnapshotBytes(const World2DSnap
                 componentFlags |= World2DSnapshotWire::ComponentPointLight;
             if (entity.shadowOccluder)
                 componentFlags |= World2DSnapshotWire::ComponentShadowOccluder;
+            if (entity.spriteAnimation)
+                componentFlags |= World2DSnapshotWire::ComponentSpriteAnimation;
             writeU32(payload, base + 8U, componentFlags);
             writeTransform(payload, base, entity);
             if (entity.sprite)
@@ -461,6 +498,8 @@ Core::Result<std::vector<std::byte>> writeWorld2DSnapshotBytes(const World2DSnap
                 writePointLight(payload, base, *entity.pointLight);
             if (entity.shadowOccluder)
                 writeOccluder(payload, base, *entity.shadowOccluder);
+            if (entity.spriteAnimation)
+                writeSpriteAnimation(payload, base, *entity.spriteAnimation);
         }
         std::copy(desc.gameplayBytes.begin(), desc.gameplayBytes.end(),
                   payload.begin() + static_cast<std::ptrdiff_t>(World2DSnapshotWire::HeaderBytes + entityBytes));
@@ -496,7 +535,7 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
     const u32 gameplayBytes = readU32(payload, 20U);
     if (entityCount > World2DSnapshotWire::MaximumEntities || gameplayBytes > World2DSnapshotWire::MaximumGameplayBytes)
     {
-        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "World2D snapshot exceeds schema-v1 limits");
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "World2D snapshot exceeds current-schema limits");
     }
     const u64 entityBytes = static_cast<u64>(entityCount) * World2DSnapshotWire::EntityBytes;
     const u64 expectedBytes = static_cast<u64>(World2DSnapshotWire::HeaderBytes) + entityBytes + gameplayBytes;
@@ -669,10 +708,32 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
                 }
                 occluder.active = active != 0U;
                 entity.shadowOccluder = occluder;
-            } else if (!bytesAreZero(payload, base + OccluderOffset, World2DSnapshotWire::EntityBytes - OccluderOffset))
+            } else if (!bytesAreZero(payload, base + OccluderOffset, SpriteAnimationOffset - OccluderOffset))
             {
                 return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                      "World2D absent occluder component is not canonical");
+            }
+
+            if ((componentFlags & World2DSnapshotWire::ComponentSpriteAnimation) != 0U)
+            {
+                World2DSpriteAnimationDesc animation{};
+                animation.clipId = readAssetId(payload, base + SpriteAnimationOffset);
+                animation.playbackSpeed = readF32(payload, base + SpriteAnimationOffset + 16U);
+                const u8 autoPlay = readU8(payload, base + SpriteAnimationOffset + 20U);
+                if (autoPlay > 1U ||
+                    !bytesAreZero(payload, base + SpriteAnimationOffset + 21U,
+                                  World2DSnapshotWire::EntityBytes - SpriteAnimationOffset - 21U))
+                {
+                    return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                         "World2D sprite animation autoPlay or reserved bytes are invalid");
+                }
+                animation.autoPlay = autoPlay != 0U;
+                entity.spriteAnimation = animation;
+            } else if (!bytesAreZero(payload, base + SpriteAnimationOffset,
+                                     World2DSnapshotWire::EntityBytes - SpriteAnimationOffset))
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "World2D absent sprite animation component is not canonical");
             }
             parsed.push_back(std::move(entity));
         }

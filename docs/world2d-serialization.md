@@ -5,16 +5,19 @@ snapshot，不是新的 Catalog `AssetKind`，也不替产品决定文件路径�
 
 ## 当前格式
 
-只存在 schema v1：32-byte header，随后是每 entity 固定224-byte record，最后是可选 game-owned blob。
+只存在 schema v2：32-byte header，随后是每 entity 固定256-byte record，最后是可选 game-owned blob。
 格式上限为4096个 entity 与4 MiB gameplay bytes。所有保留位、未声明 component 区域和未启用 Sprite
-override 区域必须为零；payload 长度必须与 header 精确一致。
+override 区域必须为零；payload 长度必须与 header 精确一致。旧 schema v1（224-byte entity）按
+current-only 纪律直接拒绝，不保留兼容或迁移分支。
 
 entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTransform 和以下可选组件：
 
 - `SpriteRenderer2D`：Sprite/normal Texture `AssetId`、override、颜色、排序、flip/visible；
 - `Camera2D`：FixedWorldHeight/PixelPerfect、viewport、pixel snap、active；
 - `PointLight2D`：linear color、intensity、influence/source radius、active；
-- `ShadowOccluder2D`：local segment 与 active。
+- `ShadowOccluder2D`：local segment 与 active；
+- `SpriteAnimation2D`：SpriteAnimationClip `AssetId`、playback speed（正有限值）、autoPlay。
+  该组件是对同 entity `SpriteRenderer2D` 的绑定，缺少 sprite 时校验拒绝。
 
 Runtime `EntityId` owner/index/generation、weak `AssetHandle`、AssetLease、Render/GPU identity 永不序列化。
 这避免 restore 后误把旧 registry identity 当成 live 对象。
@@ -26,7 +29,7 @@ World owner-thread view
   -> stableEntityId(EntityId)
   -> assetIdForHandle(Sprite/Texture weak handle)
   -> hierarchy depth + stable ID ordering
-  -> validate canonical schema-v1 descriptors
+  -> validate canonical schema-v2 descriptors
   -> owning byte vector
 ```
 
@@ -41,7 +44,7 @@ span 借用原始 payload；任一 backing storage 修改或析构后 view 失�
 后才替换 caller storage，所以失败不会抹掉上一次成功结果。
 
 ```text
-schema-v1 view
+schema-v2 view
   -> validate all records and parent order
   -> check remaining World capacity
   -> resolve every Sprite/Texture AssetId to weak AssetHandle

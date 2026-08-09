@@ -2,7 +2,7 @@
 
 ## 产品场景
 
-Editor 的当前闭环同时覆盖 schema-v1 World2D snapshot、schema-v2 Prefab、TileMap schema-v3 root +
+Editor 的当前闭环同时覆盖 schema-v2 World2D snapshot、schema-v2 Prefab、TileMap schema-v3 root +
 TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v1。Hierarchy/Inspector/Timeline 把一次
 用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Preview 直接把当前 canonical bytes
 交给对应 Runtime parser 与 Scene instantiate。工具不能绕过 `AssetFormat` 写半合法数据，也不维护 editor-only 或旧
@@ -20,8 +20,10 @@ gizmo、Undo、Redo 都接到 active document，每次成功 canonical command �
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
 Inspector 的 Components 区块由 `Tina::Editor::EditorComponentOperations` 后端驱动：`world2DComponentRegistry()`
-静态注册 SpriteRenderer2D/Camera2D/PointLight2D/ShadowOccluder2D 四种 2D 组件（数据结构沿用 AssetFormat 的
-`World2DEntityDesc` optional payload，wire schema 不变），3D 侧以成对非零 mesh/material AssetId 表示 MeshRenderer3D。
+静态注册 SpriteRenderer2D/Camera2D/PointLight2D/ShadowOccluder2D/SpriteAnimation2D 五种 2D 组件（数据结构沿用
+AssetFormat 的 `World2DEntityDesc` optional payload），3D 侧以成对非零 mesh/material AssetId 表示 MeshRenderer3D。
+SpriteAnimation2D 是 schema-v2 新增的剪辑绑定组件（clip AssetId + playback speed + autoPlay），要求同实体存在
+SpriteRenderer2D，Remove Sprite 会级联摘除该绑定；preview 优先把 autoPlay 绑定实体作为动画目标。
 每个组件区块提供 Add/Remove、可编辑属性行、`Apply <Component>` 与表示 `visible/active` 的 checkbox；Add/Remove/Apply
 遵循 scene operations 同一契约——成功恰好发布一条 canonical revision，失败（未知 stable ID、重复 Add、对缺失组件
 Remove/Apply、非有限或非法值）fail-closed 且 document/history 字节不变，值未变化的 Apply 成功但不发布 revision。
