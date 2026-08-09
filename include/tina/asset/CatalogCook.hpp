@@ -62,7 +62,8 @@ cookAndStageCatalogPackage(std::string_view stagingRootUtf8, const CatalogCookRe
 // validated baseline snapshot. stagingRootUtf8 must resolve outside baselineRootUtf8. Clean object
 // bytes are read from baselineRootUtf8 and copied exactly; they are never linked and the baseline
 // root is never modified. Dirty and clean ids must be disjoint, all objects must use
-// dirtyRequest.targetPlatform, and the rebuilt dependency graph must be valid.
+// dirtyRequest.targetPlatform, and the rebuilt dependency graph must be valid. When both clean and
+// dirty inputs are empty, a valid baseline is required and an empty Catalog is staged.
 [[nodiscard]] Core::Result<CatalogSnapshot>
 cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
                                       std::string_view baselineRootUtf8,

@@ -535,7 +535,7 @@ probeSourceImportUnits(const AssetFormat::SourceImportMetadataView& baseline,
                        AssetFormat::SourceImportManifestRevision currentCatalogRevision,
                        std::span<const SourceImportUnitProbeDesc> descs)
 {
-    if (!baseline || !validCatalogRevision(currentCatalogRevision) || descs.empty())
+    if (!baseline || !validCatalogRevision(currentCatalogRevision))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "source import batch probe input is invalid");

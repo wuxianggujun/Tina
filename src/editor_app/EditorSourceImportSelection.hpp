@@ -33,4 +33,11 @@ mergeEditorSourceImportSelection(
     std::span<const std::string> selectedPathsUtf8,
     Core::u32 maxUnits = EditorSourceImportUnitCapacity);
 
+// Builds a new intended set without the selected logical unit. No source path is opened or
+// revalidated, so an intended unit whose physical file disappeared remains removable.
+[[nodiscard]] Core::Result<std::vector<EditorSourceImportUnit>>
+removeEditorSourceImportUnit(
+    std::span<const EditorSourceImportUnit> currentIntendedUnits,
+    Core::usize logicalIndex);
+
 } // namespace Tina::EditorApp::Detail

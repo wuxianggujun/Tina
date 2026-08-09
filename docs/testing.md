@@ -31,6 +31,25 @@ CTest 测试。测试进程任一返回非0即失败。
     记录后，无论成功失败都回收，不能为了未来可能运行的测试保留数十 GiB 产物。收尾必须报告 tree 已不存在，
     且 compiler/helper/container/volume/agent 均归零；核心集成常驻 tree 和外部共享 `VCPKG_ROOT` 不在清理范围。
 
+## Editor 开发与验证节奏
+
+本节是上述通用“小功能最小构建/定向测试”规则的 Editor 专项例外，冲突时以本节为准。Editor 按 Backlog
+大功能、完整用户工作流或明确里程碑划定统一验证边界，不以单个控件、命令、状态字段、错误修复或源码提交
+作为验证边界。
+
+1. 大功能尚未完整闭环时，连续实现其中的小功能和小细节；不得为 Editor 新增或修改测试代码，也不得执行
+   configure、build、GoogleTest、CTest、sample、smoke、Visual 或平台 gate。
+2. 实施期间只进行源码/API 阅读、定向静态搜索、编译契约人工核对、`git status` 和 `git diff --check`；这些
+   静态检查不产生编译通过、测试通过或产品 smoke 通过的结论。
+3. 大功能全部实现、交互与错误状态收口、文档同步完成后，复用核心常驻 build tree 集中执行一次受影响
+   Editor target 的增量 build、仓库已有的定向 Editor executable，以及该功能确实需要的最短 2D/3D smoke。
+4. 统一 gate 发现问题时，先完成同批问题修复，再只重跑失败项或直接受影响项；不得在每个修复点后重新执行
+   整套 gate。完整 UI/Runtime/product/cross-platform 矩阵只用于 Editor 里程碑、release candidate 或明确要求的
+   正式产品证据。
+
+Editor 功能完成不以新增测试数量为条件。下文的 Editor 构建、测试和 smoke 命令都是“大功能统一 gate”入口，
+不是日常小切片实施步骤。
+
 ## Compile-only 结果口径
 
 Linux compile-only 的通过条件只有“指定最小 target 编译 exit 0”。它不产生测试通过、sample 生命周期、真实
@@ -874,7 +893,8 @@ smoke。
 
 ## 2D Editor authoring document
 
-日常只构建独立工具模块并运行对应 suite；不需要重跑产品、bgfx 或完整 Asset/Scene executable：
+以下命令只在 Editor 大功能或里程碑全部闭环后集中执行一次；日常小切片不构建、不运行 suite，也不新增或
+修改 Editor 测试。统一 gate 只使用独立工具模块和仓库已有 suite，不重跑产品、bgfx 或完整 Asset/Scene executable：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_editor_tests --parallel 1 -- /nr:false
@@ -882,10 +902,10 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
   --gtest_filter=EditorPlaySessionTests.*:EditorSceneOperationsTests.*:EditorViewportNavigationTests.*:EditorViewportGridTests.*:EditorTransformGizmoTests.*:EditorMarqueeSelectionTests.*:TileMapGameplaySpawnPlanTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 ```
 
-用例覆盖 canonical runtime preview、replace/load/upsert/erase-subtree/gameplay revision、undo/redo 与分支替换、
+已有用例覆盖 canonical runtime preview、replace/load/upsert/erase-subtree/gameplay revision、undo/redo 与分支替换、
 entry/byte budget 淘汰、非法 schema/parent/容量失败的 current + history 原子性以及公开头隔离。只有 Editor application
-接线或文件/cook 集成完成时才扩大到 `TinaEditor.exe` 产品 smoke；Runtime samples 不是 Editor gate，纯 document 小切片
-不跑无关产品门禁。
+大功能接线或文件/cook 集成完整闭环时才扩大到 `TinaEditor.exe` 产品 smoke；Runtime samples 不是 Editor gate，
+纯 document 小切片只做静态检查，不运行构建、测试或无关产品门禁。
 TileMap suite 另覆盖 root v3 + chunk v1 canonical family、稳定 chunk AssetId、Paint/Erase、空 chunk 删除、layer/object
 事务、payload-family load、root+chunk Cooked preview、bounded Undo/Redo 与失败不发布。Gameplay plan suite 覆盖 owning
 stable-ID records、hidden object、unknown/duplicate/capacity failure，以及 encoder 完成后单次 World2D publication 和失败时
@@ -901,7 +921,8 @@ artifact/byte count；TileMap 保存必须使用 canonical relative path 并 roo
 它们只证明基础 API；EditorApp `New` 的空 Catalog publish/reopen、Project `Open` + live switch 与 source-import 产品流程
 仍由下述定向 EditorApp/unit + product smoke 证明，不用纯 document suite 代替。
 
-TinaEditor GPU viewport 切片在代码完成后只做一次受影响正式 target 的增量验证，不重跑全量 UI/产品矩阵。
+TinaEditor GPU viewport 大功能完整闭环后只做一次受影响正式 target 的增量验证，不在内部小切片重复构建或测试，
+也不重跑全量 UI/产品矩阵。
 `--auto-demo` 的最小预算为 54 帧，正式 2D/3D smoke 固定使用 60 帧：
 
 ```powershell
@@ -938,7 +959,8 @@ Play Start/Pause/Step/Resume/Stop 固定为 `1/1/1/1/1`；即使 `--frame-delay-
 `playSimulationSteps` 与 `playMaximumSimulationTick` 非零。最后继续检查 2D/3D workspace round-trip、runtime preview
 多次重建、最终 document revision/undo depth 非零且 GPU revision 对齐。
 
-Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的产品 smoke：
+Editor 文件加载/原子保存大功能进入统一 gate 时复用同一增量 build tree，只运行已有 Editor file filter 和带显式
+UTF-8 路径的产品 smoke：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -986,7 +1008,8 @@ New/Open 被阻止且旧状态不变；保存或丢弃后重试，确认动态 C
 Catalog snapshot 重新加载，Browser 不会复用 reload 前的磁盘快照。Linux 运行相同步骤并分别覆盖 `zenity` 与 `kdialog`
 回退；其他未支持平台报告 folder selection unavailable。
 
-Editor source import 使用独立小 target 验证 launch parser 与 owner-thread service，不重跑全量 Runtime/UI：
+Editor source import 只有在完整大功能收口后才使用独立 target 统一验证 launch parser 与 owner-thread service；实现
+内部的小功能、小细节不构建、不新增或运行测试，统一 gate 也不重跑全量 Runtime/UI：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <filesystem>
 #include <limits>
 #include <new>
@@ -331,6 +332,33 @@ mergeEditorSourceImportSelection(
     } catch (const std::bad_alloc&) {
         return Core::failure(Core::CoreErrorCode::OutOfMemory,
                              "Editor could not retain the source import selection");
+    }
+}
+
+Core::Result<std::vector<EditorSourceImportUnit>>
+removeEditorSourceImportUnit(
+    std::span<const EditorSourceImportUnit> currentIntendedUnits,
+    Core::usize logicalIndex)
+{
+    if (logicalIndex >= currentIntendedUnits.size()) {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Editor source import removal index is out of range");
+    }
+
+    try {
+        std::vector<EditorSourceImportUnit> intendedUnits;
+        intendedUnits.reserve(currentIntendedUnits.size() - 1U);
+        intendedUnits.insert(intendedUnits.end(), currentIntendedUnits.begin(),
+                             currentIntendedUnits.begin() +
+                                 static_cast<std::ptrdiff_t>(logicalIndex));
+        intendedUnits.insert(intendedUnits.end(),
+                             currentIntendedUnits.begin() +
+                                 static_cast<std::ptrdiff_t>(logicalIndex + 1U),
+                             currentIntendedUnits.end());
+        return intendedUnits;
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Editor could not remove the source import unit");
     }
 }
 

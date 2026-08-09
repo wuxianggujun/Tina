@@ -123,6 +123,7 @@ inline constexpr u32 WindowLogicalWidth = 1280;
 inline constexpr u32 WindowLogicalHeight = 800;
 inline constexpr u32 HierarchyMaterializedCapacity = 16;
 inline constexpr u32 AssetBrowserMaterializedCapacity = 12;
+inline constexpr u32 SourceImportMaterializedCapacity = 5;
 inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
@@ -1409,6 +1410,7 @@ enum class EditorCommand : u32 {
     CreateProject,
     OpenProject,
     ImportSource,
+    RemoveSelectedSourceImport,
     OpenSelectedProjectAsset,
     CloseActiveDocument,
     DirtyCloseSave,
@@ -2964,7 +2966,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
 
         UI::UILayoutStyle hierarchyStyle = growingRegion();
-        hierarchyStyle.minMax.minHeight = UI::UILayoutLength::Px(160.0F);
+        hierarchyStyle.minMax.minHeight = UI::UILayoutLength::Px(128.0F);
         auto hierarchy = tree->createElement(
             left, UI::makeTreeViewElement({.materializedItemCapacity = HierarchyMaterializedCapacity},
                                           hierarchyStyle));
@@ -3070,7 +3072,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
 
         UI::UILayoutStyle projectListStyle = growingRegion();
-        projectListStyle.minMax.minHeight = UI::UILayoutLength::Px(128.0F);
+        projectListStyle.minMax.minHeight = UI::UILayoutLength::Px(96.0F);
         auto projectList = tree->createElement(
             left, UI::makeListViewElement(
                       {.materializedItemCapacity = AssetBrowserMaterializedCapacity},
@@ -3105,6 +3107,85 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 return status;
             }
             observedProjectAssetSelectionIndex_ = 0U;
+        }
+
+        UI::UINodeId sourceImportHeader{};
+        UI::UILayoutStyle sourceImportHeaderStyle = fillWidth(28.0F);
+        sourceImportHeaderStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        sourceImportHeaderStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        sourceImportHeaderStyle.flexContainer.gap.column = 4.0F;
+        if (auto status = storeNode(createPanel(left, sourceImportHeaderStyle,
+                                                UI::UIStyleRoleId::None),
+                                    sourceImportHeader);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle sourceImportTitleStyle = fixedSize(0.0F, 24.0F);
+        sourceImportTitleStyle.size.width = UI::UILayoutLength::Auto();
+        sourceImportTitleStyle.flexItem.grow = 1.0F;
+        sourceImportTitleStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+        UI::UINodeId sourceImportTitle{};
+        if (auto status = storeNode(createLabel(sourceImportHeader, "Source Imports",
+                                                sourceImportTitleStyle, sectionText),
+                                    sourceImportTitle);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(
+                                        sourceImportHeader,
+                                        std::to_string(sourceImportUnits_.size()),
+                                        fixedSize(36.0F, 20.0F), secondaryText),
+                                    sourceImportCount_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(
+                                        sourceImportHeader, "Remove",
+                                        fixedSize(62.0F, 26.0F),
+                                        activeProjectWorkspace_.has_value() &&
+                                            !sourceImportUnits_.empty()),
+                                    removeSourceImportButton_);
+            !status) {
+            return status;
+        }
+
+        UI::UILayoutStyle sourceImportListStyle = fillWidth(80.0F);
+        sourceImportListStyle.minMax.minHeight = UI::UILayoutLength::Px(64.0F);
+        auto sourceImportList = tree->createElement(
+            left, UI::makeListViewElement(
+                      {.materializedItemCapacity = SourceImportMaterializedCapacity},
+                      sourceImportListStyle));
+        if (!sourceImportList) {
+            return Tina::Core::failure(std::move(sourceImportList.error()));
+        }
+        sourceImportList_ = *sourceImportList;
+        if (auto status = tree->setListViewStyle(
+                sourceImportList_,
+                UI::UIListViewStyle{
+                    .rowHeight = 28.0F,
+                    .overscanRows = 1,
+                    .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                    .wheelStep = 28.0F,
+                });
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setListViewPaint(
+                sourceImportList_, UI::makeListViewPaint(productTheme));
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setListViewDataSource(
+                sourceImportList_, sourceImportDataSource());
+            !status) {
+            return status;
+        }
+        if (!sourceImportUnits_.empty()) {
+            if (auto status = tree->setListViewSelectedIndex(sourceImportList_, 0U);
+                !status) {
+                return status;
+            }
+            observedSourceImportSelectionIndex_ = 0U;
         }
 
         UI::UINodeId projectLifecycleActions{};
@@ -4497,6 +4578,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree->setButtonAction(
+                removeSourceImportButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::RemoveSelectedSourceImport);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
                 closeDocumentButton_,
                 UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
                     queueEditorCommand(EditorCommand::CloseActiveDocument);
@@ -5231,6 +5320,33 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 return status;
             }
         }
+        if (sourceImportUiRefreshPending_) {
+            sourceImportUiRefreshPending_ = false;
+            if (auto status = tree->setListViewDataSource(
+                    sourceImportList_, sourceImportDataSource());
+                !status) {
+                return status;
+            }
+            if (auto status = tree->invalidateListViewItems(sourceImportList_); !status) {
+                return status;
+            }
+            if (sourceImportUnits_.empty()) {
+                if (auto status = tree->clearListViewSelection(sourceImportList_); !status) {
+                    return status;
+                }
+                observedSourceImportSelectionIndex_.reset();
+            } else {
+                const u64 selectedIndex = std::min<u64>(
+                    observedSourceImportSelectionIndex_.value_or(0U),
+                    static_cast<u64>(sourceImportUnits_.size() - 1U));
+                if (auto status = tree->setListViewSelectedIndex(
+                        sourceImportList_, selectedIndex);
+                    !status) {
+                    return status;
+                }
+                observedSourceImportSelectionIndex_ = selectedIndex;
+            }
+        }
         if (projectBrowserUiRefreshPending_) {
             projectBrowserUiRefreshPending_ = false;
             if (auto status = tree->setListViewDataSource(
@@ -5328,6 +5444,30 @@ class EditorWorkspaceState final : public Tina::IGameState {
             assetInspectorActive_ = false;
             synchronizeViewportSelectionFromHierarchy();
             if (auto status = refreshAuthoringUi(*tree); !status) {
+                return status;
+            }
+        }
+        auto sourceImportSelection = tree->listViewSelection(sourceImportList_);
+        if (!sourceImportSelection) {
+            return Tina::Core::failure(std::move(sourceImportSelection.error()));
+        }
+        if (sourceImportSelection->hasValue() &&
+            observedSourceImportSelectionIndex_ !=
+                sourceImportSelection->logicalIndex) {
+            if (sourceImportSelection->logicalIndex >= sourceImportUnits_.size()) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "Source import ListView selected an unavailable intended unit");
+            }
+            observedSourceImportSelectionIndex_ =
+                sourceImportSelection->logicalIndex;
+            if (auto status = refreshProjectAssetUi(*tree); !status) {
+                return status;
+            }
+        } else if (!sourceImportSelection->hasValue() &&
+                   observedSourceImportSelectionIndex_.has_value()) {
+            observedSourceImportSelectionIndex_.reset();
+            if (auto status = refreshProjectAssetUi(*tree); !status) {
                 return status;
             }
         }
@@ -9308,6 +9448,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
+        if (auto status = tree.setText(
+                sourceImportCount_, std::to_string(sourceImportUnits_.size()));
+            !status) {
+            return status;
+        }
         const u32 activeFilter = static_cast<u32>(projectAssets_.filter());
         for (u32 index = 0; index < projectFilterButtons_.size(); ++index) {
             if (auto status = tree.setEnabled(projectFilterButtons_[index],
@@ -9324,6 +9469,22 @@ class EditorWorkspaceState final : public Tina::IGameState {
         const bool sourceImportIdle =
             sourceImportService_.state() ==
             Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle;
+        const bool sourceImportEditable =
+            activeProjectWorkspace_.has_value() &&
+            !pendingProjectSwitch_.has_value() && !catalogRefreshPending_ &&
+            sourceImportIdle;
+        if (auto status = tree.setEnabled(sourceImportList_, sourceImportEditable);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(
+                removeSourceImportButton_,
+                sourceImportEditable &&
+                    observedSourceImportSelectionIndex_.has_value() &&
+                    *observedSourceImportSelectionIndex_ < sourceImportUnits_.size());
+            !status) {
+            return status;
+        }
         if (auto status = tree.setEnabled(refreshProjectCatalogButton_,
                                           assetResources_.projectCatalogConfigured &&
                                               !catalogRefreshPending_ &&
@@ -9345,9 +9506,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
         if (auto status = tree.setEnabled(importSourceButton_,
-                                          activeProjectWorkspace_.has_value() &&
-                                              !pendingProjectSwitch_.has_value() &&
-                                              !catalogRefreshPending_ && sourceImportIdle);
+                                          sourceImportEditable);
             !status) {
             return status;
         }
@@ -9718,6 +9877,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         activeProjectWorkspace_ = std::move(workspace);
         sourceImportUnits_ = std::move(resolvedCatalog->sourceImportUnits);
         counters_.sourceImportIntendedUnits = sourceImportUnits_.size();
+        observedSourceImportSelectionIndex_.reset();
+        sourceImportUiRefreshPending_ = true;
         sourceImportPointerPathUtf8_.clear();
         sourceImportPendingStageRootUtf8_.clear();
         sourceImportSupersededCatalogRootUtf8_.clear();
@@ -9879,10 +10040,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
             authoringFeedback_ = "Source import requires an open Tina project";
             return Tina::Core::success();
         }
-        if (intendedUnits.empty()) {
-            authoringFeedback_ = "Source import requires at least one recipe or glTF unit";
-            return Tina::Core::success();
-        }
         if (sourceImportService_.state() !=
             Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle) {
             authoringFeedback_ = "Source import is already running or awaiting Catalog commit";
@@ -9932,6 +10089,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         sourceImportUnits_.swap(*validatedUnits);
         counters_.sourceImportIntendedUnits = sourceImportUnits_.size();
+        sourceImportUiRefreshPending_ = true;
         stageReservation.release();
         sourceImportCatalogCommitted_ = false;
         counters_.sourceImportRunning = true;
@@ -9992,6 +10150,42 @@ class EditorWorkspaceState final : public Tina::IGameState {
                                           merged.error());
         }
         return startSourceImport(merged->intendedUnits);
+    }
+
+    [[nodiscard]] Tina::Core::Status removeSelectedSourceImport()
+    {
+        if (!activeProjectWorkspace_.has_value()) {
+            authoringFeedback_ = "Source import removal requires an open Tina project";
+            return Tina::Core::success();
+        }
+        if (sourceImportService_.state() !=
+            Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle) {
+            authoringFeedback_ =
+                "Finish or dismiss the current source import before removing a unit";
+            return Tina::Core::success();
+        }
+        if (!observedSourceImportSelectionIndex_.has_value()) {
+            authoringFeedback_ = "Select a source import unit to remove";
+            return Tina::Core::success();
+        }
+
+        auto intendedUnits =
+            Tina::EditorApp::Detail::removeEditorSourceImportUnit(
+                sourceImportUnits_,
+                static_cast<Tina::Core::usize>(
+                    *observedSourceImportSelectionIndex_));
+        if (!intendedUnits) {
+            return reportAuthoringFailure(
+                "Source import removal rejected: ", intendedUnits.error());
+        }
+        const bool removesFinalUnit = intendedUnits->empty();
+        if (auto status = startSourceImport(*intendedUnits); !status) {
+            return status;
+        }
+        authoringFeedback_ = removesFinalUnit
+            ? "Removing the final source import and publishing an empty Catalog"
+            : "Rebuilding the Catalog without the selected source import";
+        return Tina::Core::success();
     }
 
     void cleanupOwnedSourceImportStage(std::string_view catalogRootUtf8) noexcept
@@ -12215,6 +12409,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
         case EditorCommand::ImportSource:
             status = importSourceFromDialog();
             break;
+        case EditorCommand::RemoveSelectedSourceImport:
+            status = removeSelectedSourceImport();
+            break;
         case EditorCommand::OpenSelectedProjectAsset:
             status = openSelectedProjectAsset(tree);
             break;
@@ -14322,6 +14519,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (auto status = tree.setEnabled(projectAssetList_, editing); !status) {
             return status;
         }
+        const bool sourceImportSelectionEnabled =
+            editing && activeProjectWorkspace_.has_value() &&
+            !pendingProjectSwitch_.has_value() && !catalogRefreshPending_ &&
+            sourceImportService_.state() ==
+                Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle;
+        if (auto status = tree.setEnabled(sourceImportList_,
+                                          sourceImportSelectionEnabled);
+            !status) {
+            return status;
+        }
         if (editing) {
             return Tina::Core::success();
         }
@@ -14343,7 +14550,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             animationDurationDecreaseButton_, animationDurationIncreaseButton_,
             animationUndoButton_, animationRedoButton_, openProjectAssetButton_,
             refreshProjectCatalogButton_, createProjectButton_, openProjectButton_,
-            importSourceButton_, closeDocumentButton_,
+            importSourceButton_, removeSourceImportButton_, closeDocumentButton_,
         };
         for (const UI::UINodeId button : lockedButtons) {
             if (auto status = tree.setEnabled(button, false); !status) {
@@ -14870,6 +15077,39 @@ class EditorWorkspaceState final : public Tina::IGameState {
             .label = self->inspectorDependencyLabels_[
                 static_cast<Tina::Core::usize>(logicalIndex)],
             .enabled = false,
+        };
+        return true;
+    }
+
+    [[nodiscard]] UI::UIListViewDataSource sourceImportDataSource() const noexcept
+    {
+        return UI::UIListViewDataSource{
+            .state = this,
+            .itemCount = &EditorWorkspaceState::sourceImportItemCount,
+            .resolveItem = &EditorWorkspaceState::resolveSourceImportItem,
+        };
+    }
+
+    [[nodiscard]] static u64 sourceImportItemCount(const void* state) noexcept
+    {
+        const auto* self = static_cast<const EditorWorkspaceState*>(state);
+        return self != nullptr ? self->sourceImportUnits_.size() : 0U;
+    }
+
+    static bool resolveSourceImportItem(
+        const void* state, u64 logicalIndex,
+        UI::UIListViewItemDescriptor& output) noexcept
+    {
+        const auto* self = static_cast<const EditorWorkspaceState*>(state);
+        if (self == nullptr || logicalIndex >= self->sourceImportUnits_.size()) {
+            return false;
+        }
+        const auto& unit = self->sourceImportUnits_[
+            static_cast<Tina::Core::usize>(logicalIndex)];
+        output = UI::UIListViewItemDescriptor{
+            .key = 30'000U + logicalIndex,
+            .label = unit.sourcePathUtf8,
+            .enabled = true,
         };
         return true;
     }
@@ -15411,6 +15651,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId projectAssetList_{};
     UI::UINodeId projectAssetCount_{};
     UI::UINodeId projectAssetSource_{};
+    UI::UINodeId sourceImportList_{};
+    UI::UINodeId sourceImportCount_{};
     UI::UINodeId inspectorMode_{};
     UI::UINodeId inspectorName_{};
     UI::UINodeId inspectorKind_{};
@@ -15495,6 +15737,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId createProjectButton_{};
     UI::UINodeId openProjectButton_{};
     UI::UINodeId importSourceButton_{};
+    UI::UINodeId removeSourceImportButton_{};
     UI::UINodeId closeDocumentButton_{};
     UI::UINodeId dirtyCloseSaveButton_{};
     UI::UINodeId dirtyCloseDiscardButton_{};
@@ -15587,6 +15830,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool previewAssetBindingsRefreshPending_ = false;
     bool catalogRefreshPending_ = false;
     bool projectBrowserUiRefreshPending_ = false;
+    bool sourceImportUiRefreshPending_ = false;
     bool assetInspectorActive_ = false;
     bool pendingAnimationTimelineRefresh_ = false;
     std::optional<Tina::Editor::EditorViewportNavigation> viewportNavigation_{};
@@ -15627,6 +15871,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::string authoringFeedback_ = "One validated revision per command";
     std::optional<u32> pendingSelectionStableId_{};
     std::optional<u64> observedProjectAssetSelectionIndex_{};
+    std::optional<u64> observedSourceImportSelectionIndex_{};
     std::vector<std::string> inspectorDependencyLabels_{};
     std::optional<u32> pendingDocumentTabActivation_{};
     std::optional<EditorCommand> pendingEditorCommand_{};

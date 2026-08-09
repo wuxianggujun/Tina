@@ -241,20 +241,30 @@ findUnitIndex(const AssetFormat::SourceImportMetadataView& baseline,
 Core::Result<SourceImportCandidateComposeResult>
 composeSourceImportCandidate(const SourceImportCandidateComposeDesc& desc)
 {
+    const bool emptyComposition =
+        desc.retainedUnitIds.empty() && desc.recookedCandidates.empty();
     if (!desc.retainedUnitIds.empty() && (desc.baseline == nullptr || !*desc.baseline))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "retained source import units require a baseline");
     }
-    if (desc.retainedUnitIds.empty() && desc.recookedCandidates.empty())
+    if (emptyComposition && (desc.baseline == nullptr || !*desc.baseline))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "source import composition requires at least one unit");
+                             "empty source import composition requires a baseline");
     }
 
     try
     {
         CandidateBuilder builder{};
+        if (emptyComposition)
+        {
+            if (const auto status = acceptTargetPlatform(
+                    builder, desc.baseline->header().targetPlatform); !status)
+            {
+                return Core::failure(status.error());
+            }
+        }
         std::vector<Core::AssetId> retainedAssetIds;
         std::set<SourceImportUnitId> retainedIds;
         for (const auto unitId : desc.retainedUnitIds)
@@ -284,7 +294,9 @@ composeSourceImportCandidate(const SourceImportCandidateComposeDesc& desc)
                 return Core::failure(status.error());
             }
         }
-        if (builder.candidate.units.empty() || builder.candidate.sources.empty())
+        if ((builder.candidate.units.empty() || builder.candidate.sources.empty()) &&
+            !(emptyComposition && builder.candidate.units.empty() &&
+              builder.candidate.sources.empty()))
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "composed source import candidate is empty");

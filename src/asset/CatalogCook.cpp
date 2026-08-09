@@ -1283,10 +1283,12 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "incremental catalog staging requires a valid baseline package");
     }
-    if (cleanAssetIds.empty() && dirtyRequest.assets.empty())
+    if (cleanAssetIds.empty() && dirtyRequest.assets.empty() &&
+        (!baseline || baselineRootUtf8.empty() ||
+         !Core::isStrictUtf8WithoutNul(baselineRootUtf8)))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "incremental catalog staging requires at least one clean or dirty asset");
+                             "empty incremental catalog staging requires a valid baseline package");
     }
     if (!baselineRootUtf8.empty())
     {

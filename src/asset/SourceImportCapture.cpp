@@ -279,10 +279,10 @@ Core::Result<std::vector<std::byte>>
 writeSourceImportCandidateBytes(const SourceImportCandidate& candidate,
                                 AssetFormat::SourceImportManifestRevision manifestRevision)
 {
-    if (candidate.sources.empty() || candidate.units.empty())
+    if (candidate.sources.empty() != candidate.units.empty())
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "source import candidate requires sources and units");
+                             "source import candidate sources and units must both be empty or populated");
     }
     if (candidate.sources.size() > AssetFormat::SourceImportWire::MaxSources ||
         candidate.units.size() > AssetFormat::SourceImportWire::MaxUnits)

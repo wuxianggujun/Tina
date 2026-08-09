@@ -25,6 +25,15 @@ Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生�
 单独传 `--frames=<N>` 只运行有限帧普通模式，其退出门禁只检查生命周期、UI、viewport、preview、document 与有限值等
 通用不变量；自动编辑目标与选择都从当前 hierarchy 的 stable ID 动态解析。
 
+## 开发与验证节奏
+
+Editor 采用完整大功能闭环后统一验证的节奏。大功能内部的小功能、小细节和连续源码切片只做源码/API 阅读、
+定向静态搜索、`git status` 与 `git diff --check`；不得新增或修改 Editor 测试，也不执行 configure、build、
+GoogleTest、sample、smoke、Visual 或平台 gate。大功能的交互、状态、错误处理和文档全部收口后，才复用核心
+常驻 build tree 集中执行一次受影响 Editor target 的增量 build、仓库已有定向 executable 和必要的最短 2D/3D
+smoke。统一 gate 的失败集中修复后只重跑失败或直接受影响项，不按每个小修复重复整套验证。详细命令与证据边界
+见[测试与验证](testing.md#editor-开发与验证节奏)。
+
 当前 Editor application 的 retained UI 布局已完整铺开：Toolbar、2D/3D 模式切换、上下文工具条、Hierarchy dock、active viewport 工作区、
 可滚动 Inspector（Identity/Transform/Components/Authoring/Document）、SpriteAnimationClip Timeline 和底部 status bar
 均由 `Flex`、`minMax`、
@@ -117,7 +126,11 @@ Catalog，commit 后 preview 重建失败则作为结构化致命错误返回，
 Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 absolute `--project-root=<path>`，以可重复且可混合的
 `--import-recipe=<path>` / `--import-gltf=<path>` 表达完整 intended unit 集；`--import-on-start` 在安全帧启动导入，
 `--project-root` 与 `--catalog-root` 互斥。Project Assets 的 Import Source 可在 Windows 原生对话框中一次批量选择
-`.recipe` / `.gltf` / `.glb` 并加入同一 intended set。Editor 以 4096 unit 为产品上限，先在临时候选中完成整批
+`.recipe` / `.gltf` / `.glb` 并加入同一 intended set。左侧 `Source Imports` 虚拟列表持续显示完整 intended set、当前
+数量和选择状态；`Remove` 在 owner thread 生成删除后的候选集合并启动同一 fresh-stage 事务，不会先打开或重新校验
+被删除的文件，因此已经从磁盘消失的 stale unit 仍可移除。移除最后一个 unit 会从有效 baseline 增量发布零 entry
+Catalog 和零 unit import state；没有有效 baseline 的首次 full cook 仍拒绝空集合。Import/Remove、项目切换和 Catalog
+refresh 互斥，隔离 PlaySession active 时列表与 authoring command 同步锁定。Editor 以 4096 unit 为产品上限，先在临时候选中完成整批
 扩展名识别、物理路径规范化、containment 与去重校验，任一文件非法、越界或分配失败时都不修改既有 intended set；
 已存在或本批重复选择的 unit 只保留一份，但仍会触发完整 intended set 的 reimport。unit 必须是项目 `Source/` 下既有的
 物理文件；Windows 大小写、分隔符或 `..` 形成的同文件别名按同一物理路径处理。对话框选择 `Source/` 外文件会保留
@@ -393,7 +406,8 @@ Save/Save As、Windows native dialog、Linux `zenity`/`kdialog` dialog 与 dirty
 Windows Project `New` 也能创建 Source/Catalog、manifest-last 发布空 current-schema package 并 reopen/typed-validate；
 Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source import 的完整 intended unit
 probe、后台 fresh-stage cook、主线程 Catalog reload/busy retry、dirty-document commit gate、stage sibling state + 单一 active pointer
-commit 与 reopen 恢复也已完成；新增 viewport/hierarchy/play 功能的专项测试、产品交互和视觉证据，以及 Linux helper 门禁仍待收口。
+commit 与 reopen 恢复，以及 intended-set 虚拟列表、选择、stale unit 删除和最终空 Catalog 发布也已完成；新增
+viewport/hierarchy/play 功能的专项测试、产品交互和视觉证据，以及 Linux helper 门禁仍待收口。
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、
 Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D 中当前可渲染实体直接预览已解析 Sprite frame，3D workspace
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、

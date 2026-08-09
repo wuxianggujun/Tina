@@ -134,8 +134,9 @@ probeSourceImportUnit(const AssetFormat::SourceImportMetadataView& baseline,
                       AssetFormat::SourceImportManifestRevision currentCatalogRevision,
                       const SourceImportUnitProbeDesc& desc);
 
-// Probes an intended unit set against one baseline. Expected UnitIds must be unique. Units absent
-// from the intended set are counted as removed; matching units may still remain clean and reusable.
+// Probes an intended unit set against one baseline. The intended set may be empty to remove every
+// baseline unit. Expected UnitIds must be unique. Units absent from the intended set are counted as
+// removed; matching units may still remain clean and reusable.
 [[nodiscard]] Core::Result<SourceImportBatchProbeResult>
 probeSourceImportUnits(const AssetFormat::SourceImportMetadataView& baseline,
                        AssetFormat::SourceImportManifestRevision currentCatalogRevision,

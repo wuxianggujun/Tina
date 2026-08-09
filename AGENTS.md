@@ -45,6 +45,12 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 ```
 
 - 直接跑 GoogleTest executable，不用 CTest。
+- Editor 开发采用“大功能闭环后统一验证”的专项节奏，优先级高于通用的小切片验证规则。大功能完成前的
+  小功能、小细节和连续源码切片不得新增或修改测试，也不得 configure、build、运行 GoogleTest、sample、smoke
+  或产品 gate；此阶段只做源码/API 阅读、定向静态搜索、`git status` 与 `git diff --check`。
+- Editor 大功能或里程碑全部实现并完成文档同步后，才复用常驻 build tree 集中执行一次受影响 target 的增量
+  build、已有 Editor test executable 和必要的 2D/3D 短 smoke。统一 gate 发现问题时先集中修复，再只重跑失败
+  或直接受影响项；禁止退化为每修一个小细节就构建或测试。Editor 功能验收不要求补测试代码。
 - FreeType 字体：`-DTINA_UI_FONT_PATH=...` 或环境变量 `TINA_UI_FONT_PATH`（见 `cmake/TinaUiFont.cmake`）。
 - 不要提交 `.agents/`、`.tmp_*`；用户未要求不要提交 `AGENTS.md`。
 - 多 worktree 默认先在功能分支完成编码并提交，再合并到核心集成 worktree，最后复用核心 worktree 的
@@ -80,7 +86,10 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 ## 完成验证
 
 1. `git status` / `git diff --check`
-2. 最小受影响 target 构建；只有 test gate 才直接运行 GoogleTest，Linux `compile-only` 必须保持
+2. 非 Editor 改动构建最小受影响 target；Editor 小切片在大功能闭环前到第1步即止，不新增/修改/运行测试，
+   也不运行 build 或 smoke
+3. Editor 大功能/里程碑闭环后才统一增量构建并运行一次已有定向 gate；只有 test gate 才直接运行 GoogleTest，
+   Linux `compile-only` 必须保持
    `testRuns=0 sampleRuns=0`
-3. 相关 sample 短 smoke
-4. 公开头无第三方泄漏
+4. 相关 sample 短 smoke
+5. 公开头无第三方泄漏

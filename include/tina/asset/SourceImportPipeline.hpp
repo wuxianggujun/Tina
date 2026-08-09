@@ -32,6 +32,7 @@ enum class SourceImportPipelineMode : Core::u8 {
 struct SourceImportPipelineRequest final {
     std::string_view sourceRootUtf8{};
     AssetFormat::TargetPlatform targetPlatform = AssetFormat::TargetPlatform::Invalid;
+    // May be empty only to remove every unit from a valid baseline.
     std::span<const SourceImportPipelineUnit> units{};
     std::string_view baselineCatalogRootUtf8{};
     std::string_view baselineStateUtf8Path{};

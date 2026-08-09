@@ -100,12 +100,12 @@ struct BaselineLoadResult final {
 
 [[nodiscard]] Core::Status validateRequest(const SourceImportPipelineRequest& request)
 {
-    if (request.units.empty() || request.sourceRootUtf8.empty() ||
+    if (request.sourceRootUtf8.empty() ||
         request.baselineCatalogRootUtf8.empty() || request.baselineStateUtf8Path.empty() ||
         !Core::isStrictUtf8WithoutNul(request.sourceRootUtf8))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "source import pipeline requires source, baseline, state, and units");
+                             "source import pipeline requires source, baseline, and state paths");
     }
     if (request.targetPlatform == AssetFormat::TargetPlatform::Invalid)
     {
@@ -402,6 +402,11 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
         loaded->probeState = SourceImportProbeState::Dirty;
         loaded->probeReason = SourceImportProbeReason::SettingsChanged;
     }
+    if (request.units.empty() && !loaded->baseline)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "empty source import intended set requires a valid baseline");
+    }
 
     if (loaded->baseline)
     {
@@ -499,8 +504,9 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
         }
         auto result = makeResultBase(
             request,
-            batch->cleanUnitCount == 0U ? SourceImportPipelineMode::FullRecook
-                                        : SourceImportPipelineMode::IncrementalRecook,
+            batch->cleanUnitCount == 0U && batch->removedUnitCount == 0U
+                ? SourceImportPipelineMode::FullRecook
+                : SourceImportPipelineMode::IncrementalRecook,
             SourceImportProbeState::Dirty, probeReason, request.stageCatalogRootUtf8,
             request.stageStateUtf8Path);
         result.unitsRecooked = batch->dirtyUnitCount;

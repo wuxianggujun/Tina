@@ -78,7 +78,8 @@ deriveSourceImportUnitId(SourceImporterKind importerKind, std::string_view prima
 digestSourceImportSettings(std::span<const std::byte> canonicalSettingsBytes);
 
 // Canonicalizes source/unit/input/output ordering, remaps input indexes, then builds the current
-// TINAIMPT bytes. candidate remains unchanged.
+// TINAIMPT bytes. Both sources and units may be empty for an explicit empty intended set. candidate
+// remains unchanged.
 [[nodiscard]] Core::Result<std::vector<std::byte>>
 writeSourceImportCandidateBytes(const SourceImportCandidate& candidate,
                                 AssetFormat::SourceImportManifestRevision manifestRevision);
