@@ -192,6 +192,34 @@ struct WindowCreatePlan final {
     return Core::success();
 }
 
+[[nodiscard]] u32 logicalWindowExtent(int nativeExtent, float contentScale) noexcept
+{
+#if defined(_WIN32)
+    const double normalized = static_cast<double>(nativeExtent) /
+                              static_cast<double>(contentScale);
+    if (!std::isfinite(normalized) ||
+        normalized > static_cast<double>((std::numeric_limits<u32>::max)()))
+    {
+        return 0;
+    }
+    return static_cast<u32>((std::max)(1.0, std::round(normalized)));
+#else
+    (void)contentScale;
+    return static_cast<u32>(nativeExtent);
+#endif
+}
+
+[[nodiscard]] double logicalPointerCoordinate(double nativeCoordinate,
+                                              float contentScale) noexcept
+{
+#if defined(_WIN32)
+    return nativeCoordinate / static_cast<double>(contentScale);
+#else
+    (void)contentScale;
+    return nativeCoordinate;
+#endif
+}
+
 [[nodiscard]] Core::Result<WindowMetricsSnapshot> readWindowMetrics(GLFWwindow* window, WindowId id, u64 revision,
                                                                     LogicalExtent lastValidLogicalExtent)
 {
@@ -228,9 +256,21 @@ struct WindowCreatePlan final {
         logicalHeight = static_cast<int>(lastValidLogicalExtent.height);
     }
 
+    const u32 normalizedLogicalWidth =
+        canReuseLastLogicalExtent ? static_cast<u32>(logicalWidth)
+                                  : logicalWindowExtent(logicalWidth, scaleX);
+    const u32 normalizedLogicalHeight =
+        canReuseLastLogicalExtent ? static_cast<u32>(logicalHeight)
+                                  : logicalWindowExtent(logicalHeight, scaleY);
+    if (normalizedLogicalWidth == 0 || normalizedLogicalHeight == 0)
+    {
+        return Core::failure(PlatformErrorCode::BackendOperationFailed,
+                             "GLFW logical window metrics exceed the supported range");
+    }
+
     return WindowMetricsSnapshot{
         .window = id,
-        .logicalExtent = {static_cast<u32>(logicalWidth), static_cast<u32>(logicalHeight)},
+        .logicalExtent = {normalizedLogicalWidth, normalizedLogicalHeight},
         .framebufferExtent = {static_cast<u32>(framebufferWidth), static_cast<u32>(framebufferHeight)},
         .contentScale = {scaleX, scaleY},
         .revision = revision,
@@ -267,7 +307,8 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                         WindowInputSnapshot input, bool initiallyVisible) noexcept
         : windows_(std::move(windows)), windowId_(windowId), surfaces_(std::move(surfaces)), surfaceId_(surfaceId),
           surfaceLeaseControl_(std::move(surfaceLeaseControl)), window_(window), frameBuilder_(std::move(frameBuilder)),
-          metrics_(metrics), input_(input), ownerThread_(std::this_thread::get_id()),
+          metrics_(metrics), input_(input), pointerContentScaleX_(metrics.contentScale.x),
+          pointerContentScaleY_(metrics.contentScale.y), ownerThread_(std::this_thread::get_id()),
           surfaceSnapshot_(makeSurfaceSnapshot(surfaceId_, metrics_, 1)), initiallyVisible_(initiallyVisible)
     {
     }
@@ -660,8 +701,10 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         input_.window = windowId_;
         input_.sourceMetricsRevision = metrics_.revision;
         input_.pointer.pointer = PrimaryPointerId;
-        input_.pointer.logicalX = cursorX;
-        input_.pointer.logicalY = cursorY;
+        pointerContentScaleX_ = metrics_.contentScale.x;
+        pointerContentScaleY_ = metrics_.contentScale.y;
+        input_.pointer.logicalX = logicalPointerCoordinate(cursorX, pointerContentScaleX_);
+        input_.pointer.logicalY = logicalPointerCoordinate(cursorY, pointerContentScaleY_);
         input_.pointer.accumulatedDeltaX = 0.0;
         input_.pointer.accumulatedDeltaY = 0.0;
         focusFilter_.reset(metrics_.focused);
@@ -690,6 +733,8 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             latestMetrics->revision = metrics_.revision + 1;
             nextMetrics = *latestMetrics;
         }
+        pointerContentScaleX_ = latestMetrics->contentScale.x;
+        pointerContentScaleY_ = latestMetrics->contentScale.y;
 
         std::optional<Integration::WindowSurfaceSnapshot> nextSurfaceSnapshot;
         if (commitSurfaceSnapshot)
@@ -807,8 +852,22 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         {
             return Core::failure(Core::CoreErrorCode::InvalidArgument, "The GLFW test extent is invalid");
         }
+        u32 nativeWidth = extent.width;
+        u32 nativeHeight = extent.height;
+#if defined(_WIN32)
+        const double scaledWidth = static_cast<double>(extent.width) * metrics_.contentScale.x;
+        const double scaledHeight = static_cast<double>(extent.height) * metrics_.contentScale.y;
+        if (scaledWidth > static_cast<double>((std::numeric_limits<int>::max)()) ||
+            scaledHeight > static_cast<double>((std::numeric_limits<int>::max)()))
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The GLFW test extent exceeds the native window limit");
+        }
+        nativeWidth = static_cast<u32>(std::lround(scaledWidth));
+        nativeHeight = static_cast<u32>(std::lround(scaledHeight));
+#endif
         clearGlfwErrors();
-        glfwSetWindowSize(window_, static_cast<int>(extent.width), static_cast<int>(extent.height));
+        glfwSetWindowSize(window_, static_cast<int>(nativeWidth), static_cast<int>(nativeHeight));
         return checkGlfwOperation("glfwSetWindowSize");
     }
 
@@ -1450,11 +1509,13 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
     }
 
-    static void cursorPositionCallback(GLFWwindow* window, double logicalX, double logicalY) noexcept
+    static void cursorPositionCallback(GLFWwindow* window, double nativeX, double nativeY) noexcept
     {
         if (auto* backend = fromWindow(window); backend != nullptr)
         {
-            backend->onCursorPosition(logicalX, logicalY);
+            backend->onCursorPosition(
+                logicalPointerCoordinate(nativeX, backend->pointerContentScaleX_),
+                logicalPointerCoordinate(nativeY, backend->pointerContentScaleY_));
         }
     }
 
@@ -1498,10 +1559,16 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
     }
 
-    static void contentScaleCallback(GLFWwindow* window, float, float) noexcept
+    static void contentScaleCallback(GLFWwindow* window, float scaleX, float scaleY) noexcept
     {
         if (auto* backend = fromWindow(window); backend != nullptr)
         {
+            if (std::isfinite(scaleX) && std::isfinite(scaleY) && scaleX > 0.0F &&
+                scaleY > 0.0F)
+            {
+                backend->pointerContentScaleX_ = scaleX;
+                backend->pointerContentScaleY_ = scaleY;
+            }
             backend->metricsDirty_ = true;
         }
     }
@@ -1539,6 +1606,8 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     PlatformFrameBuilder frameBuilder_;
     WindowMetricsSnapshot metrics_{};
     WindowInputSnapshot input_{};
+    float pointerContentScaleX_ = 1.0F;
+    float pointerContentScaleY_ = 1.0F;
     Detail::GlfwDigitalFocusFilter focusFilter_{};
     Core::GenerationPool<int, GamepadRegistryTag> gamepadPool_ =
         *Core::GenerationPool<int, GamepadRegistryTag>::Create(
@@ -1681,6 +1750,9 @@ createBackendUnchecked(const PlatformBackendCreateParams& params, bool publishDu
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     glfwWindowHint(GLFW_RESIZABLE, plan->resizable ? GLFW_TRUE : GLFW_FALSE);
     glfwWindowHint(GLFW_DECORATED, plan->decorated ? GLFW_TRUE : GLFW_FALSE);
+#if defined(_WIN32)
+    glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
+#endif
     if (auto status = checkGlfwOperation("configure GLFW window hints"); !status)
     {
         return std::unexpected(std::move(status.error()));

@@ -164,6 +164,15 @@ inline constexpr Tina::Core::usize ViewportTransformTargetCapacity =
     ViewportMarqueeCandidateCapacity;
 inline constexpr u64 ViewportPrimaryPointerToken = 1;
 
+struct EditorTypographyMetrics final {
+    static constexpr float Title = 20.0F;
+    static constexpr float Section = 16.0F;
+    static constexpr float Body = 15.0F;
+    static constexpr float Compact = 14.0F;
+    static constexpr float Secondary = 14.0F;
+    static constexpr float Accent = 15.0F;
+};
+
 namespace EditorShortcutActions {
 
 inline constexpr Tina::InputActionId Control{1};
@@ -2698,12 +2707,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
             return status;
         }
 
-        const UI::UITextStyle titleText = UI::makeTitleTextStyle(productTheme, 18.0F);
-        const UI::UITextStyle sectionText = UI::makeTitleTextStyle(productTheme, 15.0F);
-        const UI::UITextStyle bodyText = UI::makeBodyTextStyle(productTheme, 14.0F);
-        const UI::UITextStyle compactText = UI::makeBodyTextStyle(productTheme, 12.0F);
-        const UI::UITextStyle secondaryText = UI::makeSecondaryTextStyle(productTheme, 12.0F);
-        const UI::UITextStyle accentText = UI::makeAccentTextStyle(productTheme, 13.0F);
+        const UI::UITextStyle titleText =
+            UI::makeTitleTextStyle(productTheme, EditorTypographyMetrics::Title);
+        const UI::UITextStyle sectionText =
+            UI::makeTitleTextStyle(productTheme, EditorTypographyMetrics::Section);
+        const UI::UITextStyle bodyText =
+            UI::makeBodyTextStyle(productTheme, EditorTypographyMetrics::Body);
+        const UI::UITextStyle compactText =
+            UI::makeBodyTextStyle(productTheme, EditorTypographyMetrics::Compact);
+        const UI::UITextStyle secondaryText =
+            UI::makeSecondaryTextStyle(productTheme, EditorTypographyMetrics::Secondary);
+        const UI::UITextStyle accentText =
+            UI::makeAccentTextStyle(productTheme, EditorTypographyMetrics::Accent);
 
         const auto storeNode = [](auto&& result, UI::UINodeId& output) -> Tina::Core::Status {
             if (!result) {
@@ -3412,27 +3427,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
-        UI::UILayoutStyle zoomSliderStyle = fixedSize(0.0F, 24.0F);
-        zoomSliderStyle.size.width = UI::UILayoutLength::Auto();
-        zoomSliderStyle.flexItem.grow = 1.0F;
-        zoomSliderStyle.flexItem.shrink = 1.0F;
-        zoomSliderStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-        UI::UIElementDescriptor zoomSliderDesc = UI::makeSliderElement(zoomSliderStyle);
-        if (auto status = storeNode(tree->createElement(viewportOptions, zoomSliderDesc), zoomSlider_); !status) {
-            return status;
-        }
-        if (auto status = tree->setSliderRange(zoomSlider_, 25.0F, 400.0F, 25.0F); !status) {
-            return status;
-        }
-        if (auto status = tree->setSliderValue(zoomSlider_, viewportZoomPercent_); !status) {
-            return status;
-        }
-        if (auto status = storeNode(createLabel(viewportOptions, "100%", fixedSize(42.0F, 20.0F), accentText),
-                                    zoomValue_);
-            !status) {
-            return status;
-        }
-
         UI::UINodeId viewportCanvas{};
         UI::UILayoutStyle viewportCanvasStyle = growingRegion();
         viewportCanvasStyle.minMax.minHeight = UI::UILayoutLength::Px(220.0F);
@@ -3467,7 +3461,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 : (assetResources_.projectCatalogConfigured ? "Project Catalog ready"
                                                             : "Built-in Catalog ready");
         if (auto status = storeNode(createLabel(viewportCanvasTop, initialAssetStatus,
-                                                fixedSize(154.0F, 20.0F), accentText),
+                                                fixedSize(240.0F, 20.0F), accentText),
                                     previewAssetStatus_);
             !status) {
             return status;
@@ -3571,7 +3565,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
 
         UI::UINodeId viewportFooter{};
-        UI::UILayoutStyle viewportFooterStyle = fillWidth(28.0F);
+        UI::UILayoutStyle viewportFooterStyle = fillWidth(32.0F);
         viewportFooterStyle.flexContainer.direction = UI::UIFlexDirection::Row;
         viewportFooterStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
         viewportFooterStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
@@ -3581,18 +3575,63 @@ class EditorWorkspaceState final : public Tina::IGameState {
             !status) {
             return status;
         }
+        UI::UILayoutStyle cameraStatusStyle = fixedSize(0.0F, 22.0F);
+        cameraStatusStyle.size.width = UI::UILayoutLength::Auto();
+        cameraStatusStyle.flexItem.grow = 1.0F;
+        cameraStatusStyle.flexItem.shrink = 1.0F;
+        cameraStatusStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
         if (auto status = storeNode(createLabel(viewportFooter,
                                                 workspaceMode_ == WorkspaceMode::World2D
-                                                    ? "Camera2D | MMB Pan | Wheel Zoom"
-                                                    : "Camera3D | MMB Pan | RMB Orbit | Wheel Dolly",
-                                                fixedSize(246.0F, 20.0F), bodyText),
+                                                    ? "Camera2D"
+                                                    : "Camera3D",
+                                                cameraStatusStyle, bodyText),
                                     cameraStatus_);
             !status) {
             return status;
         }
         if (auto status = storeNode(createLabel(viewportFooter, "Select | Local | Snap",
-                                                fixedSize(190.0F, 20.0F), secondaryText),
+                                                fixedSize(160.0F, 22.0F), secondaryText),
                                     viewportToolStatus_);
+            !status) {
+            return status;
+        }
+
+        UI::UINodeId zoomControls{};
+        UI::UILayoutStyle zoomControlsStyle = fixedSize(208.0F, 26.0F);
+        zoomControlsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+        zoomControlsStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        zoomControlsStyle.flexContainer.gap.column = 4.0F;
+        if (auto status = storeNode(createPanel(viewportFooter, zoomControlsStyle,
+                                                UI::UIStyleRoleId::None),
+                                    zoomControls);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(zoomControls, "-", fixedSize(28.0F, 26.0F)),
+                                    zoomOutButton_);
+            !status) {
+            return status;
+        }
+        UI::UIElementDescriptor zoomSliderDesc =
+            UI::makeSliderElement(fixedSize(86.0F, 24.0F));
+        if (auto status = storeNode(tree->createElement(zoomControls, zoomSliderDesc), zoomSlider_);
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setSliderRange(zoomSlider_, 25.0F, 400.0F, 25.0F); !status) {
+            return status;
+        }
+        if (auto status = tree->setSliderValue(zoomSlider_, viewportZoomPercent_); !status) {
+            return status;
+        }
+        if (auto status = storeNode(createLabel(zoomControls, "100%", fixedSize(46.0F, 22.0F),
+                                                accentText),
+                                    zoomValue_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(createButton(zoomControls, "+", fixedSize(28.0F, 26.0F)),
+                                    zoomInButton_);
             !status) {
             return status;
         }
@@ -4460,6 +4499,22 @@ class EditorWorkspaceState final : public Tina::IGameState {
                         pendingViewportZoomPercent_ =
                             std::clamp(event.value, 25.0F, 400.0F);
                     }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                zoomOutButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueViewportZoomStep(-25.0F);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = tree->setButtonAction(
+                zoomInButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueViewportZoomStep(25.0F);
+                }});
             !status) {
             return status;
         }
@@ -5574,6 +5629,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
     }
 
   private:
+    void queueViewportZoomStep(float deltaPercent) noexcept
+    {
+        const float basePercent =
+            pendingViewportZoomPercent_.value_or(viewportZoomPercent_);
+        pendingViewportZoomPercent_ =
+            std::clamp(basePercent + deltaPercent, 25.0F, 400.0F);
+    }
+
     void resetViewportInteractionState() noexcept
     {
         if (viewportTransformGizmo_.snapshot().dragging()) {
@@ -9089,12 +9152,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
             counters_.viewportGrid3DObserved = true;
         }
 
-        std::string gridLabel = workspaceMode_ == WorkspaceMode::World2D
-                                    ? "2D Grid 1 m | "
-                                    : "3D Ground Grid | ";
-        gridLabel += std::to_string(
-            static_cast<int>(std::lround(viewportZoomPercent_)));
-        gridLabel += '%';
+        const std::string_view gridLabel = workspaceMode_ == WorkspaceMode::World2D
+                                               ? "Tile Grid 1 m"
+                                               : "Grid 1 m";
         if (auto status = tree.setText(gridStatus_, gridLabel); !status) {
             return status;
         }
@@ -12481,8 +12541,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (auto status = tree.setText(
                 cameraStatus_,
-                world2D ? "Camera2D | MMB Pan | Wheel Zoom"
-                        : "Camera3D | MMB Pan | RMB Orbit | Wheel Dolly");
+                world2D ? "Camera2D" : "Camera3D");
             !status) {
             return status;
         }
@@ -15583,8 +15642,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId previewAssetStatus_{};
     UI::UINodeId cameraStatus_{};
     UI::UINodeId viewportToolStatus_{};
+    UI::UINodeId zoomOutButton_{};
     UI::UINodeId zoomSlider_{};
     UI::UINodeId zoomValue_{};
+    UI::UINodeId zoomInButton_{};
     UI::UINodeId frameAllButton_{};
     UI::UINodeId documentFormat_{};
     std::array<UI::UINodeId, 3> componentLabels_{};

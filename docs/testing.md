@@ -365,8 +365,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 脚本运行 1280×980、1600×1225、1920×1470 三种 logical client footprint × Dark/Light 共 6 个
 case。每个 case 必须有连续两张相同 SHA-256 的非空 PNG，sample JSON 必须保持 4 个 image product、
 每帧 resolver hit、12 个 ImageQuad、4 个 image batch、单资源去重、Linear/Nearest、atlas 失效释放、
-pin 归零、非零 checksum，并接受 GLFW 的 `framebuffer≈logical×contentScale` 或
-`framebuffer≈logical` 两种既有 Windows metrics 模式。汇总写入
+pin 归零、非零 checksum；当前 Windows GLFW 路径要求
+`framebuffer≈logical×contentScale`，不再把原生像素 window extent 直接发布为 logical extent。汇总写入
 `artifacts/gates/ui-image-size-matrix-<stamp>.json`；这只是 content-scale-like client footprint，
 不冒充 OS Settings 100/150/200% 真 DPI、多显示器混 DPI 或跨 GPU 金标。
 

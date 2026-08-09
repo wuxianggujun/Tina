@@ -41,6 +41,18 @@ TEST(GlfwBackendIntegrationTests, InitialPrimaryWindowMetricsDoesNotPumpAndPubli
     EXPECT_GT((*startupMetrics)->logicalExtent.width, 0U);
     EXPECT_GT((*startupMetrics)->logicalExtent.height, 0U);
     EXPECT_FALSE((*startupMetrics)->visible);
+#if defined(_WIN32)
+    EXPECT_EQ((*startupMetrics)->logicalExtent,
+              hiddenWindowParams().primaryWindow.initialLogicalExtent);
+    EXPECT_NEAR(static_cast<double>((*startupMetrics)->framebufferExtent.width),
+                static_cast<double>((*startupMetrics)->logicalExtent.width) *
+                    (*startupMetrics)->contentScale.x,
+                2.0);
+    EXPECT_NEAR(static_cast<double>((*startupMetrics)->framebufferExtent.height),
+                static_cast<double>((*startupMetrics)->logicalExtent.height) *
+                    (*startupMetrics)->contentScale.y,
+                2.0);
+#endif
 
     auto statsAfterSeed = Detail::glfwEventPumpStatsForTest(**backend);
     ASSERT_TRUE(statsAfterSeed.has_value()) << statsAfterSeed.error().message;

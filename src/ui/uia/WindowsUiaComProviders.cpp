@@ -16,18 +16,28 @@ namespace Tina::UI::UiaCom {
 namespace {
 
 constexpr UINT kActionTimeoutMs = 5'000;
+constexpr double kDefaultWindowsDpi = 96.0;
 
 [[nodiscard]] RECT clientRelativeToScreen(HWND hwnd, const UI::UILogicalRect& logical) noexcept
 {
     POINT origin{0, 0};
+    double contentScale = 1.0;
     if (hwnd != nullptr) {
         (void)::ClientToScreen(hwnd, &origin);
+        const UINT dpi = ::GetDpiForWindow(hwnd);
+        if (dpi != 0) {
+            contentScale = static_cast<double>(dpi) / kDefaultWindowsDpi;
+        }
     }
+    const auto project = [contentScale](float logicalCoordinate) noexcept {
+        return static_cast<LONG>(std::lround(static_cast<double>(logicalCoordinate) *
+                                             contentScale));
+    };
     RECT out{};
-    out.left = origin.x + static_cast<LONG>(std::lround(logical.x));
-    out.top = origin.y + static_cast<LONG>(std::lround(logical.y));
-    out.right = out.left + static_cast<LONG>(std::lround(logical.width));
-    out.bottom = out.top + static_cast<LONG>(std::lround(logical.height));
+    out.left = origin.x + project(logical.x);
+    out.top = origin.y + project(logical.y);
+    out.right = origin.x + project(logical.x + logical.width);
+    out.bottom = origin.y + project(logical.y + logical.height);
     return out;
 }
 

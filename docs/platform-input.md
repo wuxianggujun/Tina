@@ -44,6 +44,9 @@ Gamepad/Window ID 是 owner-aware generation identity，不能按 native index �
 GLFW backend 已实现：
 
 - keyboard、pointer button/move/wheel 与 content/window/framebuffer metrics；
+- Windows 启用 `GLFW_SCALE_TO_MONITOR`，并将 GLFW 原生 window/Pointer 坐标除以当前
+  `contentScale` 后发布为 logical pixel；`framebufferExtent` 继续保留物理像素，因此 200% DPI 下
+  `framebufferExtent` 约为 `logicalExtent * 2`，UI layout、hit-test 与 Pointer route 使用同一坐标空间；
 - committed Unicode text 转 strict UTF-8；
 - 标准 Gamepad 轮询（`glfwGetGamepadState`）、generation registry、button diff、axis deadzone/hysteresis、
   connect/disconnect 与 snapshot revision；

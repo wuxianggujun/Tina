@@ -31,6 +31,9 @@ Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生�
 固定控件高度与滚动容器组合。`updateUI()` 从上一轮成功提交的 viewport/root `worldRect` 计算
 `RenderNormalizedViewport`，因此窗口变大时 viewport 与中间工作区共同增长，两侧 dock 保持 bounded width，
 world pass 下一帧跟随新的布局；首帧在 committed rect 可用前不提交 world，避免用 `1280×800` 写死区域或全屏闪烁。
+Windows GLFW 将原生 window/Pointer 坐标按 `contentScale` 归一为 logical pixel；Editor 字体层级固定为
+14–20 logical px，因此 200% DPI 最大化时布局、文字与命中使用同一缩放。viewport 顶部只显示网格类型，
+zoom slider、百分比以及 `-`/`+` 25% 步进集中在 viewport footer 右侧。
 `--world2d-path=<UTF-8 path>` 与 `--world3d-path=<UTF-8 path>` 分别配置两个 pinned workspace session；已有文件按各自
 schema 原子加载为 clean baseline，不存在的路径保留为该 workspace 的新文档 Save target。每个 pinned/Catalog tab
 都有固定容量 session，独立持有 document key、strict UTF-8 path、target platform、loaded flag 与完整 canonical
@@ -191,7 +194,7 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
   也不能退化成普通屏幕方格。X/Z axis 独立着色。
 - overlay node 在 root 创建期一次性预分配，未使用槽为 `Collapsed`，全部 `UIPointerHitPolicy::Ignore`；命中仍由
   `viewportPreviewLayer_` 统一路由给 navigation、transform gizmo、marquee 与 TileMap brush。
-- Zoom Slider 与 Frame All 共用 `viewportZoomPercent`。2D projection、TileMap visibility query、pointer-to-cell、gizmo delta
+- footer 的 `-` / Zoom Slider / 百分比 / `+` 与 Frame All 共用 `viewportZoomPercent`。2D projection、TileMap visibility query、pointer-to-cell、gizmo delta
   和 grid 使用同一 world extent；3D 同步调整 perspective FOV，避免只缩放网格而场景内容不变。
 
 产品结果必须报告 `viewportGridRevision/Segments/MinorLines/MajorLines/AxisLines`、`viewportZoomPercent`、

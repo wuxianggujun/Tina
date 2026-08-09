@@ -458,6 +458,16 @@ TEST(WindowsUiaHostBridgeTest, AttachPublishExposesRootProviderAndChildren)
         ASSERT_HRESULT_SUCCEEDED(childSimple->GetPropertyValue(UIA_ControlTypePropertyId, &controlType));
         EXPECT_EQ(controlType.vt, VT_I4);
         ::VariantClear(&controlType);
+        UiaRect bounds{};
+        ASSERT_HRESULT_SUCCEEDED(firstChild->get_BoundingRectangle(&bounds));
+        POINT clientOrigin{0, 0};
+        ASSERT_TRUE(::ClientToScreen(hwnd, &clientOrigin));
+        const double contentScale =
+            static_cast<double>(::GetDpiForWindow(hwnd)) / 96.0;
+        EXPECT_NEAR(bounds.left, static_cast<double>(clientOrigin.x), 1.0);
+        EXPECT_NEAR(bounds.top, static_cast<double>(clientOrigin.y), 1.0);
+        EXPECT_NEAR(bounds.width, 80.0 * contentScale, 1.0);
+        EXPECT_NEAR(bounds.height, 32.0 * contentScale, 1.0);
         childSimple->Release();
         firstChild->Release();
     }
