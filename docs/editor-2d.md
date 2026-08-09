@@ -116,10 +116,12 @@ Catalog，commit 后 preview 重建失败则作为结构化致命错误返回，
 
 Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 absolute `--project-root=<path>`，以可重复且可混合的
 `--import-recipe=<path>` / `--import-gltf=<path>` 表达完整 intended unit 集；`--import-on-start` 在安全帧启动导入，
-`--project-root` 与 `--catalog-root` 互斥。Project Assets 的 Import Source 也把 `.recipe` / `.gltf` / `.glb` 加入同一
-intended set。unit 必须是项目 `Source/` 下既有的物理文件；Editor 在启动 worker 前按物理路径规范化并校验 containment、
-扩展名/importer kind，Windows 大小写、分隔符或 `..` 形成的同文件别名会作为重复 unit 拒绝且不改变既有集合。对话框选择
-`Source/` 外文件会保留当前 Catalog 并给出明确反馈。后台 `EditorSourceImportService` 只调用共享 Asset pipeline，probe 完整 unit 集并生成 fully validated fresh
+`--project-root` 与 `--catalog-root` 互斥。Project Assets 的 Import Source 可在 Windows 原生对话框中一次批量选择
+`.recipe` / `.gltf` / `.glb` 并加入同一 intended set。Editor 以 4096 unit 为产品上限，先在临时候选中完成整批
+扩展名识别、物理路径规范化、containment 与去重校验，任一文件非法、越界或分配失败时都不修改既有 intended set；
+已存在或本批重复选择的 unit 只保留一份，但仍会触发完整 intended set 的 reimport。unit 必须是项目 `Source/` 下既有的
+物理文件；Windows 大小写、分隔符或 `..` 形成的同文件别名按同一物理路径处理。对话框选择 `Source/` 外文件会保留
+当前 Catalog 并给出明确反馈。后台 `EditorSourceImportService` 只调用共享 Asset pipeline，probe 完整 unit 集并生成 fully validated fresh
 stage，不接触 UI、Render 或 `AssetSystem`；owner thread 在下一安全帧携带当前 Sprite/Mesh participant 调用
 `reloadCatalog()`。dirty Catalog document 会在 commit 前保留 Ready stage；`CatalogReloadBusy` 同样保留 stage 并逐安全帧
 重试。fresh stage 在 Ready 前已包含 sibling current import state；Catalog、Browser、documents 与 2D/3D/Animation preview

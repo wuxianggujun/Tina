@@ -340,6 +340,76 @@ showDialog(IFileDialog& dialog, uintptr nativeOwnerWindow)
     };
 }
 
+[[nodiscard]] Core::Result<EditorFileDialogResults>
+showOpenFilesDialog(IFileOpenDialog& dialog,
+                    uintptr nativeOwnerWindow,
+                    u32 maxSelectedPaths)
+{
+    HWND ownerWindow = reinterpret_cast<HWND>(nativeOwnerWindow);
+    if (ownerWindow == nullptr) {
+        ownerWindow = ::GetActiveWindow();
+    }
+    const HRESULT showResult = dialog.Show(ownerWindow);
+    if (showResult == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+        return EditorFileDialogResults{};
+    }
+    if (FAILED(showResult)) {
+        return Core::failure(hresultError("Editor file dialog could not be shown", showResult));
+    }
+
+    ComPtr<IShellItemArray> selections;
+    const HRESULT selectionsResult = dialog.GetResults(selections.put());
+    if (FAILED(selectionsResult)) {
+        return Core::failure(hresultError(
+            "Editor open-file dialog selections could not be read", selectionsResult));
+    }
+    DWORD selectionCount = 0;
+    const HRESULT countResult = selections->GetCount(&selectionCount);
+    if (FAILED(countResult)) {
+        return Core::failure(hresultError(
+            "Editor open-file dialog selection count could not be read", countResult));
+    }
+    if (selectionCount == 0U) {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Editor open-file dialog returned no filesystem paths");
+    }
+    if (selectionCount > maxSelectedPaths) {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "Editor open-file dialog selection capacity exceeded");
+    }
+
+    try {
+        EditorFileDialogResults result{
+            .outcome = EditorFileDialogOutcome::Selected,
+        };
+        result.selectedPathsUtf8.reserve(selectionCount);
+        for (DWORD index = 0; index < selectionCount; ++index) {
+            ComPtr<IShellItem> selection;
+            const HRESULT selectionResult = selections->GetItemAt(index, selection.put());
+            if (FAILED(selectionResult)) {
+                return Core::failure(hresultError(
+                    "Editor open-file dialog selection could not be read", selectionResult));
+            }
+            CoTaskMemString path;
+            const HRESULT pathResult =
+                selection->GetDisplayName(SIGDN_FILESYSPATH, path.put());
+            if (FAILED(pathResult)) {
+                return Core::failure(hresultError(
+                    "Editor open-file dialog selection is not a filesystem path", pathResult));
+            }
+            auto pathUtf8 = utf8FromWide(path.get());
+            if (!pathUtf8) {
+                return Core::failure(std::move(pathUtf8.error()));
+            }
+            result.selectedPathsUtf8.push_back(std::move(*pathUtf8));
+        }
+        return result;
+    } catch (const std::bad_alloc&) {
+        return Core::failure(allocationError(
+            "Editor open-file dialog selection allocation failed"));
+    }
+}
+
 #endif
 
 } // namespace
@@ -410,6 +480,90 @@ EditorFileDialog::openExistingFile(const OpenExistingFileDialogRequest& request)
         return Core::failure(std::move(status.error()));
     }
     return openExistingFileLinux(request);
+#else
+    static_cast<void>(request);
+    return Core::failure(Core::CoreErrorCode::Unsupported,
+                         "Editor native file dialogs are not available on this platform");
+#endif
+}
+
+Core::Result<EditorFileDialogResults>
+EditorFileDialog::openExistingFiles(const OpenExistingFilesDialogRequest& request) const
+{
+    if (request.maxSelectedPaths == 0U ||
+        request.maxSelectedPaths > EditorFileDialogSelectionCapacity) {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Editor open-file dialog selection capacity is invalid");
+    }
+#if defined(_WIN32)
+    if (auto status = ensureOwnerThread(); !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    ComApartment apartment;
+    if (FAILED(apartment.result())) {
+        return Core::failure(hresultError("Editor file dialog requires a Windows STA thread",
+                                          apartment.result()));
+    }
+    ComPtr<IFileOpenDialog> dialog;
+    const HRESULT createResult = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr,
+                                                     CLSCTX_INPROC_SERVER,
+                                                     IID_PPV_ARGS(dialog.put()));
+    if (FAILED(createResult)) {
+        return Core::failure(hresultError("Editor open-file dialog could not be created",
+                                          createResult));
+    }
+    FILEOPENDIALOGOPTIONS options = 0;
+    if (const HRESULT result = dialog->GetOptions(&options); FAILED(result)) {
+        return Core::failure(hresultError(
+            "Editor open-file dialog options could not be read", result));
+    }
+    options |= FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST |
+               FOS_NOCHANGEDIR | FOS_ALLOWMULTISELECT;
+    if (const HRESULT result = dialog->SetOptions(options); FAILED(result)) {
+        return Core::failure(hresultError(
+            "Editor open-file dialog options could not be set", result));
+    }
+    if (auto status = setDialogTitle(*dialog.get(), request.titleUtf8); !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = setInitialDirectory(*dialog.get(), request.initialDirectoryUtf8); !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    auto nativeFilters = makeNativeFilters(request.filters);
+    if (!nativeFilters) {
+        return Core::failure(std::move(nativeFilters.error()));
+    }
+    if (!nativeFilters->specs.empty()) {
+        const HRESULT result = dialog->SetFileTypes(
+            static_cast<UINT>(nativeFilters->specs.size()), nativeFilters->specs.data());
+        if (FAILED(result)) {
+            return Core::failure(hresultError(
+                "Editor open-file dialog filters could not be set", result));
+        }
+    }
+    return showOpenFilesDialog(*dialog.get(), nativeOwnerWindow_, request.maxSelectedPaths);
+#elif defined(__linux__)
+    auto selected = openExistingFile({
+        .titleUtf8 = request.titleUtf8,
+        .initialDirectoryUtf8 = request.initialDirectoryUtf8,
+        .filters = request.filters,
+    });
+    if (!selected) {
+        return Core::failure(std::move(selected.error()));
+    }
+    if (!selected->selected()) {
+        return EditorFileDialogResults{};
+    }
+    try {
+        EditorFileDialogResults result{
+            .outcome = EditorFileDialogOutcome::Selected,
+        };
+        result.selectedPathsUtf8.push_back(std::move(selected->selectedPathUtf8));
+        return result;
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Editor open-file dialog selection allocation failed");
+    }
 #else
     static_cast<void>(request);
     return Core::failure(Core::CoreErrorCode::Unsupported,

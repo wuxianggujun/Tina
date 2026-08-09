@@ -1,6 +1,7 @@
 #pragma once
 
-#include <tina/asset_format/SourceImportMetadataFormat.hpp>
+#include "EditorSourceImportLimits.hpp"
+
 #include <tina/core/error/Result.hpp>
 
 #include <string>
@@ -8,11 +9,6 @@
 #include <vector>
 
 namespace Tina::EditorApp::Detail {
-
-inline constexpr Core::u32 EditorSourceImportPathByteCapacity =
-    AssetFormat::SourceImportWire::MaxPathBytes;
-inline constexpr Core::u32 EditorSourceImportUnitCapacity =
-    AssetFormat::SourceImportWire::MaxUnits;
 
 enum class EditorSourceImportLaunchUnitKind : Core::u8 {
     CatalogRecipe = 0,

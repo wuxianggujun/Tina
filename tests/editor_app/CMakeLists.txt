@@ -1,5 +1,6 @@
 add_executable(tina_editor_app_tests
     EditorSourceImportLaunchOptionsTests.cpp
+    EditorSourceImportSelectionTests.cpp
     EditorSourceImportServiceTests.cpp
 )
 target_compile_features(tina_editor_app_tests PRIVATE cxx_std_23)

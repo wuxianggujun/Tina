@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace Tina::EditorApp::Detail {
 
@@ -30,10 +31,29 @@ struct EditorFileDialogResult final {
     }
 };
 
+inline constexpr u32 EditorFileDialogSelectionCapacity = 4096;
+
+struct EditorFileDialogResults final {
+    EditorFileDialogOutcome outcome = EditorFileDialogOutcome::Cancelled;
+    std::vector<std::string> selectedPathsUtf8{};
+
+    [[nodiscard]] bool selected() const noexcept
+    {
+        return outcome == EditorFileDialogOutcome::Selected;
+    }
+};
+
 struct OpenExistingFileDialogRequest final {
     std::string_view titleUtf8{};
     std::string_view initialDirectoryUtf8{};
     std::span<const EditorFileDialogFilter> filters{};
+};
+
+struct OpenExistingFilesDialogRequest final {
+    std::string_view titleUtf8{};
+    std::string_view initialDirectoryUtf8{};
+    std::span<const EditorFileDialogFilter> filters{};
+    u32 maxSelectedPaths = EditorFileDialogSelectionCapacity;
 };
 
 struct SaveFileDialogRequest final {
@@ -60,6 +80,9 @@ public:
 
     [[nodiscard]] Core::Result<EditorFileDialogResult>
     openExistingFile(const OpenExistingFileDialogRequest& request) const;
+
+    [[nodiscard]] Core::Result<EditorFileDialogResults>
+    openExistingFiles(const OpenExistingFilesDialogRequest& request) const;
 
     [[nodiscard]] Core::Result<EditorFileDialogResult>
     saveFile(const SaveFileDialogRequest& request) const;

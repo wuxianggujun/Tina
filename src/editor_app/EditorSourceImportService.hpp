@@ -1,5 +1,7 @@
 #pragma once
 
+#include "EditorSourceImportLimits.hpp"
+
 #include <tina/asset/SourceImportPipeline.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/base/Types.hpp>
@@ -68,7 +70,7 @@ struct EditorSourceImportReadyStage final {
 };
 
 struct EditorSourceImportServiceConfig final {
-    Core::u32 maxUnits = 4096;
+    Core::u32 maxUnits = EditorSourceImportUnitCapacity;
     Core::usize maxPathBytes = 4096;
     Core::usize maxAggregatePathBytes = 4U * 1024U * 1024U;
     Core::usize maxErrorMessageBytes = 1024;

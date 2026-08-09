@@ -5,6 +5,9 @@ add_library(tina_editor_app STATIC
     EditorFileDialog.hpp
     EditorSourceImportLaunchOptions.cpp
     EditorSourceImportLaunchOptions.hpp
+    EditorSourceImportLimits.hpp
+    EditorSourceImportSelection.cpp
+    EditorSourceImportSelection.hpp
     EditorSourceImportService.cpp
     EditorSourceImportService.hpp
 )
