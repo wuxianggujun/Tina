@@ -5,6 +5,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageChangeDetector.hpp>
+#include <tina/asset/MediaCook.hpp>
 #include <tina/asset/SourceImportExecutor.hpp>
 #include <tina/asset/SourceImportPlan.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
@@ -130,7 +131,9 @@ struct BaselineLoadResult final {
                                  "source import unit path is invalid");
         }
         if (unit.kind != SourceImportPipelineUnitKind::CatalogRecipe &&
-            unit.kind != SourceImportPipelineUnitKind::Gltf)
+            unit.kind != SourceImportPipelineUnitKind::Gltf &&
+            unit.kind != SourceImportPipelineUnitKind::Texture &&
+            unit.kind != SourceImportPipelineUnitKind::Audio)
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "source import unit kind is invalid");
@@ -295,10 +298,20 @@ loadBaseline(const SourceImportPipelineRequest& request)
 makeProbeDesc(const SourceImportPipelineUnit& unit, std::string_view sourceRoot,
               AssetFormat::TargetPlatform targetPlatform)
 {
-    return unit.kind == SourceImportPipelineUnitKind::CatalogRecipe
-               ? makeCatalogRecipeSourceImportProbeDesc(sourceRoot, unit.sourceUtf8Path,
-                                                         targetPlatform)
-               : makeGltfSourceImportProbeDesc(sourceRoot, unit.sourceUtf8Path, unit.gltfIds);
+    switch (unit.kind)
+    {
+    case SourceImportPipelineUnitKind::CatalogRecipe:
+        return makeCatalogRecipeSourceImportProbeDesc(sourceRoot, unit.sourceUtf8Path,
+                                                      targetPlatform);
+    case SourceImportPipelineUnitKind::Gltf:
+        return makeGltfSourceImportProbeDesc(sourceRoot, unit.sourceUtf8Path, unit.gltfIds);
+    case SourceImportPipelineUnitKind::Texture:
+        return makeTextureSourceImportProbeDesc(sourceRoot, unit.sourceUtf8Path);
+    case SourceImportPipelineUnitKind::Audio:
+        return makeAudioSourceImportProbeDesc(sourceRoot, unit.sourceUtf8Path);
+    }
+    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                         "source import unit kind is unsupported");
 }
 
 [[nodiscard]] Core::Result<CatalogCookSourceResult>
@@ -306,10 +319,22 @@ cookUnit(const SourceImportPipelineUnit& unit, std::string_view sourceRoot,
          AssetFormat::TargetPlatform targetPlatform)
 {
     const SourceImportCaptureConfig capture{.sourceRootUtf8 = sourceRoot};
-    return unit.kind == SourceImportPipelineUnitKind::CatalogRecipe
-               ? loadCatalogCookRecipeSourceFile(unit.sourceUtf8Path, capture)
-               : cookGltfFileToCatalogSourceResult(unit.sourceUtf8Path, targetPlatform,
-                                                   capture, unit.gltfIds);
+    switch (unit.kind)
+    {
+    case SourceImportPipelineUnitKind::CatalogRecipe:
+        return loadCatalogCookRecipeSourceFile(unit.sourceUtf8Path, capture);
+    case SourceImportPipelineUnitKind::Gltf:
+        return cookGltfFileToCatalogSourceResult(unit.sourceUtf8Path, targetPlatform,
+                                                 capture, unit.gltfIds);
+    case SourceImportPipelineUnitKind::Texture:
+        return cookTextureFileToCatalogSourceResult(unit.sourceUtf8Path, targetPlatform,
+                                                    capture);
+    case SourceImportPipelineUnitKind::Audio:
+        return cookAudioFileToCatalogSourceResult(unit.sourceUtf8Path, targetPlatform,
+                                                  capture);
+    }
+    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                         "source import unit kind is unsupported");
 }
 
 [[nodiscard]] Core::Status appendCookRequest(CatalogCookRequest& combined,

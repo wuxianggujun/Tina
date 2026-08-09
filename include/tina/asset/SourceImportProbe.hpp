@@ -116,6 +116,14 @@ currentCatalogRecipeSourceImportContract(
 currentGltfSourceImportContract(std::string_view normalizedPrimarySourcePath,
                                 const GltfCookIds& ids);
 
+// Plain media importers: one image file (Texture2D + full-rect Sprite) or one
+// PCM WAV file (AudioClip) with deterministic path-derived output AssetIds.
+[[nodiscard]] Core::Result<SourceImportUnitContract>
+currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath);
+
+[[nodiscard]] Core::Result<SourceImportUnitContract>
+currentAudioSourceImportContract(std::string_view normalizedPrimarySourcePath);
+
 [[nodiscard]] Core::Result<SourceImportUnitProbeDesc>
 makeCatalogRecipeSourceImportProbeDesc(
     std::string_view sourceRootUtf8,
@@ -126,6 +134,14 @@ makeCatalogRecipeSourceImportProbeDesc(
 makeGltfSourceImportProbeDesc(std::string_view sourceRootUtf8,
                               std::string_view primarySourceUtf8Path,
                               const GltfCookIds& ids);
+
+[[nodiscard]] Core::Result<SourceImportUnitProbeDesc>
+makeTextureSourceImportProbeDesc(std::string_view sourceRootUtf8,
+                                 std::string_view primarySourceUtf8Path);
+
+[[nodiscard]] Core::Result<SourceImportUnitProbeDesc>
+makeAudioSourceImportProbeDesc(std::string_view sourceRootUtf8,
+                               std::string_view primarySourceUtf8Path);
 
 // Contract mismatches and source fingerprint changes are normal Dirty results. Invalid input,
 // unsafe final paths, source IO failures, and replacement during a snapshot are structured errors.

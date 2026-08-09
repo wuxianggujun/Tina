@@ -89,7 +89,9 @@ validateUnit(std::string_view sourceRootUtf8, const EditorSourceImportUnit& unit
                              "Editor source import path must be bounded strict UTF-8 without NUL");
     }
     if (unit.kind != EditorSourceImportUnitKind::CatalogRecipe &&
-        unit.kind != EditorSourceImportUnitKind::Gltf) {
+        unit.kind != EditorSourceImportUnitKind::Gltf &&
+        unit.kind != EditorSourceImportUnitKind::Texture &&
+        unit.kind != EditorSourceImportUnitKind::Audio) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "Editor source import unit kind is invalid");
     }
@@ -161,10 +163,22 @@ validateUnit(std::string_view sourceRootUtf8, const EditorSourceImportUnit& unit
                        [](unsigned char value) {
                            return static_cast<char>(std::tolower(value));
                        });
-        const bool extensionMatches =
-            unit.kind == EditorSourceImportUnitKind::CatalogRecipe
-                ? extension == ".recipe"
-                : extension == ".gltf" || extension == ".glb";
+        bool extensionMatches = false;
+        switch (unit.kind) {
+        case EditorSourceImportUnitKind::CatalogRecipe:
+            extensionMatches = extension == ".recipe";
+            break;
+        case EditorSourceImportUnitKind::Gltf:
+            extensionMatches = extension == ".gltf" || extension == ".glb";
+            break;
+        case EditorSourceImportUnitKind::Texture:
+            extensionMatches = extension == ".png" || extension == ".jpg" ||
+                               extension == ".jpeg";
+            break;
+        case EditorSourceImportUnitKind::Audio:
+            extensionMatches = extension == ".wav";
+            break;
+        }
         if (!extensionMatches) {
             return Core::failure(
                 Core::CoreErrorCode::InvalidArgument,
@@ -202,10 +216,16 @@ unitFromSelectedPath(std::string_view selectedPathUtf8)
             kind = EditorSourceImportUnitKind::CatalogRecipe;
         } else if (extension == ".gltf" || extension == ".glb") {
             kind = EditorSourceImportUnitKind::Gltf;
+        } else if (extension == ".png" || extension == ".jpg" ||
+                   extension == ".jpeg") {
+            kind = EditorSourceImportUnitKind::Texture;
+        } else if (extension == ".wav") {
+            kind = EditorSourceImportUnitKind::Audio;
         } else {
             Core::Error error{
                 Core::CoreErrorCode::InvalidArgument,
-                "Editor source import supports only .recipe, .gltf, and .glb files"};
+                "Editor source import supports only .recipe, .gltf, .glb, .png, "
+                ".jpg, .jpeg, and .wav files"};
             error.addContext("sourcePath", selectedPathUtf8);
             return Core::failure(std::move(error));
         }

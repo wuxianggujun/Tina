@@ -115,7 +115,9 @@ namespace {
     for (const auto& unit : request.units)
     {
         if (unit.kind != EditorSourceImportUnitKind::CatalogRecipe &&
-            unit.kind != EditorSourceImportUnitKind::Gltf)
+            unit.kind != EditorSourceImportUnitKind::Gltf &&
+            unit.kind != EditorSourceImportUnitKind::Texture &&
+            unit.kind != EditorSourceImportUnitKind::Audio)
         {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "Editor source import unit kind is invalid");
@@ -232,10 +234,25 @@ EditorSourceImportWorker makeEditorSourceImportPipelineWorker(
         units.reserve(request.units.size());
         for (const auto& unit : request.units)
         {
+            Asset::SourceImportPipelineUnitKind pipelineKind =
+                Asset::SourceImportPipelineUnitKind::CatalogRecipe;
+            switch (unit.kind)
+            {
+            case EditorSourceImportUnitKind::CatalogRecipe:
+                pipelineKind = Asset::SourceImportPipelineUnitKind::CatalogRecipe;
+                break;
+            case EditorSourceImportUnitKind::Gltf:
+                pipelineKind = Asset::SourceImportPipelineUnitKind::Gltf;
+                break;
+            case EditorSourceImportUnitKind::Texture:
+                pipelineKind = Asset::SourceImportPipelineUnitKind::Texture;
+                break;
+            case EditorSourceImportUnitKind::Audio:
+                pipelineKind = Asset::SourceImportPipelineUnitKind::Audio;
+                break;
+            }
             units.push_back(Asset::SourceImportPipelineUnit{
-                .kind = unit.kind == EditorSourceImportUnitKind::CatalogRecipe
-                            ? Asset::SourceImportPipelineUnitKind::CatalogRecipe
-                            : Asset::SourceImportPipelineUnitKind::Gltf,
+                .kind = pipelineKind,
                 .sourceUtf8Path = unit.sourcePathUtf8,
                 .gltfIds = unit.gltfIds,
             });

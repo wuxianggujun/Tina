@@ -35,6 +35,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageSummary.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageValidation.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogSnapshot.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/MediaCook.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportCapture.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportExecutor.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportPlan.hpp
@@ -68,6 +69,7 @@ set(TINA_ASSET_SOURCES
     CatalogChangePlan.cpp
     GltfFileSnapshot.cpp
     GltfCook.cpp
+    MediaCook.cpp
     CatalogFile.cpp
     CatalogLoadOrder.cpp
     CatalogLoadPlan.cpp
@@ -88,6 +90,7 @@ set(TINA_ASSET_SOURCES
     CookedAssetFile.cpp
     CatalogPackagePath.hpp
     Utf8Path.hpp
+    WavDecode.hpp
 )
 
 add_library(tina_asset_types INTERFACE)

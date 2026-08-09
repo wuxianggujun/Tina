@@ -15,6 +15,8 @@ namespace Tina::Asset {
 enum class SourceImportPipelineUnitKind : Core::u8 {
     CatalogRecipe = 0,
     Gltf = 1,
+    Texture = 2,
+    Audio = 3,
 };
 
 struct SourceImportPipelineUnit final {

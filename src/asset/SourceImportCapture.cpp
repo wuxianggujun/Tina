@@ -228,7 +228,8 @@ Core::Result<Core::u32> captureSourceImportBytes(SourceImportCandidate& candidat
 Core::Result<AssetFormat::SourceImportUnitId>
 deriveSourceImportUnitId(SourceImporterKind importerKind, std::string_view primarySourcePath)
 {
-    if ((importerKind != SourceImporterKind::CatalogRecipe && importerKind != SourceImporterKind::Gltf) ||
+    if ((importerKind != SourceImporterKind::CatalogRecipe && importerKind != SourceImporterKind::Gltf &&
+         importerKind != SourceImporterKind::Texture && importerKind != SourceImporterKind::Audio) ||
         primarySourcePath.empty() || !Core::isStrictUtf8WithoutNul(primarySourcePath))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,

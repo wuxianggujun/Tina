@@ -14,6 +14,8 @@ namespace Tina::Asset {
 enum class SourceImporterKind : Core::u32 {
     CatalogRecipe = 1,
     Gltf = 2,
+    Texture = 3,
+    Audio = 4,
 };
 
 struct SourceImportCaptureConfig final {

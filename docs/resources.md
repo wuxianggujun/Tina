@@ -92,8 +92,10 @@ Windows EditorApp Project `New` 随后写零 entry current-schema manifest，以
 不会留下伪成功状态。
 
 Editor source import 已在同一 Project/Catalog owner 上闭环。launch parser 强制 absolute strict UTF-8
-`--project-root`，可重复混合的 `--import-recipe` / `--import-gltf` 按 caller order 保留完整 intended unit 集，
-`--import-on-start` 只负责排队安全帧启动；人工 Import Source 支持 `.recipe`、`.gltf`、`.glb` 并复用该集合。后台
+`--project-root`，可重复混合的 `--import-recipe` / `--import-gltf` / `--import-texture` / `--import-audio` 按 caller order 保留完整 intended unit 集，
+`--import-on-start` 只负责排队安全帧启动；人工 Import Source 支持 `.recipe`、`.gltf`、`.glb`、`.png`、`.jpg`、`.jpeg`、`.wav` 并复用该集合。
+普通媒体一步导入：Texture importer 把一张图片 cook 成 path-derived Texture2D + 全幅默认 Sprite（Sprite 以 required 依赖引用纹理），
+Audio importer 把 PCM16 WAV cook 成 AudioClip；输出 AssetId 由 source-root 相对路径确定性派生，rename 视为 Removed+Added。后台
 `EditorSourceImportService` 只调用共享 `executeSourceImportPipeline()`，不触碰 UI/Render/AssetSystem；dirty/added unit
 生成此前不存在且 fully validated 的 fresh stage，clean unit 复用 baseline，removed unit 不进入候选。主线程对 Ready stage
 先执行 dirty Catalog document gate，再携带 Sprite/Mesh participant 调用 `reloadCatalog()`；`CatalogReloadBusy` 保留同一 Ready

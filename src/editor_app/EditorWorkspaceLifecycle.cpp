@@ -1145,8 +1145,16 @@ auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
     }
     constexpr std::array filters{
         Tina::EditorApp::Detail::EditorFileDialogFilter{
-            .labelUtf8 = "Tina recipe or glTF",
-            .patternUtf8 = "*.recipe;*.gltf;*.glb",
+            .labelUtf8 = "Tina importable sources",
+            .patternUtf8 = "*.recipe;*.gltf;*.glb;*.png;*.jpg;*.jpeg;*.wav",
+        },
+        Tina::EditorApp::Detail::EditorFileDialogFilter{
+            .labelUtf8 = "Images",
+            .patternUtf8 = "*.png;*.jpg;*.jpeg",
+        },
+        Tina::EditorApp::Detail::EditorFileDialogFilter{
+            .labelUtf8 = "Audio",
+            .patternUtf8 = "*.wav",
         },
         Tina::EditorApp::Detail::EditorFileDialogFilter{
             .labelUtf8 = "All files",

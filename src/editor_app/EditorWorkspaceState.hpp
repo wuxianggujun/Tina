@@ -704,6 +704,12 @@ restoreSourceImportUnits(
         } else if (metadataUnit->importerKind ==
                    static_cast<u32>(Tina::Asset::SourceImporterKind::Gltf)) {
             kind = Tina::EditorApp::Detail::EditorSourceImportUnitKind::Gltf;
+        } else if (metadataUnit->importerKind ==
+                   static_cast<u32>(Tina::Asset::SourceImporterKind::Texture)) {
+            kind = Tina::EditorApp::Detail::EditorSourceImportUnitKind::Texture;
+        } else if (metadataUnit->importerKind ==
+                   static_cast<u32>(Tina::Asset::SourceImporterKind::Audio)) {
+            kind = Tina::EditorApp::Detail::EditorSourceImportUnitKind::Audio;
         } else {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::InvalidArgument,
@@ -2426,13 +2432,23 @@ class EditorWorkspaceState final : public Tina::IGameState {
         } else {
             sourceImportUnits_.reserve(options_.sourceImport.intendedUnits.size());
             for (const auto& unit : options_.sourceImport.intendedUnits) {
-                const bool isRecipe =
-                    unit.kind ==
-                    Tina::EditorApp::Detail::EditorSourceImportLaunchUnitKind::CatalogRecipe;
+                auto kind = Tina::EditorApp::Detail::EditorSourceImportUnitKind::CatalogRecipe;
+                switch (unit.kind) {
+                case Tina::EditorApp::Detail::EditorSourceImportLaunchUnitKind::CatalogRecipe:
+                    kind = Tina::EditorApp::Detail::EditorSourceImportUnitKind::CatalogRecipe;
+                    break;
+                case Tina::EditorApp::Detail::EditorSourceImportLaunchUnitKind::Gltf:
+                    kind = Tina::EditorApp::Detail::EditorSourceImportUnitKind::Gltf;
+                    break;
+                case Tina::EditorApp::Detail::EditorSourceImportLaunchUnitKind::Texture:
+                    kind = Tina::EditorApp::Detail::EditorSourceImportUnitKind::Texture;
+                    break;
+                case Tina::EditorApp::Detail::EditorSourceImportLaunchUnitKind::Audio:
+                    kind = Tina::EditorApp::Detail::EditorSourceImportUnitKind::Audio;
+                    break;
+                }
                 sourceImportUnits_.push_back({
-                    .kind = isRecipe
-                                ? Tina::EditorApp::Detail::EditorSourceImportUnitKind::CatalogRecipe
-                                : Tina::EditorApp::Detail::EditorSourceImportUnitKind::Gltf,
+                    .kind = kind,
                     .sourcePathUtf8 = unit.pathUtf8,
                 });
             }

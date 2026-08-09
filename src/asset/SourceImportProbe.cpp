@@ -27,6 +27,8 @@ namespace {
 
 inline constexpr Core::u32 CatalogRecipeImporterVersion = 1U;
 inline constexpr Core::u32 GltfImporterVersion = 1U;
+inline constexpr Core::u32 TextureImporterVersion = 1U;
+inline constexpr Core::u32 AudioImporterVersion = 1U;
 
 [[nodiscard]] constexpr std::array<std::byte, 16>
 canonicalCatalogRecipeSettings(AssetFormat::TargetPlatform targetPlatform) noexcept
@@ -90,6 +92,12 @@ makeProbeDesc(std::string_view sourceRootUtf8,
     } else if (importerKind == SourceImporterKind::Gltf && gltfIds != nullptr)
     {
         contract = currentGltfSourceImportContract(*normalized, *gltfIds);
+    } else if (importerKind == SourceImporterKind::Texture)
+    {
+        contract = currentTextureSourceImportContract(*normalized);
+    } else if (importerKind == SourceImporterKind::Audio)
+    {
+        contract = currentAudioSourceImportContract(*normalized);
     }
     if (!contract)
     {
@@ -147,7 +155,9 @@ makeProbeDesc(std::string_view sourceRootUtf8,
                              "source import probe description is invalid");
     }
     if (desc.expected.importerKind != SourceImporterKind::CatalogRecipe &&
-        desc.expected.importerKind != SourceImporterKind::Gltf)
+        desc.expected.importerKind != SourceImporterKind::Gltf &&
+        desc.expected.importerKind != SourceImporterKind::Texture &&
+        desc.expected.importerKind != SourceImporterKind::Audio)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "source import probe importer is unsupported");
@@ -383,6 +393,71 @@ makeGltfSourceImportProbeDesc(std::string_view sourceRootUtf8,
     return makeProbeDesc(sourceRootUtf8, primarySourceUtf8Path,
                          SourceImporterKind::Gltf,
                          AssetFormat::TargetPlatform::Invalid, &ids);
+}
+
+namespace {
+
+[[nodiscard]] Core::Result<SourceImportUnitContract>
+currentMediaSourceImportContract(SourceImporterKind importerKind,
+                                 Core::u32 importerVersion,
+                                 std::string_view canonicalSettingsTag,
+                                 std::string_view normalizedPrimarySourcePath)
+{
+    auto unitId = deriveSourceImportUnitId(importerKind, normalizedPrimarySourcePath);
+    auto settingsHash = digestSourceImportSettings(
+        std::as_bytes(std::span{canonicalSettingsTag.data(), canonicalSettingsTag.size()}));
+    if (!unitId)
+    {
+        return Core::failure(std::move(unitId.error()));
+    }
+    if (!settingsHash)
+    {
+        return Core::failure(std::move(settingsHash.error()));
+    }
+    return SourceImportUnitContract{
+        .unitId = *unitId,
+        .importerKind = importerKind,
+        .importerVersion = importerVersion,
+        .settingsHash = *settingsHash,
+    };
+}
+
+} // namespace
+
+Core::Result<SourceImportUnitContract>
+currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath)
+{
+    return currentMediaSourceImportContract(SourceImporterKind::Texture,
+                                            TextureImporterVersion,
+                                            "tina.import.texture.v1",
+                                            normalizedPrimarySourcePath);
+}
+
+Core::Result<SourceImportUnitContract>
+currentAudioSourceImportContract(std::string_view normalizedPrimarySourcePath)
+{
+    return currentMediaSourceImportContract(SourceImporterKind::Audio,
+                                            AudioImporterVersion,
+                                            "tina.import.audio.v1",
+                                            normalizedPrimarySourcePath);
+}
+
+Core::Result<SourceImportUnitProbeDesc>
+makeTextureSourceImportProbeDesc(std::string_view sourceRootUtf8,
+                                 std::string_view primarySourceUtf8Path)
+{
+    return makeProbeDesc(sourceRootUtf8, primarySourceUtf8Path,
+                         SourceImporterKind::Texture,
+                         AssetFormat::TargetPlatform::Invalid, nullptr);
+}
+
+Core::Result<SourceImportUnitProbeDesc>
+makeAudioSourceImportProbeDesc(std::string_view sourceRootUtf8,
+                               std::string_view primarySourceUtf8Path)
+{
+    return makeProbeDesc(sourceRootUtf8, primarySourceUtf8Path,
+                         SourceImporterKind::Audio,
+                         AssetFormat::TargetPlatform::Invalid, nullptr);
 }
 
 Core::Result<SourceImportProbeResult>

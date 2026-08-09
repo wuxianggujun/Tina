@@ -114,11 +114,35 @@ TEST_F(EditorSourceImportSelectionTests, DeduplicatesExistingAndRepeatedSelectio
               Detail::EditorSourceImportUnitKind::Gltf);
 }
 
-TEST_F(EditorSourceImportSelectionTests, InvalidPathAfterValidSelectionLeavesCurrentSetUnchanged)
+TEST_F(EditorSourceImportSelectionTests, MergesTextureAndAudioSelections)
 {
+    const auto png = writeSourceFile("textures/albedo.png");
+    const auto jpeg = writeSourceFile("textures/photo.JPEG");
+    const auto wav = writeSourceFile("audio/step.wav");
+    const std::array selectedPaths{
+        pathToUtf8(png),
+        pathToUtf8(jpeg),
+        pathToUtf8(wav),
+    };
+
+    auto merged = Detail::mergeEditorSourceImportSelection(
+        pathToUtf8(sourceRoot_), {}, selectedPaths);
+
+    ASSERT_TRUE(merged) << merged.error().message;
+    EXPECT_EQ(merged->addedUnitCount, 3U);
+    ASSERT_EQ(merged->intendedUnits.size(), 3U);
+    EXPECT_EQ(merged->intendedUnits[0].kind,
+              Detail::EditorSourceImportUnitKind::Texture);
+    EXPECT_EQ(merged->intendedUnits[1].kind,
+              Detail::EditorSourceImportUnitKind::Texture);
+    EXPECT_EQ(merged->intendedUnits[2].kind,
+              Detail::EditorSourceImportUnitKind::Audio);
+}
+
+TEST_F(EditorSourceImportSelectionTests, InvalidPathAfterValidSelectionLeavesCurrentSetUnchanged){
     const auto recipe = writeSourceFile("catalog.recipe");
     const auto gltf = writeSourceFile("models/hero.gltf");
-    const auto unsupported = writeSourceFile("textures/albedo.png");
+    const auto unsupported = writeSourceFile("textures/albedo.tga");
     std::vector currentUnits{
         unit(Detail::EditorSourceImportUnitKind::CatalogRecipe, recipe),
     };

@@ -25,6 +25,8 @@ namespace {
 inline constexpr std::string_view ProjectRootPrefix = "--project-root=";
 inline constexpr std::string_view ImportRecipePrefix = "--import-recipe=";
 inline constexpr std::string_view ImportGltfPrefix = "--import-gltf=";
+inline constexpr std::string_view ImportTexturePrefix = "--import-texture=";
+inline constexpr std::string_view ImportAudioPrefix = "--import-audio=";
 inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
 
 [[nodiscard]] Core::Status validatePathText(std::string_view path, std::string_view optionName)
@@ -144,10 +146,22 @@ inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
                              "Source-import extension is invalid on this platform");
     }
 
-    const bool extensionMatches =
-        kind == EditorSourceImportLaunchUnitKind::CatalogRecipe
-            ? extension == ".recipe"
-            : extension == ".gltf" || extension == ".glb";
+    bool extensionMatches = false;
+    switch (kind) {
+    case EditorSourceImportLaunchUnitKind::CatalogRecipe:
+        extensionMatches = extension == ".recipe";
+        break;
+    case EditorSourceImportLaunchUnitKind::Gltf:
+        extensionMatches = extension == ".gltf" || extension == ".glb";
+        break;
+    case EditorSourceImportLaunchUnitKind::Texture:
+        extensionMatches = extension == ".png" || extension == ".jpg" ||
+                           extension == ".jpeg";
+        break;
+    case EditorSourceImportLaunchUnitKind::Audio:
+        extensionMatches = extension == ".wav";
+        break;
+    }
     if (!extensionMatches) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              std::string{optionName} + " has an incompatible file extension");
@@ -240,6 +254,14 @@ parseEditorSourceImportLaunchOption(std::string_view argument,
         return appendImportUnit(argument.substr(ImportGltfPrefix.size()), "--import-gltf",
                                 EditorSourceImportLaunchUnitKind::Gltf, options);
     }
+    if (argument.starts_with(ImportTexturePrefix)) {
+        return appendImportUnit(argument.substr(ImportTexturePrefix.size()), "--import-texture",
+                                EditorSourceImportLaunchUnitKind::Texture, options);
+    }
+    if (argument.starts_with(ImportAudioPrefix)) {
+        return appendImportUnit(argument.substr(ImportAudioPrefix.size()), "--import-audio",
+                                EditorSourceImportLaunchUnitKind::Audio, options);
+    }
     if (argument == ImportOnStartArgument) {
         if (options.importOnStart) {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
@@ -272,6 +294,12 @@ validateEditorSourceImportLaunchOptions(const EditorSourceImportLaunchOptions& o
             break;
         case EditorSourceImportLaunchUnitKind::Gltf:
             optionName = "--import-gltf";
+            break;
+        case EditorSourceImportLaunchUnitKind::Texture:
+            optionName = "--import-texture";
+            break;
+        case EditorSourceImportLaunchUnitKind::Audio:
+            optionName = "--import-audio";
             break;
         default:
             return Core::failure(Core::CoreErrorCode::InvalidArgument,

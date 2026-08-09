@@ -18,6 +18,8 @@ namespace Tina::EditorApp::Detail {
 enum class EditorSourceImportUnitKind : Core::u8 {
     CatalogRecipe = 0,
     Gltf = 1,
+    Texture = 2,
+    Audio = 3,
 };
 
 struct EditorSourceImportUnit final {

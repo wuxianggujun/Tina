@@ -1,6 +1,7 @@
 #include <tina/asset/CatalogCook.hpp>
 
 #include "Utf8Path.hpp"
+#include "WavDecode.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogPackage.hpp>
@@ -468,7 +469,7 @@ struct RecipeSourceCaptureContext final {
 // Cook-time PCM WAV decode only (RIFF/WAVE, PCM 16-bit). Keeps Asset free of miniaudio.
 // MP3/Ogg still go through Audio adapter decode + offline cook paths.
 [[nodiscard]] Core::Result<AssetFormat::AudioClipPayloadDesc>
-decodePcm16WavToClipDesc(std::span<const std::byte> bytes, std::vector<float>& pcmOut)
+decodePcm16WavToClipDescImpl(std::span<const std::byte> bytes, std::vector<float>& pcmOut)
 {
     if (bytes.size() < 44U)
     {
@@ -615,7 +616,7 @@ parseAudioClipInline(const std::vector<std::string>& tokens,
             return Core::failure(std::move(captured.error()).withContext(
                 "parseAudioClipInline", "captureWav"));
         }
-        auto decoded = decodePcm16WavToClipDesc(*bytes, pcm);
+        auto decoded = decodePcm16WavToClipDescImpl(*bytes, pcm);
         if (!decoded)
         {
             return Core::failure(std::move(decoded.error()));
@@ -2711,5 +2712,15 @@ loadCatalogCookRecipeSourceFile(std::string_view recipeUtf8Path,
 {
     return loadCatalogCookRecipeFileInternal(recipeUtf8Path, &captureConfig);
 }
+
+namespace Detail {
+
+Core::Result<AssetFormat::AudioClipPayloadDesc>
+decodePcm16WavToClipDesc(std::span<const std::byte> bytes, std::vector<float>& pcmOut)
+{
+    return decodePcm16WavToClipDescImpl(bytes, pcmOut);
+}
+
+} // namespace Detail
 
 } // namespace Tina::Asset
