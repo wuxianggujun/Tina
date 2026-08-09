@@ -19,6 +19,18 @@ gizmo、Undo、Redo 都接到 active document，每次成功 canonical command �
 2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
+Inspector 的 Components 区块由 `Tina::Editor::EditorComponentOperations` 后端驱动：`world2DComponentRegistry()`
+静态注册 SpriteRenderer2D/Camera2D/PointLight2D/ShadowOccluder2D 四种 2D 组件（数据结构沿用 AssetFormat 的
+`World2DEntityDesc` optional payload，wire schema 不变），3D 侧以成对非零 mesh/material AssetId 表示 MeshRenderer3D。
+每个组件区块提供 Add/Remove、可编辑属性行、`Apply <Component>` 与表示 `visible/active` 的 checkbox；Add/Remove/Apply
+遵循 scene operations 同一契约——成功恰好发布一条 canonical revision，失败（未知 stable ID、重复 Add、对缺失组件
+Remove/Apply、非有限或非法值）fail-closed 且 document/history 字节不变，值未变化的 Apply 成功但不发布 revision。
+多选时 Add 只补齐缺失组件、Remove 只摘除持有组件，均合并为一次 `replace()`；属性行按选中集合一致性显示 `Mixed`，
+`Mixed` 字段保留每个实体自己的值。Add Sprite/MeshRenderer 需要 sprite（或 mesh+material）资产：优先取 Project Assets
+当前选中的对应 kind 资产，否则回退到内置 preview 资产；`Assign Sprite From Selection` 把选中 Sprite 资产写入现有组件。
+Play active 时全部组件控件与其它 authoring 控件一同锁定；组件增删后 Hierarchy 标签（按组件存在性生成）与 runtime
+preview 从新 canonical bytes 重建。
+
 Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生命周期；自动演示不再默认执行。只有同时显式传入
 `--auto-demo` 与 `--frames=<N>` 且 `N >= 54` 才运行自动 authoring 流程，重复 `--auto-demo`、缺少 `--frames`
 或帧预算不足都拒绝启动。正式短 smoke 统一使用 60 帧。

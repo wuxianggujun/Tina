@@ -4,6 +4,7 @@ add_library(tina_editor STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorProjectCreation.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorProjectWorkspace.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorMarqueeSelection.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorComponentOperations.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorPlaySession.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorSceneOperations.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorTransformGizmo.hpp
@@ -20,6 +21,7 @@ add_library(tina_editor STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World3DAuthoringDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/World3DAuthoringFile.hpp
     World2DAuthoringDocument.cpp
+    EditorComponentOperations.cpp
     EditorDocumentTabs.cpp
     EditorMarqueeSelection.cpp
     EditorPlaySession.cpp
