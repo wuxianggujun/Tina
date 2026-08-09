@@ -1,6 +1,22 @@
 add_library(tina_editor_app STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor_app/EditorApplication.hpp
     EditorApplication.cpp
+    EditorWorkspaceState.hpp
+    EditorWorkspaceAnimation.cpp
+    EditorWorkspaceCommands.cpp
+    EditorWorkspaceComponents.cpp
+    EditorWorkspaceDocuments.cpp
+    EditorWorkspaceGizmo.cpp
+    EditorWorkspaceHierarchy.cpp
+    EditorWorkspaceInspector.cpp
+    EditorWorkspaceLifecycle.cpp
+    EditorWorkspacePreview.cpp
+    EditorWorkspaceProject.cpp
+    EditorWorkspaceSourceImport.cpp
+    EditorWorkspaceStatus.cpp
+    EditorWorkspaceTileMap.cpp
+    EditorWorkspaceUiBuild.cpp
+    EditorWorkspaceViewport.cpp
     EditorFileDialog.cpp
     EditorFileDialog.hpp
     EditorSourceImportLaunchOptions.cpp
