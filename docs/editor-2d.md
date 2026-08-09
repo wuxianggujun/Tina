@@ -20,7 +20,8 @@ gizmo、Undo、Redo 都接到 active document，每次成功 canonical command �
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
 Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生命周期；自动演示不再默认执行。只有同时显式传入
-`--auto-demo` 与非零 `--frames=<N>` 才运行自动 authoring 流程，重复 `--auto-demo` 或缺少 `--frames` 都拒绝启动。
+`--auto-demo` 与 `--frames=<N>` 且 `N >= 54` 才运行自动 authoring 流程，重复 `--auto-demo`、缺少 `--frames`
+或帧预算不足都拒绝启动。正式短 smoke 统一使用 60 帧。
 单独传 `--frames=<N>` 只运行有限帧普通模式，其退出门禁只检查生命周期、UI、viewport、preview、document 与有限值等
 通用不变量；自动编辑目标与选择都从当前 hierarchy 的 stable ID 动态解析。
 
@@ -358,13 +359,22 @@ document 与 EditorApp 接线切片关闭需要：canonical preview 与 AssetFor
 resolved transforms 与 revision 来自同一 preview World/binding，committed UI rect 正确归一化且不保存 snapshot borrow；非法 edit 原子失败；
 subtree 删除；bounded undo/redo、branch replacement 与 history byte failure；旧 schema 拒绝；Editor 2D/3D 公共头
 isolation 编译通过；已有文件加载为 clean baseline、加载失败不改变 current/history；文件保存 exact canonical bytes、
-覆盖失败不删除旧目标；TinaEditor 在显式 `--auto-demo` 下自动完成
-Move → Apply Transform → viewport drag → Undo → Redo → Generate Gameplay（2D）→ Save → other workspace → Animation Next/Mode/Undo/Redo/Cook
-→ initial workspace → Open Selected Asset。自动目标从当前 hierarchy 动态选择可变换 stable ID，最终选择同样按 stable ID
-重新解析并验证 logical index 位于当前动态 item count 内。一次 drag 必须 begin/preview/commit 成功且 cancel/reject 为零，
-delta 各分量有限并至少一项非零；最终 TRS 各分量有限且 scale 为正，document/GPU revision 相等，Undo/Redo 都实际完成且
-redo depth 为零。round-trip 至少执行两次 workspace switch、验证两种 workspace preview ready，并证明 inactive session 的
-path/loaded/baseline/dirty 未变化；不再固化最终坐标、scene revision、undo depth 或 preview instantiate 次数。
+覆盖失败不删除旧目标；TinaEditor 在显式 `--auto-demo` 下自动完成 Move → Apply Transform → 当前 workspace navigation
+→ Translate Gizmo → Marquee Replace/Add → 多目标 Rotate/Scale Gizmo → Marquee Toggle → Undo/Redo
+→ Add/Duplicate/To Root/Reparent/Delete/Delete → Play/Pause/Step/Resume/Stop → Generate Gameplay（2D）→ Save
+→ other workspace navigation → Animation Next/Mode/Undo/Redo/Cook → initial workspace → Open Selected Asset。
+自动目标、marquee probe、gizmo handle 与 Reparent parent 都从当前 preview/hierarchy 动态解析 stable ID 和投影几何，
+不依赖固定行号或最终坐标；Add/Duplicate 产生的对象在 scene operation 链末尾删除，实体数恢复为初始值。
+
+三类 Gizmo 必须各自 begin/preview/commit 一次且 cancel/reject 为零；Rotate 与 Scale 还必须分别证明实际捕获至少两个
+祖先过滤后的 transform target，不能用 parent/child 表面多选冒充 group transform。Translate delta、rotation degrees 与
+scale factors 都必须有限且 non-identity。Marquee Replace/Add/Toggle 各 commit 一次、selection 都实际变化，并同时观察
+added/removed 与最大多选数。Scene command 固定为 Add/Duplicate/To Root/Reparent/Delete=`1/1/1/1/2`；Play
+固定为 Start/Pause/Step/Resume/Stop=`1/1/1/1/1`，paused Step 必须实际推进 simulation tick。
+最终选择按 stable ID 重新解析并验证 logical index 位于动态 item count 内；最终 TRS 有限且 scale 为正，document/GPU
+revision 相等，Undo/Redo 都实际完成且 redo depth 为零。round-trip 至少执行两次 workspace switch、消费 2D pan/zoom
+与 3D orbit/pan/dolly、验证两种 workspace preview ready，并证明 inactive session 的 path/loaded/baseline/dirty 未变化；
+不再固化最终坐标、scene revision、undo depth 或 preview instantiate 次数。
 2D gameplay generation/records/bytes=`1/2/64`
 且 source revision 非零；3D 的四项 gameplay generation 字段保持零。built-in Catalog smoke 还必须固定报告 entry/load=`9/7`、
 Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`1/3`。
@@ -381,7 +391,6 @@ Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D 中当前可�
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、
 动画 frame/cook=`4/256 B`、Catalog entry/load=`9/7` 和 GPU sprites=`13`。继续只保留现行 schema，
 不增加旧资产兼容分支。`EditorSceneOperations` / `EditorPlaySession` 的专门 unit 与 header-isolation 已接线。
-`2D-EDITOR` 仍保持 InProgress 的真实剩余项是：增加 EditorApp 产品输入/smoke/视觉门禁，覆盖 navigation、Translate/Rotate/Scale gizmo、
-marquee、多步 scene operations 与 Play/Pause/Step/Stop 状态流；完成跨 DPI/GPU 视觉金标；完成 Linux Editor target 定向编译及
+`2D-EDITOR` 仍保持 InProgress 的真实剩余项是：完成跨 DPI/GPU 视觉金标；完成 Linux Editor target 定向编译及
 `zenity`/`kdialog` open/save/folder/cancel 产品门禁。其他未支持平台继续结构化返回 `Unsupported`，document Save 路径保留
 TextEdit 回退。

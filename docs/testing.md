@@ -901,7 +901,8 @@ artifact/byte count；TileMap 保存必须使用 canonical relative path 并 roo
 它们只证明基础 API；EditorApp `New` 的空 Catalog publish/reopen、Project `Open` + live switch 与 source-import 产品流程
 仍由下述定向 EditorApp/unit + product smoke 证明，不用纯 document suite 代替。
 
-TinaEditor GPU viewport 切片在代码完成后只做一次受影响正式 target 的增量验证，不重跑全量 UI/产品矩阵：
+TinaEditor GPU viewport 切片在代码完成后只做一次受影响正式 target 的增量验证，不重跑全量 UI/产品矩阵。
+`--auto-demo` 的最小预算为 54 帧，正式 2D/3D smoke 固定使用 60 帧：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
@@ -926,9 +927,16 @@ Project Browser/tabs 还要求 ready=`true/true`、visible assets 非零；自�
 对应四字段全为零；viewport 使用上一轮 committed
 layout，所以首帧不提交 world，窗口尺寸改变后下一帧跟随新 rect。
 不带 `--auto-demo` 就是默认人工操作模式；本切片不扩大到完整 product-2d gate。
-Transform/gizmo smoke 还要检查 Inspector transaction、gizmo begin/preview/commit 均非零，cancel/reject 为零，
-2D/3D workspace round-trip、runtime preview 多次重建、最终 document revision/undo depth 非零且 GPU revision 对齐。
-Gizmo delta 必须有限且非 identity，完整 TRS 在 canonical document、Scene preview 与结构化结果中一致。
+自动交互 smoke 必须消费 2D pan/anchored zoom 与 3D orbit/pan/dolly，且两个 workspace 都至少形成一个 navigation batch。
+Translate/Rotate/Scale Gizmo 各 commit 一次，cancel/reject 为零；Rotate/Scale 各自必须是实际 multi-target commit，
+`viewportMaximumGizmoTargets >= 2`，不能只依据 selection count。Translate delta、rotation degrees 和 scale factors
+都必须有限且 non-identity，完整 TRS 在 canonical document、Scene preview 与结构化结果中一致。
+
+Marquee Replace/Add/Toggle 各 commit 一次且 selection change=`3`，added/removed 非零、maximum selection 至少为 2。
+Scene Add/Duplicate/To Root/Reparent/Delete 固定为 `1/1/1/1/2`，自动创建的两个 stable ID 均非零，结束时实体数恢复为 5。
+Play Start/Pause/Step/Resume/Stop 固定为 `1/1/1/1/1`；即使 `--frame-delay-ms=0`，paused Step 仍必须令
+`playSimulationSteps` 与 `playMaximumSimulationTick` 非零。最后继续检查 2D/3D workspace round-trip、runtime preview
+多次重建、最终 document revision/undo depth 非零且 GPU revision 对齐。
 
 Editor 文件加载/原子保存切片复用同一增量 build tree，只增加 Editor file filter 和带显式 UTF-8 路径的产品 smoke：
 

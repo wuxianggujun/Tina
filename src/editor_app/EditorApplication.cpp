@@ -126,7 +126,11 @@ inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
 inline constexpr u32 DocumentTabSlots = 6;
-inline constexpr u32 AutomaticAuthoringStageCount = 23;
+inline constexpr u32 AutomaticAuthoringStageCount = 46;
+inline constexpr u64 AutomaticAuthoringFrameReserve = 8;
+inline constexpr u64 AutomaticAuthoringMinimumFrameCount =
+    static_cast<u64>(AutomaticAuthoringStageCount) +
+    AutomaticAuthoringFrameReserve;
 inline constexpr u32 EditorLayoutRegionCount = 9;
 inline constexpr u32 GpuViewportSpriteCount = 1;
 inline constexpr u32 GpuViewportMeshCount = 3;
@@ -1220,8 +1224,46 @@ struct LifecycleCounters final {
     u64 viewportGizmoBegins = 0;
     u64 viewportGizmoPreviews = 0;
     u64 viewportGizmoCommits = 0;
+    u64 viewportTranslateGizmoCommits = 0;
+    u64 viewportRotateGizmoCommits = 0;
+    u64 viewportScaleGizmoCommits = 0;
+    u64 viewportGroupGizmoCommits = 0;
+    u64 viewportGroupRotateGizmoCommits = 0;
+    u64 viewportGroupScaleGizmoCommits = 0;
+    u64 viewportMaximumGizmoTargets = 0;
     u64 viewportGizmoCancels = 0;
     u64 viewportGizmoRejects = 0;
+    u64 viewportNavigationBatches = 0;
+    u64 viewportPan2DInputs = 0;
+    u64 viewportZoom2DInputs = 0;
+    u64 viewportOrbit3DInputs = 0;
+    u64 viewportPan3DInputs = 0;
+    u64 viewportDolly3DInputs = 0;
+    u64 viewportMarqueeCommits = 0;
+    u64 viewportMarqueeReplaceCommits = 0;
+    u64 viewportMarqueeAddCommits = 0;
+    u64 viewportMarqueeToggleCommits = 0;
+    u64 viewportMarqueeSelectionChanges = 0;
+    u64 viewportMarqueeAddedItems = 0;
+    u64 viewportMarqueeRemovedItems = 0;
+    u64 viewportMarqueeMaximumSelection = 0;
+    u64 viewportMarqueeCancels = 0;
+    u64 viewportMarqueeRejects = 0;
+    u64 sceneAddCommands = 0;
+    u64 sceneDuplicateCommands = 0;
+    u64 sceneReparentRootCommands = 0;
+    u64 sceneReparentCommands = 0;
+    u64 sceneDeleteCommands = 0;
+    u32 automaticAddedStableId = 0;
+    u32 automaticDuplicatedStableId = 0;
+    u32 automaticAuthoringStage = 0;
+    u64 playStarts = 0;
+    u64 playPauses = 0;
+    u64 playStepRequests = 0;
+    u64 playResumes = 0;
+    u64 playStops = 0;
+    u64 playSimulationSteps = 0;
+    u64 playMaximumSimulationTick = 0;
     u64 viewportGridRevision = 0;
     u64 viewportGridSegments = 0;
     u64 viewportGridMinorLines = 0;
@@ -1256,6 +1298,10 @@ struct LifecycleCounters final {
     float viewportGizmoWorldDeltaX = 0.0F;
     float viewportGizmoWorldDeltaY = 0.0F;
     float viewportGizmoWorldDeltaZ = 0.0F;
+    float viewportGizmoRotationDegrees = 0.0F;
+    float viewportGizmoScaleFactorX = 1.0F;
+    float viewportGizmoScaleFactorY = 1.0F;
+    float viewportGizmoScaleFactorZ = 1.0F;
     float viewportZoomPercent = 100.0F;
     u64 editorLayoutRegions = 0;
     bool selectionVerified = false;
@@ -1698,6 +1744,13 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
         return Tina::Core::failure(
             Tina::Core::CoreErrorCode::InvalidArgument,
             "--auto-demo requires an explicit --frames value");
+    }
+    if (options.autoDemo &&
+        options.targetFrameCount < AutomaticAuthoringMinimumFrameCount) {
+        std::string message = "--auto-demo requires --frames of at least ";
+        message += std::to_string(AutomaticAuthoringMinimumFrameCount);
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   std::move(message));
     }
     return options;
 }
@@ -4518,6 +4571,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
             if (!steps) {
                 return Tina::Core::failure(std::move(steps.error()));
             }
+            counters_.playSimulationSteps += *steps;
+            counters_.playMaximumSimulationTick = (std::max)(
+                counters_.playMaximumSimulationTick,
+                playSession_->snapshot().simulationTickCount);
         }
         if (auto status = processEditorShortcuts(context.frameActions()); !status) {
             return status;
@@ -4554,9 +4611,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (options_.autoDemo &&
             sourceImportService_.state() ==
                 Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle) {
-            const u64 first = (std::max)(u64{1}, options_.targetFrameCount / u64{3});
-            const u64 second =
-                (std::max)(first + u64{1}, options_.targetFrameCount - options_.targetFrameCount / u64{3});
+            if (automaticDemoStartFrame_ == 0U) {
+                automaticDemoStartFrame_ = counters_.frameUpdates;
+            }
+            const u64 first =
+                options_.targetFrameCount > AutomaticAuthoringMinimumFrameCount
+                    ? options_.targetFrameCount -
+                          AutomaticAuthoringMinimumFrameCount
+                    : u64{1};
+            const u64 second = (std::max)(
+                first + u64{1},
+                options_.targetFrameCount - options_.targetFrameCount / u64{6});
             if (!queuedFirstSelection_ && counters_.frameUpdates >= first) {
                 const auto stableId = automaticHierarchyStableId(false);
                 if (stableId.has_value()) {
@@ -4566,14 +4631,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     pendingViewportToolMode_ = ViewportToolMode::Translate;
                     queuedFirstSelection_ = true;
                 }
-            } else if (queuedFirstSelection_ && !queuedSecondSelection_ &&
+            } else if (queuedFirstSelection_ && !queuedSecondStyleUpdate_ &&
                        counters_.frameUpdates >= second) {
-                const auto stableId = automaticHierarchyStableId(true);
-                if (stableId.has_value()) {
-                    pendingSelectionStableId_ = *stableId;
-                    pendingViewportTokenColor_ = UI::rgb(0x0C141E);
-                    queuedSecondSelection_ = true;
-                }
+                pendingViewportTokenColor_ = UI::rgb(0x0C141E);
+                queuedSecondStyleUpdate_ = true;
             }
             if (queuedFirstSelection_) {
                 const auto queueAutoCommand = [&](EditorCommand command) noexcept {
@@ -4592,11 +4653,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     (void)queueAutoCommand(EditorCommand::ApplyTransform);
                     break;
                 case 2:
-                    if (prepareAutomaticViewportGizmo()) {
+                    if (queueAutomaticViewportNavigation()) {
                         ++autoAuthoringStage_;
                     }
                     break;
-                case 3: {
+                case 3:
+                    if (prepareAutomaticViewportGizmo(
+                            Tina::Editor::EditorTransformGizmoMode::Translate)) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                case 4: {
                     const auto point = automaticViewportGizmoPoint(0.5F);
                     if (point.has_value() && updateViewportGizmo(
                                                  Tina::Platform::PrimaryPointerId,
@@ -4605,7 +4672,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     }
                     break;
                 }
-                case 4: {
+                case 5: {
                     const auto point = automaticViewportGizmoPoint(1.0F);
                     if (point.has_value() && requestViewportGizmoCommit(
                                                  Tina::Platform::PrimaryPointerId,
@@ -4614,13 +4681,169 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     }
                     break;
                 }
-                case 5:
-                    (void)queueAutoCommand(EditorCommand::Undo);
-                    break;
                 case 6:
-                    (void)queueAutoCommand(EditorCommand::Redo);
+                    if (prepareAutomaticViewportMarquee(
+                            Tina::Editor::EditorMarqueeSelectionMode::Replace)) {
+                        ++autoAuthoringStage_;
+                    }
                     break;
                 case 7:
+                    if (prepareAutomaticViewportMarquee(
+                            Tina::Editor::EditorMarqueeSelectionMode::Add)) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                case 8:
+                    if (prepareAutomaticViewportGizmo(
+                            Tina::Editor::EditorTransformGizmoMode::Rotate)) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                case 9: {
+                    const auto point = automaticViewportGizmoPoint(0.5F);
+                    if (point.has_value() && updateViewportGizmo(
+                                                 Tina::Platform::PrimaryPointerId,
+                                                 *point)) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                }
+                case 10: {
+                    const auto point = automaticViewportGizmoPoint(1.0F);
+                    if (point.has_value() && requestViewportGizmoCommit(
+                                                 Tina::Platform::PrimaryPointerId,
+                                                 *point)) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                }
+                case 11:
+                    if (prepareAutomaticViewportGizmo(
+                            Tina::Editor::EditorTransformGizmoMode::Scale)) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                case 12: {
+                    const auto point = automaticViewportGizmoPoint(0.5F);
+                    if (point.has_value() && updateViewportGizmo(
+                                                 Tina::Platform::PrimaryPointerId,
+                                                 *point)) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                }
+                case 13: {
+                    const auto point = automaticViewportGizmoPoint(1.0F);
+                    if (point.has_value() && requestViewportGizmoCommit(
+                                                 Tina::Platform::PrimaryPointerId,
+                                                 *point)) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                }
+                case 14:
+                    if (prepareAutomaticViewportMarquee(
+                            Tina::Editor::EditorMarqueeSelectionMode::Toggle)) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                case 15:
+                    (void)queueAutoCommand(EditorCommand::Undo);
+                    break;
+                case 16:
+                    (void)queueAutoCommand(EditorCommand::Redo);
+                    break;
+                case 17:
+                    (void)queueAutoCommand(EditorCommand::SceneAdd);
+                    break;
+                case 18:
+                    if (counters_.automaticAddedStableId != 0U &&
+                        stableEntityIdForHierarchyItem(selectionKey_) ==
+                            counters_.automaticAddedStableId) {
+                        (void)queueAutoCommand(EditorCommand::SceneDuplicate);
+                    }
+                    break;
+                case 19:
+                    if (counters_.automaticDuplicatedStableId != 0U &&
+                        stableEntityIdForHierarchyItem(selectionKey_) ==
+                            counters_.automaticDuplicatedStableId) {
+                        (void)queueAutoCommand(EditorCommand::SceneReparentRoot);
+                    }
+                    break;
+                case 20:
+                    if (counters_.automaticAddedStableId != 0U &&
+                        counters_.automaticDuplicatedStableId != 0U &&
+                        stableEntityIdForHierarchyItem(selectionKey_) ==
+                            counters_.automaticDuplicatedStableId) {
+                        if (queueAutoCommand(EditorCommand::SceneReparent)) {
+                            pendingAutoParentStableId_ =
+                                counters_.automaticAddedStableId;
+                        }
+                    }
+                    break;
+                case 21: {
+                    const EditorHierarchyRow* duplicated =
+                        hierarchyRow(counters_.automaticDuplicatedStableId);
+                    if (duplicated != nullptr &&
+                        duplicated->parentStableId ==
+                            counters_.automaticAddedStableId &&
+                        stableEntityIdForHierarchyItem(selectionKey_) ==
+                            counters_.automaticDuplicatedStableId) {
+                        (void)queueAutoCommand(EditorCommand::SceneDelete);
+                    }
+                    break;
+                }
+                case 22:
+                    if (stableEntityIdForHierarchyItem(selectionKey_) ==
+                        counters_.automaticAddedStableId) {
+                        (void)queueAutoCommand(EditorCommand::SceneDelete);
+                    }
+                    break;
+                case 23:
+                    (void)queueAutoCommand(EditorCommand::PlayStartOrResume);
+                    break;
+                case 24:
+                    if (playSession_.has_value() &&
+                        playSession_->snapshot().state ==
+                            Tina::Editor::EditorPlayState::Playing) {
+                        (void)queueAutoCommand(EditorCommand::PlayPause);
+                    }
+                    break;
+                case 25:
+                    if (playSession_.has_value() &&
+                        playSession_->snapshot().state ==
+                            Tina::Editor::EditorPlayState::Paused) {
+                        automaticPlayStepBaseline_ =
+                            playSession_->snapshot().simulationTickCount;
+                        (void)queueAutoCommand(EditorCommand::PlayStep);
+                    }
+                    break;
+                case 26:
+                    if (playSession_.has_value() &&
+                        playSession_->snapshot().state ==
+                            Tina::Editor::EditorPlayState::Paused &&
+                        !playSession_->snapshot().stepPending &&
+                        playSession_->snapshot().simulationTickCount >
+                            automaticPlayStepBaseline_) {
+                        (void)queueAutoCommand(EditorCommand::PlayStartOrResume);
+                    }
+                    break;
+                case 27:
+                    if (playSession_.has_value() &&
+                        playSession_->snapshot().state ==
+                            Tina::Editor::EditorPlayState::Playing) {
+                        (void)queueAutoCommand(EditorCommand::PlayStop);
+                    }
+                    break;
+                case 28:
+                    if (playSession_.has_value() &&
+                        playSession_->snapshot().state ==
+                            Tina::Editor::EditorPlayState::Editing &&
+                        counters_.playStops != 0U) {
+                        ++autoAuthoringStage_;
+                    }
+                    break;
+                case 29:
                     if (options_.initialWorkspace != WorkspaceMode::World2D) {
                         ++autoAuthoringStage_;
                     } else if (tileMapEditingContext()) {
@@ -4632,7 +4855,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                         pendingDocumentTabActivation_ = 2U;
                     }
                     break;
-                case 8:
+                case 30:
                     if (options_.initialWorkspace == WorkspaceMode::World2D &&
                         tileMapEditingContext()) {
                         // Return to the World2D document before exercising Save;
@@ -4644,51 +4867,63 @@ class EditorWorkspaceState final : public Tina::IGameState {
                         (void)queueAutoCommand(EditorCommand::Save);
                     }
                     break;
-                case 9:
+                case 31:
                     (void)queueAutoCommand(options_.initialWorkspace == WorkspaceMode::World2D
                                                ? EditorCommand::SwitchToWorld3D
                                                : EditorCommand::SwitchToWorld2D);
                     break;
-                case 10:
-                    if (options_.initialWorkspace == WorkspaceMode::World3D) {
+                case 32: {
+                    const WorkspaceMode otherWorkspace =
+                        options_.initialWorkspace == WorkspaceMode::World2D
+                            ? WorkspaceMode::World3D
+                            : WorkspaceMode::World2D;
+                    if (workspaceMode_ == otherWorkspace &&
+                        !pendingEditorCommand_.has_value() &&
+                        queueAutomaticViewportNavigation()) {
                         ++autoAuthoringStage_;
-                    } else {
-                        (void)queueAutoCommand(EditorCommand::SwitchToWorld2D);
                     }
                     break;
-                case 11:
+                }
+                case 33:
                     if (workspaceMode_ == WorkspaceMode::World2D) {
                         ++autoAuthoringStage_;
                     } else {
                         (void)queueAutoCommand(EditorCommand::SwitchToWorld2D);
                     }
                     break;
-                case 12:
+                case 34:
+                    if (workspaceMode_ == WorkspaceMode::World2D) {
+                        ++autoAuthoringStage_;
+                    } else {
+                        (void)queueAutoCommand(EditorCommand::SwitchToWorld2D);
+                    }
+                    break;
+                case 35:
                     (void)queueAutoCommand(EditorCommand::AnimationNextFrame);
                     break;
-                case 13:
+                case 36:
                     (void)queueAutoCommand(EditorCommand::AnimationCycleMode);
                     break;
-                case 14:
+                case 37:
                     (void)queueAutoCommand(EditorCommand::AnimationUndo);
                     break;
-                case 15:
+                case 38:
                     (void)queueAutoCommand(EditorCommand::AnimationRedo);
                     break;
-                case 16:
+                case 39:
                     (void)queueAutoCommand(EditorCommand::AnimationCookPreview);
                     break;
-                case 17:
+                case 40:
                     if (options_.initialWorkspace == WorkspaceMode::World2D) {
                         ++autoAuthoringStage_;
                     } else {
                         (void)queueAutoCommand(EditorCommand::SwitchToWorld3D);
                     }
                     break;
-                case 18:
+                case 41:
                     (void)queueAutoCommand(EditorCommand::OpenSelectedProjectAsset);
                     break;
-                case 19:
+                case 42:
                     if (counters_.tabOwnedDocumentLoads != 0U) {
                         const auto* activeTab = documentTabs_.activeTab();
                         if (activeTab == nullptr) {
@@ -4712,12 +4947,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
                     }
                     ++autoAuthoringStage_;
                     break;
-                case 20:
+                case 43:
                     (void)queueAutoCommand(options_.initialWorkspace == WorkspaceMode::World2D
                                                ? EditorCommand::SwitchToWorld2D
                                                : EditorCommand::SwitchToWorld3D);
                     break;
-                case 21:
+                case 44:
                     if (workspaceMode_ == options_.initialWorkspace &&
                         !pendingEditorCommand_.has_value()) {
                         const auto stableId = automaticHierarchyStableId(true);
@@ -4728,7 +4963,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                         }
                     }
                     break;
-                case 22:
+                case 45:
                     // Allow the final workspace/selection mutations to publish
                     // through one complete retained-UI frame before shutdown.
                     ++autoAuthoringStage_;
@@ -4763,9 +4998,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
         const bool automaticDemoSettled =
             !options_.autoDemo ||
             autoAuthoringStage_ >= AutomaticAuthoringStageCount;
+        counters_.automaticAuthoringStage = autoAuthoringStage_;
+        const bool automaticDemoDeadlineReached =
+            options_.autoDemo && automaticDemoStartFrame_ != 0U &&
+            counters_.frameUpdates >= automaticDemoStartFrame_ &&
+            counters_.frameUpdates - automaticDemoStartFrame_ >=
+                AutomaticAuthoringMinimumFrameCount - u64{1};
         if (options_.targetFrameCount != 0 &&
             counters_.frameUpdates >= options_.targetFrameCount &&
-            sourceImportSettled && automaticDemoSettled) {
+            sourceImportSettled &&
+            (automaticDemoSettled || automaticDemoDeadlineReached)) {
             context.requestExitAfterFrame();
         }
         if (options_.frameDelayMilliseconds != 0) {
@@ -5147,6 +5389,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (pendingAutoTransformInput_ && pendingEditorCommand_ == EditorCommand::ApplyTransform) {
             pendingAutoTransformInput_ = false;
+            const char* automaticScale =
+                workspaceMode_ == WorkspaceMode::World3D ? "1.25" : "1.0";
             if (auto status = tree->setText(inspectorPositionX_, "2.5"); !status) {
                 return status;
             }
@@ -5156,10 +5400,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
             if (auto status = tree->setText(inspectorRotationZ_, "30.0"); !status) {
                 return status;
             }
-            if (auto status = tree->setText(inspectorScaleX_, "1.25"); !status) {
+            if (auto status = tree->setText(inspectorScaleX_, automaticScale); !status) {
                 return status;
             }
-            if (auto status = tree->setText(inspectorScaleY_, "0.75"); !status) {
+            if (auto status = tree->setText(inspectorScaleY_, automaticScale); !status) {
                 return status;
             }
             if (workspaceMode_ == WorkspaceMode::World3D) {
@@ -5172,9 +5416,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 if (auto status = tree->setText(inspectorRotationY_, "25.0"); !status) {
                     return status;
                 }
-                if (auto status = tree->setText(inspectorScaleZ_, "1.5"); !status) {
+                if (auto status = tree->setText(inspectorScaleZ_, automaticScale); !status) {
                     return status;
                 }
+            }
+        }
+        if (pendingAutoParentStableId_.has_value() &&
+            pendingEditorCommand_ == EditorCommand::SceneReparent) {
+            const u32 parentStableId = *pendingAutoParentStableId_;
+            pendingAutoParentStableId_.reset();
+            if (auto status = tree->setText(
+                    inspectorParentStableId_, std::to_string(parentStableId));
+                !status) {
+                return status;
             }
         }
         if (pendingEditorCommand_.has_value()) {
@@ -6118,6 +6372,26 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 !status) {
                 return status;
             }
+            ++counters_.viewportNavigationBatches;
+            for (Tina::Core::usize index = 0; index < inputCount; ++index) {
+                switch (inputs[index].kind) {
+                case Tina::Editor::EditorViewportNavigationInputKind::Pan2D:
+                    ++counters_.viewportPan2DInputs;
+                    break;
+                case Tina::Editor::EditorViewportNavigationInputKind::Zoom2D:
+                    ++counters_.viewportZoom2DInputs;
+                    break;
+                case Tina::Editor::EditorViewportNavigationInputKind::Orbit3D:
+                    ++counters_.viewportOrbit3DInputs;
+                    break;
+                case Tina::Editor::EditorViewportNavigationInputKind::Pan3D:
+                    ++counters_.viewportPan3DInputs;
+                    break;
+                case Tina::Editor::EditorViewportNavigationInputKind::Dolly3D:
+                    ++counters_.viewportDolly3DInputs;
+                    break;
+                }
+            }
             if (orbitInputObserved) {
                 viewport3DViewPreset_.reset();
                 viewportViewModeRefreshPending_ = true;
@@ -6136,7 +6410,53 @@ class EditorWorkspaceState final : public Tina::IGameState {
         return Tina::Core::success();
     }
 
-    [[nodiscard]] bool prepareAutomaticViewportGizmo() noexcept
+    [[nodiscard]] bool queueAutomaticViewportNavigation() noexcept
+    {
+        if (pendingViewportNavigationCount_ != 0U ||
+            viewportNavigationQueueOverflowed_ || viewportGizmo_.captured ||
+            viewportNavigationDrag_.captured || viewportMarquee_.captured ||
+            !std::isfinite(viewportLogicalRect_.width) ||
+            !std::isfinite(viewportLogicalRect_.height) ||
+            viewportLogicalRect_.width <= 0.0F ||
+            viewportLogicalRect_.height <= 0.0F) {
+            return false;
+        }
+        using Kind = Tina::Editor::EditorViewportNavigationInputKind;
+        if (workspaceMode_ == WorkspaceMode::World2D) {
+            const bool panQueued = queueViewportNavigationInput({
+                .kind = Kind::Pan2D,
+                .pixelDelta = {.x = 24.0F, .y = -12.0F},
+            });
+            const bool zoomQueued = queueViewportNavigationInput({
+                .kind = Kind::Zoom2D,
+                .wheelSteps = 1.0F,
+                .viewportSizePixels = {
+                    .x = viewportLogicalRect_.width,
+                    .y = viewportLogicalRect_.height,
+                },
+                .anchorPixels = {
+                    .x = viewportLogicalRect_.width * 0.65F,
+                    .y = viewportLogicalRect_.height * 0.4F,
+                },
+            });
+            return panQueued && zoomQueued;
+        }
+        return queueViewportNavigationInput({
+                   .kind = Kind::Orbit3D,
+                   .pixelDelta = {.x = 18.0F, .y = -8.0F},
+               }) &&
+               queueViewportNavigationInput({
+                   .kind = Kind::Pan3D,
+                   .pixelDelta = {.x = -10.0F, .y = 6.0F},
+               }) &&
+               queueViewportNavigationInput({
+                   .kind = Kind::Dolly3D,
+                   .wheelSteps = 1.0F,
+               });
+    }
+
+    [[nodiscard]] bool prepareAutomaticViewportGizmo(
+        Tina::Editor::EditorTransformGizmoMode mode) noexcept
     {
         using Handle = Tina::Editor::EditorTransformGizmoHandle;
         using Mode = Tina::Editor::EditorTransformGizmoMode;
@@ -6145,17 +6465,34 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (!snapshot.framePublished || snapshot.dragging()) {
             return false;
         }
-        if (snapshot.mode != Mode::Translate) {
-            (void)viewportTransformGizmo_.setMode(Mode::Translate);
+        ViewportToolMode toolMode = ViewportToolMode::Translate;
+        if (mode == Mode::Rotate) {
+            toolMode = ViewportToolMode::Rotate;
+        } else if (mode == Mode::Scale) {
+            toolMode = ViewportToolMode::Scale;
+        }
+        if (snapshot.mode != mode || viewportToolMode_ != toolMode) {
+            pendingViewportToolMode_ = toolMode;
             return false;
         }
         if (snapshot.orientation != Orientation::World) {
-            (void)viewportTransformGizmo_.setOrientation(Orientation::World);
+            pendingGizmoOrientationToggle_ = true;
             return false;
         }
-        const Handle desired = workspaceMode_ == WorkspaceMode::World2D
-                                   ? Handle::PlaneXY
-                                   : Handle::PlaneXZ;
+        if (viewportTransformGizmo_.snap().enabled) {
+            pendingGizmoSnapToggle_ = true;
+            return false;
+        }
+        Handle desired = workspaceMode_ == WorkspaceMode::World2D
+                             ? Handle::PlaneXY
+                             : Handle::PlaneXZ;
+        if (mode == Mode::Rotate) {
+            desired = workspaceMode_ == WorkspaceMode::World2D
+                          ? Handle::AxisZ
+                          : Handle::AxisY;
+        } else if (mode == Mode::Scale) {
+            desired = Handle::Uniform;
+        }
         const auto geometry = std::find_if(
             snapshot.handles().begin(), snapshot.handles().end(),
             [desired](const auto& candidate) {
@@ -6164,14 +6501,26 @@ class EditorWorkspaceState final : public Tina::IGameState {
         if (geometry == snapshot.handles().end()) {
             return false;
         }
-        UI::UILogicalPoint center{};
-        for (u32 index = 0; index < geometry->pointCount; ++index) {
-            center.x += geometry->points[index].x;
-            center.y += geometry->points[index].y;
+        autoGizmoCenter_ = {};
+        if (geometry->shape ==
+            Tina::Editor::EditorTransformGizmoHandleShape::Ring) {
+            autoGizmoCenter_ = {
+                .x = geometry->points[0].x,
+                .y = geometry->points[0].y,
+            };
+            autoGizmoStart_ = {
+                .x = autoGizmoCenter_.x + geometry->radiusPixels,
+                .y = autoGizmoCenter_.y,
+            };
+        } else {
+            for (u32 index = 0; index < geometry->pointCount; ++index) {
+                autoGizmoCenter_.x += geometry->points[index].x;
+                autoGizmoCenter_.y += geometry->points[index].y;
+            }
+            autoGizmoCenter_.x /= static_cast<float>(geometry->pointCount);
+            autoGizmoCenter_.y /= static_cast<float>(geometry->pointCount);
+            autoGizmoStart_ = autoGizmoCenter_;
         }
-        center.x /= static_cast<float>(geometry->pointCount);
-        center.y /= static_cast<float>(geometry->pointCount);
-        autoGizmoStart_ = center;
         return beginViewportGizmo(Tina::Platform::PrimaryPointerId,
                                   autoGizmoStart_);
     }
@@ -6179,8 +6528,29 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] std::optional<UI::UILogicalPoint>
     automaticViewportGizmoPoint(float fraction) const noexcept
     {
-        if (!std::isfinite(fraction) || !viewportGizmo_.captured ||
-            !previewWorld_.has_value()) {
+        if (!std::isfinite(fraction) || !viewportGizmo_.captured) {
+            return std::nullopt;
+        }
+        const auto mode = viewportTransformGizmo_.snapshot().mode;
+        if (mode == Tina::Editor::EditorTransformGizmoMode::Rotate) {
+            const float radius = std::hypot(
+                autoGizmoStart_.x - autoGizmoCenter_.x,
+                autoGizmoStart_.y - autoGizmoCenter_.y);
+            const float radians =
+                -std::numbers::pi_v<float> * 0.5F * fraction;
+            return UI::UILogicalPoint{
+                .x = autoGizmoCenter_.x + std::cos(radians) * radius,
+                .y = autoGizmoCenter_.y + std::sin(radians) * radius,
+            };
+        }
+        if (mode == Tina::Editor::EditorTransformGizmoMode::Scale) {
+            constexpr float AutomaticScaleDragPixels = 32.0F;
+            return UI::UILogicalPoint{
+                .x = autoGizmoStart_.x + AutomaticScaleDragPixels * fraction,
+                .y = autoGizmoStart_.y - AutomaticScaleDragPixels * fraction,
+            };
+        }
+        if (!previewWorld_.has_value()) {
             return std::nullopt;
         }
         const Tina::Scene::EntityId entity =
@@ -6219,6 +6589,103 @@ class EditorWorkspaceState final : public Tina::IGameState {
                   (secondAxis.screen.y - origin.screen.y) * secondAmount) *
                      fraction,
         };
+    }
+
+    [[nodiscard]] bool prepareAutomaticViewportMarquee(
+        Tina::Editor::EditorMarqueeSelectionMode mode) noexcept
+    {
+        if (viewportGizmo_.captured || viewportNavigationDrag_.captured ||
+            viewportMarquee_.captured) {
+            return false;
+        }
+        if (viewportToolMode_ != ViewportToolMode::Select) {
+            pendingViewportToolMode_ = ViewportToolMode::Select;
+            return false;
+        }
+        if (marqueeSelectionMode_ != mode) {
+            pendingMarqueeSelectionMode_ = mode;
+            return false;
+        }
+
+        std::array<Tina::Editor::EditorMarqueeCandidate,
+                   ViewportMarqueeCandidateCapacity>
+            candidates{};
+        const Tina::Core::usize candidateCount =
+            collectViewportMarqueeCandidates(candidates);
+        if (candidateCount < 2U) {
+            return false;
+        }
+        const auto currentSelection = std::span{
+            viewportSelectedEntityIds_.data(), viewportSelectedEntityCount_};
+        constexpr std::array ProbeFactors{
+            UI::UILogicalPoint{.x = 0.5F, .y = 0.5F},
+            UI::UILogicalPoint{.x = 0.2F, .y = 0.2F},
+            UI::UILogicalPoint{.x = 0.8F, .y = 0.2F},
+            UI::UILogicalPoint{.x = 0.2F, .y = 0.8F},
+            UI::UILogicalPoint{.x = 0.8F, .y = 0.8F},
+        };
+        constexpr float ProbeHalfExtent = 0.5F;
+        for (Tina::Core::usize candidateIndex = 0;
+             candidateIndex < candidateCount; ++candidateIndex) {
+            const auto& bounds = candidates[candidateIndex].screenBounds;
+            const float left = (std::min)(bounds.x0, bounds.x1);
+            const float right = (std::max)(bounds.x0, bounds.x1);
+            const float top = (std::min)(bounds.y0, bounds.y1);
+            const float bottom = (std::max)(bounds.y0, bounds.y1);
+            for (const UI::UILogicalPoint factor : ProbeFactors) {
+                const UI::UILogicalPoint point{
+                    .x = left + (right - left) * factor.x,
+                    .y = top + (bottom - top) * factor.y,
+                };
+                const Tina::Editor::EditorMarqueeScreenRect rect{
+                    .x0 = point.x - ProbeHalfExtent,
+                    .y0 = point.y - ProbeHalfExtent,
+                    .x1 = point.x + ProbeHalfExtent,
+                    .y1 = point.y + ProbeHalfExtent,
+                };
+                auto evaluated = Tina::Editor::EditorMarqueeSelection::Evaluate(
+                    rect, std::span{candidates.data(), candidateCount},
+                    currentSelection, mode);
+                if (!evaluated) {
+                    continue;
+                }
+                bool suitable = false;
+                const Tina::Core::usize transformTargetCount =
+                    viewportTransformTargetCount(evaluated->selection());
+                switch (mode) {
+                case Tina::Editor::EditorMarqueeSelectionMode::Replace:
+                    suitable = evaluated->changed() &&
+                               evaluated->selection().size() == 1U &&
+                               transformTargetCount == 1U;
+                    break;
+                case Tina::Editor::EditorMarqueeSelectionMode::Add:
+                    suitable = !evaluated->added().empty() &&
+                               evaluated->selection().size() >
+                                   currentSelection.size() &&
+                               transformTargetCount >= 2U;
+                    break;
+                case Tina::Editor::EditorMarqueeSelectionMode::Toggle:
+                    suitable = !evaluated->removed().empty() &&
+                               transformTargetCount == 1U;
+                    break;
+                }
+                if (!suitable ||
+                    !beginViewportMarquee(
+                        Tina::Platform::PrimaryPointerId,
+                        {.x = rect.x0, .y = rect.y0})) {
+                    continue;
+                }
+                if (!updateViewportMarquee(
+                        Tina::Platform::PrimaryPointerId,
+                        {.x = rect.x1, .y = rect.y1})) {
+                    viewportMarquee_ = {};
+                    return false;
+                }
+                viewportMarquee_.commitRequested = true;
+                return true;
+            }
+        }
+        return false;
     }
 
     [[nodiscard]] bool beginViewportGizmo(Tina::Platform::PointerId pointer,
@@ -6626,8 +7093,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
                    static_cast<std::ptrdiff_t>(viewportSelectedEntityCount_);
     }
 
-    [[nodiscard]] bool previewEntityHasSelectedAncestor(
-        Tina::Scene::EntityId entity) const noexcept
+    [[nodiscard]] bool previewEntityHasAncestorInSelection(
+        Tina::Scene::EntityId entity,
+        std::span<const u64> selection) const noexcept
     {
         if (!previewWorld_.has_value()) {
             return false;
@@ -6636,7 +7104,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         for (Tina::Core::usize depth = 0;
              depth < ViewportTransformTargetCapacity && parent.hasValue();
              ++depth) {
-            if (viewportSelectionContains(stableIdForPreviewEntity(parent))) {
+            const u64 parentStableId = stableIdForPreviewEntity(parent);
+            if (parentStableId != 0U &&
+                std::find(selection.begin(), selection.end(), parentStableId) !=
+                    selection.end()) {
                 return true;
             }
             const Tina::Scene::EntityId next = previewWorld_->parent(parent);
@@ -6646,6 +7117,45 @@ class EditorWorkspaceState final : public Tina::IGameState {
             parent = next;
         }
         return false;
+    }
+
+    [[nodiscard]] bool previewEntityHasSelectedAncestor(
+        Tina::Scene::EntityId entity) const noexcept
+    {
+        return previewEntityHasAncestorInSelection(
+            entity,
+            std::span<const u64>{viewportSelectedEntityIds_.data(),
+                                 viewportSelectedEntityCount_});
+    }
+
+    [[nodiscard]] Tina::Core::usize viewportTransformTargetCount(
+        std::span<const u64> selection) const noexcept
+    {
+        if (!previewWorld_.has_value()) {
+            return 0U;
+        }
+        Tina::Core::usize count = 0;
+        for (const u64 stableId : selection) {
+            if (stableId == 0U ||
+                stableId > (std::numeric_limits<u32>::max)()) {
+                continue;
+            }
+            const Tina::Scene::EntityId entity =
+                findPreviewEntity(static_cast<u32>(stableId));
+            if (!entity.hasValue() ||
+                previewEntityHasAncestorInSelection(entity, selection)) {
+                continue;
+            }
+            const Tina::Scene::LocalTransform* local =
+                previewWorld_->localTransform(entity);
+            const Tina::Scene::WorldTransform* world =
+                previewWorld_->worldTransform(entity);
+            if (local != nullptr && world != nullptr &&
+                Tina::Scene::isValid(*local) && Tina::Scene::isValid(*world)) {
+                ++count;
+            }
+        }
+        return count;
     }
 
     [[nodiscard]] Tina::Scene::Vec3 viewportSelectionPivot() const noexcept
@@ -7183,25 +7693,33 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 }
                 viewportGizmo_.previewPublished = true;
                 ++counters_.viewportGizmoPreviews;
-                counters_.viewportGizmoWorldDeltaX =
-                    viewportGizmo_.delta.translation.x;
-                counters_.viewportGizmoWorldDeltaY =
-                    viewportGizmo_.delta.translation.y;
-                counters_.viewportGizmoWorldDeltaZ =
-                    viewportGizmo_.delta.translation.z;
                 switch (snapshot.mode) {
                 case Tina::Editor::EditorTransformGizmoMode::Rotate:
+                    counters_.viewportGizmoRotationDegrees =
+                        viewportGizmo_.delta.rotationDegrees;
                     authoringFeedback_ = viewportGizmo_.selectionCount > 1U
                                              ? "Group rotation preview"
                                              : "Viewport rotation preview";
                     break;
                 case Tina::Editor::EditorTransformGizmoMode::Scale:
+                    counters_.viewportGizmoScaleFactorX =
+                        viewportGizmo_.delta.scaleFactors.x;
+                    counters_.viewportGizmoScaleFactorY =
+                        viewportGizmo_.delta.scaleFactors.y;
+                    counters_.viewportGizmoScaleFactorZ =
+                        viewportGizmo_.delta.scaleFactors.z;
                     authoringFeedback_ = viewportGizmo_.selectionCount > 1U
                                              ? "Group scale preview"
                                              : "Viewport scale preview";
                     break;
                 case Tina::Editor::EditorTransformGizmoMode::Translate:
                 default:
+                    counters_.viewportGizmoWorldDeltaX =
+                        viewportGizmo_.delta.translation.x;
+                    counters_.viewportGizmoWorldDeltaY =
+                        viewportGizmo_.delta.translation.y;
+                    counters_.viewportGizmoWorldDeltaZ =
+                        viewportGizmo_.delta.translation.z;
                     authoringFeedback_ = viewportGizmo_.selectionCount > 1U
                                              ? "Group translation preview"
                                              : (workspaceMode_ == WorkspaceMode::World2D
@@ -7247,15 +7765,41 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 Tina::Core::CoreErrorCode::Internal,
                 "viewport gizmo commit did not publish exactly one document revision");
         }
-        const bool group = viewportGizmo_.selectionCount > 1U;
         const Tina::Core::usize selectionCount = viewportGizmo_.selectionCount;
+        const Tina::Core::usize targetCount = viewportGizmo_.targetCount;
+        const bool multiSelection = selectionCount > 1U;
+        const bool multiTarget = targetCount > 1U;
+        const Tina::Editor::EditorTransformGizmoMode committedMode = snapshot.mode;
         viewportGizmo_ = {};
         ++counters_.viewportGizmoCommits;
+        counters_.viewportMaximumGizmoTargets = (std::max)(
+            counters_.viewportMaximumGizmoTargets,
+            static_cast<u64>(targetCount));
+        switch (committedMode) {
+        case Tina::Editor::EditorTransformGizmoMode::Translate:
+            ++counters_.viewportTranslateGizmoCommits;
+            break;
+        case Tina::Editor::EditorTransformGizmoMode::Rotate:
+            ++counters_.viewportRotateGizmoCommits;
+            if (multiTarget) {
+                ++counters_.viewportGroupRotateGizmoCommits;
+            }
+            break;
+        case Tina::Editor::EditorTransformGizmoMode::Scale:
+            ++counters_.viewportScaleGizmoCommits;
+            if (multiTarget) {
+                ++counters_.viewportGroupScaleGizmoCommits;
+            }
+            break;
+        }
+        if (multiTarget) {
+            ++counters_.viewportGroupGizmoCommits;
+        }
         ++counters_.authoringEdits;
         if (auto status = validateRuntimePreview(); !status) {
             return status;
         }
-        if (group) {
+        if (multiSelection) {
             try {
                 authoringFeedback_ = "Group transform committed as one document revision | ";
                 authoringFeedback_ += std::to_string(selectionCount);
@@ -8153,6 +8697,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
         if (viewportMarquee_.cancelRequested) {
             viewportMarquee_ = {};
+            ++counters_.viewportMarqueeCancels;
             return Tina::Core::success();
         }
         if (!viewportMarquee_.commitRequested) {
@@ -8174,10 +8719,33 @@ class EditorWorkspaceState final : public Tina::IGameState {
             std::span{viewportSelectedEntityIds_.data(),
                       viewportSelectedEntityCount_},
             viewportMarquee_.mode);
+        const Tina::Editor::EditorMarqueeSelectionMode committedMode =
+            viewportMarquee_.mode;
         viewportMarquee_ = {};
         if (!evaluated) {
+            ++counters_.viewportMarqueeRejects;
             return Tina::Core::failure(std::move(evaluated.error()));
         }
+        ++counters_.viewportMarqueeCommits;
+        switch (committedMode) {
+        case Tina::Editor::EditorMarqueeSelectionMode::Replace:
+            ++counters_.viewportMarqueeReplaceCommits;
+            break;
+        case Tina::Editor::EditorMarqueeSelectionMode::Add:
+            ++counters_.viewportMarqueeAddCommits;
+            break;
+        case Tina::Editor::EditorMarqueeSelectionMode::Toggle:
+            ++counters_.viewportMarqueeToggleCommits;
+            break;
+        }
+        if (evaluated->changed()) {
+            ++counters_.viewportMarqueeSelectionChanges;
+        }
+        counters_.viewportMarqueeAddedItems += evaluated->added().size();
+        counters_.viewportMarqueeRemovedItems += evaluated->removed().size();
+        counters_.viewportMarqueeMaximumSelection = (std::max)(
+            counters_.viewportMarqueeMaximumSelection,
+            static_cast<u64>(evaluated->selection().size()));
         std::array<u64, Tina::Editor::EditorMarqueeSelectionCapacity>
             previousSelectionStorage{};
         const Tina::Core::usize previousSelectionCount =
@@ -10977,6 +11545,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
             hierarchyRefreshStableId = added->primaryStableId;
             requiresPreviewValidation = true;
             ++counters_.authoringEdits;
+            ++counters_.sceneAddCommands;
+            if (options_.autoDemo) {
+                counters_.automaticAddedStableId = added->primaryStableId;
+            }
             authoringFeedback_ = workspaceMode_ == WorkspaceMode::World2D
                                      ? "Entity2D added as one scene revision"
                                      : "Node3D added as one scene revision";
@@ -11008,6 +11580,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
             hierarchyRefreshStableId = duplicated->primaryStableId;
             requiresPreviewValidation = true;
             ++counters_.authoringEdits;
+            ++counters_.sceneDuplicateCommands;
+            if (options_.autoDemo) {
+                counters_.automaticDuplicatedStableId =
+                    duplicated->primaryStableId;
+            }
             authoringFeedback_ = "Scene subtree duplicated as one canonical revision";
             break;
         }
@@ -11037,6 +11614,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             hierarchyRefreshStableId = deleted->primaryStableId;
             requiresPreviewValidation = true;
             ++counters_.authoringEdits;
+            ++counters_.sceneDeleteCommands;
             authoringFeedback_ = "Scene subtree deleted as one canonical revision";
             break;
         }
@@ -11068,6 +11646,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 hierarchyRefreshStableId = stableId;
                 requiresPreviewValidation = true;
                 ++counters_.authoringEdits;
+                ++counters_.sceneReparentRootCommands;
                 authoringFeedback_ = "Scene item reparented to the document root";
             }
             break;
@@ -11110,6 +11689,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                 hierarchyRefreshStableId = stableId;
                 requiresPreviewValidation = true;
                 ++counters_.authoringEdits;
+                ++counters_.sceneReparentCommands;
                 authoringFeedback_ = "Scene item reparented as one canonical revision";
             }
             break;
@@ -11130,6 +11710,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             if (playSession_->snapshot().state == Tina::Editor::EditorPlayState::Paused) {
                 status = playSession_->resume();
                 if (status) {
+                    ++counters_.playResumes;
                     authoringFeedback_ = "Isolated scene simulation resumed";
                 }
                 break;
@@ -11166,6 +11747,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
             }
             if (status) {
                 requiresPreviewValidation = true;
+                ++counters_.playStarts;
                 authoringFeedback_ = "Isolated scene simulation started from a canonical snapshot";
             }
             break;
@@ -11178,34 +11760,48 @@ class EditorWorkspaceState final : public Tina::IGameState {
             }
             status = playSession_->pause();
             if (status) {
+                ++counters_.playPauses;
                 authoringFeedback_ = "Isolated scene simulation paused";
             }
             break;
-        case EditorCommand::PlayStep:
+        case EditorCommand::PlayStep: {
             if (!playSession_.has_value()) {
                 status = Tina::Core::failure(
                     Tina::Core::CoreErrorCode::Internal,
                     "Editor play session owner is unavailable");
                 break;
             }
+            const bool stepWasPending = playSession_->snapshot().stepPending;
             status = playSession_->requestStep();
             if (status) {
+                if (!stepWasPending) {
+                    ++counters_.playStepRequests;
+                }
                 authoringFeedback_ = "One fixed simulation step queued";
             }
             break;
-        case EditorCommand::PlayStop:
+        }
+        case EditorCommand::PlayStop: {
             if (!playSession_.has_value()) {
                 status = Tina::Core::failure(
                     Tina::Core::CoreErrorCode::Internal,
                     "Editor play session owner is unavailable");
                 break;
             }
+            const bool playWasActive = playSession_->active();
+            counters_.playMaximumSimulationTick = (std::max)(
+                counters_.playMaximumSimulationTick,
+                playSession_->snapshot().simulationTickCount);
             status = playSession_->stop();
             if (status) {
+                if (playWasActive) {
+                    ++counters_.playStops;
+                }
                 requiresPreviewValidation = true;
                 authoringFeedback_ = "Play session stopped; canonical authoring scene restored";
             }
             break;
+        }
         case EditorCommand::PaintTile:
             status = editTileMapBrushCell(false);
             if (status) {
@@ -14906,10 +15502,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool preserveViewportSelectionOnHierarchyPublish_ = false;
     std::array<UI::UIRoutedPointerListenerToken, 5> viewportPointerListeners_{};
     bool queuedFirstSelection_ = false;
-    bool queuedSecondSelection_ = false;
+    bool queuedSecondStyleUpdate_ = false;
     bool pendingAutoTransformInput_ = false;
     u32 autoAuthoringStage_ = 0;
     UI::UILogicalPoint autoGizmoStart_{};
+    UI::UILogicalPoint autoGizmoCenter_{};
+    u64 automaticPlayStepBaseline_ = 0;
+    u64 automaticDemoStartFrame_ = 0;
     mutable std::optional<Tina::Scene::World> previewWorld_{};
     mutable std::optional<Tina::Asset::TileMapInstance> previewTileMap_{};
     Tina::Asset::AssetHandle previewTilesetAsset_{};
@@ -14996,6 +15595,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<float> pendingViewportZoomPercent_{};
     std::optional<Tina::Editor::EditorMarqueeSelectionMode>
         pendingMarqueeSelectionMode_{};
+    std::optional<u32> pendingAutoParentStableId_{};
     bool pendingGizmoOrientationToggle_ = false;
     bool pendingGizmoSnapToggle_ = false;
     u64 observedPlaySessionRevision_ = 0;
@@ -15302,8 +15902,25 @@ class EditorApplication final : public Tina::IGameApplication {
         static_cast<double>(counters.viewportNormalizedY) + counters.viewportNormalizedHeight > 1.0 ||
         counters.documentEntityCount != InitialAuthoringEntityCount ||
         counters.cookPreviewBytes != expectedCookBytes) {
+        std::string message = "Tina Editor lifecycle counters did not match contract";
+        if (options.autoDemo) {
+            message += ": stage=";
+            message += std::to_string(counters.automaticAuthoringStage);
+            message += ", frames=";
+            message += std::to_string(counters.frameUpdates);
+            message += ", entities=";
+            message += std::to_string(counters.documentEntityCount);
+            message += ", gizmo(begin/preview/commit/reject)=";
+            message += std::to_string(counters.viewportGizmoBegins);
+            message += "/";
+            message += std::to_string(counters.viewportGizmoPreviews);
+            message += "/";
+            message += std::to_string(counters.viewportGizmoCommits);
+            message += "/";
+            message += std::to_string(counters.viewportGizmoRejects);
+        }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "Tina Editor lifecycle counters did not match contract");
+                                   std::move(message));
     }
     if (options.sourceImport.importOnStart &&
         (counters.sourceImportStarts != 1U ||
@@ -15368,12 +15985,25 @@ class EditorApplication final : public Tina::IGameApplication {
         const bool gizmoDeltaFinite =
             std::isfinite(counters.viewportGizmoWorldDeltaX) &&
             std::isfinite(counters.viewportGizmoWorldDeltaY) &&
-            std::isfinite(counters.viewportGizmoWorldDeltaZ);
+            std::isfinite(counters.viewportGizmoWorldDeltaZ) &&
+            std::isfinite(counters.viewportGizmoRotationDegrees) &&
+            std::isfinite(counters.viewportGizmoScaleFactorX) &&
+            std::isfinite(counters.viewportGizmoScaleFactorY) &&
+            std::isfinite(counters.viewportGizmoScaleFactorZ);
         constexpr float GizmoDeltaEpsilon = 1.0e-5F;
-        const bool gizmoChangedTransform =
+        const bool gizmoTranslated =
             std::abs(counters.viewportGizmoWorldDeltaX) > GizmoDeltaEpsilon ||
             std::abs(counters.viewportGizmoWorldDeltaY) > GizmoDeltaEpsilon ||
             std::abs(counters.viewportGizmoWorldDeltaZ) > GizmoDeltaEpsilon;
+        const bool gizmoRotated =
+            std::abs(counters.viewportGizmoRotationDegrees) > GizmoDeltaEpsilon;
+        const bool gizmoScaled =
+            std::abs(counters.viewportGizmoScaleFactorX - 1.0F) >
+                GizmoDeltaEpsilon ||
+            std::abs(counters.viewportGizmoScaleFactorY - 1.0F) >
+                GizmoDeltaEpsilon ||
+            std::abs(counters.viewportGizmoScaleFactorZ - 1.0F) >
+                GizmoDeltaEpsilon;
         const bool gameplayGenerationMatches =
             world2D
                 ? counters.tileMapGameplayGenerations != 0U &&
@@ -15388,10 +16018,46 @@ class EditorApplication final : public Tina::IGameApplication {
             counters.hierarchySelectionChanges == 0U || counters.styleTokenUpdates < 2U ||
             counters.authoringEdits < 3U || counters.inspectorTransactions != 1U ||
             counters.inspectorRejectedTransactions != 0U ||
-            counters.viewportGizmoBegins != 1U || counters.viewportGizmoPreviews == 0U ||
-            counters.viewportGizmoCommits != 1U || counters.viewportGizmoCancels != 0U ||
+            counters.viewportGizmoBegins != 3U || counters.viewportGizmoPreviews < 3U ||
+            counters.viewportGizmoCommits != 3U ||
+            counters.viewportTranslateGizmoCommits != 1U ||
+            counters.viewportRotateGizmoCommits != 1U ||
+            counters.viewportScaleGizmoCommits != 1U ||
+            counters.viewportGroupGizmoCommits != 2U ||
+            counters.viewportGroupRotateGizmoCommits != 1U ||
+            counters.viewportGroupScaleGizmoCommits != 1U ||
+            counters.viewportMaximumGizmoTargets < 2U ||
+            counters.viewportGizmoCancels != 0U ||
             counters.viewportGizmoRejects != 0U || !gizmoDeltaFinite ||
-            !gizmoChangedTransform || counters.authoringUndos == 0U ||
+            !gizmoTranslated || !gizmoRotated || !gizmoScaled ||
+            counters.viewportNavigationBatches < 2U ||
+            counters.viewportPan2DInputs == 0U ||
+            counters.viewportZoom2DInputs == 0U ||
+            counters.viewportOrbit3DInputs == 0U ||
+            counters.viewportPan3DInputs == 0U ||
+            counters.viewportDolly3DInputs == 0U ||
+            counters.viewportMarqueeCommits != 3U ||
+            counters.viewportMarqueeReplaceCommits != 1U ||
+            counters.viewportMarqueeAddCommits != 1U ||
+            counters.viewportMarqueeToggleCommits != 1U ||
+            counters.viewportMarqueeSelectionChanges != 3U ||
+            counters.viewportMarqueeAddedItems == 0U ||
+            counters.viewportMarqueeRemovedItems == 0U ||
+            counters.viewportMarqueeMaximumSelection < 2U ||
+            counters.viewportMarqueeCancels != 0U ||
+            counters.viewportMarqueeRejects != 0U ||
+            counters.sceneAddCommands != 1U ||
+            counters.sceneDuplicateCommands != 1U ||
+            counters.sceneReparentRootCommands != 1U ||
+            counters.sceneReparentCommands != 1U ||
+            counters.sceneDeleteCommands != 2U ||
+            counters.automaticAddedStableId == 0U ||
+            counters.automaticDuplicatedStableId == 0U ||
+            counters.playStarts != 1U || counters.playPauses != 1U ||
+            counters.playStepRequests != 1U || counters.playResumes != 1U ||
+            counters.playStops != 1U || counters.playSimulationSteps == 0U ||
+            counters.playMaximumSimulationTick == 0U ||
+            counters.authoringUndos == 0U ||
             counters.authoringUndos != counters.authoringRedos ||
             counters.animationEdits == 0U || counters.animationUndos == 0U ||
             counters.animationUndos != counters.animationRedos ||
@@ -15402,8 +16068,13 @@ class EditorApplication final : public Tina::IGameApplication {
             counters.gpuViewportDocumentRevision != counters.documentRevision ||
             counters.documentUndoDepth == 0U || counters.documentRedoDepth != 0U ||
             !selectedTransformFinite || !gameplayGenerationMatches) {
+            std::string message =
+                "Tina Editor automatic authoring demo did not finish: stage=";
+            message += std::to_string(counters.automaticAuthoringStage);
+            message += "/";
+            message += std::to_string(AutomaticAuthoringStageCount);
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "Tina Editor automatic authoring demo did not finish");
+                                       std::move(message));
         }
         if (counters.automaticFinalSelectionStableId == 0U ||
             counters.finalSelectionKey == UI::InvalidUITreeViewItemKey ||
@@ -15580,8 +16251,67 @@ class EditorApplication final : public Tina::IGameApplication {
               << ",\"viewportGizmoBegins\":" << counters.viewportGizmoBegins
               << ",\"viewportGizmoPreviews\":" << counters.viewportGizmoPreviews
               << ",\"viewportGizmoCommits\":" << counters.viewportGizmoCommits
+              << ",\"viewportTranslateGizmoCommits\":"
+              << counters.viewportTranslateGizmoCommits
+              << ",\"viewportRotateGizmoCommits\":"
+              << counters.viewportRotateGizmoCommits
+              << ",\"viewportScaleGizmoCommits\":"
+              << counters.viewportScaleGizmoCommits
+              << ",\"viewportGroupGizmoCommits\":"
+              << counters.viewportGroupGizmoCommits
+              << ",\"viewportGroupRotateGizmoCommits\":"
+              << counters.viewportGroupRotateGizmoCommits
+              << ",\"viewportGroupScaleGizmoCommits\":"
+              << counters.viewportGroupScaleGizmoCommits
+              << ",\"viewportMaximumGizmoTargets\":"
+              << counters.viewportMaximumGizmoTargets
               << ",\"viewportGizmoCancels\":" << counters.viewportGizmoCancels
               << ",\"viewportGizmoRejects\":" << counters.viewportGizmoRejects
+              << ",\"viewportNavigationBatches\":"
+              << counters.viewportNavigationBatches
+              << ",\"viewportPan2DInputs\":" << counters.viewportPan2DInputs
+              << ",\"viewportZoom2DInputs\":" << counters.viewportZoom2DInputs
+              << ",\"viewportOrbit3DInputs\":" << counters.viewportOrbit3DInputs
+              << ",\"viewportPan3DInputs\":" << counters.viewportPan3DInputs
+              << ",\"viewportDolly3DInputs\":" << counters.viewportDolly3DInputs
+              << ",\"viewportMarqueeCommits\":" << counters.viewportMarqueeCommits
+              << ",\"viewportMarqueeReplaceCommits\":"
+              << counters.viewportMarqueeReplaceCommits
+              << ",\"viewportMarqueeAddCommits\":"
+              << counters.viewportMarqueeAddCommits
+              << ",\"viewportMarqueeToggleCommits\":"
+              << counters.viewportMarqueeToggleCommits
+              << ",\"viewportMarqueeSelectionChanges\":"
+              << counters.viewportMarqueeSelectionChanges
+              << ",\"viewportMarqueeAddedItems\":"
+              << counters.viewportMarqueeAddedItems
+              << ",\"viewportMarqueeRemovedItems\":"
+              << counters.viewportMarqueeRemovedItems
+              << ",\"viewportMarqueeMaximumSelection\":"
+              << counters.viewportMarqueeMaximumSelection
+              << ",\"viewportMarqueeCancels\":"
+              << counters.viewportMarqueeCancels
+              << ",\"viewportMarqueeRejects\":"
+              << counters.viewportMarqueeRejects
+              << ",\"sceneAddCommands\":" << counters.sceneAddCommands
+              << ",\"sceneDuplicateCommands\":" << counters.sceneDuplicateCommands
+              << ",\"sceneReparentRootCommands\":"
+              << counters.sceneReparentRootCommands
+              << ",\"sceneReparentCommands\":" << counters.sceneReparentCommands
+              << ",\"sceneDeleteCommands\":" << counters.sceneDeleteCommands
+              << ",\"automaticAddedStableId\":" << counters.automaticAddedStableId
+              << ",\"automaticDuplicatedStableId\":"
+              << counters.automaticDuplicatedStableId
+              << ",\"automaticAuthoringStage\":"
+              << counters.automaticAuthoringStage
+              << ",\"playStarts\":" << counters.playStarts
+              << ",\"playPauses\":" << counters.playPauses
+              << ",\"playStepRequests\":" << counters.playStepRequests
+              << ",\"playResumes\":" << counters.playResumes
+              << ",\"playStops\":" << counters.playStops
+              << ",\"playSimulationSteps\":" << counters.playSimulationSteps
+              << ",\"playMaximumSimulationTick\":"
+              << counters.playMaximumSimulationTick
               << ",\"viewportGridRevision\":" << counters.viewportGridRevision
               << ",\"viewportGridSegments\":" << counters.viewportGridSegments
               << ",\"viewportGridMinorLines\":" << counters.viewportGridMinorLines
@@ -15678,6 +16408,14 @@ class EditorApplication final : public Tina::IGameApplication {
               << ",\"viewportGizmoWorldDeltaX\":" << counters.viewportGizmoWorldDeltaX
               << ",\"viewportGizmoWorldDeltaY\":" << counters.viewportGizmoWorldDeltaY
               << ",\"viewportGizmoWorldDeltaZ\":" << counters.viewportGizmoWorldDeltaZ
+              << ",\"viewportGizmoRotationDegrees\":"
+              << counters.viewportGizmoRotationDegrees
+              << ",\"viewportGizmoScaleFactorX\":"
+              << counters.viewportGizmoScaleFactorX
+              << ",\"viewportGizmoScaleFactorY\":"
+              << counters.viewportGizmoScaleFactorY
+              << ",\"viewportGizmoScaleFactorZ\":"
+              << counters.viewportGizmoScaleFactorZ
               << ",\"runtimePreviewInstantiations\":" << counters.runtimePreviewInstantiations
               << ",\"runtimePreviewValid\":" << (counters.runtimePreviewValid ? "true" : "false")
               << ",\"documentRevision\":" << counters.documentRevision
