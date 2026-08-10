@@ -39,59 +39,19 @@ auto EditorWorkspaceState::refreshDocumentTabsUi(
 }
 
 auto EditorWorkspaceState::findDocumentSession(Tina::Editor::EditorDocumentKey key) noexcept -> WorkspaceSessionState*{
-    if (key == world2DSession_.key) {
-        return &world2DSession_;
-    }
-    if (key == world3DSession_.key) {
-        return &world3DSession_;
-    }
-    for (auto& slot : tabDocumentSessions_) {
-        if (slot.has_value() && slot->key == key) {
-            return &*slot;
-        }
-    }
-    return nullptr;
+    return documentSessions_.find(key);
 }
 
 auto EditorWorkspaceState::findDocumentSession(Tina::Editor::EditorDocumentKey key) const noexcept -> const WorkspaceSessionState*{
-    if (key == world2DSession_.key) {
-        return &world2DSession_;
-    }
-    if (key == world3DSession_.key) {
-        return &world3DSession_;
-    }
-    for (const auto& slot : tabDocumentSessions_) {
-        if (slot.has_value() && slot->key == key) {
-            return &*slot;
-        }
-    }
-    return nullptr;
+    return documentSessions_.find(key);
 }
 
 auto EditorWorkspaceState::installDocumentSession(WorkspaceSessionState session) -> Tina::Core::Status{
-    if (findDocumentSession(session.key) != nullptr) {
-        return Tina::Core::failure(
-            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
-            "Editor document already owns a save session");
-    }
-    for (auto& slot : tabDocumentSessions_) {
-        if (!slot.has_value()) {
-            slot.emplace(std::move(session));
-            return Tina::Core::success();
-        }
-    }
-    return Tina::Core::failure(
-        Tina::Editor::EditorErrorCode::DocumentTabCapacityExceeded,
-        "Editor document save session capacity is exhausted");
+    return documentSessions_.install(std::move(session));
 }
 
 auto EditorWorkspaceState::discardDocumentSession(Tina::Editor::EditorDocumentKey key) noexcept -> void{
-    for (auto& slot : tabDocumentSessions_) {
-        if (slot.has_value() && slot->key == key) {
-            slot.reset();
-            return;
-        }
-    }
+    documentSessions_.discard(key);
 }
 
 auto EditorWorkspaceState::initializePinnedDocumentSessions() -> Tina::Core::Status{
@@ -165,16 +125,7 @@ auto EditorWorkspaceState::activeDocumentSession() const noexcept -> const Works
 auto EditorWorkspaceState::documentPathOwnedByOtherSession(
     std::string_view path,
     Tina::Editor::EditorDocumentKey activeKey) const noexcept -> bool{
-    const auto ownsPath = [path, activeKey](const WorkspaceSessionState& session) {
-        return session.key != activeKey && session.documentPathUtf8 == path;
-    };
-    if (ownsPath(world2DSession_) || ownsPath(world3DSession_)) {
-        return true;
-    }
-    return std::any_of(tabDocumentSessions_.begin(), tabDocumentSessions_.end(),
-                       [&](const auto& slot) {
-                           return slot.has_value() && ownsPath(*slot);
-                       });
+    return documentSessions_.pathOwnedByOtherSession(path, activeKey);
 }
 
 auto EditorWorkspaceState::refreshToolbarPathForActiveTab(
@@ -205,21 +156,11 @@ auto EditorWorkspaceState::activeAuthoringDocumentOwner(Tina::Editor::EditorDocu
 }
 
 auto EditorWorkspaceState::findSuspendedAuthoringDocument(Tina::Editor::EditorDocumentKey key) const noexcept -> const SuspendedTabAuthoringDocument*{
-    for (const auto& slot : suspendedAuthoringDocuments_) {
-        if (slot.has_value() && slot->key == key) {
-            return &*slot;
-        }
-    }
-    return nullptr;
+    return documentSessions_.findSuspended(key);
 }
 
 auto EditorWorkspaceState::findSuspendedAuthoringDocument(Tina::Editor::EditorDocumentKey key) noexcept -> SuspendedTabAuthoringDocument*{
-    for (auto& slot : suspendedAuthoringDocuments_) {
-        if (slot.has_value() && slot->key == key) {
-            return &*slot;
-        }
-    }
-    return nullptr;
+    return documentSessions_.findSuspended(key);
 }
 
 auto EditorWorkspaceState::switchActiveAuthoringDocument(Tina::Editor::EditorDocumentKey key) noexcept -> Tina::Core::Status{
@@ -282,29 +223,14 @@ auto EditorWorkspaceState::installNewAuthoringDocument(Tina::Editor::EditorDocum
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "Catalog document kind cannot own an authoring tab");
     }
-    std::optional<SuspendedTabAuthoringDocument>* emptySlot = nullptr;
-    for (auto& slot : suspendedAuthoringDocuments_) {
-        if (!slot.has_value()) {
-            emptySlot = &slot;
-            break;
-        }
-    }
-    if (emptySlot == nullptr) {
-        return Tina::Core::failure(
-            Tina::Editor::EditorErrorCode::DocumentTabCapacityExceeded,
-            "Editor authoring document state capacity is exhausted");
-    }
-    try {
-        emptySlot->emplace(SuspendedTabAuthoringDocument{
+    if (auto status = documentSessions_.storeSuspended(SuspendedTabAuthoringDocument{
             .key = key,
             .document = std::move(document),
-        });
-    } catch (const std::bad_alloc&) {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
-                                   "Editor authoring tab state allocation failed");
+        }); !status) {
+        return status;
     }
     if (auto status = switchActiveAuthoringDocument(key); !status) {
-        emptySlot->reset();
+        documentSessions_.discardSuspended(key);
         return status;
     }
     return Tina::Core::success();
@@ -312,14 +238,7 @@ auto EditorWorkspaceState::installNewAuthoringDocument(Tina::Editor::EditorDocum
 
 auto EditorWorkspaceState::discardSuspendedAuthoringDocument(
     Tina::Editor::EditorDocumentKey key) noexcept -> void{
-    if (auto* slot = findSuspendedAuthoringDocument(key); slot != nullptr) {
-        for (auto& candidate : suspendedAuthoringDocuments_) {
-            if (candidate.has_value() && &*candidate == slot) {
-                candidate.reset();
-                return;
-            }
-        }
-    }
+    documentSessions_.discardSuspended(key);
 }
 
 auto EditorWorkspaceState::loadProjectAssetDocument(
@@ -1033,15 +952,15 @@ auto EditorWorkspaceState::saveActiveDocument(
 }
 
 auto EditorWorkspaceState::activeWorkspaceSession() noexcept -> WorkspaceSessionState&{
-    return workspaceMode_ == WorkspaceMode::World2D ? world2DSession_ : world3DSession_;
+    return documentSessions_.workspaceSession(workspaceMode_);
 }
 
 auto EditorWorkspaceState::activeWorkspaceSession() const noexcept -> const WorkspaceSessionState&{
-    return workspaceMode_ == WorkspaceMode::World2D ? world2DSession_ : world3DSession_;
+    return documentSessions_.workspaceSession(workspaceMode_);
 }
 
 auto EditorWorkspaceState::workspaceSession(WorkspaceMode mode) const noexcept -> const WorkspaceSessionState&{
-    return mode == WorkspaceMode::World2D ? world2DSession_ : world3DSession_;
+    return documentSessions_.workspaceSession(mode);
 }
 
 auto EditorWorkspaceState::documentBytes(WorkspaceMode mode) const noexcept -> std::span<const std::byte>{
@@ -1112,16 +1031,16 @@ auto EditorWorkspaceState::publishWorkspaceSessionCounters() noexcept -> void{
     const WorkspaceSessionState* active = activeDocumentSession();
 
     counters_.finalWorkspaceWorld2D = workspaceMode_ == WorkspaceMode::World2D;
-    counters_.world2DDocumentPathConfigured = world2DSession_.hasDocumentPath();
-    counters_.world3DDocumentPathConfigured = world3DSession_.hasDocumentPath();
-    counters_.world2DDocumentLoaded = world2DSession_.loadedFromPath;
-    counters_.world3DDocumentLoaded = world3DSession_.loadedFromPath;
+    counters_.world2DDocumentPathConfigured = documentSessions_.workspaceSession(WorkspaceMode::World2D).hasDocumentPath();
+    counters_.world3DDocumentPathConfigured = documentSessions_.workspaceSession(WorkspaceMode::World3D).hasDocumentPath();
+    counters_.world2DDocumentLoaded = documentSessions_.workspaceSession(WorkspaceMode::World2D).loadedFromPath;
+    counters_.world3DDocumentLoaded = documentSessions_.workspaceSession(WorkspaceMode::World3D).loadedFromPath;
     counters_.world2DDocumentDirty = world2DDirty;
     counters_.world3DDocumentDirty = world3DDirty;
     counters_.world2DSavedSnapshotBytes =
-        world2DSession_.savedBaseline.primaryBytes.size();
+        documentSessions_.workspaceSession(WorkspaceMode::World2D).savedBaseline.primaryBytes.size();
     counters_.world3DSavedSnapshotBytes =
-        world3DSession_.savedBaseline.primaryBytes.size();
+        documentSessions_.workspaceSession(WorkspaceMode::World3D).savedBaseline.primaryBytes.size();
     counters_.documentPathConfigured =
         active != nullptr && active->hasDocumentPath();
     counters_.documentLoaded = active != nullptr && active->loadedFromPath;

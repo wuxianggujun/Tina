@@ -1994,6 +1994,156 @@ struct SuspendedTabAuthoringDocument final {
     Tina::Editor::EditorDocumentKey key{};
     TabAuthoringDocument document;
 };
+
+// Owner of every document save session (the two pinned workspace sessions plus
+// the bounded per-tab sessions) and of the suspended per-tab authoring
+// documents. Sessions are found by document key; the two workspace sessions
+// are fixed and can only be replaced through workspaceSession() references.
+class EditorDocumentSessionStore final {
+  public:
+    EditorDocumentSessionStore(WorkspaceSessionState world2DSession,
+                               WorkspaceSessionState world3DSession) noexcept
+        : world2DSession_(std::move(world2DSession)),
+          world3DSession_(std::move(world3DSession))
+    {
+    }
+
+    [[nodiscard]] WorkspaceSessionState& workspaceSession(WorkspaceMode mode) noexcept
+    {
+        return mode == WorkspaceMode::World2D ? world2DSession_ : world3DSession_;
+    }
+    [[nodiscard]] const WorkspaceSessionState& workspaceSession(WorkspaceMode mode) const noexcept
+    {
+        return mode == WorkspaceMode::World2D ? world2DSession_ : world3DSession_;
+    }
+
+    [[nodiscard]] WorkspaceSessionState* find(Tina::Editor::EditorDocumentKey key) noexcept
+    {
+        if (key == world2DSession_.key) {
+            return &world2DSession_;
+        }
+        if (key == world3DSession_.key) {
+            return &world3DSession_;
+        }
+        for (auto& slot : tabSessions_) {
+            if (slot.has_value() && slot->key == key) {
+                return &*slot;
+            }
+        }
+        return nullptr;
+    }
+    [[nodiscard]] const WorkspaceSessionState* find(Tina::Editor::EditorDocumentKey key) const noexcept
+    {
+        return const_cast<EditorDocumentSessionStore*>(this)->find(key);
+    }
+
+    [[nodiscard]] Tina::Core::Status install(WorkspaceSessionState session)
+    {
+        if (find(session.key) != nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Editor document already owns a save session");
+        }
+        for (auto& slot : tabSessions_) {
+            if (!slot.has_value()) {
+                slot.emplace(std::move(session));
+                return Tina::Core::success();
+            }
+        }
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::DocumentTabCapacityExceeded,
+            "Editor document save session capacity is exhausted");
+    }
+
+    void discard(Tina::Editor::EditorDocumentKey key) noexcept
+    {
+        for (auto& slot : tabSessions_) {
+            if (slot.has_value() && slot->key == key) {
+                slot.reset();
+                return;
+            }
+        }
+    }
+
+    [[nodiscard]] bool pathOwnedByOtherSession(
+        std::string_view path, Tina::Editor::EditorDocumentKey activeKey) const noexcept
+    {
+        const auto ownsPath = [path, activeKey](const WorkspaceSessionState& session) {
+            return session.key != activeKey && session.documentPathUtf8 == path;
+        };
+        if (ownsPath(world2DSession_) || ownsPath(world3DSession_)) {
+            return true;
+        }
+        return std::any_of(tabSessions_.begin(), tabSessions_.end(),
+                           [&](const auto& slot) {
+                               return slot.has_value() && ownsPath(*slot);
+                           });
+    }
+
+    [[nodiscard]] SuspendedTabAuthoringDocument* findSuspended(
+        Tina::Editor::EditorDocumentKey key) noexcept
+    {
+        for (auto& slot : suspendedDocuments_) {
+            if (slot.has_value() && slot->key == key) {
+                return &*slot;
+            }
+        }
+        return nullptr;
+    }
+    [[nodiscard]] const SuspendedTabAuthoringDocument* findSuspended(
+        Tina::Editor::EditorDocumentKey key) const noexcept
+    {
+        return const_cast<EditorDocumentSessionStore*>(this)->findSuspended(key);
+    }
+
+    [[nodiscard]] Tina::Core::Status storeSuspended(SuspendedTabAuthoringDocument suspended)
+    {
+        for (auto& slot : suspendedDocuments_) {
+            if (!slot.has_value()) {
+                try {
+                    slot.emplace(std::move(suspended));
+                } catch (const std::bad_alloc&) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::OutOfMemory,
+                        "Editor authoring tab state allocation failed");
+                }
+                return Tina::Core::success();
+            }
+        }
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::DocumentTabCapacityExceeded,
+            "Editor authoring document state capacity is exhausted");
+    }
+
+    void discardSuspended(Tina::Editor::EditorDocumentKey key) noexcept
+    {
+        for (auto& slot : suspendedDocuments_) {
+            if (slot.has_value() && slot->key == key) {
+                slot.reset();
+                return;
+            }
+        }
+    }
+
+    // Project switches drop every per-tab session and suspended document but
+    // keep the two pinned workspace sessions.
+    void resetTabState() noexcept
+    {
+        for (auto& slot : suspendedDocuments_) {
+            slot.reset();
+        }
+        for (auto& slot : tabSessions_) {
+            slot.reset();
+        }
+    }
+
+  private:
+    WorkspaceSessionState world2DSession_{};
+    WorkspaceSessionState world3DSession_{};
+    std::array<std::optional<WorkspaceSessionState>, DocumentTabSlots> tabSessions_{};
+    std::array<std::optional<SuspendedTabAuthoringDocument>, DocumentTabSlots>
+        suspendedDocuments_{};
+};
 struct World3DPreviewBinding final {
     u32 stableNodeId = 0;
     Tina::Scene::EntityId entity{};
@@ -2415,8 +2565,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
           document3D_(std::move(world3D)), tileMapDocument_(std::move(tileMap)),
           spriteAnimationDocument_(std::move(spriteAnimation)),
           workspaceMode_(options_.initialWorkspace),
-          world2DSession_(std::move(world2DSession)),
-          world3DSession_(std::move(world3DSession)),
+          documentSessions_(std::move(world2DSession), std::move(world3DSession)),
           projectAssets_(std::move(projectAssets)),
           documentTabs_(std::move(documentTabs)), assetResources_(assetResources),
           renderDeviceAccess_(renderDeviceAccess),
@@ -2902,13 +3051,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         .kind = Tina::Editor::EditorDocumentKind::SpriteAnimation2D,
         .assetId = editorAssetId(0x50U),
     };
-    std::array<std::optional<SuspendedTabAuthoringDocument>, DocumentTabSlots>
-        suspendedAuthoringDocuments_{};
-    std::array<std::optional<WorkspaceSessionState>, DocumentTabSlots>
-        tabDocumentSessions_{};
     WorkspaceMode workspaceMode_ = WorkspaceMode::World2D;
-    WorkspaceSessionState world2DSession_{};
-    WorkspaceSessionState world3DSession_{};
+    EditorDocumentSessionStore documentSessions_;
     Tina::Editor::ProjectAssetBrowserModel projectAssets_;
     Tina::Editor::EditorDocumentTabs documentTabs_;
     std::optional<Tina::Editor::EditorProjectWorkspace> pendingProjectSwitch_{};

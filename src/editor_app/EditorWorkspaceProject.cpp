@@ -251,12 +251,7 @@ auto EditorWorkspaceState::refreshPinnedCatalogAuthoringDocuments(
 auto EditorWorkspaceState::commitProjectSwitchDocumentTabs(
     Tina::Editor::EditorDocumentTabs candidateTabs) noexcept -> void{
     documentTabs_ = std::move(candidateTabs);
-    for (auto& slot : suspendedAuthoringDocuments_) {
-        slot.reset();
-    }
-    for (auto& slot : tabDocumentSessions_) {
-        slot.reset();
-    }
+    documentSessions_.resetTabState();
     pendingDirtyCloseKey_.reset();
     assetInspectorActive_ = false;
     synchronizeViewportSelectionFromHierarchy();
