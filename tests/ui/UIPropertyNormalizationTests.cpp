@@ -35,6 +35,57 @@ TEST(UIPropertyNormalizationTests, BoxPaintDropsInvisibleChrome)
     EXPECT_EQ(normalized.cornerRadius, 0.0F);
 }
 
+TEST(UIPropertyNormalizationTests, BoxPaintPreservesValidEllipseAndLineGeometry)
+{
+    const UI::UIBoxPaint ellipse = UI::Detail::normalizeBoxPaint(
+        UI::makeSolidEllipse(UI::rgb(0x336699), 2.5F));
+    ASSERT_TRUE(ellipse.solidFill.has_value());
+    EXPECT_EQ(ellipse.primitive, UI::UIBoxPrimitiveKind::Ellipse);
+    EXPECT_FLOAT_EQ(ellipse.ellipseStrokeWidth, 2.5F);
+    EXPECT_EQ(ellipse.line, UI::UILineGeometry{});
+
+    const UI::UIBoxPaint line = UI::Detail::normalizeBoxPaint(
+        UI::makeSolidLine(UI::rgb(0xAABBCC), {.x = 1.0F, .y = 2.0F},
+                          {.x = 9.0F, .y = 6.0F}, 3.0F));
+    ASSERT_TRUE(line.solidFill.has_value());
+    EXPECT_EQ(line.primitive, UI::UIBoxPrimitiveKind::Line);
+    EXPECT_EQ(line.line.start, (UI::UILogicalPoint{.x = 1.0F, .y = 2.0F}));
+    EXPECT_EQ(line.line.end, (UI::UILogicalPoint{.x = 9.0F, .y = 6.0F}));
+    EXPECT_FLOAT_EQ(line.line.thickness, 3.0F);
+    EXPECT_FLOAT_EQ(line.ellipseStrokeWidth, 0.0F);
+}
+
+TEST(UIPropertyNormalizationTests, InvalidPrimitiveGeometryFailsClosed)
+{
+    const auto expectBlankRectangle = [](const UI::UIBoxPaint& paint) {
+        const UI::UIBoxPaint normalized = UI::Detail::normalizeBoxPaint(paint);
+        EXPECT_EQ(normalized.primitive, UI::UIBoxPrimitiveKind::Rectangle);
+        EXPECT_FALSE(normalized.solidFill.has_value());
+        EXPECT_EQ(normalized.line, UI::UILineGeometry{});
+        EXPECT_FLOAT_EQ(normalized.ellipseStrokeWidth, 0.0F);
+    };
+
+    UI::UIBoxPaint nonFiniteLine = UI::makeSolidLine(
+        UI::rgb(0xFFFFFF), {}, {.x = 8.0F, .y = 4.0F}, 2.0F);
+    nonFiniteLine.line.end.x = (std::numeric_limits<float>::quiet_NaN)();
+    expectBlankRectangle(nonFiniteLine);
+
+    expectBlankRectangle(UI::makeSolidLine(
+        UI::rgb(0xFFFFFF), {.x = 4.0F, .y = 3.0F},
+        {.x = 4.0F, .y = 3.0F}, 2.0F));
+    expectBlankRectangle(UI::makeSolidLine(
+        UI::rgb(0xFFFFFF), {}, {.x = 8.0F, .y = 4.0F}, 0.0F));
+
+    UI::UIBoxPaint nonFiniteEllipse = UI::makeSolidEllipse(UI::rgb(0xFFFFFF));
+    nonFiniteEllipse.ellipseStrokeWidth =
+        (std::numeric_limits<float>::quiet_NaN)();
+    expectBlankRectangle(nonFiniteEllipse);
+
+    UI::UIBoxPaint unknownPrimitive = UI::makeSolidBox(UI::rgb(0xFFFFFF));
+    unknownPrimitive.primitive = static_cast<UI::UIBoxPrimitiveKind>(255);
+    expectBlankRectangle(unknownPrimitive);
+}
+
 TEST(UIPropertyNormalizationTests, ContextCapacitiesDeriveFromNodeCapacity)
 {
     UI::UIContextCapacityConfig config{
@@ -157,6 +208,30 @@ TEST(UIPropertyNormalizationTests, LayoutCanonicalizesNegativeZeroAndRejectsInva
     auto rejected = UI::Detail::normalizeLayoutStyle(style);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
+}
+
+TEST(UIPropertyNormalizationTests, LayoutAllowsSignedOverlayOffsetsWithoutAllowingNegativeSizes)
+{
+    UI::UILayoutStyle style{};
+    style.placement = UI::UILayoutPlacement::Overlay;
+    style.overlay.offset.x = UI::UILayoutLength::Px(-2.5F);
+    style.overlay.offset.y = UI::UILayoutLength::Percent(-25.0F);
+
+    auto normalized = UI::Detail::normalizeLayoutStyle(style);
+    ASSERT_TRUE(normalized.has_value());
+    EXPECT_EQ(normalized->overlay.offset.x, UI::UILayoutLength::Px(-2.5F));
+    EXPECT_EQ(normalized->overlay.offset.y, UI::UILayoutLength::Percent(-25.0F));
+
+    style.overlay.offset.y = UI::UILayoutLength::Percent(-100.01F);
+    auto invalidOffset = UI::Detail::normalizeLayoutStyle(style);
+    ASSERT_FALSE(invalidOffset.has_value());
+    EXPECT_EQ(invalidOffset.error().code, UI::UIErrorCode::InvalidLayout);
+
+    style.overlay.offset.y = UI::UILayoutLength::Percent(-25.0F);
+    style.size.width = UI::UILayoutLength::Px(-1.0F);
+    auto invalidSize = UI::Detail::normalizeLayoutStyle(style);
+    ASSERT_FALSE(invalidSize.has_value());
+    EXPECT_EQ(invalidSize.error().code, UI::UIErrorCode::InvalidLayout);
 }
 
 TEST(UIPropertyNormalizationTests, ScrollOffsetRejectsNegativeAndCanonicalizesZero)

@@ -44,6 +44,25 @@ struct UIPremultipliedRgba8 final {
     auto operator<=>(const UIPremultipliedRgba8&) const = default;
 };
 
+struct UISubpixelPoint final {
+    float x = 0.0F;
+    float y = 0.0F;
+
+    auto operator<=>(const UISubpixelPoint&) const = default;
+};
+
+// Framebuffer-space corners in authored winding order. The names describe the
+// source quad before projection; anisotropic projection may produce a general
+// parallelogram rather than a screen-space rotated rectangle.
+struct UISolidQuadVertices final {
+    UISubpixelPoint topLeft{};
+    UISubpixelPoint topRight{};
+    UISubpixelPoint bottomRight{};
+    UISubpixelPoint bottomLeft{};
+
+    auto operator<=>(const UISolidQuadVertices&) const = default;
+};
+
 class UIClipId final {
   public:
     constexpr UIClipId() noexcept = default;
@@ -73,6 +92,7 @@ class UIClipId final {
 
 enum class UIDrawCommandKind : u8 {
     SolidQuad = 0,
+    SolidEllipse,
     // Glyph draws a textured quad from a CPU atlas page. Backend upload and
     // textured UI pass remain a later slice; builder/batch/checksum support
     // Glyph now so UI can emit placements without forcing GPU support.
@@ -101,6 +121,21 @@ struct UISolidQuadInput final {
     // Radius in framebuffer pixels. Must be finite, non-negative, and no
     // greater than half the smallest bounds extent.
     float cornerRadius = 0.0F;
+    // Optional exact subpixel geometry. bounds remains a conservative integer
+    // AABB for culling/clip decisions. Explicit vertices are SolidQuad-only,
+    // must form a finite strictly-convex quad covered by bounds, and cannot be
+    // combined with cornerRadius.
+    std::optional<UISolidQuadVertices> vertices{};
+    std::optional<UIPixelRect> effectiveClip{};
+};
+
+struct UISolidEllipseInput final {
+    u32 paintOrdinal = 0;
+    UIPixelRect bounds{};
+    UIPremultipliedRgba8 color{};
+    // Stroke width in framebuffer pixels. Zero draws a filled ellipse; a
+    // positive value draws an inward ring and must fit within the bounds.
+    float strokeWidth = 0.0F;
     std::optional<UIPixelRect> effectiveClip{};
 };
 
@@ -132,6 +167,10 @@ struct UIDrawCommand final {
     UIPixelRect bounds{};
     UIPremultipliedRgba8 color{};
     float cornerRadius = 0.0F;
+    // SolidQuad-only exact geometry; absent commands use bounds corners.
+    std::optional<UISolidQuadVertices> vertices{};
+    // SolidEllipse-only stroke width in framebuffer pixels. Zero means filled.
+    float strokeWidth = 0.0F;
     UIClipId clip{};
     UIPixelRect atlasUv{};
     u32 atlasPage = 0;
@@ -159,6 +198,7 @@ struct UIDisplayListCapacity final {
 
 struct UIDisplayListStatistics final {
     u32 solidQuadCommandCount = 0;
+    u32 solidEllipseCommandCount = 0;
     u32 glyphCommandCount = 0;
     u32 imageQuadCommandCount = 0;
     u32 clipCount = 0;
@@ -248,6 +288,7 @@ class UIDisplayListBuilder final {
 
     [[nodiscard]] Core::Status beginFrame();
     [[nodiscard]] Core::Status addSolidQuad(const UISolidQuadInput& input);
+    [[nodiscard]] Core::Status addSolidEllipse(const UISolidEllipseInput& input);
     // Emits a Glyph command with atlas UV placement. Does not upload textures.
     [[nodiscard]] Core::Status addGlyphQuad(const UIGlyphQuadInput& input);
     [[nodiscard]] Core::Status addImageQuad(const UIImageQuadInput& input);

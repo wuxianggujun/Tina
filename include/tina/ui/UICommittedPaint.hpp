@@ -12,6 +12,8 @@ namespace Tina::UI {
 
 enum class UICommittedPaintKind : u8 {
     SolidQuad = 0,
+    SolidEllipse,
+    SolidLine,
     Glyph,
     Image,
 };
@@ -30,7 +32,7 @@ struct UICommittedPaintEntry final {
     UILogicalRect worldRect{};
     UILogicalRect effectiveClip{};
     u32 paintOrdinal = 0;
-    // Premultiplied vertex/tint color for SolidQuad, Glyph, and Image.
+    // Premultiplied vertex/tint color for every paint kind.
     UIPremultipliedRgba8Color solidFill{};
     // Logical-pixel radius for SolidQuad paint. Integration projects and clamps
     // it before publishing the backend-neutral DisplayList command.
@@ -51,6 +53,13 @@ struct UICommittedPaintEntry final {
     // extents exposed to inspection; this point preserves their authored end
     // when float subtraction cannot be reversed exactly by addition.
     UILogicalPoint imageProjectionEnd{};
+    // SolidLine geometry is in committed logical coordinates. worldRect is a
+    // conservative envelope used for clipping and culling.
+    UILogicalPoint lineStart{};
+    UILogicalPoint lineEnd{};
+    float lineThickness = 0.0F;
+    // SolidEllipse stroke width in logical pixels; zero means filled.
+    float ellipseStrokeWidth = 0.0F;
 };
 
 // Owner-thread borrowed paint/composite snapshot. It is invalidated by the

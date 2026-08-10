@@ -4,6 +4,7 @@
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UITheme.hpp>
 
+#include <array>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -64,6 +65,136 @@ TEST(UIThemeTest, PanelBoxPaintIncludesBorderAndOptionalShadow)
     EXPECT_EQ(elevated.shadow, theme.shadow);
     EXPECT_EQ(elevated.shadowOffsetX, theme.panelShadowOffsetX);
     EXPECT_EQ(elevated.shadowOffsetY, theme.panelShadowOffsetY);
+}
+
+TEST(UIThemeTest, PrimitiveAuthoringHelpersPopulateGeometry)
+{
+    constexpr UI::UIStraightSrgba8Color color = UI::rgb(0x336699);
+    constexpr UI::UIBoxPaint ellipse = UI::makeSolidEllipse(color, 2.0F);
+    constexpr UI::UIBoxPaint outline = UI::makeEllipseOutline(color, 3.0F);
+    constexpr UI::UIBoxPaint line = UI::makeSolidLine(
+        color, {.x = 1.0F, .y = 2.0F}, {.x = 9.0F, .y = 6.0F}, 4.0F);
+
+    EXPECT_EQ(ellipse.primitive, UI::UIBoxPrimitiveKind::Ellipse);
+    ASSERT_TRUE(ellipse.solidFill.has_value());
+    EXPECT_EQ(ellipse.solidFill->color, color);
+    EXPECT_FLOAT_EQ(ellipse.ellipseStrokeWidth, 2.0F);
+    EXPECT_EQ(outline.primitive, UI::UIBoxPrimitiveKind::Ellipse);
+    EXPECT_FLOAT_EQ(outline.ellipseStrokeWidth, 3.0F);
+    EXPECT_EQ(line.primitive, UI::UIBoxPrimitiveKind::Line);
+    EXPECT_EQ(line.line.start,
+              (UI::UILogicalPoint{.x = 1.0F, .y = 2.0F}));
+    EXPECT_EQ(line.line.end,
+              (UI::UILogicalPoint{.x = 9.0F, .y = 6.0F}));
+    EXPECT_FLOAT_EQ(line.line.thickness, 4.0F);
+
+    constexpr UI::UICanvasCommand canvasEllipse = UI::makeCanvasEllipse(
+        {.x = 2.0F, .y = 3.0F, .width = 10.0F, .height = 8.0F},
+        color, 1.5F);
+    constexpr UI::UICanvasCommand canvasLine = UI::makeCanvasLine(
+        {.x = 3.0F, .y = 4.0F}, {.x = 11.0F, .y = 8.0F}, 2.5F,
+        color);
+    EXPECT_EQ(canvasEllipse.kind, UI::UICanvasCommandKind::SolidEllipse);
+    EXPECT_FLOAT_EQ(canvasEllipse.ellipseStrokeWidth, 1.5F);
+    EXPECT_EQ(canvasLine.kind, UI::UICanvasCommandKind::SolidLine);
+    EXPECT_EQ(canvasLine.lineStart,
+              (UI::UILogicalPoint{.x = 3.0F, .y = 4.0F}));
+    EXPECT_EQ(canvasLine.lineEnd,
+              (UI::UILogicalPoint{.x = 11.0F, .y = 8.0F}));
+    EXPECT_FLOAT_EQ(canvasLine.lineThickness, 2.5F);
+}
+
+TEST(UIThemeTest, CanvasLineAndEllipsePublishCommittedGeometry)
+{
+    const Platform::WindowId window = makeTestWindow();
+    auto contextResult = UI::UIContext::Create(
+        window,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 4,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 4,
+            .canvasCommandCapacity = 2,
+            .applyDefaultProductChrome = false,
+        });
+    ASSERT_TRUE(contextResult.has_value())
+        << (contextResult ? "" : contextResult.error().message);
+    auto context = std::move(*contextResult);
+    ASSERT_NE(context, nullptr);
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value())
+        << (rootResult ? "" : rootResult.error().message);
+    UI::UIRootOwner root = std::move(*rootResult);
+
+    const std::array commands{
+        UI::makeCanvasLine(
+            {.x = 2.0F, .y = 3.0F}, {.x = 12.0F, .y = 3.0F}, 4.0F,
+            UI::rgb(0xCC8844)),
+        UI::makeCanvasEllipse(
+            {.x = 14.0F, .y = 5.0F, .width = 10.0F, .height = 8.0F},
+            UI::rgb(0x336699), 2.0F),
+    };
+    UI::UILayoutStyle layout{};
+    layout.size = {
+        .width = UI::UILayoutLength::Px(40.0F),
+        .height = UI::UILayoutLength::Px(30.0F),
+    };
+    UI::UIElementDescriptor descriptor = UI::makePanelElement(layout);
+    descriptor.visual.canvas = commands;
+    auto element = context->rootBuilder().createElement(
+        root.rootNodeId(), descriptor);
+    ASSERT_TRUE(element.has_value())
+        << (element ? "" : element.error().message);
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 80.0F})
+                    .has_value());
+
+    std::array<const UI::UICommittedPaintEntry*, 2> paints{};
+    usize paintCount = 0;
+    for (const UI::UICommittedPaintEntry& entry : context->committedPaint())
+    {
+        if (entry.node == *element)
+        {
+            if (paintCount < paints.size())
+            {
+                paints[paintCount] = &entry;
+            }
+            ++paintCount;
+        }
+    }
+    ASSERT_EQ(paintCount, paints.size());
+    ASSERT_NE(paints[0], nullptr);
+    ASSERT_NE(paints[1], nullptr);
+
+    EXPECT_EQ(paints[0]->kind, UI::UICommittedPaintKind::SolidLine);
+    EXPECT_EQ(paints[0]->root, root.rootNodeId());
+    EXPECT_EQ(paints[0]->lineStart,
+              (UI::UILogicalPoint{.x = 2.0F, .y = 3.0F}));
+    EXPECT_EQ(paints[0]->lineEnd,
+              (UI::UILogicalPoint{.x = 12.0F, .y = 3.0F}));
+    EXPECT_FLOAT_EQ(paints[0]->lineThickness, 4.0F);
+    EXPECT_EQ(paints[0]->worldRect,
+              (UI::UILogicalRect{
+                  .x = 2.0F,
+                  .y = 1.0F,
+                  .width = 10.0F,
+                  .height = 4.0F,
+              }));
+    EXPECT_EQ(paints[0]->solidFill,
+              UI::premultiply(commands[0].color));
+
+    EXPECT_EQ(paints[1]->kind, UI::UICommittedPaintKind::SolidEllipse);
+    EXPECT_EQ(paints[1]->root, root.rootNodeId());
+    EXPECT_EQ(paints[1]->worldRect,
+              (UI::UILogicalRect{
+                  .x = 14.0F,
+                  .y = 5.0F,
+                  .width = 10.0F,
+                  .height = 8.0F,
+              }));
+    EXPECT_FLOAT_EQ(paints[1]->ellipseStrokeWidth, 2.0F);
+    EXPECT_EQ(paints[1]->solidFill,
+              UI::premultiply(commands[1].color));
+    EXPECT_LT(paints[0]->paintOrdinal, paints[1]->paintOrdinal);
 }
 
 TEST(UIThemeTest, PressedAndDisabledHelpersAreDeterministic)

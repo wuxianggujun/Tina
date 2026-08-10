@@ -1154,57 +1154,100 @@ auto EditorWorkspaceState::materializeViewportGizmoVisuals(
     };
     const auto appendLine = [&](Tina::Editor::EditorTransformGizmoPoint start,
                                 Tina::Editor::EditorTransformGizmoPoint end,
-                                u32 steps,
                                 Tina::Editor::EditorTransformGizmoHandle handle,
                                 bool highlighted) -> Tina::Core::Status {
         const UI::UIStraightSrgba8Color color =
             viewportGizmoColor(handle, highlighted);
         const float thickness = highlighted ? 3.0F : 2.0F;
-        for (u32 step = 0; step < steps; ++step) {
-            const float firstT = static_cast<float>(step) /
-                                 static_cast<float>(steps);
-            const float secondT = static_cast<float>(step + 1U) /
-                                  static_cast<float>(steps);
-            const Tina::Editor::EditorTransformGizmoPoint first{
-                .x = start.x + (end.x - start.x) * firstT,
-                .y = start.y + (end.y - start.y) * firstT,
-            };
-            const Tina::Editor::EditorTransformGizmoPoint second{
-                .x = start.x + (end.x - start.x) * secondT,
-                .y = start.y + (end.y - start.y) * secondT,
-            };
-            const float horizontalLength = std::abs(second.x - first.x);
-            if (horizontalLength > 1.0e-4F) {
-                if (auto status = appendRect(
-                        {
-                            .x = (std::min)(first.x, second.x) -
-                                 thickness * 0.5F,
-                            .y = first.y - thickness * 0.5F,
-                            .width = horizontalLength + thickness,
-                            .height = thickness,
-                        },
-                        color);
-                    !status) {
-                    return status;
-                }
-            }
-            const float verticalLength = std::abs(second.y - first.y);
-            if (verticalLength > 1.0e-4F) {
-                if (auto status = appendRect(
-                        {
-                            .x = second.x - thickness * 0.5F,
-                            .y = (std::min)(first.y, second.y) -
-                                 thickness * 0.5F,
-                            .width = thickness,
-                            .height = verticalLength + thickness,
-                        },
-                        color);
-                    !status) {
-                    return status;
-                }
-            }
+        if (!std::isfinite(start.x) || !std::isfinite(start.y) ||
+            !std::isfinite(end.x) || !std::isfinite(end.y) ||
+            !std::isfinite(thickness) || thickness <= 0.0F) {
+            return Tina::Core::success();
         }
-        return Tina::Core::success();
+
+        const float x0 = start.x - viewportLogicalRect_.x;
+        const float y0 = start.y - viewportLogicalRect_.y;
+        const float x1 = end.x - viewportLogicalRect_.x;
+        const float y1 = end.y - viewportLogicalRect_.y;
+        const float dx = x1 - x0;
+        const float dy = y1 - y0;
+        const float length = std::hypot(dx, dy);
+        if (!(std::isfinite(length) && length > 1.0e-4F)) {
+            return Tina::Core::success();
+        }
+        const float halfThickness = thickness * 0.5F;
+        const float extentX = std::abs(dy / length) * halfThickness;
+        const float extentY = std::abs(dx / length) * halfThickness;
+        const float left = (std::min)(x0, x1) - extentX;
+        const float top = (std::min)(y0, y1) - extentY;
+        const float right = (std::max)(x0, x1) + extentX;
+        const float bottom = (std::max)(y0, y1) + extentY;
+        if (right <= 0.0F || bottom <= 0.0F ||
+            left >= viewportLogicalRect_.width ||
+            top >= viewportLogicalRect_.height) {
+            return Tina::Core::success();
+        }
+        if (nodeCount == viewportGizmoVisualNodes_.size()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentCapacityExceeded,
+                "editor transform gizmo visual exceeded fixed node capacity");
+        }
+
+        UI::UILayoutStyle style = fixedSize(right - left, bottom - top);
+        style.placement = UI::UILayoutPlacement::Overlay;
+        style.overlay.horizontal = UI::UIAxisAlignment::Start;
+        style.overlay.vertical = UI::UIAxisAlignment::Start;
+        style.overlay.offset.x = UI::UILayoutLength::Px(left);
+        style.overlay.offset.y = UI::UILayoutLength::Px(top);
+        const UI::UINodeId node = viewportGizmoVisualNodes_[nodeCount++];
+        if (auto status = tree.setLayoutStyle(node, style); !status) {
+            return status;
+        }
+        UI::UIBoxPaint paint = UI::makeSolidLine(
+            color,
+            UI::UILogicalPoint{.x = x0 - left, .y = y0 - top},
+            UI::UILogicalPoint{.x = x1 - left, .y = y1 - top},
+            thickness);
+        return tree.setBoxPaint(node, paint);
+    };
+    const auto appendEllipseOutline = [&]
+        (Tina::Editor::EditorTransformGizmoPoint center, float radius,
+         Tina::Editor::EditorTransformGizmoHandle handle,
+         bool highlighted) -> Tina::Core::Status {
+        const UI::UIStraightSrgba8Color color =
+            viewportGizmoColor(handle, highlighted);
+        const float strokeWidth = highlighted ? 3.0F : 2.0F;
+        if (!std::isfinite(center.x) || !std::isfinite(center.y) ||
+            !std::isfinite(radius) || radius <= 0.0F) {
+            return Tina::Core::success();
+        }
+        const float localCenterX = center.x - viewportLogicalRect_.x;
+        const float localCenterY = center.y - viewportLogicalRect_.y;
+        const float left = localCenterX - radius;
+        const float top = localCenterY - radius;
+        const float diameter = radius * 2.0F;
+        if (left + diameter <= 0.0F || top + diameter <= 0.0F ||
+            left >= viewportLogicalRect_.width ||
+            top >= viewportLogicalRect_.height) {
+            return Tina::Core::success();
+        }
+        if (nodeCount == viewportGizmoVisualNodes_.size()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentCapacityExceeded,
+                "editor transform gizmo visual exceeded fixed node capacity");
+        }
+        UI::UILayoutStyle style = fixedSize(diameter, diameter);
+        style.placement = UI::UILayoutPlacement::Overlay;
+        style.overlay.horizontal = UI::UIAxisAlignment::Start;
+        style.overlay.vertical = UI::UIAxisAlignment::Start;
+        style.overlay.offset.x = UI::UILayoutLength::Px(left);
+        style.overlay.offset.y = UI::UILayoutLength::Px(top);
+        const UI::UINodeId node = viewportGizmoVisualNodes_[nodeCount++];
+        if (auto status = tree.setLayoutStyle(node, style); !status) {
+            return status;
+        }
+        return tree.setBoxPaint(
+            node, UI::makeEllipseOutline(color, strokeWidth));
     };
 
     for (const auto& geometry : snapshot.handles()) {
@@ -1212,41 +1255,18 @@ auto EditorWorkspaceState::materializeViewportGizmoVisuals(
                                  geometry.handle == snapshot.hoveredHandle;
         if (geometry.shape ==
             Tina::Editor::EditorTransformGizmoHandleShape::Segment) {
-            constexpr u32 SegmentSteps = 12;
             if (auto status = appendLine(geometry.points[0], geometry.points[1],
-                                         SegmentSteps, geometry.handle,
-                                         highlighted);
+                                         geometry.handle, highlighted);
                 !status) {
                 return status;
             }
         } else if (geometry.shape ==
                    Tina::Editor::EditorTransformGizmoHandleShape::Ring) {
-            constexpr u32 RingSteps = 24;
-            for (u32 step = 0; step < RingSteps; ++step) {
-                const float firstRadians =
-                    static_cast<float>(step) / static_cast<float>(RingSteps) *
-                    std::numbers::pi_v<float> * 2.0F;
-                const float secondRadians =
-                    static_cast<float>(step + 1U) /
-                    static_cast<float>(RingSteps) *
-                    std::numbers::pi_v<float> * 2.0F;
-                const Tina::Editor::EditorTransformGizmoPoint first{
-                    .x = geometry.points[0].x +
-                         std::cos(firstRadians) * geometry.radiusPixels,
-                    .y = geometry.points[0].y +
-                         std::sin(firstRadians) * geometry.radiusPixels,
-                };
-                const Tina::Editor::EditorTransformGizmoPoint second{
-                    .x = geometry.points[0].x +
-                         std::cos(secondRadians) * geometry.radiusPixels,
-                    .y = geometry.points[0].y +
-                         std::sin(secondRadians) * geometry.radiusPixels,
-                };
-                if (auto status = appendLine(first, second, 1U,
-                                             geometry.handle, highlighted);
-                    !status) {
-                    return status;
-                }
+            if (auto status = appendEllipseOutline(
+                    geometry.points[0], geometry.radiusPixels,
+                    geometry.handle, highlighted);
+                !status) {
+                return status;
             }
         } else {
             if (geometry.pointCount < 3U) {
@@ -1282,7 +1302,7 @@ auto EditorWorkspaceState::materializeViewportGizmoVisuals(
                 const u32 nextPoint = (pointIndex + 1U) % geometry.pointCount;
                 if (auto status = appendLine(
                         geometry.points[pointIndex], geometry.points[nextPoint],
-                        1U, geometry.handle, highlighted);
+                        geometry.handle, highlighted);
                     !status) {
                     return status;
                 }

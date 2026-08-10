@@ -255,6 +255,39 @@ TEST_F(UIPaintSnapshotTest, PublishesOnlyVisibleNonTransparentSolidFillsInPaintO
     EXPECT_EQ(findPaintEntry(paint, collapsed), nullptr);
 }
 
+TEST_F(UIPaintSnapshotTest, DescendantClipPreservesOverlayPaintGeometryAndClipsAtThePanelBorderBox)
+{
+    auto context = createContext(window, {.nodeCapacity = 3, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId paintedOverlay = createPanel(*context, panel);
+    auto updater = createUpdater(*context, root);
+
+    UI::UILayoutStyle panelStyle = fixedSize(50.0F, 40.0F);
+    panelStyle.placement = UI::UILayoutPlacement::Overlay;
+    panelStyle.overlay.offset.x = UI::UILayoutLength::Px(40.0F);
+    panelStyle.overlay.offset.y = UI::UILayoutLength::Px(30.0F);
+    panelStyle.clipDescendants = true;
+    expectOk(updater.setLayoutStyle(panel, panelStyle));
+
+    UI::UILayoutStyle overlayStyle = fixedSize(70.0F, 60.0F);
+    overlayStyle.placement = UI::UILayoutPlacement::Overlay;
+    overlayStyle.overlay.offset.x = UI::UILayoutLength::Px(-10.0F);
+    overlayStyle.overlay.offset.y = UI::UILayoutLength::Px(-5.0F);
+    expectOk(updater.setLayoutStyle(paintedOverlay, overlayStyle));
+    expectOk(updater.setBoxPaint(paintedOverlay, solidFill(80, 120, 160)));
+    expectOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+
+    const UI::UICommittedPaintEntry* paint = findPaintEntry(context->committedPaint(), paintedOverlay);
+    ASSERT_NE(paint, nullptr);
+    EXPECT_EQ(paint->worldRect,
+              (UI::UILogicalRect{.x = 30.0F, .y = 25.0F, .width = 70.0F, .height = 60.0F}));
+    EXPECT_EQ(paint->effectiveClip,
+              (UI::UILogicalRect{.x = 40.0F, .y = 30.0F, .width = 50.0F, .height = 40.0F}));
+}
+
 TEST_F(UIPaintSnapshotTest, MultipleRootsAndSiblingsPublishUniqueStrictPaintOrdinals)
 {
     auto context = createContext(window, {.nodeCapacity = 8, .rootCapacity = 2});

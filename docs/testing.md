@@ -1450,6 +1450,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003VisualGate.ps1 
 # 写入/更新本机金标（同机回归）：
 #   ... -WriteBaseline
 # 默认读取 tools/windows/baselines/ui-003-sample2d-960x540.json
+# 当截图 raster 与 logical 尺寸不同时，自动选择同目录的
+# ui-003-sample2d-960x540-raster-Npct.json，避免跨采样密度比较 avgRgb。
 
 # 逻辑 / content-scale-like 尺寸矩阵（非 OS Settings DPI；sample --width/--height）
 # 含 960×540 / 1200×675 / 1440×810 / 1280×720 / 1920×1080；按尺寸 ROI baseline
@@ -1462,7 +1464,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003SizeMatrix.ps1 
 逻辑窗口 content-scale-like 矩阵；sample JSON `logicalPixel*` / `framebufferPixel*` / `contentScale*`
 一致性（GLFW metrics，非 COM DPI API）；**字体 identity fingerprint**（`fontFingerprint`：env
 `TINA_UI_FONT_PATH` / repo fixture path、`sha256`、`freeTypeLikelyOn`、`identity`；baseline schema 3；
-与 baseline 不一致时默认 fail，`-AllowFontFingerprintMismatch` 可 provisional 跳过 ROI 比对）。
+与 baseline 不一致时默认 fail，`-AllowFontFingerprintMismatch` 可 provisional 跳过 ROI 比对）。ROI `rectPx`
+比较前会按各自 logical-to-capture scale 还原为 logical rect；avgRgb 金标按 raster scale 分文件保存。
 
 **未证明：** OS 显示缩放 100/150/200% 真机多 DPI 金标；多显示器混 DPI；跨 GPU 像素金标。
 

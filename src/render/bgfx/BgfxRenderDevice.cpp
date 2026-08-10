@@ -17,7 +17,6 @@
 #include "BgfxUIDisplayGeometry.hpp"
 #include "BgfxUIAtlasTexture.hpp"
 #include "BgfxUIImageShader.hpp"
-#include "BgfxUISolidQuadShader.hpp"
 #include "BgfxUITexturedShader.hpp"
 
 #include "../../integration/WindowSurfaceLeaseAccess.hpp"
@@ -248,7 +247,7 @@ static_assert(offsetof(BgfxUIDisplayVertex, u) == sizeof(float) * 2U + sizeof(u3
 static_assert(offsetof(BgfxUIDisplayVertex, v) == sizeof(float) * 3U + sizeof(u32));
 static_assert(offsetof(BgfxUIDisplayVertex, shapeWidth) == sizeof(float) * 4U + sizeof(u32));
 static_assert(offsetof(BgfxUIDisplayVertex, shapeHeight) == sizeof(float) * 5U + sizeof(u32));
-static_assert(offsetof(BgfxUIDisplayVertex, cornerRadius) == sizeof(float) * 6U + sizeof(u32));
+static_assert(offsetof(BgfxUIDisplayVertex, shapeParameter) == sizeof(float) * 6U + sizeof(u32));
 static_assert(sizeof(BgfxUIDisplayVertex) <= (std::numeric_limits<u16>::max)());
 static_assert(sizeof(BgfxOpaque3DInstanceData) <= (std::numeric_limits<u16>::max)());
 static_assert(std::is_standard_layout_v<BgfxSprite2DVertex>);
@@ -555,7 +554,9 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
             return Core::failure(RenderErrorCode::InvalidDrawCommand,
                                  "A bgfx UI draw batch is empty");
         }
-        if (batch.kind != UIDrawCommandKind::SolidQuad && batch.kind != UIDrawCommandKind::Glyph &&
+        if (batch.kind != UIDrawCommandKind::SolidQuad &&
+            batch.kind != UIDrawCommandKind::SolidEllipse &&
+            batch.kind != UIDrawCommandKind::Glyph &&
             batch.kind != UIDrawCommandKind::ImageQuad)
         {
             return Core::failure(RenderErrorCode::InvalidDrawCommand,
@@ -1015,7 +1016,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(uiProgram.error()));
         }
-        uiSolidQuadProgram_ = *uiProgram;
+        uiCoverageProgram_ = *uiProgram;
         ++statistics_.liveResources;
 
         auto uiImageProgram = ShaderDetail::createUIImageQuadProgram();
@@ -2097,10 +2098,10 @@ class BgfxRenderDevice final : public IRenderDevice {
                 }
             }
             texture2DBindings_.clear();
-            if (bgfx::isValid(uiSolidQuadProgram_))
+            if (bgfx::isValid(uiCoverageProgram_))
             {
-                bgfx::destroy(uiSolidQuadProgram_);
-                uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
+                bgfx::destroy(uiCoverageProgram_);
+                uiCoverageProgram_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(uiImageQuadProgram_))
@@ -2141,7 +2142,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 --statistics_.liveResources;
             }
             // Device-owned init resources (must match ++ in initialize):
-            // uiSolidQuadProgram, uiSolidWhiteTexture, uiTexColorUniform,
+            // uiCoverageProgram, uiSolidWhiteTexture, uiTexColorUniform,
             // sprite2DProgram, base/normal samplers, lighting/normal uniforms,
             // sprite2DDefaultTexture, sprite2DDefaultNormalTexture,
             // opaque3DProgram/shadowProgram, material/shadow/IBL samplers and uniforms,
@@ -4132,7 +4133,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
 
             bgfx::TextureHandle texture = uiSolidWhiteTexture_;
-            bgfx::ProgramHandle program = uiSolidQuadProgram_;
+            bgfx::ProgramHandle program = uiCoverageProgram_;
             u32 samplerFlags = BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_MIP_POINT;
             if (batch.kind == UIDrawCommandKind::Glyph)
             {
@@ -4338,7 +4339,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle sprite2DShadowSegmentsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle sprite2DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
-    bgfx::ProgramHandle uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle uiCoverageProgram_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiImageQuadProgram_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle uiSolidWhiteTexture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;

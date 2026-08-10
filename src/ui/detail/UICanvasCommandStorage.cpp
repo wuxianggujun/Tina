@@ -17,6 +17,11 @@ namespace {
            std::isfinite(bounds.height) && bounds.height >= 0.0F;
 }
 
+[[nodiscard]] bool hasValidPoint(const UILogicalPoint& point) noexcept
+{
+    return std::isfinite(point.x) && std::isfinite(point.y);
+}
+
 [[nodiscard]] bool hasValidDestinationInsets(const UIEdgeSpacing& insets) noexcept
 {
     return std::isfinite(insets.left) && insets.left >= 0.0F &&
@@ -42,8 +47,7 @@ namespace {
 
 [[nodiscard]] bool isValidCanvasCommand(const UICanvasCommand& command) noexcept
 {
-    if (!hasValidBounds(command.bounds) || !std::isfinite(command.cornerRadius) ||
-        command.cornerRadius < 0.0F)
+    if (!std::isfinite(command.cornerRadius) || command.cornerRadius < 0.0F)
     {
         return false;
     }
@@ -51,7 +55,22 @@ namespace {
     switch (command.kind)
     {
     case UICanvasCommandKind::SolidRect:
-        return true;
+        return hasValidBounds(command.bounds);
+    case UICanvasCommandKind::SolidEllipse:
+        return hasValidBounds(command.bounds) && command.bounds.width > 0.0F &&
+               command.bounds.height > 0.0F && command.cornerRadius == 0.0F &&
+               std::isfinite(command.ellipseStrokeWidth) && command.ellipseStrokeWidth >= 0.0F &&
+               command.ellipseStrokeWidth <=
+                   (std::min)(command.bounds.width, command.bounds.height) * 0.5F;
+    case UICanvasCommandKind::SolidLine:
+    {
+        const float length = std::hypot(
+            command.lineEnd.x - command.lineStart.x,
+            command.lineEnd.y - command.lineStart.y);
+        return command.cornerRadius == 0.0F && hasValidPoint(command.lineStart) &&
+               hasValidPoint(command.lineEnd) && std::isfinite(command.lineThickness) &&
+               command.lineThickness > 0.0F && std::isfinite(length) && length > 0.0F;
+    }
     case UICanvasCommandKind::Image:
         return command.cornerRadius == 0.0F && isValidImageSource(command.imageSource) &&
                isValidImageSampling(command.imageSampling) &&

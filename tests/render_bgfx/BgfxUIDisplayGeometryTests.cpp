@@ -132,7 +132,7 @@ TEST(BgfxUIDisplayGeometryTest, ExpandsTwoSolidQuadsInPaintOrderWithAbsoluteIndi
     {
         EXPECT_FLOAT_EQ(vertices[index].shapeWidth, 30.0F);
         EXPECT_FLOAT_EQ(vertices[index].shapeHeight, 40.0F);
-        EXPECT_FLOAT_EQ(vertices[index].cornerRadius, 6.0F);
+        EXPECT_FLOAT_EQ(vertices[index].shapeParameter, 6.0F);
     }
 
     constexpr u32 SecondAbgr = 0xFF1E140AU;
@@ -142,7 +142,7 @@ TEST(BgfxUIDisplayGeometryTest, ExpandsTwoSolidQuadsInPaintOrderWithAbsoluteIndi
     expectVertex(vertices[7], -5.0F, -4.0F, SecondAbgr, 0.0F, 1.0F);
     EXPECT_FLOAT_EQ(vertices[4].shapeWidth, 2.0F);
     EXPECT_FLOAT_EQ(vertices[4].shapeHeight, 3.0F);
-    EXPECT_FLOAT_EQ(vertices[4].cornerRadius, 0.0F);
+    EXPECT_FLOAT_EQ(vertices[4].shapeParameter, 0.0F);
     expectVertex(vertices[8], VertexSentinel.x, VertexSentinel.y, VertexSentinel.abgr,
                  VertexSentinel.u, VertexSentinel.v);
 
@@ -313,6 +313,83 @@ TEST(BgfxUIDisplayGeometryTest, ExpandsImageCommandsWithTheirNormalizedUvWithout
     expectVertex(vertices[2], 18.0F, 36.0F, 0x40102040U, 0.625F, 0.75F);
     expectVertex(vertices[3], 10.0F, 36.0F, 0x40102040U, 0.125F, 0.75F);
     EXPECT_EQ(indices[5], 3U);
+}
+
+TEST(BgfxUIDisplayGeometryTest, CopiesExplicitSolidQuadVerticesExactly)
+{
+    auto builder = createBuilder(1);
+    constexpr UISolidQuadVertices ExplicitVertices{
+        .topLeft = {11.25F, 22.5F},
+        .topRight = {35.5F, 24.0F},
+        .bottomRight = {38.75F, 54.5F},
+        .bottomLeft = {14.5F, 53.0F},
+    };
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    ASSERT_TRUE(builder
+                    .addSolidQuad({
+                        .paintOrdinal = 1,
+                        .bounds = {10, 20, 30, 40},
+                        .color = {.red = 64, .green = 32, .blue = 16, .alpha = 64},
+                        .vertices = ExplicitVertices,
+                    })
+                    .has_value());
+    auto displayList = builder.commit();
+    ASSERT_TRUE(displayList.has_value());
+
+    std::array<BgfxUIDisplayVertex, 4> vertices{};
+    std::array<u32, 6> indices{};
+    auto written = writeGeometry(*displayList, vertices, indices);
+    ASSERT_TRUE(written.has_value());
+    expectVertex(vertices[0], ExplicitVertices.topLeft.x, ExplicitVertices.topLeft.y,
+                 0x40102040U, 0.0F, 0.0F);
+    expectVertex(vertices[1], ExplicitVertices.topRight.x, ExplicitVertices.topRight.y,
+                 0x40102040U, 1.0F, 0.0F);
+    expectVertex(vertices[2], ExplicitVertices.bottomRight.x, ExplicitVertices.bottomRight.y,
+                 0x40102040U, 1.0F, 1.0F);
+    expectVertex(vertices[3], ExplicitVertices.bottomLeft.x, ExplicitVertices.bottomLeft.y,
+                 0x40102040U, 0.0F, 1.0F);
+    constexpr std::array<u32, 6> ExpectedIndices{0, 1, 2, 0, 2, 3};
+    EXPECT_EQ(indices, ExpectedIndices);
+}
+
+TEST(BgfxUIDisplayGeometryTest, EncodesFilledAndStrokedEllipsesInShapeParameter)
+{
+    auto builder = createBuilder(2);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    ASSERT_TRUE(builder
+                    .addSolidEllipse({
+                        .paintOrdinal = 1,
+                        .bounds = {10, 20, 8, 6},
+                        .color = {.red = 64, .green = 32, .blue = 16, .alpha = 64},
+                    })
+                    .has_value());
+    ASSERT_TRUE(builder
+                    .addSolidEllipse({
+                        .paintOrdinal = 2,
+                        .bounds = {20, 30, 12, 10},
+                        .color = {.red = 64, .green = 32, .blue = 16, .alpha = 64},
+                        .strokeWidth = 3.0F,
+                    })
+                    .has_value());
+    auto displayList = builder.commit();
+    ASSERT_TRUE(displayList.has_value());
+
+    std::array<BgfxUIDisplayVertex, 8> vertices{};
+    std::array<u32, 12> indices{};
+    auto written = writeGeometry(*displayList, vertices, indices);
+    ASSERT_TRUE(written.has_value());
+    for (usize index = 0; index < 4; ++index)
+    {
+        EXPECT_FLOAT_EQ(vertices[index].shapeParameter, -1.0F);
+        EXPECT_FLOAT_EQ(vertices[index].shapeWidth, 8.0F);
+        EXPECT_FLOAT_EQ(vertices[index].shapeHeight, 6.0F);
+    }
+    for (usize index = 4; index < 8; ++index)
+    {
+        EXPECT_FLOAT_EQ(vertices[index].shapeParameter, -(3.0F + 1.0F));
+        EXPECT_FLOAT_EQ(vertices[index].shapeWidth, 12.0F);
+        EXPECT_FLOAT_EQ(vertices[index].shapeHeight, 10.0F);
+    }
 }
 
 TEST(BgfxUIDisplayGeometryTest, ReusesCallerOwnedStorageForThreeHundredWrites)

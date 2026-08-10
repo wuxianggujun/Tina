@@ -57,7 +57,7 @@ Committed snapshots, atomic publication
         v
 tina_ui_render_integration
   logical coordinates -> framebuffer coordinates
-  UIDisplayList SolidQuad/Glyph/ImageQuad + glyph atlas + packet-local Texture2D refs
+  UIDisplayList SolidQuad/SolidEllipse/Glyph/ImageQuad + glyph atlas + packet-local Texture2D refs
         |
         v
 private Render backend, currently bgfx
@@ -71,9 +71,9 @@ private Render backend, currently bgfx
 | Tree/事务/快照 | `include/tina/ui/UIContext.hpp` 的 builder、updater、`UIElementBuildTransaction` 与 committed views |
 | Behavior | `include/tina/ui/UIBehavior.hpp`；Activate/Toggle/RangeInput/TextInput/Scroll/Select 使用私有 fixed-capacity side store，输入与具体视觉仍由 resolver 约束到私有 kind |
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
-| Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp` 与 `UIPaint.hpp`；Image content 和 Canvas `SolidRect`/`Image`/`NineSlice` |
+| Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp` 与 `UIPaint.hpp`；Rectangle/Ellipse/Line box paint、Image content 和 Canvas `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` |
 | Render bridge | `include/tina/integration/UIRenderDisplayList.hpp` |
-| DisplayList | `include/tina/render/UIDisplayList.hpp`；当前有 `SolidQuad`、`Glyph` 与 `ImageQuad` |
+| DisplayList | `include/tina/render/UIDisplayList.hpp`；当前有 `SolidQuad`、`SolidEllipse`、`Glyph` 与 `ImageQuad`；Line 在 bridge 投影为带 exact 四顶点的 `SolidQuad` |
 | Runtime 帧序 | `src/runtime/EngineHost.cpp`；`updateUI()` 后统一 `commitForFrame()` |
 
 ### Element 不是传统 Widget 对象
@@ -94,6 +94,19 @@ UIElementDescriptor button = makeButtonElement("Apply", layout);
 游戏保存 `UINodeId`，不保存 `Widget*`。节点状态由 `UIContext` 的固定容量 store 拥有；generation/owner
 校验拒绝 stale 或跨窗口 ID。多节点组件由 `UIElementBuildTransaction` 先声明 node/text/canvas/Behavior
 完整预算，任一步失败时回滚整个子树及所有已消费或未消费 reservation。
+
+### Axis-aligned descendant clip
+
+`UILayoutStyle::clipDescendants` 默认 `false`，因此普通 Panel 不隐式裁剪后代。设为 `true` 后，当前节点
+成为 axis-aligned clip owner：layout 在安排普通 in-tree Flow/Overlay children 时把继承的
+`descendantClip` 与 owner 的 world border-box 求交，嵌套 owner 继续取交集。后代保持完整 `worldRect` 与
+完整 Line/Ellipse/Image destination envelope，只收紧 committed `effectiveClip`；hit query、committed
+paint、DisplayList clip 与 backend scissor 继续消费同一条既有数据链，不建立第二条渲染路径。
+
+该属性不改变 `Visible/Hidden/Collapsed`、tree/paint/focus/semantics 顺序或 authored semantics
+`worldRect`，也不额外改变 owner 自身的 paint clip。它不是 rounded/stencil clip；`cornerRadius` 仍只影响
+Rectangle 自身 chrome。ScrollView/ListView/TreeView 的 viewport clip 继续复用同一 descendant clip 传播和
+失败原子 publication 契约；viewport-level Popup 继续使用专用 anchor/clip policy。
 
 ### 一帧如何流动
 
@@ -178,7 +191,8 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 - 在 `UIContext` 创建首个节点前注册 StyleClass/ColorToken、安装 literal/token-backed BoxFill stylesheet；
   游戏侧通过 `GameStateEnter` 的 `PrimaryWindowUIRootBuilder` 使用同一 startup-only 契约；
 - 注册 routed pointer listener，使用 Button/Slider/selection 等已有 callback；
-- 使用 Image/Icon content，以及 `SolidRect`/`Image`/Stretch-only `NineSlice` Canvas 组合 backend-neutral 图形。
+- 使用 Rectangle/Ellipse/Line box paint、Image/Icon content，以及 `SolidRect`/`SolidEllipse`/`SolidLine`/
+  Image/Stretch-only `NineSlice` Canvas 组合 backend-neutral 图形。
 - 通过安装目录使用 backend-neutral `Tina::GameSDK`、独立 `PlatformGlfw`、DesktopBootstrap/RenderBgfx
   与可选 UIFreetype component；GameSDK-only 不加载 Desktop adapter。
 
@@ -254,7 +268,7 @@ Tina::UI
 |  |- Theme tokens
 |  |- StyleRole + user StyleClass
 |  |- node-local pseudo-state resolver
-|  |- Rect / Image (including Icon) / NineSlice / Glyph / Clip
+|  |- Rect / Ellipse / Line / Image (including Icon) / NineSlice / Glyph / Clip
 |  `- fixed-capacity paint-only Motion
 |- Semantics
 `- Private adapters
@@ -452,6 +466,8 @@ enum class UICanvasCommandKind : u8 {
     SolidRect,
     Image,
     NineSlice,
+    SolidEllipse,
+    SolidLine,
 };
 
 struct UIImagePixelInsets final {
@@ -470,6 +486,10 @@ struct UICanvasCommand final {
     UIImagePixelInsets imageSourceInsets{};
     UIEdgeSpacing imageDestinationInsets{};
     UIImageSampling imageSampling = UIImageSampling::Linear;
+    UILogicalPoint lineStart{};
+    UILogicalPoint lineEnd{};
+    float lineThickness = 0.0F;
+    float ellipseStrokeWidth = 0.0F;
 };
 ```
 
@@ -492,6 +512,18 @@ struct UICanvasCommand final {
 - Image content 与 text content 首版互斥；“图标 + 文字”用两个子 Element 组合，而不是在一个 content 字段中
   引入另一套 inline layout；
 - Canvas Image 使用同一 `UIImageSource`，但 destination rect 是 Element-local paint，不贡献 intrinsic layout。
+
+`UIBoxPaint::primitive` 当前支持 Rectangle、Ellipse 与 Line。Ellipse 使用 Element layout rect，零 stroke
+表示填充，正 stroke 表示向内描边；Line 使用 Element-local 起止点和 logical thickness。Canvas 的
+`SolidEllipse`/`SolidLine` 使用相同语义并复制进固定容量 command storage。非法、退化或非正厚度 Line
+fail closed，不回退成覆盖整个 Element 的矩形。
+
+Line committed paint 保存 logical world endpoints、logical thickness 与覆盖实际线宽的 conservative envelope。
+UI-Render bridge 先在 logical 空间构造法向四角，再分别应用 framebuffer `scaleX/scaleY`，因此非等比 DPI
+映射仍得到正确平行四边形；DisplayList 以 exact `UISolidQuadVertices` 发布，不公开 `rotationRadians` 或
+rotated-quad 兼容入口。Ellipse 保持完整未预裁切 bounds，发布 `SolidEllipse` command；bgfx 统一 coverage
+shader 用 local UV 计算解析椭圆 coverage，并用外 coverage 减内 coverage形成向内描边。最终可见区域仍由
+axis-aligned clip/scissor 决定，避免把部分越界的圆形或图片先裁 bounds 后错误拉伸。
 
 Icon 只是 Image 的官方 authoring profile。`makeIconElement()` 可以默认 `Contain`、可 tint、固定 logical
 size、`UIPointerHitPolicy::Ignore` 和 decorative semantics，但它仍创建普通 Element，最终只产生一个
@@ -564,8 +596,9 @@ authoring metadata 非法时 descriptor/paint candidate 失败且旧 committed s
 DisplayList/frame-resource/pin 容量不足在 backend 副作用前让本帧构建原子失败。产品 fallback/strict policy
 尚未开放，不能把它写成现有 root API。
 
-bgfx 的 Solid/Glyph fragment shader 只采样 R8 `.r` coverage，`ImageQuad` 已选择独立 RGBA sampling
-shader mode/program；command 保存 bounds/UV/tint/clip，batch 保存
+bgfx 的 solid-shape/Glyph fragment shader 采样 R8 `.r` coverage，并按每顶点 shape 参数计算 Rectangle、
+RoundedRect 或 Ellipse coverage；`ImageQuad` 使用独立 RGBA sampling shader mode/program。command 保存
+bounds/可选 exact vertices/shape 参数/UV/tint/clip，batch 保存
 packet-local Texture2D ref 与 sampling。batch key 至少包含 `shader mode + texture ref + clip + sampling`，只合并
 paint-order 中相邻兼容命令，不为减少 draw call 全局重排 UI。cooked RGBA8 仍按 straight alpha 采样，
 fragment 必须先将 sampled RGB 乘 sampled alpha，再乘 committed premultiplied tint，保持现有
@@ -679,6 +712,8 @@ paint 的事实一致，不会把 clean `UIContext` commit 变成 Layout/Paint r
    等待磁盘或网络；Image/Icon/NineSlice 复用同一 Texture2D frame-resource 与 RGBA ImageQuad 路径；
 9. `UICommittedPaintEntry` 的图片路径使用显式 kind，没有在旧 `isGlyph` 上叠加 `isImage/isNineSlice`
    布尔组合；NineSlice 在进入 DisplayList 前展开，DisplayList 不保留 NineSlice 专用 command。
+10. Line 每条线段只消耗一个 retained paint entry 和一个 DisplayList quad；Ellipse 每个填充或描边只消耗
+    一个 retained paint entry 和一个 DisplayList command，不得恢复按像素阶梯或多段弦近似。
 
 ### `UI-PERF-001` workload
 

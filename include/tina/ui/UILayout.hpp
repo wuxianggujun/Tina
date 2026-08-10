@@ -21,8 +21,9 @@ struct UILayoutLength final {
         return UILayoutLength{.unit = UILayoutLengthUnit::Px, .value = logicalPixels};
     }
 
-    // Percent is expressed as 0..100, not 0..1. Validation and finite checks
-    // happen when styles are normalized by the layout implementation.
+    // Percent is expressed in percentage points, not 0..1. Sizes use 0..100;
+    // Overlay offsets additionally allow -100..100. Validation and finite
+    // checks happen when styles are normalized by the layout implementation.
     [[nodiscard]] static constexpr UILayoutLength Percent(float percent) noexcept
     {
         return UILayoutLength{.unit = UILayoutLengthUnit::Percent, .value = percent};
@@ -244,6 +245,10 @@ struct UILayoutStyle final {
     UIOverlayStyle overlay{};
     UILayoutPlacement placement = UILayoutPlacement::Flow;
     UIVisibility visibility = UIVisibility::Visible;
+    // Clips ordinary in-tree descendants to this element's axis-aligned border
+    // box. Viewport-level Popup placement keeps its dedicated clip policy. This
+    // does not create a rounded clip or alter this element's own paint clip.
+    bool clipDescendants = false;
 
     auto operator<=>(const UILayoutStyle&) const = default;
 };

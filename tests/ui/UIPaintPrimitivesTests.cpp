@@ -101,6 +101,164 @@ TEST(UIPaintPrimitivesTests, RoundedChromeEmitsShadowOuterBorderAndInsetFill)
     EXPECT_FLOAT_EQ(entries[2].cornerRadius, 6.0F);
 }
 
+TEST(UIPaintPrimitivesTests, EllipseEmitsOneCommittedEntryWithStroke)
+{
+    const UI::UIBoxPaint paint =
+        UI::makeEllipseOutline(UI::rgb(0x336699), 3.0F);
+    const UI::UILogicalRect worldRect{
+        .x = 10.0F,
+        .y = 20.0F,
+        .width = 40.0F,
+        .height = 24.0F,
+    };
+    const UI::UILogicalRect clip{
+        .x = 0.0F,
+        .y = 0.0F,
+        .width = 100.0F,
+        .height = 80.0F,
+    };
+    const auto fill = UI::premultiply(paint.solidFill->color);
+
+    std::pmr::vector<UI::UICommittedPaintEntry> entries;
+    u32 ordinal = 4;
+    UI::Detail::appendBoxChromePaints(
+        entries, UI::UINodeId{}, worldRect, clip, ordinal, paint, fill);
+
+    EXPECT_EQ(UI::Detail::countBoxChromePaintEntries(
+                  paint, worldRect, true),
+              1U);
+    ASSERT_EQ(entries.size(), 1U);
+    EXPECT_EQ(entries[0].kind, UI::UICommittedPaintKind::SolidEllipse);
+    EXPECT_EQ(entries[0].worldRect, worldRect);
+    EXPECT_EQ(entries[0].effectiveClip, clip);
+    EXPECT_EQ(entries[0].solidFill, fill);
+    EXPECT_FLOAT_EQ(entries[0].ellipseStrokeWidth, 3.0F);
+    EXPECT_EQ(entries[0].paintOrdinal, 4U);
+    EXPECT_EQ(ordinal, 5U);
+}
+
+TEST(UIPaintPrimitivesTests, EllipseWithOversizedStrokeEmitsNothing)
+{
+    const UI::UIBoxPaint paint =
+        UI::makeEllipseOutline(UI::rgb(0x336699), 13.0F);
+    const UI::UILogicalRect worldRect{
+        .x = 10.0F,
+        .y = 20.0F,
+        .width = 40.0F,
+        .height = 24.0F,
+    };
+    const auto fill = UI::premultiply(paint.solidFill->color);
+
+    std::pmr::vector<UI::UICommittedPaintEntry> entries;
+    u32 ordinal = 4;
+    UI::Detail::appendBoxChromePaints(
+        entries, UI::UINodeId{}, worldRect, worldRect, ordinal, paint, fill);
+
+    EXPECT_EQ(UI::Detail::countBoxChromePaintEntries(
+                  paint, worldRect, true),
+              0U);
+    EXPECT_TRUE(entries.empty());
+    EXPECT_EQ(ordinal, 4U);
+}
+
+TEST(UIPaintPrimitivesTests, LineEmitsWorldGeometryAndConservativeEnvelope)
+{
+    const UI::UIBoxPaint paint = UI::makeSolidLine(
+        UI::rgb(0xCC8844), {.x = 2.0F, .y = 3.0F},
+        {.x = 12.0F, .y = 3.0F}, 4.0F);
+    const UI::UILogicalRect worldRect{
+        .x = 10.0F,
+        .y = 20.0F,
+        .width = 40.0F,
+        .height = 24.0F,
+    };
+    const UI::UILogicalRect clip{
+        .x = 0.0F,
+        .y = 0.0F,
+        .width = 100.0F,
+        .height = 80.0F,
+    };
+
+    std::pmr::vector<UI::UICommittedPaintEntry> entries;
+    u32 ordinal = 8;
+    UI::Detail::appendBoxChromePaints(
+        entries, UI::UINodeId{}, worldRect, clip, ordinal, paint,
+        UI::premultiply(paint.solidFill->color));
+
+    EXPECT_EQ(UI::Detail::countBoxChromePaintEntries(
+                  paint, worldRect, true),
+              1U);
+    ASSERT_EQ(entries.size(), 1U);
+    EXPECT_EQ(entries[0].kind, UI::UICommittedPaintKind::SolidLine);
+    EXPECT_EQ(entries[0].lineStart,
+              (UI::UILogicalPoint{.x = 12.0F, .y = 23.0F}));
+    EXPECT_EQ(entries[0].lineEnd,
+              (UI::UILogicalPoint{.x = 22.0F, .y = 23.0F}));
+    EXPECT_FLOAT_EQ(entries[0].lineThickness, 4.0F);
+    EXPECT_EQ(entries[0].worldRect,
+              (UI::UILogicalRect{
+                  .x = 12.0F,
+                  .y = 21.0F,
+                  .width = 10.0F,
+                  .height = 4.0F,
+              }));
+    EXPECT_EQ(ordinal, 9U);
+}
+
+TEST(UIPaintPrimitivesTests, DegenerateLineEmitsNothingInsteadOfBoxRectangle)
+{
+    const UI::UIBoxPaint paint = UI::makeSolidLine(
+        UI::rgb(0xFFFFFF), {.x = 4.0F, .y = 5.0F},
+        {.x = 4.0F, .y = 5.0F}, 2.0F);
+    const UI::UILogicalRect worldRect{
+        .x = 10.0F,
+        .y = 20.0F,
+        .width = 80.0F,
+        .height = 60.0F,
+    };
+
+    std::pmr::vector<UI::UICommittedPaintEntry> entries;
+    u32 ordinal = 2;
+    UI::Detail::appendBoxChromePaints(
+        entries, UI::UINodeId{}, worldRect, worldRect, ordinal, paint,
+        UI::premultiply(paint.solidFill->color));
+
+    EXPECT_EQ(UI::Detail::countBoxChromePaintEntries(
+                  paint, worldRect, true),
+              0U);
+    EXPECT_TRUE(entries.empty());
+    EXPECT_EQ(ordinal, 2U);
+}
+
+TEST(UIPaintPrimitivesTests, LineTranslationFailsClosedWhenFloatCoordinatesCollapseEndpoints)
+{
+    constexpr UI::UILogicalPoint WorldOrigin{.x = 16777216.0F, .y = 0.0F};
+    const UI::UIBoxPaint paint = UI::makeSolidLine(
+        UI::rgb(0xFFFFFF), {}, {.x = 1.0F, .y = 0.0F}, 2.0F);
+
+    EXPECT_FALSE(UI::Detail::resolveCommittedLineGeometry(
+                     paint.line, WorldOrigin)
+                     .has_value());
+
+    const UI::UILogicalRect worldRect{
+        .x = WorldOrigin.x,
+        .y = WorldOrigin.y,
+        .width = 4.0F,
+        .height = 4.0F,
+    };
+    std::pmr::vector<UI::UICommittedPaintEntry> entries;
+    u32 ordinal = 7;
+    UI::Detail::appendBoxChromePaints(
+        entries, UI::UINodeId{}, worldRect, worldRect, ordinal, paint,
+        UI::premultiply(paint.solidFill->color));
+
+    EXPECT_EQ(UI::Detail::countBoxChromePaintEntries(
+                  paint, worldRect, true),
+              0U);
+    EXPECT_TRUE(entries.empty());
+    EXPECT_EQ(ordinal, 7U);
+}
+
 TEST(UIPaintPrimitivesTests, DrawableTextCountSkipsNewlinesAndStopsAtTruncation)
 {
     EXPECT_EQ(UI::Detail::countDrawableTextCodepoints("A\n\xE4\xB8\xAD"), 2U);

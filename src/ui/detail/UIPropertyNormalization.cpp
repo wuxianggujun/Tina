@@ -55,6 +55,39 @@ namespace {
                          "UI layout length unit is invalid");
 }
 
+[[nodiscard]] Core::Status normalizeOverlayOffsetLength(
+    UILayoutLength& length)
+{
+    switch (length.unit)
+    {
+    case UILayoutLengthUnit::Auto:
+        return Core::failure(UIErrorCode::InvalidLayout,
+                             "UI overlay offset cannot be Auto");
+    case UILayoutLengthUnit::Px:
+        if (!std::isfinite(length.value))
+        {
+            return Core::failure(
+                UIErrorCode::InvalidLayout,
+                "UI overlay pixel offset must be finite");
+        }
+        length.value = normalizeFloat(length.value);
+        return Core::success();
+    case UILayoutLengthUnit::Percent:
+        if (!std::isfinite(length.value) ||
+            length.value < -100.0F || length.value > 100.0F)
+        {
+            return Core::failure(
+                UIErrorCode::InvalidLayout,
+                "UI overlay percent offset must be finite and within -100..100");
+        }
+        length.value = normalizeFloat(length.value);
+        return Core::success();
+    }
+
+    return Core::failure(UIErrorCode::InvalidLayout,
+                         "UI overlay offset unit is invalid");
+}
+
 [[nodiscard]] Core::Status normalizeSpacing(float& value)
 {
     if (!isFiniteNonNegative(value))
@@ -230,6 +263,79 @@ Core::Result<UIImageContent> normalizeImageContent(UIImageContent content)
 
 UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept
 {
+    const auto clearNonRectChrome = [&paint]() noexcept {
+        paint.borderWidth = 0.0F;
+        paint.borderLight = {};
+        paint.borderDark = {};
+        paint.shadow = {};
+        paint.shadowOffsetX = 0.0F;
+        paint.shadowOffsetY = 0.0F;
+        paint.cornerRadius = 0.0F;
+    };
+    const auto clearPrimitiveGeometry = [&paint]() noexcept {
+        paint.primitive = UIBoxPrimitiveKind::Rectangle;
+        paint.line = {};
+        paint.ellipseStrokeWidth = 0.0F;
+    };
+    switch (paint.primitive)
+    {
+    case UIBoxPrimitiveKind::Rectangle:
+        paint.line = {};
+        paint.ellipseStrokeWidth = 0.0F;
+        break;
+    case UIBoxPrimitiveKind::Ellipse:
+        if (!std::isfinite(paint.ellipseStrokeWidth) || paint.ellipseStrokeWidth < 0.0F)
+        {
+            paint.solidFill.reset();
+            clearPrimitiveGeometry();
+            clearNonRectChrome();
+        }
+        else
+        {
+            paint.ellipseStrokeWidth = normalizeFloat(paint.ellipseStrokeWidth);
+            paint.line = {};
+            clearNonRectChrome();
+        }
+        break;
+    case UIBoxPrimitiveKind::Line:
+    {
+        const float lineLength = std::hypot(
+            paint.line.end.x - paint.line.start.x,
+            paint.line.end.y - paint.line.start.y);
+        if (!std::isfinite(paint.line.start.x) || !std::isfinite(paint.line.start.y) ||
+            !std::isfinite(paint.line.end.x) || !std::isfinite(paint.line.end.y) ||
+            !std::isfinite(paint.line.thickness) || paint.line.thickness <= 0.0F)
+        {
+            // Invalid geometry is deliberately blank rather than silently
+            // becoming a rectangle over the entire layout envelope.
+            paint.solidFill.reset();
+            clearPrimitiveGeometry();
+            clearNonRectChrome();
+        }
+        else if (!std::isfinite(lineLength) || lineLength <= 0.0F)
+        {
+            paint.solidFill.reset();
+            clearPrimitiveGeometry();
+            clearNonRectChrome();
+        }
+        else
+        {
+            paint.line.start.x = normalizeFloat(paint.line.start.x);
+            paint.line.start.y = normalizeFloat(paint.line.start.y);
+            paint.line.end.x = normalizeFloat(paint.line.end.x);
+            paint.line.end.y = normalizeFloat(paint.line.end.y);
+            paint.line.thickness = normalizeFloat(paint.line.thickness);
+            paint.ellipseStrokeWidth = 0.0F;
+            clearNonRectChrome();
+        }
+        break;
+    }
+    default:
+        paint.solidFill.reset();
+        clearPrimitiveGeometry();
+        clearNonRectChrome();
+        break;
+    }
     if (paint.solidFill.has_value() && paint.solidFill->color.alpha == 0)
     {
         paint.solidFill.reset();
@@ -537,12 +643,12 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeLayoutLength(style.overlay.offset.x, false);
+    if (Core::Status status = normalizeOverlayOffsetLength(style.overlay.offset.x);
         !status)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeLayoutLength(style.overlay.offset.y, false);
+    if (Core::Status status = normalizeOverlayOffsetLength(style.overlay.offset.y);
         !status)
     {
         return Core::failure(status.error());

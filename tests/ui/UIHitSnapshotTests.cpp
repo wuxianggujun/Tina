@@ -687,6 +687,43 @@ TEST_F(UIHitSnapshotTest, QueryPointerHitUsesWorldAndClipHalfOpenBounds)
     EXPECT_EQ(worldBottomEdge.visitedEntryCount, context->committedHit().size());
 }
 
+TEST_F(UIHitSnapshotTest, DescendantClipRejectsThePortionOfANegativeOverlayOutsideItsPanel)
+{
+    auto context = createContext(firstWindow, {.nodeCapacity = 3, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId button = createButton(*context, panel);
+    auto updater = createUpdater(*context, root);
+
+    UI::UILayoutStyle panelStyle = fixedSize(50.0F, 40.0F);
+    panelStyle.placement = UI::UILayoutPlacement::Overlay;
+    panelStyle.overlay.offset.x = UI::UILayoutLength::Px(40.0F);
+    panelStyle.overlay.offset.y = UI::UILayoutLength::Px(30.0F);
+    panelStyle.clipDescendants = true;
+    assertOk(updater.setLayoutStyle(panel, panelStyle));
+
+    UI::UILayoutStyle buttonStyle = fixedSize(70.0F, 60.0F);
+    buttonStyle.placement = UI::UILayoutPlacement::Overlay;
+    buttonStyle.overlay.offset.x = UI::UILayoutLength::Px(-10.0F);
+    buttonStyle.overlay.offset.y = UI::UILayoutLength::Px(-5.0F);
+    assertOk(updater.setLayoutStyle(button, buttonStyle));
+    assertOk(updater.setPointerHitPolicy(button, UI::UIPointerHitPolicy::Targetable));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+
+    const UI::UICommittedHitEntry* buttonHit = findHitEntry(context->committedHit(), button);
+    ASSERT_NE(buttonHit, nullptr);
+    EXPECT_EQ(buttonHit->worldRect,
+              (UI::UILogicalRect{.x = 30.0F, .y = 25.0F, .width = 70.0F, .height = 60.0F}));
+    EXPECT_EQ(buttonHit->effectiveClip,
+              (UI::UILogicalRect{.x = 40.0F, .y = 30.0F, .width = 50.0F, .height = 40.0F}));
+    EXPECT_FALSE(context->queryPointerHit({35.0F, 27.0F}).hasTarget());
+    const UI::UIPointerHitQueryResult inside = context->queryPointerHit({40.0F, 30.0F});
+    ASSERT_TRUE(inside.hasTarget());
+    EXPECT_EQ(inside.target.node, button);
+}
+
 TEST_F(UIHitSnapshotTest, QueryPointerHitTreatsNonFiniteCoordinatesAsAnUnscannedMiss)
 {
     auto context = createContext(firstWindow, {.nodeCapacity = 2, .rootCapacity = 1});

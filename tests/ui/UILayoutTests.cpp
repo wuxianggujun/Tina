@@ -519,6 +519,64 @@ TEST_F(UILayoutTest, OverlayDoesNotParticipateInFlowAndKeepsSnapshotOrder)
         {.x = 5.0F, .y = 6.0F, .width = 85.0F, .height = 63.0F});
 }
 
+TEST_F(UILayoutTest, PanelDescendantClipIsOptInAndKeepsNegativeOverlayGeometry)
+{
+    auto context = makeContext({.nodeCapacity = 3, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId overlay = createPanel(*context, panel);
+
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle panelStyle = fixedSize(50.0F, 40.0F);
+    panelStyle.placement = UI::UILayoutPlacement::Overlay;
+    panelStyle.overlay.offset.x = UI::UILayoutLength::Px(40.0F);
+    panelStyle.overlay.offset.y = UI::UILayoutLength::Px(30.0F);
+    assertOk(updater.setLayoutStyle(panel, panelStyle));
+
+    UI::UILayoutStyle overlayStyle = fixedSize(70.0F, 60.0F);
+    overlayStyle.placement = UI::UILayoutPlacement::Overlay;
+    overlayStyle.overlay.offset.x = UI::UILayoutLength::Px(-10.0F);
+    overlayStyle.overlay.offset.y = UI::UILayoutLength::Px(-5.0F);
+    assertOk(updater.setLayoutStyle(overlay, overlayStyle));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+
+    constexpr UI::UILogicalRect PanelRect{.x = 40.0F, .y = 30.0F, .width = 50.0F, .height = 40.0F};
+    constexpr UI::UILogicalRect OverlayRect{.x = 30.0F, .y = 25.0F, .width = 70.0F, .height = 60.0F};
+    const UI::UICommittedLayoutEntry& defaultOverlay =
+        requireLayoutEntry(context->committedLayout(), overlay);
+    expectRectNear(defaultOverlay.worldRect, OverlayRect);
+    expectRectNear(defaultOverlay.effectiveClip, OverlayRect);
+    const u64 defaultLayoutRevision = context->committedLayout().layoutRevision();
+    const u64 defaultHitRevision = context->committedHit().hitRevision();
+    const u64 defaultPaintRevision = context->committedPaint().paintRevision();
+    const u64 defaultSemanticsRevision = context->committedSemantics().semanticsRevision();
+
+    panelStyle.clipDescendants = true;
+    assertOk(updater.setLayoutStyle(panel, panelStyle));
+    UI::UILayoutStyle overflowingOverlay = overlayStyle;
+    overflowingOverlay.size.width = UI::UILayoutLength::Px((std::numeric_limits<float>::max)());
+    overflowingOverlay.margin.left = (std::numeric_limits<float>::max)();
+    assertOk(updater.setLayoutStyle(overlay, overflowingOverlay));
+    const Core::Status rejected = context->commitLayout({.width = 200.0F, .height = 120.0F});
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
+    EXPECT_EQ(context->committedLayout().layoutRevision(), defaultLayoutRevision);
+    EXPECT_EQ(context->committedHit().hitRevision(), defaultHitRevision);
+    EXPECT_EQ(context->committedPaint().paintRevision(), defaultPaintRevision);
+    EXPECT_EQ(context->committedSemantics().semanticsRevision(), defaultSemanticsRevision);
+    expectRectNear(requireLayoutEntry(context->committedLayout(), overlay).effectiveClip, OverlayRect);
+
+    assertOk(updater.setLayoutStyle(overlay, overlayStyle));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    const UI::UICommittedLayoutEntry& clippedOverlay =
+        requireLayoutEntry(context->committedLayout(), overlay);
+    expectRectNear(requireLayoutEntry(context->committedLayout(), panel).worldRect, PanelRect);
+    expectRectNear(clippedOverlay.worldRect, OverlayRect);
+    expectRectNear(clippedOverlay.effectiveClip, PanelRect);
+}
+
 TEST_F(UILayoutTest, HiddenParticipatesInLayoutButCollapsedIsExcludedFromFlow)
 {
     auto context = makeContext({.nodeCapacity = 5, .rootCapacity = 1});

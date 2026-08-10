@@ -159,16 +159,8 @@ inline constexpr float PreviewWorldHeight = 9.0F;
 inline constexpr float PreviewWorld3DCameraDistance = 8.0F;
 inline constexpr float DegreesToRadians = 0.01745329251994329577F;
 inline constexpr float RadiansToDegrees = 57.295779513082320876F;
-inline constexpr Tina::Core::usize ViewportGridDiagonalSteps = 6;
-inline constexpr Tina::Core::usize ViewportGridDiagonalMaximumSteps = 64;
-// Projected 3D grid lines are approximated with axis-aligned stair parts, so
-// smaller steps read as smoother lines. Steps adapt to the projected pixel
-// length under this target within the fixed visual node budget.
-inline constexpr float ViewportGridTargetStairPixels = 3.0F;
-inline constexpr Tina::Core::usize ViewportGridDiagonalPartsPerStep = 2;
 inline constexpr Tina::Core::usize ViewportGridVisualNodeCapacity =
-    Tina::Editor::EditorViewportGridSegmentCapacity * ViewportGridDiagonalSteps *
-    ViewportGridDiagonalPartsPerStep;
+    Tina::Editor::EditorViewportGridSegmentCapacity;
 inline constexpr Tina::Core::usize ViewportGizmoVisualNodeCapacity = 256;
 inline constexpr Tina::Core::usize ViewportMarqueeCandidateCapacity = 64;
 inline constexpr Tina::Core::usize ViewportTransformTargetCapacity =
@@ -2819,8 +2811,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::Editor::EditorViewportGridSegmentKind kind) noexcept;
     [[nodiscard]] static UI::UILayoutStyle viewportGridLayout(
         const Tina::Editor::EditorViewportGridSegment& segment,
-        Tina::Core::usize partIndex,
-        Tina::Core::usize diagonalStepCount) noexcept;
+        float viewportWidth,
+        float viewportHeight,
+        UI::UILineGeometry& line) noexcept;
     [[nodiscard]] Tina::Core::Status
     updateViewportGrid(Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status updateGpuViewport(Tina::PrimaryWindowUITreeUpdater& tree);

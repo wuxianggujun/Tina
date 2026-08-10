@@ -123,6 +123,70 @@ TEST(UICanvasCommandStorageTests, CopiesImageAndNineSliceMetadataWithoutBorrowin
     EXPECT_EQ(visited, expected);
 }
 
+TEST(UICanvasCommandStorageTests, CopiesValidEllipseAndLineGeometry)
+{
+    UI::Detail::UICanvasCommandStorage storage(
+        1, 2, *std::pmr::get_default_resource());
+    const std::array commands{
+        UI::makeCanvasEllipse(
+            {.x = 1.0F, .y = 2.0F, .width = 12.0F, .height = 8.0F},
+            UI::rgb(0x336699), 2.0F),
+        UI::makeCanvasLine(
+            {.x = 2.0F, .y = 3.0F}, {.x = 10.0F, .y = 7.0F}, 3.0F,
+            UI::rgb(0xCC8844)),
+    };
+
+    ASSERT_TRUE(storage.assign(0, commands).has_value());
+
+    std::array<UI::UICanvasCommand, 2> visited{};
+    usize visitedCount = 0;
+    storage.forEach(0, [&](const UI::UICanvasCommand& command) noexcept {
+        visited[visitedCount++] = command;
+    });
+    ASSERT_EQ(visitedCount, commands.size());
+    EXPECT_EQ(visited, commands);
+}
+
+TEST(UICanvasCommandStorageTests, RejectsInvalidEllipseAndLineGeometryAtomically)
+{
+    UI::Detail::UICanvasCommandStorage storage(
+        1, 1, *std::pmr::get_default_resource());
+    const float nan = (std::numeric_limits<float>::quiet_NaN)();
+
+    UI::UICanvasCommand emptyEllipse = UI::makeCanvasEllipse(
+        {.width = 0.0F, .height = 8.0F}, UI::rgb(0xFFFFFF));
+    UI::UICanvasCommand oversizedEllipseStroke = UI::makeCanvasEllipse(
+        {.width = 12.0F, .height = 8.0F}, UI::rgb(0xFFFFFF), 4.5F);
+    UI::UICanvasCommand nonFiniteEllipseStroke = UI::makeCanvasEllipse(
+        {.width = 12.0F, .height = 8.0F}, UI::rgb(0xFFFFFF), nan);
+    UI::UICanvasCommand degenerateLine = UI::makeCanvasLine(
+        {.x = 3.0F, .y = 4.0F}, {.x = 3.0F, .y = 4.0F}, 2.0F,
+        UI::rgb(0xFFFFFF));
+    UI::UICanvasCommand nonFiniteLine = UI::makeCanvasLine(
+        {}, {.x = 8.0F, .y = 4.0F}, 2.0F, UI::rgb(0xFFFFFF));
+    nonFiniteLine.lineEnd.x = nan;
+    UI::UICanvasCommand zeroThicknessLine = UI::makeCanvasLine(
+        {}, {.x = 8.0F, .y = 4.0F}, 0.0F, UI::rgb(0xFFFFFF));
+    const std::array invalidCommands{
+        emptyEllipse,
+        oversizedEllipseStroke,
+        nonFiniteEllipseStroke,
+        degenerateLine,
+        nonFiniteLine,
+        zeroThicknessLine,
+    };
+
+    for (const UI::UICanvasCommand& command : invalidCommands)
+    {
+        const Core::Status result = storage.assign(0, std::span(&command, 1));
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code,
+                  UI::UIErrorCode::InvalidElementDescriptor);
+        EXPECT_EQ(storage.activeCount(), 0U);
+        EXPECT_EQ(storage.highWater(), 0U);
+    }
+}
+
 TEST(UICanvasCommandStorageTests, RejectsMalformedImageAndNineSliceMetadataAtomically)
 {
     UI::Detail::UICanvasCommandStorage storage(1, 1, *std::pmr::get_default_resource());

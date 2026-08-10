@@ -8,20 +8,24 @@
 
 namespace Tina::Render::Bgfx {
 
-// Unified UI vertex: SolidQuad uses UV (0,0)-(1,1) with white page; Glyph uses
-// atlas UV in normalized 0..1 space derived from atlasUv texels / page size;
-// ImageQuad uses its already-normalized command UV directly.
+// Unified UI vertex: solid shapes use UV (0,0)-(1,1) with the white page; Glyph
+// uses atlas UV in normalized 0..1 space derived from atlasUv texels / page
+// size; ImageQuad uses its already-normalized command UV directly. SolidQuad
+// commands with explicit subpixel vertices are copied verbatim; textured
+// commands remain axis-aligned.
 struct BgfxUIDisplayVertex final {
     float x = 0.0F;
     float y = 0.0F;
     u32 abgr = 0;
     float u = 0.0F;
     float v = 0.0F;
-    // Constant across a quad; interpolated to the fragment shader so rounded
-    // solid shapes remain batchable without per-command uniforms.
+    // Constant across a quad; interpolated to the fragment shader so solid
+    // shapes remain batchable without per-command uniforms.
     float shapeWidth = 0.0F;
     float shapeHeight = 0.0F;
-    float cornerRadius = 0.0F;
+    // >= 0: rounded-rect radius; < 0: ellipse marker encoded as
+    // -(strokeWidth + 1). Zero remains the fast rectangular path.
+    float shapeParameter = 0.0F;
 };
 
 struct BgfxUIDisplayGeometryRequirements final {

@@ -873,6 +873,7 @@ auto EditorWorkspaceState::buildViewportUi(UiBuildContext& ui, UI::UINodeId pare
     UI::UILayoutStyle previewWorldLayerStyle = growingRegion();
     previewWorldLayerStyle.minMax.minHeight = UI::UILayoutLength::Px(180.0F);
     previewWorldLayerStyle.placement = UI::UILayoutPlacement::Flow;
+    previewWorldLayerStyle.clipDescendants = true;
     if (auto status = storeNode(ui.createPanel(previewFrame, previewWorldLayerStyle,
                                             UI::UIStyleRoleId::None),
                                 viewportPreviewLayer_);

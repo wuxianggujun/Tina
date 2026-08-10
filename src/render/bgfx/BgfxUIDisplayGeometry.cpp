@@ -1,6 +1,7 @@
 #include "BgfxUIDisplayGeometry.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -45,8 +46,69 @@ geometryCapacityFailure(const char* message)
 
 [[nodiscard]] bool isSupportedCommandKind(UIDrawCommandKind kind) noexcept
 {
-    return kind == UIDrawCommandKind::SolidQuad || kind == UIDrawCommandKind::Glyph ||
+    return kind == UIDrawCommandKind::SolidQuad || kind == UIDrawCommandKind::SolidEllipse ||
+           kind == UIDrawCommandKind::Glyph ||
            kind == UIDrawCommandKind::ImageQuad;
+}
+
+[[nodiscard]] constexpr std::array<UISubpixelPoint, VerticesPerQuad> quadPoints(
+    const UISolidQuadVertices& vertices) noexcept
+{
+    return {
+        vertices.topLeft,
+        vertices.topRight,
+        vertices.bottomRight,
+        vertices.bottomLeft,
+    };
+}
+
+[[nodiscard]] bool validSolidQuadVertices(
+    const UISolidQuadVertices& vertices,
+    const UIPixelRect& bounds) noexcept
+{
+    const std::array points = quadPoints(vertices);
+    const double left = static_cast<double>(bounds.x);
+    const double top = static_cast<double>(bounds.y);
+    const double right = left + static_cast<double>(bounds.width);
+    const double bottom = top + static_cast<double>(bounds.height);
+    for (const UISubpixelPoint point : points)
+    {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+            static_cast<double>(point.x) < left ||
+            static_cast<double>(point.x) > right ||
+            static_cast<double>(point.y) < top ||
+            static_cast<double>(point.y) > bottom)
+        {
+            return false;
+        }
+    }
+
+    int winding = 0;
+    for (usize index = 0; index < points.size(); ++index)
+    {
+        const UISubpixelPoint current = points[index];
+        const UISubpixelPoint next = points[(index + 1U) % points.size()];
+        const UISubpixelPoint following = points[(index + 2U) % points.size()];
+        const double firstX = static_cast<double>(next.x) - current.x;
+        const double firstY = static_cast<double>(next.y) - current.y;
+        const double secondX = static_cast<double>(following.x) - next.x;
+        const double secondY = static_cast<double>(following.y) - next.y;
+        const double cross = firstX * secondY - firstY * secondX;
+        if (!std::isfinite(cross) || cross == 0.0)
+        {
+            return false;
+        }
+        const int edgeWinding = cross > 0.0 ? 1 : -1;
+        if (winding == 0)
+        {
+            winding = edgeWinding;
+        }
+        else if (winding != edgeWinding)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -92,6 +154,23 @@ checkedGeometryRequirements(UIDisplayListView displayList)
         {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "The UI DisplayList contains an invalid corner radius");
+        }
+        const float maximumStrokeWidth = maximumCornerRadius;
+        if (!std::isfinite(command.strokeWidth) || command.strokeWidth < 0.0F ||
+            command.strokeWidth > maximumStrokeWidth ||
+            (command.kind != UIDrawCommandKind::SolidEllipse && command.strokeWidth != 0.0F))
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The UI DisplayList contains an invalid ellipse stroke width");
+        }
+        if (command.vertices.has_value() &&
+            (command.kind != UIDrawCommandKind::SolidQuad ||
+             command.cornerRadius != 0.0F ||
+             command.strokeWidth != 0.0F ||
+             !validSolidQuadVertices(*command.vertices, command.bounds)))
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The UI DisplayList contains invalid explicit SolidQuad vertices");
         }
     }
 
@@ -156,8 +235,12 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
         const i64 right = left + static_cast<i64>(command.bounds.width);
         const i64 bottom = top + static_cast<i64>(command.bounds.height);
         const u32 color = packAbgr(command.color);
-        const float shapeWidth = static_cast<float>(command.bounds.width);
-        const float shapeHeight = static_cast<float>(command.bounds.height);
+        float shapeWidth = static_cast<float>(command.bounds.width);
+        float shapeHeight = static_cast<float>(command.bounds.height);
+        const float shapeParameter =
+            command.kind == UIDrawCommandKind::SolidEllipse
+                ? -(command.strokeWidth + 1.0F)
+                : command.cornerRadius;
 
         float u0 = 0.0F;
         float v0 = 0.0F;
@@ -184,46 +267,71 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             v1 = command.uv.v1;
         }
 
+        std::array<std::array<float, 2>, VerticesPerQuad> positions{};
+        if (command.vertices.has_value())
+        {
+            const std::array points = quadPoints(*command.vertices);
+            for (usize pointIndex = 0; pointIndex < points.size(); ++pointIndex)
+            {
+                positions[pointIndex] = {points[pointIndex].x, points[pointIndex].y};
+            }
+            shapeWidth = std::hypot(
+                points[1U].x - points[0U].x,
+                points[1U].y - points[0U].y);
+            shapeHeight = std::hypot(
+                points[3U].x - points[0U].x,
+                points[3U].y - points[0U].y);
+        }
+        else
+        {
+            positions = {
+                std::array<float, 2>{static_cast<float>(left), static_cast<float>(top)},
+                std::array<float, 2>{static_cast<float>(right), static_cast<float>(top)},
+                std::array<float, 2>{static_cast<float>(right), static_cast<float>(bottom)},
+                std::array<float, 2>{static_cast<float>(left), static_cast<float>(bottom)},
+            };
+        }
+
         const usize vertexOffset = commandIndex * VerticesPerQuad;
         vertices[vertexOffset + 0U] = {
-            .x = static_cast<float>(left),
-            .y = static_cast<float>(top),
+            .x = positions[0U][0],
+            .y = positions[0U][1],
             .abgr = color,
             .u = u0,
             .v = v0,
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
-            .cornerRadius = command.cornerRadius,
+            .shapeParameter = shapeParameter,
         };
         vertices[vertexOffset + 1U] = {
-            .x = static_cast<float>(right),
-            .y = static_cast<float>(top),
+            .x = positions[1U][0],
+            .y = positions[1U][1],
             .abgr = color,
             .u = u1,
             .v = v0,
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
-            .cornerRadius = command.cornerRadius,
+            .shapeParameter = shapeParameter,
         };
         vertices[vertexOffset + 2U] = {
-            .x = static_cast<float>(right),
-            .y = static_cast<float>(bottom),
+            .x = positions[2U][0],
+            .y = positions[2U][1],
             .abgr = color,
             .u = u1,
             .v = v1,
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
-            .cornerRadius = command.cornerRadius,
+            .shapeParameter = shapeParameter,
         };
         vertices[vertexOffset + 3U] = {
-            .x = static_cast<float>(left),
-            .y = static_cast<float>(bottom),
+            .x = positions[3U][0],
+            .y = positions[3U][1],
             .abgr = color,
             .u = u0,
             .v = v1,
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
-            .cornerRadius = command.cornerRadius,
+            .shapeParameter = shapeParameter,
         };
 
         const u32 absoluteVertex = static_cast<u32>(vertexOffset);

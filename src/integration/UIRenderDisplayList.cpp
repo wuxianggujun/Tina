@@ -3,6 +3,7 @@
 #include <tina/core/base/ScopeExit.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -37,6 +38,78 @@ struct PixelProjection final {
 {
     return color.red <= color.alpha && color.green <= color.alpha &&
            color.blue <= color.alpha;
+}
+
+[[nodiscard]] bool zeroPoint(const UI::UILogicalPoint& point) noexcept
+{
+    return point.x == 0.0F && point.y == 0.0F;
+}
+
+[[nodiscard]] bool validLinePaint(const UI::UICommittedPaintEntry& entry) noexcept
+{
+    if (entry.kind != UI::UICommittedPaintKind::SolidLine)
+    {
+        return zeroPoint(entry.lineStart) && zeroPoint(entry.lineEnd) &&
+               entry.lineThickness == 0.0F;
+    }
+    if (entry.cornerRadius != 0.0F || entry.ellipseStrokeWidth != 0.0F ||
+        !std::isfinite(entry.lineStart.x) || !std::isfinite(entry.lineStart.y) ||
+        !std::isfinite(entry.lineEnd.x) || !std::isfinite(entry.lineEnd.y) ||
+        !std::isfinite(entry.lineThickness) || entry.lineThickness <= 0.0F ||
+        (entry.lineStart.x == entry.lineEnd.x && entry.lineStart.y == entry.lineEnd.y) ||
+        entry.worldRect.width <= 0.0F || entry.worldRect.height <= 0.0F)
+    {
+        return false;
+    }
+
+    const double deltaX = static_cast<double>(entry.lineEnd.x) - entry.lineStart.x;
+    const double deltaY = static_cast<double>(entry.lineEnd.y) - entry.lineStart.y;
+    const double length = std::hypot(deltaX, deltaY);
+    if (!std::isfinite(length) || length <= 0.0)
+    {
+        return false;
+    }
+    const double halfThickness = static_cast<double>(entry.lineThickness) * 0.5;
+    const double extentX = std::abs(deltaY / length) * halfThickness;
+    const double extentY = std::abs(deltaX / length) * halfThickness;
+    const double requiredLeft =
+        (std::min)(static_cast<double>(entry.lineStart.x),
+                   static_cast<double>(entry.lineEnd.x)) - extentX;
+    const double requiredTop =
+        (std::min)(static_cast<double>(entry.lineStart.y),
+                   static_cast<double>(entry.lineEnd.y)) - extentY;
+    const double requiredRight =
+        (std::max)(static_cast<double>(entry.lineStart.x),
+                   static_cast<double>(entry.lineEnd.x)) + extentX;
+    const double requiredBottom =
+        (std::max)(static_cast<double>(entry.lineStart.y),
+                   static_cast<double>(entry.lineEnd.y)) + extentY;
+    const double envelopeRight = static_cast<double>(entry.worldRect.x) +
+                                 static_cast<double>(entry.worldRect.width);
+    const double envelopeBottom = static_cast<double>(entry.worldRect.y) +
+                                  static_cast<double>(entry.worldRect.height);
+    const double tolerance = (std::max)(
+        1.0,
+        (std::max)(static_cast<double>(entry.worldRect.width),
+                   static_cast<double>(entry.worldRect.height))) * 1.0e-5;
+    return std::isfinite(requiredLeft) && std::isfinite(requiredTop) &&
+           std::isfinite(requiredRight) && std::isfinite(requiredBottom) &&
+           requiredLeft >= static_cast<double>(entry.worldRect.x) - tolerance &&
+           requiredTop >= static_cast<double>(entry.worldRect.y) - tolerance &&
+           requiredRight <= envelopeRight + tolerance &&
+           requiredBottom <= envelopeBottom + tolerance;
+}
+
+[[nodiscard]] bool validEllipsePaint(
+    const UI::UICommittedPaintEntry& entry) noexcept
+{
+    if (entry.kind != UI::UICommittedPaintKind::SolidEllipse)
+    {
+        return entry.ellipseStrokeWidth == 0.0F;
+    }
+    return entry.cornerRadius == 0.0F &&
+           std::isfinite(entry.ellipseStrokeWidth) &&
+           entry.ellipseStrokeWidth >= 0.0F;
 }
 
 [[nodiscard]] bool validImagePaint(const UI::UICommittedPaintEntry& entry) noexcept
@@ -106,6 +179,8 @@ struct PixelProjection final {
                 "Committed UI paint colors must use premultiplied RGBA8 channels");
         }
         const bool validKind = entry.kind == UI::UICommittedPaintKind::SolidQuad ||
+                               entry.kind == UI::UICommittedPaintKind::SolidEllipse ||
+                               entry.kind == UI::UICommittedPaintKind::SolidLine ||
                                entry.kind == UI::UICommittedPaintKind::Glyph ||
                                entry.kind == UI::UICommittedPaintKind::Image;
         if (!validKind || !std::isfinite(entry.cornerRadius) || entry.cornerRadius < 0.0F ||
@@ -113,6 +188,16 @@ struct PixelProjection final {
         {
             return invalidInput(
                 "Committed UI paint kind and corner radius must be valid");
+        }
+        if (!validLinePaint(entry))
+        {
+            return invalidInput(
+                "Committed UI line geometry must be finite, non-degenerate, positive-width, and covered by its logical envelope");
+        }
+        if (!validEllipsePaint(entry))
+        {
+            return invalidInput(
+                "Committed UI ellipse geometry and stroke width must be finite, non-negative, and exclusive to SolidEllipse paint");
         }
         if (entry.kind == UI::UICommittedPaintKind::Image && !validImagePaint(entry))
         {
@@ -175,12 +260,18 @@ struct ProjectedAxis final {
     u32 extent = 0;
 };
 
+struct ProjectedQuad final {
+    Render::UIPixelRect bounds{};
+    Render::UISolidQuadVertices vertices{};
+};
+
 [[nodiscard]] Core::Result<ProjectedAxis> projectAxis(
     float logicalOrigin,
     float logicalExtent,
     double scale,
     double pixelViewportStart,
     double pixelViewportEnd,
+    bool clampToViewport,
     std::optional<float> sharedLogicalEnd = std::nullopt)
 {
     const double logicalStart = static_cast<double>(logicalOrigin);
@@ -206,15 +297,29 @@ struct ProjectedAxis final {
                             : sharedLogicalEnd.has_value()
                                 ? std::round(projectedEnd)
                                 : std::ceil(projectedEnd);
-    roundedStart = std::clamp(
-        roundedStart, pixelViewportStart, pixelViewportEnd);
-    roundedEnd = std::clamp(
-        roundedEnd, pixelViewportStart, pixelViewportEnd);
+    if (clampToViewport)
+    {
+        roundedStart = std::clamp(
+            roundedStart, pixelViewportStart, pixelViewportEnd);
+        roundedEnd = std::clamp(
+            roundedEnd, pixelViewportStart, pixelViewportEnd);
+    }
     if (roundedEnd < roundedStart)
     {
         roundedEnd = roundedStart;
     }
 
+    constexpr double MinimumCoordinate =
+        static_cast<double>((std::numeric_limits<i32>::min)());
+    constexpr double MaximumCoordinateExclusive =
+        static_cast<double>((std::numeric_limits<i32>::max)()) + 1.0;
+    if (roundedStart < MinimumCoordinate || roundedStart > MaximumCoordinateExclusive ||
+        roundedEnd < MinimumCoordinate || roundedEnd > MaximumCoordinateExclusive)
+    {
+        return Core::failure(
+            Core::CoreErrorCode::InvalidArgument,
+            "A projected UI rectangle exceeds representable pixel coordinates");
+    }
     const i64 integerStart = static_cast<i64>(roundedStart);
     const i64 integerEnd = static_cast<i64>(roundedEnd);
     const i64 integerExtent = integerEnd - integerStart;
@@ -248,7 +353,8 @@ struct ProjectedAxis final {
 [[nodiscard]] Core::Result<Render::UIPixelRect> projectRect(
     const UI::UILogicalRect& logicalRect,
     const PixelProjection& projection,
-    std::optional<UI::UILogicalPoint> sharedLogicalEnd = std::nullopt)
+    std::optional<UI::UILogicalPoint> sharedLogicalEnd = std::nullopt,
+    bool clampToViewport = true)
 {
     auto horizontal = projectAxis(
         logicalRect.x,
@@ -256,6 +362,7 @@ struct ProjectedAxis final {
         projection.scaleX,
         projection.viewportLeft,
         projection.viewportRight,
+        clampToViewport,
         sharedLogicalEnd.has_value() ? std::optional<float>{sharedLogicalEnd->x} : std::nullopt);
     if (!horizontal)
     {
@@ -267,6 +374,7 @@ struct ProjectedAxis final {
         projection.scaleY,
         projection.viewportTop,
         projection.viewportBottom,
+        clampToViewport,
         sharedLogicalEnd.has_value() ? std::optional<float>{sharedLogicalEnd->y} : std::nullopt);
     if (!vertical)
     {
@@ -277,6 +385,131 @@ struct ProjectedAxis final {
         .y = vertical->origin,
         .width = horizontal->extent,
         .height = vertical->extent,
+    };
+}
+
+[[nodiscard]] Core::Result<ProjectedQuad> projectLine(
+    const UI::UICommittedPaintEntry& entry,
+    const PixelProjection& projection)
+{
+    struct DoublePoint final {
+        double x = 0.0;
+        double y = 0.0;
+    };
+
+    const double startX = static_cast<double>(entry.lineStart.x);
+    const double startY = static_cast<double>(entry.lineStart.y);
+    const double endX = static_cast<double>(entry.lineEnd.x);
+    const double endY = static_cast<double>(entry.lineEnd.y);
+    const double deltaX = endX - startX;
+    const double deltaY = endY - startY;
+    const double length = std::hypot(deltaX, deltaY);
+    if (!std::isfinite(length) || length <= 0.0)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "A committed UI line is degenerate");
+    }
+    const double halfThickness = static_cast<double>(entry.lineThickness) * 0.5;
+    const double normalX = -deltaY / length * halfThickness;
+    const double normalY = deltaX / length * halfThickness;
+    const auto projectCorner = [&](double logicalX, double logicalY) noexcept {
+        return DoublePoint{
+            .x = projection.viewportLeft + logicalX * projection.scaleX,
+            .y = projection.viewportTop + logicalY * projection.scaleY,
+        };
+    };
+    const std::array projected{
+        projectCorner(startX - normalX, startY - normalY),
+        projectCorner(endX - normalX, endY - normalY),
+        projectCorner(endX + normalX, endY + normalY),
+        projectCorner(startX + normalX, startY + normalY),
+    };
+
+    constexpr double MinimumCoordinate =
+        static_cast<double>((std::numeric_limits<i32>::min)());
+    constexpr double MaximumCoordinateExclusive =
+        static_cast<double>((std::numeric_limits<i32>::max)()) + 1.0;
+    std::array<Render::UISubpixelPoint, 4> points{};
+    for (usize index = 0; index < projected.size(); ++index)
+    {
+        if (!std::isfinite(projected[index].x) ||
+            !std::isfinite(projected[index].y) ||
+            projected[index].x < MinimumCoordinate ||
+            projected[index].x > MaximumCoordinateExclusive ||
+            projected[index].y < MinimumCoordinate ||
+            projected[index].y > MaximumCoordinateExclusive)
+        {
+            return Core::failure(
+                Core::CoreErrorCode::InvalidArgument,
+                "A UI line vertex exceeds representable framebuffer coordinates");
+        }
+        points[index] = Render::UISubpixelPoint{
+            .x = projected[index].x == 0.0
+                     ? 0.0F
+                     : static_cast<float>(projected[index].x),
+            .y = projected[index].y == 0.0
+                     ? 0.0F
+                     : static_cast<float>(projected[index].y),
+        };
+    }
+
+    float minimumX = points[0].x;
+    float minimumY = points[0].y;
+    float maximumX = points[0].x;
+    float maximumY = points[0].y;
+    for (usize index = 1; index < points.size(); ++index)
+    {
+        minimumX = (std::min)(minimumX, points[index].x);
+        minimumY = (std::min)(minimumY, points[index].y);
+        maximumX = (std::max)(maximumX, points[index].x);
+        maximumY = (std::max)(maximumY, points[index].y);
+    }
+    const double roundedLeft = std::floor(static_cast<double>(minimumX));
+    const double roundedTop = std::floor(static_cast<double>(minimumY));
+    const double roundedRight = std::ceil(static_cast<double>(maximumX));
+    const double roundedBottom = std::ceil(static_cast<double>(maximumY));
+    if (roundedLeft < MinimumCoordinate ||
+        roundedTop < MinimumCoordinate ||
+        roundedLeft > static_cast<double>((std::numeric_limits<i32>::max)()) ||
+        roundedTop > static_cast<double>((std::numeric_limits<i32>::max)()) ||
+        roundedRight > MaximumCoordinateExclusive ||
+        roundedBottom > MaximumCoordinateExclusive ||
+        roundedRight <= roundedLeft || roundedBottom <= roundedTop)
+    {
+        return Core::failure(
+            Core::CoreErrorCode::InvalidArgument,
+            "A UI line AABB exceeds the pixel representation");
+    }
+
+    const i64 integerLeft = static_cast<i64>(roundedLeft);
+    const i64 integerTop = static_cast<i64>(roundedTop);
+    const i64 integerRight = static_cast<i64>(roundedRight);
+    const i64 integerBottom = static_cast<i64>(roundedBottom);
+    const i64 integerWidth = integerRight - integerLeft;
+    const i64 integerHeight = integerBottom - integerTop;
+    if (integerWidth > static_cast<i64>((std::numeric_limits<u32>::max)()) ||
+        integerHeight > static_cast<i64>((std::numeric_limits<u32>::max)()))
+    {
+        return Core::failure(
+            Core::CoreErrorCode::InvalidArgument,
+            "A UI line extent exceeds the pixel representation");
+    }
+
+    return ProjectedQuad{
+        .bounds =
+            Render::UIPixelRect{
+                .x = static_cast<i32>(integerLeft),
+                .y = static_cast<i32>(integerTop),
+                .width = static_cast<u32>(integerWidth),
+                .height = static_cast<u32>(integerHeight),
+            },
+        .vertices =
+            Render::UISolidQuadVertices{
+                .topLeft = points[0],
+                .topRight = points[1],
+                .bottomRight = points[2],
+                .bottomLeft = points[3],
+            },
     };
 }
 
@@ -407,6 +640,22 @@ struct ProjectedAxis final {
     return (std::min)(static_cast<float>(projected), maximum);
 }
 
+[[nodiscard]] float projectEllipseStrokeWidth(
+    float logicalStrokeWidth,
+    const PixelProjection& projection,
+    const Render::UIPixelRect& bounds) noexcept
+{
+    if (!(logicalStrokeWidth > 0.0F) || bounds.empty())
+    {
+        return 0.0F;
+    }
+    const double projected = static_cast<double>(logicalStrokeWidth) *
+                             (std::min)(projection.scaleX, projection.scaleY);
+    const float maximum =
+        static_cast<float>((std::min)(bounds.width, bounds.height)) * 0.5F;
+    return (std::min)(static_cast<float>(projected), maximum);
+}
+
 } // namespace
 
 Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
@@ -472,10 +721,27 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                     entry.imageBoundsProjection == UI::UICommittedImageBoundsProjection::SharedBoundary
                 ? std::optional<UI::UILogicalPoint>{entry.imageProjectionEnd}
                 : std::nullopt;
-        auto bounds = projectRect(entry.worldRect, *projection, sharedBoundsEnd);
-        if (!bounds)
+        const bool solidLine = entry.kind == UI::UICommittedPaintKind::SolidLine;
+        Render::UIPixelRect boundsValue{};
+        std::optional<Render::UISolidQuadVertices> explicitVertices;
+        if (solidLine)
         {
-            return Core::failure(std::move(bounds.error()));
+            auto projected = projectLine(entry, *projection);
+            if (!projected)
+            {
+                return Core::failure(std::move(projected.error()));
+            }
+            boundsValue = projected->bounds;
+            explicitVertices = projected->vertices;
+        }
+        else
+        {
+            auto bounds = projectRect(entry.worldRect, *projection, sharedBoundsEnd, false);
+            if (!bounds)
+            {
+                return Core::failure(std::move(bounds.error()));
+            }
+            boundsValue = *bounds;
         }
         auto clip = projectRect(entry.effectiveClip, *projection);
         if (!clip)
@@ -484,10 +750,10 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
         }
 
         std::optional<Render::UIPixelRect> submittedClip;
-        if (!bounds->empty() && covers(*clip, *bounds))
+        if (!boundsValue.empty() && covers(*clip, boundsValue))
         {
             ++statistics.redundantClipElisionCount;
-        } else if (!bounds->empty())
+        } else if (!boundsValue.empty())
         {
             submittedClip = *clip;
         }
@@ -502,7 +768,7 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
         {
             Core::Status addStatus = builder.addGlyphQuad({
                 .paintOrdinal = entry.paintOrdinal,
-                .bounds = *bounds,
+                .bounds = boundsValue,
                 .color = color,
                 .atlasUv =
                     Render::UIPixelRect{
@@ -543,7 +809,7 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
             const UI::UIImagePixelRect source = entry.imageSource.sourcePixels;
             Core::Status addStatus = builder.addImageQuad({
                 .paintOrdinal = entry.paintOrdinal,
-                .bounds = *bounds,
+                .bounds = boundsValue,
                 .color = color,
                 .texture = resolution.resource,
                 .resourceOrdinal = (*cached)->resourceOrdinal,
@@ -564,20 +830,44 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
             }
             ++statistics.submittedImageQuadCount;
         }
-        else
+        else if (entry.kind == UI::UICommittedPaintKind::SolidEllipse)
         {
-            Core::Status addStatus = builder.addSolidQuad({
+            Core::Status addStatus = builder.addSolidEllipse({
                 .paintOrdinal = entry.paintOrdinal,
-                .bounds = *bounds,
+                .bounds = boundsValue,
                 .color = color,
-                .cornerRadius = projectCornerRadius(entry.cornerRadius, *projection, *bounds),
+                .strokeWidth = projectEllipseStrokeWidth(
+                    entry.ellipseStrokeWidth, *projection, boundsValue),
                 .effectiveClip = submittedClip,
             });
             if (!addStatus)
             {
                 return Core::failure(std::move(addStatus.error()));
             }
-            ++statistics.submittedSolidQuadCount;
+            ++statistics.submittedSolidEllipseCount;
+        }
+        else
+        {
+            Core::Status addStatus = builder.addSolidQuad({
+                .paintOrdinal = entry.paintOrdinal,
+                .bounds = boundsValue,
+                .color = color,
+                .cornerRadius = projectCornerRadius(entry.cornerRadius, *projection, boundsValue),
+                .vertices = explicitVertices,
+                .effectiveClip = submittedClip,
+            });
+            if (!addStatus)
+            {
+                return Core::failure(std::move(addStatus.error()));
+            }
+            if (solidLine)
+            {
+                ++statistics.submittedSolidLineCount;
+            }
+            else
+            {
+                ++statistics.submittedSolidQuadCount;
+            }
         }
     }
 

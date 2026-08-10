@@ -3,10 +3,23 @@
 #include <tina/ui/UICommittedPaint.hpp>
 
 #include <memory_resource>
+#include <optional>
 #include <string_view>
 #include <vector>
 
 namespace Tina::UI::Detail {
+
+struct UICommittedLineGeometry final {
+    UILogicalRect worldEnvelope{};
+    UILogicalPoint worldStart{};
+    UILogicalPoint worldEnd{};
+};
+
+// Resolves local line geometry into the committed float coordinate space.
+// Translation and envelope math use double, then fail closed if the float
+// representation would overflow or collapse a non-degenerate line.
+[[nodiscard]] std::optional<UICommittedLineGeometry> resolveCommittedLineGeometry(
+    const UILineGeometry& line, UILogicalPoint worldOrigin) noexcept;
 
 [[nodiscard]] usize countBoxChromePaintEntries(
     const UIBoxPaint& paint, const UILogicalRect& worldRect,

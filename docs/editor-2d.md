@@ -218,17 +218,18 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
 
 - 2D 使用 Camera2D 中心、视口 aspect 与 `FixedWorldHeight2D` 生成 1 m orthographic grid；低像素密度时按
   `1/2/5 x 10^n` 自适应隐藏过密 minor line，X/Y axis 独立着色。
-- 3D 使用真实 camera yaw/pitch/distance/FOV 投影并裁剪 XZ perspective ground grid；当前 retained UI 只提供
-  axis-aligned quad，因此每条斜向 ray 以首尾相接的水平/垂直短线构成连续阶梯 polyline。阶梯步数不再固定：按投影后
-  像素长度向 `ViewportGridTargetStairPixels`（3 px）自适应细分（每段 6–64 步），贪心分配保证总 part 数不超过固定
-  visual node 预算且每段保底最小细分；transform gizmo 的轴线（12 步）与旋转环（24 弦）同样加密。Editor 因此显式
-  放宽 UI node/paint/display-list 容量。X/Z axis 独立着色。
-- **已知视觉限制与根因**：网格斜线与 gizmo 旋转环的"台阶感"都来自同一根因——UI 叠加层只有轴对齐
-  `SolidQuad` 图元，没有旋转矩形/线段图元，所有斜线只能用阶梯折线近似；投影数学本身（针孔投影 +
-  Liang-Barsky 裁剪，与 GPU camera 同为 55° FOV、同一 viewport aspect）是正确的。世界 pass 里 mesh 边缘
-  的锯齿则来自 backbuffer 抗锯齿：Editor 通过 `EngineConfig::renderMsaaSamples = 8` 打开 8× MSAA（见
-  [rendering.md](rendering.md)），samples 与像素证据 gate 保持关闭。彻底消除叠加层阶梯需要真正的线段/
-  旋转四边形渲染原语或把 grid/gizmo 移入 world pass，见 backlog `RENDER-LINES-001`。
+- 3D 使用真实 camera yaw/pitch/distance/FOV 投影并裁剪 XZ perspective ground grid；2D/3D grid 的每个
+  projected segment 都直接发布为一个 `UIBoxPaint::Line`，X/Y/Z axis 独立着色。Line committed paint 保留
+  logical 端点和线宽，Render bridge 对线宽法向四角分别应用 framebuffer X/Y scale，以 exact 四顶点支持
+  anisotropic 投影；integer envelope 只用于裁剪和剔除。
+- transform gizmo 的轴线和平面边界使用同一 Line 原语；rotation ring 使用单个向内描边的
+  `UIBoxPaint::Ellipse`，不再拆成弦段。Ellipse 的填充/向内描边由 coverage shader 完成。
+- 原有 axis-aligned 多段近似及其预算代码已经删除。overlay node 仍为固定容量、
+  `PointerHitPolicy::Ignore`，effective clip 仍是 axis-aligned scissor，几何命中继续由 gizmo backend 负责。
+  世界 pass 的 mesh 边缘继续由 backbuffer 抗锯齿处理：Editor 通过
+  `EngineConfig::renderMsaaSamples = 8` 打开 8× MSAA（见 [rendering.md](rendering.md)），samples 与像素证据
+  gate 保持关闭。2026-08-10 当前 Windows 宿主的 200% DPI 2D/3D 截图已证明 grid、斜向 gizmo 与
+  rotation ring 连续无阶梯；100% DPI 与跨 GPU UI-003 golden 仍由 backlog `RENDER-LINES-001` 跟踪。
 - overlay node 在 root 创建期一次性预分配，未使用槽为 `Collapsed`，全部 `UIPointerHitPolicy::Ignore`；命中仍由
   `viewportPreviewLayer_` 统一路由给 navigation、transform gizmo、marquee 与 TileMap brush。
 - footer 的 `-` / Zoom Slider / 百分比 / `+` 与 Frame All 共用 `viewportZoomPercent`。2D projection、TileMap visibility query、pointer-to-cell、gizmo delta

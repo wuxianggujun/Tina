@@ -1,6 +1,8 @@
 #include "UIPaintPrimitives.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace Tina::UI::Detail {
 namespace {
@@ -34,12 +36,133 @@ namespace {
     return paint.borderDark.alpha != 0 ? paint.borderDark : paint.borderLight;
 }
 
+[[nodiscard]] bool validLineGeometry(const UIBoxPaint& paint) noexcept
+{
+    const float length = std::hypot(
+        paint.line.end.x - paint.line.start.x,
+        paint.line.end.y - paint.line.start.y);
+    return paint.primitive == UIBoxPrimitiveKind::Line &&
+           std::isfinite(paint.line.start.x) && std::isfinite(paint.line.start.y) &&
+           std::isfinite(paint.line.end.x) && std::isfinite(paint.line.end.y) &&
+           std::isfinite(paint.line.thickness) && paint.line.thickness > 0.0F &&
+           std::isfinite(length) && length > 0.0F;
+}
+
+[[nodiscard]] bool validEllipseGeometry(const UIBoxPaint& paint,
+                                        const UILogicalRect& worldRect) noexcept
+{
+    return paint.primitive == UIBoxPrimitiveKind::Ellipse &&
+           std::isfinite(worldRect.width) && worldRect.width > 0.0F &&
+           std::isfinite(worldRect.height) && worldRect.height > 0.0F &&
+           std::isfinite(paint.ellipseStrokeWidth) &&
+           paint.ellipseStrokeWidth >= 0.0F &&
+           paint.ellipseStrokeWidth <=
+               (std::min)(worldRect.width, worldRect.height) * 0.5F;
+}
+
 } // namespace
+
+std::optional<UICommittedLineGeometry> resolveCommittedLineGeometry(
+    const UILineGeometry& line, UILogicalPoint worldOrigin) noexcept
+{
+    const double localDeltaX = static_cast<double>(line.end.x) - line.start.x;
+    const double localDeltaY = static_cast<double>(line.end.y) - line.start.y;
+    const double localLength = std::hypot(localDeltaX, localDeltaY);
+    if (!std::isfinite(line.start.x) || !std::isfinite(line.start.y) ||
+        !std::isfinite(line.end.x) || !std::isfinite(line.end.y) ||
+        !std::isfinite(line.thickness) || line.thickness <= 0.0F ||
+        !std::isfinite(worldOrigin.x) || !std::isfinite(worldOrigin.y) ||
+        !std::isfinite(localLength) || localLength <= 0.0)
+    {
+        return std::nullopt;
+    }
+
+    static constexpr double MaximumFloat =
+        static_cast<double>((std::numeric_limits<float>::max)());
+    const auto finiteFloat = [](double value) noexcept -> std::optional<float> {
+        if (!std::isfinite(value) || value < -MaximumFloat || value > MaximumFloat)
+        {
+            return std::nullopt;
+        }
+        const float converted = static_cast<float>(value);
+        return std::isfinite(converted)
+                   ? std::optional<float>{normalizeFloat(converted)}
+                   : std::nullopt;
+    };
+
+    const auto startX = finiteFloat(static_cast<double>(worldOrigin.x) + line.start.x);
+    const auto startY = finiteFloat(static_cast<double>(worldOrigin.y) + line.start.y);
+    const auto endX = finiteFloat(static_cast<double>(worldOrigin.x) + line.end.x);
+    const auto endY = finiteFloat(static_cast<double>(worldOrigin.y) + line.end.y);
+    if (!startX || !startY || !endX || !endY ||
+        (*startX == *endX && *startY == *endY))
+    {
+        return std::nullopt;
+    }
+
+    const double deltaX = static_cast<double>(*endX) - *startX;
+    const double deltaY = static_cast<double>(*endY) - *startY;
+    const double length = std::hypot(deltaX, deltaY);
+    const double halfThickness = static_cast<double>(line.thickness) * 0.5;
+    if (!std::isfinite(length) || length <= 0.0 || !std::isfinite(halfThickness))
+    {
+        return std::nullopt;
+    }
+    const double extentX = std::abs(deltaY / length) * halfThickness;
+    const double extentY = std::abs(deltaX / length) * halfThickness;
+    const double left = (std::min)(static_cast<double>(*startX),
+                                   static_cast<double>(*endX)) - extentX;
+    const double top = (std::min)(static_cast<double>(*startY),
+                                  static_cast<double>(*endY)) - extentY;
+    const double right = (std::max)(static_cast<double>(*startX),
+                                    static_cast<double>(*endX)) + extentX;
+    const double bottom = (std::max)(static_cast<double>(*startY),
+                                     static_cast<double>(*endY)) + extentY;
+    const auto envelopeX = finiteFloat(left);
+    const auto envelopeY = finiteFloat(top);
+    const auto envelopeWidth = finiteFloat(right - left);
+    const auto envelopeHeight = finiteFloat(bottom - top);
+    if (!envelopeX || !envelopeY || !envelopeWidth || !envelopeHeight ||
+        *envelopeWidth <= 0.0F || *envelopeHeight <= 0.0F)
+    {
+        return std::nullopt;
+    }
+
+    return UICommittedLineGeometry{
+        .worldEnvelope = {
+            .x = *envelopeX,
+            .y = *envelopeY,
+            .width = *envelopeWidth,
+            .height = *envelopeHeight,
+        },
+        .worldStart = {.x = *startX, .y = *startY},
+        .worldEnd = {.x = *endX, .y = *endY},
+    };
+}
 
 usize countBoxChromePaintEntries(const UIBoxPaint& paint,
                                  const UILogicalRect& worldRect,
                                  bool hasResolvedFill) noexcept
 {
+    if (paint.primitive == UIBoxPrimitiveKind::Ellipse)
+    {
+        return validEllipseGeometry(paint, worldRect) && hasResolvedFill
+                   ? 1U
+                   : 0U;
+    }
+    if (paint.primitive == UIBoxPrimitiveKind::Line)
+    {
+        return validLineGeometry(paint) && hasResolvedFill &&
+                       resolveCommittedLineGeometry(
+                           paint.line, {.x = worldRect.x, .y = worldRect.y})
+                           .has_value()
+                   ? 1U
+                   : 0U;
+    }
+    if (paint.primitive != UIBoxPrimitiveKind::Rectangle)
+    {
+        return 0U;
+    }
     usize count = hasDrawableShadow(paint, worldRect) ? 1U : 0U;
     const bool hasBorder = hasDrawableBorder(paint, worldRect);
     if (paint.cornerRadius > 0.0F && hasResolvedFill && hasBorder)
@@ -70,6 +193,49 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output,
                            u32& nextPaintOrdinal, const UIBoxPaint& paint,
                            UIPremultipliedRgba8Color resolvedFill) noexcept
 {
+    if (paint.primitive == UIBoxPrimitiveKind::Ellipse)
+    {
+        if (!resolvedFill.isTransparent() && validEllipseGeometry(paint, worldRect))
+        {
+            output.push_back(UICommittedPaintEntry{
+                .node = node,
+                .worldRect = worldRect,
+                .effectiveClip = effectiveClip,
+                .paintOrdinal = nextPaintOrdinal,
+                .solidFill = resolvedFill,
+                .kind = UICommittedPaintKind::SolidEllipse,
+                .ellipseStrokeWidth = paint.ellipseStrokeWidth,
+            });
+            ++nextPaintOrdinal;
+        }
+        return;
+    }
+    if (paint.primitive == UIBoxPrimitiveKind::Line)
+    {
+        const auto geometry = resolveCommittedLineGeometry(
+            paint.line, {.x = worldRect.x, .y = worldRect.y});
+        if (validLineGeometry(paint) && geometry.has_value() &&
+            !resolvedFill.isTransparent())
+        {
+            output.push_back(UICommittedPaintEntry{
+                .node = node,
+                .worldRect = geometry->worldEnvelope,
+                .effectiveClip = effectiveClip,
+                .paintOrdinal = nextPaintOrdinal,
+                .solidFill = resolvedFill,
+                .kind = UICommittedPaintKind::SolidLine,
+                .lineStart = geometry->worldStart,
+                .lineEnd = geometry->worldEnd,
+                .lineThickness = paint.line.thickness,
+            });
+            ++nextPaintOrdinal;
+        }
+        return;
+    }
+    if (paint.primitive != UIBoxPrimitiveKind::Rectangle)
+    {
+        return;
+    }
     if (hasDrawableShadow(paint, worldRect))
     {
         output.push_back(UICommittedPaintEntry{

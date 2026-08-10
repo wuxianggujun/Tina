@@ -9,7 +9,7 @@
 
 namespace Tina::Render::Bgfx {
 
-// Creates a 1x1 R8 white texture for SolidQuad sampling (coverage = 1).
+// Creates a 1x1 R8 white texture for solid-shape sampling (coverage = 1).
 [[nodiscard]] Core::Result<bgfx::TextureHandle> createUISolidWhiteTexture();
 
 // Creates an R8 atlas page texture. Pixels must be width*height bytes, row-major.

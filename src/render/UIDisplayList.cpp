@@ -3,6 +3,7 @@
 #include <tina/render/RenderErrors.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <limits>
@@ -27,6 +28,66 @@ namespace {
     const i64 rightBottom = static_cast<i64>(right.y) + static_cast<i64>(right.height);
     return static_cast<i64>(left.x) < rightRight && static_cast<i64>(right.x) < leftRight &&
            static_cast<i64>(left.y) < rightBottom && static_cast<i64>(right.y) < leftBottom;
+}
+
+[[nodiscard]] constexpr std::array<UISubpixelPoint, 4> quadPoints(
+    const UISolidQuadVertices& vertices) noexcept
+{
+    return {
+        vertices.topLeft,
+        vertices.topRight,
+        vertices.bottomRight,
+        vertices.bottomLeft,
+    };
+}
+
+[[nodiscard]] bool validSolidQuadVertices(
+    const UISolidQuadVertices& vertices,
+    const UIPixelRect& bounds) noexcept
+{
+    const std::array points = quadPoints(vertices);
+    const double left = static_cast<double>(bounds.x);
+    const double top = static_cast<double>(bounds.y);
+    const double right = left + static_cast<double>(bounds.width);
+    const double bottom = top + static_cast<double>(bounds.height);
+    for (const UISubpixelPoint point : points)
+    {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+            static_cast<double>(point.x) < left ||
+            static_cast<double>(point.x) > right ||
+            static_cast<double>(point.y) < top ||
+            static_cast<double>(point.y) > bottom)
+        {
+            return false;
+        }
+    }
+
+    int winding = 0;
+    for (usize index = 0; index < points.size(); ++index)
+    {
+        const UISubpixelPoint current = points[index];
+        const UISubpixelPoint next = points[(index + 1U) % points.size()];
+        const UISubpixelPoint following = points[(index + 2U) % points.size()];
+        const double firstX = static_cast<double>(next.x) - current.x;
+        const double firstY = static_cast<double>(next.y) - current.y;
+        const double secondX = static_cast<double>(following.x) - next.x;
+        const double secondY = static_cast<double>(following.y) - next.y;
+        const double cross = firstX * secondY - firstY * secondX;
+        if (!std::isfinite(cross) || cross == 0.0)
+        {
+            return false;
+        }
+        const int edgeWinding = cross > 0.0 ? 1 : -1;
+        if (winding == 0)
+        {
+            winding = edgeWinding;
+        }
+        else if (winding != edgeWinding)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 inline constexpr u64 Fnv1aOffsetBasis = 14695981039346656037ULL;
@@ -195,6 +256,15 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
         return failBuild(RenderErrorCode::InvalidDrawCommand,
                          "UI solid quad corner radius must be finite and fit within its bounds");
     }
+    if (input.vertices.has_value() &&
+        (input.cornerRadius != 0.0F ||
+         !validSolidQuadVertices(*input.vertices, input.bounds)))
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(
+            RenderErrorCode::InvalidDrawCommand,
+            "UI solid quad vertices must be finite, strictly convex, covered by bounds, and cannot be combined with a corner radius");
+    }
     if (input.bounds.empty())
     {
         ++m_candidateStatistics.prunedEmptyBoundsCount;
@@ -250,6 +320,7 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
                                                        .bounds = input.bounds,
                                                        .color = input.color,
                                                        .cornerRadius = input.cornerRadius,
+                                                       .vertices = input.vertices,
                                                        .clip = clip,
                                                    });
     ++m_commandCount;
@@ -269,6 +340,119 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
     }
 
     ++m_candidateStatistics.solidQuadCommandCount;
+    return Core::success();
+}
+
+Core::Status UIDisplayListBuilder::addSolidEllipse(const UISolidEllipseInput& input)
+{
+    if (m_state != State::Building)
+    {
+        return displayListFailure(RenderErrorCode::DisplayListBuildNotOpen,
+                                  "A UI DisplayList build must be open before adding commands");
+    }
+    if (m_stickyBuildError.has_value())
+    {
+        return displayListFailure(*m_stickyBuildError, "The UI DisplayList build has already failed");
+    }
+    if (m_lastPaintOrdinal.has_value() && input.paintOrdinal <= *m_lastPaintOrdinal)
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand,
+                         "UI draw command paint ordinals must be strictly increasing");
+    }
+    m_lastPaintOrdinal = input.paintOrdinal;
+    if (!input.color.isValid())
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidPremultipliedColor,
+                         "UI colors must use premultiplied RGBA8 channels");
+    }
+    const float maximumStrokeWidth =
+        static_cast<float>((std::min)(input.bounds.width, input.bounds.height)) * 0.5F;
+    if (!std::isfinite(input.strokeWidth) || input.strokeWidth < 0.0F ||
+        input.strokeWidth > maximumStrokeWidth)
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand,
+                         "UI solid ellipse stroke width must be finite and fit within its bounds");
+    }
+    if (input.bounds.empty())
+    {
+        ++m_candidateStatistics.prunedEmptyBoundsCount;
+        return Core::success();
+    }
+    if (input.color.transparent())
+    {
+        ++m_candidateStatistics.prunedTransparentCount;
+        return Core::success();
+    }
+    if (input.effectiveClip.has_value() && input.effectiveClip->empty())
+    {
+        ++m_candidateStatistics.prunedEmptyClipCount;
+        return Core::success();
+    }
+    if (input.effectiveClip.has_value() && !intersects(input.bounds, *input.effectiveClip))
+    {
+        ++m_candidateStatistics.prunedOutsideClipCount;
+        return Core::success();
+    }
+
+    UIClipId clip{};
+    bool needsClip = false;
+    if (input.effectiveClip.has_value())
+    {
+        clip = findClip(*input.effectiveClip);
+        needsClip = !clip.hasClip();
+        if (needsClip)
+        {
+            clip = UIClipId{m_clipCount + 1U};
+        }
+    }
+
+    const bool needsBatch =
+        m_batchCount == 0 ||
+        m_batches[m_batchCount - 1U].kind != UIDrawCommandKind::SolidEllipse ||
+        m_batches[m_batchCount - 1U].clip != clip;
+    if (!hasCapacityFor(needsClip, needsBatch))
+    {
+        ++m_statistics.capacityFailureCount;
+        return failBuild(RenderErrorCode::DisplayListCapacityExceeded,
+                         "UI DisplayList fixed command, clip, or batch capacity was exceeded");
+    }
+
+    if (needsClip)
+    {
+        std::construct_at(&m_clips[m_clipCount], *input.effectiveClip);
+        ++m_clipCount;
+    }
+
+    const u32 commandIndex = m_commandCount;
+    std::construct_at(&m_commands[m_commandCount], UIDrawCommand{
+                                                       .kind = UIDrawCommandKind::SolidEllipse,
+                                                       .paintOrdinal = input.paintOrdinal,
+                                                       .bounds = input.bounds,
+                                                       .color = input.color,
+                                                       .strokeWidth = input.strokeWidth,
+                                                       .clip = clip,
+                                                   });
+    ++m_commandCount;
+
+    if (needsBatch)
+    {
+        std::construct_at(&m_batches[m_batchCount], UIDrawBatch{
+                                                        .kind = UIDrawCommandKind::SolidEllipse,
+                                                        .clip = clip,
+                                                        .firstCommand = commandIndex,
+                                                        .commandCount = 1,
+                                                    });
+        ++m_batchCount;
+    }
+    else
+    {
+        ++m_batches[m_batchCount - 1U].commandCount;
+    }
+
+    ++m_candidateStatistics.solidEllipseCommandCount;
     return Core::success();
 }
 
@@ -576,6 +760,16 @@ u64 UIDisplayListBuilder::calculatePaintOrderChecksum(std::span<const UIDrawComm
         hashByte(checksum, command.color.blue);
         hashByte(checksum, command.color.alpha);
         hashU32(checksum, std::bit_cast<u32>(command.cornerRadius));
+        hashByte(checksum, static_cast<u8>(command.vertices.has_value()));
+        if (command.vertices.has_value())
+        {
+            for (const UISubpixelPoint point : quadPoints(*command.vertices))
+            {
+                hashU32(checksum, std::bit_cast<u32>(point.x));
+                hashU32(checksum, std::bit_cast<u32>(point.y));
+            }
+        }
+        hashU32(checksum, std::bit_cast<u32>(command.strokeWidth));
         hashByte(checksum, static_cast<u8>(command.clip.hasClip()));
         hashU32(checksum, command.clip.m_value);
         if (command.clip.hasClip())

@@ -379,7 +379,7 @@ TEST_F(UIRenderDisplayListTest, PreservesMixedSolidAndGlyphPaintOrderClipAndBatc
     EXPECT_EQ(result->displayList.statistics().glyphCommandCount, 2U);
 }
 
-TEST_F(UIRenderDisplayListTest, UsesOutwardFractionalRoundingAndClampsToFramebufferViewport)
+TEST_F(UIRenderDisplayListTest, UsesOutwardFractionalRoundingAndRetainsBoundsOutsideFramebufferViewport)
 {
     const std::array entries{
         solidEntry(
@@ -396,7 +396,12 @@ TEST_F(UIRenderDisplayListTest, UsesOutwardFractionalRoundingAndClampsToFramebuf
     ASSERT_EQ(result->displayList.commands().size(), 1U);
     EXPECT_EQ(
         result->displayList.commands().front().bounds,
-        (Render::UIPixelRect{10, 20, 3, 3}));
+        (Render::UIPixelRect{9, 20, 4, 3}));
+    const Render::UIClipId clipId = result->displayList.commands().front().clip;
+    ASSERT_TRUE(clipId.hasClip());
+    const Render::UIPixelRect* clip = result->displayList.resolveClip(clipId);
+    ASSERT_NE(clip, nullptr);
+    EXPECT_EQ(*clip, (Render::UIPixelRect{10, 20, 7, 5}));
 }
 
 TEST_F(UIRenderDisplayListTest, ProjectsAndClampsLogicalCornerRadiusWithAnisotropicScale)
@@ -419,6 +424,145 @@ TEST_F(UIRenderDisplayListTest, ProjectsAndClampsLogicalCornerRadiusWithAnisotro
     const Render::UIDrawCommand& command = result->displayList.commands().front();
     EXPECT_EQ(command.bounds, (Render::UIPixelRect{20, 10, 20, 8}));
     EXPECT_FLOAT_EQ(command.cornerRadius, 4.0F);
+}
+
+TEST_F(UIRenderDisplayListTest, Projects45DegreeSolidLineAsExactParallelogramWithConservativeAabb)
+{
+    constexpr float RootTwo = 1.4142135623730951F;
+    const std::array entries{
+        UI::UICommittedPaintEntry{
+            .worldRect = {
+                .x = 5.0F - RootTwo,
+                .y = 5.0F - RootTwo,
+                .width = 20.0F + 2.0F * RootTwo,
+                .height = 20.0F + 2.0F * RootTwo,
+            },
+            .effectiveClip = {.width = 40.0F, .height = 40.0F},
+            .paintOrdinal = 1,
+            .solidFill = {20, 40, 60, 255},
+            .kind = UI::UICommittedPaintKind::SolidLine,
+            .lineStart = {.x = 5.0F, .y = 5.0F},
+            .lineEnd = {.x = 25.0F, .y = 25.0F},
+            .lineThickness = 4.0F,
+        },
+    };
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {40.0F, 40.0F}),
+        {.framebufferViewport = {0, 0, 80, 40}});
+
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    const Render::UIDrawCommand& command = result->displayList.commands().front();
+    EXPECT_EQ(command.kind, Render::UIDrawCommandKind::SolidQuad);
+    EXPECT_EQ(command.bounds, (Render::UIPixelRect{7, 3, 46, 24}));
+    ASSERT_TRUE(command.vertices.has_value());
+    EXPECT_FLOAT_EQ(command.vertices->topLeft.x, 10.0F + 2.0F * RootTwo);
+    EXPECT_FLOAT_EQ(command.vertices->topLeft.y, 5.0F - RootTwo);
+    EXPECT_FLOAT_EQ(command.vertices->topRight.x, 50.0F + 2.0F * RootTwo);
+    EXPECT_FLOAT_EQ(command.vertices->topRight.y, 25.0F - RootTwo);
+    EXPECT_FLOAT_EQ(command.vertices->bottomRight.x, 50.0F - 2.0F * RootTwo);
+    EXPECT_FLOAT_EQ(command.vertices->bottomRight.y, 25.0F + RootTwo);
+    EXPECT_FLOAT_EQ(command.vertices->bottomLeft.x, 10.0F - 2.0F * RootTwo);
+    EXPECT_FLOAT_EQ(command.vertices->bottomLeft.y, 5.0F + RootTwo);
+    EXPECT_FALSE(command.clip.hasClip());
+    EXPECT_EQ(result->statistics.submittedSolidLineCount, 1U);
+    EXPECT_EQ(result->statistics.submittedSolidQuadCount, 0U);
+    EXPECT_EQ(result->displayList.statistics().solidQuadCommandCount, 1U);
+}
+
+TEST_F(UIRenderDisplayListTest, RetainsOffscreenSolidLineGeometryAndSubmitsViewportScissor)
+{
+    const std::array entries{
+        UI::UICommittedPaintEntry{
+            .worldRect = {.x = -10.0F, .y = 9.0F, .width = 20.0F, .height = 2.0F},
+            .effectiveClip = {.width = 20.0F, .height = 20.0F},
+            .paintOrdinal = 1,
+            .solidFill = {20, 40, 60, 255},
+            .kind = UI::UICommittedPaintKind::SolidLine,
+            .lineStart = {.x = -10.0F, .y = 10.0F},
+            .lineEnd = {.x = 10.0F, .y = 10.0F},
+            .lineThickness = 2.0F,
+        },
+    };
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 1, .batchCount = 1});
+
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {20.0F, 20.0F}),
+        {.framebufferViewport = {0, 0, 20, 20}});
+
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    const Render::UIDrawCommand& command = result->displayList.commands().front();
+    EXPECT_EQ(command.bounds, (Render::UIPixelRect{-10, 9, 20, 2}));
+    ASSERT_TRUE(command.vertices.has_value());
+    EXPECT_EQ(command.vertices->topLeft, (Render::UISubpixelPoint{-10.0F, 9.0F}));
+    EXPECT_EQ(command.vertices->topRight, (Render::UISubpixelPoint{10.0F, 9.0F}));
+    EXPECT_EQ(command.vertices->bottomRight, (Render::UISubpixelPoint{10.0F, 11.0F}));
+    EXPECT_EQ(command.vertices->bottomLeft, (Render::UISubpixelPoint{-10.0F, 11.0F}));
+    ASSERT_TRUE(command.clip.hasClip());
+    const Render::UIPixelRect* clip = result->displayList.resolveClip(command.clip);
+    ASSERT_NE(clip, nullptr);
+    EXPECT_EQ(*clip, (Render::UIPixelRect{0, 0, 20, 20}));
+}
+
+TEST_F(UIRenderDisplayListTest, ConvertsCommittedSolidEllipseToEllipseCommand)
+{
+    const std::array entries{
+        UI::UICommittedPaintEntry{
+            .worldRect = {.x = 10.0F, .y = 20.0F, .width = 20.0F, .height = 10.0F},
+            .effectiveClip = {.width = 100.0F, .height = 100.0F},
+            .paintOrdinal = 3,
+            .solidFill = {20, 40, 60, 255},
+            .kind = UI::UICommittedPaintKind::SolidEllipse,
+            .ellipseStrokeWidth = 3.0F,
+        },
+    };
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {100.0F, 100.0F}),
+        {.framebufferViewport = {0, 0, 200, 100}});
+
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    const Render::UIDrawCommand& command = result->displayList.commands().front();
+    EXPECT_EQ(command.kind, Render::UIDrawCommandKind::SolidEllipse);
+    EXPECT_EQ(command.bounds, (Render::UIPixelRect{20, 20, 40, 10}));
+    EXPECT_FLOAT_EQ(command.strokeWidth, 3.0F);
+    EXPECT_FALSE(command.clip.hasClip());
+    EXPECT_EQ(result->statistics.submittedSolidEllipseCount, 1U);
+    EXPECT_EQ(result->statistics.submittedSolidQuadCount, 0U);
+    EXPECT_EQ(result->displayList.statistics().solidEllipseCommandCount, 1U);
+}
+
+TEST_F(UIRenderDisplayListTest, PrunesEmptyCommittedSolidEllipseWithoutFailingTheFrame)
+{
+    const std::array entries{
+        UI::UICommittedPaintEntry{
+            .worldRect = {.x = 10.0F, .y = 20.0F, .width = 0.0F, .height = 10.0F},
+            .effectiveClip = {.width = 100.0F, .height = 100.0F},
+            .paintOrdinal = 3,
+            .solidFill = {20, 40, 60, 255},
+            .kind = UI::UICommittedPaintKind::SolidEllipse,
+            .ellipseStrokeWidth = 3.0F,
+        },
+    };
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 1, .batchCount = 1});
+
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {100.0F, 100.0F}),
+        {.framebufferViewport = {0, 0, 100, 100}});
+
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    EXPECT_TRUE(result->displayList.empty());
+    EXPECT_EQ(result->statistics.submittedSolidEllipseCount, 1U);
+    EXPECT_EQ(result->displayList.statistics().prunedEmptyBoundsCount, 1U);
 }
 
 TEST_F(UIRenderDisplayListTest, ElidesAClipThatCoversTheProjectedCommand)
@@ -602,7 +746,8 @@ TEST_F(UIRenderDisplayListTest, PrunesTransparentEmptyAndOutsideEntriesWithoutBr
     EXPECT_EQ(result->statistics.submittedSolidQuadCount, 4U);
     EXPECT_EQ(result->statistics.redundantClipElisionCount, 2U);
     EXPECT_EQ(result->displayList.statistics().prunedTransparentCount, 1U);
-    EXPECT_EQ(result->displayList.statistics().prunedEmptyBoundsCount, 2U);
+    EXPECT_EQ(result->displayList.statistics().prunedEmptyBoundsCount, 1U);
+    EXPECT_EQ(result->displayList.statistics().prunedOutsideClipCount, 1U);
 }
 
 TEST_F(UIRenderDisplayListTest, CapacityFailureAfterSuccessLeavesNoOldOrTruncatedPublishedView)

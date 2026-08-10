@@ -95,15 +95,6 @@ struct UITheme final {
     return theme;
 }
 
-[[nodiscard]] constexpr UIBoxPaint makeSolidBox(
-    UIStraightSrgba8Color color,
-    float cornerRadius = 0.0F) noexcept
-{
-    UIBoxPaint paint{.solidFill = UISolidFill{.color = color}};
-    paint.cornerRadius = cornerRadius;
-    return paint;
-}
-
 [[nodiscard]] constexpr UIStraightSrgba8Color scaleColorAlpha(
     UIStraightSrgba8Color color,
     u8 alpha) noexcept

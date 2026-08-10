@@ -1363,6 +1363,12 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         hash.addU32(entry.atlasWidth);
         hash.addU32(entry.atlasHeight);
         hash.addU32(entry.atlasPage);
+        hash.addFloat(entry.lineStart.x);
+        hash.addFloat(entry.lineStart.y);
+        hash.addFloat(entry.lineEnd.x);
+        hash.addFloat(entry.lineEnd.y);
+        hash.addFloat(entry.lineThickness);
+        hash.addFloat(entry.ellipseStrokeWidth);
     }
 
     hash.addU64(hashStableSemantics(fixture.context->committedSemantics()));

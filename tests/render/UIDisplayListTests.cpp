@@ -6,6 +6,7 @@
 #include <tina/render/UIDisplayList.hpp>
 
 #include <array>
+#include <limits>
 #include <memory_resource>
 #include <new>
 
@@ -363,6 +364,85 @@ TEST(UIDisplayListTest, SolidQuadCornerRadiusIsValidatedStoredAndChecksummed)
     ASSERT_FALSE(oversized.has_value());
     EXPECT_EQ(oversized.error().code, Render::RenderErrorCode::InvalidDrawCommand);
     EXPECT_FALSE(builder.commit().has_value());
+}
+
+TEST(UIDisplayListTest, SolidEllipseStoresFillAndStrokeInOneBatchAndChecksumsStrokeWidth)
+{
+    auto builder = createBuilder({.commandCount = 2, .clipCount = 1, .batchCount = 1});
+    constexpr Render::UIPixelRect Clip{0, 0, 40, 20};
+    constexpr std::array<Render::UISolidEllipseInput, 2> Ellipses{{
+        {
+            .paintOrdinal = 2,
+            .bounds = {0, 0, 20, 10},
+            .color = opaque(10, 20, 30),
+            .effectiveClip = Clip,
+        },
+        {
+            .paintOrdinal = 5,
+            .bounds = {20, 0, 20, 10},
+            .color = opaque(30, 20, 10),
+            .strokeWidth = 2.5F,
+            .effectiveClip = Clip,
+        },
+    }};
+
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    for (const Render::UISolidEllipseInput& ellipse : Ellipses)
+    {
+        ASSERT_TRUE(builder.addSolidEllipse(ellipse).has_value());
+    }
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value());
+    ASSERT_EQ(committed->commands().size(), 2U);
+    EXPECT_EQ(committed->commands()[0].kind, Render::UIDrawCommandKind::SolidEllipse);
+    EXPECT_FLOAT_EQ(committed->commands()[0].strokeWidth, 0.0F);
+    EXPECT_EQ(committed->commands()[1].kind, Render::UIDrawCommandKind::SolidEllipse);
+    EXPECT_FLOAT_EQ(committed->commands()[1].strokeWidth, 2.5F);
+    ASSERT_EQ(committed->batches().size(), 1U);
+    EXPECT_EQ(committed->batches().front().kind, Render::UIDrawCommandKind::SolidEllipse);
+    EXPECT_EQ(committed->batches().front().commandCount, 2U);
+    EXPECT_EQ(committed->statistics().solidQuadCommandCount, 0U);
+    EXPECT_EQ(committed->statistics().solidEllipseCommandCount, 2U);
+    const u64 strokedChecksum = committed->paintOrderChecksum();
+    EXPECT_NE(strokedChecksum, 0U);
+
+    auto changedStroke = Ellipses;
+    changedStroke[1].strokeWidth = 1.5F;
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    for (const Render::UISolidEllipseInput& ellipse : changedStroke)
+    {
+        ASSERT_TRUE(builder.addSolidEllipse(ellipse).has_value());
+    }
+    auto changed = builder.commit();
+    ASSERT_TRUE(changed.has_value());
+    EXPECT_NE(changed->paintOrderChecksum(), strokedChecksum);
+}
+
+TEST(UIDisplayListTest, SolidEllipseRejectsInvalidStrokeWidths)
+{
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+    constexpr auto Valid = Render::UISolidEllipseInput{
+        .paintOrdinal = 1,
+        .bounds = {0, 0, 20, 10},
+        .color = opaque(10, 20, 30),
+    };
+    const std::array invalidStrokeWidths{
+        -1.0F,
+        5.5F,
+        (std::numeric_limits<float>::quiet_NaN)(),
+    };
+
+    for (float strokeWidth : invalidStrokeWidths)
+    {
+        ASSERT_TRUE(builder.beginFrame().has_value());
+        auto input = Valid;
+        input.strokeWidth = strokeWidth;
+        auto rejected = builder.addSolidEllipse(input);
+        ASSERT_FALSE(rejected.has_value());
+        EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::InvalidDrawCommand);
+        EXPECT_FALSE(builder.commit().has_value());
+    }
+    EXPECT_EQ(builder.statistics().invalidInputFailureCount, invalidStrokeWidths.size());
 }
 
 TEST(UIDisplayListTest, PerformsNoFurtherPmrAllocationsAfterCreate)

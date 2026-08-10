@@ -1003,62 +1003,52 @@ auto EditorWorkspaceState::viewportGridColor(
 
 auto EditorWorkspaceState::viewportGridLayout(
     const Tina::Editor::EditorViewportGridSegment& segment,
-    Tina::Core::usize partIndex,
-    Tina::Core::usize diagonalStepCount) noexcept -> UI::UILayoutStyle{
+    float viewportWidth,
+    float viewportHeight,
+    UI::UILineGeometry& line) noexcept -> UI::UILayoutStyle{
     using Kind = Tina::Editor::EditorViewportGridSegmentKind;
     const bool axis = segment.kind == Kind::AxisX ||
                       segment.kind == Kind::AxisY ||
                       segment.kind == Kind::AxisZ;
     const float thickness = axis ? 2.0F
                                  : (segment.kind == Kind::Major ? 1.25F : 1.0F);
-    float startX = segment.startX;
-    float startY = segment.startY;
-    float endX = segment.endX;
-    float endY = segment.endY;
-    if (diagonalStepCount > 0U) {
-        const Tina::Core::usize stepIndex =
-            partIndex / ViewportGridDiagonalPartsPerStep;
-        const bool verticalPart =
-            partIndex % ViewportGridDiagonalPartsPerStep != 0U;
-        const float startT = static_cast<float>(stepIndex) /
-                             static_cast<float>(diagonalStepCount);
-        const float endT = static_cast<float>(stepIndex + 1U) /
-                           static_cast<float>(diagonalStepCount);
-        startX = segment.startX +
-                 (segment.endX - segment.startX) * startT;
-        startY = segment.startY +
-                 (segment.endY - segment.startY) * startT;
-        endX = segment.startX +
-               (segment.endX - segment.startX) * endT;
-        endY = segment.startY +
-               (segment.endY - segment.startY) * endT;
-        if (verticalPart) {
-            startX = endX;
-        } else {
-            endY = startY;
-        }
+    const float startX = segment.startX * viewportWidth;
+    const float startY = segment.startY * viewportHeight;
+    const float endX = segment.endX * viewportWidth;
+    const float endY = segment.endY * viewportHeight;
+    const float deltaX = endX - startX;
+    const float deltaY = endY - startY;
+    const float length = std::hypot(deltaX, deltaY);
+    if (!(std::isfinite(length) && length > 1.0e-4F) ||
+        !(std::isfinite(viewportWidth) && std::isfinite(viewportHeight)) ||
+        viewportWidth <= 0.0F || viewportHeight <= 0.0F) {
+        line = {};
+        UI::UILayoutStyle collapsed = fixedSize(1.0F, 1.0F);
+        collapsed.placement = UI::UILayoutPlacement::Overlay;
+        collapsed.visibility = UI::UIVisibility::Collapsed;
+        return collapsed;
     }
-    const float width = std::abs(endX - startX);
-    const float height = std::abs(endY - startY);
+
+    const float halfThickness = thickness * 0.5F;
+    const float extentX = std::abs(deltaY / length) * halfThickness;
+    const float extentY = std::abs(deltaX / length) * halfThickness;
+    const float left = (std::min)(startX, endX) - extentX;
+    const float top = (std::min)(startY, endY) - extentY;
+    const float right = (std::max)(startX, endX) + extentX;
+    const float bottom = (std::max)(startY, endY) + extentY;
+    line = UI::UILineGeometry{
+        .start = UI::UILogicalPoint{.x = startX - left, .y = startY - top},
+        .end = UI::UILogicalPoint{.x = endX - left, .y = endY - top},
+        .thickness = thickness,
+    };
     UI::UILayoutStyle style{};
     style.placement = UI::UILayoutPlacement::Overlay;
     style.overlay.horizontal = UI::UIAxisAlignment::Start;
     style.overlay.vertical = UI::UIAxisAlignment::Start;
-    if (height > width) {
-        style.overlay.offset.x = UI::UILayoutLength::Percent(
-            (startX + endX) * 50.0F);
-        style.overlay.offset.y = UI::UILayoutLength::Percent(
-            (std::min)(startY, endY) * 100.0F);
-        style.size.width = UI::UILayoutLength::Px(thickness);
-        style.size.height = UI::UILayoutLength::Percent(height * 100.0F);
-    } else {
-        style.overlay.offset.x = UI::UILayoutLength::Percent(
-            (std::min)(startX, endX) * 100.0F);
-        style.overlay.offset.y = UI::UILayoutLength::Percent(
-            (startY + endY) * 50.0F);
-        style.size.width = UI::UILayoutLength::Percent(width * 100.0F);
-        style.size.height = UI::UILayoutLength::Px(thickness);
-    }
+    style.overlay.offset.x = UI::UILayoutLength::Px(left);
+    style.overlay.offset.y = UI::UILayoutLength::Px(top);
+    style.size.width = UI::UILayoutLength::Px(right - left);
+    style.size.height = UI::UILayoutLength::Px(bottom - top);
     return style;
 }
 
@@ -1096,81 +1086,26 @@ auto EditorWorkspaceState::updateViewportGrid(Tina::PrimaryWindowUITreeUpdater& 
     }
 
     const std::span segments = viewportGrid_.segments();
-    // Diagonal projected lines are approximated with axis-aligned stair parts.
-    // Steps per segment follow the projected pixel length so stairs stay near
-    // ViewportGridTargetStairPixels; a greedy pass guarantees the total part
-    // count never exceeds the fixed visual node budget while every segment
-    // keeps at least its minimum subdivision.
-    std::array<Tina::Core::usize, Tina::Editor::EditorViewportGridSegmentCapacity>
-        diagonalSteps{};
-    Tina::Core::usize minimumPartsRemaining = 0;
-    for (Tina::Core::usize segmentIndex = 0; segmentIndex < segments.size();
-         ++segmentIndex) {
-        const auto& segment = segments[segmentIndex];
-        const float deltaX = std::abs(segment.endX - segment.startX);
-        const float deltaY = std::abs(segment.endY - segment.startY);
-        const bool diagonal = deltaX > 1.0e-5F && deltaY > 1.0e-5F;
-        if (!diagonal) {
-            diagonalSteps[segmentIndex] = 0;
-            ++minimumPartsRemaining;
-            continue;
-        }
-        const float pixelLength = std::hypot(
-            deltaX * viewportLogicalRect_.width,
-            deltaY * viewportLogicalRect_.height);
-        const auto desired = static_cast<Tina::Core::usize>(
-            std::lround(pixelLength / ViewportGridTargetStairPixels));
-        diagonalSteps[segmentIndex] = std::clamp(
-            desired, ViewportGridDiagonalSteps, ViewportGridDiagonalMaximumSteps);
-        minimumPartsRemaining +=
-            ViewportGridDiagonalSteps * ViewportGridDiagonalPartsPerStep;
-    }
-    Tina::Core::usize budgetUsed = 0;
-    for (Tina::Core::usize segmentIndex = 0; segmentIndex < segments.size();
-         ++segmentIndex) {
-        if (diagonalSteps[segmentIndex] == 0U) {
-            --minimumPartsRemaining;
-            ++budgetUsed;
-            continue;
-        }
-        minimumPartsRemaining -=
-            ViewportGridDiagonalSteps * ViewportGridDiagonalPartsPerStep;
-        const Tina::Core::usize available =
-            viewportGridNodes_.size() - budgetUsed - minimumPartsRemaining;
-        const Tina::Core::usize maximumSteps =
-            available / ViewportGridDiagonalPartsPerStep;
-        diagonalSteps[segmentIndex] = std::clamp(
-            diagonalSteps[segmentIndex], ViewportGridDiagonalSteps,
-            (std::max)(ViewportGridDiagonalSteps, maximumSteps));
-        budgetUsed +=
-            diagonalSteps[segmentIndex] * ViewportGridDiagonalPartsPerStep;
-    }
     Tina::Core::usize visualNodeCount = 0;
-    for (Tina::Core::usize segmentIndex = 0; segmentIndex < segments.size();
-         ++segmentIndex) {
-        const auto& segment = segments[segmentIndex];
-        const Tina::Core::usize stepCount = diagonalSteps[segmentIndex];
-        const Tina::Core::usize partCount =
-            stepCount > 0U ? stepCount * ViewportGridDiagonalPartsPerStep
-                           : Tina::Core::usize{1};
-        for (Tina::Core::usize part = 0; part < partCount; ++part) {
-            if (visualNodeCount == viewportGridNodes_.size()) {
-                return Tina::Core::failure(
-                    Tina::Editor::EditorErrorCode::DocumentCapacityExceeded,
-                    "editor viewport grid exceeded its fixed visual node capacity");
-            }
-            const UI::UINodeId node = viewportGridNodes_[visualNodeCount++];
-            if (auto status = tree.setLayoutStyle(
-                    node, viewportGridLayout(segment, part, stepCount));
-                !status) {
-                return status;
-            }
-            if (auto status = tree.setBoxPaint(
-                    node,
-                    UI::makeSolidBox(viewportGridColor(segment.kind)));
-                !status) {
-                return status;
-            }
+    for (const auto& segment : segments) {
+        if (visualNodeCount == viewportGridNodes_.size()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentCapacityExceeded,
+                "editor viewport grid exceeded its fixed visual node capacity");
+        }
+        UI::UILineGeometry line{};
+        const UI::UINodeId node = viewportGridNodes_[visualNodeCount++];
+        if (auto status = tree.setLayoutStyle(
+                node, viewportGridLayout(segment, viewportLogicalRect_.width,
+                                         viewportLogicalRect_.height,
+                                         line));
+            !status) {
+            return status;
+        }
+        UI::UIBoxPaint paint = UI::makeSolidLine(
+            viewportGridColor(segment.kind), line.start, line.end, line.thickness);
+        if (auto status = tree.setBoxPaint(node, paint); !status) {
+            return status;
         }
     }
     for (Tina::Core::usize index = visualNodeCount;

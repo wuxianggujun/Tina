@@ -276,9 +276,13 @@ commit 后返回 borrowed view。
 `normalTexture` 是 optional packet-local Texture2D ref，invalid 表示无 normal map；
 `RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
 backend 在同步 submit 中分别按 `Texture2D`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
-`UIDisplayList` 支持 SolidQuad/Glyph/ImageQuad、SolidQuad 像素 corner radius 与 axis-aligned clip；
+`UIDisplayList` 支持 SolidQuad/SolidEllipse/Glyph/ImageQuad、SolidQuad 像素 corner radius、可选 exact
+`UISolidQuadVertices` 与 axis-aligned clip；SolidEllipse 支持填充和向内描边。UI Line 在 integration
+边界按 logical 法向构造四角并分别应用 X/Y framebuffer scale，随后以 exact SolidQuad 发布，不公开
+`rotationRadians`/rotated-quad 兼容 API。
 ImageQuad 携带 normalized UV、premultiplied tint、packet-local Texture2D ref 与 Linear/Nearest sampling，
-相邻兼容 command 才合并 batch。corner radius 计入 paint-order checksum，并由 backend 验证不超过最小边的一半。
+相邻兼容 command 才合并 batch。corner radius、exact vertices 与 ellipse stroke 均计入 paint-order checksum，
+backend 验证其有限性、凸性、bounds 覆盖与最大半径/描边宽度。
 
 ## UI
 
@@ -291,7 +295,13 @@ Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit、ScrollView，�
 Dropdown/Popup/DropdownItem、ListView/TreeView。
 
 `UILayoutStyle` 将父容器 `flexContainer`、子项 `flexItem` 与 `Flow/Overlay` placement 分开；Overlay 使用
-alignment + offset，Stretch 的边距用 margin 表达，Popup recipe 强制 Overlay 并继续采用 anchor policy。
+alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-100..100`，以表达受父级 clip 的
+部分越界图元；Stretch 的边距用 margin 表达，Popup recipe 强制 Overlay 并继续采用 anchor policy。
+`clipDescendants` 是默认 `false` 的显式 axis-aligned clip-owner 契约：开启后，普通 Flow/Overlay 后代的
+committed `effectiveClip` 与 owner 的 world border-box 求交，但不改后代 `worldRect`，不建立 rounded clip，
+也不额外改变 owner 自身的 paint clip。hit 与 paint 读取同一 committed clip；可见性、tree/semantics 顺序和
+authored semantics `worldRect` 不变。ScrollView/ListView/TreeView viewport clip 复用同一传播机制；Popup
+作为 viewport-level overlay 继续使用专用 anchor/clip policy，不受普通祖先 clip owner 限制。
 控件内部文字由独立 `UIContentAlignment` 定位，layout snapshot 发布
 `UICommittedContentPlacement`，paint、caret/selection 与 pointer-to-text mapping 共用该 committed origin。
 
@@ -352,12 +362,15 @@ Behavior slot；Runtime 对应的 move-only `PrimaryWindowUIBuildTransaction` �
 `UIContextStatistics::componentBuild` 提供各 reservation pool 的 requested/reserved/published/failure/outstanding
 counter、活动事务数与失败事务数。
 
-`UIElementVisual::canvas` 接受 borrowed、backend-neutral `SolidRect`/`Image`/`NineSlice` command span。
-`SolidRect` 可设置统一 logical-pixel `cornerRadius`；Image/NineSlice 复用 `UIImageSource`，NineSlice 另带
+`UIElementVisual::canvas` 接受 borrowed、backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/Image/
+`NineSlice` command span。`SolidRect` 可设置统一 logical-pixel `cornerRadius`；`SolidEllipse` 使用 bounds，
+零 stroke 表示填充、正 stroke 表示向内描边；`SolidLine` 使用 Element-local 起止点与 logical thickness，
+非法或退化线段 fail closed。Image/NineSlice 复用 `UIImageSource`，NineSlice 另带
 source-pixel 与 destination-logical insets，首版只支持 Stretch。命令在
 `createElement()` 返回前复制到 Context 固定容量 pool，destroy/transaction rollback 回收 slot。公开
-`UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。`UIBoxPaint::cornerRadius` 同样只
-圆化自身 chrome，不建立子树 clip。NineSlice 在 committed paint 中按 row-major 精确展开1..9个 Image
+`UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。`UIBoxPaint::primitive` 支持
+Rectangle/Ellipse/Line；Ellipse 使用 Element layout rect，Line 使用 Element-local geometry。
+`UIBoxPaint::cornerRadius` 只圆化 Rectangle 自身 chrome，不建立子树 clip。NineSlice 在 committed paint 中按 row-major 精确展开1..9个 Image
 entry，小目标按两侧 destination inset 比例压缩并消除零面积 patch；paint/DisplayList 容量不足不截断。
 逐角半径与 rounded clip 仍是后续扩展。startup-only 强类型 StyleClass/ColorToken、node-local state、
 literal/token-backed BoxFill stylesheet，以及运行期 ColorToken getter/setter 与固定 reverse-dependency

@@ -157,14 +157,26 @@ Scene/Runtime writer 不能创建 GPU resource。产品 State 在安全阶段上
 
 ## UI DisplayList 与 Glyph
 
-UI paint 通过 integration 转为固定容量 DisplayList。当前 command/batch 支持 SolidQuad、Glyph 与
-ImageQuad，clip 为 axis-aligned scissor。Glyph 使用 UIContext-owned R8 atlas page：Runtime 在 submit 时
-借用像素，bgfx 创建或更新私有 atlas texture，并用 coverage UI shader 绘制；ImageQuad 使用 packet-local
-Texture2D ref、normalized UV、tint 与 Linear/Nearest sampling，并选择独立 RGBA shader。
+UI paint 通过 integration 转为固定容量 DisplayList。当前 command/batch 支持 SolidQuad、SolidEllipse、Glyph
+与 ImageQuad；clip 仍为 axis-aligned scissor。UI authoring 的 `UIBoxPaint` 支持 Rectangle/Ellipse/Line，
+Canvas 支持 `SolidRect`/`SolidEllipse`/`SolidLine`。SolidLine committed entry 保存 world-space 端点、logical
+thickness 和 conservative envelope；integration 在 logical 空间构造线宽法向的四个角点，再对每个角点分别
+应用 framebuffer `scaleX/scaleY`，以 exact `UISolidQuadVertices` 写入 SolidQuad command。其 integer bounds
+只用于 culling/clip，因此 `scaleX != scaleY` 的 anisotropic 投影保留精确四顶点，不依赖 angle 或单一像素
+thickness 近似。
+
+SolidEllipse command 以 bounds 和 pixel stroke width 表达；零 stroke 为填充，正 stroke 为向内描边。bgfx
+geometry 仍生成一个 quad，统一 R8 coverage shader 根据 local UV、pixel extent 计算外椭圆 coverage，描边时
+再减去内椭圆 coverage。Glyph 使用 UIContext-owned R8 atlas page：Runtime 在 submit 时借用像素，bgfx 创建
+或更新私有 atlas texture；ImageQuad 使用 packet-local Texture2D ref、normalized UV、tint 与 Linear/Nearest
+sampling，并选择独立 RGBA shader。
 
 已实现的路径包括：
 
 - Text/Glyph placement → `UIDrawCommandKind::Glyph`；
+- Box/Canvas Ellipse → `UIDrawCommandKind::SolidEllipse`，填充/向内描边均走 shader coverage；
+- Box/Canvas Line → exact 四顶点 `UIDrawCommandKind::SolidQuad`；
+- Editor grid/gizmo segment → `UIBoxPaint::Line`，rotation ring → 单个 `UIBoxPaint::Ellipse`；
 - atlas UV 与 page 校验；
 - solid/glyph 按 clip、kind、atlas page batching；
 - Image/Icon content 与 Canvas Image/NineSlice → `UIDrawCommandKind::ImageQuad`；

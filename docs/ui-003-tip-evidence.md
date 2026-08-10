@@ -37,7 +37,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 - Verify matrix: **ok=True**, failCases=0  
   (`artifacts/gates/ui-003-size-matrix-20260803-092133.json`).
 
-### Still open for full UI-003 Done
+### 2026-08-03 时点仍开放
 
 - OS Settings 100/150/200% multi-DPI true golden matrix
 - Cross-GPU pixel gold
+
+## 2026-08-10 200% Raster Evidence
+
+当前 Windows 宿主报告 `contentScale=2×2`、`logicalPixel=960×540`、`framebuffer/capture=1920×1080`。
+`RunUi003VisualGate.ps1` 现按实测 logical-to-capture scale 映射 ROI，并按 raster scale 选择 sibling baseline；
+baseline rect 比较会先还原到 logical space，容许 1 logical pixel 的采样取整差。
+
+- Baseline：`tools/windows/baselines/ui-003-sample2d-960x540-raster-200pct.json`
+- 独立复跑：`artifacts/screenshots/ui-003-line-ellipse-dpi200-verify/20260810-175302/20260810-175306/ui-003-gate.json`
+- 结果：`ok=true`、`captureOk=true`、`captureLogicalToPixelScale=[2,2]`、
+  `baselineCompare.matched=true`、`roiCompared=true`、`errors=[]`
+- Editor 2D/3D 200% 截图：`artifacts/screenshots/editor-ring-200pct/2d/20260810-165944/` 与
+  `artifacts/screenshots/editor-ring-200pct/3d/20260810-165624/`；grid、斜向 gizmo 与单 Ellipse rotation ring
+  人工检查连续无阶梯。
+
+仍开放：100%/150% OS DPI 金标与跨 GPU 像素金标；因此 UI-003 和 `RENDER-LINES-001` 保持 InProgress。

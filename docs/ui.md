@@ -13,9 +13,9 @@
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
 | Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
 | Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView，固定容量 mutation |
-| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、committed content placement、事务 commit、clean-subtree reuse |
+| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
-| Paint | box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
+| Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | **Done：** 可伪造 clock + fixed-capacity paint-only tracks；Runtime phase facade；显式 begin*Transition；stylesheet `BackgroundColor` transition 在 Style 绑定阶段持久预留、pseudo-state 变化时激活；showcase 主题切换 card transition（`motionBegins`）；`ui_motion_v1` |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
@@ -81,6 +81,10 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
 - `flexItem`（grow/shrink/basis/alignSelf）由父容器为当前子节点解释；
 - `placement=Flow` 参与正常 Flex 顺序，`placement=Overlay` 使用 horizontal/vertical alignment、offset 与
   margin，不参与 Flow 尺寸和顺序；Popup recipe 强制 Overlay，仍走受控 anchor/flip/clamp policy；
+- `clipDescendants=false` 是普通容器默认值；启用后，该节点成为 axis-aligned clip owner，普通 in-tree Flow
+  与 Overlay 后代沿既有 `descendantClip` 链与 owner 的 world border-box 求交。后代 `worldRect`、布局和
+  tree/semantics 顺序不变，committed `effectiveClip` 统一供 hit/paint 使用；viewport-level Popup 继续走专用
+  anchor/clip policy；这不是 rounded clip，也不额外改变 owner 自身的 paint clip；
 - tree 顺序同时决定 layout、paint、focus 与 semantics 顺序，没有 CSS `order` 双轨。
 
 控件内部文字使用独立的 `UIContentAlignment`，不再借用父容器的 child alignment。layout 将
@@ -102,7 +106,10 @@ Runtime phase facade 同样可切换/query role 和 reset override。
 active transaction 期间 structure/layout commit 返回 `BuildTransactionInProgress`。Runtime facade 由 capability
 state 持有底层事务并逐操作校验 epoch/phase；成功 commit 后只留下普通 retained subtree，不保留 component
 wrapper。公开 `UIWidgetKind` 已删除；私有 `BuiltinElementKind` 只服务成熟控件 storage/行为分派。
-Canvas 命令复制到固定容量 storage：`SolidRect` 支持统一 `cornerRadius`，`Image` 复用 `UIImageSource`，
+`UIBoxPaint::primitive` 明确区分 Rectangle/Ellipse/Line：Rectangle 保留 fill/border/shadow/cornerRadius
+box chrome；Ellipse 以 Element layout rect 为边界，`ellipseStrokeWidth=0` 表示填充，正值表示向内描边；
+Line 使用 Element-local 起止点与 logical thickness。Canvas 命令复制到固定容量 storage：`SolidRect`
+支持统一 `cornerRadius`，`SolidEllipse`/`SolidLine` 与上述几何语义一致，`Image` 复用 `UIImageSource`，
 `NineSlice` 使用 source-pixel/destination-logical insets 且首版仅 Stretch。逐角半径、圆角子树 clip 与
 BoxFill 之外的属性面仍属后续扩展。
 
@@ -123,7 +130,7 @@ snapshot 均不改变。这些公开接口也不代表正式发布 ABI 已冻结
 | 组合 Panel/Label/Button/List 等 retained 子树 | 可用 | 通过统一 `createElement()` 与官方 `make*Element()` recipe |
 | 自定义布局、Semantics、命中策略、局部 box/text paint | 可用 | 仍受 fixed-capacity、owner-thread 与 phase 生命周期约束 |
 | 多节点业务组件 | 直接与 Runtime phase facade 均可用 | `UIElementBuildTransaction` / `PrimaryWindowUIBuildTransaction` 统一预留 node/text/canvas/Behavior 完整预算、失败整棵回滚；Runtime transaction 不得跨 callback 保存 |
-| 自定义 Canvas | 可用首版 | backend-neutral `SolidRect`、`Image`、Stretch-only `NineSlice`；只保存 AssetId/图片元数据，不能提交 shader、GPU handle 或任意 paint callback |
+| 自定义 Canvas | 可用首版 | backend-neutral `SolidRect`、`SolidEllipse`、`SolidLine`、`Image`、Stretch-only `NineSlice`；只保存几何、颜色与 AssetId/图片元数据，不能提交 shader、GPU handle 或任意 paint callback |
 | 自定义 Theme/外观 | 部分可用 | 可替换 `UITheme`、选择封闭 `UIStyleRoleId`、做属性级 override，在首个 retained node 前注册强类型 StyleClass/ColorToken、安装 node-local pseudo-state + literal/token-backed BoxFill rule，并在 owner thread/有效 Runtime phase 更新 ColorToken（reverse-dependency `O(affected)`）；尚无通用 selector / descendant 匹配 |
 | 自定义交互 | 部分可用 | 可组合标准 Activate/Toggle/RangeInput capability、挂 routed listener 和使用现有控件 callback；不能注册全新的 Behavior/state machine |
 | 安装后作为外部 SDK 使用 | 主要切片可用 | backend-neutral `Tina::GameSDK`、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype 与 AudioMiniaudio 已有安装 consumer；Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer gate 已通过；待正式 ABI 策略 |
@@ -331,8 +338,9 @@ UI 不调用 bgfx。`tina_ui_render_integration` 把 committed paint 转为固�
 在 `RenderFrame` 中只借用 DisplayList 和可选 R8 atlas page。backend 必须在 `submitFrame()` 内同步
 消费。
 
-当前支持 SolidQuad/Glyph/ImageQuad、带统一圆角半径的 Box/Element Canvas `SolidRect`、Image/Icon content、
-Canvas Image/NineSlice 与 axis-aligned scissor。Runtime `RenderFramePacket`/FramePin 的 present-return CPU
+当前支持 SolidQuad/SolidEllipse/Glyph/ImageQuad；Element `UIBoxPaint` 可选择 Rectangle/Ellipse/Line，
+Canvas 可提交 `SolidRect`/`SolidEllipse`/`SolidLine`/Image/NineSlice，clip 仍为 axis-aligned scissor。
+Line 在 integration 中降为携带 exact 四顶点的 SolidQuad，而不是增加 backend command kind。Runtime `RenderFramePacket`/FramePin 的 present-return CPU
 completion 已落地（Null 同步 complete）；root-scoped resolver 在 frame packet 构建时按
 `(root scope, AssetId)` 去重并 pin Texture2D。图片产品/失效/尺寸矩阵与固定性能 workload 已关闭；
 rounded/stencil 子树 clip 和跨 GPU/DPI golden（UI-003）尚未完成。
@@ -351,24 +359,29 @@ IGameState::onEnter / updateUI
   -> UICommittedPaintView
   -> tina_ui_render_integration::buildUIDisplayList
   -> logical pixels 映射到 framebuffer pixels、裁剪、相邻 batch 合并
-  -> UIDisplayList SolidQuad / Glyph / ImageQuad commands
+  -> UIDisplayList SolidQuad / SolidEllipse / Glyph / ImageQuad commands
   -> bgfx transient vertex/index buffer
   -> UI textured shader + scissor + premultiplied alpha
   -> RenderDevice::submitFrame 后显示
 ```
 
-`UIContext::buildCommittedPaint()` 按 paint order 遍历可见节点。普通 `UIBoxPaint` 生成矩形 entry；圆角且
-同时有 fill/border 时以外层统一 border + inset fill 两条 entry 表达，shadow 继承外层半径。Canvas
-`SolidRect`/`Image` 从 Element local 坐标转换到 world，并在 box chrome 后按 descriptor 命令顺序追加；
-NineSlice 先精确计算有效 source/destination patch，再按 row-major 展开为1..9个 Image entry；
+`UIContext::buildCommittedPaint()` 按 paint order 遍历可见节点。`UIBoxPaint::Rectangle` 生成矩形 entry；圆角且
+同时有 fill/border 时以外层统一 border + inset fill 两条 entry 表达，shadow 继承外层半径。
+`UIBoxPaint::Ellipse` 生成一个 SolidEllipse entry，`UIBoxPaint::Line` 将 Element-local 端点提交为 world-space
+端点，并保存覆盖线宽的 conservative envelope。Canvas `SolidRect`/`SolidEllipse`/`SolidLine`/`Image` 从
+Element local 坐标转换到 world，并在 box chrome 后按 descriptor 命令顺序追加；NineSlice 先精确计算有效
+source/destination patch，再按 row-major 展开为1..9个 Image entry；
 文字生成 Glyph entry；ProgressBar 追加按 value 缩短的 foreground，RadioButton 追加 indicator 和
 选中内块，TextEdit 在焦点状态下追加 selection highlight、IME preedit 和 caret。Integration 再把
 逻辑坐标投影为像素矩形，并丢弃空/透明/完全在 clip 外的 entry。
 
-Solid 和 Glyph 共用一套带 UV 的 UI shader：SolidQuad 绑定 1×1 白色 R8 纹理，采样值恒为 1；Glyph
-绑定 UIContext 持有的 R8 atlas，采样灰度作为 coverage。圆角 SolidQuad 额外由每顶点携带的像素
-width/height/radius 计算 SDF coverage，保持相邻 batch 无 per-command uniform。片元颜色是顶点
-premultiplied 颜色乘 coverage，
+Solid、SolidEllipse 和 Glyph 共用一套带 UV 的 UI coverage shader：SolidQuad/SolidEllipse 绑定 1×1
+白色 R8 纹理，Glyph 绑定 UIContext 持有的 R8 atlas。圆角 SolidQuad 由每顶点携带的像素
+width/height/radius 计算 SDF coverage；SolidEllipse 使用像素 extent 与 local UV 计算填充 coverage，正
+stroke width 再减去内椭圆 coverage，形成向内描边。Line 则在 logical 空间构造线宽法向的四个角点，
+逐点应用 framebuffer `scaleX/scaleY` 后作为 exact `UISolidQuadVertices` 提交；integer bounds 只作
+conservative AABB，因此 anisotropic 投影也不会退化为 angle + 单一缩放的近似。上述路径保持相邻 batch
+无 per-command uniform。片元颜色是顶点 premultiplied 颜色乘 coverage，
 backend 对每个 clip batch 设置 bgfx scissor，并使用 `ONE, INV_SRC_ALPHA` 混合。UI 模块本身不依赖
 bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx backend。
 
@@ -384,7 +397,7 @@ straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继
 | 控件 | 语义/交互 | 当前实际绘制 |
 | --- | --- | --- |
 | `Root` | 树和所有权边界 | 默认不绘制；设置 `UIBoxPaint` 后也可作为背景 SolidQuad |
-| `Panel` | 容器和布局 | `UIBoxPaint` 的 SolidQuad；当前 effective clip 是 viewport 与自身矩形的交集 |
+| `Panel` | 容器和布局 | `UIBoxPaint` 的 SolidQuad；默认允许后代越过自身 border-box，`clipDescendants` 可选择 axis-aligned 后代裁剪 |
 | `Modal` | committed Focus/Input scope、下层输入 barrier、Dialog semantics | Theme surface chrome；布局/内容由 retained 子树组合 |
 | `Label` | 只读 UTF-8 文本 | Glyph quads；没有可用字体时为确定性的 placeholder SolidQuad |
 | `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | `UIBoxPaint` 背景 + 可选 `UIButtonPaint` 状态色 + 文本 |
@@ -424,8 +437,9 @@ retained 状态并标记必要的 dirty 类别。
   具有可辨识层次；
 - 另提供 `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome` 等）。
 
-`UIBoxPaint` 仍是 escape hatch，并可携带 borderLight/borderDark/borderWidth、shadow（假 elevation）与
-统一 `cornerRadius`。Image/Icon/NineSlice 基础绘制、产品采用、失效/尺寸矩阵与性能 workload 已关闭。
+`UIBoxPaint` 仍是 escape hatch；Rectangle 可携带 borderLight/borderDark/borderWidth、shadow（假 elevation）
+与统一 `cornerRadius`，Ellipse/Line 则使用各自封闭的几何字段。Image/Icon/NineSlice 基础绘制、产品采用、
+失效/尺寸矩阵与性能 workload 已关闭。
 逐角半径、圆角子树 clip、毛玻璃与完整 CSS 仍未实现；
 ColorToken startup registry/value 与运行期 reverse-dependency update、literal/token-backed BoxFill rule、node-local state
 和 Runtime 入口已经可用。
@@ -594,7 +608,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 | ID | 范围 |
 | --- | --- |
 | `UI-002` | Windows UIA：tip 跨进程 gate 证据已固化（2026-08-03）；待 Narrator/Inspect 人工金标 |
-| `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；OS 级 100/150/200% DPI 真机矩阵与跨 GPU 像素金标后置） |
+| `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；2026-08-10 当前 Windows 宿主 200% raster baseline 已通过独立复跑；OS 级 100/150% 与跨 GPU 像素金标后置） |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
 | `UI-PERF-001` | Done；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合、`ui_image_nineslice_v1`、完整 `ui_component_build_v1`、`ui_style_state_v1` 与 `ui_motion_v1` 已落地；固定机前时间结论只报 provisional |
 | `UI-COMPONENT-001` | Done；Runtime phase-scoped bounded transaction、六类 fixed-capacity Behavior side store、node/text/canvas/各 Behavior pool 统一 reservation/counter 与 `ui_component_build_v1` 已落地 |

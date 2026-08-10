@@ -154,6 +154,7 @@ using Detail::resolveLengthNoFallbackCount;
 using Detail::resolveMeasuredLayoutSize;
 using Detail::resolveOverlayRect;
 using Detail::resolvePopupPlacement;
+using Detail::resolveCommittedLineGeometry;
 using Detail::resolveScrollViewLayout;
 using Detail::resolveScrollThumbOffset;
 using Detail::resolveScrollTrackPageOffset;
@@ -1963,7 +1964,7 @@ struct UIContext::Impl final {
         };
         UILogicalRect layoutContentRect = unscrolledContentRect;
         UILogicalRect descendantClip = parentScratch.descendantClip;
-        if (parentRecord->kind == BuiltinElementKind::Popup)
+        if (parentRecord->kind == BuiltinElementKind::Popup || parentStyle.clipDescendants)
         {
             descendantClip = intersectRects(descendantClip, parentScratch.worldRect);
         }
@@ -2075,7 +2076,7 @@ struct UIContext::Impl final {
                 .viewportRect = plan.viewportRect,
             };
             layoutContentRect = plan.contentRect;
-            descendantClip = intersectRects(parentScratch.descendantClip, plan.viewportRect);
+            descendantClip = intersectRects(descendantClip, plan.viewportRect);
         }
 
         auto flexPlan = resolveFlexLinePlan(parentStyle, layoutContentRect, flexSummary);
@@ -2958,8 +2959,26 @@ struct UIContext::Impl final {
     [[nodiscard]] usize countCanvasPaintEntries(const UICommittedLayoutEntry& layoutEntry) const noexcept
     {
         usize count = 0;
+        const auto drawable = [&layoutEntry](const UICanvasCommand& command) noexcept {
+            if (command.color.alpha == 0)
+            {
+                return false;
+            }
+            if (command.kind == UICanvasCommandKind::SolidLine)
+            {
+                return resolveCommittedLineGeometry(
+                           UILineGeometry{
+                               .start = command.lineStart,
+                               .end = command.lineEnd,
+                               .thickness = command.lineThickness,
+                           },
+                           {.x = layoutEntry.worldRect.x, .y = layoutEntry.worldRect.y})
+                    .has_value();
+            }
+            return command.bounds.width > 0.0F && command.bounds.height > 0.0F;
+        };
         canvasCommandStorage.forEach(layoutEntry.node.index(), [&](const UICanvasCommand& command) noexcept {
-            if (command.color.alpha == 0 || command.bounds.width <= 0.0F || command.bounds.height <= 0.0F)
+            if (!drawable(command))
             {
                 return;
             }
@@ -2981,6 +3000,32 @@ struct UIContext::Impl final {
         const UILogicalRect canvasClip = intersectRects(layoutEntry.effectiveClip, layoutEntry.worldRect);
         const NodeRecord* record = recordByIndex(nodeIndex);
         const UINodeId root = record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+        const auto localRect = [&layoutEntry](const UICanvasCommand& command) noexcept {
+            return UILogicalRect{
+                .x = normalizeFloat(layoutEntry.worldRect.x + command.bounds.x),
+                .y = normalizeFloat(layoutEntry.worldRect.y + command.bounds.y),
+                .width = command.bounds.width,
+                .height = command.bounds.height,
+            };
+        };
+        const auto drawable = [&layoutEntry](const UICanvasCommand& command) noexcept {
+            if (command.color.alpha == 0)
+            {
+                return false;
+            }
+            if (command.kind == UICanvasCommandKind::SolidLine)
+            {
+                return resolveCommittedLineGeometry(
+                           UILineGeometry{
+                               .start = command.lineStart,
+                               .end = command.lineEnd,
+                               .thickness = command.lineThickness,
+                           },
+                           {.x = layoutEntry.worldRect.x, .y = layoutEntry.worldRect.y})
+                    .has_value();
+            }
+            return command.bounds.width > 0.0F && command.bounds.height > 0.0F;
+        };
         const auto appendImage = [&](const UICanvasCommand& command, UILogicalRect worldRect,
                                      UIImagePixelRect sourcePixels,
                                      UICommittedImageBoundsProjection boundsProjection,
@@ -3003,7 +3048,7 @@ struct UIContext::Impl final {
             ++nextPaintOrdinal;
         };
         canvasCommandStorage.forEach(nodeIndex, [&](const UICanvasCommand& command) noexcept {
-            if (command.color.alpha == 0 || command.bounds.width <= 0.0F || command.bounds.height <= 0.0F)
+            if (!drawable(command))
             {
                 return;
             }
@@ -3011,29 +3056,58 @@ struct UIContext::Impl final {
             {
                 output.push_back(UICommittedPaintEntry{
                     .node = layoutEntry.node,
-                    .worldRect =
-                        UILogicalRect{
-                            .x = normalizeFloat(layoutEntry.worldRect.x + command.bounds.x),
-                            .y = normalizeFloat(layoutEntry.worldRect.y + command.bounds.y),
-                            .width = command.bounds.width,
-                            .height = command.bounds.height,
-                        },
+                    .root = root,
+                    .worldRect = localRect(command),
                     .effectiveClip = canvasClip,
                     .paintOrdinal = nextPaintOrdinal,
                     .solidFill = premultiply(command.color),
                     .cornerRadius = command.cornerRadius,
                 });
                 ++nextPaintOrdinal;
+            } else if (command.kind == UICanvasCommandKind::SolidEllipse)
+            {
+                output.push_back(UICommittedPaintEntry{
+                    .node = layoutEntry.node,
+                    .root = root,
+                    .worldRect = localRect(command),
+                    .effectiveClip = canvasClip,
+                    .paintOrdinal = nextPaintOrdinal,
+                    .solidFill = premultiply(command.color),
+                    .kind = UICommittedPaintKind::SolidEllipse,
+                    .ellipseStrokeWidth = command.ellipseStrokeWidth,
+                });
+                ++nextPaintOrdinal;
+            } else if (command.kind == UICanvasCommandKind::SolidLine)
+            {
+                const auto geometry = resolveCommittedLineGeometry(
+                    UILineGeometry{
+                        .start = command.lineStart,
+                        .end = command.lineEnd,
+                        .thickness = command.lineThickness,
+                    },
+                    {.x = layoutEntry.worldRect.x, .y = layoutEntry.worldRect.y});
+                if (!geometry)
+                {
+                    return;
+                }
+                output.push_back(UICommittedPaintEntry{
+                    .node = layoutEntry.node,
+                    .root = root,
+                    .worldRect = geometry->worldEnvelope,
+                    .effectiveClip = canvasClip,
+                    .paintOrdinal = nextPaintOrdinal,
+                    .solidFill = premultiply(command.color),
+                    .kind = UICommittedPaintKind::SolidLine,
+                    .lineStart = geometry->worldStart,
+                    .lineEnd = geometry->worldEnd,
+                    .lineThickness = command.lineThickness,
+                });
+                ++nextPaintOrdinal;
             } else if (command.kind == UICanvasCommandKind::Image)
             {
                 appendImage(
                     command,
-                    UILogicalRect{
-                        .x = normalizeFloat(layoutEntry.worldRect.x + command.bounds.x),
-                        .y = normalizeFloat(layoutEntry.worldRect.y + command.bounds.y),
-                        .width = command.bounds.width,
-                        .height = command.bounds.height,
-                    },
+                    localRect(command),
                     command.imageSource.sourcePixels,
                     UICommittedImageBoundsProjection::Cover,
                     {});
