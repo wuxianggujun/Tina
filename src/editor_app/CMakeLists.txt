@@ -1,5 +1,7 @@
 add_library(tina_editor_app STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor_app/EditorApplication.hpp
+    EditorAnimationPreview.cpp
+    EditorAnimationPreview.hpp
     EditorApplication.cpp
     EditorWorkspaceState.hpp
     EditorWorkspaceAnimation.cpp

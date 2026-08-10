@@ -28,6 +28,8 @@ struct World2DSnapshotCaptureConfig final {
 struct World2DSnapshotAssetResolver final {
     std::function<Asset::AssetHandle(Core::AssetId)> resolveSprite{};
     std::function<Asset::AssetHandle(Core::AssetId)> resolveTexture{};
+    // Required when any entity carries a SpriteAnimation2D clip binding.
+    std::function<Asset::AssetHandle(Core::AssetId)> resolveAnimationClip{};
 };
 
 struct World2DEntityBinding final {

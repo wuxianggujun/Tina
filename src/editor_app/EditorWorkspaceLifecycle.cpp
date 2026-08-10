@@ -28,7 +28,7 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     previewCamera3D_ = {};
     previewTileMap_.reset();
     previewWorld_.reset();
-    animationAnimator_.reset();
+    animationPreview_.resetAnimator();
     releasePreviewAssetBindings();
     if (uiRoot_) {
         uiRoot_.reset();
@@ -456,9 +456,9 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
             }
         }
     }
-    if (workspaceMode_ == WorkspaceMode::World2D && animationPlaying_ &&
-        animationAnimator_.has_value()) {
-        auto update = animationAnimator_->update(context.frameTiming().updateDelta);
+    if (workspaceMode_ == WorkspaceMode::World2D && animationPreview_.playing() &&
+        animationPreview_.hasAnimator()) {
+        auto update = animationPreview_.animator().update(context.frameTiming().updateDelta);
         if (!update) {
             return Tina::Core::failure(std::move(update.error()));
         }
@@ -469,8 +469,8 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
             }
             pendingAnimationTimelineRefresh_ = true;
         }
-        if (animationAnimator_->isCompleted()) {
-            animationPlaying_ = false;
+        if (animationPreview_.animator().isCompleted()) {
+            animationPreview_.setPlaying(false);
             pendingAnimationTimelineRefresh_ = true;
         }
     }
@@ -1198,9 +1198,9 @@ auto EditorWorkspaceState::activateWorkspace(Tina::PrimaryWindowUITreeUpdater& t
     resetViewportInteractionState();
     workspaceMode_ = mode;
     if (mode == WorkspaceMode::World3D) {
-        animationPlaying_ = false;
-        if (animationAnimator_.has_value()) {
-            animationAnimator_->pause();
+        animationPreview_.setPlaying(false);
+        if (animationPreview_.hasAnimator()) {
+            animationPreview_.animator().pause();
         }
     }
     if (auto status = refreshHierarchyTree(tree, 0); !status) {

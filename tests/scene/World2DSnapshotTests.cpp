@@ -57,10 +57,13 @@ class World2DSnapshotSceneTests : public testing::Test {
 
         auto sprite = store_->beginQueued(spriteId_, AssetFormat::AssetKind::Sprite);
         auto texture = store_->beginQueued(textureId_, AssetFormat::AssetKind::Texture2D);
+        auto clip = store_->beginQueued(clipId_, AssetFormat::AssetKind::SpriteAnimationClip);
         ASSERT_TRUE(sprite);
         ASSERT_TRUE(texture);
+        ASSERT_TRUE(clip);
         sprite_ = *sprite;
         texture_ = *texture;
+        clip_ = *clip;
     }
 
     [[nodiscard]] World2DSnapshotCaptureConfig captureConfig(std::function<Core::u32(EntityId)> stableEntityId,
@@ -80,6 +83,8 @@ class World2DSnapshotSceneTests : public testing::Test {
         return World2DSnapshotAssetResolver{
             .resolveSprite = [this](Core::AssetId id) { return id == spriteId_ ? sprite_ : Asset::AssetHandle{}; },
             .resolveTexture = [this](Core::AssetId id) { return id == textureId_ ? texture_ : Asset::AssetHandle{}; },
+            .resolveAnimationClip =
+                [this](Core::AssetId id) { return id == clipId_ ? clip_ : Asset::AssetHandle{}; },
         };
     }
 
@@ -87,8 +92,10 @@ class World2DSnapshotSceneTests : public testing::Test {
     std::optional<Asset::AssetStore> store_{};
     Core::AssetId spriteId_ = assetId(1);
     Core::AssetId textureId_ = assetId(2);
+    Core::AssetId clipId_ = assetId(3);
     Asset::AssetHandle sprite_{};
     Asset::AssetHandle texture_{};
+    Asset::AssetHandle clip_{};
 };
 
 TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
@@ -133,6 +140,11 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
                    .orderInLayer = 17,
                    .flipX = true,
                }));
+    ASSERT_TRUE(source.setSpriteAnimationBinding2D(child, SpriteAnimationBinding2D{
+                                                              .clip = clip_,
+                                                              .playbackSpeed = 1.5F,
+                                                              .autoPlay = false,
+                                                          }));
     ASSERT_TRUE(source.updateWorldTransforms());
 
     const std::array gameplay{std::byte{7}, std::byte{8}, std::byte{9}};
@@ -164,11 +176,58 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
     ASSERT_NE(restored.spriteRenderer2D((*bindings)[1].entity), nullptr);
     EXPECT_EQ(restored.spriteRenderer2D((*bindings)[1].entity)->sprite, sprite_);
     EXPECT_EQ(restored.spriteRenderer2D((*bindings)[1].entity)->normalTexture, texture_);
+    const SpriteAnimationBinding2D* restoredAnimation =
+        restored.spriteAnimationBinding2D((*bindings)[1].entity);
+    ASSERT_NE(restoredAnimation, nullptr);
+    EXPECT_EQ(restoredAnimation->clip, clip_);
+    EXPECT_FLOAT_EQ(restoredAnimation->playbackSpeed, 1.5F);
+    EXPECT_FALSE(restoredAnimation->autoPlay);
 
     auto recaptured = captureWorld2DSnapshotBytes(
         restored, captureConfig([&bindings](EntityId entity) { return stableIdFor(*bindings, entity); }, gameplay));
     ASSERT_TRUE(recaptured) << (recaptured ? "" : recaptured.error().message);
     EXPECT_EQ(*recaptured, *bytes);
+}
+
+TEST_F(World2DSnapshotSceneTests, UnresolvedAnimationClipFailsClosedBeforeMutation)
+{
+    const std::array entities{
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 1,
+            .sprite = AssetFormat::World2DSpriteDesc{.spriteId = spriteId_},
+            .spriteAnimation =
+                AssetFormat::World2DSpriteAnimationDesc{.clipId = assetId(99)},
+        },
+    };
+    auto bytes = AssetFormat::writeWorld2DSnapshotBytes(AssetFormat::World2DSnapshotDesc{.entities = entities});
+    ASSERT_TRUE(bytes) << (bytes ? "" : bytes.error().message);
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, storage);
+    ASSERT_TRUE(snapshot);
+
+    World world = makeWorld();
+    auto unresolvedClip = instantiateWorld2DSnapshot(world, *snapshot, resolver());
+    ASSERT_FALSE(unresolvedClip);
+    EXPECT_EQ(unresolvedClip.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(world.entityCount(), 0U);
+
+    // A missing binding on the sprite entity keeps working without the clip resolver.
+    World2DSnapshotAssetResolver noClipResolver = resolver();
+    noClipResolver.resolveAnimationClip = {};
+    const std::array plainEntities{
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 1,
+            .sprite = AssetFormat::World2DSpriteDesc{.spriteId = spriteId_},
+        },
+    };
+    auto plainBytes = AssetFormat::writeWorld2DSnapshotBytes(
+        AssetFormat::World2DSnapshotDesc{.entities = plainEntities});
+    ASSERT_TRUE(plainBytes);
+    std::vector<AssetFormat::World2DEntityDesc> plainStorage;
+    auto plainSnapshot = AssetFormat::parseWorld2DSnapshot(*plainBytes, plainStorage);
+    ASSERT_TRUE(plainSnapshot);
+    auto restored = instantiateWorld2DSnapshot(world, *plainSnapshot, noClipResolver);
+    ASSERT_TRUE(restored) << (restored ? "" : restored.error().message);
 }
 
 TEST_F(World2DSnapshotSceneTests, OrdersParentsFirstThenStableId)

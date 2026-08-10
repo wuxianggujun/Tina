@@ -3,6 +3,7 @@
 // Tina Editor desktop composition: shared retained tool chrome backed by
 // validated World2D and World3D authoring documents and Scene GPU previews.
 
+#include "EditorAnimationPreview.hpp"
 #include "EditorFileDialog.hpp"
 #include "EditorSourceImportLaunchOptions.hpp"
 #include "EditorSourceImportSelection.hpp"
@@ -2465,6 +2466,44 @@ class EditorWorkspaceState final : public Tina::IGameState {
         }
     }
     Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override;
+
+    // Shared retained-UI build context: one tree updater plus the fixed Editor
+    // typography set, threaded through the per-region build methods below.
+    struct UiBuildContext final {
+        Tina::PrimaryWindowUITreeUpdater& tree;
+        UI::UITheme productTheme{};
+        UI::UITextStyle titleText{};
+        UI::UITextStyle sectionText{};
+        UI::UITextStyle bodyText{};
+        UI::UITextStyle compactText{};
+        UI::UITextStyle secondaryText{};
+        UI::UITextStyle accentText{};
+
+        [[nodiscard]] Tina::Core::Result<UI::UINodeId> createPanel(
+            UI::UINodeId parent, UI::UILayoutStyle layout, UI::UIStyleRoleId role,
+            UI::UIStyleClassId styleClass = {});
+        [[nodiscard]] Tina::Core::Result<UI::UINodeId> createLabel(
+            UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
+            const UI::UITextStyle& style);
+        [[nodiscard]] Tina::Core::Result<UI::UINodeId> createButton(
+            UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
+            bool enabled = true);
+        [[nodiscard]] Tina::Core::Result<UI::UINodeId> createTextEdit(
+            UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
+            bool enabled);
+    };
+
+    [[nodiscard]] Tina::Core::Status buildToolbarUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildContextBarUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildLeftDockUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildViewportUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildInspectorUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildTimelineUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildStatusBarUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status registerUiCallbacks(UiBuildContext& ui);
+
     void onExit(Tina::GameStateExitContext&) noexcept override;
     [[nodiscard]] Tina::GameStatePolicy initialPolicy() const noexcept override;
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override;
@@ -2482,8 +2521,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] bool authoringEnabled() const noexcept;
     [[nodiscard]] bool playStartReady() const noexcept;
     [[nodiscard]] bool sceneDocumentActive() const noexcept;
-    [[nodiscard]] static Tina::Scene::SpriteAnimationPlaybackMode
-    sceneAnimationMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept;
     [[nodiscard]] static std::string_view
     animationModeLabel(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept;
     [[nodiscard]] Tina::Core::Status applyAnimationPreviewFrame(u32 frameIndex);
@@ -3068,7 +3105,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Scene::EntityId previewCamera3D_{};
     std::optional<Tina::Asset::Sprite2DBindingRegistry> spriteBindings_{};
     std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};
-    std::optional<Tina::Scene::SpriteAnimator2D> animationAnimator_{};
     std::vector<Tina::Asset::AssetHandle> loadedPreviewHandles_{};
     std::vector<Tina::Asset::AssetHandle> boundSpriteAssets_{};
     std::vector<Tina::Asset::AssetHandle> boundTilesetAssets_{};
@@ -3077,10 +3113,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u64 previewResolvedSpriteCount_ = 0;
     u64 previewResolvedMeshCount_ = 0;
     u64 previewRevision_ = 0;
-    u32 animationSelectedFrameIndex_ = 0;
-    u32 animationVisibleFrameStart_ = 0;
-    bool animationPlaying_ = false;
-    bool animationPreviewAvailable_ = false;
+    Tina::EditorApp::Detail::EditorAnimationPreview animationPreview_{};
     bool previewAssetBindingsRefreshPending_ = false;
     bool catalogRefreshPending_ = false;
     bool projectBrowserUiRefreshPending_ = false;
@@ -3130,7 +3163,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<u32> pendingDocumentTabActivation_{};
     std::optional<EditorCommand> pendingEditorCommand_{};
     std::optional<Tina::Editor::EditorDocumentKey> pendingDirtyCloseKey_{};
-    std::optional<u32> pendingAnimationFrameSelection_{};
     std::optional<ViewportToolMode> pendingViewportToolMode_{};
     std::optional<UI::UIStraightSrgba8Color> pendingViewportTokenColor_{};
     std::optional<float> pendingViewportSliderValue_{};

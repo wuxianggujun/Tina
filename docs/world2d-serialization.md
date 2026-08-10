@@ -17,7 +17,9 @@ entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTran
 - `PointLight2D`：linear color、intensity、influence/source radius、active；
 - `ShadowOccluder2D`：local segment 与 active；
 - `SpriteAnimation2D`：SpriteAnimationClip `AssetId`、playback speed（正有限值）、autoPlay。
-  该组件是对同 entity `SpriteRenderer2D` 的绑定，缺少 sprite 时校验拒绝。
+  该组件是对同 entity `SpriteRenderer2D` 的绑定，缺少 sprite 时校验拒绝。Scene World 以
+  `SpriteAnimationBinding2D`（weak clip handle + speed + autoPlay）承载它：restore 需要 resolver 把 clip
+  `AssetId` 解析为 weak handle（未解析 fail closed），capture 经 `assetIdForHandle` 写回稳定 `AssetId`。
 
 Runtime `EntityId` owner/index/generation、weak `AssetHandle`、AssetLease、Render/GPU identity 永不序列化。
 这避免 restore 后误把旧 registry identity 当成 live 对象。

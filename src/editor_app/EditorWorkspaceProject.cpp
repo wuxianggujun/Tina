@@ -267,7 +267,7 @@ auto EditorWorkspaceState::rebuildLiveCatalogPreview(
     std::string successFeedback) -> Tina::Core::Status{
     counters_.runtimePreviewValid = false;
     counters_.catalogReady = false;
-    animationAnimator_.reset();
+    animationPreview_.resetAnimator();
     releasePreviewAssetBindings();
     if (auto status = preparePreviewAssetBindings(); !status) {
         auto error = std::move(status.error());

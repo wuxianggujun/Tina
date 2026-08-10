@@ -469,16 +469,16 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
         return Tina::Core::failure(std::move(snapshot.error()));
     }
     const auto animationFrame = spriteAnimationDocument_.frameAt(
-        animationSelectedFrameIndex_);
+        animationPreview_.selectedFrameIndex());
     if (!animationFrame) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Animation preview selected frame is invalid");
     }
     const Tina::Asset::AssetHandle animationSprite = loadedAsset(
         animationFrame->spriteId, Tina::AssetFormat::AssetKind::Sprite);
-    animationPreviewAvailable_ = animationSprite &&
-                                 containsHandle(boundSpriteAssets_, animationSprite);
-    if (animationPreviewAvailable_) {
+    animationPreview_.setPreviewAvailable(animationSprite &&
+                                 containsHandle(boundSpriteAssets_, animationSprite));
+    if (animationPreview_.previewAvailable()) {
         const u32 selectedStableId = stableEntityIdForHierarchyItem(selectionKey_);
         // Explicitly authored SpriteAnimation2D bindings win over the
         // selection/first-sprite preview heuristics.
@@ -520,7 +520,15 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
                                      spriteBindings_->bindingKey(normalTexture) != 0);
         if (!spriteResolved || !normalResolved) {
             entity.sprite.reset();
+            // The animation binding targets the sprite; filtering the sprite
+            // from the preview must also filter its binding.
+            entity.spriteAnimation.reset();
             continue;
+        }
+        if (entity.spriteAnimation.has_value() &&
+            !loadedAsset(entity.spriteAnimation->clipId,
+                         Tina::AssetFormat::AssetKind::SpriteAnimationClip)) {
+            entity.spriteAnimation.reset();
         }
         ++resolvedSpriteCount;
     }
@@ -543,6 +551,10 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
             },
             .resolveTexture = [this](Tina::Core::AssetId assetId) {
                 return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Texture2D);
+            },
+            .resolveAnimationClip = [this](Tina::Core::AssetId assetId) {
+                return loadedAsset(assetId,
+                                   Tina::AssetFormat::AssetKind::SpriteAnimationClip);
             },
         });
     if (!bindings) {
@@ -637,7 +649,7 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
     counters_.animationDocumentRevision = spriteAnimationDocument_.revision();
     counters_.animationFrameCount = spriteAnimationDocument_.frameCount();
     counters_.animationCookPreviewBytes = animationCookPreview->cookedBytes.size();
-    counters_.animationPreviewFrameIndex = animationSelectedFrameIndex_;
+    counters_.animationPreviewFrameIndex = animationPreview_.selectedFrameIndex();
 
     previewTileMap_.reset();
     previewTileMapLayerIds_.clear();

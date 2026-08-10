@@ -227,9 +227,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
                 ++counters_.tileMapUndos;
             } else if (activeKind ==
                        Tina::Editor::EditorDocumentKind::SpriteAnimation2D) {
-                animationSelectedFrameIndex_ = (std::min)(
-                    animationSelectedFrameIndex_,
-                    static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U));
+                animationPreview_.clampSelection(static_cast<u32>(spriteAnimationDocument_.frameCount()));
                 ++counters_.animationUndos;
                 animationDocumentChanged = true;
             }
@@ -272,9 +270,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
                 ++counters_.tileMapRedos;
             } else if (activeKind ==
                        Tina::Editor::EditorDocumentKind::SpriteAnimation2D) {
-                animationSelectedFrameIndex_ = (std::min)(
-                    animationSelectedFrameIndex_,
-                    static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U));
+                animationPreview_.clampSelection(static_cast<u32>(spriteAnimationDocument_.frameCount()));
                 ++counters_.animationRedos;
                 animationDocumentChanged = true;
             }
@@ -552,9 +548,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         resetViewportInteractionState();
         viewportToolMode_ = ViewportToolMode::Select;
-        animationPlaying_ = false;
-        if (animationAnimator_.has_value()) {
-            animationAnimator_->pause();
+        animationPreview_.setPlaying(false);
+        if (animationPreview_.hasAnimator()) {
+            animationPreview_.animator().pause();
         }
         if (workspaceMode_ == WorkspaceMode::World2D) {
             status = playSession_->start(
@@ -726,47 +722,47 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         break;
     }
     case EditorCommand::AnimationTogglePlayback:
-        if (!animationAnimator_.has_value() || !animationPreviewAvailable_) {
+        if (!animationPreview_.hasAnimator() || !animationPreview_.previewAvailable()) {
             status = Tina::Core::failure(
                 Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
                 "Animation preview requires resolved Sprite frames");
             break;
         }
-        if (animationPlaying_) {
-            animationAnimator_->pause();
-            animationPlaying_ = false;
+        if (animationPreview_.playing()) {
+            animationPreview_.animator().pause();
+            animationPreview_.setPlaying(false);
             authoringFeedback_ = "Animation preview paused";
         } else {
-            animationAnimator_->play();
-            animationPlaying_ = true;
+            animationPreview_.animator().play();
+            animationPreview_.setPlaying(true);
             status = applyAnimationPreviewFrame(
-                static_cast<u32>(animationAnimator_->frameIndex()));
+                static_cast<u32>(animationPreview_.animator().frameIndex()));
             authoringFeedback_ = "Animation preview playing";
         }
         ++counters_.animationPlaybackTransitions;
         break;
     case EditorCommand::AnimationPreviousFrame:
-        animationPlaying_ = false;
-        if (animationAnimator_.has_value()) {
-            animationAnimator_->pause();
+        animationPreview_.setPlaying(false);
+        if (animationPreview_.hasAnimator()) {
+            animationPreview_.animator().pause();
         }
-        if (animationSelectedFrameIndex_ > 0U) {
-            status = applyAnimationPreviewFrame(animationSelectedFrameIndex_ - 1U);
+        if (animationPreview_.selectedFrameIndex() > 0U) {
+            status = applyAnimationPreviewFrame(animationPreview_.selectedFrameIndex() - 1U);
         }
         authoringFeedback_ = "Animation playhead stepped backward";
         break;
     case EditorCommand::AnimationNextFrame:
-        animationPlaying_ = false;
-        if (animationAnimator_.has_value()) {
-            animationAnimator_->pause();
+        animationPreview_.setPlaying(false);
+        if (animationPreview_.hasAnimator()) {
+            animationPreview_.animator().pause();
         }
-        if (animationSelectedFrameIndex_ + 1U < spriteAnimationDocument_.frameCount()) {
-            status = applyAnimationPreviewFrame(animationSelectedFrameIndex_ + 1U);
+        if (animationPreview_.selectedFrameIndex() + 1U < spriteAnimationDocument_.frameCount()) {
+            status = applyAnimationPreviewFrame(animationPreview_.selectedFrameIndex() + 1U);
         }
         authoringFeedback_ = "Animation playhead stepped forward";
         break;
     case EditorCommand::AnimationAddFrame: {
-        const auto selected = spriteAnimationDocument_.frameAt(animationSelectedFrameIndex_);
+        const auto selected = spriteAnimationDocument_.frameAt(animationPreview_.selectedFrameIndex());
         if (!selected) {
             status = Tina::Core::failure(Tina::Editor::EditorErrorCode::FrameNotFound,
                                          "Animation selected frame does not exist");
@@ -774,8 +770,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         status = spriteAnimationDocument_.appendFrame(*selected);
         if (status) {
-            animationSelectedFrameIndex_ =
-                static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U);
+            animationPreview_.setSelectedFrameIndex(static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U));
             animationDocumentChanged = true;
             ++counters_.animationEdits;
             ++counters_.authoringEdits;
@@ -784,9 +779,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         break;
     }
     case EditorCommand::AnimationDuplicateFrame:
-        status = spriteAnimationDocument_.duplicateFrame(animationSelectedFrameIndex_);
+        status = spriteAnimationDocument_.duplicateFrame(animationPreview_.selectedFrameIndex());
         if (status) {
-            ++animationSelectedFrameIndex_;
+            animationPreview_.setSelectedFrameIndex(animationPreview_.selectedFrameIndex() + 1U);
             animationDocumentChanged = true;
             ++counters_.animationEdits;
             ++counters_.authoringEdits;
@@ -794,11 +789,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         break;
     case EditorCommand::AnimationDeleteFrame:
-        status = spriteAnimationDocument_.eraseFrame(animationSelectedFrameIndex_);
+        status = spriteAnimationDocument_.eraseFrame(animationPreview_.selectedFrameIndex());
         if (status) {
-            animationSelectedFrameIndex_ = (std::min)(
-                animationSelectedFrameIndex_,
-                static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U));
+            animationPreview_.clampSelection(static_cast<u32>(spriteAnimationDocument_.frameCount()));
             animationDocumentChanged = true;
             ++counters_.animationEdits;
             ++counters_.authoringEdits;
@@ -806,11 +799,11 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         break;
     case EditorCommand::AnimationMoveFrameLeft:
-        if (animationSelectedFrameIndex_ > 0U) {
+        if (animationPreview_.selectedFrameIndex() > 0U) {
             status = spriteAnimationDocument_.moveFrame(
-                animationSelectedFrameIndex_, animationSelectedFrameIndex_ - 1U);
+                animationPreview_.selectedFrameIndex(), animationPreview_.selectedFrameIndex() - 1U);
             if (status) {
-                --animationSelectedFrameIndex_;
+                animationPreview_.setSelectedFrameIndex(animationPreview_.selectedFrameIndex() - 1U);
                 animationDocumentChanged = true;
                 ++counters_.animationEdits;
                 ++counters_.authoringEdits;
@@ -819,11 +812,11 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         break;
     case EditorCommand::AnimationMoveFrameRight:
-        if (animationSelectedFrameIndex_ + 1U < spriteAnimationDocument_.frameCount()) {
+        if (animationPreview_.selectedFrameIndex() + 1U < spriteAnimationDocument_.frameCount()) {
             status = spriteAnimationDocument_.moveFrame(
-                animationSelectedFrameIndex_, animationSelectedFrameIndex_ + 1U);
+                animationPreview_.selectedFrameIndex(), animationPreview_.selectedFrameIndex() + 1U);
             if (status) {
-                ++animationSelectedFrameIndex_;
+                animationPreview_.setSelectedFrameIndex(animationPreview_.selectedFrameIndex() + 1U);
                 animationDocumentChanged = true;
                 ++counters_.animationEdits;
                 ++counters_.authoringEdits;
@@ -832,7 +825,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         break;
     case EditorCommand::AnimationCycleSprite: {
-        const auto selected = spriteAnimationDocument_.frameAt(animationSelectedFrameIndex_);
+        const auto selected = spriteAnimationDocument_.frameAt(animationPreview_.selectedFrameIndex());
         if (!selected) {
             status = Tina::Core::failure(Tina::Editor::EditorErrorCode::FrameNotFound,
                                          "Animation selected frame does not exist");
@@ -841,7 +834,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         Tina::Core::AssetId nextSprite = selected->spriteId;
         for (u32 offset = 1; offset < spriteAnimationDocument_.frameCount(); ++offset) {
             const u32 candidateIndex = static_cast<u32>(
-                (animationSelectedFrameIndex_ + offset) %
+                (animationPreview_.selectedFrameIndex() + offset) %
                 spriteAnimationDocument_.frameCount());
             const auto candidate = spriteAnimationDocument_.frameAt(candidateIndex);
             if (candidate && candidate->spriteId != selected->spriteId) {
@@ -852,7 +845,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         if (nextSprite != selected->spriteId) {
             auto updated = *selected;
             updated.spriteId = nextSprite;
-            status = spriteAnimationDocument_.setFrame(animationSelectedFrameIndex_, updated);
+            status = spriteAnimationDocument_.setFrame(animationPreview_.selectedFrameIndex(), updated);
             if (status) {
                 animationDocumentChanged = true;
                 ++counters_.animationEdits;
@@ -864,7 +857,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     }
     case EditorCommand::AnimationDecreaseDuration:
     case EditorCommand::AnimationIncreaseDuration: {
-        const auto selected = spriteAnimationDocument_.frameAt(animationSelectedFrameIndex_);
+        const auto selected = spriteAnimationDocument_.frameAt(animationPreview_.selectedFrameIndex());
         if (!selected) {
             status = Tina::Core::failure(Tina::Editor::EditorErrorCode::FrameNotFound,
                                          "Animation selected frame does not exist");
@@ -875,7 +868,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
                                 : -0.05F;
         const float duration = (std::max)(0.01F, selected->durationSeconds + delta);
         status = spriteAnimationDocument_.setFrameDuration(
-            animationSelectedFrameIndex_, duration);
+            animationPreview_.selectedFrameIndex(), duration);
         if (status && duration != selected->durationSeconds) {
             animationDocumentChanged = true;
             ++counters_.animationEdits;
@@ -920,9 +913,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::AnimationUndo:
         status = spriteAnimationDocument_.undo();
         if (status) {
-            animationSelectedFrameIndex_ = (std::min)(
-                animationSelectedFrameIndex_,
-                static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U));
+            animationPreview_.clampSelection(static_cast<u32>(spriteAnimationDocument_.frameCount()));
             animationDocumentChanged = true;
             ++counters_.animationUndos;
             ++counters_.authoringUndos;
@@ -932,9 +923,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::AnimationRedo:
         status = spriteAnimationDocument_.redo();
         if (status) {
-            animationSelectedFrameIndex_ = (std::min)(
-                animationSelectedFrameIndex_,
-                static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U));
+            animationPreview_.clampSelection(static_cast<u32>(spriteAnimationDocument_.frameCount()));
             animationDocumentChanged = true;
             ++counters_.animationRedos;
             ++counters_.authoringRedos;
@@ -1017,9 +1006,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     }
     if (animationDocumentChanged) {
         if (auto animationStatus = rebuildAnimationAnimator(); !animationStatus) {
-            animationAnimator_.reset();
-            animationPlaying_ = false;
-            animationPreviewAvailable_ = false;
+            animationPreview_.resetAnimator();
+            animationPreview_.setPlaying(false);
+            animationPreview_.setPreviewAvailable(false);
             authoringFeedback_ += " | Runtime preview unavailable: ";
             authoringFeedback_ += animationStatus.error().message;
         }

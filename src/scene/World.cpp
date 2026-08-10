@@ -28,6 +28,8 @@ struct World::EntityRecord final {
     PointLight2D pointLight2D{};
     bool hasShadowOccluder2D = false;
     ShadowOccluder2D shadowOccluder2D{};
+    bool hasSpriteAnimationBinding2D = false;
+    SpriteAnimationBinding2D spriteAnimationBinding2D{};
     bool hasPerspectiveCamera3D = false;
     PerspectiveCamera3D perspectiveCamera3D{};
     bool hasMeshRenderer3D = false;
@@ -1202,6 +1204,77 @@ const ShadowOccluder2D* World::shadowOccluder2D(EntityId entity) const noexcept
         return nullptr;
     }
     return &entityRecord->shadowOccluder2D;
+}
+
+Core::Status World::setSpriteAnimationBinding2D(
+    EntityId entity,
+    SpriteAnimationBinding2D binding) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(binding)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene SpriteAnimationBinding2D requires a clip handle and positive finite speed");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for SpriteAnimationBinding2D");
+    }
+    entityRecord->spriteAnimationBinding2D = binding;
+    entityRecord->hasSpriteAnimationBinding2D = true;
+    return Core::success();
+}
+
+Core::Status World::clearSpriteAnimationBinding2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for SpriteAnimationBinding2D clear");
+    }
+    entityRecord->hasSpriteAnimationBinding2D = false;
+    entityRecord->spriteAnimationBinding2D = {};
+    return Core::success();
+}
+
+const SpriteAnimationBinding2D* World::spriteAnimationBinding2D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasSpriteAnimationBinding2D) {
+        return nullptr;
+    }
+    return &entityRecord->spriteAnimationBinding2D;
 }
 
 Core::Status World::setPerspectiveCamera3D(EntityId entity, PerspectiveCamera3D camera) noexcept

@@ -32,6 +32,7 @@ struct PreparedEntity final {
     std::optional<Camera2D> camera{};
     std::optional<PointLight2D> pointLight{};
     std::optional<ShadowOccluder2D> shadowOccluder{};
+    std::optional<SpriteAnimationBinding2D> spriteAnimation{};
 };
 
 [[nodiscard]] const CaptureEntity* findCaptureEntity(std::span<const CaptureEntity> entities, EntityId entity) noexcept
@@ -196,6 +197,61 @@ struct PreparedEntity final {
         .localEndY = occluder.localEndY,
         .active = occluder.active,
     };
+}
+
+[[nodiscard]] Core::Result<AssetFormat::World2DSpriteAnimationDesc>
+captureSpriteAnimation(const SpriteAnimationBinding2D& binding,
+                       const World2DSnapshotCaptureConfig& config)
+{
+    if (!isValid(binding))
+    {
+        return Core::failure(SceneErrorCode::InvalidComponent,
+                             "World2D capture found an invalid SpriteAnimationBinding2D");
+    }
+    if (!config.assetIdForHandle)
+    {
+        return Core::failure(SceneErrorCode::UnresolvedSprite,
+                             "World2D capture requires an AssetId mapper for animation clips");
+    }
+    const Core::AssetId clipId = config.assetIdForHandle(binding.clip);
+    if (!clipId)
+    {
+        return Core::failure(SceneErrorCode::UnresolvedSprite,
+                             "World2D animation clip handle did not map to an AssetId");
+    }
+    return AssetFormat::World2DSpriteAnimationDesc{
+        .clipId = clipId,
+        .playbackSpeed = binding.playbackSpeed,
+        .autoPlay = binding.autoPlay,
+    };
+}
+
+[[nodiscard]] Core::Result<SpriteAnimationBinding2D>
+prepareSpriteAnimation(const AssetFormat::World2DSpriteAnimationDesc& source,
+                       const World2DSnapshotAssetResolver& assets)
+{
+    if (!assets.resolveAnimationClip)
+    {
+        return Core::failure(SceneErrorCode::UnresolvedSprite,
+                             "World2D restore requires an animation clip AssetId resolver");
+    }
+    const Asset::AssetHandle clipHandle = assets.resolveAnimationClip(source.clipId);
+    if (!clipHandle)
+    {
+        return Core::failure(SceneErrorCode::UnresolvedSprite,
+                             "World2D animation clip AssetId did not resolve to a weak handle");
+    }
+    SpriteAnimationBinding2D binding{
+        .clip = clipHandle,
+        .playbackSpeed = source.playbackSpeed,
+        .autoPlay = source.autoPlay,
+    };
+    if (!isValid(binding))
+    {
+        return Core::failure(SceneErrorCode::InvalidComponent,
+                             "World2D restored SpriteAnimationBinding2D is invalid");
+    }
+    return binding;
 }
 
 [[nodiscard]] Core::Result<SpriteRenderer2D> prepareSprite(const AssetFormat::World2DSpriteDesc& source,
@@ -477,6 +533,16 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
                 }
                 entity.shadowOccluder = captureOccluder(*occluder);
             }
+            if (const SpriteAnimationBinding2D* animation =
+                    world.spriteAnimationBinding2D(captured.entity))
+            {
+                auto capturedAnimation = captureSpriteAnimation(*animation, config);
+                if (!capturedAnimation)
+                {
+                    return Core::failure(std::move(capturedAnimation.error()));
+                }
+                entity.spriteAnimation = std::move(*capturedAnimation);
+            }
             entities.push_back(std::move(entity));
         }
 
@@ -602,6 +668,15 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
                                          "World2D restored ShadowOccluder2D is invalid");
                 }
             }
+            if (source.spriteAnimation)
+            {
+                auto animation = prepareSpriteAnimation(*source.spriteAnimation, assets);
+                if (!animation)
+                {
+                    return Core::failure(std::move(animation.error()));
+                }
+                entity.spriteAnimation = std::move(*animation);
+            }
             prepared.push_back(std::move(entity));
         }
 
@@ -660,6 +735,16 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
             if (preparedEntity.shadowOccluder)
             {
                 if (Core::Status status = world.setShadowOccluder2D(*entity, *preparedEntity.shadowOccluder); !status)
+                {
+                    rollback();
+                    return Core::failure(std::move(status.error()));
+                }
+            }
+            if (preparedEntity.spriteAnimation)
+            {
+                if (Core::Status status =
+                        world.setSpriteAnimationBinding2D(*entity, *preparedEntity.spriteAnimation);
+                    !status)
                 {
                     rollback();
                     return Core::failure(std::move(status.error()));

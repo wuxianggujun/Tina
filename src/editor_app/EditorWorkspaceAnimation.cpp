@@ -2,18 +2,6 @@
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
-auto EditorWorkspaceState::sceneAnimationMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept -> Tina::Scene::SpriteAnimationPlaybackMode{
-    switch (mode) {
-    case Tina::AssetFormat::SpriteAnimationPlaybackMode::Once:
-        return Tina::Scene::SpriteAnimationPlaybackMode::Once;
-    case Tina::AssetFormat::SpriteAnimationPlaybackMode::PingPong:
-        return Tina::Scene::SpriteAnimationPlaybackMode::PingPong;
-    case Tina::AssetFormat::SpriteAnimationPlaybackMode::Loop:
-    default:
-        return Tina::Scene::SpriteAnimationPlaybackMode::Loop;
-    }
-}
-
 auto EditorWorkspaceState::animationModeLabel(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept -> std::string_view{
     switch (mode) {
     case Tina::AssetFormat::SpriteAnimationPlaybackMode::Once:
@@ -32,15 +20,15 @@ auto EditorWorkspaceState::applyAnimationPreviewFrame(u32 frameIndex) -> Tina::C
         return Tina::Core::failure(Tina::Editor::EditorErrorCode::FrameNotFound,
                                    "Animation timeline frame does not exist");
     }
-    animationSelectedFrameIndex_ = frameIndex;
+    animationPreview_.setSelectedFrameIndex(frameIndex);
     counters_.animationPreviewFrameIndex = frameIndex;
     const Tina::Asset::AssetHandle sprite = loadedAsset(
         frame->spriteId, Tina::AssetFormat::AssetKind::Sprite);
     if (!sprite || !containsHandle(boundSpriteAssets_, sprite)) {
-        animationPreviewAvailable_ = false;
+        animationPreview_.setPreviewAvailable(false);
         return Tina::Core::success();
     }
-    animationPreviewAvailable_ = true;
+    animationPreview_.setPreviewAvailable(true);
     if (workspaceMode_ != WorkspaceMode::World2D || !previewWorld_.has_value()) {
         return Tina::Core::success();
     }
@@ -54,7 +42,7 @@ auto EditorWorkspaceState::applyAnimationPreviewFrame(u32 frameIndex) -> Tina::C
         target = firstSprite != previewBindings_.end() ? &*firstSprite : nullptr;
     }
     if (target == nullptr) {
-        animationPreviewAvailable_ = false;
+        animationPreview_.setPreviewAvailable(false);
         return Tina::Core::success();
     }
     const Tina::Scene::SpriteRenderer2D* current =
@@ -65,69 +53,41 @@ auto EditorWorkspaceState::applyAnimationPreviewFrame(u32 frameIndex) -> Tina::C
 }
 
 auto EditorWorkspaceState::rebuildAnimationAnimator() -> Tina::Core::Status{
-    std::vector<Tina::Scene::SpriteAnimationFrame2D> resolvedFrames;
-    try {
-        resolvedFrames.reserve(spriteAnimationDocument_.frameCount());
-    } catch (const std::bad_alloc&) {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
-                                   "Animation preview frame allocation failed");
+    if (auto status = animationPreview_.rebuild(
+            spriteAnimationDocument_, assetResources_.memory,
+            [this](Tina::Core::AssetId spriteId) {
+                const Tina::Asset::AssetHandle sprite = loadedAsset(
+                    spriteId, Tina::AssetFormat::AssetKind::Sprite);
+                return sprite && containsHandle(boundSpriteAssets_, sprite)
+                           ? sprite
+                           : Tina::Asset::AssetHandle{};
+            });
+        !status) {
+        return status;
     }
-    for (u32 frameIndex = 0; frameIndex < spriteAnimationDocument_.frameCount(); ++frameIndex) {
-        const auto frame = spriteAnimationDocument_.frameAt(frameIndex);
-        if (!frame) {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "Animation document frame disappeared during preview rebuild");
-        }
-        const Tina::Asset::AssetHandle sprite = loadedAsset(
-            frame->spriteId, Tina::AssetFormat::AssetKind::Sprite);
-        if (!sprite || !containsHandle(boundSpriteAssets_, sprite)) {
-            animationAnimator_.reset();
-            animationPlaying_ = false;
-            animationPreviewAvailable_ = false;
-            return Tina::Core::success();
-        }
-        resolvedFrames.push_back(Tina::Scene::SpriteAnimationFrame2D{
-            .sprite = Tina::Scene::SpriteRenderer2D{.sprite = sprite},
-            .duration = Tina::Core::Duration{frame->durationSeconds},
-        });
+    if (!animationPreview_.hasAnimator()) {
+        return Tina::Core::success();
     }
-    auto animator = Tina::Scene::SpriteAnimator2D::Create(
-        Tina::Scene::SpriteAnimationClip2D{
-            .frames = resolvedFrames,
-            .playbackMode = sceneAnimationMode(spriteAnimationDocument_.playbackMode()),
-        },
-        assetResources_.memory);
-    if (!animator) {
-        return Tina::Core::failure(std::move(animator.error()));
-    }
-    animator->pause();
-    animationAnimator_.reset();
-    animationAnimator_.emplace(std::move(*animator));
-    animationPlaying_ = false;
-    animationPreviewAvailable_ = true;
-    animationSelectedFrameIndex_ = (std::min)(
-        animationSelectedFrameIndex_,
-        static_cast<u32>(spriteAnimationDocument_.frameCount() - 1U));
-    return applyAnimationPreviewFrame(animationSelectedFrameIndex_);
+    return applyAnimationPreviewFrame(animationPreview_.selectedFrameIndex());
 }
 
 auto EditorWorkspaceState::processPendingAnimationFrameSelection(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
-    if (!pendingAnimationFrameSelection_.has_value()) {
+    const auto pendingSlot = animationPreview_.takePendingFrameSelection();
+    if (!pendingSlot.has_value()) {
         return Tina::Core::success();
     }
-    const u32 slot = *pendingAnimationFrameSelection_;
-    pendingAnimationFrameSelection_.reset();
+    const u32 slot = *pendingSlot;
     if (workspaceMode_ != WorkspaceMode::World2D) {
         return refreshAnimationTimelineUi(tree);
     }
-    const u32 frameIndex = animationVisibleFrameStart_ + slot;
+    const u32 frameIndex = animationPreview_.visibleFrameStart() + slot;
     if (frameIndex >= spriteAnimationDocument_.frameCount()) {
         return Tina::Core::success();
     }
-    animationPlaying_ = false;
-    if (animationAnimator_.has_value()) {
-        animationAnimator_->pause();
+    animationPreview_.setPlaying(false);
+    if (animationPreview_.hasAnimator()) {
+        animationPreview_.animator().pause();
     }
     if (auto status = applyAnimationPreviewFrame(frameIndex); !status) {
         return status;
@@ -142,10 +102,10 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
     const bool editable = workspaceMode_ == WorkspaceMode::World2D &&
                           authoringEnabled();
     const u32 frameCount = static_cast<u32>(spriteAnimationDocument_.frameCount());
-    animationSelectedFrameIndex_ = (std::min)(animationSelectedFrameIndex_, frameCount - 1U);
+    animationPreview_.clampSelection(frameCount);
     counters_.animationDocumentRevision = spriteAnimationDocument_.revision();
     counters_.animationFrameCount = frameCount;
-    counters_.animationPreviewFrameIndex = animationSelectedFrameIndex_;
+    counters_.animationPreviewFrameIndex = animationPreview_.selectedFrameIndex();
 
     std::string statusText;
     if (!editable) {
@@ -160,7 +120,7 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
         statusText += " | Cook ";
         statusText += std::to_string(counters_.animationCookPreviewBytes);
         statusText += " B";
-        if (!animationPreviewAvailable_) {
+        if (!animationPreview_.previewAvailable()) {
             statusText += " | Sprite unresolved";
         }
     }
@@ -172,19 +132,19 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
     if (auto status = tree.setText(animationModeButton_, modeText); !status) {
         return status;
     }
-    if (auto status = tree.setText(animationPlayButton_, animationPlaying_ ? "Pause" : "Play");
+    if (auto status = tree.setText(animationPlayButton_, animationPreview_.playing() ? "Pause" : "Play");
         !status) {
         return status;
     }
 
-    const auto selectedFrame = spriteAnimationDocument_.frameAt(animationSelectedFrameIndex_);
+    const auto selectedFrame = spriteAnimationDocument_.frameAt(animationPreview_.selectedFrameIndex());
     if (!selectedFrame) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Animation timeline selected frame is invalid");
     }
     const auto spriteText = selectedFrame->spriteId.canonicalText();
     std::string selectionText = "Frame ";
-    selectionText += std::to_string(animationSelectedFrameIndex_ + 1U);
+    selectionText += std::to_string(animationPreview_.selectedFrameIndex() + 1U);
     selectionText += " | Sprite ";
     selectionText.append(spriteText.data(),
                          (std::min)(Tina::Core::usize{8}, spriteText.size()));
@@ -196,20 +156,20 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
         return status;
     }
 
-    animationVisibleFrameStart_ = 0;
+    animationPreview_.setVisibleFrameStart(0);
     if (frameCount > AnimationVisibleFrameSlots &&
-        animationSelectedFrameIndex_ >= AnimationVisibleFrameSlots) {
-        animationVisibleFrameStart_ = (std::min)(
-            animationSelectedFrameIndex_ - AnimationVisibleFrameSlots + 1U,
-            frameCount - AnimationVisibleFrameSlots);
+        animationPreview_.selectedFrameIndex() >= AnimationVisibleFrameSlots) {
+        animationPreview_.setVisibleFrameStart((std::min)(
+            animationPreview_.selectedFrameIndex() - AnimationVisibleFrameSlots + 1U,
+            frameCount - AnimationVisibleFrameSlots));
     }
     for (u32 slot = 0; slot < animationFrameButtons_.size(); ++slot) {
-        const u32 frameIndex = animationVisibleFrameStart_ + slot;
+        const u32 frameIndex = animationPreview_.visibleFrameStart() + slot;
         const bool materialized = frameIndex < frameCount;
         std::string label = "--";
         if (materialized) {
             const auto frame = spriteAnimationDocument_.frameAt(frameIndex);
-            label = frameIndex == animationSelectedFrameIndex_ ? ">" : "";
+            label = frameIndex == animationPreview_.selectedFrameIndex() ? ">" : "";
             label += std::to_string(frameIndex + 1U);
             label += " ";
             label += std::to_string(
@@ -225,17 +185,17 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
         }
     }
 
-    if (auto status = tree.setEnabled(animationPlayButton_, editable && animationPreviewAvailable_);
+    if (auto status = tree.setEnabled(animationPlayButton_, editable && animationPreview_.previewAvailable());
         !status) {
         return status;
     }
     if (auto status = tree.setEnabled(animationPreviousButton_,
-                                      editable && animationSelectedFrameIndex_ > 0U);
+                                      editable && animationPreview_.selectedFrameIndex() > 0U);
         !status) {
         return status;
     }
     if (auto status = tree.setEnabled(animationNextButton_,
-                                      editable && animationSelectedFrameIndex_ + 1U < frameCount);
+                                      editable && animationPreview_.selectedFrameIndex() + 1U < frameCount);
         !status) {
         return status;
     }
@@ -251,12 +211,12 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
         return status;
     }
     if (auto status = tree.setEnabled(animationMoveLeftButton_,
-                                      editable && animationSelectedFrameIndex_ > 0U);
+                                      editable && animationPreview_.selectedFrameIndex() > 0U);
         !status) {
         return status;
     }
     if (auto status = tree.setEnabled(animationMoveRightButton_,
-                                      editable && animationSelectedFrameIndex_ + 1U < frameCount);
+                                      editable && animationPreview_.selectedFrameIndex() + 1U < frameCount);
         !status) {
         return status;
     }

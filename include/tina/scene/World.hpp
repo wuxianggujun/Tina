@@ -12,6 +12,7 @@
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/ShadowOccluder2D.hpp>
 #include <tina/scene/SpotLight3D.hpp>
+#include <tina/scene/SpriteAnimationBinding2D.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
 
@@ -85,6 +86,10 @@ public:
         EntityId entity,
         ShadowOccluder2D occluder) noexcept;
     [[nodiscard]] Core::Status clearShadowOccluder2D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status setSpriteAnimationBinding2D(
+        EntityId entity,
+        SpriteAnimationBinding2D binding) noexcept;
+    [[nodiscard]] Core::Status clearSpriteAnimationBinding2D(EntityId entity) noexcept;
     [[nodiscard]] Core::Status setPerspectiveCamera3D(
         EntityId entity,
         PerspectiveCamera3D camera) noexcept;
@@ -110,6 +115,7 @@ public:
     [[nodiscard]] const SpriteRenderer2D* spriteRenderer2D(EntityId entity) const noexcept;
     [[nodiscard]] const PointLight2D* pointLight2D(EntityId entity) const noexcept;
     [[nodiscard]] const ShadowOccluder2D* shadowOccluder2D(EntityId entity) const noexcept;
+    [[nodiscard]] const SpriteAnimationBinding2D* spriteAnimationBinding2D(EntityId entity) const noexcept;
     [[nodiscard]] const PerspectiveCamera3D* perspectiveCamera3D(EntityId entity) const noexcept;
     [[nodiscard]] const MeshRenderer3D* meshRenderer3D(EntityId entity) const noexcept;
     [[nodiscard]] const DirectionalLight3D* directionalLight3D(EntityId entity) const noexcept;
