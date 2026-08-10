@@ -80,6 +80,14 @@ class EditorApplication final : public Tina::IGameApplication {
     config.renderSceneCapacities.spriteCapacity = EditorViewportSpriteCapacity;
     config.renderSceneCapacities.mesh3DItemCapacity = 8;
     config.renderSceneCapacities.mesh3DBatchCapacity = 4;
+    // The adaptive 3D grid stair approximation plus the gizmo visuals can emit
+    // a few thousand solid quads on top of the editor chrome, so the default
+    // UI paint/display-list capacities are explicitly widened here.
+    config.primaryWindowUICapacities.nodeCapacity = 12U * 1024U;
+    config.primaryWindowUICapacities.paintSnapshotCapacity = 32U * 1024U;
+    config.primaryWindowUIDisplayListCapacities.commandCapacity = 16U * 1024U;
+    config.primaryWindowUIDisplayListCapacities.clipCapacity = 16U * 1024U;
+    config.primaryWindowUIDisplayListCapacities.batchCapacity = 16U * 1024U;
     using Key = Tina::Platform::Key;
     config.inputActions.bindings = {
         editorShortcutBinding(Key::LeftControl, EditorShortcutActions::Control),

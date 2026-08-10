@@ -1004,7 +1004,7 @@ auto EditorWorkspaceState::viewportGridColor(
 auto EditorWorkspaceState::viewportGridLayout(
     const Tina::Editor::EditorViewportGridSegment& segment,
     Tina::Core::usize partIndex,
-    bool diagonal) noexcept -> UI::UILayoutStyle{
+    Tina::Core::usize diagonalStepCount) noexcept -> UI::UILayoutStyle{
     using Kind = Tina::Editor::EditorViewportGridSegmentKind;
     const bool axis = segment.kind == Kind::AxisX ||
                       segment.kind == Kind::AxisY ||
@@ -1015,15 +1015,15 @@ auto EditorWorkspaceState::viewportGridLayout(
     float startY = segment.startY;
     float endX = segment.endX;
     float endY = segment.endY;
-    if (diagonal) {
+    if (diagonalStepCount > 0U) {
         const Tina::Core::usize stepIndex =
             partIndex / ViewportGridDiagonalPartsPerStep;
         const bool verticalPart =
             partIndex % ViewportGridDiagonalPartsPerStep != 0U;
         const float startT = static_cast<float>(stepIndex) /
-                             static_cast<float>(ViewportGridDiagonalSteps);
+                             static_cast<float>(diagonalStepCount);
         const float endT = static_cast<float>(stepIndex + 1U) /
-                           static_cast<float>(ViewportGridDiagonalSteps);
+                           static_cast<float>(diagonalStepCount);
         startX = segment.startX +
                  (segment.endX - segment.startX) * startT;
         startY = segment.startY +
@@ -1096,15 +1096,63 @@ auto EditorWorkspaceState::updateViewportGrid(Tina::PrimaryWindowUITreeUpdater& 
     }
 
     const std::span segments = viewportGrid_.segments();
+    // Diagonal projected lines are approximated with axis-aligned stair parts.
+    // Steps per segment follow the projected pixel length so stairs stay near
+    // ViewportGridTargetStairPixels; a greedy pass guarantees the total part
+    // count never exceeds the fixed visual node budget while every segment
+    // keeps at least its minimum subdivision.
+    std::array<Tina::Core::usize, Tina::Editor::EditorViewportGridSegmentCapacity>
+        diagonalSteps{};
+    Tina::Core::usize minimumPartsRemaining = 0;
+    for (Tina::Core::usize segmentIndex = 0; segmentIndex < segments.size();
+         ++segmentIndex) {
+        const auto& segment = segments[segmentIndex];
+        const float deltaX = std::abs(segment.endX - segment.startX);
+        const float deltaY = std::abs(segment.endY - segment.startY);
+        const bool diagonal = deltaX > 1.0e-5F && deltaY > 1.0e-5F;
+        if (!diagonal) {
+            diagonalSteps[segmentIndex] = 0;
+            ++minimumPartsRemaining;
+            continue;
+        }
+        const float pixelLength = std::hypot(
+            deltaX * viewportLogicalRect_.width,
+            deltaY * viewportLogicalRect_.height);
+        const auto desired = static_cast<Tina::Core::usize>(
+            std::lround(pixelLength / ViewportGridTargetStairPixels));
+        diagonalSteps[segmentIndex] = std::clamp(
+            desired, ViewportGridDiagonalSteps, ViewportGridDiagonalMaximumSteps);
+        minimumPartsRemaining +=
+            ViewportGridDiagonalSteps * ViewportGridDiagonalPartsPerStep;
+    }
+    Tina::Core::usize budgetUsed = 0;
+    for (Tina::Core::usize segmentIndex = 0; segmentIndex < segments.size();
+         ++segmentIndex) {
+        if (diagonalSteps[segmentIndex] == 0U) {
+            --minimumPartsRemaining;
+            ++budgetUsed;
+            continue;
+        }
+        minimumPartsRemaining -=
+            ViewportGridDiagonalSteps * ViewportGridDiagonalPartsPerStep;
+        const Tina::Core::usize available =
+            viewportGridNodes_.size() - budgetUsed - minimumPartsRemaining;
+        const Tina::Core::usize maximumSteps =
+            available / ViewportGridDiagonalPartsPerStep;
+        diagonalSteps[segmentIndex] = std::clamp(
+            diagonalSteps[segmentIndex], ViewportGridDiagonalSteps,
+            (std::max)(ViewportGridDiagonalSteps, maximumSteps));
+        budgetUsed +=
+            diagonalSteps[segmentIndex] * ViewportGridDiagonalPartsPerStep;
+    }
     Tina::Core::usize visualNodeCount = 0;
-    for (const auto& segment : segments) {
-        const bool diagonal =
-            std::abs(segment.endX - segment.startX) > 1.0e-5F &&
-            std::abs(segment.endY - segment.startY) > 1.0e-5F;
+    for (Tina::Core::usize segmentIndex = 0; segmentIndex < segments.size();
+         ++segmentIndex) {
+        const auto& segment = segments[segmentIndex];
+        const Tina::Core::usize stepCount = diagonalSteps[segmentIndex];
         const Tina::Core::usize partCount =
-            diagonal ? ViewportGridDiagonalSteps *
-                           ViewportGridDiagonalPartsPerStep
-                     : Tina::Core::usize{1};
+            stepCount > 0U ? stepCount * ViewportGridDiagonalPartsPerStep
+                           : Tina::Core::usize{1};
         for (Tina::Core::usize part = 0; part < partCount; ++part) {
             if (visualNodeCount == viewportGridNodes_.size()) {
                 return Tina::Core::failure(
@@ -1113,7 +1161,7 @@ auto EditorWorkspaceState::updateViewportGrid(Tina::PrimaryWindowUITreeUpdater& 
             }
             const UI::UINodeId node = viewportGridNodes_[visualNodeCount++];
             if (auto status = tree.setLayoutStyle(
-                    node, viewportGridLayout(segment, part, diagonal));
+                    node, viewportGridLayout(segment, part, stepCount));
                 !status) {
                 return status;
             }

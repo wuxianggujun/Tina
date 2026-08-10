@@ -1212,7 +1212,7 @@ auto EditorWorkspaceState::materializeViewportGizmoVisuals(
                                  geometry.handle == snapshot.hoveredHandle;
         if (geometry.shape ==
             Tina::Editor::EditorTransformGizmoHandleShape::Segment) {
-            constexpr u32 SegmentSteps = 4;
+            constexpr u32 SegmentSteps = 12;
             if (auto status = appendLine(geometry.points[0], geometry.points[1],
                                          SegmentSteps, geometry.handle,
                                          highlighted);
@@ -1221,7 +1221,7 @@ auto EditorWorkspaceState::materializeViewportGizmoVisuals(
             }
         } else if (geometry.shape ==
                    Tina::Editor::EditorTransformGizmoHandleShape::Ring) {
-            constexpr u32 RingSteps = 8;
+            constexpr u32 RingSteps = 24;
             for (u32 step = 0; step < RingSteps; ++step) {
                 const float firstRadians =
                     static_cast<float>(step) / static_cast<float>(RingSteps) *

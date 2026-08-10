@@ -219,8 +219,10 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
 - 2D 使用 Camera2D 中心、视口 aspect 与 `FixedWorldHeight2D` 生成 1 m orthographic grid；低像素密度时按
   `1/2/5 x 10^n` 自适应隐藏过密 minor line，X/Y axis 独立着色。
 - 3D 使用真实 camera yaw/pitch/distance/FOV 投影并裁剪 XZ perspective ground grid；当前 retained UI 只提供
-  axis-aligned quad，因此每条斜向 ray 以固定容量、首尾相接的水平/垂直短线构成连续阶梯 polyline，不再显示为一串离散小方块，
-  也不能退化成普通屏幕方格。X/Z axis 独立着色。
+  axis-aligned quad，因此每条斜向 ray 以首尾相接的水平/垂直短线构成连续阶梯 polyline。阶梯步数不再固定：按投影后
+  像素长度向 `ViewportGridTargetStairPixels`（3 px）自适应细分（每段 6–64 步），贪心分配保证总 part 数不超过固定
+  visual node 预算且每段保底最小细分；transform gizmo 的轴线（12 步）与旋转环（24 弦）同样加密。Editor 因此显式
+  放宽 UI node/paint/display-list 容量。X/Z axis 独立着色。
 - overlay node 在 root 创建期一次性预分配，未使用槽为 `Collapsed`，全部 `UIPointerHitPolicy::Ignore`；命中仍由
   `viewportPreviewLayer_` 统一路由给 navigation、transform gizmo、marquee 与 TileMap brush。
 - footer 的 `-` / Zoom Slider / 百分比 / `+` 与 Frame All 共用 `viewportZoomPercent`。2D projection、TileMap visibility query、pointer-to-cell、gizmo delta
