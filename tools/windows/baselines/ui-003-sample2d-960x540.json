@@ -9,6 +9,10 @@
                        960,
                        540
                    ],
+    "captureLogicalToPixelScale":  [
+                                       1,
+                                       1
+                                   ],
     "aspect":  1.7778,
     "fontFingerprint":  {
                             "schema":  1,
@@ -35,12 +39,12 @@
                           "logicalPixelHeight":  540,
                           "framebufferPixelWidth":  960,
                           "framebufferPixelHeight":  540,
-                          "contentScaleX":  2,
-                          "contentScaleY":  2,
+                          "contentScaleX":  1,
+                          "contentScaleY":  1,
                           "surfacePixelWidth":  960,
                           "surfacePixelHeight":  540,
                           "contentScaleConsistent":  true,
-                          "contentScaleMode":  "logical_equals_framebuffer"
+                          "contentScaleMode":  "logical_times_scale"
                       },
     "rois":  [
                  {
@@ -53,13 +57,13 @@
                                 ],
                      "samples":  700,
                      "avgRgb":  [
-                                    56.94,
-                                    83.15,
-                                    83.23
+                                    24.68,
+                                    35.69,
+                                    44.23
                                 ],
                      "dominantColor":  "111A26",
-                     "dominantRatio":  0.6429,
-                     "uniqueSampleColors":  8
+                     "dominantRatio":  0.8386,
+                     "uniqueSampleColors":  51
                  },
                  {
                      "name":  "scene_explorer",
@@ -71,13 +75,13 @@
                                 ],
                      "samples":  625,
                      "avgRgb":  [
-                                    91.34,
-                                    105.16,
-                                    111.08
+                                    55.71,
+                                    66.02,
+                                    71.26
                                 ],
                      "dominantColor":  "464B50",
-                     "dominantRatio":  0.4032,
-                     "uniqueSampleColors":  17
+                     "dominantRatio":  0.5296,
+                     "uniqueSampleColors":  64
                  },
                  {
                      "name":  "settings_panel",
@@ -89,13 +93,13 @@
                                 ],
                      "samples":  650,
                      "avgRgb":  [
-                                    46.72,
-                                    69.16,
-                                    70.99
+                                    22.79,
+                                    46.56,
+                                    48.3
                                 ],
                      "dominantColor":  "09121B",
-                     "dominantRatio":  0.2662,
-                     "uniqueSampleColors":  26
+                     "dominantRatio":  0.2892,
+                     "uniqueSampleColors":  54
                  },
                  {
                      "name":  "progress_bar",
@@ -107,13 +111,13 @@
                                 ],
                      "samples":  720,
                      "avgRgb":  [
-                                    90.17,
-                                    101.27,
-                                    112.93
+                                    45.08,
+                                    57.87,
+                                    72.07
                                 ],
                      "dominantColor":  "192737",
-                     "dominantRatio":  0.6042,
-                     "uniqueSampleColors":  4
+                     "dominantRatio":  0.7292,
+                     "uniqueSampleColors":  93
                  },
                  {
                      "name":  "playfield_lower",
@@ -125,19 +129,19 @@
                                 ],
                      "samples":  625,
                      "avgRgb":  [
-                                    59.01,
-                                    56.4,
-                                    43.49
+                                    69.12,
+                                    56.08,
+                                    42.52
                                 ],
                      "dominantColor":  "102A43",
-                     "dominantRatio":  0.3712,
-                     "uniqueSampleColors":  174
+                     "dominantRatio":  0.344,
+                     "uniqueSampleColors":  235
                  }
              ],
     "notes":  [
                   "Host-recorded ROI fingerprints for regression on same machine/class of GPU",
                   "avgRgb compared with absolute channel tolerance; uniqueSampleColors is a soft floor",
-                  "Absolute UI layout is design-locked; per-size baselines are not OS DPI goldens",
+                  "Absolute UI layout is design-locked; non-1x logical-to-capture rasters use a -raster-Npct sibling baseline",
                   "fontFingerprint.identity/sha256 must match when baseline includes fingerprint (gate fails on mismatch)"
               ]
 }

@@ -42,10 +42,10 @@ bgfx 类型。部分越界的圆形和图片不能通过先裁 destination bound
   边界；`viewportPreviewLayer_` 显式启用后，grid/gizmo 的完整 Line/Ellipse envelope 保持不变，并由既有
   committed clip、DisplayList clip 与 backend scissor 在相邻 chrome 前裁剪。该契约不是 rounded clip，也
   不额外改变 clip owner 自身的 paint clip；viewport-level Popup 继续使用专用 anchor/clip policy；
-- 2026-08-10 当前 Windows 宿主的 150%/200% DPI 证据已完成：Editor 2D/3D grid、斜向 gizmo 与单
-  Ellipse rotation ring 截图无可见阶梯，UI-003 以 logical 960×540 → capture 1440×810/1920×1080
-  的专用 raster baseline 分别独立复跑通过；`RENDER-LINES-001` 仍需 100% DPI Editor/UI-003 金标与
-  跨 GPU 证据后才能转为 Done。
+- 2026-08-10 当前 Windows 宿主的 100%/150%/200% DPI 证据已完成：Editor 2D/3D grid、斜向 gizmo 与
+  单 Ellipse rotation ring 截图无可见阶梯，UI-003 以 logical 960×540 → capture
+  960×540/1440×810/1920×1080 的对应 baseline 分别独立复跑通过；`RENDER-LINES-001` 仍需跨 GPU
+  证据后才能转为 Done。
 
 ## 被拒绝方案
 

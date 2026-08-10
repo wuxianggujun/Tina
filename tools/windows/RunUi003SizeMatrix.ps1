@@ -193,7 +193,6 @@ $matrixReport = [pscustomobject]@{
         'blankLike exclusion via CaptureSampleWindow'
     )
     open = @(
-        'OS Settings display scale 100% true DPI golden',
         'Multi-monitor mixed-DPI capture matrix',
         'Cross-GPU pixel golden (font fingerprint is identity metadata, not pixel golden)'
     )

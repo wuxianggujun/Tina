@@ -1466,10 +1466,10 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003SizeMatrix.ps1 
 `TINA_UI_FONT_PATH` / repo fixture path、`sha256`、`freeTypeLikelyOn`、`identity`；baseline schema 3；
 与 baseline 不一致时默认 fail，`-AllowFontFingerprintMismatch` 可 provisional 跳过 ROI 比对）。ROI `rectPx`
 比较前会按各自 logical-to-capture scale 还原为 logical rect；avgRgb 金标按 raster scale 分文件保存。同一
-Windows 宿主在用户切换 OS 设置后已完成 150%/200% 专用 baseline 与独立复跑；150% 另以
-`PER_MONITOR_AWARE_V2` Win32 探针确认 system DPI 为 144。
+Windows 宿主在用户切换 OS 设置后已完成 100%/150%/200% 对应 baseline 与独立复跑；100%/150% 另以
+`PER_MONITOR_AWARE_V2` Win32 探针确认 system DPI 为 96/144。
 
-**未证明：** OS 显示缩放 100% 真机金标；多显示器混 DPI；跨 GPU 像素金标。
+**未证明：** 多显示器混 DPI；跨 GPU 像素金标。
 
 ## Linux 与 sanitizer
 
