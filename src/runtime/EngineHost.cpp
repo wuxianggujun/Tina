@@ -1834,6 +1834,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         {
             const Render::RenderDeviceCreateParams renderParams{
                 .shadowMapExtents = ownedConfig.shadowMapExtents,
+                .msaaSamples = ownedConfig.renderMsaaSamples,
             };
             auto renderResult = invokeResultBoundary("IndependentPlatformRenderFactories::createRenderDevice",
                                                      RuntimeErrorCode::EngineFactoryThrewException,
@@ -1897,6 +1898,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             const Render::RenderDeviceCreateParams renderParams{
                 .initialPrimaryWindowSurface = toRenderSurfaceState(*snapshotResult),
                 .shadowMapExtents = ownedConfig.shadowMapExtents,
+                .msaaSamples = ownedConfig.renderMsaaSamples,
             };
             auto renderResult = invokeResultBoundary(
                 "WindowSurfacePlatformRenderFactories::createWindowSurfaceRenderDevice",

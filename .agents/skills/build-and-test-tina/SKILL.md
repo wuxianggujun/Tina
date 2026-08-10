@@ -29,6 +29,7 @@ git submodule status --recursive
 | bgfx Desktop/2D/3D | `windows-msvc-vnext-bgfx` | `windows-vnext-bgfx-debug`；`tina_render_bgfx_tests`、samples |
 | UI + FreeType + UIA | `windows-msvc-vnext-bgfx-ui-freetype` | `windows-vnext-bgfx-ui-freetype-debug`；UI/UIA tests + showcase |
 | 完整 2D 产品 | `windows-msvc-vnext-bgfx-product-2d` | `windows-vnext-bgfx-product-2d-debug`；Physics/Audio/UI/Asset + `tina_sample_2d` |
+| Editor（authoring + 桌面） | `windows-msvc-vnext-bgfx-product-2d` | `tina_editor_tests`、`tina_editor_app_tests`、`tina_editor_desktop`；smoke 用 `TinaEditor.exe --auto-demo --frames=600`（2D/3D 各一次） |
 | Physics2D 或 Audio 专图 | 对应 `windows-msvc-vnext-*` preset | 对应模块 tests/bench |
 
 Legacy 产品图已删除；`TINA_BUILD_LEGACY=ON` 必须 FATAL。FreeType 字体通过 CMake/env

@@ -38,6 +38,7 @@ Core
 ├─ Scene (+ Render + AssetFormat + AssetTypes)
 ├─ Asset (+ AssetTypes + AssetFormat + Task + Render)
 ├─ Physics2D (optional private Box2D)
+├─ Editor (+ AssetFormat + Asset + Scene) ── EditorApp (+ Runtime + UI) ── tina_editor_desktop (TinaEditor.exe)
 ├─ WindowSurfaceIntegration (+ Platform)
 ├─ UIRenderIntegration (+ UI + Render)
 └─ Runtime (+ Platform + Task + Render + UI + Audio + integrations)

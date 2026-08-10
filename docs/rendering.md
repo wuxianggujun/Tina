@@ -99,6 +99,11 @@ point shadow 或非法 near/depth/normal bias 在 Scene publish 前 fail closed�
 EngineHost 在创建任何 module factory 前 fail closed，Null/bgfx 直接 factory 也独立校验。bgfx 的 D16
 资源创建、shadow view rect 与3×3 PCF texel size 使用同一份实际 extent；不支持热改或旧固定尺寸分支。
 
+`EngineConfig::renderMsaaSamples` 同样是 device-lifetime 启动配置：`0`（默认，关闭）或 `2/4/8/16`，
+其余值在 EngineConfig 校验与 bgfx factory 双双 fail closed。它映射为 backbuffer 的
+`BGFX_RESET_MSAA_X*` flag，由 init 与 resize reset 共用。samples 与所有像素证据 gate 保持 `0`
+以免破坏已冻结的视觉金标；`TinaEditor` 以 `8` 启动来抗锯齿 world pass（mesh 边缘与 sprite 采样）。
+
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、
 非负 RGB 与 ambient；shadow endpoint 必须 finite，

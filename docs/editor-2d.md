@@ -223,6 +223,12 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
   像素长度向 `ViewportGridTargetStairPixels`（3 px）自适应细分（每段 6–64 步），贪心分配保证总 part 数不超过固定
   visual node 预算且每段保底最小细分；transform gizmo 的轴线（12 步）与旋转环（24 弦）同样加密。Editor 因此显式
   放宽 UI node/paint/display-list 容量。X/Z axis 独立着色。
+- **已知视觉限制与根因**：网格斜线与 gizmo 旋转环的"台阶感"都来自同一根因——UI 叠加层只有轴对齐
+  `SolidQuad` 图元，没有旋转矩形/线段图元，所有斜线只能用阶梯折线近似；投影数学本身（针孔投影 +
+  Liang-Barsky 裁剪，与 GPU camera 同为 55° FOV、同一 viewport aspect）是正确的。世界 pass 里 mesh 边缘
+  的锯齿则来自 backbuffer 抗锯齿：Editor 通过 `EngineConfig::renderMsaaSamples = 8` 打开 8× MSAA（见
+  [rendering.md](rendering.md)），samples 与像素证据 gate 保持关闭。彻底消除叠加层阶梯需要真正的线段/
+  旋转四边形渲染原语或把 grid/gizmo 移入 world pass，见 backlog `RENDER-LINES-001`。
 - overlay node 在 root 创建期一次性预分配，未使用槽为 `Collapsed`，全部 `UIPointerHitPolicy::Ignore`；命中仍由
   `viewportPreviewLayer_` 统一路由给 navigation、transform gizmo、marquee 与 TileMap brush。
 - footer 的 `-` / Zoom Slider / 百分比 / `+` 与 Frame All 共用 `viewportZoomPercent`。2D projection、TileMap visibility query、pointer-to-cell、gizmo delta

@@ -151,6 +151,9 @@ backend，也不取得 `IRenderDevice*`。
 TaskSystem 阶段返回 `TaskErrorCode::WaitTimeout`，Host 先写入 `runtime.lifecycle` Diagnostics，再
 `std::terminate()`；不会 reset TaskSystem 或继续析构 Platform、Clock、Diagnostics 等剩余 owner。
 
+`EngineConfig::renderMsaaSamples`（`0` 默认关闭，或 `2/4/8/16`）在启动时选择 backbuffer MSAA 采样数，
+非法值 fail closed；它是 device-lifetime 配置，不支持热改。像素证据 gate 与 samples 保持 `0`。
+
 ## `IGameApplication` 与 `IGameState`
 
 当前 Application 接口：

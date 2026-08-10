@@ -88,6 +88,9 @@ class EditorApplication final : public Tina::IGameApplication {
     config.primaryWindowUIDisplayListCapacities.commandCapacity = 16U * 1024U;
     config.primaryWindowUIDisplayListCapacities.clipCapacity = 16U * 1024U;
     config.primaryWindowUIDisplayListCapacities.batchCapacity = 16U * 1024U;
+    // Anti-alias the editor world pass (mesh edges, sprites); pixel-evidence
+    // gates and samples keep the engine-wide 0 default.
+    config.renderMsaaSamples = 8;
     using Key = Tina::Platform::Key;
     config.inputActions.bindings = {
         editorShortcutBinding(Key::LeftControl, EditorShortcutActions::Control),

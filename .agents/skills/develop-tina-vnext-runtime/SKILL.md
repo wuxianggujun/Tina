@@ -28,6 +28,7 @@ packet-local frame resource、Texture/Mesh retirement、GLFW WindowSurface 与 D
 | Scene/Asset | `include/tina/{scene,asset,asset_format,asset_types}`、对应 `src` | `docs/scene-ecs.md`、`docs/resources.md`、ADR 0009/0013/0016 |
 | Render/backend | `include/tina/render`、`src/render` | `docs/rendering.md`、ADR 0008/0020 |
 | Audio/Physics | `include/tina/{audio,physics2d}`、对应 `src` | `docs/audio.md`、`docs/physics.md`、ADR 0010/0012 |
+| Editor/EditorApp | `include/tina/editor`、`src/editor`、`src/editor_app` | `docs/editor-2d.md`、`docs/world2d-serialization.md`、`docs/resources.md` |
 | Retained UI | `include/tina/ui`、`src/ui` | 改用 `$develop-tina-ui` |
 
 ## 保护架构边界

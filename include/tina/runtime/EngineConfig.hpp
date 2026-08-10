@@ -35,6 +35,9 @@ struct EngineConfig final {
     PrimaryWindowUIDisplayListCapacityConfig primaryWindowUIDisplayListCapacities{};
     Render::RenderSceneCapacity renderSceneCapacities{};
     Render::ShadowMapExtentConfig shadowMapExtents{};
+    // Backbuffer MSAA sample count (0 = off, 2/4/8/16). Pixel-evidence gates
+    // and samples keep the 0 default; interactive tools may opt in.
+    Core::u8 renderMsaaSamples = 0;
     InputActionMapConfig inputActions;
     PlatformEventSubscriptionConfig platformEventSubscriptions{};
     Core::FixedStepConfig fixedSimulation;

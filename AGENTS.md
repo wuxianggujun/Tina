@@ -26,6 +26,7 @@ Tina 是 C++23 游戏 Runtime。产品路径为 vNext Desktop + samples；Legacy
 | `src/core` `src/platform` `src/render` `src/runtime` `src/task` `src/desktop` `src/integration` | Runtime / Platform / Render / Desktop |
 | `src/ui` | 产品 Retained UI 实现（**不是**已删的 Legacy UI） |
 | `src/scene` `src/asset` `src/asset_format` `src/audio` `src/physics2d` | Scene / Asset / Audio / Physics |
+| `src/editor` `src/editor_app` | `Tina::Editor` authoring 模块与 `TinaEditor.exe` 桌面组合（见 `docs/editor-2d.md`） |
 | `src/render/bgfx` | 私有 bgfx 后端 |
 | `samples/` | 产品与 infrastructure 样例 |
 | `tests/` | GoogleTest；`tests/runtime_ui` 为 Runtime→UI 专项 |

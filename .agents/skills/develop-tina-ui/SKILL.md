@@ -14,6 +14,8 @@ ADR 0011、ADR 0022、相关公开头/实现/测试与模块 `CMakeLists.txt`。
 Tina 只有一套产品 UI：`include/tina/ui/**` + `src/ui/**`。Legacy UI 已删除，不得恢复第二套 UI ABI。
 当前已有 Element composition、Focus Scope/Modal/持久 Pointer Capture、ScrollView、Dropdown/Popup、
 虚拟 ListView/TreeView、Windows UIA 属性/fragment/control pattern/action；开放项见 `docs/backlog.md`。
+`TinaEditor` 是最大的内部 UI consumer：它显式放宽 node/paint/display-list 容量，并用大量 axis-aligned
+SolidQuad 阶梯折线近似 3D 视口斜线（UI 层暂无旋转矩形/线段图元，正式方案见 backlog `RENDER-LINES-001`）。
 
 ## 所有权与事务
 

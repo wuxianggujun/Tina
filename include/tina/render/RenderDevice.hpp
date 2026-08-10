@@ -22,6 +22,9 @@ namespace Tina::Render {
 struct RenderDeviceCreateParams final {
     std::optional<RenderSurfaceState> initialPrimaryWindowSurface;
     ShadowMapExtentConfig shadowMapExtents{};
+    // Backbuffer multisampling: 0 disables MSAA; 2/4/8/16 request that sample
+    // count. Anything else fails device creation. Pixel-evidence gates keep 0.
+    u8 msaaSamples = 0;
 };
 
 struct RenderStatistics final {

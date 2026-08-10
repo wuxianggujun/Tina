@@ -914,10 +914,11 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
 class BgfxRenderDevice final : public IRenderDevice {
   public:
     BgfxRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker, Integration::NativeWindowSurfaceLease lease,
-                     RenderSurfaceState initialSurface, ShadowMapExtentConfig shadowMapExtents) noexcept
+                     RenderSurfaceState initialSurface, ShadowMapExtentConfig shadowMapExtents,
+                     u32 resetFlags) noexcept
         : surfaceStateTracker_(std::move(surfaceStateTracker)), lease_(std::move(lease)),
           ownerThread_(std::this_thread::get_id()), committedSurfaceState_(initialSurface),
-          shadowMapExtents_(shadowMapExtents)
+          shadowMapExtents_(shadowMapExtents), resetFlags_(resetFlags)
     {
     }
 
@@ -939,7 +940,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         init.platformData = platformData;
         init.resolution.width = initialBackbuffer.width;
         init.resolution.height = initialBackbuffer.height;
-        init.resolution.reset = kDefaultResetFlags;
+        init.resolution.reset = resetFlags_;
         // M11-D1: required for requestScreenShot / product pixel evidence.
         init.callback = &captureCallback_;
 
@@ -2253,7 +2254,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
     void resetBackbuffer(RenderSurfaceExtent extent) noexcept
     {
-        bgfx::reset(extent.width, extent.height, kDefaultResetFlags);
+        bgfx::reset(extent.width, extent.height, resetFlags_);
         appliedBackbuffer_ = extent;
     }
 
@@ -4277,6 +4278,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     std::thread::id ownerThread_{};
     RenderSurfaceState committedSurfaceState_{};
     ShadowMapExtentConfig shadowMapExtents_{};
+    u32 resetFlags_ = kDefaultResetFlags;
     RenderSurfaceExtent appliedBackbuffer_ = BgfxSurfaceFramePlanner::BootstrapBackbufferExtent;
     RenderStatistics statistics_{};
     u64 nextFrameIndex_ = 0;
@@ -4432,6 +4434,27 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const Render
     {
         return Core::failure(std::move(status.error()));
     }
+    u32 resetFlags = kDefaultResetFlags;
+    switch (params.msaaSamples)
+    {
+    case 0:
+        break;
+    case 2:
+        resetFlags |= BGFX_RESET_MSAA_X2;
+        break;
+    case 4:
+        resetFlags |= BGFX_RESET_MSAA_X4;
+        break;
+    case 8:
+        resetFlags |= BGFX_RESET_MSAA_X8;
+        break;
+    case 16:
+        resetFlags |= BGFX_RESET_MSAA_X16;
+        break;
+    default:
+        return Core::failure(RenderErrorCode::InvalidSurfaceState,
+                             "The bgfx render device MSAA sample count must be 0, 2, 4, 8, or 16");
+    }
     if (!params.initialPrimaryWindowSurface.has_value())
     {
         return Core::failure(RenderErrorCode::InvalidSurfaceState,
@@ -4465,7 +4488,7 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const Render
     {
         auto renderDevice = std::unique_ptr<BgfxRenderDevice>(
             new BgfxRenderDevice(std::move(*surfaceStateTracker), std::move(lease), initialSurface,
-                                 params.shadowMapExtents));
+                                 params.shadowMapExtents, resetFlags));
 
         if (auto status = renderDevice->initialize(nativeBinding->platformData); !status)
         {

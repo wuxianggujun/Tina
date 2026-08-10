@@ -245,6 +245,12 @@ Core::Status EngineConfig::validate() const
         error.addContext("EngineConfig::validate", shadowMapStatus.error().message);
         return Core::failure(std::move(error));
     }
+    if (renderMsaaSamples != 0U && renderMsaaSamples != 2U && renderMsaaSamples != 4U &&
+        renderMsaaSamples != 8U && renderMsaaSamples != 16U)
+    {
+        return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                             "renderMsaaSamples must be 0, 2, 4, 8, or 16");
+    }
     if (platformEventSubscriptions.subscriberCapacity == 0 ||
         platformEventSubscriptions.subscriberCapacity > PlatformEventSubscriptionConfig::MaximumSubscriberCapacity)
     {
