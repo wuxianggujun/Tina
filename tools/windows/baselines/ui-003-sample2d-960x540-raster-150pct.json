@@ -1,0 +1,147 @@
+﻿{
+    "schema":  3,
+    "gate":  "UI-003-visual-roi-baseline",
+    "designLogicalSize":  [
+                              960,
+                              540
+                          ],
+    "clientSize":  [
+                       1440,
+                       810
+                   ],
+    "captureLogicalToPixelScale":  [
+                                       1.5,
+                                       1.5
+                                   ],
+    "aspect":  1.7778,
+    "fontFingerprint":  {
+                            "schema":  1,
+                            "envTinaUiFontPath":  null,
+                            "resolvedPath":  "resources/fonts/SourceHanSansSC-Regular.otf",
+                            "source":  "repo-fixture",
+                            "fileName":  "SourceHanSansSC-Regular.otf",
+                            "exists":  true,
+                            "sizeBytes":  16529832,
+                            "sha256":  "f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256",
+                            "freeTypeLikelyOn":  true,
+                            "identity":  "sha256:f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256",
+                            "notes":  [
+                                          "Resolution order matches cmake/TinaUiFont.cmake: env TINA_UI_FONT_PATH then repo fixture",
+                                          "identity prefers sha256 of font file bytes; baseline compare fails on mismatch when baseline has fingerprint"
+                                      ]
+                        },
+    "sampleMetrics":  {
+                          "parsed":  true,
+                          "status":  "ok",
+                          "windowLogicalWidth":  960,
+                          "windowLogicalHeight":  540,
+                          "logicalPixelWidth":  960,
+                          "logicalPixelHeight":  540,
+                          "framebufferPixelWidth":  1440,
+                          "framebufferPixelHeight":  810,
+                          "contentScaleX":  1.5,
+                          "contentScaleY":  1.5,
+                          "surfacePixelWidth":  1440,
+                          "surfacePixelHeight":  810,
+                          "contentScaleConsistent":  true,
+                          "contentScaleMode":  "logical_times_scale"
+                      },
+    "rois":  [
+                 {
+                     "name":  "title_plate",
+                     "rectPx":  [
+                                    24,
+                                    18,
+                                    480,
+                                    84
+                                ],
+                     "samples":  672,
+                     "avgRgb":  [
+                                    27.7,
+                                    37.79,
+                                    44.4
+                                ],
+                     "dominantColor":  "111A26",
+                     "dominantRatio":  0.8006,
+                     "uniqueSampleColors":  66
+                 },
+                 {
+                     "name":  "scene_explorer",
+                     "rectPx":  [
+                                    24,
+                                    126,
+                                    480,
+                                    552
+                                ],
+                     "samples":  576,
+                     "avgRgb":  [
+                                    53.34,
+                                    67.73,
+                                    71.19
+                                ],
+                     "dominantColor":  "464B50",
+                     "dominantRatio":  0.4601,
+                     "uniqueSampleColors":  75
+                 },
+                 {
+                     "name":  "settings_panel",
+                     "rectPx":  [
+                                    1002,
+                                    12,
+                                    414,
+                                    672
+                                ],
+                     "samples":  600,
+                     "avgRgb":  [
+                                    24.95,
+                                    44.84,
+                                    48.94
+                                ],
+                     "dominantColor":  "09121B",
+                     "dominantRatio":  0.3133,
+                     "uniqueSampleColors":  59
+                 },
+                 {
+                     "name":  "progress_bar",
+                     "rectPx":  [
+                                    1050,
+                                    450,
+                                    360,
+                                    46
+                                ],
+                     "samples":  1104,
+                     "avgRgb":  [
+                                    45.44,
+                                    58.23,
+                                    72.48
+                                ],
+                     "dominantColor":  "192737",
+                     "dominantRatio":  0.6404,
+                     "uniqueSampleColors":  145
+                 },
+                 {
+                     "name":  "playfield_lower",
+                     "rectPx":  [
+                                    528,
+                                    450,
+                                    450,
+                                    300
+                                ],
+                     "samples":  625,
+                     "avgRgb":  [
+                                    85.29,
+                                    63.04,
+                                    43.08
+                                ],
+                     "dominantColor":  "102A43",
+                     "dominantRatio":  0.32,
+                     "uniqueSampleColors":  302
+                 }
+             ],
+    "notes":  [
+                  "Host-recorded ROI fingerprints for regression on same machine/class of GPU",
+                  "avgRgb compared with absolute channel tolerance; uniqueSampleColors is a soft floor",
+                  "Absolute UI layout is design-locked; non-1x logical-to-capture rasters use a -raster-Npct sibling baseline",
+                  "fontFingerprint.identity/sha256 must match when baseline includes fingerprint (gate fails on mismatch)"
+              ]
+}

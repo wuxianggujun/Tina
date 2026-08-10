@@ -11,7 +11,7 @@
   (path/hash/env TINA_UI_FONT_PATH/FreeType-on) in gate report and baseline compare.
   Font fingerprint mismatch vs baseline metadata fails the gate when the baseline
   expects a fingerprint (prefer fail over provisional skip). Does NOT change OS
-  display scale; true OS 100/150/200% multi-DPI golden matrix remains open.
+  display scale; the true OS 100% golden and mixed-monitor/cross-GPU matrix remain open.
 #>
 [CmdletBinding()]
 param(
@@ -802,7 +802,7 @@ $gateReport = [pscustomobject]@{
         'Absolute UI ROIs map the design-locked 960x540 HUD through measured logical-to-capture scale; playfield_lower is client-bottom anchored',
         'Proven: single-host ROI + optional baseline + GLFW contentScale consistency + font fingerprint metadata',
         'Font fingerprint mismatch vs baseline fails gate when baseline expects identity/sha256 (prefer fail)',
-        'Open: OS Settings display scale 100/150% and cross-GPU goldens; current host 200% uses a raster-specific baseline',
+        'Open: OS Settings display scale 100%, mixed-monitor DPI, and cross-GPU goldens; validated 150%/200% runs use raster-specific baselines',
         'blankLike frames excluded via CaptureSampleWindow usefulNonBlank / RequireNonBlank',
         'Logical --width/--height matrix is not OS DPI; larger windows leave absolute-UI margin'
     )

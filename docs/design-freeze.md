@@ -41,7 +41,7 @@
 | Runtime UI | startup transaction + root/phase-scoped capability | [0021](adr/0021-runtime-ui-startup-capability.md) | Implemented |
 | UI Authoring | Element 组合 authoring、父/子布局分离与统一 committed 内容放置 | [0022](adr/0022-ui-element-authoring-and-layout.md) | Implemented：descriptor/recipe、Flow/Flex、Semantics、StyleRole/reset、bounded build transaction、`SolidRect` Canvas 与统一 RoundedRect 已落地 |
 | UI 扩展 | 可组合标准 Behavior、bounded Component、node-local StyleSheet、Image/Icon/NineSlice 与 paint-only Motion | [0023](adr/0023-ui-extensibility-style-paint-motion.md) | Partial→近完成：IMAGE/COMPONENT/STYLE Done；MOTION paint-only tracks、声明式 Style BackgroundColor persistent reservation/activation 与 `ui_motion_v1` Done；完整产品 Visual 仍可增强 |
-| UI 绘制图元 | Line 使用 exact 四顶点投影，Ellipse 使用解析 coverage；不保留阶梯折线、弦环或 rotated-quad 兼容 API | [0025](adr/0025-ui-line-and-ellipse-primitives.md) | 代码已实现：Box/Canvas authoring、committed paint、DisplayList、bgfx 与 Editor grid/gizmo 已贯通；200% Editor/UI-003 视觉证据已完成，`RENDER-LINES-001` 在 100% DPI 与跨 GPU UI-003 证据完成前保持 InProgress |
+| UI 绘制图元 | Line 使用 exact 四顶点投影，Ellipse 使用解析 coverage；不保留阶梯折线、弦环或 rotated-quad 兼容 API | [0025](adr/0025-ui-line-and-ellipse-primitives.md) | 代码已实现：Box/Canvas authoring、committed paint、DisplayList、bgfx 与 Editor grid/gizmo 已贯通；150%/200% Editor/UI-003 视觉证据已完成，`RENDER-LINES-001` 在 100% DPI 与跨 GPU UI-003 证据完成前保持 InProgress |
 
 ## Proposed
 

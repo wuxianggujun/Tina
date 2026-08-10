@@ -228,7 +228,7 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
   `PointerHitPolicy::Ignore`，effective clip 仍是 axis-aligned scissor，几何命中继续由 gizmo backend 负责。
   世界 pass 的 mesh 边缘继续由 backbuffer 抗锯齿处理：Editor 通过
   `EngineConfig::renderMsaaSamples = 8` 打开 8× MSAA（见 [rendering.md](rendering.md)），samples 与像素证据
-  gate 保持关闭。2026-08-10 当前 Windows 宿主的 200% DPI 2D/3D 截图已证明 grid、斜向 gizmo 与
+  gate 保持关闭。2026-08-10 当前 Windows 宿主的 150%/200% DPI 2D/3D 截图已证明 grid、斜向 gizmo 与
   rotation ring 连续无阶梯；100% DPI 与跨 GPU UI-003 golden 仍由 backlog `RENDER-LINES-001` 跟踪。
 - overlay node 在 root 创建期一次性预分配，未使用槽为 `Collapsed`，全部 `UIPointerHitPolicy::Ignore`；命中仍由
   `viewportPreviewLayer_` 统一路由给 navigation、transform gizmo、marquee 与 TileMap brush。
@@ -436,6 +436,6 @@ Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D 中当前可�
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、
 动画 frame/cook=`4/256 B`、Catalog entry/load=`9/7` 和 GPU sprites=`13`。继续只保留现行 schema，
 不增加旧资产兼容分支。`EditorSceneOperations` / `EditorPlaySession` 的专门 unit 与 header-isolation 已接线。
-`2D-EDITOR` 仍保持 InProgress 的真实剩余项是：完成跨 DPI/GPU 视觉金标；完成 Linux Editor target 定向编译及
+`2D-EDITOR` 仍保持 InProgress 的真实剩余项是：完成 100% DPI 与跨 GPU 视觉金标；完成 Linux Editor target 定向编译及
 `zenity`/`kdialog` open/save/folder/cancel 产品门禁。其他未支持平台继续结构化返回 `Unsupported`，document Save 路径保留
 TextEdit 回退。
