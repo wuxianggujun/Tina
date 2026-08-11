@@ -57,6 +57,14 @@ world pass 下一帧跟随新的布局；首帧在 committed rect 可用前不�
 Windows GLFW 将原生 window/Pointer 坐标按 `contentScale` 归一为 logical pixel；Editor 字体层级固定为
 14–20 logical px，因此 200% DPI 最大化时布局、文字与命中使用同一缩放。viewport 顶部只显示网格类型，
 zoom slider、百分比以及 `-`/`+` 25% 步进集中在 viewport footer 右侧。
+
+Editor 视觉系统为 `Tina Studio Compact`：Material-inspired，但按桌面 authoring 工作台维持 26–34 logical px
+高密度控件，不照搬移动端 Material 组件尺寸。Dark/Light 使用中性 surface、蓝色 accent、单色边界和无偏移
+假阴影的平面层级；普通命令默认 Tonal，Play/确认使用 Primary，Save 使用 Outlined，Undo/Redo/Cancel 使用
+Text，Delete/Discard 使用 Danger。2D/3D、Select/Move/Rotate/Scale/Tile、marquee、Project filter 与 document
+tab 都使用 `SegmentedButton` role，并通过真实 `setRadioButtonSelected()` 表达 active selection；enabled 只表示
+命令是否可执行，不再兼作选中视觉。Segmented 仍复用 RadioButton 的互斥、Focus、Keyboard/Gamepad、UIA 和
+`Selected` pseudo-state，不建立 Editor 私有状态机或 backend paint 分支。
 `--world2d-path=<UTF-8 path>` 与 `--world3d-path=<UTF-8 path>` 分别配置两个 pinned workspace session；已有文件按各自
 schema 原子加载为 clean baseline，不存在的路径保留为该 workspace 的新文档 Save target。每个 pinned/Catalog tab
 都有固定容量 session，独立持有 document key、strict UTF-8 path、target platform、loaded flag 与完整 canonical

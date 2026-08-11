@@ -2904,7 +2904,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             }
             auto configuredButtonPaint = tree->buttonPaint(*button);
             if (!configuredButtonPaint ||
-                *configuredButtonPaint != Tina::UI::makeButtonChrome(initialTheme).states)
+                *configuredButtonPaint != Tina::UI::makeTonalButtonChrome(initialTheme).states)
             {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::Internal,
@@ -4588,7 +4588,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(treePaint.error()));
         }
-        if (*activeTheme != theme || *buttonPaint != Tina::UI::makeButtonChrome(theme).states ||
+        if (*activeTheme != theme || *buttonPaint != Tina::UI::makeTonalButtonChrome(theme).states ||
             *treePaint != Tina::UI::makeTreeViewPaint(theme))
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,

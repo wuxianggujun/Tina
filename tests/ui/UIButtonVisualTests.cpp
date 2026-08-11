@@ -356,7 +356,7 @@ TEST(UIButtonVisualTest, PaintTracksHoverPressMoveReleaseAndFocus)
     EXPECT_TRUE(semantics->focused);
 }
 
-TEST(UIButtonVisualTest, ProductChromeFocusesWithBorderAndPressCollapsesShadow)
+TEST(UIButtonVisualTest, ProductChromeStaysFlatAndPublishesFocusBorder)
 {
     auto windows = WindowPool::Create(1);
     ASSERT_TRUE(windows.has_value());
@@ -384,9 +384,9 @@ TEST(UIButtonVisualTest, ProductChromeFocusesWithBorderAndPressCollapsesShadow)
             [](const UI::UIButtonActionEvent&) noexcept {}}));
     publishLayout(*context);
 
-    const UI::UIButtonChrome chrome = UI::makeButtonChrome(context->productTheme());
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 3U);
-    EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
+    const UI::UIButtonChrome chrome = UI::makeTonalButtonChrome(context->productTheme());
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 1U);
+    EXPECT_FALSE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
 
     const UI::UIPointerRouteResult downRoute = route(
         *context,
@@ -397,9 +397,12 @@ TEST(UIButtonVisualTest, ProductChromeFocusesWithBorderAndPressCollapsesShadow)
             {.x = 10.0F, .y = 10.0F}));
     EXPECT_TRUE(downRoute.consumed);
     publishLayout(*context);
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 2U);
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 1U);
     EXPECT_FALSE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
-    EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.borderLight));
+    EXPECT_TRUE(hasSolidColor(
+        context->committedPaint(),
+        button,
+        chrome.states.pressedBackgroundColor));
 
     const UI::UIPointerRouteResult upRoute = route(
         *context,
@@ -410,7 +413,7 @@ TEST(UIButtonVisualTest, ProductChromeFocusesWithBorderAndPressCollapsesShadow)
             {.x = 10.0F, .y = 10.0F}));
     EXPECT_TRUE(upRoute.consumed);
     publishLayout(*context);
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 3U);
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 2U);
     EXPECT_TRUE(hasSolidColor(
         context->committedPaint(),
         button,

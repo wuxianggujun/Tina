@@ -86,10 +86,14 @@ UIElementDescriptor button = makeButtonElement("Apply", layout);
 
 // recipe 已提供：
 // contentAlignment = Center
-// styleRole       = ButtonPrimary
+// styleRole       = ButtonTonal
 // behaviors       = Focusable | Activate
 // semantics       = Button + Focus | Activate
 ```
+
+Tonal 是普通命令的默认层级；Primary、Danger、Outlined 与 Text 通过显式 `UIStyleRoleId` 选择。
+互斥工具、筛选和文档页签使用 `makeRadioButtonElement()` + `SegmentedButton` role，隐藏传统 leading
+indicator，但不复制 RadioButton 的 selection、Focus、Keyboard/Gamepad 或 accessibility 状态机。
 
 游戏保存 `UINodeId`，不保存 `Widget*`。节点状态由 `UIContext` 的固定容量 store 拥有；generation/owner
 校验拒绝 stale 或跨窗口 ID。多节点组件由 `UIElementBuildTransaction` 先声明 node/text/canvas/Behavior

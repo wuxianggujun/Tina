@@ -490,6 +490,69 @@ TEST_F(UIRadioButtonTest, AutoWidthUsesResolvedHeightAndTracksLabelGap)
     EXPECT_FLOAT_EQ(secondLayout->worldRect.height, 40.0F);
 }
 
+TEST_F(UIRadioButtonTest, IndicatorlessAutoWidthDoesNotReserveLeadingSpace)
+{
+    UI::UILayoutStyle rootStyle = fixedSize(160.0F, 120.0F);
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+
+    const UI::UINodeId radioButton = createRadioButton();
+    ASSERT_TRUE(radioButton.hasValue());
+    UI::UILayoutStyle style{};
+    style.size.height = UI::UILayoutLength::Px(40.0F);
+    assertOk(updater.setLayoutStyle(radioButton, style));
+    assertOk(updater.setText(radioButton, "AB"));
+    assertOk(updater.setRadioButtonPaint(radioButton, {.labelGap = 10.0F}));
+    publishLayout();
+
+    const UI::UICommittedLayoutEntry* withIndicator =
+        findLayoutEntry(context->committedLayout(), radioButton);
+    ASSERT_NE(withIndicator, nullptr);
+    const float widthWithIndicator = withIndicator->worldRect.width;
+
+    assertOk(updater.setRadioButtonPaint(
+        radioButton,
+        {
+            .labelGap = 10.0F,
+            .indicatorVisible = false,
+        }));
+    EXPECT_TRUE(context->statistics().layoutDirty);
+    publishLayout();
+
+    const UI::UICommittedLayoutEntry* withoutIndicator =
+        findLayoutEntry(context->committedLayout(), radioButton);
+    ASSERT_NE(withoutIndicator, nullptr);
+    EXPECT_FLOAT_EQ(withoutIndicator->worldRect.width + 50.0F, widthWithIndicator);
+    EXPECT_FLOAT_EQ(withoutIndicator->worldRect.height, 40.0F);
+}
+
+TEST_F(UIRadioButtonTest, IndicatorlessSelectionPaintsTheFullControlWithoutIndicatorPrimitives)
+{
+    constexpr UI::UIStraightSrgba8Color baseColor{20, 30, 40, 255};
+    constexpr UI::UIStraightSrgba8Color selectedColor{70, 120, 180, 255};
+    const UI::UINodeId radioButton = createRadioButton(80.0F, 24.0F);
+    ASSERT_TRUE(radioButton.hasValue());
+    assertOk(updater.setBoxPaint(
+        radioButton,
+        UI::UIBoxPaint{.solidFill = UI::UISolidFill{.color = baseColor}}));
+    assertOk(updater.setRadioButtonPaint(
+        radioButton,
+        {
+            .indicatorVisible = false,
+            .selectedBackgroundColor = selectedColor,
+        }));
+    assertOk(updater.setRadioButtonSelected(radioButton, true));
+
+    publishLayout();
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 1U);
+    EXPECT_EQ(paint.entries()[0].node, radioButton);
+    EXPECT_EQ(
+        paint.entries()[0].worldRect,
+        (UI::UILogicalRect{.x = 0.0F, .y = 0.0F, .width = 80.0F, .height = 24.0F}));
+    EXPECT_EQ(paint.entries()[0].solidFill, UI::premultiply(selectedColor));
+}
+
 TEST_F(UIRadioButtonTest, EmptyLabelAutoSizeKeepsIndicatorVisible)
 {
     UI::UILayoutStyle rootStyle = fixedSize(160.0F, 120.0F);

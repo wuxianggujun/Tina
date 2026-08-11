@@ -16,7 +16,7 @@
 | Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
-| Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
+| Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton 状态机提供 SegmentedButton；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | **Done：** 可伪造 clock + fixed-capacity paint-only tracks；Runtime phase facade；显式 begin*Transition；stylesheet `BackgroundColor` transition 在 Style 绑定阶段持久预留、pseudo-state 变化时激活；showcase 主题切换 card transition（`motionBegins`）；`ui_motion_v1` |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
@@ -400,12 +400,12 @@ straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继
 | `Panel` | 容器和布局 | `UIBoxPaint` 的 SolidQuad；默认允许后代越过自身 border-box，`clipDescendants` 可选择 axis-aligned 后代裁剪 |
 | `Modal` | committed Focus/Input scope、下层输入 barrier、Dialog semantics | Theme surface chrome；布局/内容由 retained 子树组合 |
 | `Label` | 只读 UTF-8 文本 | Glyph quads；没有可用字体时为确定性的 placeholder SolidQuad |
-| `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | `UIBoxPaint` 背景 + 可选 `UIButtonPaint` 状态色 + 文本 |
+| `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | 默认 Tonal；Primary/Danger 为强调填充，Outlined 保留边界，Text 仅在交互态显示 state layer；统一使用 `UIButtonPaint` 状态色 + 文本 |
 | `Checkbox` | checked 切换，复用 Button action/焦点路径 | 背景 SolidQuad + `UICheckboxPaint` 勾选指示块；标签由相邻 Label 组合 |
 | `Slider` | Pointer 横向拖动、Tab/空间导航/显式焦点，min/max/value/step | 背景 track + `UISliderPaint` filled track/thumb；状态优先级为 drag > focus > normal |
 | `TextEdit` | 单行编辑、选择、光标、IME | `UIBoxPaint` 背景 + `UITextEditPaint` hover/press/focus/disabled、selection highlight 与 caret + 文本 Glyph/placeholder |
 | `ProgressBar` | 非交互 determinate range/value | track SolidQuad + 按比例缩短的 foreground SolidQuad |
-| `RadioButton` | 同直接父节点互斥选择 | indicator SolidQuad + 选中内块 + 文本 Glyph |
+| `RadioButton` | 同直接父节点互斥选择 | 标准 role 绘制 indicator + 选中内块；SegmentedButton role 隐藏 indicator，以 selected/hover/focus/pressed/disabled 背景和焦点边界表达状态，仍复用同一互斥选择、键盘、Gamepad 与 accessibility 路径 |
 | `ScrollView` | wheel/thumb drag 与 viewport clip | 内容沿 offset 平移并裁剪，追加 track/thumb SolidQuad |
 | `Dropdown` | ComboBox value、Pointer/Keyboard/Gamepad 开关 | Button chrome + 文本 + 下拉指示块 |
 | `Popup` | 独立 List/focus scope、anchor flip/clamp、输入 barrier | 顶层 overlay surface chrome，始终晚于普通树绘制 |
@@ -428,14 +428,23 @@ retained 状态并标记必要的 dirty 类别。
 - 局部覆盖按属性分离：`setBoxPaint` / `set*Paint` / `setTextStyle` 只让对应属性脱离后续全局换肤，
   同一控件上未覆盖的其他属性仍会跟随 Theme；即使 setter 写入当前相同值，也视为显式局部覆盖；
   `clearOverride(mask)` 从当前 StyleRole 和当前 Theme 恢复选定属性；
-- `setStyleRole()` 原子切换 recipe，保留显式 local override；ButtonPrimary/ButtonDanger、四级 Text、
+- `makeButtonElement()` 默认绑定 `ButtonTonal`；Primary/Danger/Outlined/Text 必须由业务按命令层级显式选择，
+  不再保留“所有按钮默认 Primary”的旧视觉行为；
+- `setStyleRole()` 原子切换 recipe，保留显式 local override；ButtonPrimary/ButtonDanger/ButtonTonal/
+  ButtonOutlined/ButtonText/SegmentedButton、四级 Text、
   Panel/Modal/Popup surface 与全部现有控件 role 均有 recipe；
 - Runtime 游戏通过 phase-scoped `PrimaryWindowUITreeUpdater::productTheme()` / `setProductTheme()` 换肤，
   不取得裸 `UIContext`；
-- 默认 panel/button 分别使用 6px/4px 统一圆角；圆角 border 使用单一外层 ring，pressed 状态收拢阴影
-  并通过 light/dark 交换改变 ring 色，focus 使用独立边框色，因此 hover / pressed / focused / disabled
-  具有可辨识层次；
-- 另提供 `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome` 等）。
+- 默认 panel/button 分别使用 6px/4px 统一圆角；普通 PanelSurface、Primary 与 Tonal 使用平面填充，
+  Outlined、Segmented、Modal/Popup 和框定工具才保留单色 1px 边界；默认主题不再使用 light/dark
+  假浮雕或偏移阴影，focus 使用独立边界，因此 hover / pressed / focused / selected / disabled 仍可辨识；
+- 默认 Dark/Light palette 均使用中性 surface、蓝色 accent、明确 on-accent 前景；另提供
+  `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome`、`makeTonalButtonChrome`、
+  `makeOutlinedButtonChrome`、`makeTextButtonChrome`、`makeSegmentedButtonChrome`）。
+  `makeButtonChrome()` 的 label 使用 `onAccent`，因此 Dropdown 与 CollectionItem 这类复用填充按钮
+  chrome 但坐在中性 surface 上的 role，必须把 `label.color` 显式复位为 `textPrimary`；
+  校验“控件是否继承 Theme”的产品代码要对齐节点实际 role，默认 `makeButtonElement()` 对应
+  `makeTonalButtonChrome()` 而不再是 `makeButtonChrome()`。
 
 `UIBoxPaint` 仍是 escape hatch；Rectangle 可携带 borderLight/borderDark/borderWidth、shadow（假 elevation）
 与统一 `cornerRadius`，Ellipse/Line 则使用各自封闭的几何字段。Image/Icon/NineSlice 基础绘制、产品采用、
@@ -448,7 +457,7 @@ ColorToken startup registry/value 与运行期 reverse-dependency update、liter
 
 `tina_sample_ui_showcase` 是控件与换肤的独立工作台，固定 1280×980 logical extent，同屏展示20个控件：
 
-- Primary、destructive、disabled 与 reset Button；
+- Primary、Danger、disabled Outlined 与 Text reset Button；
 - Checkbox、Slider→ProgressBar 联动、UTF-8 TextEdit；
 - Performance/Balanced/Quality 与 Dark/Light 两组 RadioButton；
 - Dropdown、虚拟化 ListView/TreeView 与 ScrollView；

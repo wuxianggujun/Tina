@@ -100,7 +100,8 @@ ProductChromeTransition resolveProductChromeTransition(ProductChromeStorage curr
     };
     markLayoutChange(ThemeBindingTextStyle, textMeasureInputsDiffer(current.text, transition.target.text));
     markLayoutChange(ThemeBindingRadioButtonPaint,
-                     current.radioButton.labelGap != transition.target.radioButton.labelGap);
+                     current.radioButton.labelGap != transition.target.radioButton.labelGap ||
+                         current.radioButton.indicatorVisible != transition.target.radioButton.indicatorVisible);
     markLayoutChange(ThemeBindingScrollViewPaint,
                      current.scrollView.thickness != transition.target.scrollView.thickness ||
                          current.scrollView.minThumbExtent != transition.target.scrollView.minThumbExtent);

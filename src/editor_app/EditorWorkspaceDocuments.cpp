@@ -16,10 +16,12 @@ auto EditorWorkspaceState::refreshDocumentTabsUi(
         if (auto status = tree.setText(documentTabButtons_[index], title); !status) {
             return status;
         }
-        if (auto status = tree.setEnabled(
-                documentTabButtons_[index],
-                tab != nullptr && index != documentTabs_.activeIndex());
+        if (auto status = tree.setRadioButtonSelected(
+                documentTabButtons_[index], tab != nullptr && index == documentTabs_.activeIndex());
             !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(documentTabButtons_[index], tab != nullptr); !status) {
             return status;
         }
     }

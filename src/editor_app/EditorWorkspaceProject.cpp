@@ -23,9 +23,11 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     }
     const u32 activeFilter = static_cast<u32>(projectAssets_.filter());
     for (u32 index = 0; index < projectFilterButtons_.size(); ++index) {
-        if (auto status = tree.setEnabled(projectFilterButtons_[index],
-                                          index != activeFilter);
+        if (auto status = tree.setRadioButtonSelected(projectFilterButtons_[index], index == activeFilter);
             !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(projectFilterButtons_[index], true); !status) {
             return status;
         }
     }

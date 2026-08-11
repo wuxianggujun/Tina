@@ -11,6 +11,7 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         break;
     case UIStyleRoleId::PanelSurface:
         chrome.box = makePanelBoxPaint(theme, theme.surface1);
+        chrome.box.borderWidth = 0.0F;
         break;
     case UIStyleRoleId::PanelElevated:
         chrome.box = makePanelBoxPaint(theme, theme.surface1, UIElevation::Low);
@@ -37,6 +38,27 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
     case UIStyleRoleId::ButtonDanger: {
         const UIButtonChrome button =
             makeButtonChrome(theme, role == UIStyleRoleId::ButtonDanger ? theme.danger : UIStraightSrgba8Color{});
+        chrome.box = button.box;
+        chrome.button = button.states;
+        chrome.text = button.label;
+        break;
+    }
+    case UIStyleRoleId::ButtonTonal: {
+        const UIButtonChrome button = makeTonalButtonChrome(theme);
+        chrome.box = button.box;
+        chrome.button = button.states;
+        chrome.text = button.label;
+        break;
+    }
+    case UIStyleRoleId::ButtonOutlined: {
+        const UIButtonChrome button = makeOutlinedButtonChrome(theme);
+        chrome.box = button.box;
+        chrome.button = button.states;
+        chrome.text = button.label;
+        break;
+    }
+    case UIStyleRoleId::ButtonText: {
+        const UIButtonChrome button = makeTextButtonChrome(theme);
         chrome.box = button.box;
         chrome.button = button.states;
         chrome.text = button.label;
@@ -71,6 +93,13 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         const UIRadioButtonChrome radioButton = makeRadioButtonChrome(theme);
         chrome.radioButton = radioButton.radio;
         chrome.text = radioButton.label;
+        break;
+    }
+    case UIStyleRoleId::SegmentedButton: {
+        const UISegmentedButtonChrome segmentedButton = makeSegmentedButtonChrome(theme);
+        chrome.box = segmentedButton.box;
+        chrome.radioButton = segmentedButton.radio;
+        chrome.text = segmentedButton.label;
         break;
     }
     case UIStyleRoleId::ScrollView:

@@ -1416,7 +1416,9 @@ struct UIContext::Impl final {
                 {
                     const UILogicalSize textSize = metrics->measuredSize;
                     content.size = textSize;
-                    if (record->kind == BuiltinElementKind::RadioButton && index < radioButtonStatesByNodeIndex.size())
+                    if (record->kind == BuiltinElementKind::RadioButton &&
+                        index < radioButtonStatesByNodeIndex.size() &&
+                        radioButtonStatesByNodeIndex[index].paint.indicatorVisible)
                     {
                         content.indicatorLabelWidth = textSize.width;
                         content.hasIndicatorLabel = true;
@@ -1432,7 +1434,8 @@ struct UIContext::Impl final {
             }
 
             if (flowMeasurement.childCount == 0 && record->kind == BuiltinElementKind::RadioButton &&
-                index < radioButtonStatesByNodeIndex.size())
+                index < radioButtonStatesByNodeIndex.size() &&
+                radioButtonStatesByNodeIndex[index].paint.indicatorVisible)
             {
                 content.squareLeadingIndicator = true;
                 content.indicatorLabelGap = radioButtonStatesByNodeIndex[index].paint.labelGap;
@@ -2180,7 +2183,8 @@ struct UIContext::Impl final {
                 dropdown.indicatorWidth + dropdown.indicatorInset * 2.0F;
         }
         if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
-            index < radioButtonStatesByNodeIndex.size())
+            index < radioButtonStatesByNodeIndex.size() &&
+            radioButtonStatesByNodeIndex[index].paint.indicatorVisible)
         {
             const float indicatorExtent = (std::min)(scratch.worldRect.width, scratch.worldRect.height);
             leadingReservedWidth =
@@ -2374,6 +2378,39 @@ struct UIContext::Impl final {
             }
             return widgetPaintColor(node, color);
         }
+        if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
+            nodeIndex < radioButtonStatesByNodeIndex.size())
+        {
+            const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
+            const UIRadioButtonPaint& paint = radio.paint;
+            const auto applyOverride = [&color](UIStraightSrgba8Color overrideColor) noexcept {
+                if (overrideColor.alpha != 0)
+                {
+                    color = premultiply(overrideColor);
+                }
+            };
+            if (radio.selected)
+            {
+                applyOverride(paint.selectedBackgroundColor);
+            }
+            if (!radio.selected && defaultActionFocusButton == node)
+            {
+                applyOverride(paint.focusedBackgroundColor);
+            }
+            if (!radio.selected && hoveredPrimaryControl == node)
+            {
+                applyOverride(paint.hoveredBackgroundColor);
+            }
+            if (isButtonPressed(node))
+            {
+                applyOverride(paint.pressedBackgroundColor);
+            }
+            if (!isNodeEnabled(node))
+            {
+                applyOverride(paint.disabledBackgroundColor);
+            }
+            return widgetPaintColor(node, color);
+        }
         if (record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
             nodeIndex < textEditPaintsByNodeIndex.size())
         {
@@ -2439,6 +2476,10 @@ struct UIContext::Impl final {
         if (record.kind == BuiltinElementKind::Checkbox)
         {
             relevantOverrides |= static_cast<u16>(UIStyleOverride::CheckboxPaint);
+        }
+        else if (record.kind == BuiltinElementKind::RadioButton)
+        {
+            relevantOverrides |= static_cast<u16>(UIStyleOverride::RadioButtonPaint);
         }
         else if (record.kind == BuiltinElementKind::TextEdit)
         {
@@ -2811,8 +2852,22 @@ struct UIContext::Impl final {
         // button pressed/focus chrome may still override for interaction feedback.
         UIBoxPaint chrome = presentationBoxPaint(node, nodeIndex);
         const NodeRecord* record = recordByIndex(nodeIndex);
-        if (record == nullptr || !isButtonChromeKind(record->kind) || nodeIndex >= buttonPaintsByNodeIndex.size() ||
-            !isCandidateNodeEnabled(node))
+        if (record == nullptr || !isCandidateNodeEnabled(node))
+        {
+            return chrome;
+        }
+
+        UIStraightSrgba8Color focusedBorderColor{};
+        if (isButtonChromeKind(record->kind) && nodeIndex < buttonPaintsByNodeIndex.size())
+        {
+            focusedBorderColor = buttonPaintsByNodeIndex[nodeIndex].focusedBorderColor;
+        }
+        else if (record->kind == BuiltinElementKind::RadioButton &&
+                 nodeIndex < radioButtonStatesByNodeIndex.size())
+        {
+            focusedBorderColor = radioButtonStatesByNodeIndex[nodeIndex].paint.focusedBorderColor;
+        }
+        else
         {
             return chrome;
         }
@@ -2825,11 +2880,10 @@ struct UIContext::Impl final {
             return chrome;
         }
 
-        const UIButtonPaint& states = buttonPaintsByNodeIndex[nodeIndex];
-        if (defaultActionFocusButton == node && states.focusedBorderColor.alpha != 0)
+        if (defaultActionFocusButton == node && focusedBorderColor.alpha != 0)
         {
-            chrome.borderLight = states.focusedBorderColor;
-            chrome.borderDark = states.focusedBorderColor;
+            chrome.borderLight = focusedBorderColor;
+            chrome.borderDark = focusedBorderColor;
             if (!(chrome.borderWidth > 0.0F))
             {
                 chrome.borderWidth = 1.0F;
@@ -3315,7 +3369,8 @@ struct UIContext::Impl final {
                     controlColor(progress.paint.fillColor));
             }
         } else if (record != nullptr && record->kind == BuiltinElementKind::RadioButton &&
-                   nodeIndex < radioButtonStatesByNodeIndex.size())
+                   nodeIndex < radioButtonStatesByNodeIndex.size() &&
+                   radioButtonStatesByNodeIndex[nodeIndex].paint.indicatorVisible)
         {
             const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
             const float extent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
@@ -12723,7 +12778,8 @@ struct UIContext::Impl final {
             detachThemeBinding(radioButton.index(), ThemeBindingRadioButtonPaint);
             return Core::success();
         }
-        const bool layoutChanged = state.paint.labelGap != paint.labelGap;
+        const bool layoutChanged = state.paint.labelGap != paint.labelGap ||
+                                   state.paint.indicatorVisible != paint.indicatorVisible;
         Core::Status dirty = layoutChanged ? markLayoutStyleDirty(radioButton) : markPaintDirty(radioButton);
         if (!dirty)
         {

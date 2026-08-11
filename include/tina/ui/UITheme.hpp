@@ -30,30 +30,31 @@ enum class UIElevation : u8 {
 // default chrome. Local setBoxPaint / set*Paint / setTextStyle calls detach only
 // the corresponding property from later theme updates.
 struct UITheme final {
-    UIStraightSrgba8Color surface0 = rgb(0x0A121C);
-    UIStraightSrgba8Color surface1 = rgb(0x121C28);
-    UIStraightSrgba8Color surface2 = rgb(0x1A2838);
-    UIStraightSrgba8Color borderLight = rgb(0x3A4E66, 200);
-    UIStraightSrgba8Color borderDark = rgb(0x05080C, 220);
-    UIStraightSrgba8Color textPrimary = rgb(0xEEF4F8);
-    UIStraightSrgba8Color textSecondary = rgb(0xB8C6D4);
-    UIStraightSrgba8Color textTitle = rgb(0x78F0FF);
-    UIStraightSrgba8Color textAccent = rgb(0xFFD250);
-    UIStraightSrgba8Color accent = rgb(0x2CD28E);
-    UIStraightSrgba8Color danger = rgb(0xE05050);
-    UIStraightSrgba8Color focusRing = rgb(0x529AD0, 245);
-    UIStraightSrgba8Color shadow = rgb(0x000000, 100);
-    UIStraightSrgba8Color buttonNormal = rgb(0x287850);
-    UIStraightSrgba8Color buttonDisabled = rgb(0x4C5258, 230);
-    UIStraightSrgba8Color scrollBarTrack = rgb(0x07101A, 210);
-    UIStraightSrgba8Color scrollBarThumb = rgb(0x58738E, 235);
-    UIStraightSrgba8Color scrollBarThumbActive = rgb(0xFFD250, 250);
+    UIStraightSrgba8Color surface0 = rgb(0x101317);
+    UIStraightSrgba8Color surface1 = rgb(0x171B21);
+    UIStraightSrgba8Color surface2 = rgb(0x222831);
+    UIStraightSrgba8Color borderLight = rgb(0x3B4653, 210);
+    UIStraightSrgba8Color borderDark = rgb(0x3B4653, 210);
+    UIStraightSrgba8Color textPrimary = rgb(0xE7ECF2);
+    UIStraightSrgba8Color textSecondary = rgb(0xAAB4C0);
+    UIStraightSrgba8Color textTitle = rgb(0xF2F5F8);
+    UIStraightSrgba8Color textAccent = rgb(0xF4C95D);
+    UIStraightSrgba8Color accent = rgb(0x4C9AFF);
+    UIStraightSrgba8Color onAccent = rgb(0xFFFFFF);
+    UIStraightSrgba8Color danger = rgb(0xD9555F);
+    UIStraightSrgba8Color focusRing = rgb(0x76B7FF, 245);
+    UIStraightSrgba8Color shadow = rgb(0x000000, 0);
+    UIStraightSrgba8Color buttonNormal = rgb(0x2F78B7);
+    UIStraightSrgba8Color buttonDisabled = rgb(0x343B44, 230);
+    UIStraightSrgba8Color scrollBarTrack = rgb(0x11161C, 210);
+    UIStraightSrgba8Color scrollBarThumb = rgb(0x596776, 235);
+    UIStraightSrgba8Color scrollBarThumbActive = rgb(0x76B7FF, 250);
 
     float panelBorderWidth = 1.0F;
     float panelCornerRadius = 6.0F;
     float controlCornerRadius = 4.0F;
-    float panelShadowOffsetX = 3.0F;
-    float panelShadowOffsetY = 4.0F;
+    float panelShadowOffsetX = 0.0F;
+    float panelShadowOffsetY = 0.0F;
     float checkboxIndicatorInset = 6.0F;
     float radioSelectedInset = 6.0F;
     float radioLabelGap = 8.0F;
@@ -76,22 +77,23 @@ struct UITheme final {
     UITheme theme{};
     theme.surface0 = rgb(0xF2F4F8);
     theme.surface1 = rgb(0xFFFFFF);
-    theme.surface2 = rgb(0xE6EBF2);
-    theme.borderLight = rgb(0xFFFFFF, 220);
-    theme.borderDark = rgb(0x90A0B4, 200);
-    theme.textPrimary = rgb(0x1A2430);
-    theme.textSecondary = rgb(0x5A6A7C);
-    theme.textTitle = rgb(0x0A6A8C);
-    theme.textAccent = rgb(0xB07000);
-    theme.accent = rgb(0x1A9E6A);
-    theme.danger = rgb(0xC03030);
-    theme.focusRing = rgb(0x2A70C0, 245);
-    theme.shadow = rgb(0x000000, 40);
-    theme.buttonNormal = rgb(0x2A8A58);
-    theme.buttonDisabled = rgb(0xA0A8B0, 230);
-    theme.scrollBarTrack = rgb(0xD2D9E2, 230);
-    theme.scrollBarThumb = rgb(0x687B90, 235);
-    theme.scrollBarThumbActive = rgb(0x9A6500, 250);
+    theme.surface2 = rgb(0xE8EDF3);
+    theme.borderLight = rgb(0xB8C2CD, 220);
+    theme.borderDark = rgb(0xB8C2CD, 220);
+    theme.textPrimary = rgb(0x20262D);
+    theme.textSecondary = rgb(0x5C6773);
+    theme.textTitle = rgb(0x171C22);
+    theme.textAccent = rgb(0x956600);
+    theme.accent = rgb(0x1769AA);
+    theme.onAccent = rgb(0xFFFFFF);
+    theme.danger = rgb(0xBA1A1A);
+    theme.focusRing = rgb(0x1769AA, 245);
+    theme.shadow = rgb(0x000000, 0);
+    theme.buttonNormal = rgb(0x1769AA);
+    theme.buttonDisabled = rgb(0xC8CED5, 230);
+    theme.scrollBarTrack = rgb(0xD8DEE5, 230);
+    theme.scrollBarThumb = rgb(0x748291, 235);
+    theme.scrollBarThumbActive = rgb(0x1769AA, 250);
     return theme;
 }
 
@@ -205,8 +207,9 @@ struct UIButtonChrome final {
 {
     const UIStraightSrgba8Color fill =
         normalFill.alpha != 0 ? normalFill : scaleColorAlpha(theme.buttonNormal, 230);
-    UIBoxPaint box = makePanelBoxPaint(theme, fill, UIElevation::Low);
+    UIBoxPaint box = makePanelBoxPaint(theme, fill, UIElevation::None);
     box.cornerRadius = theme.controlCornerRadius;
+    box.borderWidth = 0.0F;
     return UIButtonChrome{
         .box = box,
         .states =
@@ -222,9 +225,53 @@ struct UIButtonChrome final {
                 .logicalSize = theme.buttonTextSize,
                 .advanceScale = 0.62F,
                 .lineHeightScale = 1.15F,
-                .color = theme.textPrimary,
+                .color = theme.onAccent,
             },
     };
+}
+
+[[nodiscard]] constexpr UIButtonChrome makeTonalButtonChrome(const UITheme& theme) noexcept
+{
+    const UIStraightSrgba8Color fill = scaleColorAlpha(theme.surface2, 245);
+    UIBoxPaint box = makePanelBoxPaint(theme, fill, UIElevation::None);
+    box.cornerRadius = theme.controlCornerRadius;
+    box.borderWidth = 0.0F;
+    return UIButtonChrome{
+        .box = box,
+        .states =
+            UIButtonPaint{
+                .hoveredBackgroundColor = lightenChannel(fill, 14),
+                .pressedBackgroundColor = darkenChannel(fill, 20),
+                .focusedBackgroundColor = lightenChannel(fill, 8),
+                .disabledBackgroundColor = theme.buttonDisabled,
+                .focusedBorderColor = theme.focusRing,
+            },
+        .label = makeBodyTextStyle(theme, theme.buttonTextSize),
+    };
+}
+
+[[nodiscard]] constexpr UIButtonChrome makeOutlinedButtonChrome(const UITheme& theme) noexcept
+{
+    UIButtonChrome chrome = makeTonalButtonChrome(theme);
+    chrome.box.solidFill = UISolidFill{.color = scaleColorAlpha(theme.surface1, 32)};
+    chrome.box.borderLight = theme.borderLight;
+    chrome.box.borderDark = theme.borderDark;
+    chrome.box.borderWidth = theme.panelBorderWidth;
+    chrome.states.hoveredBackgroundColor = scaleColorAlpha(theme.surface2, 220);
+    chrome.states.focusedBackgroundColor = scaleColorAlpha(theme.surface2, 180);
+    chrome.states.pressedBackgroundColor = scaleColorAlpha(theme.accent, 90);
+    return chrome;
+}
+
+[[nodiscard]] constexpr UIButtonChrome makeTextButtonChrome(const UITheme& theme) noexcept
+{
+    UIButtonChrome chrome = makeTonalButtonChrome(theme);
+    chrome.box = makeSolidBox(scaleColorAlpha(theme.surface1, 1), theme.controlCornerRadius);
+    chrome.states.hoveredBackgroundColor = scaleColorAlpha(theme.surface2, 210);
+    chrome.states.focusedBackgroundColor = scaleColorAlpha(theme.surface2, 170);
+    chrome.states.pressedBackgroundColor = scaleColorAlpha(theme.accent, 80);
+    chrome.label.color = theme.textSecondary;
+    return chrome;
 }
 
 struct UICheckboxChrome final {
@@ -293,6 +340,33 @@ struct UIRadioButtonChrome final {
     UIRadioButtonPaint radio{};
     UITextStyle label{};
 };
+
+struct UISegmentedButtonChrome final {
+    UIBoxPaint box{};
+    UIRadioButtonPaint radio{};
+    UITextStyle label{};
+};
+
+[[nodiscard]] constexpr UISegmentedButtonChrome makeSegmentedButtonChrome(const UITheme& theme) noexcept
+{
+    const UIStraightSrgba8Color base = scaleColorAlpha(theme.surface1, 90);
+    UIBoxPaint box = makePanelBoxPaint(theme, base, UIElevation::None);
+    box.cornerRadius = theme.controlCornerRadius;
+    return UISegmentedButtonChrome{
+        .box = box,
+        .radio =
+            UIRadioButtonPaint{
+                .indicatorVisible = false,
+                .selectedBackgroundColor = scaleColorAlpha(theme.accent, 185),
+                .hoveredBackgroundColor = scaleColorAlpha(theme.surface2, 245),
+                .focusedBackgroundColor = scaleColorAlpha(theme.surface2, 230),
+                .pressedBackgroundColor = scaleColorAlpha(theme.accent, 125),
+                .disabledBackgroundColor = theme.buttonDisabled,
+                .focusedBorderColor = theme.focusRing,
+            },
+        .label = makeBodyTextStyle(theme, theme.buttonTextSize),
+    };
+}
 
 [[nodiscard]] constexpr UIRadioButtonChrome makeRadioButtonChrome(const UITheme& theme) noexcept
 {
@@ -384,7 +458,8 @@ struct UIDropdownChrome final {
 
 [[nodiscard]] constexpr UIDropdownChrome makeDropdownChrome(const UITheme& theme) noexcept
 {
-    const UIButtonChrome button = makeButtonChrome(theme, scaleColorAlpha(theme.surface2, 245));
+    UIButtonChrome button = makeButtonChrome(theme, scaleColorAlpha(theme.surface2, 245));
+    button.label.color = theme.textPrimary;
     return UIDropdownChrome{
         .box = button.box,
         .states = button.states,
@@ -411,6 +486,7 @@ struct UIDropdownChrome final {
     chrome.box.shadow = {};
     chrome.box.shadowOffsetX = 0.0F;
     chrome.box.shadowOffsetY = 0.0F;
+    chrome.label.color = theme.textPrimary;
     return chrome;
 }
 

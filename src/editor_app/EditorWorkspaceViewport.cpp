@@ -800,40 +800,48 @@ auto EditorWorkspaceState::refreshViewportToolUi(Tina::PrimaryWindowUITreeUpdate
         viewportToolMode_ = ViewportToolMode::Select;
     }
     const bool selectActive = viewportToolMode_ == ViewportToolMode::Select;
-    for (const UI::UINodeId button : selectToolButtons_) {
-        if (auto status = tree.setEnabled(button, !selectActive); !status) {
-            return status;
+    const auto refreshToolButtons = [&tree](const auto& buttons, bool selected,
+                                            bool enabled) -> Tina::Core::Status {
+        for (const UI::UINodeId button : buttons) {
+            if (auto status = tree.setRadioButtonSelected(button, selected); !status) {
+                return status;
+            }
+            if (auto status = tree.setEnabled(button, enabled); !status) {
+                return status;
+            }
         }
-    }
-    for (const UI::UINodeId button : translateToolButtons_) {
-        if (auto status = tree.setEnabled(
-                button, authoring && viewportToolMode_ != ViewportToolMode::Translate);
-            !status) {
-            return status;
-        }
-    }
-    for (const UI::UINodeId button : rotateToolButtons_) {
-        if (auto status = tree.setEnabled(
-                button, authoring && viewportToolMode_ != ViewportToolMode::Rotate);
-            !status) {
-            return status;
-        }
-    }
-    for (const UI::UINodeId button : scaleToolButtons_) {
-        if (auto status = tree.setEnabled(
-                button, authoring && viewportToolMode_ != ViewportToolMode::Scale);
-            !status) {
-            return status;
-        }
-    }
-    if (auto status = tree.setEnabled(
-            tilePaintToolButton_,
-            tileToolsAvailable && viewportToolMode_ != ViewportToolMode::TilePaint); !status) {
+        return Tina::Core::success();
+    };
+    if (auto status = refreshToolButtons(selectToolButtons_, selectActive, authoring); !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(
-            tileEraseToolButton_,
-            tileToolsAvailable && viewportToolMode_ != ViewportToolMode::TileErase); !status) {
+    if (auto status = refreshToolButtons(
+            translateToolButtons_, viewportToolMode_ == ViewportToolMode::Translate, authoring);
+        !status) {
+        return status;
+    }
+    if (auto status = refreshToolButtons(
+            rotateToolButtons_, viewportToolMode_ == ViewportToolMode::Rotate, authoring);
+        !status) {
+        return status;
+    }
+    if (auto status = refreshToolButtons(
+            scaleToolButtons_, viewportToolMode_ == ViewportToolMode::Scale, authoring);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setRadioButtonSelected(
+            tilePaintToolButton_, viewportToolMode_ == ViewportToolMode::TilePaint); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(tilePaintToolButton_, tileToolsAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setRadioButtonSelected(
+            tileEraseToolButton_, viewportToolMode_ == ViewportToolMode::TileErase); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(tileEraseToolButton_, tileToolsAvailable); !status) {
         return status;
     }
     const bool transformTool = viewportToolMode_ == ViewportToolMode::Translate ||
@@ -877,10 +885,11 @@ auto EditorWorkspaceState::refreshViewportToolUi(Tina::PrimaryWindowUITreeUpdate
     for (Tina::Core::usize index = 0; index < marqueeModeButtons_.size();
          ++index) {
         const bool active = marqueeSelectionMode_ == marqueeModes[index];
+        if (auto status = tree.setRadioButtonSelected(marqueeModeButtons_[index], active); !status) {
+            return status;
+        }
         if (auto status = tree.setEnabled(
-                marqueeModeButtons_[index], selectActive && !active &&
-                                                !interactionActive);
-            !status) {
+                marqueeModeButtons_[index], selectActive && !interactionActive); !status) {
             return status;
         }
     }

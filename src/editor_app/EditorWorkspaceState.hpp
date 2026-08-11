@@ -2633,6 +2633,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
             const UI::UITextStyle& style);
         [[nodiscard]] Tina::Core::Result<UI::UINodeId> createButton(
             UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
+            bool enabled = true,
+            UI::UIStyleRoleId role = UI::UIStyleRoleId::ButtonTonal);
+        [[nodiscard]] Tina::Core::Result<UI::UINodeId> createSegmentedButton(
+            UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
             bool enabled = true);
         [[nodiscard]] Tina::Core::Result<UI::UINodeId> createTextEdit(
             UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,

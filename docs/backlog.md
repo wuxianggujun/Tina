@@ -24,6 +24,7 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
+| UI-STUDIO-DESIGN | InProgress | P1 | `Tina Studio Compact` Material-inspired 设计系统与 Editor 迁移 | Retained UI Theme/RadioButton/StyleRole | 默认 Button 从 Primary 改为 Tonal；补齐 Primary/Danger/Tonal/Outlined/Text 与 Segmented recipes；Segmented 复用 RadioButton 互斥、输入、UIA 和 Selected state；Editor mode/tools/marquee/filter/tabs 删除 disabled-active 旧视觉，按钮层级和 14/15/20 desktop typography 已接入。默认 role 翻转波及的产品主题校验已对齐（2D/3D sample 与 runtime_ui facade 断言改用 `makeTonalButtonChrome()`）。**本轮编译与单测证据（UI worktree 临时 build tree）：** `tina_ui_tests` 624/624、`tina_runtime_ui_tests` 125/125、`tina_editor_app_tests` 13/13、`tina_ui_uia_tests` 12/12 全绿；`tina_sample_ui_showcase`、`TinaEditor`、`tina_sample_2d`、`tina_sample_3d` 均编译通过且无新警告；`CheckDocs.ps1` errors=0 warnings=0。**待：** 2D/3D Editor smoke 与 Dark/Light 视觉截图后转 Done | Unit + Editor Product + Visual |
 | UI-002 | InProgress | P1 | Windows UIA 产品验收收口 | UI-002-SPI / UI-002-UIA-MAP / UI-002-HWND / UI-002-HOST | **自动证据已在 tip 固化（2026-08-03）：** `RunUi002UiaGate.ps1` → `artifacts/gates/ui-002-uia-20260803-tip.json`（ok、providers=69、fragment、Invoke/Toggle/Range/Value/Focus、normalShutdown）；`tina_ui_uia_tests` 12/12 + a11y unit 8/8；Focus 校验以 TextEdit `HasKeyboardFocus` 为准。**待：** 按 [ui-002-narrator-inspect-checklist.md](ui-002-narrator-inspect-checklist.md) 完成 Narrator/Inspect 人工金标后转 Done。Linux AT-SPI = `UI-002-LINUX` | Unit + Integration + Platform + Manual |
 
 ## Next
