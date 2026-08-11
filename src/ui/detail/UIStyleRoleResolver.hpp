@@ -34,7 +34,7 @@ struct ProductChrome final {
 
 [[nodiscard]] constexpr bool isValidStyleRole(UIStyleRoleId role) noexcept
 {
-    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::TreeView;
+    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::SegmentedButton;
 }
 
 [[nodiscard]] constexpr u16 defaultThemeBindingsFor(UIStyleRoleId role) noexcept
@@ -55,6 +55,9 @@ struct ProductChrome final {
         return ThemeBindingTextStyle;
     case UIStyleRoleId::ButtonPrimary:
     case UIStyleRoleId::ButtonDanger:
+    case UIStyleRoleId::ButtonTonal:
+    case UIStyleRoleId::ButtonOutlined:
+    case UIStyleRoleId::ButtonText:
     case UIStyleRoleId::CollectionItem:
         return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
     case UIStyleRoleId::Checkbox:
@@ -67,6 +70,8 @@ struct ProductChrome final {
         return ThemeBindingBoxPaint | ThemeBindingProgressBarPaint;
     case UIStyleRoleId::RadioButton:
         return ThemeBindingRadioButtonPaint | ThemeBindingTextStyle;
+    case UIStyleRoleId::SegmentedButton:
+        return ThemeBindingBoxPaint | ThemeBindingRadioButtonPaint | ThemeBindingTextStyle;
     case UIStyleRoleId::ScrollView:
         return ThemeBindingScrollViewPaint;
     case UIStyleRoleId::Dropdown:

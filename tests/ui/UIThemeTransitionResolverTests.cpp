@@ -77,6 +77,22 @@ TEST(UIThemeTransitionResolverTests, ClassifiesEveryLayoutAffectingChromeInput)
     EXPECT_EQ(transition.layoutAffectingBindings, bindings);
 }
 
+TEST(UIThemeTransitionResolverTests, IndicatorVisibilityChangeRequiresLayout)
+{
+    using namespace UI::Detail;
+
+    const UI::UITheme theme = UI::makeDefaultProductTheme();
+    ProductChrome current = productChromeFor(UI::UIStyleRoleId::RadioButton, theme);
+
+    const ProductChromeTransition transition = resolveProductChromeTransition(
+        storageFor(current), UI::UIStyleRoleId::SegmentedButton, theme,
+        ThemeBindingRadioButtonPaint, ThemeBindingRadioButtonPaint);
+
+    EXPECT_EQ(transition.changedBindings, ThemeBindingRadioButtonPaint);
+    EXPECT_EQ(transition.layoutAffectingBindings, ThemeBindingRadioButtonPaint);
+    EXPECT_FALSE(transition.target.radioButton.indicatorVisible);
+}
+
 TEST(UIThemeTransitionResolverTests, ClearsDetachedBindingsAndAppliesOnlyAffectedStorage)
 {
     using namespace UI::Detail;

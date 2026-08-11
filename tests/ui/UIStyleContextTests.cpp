@@ -236,7 +236,7 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
             .colorToken = primaryToken,
         },
         UI::UIStyleBoxFillRule{
-            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .role = UI::UIStyleRoleId::ButtonTonal,
             .colorToken = secondaryToken,
         },
         UI::UIStyleBoxFillRule{
@@ -262,7 +262,7 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
         return context->rootBuilder().createElement(root.rootNodeId(), descriptor);
     };
     const auto primaryPanel = createPanel(UI::UIStyleRoleId::PanelSurface);
-    const auto secondaryPanel = createPanel(UI::UIStyleRoleId::ButtonPrimary);
+    const auto secondaryPanel = createPanel(UI::UIStyleRoleId::ButtonTonal);
     const auto literalPanel = createPanel(UI::UIStyleRoleId::TextInput);
     const auto localPanel = createPanel(UI::UIStyleRoleId::PanelSurface,
                                         UI::rgb(0x22AA55));
@@ -521,7 +521,7 @@ TEST(UIStyleContextTests, StylesheetOverridesDefaultProductChromeForClasslessAnd
             .color = UI::rgb(0x184E77),
         },
         UI::UIStyleBoxFillRule{
-            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .role = UI::UIStyleRoleId::ButtonTonal,
             .styleClass = accent,
             .color = UI::rgb(0xF4A261),
         },
@@ -680,7 +680,7 @@ TEST(UIStyleContextTests, ControlPaintOverridesSuppressStylesheetEvenAtExistingV
     ASSERT_NE(context, nullptr);
     const std::array rules{
         UI::UIStyleBoxFillRule{
-            .role = UI::UIStyleRoleId::ButtonPrimary,
+            .role = UI::UIStyleRoleId::ButtonTonal,
             .color = UI::rgb(0xAA3311),
         },
         UI::UIStyleBoxFillRule{

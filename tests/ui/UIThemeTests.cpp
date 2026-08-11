@@ -217,7 +217,7 @@ TEST(UIThemeTest, TextStyleHelpersUseTokenColors)
     EXPECT_EQ(UI::makeAccentTextStyle(theme).color, theme.textAccent);
 }
 
-TEST(UIThemeTest, ButtonChromeUsesThemeTokens)
+TEST(UIThemeTest, FilledButtonChromeUsesFlatThemeTokens)
 {
     constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
     constexpr UI::UIButtonChrome chrome = UI::makeButtonChrome(theme);
@@ -226,9 +226,9 @@ TEST(UIThemeTest, ButtonChromeUsesThemeTokens)
     EXPECT_NE(chrome.states.focusedBackgroundColor.alpha, 0);
     EXPECT_EQ(chrome.states.disabledBackgroundColor, theme.buttonDisabled);
     EXPECT_EQ(chrome.states.focusedBorderColor, theme.focusRing);
-    EXPECT_EQ(chrome.label.color, theme.textPrimary);
+    EXPECT_EQ(chrome.label.color, theme.onAccent);
     EXPECT_EQ(chrome.box.shadow, theme.shadow);
-    EXPECT_GT(chrome.box.borderWidth, 0.0F);
+    EXPECT_FLOAT_EQ(chrome.box.borderWidth, 0.0F);
     EXPECT_EQ(chrome.box.cornerRadius, theme.controlCornerRadius);
 }
 
@@ -306,7 +306,7 @@ TEST(UIThemeTest, CreateAppliesDefaultButtonChrome)
     auto buttonPaint = updater->buttonPaint(*button);
     ASSERT_TRUE(buttonPaint.has_value()) << (buttonPaint ? "" : buttonPaint.error().message);
 
-    const UI::UIButtonChrome expected = UI::makeButtonChrome(context->productTheme());
+    const UI::UIButtonChrome expected = UI::makeTonalButtonChrome(context->productTheme());
     EXPECT_EQ(*buttonPaint, expected.states);
 
     auto textStyle = updater->textStyle(*button);
@@ -338,8 +338,8 @@ TEST(UIThemeTest, SetProductThemeUpdatesExistingAndSubsequentControls)
     auto lightPaint = updater->buttonPaint(*lightButton);
     ASSERT_TRUE(darkPaint.has_value());
     ASSERT_TRUE(lightPaint.has_value());
-    EXPECT_EQ(*darkPaint, UI::makeButtonChrome(UI::makeLightProductTheme()).states);
-    EXPECT_EQ(*lightPaint, UI::makeButtonChrome(UI::makeLightProductTheme()).states);
+    EXPECT_EQ(*darkPaint, UI::makeTonalButtonChrome(UI::makeLightProductTheme()).states);
+    EXPECT_EQ(*lightPaint, UI::makeTonalButtonChrome(UI::makeLightProductTheme()).states);
     EXPECT_EQ(*darkPaint, *lightPaint);
 }
 
@@ -361,7 +361,7 @@ TEST(UIThemeTest, LocalPaintOverrideDoesNotClearButtonStateChrome)
 
     auto buttonPaint = updater->buttonPaint(*button);
     ASSERT_TRUE(buttonPaint.has_value());
-    EXPECT_EQ(*buttonPaint, UI::makeButtonChrome(UI::makeDefaultProductTheme()).states);
+    EXPECT_EQ(*buttonPaint, UI::makeTonalButtonChrome(UI::makeDefaultProductTheme()).states);
 }
 
 TEST(UIThemeTest, LocalOverridesDetachOnlyTheirCorrespondingThemeProperties)
@@ -391,7 +391,7 @@ TEST(UIThemeTest, LocalOverridesDetachOnlyTheirCorrespondingThemeProperties)
     ASSERT_TRUE(states.has_value());
     ASSERT_TRUE(textStyle.has_value());
     EXPECT_EQ(*states, localStates);
-    EXPECT_EQ(*textStyle, UI::makeButtonChrome(UI::makeLightProductTheme()).label);
+    EXPECT_EQ(*textStyle, UI::makeTonalButtonChrome(UI::makeLightProductTheme()).label);
 }
 
 TEST(UIThemeTest, ExplicitSameValueSetterStillDetachesThatProperty)

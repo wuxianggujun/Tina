@@ -38,10 +38,21 @@ auto EditorWorkspaceState::UiBuildContext::createLabel(
 
 auto EditorWorkspaceState::UiBuildContext::createButton(
     UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
-    bool enabled) -> Tina::Core::Result<UI::UINodeId>
+    bool enabled, UI::UIStyleRoleId role) -> Tina::Core::Result<UI::UINodeId>
 {
     UI::UIElementDescriptor descriptor = UI::makeButtonElement(text, layout);
-    descriptor.textStyle = compactText;
+    descriptor.visual.styleRole = role;
+    descriptor.enabled = enabled;
+    return tree.createElement(parent, descriptor);
+}
+
+auto EditorWorkspaceState::UiBuildContext::createSegmentedButton(
+    UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
+    bool enabled) -> Tina::Core::Result<UI::UINodeId>
+{
+    UI::UIElementDescriptor descriptor = UI::makeRadioButtonElement(text, layout);
+    descriptor.contentAlignment.horizontal = UI::UIAxisAlignment::Center;
+    descriptor.visual.styleRole = UI::UIStyleRoleId::SegmentedButton;
     descriptor.enabled = enabled;
     return tree.createElement(parent, descriptor);
 }
@@ -101,19 +112,18 @@ auto EditorWorkspaceState::buildToolbarUi(UiBuildContext& ui, UI::UINodeId paren
         return status;
     }
 
-    if (auto status = storeNode(ui.createButton(toolbar, "2D", fixedSize(46.0F, 30.0F),
-                                             workspaceMode_ != WorkspaceMode::World2D),
+    if (auto status = storeNode(ui.createSegmentedButton(toolbar, "2D", fixedSize(46.0F, 30.0F)),
                                 mode2DButton_);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(toolbar, "3D", fixedSize(46.0F, 30.0F),
-                                             workspaceMode_ != WorkspaceMode::World3D),
+    if (auto status = storeNode(ui.createSegmentedButton(toolbar, "3D", fixedSize(46.0F, 30.0F)),
                                 mode3DButton_);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(toolbar, "Play", fixedSize(52.0F, 30.0F)),
+    if (auto status = storeNode(ui.createButton(toolbar, "Play", fixedSize(52.0F, 30.0F), true,
+                                             UI::UIStyleRoleId::ButtonPrimary),
                                 playButton_);
         !status) {
         return status;
@@ -133,21 +143,25 @@ auto EditorWorkspaceState::buildToolbarUi(UiBuildContext& ui, UI::UINodeId paren
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(toolbar, "Undo", fixedSize(60.0F, 30.0F)), undoButton_);
+    if (auto status = storeNode(ui.createButton(toolbar, "Undo", fixedSize(60.0F, 30.0F), true,
+                                             UI::UIStyleRoleId::ButtonText), undoButton_);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(toolbar, "Redo", fixedSize(60.0F, 30.0F)), redoButton_);
+    if (auto status = storeNode(ui.createButton(toolbar, "Redo", fixedSize(60.0F, 30.0F), true,
+                                             UI::UIStyleRoleId::ButtonText), redoButton_);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createButton(toolbar, "Save", fixedSize(58.0F, 30.0F),
-                                             initialSession.hasDocumentPath()),
+                                             initialSession.hasDocumentPath(),
+                                             UI::UIStyleRoleId::ButtonOutlined),
                                 saveButton_);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(toolbar, "Save As", fixedSize(72.0F, 30.0F)),
+    if (auto status = storeNode(ui.createButton(toolbar, "Save As", fixedSize(72.0F, 30.0F), true,
+                                             UI::UIStyleRoleId::ButtonOutlined),
                                 saveAsButton_);
         !status) {
         return status;
@@ -185,22 +199,22 @@ auto EditorWorkspaceState::buildContextBarUi(UiBuildContext& ui, UI::UINodeId pa
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(contextBar, "Select", fixedSize(58.0F, 26.0F), false),
+    if (auto status = storeNode(ui.createSegmentedButton(contextBar, "Select", fixedSize(58.0F, 26.0F)),
                                 selectToolButtons_[0]);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(contextBar, "Move", fixedSize(58.0F, 26.0F)),
+    if (auto status = storeNode(ui.createSegmentedButton(contextBar, "Move", fixedSize(58.0F, 26.0F)),
                                 translateToolButtons_[0]);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(contextBar, "Rotate", fixedSize(62.0F, 26.0F)),
+    if (auto status = storeNode(ui.createSegmentedButton(contextBar, "Rotate", fixedSize(62.0F, 26.0F)),
                                 rotateToolButtons_[0]);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(contextBar, "Scale", fixedSize(56.0F, 26.0F)),
+    if (auto status = storeNode(ui.createSegmentedButton(contextBar, "Scale", fixedSize(56.0F, 26.0F)),
                                 scaleToolButtons_[0]);
         !status) {
         return status;
@@ -250,11 +264,10 @@ auto EditorWorkspaceState::buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId 
     documentTabStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
     for (u32 index = 0; index < DocumentTabSlots; ++index) {
         const auto* tab = documentTabs_.tab(index);
-        if (auto status = storeNode(ui.createButton(documentTabsBar,
-                                                 tab != nullptr ? tab->title : "Empty",
-                                                 documentTabStyle,
-                                                 tab != nullptr &&
-                                                     index != documentTabs_.activeIndex()),
+        if (auto status = storeNode(ui.createSegmentedButton(documentTabsBar,
+                                                          tab != nullptr ? tab->title : "Empty",
+                                                          documentTabStyle,
+                                                          tab != nullptr),
                                     documentTabButtons_[index]);
             !status) {
             return status;
@@ -364,7 +377,8 @@ auto EditorWorkspaceState::buildLeftDockUi(UiBuildContext& ui, UI::UINodeId pare
         return status;
     }
     if (auto status = storeNode(ui.createButton(hierarchyPrimaryActions, "Delete",
-                                             hierarchyActionStyle, false),
+                                             hierarchyActionStyle, false,
+                                             UI::UIStyleRoleId::ButtonDanger),
                                 deleteEntityButton_);
         !status) {
         return status;
@@ -480,8 +494,8 @@ auto EditorWorkspaceState::buildLeftDockUi(UiBuildContext& ui, UI::UINodeId pare
         filterStyle.size.width = UI::UILayoutLength::Auto();
         filterStyle.flexItem.grow = 1.0F;
         filterStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-        if (auto status = storeNode(ui.createButton(projectFilters, projectFilterLabels[index],
-                                                 filterStyle, index != 0U),
+        if (auto status = storeNode(ui.createSegmentedButton(projectFilters, projectFilterLabels[index],
+                                                          filterStyle),
                                     projectFilterButtons_[index]);
             !status) {
             return status;
@@ -737,32 +751,32 @@ auto EditorWorkspaceState::buildViewportUi(UiBuildContext& ui, UI::UINodeId pare
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(viewportTools, "Select", fixedSize(64.0F, 28.0F), false),
+    if (auto status = storeNode(ui.createSegmentedButton(viewportTools, "Select", fixedSize(64.0F, 28.0F)),
                                 selectToolButtons_[1]);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(viewportTools, "Move", fixedSize(64.0F, 28.0F)),
+    if (auto status = storeNode(ui.createSegmentedButton(viewportTools, "Move", fixedSize(64.0F, 28.0F)),
                                 translateToolButtons_[1]);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(viewportTools, "Rotate", fixedSize(62.0F, 28.0F)),
+    if (auto status = storeNode(ui.createSegmentedButton(viewportTools, "Rotate", fixedSize(62.0F, 28.0F)),
                                 rotateToolButtons_[1]);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(viewportTools, "Scale", fixedSize(56.0F, 28.0F)),
+    if (auto status = storeNode(ui.createSegmentedButton(viewportTools, "Scale", fixedSize(56.0F, 28.0F)),
                                 scaleToolButtons_[1]);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(viewportTools, "Paint", fixedSize(60.0F, 28.0F), false),
+    if (auto status = storeNode(ui.createSegmentedButton(viewportTools, "Paint", fixedSize(60.0F, 28.0F), false),
                                 tilePaintToolButton_);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(viewportTools, "Erase", fixedSize(60.0F, 28.0F), false),
+    if (auto status = storeNode(ui.createSegmentedButton(viewportTools, "Erase", fixedSize(60.0F, 28.0F), false),
                                 tileEraseToolButton_);
         !status) {
         return status;
@@ -788,17 +802,17 @@ auto EditorWorkspaceState::buildViewportUi(UiBuildContext& ui, UI::UINodeId pare
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(viewportOptions, "Replace", fixedSize(58.0F, 28.0F), false),
+    if (auto status = storeNode(ui.createSegmentedButton(viewportOptions, "Replace", fixedSize(58.0F, 28.0F)),
                                 marqueeModeButtons_[0]);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(viewportOptions, "Add", fixedSize(40.0F, 28.0F)),
+    if (auto status = storeNode(ui.createSegmentedButton(viewportOptions, "Add", fixedSize(40.0F, 28.0F)),
                                 marqueeModeButtons_[1]);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createButton(viewportOptions, "Toggle", fixedSize(52.0F, 28.0F)),
+    if (auto status = storeNode(ui.createSegmentedButton(viewportOptions, "Toggle", fixedSize(52.0F, 28.0F)),
                                 marqueeModeButtons_[2]);
         !status) {
         return status;
@@ -1613,7 +1627,8 @@ auto EditorWorkspaceState::buildTimelineUi(UiBuildContext& ui, UI::UINodeId pare
         return status;
     }
     if (auto status = storeNode(ui.createButton(animationFrames, "Delete",
-                                             fixedSize(58.0F, 28.0F)),
+                                             fixedSize(58.0F, 28.0F), true,
+                                             UI::UIStyleRoleId::ButtonDanger),
                                 animationDeleteButton_);
         !status) {
         return status;
@@ -1672,13 +1687,15 @@ auto EditorWorkspaceState::buildTimelineUi(UiBuildContext& ui, UI::UINodeId pare
         return status;
     }
     if (auto status = storeNode(ui.createButton(animationEditRow, "Undo",
-                                             fixedSize(54.0F, 28.0F)),
+                                             fixedSize(54.0F, 28.0F), true,
+                                             UI::UIStyleRoleId::ButtonText),
                                 animationUndoButton_);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createButton(animationEditRow, "Redo",
-                                             fixedSize(54.0F, 28.0F)),
+                                             fixedSize(54.0F, 28.0F), true,
+                                             UI::UIStyleRoleId::ButtonText),
                                 animationRedoButton_);
         !status) {
         return status;
@@ -1772,19 +1789,22 @@ auto EditorWorkspaceState::buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINode
         return status;
     }
     if (auto status = storeNode(
-            ui.createButton(dirtyCloseActions, "Save", fixedSize(86.0F, 32.0F)),
+            ui.createButton(dirtyCloseActions, "Save", fixedSize(86.0F, 32.0F), true,
+                            UI::UIStyleRoleId::ButtonPrimary),
             dirtyCloseSaveButton_);
         !status) {
         return status;
     }
     if (auto status = storeNode(
-            ui.createButton(dirtyCloseActions, "Discard", fixedSize(86.0F, 32.0F)),
+            ui.createButton(dirtyCloseActions, "Discard", fixedSize(86.0F, 32.0F), true,
+                            UI::UIStyleRoleId::ButtonDanger),
             dirtyCloseDiscardButton_);
         !status) {
         return status;
     }
     if (auto status = storeNode(
-            ui.createButton(dirtyCloseActions, "Cancel", fixedSize(86.0F, 32.0F)),
+            ui.createButton(dirtyCloseActions, "Cancel", fixedSize(86.0F, 32.0F), true,
+                            UI::UIStyleRoleId::ButtonText),
             dirtyCloseCancelButton_);
         !status) {
         return status;
@@ -2326,7 +2346,10 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
         return Tina::Core::failure(std::move(tree.error()));
     }
 
-    const UI::UITheme productTheme = UI::makeDefaultProductTheme();
+    UI::UITheme productTheme = UI::makeDefaultProductTheme();
+    productTheme.buttonTextSize = EditorTypographyMetrics::Compact;
+    productTheme.bodyTextSize = EditorTypographyMetrics::Body;
+    productTheme.titleTextSize = EditorTypographyMetrics::Title;
     if (auto status = tree->setProductTheme(productTheme); !status) {
         return status;
     }

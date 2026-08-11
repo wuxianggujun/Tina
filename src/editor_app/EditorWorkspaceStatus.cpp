@@ -63,10 +63,16 @@ auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdat
         !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(mode2DButton_, !world2D); !status) {
+    if (auto status = tree.setRadioButtonSelected(mode2DButton_, world2D); !status) {
         return status;
     }
-    return tree.setEnabled(mode3DButton_, world2D);
+    if (auto status = tree.setRadioButtonSelected(mode3DButton_, !world2D); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(mode2DButton_, true); !status) {
+        return status;
+    }
+    return tree.setEnabled(mode3DButton_, true);
 }
 
 auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{

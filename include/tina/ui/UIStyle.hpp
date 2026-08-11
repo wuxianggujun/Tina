@@ -32,6 +32,10 @@ enum class UIStyleRoleId : u8 {
     CollectionItem,
     ListView,
     TreeView,
+    ButtonTonal,
+    ButtonOutlined,
+    ButtonText,
+    SegmentedButton,
 };
 
 // Startup-registered stylesheet identities. Zero is invalid so a default

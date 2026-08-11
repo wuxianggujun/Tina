@@ -103,7 +103,7 @@ defaultStyleRoleForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::Label:
         return UIStyleRoleId::TextBody;
     case BuiltinElementKind::Button:
-        return UIStyleRoleId::ButtonPrimary;
+        return UIStyleRoleId::ButtonTonal;
     case BuiltinElementKind::Checkbox:
         return UIStyleRoleId::Checkbox;
     case BuiltinElementKind::Slider:

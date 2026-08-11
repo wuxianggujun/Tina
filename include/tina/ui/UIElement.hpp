@@ -113,7 +113,7 @@ struct UIElementDescriptor final {
             .horizontal = UIAxisAlignment::Center,
             .vertical = UIAxisAlignment::Center,
         },
-        .visual = {.styleRole = UIStyleRoleId::ButtonPrimary},
+        .visual = {.styleRole = UIStyleRoleId::ButtonTonal},
         .behaviors = UIElementBehavior::Focusable | UIElementBehavior::Activate,
         .semantics = {
             .mode = UISemanticsMode::Publish,

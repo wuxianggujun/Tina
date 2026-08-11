@@ -488,7 +488,7 @@ TEST_F(UIElementTest, StyleRoleCapacityFailureLeavesRoleAndChromeUntouched)
     const Core::Status rejected = updater.setStyleRole(*second, UI::UIStyleRoleId::ButtonDanger);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(updater.styleRole(*second).value(), UI::UIStyleRoleId::ButtonPrimary);
+    EXPECT_EQ(updater.styleRole(*second).value(), UI::UIStyleRoleId::ButtonTonal);
     EXPECT_EQ(updater.buttonPaint(*second).value(), originalSecondPaint);
 }
 

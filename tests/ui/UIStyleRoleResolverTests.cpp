@@ -22,6 +22,12 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
         std::pair{UI::UIStyleRoleId::TextBody, ThemeBindingTextStyle},
         std::pair{UI::UIStyleRoleId::ButtonPrimary,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle)},
+        std::pair{UI::UIStyleRoleId::ButtonTonal,
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle)},
+        std::pair{UI::UIStyleRoleId::ButtonOutlined,
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle)},
+        std::pair{UI::UIStyleRoleId::ButtonText,
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle)},
         std::pair{UI::UIStyleRoleId::Checkbox,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingCheckboxPaint)},
         std::pair{UI::UIStyleRoleId::Slider,
@@ -32,6 +38,9 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingProgressBarPaint)},
         std::pair{UI::UIStyleRoleId::RadioButton,
                   static_cast<u16>(ThemeBindingRadioButtonPaint | ThemeBindingTextStyle)},
+        std::pair{UI::UIStyleRoleId::SegmentedButton,
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingRadioButtonPaint |
+                                   ThemeBindingTextStyle)},
         std::pair{UI::UIStyleRoleId::ScrollView, ThemeBindingScrollViewPaint},
         std::pair{UI::UIStyleRoleId::Dropdown,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle |
@@ -51,11 +60,41 @@ TEST(UIStyleRoleResolverTests, ResolvesControlChromeFromTheRequestedTheme)
 {
     const UI::UITheme theme = UI::makeLightProductTheme();
 
+    const auto primary = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonPrimary, theme);
+    const UI::UIButtonChrome expectedPrimary = UI::makeButtonChrome(theme);
+    EXPECT_EQ(primary.box, expectedPrimary.box);
+    EXPECT_EQ(primary.button, expectedPrimary.states);
+    EXPECT_EQ(primary.text, expectedPrimary.label);
+
     const auto danger = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonDanger, theme);
     const UI::UIButtonChrome expectedDanger = UI::makeButtonChrome(theme, theme.danger);
     EXPECT_EQ(danger.box, expectedDanger.box);
     EXPECT_EQ(danger.button, expectedDanger.states);
     EXPECT_EQ(danger.text, expectedDanger.label);
+
+    const auto tonal = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonTonal, theme);
+    const UI::UIButtonChrome expectedTonal = UI::makeTonalButtonChrome(theme);
+    EXPECT_EQ(tonal.box, expectedTonal.box);
+    EXPECT_EQ(tonal.button, expectedTonal.states);
+    EXPECT_EQ(tonal.text, expectedTonal.label);
+
+    const auto outlined = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonOutlined, theme);
+    const UI::UIButtonChrome expectedOutlined = UI::makeOutlinedButtonChrome(theme);
+    EXPECT_EQ(outlined.box, expectedOutlined.box);
+    EXPECT_EQ(outlined.button, expectedOutlined.states);
+    EXPECT_EQ(outlined.text, expectedOutlined.label);
+
+    const auto textButton = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonText, theme);
+    const UI::UIButtonChrome expectedTextButton = UI::makeTextButtonChrome(theme);
+    EXPECT_EQ(textButton.box, expectedTextButton.box);
+    EXPECT_EQ(textButton.button, expectedTextButton.states);
+    EXPECT_EQ(textButton.text, expectedTextButton.label);
+
+    const auto segmented = UI::Detail::productChromeFor(UI::UIStyleRoleId::SegmentedButton, theme);
+    const UI::UISegmentedButtonChrome expectedSegmented = UI::makeSegmentedButtonChrome(theme);
+    EXPECT_EQ(segmented.box, expectedSegmented.box);
+    EXPECT_EQ(segmented.radioButton, expectedSegmented.radio);
+    EXPECT_EQ(segmented.text, expectedSegmented.label);
 
     const auto dropdown = UI::Detail::productChromeFor(UI::UIStyleRoleId::Dropdown, theme);
     const UI::UIDropdownChrome expectedDropdown = UI::makeDropdownChrome(theme);

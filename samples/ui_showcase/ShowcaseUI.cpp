@@ -113,9 +113,12 @@ constexpr std::array<std::string_view, 6> ScrollContentLabels{
 }
 
 [[nodiscard]] Core::Result<UI::UINodeId> createButton(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
-                                                      const UI::UILayoutStyle& layout, std::string_view text)
+                                                      const UI::UILayoutStyle& layout, std::string_view text,
+                                                      UI::UIStyleRoleId role = UI::UIStyleRoleId::ButtonTonal)
 {
-    return tree.createElement(parent, UI::makeButtonElement(text, layout));
+    UI::UIElementDescriptor descriptor = UI::makeButtonElement(text, layout);
+    descriptor.visual.styleRole = role;
+    return tree.createElement(parent, descriptor);
 }
 
 [[nodiscard]] Core::Result<UI::UINodeId> createRadio(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
@@ -605,6 +608,7 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     buttonLayout.flexContainer.justifyContent = UI::UIJustifyContent::Center;
     buttonLayout.flexContainer.gap.column = 8.0F;
     UI::UIElementDescriptor primaryButton = UI::makeButtonElement({}, buttonLayout);
+    primaryButton.visual.styleRole = UI::UIStyleRoleId::ButtonPrimary;
     primaryButton.semantics.name = "Primary action";
     primaryButton.semantics.useContentAsName = false;
     if (Core::Status status =
@@ -640,6 +644,7 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     destructiveLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
     destructiveLayout.flexContainer.justifyContent = UI::UIJustifyContent::Center;
     UI::UIElementDescriptor destructiveButton = UI::makeButtonElement({}, destructiveLayout);
+    destructiveButton.visual.styleRole = UI::UIStyleRoleId::ButtonDanger;
     destructiveButton.semantics.name = "Destructive action";
     destructiveButton.semantics.useContentAsName = false;
     if (Core::Status status = storeNode(
@@ -663,6 +668,7 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     }
 
     UI::UIElementDescriptor disabledButton = UI::makeButtonElement("Disabled", buttonLayout);
+    disabledButton.visual.styleRole = UI::UIStyleRoleId::ButtonOutlined;
     disabledButton.enabled = false;
     if (Core::Status status =
             storeNode(tree->createElement(buttonRows[1], disabledButton), nodes_.disabledButton);
@@ -670,7 +676,9 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
     if (Core::Status status =
-            storeNode(createButton(*tree, buttonRows[1], buttonLayout, "Reset state"), nodes_.resetButton);
+            storeNode(createButton(*tree, buttonRows[1], buttonLayout, "Reset state",
+                                   UI::UIStyleRoleId::ButtonText),
+                      nodes_.resetButton);
         !status) {
         return status;
     }
@@ -1385,17 +1393,6 @@ Core::Status ShowcaseUI::applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTh
     if (Core::Status status =
             setTextStyles(tree, nodes_.scrollContentLabels, UI::makeBodyTextStyle(theme, 14.0F));
         !status) {
-        return status;
-    }
-
-    const UI::UIButtonChrome destructive = UI::makeButtonChrome(theme, UI::scaleColorAlpha(theme.danger, 230));
-    if (Core::Status status = tree.setBoxPaint(nodes_.destructiveButton, destructive.box); !status) {
-        return status;
-    }
-    if (Core::Status status = tree.setButtonPaint(nodes_.destructiveButton, destructive.states); !status) {
-        return status;
-    }
-    if (Core::Status status = tree.setTextStyle(nodes_.destructiveButton, destructive.label); !status) {
         return status;
     }
 

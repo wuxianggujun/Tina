@@ -943,7 +943,7 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
     {
         return Core::failure(std::move(treePaint.error()));
     }
-    if (*activeTheme != theme || *buttonPaint != UI::makeButtonChrome(theme).states ||
+    if (*activeTheme != theme || *buttonPaint != UI::makeTonalButtonChrome(theme).states ||
         *checkboxPaint != UI::makeCheckboxChrome(theme).indicator ||
         *sliderPaint != UI::makeSliderChrome(theme).slider || *progressPaint != UI::makeProgressBarChrome(theme).bar ||
         *listPaint != UI::makeListViewPaint(theme) || *treePaint != UI::makeTreeViewPaint(theme))
