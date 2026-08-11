@@ -8,40 +8,45 @@
 
 namespace Tina::Physics2D {
 
-// One solid grid cell in map-local meters with origin at cell (0,0) bottom-left.
-// Center of cell (x,y) is ((x + 0.5) * cellSize, (y + 0.5) * cellSize).
-struct PhysicsGridSolidCell2D final {
+// A maximal axis-aligned solid rectangle in grid-cell coordinates. The rectangle
+// origin is the bottom-left cell and its extents are strictly positive.
+struct PhysicsGridSolidRect2D final {
     Core::u32 cellX = 0;
     Core::u32 cellY = 0;
+    Core::u32 widthCells = 1;
+    Core::u32 heightCells = 1;
 
     friend constexpr bool operator==(
-        const PhysicsGridSolidCell2D&,
-        const PhysicsGridSolidCell2D&) noexcept = default;
+        const PhysicsGridSolidRect2D&,
+        const PhysicsGridSolidRect2D&) noexcept = default;
 };
 
-struct PhysicsGridBodySyncConfig2D final {
-    float cellSizeMeters = 1.0F;
+struct PhysicsGridColliderMaterial2D final {
     PhysicsCollisionFilter2D filter{};
     bool enableContactEvents = false;
-    // When false, density is 0 (static massless fixtures). Static bodies ignore density
-    // for dynamics but keep a finite non-negative value for Box2D validation.
     float density = 0.0F;
     float friction = 0.6F;
     float restitution = 0.0F;
 };
 
-// Creates one static box body per solid cell. All-or-nothing: any failure destroys
-// bodies created in this call and does not leave half-synced geometry. Writes body
-// IDs into outBodies when capacity allows; always reports total cells attempted.
-// Does not depend on Asset/TileMap; callers collect solid cells from IGridCollisionProvider.
-[[nodiscard]] Core::Result<PhysicsQueryWriteResult2D> createStaticBodiesForSolidCells(
-    PhysicsWorld2D& world,
-    std::span<const PhysicsGridSolidCell2D> solidCells,
-    const PhysicsGridBodySyncConfig2D& config,
-    std::span<PhysicsBodyId> outBodies);
+struct PhysicsGridBodyCreateResult2D final {
+    PhysicsBodyId body{};
+    Core::usize shapeCount = 0;
+};
 
-// Destroys every live body id in the span. Stale/invalid ids are skipped and counted
-// in totalFound while written tracks successful destroys. Continues after skips.
+// Creates one static body containing one box shape per solid rectangle. The
+// operation is atomic: a failed shape creation destroys the body and every shape
+// created by this call. No Asset or TileMap type crosses the Physics2D boundary.
+// An empty rectangle span is a successful no-op with an empty body id.
+[[nodiscard]] Core::Result<PhysicsGridBodyCreateResult2D>
+createStaticBodyForSolidRectangles(
+    PhysicsWorld2D& world,
+    std::span<const PhysicsGridSolidRect2D> solidRectangles,
+    float cellSizeMeters,
+    const PhysicsGridColliderMaterial2D& material);
+
+// Destroys every live body id in the span. Stale/invalid ids are skipped and
+// counted in totalFound while written tracks successful destroys.
 [[nodiscard]] Core::Result<PhysicsQueryWriteResult2D> destroyBodies(
     PhysicsWorld2D& world,
     std::span<const PhysicsBodyId> bodies);

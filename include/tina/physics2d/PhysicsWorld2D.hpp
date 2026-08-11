@@ -23,8 +23,9 @@ namespace Tina::Physics2D {
 [[nodiscard]] Core::Status validatePhysicsRayCast2D(const PhysicsRayCast2D& ray) noexcept;
 
 // Single-owner, fixed-step 2D physics world. Bodies, shapes, and joints have
-// independent generation handles. Shapes are backend-neutral Box/Circle/Capsule
-// descriptors and may be sensors; every body may own multiple shapes.
+// independent generation handles. Shapes are backend-neutral Box/Circle/Capsule/
+// ConvexPolygon descriptors and may be sensors; every body may own multiple shapes.
+// Joints are backend-neutral Distance/Revolute/Prismatic descriptors.
 class PhysicsWorld2D final {
 public:
     [[nodiscard]] static Core::Result<PhysicsWorld2D> Create(

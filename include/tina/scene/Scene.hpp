@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/scene/Camera2D.hpp>
+#include <tina/scene/CameraFollow2D.hpp>
 #include <tina/scene/Entity.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>

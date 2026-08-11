@@ -37,5 +37,6 @@ inline constexpr Core::ErrorCode SourceImportCatalogMismatch{Core::ErrorDomain::
 inline constexpr Core::ErrorCode SourceImportCaptureCapacityExceeded{Core::ErrorDomain::Asset, 41};
 inline constexpr Core::ErrorCode SourceImportCancelled{Core::ErrorDomain::Asset, 42};
 inline constexpr Core::ErrorCode SourceImportTargetPlatformMismatch{Core::ErrorDomain::Asset, 43};
+inline constexpr Core::ErrorCode TileMapPhysicsCapacityExceeded{Core::ErrorDomain::Asset, 44};
 
 } // namespace Tina::Asset::AssetErrorCode

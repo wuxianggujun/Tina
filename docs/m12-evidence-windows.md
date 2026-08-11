@@ -98,9 +98,12 @@ FreeType/Physics2D/Audio/miniaudio/Asset 直接测试与300帧 sample 均 exit 0
 
 该归档 sample 的 `evidenceSchema=14` 验证 Dark→Light→Dark 与 Scene Explorer TreeView：13个 logical
 item、12个 materialized slot、两次 stable-key selection、最终 key `402`/index `12`、滚动、Theme paint
-和 Tree/TreeItem selected semantics。当前 sample/gate 已升级到 schema 24：继承 schema 19 的 normal-map
+和 Tree/TreeItem selected semantics。当前 sample/gate 已升级到 schema 27：继承 schema 19 的 normal-map
 证据与 schema 16 的两盏 committed
-`PointLight2D`、两条 `ShadowOccluder2D` 与 `sceneLightingFrames=renderExtractions`，并增加
+`PointLight2D`、两条 `ShadowOccluder2D`，并以
+`sceneLightingFrames=submittedRenderFrames` 和
+`submittedRenderFrames + skippedSuspendedSurfaceFrames=renderExtractions` 区分实际提交、surface suspend skip
+与 state extraction；同时继承
 schema 17 的 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1` 以及 N4
 `softShadowPointLight2DCount=2`；soft/hard 各两次同机 RGBA8 fingerprint 可重复且互异。N5 再加入独立
 character normal atlas、`normalMappedSpriteCount=1/0`、15个 recipe assets、`texturesUploaded=3` 与3张

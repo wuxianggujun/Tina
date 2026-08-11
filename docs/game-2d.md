@@ -96,7 +96,7 @@ bgfx 对每个 fragment 计算线性径向衰减。`sourceRadiusMeters=0` 时 fr
 积分或重叠区间 union。
 ambient、上述透明排序、连续 texture batch 与 premultiplied alpha 不变。没有 PointLight2D 组件时维持
 原 unlit 输出，inactive-only 可显式发布 ambient-only。产品 sample 固定创建暖/冷两盏相机内灯、1盏
-永久离屏 active light 与两条遮挡线并逐帧发布；当前 schema 24 继承 schema 19 并断言 `authoredPointLight2DCount=3`、
+永久离屏 active light 与两条遮挡线并逐帧发布；当前 schema 27 继承 schema 19 并断言 `authoredPointLight2DCount=3`、
 `pointLight2DCount=2`、`culledPointLight2DCount=1` 与默认 `softShadowPointLight2DCount=2`，同时继承
 schema 16 的双灯双遮挡 evidence。`RunProduct2dShadowVisualGate.ps1` 对 soft/hard 各重复两次并证明两种
 RGBA8 fingerprint 稳定且不同。角色 Sprite 另带独立3×1 normal atlas；`RunProduct2dNormalMapVisualGate.ps1`
@@ -225,6 +225,11 @@ gameplay object layer `30`。渲染只显式提交 layer `10`；visibility=false
 `CharacterController2D` 使用 `IGridCollisionProvider` 进行确定性的 Tile AABB 运动。默认产品 demo 在
 ground 后向右行走并撞墙；它与 Box2D dynamic body 共用同一 Tile solid 数据，但角色本身不是刚体。
 
+`Scene::CameraFollow2D` 是 allocation-free 相机跟随状态 owner。fixed update 在 dead zone、可选最大速度、
+viewport 与 world bounds 下事务式发布 previous/current center；viewport 大于 world 时按轴居中，render
+extraction 只读取 `interpolatedCenter()`。产品使用零 dead zone、无限速配置保持直接跟随，streaming 读取
+current simulation center，旧的散落 previous/current float 与手写 map clamp 已删除。
+
 受控 `--seed-tile-selection=x,y` 可以验证 logical→world→cell 命中和 selection highlight。默认 smoke
 不注入点击，`tileSelectionHits=0` 合法；UI 点击不得穿透成世界选择。
 
@@ -235,34 +240,46 @@ chunk 已驻留、gameplay object layer 已验证后调用 `Asset::buildTileMapN
 
 1. hidden collision tile layer `20` 中带 Tileset `MaterialSolid` 的11个 cell 成为 base blocker；
 2. gameplay object layer `30` 中唯一 visible Rectangle 且 `role=crate` 的 object 栅格化为2个 cell；
-3. 去重后 schema-v1 数据含13个 blocked cell；引用 chunk 未驻留或 layer/object 非法时原子失败；
+3. `MaterialOneWay` 的1个 cell 通过精确 material-flags rule 得到 traversal multiplier 5，仍不成为
+   Physics solid；去重后的 immutable grid 数据含13个 blocked cell；引用 chunk 未驻留或 layer/object/rule 非法时原子失败；
 4. State-owned `NavigationGrid2D` 预留4个 generation dynamic blocker；
 5. `NavigationPathfinder2D` 按完整32-cell map 容量一次性预分配 records/open-set/path storage。
 
-四方向单位代价 A* 使用 `f -> Manhattan heuristic -> row-major index` 决胜。产品从 `(1,3)` 到 `(5,3)`
-得到7-cell基础路径；添加 `{4,2,1,1}` dynamic blocker 后得到9-cell改道路径，随后移除 blocker。另一个
+默认四方向 A* 使用 `f -> heuristic -> row-major index` 决胜；启用对角时使用 octile heuristic，
+直行/对角进入成本为 `10/14 × destination traversal multiplier`，heuristic 乘 grid 最小 multiplier。
+产品从 `(1,3)` 到 `(5,3)` 得到9-cell基础路径（cost 80）、严格防切角路径得到6-cell路径（cost 62），
+允许切角路径得到5-cell路径（cost 56）；添加 `{3,1,1,1}` dynamic blocker 后四方向得到7-cell改道路径
+（cost 100），随后移除 blocker。独立 `(1,2)->(5,2)` 查询得到7-cell/cost 60，并证明路径未经过
+高代价 `(3,2)` cell。另一个
 `begin()` query 只 `advance(1)` 后调用 `cancel()`，终态必须为 `Cancelled`；add/remove 使 Grid revision 从1
-推进到3，最终 live dynamic blocker 为0。以上字段进入 schema 24 evidence。
+推进到3，最终 live dynamic blocker 为0。以上字段进入 schema 27 evidence。
 
 `begin()/advance()` 是 cooperative query，不创建 worker/thread；Pending 期间必须继续传入同一 Grid 地址与
 revision，否则终态为 `Invalidated`。blocked endpoint/open-set 耗尽是 `Unreachable`，不是 API error。
-完整 schema、借用和容量契约见 [2D 导航](navigation2d.md)。
+完整 grid layout、借用和容量契约见 [2D 导航](navigation2d.md)。
 
 ## Physics2D 产品接入
 
 在 `TINA_BUILD_PHYSICS2D=ON` 图中：
 
 1. 启动 demand/pump/commit visual `10` 与 collision `20`，确认两块 resident；
-2. `TileMapGridCollision(stream.map(), 20)` 显式选择 hidden collision tile layer；
-3. `collectAllSolidCellsForPhysics()` 从该 layer 收集 solid cell；
-4. `syncTileMapSolidsToStaticBodies()` 通过公开 `createBody()` + `createShape(Box)` 原子创建 static terrain；
-5. 产品 State 从 `role=crate` 的 Rectangle record 创建一个 dynamic crate，并显式挂接 Box shape；
-6. 同一 World 创建 circle sensor 和一个远离主场景的 spring Distance joint；
+2. `TileMapPhysicsSync2D::Create(stream.map(), {.layerId = 20, ...})` 绑定 hidden collision tile layer
+   并固定 chunk/rectangle/staging 容量；
+3. 每个 fixed tick 在 stream commit 之后、`step()` 之前调用 `synchronize(map, world)`：只处理 resident
+   chunk，按 residency generation 与 content revision 增量 add/rebuild/remove，unchanged chunk 的 collider
+   原样保留；
+4. 每个变化 chunk 用确定性 greedy rectangle 合并后创建**一个 static body + 每矩形一个 box shape**，
+   全部 staged 成功才退休旧 body；失败保留上一次发布的 collider 且不推进 stats；
+5. 产品 State 从 `role=crate` 的 Rectangle record 创建一个 dynamic crate，并显式挂接 ConvexPolygon shape；
+6. 同一 World 创建 circle sensor 和远离主场景的 spring Distance、Revolute 与 Prismatic joint；
 7. 每个 fixed tick 调用 `PhysicsWorld2D::step()`，读取 contact/sensor event、body state 与 joint state；
-8. Scene sprite 使用 crate state 输出可见结果。
+8. Scene sprite 使用 crate state 输出可见结果；
+9. State 退出时先 `shutdown(world)` 退休全部 chunk collider，再释放 sync 与 stream。
 
-当前 product-2d 证据为11个 static body、dynamic contact 非0、300次 physics step、sensor enter/exit 各1次
-与 `physicsJointReady=true`。完整细节见 [物理](physics.md)。
+当前 product-2d 证据为 `physicsStaticBodies=1`（唯一 resident collision chunk 的 collider；11个 solid cell
+合并成2个 box shape）、dynamic contact 非0、300次 physics step、sensor enter/exit 各1次，以及
+`physicsJointReady`/`physicsConvexPolygonReady`/`physicsRevoluteJointReady`/`physicsPrismaticJointReady`
+均为 true。逐 cell 的 static body 同步已删除，不保留兼容路径。完整细节见 [物理](physics.md)。
 
 ## UI 与 Audio
 
@@ -298,10 +315,11 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
 - `catalogFromRecipeFile=true`、`catalogRecipeAssets=15`（含2个 cooked chunk 与独立 normal atlas）、`texturesUploaded=3`；
-- `evidenceSchema=24`，新增 Navigation2D 产品证据，并继承 schema 23 的 Menu、schema 22 的 Confirm、schema 21 的输入设备提示、schema 20 的 UI Flow 与 schema 19 的 normal-map 证据；仍要求 `sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
+- `evidenceSchema=27`，新增 Navigation2D immutable grid 权重统计与绕行证据，并继承 schema 25 的对角策略/path cost、schema 23 的 Menu、schema 22 的 Confirm、schema 21 的输入设备提示、schema 20 的 UI Flow 与 schema 19 的 normal-map 证据；仍要求 `sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
   `pointLight2DCount=2`、`culledPointLight2DCount=1`，并继承 schema 16 的双灯双遮挡证据；
   `shadowOccluder2DCount=2`、`softShadowPointLight2DCount=2`、
-  `normalMappedSpriteCount=1`、`sceneLightingFrames=renderExtractions`，并保留 `uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
+  `normalMappedSpriteCount=1`、`sceneLightingFrames=submittedRenderFrames`，并要求
+  `submittedRenderFrames + skippedSuspendedSurfaceFrames = renderExtractions`；同时保留 `uiThemeDemoRequested=true`、`uiThemeSwitches=2`、
   `uiThemeButtonActivations=0`、`uiThemeFinalLight=false`，证明自动 Dark→Light→Dark 在 UI phase 完成；
 - `uiTreeDemoRequested=true`、`uiTreeViewsCreated=1`、`uiTreeLogicalItems=13`、
   `uiTreeMaterializedCapacity=12`、`uiTreeSelectionChanges=2`、最终 stable key `402`/index `12`、
@@ -323,9 +341,10 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - `tileMapStreamRequests=2`、`tileMapStreamCommitted=2`、`tileMapStreamResident=2`，且每个 frame 都推进
   demand/pump/commit；
 - `objectLayerConsumed=true`、`objectLayerObjects=2`，唯一 player/crate role 与 Point/Rectangle kind 已被产品逻辑消费；
-- `navigationReady=true`、`navigationSchemaVersion=1`、solid/rectangle/blocked=`11/1/13`、基础/动态路径
-  cell=`7/9`、`navigationIncrementalExpandedNodes=1`、revision/mutation=`3/2` 且
-  `navigationCancelled=true`；
+- `navigationReady=true`、solid/rectangle/blocked=`11/1/13`、
+  weighted/max-cost=`1/5`；基础/动态路径 cell/cost=`9/80`、`7/100`，严格/切角=`6/62`、`5/56`，
+  独立 weighted path=`7/60` 且避开高代价 cell；`navigationIncrementalExpandedNodes=1`、
+  revision/mutation=`3/2` 且 `navigationCancelled=true`；
 - 300次 extraction/physics step，角色 grounded/walk/hit-right；
 - Tile/角色 base/角色 normal 三纹理 upload/binding、连续 sprite batch、Camera follow/interpolation、chunk cache；
 - 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；
@@ -335,7 +354,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   瞬时 generation handle bits 或 render key 写入指纹，并覆盖确定性的初始粒子/Trail 状态；
 - UI/TextEdit/ProgressBar/RadioButton、Audio Catalog lease、Advanced Audio owner-thread deterministic mix、
   Physics contact；
-- `physicsSensorEnters>0`、`physicsSensorExits>0`、`physicsJointReady=true`；
+- `physicsSensorEnters>0`、`physicsSensorExits>0`、`physicsJointReady=true`，并要求
+  `physicsConvexPolygonReady=true`、`physicsRevoluteJointReady=true`、`physicsPrismaticJointReady=true`；
 - `stateExits=1`、`applicationShutdowns=1`、`uiRootsReleased=1`；
 - `pixelCaptureOk=true`。
 
@@ -375,15 +395,19 @@ Escape/Gamepad East 的 Back 路由给该 active Screen；Enter/Keypad Enter/Gam
 ## 当前限制
 
 - 当前 streaming 是固定容量 Camera/layer priority demand owner，已有稳定的新请求排序与 retain-window
-  demand-recency LRU；通用 Scene 编辑器、旧 schema migration 与网络 rollback 仍未提供；
-- Navigation2D 当前只有 schema-v1矩形 grid、四方向单位代价 A*、property-tagged Rectangle blocker 与
-  cooperative query；没有 diagonal/weight/navmesh、内部 worker、crowd avoidance、独立 Cooked Navigation
+  demand-recency LRU；通用 Scene 编辑器与网络 rollback 仍未提供；
+- Navigation2D 仅提供唯一当前矩形 weighted grid、property-tagged Rectangle blocker 与 cooperative
+  A* query；没有 navmesh、内部 worker、crowd avoidance、独立 Cooked Navigation
   AssetKind、Physics 自动同步或 editor bake；
 - Cooked SpriteAsset 的完整 atlas/PPU metadata resolve 仍可扩展，当前产品使用 Texture2D + 显式 UV/key；
 - GPU chunk mesh cache、复杂透明材质与多 camera/letterbox policy 尚未产品化；
 - 当前 2D-FX 是 CPU fixed-capacity Sprite2D extraction，不包含 Cooked FX asset schema、effect graph/editor、
   GPU particle simulation 或 mesh-ribbon trail；
-- Physics2D 当前 shape 为 Box/Circle/Capsule、joint 为 Distance；polygon/chain 与更多 joint 类型未产品化；
+- Physics2D 当前 shape 为 Box/Circle/Capsule/ConvexPolygon，joint 为 Distance/Revolute/Prismatic；Chain 与
+  更多高级约束未产品化；
+- TileMap→Physics 当前是 per-chunk static collider + 确定性 greedy rectangle 合并 + residency/revision
+  增量同步；它只覆盖 tile solid 几何，不生成 one-way/platform 语义、不做 object layer collider、
+  也不提供 editor bake 或跨 chunk 的全局矩形合并；
 - Linux 当前 tip、跨 GPU/DPI golden 与真实扬声器不由 Windows 报告证明。
 
 这些限制不能通过向 gameplay 暴露 backend handle 绕过。任务与验收统一见 [Backlog](backlog.md)和

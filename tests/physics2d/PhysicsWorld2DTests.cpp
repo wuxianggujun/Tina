@@ -128,6 +128,17 @@ template <typename Id>
     return desc;
 }
 
+[[nodiscard]] PhysicsShape2DDesc convexTriangle() noexcept
+{
+    PhysicsShape2DDesc desc;
+    desc.kind = PhysicsShapeKind2D::ConvexPolygon;
+    desc.polygonVertices[0] = {-0.5F, -0.5F};
+    desc.polygonVertices[1] = {0.5F, -0.5F};
+    desc.polygonVertices[2] = {0.0F, 0.5F};
+    desc.polygonVertexCount = 3;
+    return desc;
+}
+
 struct CreatedBodyShape final {
     PhysicsBodyId body{};
     PhysicsShapeId shape{};
@@ -228,6 +239,120 @@ TEST(PhysicsWorld2DTest, ValidatesBodyAndShapeDescriptions)
     shape = unitBox();
     shape.filter.categoryBits = 0;
     expectFailureCode(validatePhysicsShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
+
+    shape = unitBox();
+    shape.radiusMeters = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_TRUE(validatePhysicsShape2DDesc(shape));
+}
+
+TEST(PhysicsWorld2DTest, ValidatesStrictConvexPolygonBoundaryAndFiniteTransform)
+{
+    EXPECT_TRUE(validatePhysicsShape2DDesc(convexTriangle()));
+
+    PhysicsShape2DDesc polygon = convexTriangle();
+    std::swap(polygon.polygonVertices[0], polygon.polygonVertices[2]);
+    EXPECT_TRUE(validatePhysicsShape2DDesc(polygon));
+
+    polygon = convexTriangle();
+    polygon.polygonVertexCount = 2;
+    expectFailureCode(
+        validatePhysicsShape2DDesc(polygon),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    polygon = convexTriangle();
+    polygon.polygonVertexCount =
+        static_cast<Core::u32>(MaximumConvexPolygonVertices2D + 1U);
+    expectFailureCode(
+        validatePhysicsShape2DDesc(polygon),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    polygon = convexTriangle();
+    polygon.polygonVertices[1].x = std::numeric_limits<float>::quiet_NaN();
+    expectFailureCode(
+        validatePhysicsShape2DDesc(polygon),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    polygon = convexTriangle();
+    polygon.polygonVertices[2] = polygon.polygonVertices[1];
+    expectFailureCode(
+        validatePhysicsShape2DDesc(polygon),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    polygon = convexTriangle();
+    polygon.polygonVertices[0] = {0.0F, 0.0F};
+    polygon.polygonVertices[1] = {1.0F, 0.0F};
+    polygon.polygonVertices[2] = {2.0F, 0.0F};
+    expectFailureCode(
+        validatePhysicsShape2DDesc(polygon),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    polygon = convexTriangle();
+    polygon.polygonVertexCount = 5;
+    polygon.polygonVertices[0] = {-1.0F, -1.0F};
+    polygon.polygonVertices[1] = {1.0F, -1.0F};
+    polygon.polygonVertices[2] = {0.0F, 0.0F};
+    polygon.polygonVertices[3] = {1.0F, 1.0F};
+    polygon.polygonVertices[4] = {-1.0F, 1.0F};
+    expectFailureCode(
+        validatePhysicsShape2DDesc(polygon),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    // Pentagram order has five hull points but is not a valid boundary order.
+    polygon = convexTriangle();
+    polygon.polygonVertexCount = 5;
+    polygon.polygonVertices[0] = {0.0F, 1.0F};
+    polygon.polygonVertices[1] = {-0.5878F, -0.8090F};
+    polygon.polygonVertices[2] = {0.9511F, 0.3090F};
+    polygon.polygonVertices[3] = {-0.9511F, 0.3090F};
+    polygon.polygonVertices[4] = {0.5878F, -0.8090F};
+    expectFailureCode(
+        validatePhysicsShape2DDesc(polygon),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    polygon = convexTriangle();
+    const float maximum = (std::numeric_limits<float>::max)();
+    polygon.localCenterMeters.x = maximum;
+    polygon.polygonVertices[0].x = maximum * 0.5F;
+    expectFailureCode(
+        validatePhysicsShape2DDesc(polygon),
+        Physics2DErrorCode::InvalidShapeDescription);
+}
+
+TEST(PhysicsWorld2DTest, ConvexPolygonFailureIsTransactionalAndLocalTransformIsApplied)
+{
+    auto worldResult = PhysicsWorld2D::Create(smallConfig(1, 1));
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    auto body = world.createBody({});
+    ASSERT_TRUE(body) << body.error().message;
+
+    PhysicsShape2DDesc invalid = convexTriangle();
+    const float maximum = (std::numeric_limits<float>::max)();
+    invalid.localCenterMeters.x = maximum;
+    invalid.polygonVertices[0].x = maximum * 0.5F;
+    expectFailureCode(
+        world.createShape(*body, invalid),
+        Physics2DErrorCode::InvalidShapeDescription);
+    EXPECT_EQ(world.stats().shapeCount, 0U);
+
+    PhysicsShape2DDesc transformed = convexTriangle();
+    transformed.localCenterMeters = {2.0F, 1.0F};
+    transformed.localAngleRadians = 0.5F * std::acos(-1.0F);
+    auto shape = world.createShape(*body, transformed);
+    ASSERT_TRUE(shape) << shape.error().message;
+    EXPECT_EQ(world.stats().shapeCount, 1U);
+
+    auto state = world.shapeState(*shape);
+    ASSERT_TRUE(state) << state.error().message;
+    EXPECT_EQ(state->kind, PhysicsShapeKind2D::ConvexPolygon);
+
+    PhysicsOverlapHit2D hit[1]{};
+    auto overlap = world.overlapAabb({{1.9F, 0.9F}, {2.1F, 1.1F}}, {}, hit);
+    ASSERT_TRUE(overlap) << overlap.error().message;
+    ASSERT_EQ(overlap->written, 1U);
+    EXPECT_EQ(hit[0].body, *body);
+    EXPECT_EQ(hit[0].shape, *shape);
 }
 
 TEST(PhysicsWorld2DTest, InvalidDescriptionsDoNotConsumeCapacity)
@@ -484,6 +609,8 @@ TEST(PhysicsWorld2DTest, DistanceJointLifecycleUsesGenerationHandles)
     EXPECT_EQ(state->bodyB, *bodyB);
     EXPECT_NEAR(state->lengthMeters, 2.0F, 1.0e-4F);
     EXPECT_TRUE(state->springEnabled);
+    EXPECT_NEAR(state->springHertz, 4.0F, 1.0e-5F);
+    EXPECT_NEAR(state->springDampingRatio, 0.5F, 1.0e-5F);
 
     expectFailureCode(world.createJoint(jointDescription), Physics2DErrorCode::CapacityExceeded);
     ASSERT_TRUE(world.destroyJoint(*firstJoint));
@@ -498,6 +625,241 @@ TEST(PhysicsWorld2DTest, DistanceJointLifecycleUsesGenerationHandles)
     EXPECT_FALSE(world.contains(*reusedJoint));
     expectFailureCode(world.destroyJoint(*reusedJoint), Physics2DErrorCode::StaleJoint);
     EXPECT_TRUE(world.contains(*bodyB));
+}
+
+TEST(PhysicsWorld2DTest, RejectsJointKindSpecificInvalidFieldsWithoutConsumingCapacity)
+{
+    PhysicsWorld2DConfig config = smallConfig(2, 1);
+    config.jointCapacity = 1;
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    auto bodyA = world.createBody(dynamicBody());
+    auto bodyB = world.createBody(dynamicBody());
+    ASSERT_TRUE(bodyA);
+    ASSERT_TRUE(bodyB);
+
+    PhysicsJoint2DDesc revolute;
+    revolute.kind = PhysicsJointKind2D::Revolute;
+    revolute.bodyA = *bodyA;
+    revolute.bodyB = *bodyB;
+    EXPECT_TRUE(validatePhysicsJoint2DDesc(revolute));
+
+    revolute.enableSpring = true;
+    revolute.hertz = 2.0F;
+    revolute.dampingRatio = 2.0F;
+    EXPECT_TRUE(validatePhysicsJoint2DDesc(revolute));
+
+    PhysicsJoint2DDesc invalid = revolute;
+    invalid.targetAngleRadians = std::numeric_limits<float>::quiet_NaN();
+    expectFailureCode(
+        validatePhysicsJoint2DDesc(invalid),
+        Physics2DErrorCode::InvalidJointDescription);
+
+    invalid = revolute;
+    invalid.targetAngleRadians = 4.0F;
+    expectFailureCode(
+        validatePhysicsJoint2DDesc(invalid),
+        Physics2DErrorCode::InvalidJointDescription);
+
+    invalid = revolute;
+    invalid.referenceAngleRadians = -4.0F;
+    expectFailureCode(
+        validatePhysicsJoint2DDesc(invalid),
+        Physics2DErrorCode::InvalidJointDescription);
+
+    invalid = revolute;
+    invalid.lowerAngleRadians = -4.0F;
+    expectFailureCode(
+        validatePhysicsJoint2DDesc(invalid),
+        Physics2DErrorCode::InvalidJointDescription);
+
+    invalid = revolute;
+    invalid.lowerAngleRadians = 0.25F;
+    invalid.upperAngleRadians = -0.25F;
+    expectFailureCode(
+        validatePhysicsJoint2DDesc(invalid),
+        Physics2DErrorCode::InvalidJointDescription);
+
+    invalid = revolute;
+    invalid.maxMotorTorqueNewtonMeters = -1.0F;
+    expectFailureCode(
+        validatePhysicsJoint2DDesc(invalid),
+        Physics2DErrorCode::InvalidJointDescription);
+
+    PhysicsJoint2DDesc prismatic;
+    prismatic.kind = PhysicsJointKind2D::Prismatic;
+    prismatic.bodyA = *bodyA;
+    prismatic.bodyB = *bodyB;
+    EXPECT_TRUE(validatePhysicsJoint2DDesc(prismatic));
+
+    prismatic.localAxisA = {(std::numeric_limits<float>::max)(), 1.0F};
+    EXPECT_TRUE(validatePhysicsJoint2DDesc(prismatic));
+
+    invalid = prismatic;
+    invalid.localAxisA = {};
+    expectFailureCode(
+        world.createJoint(invalid),
+        Physics2DErrorCode::InvalidJointDescription);
+    EXPECT_EQ(world.stats().jointCount, 0U);
+
+    invalid = prismatic;
+    invalid.lowerTranslationMeters = 1.0F;
+    invalid.upperTranslationMeters = -1.0F;
+    expectFailureCode(
+        validatePhysicsJoint2DDesc(invalid),
+        Physics2DErrorCode::InvalidJointDescription);
+
+    invalid = prismatic;
+    invalid.maxMotorForceNewtons = -1.0F;
+    expectFailureCode(
+        validatePhysicsJoint2DDesc(invalid),
+        Physics2DErrorCode::InvalidJointDescription);
+
+    auto valid = world.createJoint(revolute);
+    ASSERT_TRUE(valid) << valid.error().message;
+    EXPECT_EQ(world.stats().jointCount, 1U);
+}
+
+TEST(PhysicsWorld2DTest, RejectsCrossWorldJointHandlesAndBodyReferences)
+{
+    PhysicsWorld2DConfig config = smallConfig(2, 1);
+    config.jointCapacity = 1;
+    auto firstResult = PhysicsWorld2D::Create(config);
+    auto secondResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(firstResult);
+    ASSERT_TRUE(secondResult);
+    PhysicsWorld2D first = std::move(*firstResult);
+    PhysicsWorld2D second = std::move(*secondResult);
+
+    auto firstBodyA = first.createBody(dynamicBody());
+    auto firstBodyB = first.createBody(dynamicBody());
+    auto secondBody = second.createBody(dynamicBody());
+    ASSERT_TRUE(firstBodyA);
+    ASSERT_TRUE(firstBodyB);
+    ASSERT_TRUE(secondBody);
+
+    PhysicsJoint2DDesc joint;
+    joint.bodyA = *firstBodyA;
+    joint.bodyB = *firstBodyB;
+    auto firstJoint = first.createJoint(joint);
+    ASSERT_TRUE(firstJoint) << firstJoint.error().message;
+
+    EXPECT_FALSE(second.contains(*firstJoint));
+    expectFailureCode(second.jointState(*firstJoint), Physics2DErrorCode::WrongWorld);
+    expectFailureCode(second.destroyJoint(*firstJoint), Physics2DErrorCode::WrongWorld);
+
+    joint.bodyB = *secondBody;
+    expectFailureCode(first.createJoint(joint), Physics2DErrorCode::WrongWorld);
+    EXPECT_EQ(first.stats().jointCount, 1U);
+}
+
+TEST(PhysicsWorld2DTest, RevoluteAndPrismaticStateCascadeAndReuseGenerationHandles)
+{
+    PhysicsWorld2DConfig config = smallConfig(4, 1);
+    config.jointCapacity = 2;
+    config.gravityMetersPerSecondSquared = {0.0F, 0.0F};
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    auto bodyA = world.createBody(dynamicBody());
+    auto bodyB = world.createBody(dynamicBody());
+    auto bodyC = world.createBody(dynamicBody());
+    ASSERT_TRUE(bodyA);
+    ASSERT_TRUE(bodyB);
+    ASSERT_TRUE(bodyC);
+
+    PhysicsJoint2DDesc revolute;
+    revolute.kind = PhysicsJointKind2D::Revolute;
+    revolute.bodyA = *bodyA;
+    revolute.bodyB = *bodyB;
+    revolute.targetAngleRadians = 0.2F;
+    revolute.enableSpring = true;
+    revolute.hertz = 3.0F;
+    revolute.dampingRatio = 0.4F;
+    revolute.enableLimit = true;
+    revolute.lowerAngleRadians = -0.5F;
+    revolute.upperAngleRadians = 0.6F;
+    revolute.enableMotor = true;
+    revolute.motorSpeedRadiansPerSecond = 1.25F;
+    revolute.maxMotorTorqueNewtonMeters = 8.0F;
+    revolute.collideConnected = true;
+    auto revoluteJoint = world.createJoint(revolute);
+    ASSERT_TRUE(revoluteJoint) << revoluteJoint.error().message;
+
+    auto revoluteState = world.jointState(*revoluteJoint);
+    ASSERT_TRUE(revoluteState) << revoluteState.error().message;
+    EXPECT_EQ(revoluteState->kind, PhysicsJointKind2D::Revolute);
+    EXPECT_EQ(revoluteState->bodyA, *bodyA);
+    EXPECT_EQ(revoluteState->bodyB, *bodyB);
+    EXPECT_TRUE(std::isfinite(revoluteState->currentAngleRadians));
+    EXPECT_NEAR(revoluteState->targetAngleRadians, 0.2F, 1.0e-5F);
+    EXPECT_TRUE(revoluteState->springEnabled);
+    EXPECT_NEAR(revoluteState->springHertz, 3.0F, 1.0e-5F);
+    EXPECT_NEAR(revoluteState->springDampingRatio, 0.4F, 1.0e-5F);
+    EXPECT_TRUE(revoluteState->limitEnabled);
+    EXPECT_NEAR(revoluteState->lowerAngleRadians, -0.5F, 1.0e-5F);
+    EXPECT_NEAR(revoluteState->upperAngleRadians, 0.6F, 1.0e-5F);
+    EXPECT_TRUE(revoluteState->motorEnabled);
+    EXPECT_NEAR(revoluteState->motorSpeedRadiansPerSecond, 1.25F, 1.0e-5F);
+    EXPECT_NEAR(revoluteState->maxMotorTorqueNewtonMeters, 8.0F, 1.0e-5F);
+    EXPECT_TRUE(revoluteState->collideConnected);
+
+    PhysicsJoint2DDesc prismatic;
+    prismatic.kind = PhysicsJointKind2D::Prismatic;
+    prismatic.bodyA = *bodyA;
+    prismatic.bodyB = *bodyC;
+    prismatic.localAxisA = {2.0F, 0.0F};
+    prismatic.targetTranslationMeters = 0.25F;
+    prismatic.enableSpring = true;
+    prismatic.hertz = 2.5F;
+    prismatic.dampingRatio = 0.6F;
+    prismatic.enableLimit = true;
+    prismatic.lowerTranslationMeters = -0.75F;
+    prismatic.upperTranslationMeters = 0.8F;
+    prismatic.enableMotor = true;
+    prismatic.motorSpeedMetersPerSecond = 0.9F;
+    prismatic.maxMotorForceNewtons = 9.0F;
+    auto prismaticJoint = world.createJoint(prismatic);
+    ASSERT_TRUE(prismaticJoint) << prismaticJoint.error().message;
+
+    auto prismaticState = world.jointState(*prismaticJoint);
+    ASSERT_TRUE(prismaticState) << prismaticState.error().message;
+    EXPECT_EQ(prismaticState->kind, PhysicsJointKind2D::Prismatic);
+    EXPECT_EQ(prismaticState->bodyA, *bodyA);
+    EXPECT_EQ(prismaticState->bodyB, *bodyC);
+    EXPECT_TRUE(std::isfinite(prismaticState->currentTranslationMeters));
+    EXPECT_NEAR(prismaticState->targetTranslationMeters, 0.25F, 1.0e-5F);
+    EXPECT_TRUE(prismaticState->springEnabled);
+    EXPECT_NEAR(prismaticState->springHertz, 2.5F, 1.0e-5F);
+    EXPECT_NEAR(prismaticState->springDampingRatio, 0.6F, 1.0e-5F);
+    EXPECT_TRUE(prismaticState->limitEnabled);
+    EXPECT_NEAR(prismaticState->lowerTranslationMeters, -0.75F, 1.0e-5F);
+    EXPECT_NEAR(prismaticState->upperTranslationMeters, 0.8F, 1.0e-5F);
+    EXPECT_TRUE(prismaticState->motorEnabled);
+    EXPECT_NEAR(prismaticState->motorSpeedMetersPerSecond, 0.9F, 1.0e-5F);
+    EXPECT_NEAR(prismaticState->maxMotorForceNewtons, 9.0F, 1.0e-5F);
+
+    ASSERT_TRUE(world.destroyBody(*bodyA));
+    EXPECT_FALSE(world.contains(*revoluteJoint));
+    EXPECT_FALSE(world.contains(*prismaticJoint));
+    EXPECT_EQ(world.stats().jointCount, 0U);
+    expectFailureCode(world.jointState(*revoluteJoint), Physics2DErrorCode::StaleJoint);
+    expectFailureCode(world.jointState(*prismaticJoint), Physics2DErrorCode::StaleJoint);
+
+    auto replacement = world.createBody(dynamicBody());
+    ASSERT_TRUE(replacement) << replacement.error().message;
+    revolute.bodyA = *replacement;
+    auto reused = world.createJoint(revolute);
+    ASSERT_TRUE(reused) << reused.error().message;
+    if (reused->index() == revoluteJoint->index()) {
+        EXPECT_NE(reused->generation(), revoluteJoint->generation());
+    } else {
+        EXPECT_EQ(reused->index(), prismaticJoint->index());
+        EXPECT_NE(reused->generation(), prismaticJoint->generation());
+    }
 }
 
 TEST(PhysicsWorld2DTest, AdvancesByTheConfiguredFixedStepOnly)

@@ -23,7 +23,7 @@ Catalog package
   -> optional Sprite2DBindingRegistry (borrow AssetSystem + RenderDevice)
      / Mesh3DBindingRegistry (borrow AssetSystem + RenderDevice)
   -> optional TileMapStream chunk residency owner
-  -> optional TileMapInstance -> NavigationGrid2DData schema-v1 conversion
+  -> optional TileMapInstance -> immutable weighted NavigationGrid2DData conversion
   -> optional Null UploadTicket coordinator
 ```
 
@@ -51,7 +51,7 @@ Catalog package
 | Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
 | Editor Project Browser | 拥有 Catalog metadata、canonical cooked 相对路径与完整 dependency records 的 AssetId 排序索引，All/2D/3D/Media 过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
 | Editor source import | `--project-root` + 可重复混合 `--import-recipe`/`--import-gltf` 保留完整 intended unit 集；后台共享 pipeline 生成 fully validated fresh stage + sibling state，主线程安全帧 reload 后只提交 active pointer，reopen 验证并恢复 Catalog 与 unit 集 |
-| TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer + property-tagged visible Rectangle 原子生成 NavigationGrid2DData v1；当前不是新 AssetKind |
+| TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer、exact material-cost rule 与 property-tagged visible Rectangle 原子生成 immutable `NavigationGrid2DData`；当前不是新 AssetKind |
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
 `ParticleSystem2D`/`Trail2D` 与 3D `MeshRenderer3D` 复制 weak handle，并在 extraction 时显式借用产品 resolver；A2
@@ -371,9 +371,11 @@ budget。priority 不重排、取消或抢占已有 Requested/Resident slot，�
 resident 数据误当成 cache hit。
 
 `buildTileMapNavigation2DData(map, config, resource)` 位于 Asset 模块，但返回 Tina::Navigation2D-owned
-schema-v1 数据。solid tile layer 只把 Tileset `MaterialSolid` cell 设为 blocked；可选 object layer 只匹配
-visible Rectangle 的精确 property key/value，并按实际相交 cell 栅格化。引用 chunk 未驻留、layer kind
-错误、标记对象不是合法 Rectangle 或分配失败时不返回半份结果。该转换不修改 TileMapInstance，也不把
+的唯一当前 immutable grid 数据。solid tile layer 只把 Tileset
+`MaterialSolid` cell 设为 blocked；可选 exact full-material-flags rule 把 tile 映射为 `[1,16]` traversal
+multiplier；可选 object layer 只匹配 visible Rectangle 的精确
+property key/value，并按实际相交 cell 栅格化。引用 chunk 未驻留、layer kind/rule 错误、标记对象不是合法
+Rectangle 或分配失败时不返回半份结果。该转换不修改 TileMapInstance，也不把
 Navigation 数据写回 Catalog；产品 State 决定 Grid/Pathfinder 容量与重建时机。详见
 [2D 导航](navigation2d.md)。
 
@@ -442,8 +444,8 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
   live Catalog/project switch，以及 Editor source-import fresh-stage/reload/单一 pointer commit/reopen 产品流程均已完成；
   Windows 使用系统 dialog，Linux 私有 adapter 使用 `zenity` 并在缺失时回退 `kdialog`。Linux 定向编译与真实 helper
   产品门禁完成前，项目产品流程仍为 InProgress；
-- Navigation2D 的 runtime-derived schema-v1 grid、动态 blocker 和确定性 A* 已闭环；独立 Cooked
-  Navigation AssetKind、旧导航 schema migration、editor bake 与自动 Physics 同步仍未提供；
+- Navigation2D 的 runtime-derived immutable weighted grid、动态 blocker 和确定性四向/对角 A* 已闭环；独立 Cooked
+  Navigation AssetKind、editor bake 与自动 Physics 同步仍未提供；
 - shader/font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收；
 - Linux 当前 tip GCC13/Clang22（含 sanitizer）复验已由 `TEST-001` 关闭；可选 Wayland/真显示器是独立扩展。
 

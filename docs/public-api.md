@@ -66,8 +66,8 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::RenderBgfx` | optional installed bgfx Render adapter；需 `COMPONENTS RenderBgfx` |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
 | `Tina::DesktopBootstrap` | optional installed Windows/Linux Desktop 组合入口；需 `COMPONENTS DesktopBootstrap` |
-| `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail |
-| `Tina::Navigation2D` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* |
+| `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail、`CameraFollow2D` |
+| `Tina::Navigation2D` | immutable weighted grid、generation dynamic blocker、确定性四向/对角同步与分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
@@ -75,7 +75,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
 | `Tina::AudioMiniaudio` | optional installed miniaudio device/decode adapter；需 `COMPONENTS AudioMiniaudio` |
-| `Tina::Physics2D` | optional Box2D-backed Tina API |
+| `Tina::Physics2D` | optional Box2D-backed Box/Circle/Capsule/ConvexPolygon 与 Distance/Revolute/Prismatic API |
 
 Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
 `Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；安装 package 按构建图
@@ -538,26 +538,36 @@ segment 各自从创建时计算 lifetime/age，width 按 normalized age 在 sta
 非法 geometry、容量或 key exhaustion 不修改 anchor/segments/next key；update 对所有 age 先 preflight，
 成功后才推进和移除过期段。稳定 segment key 单调且不复用。
 
+`CameraFollow2D::Create()` 创建 allocation-free owner-thread controller。`fixedUpdate()` 先完整验证 target、
+positive viewport half extents、可选 world bounds 与 positive fixed delta，再按 dead zone 和可选最大速度计算
+next center，最后按 viewport clamp world；viewport 大于 world 时按轴居中。失败不改变 previous/current center，
+`snapTo()` 原子重置两份 snapshot，`interpolatedCenter([0,1])` 只产生 presentation 值，不修改 `Camera2D`
+projection component 或 `World`。
+
 当前没有公开 SceneManager、ECS registry 或 Runtime-owned World capability。EnTT 不在公开面，也未被当前
 Scene target 使用。
 
 ## Navigation2D
 
-`NavigationGrid2DData::Create()` 只接受 schema v1、精确 row-major cell flags 与正 finite cell size；旧
-schema 和保留 flag 直接失败。`NavigationGrid2D::Create()` 在调用方 PMR 上一次性建立固定容量
+`NavigationGrid2DData::Create()` 按唯一 `NavigationGrid2DContract` 校验精确 row-major cell flags/traversal costs 与正 finite
+cell size；每格 multiplier 必须在 `[1,16]`，非法尺寸、数组长度、multiplier 或保留 flag 直接失败。数据深拷贝到
+调用方 PMR，并保存全局最小 multiplier。`NavigationGrid2D::Create()` 在调用方 PMR 上一次性建立固定容量
 `NavigationBlockerId` generation pool 与 per-cell 引用计数。`addBlocker()`、`updateBlocker()`、
-`removeBlocker()` 对容量、越界、stale 和 wrong-owner 失败保持旧状态；重叠 blocker 不会互相误清除，真实
+`removeBlocker()` 对容量、越界、stale 和 wrong-owner 失败保持当前状态；重叠 blocker 不会互相误清除，真实
 mutation 推进 `revision()`。
 
-`NavigationPathfinder2D::Create(cellCapacity)` 一次性分配 records/open-set/path storage。四方向单位代价 A*
-按 `f`、Manhattan heuristic、row-major index 确定性决胜。`findPath()` 同步完成查询；
+`NavigationPathfinder2D::Create(cellCapacity)` 一次性分配 records/open-set/path storage。四向/对角 A* 的
+cardinal/diagonal 进入成本为 `10/14 × destination multiplier`；Disabled 使用 Manhattan，启用对角使用
+octile，两者乘 grid 最小 multiplier 保持 admissible，并按 `f`、heuristic、row-major index 确定性决胜。
+对角策略可严格要求相邻正交格均畅通，或显式允许切角。`findPath()` 同步完成查询；
 `begin()/advance(expansionBudget)` 提供调用方编排的分步查询，`cancel()` 产生吸收态 `Cancelled`。blocked
 endpoint 或 open set 耗尽返回 `Unreachable`；Pending 期间 Grid 地址或 revision 变化返回 `Invalidated`。
 越界 cell、零 budget 和未开始 query 是 `Core::Result` error。`path()` 只借用到下一次
 `begin()/reset()` 或 Pathfinder 析构。
 
 `Asset::buildTileMapNavigation2DData()` 是 TileMap 转换桥：solid tile layer 中 `MaterialSolid` cell 进入 base
-blocked flags；可选 object layer 只栅格化 property 精确匹配的 visible Rectangle。引用的 TileMapChunk 必须
+blocked flags；可选 exact full-material-flags rule 写入 traversal multiplier；可选 object layer 只栅格化
+property 精确匹配的 visible Rectangle。引用的 TileMapChunk 必须
 已驻留，任何 layer/chunk/object/schema 错误都不返回半份数据。结果当前不是 Catalog `AssetKind`；产品 State
 持有 Grid/Pathfinder，Scene、Runtime、Render 和 Physics2D 不隐式取得所有权。详见
 [2D 导航](navigation2d.md)。
@@ -801,8 +811,30 @@ resident capacity 时 failure 是 transactional，旧 active set 保持不变；
 cache，overflow 时按最近一次成功 demand update 的 recency 自动淘汰，读取 API 不 touch recency。同一 chunk 的 demand
 取最高 `TileMapChunkDemand::priority`；新请求按 `priority desc -> layerId -> chunkY -> chunkX` 稳定 dispatch，只消费本轮
 request budget，不重排或抢占已经 Requested/Resident 的 slot。
-`map()` 是借用视图：先把 stream 放到最终地址再创建 `TileMapGridCollision`，stream 不得在
-borrower 存活时移动，并必须早于它所引用的 `AssetSystem` 析构。
+`map()` 是借用视图：先把 stream 放到最终地址再创建 `TileMapGridCollision` 或
+`TileMapPhysicsSync2D`，stream 不得在 borrower 存活时移动，并必须早于它所引用的 `AssetSystem` 析构。
+
+`Physics2D::createStaticBodyForSolidRectangles(world, rectangles, cellSizeMeters, material)` 是 Physics2D
+侧唯一的 grid collider 入口：一次调用创建**一个 static body**，并为每个 `PhysicsGridSolidRect2D` 挂一个
+box shape。空 span 是成功的 no-op 且返回空 body id；非法矩形（零宽/零高、cell 越界、非有限中心/extent）
+返回 `InvalidShapeDescription`，非法 `cellSizeMeters` 或 material 返回 `InvalidConfiguration`，两者都在
+创建任何 body 之前拒绝。任一 shape 创建失败会销毁该 body 与本次已创建的全部 shape。Physics2D 不 include
+TileMap，也不感知 chunk。
+
+`Asset::TileMapPhysicsSync2D` 是唯一现行 TileMap→Physics 桥；逐 cell 的
+`collectSolidCellsForPhysics()`、`collectAllSolidCellsForPhysics()` 与
+`syncTileMapSolidsToStaticBodies()` 已删除，不提供兼容别名。`Create(map, config)` 绑定一个 tile layer 并
+在此处完成全部持久分配（chunk record、rectangle scratch、occupancy、staged/retired 列表）；
+`rectangleCapacityPerChunk=0` 表示取源 chunk 的精确 cell 数，超过一个 chunk 的值、`layerId=0`、
+非 tile layer、超出 chunk capacity 上限与非法 material 都在发布前失败。`synchronize(map, world)` 是
+owner-thread 调用，只遍历 resident chunk，按 `residencyGeneration` + `contentRevision` 判定
+unchanged/added/rebuilt/removed；unchanged chunk 保留原 body，不销毁重建。变化 chunk 经确定性 greedy
+rectangle 合并后整体 staged，全部成功才退休旧 body；bake/create/capacity 失败保留上一次成功发布的
+collider 并且不推进 `stats()`，容量不足返回 `AssetErrorCode::TileMapPhysicsCapacityExceeded`。
+`Create()` 之后稳态零分配。绑定契约（tile map/tileset AssetId、尺寸、chunk size、cell size）不匹配的
+map 会被拒绝，world 关闭时返回 `WorldClosed`。必须在 world 关闭或 `TileMapInstance` 消失之前调用
+`shutdown(world)`；它 owner-thread 幂等，成功后对象仍可重新 `synchronize()`。该类型不持有
+`AssetLease`、GPU resource 或 Scene 状态，只保存 generation-aware 的 runtime body handle。
 
 `AssetSystem` 提供 request/load/pump、generation slot 与 typed state。`AssetHandle` 是弱 lookup；
 `AssetLease` 强保活 CPU payload。逻辑 invalidation 不等于物理释放。产品 helper 可把 Cooked Texture2D/
@@ -918,8 +950,10 @@ consumer。EOF 排空后单次 Stopped、cancel 单次 Cancelled，terminal comp
 
 `PhysicsWorld2D` 提供 Box2D-backed fixed-step world，以及相互独立的 body/shape/joint generation ID。
 唯一创建模型是 `createBody()` + `createShape()`；backend-neutral `PhysicsShape2DDesc` 支持
-Box/Circle/Capsule 与 sensor，一个 body 可拥有多个 shape。sensor enter/exit 通过 contact view 的
-`isSensor` 表达；joint 当前为 Distance，并有 create/query/destroy 与关联 body 级联 retirement。公共面还
+Box/Circle/Capsule/ConvexPolygon 与 sensor，一个 body 可拥有多个 shape。ConvexPolygon 接受3..8个严格凸、
+顺/逆时针边界顶点及有限 local transform。sensor enter/exit 通过 contact view 的 `isSensor` 表达；joint 支持
+Distance/Revolute/Prismatic，`jointState()` 返回适用于当前 kind 的 spring/limit/motor backend snapshot，
+并有 create/query/destroy 与关联 body 级联 retirement。公共面还
 包含 query、deferred command 与 Tile grid static body helper。Box2D 类型不出现在 public header；
 Jolt/Physics3D 尚未接入。
 
@@ -952,14 +986,15 @@ Jolt/Physics3D 尚未接入。
 `blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / present-return CPU
 submission ledger；Focus Scope/Modal/持久 Pointer Capture；ScrollView/Dropdown/Popup/虚拟
 ListView/TreeView；`UIFlowLayerId`/`UIFlowScreenId`、固定容量 Screen stack、16 槽 `UIFlowLocalUserId` 与 Gamepad assignment；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
-Invoke/Toggle/RangeValue/Value patterns；schema-v1 Navigation2D grid、动态 blocker 与确定性同步/分步 A*。
+Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid、动态 blocker、四向/对角同步与
+分步 A*；allocation-free `CameraFollow2D`；Physics2D ConvexPolygon 与 Revolute/Prismatic joint。
 
 **仍不存在或未完成：**
 
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
-- TileMap 更高层 editor orchestration 与旧 schema migration；
+- TileMap 更高层 editor orchestration；
 - 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
 - stylesheet 更广 opacity 等属性面、完整 keyframe timeline 与 layout animation；imageTint、paint-only Motion

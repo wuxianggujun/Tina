@@ -1,5 +1,6 @@
 set(TINA_SCENE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Camera2D.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/CameraFollow2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/DirectionalLight3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Entity.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ExtractRenderScene.hpp
@@ -23,6 +24,7 @@ set(TINA_SCENE_PUBLIC_HEADERS
 
 add_library(tina_scene STATIC
     ${TINA_SCENE_PUBLIC_HEADERS}
+    CameraFollow2D.cpp
     ExtractRenderScene.cpp
     ParticleSystem2D.cpp
     PrefabInstantiate.cpp

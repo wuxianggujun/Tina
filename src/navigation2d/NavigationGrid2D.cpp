@@ -2,6 +2,7 @@
 
 #include <tina/navigation2d/NavigationErrors.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <new>
@@ -9,37 +10,36 @@
 
 namespace Tina::Navigation2D {
 
-NavigationGrid2DData::NavigationGrid2DData(Core::u16 schemaVersion, Core::u32 widthCells,
-                                           Core::u32 heightCells, float cellSizeMeters,
-                                           std::pmr::vector<Core::u8> cellFlags) noexcept
-    : m_schemaVersion(schemaVersion), m_widthCells(widthCells), m_heightCells(heightCells),
-      m_cellSizeMeters(cellSizeMeters), m_cellFlags(std::move(cellFlags))
+NavigationGrid2DData::NavigationGrid2DData(Core::u32 widthCells, Core::u32 heightCells,
+                                           float cellSizeMeters,
+                                           std::pmr::vector<Core::u8> cellFlags,
+                                           std::pmr::vector<Core::u8> traversalCosts,
+                                           Core::u8 minimumTraversalCost) noexcept
+    : m_widthCells(widthCells), m_heightCells(heightCells), m_cellSizeMeters(cellSizeMeters),
+      m_cellFlags(std::move(cellFlags)),
+      m_traversalCosts(std::move(traversalCosts)), m_minimumTraversalCost(minimumTraversalCost)
 {
 }
 
 NavigationGrid2DData::NavigationGrid2DData(NavigationGrid2DData&& other) noexcept
-    : m_schemaVersion(std::exchange(other.m_schemaVersion, 0)),
-      m_widthCells(std::exchange(other.m_widthCells, 0)),
+    : m_widthCells(std::exchange(other.m_widthCells, 0)),
       m_heightCells(std::exchange(other.m_heightCells, 0)),
       m_cellSizeMeters(std::exchange(other.m_cellSizeMeters, 0.0F)),
-      m_cellFlags(std::move(other.m_cellFlags))
+      m_cellFlags(std::move(other.m_cellFlags)),
+      m_traversalCosts(std::move(other.m_traversalCosts)),
+      m_minimumTraversalCost(std::exchange(other.m_minimumTraversalCost, 0))
 {
 }
 
 Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
     const NavigationGrid2DDataDesc& desc, std::pmr::memory_resource& resource)
 {
-    if (desc.schemaVersion != NavigationGrid2DSchema::Version)
-    {
-        return Core::failure(NavigationErrorCode::InvalidData,
-                             "navigation grid data schema version is not supported");
-    }
     if (desc.widthCells == 0U || desc.heightCells == 0U ||
-        desc.widthCells > NavigationGrid2DSchema::MaximumDimension ||
-        desc.heightCells > NavigationGrid2DSchema::MaximumDimension)
+        desc.widthCells > NavigationGrid2DContract::MaximumDimension ||
+        desc.heightCells > NavigationGrid2DContract::MaximumDimension)
     {
         return Core::failure(NavigationErrorCode::InvalidData,
-                             "navigation grid dimensions are outside the schema-v1 range");
+                             "navigation grid dimensions are outside the supported range");
     }
     if (!std::isfinite(desc.cellSizeMeters) || !(desc.cellSizeMeters > 0.0F))
     {
@@ -55,26 +55,41 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
                              "navigation grid cell count overflowed addressable storage");
     }
     const Core::usize cellCount = width * height;
-    if (cellCount > NavigationGrid2DSchema::MaximumCellCount || desc.cellFlags.size() != cellCount)
+    if (cellCount > NavigationGrid2DContract::MaximumCellCount || desc.cellFlags.size() != cellCount
+        || desc.traversalCosts.size() != cellCount)
     {
         return Core::failure(NavigationErrorCode::InvalidData,
-                             "navigation grid cell flags do not match the schema-v1 dimensions");
+                             "navigation grid fields do not match the declared dimensions");
     }
     for (const Core::u8 flags : desc.cellFlags)
     {
-        if ((flags & static_cast<Core::u8>(~NavigationGrid2DSchema::ValidCellFlags)) != 0U)
+        if ((flags & static_cast<Core::u8>(~NavigationGrid2DContract::ValidCellFlags)) != 0U)
         {
             return Core::failure(NavigationErrorCode::InvalidData,
-                                 "navigation grid cell contains reserved schema-v1 flags");
+                                 "navigation grid cell contains unsupported flags");
         }
+    }
+    Core::u8 minimumTraversalCost = NavigationGrid2DContract::MaximumTraversalCost;
+    for (const Core::u8 traversalCost : desc.traversalCosts)
+    {
+        if (traversalCost < NavigationGrid2DContract::MinimumTraversalCost
+            || traversalCost > NavigationGrid2DContract::MaximumTraversalCost)
+        {
+            return Core::failure(NavigationErrorCode::InvalidData,
+                                 "navigation grid traversal cost is outside the supported range");
+        }
+        minimumTraversalCost = (std::min)(minimumTraversalCost, traversalCost);
     }
 
     try
     {
         std::pmr::vector<Core::u8> cellFlags{&resource};
         cellFlags.assign(desc.cellFlags.begin(), desc.cellFlags.end());
-        return NavigationGrid2DData(desc.schemaVersion, desc.widthCells, desc.heightCells,
-                                    desc.cellSizeMeters, std::move(cellFlags));
+        std::pmr::vector<Core::u8> traversalCosts{&resource};
+        traversalCosts.assign(desc.traversalCosts.begin(), desc.traversalCosts.end());
+        return NavigationGrid2DData(desc.widthCells, desc.heightCells, desc.cellSizeMeters,
+                                    std::move(cellFlags),
+                                    std::move(traversalCosts), minimumTraversalCost);
     }
     catch (const std::bad_alloc&)
     {
@@ -85,8 +100,10 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
 
 NavigationGrid2DData::operator bool() const noexcept
 {
-    return m_schemaVersion == NavigationGrid2DSchema::Version && m_widthCells != 0U &&
-           m_heightCells != 0U && !m_cellFlags.empty();
+    return m_widthCells != 0U && m_heightCells != 0U && !m_cellFlags.empty()
+           && m_traversalCosts.size() == m_cellFlags.size()
+           && m_minimumTraversalCost >= NavigationGrid2DContract::MinimumTraversalCost
+           && m_minimumTraversalCost <= NavigationGrid2DContract::MaximumTraversalCost;
 }
 
 bool NavigationGrid2DData::inBounds(NavigationCell2D cell) const noexcept
@@ -101,7 +118,17 @@ bool NavigationGrid2DData::blockedAt(NavigationCell2D cell) const noexcept
         return true;
     }
     const Core::usize index = static_cast<Core::usize>(cell.y) * m_widthCells + cell.x;
-    return (m_cellFlags[index] & NavigationGrid2DSchema::CellBlocked) != 0U;
+    return (m_cellFlags[index] & NavigationGrid2DContract::CellBlocked) != 0U;
+}
+
+Core::u8 NavigationGrid2DData::traversalCostAt(NavigationCell2D cell) const noexcept
+{
+    if (!inBounds(cell))
+    {
+        return 0;
+    }
+    const Core::usize index = static_cast<Core::usize>(cell.y) * m_widthCells + cell.x;
+    return m_traversalCosts[index];
 }
 
 NavigationGrid2D::NavigationGrid2D(NavigationGrid2DData data, BlockerPool blockers,
@@ -124,10 +151,10 @@ Core::Result<NavigationGrid2D> NavigationGrid2D::Create(
     if (!data)
     {
         return Core::failure(NavigationErrorCode::InvalidData,
-                             "navigation grid requires valid schema-v1 data");
+                             "navigation grid requires valid immutable grid data");
     }
     if (config.dynamicBlockerCapacity == 0U ||
-        config.dynamicBlockerCapacity > NavigationGrid2DSchema::MaximumDynamicBlockers)
+        config.dynamicBlockerCapacity > NavigationGrid2DContract::MaximumDynamicBlockers)
     {
         return Core::failure(NavigationErrorCode::CapacityExceeded,
                              "navigation dynamic blocker capacity is outside the supported range");

@@ -143,18 +143,31 @@ if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
 $requiredProductEvidence = @(
-    'evidenceSchema\":24',
+    'evidenceSchema\":27',
     'navigationReady\":true',
-    'navigationSchemaVersion\":1',
     'navigationSolidTileCells\":11',
     'navigationBlockerRectangles\":1',
     'navigationBlockedCells\":13',
-    'navigationBasePathCells\":7',
-    'navigationDynamicPathCells\":9',
+    'navigationWeightedCells\":1',
+    'navigationMaximumTraversalCost\":5',
+    'navigationBasePathCells\":9',
+    'navigationBasePathCost\":80',
+    'navigationDynamicPathCells\":7',
+    'navigationDynamicPathCost\":100',
+    'navigationStrictDiagonalPathCells\":6',
+    'navigationStrictDiagonalPathCost\":62',
+    'navigationCornerCutPathCells\":5',
+    'navigationCornerCutPathCost\":56',
+    'navigationWeightedPathCells\":7',
+    'navigationWeightedPathCost\":60',
+    'navigationWeightedPathAvoidedCostCell\":true',
     'navigationIncrementalExpandedNodes\":1',
     'navigationGridRevision\":3',
     'navigationDynamicBlockerMutations\":2',
     'navigationCancelled\":true',
+    'physicsConvexPolygonReady\":true',
+    'physicsRevoluteJointReady\":true',
+    'physicsPrismaticJointReady\":true',
     'sprite2DLightingConfigured\":true',
     'authoredPointLight2DCount\":3',
     'pointLight2DCount\":2',
@@ -163,6 +176,7 @@ $requiredProductEvidence = @(
     'softShadowPointLight2DCount\":2',
     'normalMappedSpriteCount\":1',
     'sceneLightingFrames\":[1-9][0-9]*',
+    'renderFrameAccountingValid\":true',
     'uiThemeDemoRequested\":true',
     'uiThemeSwitches\":2',
     'uiThemeButtonActivations\":0',
@@ -253,10 +267,19 @@ $renderExtractionsMatch =
     [regex]::Match($sampleOut, 'renderExtractions\":(?<value>[1-9][0-9]*)')
 $sceneLightingFramesMatch =
     [regex]::Match($sampleOut, 'sceneLightingFrames\":(?<value>[1-9][0-9]*)')
+$submittedRenderFramesMatch =
+    [regex]::Match($sampleOut, 'submittedRenderFrames\":(?<value>[1-9][0-9]*)')
+$skippedSuspendedSurfaceFramesMatch =
+    [regex]::Match($sampleOut, 'skippedSuspendedSurfaceFrames\":(?<value>[0-9]+)')
 if (-not $renderExtractionsMatch.Success -or -not $sceneLightingFramesMatch.Success -or
-    $renderExtractionsMatch.Groups['value'].Value -ne
-        $sceneLightingFramesMatch.Groups['value'].Value) {
-    Add-Step -Name 'sceneLightingFrames' -ExitCode 1 -Detail 'sceneLightingFrames must equal renderExtractions'
+    -not $submittedRenderFramesMatch.Success -or -not $skippedSuspendedSurfaceFramesMatch.Success -or
+    [int64]$sceneLightingFramesMatch.Groups['value'].Value -ne
+        [int64]$submittedRenderFramesMatch.Groups['value'].Value -or
+    [int64]$renderExtractionsMatch.Groups['value'].Value -ne
+        [int64]$submittedRenderFramesMatch.Groups['value'].Value +
+        [int64]$skippedSuspendedSurfaceFramesMatch.Groups['value'].Value) {
+    Add-Step -Name 'sceneLightingFrames' -ExitCode 1 `
+        -Detail 'lighting submissions plus suspended-surface skips must exactly account for renderExtractions'
 }
 Add-Step -Name 'tina_sample_2d' -ExitCode 0 -Detail "productGate=$expectedGate frames=$SampleFrames"
 

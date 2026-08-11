@@ -16,10 +16,13 @@ namespace {
     std::pmr::memory_resource& memory)
 {
     std::vector<Core::u8> flags(static_cast<Core::usize>(width) * height, 0U);
+    std::vector<Core::u8> traversalCosts(
+        static_cast<Core::usize>(width) * height,
+        NavigationGrid2DContract::MinimumTraversalCost);
     for (const NavigationCell2D cell : blocked)
     {
         flags[static_cast<Core::usize>(cell.y) * width + cell.x] =
-            NavigationGrid2DSchema::CellBlocked;
+            NavigationGrid2DContract::CellBlocked;
     }
     auto data = NavigationGrid2DData::Create(
         NavigationGrid2DDataDesc{
@@ -27,33 +30,73 @@ namespace {
             .heightCells = height,
             .cellSizeMeters = 0.5F,
             .cellFlags = flags,
+            .traversalCosts = traversalCosts,
         },
         memory);
     EXPECT_TRUE(data.has_value()) << (data ? "" : data.error().message);
     return std::move(*data);
 }
 
-TEST(NavigationGrid2DDataTests, RejectsInvalidSchemaDimensionsAndReservedFlags)
+TEST(NavigationGrid2DDataTests, RejectsInvalidDimensionsFlagsAndTraversalCosts)
 {
     std::pmr::unsynchronized_pool_resource memory;
     const std::array<Core::u8, 1> clear{0U};
+    const std::array<Core::u8, 2> clearTwo{0U, 0U};
+    const std::array<Core::u8, 1> unitCost{1U};
+    const std::array<Core::u8, 2> unitCostTwo{1U, 1U};
 
-    auto oldSchema = NavigationGrid2DData::Create(
-        NavigationGrid2DDataDesc{.schemaVersion = 0, .widthCells = 1, .heightCells = 1, .cellFlags = clear},
-        memory);
-    ASSERT_FALSE(oldSchema.has_value());
-    EXPECT_EQ(oldSchema.error().code, NavigationErrorCode::InvalidData);
+    auto wrongFlagCount = NavigationGrid2DData::Create(
+        NavigationGrid2DDataDesc{.widthCells = 2, .heightCells = 1, .cellFlags = clear,
+                                 .traversalCosts = unitCostTwo}, memory);
+    ASSERT_FALSE(wrongFlagCount.has_value());
+    EXPECT_EQ(wrongFlagCount.error().code, NavigationErrorCode::InvalidData);
 
-    auto wrongCount = NavigationGrid2DData::Create(
-        NavigationGrid2DDataDesc{.widthCells = 2, .heightCells = 1, .cellFlags = clear}, memory);
-    ASSERT_FALSE(wrongCount.has_value());
-    EXPECT_EQ(wrongCount.error().code, NavigationErrorCode::InvalidData);
+    auto wrongCostCount = NavigationGrid2DData::Create(
+        NavigationGrid2DDataDesc{.widthCells = 2, .heightCells = 1, .cellFlags = clearTwo,
+                                 .traversalCosts = unitCost}, memory);
+    ASSERT_FALSE(wrongCostCount.has_value());
+    EXPECT_EQ(wrongCostCount.error().code, NavigationErrorCode::InvalidData);
 
     const std::array<Core::u8, 1> reserved{2U};
     auto reservedFlags = NavigationGrid2DData::Create(
-        NavigationGrid2DDataDesc{.widthCells = 1, .heightCells = 1, .cellFlags = reserved}, memory);
+        NavigationGrid2DDataDesc{.widthCells = 1, .heightCells = 1, .cellFlags = reserved,
+                                 .traversalCosts = unitCost}, memory);
     ASSERT_FALSE(reservedFlags.has_value());
     EXPECT_EQ(reservedFlags.error().code, NavigationErrorCode::InvalidData);
+
+    const std::array<Core::u8, 1> zeroCost{0U};
+    auto invalidCost = NavigationGrid2DData::Create(
+        NavigationGrid2DDataDesc{.widthCells = 1, .heightCells = 1, .cellFlags = clear,
+                                 .traversalCosts = zeroCost}, memory);
+    ASSERT_FALSE(invalidCost.has_value());
+    EXPECT_EQ(invalidCost.error().code, NavigationErrorCode::InvalidData);
+
+    const std::array<Core::u8, 1> excessiveCost{
+        static_cast<Core::u8>(NavigationGrid2DContract::MaximumTraversalCost + 1U)};
+    auto excessiveTraversalCost = NavigationGrid2DData::Create(
+        NavigationGrid2DDataDesc{.widthCells = 1, .heightCells = 1, .cellFlags = clear,
+                                 .traversalCosts = excessiveCost}, memory);
+    ASSERT_FALSE(excessiveTraversalCost.has_value());
+    EXPECT_EQ(excessiveTraversalCost.error().code, NavigationErrorCode::InvalidData);
+}
+
+TEST(NavigationGrid2DDataTests, OwnsTraversalCostsAndPublishesMinimum)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    std::array<Core::u8, 3> flags{};
+    std::array<Core::u8, 3> costs{4U, 2U, NavigationGrid2DContract::MaximumTraversalCost};
+    auto data = NavigationGrid2DData::Create(
+        NavigationGrid2DDataDesc{.widthCells = 3, .heightCells = 1, .cellFlags = flags,
+                                 .traversalCosts = costs}, memory);
+    ASSERT_TRUE(data.has_value()) << data.error().message;
+
+    flags[0] = NavigationGrid2DContract::CellBlocked;
+    costs[0] = NavigationGrid2DContract::MinimumTraversalCost;
+    EXPECT_EQ(data->minimumTraversalCost(), 2U);
+    EXPECT_FALSE(data->blockedAt({0, 0}));
+    EXPECT_EQ(data->traversalCostAt({0, 0}), 4U);
+    EXPECT_EQ(data->traversalCostAt({2, 0}), NavigationGrid2DContract::MaximumTraversalCost);
+    EXPECT_EQ(data->traversalCostAt({3, 0}), 0U);
 }
 
 TEST(NavigationGrid2DTests, DynamicBlockersAreGenerationSafeReferenceCountedAndRevisioned)

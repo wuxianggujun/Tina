@@ -370,6 +370,45 @@ TEST_F(UITreeViewTest, VirtualizesOneHundredThousandItemsWithFixedNodePool)
     EXPECT_EQ(accessibleRow->level, row->level);
 }
 
+TEST_F(UITreeViewTest, ProgrammaticSelectionPublishesSelectedAccessibleVirtualItem)
+{
+    constexpr u32 RowCapacity = 12;
+    constexpr u64 SelectedIndex = 12;
+    auto context = createContext(window, ContextNodeCapacity);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    FlatTreeDataSource source{.count = 13, .keyBase = 400};
+
+    const UI::UINodeId treeView =
+        *updater.createElement(root.rootNodeId(), UI::makeTreeViewElement({.materializedItemCapacity = RowCapacity}));
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    assertOk(updater.setLayoutStyle(treeView, fixedSize(100.0F, 100.0F)));
+    assertOk(updater.setTreeViewStyle(treeView, {
+                                                    .rowHeight = 20.0F,
+                                                    .overscanRows = 2,
+                                                    .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                                                }));
+    assertOk(updater.setTreeViewDataSource(treeView, source.view()));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    assertOk(updater.setTreeViewSelectedIndex(treeView, SelectedIndex));
+    assertOk(updater.scrollTreeViewToIndex(treeView, SelectedIndex, UI::UITreeViewScrollAlignment::End));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    const UI::UISemanticsEntry* selected = findVirtualItem(context->committedSemantics(), SelectedIndex);
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected->virtualItemKey, 413U);
+    EXPECT_TRUE(selected->selected);
+
+    UI::UIAccessibilityTree accessibility;
+    assertOk(accessibility.rebuildFrom(context->committedSemantics()));
+    const UI::UIAccessibilityNode* accessible = accessibility.findNode(selected->node);
+    ASSERT_NE(accessible, nullptr);
+    EXPECT_EQ(accessible->virtualItemKey, selected->virtualItemKey);
+    EXPECT_TRUE(UI::hasState(accessible->states, UI::UIAccessibilityState::Selected));
+}
+
 TEST_F(UITreeViewTest, PointerSelectsRowsAndDisclosureTogglesCommittedStableKey)
 {
     constexpr u32 RowCapacity = 10;

@@ -10,6 +10,22 @@
 
 namespace Tina::Navigation2D {
 
+namespace {
+
+[[nodiscard]] constexpr bool validDiagonalMode(NavigationDiagonalMode2D mode) noexcept
+{
+    switch (mode)
+    {
+    case NavigationDiagonalMode2D::Disabled:
+    case NavigationDiagonalMode2D::RequireClearAdjacentCells:
+    case NavigationDiagonalMode2D::AllowCornerCutting:
+        return true;
+    }
+    return false;
+}
+
+} // namespace
+
 NavigationPathfinder2D::NavigationPathfinder2D(Core::usize cellCapacity,
                                                std::pmr::vector<NodeRecord> records,
                                                std::pmr::vector<Core::u32> openHeap,
@@ -30,6 +46,8 @@ NavigationPathfinder2D::NavigationPathfinder2D(NavigationPathfinder2D&& other) n
       m_epoch(std::exchange(other.m_epoch, 0)),
       m_gridRevision(std::exchange(other.m_gridRevision, 0)),
       m_expandedNodes(std::exchange(other.m_expandedNodes, 0)),
+      m_options(std::exchange(other.m_options, {})),
+      m_pathCost(std::exchange(other.m_pathCost, 0)),
       m_state(std::exchange(other.m_state, NavigationPathQueryState::Idle))
 {
 }
@@ -37,7 +55,7 @@ NavigationPathfinder2D::NavigationPathfinder2D(NavigationPathfinder2D&& other) n
 Core::Result<NavigationPathfinder2D> NavigationPathfinder2D::Create(
     NavigationPathfinder2DConfig config, std::pmr::memory_resource& resource)
 {
-    if (config.cellCapacity == 0U || config.cellCapacity > NavigationGrid2DSchema::MaximumCellCount ||
+    if (config.cellCapacity == 0U || config.cellCapacity > NavigationGrid2DContract::MaximumCellCount ||
         config.cellCapacity > static_cast<Core::usize>((std::numeric_limits<Core::u32>::max)()))
     {
         return Core::failure(NavigationErrorCode::CapacityExceeded,
@@ -91,7 +109,19 @@ Core::u32 NavigationPathfinder2D::heuristic(Core::u32 index) const noexcept
     const NavigationCell2D goal = cellForIndex(m_goalIndex);
     const Core::u32 dx = cell.x > goal.x ? cell.x - goal.x : goal.x - cell.x;
     const Core::u32 dy = cell.y > goal.y ? cell.y - goal.y : goal.y - cell.y;
-    return dx + dy;
+    Core::u32 distanceCost = 0;
+    if (m_options.diagonalMode == NavigationDiagonalMode2D::Disabled)
+    {
+        distanceCost = NavigationPathCost2D::Cardinal * (dx + dy);
+    }
+    else
+    {
+        const Core::u32 diagonalSteps = (std::min)(dx, dy);
+        const Core::u32 cardinalSteps = (std::max)(dx, dy) - diagonalSteps;
+        distanceCost = NavigationPathCost2D::Diagonal * diagonalSteps +
+                       NavigationPathCost2D::Cardinal * cardinalSteps;
+    }
+    return distanceCost * m_grid->minimumTraversalCost();
 }
 
 bool NavigationPathfinder2D::higherPriority(Core::u32 left, Core::u32 right) const noexcept
@@ -234,12 +264,13 @@ void NavigationPathfinder2D::setTerminal(NavigationPathQueryState state) noexcep
     if (state != NavigationPathQueryState::Reached)
     {
         m_path.clear();
+        m_pathCost = 0;
     }
 }
 
 Core::Result<NavigationPathQueryResult>
 NavigationPathfinder2D::begin(const NavigationGrid2D& grid, NavigationCell2D start,
-                              NavigationCell2D goal)
+                              NavigationCell2D goal, NavigationPathQueryOptions options)
 {
     if (!grid)
     {
@@ -256,6 +287,11 @@ NavigationPathfinder2D::begin(const NavigationGrid2D& grid, NavigationCell2D sta
         return Core::failure(NavigationErrorCode::InvalidCell,
                              "navigation path start or goal is outside the grid");
     }
+    if (!validDiagonalMode(options.diagonalMode))
+    {
+        return Core::failure(NavigationErrorCode::InvalidData,
+                             "navigation path query diagonal mode is invalid");
+    }
 
     startNewEpoch();
     m_openHeap.clear();
@@ -267,6 +303,8 @@ NavigationPathfinder2D::begin(const NavigationGrid2D& grid, NavigationCell2D sta
     m_goalIndex = cellIndex(goal);
     m_gridRevision = grid.revision();
     m_expandedNodes = 0;
+    m_options = options;
+    m_pathCost = 0;
     m_state = NavigationPathQueryState::Pending;
 
     if (grid.isBlocked(start) || grid.isBlocked(goal))
@@ -312,7 +350,8 @@ NavigationPathfinder2D::advance(const NavigationGrid2D& grid, Core::usize expans
         return result();
     }
 
-    const auto visitNeighbor = [this, &grid](Core::u32 currentIndex, NavigationCell2D neighbor) {
+    const auto visitNeighbor = [this, &grid](Core::u32 currentIndex, NavigationCell2D neighbor,
+                                             Core::u32 movementCost) {
         if (!grid.inBounds(neighbor) || grid.isBlocked(neighbor))
         {
             return;
@@ -323,7 +362,9 @@ NavigationPathfinder2D::advance(const NavigationGrid2D& grid, Core::usize expans
         {
             return;
         }
-        const Core::u32 tentativeCost = m_records[currentIndex].gCost + 1U;
+        const Core::u32 weightedMovementCost =
+            movementCost * static_cast<Core::u32>(grid.traversalCostAt(neighbor));
+        const Core::u32 tentativeCost = m_records[currentIndex].gCost + weightedMovementCost;
         if (tentativeCost >= neighborRecord.gCost)
         {
             return;
@@ -356,6 +397,7 @@ NavigationPathfinder2D::advance(const NavigationGrid2D& grid, Core::usize expans
                 reset();
                 return Core::failure(std::move(status.error()));
             }
+            m_pathCost = currentRecord.gCost;
             setTerminal(NavigationPathQueryState::Reached);
             return result();
         }
@@ -364,19 +406,53 @@ NavigationPathfinder2D::advance(const NavigationGrid2D& grid, Core::usize expans
         // Direction order is explicit; the heap tie-break remains authoritative.
         if (current.y + 1U < m_heightCells)
         {
-            visitNeighbor(currentIndex, {current.x, current.y + 1U});
+            visitNeighbor(currentIndex, {current.x, current.y + 1U}, NavigationPathCost2D::Cardinal);
         }
         if (current.x != 0U)
         {
-            visitNeighbor(currentIndex, {current.x - 1U, current.y});
+            visitNeighbor(currentIndex, {current.x - 1U, current.y}, NavigationPathCost2D::Cardinal);
         }
         if (current.x + 1U < m_widthCells)
         {
-            visitNeighbor(currentIndex, {current.x + 1U, current.y});
+            visitNeighbor(currentIndex, {current.x + 1U, current.y}, NavigationPathCost2D::Cardinal);
         }
         if (current.y != 0U)
         {
-            visitNeighbor(currentIndex, {current.x, current.y - 1U});
+            visitNeighbor(currentIndex, {current.x, current.y - 1U}, NavigationPathCost2D::Cardinal);
+        }
+
+        if (m_options.diagonalMode != NavigationDiagonalMode2D::Disabled)
+        {
+            const auto visitDiagonal = [this, &grid, &visitNeighbor, currentIndex, current](
+                                           NavigationCell2D neighbor) {
+                if (m_options.diagonalMode == NavigationDiagonalMode2D::RequireClearAdjacentCells)
+                {
+                    const NavigationCell2D horizontal{neighbor.x, current.y};
+                    const NavigationCell2D vertical{current.x, neighbor.y};
+                    if (grid.isBlocked(horizontal) || grid.isBlocked(vertical))
+                    {
+                        return;
+                    }
+                }
+                visitNeighbor(currentIndex, neighbor, NavigationPathCost2D::Diagonal);
+            };
+
+            if (current.x != 0U && current.y != 0U)
+            {
+                visitDiagonal({current.x - 1U, current.y - 1U});
+            }
+            if (current.x + 1U < m_widthCells && current.y != 0U)
+            {
+                visitDiagonal({current.x + 1U, current.y - 1U});
+            }
+            if (current.x != 0U && current.y + 1U < m_heightCells)
+            {
+                visitDiagonal({current.x - 1U, current.y + 1U});
+            }
+            if (current.x + 1U < m_widthCells && current.y + 1U < m_heightCells)
+            {
+                visitDiagonal({current.x + 1U, current.y + 1U});
+            }
         }
     }
 
@@ -389,9 +465,9 @@ NavigationPathfinder2D::advance(const NavigationGrid2D& grid, Core::usize expans
 
 Core::Result<NavigationPathQueryResult>
 NavigationPathfinder2D::findPath(const NavigationGrid2D& grid, NavigationCell2D start,
-                                 NavigationCell2D goal)
+                                 NavigationCell2D goal, NavigationPathQueryOptions options)
 {
-    auto started = begin(grid, start, goal);
+    auto started = begin(grid, start, goal, options);
     if (!started || started->state != NavigationPathQueryState::Pending)
     {
         return started;
@@ -419,6 +495,8 @@ void NavigationPathfinder2D::reset() noexcept
     m_goalIndex = InvalidIndex;
     m_gridRevision = 0;
     m_expandedNodes = 0;
+    m_options = {};
+    m_pathCost = 0;
     m_state = NavigationPathQueryState::Idle;
 }
 
@@ -428,6 +506,7 @@ NavigationPathQueryResult NavigationPathfinder2D::result() const noexcept
         .state = m_state,
         .expandedNodes = m_expandedNodes,
         .pathCellCount = m_path.size(),
+        .pathCost = m_pathCost,
         .gridRevision = m_gridRevision,
     };
 }

@@ -41,6 +41,7 @@
 #include <tina/audio/AudioClipView.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/scene/Camera2D.hpp>
+#include <tina/scene/CameraFollow2D.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/ParticleSystem2D.hpp>
 #include <tina/scene/PointLight2D.hpp>
@@ -86,6 +87,7 @@
 #include <memory_resource>
 #include <new>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -123,11 +125,31 @@ inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
 inline constexpr u32 ExpectedNavigationSolidTileCells = 11;
 inline constexpr u32 ExpectedNavigationBlockerRectangles = 1;
 inline constexpr u32 ExpectedNavigationBlockedCells = 13;
-inline constexpr u32 ExpectedNavigationBasePathCells = 7;
-inline constexpr u32 ExpectedNavigationDynamicPathCells = 9;
+inline constexpr u32 ExpectedNavigationWeightedCells = 1;
+inline constexpr u32 ExpectedNavigationMaximumTraversalCost = 5;
+inline constexpr u32 ExpectedNavigationBasePathCells = 9;
+inline constexpr u32 ExpectedNavigationBasePathCost = 80;
+inline constexpr u32 ExpectedNavigationDynamicPathCells = 7;
+inline constexpr u32 ExpectedNavigationDynamicPathCost = 100;
+inline constexpr u32 ExpectedNavigationStrictDiagonalPathCells = 6;
+inline constexpr u32 ExpectedNavigationStrictDiagonalPathCost = 62;
+inline constexpr u32 ExpectedNavigationCornerCutPathCells = 5;
+inline constexpr u32 ExpectedNavigationCornerCutPathCost = 56;
+inline constexpr u32 ExpectedNavigationWeightedPathCells = 7;
+inline constexpr u32 ExpectedNavigationWeightedPathCost = 60;
 inline constexpr Tina::Navigation2D::NavigationCell2D ProductNavigationStart{1, 3};
 inline constexpr Tina::Navigation2D::NavigationCell2D ProductNavigationGoal{5, 3};
-inline constexpr Tina::Navigation2D::NavigationCellRect2D ProductNavigationDynamicBlocker{4, 2, 1, 1};
+inline constexpr Tina::Navigation2D::NavigationCellRect2D ProductNavigationDynamicBlocker{3, 1, 1, 1};
+inline constexpr Tina::Navigation2D::NavigationCell2D ProductNavigationWeightedStart{1, 2};
+inline constexpr Tina::Navigation2D::NavigationCell2D ProductNavigationWeightedGoal{5, 2};
+inline constexpr Tina::Navigation2D::NavigationCell2D ProductNavigationWeightedCell{3, 2};
+inline constexpr std::array<Tina::Asset::TileMapNavigation2DMaterialCostRule, 1>
+    ProductNavigationMaterialCostRules{{
+        {
+            .materialFlags = Tina::AssetFormat::TilesetWire::MaterialOneWay,
+            .traversalCost = ExpectedNavigationMaximumTraversalCost,
+        },
+    }};
 inline constexpr u32 ProductParticleCapacity = 12;
 inline constexpr u32 ProductParticleEmitted = 10;
 inline constexpr u32 ProductParticleExpiredAt300Frames = 4;
@@ -144,7 +166,7 @@ inline constexpr u32 ProductCulledPointLight2DCount =
 inline constexpr u32 ProductShadowOccluder2DCount = 2;
 inline constexpr u32 ProductSoftShadowPointLight2DCount = 2;
 inline constexpr float ProductAmbientLight2DScale = 0.28F;
-inline constexpr u32 ProductEvidenceSchema = 24;
+inline constexpr u32 ProductEvidenceSchema = 27;
 inline constexpr std::string_view PauseKeyboardMouseHint = "ESC / ENTER / P TO RESUME";
 inline constexpr std::string_view PauseGamepadHint = "B / A / START TO RESUME";
 inline constexpr float ProductWarmLightSourceRadiusMeters = 0.45F;
@@ -255,6 +277,8 @@ struct SampleOptions final {
 struct LifecycleCounters final {
     u64 frameUpdates = 0;
     u64 renderExtractions = 0;
+    u64 submittedRenderFrames = 0;
+    u64 skippedSuspendedSurfaceFrames = 0;
     u64 stateEnters = 0;
     u64 stateExits = 0;
     u64 applicationShutdowns = 0;
@@ -375,16 +399,26 @@ struct LifecycleCounters final {
     u64 tileMapStreamCommitted = 0;
     u64 tileMapStreamResident = 0;
     u64 tileMapStreamPeakResident = 0;
-    // 2D-NAV: schema-v1 TileMap conversion, deterministic A*, blocker, and cancellation evidence.
-    u16 navigationSchemaVersion = 0;
+    // 2D-NAV: current TileMap conversion, weighted/diagonal A*, blocker, and cancellation evidence.
     u64 navigationSolidTileCells = 0;
     u64 navigationBlockerRectangles = 0;
     u64 navigationBlockedCells = 0;
+    u64 navigationWeightedCells = 0;
+    u64 navigationMaximumTraversalCost = 0;
     u64 navigationBasePathCells = 0;
+    u64 navigationBasePathCost = 0;
     u64 navigationDynamicPathCells = 0;
+    u64 navigationDynamicPathCost = 0;
+    u64 navigationStrictDiagonalPathCells = 0;
+    u64 navigationStrictDiagonalPathCost = 0;
+    u64 navigationCornerCutPathCells = 0;
+    u64 navigationCornerCutPathCost = 0;
+    u64 navigationWeightedPathCells = 0;
+    u64 navigationWeightedPathCost = 0;
     u64 navigationIncrementalExpandedNodes = 0;
     u64 navigationGridRevision = 0;
     u64 navigationDynamicBlockerMutations = 0;
+    bool navigationWeightedPathAvoidedCostCell = false;
     bool navigationCancelled = false;
     bool navigationReady = false;
     // 2D-FX: deterministic fixed-capacity particle/trail product evidence.
@@ -476,13 +510,19 @@ struct LifecycleCounters final {
 #endif
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
+    // Chunk collider bodies published by TileMapPhysicsSync2D, not per-cell bodies.
     u64 physicsStaticBodies = 0;
+    // Set when onExit retired every chunk collider while the world was still open.
+    bool physicsColliderRetirementOk = false;
     u64 physicsDynamicContacts = 0;
     u64 physicsSensorEnters = 0;
     u64 physicsSensorExits = 0;
     float lastDynamicY = 0.0f;
     bool physicsReady = false;
+    bool physicsConvexPolygonReady = false;
     bool physicsJointReady = false;
+    bool physicsRevoluteJointReady = false;
+    bool physicsPrismaticJointReady = false;
 #endif
     // RUNTIME-001 product evidence: pause overlay push/pop + policy blocks below.
     u64 pauseOverlayPushes = 0;
@@ -531,44 +571,14 @@ inline constexpr Tina::UI::UITreeViewItemKey CrateSpawnTreeItemKey = 402;
 // Keep height small enough that half-width fits the 8m-wide sample map so follow
 // can pan (height 6m →halfW≥.3m > map half →clamp freezes at center).
 inline constexpr float ProductCameraHeightMeters = 4.0f;
-
-// Clamp camera center so the orthographic view stays over the map (map-local meters).
-// Uses authored height + surface aspect for half-extents; does not write Simulation.
-[[nodiscard]] inline void clampCameraCenterToMap(const Tina::Asset::TileMapInstance& map, float worldHeightMeters,
-                                                 float surfaceAspect, float& centerX, float& centerY) noexcept
-{
-    if (!map || worldHeightMeters <= 0.0f || !std::isfinite(worldHeightMeters) || !std::isfinite(surfaceAspect) ||
-        surfaceAspect <= 0.0f)
-    {
-        return;
-    }
-    const float mapW = static_cast<float>(map.widthCells()) * map.cellSizeMeters();
-    const float mapH = static_cast<float>(map.heightCells()) * map.cellSizeMeters();
-    const float halfH = worldHeightMeters * 0.5f;
-    const float halfW = halfH * surfaceAspect;
-    const float minX = halfW;
-    const float maxX = mapW - halfW;
-    const float minY = halfH;
-    const float maxY = mapH - halfH;
-    if (minX <= maxX)
-    {
-        centerX = (std::min)(maxX, (std::max)(minX, centerX));
-    }
-    else
-    {
-        centerX = mapW * 0.5f;
-    }
-    if (minY <= maxY)
-    {
-        centerY = (std::min)(maxY, (std::max)(minY, centerY));
-    }
-    else
-    {
-        centerY = mapH * 0.5f;
-    }
-}
+inline constexpr Tina::Scene::CameraFollowPoint2D ProductInitialCameraCenter{4.0F, 2.0F};
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
-inline constexpr u32 ExpectedPhysicsStaticBodies = ExpectedNonEmptyTiles;
+// Chunk colliders, not per-cell bodies: the recipe map is 8x4 with cooker chunk
+// size 16, so the collision layer has exactly one resident chunk and therefore
+// one static body. Its 11 solid cells (8-wide floor run + 3-tall wall column)
+// deterministically merge into 2 box shapes.
+inline constexpr u32 ExpectedPhysicsColliderBodies = 1;
+inline constexpr u32 ExpectedPhysicsColliderShapes = 2;
 inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 2; // tiles + character + crate
 #else
 inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 1;
@@ -815,11 +825,8 @@ struct TileMapResources final {
     std::pmr::vector<Tina::Asset::TileMapSolidHit> solidScratch{&memory};
     float characterSpawnX = 1.0f;
     float characterSpawnY = 3.0f;
-    // Presentation camera: previous/current sim targets; extract lerps with FrameTiming.interpolation.
-    float cameraPreviousX = 4.0f;
-    float cameraPreviousY = 2.0f;
-    float cameraCurrentX = 4.0f;
-    float cameraCurrentY = 2.0f;
+    // Owns previous/current simulation centers used by stream and presentation extraction.
+    std::optional<Tina::Scene::CameraFollow2D> cameraFollow{};
     // M8-C1: Scene World owns Camera2D + character (+ optional crate) for extract.
     // TileMap tiles and selection highlight remain feature-side emit.
     std::optional<Tina::Scene::World> sceneWorld{};
@@ -846,8 +853,17 @@ struct TileMapResources final {
     Tina::Physics2D::PhysicsBodyId jointFollowerBody{};
     Tina::Physics2D::PhysicsShapeId jointFollowerShape{};
     Tina::Physics2D::PhysicsJointId demoJoint{};
-    Tina::Physics2D::PhysicsBodyId staticBodies[32]{};
-    Tina::Physics2D::PhysicsGridSolidCell2D solidCellScratch[32]{};
+    Tina::Physics2D::PhysicsBodyId revoluteAnchorBody{};
+    Tina::Physics2D::PhysicsBodyId revoluteFollowerBody{};
+    Tina::Physics2D::PhysicsShapeId revoluteFollowerShape{};
+    Tina::Physics2D::PhysicsJointId demoRevoluteJoint{};
+    Tina::Physics2D::PhysicsBodyId prismaticAnchorBody{};
+    Tina::Physics2D::PhysicsBodyId prismaticFollowerBody{};
+    Tina::Physics2D::PhysicsShapeId prismaticFollowerShape{};
+    Tina::Physics2D::PhysicsJointId demoPrismaticJoint{};
+    // Owns one static chunk collider per resident collision chunk and keeps it
+    // consistent with stream residency / tile edits every fixed tick.
+    std::optional<Tina::Asset::TileMapPhysicsSync2D> physicsSync{};
     float dynamicHalfExtent = 0.25f;
     float lastDynamicX = 3.0f;
     float lastDynamicY = 3.5f;
@@ -1169,12 +1185,13 @@ struct TileMapResources final {
             .blockerObjectLayerId = GameplayObjectLayerId,
             .blockerPropertyKey = "role",
             .blockerPropertyValue = "crate",
+            .materialCostRules = ProductNavigationMaterialCostRules,
         },
         resources.memory);
     if (!built)
     {
         return Tina::Core::failure(std::move(built.error()).withContext(
-            "prepareNavigation2D", "TileMap schema-v1 conversion"));
+            "prepareNavigation2D", "TileMap navigation conversion"));
     }
 
     const Tina::Asset::TileMapNavigation2DDataBuildStats buildStats = built->stats;
@@ -1209,6 +1226,61 @@ struct TileMapResources final {
                                    "product navigation base path was not reachable");
     }
     const Tina::Core::usize basePathCellCount = pathfinder->path().size();
+    const Tina::Core::u32 basePathCost = basePath->pathCost;
+
+    auto strictDiagonalPath = pathfinder->findPath(
+        *grid, ProductNavigationStart, ProductNavigationGoal,
+        Tina::Navigation2D::NavigationPathQueryOptions{
+            .diagonalMode = Tina::Navigation2D::NavigationDiagonalMode2D::RequireClearAdjacentCells,
+        });
+    if (!strictDiagonalPath)
+    {
+        return Tina::Core::failure(std::move(strictDiagonalPath.error()).withContext(
+            "prepareNavigation2D", "strict diagonal path query"));
+    }
+    if (strictDiagonalPath->state != Tina::Navigation2D::NavigationPathQueryState::Reached)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product strict diagonal navigation path was not reachable");
+    }
+    const Tina::Core::usize strictDiagonalPathCellCount = pathfinder->path().size();
+    const Tina::Core::u32 strictDiagonalPathCost = strictDiagonalPath->pathCost;
+
+    auto cornerCutPath = pathfinder->findPath(
+        *grid, ProductNavigationStart, ProductNavigationGoal,
+        Tina::Navigation2D::NavigationPathQueryOptions{
+            .diagonalMode = Tina::Navigation2D::NavigationDiagonalMode2D::AllowCornerCutting,
+        });
+    if (!cornerCutPath)
+    {
+        return Tina::Core::failure(std::move(cornerCutPath.error()).withContext(
+            "prepareNavigation2D", "corner-cut diagonal path query"));
+    }
+    if (cornerCutPath->state != Tina::Navigation2D::NavigationPathQueryState::Reached)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product corner-cut diagonal navigation path was not reachable");
+    }
+    const Tina::Core::usize cornerCutPathCellCount = pathfinder->path().size();
+    const Tina::Core::u32 cornerCutPathCost = cornerCutPath->pathCost;
+
+    auto weightedPath = pathfinder->findPath(
+        *grid, ProductNavigationWeightedStart, ProductNavigationWeightedGoal);
+    if (!weightedPath)
+    {
+        return Tina::Core::failure(std::move(weightedPath.error()).withContext(
+            "prepareNavigation2D", "weighted path query"));
+    }
+    if (weightedPath->state != Tina::Navigation2D::NavigationPathQueryState::Reached)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product weighted navigation path was not reachable");
+    }
+    const std::span<const Tina::Navigation2D::NavigationCell2D> weightedPathCells = pathfinder->path();
+    const Tina::Core::usize weightedPathCellCount = weightedPathCells.size();
+    const Tina::Core::u32 weightedPathCost = weightedPath->pathCost;
+    const bool weightedPathAvoidedCostCell =
+        std::ranges::find(weightedPathCells, ProductNavigationWeightedCell) == weightedPathCells.end();
 
     auto blocker = grid->addBlocker(ProductNavigationDynamicBlocker);
     if (!blocker)
@@ -1228,6 +1300,7 @@ struct TileMapResources final {
                                    "product navigation dynamic path was not reachable");
     }
     const Tina::Core::usize dynamicPathCellCount = pathfinder->path().size();
+    const Tina::Core::u32 dynamicPathCost = dynamicPath->pathCost;
     if (auto status = grid->removeBlocker(*blocker); !status)
     {
         return Tina::Core::failure(std::move(status.error()).withContext(
@@ -1263,15 +1336,25 @@ struct TileMapResources final {
                                    "product navigation incremental query did not cancel deterministically");
     }
 
-    counters.navigationSchemaVersion = grid->data().schemaVersion();
     counters.navigationSolidTileCells = buildStats.solidTileCells;
     counters.navigationBlockerRectangles = buildStats.blockerRectangles;
     counters.navigationBlockedCells = buildStats.blockedCells;
+    counters.navigationWeightedCells = buildStats.weightedCells;
+    counters.navigationMaximumTraversalCost = buildStats.maximumTraversalCost;
     counters.navigationBasePathCells = basePathCellCount;
+    counters.navigationBasePathCost = basePathCost;
     counters.navigationDynamicPathCells = dynamicPathCellCount;
+    counters.navigationDynamicPathCost = dynamicPathCost;
+    counters.navigationStrictDiagonalPathCells = strictDiagonalPathCellCount;
+    counters.navigationStrictDiagonalPathCost = strictDiagonalPathCost;
+    counters.navigationCornerCutPathCells = cornerCutPathCellCount;
+    counters.navigationCornerCutPathCost = cornerCutPathCost;
+    counters.navigationWeightedPathCells = weightedPathCellCount;
+    counters.navigationWeightedPathCost = weightedPathCost;
     counters.navigationIncrementalExpandedNodes = cancelled.expandedNodes;
     counters.navigationGridRevision = grid->revision();
     counters.navigationDynamicBlockerMutations = 2;
+    counters.navigationWeightedPathAvoidedCostCell = weightedPathAvoidedCostCell;
     counters.navigationCancelled = true;
     counters.navigationReady = true;
 
@@ -1610,13 +1693,23 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                                    "controller and character animator required for Scene World");
     }
 
+    auto cameraFollow = Tina::Scene::CameraFollow2D::Create({
+        .initialCenter = ProductInitialCameraCenter,
+    });
+    if (!cameraFollow)
+    {
+        return Tina::Core::failure(std::move(cameraFollow.error()));
+    }
+
     auto world = Tina::Scene::World::Create(Tina::Scene::WorldConfig{.entityCapacity = 16});
     if (!world)
     {
         return Tina::Core::failure(std::move(world.error()));
     }
 
-    auto cameraEntity = world->createEntity(sceneTranslation(resources.cameraCurrentX, resources.cameraCurrentY));
+    const Tina::Scene::CameraFollowPoint2D initialCameraCenter = cameraFollow->currentCenter();
+    auto cameraEntity =
+        world->createEntity(sceneTranslation(initialCameraCenter.x, initialCameraCenter.y));
     if (!cameraEntity)
     {
         return Tina::Core::failure(std::move(cameraEntity.error()));
@@ -1768,6 +1861,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
 
     resources.cameraEntity = *cameraEntity;
     resources.characterEntity = *characterEntity;
+    resources.cameraFollow.emplace(std::move(*cameraFollow));
     resources.sceneWorld.emplace(std::move(*world));
     return Tina::Core::success();
 }
@@ -1993,35 +2087,55 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     }
     resources.physicsWorld.emplace(std::move(*worldResult));
 
-    Tina::Physics2D::PhysicsGridBodySyncConfig2D syncConfig;
-    syncConfig.cellSizeMeters = 0.0F;
-    syncConfig.enableContactEvents = true;
-    auto synced = Tina::Asset::syncTileMapSolidsToStaticBodies(
-        *resources.grid, *resources.physicsWorld, syncConfig, resources.staticBodies, resources.solidCellScratch);
+    // One static body per resident collision chunk, kept in sync with stream
+    // residency and tile edits by synchronize() on every fixed tick.
+    auto physicsSync = Tina::Asset::TileMapPhysicsSync2D::Create(
+        resources.tileMapStream->map(),
+        Tina::Asset::TileMapPhysicsSync2DConfig{
+            .layerId = CollisionTileLayerId,
+            .chunkCapacity = 8,
+            .material = {.enableContactEvents = true},
+            .memoryResource = &resources.memory});
+    if (!physicsSync)
+    {
+        return Tina::Core::failure(std::move(physicsSync.error()));
+    }
+    resources.physicsSync.emplace(std::move(*physicsSync));
+
+    auto synced = resources.physicsSync->synchronize(resources.tileMapStream->map(), *resources.physicsWorld);
     if (!synced)
     {
         return Tina::Core::failure(std::move(synced.error()));
     }
-    if (synced->written != ExpectedPhysicsStaticBodies)
+    if (synced->colliderBodyCount != ExpectedPhysicsColliderBodies ||
+        synced->colliderShapeCount != ExpectedPhysicsColliderShapes)
     {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "unexpected static tile body count");
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "unexpected tile chunk collider body/shape count");
     }
 
     Tina::Physics2D::PhysicsBody2DDesc dynamicDesc;
     dynamicDesc.type = Tina::Physics2D::PhysicsBodyType2D::Dynamic;
     dynamicDesc.positionMeters = {resources.lastDynamicX, resources.lastDynamicY};
-    Tina::Physics2D::PhysicsShape2DDesc box;
-    box.kind = Tina::Physics2D::PhysicsShapeKind2D::Box;
-    box.halfExtentsMeters = {resources.dynamicHalfExtent, resources.dynamicHalfExtent};
-    box.density = 1.0F;
-    box.enableContactEvents = true;
-    box.enableSensorEvents = true;
+    Tina::Physics2D::PhysicsShape2DDesc cratePolygon;
+    cratePolygon.kind = Tina::Physics2D::PhysicsShapeKind2D::ConvexPolygon;
+    cratePolygon.polygonVertices = {
+        Tina::Physics2D::PhysicsVec2{-resources.dynamicHalfExtent, -resources.dynamicHalfExtent},
+        Tina::Physics2D::PhysicsVec2{resources.dynamicHalfExtent * 0.6F, -resources.dynamicHalfExtent},
+        Tina::Physics2D::PhysicsVec2{resources.dynamicHalfExtent, 0.0F},
+        Tina::Physics2D::PhysicsVec2{resources.dynamicHalfExtent * 0.6F, resources.dynamicHalfExtent},
+        Tina::Physics2D::PhysicsVec2{-resources.dynamicHalfExtent, resources.dynamicHalfExtent},
+    };
+    cratePolygon.polygonVertexCount = 5;
+    cratePolygon.density = 1.0F;
+    cratePolygon.enableContactEvents = true;
+    cratePolygon.enableSensorEvents = true;
     auto dynamic = resources.physicsWorld->createBody(dynamicDesc);
     if (!dynamic)
     {
         return Tina::Core::failure(std::move(dynamic.error()));
     }
-    auto dynamicShape = resources.physicsWorld->createShape(*dynamic, box);
+    auto dynamicShape = resources.physicsWorld->createShape(*dynamic, cratePolygon);
     if (!dynamicShape)
     {
         return Tina::Core::failure(std::move(dynamicShape.error()));
@@ -2030,6 +2144,9 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     resources.dynamicShape = *dynamicShape;
     resources.lastDynamicX = dynamicDesc.positionMeters.x;
     resources.lastDynamicY = dynamicDesc.positionMeters.y;
+    const auto dynamicShapeState = resources.physicsWorld->shapeState(*dynamicShape);
+    counters.physicsConvexPolygonReady =
+        dynamicShapeState && dynamicShapeState->kind == Tina::Physics2D::PhysicsShapeKind2D::ConvexPolygon;
 
     Tina::Physics2D::PhysicsBody2DDesc sensorBodyDesc;
     sensorBodyDesc.type = Tina::Physics2D::PhysicsBodyType2D::Static;
@@ -2094,7 +2211,125 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     resources.jointFollowerBody = *followerBody;
     resources.jointFollowerShape = *followerShape;
     resources.demoJoint = *joint;
-    counters.physicsJointReady = resources.physicsWorld->jointState(*joint).has_value();
+    const auto distanceJointState = resources.physicsWorld->jointState(*joint);
+    counters.physicsJointReady =
+        distanceJointState && distanceJointState->kind == Tina::Physics2D::PhysicsJointKind2D::Distance &&
+        distanceJointState->springEnabled;
+
+    Tina::Physics2D::PhysicsBody2DDesc revoluteAnchorDesc;
+    revoluteAnchorDesc.type = Tina::Physics2D::PhysicsBodyType2D::Static;
+    revoluteAnchorDesc.positionMeters = {-16.0F, 10.0F};
+    auto revoluteAnchor = resources.physicsWorld->createBody(revoluteAnchorDesc);
+    if (!revoluteAnchor)
+    {
+        return Tina::Core::failure(std::move(revoluteAnchor.error()));
+    }
+    Tina::Physics2D::PhysicsBody2DDesc revoluteFollowerDesc;
+    revoluteFollowerDesc.type = Tina::Physics2D::PhysicsBodyType2D::Dynamic;
+    revoluteFollowerDesc.positionMeters = {-16.0F, 9.0F};
+    auto revoluteFollower = resources.physicsWorld->createBody(revoluteFollowerDesc);
+    if (!revoluteFollower)
+    {
+        return Tina::Core::failure(std::move(revoluteFollower.error()));
+    }
+    Tina::Physics2D::PhysicsShape2DDesc revoluteFollowerShapeDesc;
+    revoluteFollowerShapeDesc.kind = Tina::Physics2D::PhysicsShapeKind2D::Capsule;
+    revoluteFollowerShapeDesc.localPointAMeters = {0.0F, -0.45F};
+    revoluteFollowerShapeDesc.localPointBMeters = {0.0F, 0.45F};
+    revoluteFollowerShapeDesc.radiusMeters = 0.12F;
+    revoluteFollowerShapeDesc.density = 1.0F;
+    auto revoluteFollowerShape =
+        resources.physicsWorld->createShape(*revoluteFollower, revoluteFollowerShapeDesc);
+    if (!revoluteFollowerShape)
+    {
+        return Tina::Core::failure(std::move(revoluteFollowerShape.error()));
+    }
+    Tina::Physics2D::PhysicsJoint2DDesc revoluteJointDesc;
+    revoluteJointDesc.kind = Tina::Physics2D::PhysicsJointKind2D::Revolute;
+    revoluteJointDesc.bodyA = *revoluteAnchor;
+    revoluteJointDesc.bodyB = *revoluteFollower;
+    revoluteJointDesc.localAnchorBMeters = {0.0F, 1.0F};
+    revoluteJointDesc.enableSpring = true;
+    revoluteJointDesc.hertz = 2.0F;
+    revoluteJointDesc.dampingRatio = 0.5F;
+    revoluteJointDesc.targetAngleRadians = 0.0F;
+    revoluteJointDesc.enableLimit = true;
+    revoluteJointDesc.lowerAngleRadians = -0.75F;
+    revoluteJointDesc.upperAngleRadians = 0.75F;
+    revoluteJointDesc.enableMotor = true;
+    revoluteJointDesc.motorSpeedRadiansPerSecond = 1.5F;
+    revoluteJointDesc.maxMotorTorqueNewtonMeters = 2.0F;
+    auto revoluteJoint = resources.physicsWorld->createJoint(revoluteJointDesc);
+    if (!revoluteJoint)
+    {
+        return Tina::Core::failure(std::move(revoluteJoint.error()));
+    }
+    resources.revoluteAnchorBody = *revoluteAnchor;
+    resources.revoluteFollowerBody = *revoluteFollower;
+    resources.revoluteFollowerShape = *revoluteFollowerShape;
+    resources.demoRevoluteJoint = *revoluteJoint;
+    const auto revoluteJointState = resources.physicsWorld->jointState(*revoluteJoint);
+    counters.physicsRevoluteJointReady =
+        revoluteJointState && revoluteJointState->kind == Tina::Physics2D::PhysicsJointKind2D::Revolute &&
+        revoluteJointState->springEnabled && revoluteJointState->limitEnabled &&
+        revoluteJointState->motorEnabled;
+
+    Tina::Physics2D::PhysicsBody2DDesc prismaticAnchorDesc;
+    prismaticAnchorDesc.type = Tina::Physics2D::PhysicsBodyType2D::Static;
+    prismaticAnchorDesc.positionMeters = {-12.0F, 10.0F};
+    auto prismaticAnchor = resources.physicsWorld->createBody(prismaticAnchorDesc);
+    if (!prismaticAnchor)
+    {
+        return Tina::Core::failure(std::move(prismaticAnchor.error()));
+    }
+    Tina::Physics2D::PhysicsBody2DDesc prismaticFollowerDesc;
+    prismaticFollowerDesc.type = Tina::Physics2D::PhysicsBodyType2D::Dynamic;
+    prismaticFollowerDesc.positionMeters = {-11.0F, 10.0F};
+    auto prismaticFollower = resources.physicsWorld->createBody(prismaticFollowerDesc);
+    if (!prismaticFollower)
+    {
+        return Tina::Core::failure(std::move(prismaticFollower.error()));
+    }
+    Tina::Physics2D::PhysicsShape2DDesc prismaticFollowerShapeDesc;
+    prismaticFollowerShapeDesc.kind = Tina::Physics2D::PhysicsShapeKind2D::Box;
+    prismaticFollowerShapeDesc.halfExtentsMeters = {0.3F, 0.15F};
+    prismaticFollowerShapeDesc.density = 1.0F;
+    auto prismaticFollowerShape =
+        resources.physicsWorld->createShape(*prismaticFollower, prismaticFollowerShapeDesc);
+    if (!prismaticFollowerShape)
+    {
+        return Tina::Core::failure(std::move(prismaticFollowerShape.error()));
+    }
+    Tina::Physics2D::PhysicsJoint2DDesc prismaticJointDesc;
+    prismaticJointDesc.kind = Tina::Physics2D::PhysicsJointKind2D::Prismatic;
+    prismaticJointDesc.bodyA = *prismaticAnchor;
+    prismaticJointDesc.bodyB = *prismaticFollower;
+    prismaticJointDesc.localAnchorBMeters = {-1.0F, 0.0F};
+    prismaticJointDesc.localAxisA = {2.0F, 0.0F};
+    prismaticJointDesc.enableSpring = true;
+    prismaticJointDesc.hertz = 2.0F;
+    prismaticJointDesc.dampingRatio = 0.5F;
+    prismaticJointDesc.targetTranslationMeters = 0.25F;
+    prismaticJointDesc.enableLimit = true;
+    prismaticJointDesc.lowerTranslationMeters = -1.0F;
+    prismaticJointDesc.upperTranslationMeters = 1.0F;
+    prismaticJointDesc.enableMotor = true;
+    prismaticJointDesc.motorSpeedMetersPerSecond = 0.4F;
+    prismaticJointDesc.maxMotorForceNewtons = 5.0F;
+    auto prismaticJoint = resources.physicsWorld->createJoint(prismaticJointDesc);
+    if (!prismaticJoint)
+    {
+        return Tina::Core::failure(std::move(prismaticJoint.error()));
+    }
+    resources.prismaticAnchorBody = *prismaticAnchor;
+    resources.prismaticFollowerBody = *prismaticFollower;
+    resources.prismaticFollowerShape = *prismaticFollowerShape;
+    resources.demoPrismaticJoint = *prismaticJoint;
+    const auto prismaticJointState = resources.physicsWorld->jointState(*prismaticJoint);
+    counters.physicsPrismaticJointReady =
+        prismaticJointState && prismaticJointState->kind == Tina::Physics2D::PhysicsJointKind2D::Prismatic &&
+        prismaticJointState->springEnabled && prismaticJointState->limitEnabled &&
+        prismaticJointState->motorEnabled;
 #endif
 
     const auto* audioFile = resources.audioClipLease.get();
@@ -2558,9 +2793,9 @@ class TileMapBgfxState final : public Tina::IGameState {
             return status;
         }
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
-        if (resources_->physicsWorld)
+        if (resources_->physicsWorld && resources_->physicsSync)
         {
-            counters_->physicsStaticBodies = ExpectedPhysicsStaticBodies;
+            counters_->physicsStaticBodies = resources_->physicsSync->stats().colliderBodyCount;
             counters_->physicsReady = true;
         }
 #endif
@@ -3282,6 +3517,16 @@ class TileMapBgfxState final : public Tina::IGameState {
         accessibilityProbe_.clear();
         accessibilityTree_ = Tina::UI::UIAccessibilityTree{};
         releaseSpriteBindings();
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+        // Retire chunk colliders while the world is still open, then drop the
+        // borrower before the TileMapInstance it reads goes away.
+        if (resources_->physicsSync && resources_->physicsWorld)
+        {
+            counters_->physicsColliderRetirementOk =
+                resources_->physicsSync->shutdown(*resources_->physicsWorld).has_value();
+        }
+        resources_->physicsSync.reset();
+#endif
         ++counters_->stateExits;
     }
 
@@ -3718,10 +3963,10 @@ class TileMapBgfxState final : public Tina::IGameState {
 #endif
         }
 
-        if (!resources_->particles || !resources_->trail)
+        if (!resources_->particles || !resources_->trail || !resources_->cameraFollow)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "2D particle and trail systems are not initialized");
+                                       "2D particle, trail, and camera follow systems are not initialized");
         }
         auto particleUpdate = resources_->particles->update(context.frameTiming().fixedDelta);
         if (!particleUpdate)
@@ -3743,9 +3988,11 @@ class TileMapBgfxState final : public Tina::IGameState {
                 ? static_cast<float>(static_cast<double>(counters_->surfacePixelWidth) /
                                      static_cast<double>(counters_->surfacePixelHeight))
                 : (10.0F / 6.0F);
+        const Tina::Scene::CameraFollowPoint2D streamCameraCenter =
+            resources_->cameraFollow->currentCenter();
         const Tina::Asset::TileChunkCameraQuery streamCamera{
-            .centerX = resources_->cameraCurrentX,
-            .centerY = resources_->cameraCurrentY,
+            .centerX = streamCameraCenter.x,
+            .centerY = streamCameraCenter.y,
             .halfWidth = ProductCameraHeightMeters * 0.5F * streamAspect,
             .halfHeight = ProductCameraHeightMeters * 0.5F,
         };
@@ -3753,6 +4000,20 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             return status;
         }
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+        // Chunk colliders follow stream residency and tile revisions. This runs
+        // after commit and before step() so the solver never sees a collider set
+        // that disagrees with the resident cells.
+        if (resources_->physicsSync && resources_->physicsWorld)
+        {
+            auto synced = resources_->physicsSync->synchronize(
+                resources_->tileMapStream->map(), *resources_->physicsWorld);
+            if (!synced)
+            {
+                return Tina::Core::failure(std::move(synced.error()));
+            }
+        }
+#endif
         if (resources_->controller && resources_->grid)
         {
             // Hermetic product demo: after first ground contact, walk right until wall.
@@ -3812,35 +4073,45 @@ class TileMapBgfxState final : public Tina::IGameState {
                 return status;
             }
 
-            // M11-B2: direct follow target after character step. previous = last
-            // current; extract lerps with FrameTiming.interpolation (snap later).
-            resources_->cameraPreviousX = resources_->cameraCurrentX;
-            resources_->cameraPreviousY = resources_->cameraCurrentY;
-            float followX = st.positionX;
-            float followY = st.positionY;
+            // M11-B2: update the simulation camera after the character step.
+            // Presentation extraction interpolates the controller snapshots.
             const float aspect =
                 (counters_->surfacePixelHeight != 0)
                     ? static_cast<float>(static_cast<double>(counters_->surfacePixelWidth) /
                                          static_cast<double>(counters_->surfacePixelHeight))
                     : (10.0f / 6.0f);
-            if (resources_->tileMapStream)
+            const Tina::Asset::TileMapInstance& map = resources_->tileMapStream->map();
+            const float mapWidthMeters = static_cast<float>(map.widthCells()) * map.cellSizeMeters();
+            const float mapHeightMeters = static_cast<float>(map.heightCells()) * map.cellSizeMeters();
+            if (const auto status = resources_->cameraFollow->fixedUpdate({
+                    .target = {st.positionX, st.positionY},
+                    .viewportHalfExtentsMeters = {
+                        ProductCameraHeightMeters * 0.5F * aspect,
+                        ProductCameraHeightMeters * 0.5F,
+                    },
+                    .worldBounds = Tina::Scene::CameraFollowBounds2D{
+                        .minimum = {0.0F, 0.0F},
+                        .maximum = {mapWidthMeters, mapHeightMeters},
+                    },
+                    .fixedDelta = context.frameTiming().fixedDelta,
+                });
+                !status)
             {
-                clampCameraCenterToMap(resources_->tileMapStream->map(), ProductCameraHeightMeters, aspect, followX,
-                                       followY);
+                return status;
             }
-            resources_->cameraCurrentX = followX;
-            resources_->cameraCurrentY = followY;
+            const Tina::Scene::CameraFollowPoint2D cameraCenter =
+                resources_->cameraFollow->currentCenter();
             ++counters_->cameraFollowUpdates;
             if (!counters_->cameraFollowPrimed)
             {
-                counters_->minCameraCenterX = followX;
-                counters_->maxCameraCenterX = followX;
+                counters_->minCameraCenterX = cameraCenter.x;
+                counters_->maxCameraCenterX = cameraCenter.x;
                 counters_->cameraFollowPrimed = true;
             }
             else
             {
-                counters_->minCameraCenterX = (std::min)(counters_->minCameraCenterX, followX);
-                counters_->maxCameraCenterX = (std::max)(counters_->maxCameraCenterX, followX);
+                counters_->minCameraCenterX = (std::min)(counters_->minCameraCenterX, cameraCenter.x);
+                counters_->maxCameraCenterX = (std::max)(counters_->maxCameraCenterX, cameraCenter.x);
             }
         }
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
@@ -3937,8 +4208,8 @@ class TileMapBgfxState final : public Tina::IGameState {
 
     Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
     {
-        if (!resources_->tileMapStream || !resources_->controller || !resources_->sceneWorld ||
-            !resources_->particles || !resources_->trail)
+        if (!resources_->tileMapStream || !resources_->controller || !resources_->cameraFollow ||
+            !resources_->sceneWorld || !resources_->particles || !resources_->trail)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap state not ready");
         }
@@ -3956,17 +4227,19 @@ class TileMapBgfxState final : public Tina::IGameState {
         // M8-C1: sample mutates Scene World camera transform immediately before
         // extract so extractRenderSceneFromWorld sees the interpolated center.
         // Character/crate use current sim pose (same as pre-C1 direct emit).
-        const double alpha = context.frameTiming().interpolation;
-        const float alphaF =
-            static_cast<float>(std::clamp(alpha, 0.0, 1.0));
-        const float centerX =
-            resources_->cameraPreviousX + (resources_->cameraCurrentX - resources_->cameraPreviousX) * alphaF;
-        const float centerY =
-            resources_->cameraPreviousY + (resources_->cameraCurrentY - resources_->cameraPreviousY) * alphaF;
+        const float alphaF = static_cast<float>(
+            std::clamp(context.frameTiming().interpolation, 0.0, 1.0));
+        auto cameraCenter = resources_->cameraFollow->interpolatedCenter(alphaF);
+        if (!cameraCenter)
+        {
+            return Tina::Core::failure(std::move(cameraCenter.error()));
+        }
 
         Tina::Scene::World& sceneWorld = *resources_->sceneWorld;
         if (const auto status =
-                sceneWorld.setLocalTransform(resources_->cameraEntity, sceneTranslation(centerX, centerY));
+                sceneWorld.setLocalTransform(
+                    resources_->cameraEntity,
+                    sceneTranslation(cameraCenter->x, cameraCenter->y));
             !status)
         {
             return status;
@@ -4016,8 +4289,8 @@ class TileMapBgfxState final : public Tina::IGameState {
         // Gate counters from resolved camera fields after Scene extract.
         const Tina::Render::Camera2DProjectionQuery projectionQuery{
             .stableCameraKey = 1,
-            .centerX = centerX,
-            .centerY = centerY,
+            .centerX = cameraCenter->x,
+            .centerY = cameraCenter->y,
             .projection = Tina::Render::FixedWorldHeight2D{.heightMeters = ProductCameraHeightMeters},
             .pixelSnap = Tina::Render::RenderPixelSnapPolicy::CameraTranslation,
             .surfaceViewport =
@@ -4335,7 +4608,12 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
         if (options_.uiTreeDemo)
         {
-            counters_->accessibilityTreeSelectionVerified = committedTreeSelectionMatches;
+            const bool finalDemoSelectionCommitted =
+                uiTreeDemoFinalSelectionQueued_ &&
+                counters_->uiTreeFinalSelectedKey == CrateSpawnTreeItemKey &&
+                counters_->uiTreeFinalSelectedIndex == 12U && committedTreeSelectionMatches;
+            counters_->accessibilityTreeSelectionVerified =
+                counters_->accessibilityTreeSelectionVerified || finalDemoSelectionCommitted;
         } else
         {
             // committedSemantics() trails the live tree by one frame. Preserve
@@ -4969,9 +5247,16 @@ int main(int argc, char** argv)
         counters.sprite2DLightingConfigured = statistics->sprite2DLightingConfigured;
         counters.pointLight2DCount = statistics->pointLight2DCount;
         counters.shadowOccluder2DCount = statistics->shadowOccluder2DCount;
-        counters.sceneLightingFrames = capture.sprite2DLightingFrameCount();
         counters.softShadowPointLight2DCount =
             capture.lastSubmittedSoftShadowPointLight2DCount();
+    }
+    counters.sceneLightingFrames = capture.sprite2DLightingFrameCount();
+    if (const Tina::Render::RenderStatistics* renderStatistics = capture.lastRenderStatistics();
+        renderStatistics != nullptr)
+    {
+        counters.submittedRenderFrames = renderStatistics->submitted;
+        counters.skippedSuspendedSurfaceFrames =
+            renderStatistics->skippedSuspendedSurfaceFrames;
     }
     counters.normalMappedSpriteCount = capture.lastSubmittedNormalMappedSpriteCount();
     if (counters.authoredPointLight2DCount >= counters.pointLight2DCount)
@@ -5104,12 +5389,22 @@ int main(int argc, char** argv)
     const bool navigationValid =
         resources.navigationGrid.has_value() && resources.navigationPathfinder.has_value() &&
         counters.navigationReady &&
-        counters.navigationSchemaVersion == Tina::Navigation2D::NavigationGrid2DSchema::Version &&
         counters.navigationSolidTileCells == ExpectedNavigationSolidTileCells &&
         counters.navigationBlockerRectangles == ExpectedNavigationBlockerRectangles &&
         counters.navigationBlockedCells == ExpectedNavigationBlockedCells &&
+        counters.navigationWeightedCells == ExpectedNavigationWeightedCells &&
+        counters.navigationMaximumTraversalCost == ExpectedNavigationMaximumTraversalCost &&
         counters.navigationBasePathCells == ExpectedNavigationBasePathCells &&
+        counters.navigationBasePathCost == ExpectedNavigationBasePathCost &&
         counters.navigationDynamicPathCells == ExpectedNavigationDynamicPathCells &&
+        counters.navigationDynamicPathCost == ExpectedNavigationDynamicPathCost &&
+        counters.navigationStrictDiagonalPathCells == ExpectedNavigationStrictDiagonalPathCells &&
+        counters.navigationStrictDiagonalPathCost == ExpectedNavigationStrictDiagonalPathCost &&
+        counters.navigationCornerCutPathCells == ExpectedNavigationCornerCutPathCells &&
+        counters.navigationCornerCutPathCost == ExpectedNavigationCornerCutPathCost &&
+        counters.navigationWeightedPathCells == ExpectedNavigationWeightedPathCells &&
+        counters.navigationWeightedPathCost == ExpectedNavigationWeightedPathCost &&
+        counters.navigationWeightedPathAvoidedCostCell &&
         counters.navigationIncrementalExpandedNodes == 1U &&
         counters.navigationGridRevision == 3U && counters.navigationDynamicBlockerMutations == 2U &&
         counters.navigationCancelled && resources.navigationGrid->dynamicBlockerCount() == 0U &&
@@ -5134,6 +5429,14 @@ int main(int argc, char** argv)
         options->disableShadowOccluders ? 0U : ProductShadowOccluder2DCount;
     const u32 expectedSoftShadowPointLight2DCount =
         options->forceHardShadows ? 0U : ProductSoftShadowPointLight2DCount;
+    // State extraction runs while the WindowSurface is suspended, but the backend
+    // intentionally skips submission. Prove both phases exactly instead of treating
+    // every extract callback as a presented lighting frame.
+    const bool renderFrameAccountingValid =
+        counters.submittedRenderFrames > 0 &&
+        counters.sceneLightingFrames == counters.submittedRenderFrames &&
+        counters.submittedRenderFrames + counters.skippedSuspendedSurfaceFrames ==
+            counters.renderExtractions;
     const bool lighting2DValid =
         counters.sprite2DLightingConfigured &&
         counters.authoredPointLight2DCount == ProductAuthoredPointLight2DCount &&
@@ -5141,7 +5444,7 @@ int main(int argc, char** argv)
         counters.culledPointLight2DCount == ProductCulledPointLight2DCount &&
         counters.shadowOccluder2DCount == expectedShadowOccluder2DCount &&
         counters.softShadowPointLight2DCount == expectedSoftShadowPointLight2DCount &&
-        counters.sceneLightingFrames == counters.renderExtractions;
+        renderFrameAccountingValid;
     const u32 expectedNormalMappedSpriteCount = options->disableNormalMaps ? 0U : 1U;
     const bool normalMappingValid =
         counters.normalMappedSpriteCount == expectedNormalMappedSpriteCount;
@@ -5251,10 +5554,12 @@ int main(int argc, char** argv)
               counters.accessibilityHasRadio && counters.accessibilityHasTextEdit &&
               *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
-    ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
+    ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsColliderBodies &&
+         counters.physicsColliderRetirementOk &&
          counters.physicsSteps == counters.frameUpdates && counters.physicsDynamicContacts > 0 &&
          counters.physicsSensorEnters > 0 && counters.physicsSensorExits > 0 &&
-         counters.physicsJointReady &&
+         counters.physicsConvexPolygonReady && counters.physicsJointReady && counters.physicsRevoluteJointReady &&
+         counters.physicsPrismaticJointReady &&
          counters.lastDynamicY < 3.5f && counters.lastDynamicY > 0.5f;
 #endif
     // M11-D1: require a successful primary-frame RGBA8 capture when the device supports it.
@@ -5326,12 +5631,22 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.tileMapStreamCommitted);
     appendLeU64(evidenceBytes, counters.tileMapStreamResident);
     appendLeU64(evidenceBytes, counters.tileMapStreamPeakResident);
-    appendLeU32(evidenceBytes, counters.navigationSchemaVersion);
     appendLeU64(evidenceBytes, counters.navigationSolidTileCells);
     appendLeU64(evidenceBytes, counters.navigationBlockerRectangles);
     appendLeU64(evidenceBytes, counters.navigationBlockedCells);
+    appendLeU64(evidenceBytes, counters.navigationWeightedCells);
+    appendLeU64(evidenceBytes, counters.navigationMaximumTraversalCost);
     appendLeU64(evidenceBytes, counters.navigationBasePathCells);
+    appendLeU64(evidenceBytes, counters.navigationBasePathCost);
     appendLeU64(evidenceBytes, counters.navigationDynamicPathCells);
+    appendLeU64(evidenceBytes, counters.navigationDynamicPathCost);
+    appendLeU64(evidenceBytes, counters.navigationStrictDiagonalPathCells);
+    appendLeU64(evidenceBytes, counters.navigationStrictDiagonalPathCost);
+    appendLeU64(evidenceBytes, counters.navigationCornerCutPathCells);
+    appendLeU64(evidenceBytes, counters.navigationCornerCutPathCost);
+    appendLeU64(evidenceBytes, counters.navigationWeightedPathCells);
+    appendLeU64(evidenceBytes, counters.navigationWeightedPathCost);
+    appendLeU32(evidenceBytes, counters.navigationWeightedPathAvoidedCostCell ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.navigationIncrementalExpandedNodes);
     appendLeU64(evidenceBytes, counters.navigationGridRevision);
     appendLeU64(evidenceBytes, counters.navigationDynamicBlockerMutations);
@@ -5358,7 +5673,7 @@ int main(int argc, char** argv)
     appendLeU32(evidenceBytes, counters.softShadowPointLight2DCount);
     appendF32Bits(evidenceBytes, ProductAmbientLight2DScale);
     appendLeU32(evidenceBytes, counters.sprite2DLightingConfigured ? 1U : 0U);
-    appendLeU64(evidenceBytes, counters.sceneLightingFrames);
+    appendLeU32(evidenceBytes, renderFrameAccountingValid ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.normalMappedSpriteCount);
     for (const char byte : counters.fxInitialFingerprint)
     {
@@ -5444,12 +5759,18 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.physicsStaticBodies);
     appendLeU64(evidenceBytes, counters.physicsSensorEnters);
     appendLeU64(evidenceBytes, counters.physicsSensorExits);
+    appendLeU32(evidenceBytes, counters.physicsConvexPolygonReady ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.physicsJointReady ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.physicsRevoluteJointReady ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.physicsPrismaticJointReady ? 1U : 0U);
     appendLeU32(evidenceBytes, 1U);
 #else
     appendLeU64(evidenceBytes, 0U);
     appendLeU64(evidenceBytes, 0U);
     appendLeU64(evidenceBytes, 0U);
+    appendLeU32(evidenceBytes, 0U);
+    appendLeU32(evidenceBytes, 0U);
+    appendLeU32(evidenceBytes, 0U);
     appendLeU32(evidenceBytes, 0U);
     appendLeU32(evidenceBytes, 0U);
 #endif
@@ -5473,7 +5794,12 @@ int main(int argc, char** argv)
     {
         std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d\","
                      "\"message\":\"verification failed\","
-                     "\"frames\":"
+                     "\"evidenceSchema\":"
+                  << ProductEvidenceSchema
+                  << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
+                  << ",\"renderFrameAccountingValid\":"
+                  << (renderFrameAccountingValid ? "true" : "false")
+                  << ",\"frames\":"
                   << counters.frameUpdates << ",\"tileSprites\":" << counters.lastTileSprites
                   << ",\"spriteBindingTextures\":" << counters.spriteBindingTextures
                   << ",\"spriteTextureLeasesAcquired\":" << counters.spriteTextureLeasesAcquired
@@ -5501,6 +5827,9 @@ int main(int argc, char** argv)
                   << ",\"softShadowPointLight2DCount\":"
                   << counters.softShadowPointLight2DCount
                   << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
+                  << ",\"submittedRenderFrames\":" << counters.submittedRenderFrames
+                  << ",\"skippedSuspendedSurfaceFrames\":"
+                  << counters.skippedSuspendedSurfaceFrames
                   << ",\"normalMappedSpriteCount\":" << counters.normalMappedSpriteCount
                   << ",\"particleCapacity\":" << ProductParticleCapacity
                   << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
@@ -5613,12 +5942,26 @@ int main(int argc, char** argv)
                   << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
                   << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
                   << ",\"navigationReady\":" << (counters.navigationReady ? "true" : "false")
-                  << ",\"navigationSchemaVersion\":" << counters.navigationSchemaVersion
                   << ",\"navigationSolidTileCells\":" << counters.navigationSolidTileCells
                   << ",\"navigationBlockerRectangles\":" << counters.navigationBlockerRectangles
                   << ",\"navigationBlockedCells\":" << counters.navigationBlockedCells
+                  << ",\"navigationWeightedCells\":" << counters.navigationWeightedCells
+                  << ",\"navigationMaximumTraversalCost\":"
+                  << counters.navigationMaximumTraversalCost
                   << ",\"navigationBasePathCells\":" << counters.navigationBasePathCells
+                  << ",\"navigationBasePathCost\":" << counters.navigationBasePathCost
                   << ",\"navigationDynamicPathCells\":" << counters.navigationDynamicPathCells
+                  << ",\"navigationDynamicPathCost\":" << counters.navigationDynamicPathCost
+                  << ",\"navigationStrictDiagonalPathCells\":"
+                  << counters.navigationStrictDiagonalPathCells
+                  << ",\"navigationStrictDiagonalPathCost\":"
+                  << counters.navigationStrictDiagonalPathCost
+                  << ",\"navigationCornerCutPathCells\":" << counters.navigationCornerCutPathCells
+                  << ",\"navigationCornerCutPathCost\":" << counters.navigationCornerCutPathCost
+                  << ",\"navigationWeightedPathCells\":" << counters.navigationWeightedPathCells
+                  << ",\"navigationWeightedPathCost\":" << counters.navigationWeightedPathCost
+                  << ",\"navigationWeightedPathAvoidedCostCell\":"
+                  << (counters.navigationWeightedPathAvoidedCostCell ? "true" : "false")
                   << ",\"navigationIncrementalExpandedNodes\":"
                   << counters.navigationIncrementalExpandedNodes
                   << ",\"navigationGridRevision\":" << counters.navigationGridRevision
@@ -5669,13 +6012,22 @@ int main(int argc, char** argv)
                   << ",\"audioMixFramesRendered\":" << counters.audioMixFramesRendered
 #endif
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+                  << ",\"physicsEnabled\":true"
                   << ",\"physicsSteps\":" << counters.physicsSteps
-                  << ",\"physicsStatics\":" << counters.physicsStaticBodies
+                  << ",\"physicsStaticBodies\":" << counters.physicsStaticBodies
                   << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
                   << ",\"physicsSensorEnters\":" << counters.physicsSensorEnters
                   << ",\"physicsSensorExits\":" << counters.physicsSensorExits
+                  << ",\"physicsConvexPolygonReady\":"
+                  << (counters.physicsConvexPolygonReady ? "true" : "false")
                   << ",\"physicsJointReady\":" << (counters.physicsJointReady ? "true" : "false")
-                  << ",\"dynamicY\":" << counters.lastDynamicY
+                  << ",\"physicsRevoluteJointReady\":"
+                  << (counters.physicsRevoluteJointReady ? "true" : "false")
+                  << ",\"physicsPrismaticJointReady\":"
+                  << (counters.physicsPrismaticJointReady ? "true" : "false")
+                  << ",\"lastDynamicY\":" << counters.lastDynamicY
+#else
+                  << ",\"physicsEnabled\":false"
 #endif
                   << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
                   << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
@@ -5708,12 +6060,26 @@ int main(int argc, char** argv)
               << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
               << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
               << ",\"navigationReady\":" << (counters.navigationReady ? "true" : "false")
-              << ",\"navigationSchemaVersion\":" << counters.navigationSchemaVersion
               << ",\"navigationSolidTileCells\":" << counters.navigationSolidTileCells
               << ",\"navigationBlockerRectangles\":" << counters.navigationBlockerRectangles
               << ",\"navigationBlockedCells\":" << counters.navigationBlockedCells
+              << ",\"navigationWeightedCells\":" << counters.navigationWeightedCells
+              << ",\"navigationMaximumTraversalCost\":"
+              << counters.navigationMaximumTraversalCost
               << ",\"navigationBasePathCells\":" << counters.navigationBasePathCells
+              << ",\"navigationBasePathCost\":" << counters.navigationBasePathCost
               << ",\"navigationDynamicPathCells\":" << counters.navigationDynamicPathCells
+              << ",\"navigationDynamicPathCost\":" << counters.navigationDynamicPathCost
+              << ",\"navigationStrictDiagonalPathCells\":"
+              << counters.navigationStrictDiagonalPathCells
+              << ",\"navigationStrictDiagonalPathCost\":"
+              << counters.navigationStrictDiagonalPathCost
+              << ",\"navigationCornerCutPathCells\":" << counters.navigationCornerCutPathCells
+              << ",\"navigationCornerCutPathCost\":" << counters.navigationCornerCutPathCost
+              << ",\"navigationWeightedPathCells\":" << counters.navigationWeightedPathCells
+              << ",\"navigationWeightedPathCost\":" << counters.navigationWeightedPathCost
+              << ",\"navigationWeightedPathAvoidedCostCell\":"
+              << (counters.navigationWeightedPathAvoidedCostCell ? "true" : "false")
               << ",\"navigationIncrementalExpandedNodes\":"
               << counters.navigationIncrementalExpandedNodes
               << ",\"navigationGridRevision\":" << counters.navigationGridRevision
@@ -5744,6 +6110,11 @@ int main(int argc, char** argv)
               << ",\"softShadowPointLight2DCount\":"
               << counters.softShadowPointLight2DCount
               << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
+              << ",\"submittedRenderFrames\":" << counters.submittedRenderFrames
+              << ",\"skippedSuspendedSurfaceFrames\":"
+              << counters.skippedSuspendedSurfaceFrames
+              << ",\"renderFrameAccountingValid\":"
+              << (renderFrameAccountingValid ? "true" : "false")
               << ",\"normalMappedSpriteCount\":" << counters.normalMappedSpriteCount
               << ",\"particleCapacity\":" << ProductParticleCapacity
               << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
@@ -5951,7 +6322,13 @@ int main(int argc, char** argv)
               << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
               << ",\"physicsSensorEnters\":" << counters.physicsSensorEnters
               << ",\"physicsSensorExits\":" << counters.physicsSensorExits
+              << ",\"physicsConvexPolygonReady\":"
+              << (counters.physicsConvexPolygonReady ? "true" : "false")
               << ",\"physicsJointReady\":" << (counters.physicsJointReady ? "true" : "false")
+              << ",\"physicsRevoluteJointReady\":"
+              << (counters.physicsRevoluteJointReady ? "true" : "false")
+              << ",\"physicsPrismaticJointReady\":"
+              << (counters.physicsPrismaticJointReady ? "true" : "false")
               << ",\"lastDynamicY\":" << counters.lastDynamicY
 #else
               << ",\"physicsEnabled\":false"

@@ -80,8 +80,8 @@ function Invoke-ShadowProbeRun {
     if ([int64]$evidence.frames -ne [int64]$SampleFrames) {
         [void]$errors.Add("frames expected=$SampleFrames actual=$($evidence.frames)")
     }
-    if ([int]$evidence.evidenceSchema -ne 24) {
-        [void]$errors.Add("evidenceSchema expected=24 actual=$($evidence.evidenceSchema)")
+    if ([int]$evidence.evidenceSchema -ne 27) {
+        [void]$errors.Add("evidenceSchema expected=27 actual=$($evidence.evidenceSchema)")
     }
     if (-not [bool]$evidence.sprite2DLightingConfigured) {
         [void]$errors.Add('sprite2DLightingConfigured must be true')
@@ -128,12 +128,15 @@ function Invoke-ShadowProbeRun {
         [void]$errors.Add(
             "spriteTextureRetirementLive expected=0 actual=$($evidence.spriteTextureRetirementLive)")
     }
-    if ([int64]$evidence.sceneLightingFrames -ne [int64]$evidence.renderExtractions) {
+    if ([int64]$evidence.sceneLightingFrames -ne [int64]$evidence.submittedRenderFrames -or
+        [int64]$evidence.submittedRenderFrames -lt 1 -or
+        [int64]$evidence.renderExtractions -ne
+            [int64]$evidence.submittedRenderFrames + [int64]$evidence.skippedSuspendedSurfaceFrames) {
         [void]$errors.Add(
-            "sceneLightingFrames must equal renderExtractions actual=$($evidence.sceneLightingFrames)/$($evidence.renderExtractions)")
+            "lighting frame accounting invalid lighting/submitted/skipped/extracted=$($evidence.sceneLightingFrames)/$($evidence.submittedRenderFrames)/$($evidence.skippedSuspendedSurfaceFrames)/$($evidence.renderExtractions)")
     }
-    if ([int64]$evidence.renderExtractions -lt 1) {
-        [void]$errors.Add('renderExtractions must be greater than zero')
+    if (-not [bool]$evidence.renderFrameAccountingValid) {
+        [void]$errors.Add('renderFrameAccountingValid must be true')
     }
     if (-not [bool]$evidence.pixelCaptureOk) {
         [void]$errors.Add('pixelCaptureOk must be true')

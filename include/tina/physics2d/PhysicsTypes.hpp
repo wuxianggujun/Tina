@@ -3,6 +3,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/physics2d/PhysicsIds.hpp>
 
+#include <array>
 #include <span>
 
 namespace Tina::Physics2D {
@@ -78,10 +79,14 @@ enum class PhysicsShapeKind2D : Core::u8 {
     Box,
     Circle,
     Capsule,
+    ConvexPolygon,
 };
+
+inline constexpr Core::usize MaximumConvexPolygonVertices2D = 8;
 
 struct PhysicsShape2DDesc final {
     PhysicsShapeKind2D kind = PhysicsShapeKind2D::Box;
+    // Only geometry fields documented for kind are consumed or validated.
     // Box: positive halfExtentsMeters, localCenterMeters, localAngleRadians.
     // Circle: positive radiusMeters, localCenterMeters.
     // Capsule: positive radiusMeters, distinct localPointA/BMeters.
@@ -91,6 +96,12 @@ struct PhysicsShape2DDesc final {
     float localAngleRadians = 0.0F;
     PhysicsVec2 localPointAMeters{-0.5F, 0.0F};
     PhysicsVec2 localPointBMeters{0.5F, 0.0F};
+    // ConvexPolygon: 3..8 finite, distinct vertices in clockwise or
+    // counter-clockwise strictly convex boundary order. Self-intersection and
+    // collinear boundary vertices are rejected. The local center/angle transform
+    // is applied before backend upload.
+    std::array<PhysicsVec2, MaximumConvexPolygonVertices2D> polygonVertices{};
+    Core::u32 polygonVertexCount = 0;
     float density = 1.0F;
     float friction = 0.6F;
     float restitution = 0.0F;
@@ -110,6 +121,8 @@ struct PhysicsShapeState2D final {
 
 enum class PhysicsJointKind2D : Core::u8 {
     Distance,
+    Revolute,
+    Prismatic,
 };
 
 struct PhysicsJoint2DDesc final {
@@ -118,19 +131,63 @@ struct PhysicsJoint2DDesc final {
     PhysicsBodyId bodyB{};
     PhysicsVec2 localAnchorAMeters{};
     PhysicsVec2 localAnchorBMeters{};
+    // Prismatic: finite, non-zero local translation direction in body A. Its
+    // magnitude is ignored and the runtime normalizes it before backend upload.
+    PhysicsVec2 localAxisA{1.0F, 0.0F};
+    // Distance only.
     float lengthMeters = 1.0F;
+    // All joint kinds support an optional spring. targetAngleRadians applies to
+    // Revolute; targetTranslationMeters applies to Prismatic.
     bool enableSpring = false;
     float hertz = 0.0F;
+    // Non-negative. Values above 1 represent an overdamped spring.
     float dampingRatio = 0.0F;
+    // Revolute reference/target angles are restricted to [-pi, pi], and limits
+    // are relative to referenceAngleRadians. Prismatic uses the reference angle
+    // to constrain relative rotation.
+    float referenceAngleRadians = 0.0F;
+    float targetAngleRadians = 0.0F;
+    // Revolute/Prismatic only; numeric limit and motor fields are kind-specific.
+    bool enableLimit = false;
+    float lowerAngleRadians = 0.0F;
+    float upperAngleRadians = 0.0F;
+    bool enableMotor = false;
+    float motorSpeedRadiansPerSecond = 0.0F;
+    float maxMotorTorqueNewtonMeters = 0.0F;
+    // Prismatic: translation target/limits and motor force in meters/newtons.
+    float targetTranslationMeters = 0.0F;
+    float lowerTranslationMeters = 0.0F;
+    float upperTranslationMeters = 0.0F;
+    float motorSpeedMetersPerSecond = 0.0F;
+    float maxMotorForceNewtons = 0.0F;
     bool collideConnected = false;
 };
 
+// Owning backend snapshot. Fields that do not apply to kind remain at defaults.
+// limitEnabled/motorEnabled apply to Revolute and Prismatic; their configured
+// values remain in the corresponding angle/translation fields.
 struct PhysicsJointState2D final {
     PhysicsJointKind2D kind = PhysicsJointKind2D::Distance;
     PhysicsBodyId bodyA{};
     PhysicsBodyId bodyB{};
     float lengthMeters = 0.0F;
+    float currentAngleRadians = 0.0F;
+    float targetAngleRadians = 0.0F;
+    float currentTranslationMeters = 0.0F;
+    float targetTranslationMeters = 0.0F;
     bool springEnabled = false;
+    float springHertz = 0.0F;
+    float springDampingRatio = 0.0F;
+    bool limitEnabled = false;
+    float lowerAngleRadians = 0.0F;
+    float upperAngleRadians = 0.0F;
+    bool motorEnabled = false;
+    float motorSpeedRadiansPerSecond = 0.0F;
+    float maxMotorTorqueNewtonMeters = 0.0F;
+    float lowerTranslationMeters = 0.0F;
+    float upperTranslationMeters = 0.0F;
+    float motorSpeedMetersPerSecond = 0.0F;
+    float maxMotorForceNewtons = 0.0F;
     bool collideConnected = false;
 };
 

@@ -11,6 +11,7 @@
 
 #include <array>
 #include <memory_resource>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -47,8 +48,18 @@ struct TileMapFixture final {
             },
             AssetFormat::TilesetTileDesc{
                 .localId = 2,
-                .materialFlags = 0,
+                .materialFlags = AssetFormat::TilesetWire::MaterialOneWay,
                 .u0 = 0.5F,
+                .v0 = 0.0F,
+                .u1 = 1.0F,
+                .v1 = 1.0F,
+            },
+            AssetFormat::TilesetTileDesc{
+                .localId = 3,
+                .materialFlags = static_cast<Core::u16>(
+                    AssetFormat::TilesetWire::MaterialSolid
+                    | AssetFormat::TilesetWire::MaterialOneWay),
+                .u0 = 0.0F,
                 .v0 = 0.0F,
                 .u1 = 1.0F,
                 .v1 = 1.0F,
@@ -64,12 +75,14 @@ struct TileMapFixture final {
     }
 };
 
-TEST(TileMapNavigation2DTests, BuildsSchemaV1DataFromSolidTilesAndTaggedRectangles)
+TEST(TileMapNavigation2DTests, BuildsCurrentGridFromSolidsTerrainCostsAndTaggedRectangles)
 {
     std::pmr::unsynchronized_pool_resource memory;
     TileMapFixture fixture;
     std::array<Core::u16, 15> cells{};
     cells[0] = 1;
+    cells[4] = 3; // Combined flags do not match the MaterialOneWay-only cost rule.
+    cells[6] = 2; // Cost remains authored when an object blocker covers the cell.
     cells[14] = 2; // Non-solid authored tile remains walkable.
 
     const std::array blockerProperty{
@@ -133,23 +146,37 @@ TEST(TileMapNavigation2DTests, BuildsSchemaV1DataFromSolidTilesAndTaggedRectangl
         5, 3, 4, fixture.mapId, fixture.tilesetId, fixture.tileset, layers, memory);
     ASSERT_TRUE(map.has_value()) << map.error().message;
 
+    const std::array materialCostRules{
+        TileMapNavigation2DMaterialCostRule{
+            .materialFlags = AssetFormat::TilesetWire::MaterialOneWay,
+            .traversalCost = 5,
+        },
+    };
+
     auto built = buildTileMapNavigation2DData(
         *map,
         TileMapNavigation2DDataBuildConfig{
             .solidTileLayerId = CollisionLayerId,
             .blockerObjectLayerId = GameplayLayerId,
+            .materialCostRules = materialCostRules,
         },
         memory);
     ASSERT_TRUE(built.has_value()) << built.error().message;
-    EXPECT_EQ(built->data.schemaVersion(), Navigation2D::NavigationGrid2DSchema::Version);
-    EXPECT_EQ(built->stats.solidTileCells, 1U);
+    EXPECT_EQ(built->stats.solidTileCells, 2U);
     EXPECT_EQ(built->stats.blockerRectangles, 1U);
-    EXPECT_EQ(built->stats.blockedCells, 3U);
+    EXPECT_EQ(built->stats.blockedCells, 4U);
+    EXPECT_EQ(built->stats.weightedCells, 2U);
+    EXPECT_EQ(built->stats.maximumTraversalCost, 5U);
     EXPECT_TRUE(built->data.blockedAt({0, 0}));
     EXPECT_TRUE(built->data.blockedAt({1, 1}));
     EXPECT_TRUE(built->data.blockedAt({2, 1}));
     EXPECT_FALSE(built->data.blockedAt({3, 1}));
+    EXPECT_TRUE(built->data.blockedAt({4, 0}));
     EXPECT_FALSE(built->data.blockedAt({4, 2}));
+    EXPECT_EQ(built->data.traversalCostAt({1, 1}), 5U);
+    EXPECT_EQ(built->data.traversalCostAt({4, 0}), 1U);
+    EXPECT_EQ(built->data.traversalCostAt({4, 2}), 5U);
+    EXPECT_EQ(built->data.minimumTraversalCost(), 1U);
 
     auto grid = Navigation2D::NavigationGrid2D::Create(
         std::move(built->data), Navigation2D::NavigationGrid2DConfig{.dynamicBlockerCapacity = 2}, memory);
@@ -159,6 +186,78 @@ TEST(TileMapNavigation2DTests, BuildsSchemaV1DataFromSolidTilesAndTaggedRectangl
     auto path = pathfinder->findPath(*grid, {0, 2}, {4, 2});
     ASSERT_TRUE(path.has_value());
     EXPECT_EQ(path->state, Navigation2D::NavigationPathQueryState::Reached);
+}
+
+TEST(TileMapNavigation2DTests, RejectsInvalidAndDuplicateMaterialCostRules)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    TileMapFixture fixture;
+    const std::array<Core::u16, 1> cells{};
+    const std::array layers{
+        TestSupport::TestTileMapLayerDesc{
+            .stableLayerId = CollisionLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = false,
+            .name = "collision",
+            .cells = cells,
+        },
+    };
+    auto map = TestSupport::makeResidentTileMapInstance(
+        1, 1, 1, fixture.mapId, fixture.tilesetId, fixture.tileset, layers, memory);
+    ASSERT_TRUE(map.has_value()) << map.error().message;
+
+    const auto buildWithRules = [&map, &memory](
+                                    std::span<const TileMapNavigation2DMaterialCostRule> rules) {
+        return buildTileMapNavigation2DData(
+            *map,
+            TileMapNavigation2DDataBuildConfig{
+                .solidTileLayerId = CollisionLayerId,
+                .materialCostRules = rules,
+            },
+            memory);
+    };
+
+    const std::array zeroFlags{
+        TileMapNavigation2DMaterialCostRule{.materialFlags = 0, .traversalCost = 2},
+    };
+    auto invalid = buildWithRules(zeroFlags);
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error().code, Navigation2D::NavigationErrorCode::InvalidData);
+
+    const std::array zeroCost{
+        TileMapNavigation2DMaterialCostRule{
+            .materialFlags = AssetFormat::TilesetWire::MaterialOneWay,
+            .traversalCost = 0,
+        },
+    };
+    auto invalidZeroCost = buildWithRules(zeroCost);
+    ASSERT_FALSE(invalidZeroCost.has_value());
+    EXPECT_EQ(invalidZeroCost.error().code, Navigation2D::NavigationErrorCode::InvalidData);
+
+    const std::array excessiveCost{
+        TileMapNavigation2DMaterialCostRule{
+            .materialFlags = AssetFormat::TilesetWire::MaterialOneWay,
+            .traversalCost = static_cast<Core::u8>(
+                Navigation2D::NavigationGrid2DContract::MaximumTraversalCost + 1U),
+        },
+    };
+    auto invalidExcessiveCost = buildWithRules(excessiveCost);
+    ASSERT_FALSE(invalidExcessiveCost.has_value());
+    EXPECT_EQ(invalidExcessiveCost.error().code, Navigation2D::NavigationErrorCode::InvalidData);
+
+    const std::array duplicateFlags{
+        TileMapNavigation2DMaterialCostRule{
+            .materialFlags = AssetFormat::TilesetWire::MaterialOneWay,
+            .traversalCost = 2,
+        },
+        TileMapNavigation2DMaterialCostRule{
+            .materialFlags = AssetFormat::TilesetWire::MaterialOneWay,
+            .traversalCost = 3,
+        },
+    };
+    auto invalidDuplicateFlags = buildWithRules(duplicateFlags);
+    ASSERT_FALSE(invalidDuplicateFlags.has_value());
+    EXPECT_EQ(invalidDuplicateFlags.error().code, Navigation2D::NavigationErrorCode::InvalidData);
 }
 
 TEST(TileMapNavigation2DTests, RejectsWrongLayerKindsAndTaggedPointBlockers)

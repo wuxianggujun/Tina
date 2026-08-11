@@ -9,6 +9,7 @@ texture2d 010000000000000000000000000000a4 2 1 F08C28FF 28C8DCFF
 tileset 020000000000000000000000000000a7 010000000000000000000000000000a4 1 1
 tile 1 1 0 0 0.5 1
 tile 2 1 0.5 0 1 1
+tile 3 2 0 0 0.5 1
 tilemap 030000000000000000000000000000a6 020000000000000000000000000000a7 8 4 1.0
 tilelayer 10 1 visual
 property role render
@@ -21,7 +22,7 @@ tilelayer 20 0 collision
 property role collision
 row 1 1 1 1 1 1 1 1
 row 0 0 0 0 0 0 2 0
-row 0 0 0 0 0 0 2 0
+row 0 0 0 3 0 0 2 0
 row 0 0 0 0 0 0 2 0
 endlayer
 objectlayer 30 1 gameplay

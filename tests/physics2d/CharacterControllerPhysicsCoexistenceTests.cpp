@@ -97,17 +97,24 @@ TEST(CharacterControllerPhysicsCoexistenceTest, GridControllerAndDynamicBodyShar
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     Physics2D::PhysicsWorld2D world = std::move(*worldResult);
 
-    Physics2D::PhysicsGridSolidCell2D solidScratch[64]{};
-    Physics2D::PhysicsBodyId staticBodies[64]{};
-    Physics2D::PhysicsGridBodySyncConfig2D syncConfig;
-    syncConfig.cellSizeMeters = 0.0F;
-    syncConfig.enableContactEvents = true;
-    auto synced = Asset::syncTileMapSolidsToStaticBodies(grid, world, syncConfig, staticBodies, solidScratch);
+    Asset::TileMapPhysicsSync2DConfig physicsSyncConfig;
+    physicsSyncConfig.layerId = CollisionLayerId;
+    physicsSyncConfig.chunkCapacity = 8;
+    physicsSyncConfig.material.enableContactEvents = true;
+    physicsSyncConfig.memoryResource = &memory;
+    auto sync = Asset::TileMapPhysicsSync2D::Create(map, physicsSyncConfig);
+    ASSERT_TRUE(sync) << sync.error().message;
+
+    auto synced = sync->synchronize(map, world);
     ASSERT_TRUE(synced) << synced.error().message;
-    // Floor 8 + wall column 3 = 11 solid cells
-    EXPECT_EQ(synced->totalFound, 11U);
-    EXPECT_EQ(synced->written, 11U);
-    EXPECT_EQ(world.stats().bodyCount, 11U);
+    // 8x4 map with chunkSize 4 => 2 resident chunks, one static body each.
+    // Chunk (0,0) merges its floor run into 1 box. Chunk (1,0) merges the floor
+    // run plus the x=6 wall column into 2 boxes. 11 solid cells => 3 shapes.
+    EXPECT_EQ(synced->residentChunkCount, 2U);
+    EXPECT_EQ(synced->colliderBodyCount, 2U);
+    EXPECT_EQ(synced->colliderShapeCount, 3U);
+    EXPECT_EQ(world.stats().bodyCount, 2U);
+    EXPECT_EQ(world.stats().shapeCount, 3U);
 
     Asset::CharacterController2D controller(Asset::CharacterController2DConfig{
         .halfWidth = 0.3f,
@@ -193,7 +200,10 @@ TEST(CharacterControllerPhysicsCoexistenceTest, GridControllerAndDynamicBodyShar
     }
     EXPECT_TRUE(hitWall);
     EXPECT_LT(controller.state().positionX + controller.config().halfWidth, 6.0f);
-    EXPECT_EQ(world.stats().bodyCount, 12U); // 11 static + 1 dynamic
+    EXPECT_EQ(world.stats().bodyCount, 3U); // 2 chunk colliders + 1 dynamic
+
+    ASSERT_TRUE(sync->shutdown(world));
+    EXPECT_EQ(world.stats().bodyCount, 1U); // only the dynamic body remains
 }
 
 } // namespace

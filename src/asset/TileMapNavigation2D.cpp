@@ -14,6 +14,47 @@
 namespace Tina::Asset {
 namespace {
 
+[[nodiscard]] Core::Status validateMaterialCostRules(
+    std::span<const TileMapNavigation2DMaterialCostRule> rules) noexcept
+{
+    for (Core::usize index = 0; index < rules.size(); ++index)
+    {
+        const auto& rule = rules[index];
+        if (rule.materialFlags == 0U
+            || rule.traversalCost < Navigation2D::NavigationGrid2DContract::MinimumTraversalCost
+            || rule.traversalCost > Navigation2D::NavigationGrid2DContract::MaximumTraversalCost)
+        {
+            return Core::failure(
+                Navigation2D::NavigationErrorCode::InvalidData,
+                "tilemap navigation material cost rule is outside the supported range");
+        }
+        for (Core::usize other = index + 1U; other < rules.size(); ++other)
+        {
+            if (rules[other].materialFlags == rule.materialFlags)
+            {
+                return Core::failure(
+                    Navigation2D::NavigationErrorCode::InvalidData,
+                    "tilemap navigation material cost rules contain a duplicate flag match");
+            }
+        }
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::u8 traversalCostForMaterial(
+    Core::u16 materialFlags,
+    std::span<const TileMapNavigation2DMaterialCostRule> rules) noexcept
+{
+    for (const auto& rule : rules)
+    {
+        if (rule.materialFlags == materialFlags)
+        {
+            return rule.traversalCost;
+        }
+    }
+    return Navigation2D::NavigationGrid2DContract::MinimumTraversalCost;
+}
+
 [[nodiscard]] Core::Status rasterizeBlockerRectangle(
     const AssetFormat::TileMapObjectPayloadView& object, Core::u32 widthCells,
     Core::u32 heightCells, float cellSizeMeters, std::pmr::vector<Core::u8>& flags)
@@ -69,7 +110,7 @@ namespace {
         for (Core::u32 x = minCellX; x <= maxCellX; ++x)
         {
             flags[static_cast<Core::usize>(y) * widthCells + x] |=
-                Navigation2D::NavigationGrid2DSchema::CellBlocked;
+                Navigation2D::NavigationGrid2DContract::CellBlocked;
         }
     }
     return Core::success();
@@ -102,6 +143,10 @@ Core::Result<TileMapNavigation2DDataBuildResult> buildTileMapNavigation2DData(
         return Core::failure(Navigation2D::NavigationErrorCode::InvalidData,
                              "tilemap navigation object blocker property match must be non-empty");
     }
+    if (const Core::Status status = validateMaterialCostRules(config.materialCostRules); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
 
     try
     {
@@ -109,6 +154,9 @@ Core::Result<TileMapNavigation2DDataBuildResult> buildTileMapNavigation2DData(
             static_cast<Core::usize>(map.widthCells()) * map.heightCells();
         std::pmr::vector<Core::u8> flags{&resource};
         flags.resize(cellCount, Core::u8{0});
+        std::pmr::vector<Core::u8> traversalCosts{&resource};
+        traversalCosts.resize(
+            cellCount, Navigation2D::NavigationGrid2DContract::MinimumTraversalCost);
         TileMapNavigation2DDataBuildStats stats{};
 
         for (Core::u32 y = 0; y < map.heightCells(); ++y)
@@ -121,12 +169,26 @@ Core::Result<TileMapNavigation2DDataBuildResult> buildTileMapNavigation2DData(
                     return Core::failure(std::move(info.error()).withContext(
                         "buildTileMapNavigation2DData", "solid tile layer"));
                 }
-                if (*info && !(*info)->empty &&
-                    (((*info)->materialFlags & AssetFormat::TilesetWire::MaterialSolid) != 0U))
+                if (!*info || (*info)->empty)
                 {
-                    flags[static_cast<Core::usize>(y) * map.widthCells() + x] |=
-                        Navigation2D::NavigationGrid2DSchema::CellBlocked;
+                    continue;
+                }
+                const Core::usize cellIndex =
+                    static_cast<Core::usize>(y) * map.widthCells() + x;
+                if (((*info)->materialFlags & AssetFormat::TilesetWire::MaterialSolid) != 0U)
+                {
+                    flags[cellIndex] |=
+                        Navigation2D::NavigationGrid2DContract::CellBlocked;
                     ++stats.solidTileCells;
+                }
+                const Core::u8 traversalCost =
+                    traversalCostForMaterial((*info)->materialFlags, config.materialCostRules);
+                traversalCosts[cellIndex] = traversalCost;
+                if (traversalCost > Navigation2D::NavigationGrid2DContract::MinimumTraversalCost)
+                {
+                    ++stats.weightedCells;
+                    stats.maximumTraversalCost =
+                        (std::max)(stats.maximumTraversalCost, traversalCost);
                 }
             }
         }
@@ -173,7 +235,7 @@ Core::Result<TileMapNavigation2DDataBuildResult> buildTileMapNavigation2DData(
 
         stats.blockedCells = static_cast<Core::usize>(std::count_if(
             flags.begin(), flags.end(), [](Core::u8 value) {
-                return (value & Navigation2D::NavigationGrid2DSchema::CellBlocked) != 0U;
+                return (value & Navigation2D::NavigationGrid2DContract::CellBlocked) != 0U;
             }));
         auto data = Navigation2D::NavigationGrid2DData::Create(
             Navigation2D::NavigationGrid2DDataDesc{
@@ -181,12 +243,13 @@ Core::Result<TileMapNavigation2DDataBuildResult> buildTileMapNavigation2DData(
                 .heightCells = map.heightCells(),
                 .cellSizeMeters = map.cellSizeMeters(),
                 .cellFlags = flags,
+                .traversalCosts = traversalCosts,
             },
             resource);
         if (!data)
         {
             return Core::failure(std::move(data.error()).withContext(
-                "buildTileMapNavigation2DData", "schema-v1 data publication"));
+                "buildTileMapNavigation2DData", "immutable grid data publication"));
         }
         return TileMapNavigation2DDataBuildResult{.data = std::move(*data), .stats = stats};
     }

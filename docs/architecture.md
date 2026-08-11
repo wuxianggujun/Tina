@@ -88,7 +88,7 @@ flowchart TD
 | `tina_audio` | AudioEngine、voice/bus/command/completion | 不含 miniaudio 类型 |
 | `tina_asset_format` | Cooked wire format 与 typed payload | Runtime 不读取源资产 |
 | `tina_editor` | current-schema authoring documents、Project Asset index 与 document-tab navigation state | 只依赖 Core/AssetFormat；owner move-only，不反向依赖 UI/Runtime/Scene |
-| `tina_navigation2d` | schema-v1 grid、generation dynamic blocker、确定性同步/分步 A* | 只依赖 Core；不创建线程，不进入 Scene World |
+| `tina_navigation2d` | immutable weighted grid、generation dynamic blocker、确定性四向/对角同步与分步 A* | 只依赖 Core；不创建线程，不进入 Scene World |
 
 ### 产品模块
 
@@ -96,10 +96,10 @@ flowchart TD
 | --- | --- | --- |
 | `tina_runtime` | `EngineHost`、帧阶段、Input→Action、Runtime→UI、Render submit | 唯一正式主循环 |
 | `tina_asset_types` | `AssetHandle` 弱 generation identity、borrowed frame-resource resolver | header-only；只传递 Core/Render，不传递完整 Asset/Task/Physics |
-| `tina_scene` | generation entity、Transform、2D/3D component 与 extraction | 仅通过 AssetTypes 引用弱 Handle；当前不链接 EnTT/GLM |
+| `tina_scene` | generation entity、Transform、2D/3D component/extraction 与 allocation-free `CameraFollow2D` | 仅通过 AssetTypes 引用弱 Handle；当前不链接 EnTT/GLM |
 | `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；两类 registry 都借用 AssetSystem/device，并唯一拥有各自 resident Lease/GPU/binding |
 | `tina_ui` | retained Element tree、layout/hit/route/paint/semantics、文本/Glyph、accessibility action | 当前产品 UI 位于 `src/ui`；UI-004/UI-005 已完成，框架演进见 [UI 框架设计](ui-framework.md) |
-| `tina_physics2d` | Box2D 3.x 的 Tina-owned 生命周期与查询边界 | 可选，Box2D PRIVATE |
+| `tina_physics2d` | Box/Circle/Capsule/ConvexPolygon、Distance/Revolute/Prismatic 与查询边界 | 可选，Box2D 3.x PRIVATE |
 
 ### 私有 adapter 与组合
 
@@ -249,13 +249,18 @@ pin 再释放 Lease。2D 与 3D Scene/Render item 的持久 binding key、产品
 cleanup 账簿都已删除。`ASSET-HANDLE-SCENE` 的 A1-A6 与 N16.1-N16.4 已完成。
 
 产品 2D 导航不进入 `Scene::World`。`Asset::buildTileMapNavigation2DData()` 从当前 resident
-`TileMapInstance` 的显式 solid tile layer 与 property-tagged visible Rectangle object 生成唯一现行 schema-v1
-数据；引用 chunk 未驻留、layer kind 或 object geometry 非法时原子失败。State 再创建固定容量
+`TileMapInstance` 的显式 solid tile layer、property-tagged visible Rectangle object 与 exact material-cost rule
+生成唯一当前 immutable grid 数据；引用 chunk 未驻留、layer/object/rule 非法时原子失败。State 再创建固定容量
 `NavigationGrid2D` 与 `NavigationPathfinder2D`，动态 blocker 以 owner-aware generation ID 和 per-cell 引用计数
-叠加；四方向单位代价 A* 以 `f -> Manhattan heuristic -> row-major index` 稳定决胜。同步 `findPath()` 与
+叠加；四向/对角 A* 按目标格 traversal multiplier 计算 `10/14 × cost`，用 minimum-scaled
+Manhattan/octile heuristic 并以 `f -> heuristic -> row-major index` 稳定决胜。同步 `findPath()` 与
 分步 `begin()/advance()/cancel()` 共用同一 storage，`Reached/Unreachable/Cancelled/Invalidated` 均为明确结果。
 当前没有独立 Cooked Navigation `AssetKind`、自动 Physics 同步或内部 worker。完整契约见
 [2D 导航](navigation2d.md)。
+
+`Scene::CameraFollow2D` 是独立于 `World::Camera2D` projection component 的 owner-thread controller；它以
+dead zone、可选速度、viewport/world bounds 更新 previous/current simulation center，presentation extraction
+只借用插值结果。它不拥有 Entity、World 或 Render backend。
 
 ## 当前 UI 边界
 

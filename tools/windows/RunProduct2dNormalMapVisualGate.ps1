@@ -81,8 +81,8 @@ function Invoke-NormalMapProbeRun {
     if ([int64]$evidence.frames -ne [int64]$SampleFrames) {
         [void]$errors.Add("frames expected=$SampleFrames actual=$($evidence.frames)")
     }
-    if ([int]$evidence.evidenceSchema -ne 24) {
-        [void]$errors.Add("evidenceSchema expected=24 actual=$($evidence.evidenceSchema)")
+    if ([int]$evidence.evidenceSchema -ne 27) {
+        [void]$errors.Add("evidenceSchema expected=27 actual=$($evidence.evidenceSchema)")
     }
     if ([int]$evidence.normalMappedSpriteCount -ne $expectedNormalMappedSpriteCount) {
         [void]$errors.Add(
@@ -122,10 +122,15 @@ function Invoke-NormalMapProbeRun {
             [void]$errors.Add("$field expected=$value actual=$($evidence.$field)")
         }
     }
-    if ([int64]$evidence.sceneLightingFrames -ne [int64]$evidence.renderExtractions -or
-        [int64]$evidence.renderExtractions -lt 1) {
+    if ([int64]$evidence.sceneLightingFrames -ne [int64]$evidence.submittedRenderFrames -or
+        [int64]$evidence.submittedRenderFrames -lt 1 -or
+        [int64]$evidence.renderExtractions -ne
+            [int64]$evidence.submittedRenderFrames + [int64]$evidence.skippedSuspendedSurfaceFrames) {
         [void]$errors.Add(
-            "sceneLightingFrames must equal non-zero renderExtractions actual=$($evidence.sceneLightingFrames)/$($evidence.renderExtractions)")
+            "lighting frame accounting invalid lighting/submitted/skipped/extracted=$($evidence.sceneLightingFrames)/$($evidence.submittedRenderFrames)/$($evidence.skippedSuspendedSurfaceFrames)/$($evidence.renderExtractions)")
+    }
+    if (-not [bool]$evidence.renderFrameAccountingValid) {
+        [void]$errors.Add('renderFrameAccountingValid must be true')
     }
     if (-not [bool]$evidence.pixelCaptureOk) {
         [void]$errors.Add('pixelCaptureOk must be true')

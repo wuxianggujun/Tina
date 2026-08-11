@@ -12,16 +12,17 @@
 
 namespace Tina::Navigation2D {
 
-namespace NavigationGrid2DSchema {
+namespace NavigationGrid2DContract {
 
-inline constexpr Core::u16 Version = 1;
 inline constexpr Core::u8 CellBlocked = 1U << 0U;
 inline constexpr Core::u8 ValidCellFlags = CellBlocked;
+inline constexpr Core::u8 MinimumTraversalCost = 1;
+inline constexpr Core::u8 MaximumTraversalCost = 16;
 inline constexpr Core::u32 MaximumDimension = 4096;
 inline constexpr Core::usize MaximumCellCount = Core::usize{16} * 1024U * 1024U;
 inline constexpr Core::usize MaximumDynamicBlockers = 65535;
 
-} // namespace NavigationGrid2DSchema
+} // namespace NavigationGrid2DContract
 
 struct NavigationCell2D final {
     Core::u32 x = 0;
@@ -40,16 +41,16 @@ struct NavigationCellRect2D final {
 };
 
 struct NavigationGrid2DDataDesc final {
-    Core::u16 schemaVersion = NavigationGrid2DSchema::Version;
     Core::u32 widthCells = 0;
     Core::u32 heightCells = 0;
     float cellSizeMeters = 1.0F;
-    // Row-major cell flags. Only NavigationGrid2DSchema::CellBlocked is valid in v1.
+    // Row-major cell flags. Only NavigationGrid2DContract::CellBlocked is valid.
     std::span<const Core::u8> cellFlags{};
+    // Row-major traversal multipliers in [1, 16], including blocked cells.
+    std::span<const Core::u8> traversalCosts{};
 };
 
-// Immutable owning schema-v1 navigation data. Old schemas are rejected rather
-// than read through compatibility branches while the project remains pre-1.0.
+// Immutable owning navigation data using the only supported grid layout.
 class NavigationGrid2DData final {
 public:
     [[nodiscard]] static Core::Result<NavigationGrid2DData> Create(
@@ -64,24 +65,30 @@ public:
     NavigationGrid2DData& operator=(NavigationGrid2DData&&) = delete;
 
     [[nodiscard]] explicit operator bool() const noexcept;
-    [[nodiscard]] Core::u16 schemaVersion() const noexcept { return m_schemaVersion; }
     [[nodiscard]] Core::u32 widthCells() const noexcept { return m_widthCells; }
     [[nodiscard]] Core::u32 heightCells() const noexcept { return m_heightCells; }
     [[nodiscard]] Core::usize cellCount() const noexcept { return m_cellFlags.size(); }
     [[nodiscard]] float cellSizeMeters() const noexcept { return m_cellSizeMeters; }
     [[nodiscard]] std::span<const Core::u8> cellFlags() const noexcept { return m_cellFlags; }
+    [[nodiscard]] std::span<const Core::u8> traversalCosts() const noexcept { return m_traversalCosts; }
+    [[nodiscard]] Core::u8 minimumTraversalCost() const noexcept { return m_minimumTraversalCost; }
     [[nodiscard]] bool inBounds(NavigationCell2D cell) const noexcept;
     [[nodiscard]] bool blockedAt(NavigationCell2D cell) const noexcept;
+    // Returns zero for an out-of-bounds cell.
+    [[nodiscard]] Core::u8 traversalCostAt(NavigationCell2D cell) const noexcept;
 
 private:
-    NavigationGrid2DData(Core::u16 schemaVersion, Core::u32 widthCells, Core::u32 heightCells,
-                         float cellSizeMeters, std::pmr::vector<Core::u8> cellFlags) noexcept;
+    NavigationGrid2DData(Core::u32 widthCells, Core::u32 heightCells, float cellSizeMeters,
+                         std::pmr::vector<Core::u8> cellFlags,
+                         std::pmr::vector<Core::u8> traversalCosts,
+                         Core::u8 minimumTraversalCost) noexcept;
 
-    Core::u16 m_schemaVersion = 0;
     Core::u32 m_widthCells = 0;
     Core::u32 m_heightCells = 0;
     float m_cellSizeMeters = 0.0F;
     std::pmr::vector<Core::u8> m_cellFlags;
+    std::pmr::vector<Core::u8> m_traversalCosts;
+    Core::u8 m_minimumTraversalCost = 0;
 };
 
 namespace Detail {
@@ -95,7 +102,7 @@ struct NavigationGrid2DConfig final {
     Core::usize dynamicBlockerCapacity = 64;
 };
 
-// Owner-thread mutable navigation grid. Base schema data remains immutable;
+// Owner-thread mutable navigation grid. Base grid data remains immutable;
 // fixed-capacity generation blockers are overlaid through per-cell reference counts.
 class NavigationGrid2D final {
 public:
@@ -119,6 +126,14 @@ public:
     [[nodiscard]] bool inBounds(NavigationCell2D cell) const noexcept { return m_data.inBounds(cell); }
     [[nodiscard]] bool isBaseBlocked(NavigationCell2D cell) const noexcept { return m_data.blockedAt(cell); }
     [[nodiscard]] bool isBlocked(NavigationCell2D cell) const noexcept;
+    [[nodiscard]] Core::u8 traversalCostAt(NavigationCell2D cell) const noexcept
+    {
+        return m_data.traversalCostAt(cell);
+    }
+    [[nodiscard]] Core::u8 minimumTraversalCost() const noexcept
+    {
+        return m_data.minimumTraversalCost();
+    }
     [[nodiscard]] Core::u16 dynamicBlockerCountAt(NavigationCell2D cell) const noexcept;
     [[nodiscard]] Core::u64 revision() const noexcept { return m_revision; }
     [[nodiscard]] Core::usize dynamicBlockerCapacity() const noexcept { return m_blockers.capacity(); }

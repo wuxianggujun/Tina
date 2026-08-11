@@ -1,4 +1,5 @@
 set(TINA_SCENE_TEST_SOURCES
+    CameraFollow2DTests.cpp
     SceneWorldTests.cpp
     SceneComponentExtractTests.cpp
     ParticleSystem2DTests.cpp
@@ -6,6 +7,7 @@ set(TINA_SCENE_TEST_SOURCES
     Trail2DTests.cpp
     World2DSnapshotTests.cpp
     header_isolation/Camera2DHeader.cpp
+    header_isolation/CameraFollow2DHeader.cpp
     header_isolation/DirectionalLight3DHeader.cpp
     header_isolation/EntityHeader.cpp
     header_isolation/ExtractRenderSceneHeader.cpp

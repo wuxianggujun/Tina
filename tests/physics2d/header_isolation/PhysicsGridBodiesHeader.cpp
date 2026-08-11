@@ -6,4 +6,6 @@
 #error "PhysicsGridBodies.hpp leaked a backend dependency"
 #endif
 
-static_assert(std::is_trivially_copyable_v<Tina::Physics2D::PhysicsGridSolidCell2D>);
+static_assert(std::is_trivially_copyable_v<Tina::Physics2D::PhysicsGridSolidRect2D>);
+static_assert(std::is_trivially_copyable_v<Tina::Physics2D::PhysicsGridColliderMaterial2D>);
+static_assert(std::is_trivially_copyable_v<Tina::Physics2D::PhysicsGridBodyCreateResult2D>);

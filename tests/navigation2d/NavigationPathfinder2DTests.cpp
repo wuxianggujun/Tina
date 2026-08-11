@@ -45,16 +45,35 @@ private:
     Core::usize blockerCapacity, std::pmr::memory_resource& memory)
 {
     std::vector<Core::u8> flags(static_cast<Core::usize>(width) * height, 0U);
+    std::vector<Core::u8> traversalCosts(
+        static_cast<Core::usize>(width) * height,
+        NavigationGrid2DContract::MinimumTraversalCost);
     for (const NavigationCell2D cell : blocked)
     {
         flags[static_cast<Core::usize>(cell.y) * width + cell.x] =
-            NavigationGrid2DSchema::CellBlocked;
+            NavigationGrid2DContract::CellBlocked;
     }
     auto data = NavigationGrid2DData::Create(
-        NavigationGrid2DDataDesc{.widthCells = width, .heightCells = height, .cellFlags = flags}, memory);
+        NavigationGrid2DDataDesc{.widthCells = width, .heightCells = height,
+                                 .cellFlags = flags, .traversalCosts = traversalCosts}, memory);
     EXPECT_TRUE(data.has_value()) << (data ? "" : data.error().message);
     auto grid = NavigationGrid2D::Create(
         std::move(*data), NavigationGrid2DConfig{.dynamicBlockerCapacity = blockerCapacity}, memory);
+    EXPECT_TRUE(grid.has_value()) << (grid ? "" : grid.error().message);
+    return std::move(*grid);
+}
+
+[[nodiscard]] NavigationGrid2D makeWeightedGrid(
+    Core::u32 width, Core::u32 height, std::span<const Core::u8> traversalCosts,
+    std::pmr::memory_resource& memory)
+{
+    std::vector<Core::u8> flags(static_cast<Core::usize>(width) * height, 0U);
+    auto data = NavigationGrid2DData::Create(
+        NavigationGrid2DDataDesc{.widthCells = width, .heightCells = height,
+                                 .cellFlags = flags, .traversalCosts = traversalCosts}, memory);
+    EXPECT_TRUE(data.has_value()) << (data ? "" : data.error().message);
+    auto grid = NavigationGrid2D::Create(
+        std::move(*data), NavigationGrid2DConfig{.dynamicBlockerCapacity = 1}, memory);
     EXPECT_TRUE(grid.has_value()) << (grid ? "" : grid.error().message);
     return std::move(*grid);
 }
@@ -71,6 +90,7 @@ TEST(NavigationPathfinder2DTests, FindsStableShortestPathAroundBlockedCells)
     auto result = pathfinder.findPath(grid, {0, 1}, {4, 1});
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(result->state, NavigationPathQueryState::Reached);
+    EXPECT_EQ(result->pathCost, 60U);
     const std::array expected{
         NavigationCell2D{0, 1}, NavigationCell2D{1, 1}, NavigationCell2D{1, 2},
         NavigationCell2D{2, 2}, NavigationCell2D{3, 2}, NavigationCell2D{3, 1},
@@ -112,6 +132,73 @@ TEST(NavigationPathfinder2DTests, ChoosesRowMajorPathWhenShortestAlternativesTie
     };
     ASSERT_EQ(pathfinder.path().size(), expected.size());
     EXPECT_TRUE(std::equal(pathfinder.path().begin(), pathfinder.path().end(), expected.begin()));
+}
+
+TEST(NavigationPathfinder2DTests, WeightedTerrainChoosesLongerLowerCostPath)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const std::array<Core::u8, 15> traversalCosts{
+        1, 1, 1, 1, 1,
+        1, 1, 8, 1, 1,
+        1, 1, 1, 1, 1,
+    };
+    NavigationGrid2D grid = makeWeightedGrid(5, 3, traversalCosts, memory);
+    auto pathfinderResult = NavigationPathfinder2D::Create({.cellCapacity = 15}, memory);
+    ASSERT_TRUE(pathfinderResult.has_value());
+    NavigationPathfinder2D pathfinder = std::move(*pathfinderResult);
+
+    auto result = pathfinder.findPath(grid, {0, 1}, {4, 1});
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->state, NavigationPathQueryState::Reached);
+    EXPECT_EQ(result->pathCellCount, 7U);
+    EXPECT_EQ(result->pathCost, 60U);
+    EXPECT_TRUE(std::none_of(
+        pathfinder.path().begin(), pathfinder.path().end(),
+        [](NavigationCell2D cell) { return cell == NavigationCell2D{2, 1}; }));
+}
+
+TEST(NavigationPathfinder2DTests, DiagonalModesHonorCornerPolicyAndDestinationCost)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const std::array blocked{NavigationCell2D{1, 0}, NavigationCell2D{0, 1}};
+    NavigationGrid2D cornerGrid = makeGrid(3, 3, blocked, 1, memory);
+    auto pathfinderResult = NavigationPathfinder2D::Create({.cellCapacity = 9}, memory);
+    ASSERT_TRUE(pathfinderResult.has_value());
+    NavigationPathfinder2D pathfinder = std::move(*pathfinderResult);
+
+    auto strict = pathfinder.findPath(
+        cornerGrid, {0, 0}, {2, 2},
+        NavigationPathQueryOptions{
+            .diagonalMode = NavigationDiagonalMode2D::RequireClearAdjacentCells});
+    ASSERT_TRUE(strict.has_value()) << strict.error().message;
+    EXPECT_EQ(strict->state, NavigationPathQueryState::Unreachable);
+    EXPECT_EQ(strict->pathCost, 0U);
+
+    auto permissive = pathfinder.findPath(
+        cornerGrid, {0, 0}, {2, 2},
+        NavigationPathQueryOptions{
+            .diagonalMode = NavigationDiagonalMode2D::AllowCornerCutting});
+    ASSERT_TRUE(permissive.has_value()) << permissive.error().message;
+    EXPECT_EQ(permissive->state, NavigationPathQueryState::Reached);
+    EXPECT_EQ(permissive->pathCellCount, 3U);
+    EXPECT_EQ(permissive->pathCost, 28U);
+
+    const std::array<Core::u8, 4> traversalCosts{1U, 4U, 4U, 3U};
+    NavigationGrid2D weightedGrid = makeWeightedGrid(2, 2, traversalCosts, memory);
+    auto weightedDiagonal = pathfinder.findPath(
+        weightedGrid, {0, 0}, {1, 1},
+        NavigationPathQueryOptions{
+            .diagonalMode = NavigationDiagonalMode2D::RequireClearAdjacentCells});
+    ASSERT_TRUE(weightedDiagonal.has_value()) << weightedDiagonal.error().message;
+    EXPECT_EQ(weightedDiagonal->state, NavigationPathQueryState::Reached);
+    EXPECT_EQ(weightedDiagonal->pathCellCount, 2U);
+    EXPECT_EQ(weightedDiagonal->pathCost, 42U);
+
+    auto sameCell = pathfinder.findPath(weightedGrid, {1, 1}, {1, 1});
+    ASSERT_TRUE(sameCell.has_value());
+    EXPECT_EQ(sameCell->state, NavigationPathQueryState::Reached);
+    EXPECT_EQ(sameCell->pathCellCount, 1U);
+    EXPECT_EQ(sameCell->pathCost, 0U);
 }
 
 TEST(NavigationPathfinder2DTests, UnreachableAndBlockedEndpointsAreTerminalResults)
@@ -194,6 +281,15 @@ TEST(NavigationPathfinder2DTests, CapacityFailurePreservesPreviousCompletedQuery
     auto tooLarge = pathfinder.begin(large, {0, 0}, {2, 2});
     ASSERT_FALSE(tooLarge.has_value());
     EXPECT_EQ(tooLarge.error().code, NavigationErrorCode::CapacityExceeded);
+    EXPECT_EQ(pathfinder.result().state, NavigationPathQueryState::Reached);
+    EXPECT_TRUE(std::equal(pathfinder.path().begin(), pathfinder.path().end(), previous.begin()));
+
+    auto invalidOptions = pathfinder.begin(
+        small, {0, 0}, {1, 1},
+        NavigationPathQueryOptions{
+            .diagonalMode = static_cast<NavigationDiagonalMode2D>(255)});
+    ASSERT_FALSE(invalidOptions.has_value());
+    EXPECT_EQ(invalidOptions.error().code, NavigationErrorCode::InvalidData);
     EXPECT_EQ(pathfinder.result().state, NavigationPathQueryState::Reached);
     EXPECT_TRUE(std::equal(pathfinder.path().begin(), pathfinder.path().end(), previous.begin()));
 }

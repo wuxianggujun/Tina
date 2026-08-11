@@ -32,6 +32,15 @@ class DeviceCapture final {
     {
         return hasLastCapture_ ? &lastCapture_ : nullptr;
     }
+    void setLastRenderStatistics(Render::RenderStatistics statistics) noexcept
+    {
+        lastRenderStatistics_ = statistics;
+        hasLastRenderStatistics_ = true;
+    }
+    [[nodiscard]] const Render::RenderStatistics* lastRenderStatistics() const noexcept
+    {
+        return hasLastRenderStatistics_ ? &lastRenderStatistics_ : nullptr;
+    }
     void noteSubmittedWorldScene(const Render::RenderSceneView& scene) noexcept
     {
         lastSubmittedWorldSceneStatistics_ = scene.statistics();
@@ -82,6 +91,8 @@ class DeviceCapture final {
     bool captureNextPresent_ = false;
     bool hasLastCapture_ = false;
     Render::Rgba8FrameCapture lastCapture_{};
+    bool hasLastRenderStatistics_ = false;
+    Render::RenderStatistics lastRenderStatistics_{};
     bool hasLastSubmittedWorldSceneStatistics_ = false;
     Render::RenderSceneStatistics lastSubmittedWorldSceneStatistics_{};
     Core::u64 sprite2DLightingFrameCount_ = 0;
@@ -108,6 +119,10 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Core::Result<Render::RenderFrameSubmission> submitFrame(const Render::RenderFrame& frame) override
     {
         auto submission = inner_->submitFrame(frame);
+        if (capture_ != nullptr)
+        {
+            capture_->setLastRenderStatistics(inner_->statistics());
+        }
         if (submission && submission->requiresPresent() && capture_ != nullptr)
         {
             capture_->noteSubmittedWorldScene(frame.primaryWorldScene);
@@ -117,6 +132,10 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Core::Status present() override
     {
         auto status = inner_->present();
+        if (capture_ != nullptr)
+        {
+            capture_->setLastRenderStatistics(inner_->statistics());
+        }
         if (status && capture_ != nullptr && capture_->consumeCaptureNextPresent())
         {
             auto captured = inner_->capturePrimaryFrameRgba8();
@@ -131,7 +150,14 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->statistics();
     }
-    void shutdown() noexcept override { inner_->shutdown(); }
+    void shutdown() noexcept override
+    {
+        if (capture_ != nullptr)
+        {
+            capture_->setLastRenderStatistics(inner_->statistics());
+        }
+        inner_->shutdown();
+    }
     [[nodiscard]] Core::Result<Render::GpuTextureId>
     createTexture2DRgba8(const Render::Texture2DUploadDesc& desc) override
     {

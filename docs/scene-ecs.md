@@ -10,10 +10,11 @@
 - 固定容量、PMR-backed `World`；
 - generation/owner-aware `EntityId`；
 - Local/World Transform 层级与显式 publication barrier；
-- Camera2D、SpriteRenderer2D、PointLight2D、ShadowOccluder2D、PerspectiveCamera3D、MeshRenderer3D、DirectionalLight3D 组件；
+- Camera2D、SpriteRenderer2D、SpriteAnimationBinding2D、PointLight2D、ShadowOccluder2D、PerspectiveCamera3D、MeshRenderer3D、DirectionalLight3D 组件；
+- standalone allocation-free `CameraFollow2D` controller；
 - standalone fixed-capacity `ParticleSystem2D` 与 `Trail2D`；
 - World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；
-- 2D World 组件与 game-owned gameplay blob 的 current-only schema-v1 快照；
+- 2D World 组件与 game-owned gameplay blob 的 current-only schema-v2 快照；
 - Cooked Prefab node 到 World entity hierarchy 的事务式实例化。
 
 它不负责：
@@ -59,6 +60,7 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 | --- | --- | --- |
 | `Camera2D` | FixedWorldHeight/PixelPerfect 投影、viewport、pixel snap | 每帧最多一个 active 2D camera；surface 0x0 时跳过 |
 | `SpriteRenderer2D` | weak Sprite `AssetHandle`、optional weak normal Texture2D `AssetHandle`、尺寸/pivot/UV override、颜色与排序 | World 只校验结构；visible extract 必须解析 base，非空 normal 独立解析为当前 packet Texture2D ref；UV finite 且严格递增 |
+| `SpriteAnimationBinding2D` | weak SpriteAnimationClip `AssetHandle`、playback speed、autoPlay | World 只保存 binding；clip 推进与帧解析由产品 State/Animator 负责，speed 必须正 finite |
 | `PointLight2D` | linear RGB color、非负 intensity、正影响半径、0..影响半径内的 source radius、active 标志 | Entity world position 是灯光中心；source radius=0 为硬阴影、正值启用连续 penumbra；有 resolved Camera2D 时每帧最多提交8个 camera-affecting light，无相机/0x0 surface 时对全部 active light 保留同一上限 |
 | `ShadowOccluder2D` | 一条 local-space 线段与 active 标志 | 应用已发布 XY scale/rotation/position；每帧最多32个 active segment，按稳定 Entity identity 发布且不做 camera culling |
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
@@ -70,6 +72,21 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 组件 storage 与 entity slot 共用固定容量。`set*` 替换当前值，`clear*` 移除组件；访问 stale 或 cross-world
 ID 失败。Camera2D 与 PerspectiveCamera3D 是独立轨道，可以在同一帧同时存在；各自出现多个 active
 camera 时 extraction 失败。
+
+## CameraFollow2D
+
+`CameraFollow2D` 属于 `Tina::Scene`，但不是 World component，也不修改 `Camera2D` projection 配置。产品
+State 在 owner thread 持有它，并在 fixed update 提交 target、delta、viewport world size 与可选 world bounds：
+
+- dead zone 决定 target 在哪个轴越界后才推动相机；
+- 可选最大速度限制每次 simulation center 推进量；
+- world bounds 按 viewport half extent clamp，viewport 大于 world 时对应轴固定在 world 中点；
+- 成功 step 同时发布 previous/current center，非法 finite、负 delta、退化 bounds 或非法 viewport 事务失败；
+- `interpolatedCenter(alpha)` 只为 presentation 读取 previous/current，非法 alpha 不改变 simulation state。
+
+该 controller 创建后不分配，也不持有 World、Asset、Render 或 backend owner。`tina_sample_2d` 的 streaming
+读取 current simulation center，render extraction 读取 interpolated center；旧的散落 previous/current float
+和手写 map clamp 不再是产品状态源。
 
 ## Standalone 2D-FX systems
 
@@ -153,7 +170,7 @@ active component、`WorldTransform` 和 color×intensity，因此非法灯即使
 走既有 hard-ray intersection；正值把遮挡段按归一化 receiver→light 深度投影到 finite source 区间，连续计算
 单段覆盖率，并用 multiplicative transmittance 合成多段。该固定 `8×32` 成本近似不宣称精确 area-light
 interval union；ambient 与 Sprite 透明排序不变，没有 PointLight2D 时不单独发布 occluder snapshot。
-product-2d schema 24 继承 schema 19 的 normal-map 证据，并固定创建3盏 active light，其中1盏永久离屏；提交结果保持
+当前 product-2d schema 27 继承 schema 19 的 normal-map 证据，并固定创建3盏 active light，其中1盏永久离屏；提交结果保持
 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1`，并继承 schema 16 的
 双 ShadowOccluder2D 逐帧 snapshot 证据；默认 committed soft light count=2，`--force-hard-shadows` 为0。
 Scene 不保存 resolver、FrameResourceSink/ref、AssetLease、Cooked payload 或 GPU handle。
@@ -180,12 +197,12 @@ writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用�
 
 ## World2D 快照
 
-`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v1；
+`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v2；
 `captureWorld2DSnapshotBytes()` / `instantiateWorld2DSnapshot()` 在该 wire 与 `World` 间转换。持久化边界只包含：
 
 - 调用方提供的非零稳定 entity ID 与 parent stable ID；
 - LocalTransform；
-- SpriteRenderer2D、Camera2D、PointLight2D、ShadowOccluder2D；
+- SpriteRenderer2D、Camera2D、PointLight2D、ShadowOccluder2D、SpriteAnimation2D binding；
 - Sprite/normal Texture 的稳定 `AssetId`；
 - Runtime 不解释的 gameplay schema/version/bytes。
 

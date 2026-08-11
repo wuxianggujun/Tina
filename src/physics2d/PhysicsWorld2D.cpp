@@ -6,11 +6,13 @@
 #include <box2d/box2d.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <exception>
 #include <limits>
 #include <memory>
 #include <new>
+#include <numbers>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -41,10 +43,6 @@ struct PhysicsWorld2D::Impl final {
         PhysicsJointId id{};
         PhysicsBodyId bodyA{};
         PhysicsBodyId bodyB{};
-        PhysicsJointKind2D kind = PhysicsJointKind2D::Distance;
-        float lengthMeters = 0.0F;
-        bool springEnabled = false;
-        bool collideConnected = false;
         PhysicsJointId previous{};
         PhysicsJointId next{};
     };
@@ -632,6 +630,8 @@ struct PhysicsWorld2D::Impl final {
 
 namespace {
 
+static_assert(MaximumConvexPolygonVertices2D == B2_MAX_POLYGON_VERTICES);
+
 [[nodiscard]] bool isFinite(PhysicsVec2 value) noexcept
 {
     return std::isfinite(value.x) && std::isfinite(value.y);
@@ -654,6 +654,7 @@ namespace {
     case PhysicsShapeKind2D::Box:
     case PhysicsShapeKind2D::Circle:
     case PhysicsShapeKind2D::Capsule:
+    case PhysicsShapeKind2D::ConvexPolygon:
         return true;
     }
     return false;
@@ -661,7 +662,145 @@ namespace {
 
 [[nodiscard]] bool isKnownJointKind(PhysicsJointKind2D kind) noexcept
 {
-    return kind == PhysicsJointKind2D::Distance;
+    switch (kind) {
+    case PhysicsJointKind2D::Distance:
+    case PhysicsJointKind2D::Revolute:
+    case PhysicsJointKind2D::Prismatic:
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] bool tryNormalizeDirection(PhysicsVec2 direction, b2Vec2& normalized) noexcept
+{
+    if (!isFinite(direction)) {
+        return false;
+    }
+    const float scale = (std::max)(std::abs(direction.x), std::abs(direction.y));
+    if (!(scale > 0.0F)) {
+        return false;
+    }
+
+    const float scaledX = direction.x / scale;
+    const float scaledY = direction.y / scale;
+    const float scaledLength = std::sqrt(scaledX * scaledX + scaledY * scaledY);
+    if (!std::isfinite(scaledLength) || !(scaledLength > 0.0F)) {
+        return false;
+    }
+    normalized = {scaledX / scaledLength, scaledY / scaledLength};
+    return std::isfinite(normalized.x) && std::isfinite(normalized.y);
+}
+
+[[nodiscard]] bool pointsEqual(b2Vec2 left, b2Vec2 right) noexcept
+{
+    return left.x == right.x && left.y == right.y;
+}
+
+[[nodiscard]] bool polygonBoundaryMatchesHull(
+    std::span<const b2Vec2> boundary,
+    const b2Hull& hull) noexcept
+{
+    if (boundary.size() != static_cast<Core::usize>(hull.count) || boundary.empty()) {
+        return false;
+    }
+
+    Core::usize hullStart = boundary.size();
+    for (Core::usize index = 0; index < boundary.size(); ++index) {
+        if (pointsEqual(boundary.front(), hull.points[index])) {
+            hullStart = index;
+            break;
+        }
+    }
+    if (hullStart == boundary.size()) {
+        return false;
+    }
+
+    bool forwardMatches = true;
+    bool reverseMatches = true;
+    for (Core::usize index = 0; index < boundary.size(); ++index) {
+        const Core::usize forwardIndex = (hullStart + index) % boundary.size();
+        const Core::usize reverseIndex =
+            (hullStart + boundary.size() - index) % boundary.size();
+        forwardMatches = forwardMatches
+            && pointsEqual(boundary[index], hull.points[forwardIndex]);
+        reverseMatches = reverseMatches
+            && pointsEqual(boundary[index], hull.points[reverseIndex]);
+    }
+    return forwardMatches || reverseMatches;
+}
+
+[[nodiscard]] Core::Status buildBackendConvexPolygon(
+    const PhysicsShape2DDesc& desc,
+    b2Polygon& polygon) noexcept
+{
+    if (desc.polygonVertexCount < 3U
+        || desc.polygonVertexCount > MaximumConvexPolygonVertices2D) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidShapeDescription,
+            "Physics2D convex polygon requires between 3 and 8 vertices");
+    }
+    if (!isFinite(desc.localCenterMeters) || !std::isfinite(desc.localAngleRadians)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidShapeDescription,
+            "Physics2D convex polygon local transform must be finite");
+    }
+
+    std::array<b2Vec2, MaximumConvexPolygonVertices2D> vertices{};
+    const float cosine = std::cos(desc.localAngleRadians);
+    const float sine = std::sin(desc.localAngleRadians);
+    for (Core::u32 index = 0; index < desc.polygonVertexCount; ++index) {
+        const PhysicsVec2 vertex = desc.polygonVertices[index];
+        if (!isFinite(vertex)) {
+            return Core::failure(
+                Physics2DErrorCode::InvalidShapeDescription,
+                "Physics2D convex polygon vertices must be finite");
+        }
+        vertices[index] = {
+            cosine * vertex.x - sine * vertex.y + desc.localCenterMeters.x,
+            sine * vertex.x + cosine * vertex.y + desc.localCenterMeters.y,
+        };
+        if (!std::isfinite(vertices[index].x) || !std::isfinite(vertices[index].y)) {
+            return Core::failure(
+                Physics2DErrorCode::InvalidShapeDescription,
+                "Physics2D convex polygon local transform must remain finite");
+        }
+    }
+
+    const std::span<const b2Vec2> boundary(
+        vertices.data(),
+        static_cast<Core::usize>(desc.polygonVertexCount));
+    const b2Hull hull = b2ComputeHull(
+        boundary.data(),
+        static_cast<int>(boundary.size()));
+    if (hull.count != static_cast<int>(boundary.size())
+        || !b2ValidateHull(&hull)
+        || !polygonBoundaryMatchesHull(boundary, hull)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidShapeDescription,
+            "Physics2D polygon vertices must form a backend-valid strictly convex boundary");
+    }
+
+    polygon = b2MakePolygon(&hull, 0.0F);
+    return Core::success();
+}
+
+[[nodiscard]] bool tryMapBackendJointKind(
+    b2JointType backendKind,
+    PhysicsJointKind2D& kind) noexcept
+{
+    switch (backendKind) {
+    case b2_distanceJoint:
+        kind = PhysicsJointKind2D::Distance;
+        return true;
+    case b2_revoluteJoint:
+        kind = PhysicsJointKind2D::Revolute;
+        return true;
+    case b2_prismaticJoint:
+        kind = PhysicsJointKind2D::Prismatic;
+        return true;
+    default:
+        return false;
+    }
 }
 
 [[nodiscard]] b2BodyType toBackendBodyType(PhysicsBodyType2D type) noexcept
@@ -801,12 +940,6 @@ Core::Status validatePhysicsBody2DDesc(const PhysicsBody2DDesc& desc) noexcept
 Core::Status validatePhysicsShape2DDesc(const PhysicsShape2DDesc& desc) noexcept
 {
     if (!isKnownShapeKind(desc.kind)
-        || !isFinite(desc.halfExtentsMeters)
-        || !std::isfinite(desc.radiusMeters)
-        || !isFinite(desc.localCenterMeters)
-        || !std::isfinite(desc.localAngleRadians)
-        || !isFinite(desc.localPointAMeters)
-        || !isFinite(desc.localPointBMeters)
         || !std::isfinite(desc.density)
         || !std::isfinite(desc.friction)
         || !std::isfinite(desc.restitution)
@@ -822,28 +955,44 @@ Core::Status validatePhysicsShape2DDesc(const PhysicsShape2DDesc& desc) noexcept
     }
     switch (desc.kind) {
     case PhysicsShapeKind2D::Box:
-        if (desc.halfExtentsMeters.x <= 0.0F || desc.halfExtentsMeters.y <= 0.0F) {
+        if (!isFinite(desc.halfExtentsMeters)
+            || !isFinite(desc.localCenterMeters)
+            || !std::isfinite(desc.localAngleRadians)
+            || desc.halfExtentsMeters.x <= 0.0F
+            || desc.halfExtentsMeters.y <= 0.0F) {
             return Core::failure(
                 Physics2DErrorCode::InvalidShapeDescription,
-                "Physics2D box shape requires positive half extents");
+                "Physics2D box shape requires finite local transform and positive half extents");
         }
         break;
     case PhysicsShapeKind2D::Circle:
-        if (!(desc.radiusMeters > 0.0F)) {
+        if (!std::isfinite(desc.radiusMeters)
+            || !isFinite(desc.localCenterMeters)
+            || !(desc.radiusMeters > 0.0F)) {
             return Core::failure(
                 Physics2DErrorCode::InvalidShapeDescription,
-                "Physics2D circle shape requires a positive radius");
+                "Physics2D circle shape requires a finite local center and positive radius");
         }
         break;
     case PhysicsShapeKind2D::Capsule:
-        if (!(desc.radiusMeters > 0.0F)
+        if (!std::isfinite(desc.radiusMeters)
+            || !isFinite(desc.localPointAMeters)
+            || !isFinite(desc.localPointBMeters)
+            || !(desc.radiusMeters > 0.0F)
             || (desc.localPointAMeters.x == desc.localPointBMeters.x
                 && desc.localPointAMeters.y == desc.localPointBMeters.y)) {
             return Core::failure(
                 Physics2DErrorCode::InvalidShapeDescription,
-                "Physics2D capsule shape requires a positive radius and distinct endpoints");
+                "Physics2D capsule shape requires finite distinct endpoints and positive radius");
         }
         break;
+    case PhysicsShapeKind2D::ConvexPolygon: {
+        b2Polygon polygon{};
+        if (const Core::Status status = buildBackendConvexPolygon(desc, polygon); !status) {
+            return status;
+        }
+        break;
+    }
     }
     return Core::success();
 }
@@ -852,12 +1001,56 @@ Core::Status validatePhysicsJoint2DDesc(const PhysicsJoint2DDesc& desc) noexcept
 {
     if (!isKnownJointKind(desc.kind) || !desc.bodyA.hasValue() || !desc.bodyB.hasValue()
         || desc.bodyA == desc.bodyB || !isFinite(desc.localAnchorAMeters) || !isFinite(desc.localAnchorBMeters)
-        || !std::isfinite(desc.lengthMeters) || !(desc.lengthMeters > 0.0F) || !std::isfinite(desc.hertz)
-        || !std::isfinite(desc.dampingRatio) || desc.hertz < 0.0F || desc.dampingRatio < 0.0F
-        || desc.dampingRatio > 1.0F) {
+        || !std::isfinite(desc.hertz) || !std::isfinite(desc.dampingRatio) || desc.hertz < 0.0F
+        || desc.dampingRatio < 0.0F) {
         return Core::failure(
             Physics2DErrorCode::InvalidJointDescription,
-            "Physics2D distance joint description is invalid");
+            "Physics2D joint description has invalid common fields");
+    }
+
+    switch (desc.kind) {
+    case PhysicsJointKind2D::Distance:
+        if (!std::isfinite(desc.lengthMeters) || !(desc.lengthMeters > 0.0F)) {
+            return Core::failure(
+                Physics2DErrorCode::InvalidJointDescription,
+                "Physics2D distance joint requires a positive finite length");
+        }
+        break;
+    case PhysicsJointKind2D::Revolute: {
+        constexpr float MaximumAngleRadians = std::numbers::pi_v<float>;
+        constexpr float MaximumLimitRadians = 0.99F * std::numbers::pi_v<float>;
+        if (!std::isfinite(desc.referenceAngleRadians) || !std::isfinite(desc.targetAngleRadians)
+            || desc.referenceAngleRadians < -MaximumAngleRadians
+            || desc.referenceAngleRadians > MaximumAngleRadians
+            || desc.targetAngleRadians < -MaximumAngleRadians
+            || desc.targetAngleRadians > MaximumAngleRadians
+            || !std::isfinite(desc.lowerAngleRadians) || !std::isfinite(desc.upperAngleRadians)
+            || desc.lowerAngleRadians < -MaximumLimitRadians
+            || desc.upperAngleRadians > MaximumLimitRadians
+            || desc.lowerAngleRadians > desc.upperAngleRadians
+            || !std::isfinite(desc.motorSpeedRadiansPerSecond)
+            || !std::isfinite(desc.maxMotorTorqueNewtonMeters)
+            || desc.maxMotorTorqueNewtonMeters < 0.0F) {
+            return Core::failure(
+                Physics2DErrorCode::InvalidJointDescription,
+                "Physics2D revolute joint angle, limit, or motor fields are invalid");
+        }
+        break;
+    }
+    case PhysicsJointKind2D::Prismatic: {
+        b2Vec2 normalizedAxis{};
+        if (!tryNormalizeDirection(desc.localAxisA, normalizedAxis)
+            || !std::isfinite(desc.referenceAngleRadians) || !std::isfinite(desc.targetTranslationMeters)
+            || !std::isfinite(desc.lowerTranslationMeters) || !std::isfinite(desc.upperTranslationMeters)
+            || desc.lowerTranslationMeters > desc.upperTranslationMeters
+            || !std::isfinite(desc.motorSpeedMetersPerSecond)
+            || !std::isfinite(desc.maxMotorForceNewtons) || desc.maxMotorForceNewtons < 0.0F) {
+            return Core::failure(
+                Physics2DErrorCode::InvalidJointDescription,
+                "Physics2D prismatic joint axis, limits, or motor fields are invalid");
+        }
+        break;
+    }
     }
     return Core::success();
 }
@@ -1460,6 +1653,15 @@ Core::Result<PhysicsShapeId> PhysicsWorld2D::createShape(
         return Core::failure(status.error());
     }
 
+    b2Polygon backendConvexPolygon{};
+    if (shapeDescription.kind == PhysicsShapeKind2D::ConvexPolygon) {
+        if (const Core::Status status =
+                buildBackendConvexPolygon(shapeDescription, backendConvexPolygon);
+            !status) {
+            return Core::failure(status.error());
+        }
+    }
+
     Impl::BodyRecord* bodyRecord = m_impl->bodies.tryGet(body);
     if (bodyRecord == nullptr || !b2Body_IsValid(bodyRecord->backend)) {
         return Core::failure(
@@ -1528,6 +1730,10 @@ Core::Result<PhysicsShapeId> PhysicsWorld2D::createShape(
         shapeRecord->backend = b2CreateCapsuleShape(bodyRecord->backend, &shapeDefinition, &capsule);
         break;
     }
+    case PhysicsShapeKind2D::ConvexPolygon:
+        shapeRecord->backend =
+            b2CreatePolygonShape(bodyRecord->backend, &shapeDefinition, &backendConvexPolygon);
+        break;
     }
 
     if (B2_IS_NULL(shapeRecord->backend) || !b2Shape_IsValid(shapeRecord->backend)) {
@@ -1596,6 +1802,14 @@ Core::Result<PhysicsJointId> PhysicsWorld2D::createJoint(const PhysicsJoint2DDes
         return Core::failure(status.error());
     }
 
+    b2Vec2 backendPrismaticAxis{};
+    if (jointDescription.kind == PhysicsJointKind2D::Prismatic
+        && !tryNormalizeDirection(jointDescription.localAxisA, backendPrismaticAxis)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidJointDescription,
+            "Physics2D prismatic joint axis must be a finite non-zero direction");
+    }
+
     Impl::BodyRecord* bodyA = m_impl->bodies.tryGet(jointDescription.bodyA);
     Impl::BodyRecord* bodyB = m_impl->bodies.tryGet(jointDescription.bodyB);
     if (bodyA == nullptr || bodyB == nullptr || !b2Body_IsValid(bodyA->backend) || !b2Body_IsValid(bodyB->backend)) {
@@ -1622,29 +1836,75 @@ Core::Result<PhysicsJointId> PhysicsWorld2D::createJoint(const PhysicsJoint2DDes
     jointRecord->id = jointId;
     jointRecord->bodyA = jointDescription.bodyA;
     jointRecord->bodyB = jointDescription.bodyB;
-    jointRecord->kind = jointDescription.kind;
-    jointRecord->lengthMeters = jointDescription.lengthMeters;
-    jointRecord->springEnabled = jointDescription.enableSpring;
-    jointRecord->collideConnected = jointDescription.collideConnected;
 
-    b2DistanceJointDef definition = b2DefaultDistanceJointDef();
-    definition.bodyIdA = bodyA->backend;
-    definition.bodyIdB = bodyB->backend;
-    definition.localAnchorA = {jointDescription.localAnchorAMeters.x, jointDescription.localAnchorAMeters.y};
-    definition.localAnchorB = {jointDescription.localAnchorBMeters.x, jointDescription.localAnchorBMeters.y};
-    definition.length = jointDescription.lengthMeters;
-    definition.enableSpring = jointDescription.enableSpring;
-    definition.hertz = jointDescription.hertz;
-    definition.dampingRatio = jointDescription.dampingRatio;
-    definition.collideConnected = jointDescription.collideConnected;
-    definition.userData = jointRecord;
-    jointRecord->backend = b2CreateDistanceJoint(m_impl->world, &definition);
+    switch (jointDescription.kind) {
+    case PhysicsJointKind2D::Distance: {
+        b2DistanceJointDef definition = b2DefaultDistanceJointDef();
+        definition.bodyIdA = bodyA->backend;
+        definition.bodyIdB = bodyB->backend;
+        definition.localAnchorA = {jointDescription.localAnchorAMeters.x, jointDescription.localAnchorAMeters.y};
+        definition.localAnchorB = {jointDescription.localAnchorBMeters.x, jointDescription.localAnchorBMeters.y};
+        definition.length = jointDescription.lengthMeters;
+        definition.enableSpring = jointDescription.enableSpring;
+        definition.hertz = jointDescription.hertz;
+        definition.dampingRatio = jointDescription.dampingRatio;
+        definition.collideConnected = jointDescription.collideConnected;
+        definition.userData = jointRecord;
+        jointRecord->backend = b2CreateDistanceJoint(m_impl->world, &definition);
+        break;
+    }
+    case PhysicsJointKind2D::Revolute: {
+        b2RevoluteJointDef definition = b2DefaultRevoluteJointDef();
+        definition.bodyIdA = bodyA->backend;
+        definition.bodyIdB = bodyB->backend;
+        definition.localAnchorA = {jointDescription.localAnchorAMeters.x, jointDescription.localAnchorAMeters.y};
+        definition.localAnchorB = {jointDescription.localAnchorBMeters.x, jointDescription.localAnchorBMeters.y};
+        definition.referenceAngle = jointDescription.referenceAngleRadians;
+        definition.targetAngle = jointDescription.targetAngleRadians;
+        definition.enableSpring = jointDescription.enableSpring;
+        definition.hertz = jointDescription.hertz;
+        definition.dampingRatio = jointDescription.dampingRatio;
+        definition.enableLimit = jointDescription.enableLimit;
+        definition.lowerAngle = jointDescription.lowerAngleRadians;
+        definition.upperAngle = jointDescription.upperAngleRadians;
+        definition.enableMotor = jointDescription.enableMotor;
+        definition.motorSpeed = jointDescription.motorSpeedRadiansPerSecond;
+        definition.maxMotorTorque = jointDescription.maxMotorTorqueNewtonMeters;
+        definition.collideConnected = jointDescription.collideConnected;
+        definition.userData = jointRecord;
+        jointRecord->backend = b2CreateRevoluteJoint(m_impl->world, &definition);
+        break;
+    }
+    case PhysicsJointKind2D::Prismatic: {
+        b2PrismaticJointDef definition = b2DefaultPrismaticJointDef();
+        definition.bodyIdA = bodyA->backend;
+        definition.bodyIdB = bodyB->backend;
+        definition.localAnchorA = {jointDescription.localAnchorAMeters.x, jointDescription.localAnchorAMeters.y};
+        definition.localAnchorB = {jointDescription.localAnchorBMeters.x, jointDescription.localAnchorBMeters.y};
+        definition.localAxisA = backendPrismaticAxis;
+        definition.referenceAngle = jointDescription.referenceAngleRadians;
+        definition.targetTranslation = jointDescription.targetTranslationMeters;
+        definition.enableSpring = jointDescription.enableSpring;
+        definition.hertz = jointDescription.hertz;
+        definition.dampingRatio = jointDescription.dampingRatio;
+        definition.enableLimit = jointDescription.enableLimit;
+        definition.lowerTranslation = jointDescription.lowerTranslationMeters;
+        definition.upperTranslation = jointDescription.upperTranslationMeters;
+        definition.enableMotor = jointDescription.enableMotor;
+        definition.motorSpeed = jointDescription.motorSpeedMetersPerSecond;
+        definition.maxMotorForce = jointDescription.maxMotorForceNewtons;
+        definition.collideConnected = jointDescription.collideConnected;
+        definition.userData = jointRecord;
+        jointRecord->backend = b2CreatePrismaticJoint(m_impl->world, &definition);
+        break;
+    }
+    }
     if (B2_IS_NULL(jointRecord->backend) || !b2Joint_IsValid(jointRecord->backend)) {
         jointRecord->backend = b2_nullJointId;
         (void)m_impl->joints.erase(jointId);
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
-            "Box2D failed to create a distance joint");
+            "Box2D failed to create a Physics2D joint");
     }
     if (!m_impl->linkJoint(*jointRecord)) {
         b2DestroyJoint(jointRecord->backend);
@@ -2190,14 +2450,56 @@ Core::Result<PhysicsJointState2D> PhysicsWorld2D::jointState(
             Physics2DErrorCode::BackendFailure,
             "Physics2D joint registry lost its Box2D joint");
     }
-    return PhysicsJointState2D{
-        .kind = jointRecord->kind,
+    PhysicsJointKind2D kind{};
+    if (!tryMapBackendJointKind(b2Joint_GetType(jointRecord->backend), kind)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D joint registry contains an unsupported Box2D joint kind");
+    }
+    PhysicsJointState2D state{
+        .kind = kind,
         .bodyA = jointRecord->bodyA,
         .bodyB = jointRecord->bodyB,
-        .lengthMeters = b2DistanceJoint_GetLength(jointRecord->backend),
-        .springEnabled = b2DistanceJoint_IsSpringEnabled(jointRecord->backend),
-        .collideConnected = jointRecord->collideConnected,
+        .collideConnected = b2Joint_GetCollideConnected(jointRecord->backend),
     };
+    switch (kind) {
+    case PhysicsJointKind2D::Distance:
+        state.lengthMeters = b2DistanceJoint_GetLength(jointRecord->backend);
+        state.springEnabled = b2DistanceJoint_IsSpringEnabled(jointRecord->backend);
+        state.springHertz = b2DistanceJoint_GetSpringHertz(jointRecord->backend);
+        state.springDampingRatio =
+            b2DistanceJoint_GetSpringDampingRatio(jointRecord->backend);
+        break;
+    case PhysicsJointKind2D::Revolute:
+        state.currentAngleRadians = b2RevoluteJoint_GetAngle(jointRecord->backend);
+        state.targetAngleRadians = b2RevoluteJoint_GetTargetAngle(jointRecord->backend);
+        state.springEnabled = b2RevoluteJoint_IsSpringEnabled(jointRecord->backend);
+        state.springHertz = b2RevoluteJoint_GetSpringHertz(jointRecord->backend);
+        state.springDampingRatio =
+            b2RevoluteJoint_GetSpringDampingRatio(jointRecord->backend);
+        state.limitEnabled = b2RevoluteJoint_IsLimitEnabled(jointRecord->backend);
+        state.lowerAngleRadians = b2RevoluteJoint_GetLowerLimit(jointRecord->backend);
+        state.upperAngleRadians = b2RevoluteJoint_GetUpperLimit(jointRecord->backend);
+        state.motorEnabled = b2RevoluteJoint_IsMotorEnabled(jointRecord->backend);
+        state.motorSpeedRadiansPerSecond = b2RevoluteJoint_GetMotorSpeed(jointRecord->backend);
+        state.maxMotorTorqueNewtonMeters = b2RevoluteJoint_GetMaxMotorTorque(jointRecord->backend);
+        break;
+    case PhysicsJointKind2D::Prismatic:
+        state.currentTranslationMeters = b2PrismaticJoint_GetTranslation(jointRecord->backend);
+        state.targetTranslationMeters = b2PrismaticJoint_GetTargetTranslation(jointRecord->backend);
+        state.springEnabled = b2PrismaticJoint_IsSpringEnabled(jointRecord->backend);
+        state.springHertz = b2PrismaticJoint_GetSpringHertz(jointRecord->backend);
+        state.springDampingRatio =
+            b2PrismaticJoint_GetSpringDampingRatio(jointRecord->backend);
+        state.limitEnabled = b2PrismaticJoint_IsLimitEnabled(jointRecord->backend);
+        state.lowerTranslationMeters = b2PrismaticJoint_GetLowerLimit(jointRecord->backend);
+        state.upperTranslationMeters = b2PrismaticJoint_GetUpperLimit(jointRecord->backend);
+        state.motorEnabled = b2PrismaticJoint_IsMotorEnabled(jointRecord->backend);
+        state.motorSpeedMetersPerSecond = b2PrismaticJoint_GetMotorSpeed(jointRecord->backend);
+        state.maxMotorForceNewtons = b2PrismaticJoint_GetMaxMotorForce(jointRecord->backend);
+        break;
+    }
+    return state;
 }
 
 bool PhysicsWorld2D::contains(PhysicsBodyId body) const noexcept

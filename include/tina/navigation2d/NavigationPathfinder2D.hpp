@@ -20,10 +20,34 @@ enum class NavigationPathQueryState : Core::u8 {
     Invalidated = 5,
 };
 
+enum class NavigationDiagonalMode2D : Core::u8 {
+    Disabled = 0,
+    RequireClearAdjacentCells = 1,
+    AllowCornerCutting = 2,
+};
+
+struct NavigationPathQueryOptions final {
+    NavigationDiagonalMode2D diagonalMode = NavigationDiagonalMode2D::Disabled;
+
+    friend constexpr bool operator==(
+        const NavigationPathQueryOptions&,
+        const NavigationPathQueryOptions&) noexcept = default;
+};
+
+namespace NavigationPathCost2D {
+
+inline constexpr Core::u32 Cardinal = 10;
+inline constexpr Core::u32 Diagonal = 14;
+
+} // namespace NavigationPathCost2D
+
 struct NavigationPathQueryResult final {
     NavigationPathQueryState state = NavigationPathQueryState::Idle;
     Core::usize expandedNodes = 0;
     Core::usize pathCellCount = 0;
+    // Deterministic integer cost: cardinal/diagonal base cost multiplied by the
+    // destination cell traversal cost. Zero unless Reached.
+    Core::u32 pathCost = 0;
     Core::u64 gridRevision = 0;
 };
 
@@ -33,8 +57,10 @@ struct NavigationPathfinder2DConfig final {
     Core::usize cellCapacity = 0;
 };
 
-// Reusable owner-thread A* query. Four-way movement has unit cost. Ties are
-// deterministic by f-cost, then heuristic, then row-major cell index.
+// Reusable owner-thread A* query. Four-way movement is the default; optional
+// diagonal movement uses 10/14 integer base costs multiplied by destination
+// cell terrain cost. Ties are deterministic by f-cost, then heuristic, then
+// row-major cell index.
 class NavigationPathfinder2D final {
 public:
     [[nodiscard]] static Core::Result<NavigationPathfinder2D> Create(
@@ -51,7 +77,8 @@ public:
     // begin() publishes a fresh query only after all request validation succeeds.
     // A blocked start/goal is a deterministic Unreachable result, not an API error.
     [[nodiscard]] Core::Result<NavigationPathQueryResult>
-    begin(const NavigationGrid2D& grid, NavigationCell2D start, NavigationCell2D goal);
+    begin(const NavigationGrid2D& grid, NavigationCell2D start, NavigationCell2D goal,
+          NavigationPathQueryOptions options = {});
 
     // Expands at most expansionBudget nodes. The same grid object must be supplied
     // for every step; address or revision changes terminate as Invalidated.
@@ -59,7 +86,8 @@ public:
     advance(const NavigationGrid2D& grid, Core::usize expansionBudget);
 
     [[nodiscard]] Core::Result<NavigationPathQueryResult>
-    findPath(const NavigationGrid2D& grid, NavigationCell2D start, NavigationCell2D goal);
+    findPath(const NavigationGrid2D& grid, NavigationCell2D start, NavigationCell2D goal,
+             NavigationPathQueryOptions options = {});
 
     // Pending -> Cancelled is absorbing until the next begin()/reset(). Calling
     // cancel() for an idle or already terminal query returns its current state.
@@ -114,6 +142,8 @@ private:
     Core::u32 m_epoch = 0;
     Core::u64 m_gridRevision = 0;
     Core::usize m_expandedNodes = 0;
+    NavigationPathQueryOptions m_options{};
+    Core::u32 m_pathCost = 0;
     NavigationPathQueryState m_state = NavigationPathQueryState::Idle;
 };
 

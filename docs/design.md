@@ -95,10 +95,15 @@ binding key 在单个 RenderDevice 实例的同类 allocator namespace 内唯一
 共享 device。Mesh/Material namespace 相互独立，Material 三张纹理与 factors 原子发布；caller-chosen
 direct binding 与同类 allocator 共用 namespace，registry 管理期间不得混用。
 
-resident TileMap 可经 `Asset::buildTileMapNavigation2DData()` 原子派生唯一现行 schema-v1 row-major grid。
-产品 State/Resources owner 持有固定容量 `NavigationGrid2D` 与 `NavigationPathfinder2D`；Scene、Runtime、Render、
-Physics2D 和 TaskSystem 都不隐式取得导航 owner。动态 blocker 使用 generation ID 与 per-cell 引用计数，
-同步/分步 A* 复用 Create 时预分配 storage。
+resident TileMap 可经 `Asset::buildTileMapNavigation2DData()` 原子派生唯一当前 weighted
+row-major grid。Tile material rule 以完整 flags 精确匹配 `[1,16]` traversal cost；产品 State/Resources owner
+持有固定容量 `NavigationGrid2D` 与 `NavigationPathfinder2D`，Scene、Runtime、Render、Physics2D 和 TaskSystem
+都不隐式取得导航 owner。动态 blocker 使用 generation ID 与 per-cell 引用计数；四向/对角同步与分步 A*
+复用 Create 时预分配 storage，公开确定性整数 `pathCost`，并显式区分严格防切角与允许切角策略。
+
+`Scene::CameraFollow2D` 是独立于 World `Camera2D` projection component 的 allocation-free owner-thread
+controller。fixed update 在 dead zone、可选最大速度、viewport 与 world bounds 下事务式推进 previous/current
+simulation center；render extraction 只读取 presentation interpolation，不把跟随策略塞进 Scene World。
 
 ### UI 与渲染
 
@@ -124,7 +129,7 @@ startup-only ColorToken registry/value、literal/token-backed BoxFill stylesheet
 
 | 产品面 | 已有 | 仍缺 |
 | --- | --- | --- |
-| 2D | Catalog TileMap v3 stream root + deferred TileMapChunk、固定容量 Camera/layer demand/cancel/unload、retain-window demand-recency LRU、resident generation dirty cache；稳定 layer/object ID、对象 101/102 消费、角色/碰撞、Physics2D Box/Circle/Capsule + sensor + Distance joint、SpriteAnimationClip/Animator；Navigation2D schema-v1 grid、generation dynamic blocker/revision、确定性同步/分步 A* 与 solid/property Rectangle TileMap 转换；World Sprite、standalone Particle/Trail 与 TileMap emit 保存 weak AssetHandle 并借用共享 resolver；Sprite2D base/optional-normal 使用 packet-local `FrameResourceRef`；owner-thread fixed-capacity Sprite registry 唯一拥有 resident Lease/GPU/binding 并交给 AssetSystem retirement；frame-scoped PointLight2D + ShadowOccluder2D 硬/finite-source 软阴影、resolved/pixel-snapped Camera2D culling 与 derivative-TBN normal map；advanced input、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | TileMap 优先级 IO/editor/自动 gameplay 生成/旧 schema migration、独立 Cooked Navigation/editor bake/Physics 自动同步、完整 FX asset/editor/GPU simulation、更多 shape/joint、跨 GPU lighting exact golden |
+| 2D | Catalog TileMap v3 stream root + deferred TileMapChunk、固定容量 Camera/layer demand/cancel/unload、retain-window demand-recency LRU、resident generation dirty cache；稳定 layer/object ID、对象 101/102 消费、角色/碰撞、allocation-free CameraFollow2D；Physics2D Box/Circle/Capsule/ConvexPolygon + sensor + Distance/Revolute/Prismatic joint；SpriteAnimationClip/Animator；Navigation2D immutable weighted grid、generation dynamic blocker/revision、确定性四向/对角同步/分步 A*、path cost 与 material-cost TileMap 转换；World Sprite、standalone Particle/Trail 与 TileMap emit 保存 weak AssetHandle 并借用共享 resolver；Sprite2D base/optional-normal 使用 packet-local `FrameResourceRef`；owner-thread fixed-capacity Sprite registry 唯一拥有 resident Lease/GPU/binding 并交给 AssetSystem retirement；frame-scoped PointLight2D + ShadowOccluder2D 硬/finite-source 软阴影、resolved/pixel-snapped Camera2D culling 与 derivative-TBN normal map；advanced input、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | TileMap 优先级 IO/editor/自动 gameplay 生成、独立 Cooked Navigation/editor bake/Physics 自动同步、完整 FX asset/editor/GPU simulation、Chain/高级约束、跨 GPU lighting exact golden |
 | 3D | multi-mesh/multi-prim SPLIT cook、authored/MikkTSpace tangent、唯一 P3N3T4UV2、Resources-owned AssetStore、Prefab/Scene weak Mesh/Material Handle、engine-provided/State-owned fixed-capacity Mesh3D registry、packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 采样、material factors、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、World DirectionalLight3D/PointLight3D/SpotLight3D→逐帧 RenderScene snapshot、point/spot influence-sphere frustum culling、固定4级联 directional CSM、固定单 SpotLight shadow 与固定单 PointLight 六面 shadow、三类 startup-only 可配置 D16 extent（默认1024/1024/512）、三类3×3 PCF、deterministic pass scheduler、实时 framebuffer camera aspect、responsive product UI、URI 安全、Texture/Mesh/EnvironmentMap retirement marker | transparent/post、跨 GPU golden、Jolt 3D gameplay |
 | UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、Focus Scope/Modal/Pointer Capture、ScrollView、Dropdown/Popup、虚拟 ListView/TreeView；Element/recipe authoring、完整预算 Component transaction、六类 Behavior side store 与 node/text/canvas/Behavior reservation/counter、统一 RoundedRect；Image/Icon content、Canvas Image/NineSlice、root-scoped resolver/pin、RGBA ImageQuad、产品/失效/尺寸矩阵与固定 workload；StyleClass、node-local pseudo-state、ColorToken registry/value 与 reverse-dependency 运行期更新、literal/token-backed BoxFill/imageTint stylesheet、Runtime startup facade 与固定 workload；fixed-capacity paint-only Motion、Style BackgroundColor reservation/activation、reduced-motion；Slider Focusable/Focus semantics、RangeInput Arrow/D-pad 独立调值 command 与 Dark/Light 交互状态矩阵已关闭；accessibility action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns、HWND 桥接与跨进程 action gate | 更广 Style 属性面、完整 keyframe timeline/layout animation；多行/grapheme/BiDi/复杂 shaping、完整 IME 候选窗、Narrator/Inspect 金标、AT-SPI |
 | Runtime | State 栈/commands、四相位阻断、`blocksGameplayInputBelow` 空 snapshot、FramePin/CPU ledger、固定步长、bounded Task shutdown + Host-enforced TaskSystem deadline | 通用 GPU submission fence、多 World、Runtime 内置 Asset/World |

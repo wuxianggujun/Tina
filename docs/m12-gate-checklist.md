@@ -32,7 +32,7 @@ Physics2D、Audio 与 Asset GoogleTest executable；测试数量随功能增长�
 - 20控件 showcase：Dropdown/List/Tree/Scroll 自动交互、Dark/Light 换肤与 root 生命周期；
 - Windows UIA：Invoke/Toggle/RangeValue/Value control patterns 已经通过 owner-thread action seam 接入，
   `RunUi002UiaGate.ps1` 可从独立进程连接真实 showcase HWND；
-- product-2d schema 24：继承 schema 19 的 normal-map 证据、两盏 committed `PointLight2D`、两条 `ShadowOccluder2D`，保留 UI Flow Base/Pause Screen、Back/Confirm/Menu、单用户设备 revision 与 Pause 提示，并增加 Navigation2D `11/1/13` blocker、`7/9` 路径、单步取消与 revision/mutation 证据；
+- product-2d schema 27：继承 schema 19 的 normal-map 证据、两盏 committed `PointLight2D`、两条 `ShadowOccluder2D`，保留 UI Flow Base/Pause Screen、Back/Confirm/Menu、单用户设备 revision 与 Pause 提示；Navigation2D immutable grid 记录 `11/1/13` blocker、weighted/max-cost=`1/5`、基础/动态 cell/cost=`9/80`、`7/100`、严格/切角=`6/62`、`5/56`、weighted 绕行=`7/60`，并保留单步取消与 revision/mutation 证据；CameraFollow2D 提供 fixed-step current center 与 presentation interpolation；Physics2D 产品断言 ConvexPolygon、Revolute 与 Prismatic ready；
   authored=3/committed=2/culled=1 与 soft=2/hard=0 四跑差分；增加独立 aligned normal atlas、
   `normalMappedSpriteCount=1/0`、`texturesUploaded=3`、3张 Texture2D owner/retirement 与 normal on/off 四跑；
   逐次随 Render extraction 发布，并保留 Scene Explorer
