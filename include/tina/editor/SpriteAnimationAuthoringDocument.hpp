@@ -8,6 +8,7 @@
 
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace Tina::Editor {
@@ -29,11 +30,43 @@ struct SpriteAnimationAuthoringDocumentConfig final {
 [[nodiscard]] Core::Status validateSpriteAnimationAuthoringDocumentConfig(
     const SpriteAnimationAuthoringDocumentConfig& config) noexcept;
 
+// Authoring-side clip description. Each frame's notify events are owned here
+// rather than borrowed, because AssetFormat::SpriteAnimationFrameDesc::events is
+// a span: frameEvents[i] holds frame i's events and frames[i].events is only a
+// view into it. Use setFrameEvents() so both stay consistent.
 struct SpriteAnimationAuthoringDesc final {
     Core::AssetId clipId{};
     AssetFormat::SpriteAnimationPlaybackMode playbackMode =
         AssetFormat::SpriteAnimationPlaybackMode::Loop;
     std::vector<AssetFormat::SpriteAnimationFrameDesc> frames{};
+    std::vector<std::vector<AssetFormat::SpriteAnimationEventDesc>> frameEvents{};
+
+    // Replaces frame index's events and repoints its span. Returns false when
+    // the index is out of range. Grows frameEvents to match frames as needed.
+    [[nodiscard]] bool setFrameEvents(
+        Core::usize index,
+        std::vector<AssetFormat::SpriteAnimationEventDesc> events)
+    {
+        if (index >= frames.size())
+        {
+            return false;
+        }
+        frameEvents.resize(frames.size());
+        frameEvents[index] = std::move(events);
+        rebindFrameEvents();
+        return true;
+    }
+
+    // Points every frame's events span at this desc's own storage. Call after
+    // adding or removing frames.
+    void rebindFrameEvents()
+    {
+        frameEvents.resize(frames.size());
+        for (Core::usize index = 0; index < frames.size(); ++index)
+        {
+            frames[index].events = frameEvents[index];
+        }
+    }
 };
 
 struct SpriteAnimationCookPreview final {
@@ -114,15 +147,62 @@ public:
     [[nodiscard]] Core::Status redo() noexcept;
 
 private:
+    // SpriteAnimationFrameDesc::events is a borrowed span, so a revision cannot
+    // simply copy the caller's frame descriptors: it owns one event vector per
+    // frame and republishes every frame span against that storage. The vector is
+    // stable for the revision's lifetime, and frames/frameEvents stay parallel.
     struct Revision final {
         Core::AssetId clipId{};
         AssetFormat::SpriteAnimationPlaybackMode playbackMode =
             AssetFormat::SpriteAnimationPlaybackMode::Loop;
         std::vector<AssetFormat::SpriteAnimationFrameDesc> frames{};
+        std::vector<std::vector<AssetFormat::SpriteAnimationEventDesc>> frameEvents{};
         std::vector<AssetFormat::CookedAssetWriteDependency> dependencies{};
         std::vector<std::byte> payloadBytes{};
         double totalDurationSeconds = 0.0;
         Core::usize byteCount = 0;
+
+        Revision() = default;
+        ~Revision() = default;
+
+        // A copy allocates fresh event buffers, so the copied frame spans must be
+        // repointed at them. Moving steals the outer buffer and leaves the inner
+        // vectors' storage addresses untouched, so the spans stay valid as-is.
+        Revision(const Revision& other)
+            : clipId(other.clipId),
+              playbackMode(other.playbackMode),
+              frames(other.frames),
+              frameEvents(other.frameEvents),
+              dependencies(other.dependencies),
+              payloadBytes(other.payloadBytes),
+              totalDurationSeconds(other.totalDurationSeconds),
+              byteCount(other.byteCount)
+        {
+            rebindFrameEvents();
+        }
+
+        Revision& operator=(const Revision& other)
+        {
+            if (this != &other)
+            {
+                Revision copy(other);
+                *this = std::move(copy);
+            }
+            return *this;
+        }
+
+        Revision(Revision&&) noexcept = default;
+        Revision& operator=(Revision&&) noexcept = default;
+
+        // Points every frame's events span at this revision's own storage.
+        // Must be called after any mutation of frames or frameEvents.
+        void rebindFrameEvents() noexcept
+        {
+            for (Core::usize index = 0; index < frames.size(); ++index)
+            {
+                frames[index].events = frameEvents[index];
+            }
+        }
     };
 
     SpriteAnimationAuthoringDocument(SpriteAnimationAuthoringDocumentConfig config,

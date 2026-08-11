@@ -650,6 +650,110 @@ TEST(CatalogCookTests, SpriteAnimationRecipeRejectsBadModeAndDuration)
     EXPECT_FALSE(parseCatalogCookRecipe(badDuration, ".").has_value());
 }
 
+TEST(CatalogCookTests, SpriteAnimationRecipeAuthorsFrameEvents)
+{
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto spriteA = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto spriteB = *Core::AssetId::fromBytes(idBytes(3U));
+    const auto clipId = *Core::AssetId::fromBytes(idBytes(4U));
+
+    std::string recipe = "platform WindowsX64\n";
+    const auto appendId = [&recipe](Core::AssetId id) {
+        const auto text = id.canonicalText();
+        recipe.append(text.data(), text.size());
+    };
+    recipe += "texture2d ";
+    appendId(textureId);
+    recipe += " 1 1 FFFFFFFF\n";
+    for (const auto spriteId : std::array{spriteA, spriteB})
+    {
+        recipe += "sprite ";
+        appendId(spriteId);
+        recipe += " ";
+        appendId(textureId);
+        recipe += "\n";
+    }
+    // Frame 0 authors two events out of offset order and mixes an explicit hex
+    // tag with a hashed identifier plus a percentage offset. Frame 1 has none.
+    recipe += "spriteanim ";
+    appendId(clipId);
+    recipe += " Loop ";
+    appendId(spriteA);
+    recipe += ":0.10#0xDEADBEEF@0.75#FOOTSTEP@25%";
+    recipe += " ";
+    appendId(spriteB);
+    recipe += ":0.15\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    const auto spec = std::find_if(
+        request->assets.begin(), request->assets.end(),
+        [clipId](const CatalogCookAssetSpec& asset) { return asset.assetId == clipId; });
+    ASSERT_NE(spec, request->assets.end());
+
+    auto payload = AssetFormat::parseSpriteAnimationClipPayload(spec->payload);
+    ASSERT_TRUE(payload.has_value()) << payload.error().message;
+    EXPECT_EQ(payload->totalEventCount, 2U);
+
+    const auto frame0 = payload->frame(0U);
+    ASSERT_TRUE(frame0.has_value());
+    ASSERT_EQ(frame0->eventCount, 2U);
+    const auto frame1 = payload->frame(1U);
+    ASSERT_TRUE(frame1.has_value());
+    EXPECT_EQ(frame1->eventCount, 0U);
+
+    // Events are stored sorted by ascending offset, so the 25% marker comes
+    // first even though the recipe authored the 0.75 one before it.
+    const auto first = payload->event(frame0->eventStartIndex);
+    ASSERT_TRUE(first.has_value());
+    EXPECT_NEAR(first->normalizedOffset, 0.25F, 1.0e-4F);
+    // FNV-1a 32 of "FOOTSTEP" must be a stable non-zero runtime tag.
+    EXPECT_NE(first->eventTag, 0U);
+    EXPECT_NE(first->eventTag, 0xDEADBEEFU);
+
+    const auto second = payload->event(frame0->eventStartIndex + 1U);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(second->eventTag, 0xDEADBEEFU);
+    EXPECT_NEAR(second->normalizedOffset, 0.75F, 1.0e-4F);
+}
+
+TEST(CatalogCookTests, SpriteAnimationRecipeRejectsMalformedEvents)
+{
+    const auto spriteId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto clipId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto spriteText = spriteId.canonicalText();
+    const auto clipText = clipId.canonicalText();
+
+    const auto recipeWithFrameSuffix = [&](std::string_view suffix) {
+        std::string recipe = "spriteanim ";
+        recipe.append(clipText.data(), clipText.size());
+        recipe += " Loop ";
+        recipe.append(spriteText.data(), spriteText.size());
+        recipe += ":0.1";
+        recipe.append(suffix);
+        recipe += "\n";
+        return recipe;
+    };
+
+    for (const std::string_view suffix : {
+             "#",                  // empty event
+             "#FOOTSTEP",          // missing @offset
+             "#FOOTSTEP@",         // missing offset value
+             "#@0.5",              // missing tag
+             "#0x0@0.5",           // zero tag is reserved by the wire format
+             "#FOOTSTEP@1.5",      // offset above 1
+             "#FOOTSTEP@-0.1",     // offset below 0
+             "#FOOTSTEP@150%",     // percentage above 100
+         })
+    {
+        EXPECT_FALSE(parseCatalogCookRecipe(recipeWithFrameSuffix(suffix), ".").has_value())
+            << "expected rejection for suffix " << suffix;
+    }
+
+    // A valid event still parses, so the rejections above are specific.
+    EXPECT_TRUE(parseCatalogCookRecipe(recipeWithFrameSuffix("#FOOTSTEP@0.5"), ".").has_value());
+}
+
 TEST(CatalogCookTests, InlineTilesetAndTileMapRecipe)
 {
     std::pmr::unsynchronized_pool_resource memory;

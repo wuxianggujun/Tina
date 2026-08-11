@@ -140,7 +140,7 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
             documentItemLabel = "layers";
             break;
         case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
-            documentKindLabel = "SpriteAnimationClip v1";
+            documentKindLabel = "SpriteAnimationClip v2";
             documentItemLabel = "frames";
             break;
         case Tina::Editor::EditorDocumentKind::AssetInspector:

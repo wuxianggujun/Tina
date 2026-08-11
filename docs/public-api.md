@@ -656,12 +656,19 @@ plan。`generateTileMapGameplay()` 在调用 game-owned encoder 完成全部 byt
 `World2DAuthoringDocument::replace()` 发布 schema/version/blob；encoder、World2D 容量、parse 或 replace 失败保留
 document revision 与 undo/redo。Editor 定义生成和事务边界，不定义游戏 ECS component 或运行时 archetype 行为。
 
-`SpriteAnimationAuthoringDocument::Create(desc, config)` 创建一个 move-only SpriteAnimationClip v1 owner。revision
-原子拥有 clip `AssetId`、播放模式、帧顺序、逐帧 Sprite `AssetId`/正有限时长、canonical payload 与排序去重的 required
-Sprite dependency stream。API 提供 replace、frame insert/append/set/duplicate/erase/move、duration、Once/Loop/PingPong、
-bounded Undo/Redo、current-schema `loadCookedAsset()` 与 `cookPreview()`；非法帧、self dependency、容量、history 或非 v1
-Cooked asset 失败均不发布。EditorApp 把该 document 接入独立 Timeline，并在 Asset/Scene 边界解析为
-`SpriteAnimator2D`，document target 本身仍不依赖 Scene 或 Runtime。
+`SpriteAnimationAuthoringDocument::Create(desc, config)` 创建一个 move-only SpriteAnimationClip v2 owner。revision
+原子拥有 clip `AssetId`、播放模式、帧顺序、逐帧 Sprite `AssetId`/正有限时长/notify events、canonical payload 与排序去重的
+required Sprite dependency stream。API 提供 replace、frame insert/append/set/duplicate/erase/move、duration、
+Once/Loop/PingPong、bounded Undo/Redo、current-schema `loadCookedAsset()` 与 `cookPreview()`；非法帧、self dependency、
+容量、history 或非 v2 Cooked asset 失败均不发布。
+
+`AssetFormat::SpriteAnimationFrameDesc::events` 是**借用 span**，所以 authoring 侧不按值托管它：
+`SpriteAnimationAuthoringDesc` 与内部 revision 各自用 `frameEvents[i]` 拥有第 i 帧的事件，并让
+`frames[i].events` 只作为指向该存储的视图。新增/删除/移动帧或替换某帧事件后必须调用 `rebindFrameEvents()`
+（`setFrameEvents()` 已内置），revision 的拷贝构造同样会重绑，避免 span 指向被销毁的调用方内存。
+
+EditorApp 把该 document 接入独立 Timeline，并在 Asset/Scene 边界解析为 `SpriteAnimator2D`，document target
+本身仍不依赖 Scene 或 Runtime。
 
 `loadWorld2DAuthoringDocument(utf8Path, document)` 以 document 配置在当前 World2D schema 内可容纳的最大 wire size 为读取上限，读取成功后
 复用 `loadSnapshot()` 原子建立 baseline；read/schema/document/history 容量失败不改变 current 或 undo/redo。

@@ -320,10 +320,16 @@ RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetS
 | 3D | `StaticMesh`、`Material`、`Prefab`、`EnvironmentMap` |
 | Audio | `AudioClip` float32 PCM |
 
-SpriteAnimationClip v1 保存 Once/Loop/PingPong、逐帧正有限 duration 与 required Sprite dependency
-索引；recipe 使用 `spriteanim <id> <mode> <sprite-id:duration>...`。typed view 会同时校验 payload 与
-Cooked dependency contract，产品 sample 再在 Asset/Scene 边界把 Sprite 解析成 Animator 所需的
-`SpriteRenderer2D` 帧。
+SpriteAnimationClip 唯一当前格式为 schema v2：32-byte header、12-byte frame（sprite dependency index、
+正有限 duration、event 区间）与 8-byte notify event（非零 u32 tag、u16 定点 normalized offset）。offset 是
+**帧内**归一化位置，因此改帧长会带着事件一起移动；上限为每帧64个、单 clip 16384个事件。v1 payload 直接
+以 `UnsupportedSchema` 拒绝，不做双读或迁移。
+
+recipe 语法为 `spriteanim <id> <mode> <frame>...`，其中
+`frame := <sprite-id>:<duration>[#<event>...]`、`event := <tag>@<offset>`。tag 可写 `0xDEADBEEF` 或标识符
+（按 FNV-1a 32 哈希成非零 u32），offset 可写 `0.75` 或 `25%`。同帧事件按 offset 升序存储，等值时保留
+authoring 顺序，所以 cook 结果确定。typed view 会同时校验 payload 与 Cooked dependency contract，产品
+sample 再在 Asset/Scene 边界把 Sprite 解析成 Animator 所需的 `SpriteRenderer2D` 帧。
 
 TileMap 当前唯一 root typed payload 为 schema v3：按 authoring 顺序保存 tile/object layers；layer/object ID
 必须 map-wide 非零唯一；layer 与 object 都有 visibility，name/properties 使用 strict UTF-8。tile layer 只保存
@@ -341,7 +347,7 @@ property，结果按 stable object ID 排序并记录 source document revision/l
 或分配失败都不返回半份 plan。`generateTileMapGameplay()` 先完成 plan 与 game-owned encoder，再以一次
 `World2DAuthoringDocument::replace()` 发布 gameplay schema/version/bytes；任何前置失败保留 current revision 和 undo/redo。
 
-工具侧 `SpriteAnimationAuthoringDocument` 同样只持有当前 SpriteAnimationClip v1 canonical payload 和 required Sprite
+工具侧 `SpriteAnimationAuthoringDocument` 同样只持有当前 SpriteAnimationClip v2 canonical payload 和 required Sprite
 dependency stream。Timeline 的帧 CRUD/重排/时长/模式各发布一个 bounded revision；Cook Preview 直接包装为正式
 SpriteAnimationClip Cooked artifact。EditorApp 只在 Asset/Scene integration 边界把 Sprite `AssetId` 解析为 weak handle
 并交给 `SpriteAnimator2D`，3D workspace 不创建第二套动画资源 owner。

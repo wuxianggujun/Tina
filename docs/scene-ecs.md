@@ -88,6 +88,30 @@ State 在 owner thread 持有它，并在 fixed update 提交 target、delta、v
 读取 current simulation center，render extraction 读取 interpolated center；旧的散落 previous/current float
 和手写 map clamp 不再是产品状态源。
 
+## SpriteAnimator2D notify events
+
+`SpriteAnimationFrame2D` 可携带 `SpriteAnimationEvent2D` 标记：非零 u32 `tag` 加**帧内**归一化
+`normalizedOffset`（`[0,1]`）。offset 相对该帧自身时长，所以重新调整帧长会带着事件一起移动。offset 0 在
+进入该帧的瞬间，offset 1 在离开的瞬间。tag 为0或 offset 非有限/越界时 `Create()`/`setClip()` 事务失败。
+
+`Create()` 的 `SpriteAnimator2DConfig::eventCapacity`（默认32）固定每次 update 的穿越预算。传入的 event span
+只在调用期间借用，animator 复制进自有存储并按 offset 升序稳定排序，因此同帧多事件的触发顺序确定。
+
+`update()` 返回 `crossedEvents` —— 本次推进穿越的事件，按时间顺序排列，借用有效期至下一次
+`update()`/`setClip()`/`restart()`/`stop()` 或 animator 销毁。语义：
+
+- 判定区间是半开的 `[fromPlayhead, toPlayhead)`：正落在本次终点的事件**不**触发，而在下一次从该点出发的
+  update 触发。这保证边界事件（offset 0/1）在连续 update 间恰好触发一次，不会重复；
+- Once clip 完成的那次 update 额外闭合终点，所以最后一帧 offset 1.0 的事件仍会触发；完成后停止推进，不再重发；
+- delta 覆盖多个完整周期时只上报一圈，每个 authored 事件每次 update 至多触发一次，而不是按圈数放大；
+- Loop 跨圈时先扫完本圈尾部，再扫新圈头部，顺序即时间顺序；
+- PingPong 反向段把 authored offset 镜像成 `1 - offset` 判定，并反向遍历该帧事件；`crossedEvents` 中的
+  `forward=false` 标识这是反向穿越，`normalizedOffset` 仍报告 authored 值而非镜像后的位置；
+- 穿越数超过 `eventCapacity` 时保留按时间顺序的前 N 条并置 `crossedEventOverflow=true`；
+- 暂停、零 delta 与无事件 clip 返回空 span，不失败。
+
+`update()` 仍然零分配：事件存储与穿越缓冲都在 `Create()`/`setClip()` 时建立。
+
 ## Standalone 2D-FX systems
 
 `ParticleSystem2D` 和 `Trail2D` 属于 `Tina::Scene`，但不是 World component，也不持有 Entity。二者由

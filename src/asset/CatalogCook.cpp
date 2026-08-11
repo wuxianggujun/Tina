@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cwctype>
+#include <deque>
 #include <filesystem>
 #include <memory_resource>
 #include <new>
@@ -387,6 +388,168 @@ struct RecipeSourceCaptureContext final {
         return std::nullopt;
     }
     return static_cast<std::byte>((high << 4) | low);
+}
+
+// FNV-1a 32-bit over the raw identifier bytes. Event tag 0 is reserved by the wire format, so a
+// hash that lands on zero is remapped to 1.
+[[nodiscard]] Core::u32 hashSpriteAnimationEventTag(std::string_view name) noexcept
+{
+    constexpr Core::u32 offsetBasis = 2166136261U;
+    constexpr Core::u32 prime = 16777619U;
+    Core::u32 hash = offsetBasis;
+    for (const char character : name)
+    {
+        hash ^= static_cast<Core::u32>(static_cast<unsigned char>(character));
+        hash *= prime;
+    }
+    return hash == 0U ? 1U : hash;
+}
+
+[[nodiscard]] bool isSpriteAnimationEventIdentifier(std::string_view text) noexcept
+{
+    constexpr std::size_t maxIdentifierChars = 64U;
+    if (text.empty() || text.size() > maxIdentifierChars)
+    {
+        return false;
+    }
+    auto isWordCharacter = [](char character) noexcept {
+        return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+               (character >= '0' && character <= '9') || character == '_';
+    };
+    if (text[0] >= '0' && text[0] <= '9')
+    {
+        return false;
+    }
+    return std::all_of(text.begin(), text.end(), isWordCharacter);
+}
+
+// <tag> := 0x<1..8 hex digits> | [A-Za-z_][A-Za-z0-9_]* (FNV-1a hashed). Zero is rejected by the
+// caller so hex 0x0 and a hashed identifier report distinct messages.
+[[nodiscard]] bool parseSpriteAnimationEventTag(std::string_view text, Core::u32& out) noexcept
+{
+    if (text.starts_with("0x") || text.starts_with("0X"))
+    {
+        const std::string_view digits = text.substr(2U);
+        if (digits.empty() || digits.size() > 8U)
+        {
+            return false;
+        }
+        Core::u32 value = 0;
+        const auto [end, err] =
+            std::from_chars(digits.data(), digits.data() + digits.size(), value, 16);
+        if (err != std::errc{} || end != digits.data() + digits.size())
+        {
+            return false;
+        }
+        out = value;
+        return true;
+    }
+    if (!isSpriteAnimationEventIdentifier(text))
+    {
+        return false;
+    }
+    out = hashSpriteAnimationEventTag(text);
+    return true;
+}
+
+// <offset> := decimal float in [0,1] or a percentage such as 50%. Range and finiteness are checked
+// by the caller so out-of-range values report a distinct message from malformed ones.
+[[nodiscard]] bool parseSpriteAnimationEventOffset(std::string_view text, float& out) noexcept
+{
+    if (text.empty())
+    {
+        return false;
+    }
+    if (text.back() == '%')
+    {
+        float percent = 0.0F;
+        if (!parseFloatToken(text.substr(0U, text.size() - 1U), percent))
+        {
+            return false;
+        }
+        out = percent / 100.0F;
+        return true;
+    }
+    return parseFloatToken(text, out);
+}
+
+// Parses the '#'-separated event suffix of one spriteanim frame token. eventSuffix excludes the
+// leading '#'. totalEventCount accumulates across the whole clip and is advanced in place.
+[[nodiscard]] Core::Result<std::vector<AssetFormat::SpriteAnimationEventDesc>>
+parseSpriteAnimationFrameEvents(std::string_view eventSuffix, Core::u32& totalEventCount)
+{
+    std::vector<AssetFormat::SpriteAnimationEventDesc> events;
+    for (std::string_view remaining = eventSuffix;;)
+    {
+        const auto next = remaining.find('#');
+        const std::string_view eventToken = remaining.substr(0U, next);
+        if (eventToken.empty())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim frame event must not be empty");
+        }
+        const auto offsetSeparator = eventToken.find('@');
+        if (offsetSeparator == std::string_view::npos)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim frame event must be tag@offset");
+        }
+        Core::u32 eventTag = 0;
+        if (!parseSpriteAnimationEventTag(eventToken.substr(0U, offsetSeparator), eventTag))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim event tag must be hex 0x... or an identifier");
+        }
+        if (eventTag == 0U)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim event tag must be non-zero");
+        }
+        float normalizedOffset = 0.0F;
+        if (!parseSpriteAnimationEventOffset(eventToken.substr(offsetSeparator + 1U),
+                                             normalizedOffset))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim event offset must be a decimal or percentage");
+        }
+        if (!std::isfinite(normalizedOffset))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim event offset must be finite");
+        }
+        if (!(normalizedOffset >= 0.0F && normalizedOffset <= 1.0F))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim event offset must be in [0.0, 1.0]");
+        }
+        if (events.size() >= AssetFormat::SpriteAnimationClipWire::MaxEventsPerFrame)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim frame event count exceeds MaxEventsPerFrame (64)");
+        }
+        if (totalEventCount >= AssetFormat::SpriteAnimationClipWire::MaxTotalEvents)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "spriteanim total event count exceeds MaxTotalEvents (16384)");
+        }
+        events.push_back(AssetFormat::SpriteAnimationEventDesc{
+            .eventTag = eventTag,
+            .normalizedOffset = normalizedOffset,
+        });
+        ++totalEventCount;
+        if (next == std::string_view::npos)
+        {
+            break;
+        }
+        remaining = remaining.substr(next + 1U);
+    }
+    // The payload writer requires ascending offsets per frame; ties keep authoring order.
+    std::stable_sort(events.begin(), events.end(),
+                     [](const AssetFormat::SpriteAnimationEventDesc& left,
+                        const AssetFormat::SpriteAnimationEventDesc& right) {
+                         return left.normalizedOffset < right.normalizedOffset;
+                     });
+    return events;
 }
 
 [[nodiscard]] Core::Result<CatalogCookAssetSpec> parseTexture2dInline(const std::vector<std::string>& tokens)
@@ -758,7 +921,7 @@ parseAudioClipInline(const std::vector<std::string>& tokens,
 [[nodiscard]] Core::Result<CatalogCookAssetSpec>
 parseSpriteAnimationInline(const std::vector<std::string>& tokens)
 {
-    // spriteanim <id> <Once|Loop|PingPong> <spriteId:durationSeconds>...
+    // spriteanim <id> <Once|Loop|PingPong> <spriteId:durationSeconds[#tag@offset...]>...
     if (tokens.size() < 4U)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -789,18 +952,28 @@ parseSpriteAnimationInline(const std::vector<std::string>& tokens)
 
     std::vector<AssetFormat::SpriteAnimationFrameDesc> frames;
     frames.reserve(tokens.size() - 3U);
+    // SpriteAnimationFrameDesc::events is a non-owning span, so every per-frame event vector must
+    // outlive the payload desc built below. std::deque never relocates already-inserted elements,
+    // so spans into frameEvents stay valid while later frames are appended.
+    std::deque<std::vector<AssetFormat::SpriteAnimationEventDesc>> frameEvents;
+    Core::u32 totalEventCount = 0;
     for (std::size_t tokenIndex = 3U; tokenIndex < tokens.size(); ++tokenIndex)
     {
         const std::string_view token = tokens[tokenIndex];
-        const auto separator = token.rfind(':');
-        if (separator == std::string_view::npos || separator == 0U || separator + 1U == token.size())
+        // Split the optional event suffix at the FIRST '#' so the spriteId:duration prefix keeps
+        // using rfind(':'); AssetId hex text contains neither '#' nor ':'.
+        const auto eventSeparator = token.find('#');
+        const std::string_view frameToken = token.substr(0U, eventSeparator);
+        const auto separator = frameToken.rfind(':');
+        if (separator == std::string_view::npos || separator == 0U ||
+            separator + 1U == frameToken.size())
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "spriteanim frame must be spriteId:durationSeconds");
+                                 "spriteanim frame must be spriteId:durationSeconds[#tag@offset...]");
         }
-        const auto spriteId = Core::AssetId::parseCanonical(token.substr(0U, separator));
+        const auto spriteId = Core::AssetId::parseCanonical(frameToken.substr(0U, separator));
         float durationSeconds = 0.0F;
-        if (!spriteId || !parseFloatToken(token.substr(separator + 1U), durationSeconds) ||
+        if (!spriteId || !parseFloatToken(frameToken.substr(separator + 1U), durationSeconds) ||
             !(durationSeconds > 0.0F) || !std::isfinite(durationSeconds))
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -811,9 +984,24 @@ parseSpriteAnimationInline(const std::vector<std::string>& tokens)
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "sprite animation clip cannot depend on itself");
         }
+
+        std::vector<AssetFormat::SpriteAnimationEventDesc> events;
+        if (eventSeparator != std::string_view::npos)
+        {
+            auto parsedEvents = parseSpriteAnimationFrameEvents(token.substr(eventSeparator + 1U),
+                                                               totalEventCount);
+            if (!parsedEvents)
+            {
+                return Core::failure(std::move(parsedEvents.error()));
+            }
+            events = std::move(*parsedEvents);
+        }
+
+        const auto& stableEvents = frameEvents.emplace_back(std::move(events));
         frames.push_back(AssetFormat::SpriteAnimationFrameDesc{
             .spriteId = *spriteId,
             .durationSeconds = durationSeconds,
+            .events = stableEvents,
         });
     }
 

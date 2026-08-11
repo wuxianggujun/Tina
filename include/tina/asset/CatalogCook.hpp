@@ -79,7 +79,12 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 //   asset Material <32hexId> <payloadPath> <dep32hex:Kind> ...
 //   texture2d <32hexId> <width> <height> <hexRRGGBBAA> ...   // inline Rgba8Unorm pixels
 //   sprite <32hexId> <texture32hexId> [u0 v0 u1 v1 pivotX pivotY ppu]
-//   spriteanim <32hexId> <Once|Loop|PingPong> <sprite32hexId:durationSeconds>...
+//   spriteanim <32hexId> <Once|Loop|PingPong> <frame>...
+//     frame := <sprite32hexId>:<durationSeconds>[#<event>[#<event>...]]
+//     event := <tag>@<offset>   // tag: 0x1F2E3D4C (non-zero u32) or IDENT hashed with FNV-1a 32
+//                               // offset: [0,1] decimal (0.5) or percentage (50%)
+//     // e.g. spriteanim <clipId> Loop <spriteA>:0.10#FOOTSTEP@50%#0xDEADBEEF@0.75 <spriteB>:0.15
+//     // Events are sorted by ascending offset per frame; authoring order breaks ties.
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> <f0...>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
 //   audioclip <32hexId> file <relativeOrAbsolute.wav>  // PCM16 WAV only (M11-A20)

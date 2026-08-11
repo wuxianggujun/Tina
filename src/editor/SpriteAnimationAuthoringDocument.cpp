@@ -149,11 +149,16 @@ SpriteAnimationAuthoringDocument::snapshot() const
 {
     try
     {
-        return SpriteAnimationAuthoringDesc{
+        SpriteAnimationAuthoringDesc desc{
             .clipId = current().clipId,
             .playbackMode = current().playbackMode,
             .frames = current().frames,
+            .frameEvents = current().frameEvents,
         };
+        // The copied frames still view the document's storage; repoint them at
+        // the snapshot's own event vectors before handing it to the caller.
+        desc.rebindFrameEvents();
+        return desc;
     }
     catch (const std::bad_alloc&)
     {
@@ -201,7 +206,16 @@ SpriteAnimationAuthoringDocument::buildRevision(
             return Core::failure(std::move(payload.error()));
         }
 
+        // Copy the frames, then take ownership of their events and repoint each
+        // span at revision-owned storage. Keeping the caller's spans here would
+        // leave the revision holding dangling pointers once the caller's desc dies.
         std::vector<AssetFormat::SpriteAnimationFrameDesc> ownedFrames = desc.frames;
+        std::vector<std::vector<AssetFormat::SpriteAnimationEventDesc>> ownedFrameEvents;
+        ownedFrameEvents.reserve(ownedFrames.size());
+        for (const auto& frame : desc.frames)
+        {
+            ownedFrameEvents.emplace_back(frame.events.begin(), frame.events.end());
+        }
         std::vector<AssetFormat::CookedAssetWriteDependency> ownedDependencies =
             std::move(*dependencies);
         double totalDurationSeconds = 0.0;
@@ -221,22 +235,36 @@ SpriteAnimationAuthoringDocument::buildRevision(
             revisionByteCount += count * elementBytes;
             return true;
         };
-        if (!addOwnedCapacity(ownedFrames.capacity(), sizeof(ownedFrames.front())) ||
+        bool eventBytesFit = true;
+        for (const auto& events : ownedFrameEvents)
+        {
+            if (!events.empty() &&
+                !addOwnedCapacity(events.capacity(),
+                                  sizeof(AssetFormat::SpriteAnimationEventDesc)))
+            {
+                eventBytesFit = false;
+                break;
+            }
+        }
+        if (!eventBytesFit ||
+            !addOwnedCapacity(ownedFrames.capacity(), sizeof(ownedFrames.front())) ||
             !addOwnedCapacity(ownedDependencies.capacity(),
                               sizeof(ownedDependencies.front())))
         {
             return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
                                  "Sprite animation revision byte count overflowed");
         }
-        return Revision{
-            .clipId = desc.clipId,
-            .playbackMode = desc.playbackMode,
-            .frames = std::move(ownedFrames),
-            .dependencies = std::move(ownedDependencies),
-            .payloadBytes = std::move(*payload),
-            .totalDurationSeconds = totalDurationSeconds,
-            .byteCount = revisionByteCount,
-        };
+        Revision revision{};
+        revision.clipId = desc.clipId;
+        revision.playbackMode = desc.playbackMode;
+        revision.frames = std::move(ownedFrames);
+        revision.frameEvents = std::move(ownedFrameEvents);
+        revision.dependencies = std::move(ownedDependencies);
+        revision.payloadBytes = std::move(*payload);
+        revision.totalDurationSeconds = totalDurationSeconds;
+        revision.byteCount = revisionByteCount;
+        revision.rebindFrameEvents();
+        return revision;
     }
     catch (const std::bad_alloc&)
     {
@@ -297,7 +325,16 @@ Core::Status SpriteAnimationAuthoringDocument::insertFrame(
     }
     try
     {
+        // frames and frameEvents are parallel, so the incoming frame's borrowed
+        // events must be copied into the matching slot before rebinding spans.
+        std::vector<AssetFormat::SpriteAnimationEventDesc> events(
+            frame.events.begin(), frame.events.end());
         desc->frames.insert(desc->frames.begin() + static_cast<std::ptrdiff_t>(index), frame);
+        desc->frameEvents.resize(desc->frames.size());
+        desc->frameEvents.insert(
+            desc->frameEvents.begin() + static_cast<std::ptrdiff_t>(index), std::move(events));
+        desc->frameEvents.resize(desc->frames.size());
+        desc->rebindFrameEvents();
     }
     catch (const std::bad_alloc&)
     {
@@ -324,7 +361,17 @@ Core::Status SpriteAnimationAuthoringDocument::setFrame(
     {
         return frameNotFound();
     }
-    desc->frames[index] = frame;
+    try
+    {
+        desc->frames[index] = frame;
+        desc->frameEvents.resize(desc->frames.size());
+        desc->frameEvents[index].assign(frame.events.begin(), frame.events.end());
+        desc->rebindFrameEvents();
+    }
+    catch (const std::bad_alloc&)
+    {
+        return allocationFailure();
+    }
     return replace(*desc);
 }
 
@@ -363,6 +410,9 @@ Core::Status SpriteAnimationAuthoringDocument::eraseFrame(Core::usize index)
         return frameNotFound();
     }
     desc->frames.erase(desc->frames.begin() + static_cast<std::ptrdiff_t>(index));
+    desc->frameEvents.resize(desc->frames.size() + 1U);
+    desc->frameEvents.erase(desc->frameEvents.begin() + static_cast<std::ptrdiff_t>(index));
+    desc->rebindFrameEvents();
     return replace(*desc);
 }
 
@@ -383,11 +433,20 @@ Core::Status SpriteAnimationAuthoringDocument::moveFrame(
         return Core::success();
     }
     const auto frame = desc->frames[sourceIndex];
-    desc->frames.erase(desc->frames.begin() + static_cast<std::ptrdiff_t>(sourceIndex));
     try
     {
+        // The frame's events travel with it, so move the parallel slot too.
+        desc->frameEvents.resize(desc->frames.size());
+        auto events = std::move(desc->frameEvents[sourceIndex]);
+        desc->frames.erase(desc->frames.begin() + static_cast<std::ptrdiff_t>(sourceIndex));
+        desc->frameEvents.erase(
+            desc->frameEvents.begin() + static_cast<std::ptrdiff_t>(sourceIndex));
         desc->frames.insert(
             desc->frames.begin() + static_cast<std::ptrdiff_t>(destinationIndex), frame);
+        desc->frameEvents.insert(
+            desc->frameEvents.begin() + static_cast<std::ptrdiff_t>(destinationIndex),
+            std::move(events));
+        desc->rebindFrameEvents();
     }
     catch (const std::bad_alloc&)
     {
@@ -463,7 +522,27 @@ Core::Status SpriteAnimationAuthoringDocument::loadCookedAsset(
                 .spriteId = dependencies[frame->spriteDependencyIndex].assetId,
                 .durationSeconds = frame->durationSeconds,
             });
+
+            // Decode this frame's notify events into desc-owned storage. The
+            // spans are bound once, after every frame has been appended.
+            std::vector<AssetFormat::SpriteAnimationEventDesc> events;
+            events.reserve(frame->eventCount);
+            for (Core::u32 offset = 0; offset < frame->eventCount; ++offset)
+            {
+                const auto event = payload->event(frame->eventStartIndex + offset);
+                if (!event)
+                {
+                    return Core::failure(AssetFormat::AssetFormatErrorCode::InvalidLayout,
+                                         "Sprite animation frame event index is out of range");
+                }
+                events.push_back(AssetFormat::SpriteAnimationEventDesc{
+                    .eventTag = event->eventTag,
+                    .normalizedOffset = event->normalizedOffset,
+                });
+            }
+            desc.frameEvents.push_back(std::move(events));
         }
+        desc.rebindFrameEvents();
         if (std::find(referenced.begin(), referenced.end(), false) != referenced.end())
         {
             return Core::failure(AssetFormat::AssetFormatErrorCode::InvalidDependency,
